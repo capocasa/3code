@@ -176,7 +176,7 @@ proc humanBytes(n: int): string =
 # ---------- Model call ----------
 
 proc callModel(p: Profile, messages: JsonNode, usage: var Usage): string =
-  let client = newHttpClient(timeout = 120_000)
+  let client = newHttpClient(timeout = -1)
   defer: client.close()
   client.headers = newHttpHeaders({
     "Authorization": "Bearer " & p.key,
@@ -189,7 +189,7 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage): string =
   }
   let bodyStr = $body
   let t0 = epochTime()
-  startSpinner(&"thinking · ↑ {humanBytes(bodyStr.len)}")
+  startSpinner(&"thinking · ↑ ~{bodyStr.len div 4} tok")
   let resp = try:
     let r = client.request(p.url & "/chat/completions", HttpPost, bodyStr)
     stopSpinner()
@@ -209,8 +209,10 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage): string =
     usage.completionTokens = u{"completion_tokens"}.getInt(0)
     usage.totalTokens = u{"total_tokens"}.getInt(0)
   stdout.styledWrite fgBlack, styleBright,
-    &"  ↓ {humanBytes(text.len)} · {elapsed:.1f}s",
-    (if usage.totalTokens > 0: &" · {usage.totalTokens} tok (in {usage.promptTokens}, out {usage.completionTokens})" else: ""),
+    (if usage.totalTokens > 0:
+       &"  ↑ {usage.promptTokens} tok · ↓ {usage.completionTokens} tok · {elapsed:.1f}s"
+     else:
+       &"  ↓ ~{text.len div 4} tok · {elapsed:.1f}s"),
     resetStyle, "\n"
   stdout.flushFile
   j["choices"][0]["message"]["content"].getStr
