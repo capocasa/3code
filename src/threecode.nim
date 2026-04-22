@@ -1,4 +1,4 @@
-import std/[httpclient, json, os, osproc, strutils, strformat, sequtils, terminal, parsecfg, parseopt, tables]
+import std/[httpclient, json, os, osproc, strutils, strformat, sequtils, terminal, parsecfg, parseopt, tables, times, atomics, critbits]
 import minline
 
 const Version = staticRead("../threecode.nimble").splitLines().filterIt(it.startsWith("version")).
@@ -56,6 +56,20 @@ const ConfigExample = """  [3code]
 (values are Nim string literals — use r"..." for anything with a colon.)
 """
 
+const HelpText = """
+commands:
+  :help         show this message
+  :tokens       show token usage for this session
+  :clear        reset conversation (keeps system prompt)
+  :model        show current profile and model
+  :q :quit      exit (also Ctrl-D)
+
+input:
+  single-line   just type and press Enter
+  multi-line    type three double-quotes on its own line, enter lines, close the same way
+  up / down     recall history; down past last clears the line
+"""
+
 type
   ActionKind* = enum akBash, akWrite, akPatch
   Action* = object
@@ -65,6 +79,8 @@ type
     edits*: seq[(string, string)]
   Profile = object
     name, url, key, model: string
+  Usage = object
+    promptTokens, completionTokens, totalTokens: int
 
 proc die(msg: string, code = 1) {.noreturn.} =
   stderr.writeLine "3code: " & msg
@@ -87,7 +103,6 @@ proc loadProfile(wanted: string): Profile =
   if pick == "":
     pick = cfg.getSectionValue("3code", "profile")
   if pick == "":
-    # fall back to first non-[3code] section
     for section in cfg.keys:
       if section != "" and section != "3code":
         pick = section
@@ -102,7 +117,45 @@ proc loadProfile(wanted: string): Profile =
   if model == "": die &"profile [{pick}]: model not set in {path}", ExitConfig
   Profile(name: pick, url: url, key: key, model: model)
 
-proc callModel(p: Profile, messages: JsonNode): string =
+# ---------- Spinner ----------
+
+var spinnerStop: Atomic[bool]
+var spinnerThread: Thread[string]
+
+proc spinnerLoop(label: string) {.thread.} =
+  const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+  let start = epochTime()
+  var i = 0
+  while not spinnerStop.load(moRelaxed):
+    let elapsed = epochTime() - start
+    try:
+      stdout.styledWrite "\r", fgCyan, styleBright, frames[i mod frames.len], resetStyle,
+        fgBlack, styleBright, &"  {label} {elapsed:4.1f}s", resetStyle
+      stdout.flushFile
+    except CatchableError: discard
+    sleep 80
+    inc i
+  try:
+    stdout.write "\r\x1b[2K"
+    stdout.flushFile
+  except CatchableError: discard
+
+proc startSpinner(label: string) =
+  spinnerStop.store(false, moRelaxed)
+  createThread(spinnerThread, spinnerLoop, label)
+
+proc stopSpinner() =
+  spinnerStop.store(true, moRelaxed)
+  joinThread(spinnerThread)
+
+proc humanBytes(n: int): string =
+  if n < 1024: &"{n}B"
+  elif n < 1024 * 1024: &"{n.float/1024:.1f}KB"
+  else: &"{n.float/1024/1024:.2f}MB"
+
+# ---------- Model call ----------
+
+proc callModel(p: Profile, messages: JsonNode, usage: var Usage): string =
   let client = newHttpClient(timeout = 120_000)
   defer: client.close()
   client.headers = newHttpHeaders({
@@ -114,14 +167,35 @@ proc callModel(p: Profile, messages: JsonNode): string =
     "messages": messages,
     "stream": false
   }
-  let resp = try: client.request(p.url & "/chat/completions", HttpPost, $body)
-             except CatchableError as e: die("network: " & e.msg, ExitApi)
+  let bodyStr = $body
+  let t0 = epochTime()
+  startSpinner(&"thinking · ↑ {humanBytes(bodyStr.len)}")
+  let resp = try:
+    let r = client.request(p.url & "/chat/completions", HttpPost, bodyStr)
+    stopSpinner()
+    r
+  except CatchableError as e:
+    stopSpinner()
+    die("network: " & e.msg, ExitApi)
   let text = resp.body
+  let elapsed = epochTime() - t0
   if resp.code != Http200:
     die("api " & $resp.code & ": " & text, ExitApi)
   let j = parseJson(text)
   if "error" in j: die("api error: " & $j["error"], ExitApi)
+  if "usage" in j:
+    let u = j["usage"]
+    usage.promptTokens = u{"prompt_tokens"}.getInt(0)
+    usage.completionTokens = u{"completion_tokens"}.getInt(0)
+    usage.totalTokens = u{"total_tokens"}.getInt(0)
+  stdout.styledWrite fgBlack, styleBright,
+    &"  ↓ {humanBytes(text.len)} · {elapsed:.1f}s",
+    (if usage.totalTokens > 0: &" · {usage.totalTokens} tok (in {usage.promptTokens}, out {usage.completionTokens})" else: ""),
+    resetStyle, "\n"
+  stdout.flushFile
   j["choices"][0]["message"]["content"].getStr
+
+# ---------- Parser ----------
 
 proc looksLikePath*(s: string): bool =
   let t = s.strip
@@ -183,41 +257,94 @@ proc replaceFirst*(s, needle, repl: string): (string, bool) =
   if idx < 0: return (s, false)
   (s[0 ..< idx] & repl & s[idx + needle.len .. ^1], true)
 
-proc runAction*(act: Action): string =
+proc runAction*(act: Action): (string, int) =
   case act.kind
   of akBash:
     let cmd = act.body.strip
     let (output, code) = execCmdEx(cmd)
     var tail = output
     if tail.len > 8000: tail = tail[0 ..< 4000] & "\n... [truncated] ...\n" & tail[^4000 .. ^1]
-    &"$ {cmd}\n{tail}[exit {code}]"
+    (&"$ {cmd}\n{tail}[exit {code}]", code)
   of akWrite:
     let dir = parentDir(act.path)
     if dir != "": createDir(dir)
     writeFile(act.path, act.body)
-    &"wrote {act.path} ({act.body.len} bytes)"
+    (&"wrote {act.path} ({act.body.len} bytes)", 0)
   of akPatch:
     if not fileExists(act.path):
-      return &"error: {act.path} does not exist"
+      return (&"error: {act.path} does not exist", 1)
     var content = readFile(act.path)
     var applied = 0
     for (s, r) in act.edits:
       let (next, ok) = replaceFirst(content, s, r)
       if not ok:
-        return &"error: SEARCH block did not match in {act.path}:\n{s}"
+        return (&"error: SEARCH block did not match in {act.path}:\n{s}", 1)
       content = next
       inc applied
     writeFile(act.path, content)
-    &"patched {act.path} ({applied} edit" & (if applied == 1: "" else: "s") & ")"
+    (&"patched {act.path} ({applied} edit" & (if applied == 1: "" else: "s") & ")", 0)
 
-proc describe(act: Action): string =
+# ---------- Display ----------
+
+proc previewCmd(body: string, width = 64): string =
+  let first = body.strip.splitLines[0]
+  if first.len > width: first[0 ..< width-1] & "…" else: first
+
+proc bannerFor(act: Action): string =
   case act.kind
-  of akBash: "bash"
-  of akWrite: "write " & act.path
-  of akPatch: "patch " & act.path
+  of akBash:
+    "bash   " & previewCmd(act.body)
+  of akWrite:
+    &"write  {act.path}  ({humanBytes(act.body.len)})"
+  of akPatch:
+    &"patch  {act.path}  ({act.edits.len} edit" & (if act.edits.len == 1: "" else: "s") & ")"
+
+proc printActionResult(act: Action, res: string, code: int) =
+  if act.kind == akBash:
+    # split into "$ cmd", body, "[exit N]"
+    let lines = res.splitLines
+    for l in lines:
+      if l.startsWith("$ "):
+        stdout.styledWriteLine fgBlack, styleBright, l, resetStyle
+      elif l.startsWith("[exit "):
+        if code == 0:
+          stdout.styledWriteLine fgGreen, l, resetStyle
+        else:
+          stdout.styledWriteLine fgRed, styleBright, l, resetStyle
+      else:
+        stdout.writeLine l
+  else:
+    if code == 0:
+      stdout.styledWriteLine fgGreen, res, resetStyle
+    else:
+      stdout.styledWriteLine fgRed, styleBright, res, resetStyle
+
+# ---------- History / editor ----------
 
 proc historyFile(): string =
   getConfigDir() / "3code" / "history"
+
+# Track up-navigation so "down past last" can return to blank line.
+var navigatedUp: bool = false
+var origDown, origUp: proc(ed: var LineEditor) {.closure.}
+
+proc installEditorTweaks() =
+  origUp = KEYMAP["up"]
+  origDown = KEYMAP["down"]
+  KEYMAP["up"] = proc(ed: var LineEditor) =
+    origUp(ed)
+    navigatedUp = true
+  KEYMAP["down"] = proc(ed: var LineEditor) =
+    let before = ed.lineText
+    origDown(ed)
+    if navigatedUp and ed.lineText == before:
+      ed.changeLine("")
+      navigatedUp = false
+  # also reset the flag when the line is cleared via ctrl+u
+  let origClear = KEYMAP["ctrl+u"]
+  KEYMAP["ctrl+u"] = proc(ed: var LineEditor) =
+    origClear(ed)
+    navigatedUp = false
 
 proc welcome(p: Profile): minline.LineEditor =
   stdout.styledWriteLine fgCyan, styleBright, "  ╭─╮"
@@ -227,14 +354,40 @@ proc welcome(p: Profile): minline.LineEditor =
   stdout.styledWriteLine fgBlack, styleBright, "  profile  ", resetStyle, p.name
   stdout.styledWriteLine fgBlack, styleBright, "  model    ", resetStyle, p.model
   stdout.write "\n"
-  stdout.styledWriteLine fgBlack, styleBright, "  type a prompt. :q or Ctrl-D to exit."
+  stdout.styledWriteLine fgBlack, styleBright, "  type a prompt. :help for commands. :q or Ctrl-D to exit."
   stdout.flushFile
-  # Initialize minline editor with history
+  installEditorTweaks()
   result = minline.initEditor(historyFile = historyFile())
 
-proc runTurns(p: Profile, messages: var JsonNode) =
+# Read one logical input. Returns "" to mean "skip" (e.g. empty, or command
+# already handled). Sets `done` when the user wants to exit.
+proc readInput(editor: var minline.LineEditor, done: var bool): string =
+  let line = try: editor.readLine("> ")
+             except EOFError:
+               done = true; return ""
+  navigatedUp = false
+  let s = line.strip
+  if s == "": return ""
+  if s == "\"\"\"":
+    var buf: seq[string]
+    while true:
+      let l = try: editor.readLine("… ")
+              except EOFError:
+                done = true; break
+      if l.strip == "\"\"\"": break
+      buf.add l
+    return buf.join("\n")
+  return line
+
+# ---------- Session loop ----------
+
+proc runTurns(p: Profile, messages: var JsonNode, session: var Usage) =
   while true:
-    let reply = callModel(p, messages)
+    var usage: Usage
+    let reply = callModel(p, messages, usage)
+    session.promptTokens += usage.promptTokens
+    session.completionTokens += usage.completionTokens
+    session.totalTokens += usage.totalTokens
     messages.add %*{"role": "assistant", "content": reply}
     stdout.write "\n"
     stdout.styledWrite fgCyan, reply, resetStyle, "\n"
@@ -243,12 +396,37 @@ proc runTurns(p: Profile, messages: var JsonNode) =
     if actions.len == 0: break
     var results = ""
     for act in actions:
-      stdout.styledWrite fgYellow, "» ", describe(act), "\n", resetStyle
+      stdout.styledWrite fgYellow, styleBright, "» ", resetStyle, fgYellow, bannerFor(act), resetStyle, "\n"
       stdout.flushFile
-      let r = runAction(act)
-      stdout.write r & "\n"
-      results.add "--- " & describe(act) & " ---\n" & r & "\n"
+      let (r, code) = runAction(act)
+      printActionResult(act, r, code)
+      results.add "--- " & bannerFor(act) & " ---\n" & r & "\n"
     messages.add %*{"role": "user", "content": results}
+
+proc handleCommand(cmd: string, messages: var JsonNode, session: Usage,
+                   prof: Profile): bool =
+  ## returns true if the input was a recognised command
+  let c = cmd.strip
+  if c.len == 0 or c[0] != ':': return false
+  case c
+  of ":help", ":h", ":?":
+    stdout.write HelpText
+  of ":tokens", ":t":
+    if session.totalTokens == 0:
+      stdout.styledWriteLine fgBlack, styleBright, "  no tokens used yet", resetStyle
+    else:
+      stdout.styledWriteLine fgBlack, styleBright,
+        &"  session: {session.totalTokens} tok  (in {session.promptTokens}, out {session.completionTokens})",
+        resetStyle
+  of ":clear":
+    messages = %* [{"role": "system", "content": SystemPrompt}]
+    stdout.styledWriteLine fgBlack, styleBright, "  context cleared", resetStyle
+  of ":model":
+    stdout.styledWriteLine fgBlack, styleBright,
+      &"  profile {prof.name}  ·  model {prof.model}", resetStyle
+  else:
+    stdout.styledWriteLine fgRed, "unknown command: ", c, "  (try :help)", resetStyle
+  return true
 
 proc usage() {.noreturn.} =
   stderr.writeLine """usage: 3code [options] [prompt...]
@@ -279,24 +457,29 @@ proc main() =
 
   let prof = loadProfile(profile)
   var messages = %* [{"role": "system", "content": SystemPrompt}]
+  var session: Usage
 
   if prompt != "":
     messages.add %*{"role": "user", "content": prompt}
-    runTurns(prof, messages)
+    runTurns(prof, messages, session)
+    if session.totalTokens > 0:
+      stdout.styledWriteLine fgBlack, styleBright,
+        &"  · {session.totalTokens} tok total", resetStyle
     return
 
   var editor = welcome(prof)
   while true:
-    var line: string
-    try:
-      line = editor.readLine("> ")
-    except EOFError:
+    var done = false
+    let line = readInput(editor, done)
+    if done:
       echo ""
       break
-    if line.strip == "": continue
-    if line.strip in ["exit", "quit", ":q"]: break
+    if line == "": continue
+    let t = line.strip
+    if t in ["exit", "quit", ":q", ":quit", ":exit"]: break
+    if handleCommand(line, messages, session, prof): continue
     messages.add %*{"role": "user", "content": line}
-    runTurns(prof, messages)
+    runTurns(prof, messages, session)
 
 when isMainModule:
   main()

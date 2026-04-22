@@ -92,10 +92,11 @@ Done.
     let tmp = getTempDir() / "3code_test_" & $getCurrentProcessId()
     removeDir(tmp)
     let p = tmp / "nested/dir/out.txt"
-    let r = runAction(Action(kind: akWrite, path: p, body: "hi\n"))
+    let (r, code) = runAction(Action(kind: akWrite, path: p, body: "hi\n"))
     check fileExists(p)
     check readFile(p) == "hi\n"
     check "wrote" in r
+    check code == 0
     removeDir(tmp)
 
   test "runAction akPatch applies exact match":
@@ -103,9 +104,10 @@ Done.
     createDir(tmp)
     let p = tmp / "a.txt"
     writeFile(p, "one two three\n")
-    let r = runAction(Action(kind: akPatch, path: p, edits: @[("two", "TWO")]))
+    let (r, code) = runAction(Action(kind: akPatch, path: p, edits: @[("two", "TWO")]))
     check readFile(p) == "one TWO three\n"
     check "patched" in r
+    check code == 0
     removeDir(tmp)
 
   test "runAction akPatch reports unmatched":
@@ -113,7 +115,8 @@ Done.
     createDir(tmp)
     let p = tmp / "a.txt"
     writeFile(p, "hello\n")
-    let r = runAction(Action(kind: akPatch, path: p, edits: @[("nope", "x")]))
+    let (r, code) = runAction(Action(kind: akPatch, path: p, edits: @[("nope", "x")]))
     check "did not match" in r
+    check code != 0
     check readFile(p) == "hello\n"
     removeDir(tmp)
