@@ -1,4 +1,5 @@
 import std/[httpclient, json, os, osproc, strutils, strformat, sequtils, terminal, parsecfg, parseopt, tables]
+import minline
 
 const Version = staticRead("../threecode.nimble").splitLines().filterIt(it.startsWith("version")).
     mapIt(it.split("=")[1].strip().strip(chars = {'"'}))[0]
@@ -215,7 +216,10 @@ proc describe(act: Action): string =
   of akWrite: "write " & act.path
   of akPatch: "patch " & act.path
 
-proc welcome(p: Profile) =
+proc historyFile(): string =
+  getConfigDir() / "3code" / "history"
+
+proc welcome(p: Profile): minline.LineEditor =
   stdout.styledWriteLine fgCyan, styleBright, "  ╭─╮"
   stdout.styledWriteLine fgCyan, styleBright, "   ─┤  ", resetStyle, fgWhite, styleBright, "3code ", resetStyle, fgBlack, styleBright, "v" & Version
   stdout.styledWriteLine fgCyan, styleBright, "  ╰─╯"
@@ -225,6 +229,8 @@ proc welcome(p: Profile) =
   stdout.write "\n"
   stdout.styledWriteLine fgBlack, styleBright, "  type a prompt. :q or Ctrl-D to exit."
   stdout.flushFile
+  # Initialize minline editor with history
+  result = minline.initEditor(historyFile = historyFile())
 
 proc runTurns(p: Profile, messages: var JsonNode) =
   while true:
@@ -279,13 +285,11 @@ proc main() =
     runTurns(prof, messages)
     return
 
-  welcome(prof)
+  var editor = welcome(prof)
   while true:
-    stdout.styledWrite fgGreen, styleBright, "\n> ", resetStyle
-    stdout.flushFile
     var line: string
     try:
-      line = stdin.readLine
+      line = editor.readLine("> ")
     except EOFError:
       echo ""
       break
