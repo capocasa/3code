@@ -82,6 +82,8 @@ commands:
   :tokens       show token usage for this session
   :clear        reset conversation (keeps system prompt)
   :model        show current profile and model
+  :show [N]     show full output of tool call N (default: last)
+  :log          list all tool calls this session
   :q :quit      exit (also Ctrl-D)
 
 input:
@@ -101,6 +103,13 @@ type
     name, url, key, model: string
   Usage = object
     promptTokens, completionTokens, totalTokens: int
+  ToolRecord = object
+    banner: string
+    output: string
+    code: int
+    kind: ActionKind
+
+var toolLog: seq[ToolRecord]
 
 proc die(msg: string, code = 1) {.noreturn.} =
   stderr.writeLine "3code: " & msg
@@ -321,20 +330,54 @@ proc bannerFor(act: Action): string =
   of akPatch:
     &"patch  {act.path}  ({act.edits.len} edit" & (if act.edits.len == 1: "" else: "s") & ")"
 
-proc printActionResult(act: Action, res: string, code: int) =
+const
+  CompactHead = 3
+  CompactTail = 10
+  CompactThreshold = CompactHead + CompactTail + 2  # below this, show everything
+
+proc trimTrailingBlank(lines: var seq[string]) =
+  while lines.len > 0 and lines[^1].strip == "":
+    lines.setLen lines.len - 1
+
+proc printLine(l: string) =
+  if l.startsWith("$ "):
+    stdout.styledWriteLine fgBlack, styleBright, l, resetStyle
+  elif l.startsWith("[exit "):
+    if l == "[exit 0]":
+      stdout.styledWriteLine fgGreen, l, resetStyle
+    else:
+      stdout.styledWriteLine fgRed, styleBright, l, resetStyle
+  else:
+    stdout.writeLine l
+
+proc printBashCompact(res: string, idx: int) =
+  var lines = res.splitLines
+  trimTrailingBlank(lines)
+  if lines.len <= CompactThreshold:
+    for l in lines: printLine(l)
+    return
+  # keep "$ cmd" line + head body + hidden marker + tail body + "[exit N]"
+  var header = 0
+  if header < lines.len and lines[header].startsWith("$ "):
+    printLine(lines[header]); inc header
+  var footer = lines.len
+  if footer > 0 and lines[footer-1].startsWith("[exit "):
+    dec footer
+  let bodyLen = footer - header
+  if bodyLen <= CompactThreshold:
+    for i in header ..< footer: printLine(lines[i])
+  else:
+    for i in header ..< header + CompactHead: printLine(lines[i])
+    let hidden = bodyLen - CompactHead - CompactTail
+    stdout.styledWriteLine fgBlack, styleBright,
+      &"  … {hidden} line" & (if hidden == 1: "" else: "s") &
+      &" hidden · :show {idx} for full …", resetStyle
+    for i in footer - CompactTail ..< footer: printLine(lines[i])
+  if footer < lines.len: printLine(lines[footer])
+
+proc printActionResult(act: Action, res: string, code: int, idx: int) =
   if act.kind == akBash:
-    # split into "$ cmd", body, "[exit N]"
-    let lines = res.splitLines
-    for l in lines:
-      if l.startsWith("$ "):
-        stdout.styledWriteLine fgBlack, styleBright, l, resetStyle
-      elif l.startsWith("[exit "):
-        if code == 0:
-          stdout.styledWriteLine fgGreen, l, resetStyle
-        else:
-          stdout.styledWriteLine fgRed, styleBright, l, resetStyle
-      else:
-        stdout.writeLine l
+    printBashCompact(res, idx)
   else:
     if code == 0:
       stdout.styledWriteLine fgGreen, res, resetStyle
@@ -418,19 +461,65 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Usage) =
     if actions.len == 0: break
     var results = ""
     for act in actions:
-      stdout.styledWrite fgYellow, styleBright, "» ", resetStyle, fgYellow, bannerFor(act), resetStyle, "\n"
+      let idx = toolLog.len + 1
+      stdout.styledWrite fgYellow, styleBright, "» ", resetStyle,
+        fgYellow, bannerFor(act), resetStyle,
+        fgBlack, styleBright, &"   [T{idx}]", resetStyle, "\n"
       stdout.flushFile
       let (r, code) = runAction(act)
-      printActionResult(act, r, code)
+      toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
+      printActionResult(act, r, code, idx)
       results.add "--- " & bannerFor(act) & " ---\n" & r & "\n"
     messages.add %*{"role": "user", "content": results}
+
+proc showTool(arg: string) =
+  if toolLog.len == 0:
+    stdout.styledWriteLine fgBlack, styleBright, "  no tool calls yet", resetStyle
+    return
+  var n = toolLog.len
+  if arg != "":
+    try: n = parseInt(arg)
+    except ValueError:
+      stdout.styledWriteLine fgRed, "show: not a number: ", arg, resetStyle
+      return
+  if n < 1 or n > toolLog.len:
+    stdout.styledWriteLine fgRed,
+      &"show: T{n} out of range (1..{toolLog.len})", resetStyle
+    return
+  let rec = toolLog[n-1]
+  stdout.styledWriteLine fgYellow, styleBright, &"── T{n}  ", rec.banner, resetStyle
+  if rec.kind == akBash:
+    for l in rec.output.splitLines: printLine(l)
+  else:
+    if rec.code == 0:
+      stdout.styledWriteLine fgGreen, rec.output, resetStyle
+    else:
+      stdout.styledWriteLine fgRed, styleBright, rec.output, resetStyle
+
+proc listTools() =
+  if toolLog.len == 0:
+    stdout.styledWriteLine fgBlack, styleBright, "  no tool calls yet", resetStyle
+    return
+  for i, rec in toolLog:
+    let tag = &"T{i+1}"
+    let lines = rec.output.splitLines.len
+    let mark = if rec.code == 0: "✓" else: "✗"
+    let color = if rec.code == 0: fgGreen else: fgRed
+    stdout.styledWrite fgBlack, styleBright, &"  {tag:>4}  ", resetStyle,
+      color, mark, resetStyle, " ",
+      rec.banner,
+      fgBlack, styleBright, &"   ({lines} line" & (if lines == 1: "" else: "s") & ")",
+      resetStyle, "\n"
 
 proc handleCommand(cmd: string, messages: var JsonNode, session: Usage,
                    prof: Profile): bool =
   ## returns true if the input was a recognised command
   let c = cmd.strip
   if c.len == 0 or c[0] != ':': return false
-  case c
+  let sp = c.find({' ', '\t'})
+  let name = if sp < 0: c else: c[0 ..< sp]
+  let arg = if sp < 0: "" else: c[sp+1 .. ^1].strip
+  case name
   of ":help", ":h", ":?":
     stdout.write HelpText
   of ":tokens", ":t":
@@ -442,10 +531,15 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: Usage,
         resetStyle
   of ":clear":
     messages = %* [{"role": "system", "content": SystemPrompt}]
+    toolLog.setLen 0
     stdout.styledWriteLine fgBlack, styleBright, "  context cleared", resetStyle
   of ":model":
     stdout.styledWriteLine fgBlack, styleBright,
       &"  profile {prof.name}  ·  model {prof.model}", resetStyle
+  of ":show", ":s":
+    showTool(arg)
+  of ":log", ":l":
+    listTools()
   else:
     stdout.styledWriteLine fgRed, "unknown command: ", c, "  (try :help)", resetStyle
   return true
