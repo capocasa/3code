@@ -1,5 +1,6 @@
 import std/[httpclient, json, os, osproc, strutils, strformat, sequtils, terminal, parsecfg, parseopt, tables, times, atomics, critbits]
 import minline
+import threecode/web
 
 const Version = staticRead("../threecode.nimble").splitLines().filterIt(it.startsWith("version")).
     mapIt(it.split("=")[1].strip().strip(chars = {'"'}))[0]
@@ -43,6 +44,25 @@ new code
 A single file block may contain multiple SEARCH/REPLACE pairs. SEARCH blocks must match the file byte-for-byte; if one does not match, the edit fails and you must retry with a corrected SEARCH.
 
 When the task is done, reply with prose and no action blocks.
+
+## Gathering context
+
+Before guessing, look things up. Assume you know nothing about this repo until you have read it.
+
+- Working directory: use `rg`, `grep -rn`, `find`, `ls`, or `cat` (via a bash block) to locate the relevant file, function, config key, version, or dependency. Read files rather than inventing their contents.
+- Web: when you need API details, library docs, error-message meanings, or any current fact you are not sure about, shell out:
+
+  ```bash
+  3code web "exact query string"
+  ```
+
+  prints a numbered list of result titles / URLs / snippets from DuckDuckGo. Then fetch the most promising one as readable text:
+
+  ```bash
+  3code fetch https://example.com/some/page
+  ```
+
+  Use these freely — one or two searches up front beats a failed attempt. Prefer official docs and source over blogspam.
 """
 
 const ConfigExample = """  [3code]
@@ -430,6 +450,8 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: Usage,
 
 proc usage() {.noreturn.} =
   stderr.writeLine """usage: 3code [options] [prompt...]
+       3code web <query...>         # DuckDuckGo search, plain-text results
+       3code fetch <url>            # GET url, return readable text
 
   -p, --profile NAME   use named profile from config
   -v, --version        print version
@@ -438,9 +460,26 @@ proc usage() {.noreturn.} =
 config: """ & configPath()
   quit ExitUsage
 
+proc runWeb(args: seq[string]) =
+  if args.len == 0:
+    die "web: missing query", ExitUsage
+  let query = args.join(" ")
+  let hits = try: webSearch(query)
+             except CatchableError as e: die("web: " & e.msg, ExitApi)
+  stdout.write formatHits(hits)
+  if hits.len > 0: stdout.write "\n"
+
+proc runFetch(args: seq[string]) =
+  if args.len != 1:
+    die "fetch: expected one url", ExitUsage
+  let text = try: fetchUrl(args[0])
+             except CatchableError as e: die("fetch: " & e.msg, ExitApi)
+  stdout.write capText(text)
+  stdout.write "\n"
+
 proc main() =
   var profile = ""
-  var prompt = ""
+  var args: seq[string]
   var p = initOptParser(commandLineParams())
   for kind, k, v in p.getopt():
     case kind
@@ -451,10 +490,16 @@ proc main() =
       of "p", "profile": profile = v
       else: die("unknown option: -" & (if k.len == 1: "" else: "-") & k, ExitUsage)
     of cmdArgument:
-      if prompt.len > 0: prompt.add " "
-      prompt.add k
+      args.add k
     of cmdEnd: discard
 
+  if args.len > 0:
+    case args[0]
+    of "web": runWeb(args[1 .. ^1]); return
+    of "fetch": runFetch(args[1 .. ^1]); return
+    else: discard
+
+  let prompt = args.join(" ")
   let prof = loadProfile(profile)
   var messages = %* [{"role": "system", "content": SystemPrompt}]
   var session: Usage
