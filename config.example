@@ -1,0 +1,23 @@
+# Save to ~/.config/3code/config
+#
+# Values are parsed as Nim string literals. Use r"..." (raw strings) for
+# anything containing a colon — parsecfg treats ':' as a key/value separator
+# in unquoted strings. Plain double-quotes work for values without colons.
+
+[3code]
+profile = openai
+
+[openai]
+url = r"https://api.openai.com/v1"
+key = r"sk-..."
+model = "gpt-4o-mini"
+
+[groq]
+url = r"https://api.groq.com/openai/v1"
+key = r"gsk_..."
+model = "llama-3.3-70b-versatile"
+
+[together]
+url = r"https://api.together.xyz/v1"
+key = r"..."
+model = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
