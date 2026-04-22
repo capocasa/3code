@@ -1,0 +1,52 @@
+import std/[unittest, strutils]
+import threecode/web
+
+suite "web helpers":
+  test "decodeEntities named and numeric":
+    check decodeEntities("a &amp; b &lt;c&gt; &quot;d&quot; &#39;e&#39;") ==
+      "a & b <c> \"d\" 'e'"
+    check decodeEntities("fa&ccedil;ade") == "fa&ccedil;ade"  # unknown entity passes through
+    check decodeEntities("&#x2014; &#8212;") == "— —"
+
+  test "stripHtml removes script/style/comments":
+    let h = """
+      <html><head><style>body{color:red}</style>
+      <!-- hidden --></head>
+      <body><script>alert(1)</script>
+      <p>Hello <b>world</b>!</p>
+      <p>Second &amp; last.</p>
+      </body></html>
+    """
+    let t = stripHtml(h)
+    check "Hello world!" in t
+    check "Second & last." in t
+    check "alert" notin t
+    check "color:red" notin t
+    check "hidden" notin t
+
+  test "stripHtml collapses whitespace and block tags":
+    let h = "<div>one</div><div>two</div><br>three"
+    let t = stripHtml(h)
+    check t.splitLines.len >= 3
+
+  test "parseSearchHits extracts title / url / snippet":
+    let html = """
+      <div class="results">
+        <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa&amp;rut=x">Title <b>One</b></a>
+        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa">Snippet <b>one</b> text.</a>
+        <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fb">Title Two</a>
+      </div>
+    """
+    let hits = parseSearchHits(html)
+    check hits.len == 2
+    check hits[0].title == "Title One"
+    check hits[0].url == "https://example.com/a"
+    check "Snippet one text." in hits[0].snippet
+    check hits[1].title == "Title Two"
+    check hits[1].url == "https://example.com/b"
+
+  test "capText middle-truncates oversize input":
+    let s = "a".repeat(30_000)
+    let c = capText(s, 1000)
+    check c.len < s.len
+    check "truncated" in c
