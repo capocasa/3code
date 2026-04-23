@@ -17,15 +17,17 @@ Or clone and `nimble install`.
 
 Write a config file at `~/.config/3code/config`:
 
-    [state]
-    model = "openai.gpt-4o-mini"
+    [settings]
+    current = "openai.gpt-4o-mini"
 
-    [openai]
+    [provider]
+    name = "openai"
     url = "https://api.openai.com/v1"
     key = "sk-..."
     models = "gpt-4o-mini, gpt-4o"
 
-    [groq]
+    [provider]
+    name = "groq"
     url = "https://api.groq.com/openai/v1"
     key = "gsk_..."
     models = "llama-3.3-70b-versatile, llama-3.1-8b-instant"
@@ -33,9 +35,10 @@ Write a config file at `~/.config/3code/config`:
 Values are Nim string literals — always wrap them in double quotes.
 parsecfg treats `:`, `=`, and `#` as syntax in unquoted values.
 
-Each provider is a section. `models` is a comma-separated list. `[state]
-model` picks the default as `provider.model` (or just `provider` to use
-the first model in its list). Override per-invocation with `-m`:
+Each `[provider]` block defines one endpoint; `models` is a comma-separated
+list. `[settings] current` picks the default as `provider.model` (or just
+`provider` to use the first model in its list). Override per-invocation
+with `-m`:
 
     3code -m groq "refactor the http client"
     3code -m groq.llama-3.1-8b-instant "quick one-liner"
