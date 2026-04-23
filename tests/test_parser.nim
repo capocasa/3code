@@ -1,86 +1,7 @@
 import std/[unittest, os, strutils, json]
 import threecode
 
-suite "parseActions":
-  test "bash block":
-    let s = "Some prose.\n\n```bash\nls -la\n```\nTrailing."
-    let a = parseActions(s)
-    check a.len == 1
-    check a[0].kind == akBash
-    check a[0].body.strip == "ls -la"
-
-  test "write block":
-    let s = "src/foo.nim\n```\necho \"hi\"\n```\n"
-    let a = parseActions(s)
-    check a.len == 1
-    check a[0].kind == akWrite
-    check a[0].path == "src/foo.nim"
-    check a[0].body == "echo \"hi\"\n"
-
-  test "patch block with one edit":
-    let s = """src/foo.nim
-```
-<<<<<<< SEARCH
-old
-=======
-new
->>>>>>> REPLACE
-```
-"""
-    let a = parseActions(s)
-    check a.len == 1
-    check a[0].kind == akPatch
-    check a[0].path == "src/foo.nim"
-    check a[0].edits.len == 1
-    check a[0].edits[0][0] == "old\n"
-    check a[0].edits[0][1] == "new\n"
-
-  test "patch with multiple edits":
-    let s = """README.md
-```
-<<<<<<< SEARCH
-one
-=======
-1
->>>>>>> REPLACE
-<<<<<<< SEARCH
-two
-=======
-2
->>>>>>> REPLACE
-```
-"""
-    let a = parseActions(s)
-    check a.len == 1
-    check a[0].kind == akPatch
-    check a[0].edits.len == 2
-
-  test "mixed actions in one reply":
-    let s = """Plan:
-
-```bash
-mkdir -p src
-```
-
-src/foo.nim
-```
-let x = 1
-```
-
-Done.
-"""
-    let a = parseActions(s)
-    check a.len == 2
-    check a[0].kind == akBash
-    check a[1].kind == akWrite
-
-  test "looksLikePath rejects prose":
-    check not looksLikePath("Here is the plan")
-    check not looksLikePath("```")
-    check looksLikePath("src/foo.nim")
-    check looksLikePath("README.md")
-    check looksLikePath("a/b/c.txt")
-
+suite "actions":
   test "replaceFirst only replaces first occurrence":
     let (out1, ok) = replaceFirst("a X b X c", "X", "Y")
     check ok
@@ -110,21 +31,21 @@ Done.
     check code == 0
     removeDir(tmp)
 
-  test "stripActions removes bash blocks":
-    let s = "Plan:\n\n```bash\nls -la\n```\n\nDone."
-    check stripActions(s) == "Plan:\n\nDone."
+  test "runAction akPatch rejects zero edits":
+    let (r, code) = runAction(Action(kind: akPatch, path: "anything.txt"))
+    check code != 0
+    check "no edits" in r
 
-  test "stripActions removes write blocks":
-    let s = "Writing config.\n\nsrc/foo.nim\n```\necho hi\nmultiline\n```\n\nDone."
-    check stripActions(s) == "Writing config.\n\nDone."
-
-  test "stripActions returns empty for pure action reply":
-    let s = "```bash\nls\n```\n"
-    check stripActions(s) == ""
-
-  test "stripActions preserves inline prose between actions":
-    let s = "First:\n```bash\na\n```\nNext:\n```bash\nb\n```\nEnd."
-    check stripActions(s) == "First:\nNext:\nEnd."
+  test "runAction akPatch reports unmatched":
+    let tmp = getTempDir() / "3code_test_" & $getCurrentProcessId() & "_p2"
+    createDir(tmp)
+    let p = tmp / "a.txt"
+    writeFile(p, "hello\n")
+    let (r, code) = runAction(Action(kind: akPatch, path: p, edits: @[("nope", "x")]))
+    check "did not match" in r
+    check code != 0
+    check readFile(p) == "hello\n"
+    removeDir(tmp)
 
   test "toolCallToAction bash":
     let a = toolCallToAction("bash", %*{"command": "ls -la"})
@@ -161,6 +82,11 @@ Done.
     check a.edits.len == 2
     check a.edits[1][0] == "two"
     check a.edits[1][1] == "2"
+
+  test "toolCallToAction patch tolerates missing edits":
+    let a = toolCallToAction("patch", %*{"path": "x"})
+    check a.kind == akPatch
+    check a.edits.len == 0
 
   test "toolCallToAction read whole file":
     let a = toolCallToAction("read", %*{"path": "src/foo.nim"})
@@ -230,19 +156,3 @@ Done.
     let (r, code) = runAction(Action(kind: akRead, path: "/nonexistent/xyz"))
     check code != 0
     check "does not exist" in r
-
-  test "toolCallToAction patch tolerates missing edits":
-    let a = toolCallToAction("patch", %*{"path": "x"})
-    check a.kind == akPatch
-    check a.edits.len == 0
-
-  test "runAction akPatch reports unmatched":
-    let tmp = getTempDir() / "3code_test_" & $getCurrentProcessId() & "_p2"
-    createDir(tmp)
-    let p = tmp / "a.txt"
-    writeFile(p, "hello\n")
-    let (r, code) = runAction(Action(kind: akPatch, path: p, edits: @[("nope", "x")]))
-    check "did not match" in r
-    check code != 0
-    check readFile(p) == "hello\n"
-    removeDir(tmp)
