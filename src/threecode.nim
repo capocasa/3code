@@ -855,7 +855,7 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: U
   if sessionUsage.cachedTokens > 0:
     spinLabel.add &" · cache {humanTokens(sessionUsage.cachedTokens)}"
   startSpinner(spinLabel)
-  const MaxAttempts = 5
+  const MaxAttempts = 8
   var resp: Response
   var attempt = 0
   var level = retryLevel
@@ -883,7 +883,14 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: U
                        try: parseInt($resp.headers.getOrDefault("retry-after"))
                        except CatchableError: 0
                      else: 0)
-    let backoff = if retryAfter > 0: retryAfter else: min(1 shl level, 16)
+    # Providers that signal "Model busy, retry later" (deepinfra 429, no
+    # Retry-After) need minutes, not seconds. Cap at 90s per attempt; over
+    # 8 attempts that budgets ~4 min of patience before surfacing the error.
+    let isBusy = errMsg.startsWith("api 429") and
+                 ("busy" in resp.body or "capacity" in resp.body or
+                  "overloaded" in resp.body)
+    let base = if isBusy: max(level, 4) else: level  # start 429-busy at ≥16s
+    let backoff = if retryAfter > 0: retryAfter else: min(1 shl base, 90)
     stopSpinner()
     stderr.writeLine &"3code: {errMsg}; retry {attempt + 1}/{MaxAttempts} in {backoff}s"
     sleep(backoff * 1000)
