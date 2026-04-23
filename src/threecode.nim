@@ -22,76 +22,7 @@ template err(args: varargs[untyped]) =
 template errLn(args: varargs[untyped]) =
   stdout.styledWriteLine(fgRed, styleBright, args, resetStyle)
 
-const SystemPromptText = """
-You are 3code, a coding agent running in a terminal.
-
-You act by emitting fenced code blocks. After your turn the harness executes them and replies with their results. Mix prose and action blocks freely.
-
-Three action forms:
-
-1. Run a shell command:
-
-```bash
-ls -la
-```
-
-2. Write a whole file (creates or overwrites). Put the path on its own line immediately before the fence:
-
-path/to/file.nim
-```
-echo "hello"
-```
-
-3. Patch an existing file with one or more exact-match edits. Put the path on its own line, then inside the fence use SEARCH/REPLACE markers:
-
-path/to/file.nim
-```
-<<<<<<< SEARCH
-old code that matches exactly
-=======
-new code
->>>>>>> REPLACE
-```
-
-A single file block may contain multiple SEARCH/REPLACE pairs. SEARCH blocks must match the file byte-for-byte — copy from a prior `cat` exactly, preserving indentation, trailing whitespace, and line endings. Paraphrased or reformatted matches will fail; on failure retry with a corrected SEARCH.
-
-When the task is done, reply with prose and no action blocks.
-
-Tone: dry wit welcome where it's earned — funny because it's true, a wry aside that also tells the user something real. Skip forced cheer, emoji, and filler like "Great question!".
-
-## Working effectively
-
-### Orient & plan
-
-- Orient first. On a fresh task in an unfamiliar repo, `ls` and read the README and the build manifest (`*.nimble`, `package.json`, `Cargo.toml`, `pyproject.toml`, etc.) before editing. Skip only for obviously trivial tasks.
-- Plan multi-step tasks. For anything beyond a one-liner, sketch a 3–8 step plan before touching files; work the steps in order and note when each is done.
-
-### Scope & style
-
-- Stay in scope. Do what was asked, nothing more. Don't refactor, reformat, add comments/docstrings, or handle hypothetical edge cases the user didn't mention.
-- Match the local style. Before writing new code, glance at a neighboring file for naming, imports, error-handling pattern, and indentation. Don't impose your own taste.
-- Edit surgically. For a small fix use a SEARCH/REPLACE patch block, not a full-file write. For a rename, patch the definition and call sites — don't rewrite each file whole.
-
-### Find out, don't guess
-
-- Gather context before guessing. Read real files; don't invent their contents.
-- Search before reading. Use `rg` or `grep -rn` to locate the handful of lines you care about, then `cat` only that file — or `sed -n 'A,Bp' file` for a specific line range when the file is large. Don't cat whole files or whole directories unless you actually need them. Prefer `find -maxdepth 2` or `ls` over recursive scans.
-- Probe when unsure. When you don't know how an API, library, regex, or command actually behaves, write a short throwaway script in a temp dir (`mktemp -d`, or under `/tmp/`) and run it — don't guess. Clean up the temp dir before moving on.
-- Local before web. Installed dependencies, vendored source, CHANGELOGs, `tests/`, `example/`, and `man` pages usually answer the question faster and more accurately than a web search. Check them first. Reach for the web only when the local tree genuinely lacks the info.
-
-### Finish cleanly
-
-- Verify before declaring done. After making changes, run the project's tests, build, or typecheck; then `git diff` / `git status` (if it's a git repo) to confirm the change is what you intended and nothing accidental tagged along. Don't call the task complete if anything's off.
-- Stop when done. If a task already looks complete when you start, say so and stop — don't invent work.
-- Pause before irreversible ops outside the working directory (`rm -rf` of other paths, force-push, database drops, destructive git history rewrites). Explain and wait for the user.
-
-## Finding things
-
-- Files and search in the working tree: `cat`, `rg`, `grep -rn`, `find`, `ls` via a bash block.
-- Web (for current facts, API details, or docs the local tree doesn't have): `3code web "query"` prints numbered DuckDuckGo results; `3code fetch <url>` returns the page as readable text. Prefer official docs over blogspam.
-"""
-
-const SystemPromptTools = """
+const SystemPrompt = """
 You are 3code, a coding agent running in a terminal.
 
 Call the provided tools (`bash`, `read`, `write`, `patch`) to take actions. After your turn the harness runs each tool call and feeds results back. You may emit prose alongside tool calls. When the task is done, reply with prose and no tool calls.
@@ -232,6 +163,7 @@ commands:
   :provider X       switch to provider X (model defaults to first in its list)
   :provider add     add a new provider (interactive, verified)
   :provider rm X    remove provider X
+  :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
   :q :quit          exit (also Ctrl-D)
@@ -253,7 +185,7 @@ type
     offset*: int
     limit*: int
   Profile = object
-    name, url, key, modelPrefix, model, mode: string
+    name, url, key, modelPrefix, model: string
   Usage = object
     promptTokens, completionTokens, totalTokens: int
   ToolRecord = object
@@ -273,14 +205,14 @@ proc configPath(): string =
 
 type
   ProviderRec = object
-    name, url, key, modelPrefix, mode: string
+    name, url, key, modelPrefix: string
     models: seq[string]
 
 var activeCurrent: string
 var activeProviders: seq[ProviderRec]
 
 const CommandNames = [":help", ":tokens", ":clear", ":model", ":provider",
-                      ":show", ":log", ":q", ":quit", ":exit"]
+                      ":prompt", ":show", ":log", ":q", ":quit", ":exit"]
 
 proc currentProvider(): ProviderRec =
   let dot = activeCurrent.find('.')
@@ -342,7 +274,6 @@ proc parseConfigFile(path: string): (string, seq[ProviderRec]) =
         of "url": prov.url = e.value.strip(chars = {'/', ' '})
         of "key": prov.key = e.value
         of "model_prefix": prov.modelPrefix = e.value
-        of "mode": prov.mode = e.value
         of "models": prov.models = splitModels(e.value)
         else: discard
       else: discard
@@ -372,8 +303,6 @@ proc writeConfigFile(path: string, current: string,
     buf.add "key = " & quoteVal(pr.key) & "\n"
     if pr.modelPrefix != "":
       buf.add "model_prefix = " & quoteVal(pr.modelPrefix) & "\n"
-    if pr.mode != "":
-      buf.add "mode = " & quoteVal(pr.mode) & "\n"
     buf.add "models = " & quoteVal(pr.models.join(" ")) & "\n"
   writeFile(path, buf)
 
@@ -400,8 +329,7 @@ proc buildProfile(current: string, providers: seq[ProviderRec],
       elif model notin pr.models:
         return Profile()
       return Profile(name: pr.name & "." & model, url: pr.url,
-                     key: pr.key, modelPrefix: pr.modelPrefix, model: model,
-                     mode: pr.mode)
+                     key: pr.key, modelPrefix: pr.modelPrefix, model: model)
   Profile()
 
 proc loadProfile(wanted: string): Profile =
@@ -441,7 +369,7 @@ proc loadProfile(wanted: string): Profile =
   elif model notin prov.models:
     die &"provider '{name}': model '{model}' not in models list ({prov.models.join(\", \")})", ExitConfig
   Profile(name: prov.name & "." & model, url: prov.url, key: prov.key,
-          modelPrefix: prov.modelPrefix, model: model, mode: prov.mode)
+          modelPrefix: prov.modelPrefix, model: model)
 
 # ---------- Spinner ----------
 
@@ -481,9 +409,6 @@ proc humanBytes(n: int): string =
 
 # ---------- Model call ----------
 
-proc systemPromptFor*(p: Profile): string =
-  if p.mode == "text": SystemPromptText else: SystemPromptTools
-
 proc toolCallToAction*(name: string, args: JsonNode): Action =
   case name
   of "bash":
@@ -505,7 +430,7 @@ proc toolCallToAction*(name: string, args: JsonNode): Action =
     Action(kind: akBash, body: "echo 'unknown tool: " & name & "'; exit 1")
 
 proc callModel(p: Profile, messages: JsonNode, usage: var Usage): JsonNode =
-  let client = newHttpClient(timeout = -1)
+  let client = newHttpClient(timeout = 180_000)
   defer: client.close()
   client.headers = newHttpHeaders({
     "Authorization": "Bearer " & p.key,
@@ -516,23 +441,44 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage): JsonNode =
     "messages": messages,
     "stream": false
   }
-  if p.mode != "text":
-    body["tools"] = ToolsJson
-    body["tool_choice"] = %"auto"
+  body["tools"] = ToolsJson
+  body["tool_choice"] = %"auto"
   let bodyStr = $body
   let t0 = epochTime()
   startSpinner(&"thinking · ↑ ~{bodyStr.len div 4} tok")
-  let resp = try:
-    let r = client.request(p.url & "/chat/completions", HttpPost, bodyStr)
+  const MaxAttempts = 3
+  var resp: Response
+  var attempt = 0
+  while true:
+    inc attempt
+    var errMsg = ""
+    var retryable = false
+    try:
+      resp = client.request(p.url & "/chat/completions", HttpPost, bodyStr)
+    except CatchableError as e:
+      errMsg = "network: " & e.msg
+      retryable = true
+    if errMsg == "":
+      let c = resp.code.int
+      if c == 429 or c == 500 or c == 502 or c == 503 or c == 504:
+        errMsg = "api " & $resp.code
+        retryable = true
+    if errMsg == "" or attempt >= MaxAttempts or not retryable:
+      stopSpinner()
+      if errMsg != "":
+        die(errMsg & (if resp.code.int != 0: ": " & resp.body else: ""), ExitApi)
+      break
+    let retryAfter = (if errMsg.startsWith("api"):
+                       try: parseInt($resp.headers.getOrDefault("retry-after"))
+                       except CatchableError: 0
+                     else: 0)
+    let backoff = if retryAfter > 0: retryAfter else: 1 shl (attempt - 1)
     stopSpinner()
-    r
-  except CatchableError as e:
-    stopSpinner()
-    die("network: " & e.msg, ExitApi)
+    stderr.writeLine &"3code: {errMsg}; retry {attempt + 1}/{MaxAttempts} in {backoff}s"
+    sleep(backoff * 1000)
+    startSpinner(&"retry {attempt + 1}/{MaxAttempts}")
   let text = resp.body
   let elapsed = epochTime() - t0
-  if resp.code != Http200:
-    die("api " & $resp.code & ": " & text, ExitApi)
   let j = parseJson(text)
   if "error" in j: die("api error: " & $j["error"], ExitApi)
   if "usage" in j:
@@ -591,95 +537,6 @@ proc fetchModels(url, key: string): seq[string] =
   except CatchableError:
     return @[]
 
-# ---------- Parser ----------
-
-proc looksLikePath*(s: string): bool =
-  let t = s.strip
-  if t.len == 0 or t.len > 200: return false
-  if ' ' in t or '\t' in t: return false
-  if t.startsWith("```") or t.startsWith("#"): return false
-  '/' in t or '.' in t
-
-proc parseActions*(text: string): seq[Action] =
-  let lines = text.splitLines
-  var i = 0
-  while i < lines.len:
-    let ln = lines[i].strip
-    if ln == "```bash" or ln == "```sh" or ln == "```shell":
-      inc i
-      var body = ""
-      while i < lines.len and lines[i].strip != "```":
-        body.add lines[i] & "\n"
-        inc i
-      if i < lines.len: inc i
-      result.add Action(kind: akBash, body: body)
-      continue
-    if i + 1 < lines.len and lines[i+1].strip == "```" and looksLikePath(lines[i]):
-      let path = lines[i].strip
-      i += 2
-      var body = ""
-      while i < lines.len and lines[i].strip != "```":
-        body.add lines[i] & "\n"
-        inc i
-      if i < lines.len: inc i
-      if "<<<<<<< SEARCH" in body:
-        var act = Action(kind: akPatch, path: path)
-        let blines = body.splitLines
-        var k = 0
-        while k < blines.len:
-          if blines[k].strip == "<<<<<<< SEARCH":
-            inc k
-            var s = ""
-            while k < blines.len and blines[k].strip != "=======":
-              s.add blines[k] & "\n"
-              inc k
-            if k < blines.len: inc k
-            var r = ""
-            while k < blines.len and blines[k].strip != ">>>>>>> REPLACE":
-              r.add blines[k] & "\n"
-              inc k
-            if k < blines.len: inc k
-            act.edits.add (s, r)
-          else:
-            inc k
-        result.add act
-      else:
-        result.add Action(kind: akWrite, path: path, body: body)
-      continue
-    inc i
-
-proc stripActions*(text: string): string =
-  ## Return `text` with every action block elided, so the user sees prose only.
-  ## Mirrors `parseActions` block detection. Collapses runs of blank lines
-  ## created by the elision and trims leading/trailing blank lines.
-  let lines = text.splitLines
-  var kept: seq[string]
-  var i = 0
-  while i < lines.len:
-    let ln = lines[i].strip
-    if ln == "```bash" or ln == "```sh" or ln == "```shell":
-      inc i
-      while i < lines.len and lines[i].strip != "```": inc i
-      if i < lines.len: inc i
-      continue
-    if i + 1 < lines.len and lines[i+1].strip == "```" and looksLikePath(lines[i]):
-      i += 2
-      while i < lines.len and lines[i].strip != "```": inc i
-      if i < lines.len: inc i
-      continue
-    kept.add lines[i]
-    inc i
-  var res: seq[string]
-  var lastBlank = true  # trims leading blank lines
-  for l in kept:
-    let blank = l.strip.len == 0
-    if blank and lastBlank: continue
-    res.add l
-    lastBlank = blank
-  while res.len > 0 and res[^1].strip.len == 0:
-    res.setLen res.len - 1
-  res.join("\n")
-
 proc replaceFirst*(s, needle, repl: string): (string, bool) =
   let idx = s.find(needle)
   if idx < 0: return (s, false)
@@ -735,6 +592,8 @@ proc runAction*(act: Action): (string, int) =
     writeFile(act.path, act.body)
     (&"wrote {act.path} ({act.body.len} bytes)", 0)
   of akPatch:
+    if act.edits.len == 0:
+      return (&"error: patch has no edits", 1)
     if not fileExists(act.path):
       return (&"error: {act.path} does not exist", 1)
     var content = readFile(act.path)
@@ -917,8 +776,12 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Usage) =
         let name = if fn != nil and fn.kind == JObject: fn{"name"}.getStr else: ""
         let argsStr =
           if fn != nil and fn.kind == JObject: fn{"arguments"}.getStr("") else: ""
-        let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
-                   except CatchableError: newJObject()
+        let args =
+          try: parseJson(if argsStr == "": "{}" else: argsStr)
+          except CatchableError as e:
+            stderr.writeLine "3code: tool_call " & name &
+              " has malformed arguments JSON (" & e.msg & "): " & argsStr
+            newJObject()
         let act = toolCallToAction(name, args)
         let idx = toolLog.len + 1
         stdout.styledWrite fgYellow, styleBright, "» ", resetStyle,
@@ -930,28 +793,13 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Usage) =
         printActionResult(act, r, code, idx)
         messages.add %*{"role": "tool", "tool_call_id": id, "content": r}
       continue
-    let prose = stripActions(content)
-    if prose.len > 0:
-      stdout.styledWrite fgCyan, prose, resetStyle, "\n"
+    if content.strip.len > 0:
+      stdout.styledWrite fgCyan, content, resetStyle, "\n"
       stdout.flushFile
-    let actions = parseActions(content)
-    if actions.len == 0:
-      if content.strip.len == 0:
-        stdout.styledWriteLine fgRed, styleBright,
-          "  (empty reply — no content, no tool calls)", resetStyle
-      break
-    var results = ""
-    for act in actions:
-      let idx = toolLog.len + 1
-      stdout.styledWrite fgYellow, styleBright, "» ", resetStyle,
-        fgYellow, bannerFor(act), resetStyle,
-        fgCyan, styleBright, &"   [T{idx}]", resetStyle, "\n"
-      stdout.flushFile
-      let (r, code) = runAction(act)
-      toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
-      printActionResult(act, r, code, idx)
-      results.add "--- " & bannerFor(act) & " ---\n" & r & "\n"
-    messages.add %*{"role": "user", "content": results}
+    else:
+      stdout.styledWriteLine fgRed, styleBright,
+        "  (empty reply — no content, no tool calls)", resetStyle
+    break
 
 proc showTool(arg: string) =
   if toolLog.len == 0:
@@ -1169,9 +1017,10 @@ proc cmdProviderList(prof: Profile) =
     return
   let curName = if prof.name == "": "" else: prof.name.split('.')[0]
   for pr in activeProviders:
-    let mark = if pr.name == curName: "*" else: " "
-    hintLn "  ", mark, " ", resetStyle,
-                           pr.name
+    let current = pr.name == curName
+    let mark = if current: "*" else: " "
+    let tail = if current: &"  [{prof.model}]" else: ""
+    hintLn "  ", mark, " ", resetStyle, pr.name, tail
 
 proc cmdProviderSelect(target: string, prof: var Profile) =
   var prov: ProviderRec
@@ -1302,13 +1151,16 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: Usage,
       hintLn &"  session: {session.totalTokens} tok  (in {session.promptTokens}, out {session.completionTokens})",
         resetStyle
   of ":clear":
-    messages = %* [{"role": "system", "content": systemPromptFor(prof)}]
+    messages = %* [{"role": "system", "content": SystemPrompt}]
     toolLog.setLen 0
     hintLn "  context cleared", resetStyle
   of ":model":
     cmdModel(arg, prof)
   of ":provider":
     cmdProvider(arg, editor, prof)
+  of ":prompt":
+    stdout.write SystemPrompt
+    if not SystemPrompt.endsWith("\n"): stdout.write "\n"
   of ":show":
     showTool(arg)
   of ":log":
@@ -1382,7 +1234,7 @@ proc main() =
 
   if prompt != "":
     let prof = loadProfile(model)
-    var messages = %* [{"role": "system", "content": systemPromptFor(prof)}]
+    var messages = %* [{"role": "system", "content": SystemPrompt}]
     messages.add %*{"role": "user", "content": prompt}
     runTurns(prof, messages, session)
     if session.totalTokens > 0:
@@ -1394,7 +1246,7 @@ proc main() =
   var editor = welcome(prof)
   if prof.name == "":
     prof = bootstrapProvider(editor)
-  var messages = %* [{"role": "system", "content": systemPromptFor(prof)}]
+  var messages = %* [{"role": "system", "content": SystemPrompt}]
   while true:
     var done = false
     let line = readInput(editor, done)

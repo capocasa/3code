@@ -56,28 +56,15 @@ with `-m`:
 
 ## How it works
 
-Reply → parse → execute → loop. Four tools:
+Reply → execute → loop. Four tools, sent as OpenAI tool calls:
 
 - `bash(command)` — run a shell command.
 - `read(path, offset?, limit?)` — read a file or a line range.
 - `write(path, body)` — create or overwrite a file.
 - `patch(path, edits)` — apply exact-match search/replace edits.
 
-Default wire format is OpenAI tool calls. Older or OSS-first models that
-prefer fenced text blocks can opt in with `mode = "text"` on the
-`[provider]`:
-
-    [provider]
-    name = "local"
-    url = "http://localhost:1234/v1"
-    key = "none"
-    mode = "text"
-    models = "llama-3-8b"
-
-In text mode, `bash` becomes a ```` ```bash ```` fence, `write` is a
-path-line + fenced body, and `patch` is a fenced body with `<<<<<<< SEARCH`
-/ `=======` / `>>>>>>> REPLACE` markers. `read` goes through `bash cat` in
-text mode — no dedicated fence.
+Providers without tool-call support aren't supported — nearly every
+major OpenAI-compatible endpoint has them in 2025.
 
 ## Use
 
@@ -95,8 +82,6 @@ Type `:q`, `exit`, `quit`, or hit Ctrl-D to leave.
   to run, in the current working directory.
 - No streaming. You wait for the full reply, then it executes.
 - No context management. The conversation grows until you exit or `:clear`.
-- Text mode breaks if the model emits a file containing triple backticks;
-  tools mode (default) is immune.
 
 Use in a scratch directory or a clean git working tree. `git diff` is your
 safety net.
