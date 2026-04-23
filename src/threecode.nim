@@ -63,7 +63,7 @@ When the task is done, reply with prose and no action blocks.
 - Stay in scope. Do what was asked, nothing more. Don't refactor, reformat, add comments/docstrings, or handle hypothetical edge cases the user didn't mention.
 - Verify before declaring done. After making changes, run the project's tests, build, or typecheck. Don't call the task complete if they fail.
 - Gather context before guessing. Read real files; don't invent their contents.
-- Search before reading. Use `rg` or `grep -rn` to locate the handful of lines you care about, then `read` only that file — with `offset` / `limit` when the file is large. Don't read whole files or whole directories unless you actually need them. Prefer `find -maxdepth 2` or `ls` over recursive scans.
+- Search before reading. Use `rg` or `grep -rn` to locate the handful of lines you care about, then `cat` only that file — or `sed -n 'A,Bp' file` for a specific line range when the file is large. Don't cat whole files or whole directories unless you actually need them. Prefer `find -maxdepth 2` or `ls` over recursive scans.
 - Probe when unsure. When you don't know how an API, library, regex, or command actually behaves, write a short throwaway script in a temp dir (`mktemp -d`, or under `/tmp/`) and run it — don't guess. Clean up the temp dir before moving on.
 - Local before web. Installed dependencies, vendored source, CHANGELOGs, `tests/`, `example/`, and `man` pages usually answer the question faster and more accurately than a web search. Check them first. Reach for the web only when the local tree genuinely lacks the info.
 - Stop when done. If a task already looks complete when you start, say so and stop — don't invent work.
@@ -91,7 +91,7 @@ Call the provided tools (`bash`, `read`, `write`, `patch`) to take actions. Afte
 - Stay in scope. Do what was asked, nothing more. Don't refactor, reformat, add comments/docstrings, or handle hypothetical edge cases the user didn't mention.
 - Verify before declaring done. After changes, run the project's tests, build, or typecheck. Don't call the task complete if they fail.
 - Gather context before guessing. Read real files; don't invent their contents.
-- Search before reading. Use `rg` or `grep -rn` to locate the handful of lines you care about, then `read` only that file — with `offset` / `limit` when the file is large. Don't read whole files or whole directories unless you actually need them. Prefer `find -maxdepth 2` or `ls` over recursive scans.
+- Search before reading. Use `rg` or `grep -rn` (via `bash`) to locate the handful of lines you care about, then `read` only that file — with `offset` / `limit` when the file is large. Prefer `read` over `bash cat` for any file over ~100 lines so you keep range control. Don't read whole files or whole directories unless you actually need them. Prefer `find -maxdepth 2` or `ls` over recursive scans.
 - Probe when unsure. When you don't know how an API, library, regex, or command actually behaves, write a short throwaway script in a temp dir (`mktemp -d`, or under `/tmp/`) and run it — don't guess. Clean up the temp dir before moving on.
 - Local before web. Installed dependencies, vendored source, CHANGELOGs, `tests/`, `example/`, and `man` pages usually answer the question faster and more accurately than a web search. Check them first. Reach for the web only when the local tree genuinely lacks the info.
 - Stop when done. If a task already looks complete when you start, say so and stop — don't invent work.
@@ -665,15 +665,38 @@ proc runAction*(act: Action): (string, int) =
     if not fileExists(act.path):
       return (&"error: {act.path} does not exist", 1)
     let content = readFile(act.path)
-    if act.offset <= 0 and act.limit <= 0:
-      return (content, 0)
+    const MaxLines = 2000
+    const MaxBytes = 60 * 1024
     let lines = content.splitLines
+    let total =
+      if lines.len > 0 and lines[^1] == "": lines.len - 1
+      else: lines.len
     let start = max(0, act.offset - 1)
-    let endi =
-      if act.limit <= 0: lines.len
-      else: min(lines.len, start + act.limit)
-    if start >= lines.len: ("", 0)
-    else: (lines[start ..< endi].join("\n"), 0)
+    if start >= total: return ("", 0)
+    let explicitLimit = act.limit > 0
+    var endi = if explicitLimit: min(total, start + act.limit) else: total
+    var capped = false
+    if not explicitLimit:
+      if endi - start > MaxLines:
+        endi = start + MaxLines
+        capped = true
+      var bytes = 0
+      var k = start
+      while k < endi:
+        let added = lines[k].len + 1
+        if bytes + added > MaxBytes:
+          capped = true
+          break
+        bytes += added
+        inc k
+      if k < endi: endi = k
+    if act.offset <= 0 and not explicitLimit and not capped and endi == total:
+      return (content, 0)
+    var body = lines[start ..< endi].join("\n")
+    if capped:
+      let shown = endi - start
+      body.add &"\n... [file is {total} lines, {content.len} bytes; showed {shown} lines from line {start + 1}. Use read(path, offset, limit) for a specific range.] ..."
+    (body, 0)
   of akWrite:
     let dir = parentDir(act.path)
     if dir != "": createDir(dir)
