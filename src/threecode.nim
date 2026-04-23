@@ -208,6 +208,20 @@ proc die(msg: string, code = 1) {.noreturn.} =
   stderr.writeLine "3code: " & msg
   quit code
 
+proc buildSystemPrompt(p: Profile): string =
+  if p.name == "": return SystemPrompt
+  let dot = p.name.find('.')
+  let provider = if dot < 0: p.name else: p.name[0 ..< dot]
+  result = SystemPrompt
+  if not result.endsWith("\n"): result.add "\n"
+  result.add &"\nRunning {p.model} via {provider}.\n"
+
+proc refreshSystemPrompt(messages: JsonNode, p: Profile) =
+  if messages == nil or messages.kind != JArray or messages.len == 0: return
+  let m = messages[0]
+  if m.kind != JObject or m{"role"}.getStr != "system": return
+  m["content"] = %buildSystemPrompt(p)
+
 proc configPath(): string =
   getConfigDir() / "3code" / "config"
 
@@ -401,6 +415,15 @@ proc splitModels(s: string): seq[string] =
   for m in s.splitWhitespace:
     if m.len > 0: result.add m
 
+proc expandEnvValue(s: string): string =
+  ## Expand a leading `$VAR` reference (after any surrounding whitespace) to
+  ## the value of the environment variable. Plain values pass through
+  ## unchanged.
+  let t = s.strip
+  if t.len > 1 and t[0] == '$':
+    return getEnv(t[1 .. ^1])
+  s
+
 proc parseConfigFile(path: string): (string, seq[ProviderRec]) =
   ## Streaming parse so that repeated [provider] sections accumulate as a list.
   var current = ""
@@ -426,16 +449,17 @@ proc parseConfigFile(path: string): (string, seq[ProviderRec]) =
       section = e.section
       if section == "provider": inProvider = true
     of cfgKeyValuePair, cfgOption:
+      let v = expandEnvValue(e.value)
       case section
       of "settings":
-        if e.key == "current": current = e.value
+        if e.key == "current": current = v
       of "provider":
         case e.key
-        of "name": prov.name = e.value
-        of "url": prov.url = e.value.strip(chars = {'/', ' '})
-        of "key": prov.key = e.value
-        of "model_prefix": prov.modelPrefix = e.value
-        of "models": prov.models = splitModels(e.value)
+        of "name": prov.name = v
+        of "url": prov.url = v.strip(chars = {'/', ' '})
+        of "key": prov.key = v
+        of "model_prefix": prov.modelPrefix = v
+        of "models": prov.models = splitModels(v)
         else: discard
       else: discard
     of cfgError:
@@ -1460,7 +1484,7 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: var Session,
       hintLn &"  session: {session.usage.totalTokens} tok  (in {session.usage.promptTokens}, out {session.usage.completionTokens})",
         resetStyle
   of ":clear":
-    messages = %* [{"role": "system", "content": SystemPrompt}]
+    messages = %* [{"role": "system", "content": buildSystemPrompt(prof)}]
     session.toolLog.setLen 0
     session.usage = Usage()
     session.lastPromptTokens = 0
@@ -1475,8 +1499,9 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: var Session,
     cmdProvider(arg, editor, prof)
     session.profileName = prof.name
   of ":prompt":
-    stdout.write SystemPrompt
-    if not SystemPrompt.endsWith("\n"): stdout.write "\n"
+    let sp = buildSystemPrompt(prof)
+    stdout.write sp
+    if not sp.endsWith("\n"): stdout.write "\n"
   of ":show":
     showTool(arg, session.toolLog)
   of ":log":
@@ -1603,6 +1628,7 @@ proc main() =
     let prof = loadProfile(model)
     session.profileName = prof.name
     messages.add %*{"role": "user", "content": prompt}
+    refreshSystemPrompt(messages, prof)
     runTurns(prof, messages, session)
     if session.usage.totalTokens > 0:
       hintLn &"  · {session.usage.totalTokens} tok total", resetStyle
@@ -1624,6 +1650,7 @@ proc main() =
       resetStyle
     if prompt != "":
       messages.add %*{"role": "user", "content": prompt}
+      refreshSystemPrompt(messages, prof)
       runTurns(prof, messages, session)
   while true:
     var done = false
@@ -1640,6 +1667,7 @@ proc main() =
         "  no provider configured. use :provider add", resetStyle
       continue
     messages.add %*{"role": "user", "content": line}
+    refreshSystemPrompt(messages, prof)
     runTurns(prof, messages, session)
 
 when isMainModule:
