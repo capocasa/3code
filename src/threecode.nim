@@ -376,12 +376,12 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage): string =
     usage.promptTokens = u{"prompt_tokens"}.getInt(0)
     usage.completionTokens = u{"completion_tokens"}.getInt(0)
     usage.totalTokens = u{"total_tokens"}.getInt(0)
-  hint
-    (if usage.totalTokens > 0:
-       &"  ↑ {usage.promptTokens} tok · ↓ {usage.completionTokens} tok · {elapsed.int}s"
-     else:
-       &"  ↓ ~{text.len div 4} tok · {elapsed.int}s"),
-    resetStyle, "\n"
+  let info =
+    if usage.totalTokens > 0:
+      &"  ↑ {usage.promptTokens} tok · ↓ {usage.completionTokens} tok · {elapsed.int}s"
+    else:
+      &"  ↓ ~{text.len div 4} tok · {elapsed.int}s"
+  hint info, resetStyle, "\n"
   stdout.flushFile
   j["choices"][0]["message"]["content"].getStr
 
@@ -602,8 +602,7 @@ proc printBashCompact(res: string, idx: int) =
   else:
     for i in header ..< header + CompactHead: printLine(lines[i])
     let hidden = bodyLen - CompactHead - CompactTail
-    hintLn
-      &"  … {hidden} line" & (if hidden == 1: "" else: "s") &
+    hintLn &"  … {hidden} line" & (if hidden == 1: "" else: "s") &
       &" hidden · :show {idx} for full …", resetStyle
     for i in footer - CompactTail ..< footer: printLine(lines[i])
   if footer < lines.len: printLine(lines[footer])
@@ -874,8 +873,7 @@ proc promptNewProvider(editor: var minline.LineEditor): ProviderRec =
     let available = fetchModels(url, key)
     let prefix = commonModelPrefix(available)
     if available.len == 0:
-      hintLn
-        "unavailable — enter manually", resetStyle
+      hintLn "unavailable — enter manually", resetStyle
     else:
       let header =
         if prefix == "": &"{available.len} available"
@@ -924,8 +922,7 @@ proc bootstrapProvider(editor: var minline.LineEditor): Profile =
   activeProviders.add prov
   activeCurrent = prov.name & "." & prov.models[0]
   writeConfigFile(configPath(), activeCurrent, activeProviders)
-  hintLn
-    &"  saved to {configPath()}", resetStyle
+  hintLn &"  saved to {configPath()}", resetStyle
   buildProfile(activeCurrent, activeProviders, "")
 
 proc cmdProviderList(prof: Profile) =
@@ -966,8 +963,7 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   if prof.name == "":
     prof = buildProfile(activeCurrent, activeProviders, "")
-  hintLn
-    &"  added {prov.name}", resetStyle
+  hintLn &"  added {prov.name}", resetStyle
 
 proc cmdProviderRm(target: string, prof: var Profile) =
   var idx = -1
@@ -987,8 +983,7 @@ proc cmdProviderRm(target: string, prof: var Profile) =
       activeCurrent = ""
       prof = Profile()
   writeConfigFile(configPath(), activeCurrent, activeProviders)
-  hintLn
-    &"  removed {target}", resetStyle
+  hintLn &"  removed {target}", resetStyle
 
 proc cmdProvider(arg: string, editor: var minline.LineEditor,
                  prof: var Profile) =
@@ -1021,8 +1016,7 @@ proc cmdModelList(prof: Profile) =
     hintLn "  no provider selected", resetStyle
     return
   if prov.models.len == 0:
-    hintLn
-      &"  {prov.name}: no models", resetStyle
+    hintLn &"  {prov.name}: no models", resetStyle
     return
   for m in prov.models:
     let mark = if m == prof.model: "*" else: " "
@@ -1067,8 +1061,7 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: Usage,
     if session.totalTokens == 0:
       hintLn "  no tokens used yet", resetStyle
     else:
-      hintLn
-        &"  session: {session.totalTokens} tok  (in {session.promptTokens}, out {session.completionTokens})",
+      hintLn &"  session: {session.totalTokens} tok  (in {session.promptTokens}, out {session.completionTokens})",
         resetStyle
   of ":clear":
     messages = %* [{"role": "system", "content": SystemPrompt}]
@@ -1155,8 +1148,7 @@ proc main() =
     messages.add %*{"role": "user", "content": prompt}
     runTurns(prof, messages, session)
     if session.totalTokens > 0:
-      hintLn
-        &"  · {session.totalTokens} tok total", resetStyle
+      hintLn &"  · {session.totalTokens} tok total", resetStyle
     return
 
   (activeCurrent, activeProviders) = loadStateOrEmpty(configPath())
