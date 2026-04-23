@@ -430,7 +430,7 @@ proc humanBytes(n: int): string =
 # ---------- Model call ----------
 
 proc systemPromptFor*(p: Profile): string =
-  if p.mode == "tools": SystemPromptTools else: SystemPromptText
+  if p.mode == "text": SystemPromptText else: SystemPromptTools
 
 proc toolCallToAction*(name: string, args: JsonNode): Action =
   case name
@@ -460,7 +460,7 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage): JsonNode =
     "messages": messages,
     "stream": false
   }
-  if p.mode == "tools":
+  if p.mode != "text":
     body["tools"] = ToolsJson
     body["tool_choice"] = %"auto"
   let bodyStr = $body

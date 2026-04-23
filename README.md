@@ -87,19 +87,18 @@ Patch with one or more exact-match edits:
 Results go back as the next user message and the loop continues until the
 model stops emitting blocks.
 
-Some 2025+ models (Kimi-K2, qwen3-coder, glm-4.5+, minimax-m2) ignore fence
-instructions and reply via OpenAI tool calls instead. For those, add
-`mode = "tools"` to the `[provider]` block:
+By default 3code sends the actions as OpenAI tool calls (`bash`, `write`,
+`patch`). Older or OSS-first models that prefer fenced blocks can opt in
+with `mode = "text"` on the `[provider]`:
 
     [provider]
-    name = "fireworks"
-    url = "https://api.fireworks.ai/inference/v1"
-    key = "fw_..."
-    mode = "tools"
-    models = "kimi-k2-instruct"
+    name = "local"
+    url = "http://localhost:1234/v1"
+    key = "none"
+    mode = "text"
+    models = "llama-3-8b"
 
-Default is `mode = "text"` (fenced blocks). Same three actions either way —
-`bash`, `write`, `patch` — just a different wire format.
+Same three actions either way — just a different wire format.
 
 ## Use
 
