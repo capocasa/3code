@@ -4,21 +4,30 @@
 # parsecfg treats ':', '=', and '#' as syntax in unquoted values, so
 # unquoted URLs or API keys will silently truncate or drop.
 
-[state]
-model = "openai.gpt-4o-mini"
-; model = "groq.llama-3.3-70b-versatile"
+[settings]
+current = "baseten.glm5"
+; current = "openai.gpt-4o-mini"
 
-[openai]
+[provider]
+name = "baseten"
+url = "https://inference.baseten.co/v1"
+key = "..."
+models = "glm5, qwen3c"
+
+[provider]
+name = "openai"
 url = "https://api.openai.com/v1"
 key = "sk-..."
 models = "gpt-4o-mini, gpt-4o"
 
-[groq]
+[provider]
+name = "groq"
 url = "https://api.groq.com/openai/v1"
 key = "gsk_..."
 models = "llama-3.3-70b-versatile, llama-3.1-8b-instant"
 
-[together]
+[provider]
+name = "together"
 url = "https://api.together.xyz/v1"
 key = "..."
 models = "meta-llama/Llama-3.3-70B-Instruct-Turbo"

@@ -1,4 +1,4 @@
-import std/[httpclient, json, os, osproc, strutils, strformat, sequtils, terminal, parsecfg, parseopt, tables, times, atomics, critbits]
+import std/[httpclient, json, os, osproc, strutils, strformat, sequtils, streams, terminal, parsecfg, parseopt, times, atomics, critbits]
 import minline
 import threecode/web
 
@@ -65,10 +65,11 @@ Before guessing, look things up. Assume you know nothing about this repo until y
   Use these freely — one or two searches up front beats a failed attempt. Prefer official docs and source over blogspam.
 """
 
-const ConfigExample = """  [state]
-  model = "openai.gpt-4o-mini"
+const ConfigExample = """  [settings]
+  current = "openai.gpt-4o-mini"
 
-  [openai]
+  [provider]
+  name = "openai"
   url = "https://api.openai.com/v1"
   key = "sk-..."
   models = "gpt-4o-mini, gpt-4o"
@@ -118,47 +119,94 @@ proc die(msg: string, code = 1) {.noreturn.} =
 proc configPath(): string =
   getConfigDir() / "3code" / "config"
 
+type
+  ProviderRec = object
+    name, url, key: string
+    models: seq[string]
+
 proc splitModels(s: string): seq[string] =
   for m in s.split(','):
     let t = m.strip
     if t.len > 0: result.add t
+
+proc parseConfigFile(path: string): (string, seq[ProviderRec]) =
+  ## Streaming parse so that repeated [provider] sections accumulate as a list.
+  var current = ""
+  var providers: seq[ProviderRec]
+  var section = ""
+  var prov: ProviderRec
+  var inProvider = false
+  let stream = newFileStream(path, fmRead)
+  if stream == nil: die &"cannot open {path}", ExitConfig
+  var p: CfgParser
+  p.open(stream, path)
+  proc flush() =
+    if inProvider:
+      providers.add prov
+      prov = ProviderRec()
+      inProvider = false
+  while true:
+    let e = p.next
+    case e.kind
+    of cfgEof: flush(); break
+    of cfgSectionStart:
+      flush()
+      section = e.section
+      if section == "provider": inProvider = true
+    of cfgKeyValuePair, cfgOption:
+      case section
+      of "settings":
+        if e.key == "current": current = e.value
+      of "provider":
+        case e.key
+        of "name": prov.name = e.value
+        of "url": prov.url = e.value.strip(chars = {'/', ' '})
+        of "key": prov.key = e.value
+        of "models": prov.models = splitModels(e.value)
+        else: discard
+      else: discard
+    of cfgError:
+      die &"{path}: {e.msg}", ExitConfig
+  p.close
+  (current, providers)
 
 proc loadProfile(wanted: string): Profile =
   let path = configPath()
   if not fileExists(path):
     stderr.writeLine "3code: no config at " & path
     stderr.writeLine ""
-    stderr.writeLine "create it with at least one provider, e.g.:"
+    stderr.writeLine "create it with at least one [provider] section, e.g.:"
     stderr.writeLine ""
     stderr.writeLine ConfigExample
     quit ExitConfig
-  let cfg = loadConfig(path)
+  let (current, providers) = parseConfigFile(path)
+  if providers.len == 0:
+    die &"no [provider] section in {path}", ExitConfig
   var pick = wanted
+  if pick == "": pick = current
+  if pick == "": pick = providers[0].name
   if pick == "":
-    pick = cfg.getSectionValue("state", "model")
-  if pick == "":
-    for section in cfg.keys:
-      if section != "" and section != "state":
-        pick = section
-        break
-  if pick == "":
-    die "no provider defined in " & path, ExitConfig
+    die &"no current provider set in {path} and first [provider] has no name", ExitConfig
   let dot = pick.find('.')
-  let provider = if dot < 0: pick else: pick[0 ..< dot]
+  let name = if dot < 0: pick else: pick[0 ..< dot]
   var model = if dot < 0: "" else: pick[dot + 1 .. ^1]
-  if not cfg.hasKey(provider):
-    die &"provider [{provider}] not found in {path}", ExitConfig
-  let url = cfg.getSectionValue(provider, "url").strip(chars = {'/', ' '})
-  let key = cfg.getSectionValue(provider, "key")
-  let models = splitModels(cfg.getSectionValue(provider, "models"))
-  if url == "": die &"[{provider}]: url not set in {path}", ExitConfig
-  if key == "": die &"[{provider}]: key not set in {path}", ExitConfig
-  if models.len == 0: die &"[{provider}]: models not set in {path}", ExitConfig
+  var prov: ProviderRec
+  var found = false
+  for p in providers:
+    if p.name == name:
+      prov = p
+      found = true
+      break
+  if not found:
+    die &"provider '{name}' not found in {path}", ExitConfig
+  if prov.url == "": die &"provider '{name}': url not set in {path}", ExitConfig
+  if prov.key == "": die &"provider '{name}': key not set in {path}", ExitConfig
+  if prov.models.len == 0: die &"provider '{name}': models not set in {path}", ExitConfig
   if model == "":
-    model = models[0]
-  elif model notin models:
-    die &"[{provider}]: model '{model}' not in models list ({models.join(\", \")})", ExitConfig
-  Profile(name: provider & "." & model, url: url, key: key, model: model)
+    model = prov.models[0]
+  elif model notin prov.models:
+    die &"provider '{name}': model '{model}' not in models list ({prov.models.join(\", \")})", ExitConfig
+  Profile(name: prov.name & "." & model, url: prov.url, key: prov.key, model: model)
 
 # ---------- Spinner ----------
 
@@ -562,7 +610,7 @@ proc usage() {.noreturn.} =
        3code web <query...>         # DuckDuckGo search, plain-text results
        3code fetch <url>            # GET url, return readable text
 
-  -m, --model PROVIDER[.MODEL]   pick model from config (overrides [state])
+  -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
   -v, --version        print version
   -h, --help           this message
 
