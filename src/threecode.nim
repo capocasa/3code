@@ -1,4 +1,4 @@
-import std/[httpclient, json, os, strutils, strformat, sequtils, streams, terminal, parsecfg, parseopt, times, atomics, critbits, uri]
+import std/[httpclient, json, os, strutils, strformat, sequtils, streams, terminal, parsecfg, parseopt, times, atomics, critbits, uri, algorithm]
 import threecode/minline
 import threecode/web
 
@@ -167,6 +167,8 @@ commands:
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
+  :sessions         list recent saved sessions
+  :compact          compact older tool output in context
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -189,14 +191,18 @@ type
     name, url, key, modelPrefix, model: string
   Usage = object
     promptTokens, completionTokens, totalTokens: int
-  ToolRecord = object
-    banner: string
-    output: string
-    code: int
-    kind: ActionKind
+  ToolRecord* = object
+    banner*: string
+    output*: string
+    code*: int
+    kind*: ActionKind
   Session = object
     usage: Usage
+    lastPromptTokens: int
     toolLog: seq[ToolRecord]
+    savePath: string
+    profileName: string
+    created: string
 
 proc die(msg: string, code = 1) {.noreturn.} =
   stderr.writeLine "3code: " & msg
@@ -204,6 +210,153 @@ proc die(msg: string, code = 1) {.noreturn.} =
 
 proc configPath(): string =
   getConfigDir() / "3code" / "config"
+
+proc sessionDir(): string =
+  getConfigDir() / "3code" / "sessions"
+
+proc sessionIdFromPath(path: string): string =
+  let name = path.extractFilename
+  if name.endsWith(".json"): name[0 ..< name.len - 5] else: name
+
+proc newSessionPath(): string =
+  let stamp = now().format("yyyyMMdd'T'HHmmss")
+  sessionDir() / (stamp & ".json")
+
+proc listSessionPaths(): seq[string] =
+  let d = sessionDir()
+  if not dirExists(d): return
+  for kind, path in walkDir(d):
+    if kind == pcFile and path.endsWith(".json"):
+      result.add path
+  result.sort(order = SortOrder.Descending)
+
+proc resolveSessionPath(id: string): string =
+  ## `id` is bare (no .json) or a full path. Returns "" if not found.
+  if id == "":
+    let all = listSessionPaths()
+    if all.len == 0: return ""
+    return all[0]
+  if fileExists(id): return id
+  let candidate = sessionDir() / (id & ".json")
+  if fileExists(candidate): return candidate
+  let candidate2 = sessionDir() / id
+  if fileExists(candidate2): return candidate2
+  ""
+
+proc toolLogToJson*(log: seq[ToolRecord]): JsonNode =
+  result = newJArray()
+  for rec in log:
+    result.add %*{
+      "banner": rec.banner,
+      "output": rec.output,
+      "code": rec.code,
+      "kind": $rec.kind,
+    }
+
+proc toolLogFromJson*(node: JsonNode): seq[ToolRecord] =
+  if node == nil or node.kind != JArray: return
+  for item in node:
+    if item.kind != JObject: continue
+    var k = akBash
+    try: k = parseEnum[ActionKind](item{"kind"}.getStr("akBash"))
+    except ValueError: discard
+    result.add ToolRecord(
+      banner: item{"banner"}.getStr(""),
+      output: item{"output"}.getStr(""),
+      code: item{"code"}.getInt(0),
+      kind: k,
+    )
+
+proc saveSession(session: Session, messages: JsonNode) =
+  if session.savePath == "": return
+  try:
+    createDir(session.savePath.parentDir)
+    let body = %*{
+      "version": 1,
+      "created": session.created,
+      "updated": $now(),
+      "profile": session.profileName,
+      "usage": {
+        "promptTokens": session.usage.promptTokens,
+        "completionTokens": session.usage.completionTokens,
+        "totalTokens": session.usage.totalTokens,
+      },
+      "lastPromptTokens": session.lastPromptTokens,
+      "messages": messages,
+      "toolLog": toolLogToJson(session.toolLog),
+    }
+    writeFile(session.savePath, body.pretty)
+  except CatchableError as e:
+    stderr.writeLine "3code: session save failed: " & e.msg
+
+proc loadSessionFile(path: string): (Session, JsonNode) =
+  let raw = try: readFile(path)
+            except CatchableError as e:
+              die("cannot read session " & path & ": " & e.msg, ExitConfig)
+  let j = try: parseJson(raw)
+          except CatchableError as e:
+            die("bad session json in " & path & ": " & e.msg, ExitConfig)
+  var sess = Session(savePath: path)
+  sess.profileName = j{"profile"}.getStr("")
+  sess.created = j{"created"}.getStr($now())
+  sess.lastPromptTokens = j{"lastPromptTokens"}.getInt(0)
+  let u = j{"usage"}
+  if u != nil and u.kind == JObject:
+    sess.usage.promptTokens = u{"promptTokens"}.getInt(0)
+    sess.usage.completionTokens = u{"completionTokens"}.getInt(0)
+    sess.usage.totalTokens = u{"totalTokens"}.getInt(0)
+  sess.toolLog = toolLogFromJson(j{"toolLog"})
+  var messages = j{"messages"}
+  if messages == nil or messages.kind != JArray:
+    messages = %* [{"role": "system", "content": SystemPrompt}]
+  (sess, messages)
+
+proc firstUserMessage(messages: JsonNode): string =
+  if messages == nil or messages.kind != JArray: return ""
+  for m in messages:
+    if m.kind == JObject and m{"role"}.getStr == "user":
+      return m{"content"}.getStr("")
+  ""
+
+# ---------- Context compaction (B.1) ----------
+
+const
+  CompactThresholdFrac = 0.8
+  CompactKeepRecent = 10
+  CompactedMarker = "[compacted — tool output elided; use :show to view]"
+
+proc contextWindowFor(model: string): int =
+  let m = model.toLowerAscii
+  if "kimi-k2" in m: 128_000
+  elif "qwen3-coder" in m or "qwen3_coder" in m: 262_144
+  elif "qwen" in m: 128_000
+  elif "claude" in m: 200_000
+  elif "gpt-5" in m: 400_000
+  elif "gpt-4" in m: 128_000
+  elif "o1" in m or "o3" in m or "o4" in m: 200_000
+  elif "deepseek" in m: 128_000
+  elif "gemini" in m: 1_000_000
+  elif "llama" in m: 128_000
+  elif "glm" in m: 128_000
+  elif "mistral" in m or "mixtral" in m: 128_000
+  else: 128_000
+
+proc compactHistory*(messages: JsonNode, keepRecent = CompactKeepRecent): int =
+  ## Replace `content` of old `tool` messages with a short marker. Returns
+  ## the number of messages compacted. System prompt (index 0) and the last
+  ## `keepRecent` messages are left untouched.
+  if messages == nil or messages.kind != JArray: return 0
+  if messages.len <= keepRecent + 1: return 0
+  let cutoff = messages.len - keepRecent
+  for i in 1 ..< cutoff:
+    let m = messages[i]
+    if m.kind != JObject: continue
+    if m{"role"}.getStr != "tool": continue
+    let c = m{"content"}.getStr("")
+    if c.len <= CompactedMarker.len + 32: continue
+    if c.startsWith("[compacted"): continue
+    m["content"] = %CompactedMarker
+    inc result
 
 type
   ProviderRec = object
@@ -214,7 +367,8 @@ var activeCurrent: string
 var activeProviders: seq[ProviderRec]
 
 const CommandNames = [":help", ":tokens", ":clear", ":model", ":provider",
-                      ":prompt", ":show", ":log", ":q", ":quit", ":exit"]
+                      ":prompt", ":show", ":log", ":sessions", ":compact",
+                      ":q", ":quit", ":exit"]
 
 proc currentProvider(): ProviderRec =
   let dot = activeCurrent.find('.')
@@ -436,7 +590,7 @@ proc toolCallToAction*(name: string, args: JsonNode): Action =
   else:
     Action(kind: akBash, body: "echo 'unknown tool: " & name & "'; exit 1")
 
-proc callModel(p: Profile, messages: JsonNode, usage: var Usage): JsonNode =
+proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: Usage): JsonNode =
   let client = newHttpClient(timeout = 180_000)
   defer: client.close()
   client.headers = newHttpHeaders({
@@ -452,7 +606,7 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage): JsonNode =
   body["tool_choice"] = %"auto"
   let bodyStr = $body
   let t0 = epochTime()
-  startSpinner(&"thinking · ↑ ~{bodyStr.len div 4} tok")
+  startSpinner(&"thinking · session ↑ {sessionUsage.promptTokens} · ↓ {sessionUsage.completionTokens}")
   const MaxAttempts = 3
   var resp: Response
   var attempt = 0
@@ -831,11 +985,23 @@ proc readInput(editor: var minline.LineEditor, done: var bool): string =
 proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
   while true:
     var usage: Usage
-    let msg = callModel(p, messages, usage)
+    let msg = callModel(p, messages, usage, session.usage)
     session.usage.promptTokens += usage.promptTokens
     session.usage.completionTokens += usage.completionTokens
     session.usage.totalTokens += usage.totalTokens
+    session.lastPromptTokens = usage.promptTokens
     messages.add msg
+    saveSession(session, messages)
+    let window = contextWindowFor(p.model)
+    if usage.promptTokens > 0 and
+       usage.promptTokens.float > CompactThresholdFrac * window.float:
+      let n = compactHistory(messages)
+      if n > 0:
+        hintLn &"  · compacted {n} old tool result" &
+          (if n == 1: "" else: "s") &
+          &" (context at {usage.promptTokens}/{window} tokens)",
+          resetStyle
+        saveSession(session, messages)
     stdout.write "\n"
     let content = msg{"content"}.getStr("")
     let tcNode = msg{"tool_calls"}
@@ -868,6 +1034,7 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
         printActionResult(act, r, code, idx, diff)
         messages.add %*{"role": "tool", "tool_call_id": id, "content": r}
+      saveSession(session, messages)
       continue
     if content.strip.len > 0:
       stdout.styledWrite fgCyan, content, resetStyle, "\n"
@@ -1295,11 +1462,18 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: var Session,
   of ":clear":
     messages = %* [{"role": "system", "content": SystemPrompt}]
     session.toolLog.setLen 0
+    session.usage = Usage()
+    session.lastPromptTokens = 0
+    if session.savePath != "":
+      session.savePath = newSessionPath()
+      session.created = $now()
     hintLn "  context cleared", resetStyle
   of ":model":
     cmdModel(arg, prof)
+    session.profileName = prof.name
   of ":provider":
     cmdProvider(arg, editor, prof)
+    session.profileName = prof.name
   of ":prompt":
     stdout.write SystemPrompt
     if not SystemPrompt.endsWith("\n"): stdout.write "\n"
@@ -1307,6 +1481,37 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: var Session,
     showTool(arg, session.toolLog)
   of ":log":
     listTools(session.toolLog)
+  of ":sessions":
+    let paths = listSessionPaths()
+    if paths.len == 0:
+      hintLn "  no saved sessions", resetStyle
+    else:
+      for p in paths:
+        let id = sessionIdFromPath(p)
+        var count = 0
+        var first = ""
+        try:
+          let j = parseJson(readFile(p))
+          let msgs = j{"messages"}
+          if msgs != nil and msgs.kind == JArray: count = msgs.len
+          first = firstUserMessage(msgs)
+        except CatchableError: discard
+        let mark = if session.savePath == p: "*" else: " "
+        let snip =
+          if first.len == 0: ""
+          elif first.len > 60: "  " & first[0 ..< 57] & "..."
+          else: "  " & first
+        hint &"  {mark} ", resetStyle, id, fgCyan, styleBright,
+          &"   ({count} msg" & (if count == 1: "" else: "s") & ")",
+          resetStyle, snip, "\n"
+  of ":compact":
+    let n = compactHistory(messages)
+    if n == 0:
+      hintLn "  nothing to compact", resetStyle
+    else:
+      hintLn &"  · compacted {n} tool result" &
+        (if n == 1: "" else: "s"), resetStyle
+      saveSession(session, messages)
   else:
     stdout.styledWriteLine fgRed, "unknown command: ", c, "  (try :help)", resetStyle
   return true
@@ -1317,6 +1522,7 @@ proc usage() {.noreturn.} =
        3code fetch <url>            # GET url, return readable text
 
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
+  -r, --resume[=ID]    resume latest saved session (or by id)
   -v, --version        print version
   -h, --help           this message
 
@@ -1344,6 +1550,8 @@ proc main() =
   var model = ""
   var args: seq[string]
   var pending = ""  # flag awaiting a space-separated value
+  var resume = false
+  var resumeId = ""
   var p = initOptParser(commandLineParams())
   for kind, k, v in p.getopt():
     case kind
@@ -1354,6 +1562,9 @@ proc main() =
       of "m", "model":
         if v != "": model = v
         else: pending = "model"
+      of "r", "resume":
+        resume = true
+        if v != "": resumeId = v
       else: die("unknown option: -" & (if k.len == 1: "" else: "-") & k, ExitUsage)
     of cmdArgument:
       if pending == "model":
@@ -1373,10 +1584,24 @@ proc main() =
 
   let prompt = args.join(" ")
   var session: Session
+  var messages: JsonNode
 
-  if prompt != "":
+  if resume:
+    let path = resolveSessionPath(resumeId)
+    if path == "":
+      if resumeId == "":
+        die("no saved sessions in " & sessionDir(), ExitConfig)
+      else:
+        die("session not found: " & resumeId, ExitConfig)
+    (session, messages) = loadSessionFile(path)
+  else:
+    messages = %* [{"role": "system", "content": SystemPrompt}]
+    session.created = $now()
+    session.savePath = newSessionPath()
+
+  if prompt != "" and not resume:
     let prof = loadProfile(model)
-    var messages = %* [{"role": "system", "content": SystemPrompt}]
+    session.profileName = prof.name
     messages.add %*{"role": "user", "content": prompt}
     runTurns(prof, messages, session)
     if session.usage.totalTokens > 0:
@@ -1384,11 +1609,22 @@ proc main() =
     return
 
   (activeCurrent, activeProviders) = loadStateOrEmpty(configPath())
-  var prof = buildProfile(activeCurrent, activeProviders, model)
+  let wantedProfile =
+    if model != "": model
+    elif resume and session.profileName != "": session.profileName
+    else: ""
+  var prof = buildProfile(activeCurrent, activeProviders, wantedProfile)
   var editor = welcome(prof)
   if prof.name == "":
     prof = bootstrapProvider(editor)
-  var messages = %* [{"role": "system", "content": SystemPrompt}]
+  session.profileName = prof.name
+  if resume:
+    hintLn &"  · resumed {sessionIdFromPath(session.savePath)}  " &
+      &"({messages.len} msg" & (if messages.len == 1: "" else: "s") & ")",
+      resetStyle
+    if prompt != "":
+      messages.add %*{"role": "user", "content": prompt}
+      runTurns(prof, messages, session)
   while true:
     var done = false
     let line = readInput(editor, done)
