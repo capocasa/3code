@@ -53,28 +53,24 @@ new code
 >>>>>>> REPLACE
 ```
 
-A single file block may contain multiple SEARCH/REPLACE pairs. SEARCH blocks must match the file byte-for-byte; if one does not match, the edit fails and you must retry with a corrected SEARCH.
+A single file block may contain multiple SEARCH/REPLACE pairs. SEARCH blocks must match the file byte-for-byte — copy from a prior `cat` exactly, preserving indentation, trailing whitespace, and line endings. Paraphrased or reformatted matches will fail; on failure retry with a corrected SEARCH.
 
 When the task is done, reply with prose and no action blocks.
 
-## Gathering context
+## Working effectively
 
-Before guessing, look things up. Assume you know nothing about this repo until you have read it.
+- Orient first. On a fresh task in an unfamiliar repo, `ls` and read the README and the build manifest (`*.nimble`, `package.json`, `Cargo.toml`, `pyproject.toml`, etc.) before editing. Skip only for obviously trivial tasks.
+- Stay in scope. Do what was asked, nothing more. Don't refactor, reformat, add comments/docstrings, or handle hypothetical edge cases the user didn't mention.
+- Verify before declaring done. After making changes, run the project's tests, build, or typecheck. Don't call the task complete if they fail.
+- Gather context before guessing. Read real files; don't invent their contents.
+- Local before web. Installed dependencies, vendored source, CHANGELOGs, `tests/`, `example/`, and `man` pages usually answer the question faster and more accurately than a web search. Check them first. Reach for the web only when the local tree genuinely lacks the info.
+- Stop when done. If a task already looks complete when you start, say so and stop — don't invent work.
+- Pause before irreversible ops outside the working directory (`rm -rf` of other paths, force-push, database drops, destructive git history rewrites). Explain and wait for the user.
 
-- Working directory: use `rg`, `grep -rn`, `find`, `ls`, or `cat` (via a bash block) to locate the relevant file, function, config key, version, or dependency. Read files rather than inventing their contents.
-- Web: when you need API details, library docs, error-message meanings, or any current fact you are not sure about, shell out:
+## Finding things
 
-  ```bash
-  3code web "exact query string"
-  ```
-
-  prints a numbered list of result titles / URLs / snippets from DuckDuckGo. Then fetch the most promising one as readable text:
-
-  ```bash
-  3code fetch https://example.com/some/page
-  ```
-
-  Use these freely — one or two searches up front beats a failed attempt. Prefer official docs and source over blogspam.
+- Files and search in the working tree: `cat`, `rg`, `grep -rn`, `find`, `ls` via a bash block.
+- Web (for current facts, API details, or docs the local tree doesn't have): `3code web "query"` prints numbered DuckDuckGo results; `3code fetch <url>` returns the page as readable text. Prefer official docs over blogspam.
 """
 
 const SystemPromptTools = """
@@ -85,23 +81,23 @@ Call the provided tools (`bash`, `read`, `write`, `patch`) to take actions. Afte
 - `bash(command)` — run a shell command; output and exit code come back.
 - `read(path, offset?, limit?)` — read a file, or a line range of it. `offset` is 1-indexed.
 - `write(path, body)` — create or overwrite a file.
-- `patch(path, edits)` — apply exact-match search/replace edits to an existing file. `edits` is an array of `{search, replace}` objects. Each `search` must match the file byte-for-byte, else the edit fails and you retry with a corrected `search`.
+- `patch(path, edits)` — apply exact-match search/replace edits to an existing file. `edits` is an array of `{search, replace}` objects. Each `search` must be copied byte-for-byte from a prior `read` — same indentation, same trailing whitespace, same line endings. Paraphrased or reformatted matches will fail; on failure retry with a corrected `search`.
 
-## Gathering context
+## Working effectively
 
-Before guessing, look things up. Assume you know nothing about this repo until you have read it.
+- Orient first. On a fresh task in an unfamiliar repo, run `ls` and read the README and the build manifest (`*.nimble`, `package.json`, `Cargo.toml`, `pyproject.toml`, etc.) before editing. Skip only for obviously trivial tasks.
+- Stay in scope. Do what was asked, nothing more. Don't refactor, reformat, add comments/docstrings, or handle hypothetical edge cases the user didn't mention.
+- Verify before declaring done. After changes, run the project's tests, build, or typecheck. Don't call the task complete if they fail.
+- Gather context before guessing. Read real files; don't invent their contents.
+- Local before web. Installed dependencies, vendored source, CHANGELOGs, `tests/`, `example/`, and `man` pages usually answer the question faster and more accurately than a web search. Check them first. Reach for the web only when the local tree genuinely lacks the info.
+- Stop when done. If a task already looks complete when you start, say so and stop — don't invent work.
+- Pause before irreversible ops outside the working directory (`rm -rf` of other paths, force-push, database drops, destructive git history rewrites). Explain and wait for the user.
 
-- Files: use the `read` tool. Read real contents rather than inventing them.
-- Search: `rg`, `grep -rn`, `find`, `ls` via the `bash` tool.
-- Web: when you need API details, library docs, error-message meanings, or any current fact you are not sure about, call `bash`:
+## Finding things
 
-    3code web "exact query string"
-
-  prints a numbered list of result titles / URLs / snippets from DuckDuckGo. Then fetch the most promising one as readable text:
-
-    3code fetch https://example.com/some/page
-
-  Use these freely — one or two searches up front beats a failed attempt. Prefer official docs and source over blogspam.
+- Files: the `read` tool.
+- Search in the working tree: `rg`, `grep -rn`, `find`, `ls` via `bash`.
+- Web (for current facts, API details, or docs the local tree doesn't have): `bash` out to `3code web "query"` for numbered DuckDuckGo results; then `3code fetch <url>` for readable page text. Prefer official docs over blogspam.
 """
 
 let ToolsJson = %*[
