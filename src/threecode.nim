@@ -1,4 +1,4 @@
-import std/[httpclient, json, os, osproc, strutils, strformat, sequtils, streams, terminal, parsecfg, parseopt, times, atomics, critbits, uri]
+import std/[httpclient, json, os, strutils, strformat, sequtils, streams, terminal, parsecfg, parseopt, times, atomics, critbits, uri]
 import threecode/minline
 import threecode/web
 
@@ -162,6 +162,7 @@ commands:
   :provider         list configured providers (current marked with *)
   :provider X       switch to provider X (model defaults to first in its list)
   :provider add     add a new provider (interactive, verified)
+  :provider edit X  edit provider X (url, key, models)
   :provider rm X    remove provider X
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
@@ -193,8 +194,9 @@ type
     output: string
     code: int
     kind: ActionKind
-
-var toolLog: seq[ToolRecord]
+  Session = object
+    usage: Usage
+    toolLog: seq[ToolRecord]
 
 proc die(msg: string, code = 1) {.noreturn.} =
   stderr.writeLine "3code: " & msg
@@ -229,9 +231,14 @@ proc completionFor(line: string): seq[string] =
     if last == "" or last.startsWith(":"):
       return @CommandNames
     return
-  if words[0] == ":provider" and words.len == 2:
-    for pr in activeProviders: result.add pr.name
-    return
+  if words[0] == ":provider":
+    if words.len == 2:
+      for pr in activeProviders: result.add pr.name
+      for sub in ["add", "edit", "rm"]: result.add sub
+      return
+    if words.len == 3 and words[1] in ["edit", "rm", "remove"]:
+      for pr in activeProviders: result.add pr.name
+      return
   if words[0] == ":model" and words.len == 2:
     for m in currentProvider().models: result.add m
     return
@@ -542,17 +549,53 @@ proc replaceFirst*(s, needle, repl: string): (string, bool) =
   if idx < 0: return (s, false)
   (s[0 ..< idx] & repl & s[idx + needle.len .. ^1], true)
 
-proc runAction*(act: Action): (string, int) =
+proc clipMiddle(s: string, head, tail: int): string =
+  if s.len <= head + tail: s
+  else: s[0 ..< head] & "\n... [truncated] ...\n" & s[^tail .. ^1]
+
+proc computeDiff(before, after, label: string): string =
+  if before == after: return ""
+  let tmp = getTempDir() / ("3code_diff_" & $getCurrentProcessId() & "_" & $epochTime().int64)
+  createDir(tmp)
+  let ap = tmp / "a"
+  let bp = tmp / "b"
+  writeFile(ap, before)
+  writeFile(bp, after)
+  let dp = tmp / "d"
+  let wrapped = &"diff -u --label \"a/{label}\" --label \"b/{label}\" \"{ap}\" \"{bp}\" > \"{dp}\" 2>/dev/null"
+  discard execShellCmd(wrapped)
+  result =
+    if fileExists(dp): readFile(dp)
+    else: ""
+  try: removeDir(tmp) except CatchableError: discard
+
+proc runAction*(act: Action): tuple[output: string, code: int, diff: string] =
   case act.kind
   of akBash:
     let cmd = act.body.strip
-    let (output, code) = execCmdEx(cmd)
-    var tail = output
-    if tail.len > 8000: tail = tail[0 ..< 4000] & "\n... [truncated] ...\n" & tail[^4000 .. ^1]
-    (&"$ {cmd}\n{tail}[exit {code}]", code)
+    let tmp = getTempDir() / ("3code_bash_" & $getCurrentProcessId() & "_" & $epochTime().int64)
+    createDir(tmp)
+    let outPath = tmp / "out"
+    let errPath = tmp / "err"
+    let wrapped = &"({cmd}) >\"{outPath}\" 2>\"{errPath}\""
+    let code = execShellCmd(wrapped)
+    let rawOut = if fileExists(outPath): readFile(outPath) else: ""
+    let rawErr = if fileExists(errPath): readFile(errPath) else: ""
+    try: removeDir(tmp) except CatchableError: discard
+    let outClip = clipMiddle(rawOut, 4000, 4000)
+    let errClip = clipMiddle(rawErr, 2000, 2000)
+    var body = &"$ {cmd}\n"
+    if outClip.len > 0:
+      body.add outClip
+      if not outClip.endsWith("\n"): body.add "\n"
+    if errClip.len > 0:
+      body.add "[stderr]\n" & errClip
+      if not errClip.endsWith("\n"): body.add "\n"
+    body.add &"[exit {code}]"
+    (body, code, "")
   of akRead:
     if not fileExists(act.path):
-      return (&"error: {act.path} does not exist", 1)
+      return (&"error: {act.path} does not exist", 1, "")
     let content = readFile(act.path)
     const MaxLines = 2000
     const MaxBytes = 60 * 1024
@@ -561,7 +604,7 @@ proc runAction*(act: Action): (string, int) =
       if lines.len > 0 and lines[^1] == "": lines.len - 1
       else: lines.len
     let start = max(0, act.offset - 1)
-    if start >= total: return ("", 0)
+    if start >= total: return ("", 0, "")
     let explicitLimit = act.limit > 0
     var endi = if explicitLimit: min(total, start + act.limit) else: total
     var capped = false
@@ -580,32 +623,36 @@ proc runAction*(act: Action): (string, int) =
         inc k
       if k < endi: endi = k
     if act.offset <= 0 and not explicitLimit and not capped and endi == total:
-      return (content, 0)
+      return (content, 0, "")
     var body = lines[start ..< endi].join("\n")
     if capped:
       let shown = endi - start
       body.add &"\n... [file is {total} lines, {content.len} bytes; showed {shown} lines from line {start + 1}. Use read(path, offset, limit) for a specific range.] ..."
-    (body, 0)
+    (body, 0, "")
   of akWrite:
     let dir = parentDir(act.path)
     if dir != "": createDir(dir)
+    let before = if fileExists(act.path): readFile(act.path) else: ""
     writeFile(act.path, act.body)
-    (&"wrote {act.path} ({act.body.len} bytes)", 0)
+    let diff = computeDiff(before, act.body, act.path)
+    (&"wrote {act.path} ({act.body.len} bytes)", 0, diff)
   of akPatch:
     if act.edits.len == 0:
-      return (&"error: patch has no edits", 1)
+      return (&"error: patch has no edits", 1, "")
     if not fileExists(act.path):
-      return (&"error: {act.path} does not exist", 1)
-    var content = readFile(act.path)
+      return (&"error: {act.path} does not exist", 1, "")
+    let before = readFile(act.path)
+    var content = before
     var applied = 0
     for (s, r) in act.edits:
       let (next, ok) = replaceFirst(content, s, r)
       if not ok:
-        return (&"error: SEARCH block did not match in {act.path}:\n{s}", 1)
+        return (&"error: SEARCH block did not match in {act.path}:\n{s}", 1, "")
       content = next
       inc applied
     writeFile(act.path, content)
-    (&"patched {act.path} ({applied} edit" & (if applied == 1: "" else: "s") & ")", 0)
+    let diff = computeDiff(before, content, act.path)
+    (&"patched {act.path} ({applied} edit" & (if applied == 1: "" else: "s") & ")", 0, diff)
 
 # ---------- Display ----------
 
@@ -672,7 +719,34 @@ proc printBashCompact(res: string, idx: int) =
     for i in footer - CompactTail ..< footer: printLine(lines[i])
   if footer < lines.len: printLine(lines[footer])
 
-proc printActionResult(act: Action, res: string, code: int, idx: int) =
+proc printDiff(diff: string) =
+  const DiffHead = 15
+  const DiffTail = 20
+  var lines = diff.splitLines
+  while lines.len > 0 and lines[^1].strip == "":
+    lines.setLen lines.len - 1
+  if lines.len == 0: return
+  proc paint(l: string) =
+    if l.startsWith("@@"):
+      stdout.styledWriteLine fgCyan, l, resetStyle
+    elif l.startsWith("+++") or l.startsWith("---"):
+      stdout.styledWriteLine styleDim, l, resetStyle
+    elif l.len > 0 and l[0] == '+':
+      stdout.styledWriteLine fgGreen, l, resetStyle
+    elif l.len > 0 and l[0] == '-':
+      stdout.styledWriteLine fgRed, l, resetStyle
+    else:
+      stdout.writeLine l
+  if lines.len <= DiffHead + DiffTail + 2:
+    for l in lines: paint(l)
+    return
+  for i in 0 ..< DiffHead: paint(lines[i])
+  let hidden = lines.len - DiffHead - DiffTail
+  hintLn &"  … {hidden} line" & (if hidden == 1: "" else: "s") &
+    " hidden · `git diff` for full …", resetStyle
+  for i in lines.len - DiffTail ..< lines.len: paint(lines[i])
+
+proc printActionResult(act: Action, res: string, code: int, idx: int, diff = "") =
   if act.kind in {akBash, akRead}:
     printBashCompact(res, idx)
   else:
@@ -680,6 +754,8 @@ proc printActionResult(act: Action, res: string, code: int, idx: int) =
       stdout.styledWriteLine fgGreen, res, resetStyle
     else:
       stdout.styledWriteLine fgRed, styleBright, res, resetStyle
+  if diff.len > 0:
+    printDiff(diff)
 
 # ---------- History / editor ----------
 
@@ -752,13 +828,13 @@ proc readInput(editor: var minline.LineEditor, done: var bool): string =
 
 # ---------- Session loop ----------
 
-proc runTurns(p: Profile, messages: var JsonNode, session: var Usage) =
+proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
   while true:
     var usage: Usage
     let msg = callModel(p, messages, usage)
-    session.promptTokens += usage.promptTokens
-    session.completionTokens += usage.completionTokens
-    session.totalTokens += usage.totalTokens
+    session.usage.promptTokens += usage.promptTokens
+    session.usage.completionTokens += usage.completionTokens
+    session.usage.totalTokens += usage.totalTokens
     messages.add msg
     stdout.write "\n"
     let content = msg{"content"}.getStr("")
@@ -783,14 +859,14 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Usage) =
               " has malformed arguments JSON (" & e.msg & "): " & argsStr
             newJObject()
         let act = toolCallToAction(name, args)
-        let idx = toolLog.len + 1
+        let idx = session.toolLog.len + 1
         stdout.styledWrite fgYellow, styleBright, "» ", resetStyle,
           fgYellow, bannerFor(act), resetStyle,
           fgCyan, styleBright, &"   [T{idx}]", resetStyle, "\n"
         stdout.flushFile
-        let (r, code) = runAction(act)
-        toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
-        printActionResult(act, r, code, idx)
+        let (r, code, diff) = runAction(act)
+        session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
+        printActionResult(act, r, code, idx, diff)
         messages.add %*{"role": "tool", "tool_call_id": id, "content": r}
       continue
     if content.strip.len > 0:
@@ -801,7 +877,7 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Usage) =
         "  (empty reply — no content, no tool calls)", resetStyle
     break
 
-proc showTool(arg: string) =
+proc showTool(arg: string, toolLog: seq[ToolRecord]) =
   if toolLog.len == 0:
     hintLn "  no tool calls yet", resetStyle
     return
@@ -825,7 +901,7 @@ proc showTool(arg: string) =
     else:
       stdout.styledWriteLine fgRed, styleBright, rec.output, resetStyle
 
-proc listTools() =
+proc listTools(toolLog: seq[ToolRecord]) =
   if toolLog.len == 0:
     hintLn "  no tool calls yet", resetStyle
     return
@@ -888,8 +964,9 @@ proc readRequired(editor: var minline.LineEditor, prompt: string,
               die "aborted", ExitConfig
     if s != "": return s
 
-proc readOptional(editor: var minline.LineEditor, prompt: string): string =
-  try: editor.readLine(prompt).strip
+proc readOptional(editor: var minline.LineEditor, prompt: string,
+                  hidden = false): string =
+  try: editor.readLine(prompt, hidechars = hidden).strip
   except EOFError:
     stdout.write "\n"
     die "aborted", ExitConfig
@@ -953,7 +1030,7 @@ proc promptNewProvider(editor: var minline.LineEditor): ProviderRec =
     if clash:
       stdout.styledWriteLine fgRed, &"  name already used: {name}", resetStyle
       continue
-    let key = readRequired(editor, "  api key              : ", hidden = true)
+    var key = readRequired(editor, "  api key              : ", hidden = true)
     hint "  fetching models...   ", resetStyle
     stdout.flushFile
     let available = fetchModels(url, key)
@@ -1000,6 +1077,44 @@ proc promptNewProvider(editor: var minline.LineEditor): ProviderRec =
       stdout.styledWriteLine fgRed, styleBright, "failed", resetStyle
       stdout.styledWriteLine fgRed, "  " & err, resetStyle
       prev = modelsStr
+      let choice = readOptional(editor,
+        "  [enter]=retry models, k=re-enter key : ").toLowerAscii
+      if choice == "k":
+        key = readRequired(editor,
+          "  api key              : ", hidden = true)
+
+proc promptEditProvider(editor: var minline.LineEditor,
+                        existing: ProviderRec): ProviderRec =
+  hintLn &"  editing '{existing.name}' (enter to keep, ctrl+d to abort)",
+    resetStyle
+  while true:
+    let newUrl = readOptional(editor,
+      &"  url [{existing.url}]  : ").strip(chars = {'/', ' '})
+    let url = if newUrl == "": existing.url else: newUrl
+    let newKey = readOptional(editor,
+      "  api key [keep existing] : ", hidden = true)
+    let key = if newKey == "": existing.key else: newKey
+    let modelsCurrent = existing.models.join(" ")
+    let newModels = readOptional(editor,
+      &"  models [{modelsCurrent}]  : ")
+    let models =
+      if newModels == "": existing.models
+      else: splitModels(newModels)
+    if models.len == 0:
+      stdout.styledWriteLine fgRed, "  need at least one model", resetStyle
+      continue
+    let prefix = commonModelPrefix(models)
+    let prof = Profile(name: existing.name & "." & models[0], url: url,
+                       key: key, modelPrefix: prefix, model: models[0])
+    hint "  verifying... ", resetStyle
+    stdout.flushFile
+    let (ok, err) = verifyProfile(prof)
+    if ok:
+      stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
+      return ProviderRec(name: existing.name, url: url, key: key,
+                         modelPrefix: prefix, models: models)
+    stdout.styledWriteLine fgRed, styleBright, "failed", resetStyle
+    stdout.styledWriteLine fgRed, "  " & err, resetStyle
 
 proc bootstrapProvider(editor: var minline.LineEditor): Profile =
   stdout.styledWriteLine fgYellow, styleBright,
@@ -1052,6 +1167,27 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
     prof = buildProfile(activeCurrent, activeProviders, "")
   hintLn &"  added {prov.name}", resetStyle
 
+proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
+                     prof: var Profile) =
+  var idx = -1
+  for i, pr in activeProviders:
+    if pr.name == target: idx = i; break
+  if idx < 0:
+    stdout.styledWriteLine fgRed, &"  unknown provider: {target}", resetStyle
+    return
+  let updated = promptEditProvider(editor, activeProviders[idx])
+  activeProviders[idx] = updated
+  let curName = if activeCurrent == "": "" else: activeCurrent.split('.')[0]
+  if curName == target:
+    let wantedModel = prof.model
+    let model =
+      if wantedModel in updated.models: wantedModel
+      else: updated.models[0]
+    activeCurrent = updated.name & "." & model
+    prof = buildProfile(activeCurrent, activeProviders, "")
+  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  hintLn &"  updated {target}", resetStyle
+
 proc cmdProviderRm(target: string, prof: var Profile) =
   var idx = -1
   for i, pr in activeProviders:
@@ -1084,6 +1220,12 @@ proc cmdProvider(arg: string, editor: var minline.LineEditor,
       stdout.styledWriteLine fgRed, "  usage: :provider add", resetStyle
     else:
       cmdProviderAdd(editor, prof)
+  of "edit":
+    if parts.len != 2:
+      stdout.styledWriteLine fgRed,
+        "  usage: :provider edit <name>", resetStyle
+    else:
+      cmdProviderEdit(parts[1], editor, prof)
   of "rm", "remove":
     if parts.len != 2:
       stdout.styledWriteLine fgRed,
@@ -1133,7 +1275,7 @@ proc cmdModel(arg: string, prof: var Profile) =
     stdout.styledWriteLine fgRed,
       "  usage: :model [<name>]", resetStyle
 
-proc handleCommand(cmd: string, messages: var JsonNode, session: Usage,
+proc handleCommand(cmd: string, messages: var JsonNode, session: var Session,
                    prof: var Profile, editor: var minline.LineEditor): bool =
   ## returns true if the input was a recognised command
   let c = cmd.strip
@@ -1145,14 +1287,14 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: Usage,
   of ":help", ":?":
     stdout.write HelpText
   of ":tokens":
-    if session.totalTokens == 0:
+    if session.usage.totalTokens == 0:
       hintLn "  no tokens used yet", resetStyle
     else:
-      hintLn &"  session: {session.totalTokens} tok  (in {session.promptTokens}, out {session.completionTokens})",
+      hintLn &"  session: {session.usage.totalTokens} tok  (in {session.usage.promptTokens}, out {session.usage.completionTokens})",
         resetStyle
   of ":clear":
     messages = %* [{"role": "system", "content": SystemPrompt}]
-    toolLog.setLen 0
+    session.toolLog.setLen 0
     hintLn "  context cleared", resetStyle
   of ":model":
     cmdModel(arg, prof)
@@ -1162,9 +1304,9 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: Usage,
     stdout.write SystemPrompt
     if not SystemPrompt.endsWith("\n"): stdout.write "\n"
   of ":show":
-    showTool(arg)
+    showTool(arg, session.toolLog)
   of ":log":
-    listTools()
+    listTools(session.toolLog)
   else:
     stdout.styledWriteLine fgRed, "unknown command: ", c, "  (try :help)", resetStyle
   return true
@@ -1230,15 +1372,15 @@ proc main() =
     else: discard
 
   let prompt = args.join(" ")
-  var session: Usage
+  var session: Session
 
   if prompt != "":
     let prof = loadProfile(model)
     var messages = %* [{"role": "system", "content": SystemPrompt}]
     messages.add %*{"role": "user", "content": prompt}
     runTurns(prof, messages, session)
-    if session.totalTokens > 0:
-      hintLn &"  · {session.totalTokens} tok total", resetStyle
+    if session.usage.totalTokens > 0:
+      hintLn &"  · {session.usage.totalTokens} tok total", resetStyle
     return
 
   (activeCurrent, activeProviders) = loadStateOrEmpty(configPath())

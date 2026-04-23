@@ -13,7 +13,7 @@ suite "actions":
     let tmp = getTempDir() / "3code_test_" & $getCurrentProcessId()
     removeDir(tmp)
     let p = tmp / "nested/dir/out.txt"
-    let (r, code) = runAction(Action(kind: akWrite, path: p, body: "hi\n"))
+    let (r, code, _) = runAction(Action(kind: akWrite, path: p, body: "hi\n"))
     check fileExists(p)
     check readFile(p) == "hi\n"
     check "wrote" in r
@@ -25,14 +25,39 @@ suite "actions":
     createDir(tmp)
     let p = tmp / "a.txt"
     writeFile(p, "one two three\n")
-    let (r, code) = runAction(Action(kind: akPatch, path: p, edits: @[("two", "TWO")]))
+    let (r, code, diff) = runAction(Action(kind: akPatch, path: p, edits: @[("two", "TWO")]))
     check readFile(p) == "one TWO three\n"
     check "patched" in r
     check code == 0
+    check "-one two three" in diff
+    check "+one TWO three" in diff
     removeDir(tmp)
 
+  test "runAction akWrite produces diff for existing file":
+    let tmp = getTempDir() / "3code_test_" & $getCurrentProcessId() & "_wd"
+    createDir(tmp)
+    let p = tmp / "a.txt"
+    writeFile(p, "old\n")
+    let (_, _, diff) = runAction(Action(kind: akWrite, path: p, body: "new\n"))
+    check "-old" in diff
+    check "+new" in diff
+    removeDir(tmp)
+
+  test "runAction akBash separates stdout and stderr":
+    let (r, code, _) = runAction(Action(kind: akBash,
+      body: "echo out; echo err >&2"))
+    check code == 0
+    check "out" in r
+    check "[stderr]" in r
+    check "err" in r
+
+  test "runAction akBash preserves nonzero exit":
+    let (r, code, _) = runAction(Action(kind: akBash, body: "false"))
+    check code != 0
+    check "[exit 1]" in r
+
   test "runAction akPatch rejects zero edits":
-    let (r, code) = runAction(Action(kind: akPatch, path: "anything.txt"))
+    let (r, code, _) = runAction(Action(kind: akPatch, path: "anything.txt"))
     check code != 0
     check "no edits" in r
 
@@ -41,7 +66,7 @@ suite "actions":
     createDir(tmp)
     let p = tmp / "a.txt"
     writeFile(p, "hello\n")
-    let (r, code) = runAction(Action(kind: akPatch, path: p, edits: @[("nope", "x")]))
+    let (r, code, _) = runAction(Action(kind: akPatch, path: p, edits: @[("nope", "x")]))
     check "did not match" in r
     check code != 0
     check readFile(p) == "hello\n"
@@ -107,7 +132,7 @@ suite "actions":
     createDir(tmp)
     let p = tmp / "a.txt"
     writeFile(p, "one\ntwo\nthree\n")
-    let (r, code) = runAction(Action(kind: akRead, path: p))
+    let (r, code, _) = runAction(Action(kind: akRead, path: p))
     check code == 0
     check r == "one\ntwo\nthree\n"
     removeDir(tmp)
@@ -117,7 +142,7 @@ suite "actions":
     createDir(tmp)
     let p = tmp / "a.txt"
     writeFile(p, "a\nb\nc\nd\ne\n")
-    let (r, code) = runAction(Action(kind: akRead, path: p, offset: 2, limit: 2))
+    let (r, code, _) = runAction(Action(kind: akRead, path: p, offset: 2, limit: 2))
     check code == 0
     check r == "b\nc"
     removeDir(tmp)
@@ -130,7 +155,7 @@ suite "actions":
     for i in 1..3000:
       buf.add $i & "\n"
     writeFile(p, buf)
-    let (r, code) = runAction(Action(kind: akRead, path: p))
+    let (r, code, _) = runAction(Action(kind: akRead, path: p))
     check code == 0
     check "file is 3000 lines" in r
     check "showed 2000 lines" in r
@@ -145,7 +170,7 @@ suite "actions":
     for i in 1..3000:
       buf.add $i & "\n"
     writeFile(p, buf)
-    let (r, code) = runAction(
+    let (r, code, _) = runAction(
       Action(kind: akRead, path: p, offset: 1, limit: 2500))
     check code == 0
     check "file is 3000" notin r
@@ -153,6 +178,6 @@ suite "actions":
     removeDir(tmp)
 
   test "runAction akRead missing file":
-    let (r, code) = runAction(Action(kind: akRead, path: "/nonexistent/xyz"))
+    let (r, code, _) = runAction(Action(kind: akRead, path: "/nonexistent/xyz"))
     check code != 0
     check "does not exist" in r
