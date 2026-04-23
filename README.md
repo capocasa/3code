@@ -15,7 +15,19 @@ Or clone and `nimble install`.
 
 ## Configure
 
-Write a config file at `~/.config/3code/config`:
+Run `3code` with no config and it walks you through adding a provider
+(name, base URL, API key, models), verifies it with a one-token test
+call, and saves the result. Inside the REPL:
+
+    :provider              list configured providers (current marked with *)
+    :provider add          add another one (same wizard)
+    :provider use groq     switch current
+    :provider use groq.llama-3.1-8b-instant
+    :provider rm groq      remove one
+
+Tab completes `:` commands, `:provider` subcommands, and provider names.
+The config file lives at `~/.config/3code/config` — you can edit it by
+hand too:
 
     [settings]
     current = "openai.gpt-4o-mini"
