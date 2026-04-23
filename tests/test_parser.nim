@@ -162,6 +162,45 @@ Done.
     check a.edits[1][0] == "two"
     check a.edits[1][1] == "2"
 
+  test "toolCallToAction read whole file":
+    let a = toolCallToAction("read", %*{"path": "src/foo.nim"})
+    check a.kind == akRead
+    check a.path == "src/foo.nim"
+    check a.offset == 0
+    check a.limit == 0
+
+  test "toolCallToAction read with range":
+    let a = toolCallToAction("read", %*{
+      "path": "a.txt", "offset": 10, "limit": 5})
+    check a.kind == akRead
+    check a.offset == 10
+    check a.limit == 5
+
+  test "runAction akRead whole file":
+    let tmp = getTempDir() / "3code_test_" & $getCurrentProcessId() & "_r"
+    createDir(tmp)
+    let p = tmp / "a.txt"
+    writeFile(p, "one\ntwo\nthree\n")
+    let (r, code) = runAction(Action(kind: akRead, path: p))
+    check code == 0
+    check r == "one\ntwo\nthree\n"
+    removeDir(tmp)
+
+  test "runAction akRead line range":
+    let tmp = getTempDir() / "3code_test_" & $getCurrentProcessId() & "_r2"
+    createDir(tmp)
+    let p = tmp / "a.txt"
+    writeFile(p, "a\nb\nc\nd\ne\n")
+    let (r, code) = runAction(Action(kind: akRead, path: p, offset: 2, limit: 2))
+    check code == 0
+    check r == "b\nc"
+    removeDir(tmp)
+
+  test "runAction akRead missing file":
+    let (r, code) = runAction(Action(kind: akRead, path: "/nonexistent/xyz"))
+    check code != 0
+    check "does not exist" in r
+
   test "toolCallToAction patch tolerates missing edits":
     let a = toolCallToAction("patch", %*{"path": "x"})
     check a.kind == akPatch
