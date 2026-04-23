@@ -726,6 +726,7 @@ const ProviderCatalog: seq[(string, string)] = @[
   ("sambanova",   "https://api.sambanova.ai/v1"),
   ("scaleway",    "https://api.scaleway.ai/v1"),
   ("together",    "https://api.together.xyz/v1"),
+  ("together-eu", "https://eu.api.together.xyz/v1"),
   ("xai",         "https://api.x.ai/v1"),
   ("zai",         "https://api.z.ai/api/paas/v4"),
   ("zai-coding",  "https://api.z.ai/api/coding/paas/v4"),
