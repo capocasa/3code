@@ -153,6 +153,8 @@ const ConfigExample = """  [settings]
 """
 
 const HelpText = """
+3code — the economical coding agent. bring your own third-party endpoint.
+
 commands:
   :help             show this message
   :tokens           show token usage for this session
@@ -176,6 +178,13 @@ input:
   multi-line    type three double-quotes on its own line, enter lines, close the same way
   up / down     recall history; down past last clears the line
   tab           complete :commands, provider names, model names
+
+recommended (cache = documented prompt caching):
+  deepinfra  (cache)   qwen3-coder-480b, kimi-k2.5
+  deepseek   (cache)   deepseek-v3.2
+  together             qwen3-coder-480b, kimi-k2.5
+  groq                 kimi-k2.5  (fast, no cache)
+models outside this list are your tokens to burn.
 """
 
 type
@@ -189,8 +198,8 @@ type
     limit*: int
   Profile = object
     name, url, key, modelPrefix, model: string
-  Usage = object
-    promptTokens, completionTokens, totalTokens: int
+  Usage* = object
+    promptTokens*, completionTokens*, totalTokens*, cachedTokens*: int
   ToolRecord* = object
     banner*: string
     output*: string
@@ -294,6 +303,7 @@ proc saveSession(session: Session, messages: JsonNode) =
         "promptTokens": session.usage.promptTokens,
         "completionTokens": session.usage.completionTokens,
         "totalTokens": session.usage.totalTokens,
+        "cachedTokens": session.usage.cachedTokens,
       },
       "lastPromptTokens": session.lastPromptTokens,
       "messages": messages,
@@ -319,6 +329,7 @@ proc loadSessionFile(path: string): (Session, JsonNode) =
     sess.usage.promptTokens = u{"promptTokens"}.getInt(0)
     sess.usage.completionTokens = u{"completionTokens"}.getInt(0)
     sess.usage.totalTokens = u{"totalTokens"}.getInt(0)
+    sess.usage.cachedTokens = u{"cachedTokens"}.getInt(0)
   sess.toolLog = toolLogFromJson(j{"toolLog"})
   var messages = j{"messages"}
   if messages == nil or messages.kind != JArray:
@@ -614,6 +625,21 @@ proc toolCallToAction*(name: string, args: JsonNode): Action =
   else:
     Action(kind: akBash, body: "echo 'unknown tool: " & name & "'; exit 1")
 
+proc parseUsage*(u: JsonNode): Usage =
+  ## Parses an OpenAI-compatible `usage` object. Cached-token accounting
+  ## differs by provider: OpenAI/DeepInfra/Anthropic report it under
+  ## `prompt_tokens_details.cached_tokens`; DeepSeek reports it flat as
+  ## `prompt_cache_hit_tokens`. We accept either.
+  if u == nil or u.kind != JObject: return
+  result.promptTokens = u{"prompt_tokens"}.getInt(0)
+  result.completionTokens = u{"completion_tokens"}.getInt(0)
+  result.totalTokens = u{"total_tokens"}.getInt(0)
+  let details = u{"prompt_tokens_details"}
+  if details != nil and details.kind == JObject:
+    result.cachedTokens = details{"cached_tokens"}.getInt(0)
+  if result.cachedTokens == 0:
+    result.cachedTokens = u{"prompt_cache_hit_tokens"}.getInt(0)
+
 proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: Usage): JsonNode =
   let client = newHttpClient(timeout = 180_000)
   defer: client.close()
@@ -630,7 +656,10 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: U
   body["tool_choice"] = %"auto"
   let bodyStr = $body
   let t0 = epochTime()
-  startSpinner(&"thinking · session ↑ {sessionUsage.promptTokens} · ↓ {sessionUsage.completionTokens}")
+  var spinLabel = &"thinking · session ↑ {sessionUsage.promptTokens} · ↓ {sessionUsage.completionTokens}"
+  if sessionUsage.cachedTokens > 0:
+    spinLabel.add &" · cache {sessionUsage.cachedTokens}"
+  startSpinner(spinLabel)
   const MaxAttempts = 3
   var resp: Response
   var attempt = 0
@@ -667,16 +696,14 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: U
   let j = parseJson(text)
   if "error" in j: die("api error: " & $j["error"], ExitApi)
   if "usage" in j:
-    let u = j["usage"]
-    usage.promptTokens = u{"prompt_tokens"}.getInt(0)
-    usage.completionTokens = u{"completion_tokens"}.getInt(0)
-    usage.totalTokens = u{"total_tokens"}.getInt(0)
-  let info =
-    if usage.totalTokens > 0:
-      &"  ↑ {usage.promptTokens} tok · ↓ {usage.completionTokens} tok · {elapsed.int}s"
-    else:
-      &"  ↓ ~{text.len div 4} tok · {elapsed.int}s"
-  hint info, resetStyle, "\n"
+    usage = parseUsage(j["usage"])
+  if usage.totalTokens > 0:
+    hint &"  ↑ {usage.promptTokens} tok · ↓ {usage.completionTokens} tok"
+    if usage.cachedTokens > 0:
+      stdout.styledWrite(styleDim, &" · cache {usage.cachedTokens}", resetStyle)
+    hint &" · {elapsed.int}s", resetStyle, "\n"
+  else:
+    hint &"  ↓ ~{text.len div 4} tok · {elapsed.int}s", resetStyle, "\n"
   stdout.flushFile
   j["choices"][0]["message"]
 
@@ -971,7 +998,8 @@ proc showProfile(p: Profile) =
 
 proc welcome(p: Profile): minline.LineEditor =
   stdout.styledWriteLine fgCyan, styleBright, "  ╭─╮"
-  stdout.styledWriteLine fgCyan, styleBright, "   ─┤  ", resetStyle, fgWhite, styleBright, "3code ", resetStyle, fgCyan, styleBright, "v" & Version
+  stdout.styledWriteLine fgCyan, styleBright, "   ─┤  ", resetStyle, fgWhite, styleBright, "3code ", resetStyle, fgCyan, styleBright, "v" & Version,
+    resetStyle, styleDim, "   the economical coding agent"
   stdout.styledWriteLine fgCyan, styleBright, "  ╰─╯"
   stdout.write "\n"
   if p.name != "":
@@ -1013,6 +1041,7 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
     session.usage.promptTokens += usage.promptTokens
     session.usage.completionTokens += usage.completionTokens
     session.usage.totalTokens += usage.totalTokens
+    session.usage.cachedTokens += usage.cachedTokens
     session.lastPromptTokens = usage.promptTokens
     messages.add msg
     saveSession(session, messages)
@@ -1181,6 +1210,19 @@ proc commonModelPrefix(models: seq[string]): string =
   let slash = prefix.rfind('/')
   if slash < 0: "" else: prefix[0 .. slash]
 
+const RecommendedWizardLines = [
+  "  recommended (cache = documented prompt caching):",
+  "    deepinfra  (cache)   qwen3-coder-480b, kimi-k2.5",
+  "    deepseek   (cache)   deepseek-v3.2",
+  "    together             qwen3-coder-480b, kimi-k2.5",
+  "    groq                 kimi-k2.5  (fast, no cache)",
+  "  models outside this list are your tokens to burn.",
+]
+
+proc printRecommended() =
+  for line in RecommendedWizardLines:
+    stdout.styledWriteLine styleDim, line, resetStyle
+
 proc readProviderEntry(editor: var minline.LineEditor): string =
   let prevCb = editor.completionCallback
   editor.completionCallback = proc(ed: LineEditor): seq[string] =
@@ -1189,6 +1231,8 @@ proc readProviderEntry(editor: var minline.LineEditor): string =
   editor.completionCallback = prevCb
 
 proc promptNewProvider(editor: var minline.LineEditor): ProviderRec =
+  printRecommended()
+  stdout.write "\n"
   while true:
     let entry = readProviderEntry(editor)
     var name, url: string
@@ -1481,8 +1525,10 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: var Session,
     if session.usage.totalTokens == 0:
       hintLn "  no tokens used yet", resetStyle
     else:
-      hintLn &"  session: {session.usage.totalTokens} tok  (in {session.usage.promptTokens}, out {session.usage.completionTokens})",
-        resetStyle
+      var msg = &"  session: {session.usage.totalTokens} tok  (in {session.usage.promptTokens}, out {session.usage.completionTokens})"
+      if session.usage.cachedTokens > 0:
+        msg.add &", cache {session.usage.cachedTokens}"
+      hintLn msg, resetStyle
   of ":clear":
     messages = %* [{"role": "system", "content": buildSystemPrompt(prof)}]
     session.toolLog.setLen 0

@@ -229,6 +229,48 @@ suite "compaction":
     for i in 1 ..< msgs.len:
       check msgs[i]["content"].getStr == big
 
+suite "usage parsing":
+  test "OpenAI-style prompt_tokens_details.cached_tokens":
+    let u = parseUsage(%*{
+      "prompt_tokens": 12400,
+      "completion_tokens": 312,
+      "total_tokens": 12712,
+      "prompt_tokens_details": {"cached_tokens": 11200}
+    })
+    check u.promptTokens == 12400
+    check u.completionTokens == 312
+    check u.totalTokens == 12712
+    check u.cachedTokens == 11200
+
+  test "DeepSeek-style prompt_cache_hit_tokens":
+    let u = parseUsage(%*{
+      "prompt_tokens": 8000,
+      "completion_tokens": 200,
+      "total_tokens": 8200,
+      "prompt_cache_hit_tokens": 7500,
+      "prompt_cache_miss_tokens": 500
+    })
+    check u.promptTokens == 8000
+    check u.completionTokens == 200
+    check u.totalTokens == 8200
+    check u.cachedTokens == 7500
+
+  test "absent cache fields produce cachedTokens == 0":
+    let u = parseUsage(%*{
+      "prompt_tokens": 100,
+      "completion_tokens": 50,
+      "total_tokens": 150
+    })
+    check u.promptTokens == 100
+    check u.cachedTokens == 0
+    let u2 = parseUsage(%*{
+      "prompt_tokens": 100,
+      "completion_tokens": 50,
+      "total_tokens": 150,
+      "prompt_tokens_details": {"cached_tokens": 0}
+    })
+    check u2.cachedTokens == 0
+
 suite "tool log serialization":
   test "round-trips all action kinds":
     let log = @[
