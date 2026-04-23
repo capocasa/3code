@@ -1,4 +1,4 @@
-import std/[httpclient, json, os, osproc, strutils, strformat, sequtils, streams, terminal, parsecfg, parseopt, times, atomics, critbits]
+import std/[httpclient, json, os, osproc, strutils, strformat, sequtils, streams, terminal, parsecfg, parseopt, times, atomics, critbits, uri]
 import minline
 import threecode/web
 
@@ -394,6 +394,23 @@ proc verifyProfile(p: Profile): (bool, string) =
   except CatchableError as e:
     return (false, e.msg)
 
+proc fetchModels(url, key: string): seq[string] =
+  let client = newHttpClient(timeout = 20000)
+  defer: client.close()
+  client.headers = newHttpHeaders({"Authorization": "Bearer " & key})
+  try:
+    let r = client.request(url & "/models", HttpGet)
+    if r.code != Http200: return @[]
+    let j = try: parseJson(r.body) except CatchableError: return @[]
+    let arr = if j.kind == JArray: j
+              elif "data" in j and j["data"].kind == JArray: j["data"]
+              else: return @[]
+    for item in arr:
+      if item.kind == JString: result.add item.getStr
+      elif item.kind == JObject and "id" in item: result.add item["id"].getStr
+  except CatchableError:
+    return @[]
+
 # ---------- Parser ----------
 
 proc looksLikePath*(s: string): bool =
@@ -683,6 +700,42 @@ proc listTools() =
 
 # ---------- Provider management ----------
 
+const ProviderCatalog: seq[(string, string)] = @[
+  ("anthropic",   "https://api.anthropic.com/v1"),
+  ("baseten",     "https://inference.baseten.co/v1"),
+  ("cerebras",    "https://api.cerebras.ai/v1"),
+  ("deepinfra",   "https://api.deepinfra.com/v1/openai"),
+  ("deepseek",    "https://api.deepseek.com/v1"),
+  ("fireworks",   "https://api.fireworks.ai/inference/v1"),
+  ("friendli",    "https://api.friendli.ai/serverless/v1"),
+  ("google",      "https://generativelanguage.googleapis.com/v1beta/openai"),
+  ("groq",        "https://api.groq.com/openai/v1"),
+  ("hyperbolic",  "https://api.hyperbolic.xyz/v1"),
+  ("mistral",     "https://api.mistral.ai/v1"),
+  ("moonshot",    "https://api.moonshot.ai/v1"),
+  ("moonshot-cn", "https://api.moonshot.cn/v1"),
+  ("nebius",      "https://api.studio.nebius.com/v1"),
+  ("nvidia",      "https://integrate.api.nvidia.com/v1"),
+  ("openai",      "https://api.openai.com/v1"),
+  ("openrouter",  "https://openrouter.ai/api/v1"),
+  ("ovh",         "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"),
+  ("perplexity",  "https://api.perplexity.ai"),
+  ("qwen",        "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
+  ("qwen-cn",     "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+  ("qwen-us",     "https://dashscope-us.aliyuncs.com/compatible-mode/v1"),
+  ("sambanova",   "https://api.sambanova.ai/v1"),
+  ("scaleway",    "https://api.scaleway.ai/v1"),
+  ("together",    "https://api.together.xyz/v1"),
+  ("xai",         "https://api.x.ai/v1"),
+  ("zai",         "https://api.z.ai/api/paas/v4"),
+  ("zai-coding",  "https://api.z.ai/api/coding/paas/v4"),
+]
+
+proc catalogUrl(name: string): string =
+  for (n, u) in ProviderCatalog:
+    if n == name: return u
+  ""
+
 proc readRequired(editor: var minline.LineEditor, prompt: string,
                   hidden = false): string =
   while true:
@@ -692,9 +745,51 @@ proc readRequired(editor: var minline.LineEditor, prompt: string,
               die "aborted", ExitConfig
     if s != "": return s
 
+proc readOptional(editor: var minline.LineEditor, prompt: string): string =
+  try: editor.readLine(prompt).strip
+  except EOFError:
+    stdout.write "\n"
+    die "aborted", ExitConfig
+
+proc defaultNameFromUrl(url: string): string =
+  let host = parseUri(url).hostname
+  if host == "": return ""
+  let labels = host.split('.')
+  if labels.len >= 2: labels[^2]
+  else: labels[0]
+
+proc readProviderEntry(editor: var minline.LineEditor): string =
+  let prevCb = editor.completionCallback
+  editor.completionCallback = proc(ed: LineEditor): seq[string] =
+    for (n, _) in ProviderCatalog: result.add n
+  result = readRequired(editor, "  provider name or url : ")
+  editor.completionCallback = prevCb
+
 proc promptNewProvider(editor: var minline.LineEditor): ProviderRec =
   while true:
-    let name = readRequired(editor, "  name (e.g. openai)   : ")
+    let entry = readProviderEntry(editor)
+    var name, url: string
+    if entry.startsWith("http://") or entry.startsWith("https://"):
+      url = entry.strip(chars = {'/', ' '})
+      let suggested = defaultNameFromUrl(url)
+      let namePrompt =
+        if suggested == "": "  name                 : "
+        else: &"  name [{suggested}]     : "
+      name = readOptional(editor, namePrompt)
+      if name == "": name = suggested
+    else:
+      name = entry
+      let cu = catalogUrl(name)
+      if cu != "":
+        url = cu
+        stdout.styledWriteLine fgBlack, styleBright,
+          "  url                  : ", resetStyle, url
+      else:
+        url = readRequired(editor, "  api base url         : ")
+          .strip(chars = {'/', ' '})
+    if name == "":
+      stdout.styledWriteLine fgRed, "  name required", resetStyle
+      continue
     var clash = false
     for pr in activeProviders:
       if pr.name == name:
@@ -703,8 +798,18 @@ proc promptNewProvider(editor: var minline.LineEditor): ProviderRec =
     if clash:
       stdout.styledWriteLine fgRed, &"  name already used: {name}", resetStyle
       continue
-    let url = readRequired(editor, "  api base url         : ").strip(chars = {'/', ' '})
     let key = readRequired(editor, "  api key              : ", hidden = true)
+    stdout.styledWrite fgBlack, styleBright, "  fetching models...   ", resetStyle
+    stdout.flushFile
+    let available = fetchModels(url, key)
+    if available.len == 0:
+      stdout.styledWriteLine fgBlack, styleBright,
+        "unavailable — enter manually", resetStyle
+    else:
+      stdout.styledWriteLine fgBlack, styleBright,
+        &"{available.len} available", resetStyle
+      for m in available:
+        stdout.styledWriteLine fgBlack, styleBright, "    ", resetStyle, m
     let modelsStr = readRequired(editor, "  models (comma-sep.)  : ")
     let models = splitModels(modelsStr)
     if models.len == 0:
