@@ -1,4 +1,4 @@
-import std/[httpclient, json, os, strutils, strformat, sequtils, streams, terminal, parsecfg, parseopt, times, atomics, critbits, uri, algorithm]
+import std/[httpclient, json, os, strutils, strformat, sequtils, streams, terminal, parsecfg, parseopt, times, atomics, critbits, uri, algorithm, tables]
 import threecode/minline
 import threecode/web
 
@@ -23,48 +23,36 @@ template errLn(args: varargs[untyped]) =
   stdout.styledWriteLine(fgRed, styleBright, args, resetStyle)
 
 const SystemPrompt = """
-You are 3code, a coding agent running in a terminal.
+You are 3code, the economical coding agent. One task, done right, few tokens.
 
-Call the provided tools (`bash`, `read`, `write`, `patch`) to take actions. After your turn the harness runs each tool call and feeds results back. You may emit prose alongside tool calls. When the task is done, reply with prose and no tool calls.
+Tools:
+- `bash(command)` — shell; returns stdout/stderr + exit code.
+- `read(path, offset?, limit?)` — file or line range. offset is 1-indexed.
+- `write(path, body)` — create or overwrite.
+- `patch(path, edits)` — exact-match search/replace on an existing file. Each `search` must be copied byte-for-byte from a prior `read`; paraphrased matches fail.
 
-- `bash(command)` — run a shell command; output and exit code come back.
-- `read(path, offset?, limit?)` — read a file, or a line range of it. `offset` is 1-indexed.
-- `write(path, body)` — create or overwrite a file.
-- `patch(path, edits)` — apply exact-match search/replace edits to an existing file. `edits` is an array of `{search, replace}` objects. Each `search` must be copied byte-for-byte from a prior `read` — same indentation, same trailing whitespace, same line endings. Paraphrased or reformatted matches will fail; on failure retry with a corrected `search`.
+The harness runs your tool calls and feeds results back. When done, reply with prose and no tool calls. Dry wit where earned; no forced cheer, no emoji, no "Great question!".
 
-Tone: dry wit welcome where it's earned — funny because it's true, a wry aside that also tells the user something real. Skip forced cheer, emoji, and filler like "Great question!".
+## Work rules
 
-## Working effectively
-
-### Orient & plan
-
-- Orient first. On a fresh task in an unfamiliar repo, run `ls` and read the README and the build manifest (`*.nimble`, `package.json`, `Cargo.toml`, `pyproject.toml`, etc.) before editing. Skip only for obviously trivial tasks.
-- Plan multi-step tasks. For anything beyond a one-liner, sketch a 3–8 step plan before touching files; work the steps in order and note when each is done.
-
-### Scope & style
-
-- Stay in scope. Do what was asked, nothing more. Don't refactor, reformat, add comments/docstrings, or handle hypothetical edge cases the user didn't mention.
-- Match the local style. Before writing new code, glance at a neighboring file for naming, imports, error-handling pattern, and indentation. Don't impose your own taste.
-- Edit surgically. For a small fix use `patch`, not `write`. For a rename, `patch` the definition and call sites — don't rewrite each file whole.
-
-### Find out, don't guess
-
-- Gather context before guessing. Read real files; don't invent their contents.
-- Search before reading. Use `rg` or `grep -rn` (via `bash`) to locate the handful of lines you care about, then `read` only that file — with `offset` / `limit` when the file is large. Prefer `read` over `bash cat` for any file over ~100 lines so you keep range control. Don't read whole files or whole directories unless you actually need them. Prefer `find -maxdepth 2` or `ls` over recursive scans.
-- Probe when unsure. When you don't know how an API, library, regex, or command actually behaves, write a short throwaway script in a temp dir (`mktemp -d`, or under `/tmp/`) and run it — don't guess. Clean up the temp dir before moving on.
-- Local before web. Installed dependencies, vendored source, CHANGELOGs, `tests/`, `example/`, and `man` pages usually answer the question faster and more accurately than a web search. Check them first. Reach for the web only when the local tree genuinely lacks the info.
-
-### Finish cleanly
-
-- Verify before declaring done. After changes, run the project's tests, build, or typecheck; then `git diff` / `git status` (if it's a git repo) to confirm the change is what you intended and nothing accidental tagged along. Don't call the task complete if anything's off.
-- Stop when done. If a task already looks complete when you start, say so and stop — don't invent work.
-- Pause before irreversible ops outside the working directory (`rm -rf` of other paths, force-push, database drops, destructive git history rewrites). Explain and wait for the user.
+- Orient before editing a fresh repo: `ls`, read the README and build manifest (`*.nimble`, `package.json`, etc.). Skip for trivial tasks.
+- Plan anything beyond a one-liner in 3–8 steps; work them in order.
+- Stay in scope. Don't refactor, reformat, or add comments the user didn't ask for.
+- Match local style: naming, imports, error handling, indentation.
+- Edit surgically. After a file exists, default to `patch`; reserve `write` for new files or deliberate wholesale replacement. Rewriting the same file repeatedly is a smell — each full body rides in context every turn after.
+- Trust your own results. `write` returning "wrote N bytes" is truthful — the file on disk is exactly what you sent. If the written file *looks* wrong, you are wrong, not the tool. Don't `read` back to verify; re-read only for content you don't have.
+- Search before reading: `rg` / `grep -rn` to find the few lines that matter, then `read` with `offset`/`limit` for large files. Don't slurp whole files or trees.
+- Quick jobs, quick scripts. For counts, format checks, data shape, or any multi-step inspection, write a 5-line throwaway under `/tmp/` and run it — faster and more reliable than eyeballing. Match the project's language; default Nim (`nim r /tmp/x.nim`) or shell. Clean up after.
+- Local before web: installed deps, vendored source, CHANGELOGs, `tests/`, `example/`, `man` pages usually have the answer.
+- Verify before declaring done: run tests/build/typecheck, then `git diff` / `git status`. Don't call complete if anything's off.
+- Stop when done. If a task looks complete on arrival, say so.
+- Pause before irreversible ops outside the working directory (`rm -rf` of other paths, force-push, DB drops, destructive git history). Explain and wait.
 
 ## Finding things
 
-- Files: the `read` tool.
-- Search in the working tree: `rg`, `grep -rn`, `find`, `ls` via `bash`.
-- Web (for current facts, API details, or docs the local tree doesn't have): `bash` out to `3code web "query"` for numbered DuckDuckGo results; then `3code fetch <url>` for readable page text. Prefer official docs over blogspam.
+- Files: `read`.
+- Tree search: `rg`, `grep -rn`, `find`, `ls` via `bash`.
+- Web: `3code web "query"` for results, `3code fetch <url>` for page text. Prefer official docs.
 """
 
 let ToolsJson = %*[
@@ -72,12 +60,9 @@ let ToolsJson = %*[
     "type": "function",
     "function": {
       "name": "bash",
-      "description": "Run a shell command. Returns combined stdout/stderr and exit code.",
       "parameters": {
         "type": "object",
-        "properties": {
-          "command": {"type": "string", "description": "Shell command to execute."}
-        },
+        "properties": {"command": {"type": "string"}},
         "required": ["command"]
       }
     }
@@ -86,13 +71,12 @@ let ToolsJson = %*[
     "type": "function",
     "function": {
       "name": "read",
-      "description": "Read a file. Omit offset/limit to read the whole file; otherwise return a line range. `offset` is 1-indexed.",
       "parameters": {
         "type": "object",
         "properties": {
           "path": {"type": "string"},
-          "offset": {"type": "integer", "description": "1-indexed line to start at."},
-          "limit": {"type": "integer", "description": "Maximum number of lines to return."}
+          "offset": {"type": "integer"},
+          "limit": {"type": "integer"}
         },
         "required": ["path"]
       }
@@ -102,7 +86,6 @@ let ToolsJson = %*[
     "type": "function",
     "function": {
       "name": "write",
-      "description": "Write a whole file (create or overwrite). Parent directories are created as needed.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -117,7 +100,6 @@ let ToolsJson = %*[
     "type": "function",
     "function": {
       "name": "patch",
-      "description": "Patch an existing file with one or more exact-match search/replace edits. Each search string must match the current file byte-for-byte.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -169,7 +151,8 @@ commands:
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
-  :sessions         list recent saved sessions
+  :sessions         list sessions saved in the current directory
+  :sessions all     list every saved session (any directory)
   :compact          compact older tool output in context
   :q :quit          exit (also Ctrl-D)
 
@@ -205,6 +188,14 @@ type
     output*: string
     code*: int
     kind*: ActionKind
+  LoopTracker* = object
+    ## Sliding-window per-path saturation detector. `bash` tool calls are
+    ## never fingerprinted (thrash is about files, not commands). Reset at
+    ## the start of each user turn via `resetLoopTracker`.
+    ring*: seq[string]       # last K fingerprints, oldest at head
+    counts*: CountTable[string]
+    strike*: int             # 0/1/2
+    trippedPaths*: seq[string] # paths that have already tripped this strike
   Session = object
     usage: Usage
     lastPromptTokens: int
@@ -212,18 +203,72 @@ type
     savePath: string
     profileName: string
     created: string
+    cwd: string
+    loop: LoopTracker
+  ApiError* = object of CatchableError
+
+const
+  LoopWindowK* = 15
+  LoopTripT* = 5
 
 proc die(msg: string, code = 1) {.noreturn.} =
   stderr.writeLine "3code: " & msg
   quit code
 
+proc initLoopTracker*(): LoopTracker =
+  result.ring = @[]
+  result.counts = initCountTable[string]()
+  result.strike = 0
+  result.trippedPaths = @[]
+
+proc resetLoopTracker*(t: var LoopTracker) =
+  t.ring.setLen 0
+  t.counts.clear()
+  t.strike = 0
+  t.trippedPaths.setLen 0
+
+proc canonPath(path: string): string =
+  if path.len == 0: return ""
+  var p = path
+  if p.startsWith("~"): p = expandTilde(p)
+  try: absolutePath(p) except CatchableError: p
+
+proc fingerprint(name: string, args: JsonNode): string =
+  ## Returns "" when the call should NOT be tracked (e.g. bash, or
+  ## write/patch/read with no path argument).
+  case name
+  of "bash": ""
+  of "write", "patch", "read":
+    let path = if args != nil and args.kind == JObject: args{"path"}.getStr else: ""
+    if path == "": "" else: canonPath(path)
+  else: ""
+
+proc trackCall*(t: var LoopTracker, name: string, args: JsonNode): int =
+  ## Feed a tool call through the detector. Returns the strike level AFTER
+  ## this call (0 = no trip, 1 = saturation first seen for this path,
+  ## 2 = second distinct trip → outer loop should halt further tool calls).
+  ## `bash` is not fingerprinted at all and returns the current strike.
+  let fp = fingerprint(name, args)
+  if fp == "": return t.strike
+  if t.ring.len >= LoopWindowK:
+    let ev = t.ring[0]
+    t.ring.delete(0)
+    let c = t.counts.getOrDefault(ev) - 1
+    if c <= 0: t.counts.del ev
+    else: t.counts[ev] = c
+  t.ring.add fp
+  t.counts.inc fp
+  if t.counts[fp] >= LoopTripT and fp notin t.trippedPaths:
+    t.trippedPaths.add fp
+    inc t.strike
+  t.strike
+
 proc buildSystemPrompt(p: Profile): string =
-  if p.name == "": return SystemPrompt
-  let dot = p.name.find('.')
-  let provider = if dot < 0: p.name else: p.name[0 ..< dot]
-  result = SystemPrompt
-  if not result.endsWith("\n"): result.add "\n"
-  result.add &"\nRunning {p.model} via {provider}.\n"
+  ## Byte-stable across every call. Provider/model identity deliberately
+  ## does NOT land here: it would vary the system prompt's bytes and kill
+  ## prefix caching on Anthropic/OpenAI/DeepInfra where an identical
+  ## prefix can shave 90% off prompt tokens on cache hit.
+  SystemPrompt
 
 proc refreshSystemPrompt(messages: JsonNode, p: Profile) =
   if messages == nil or messages.kind != JArray or messages.len == 0: return
@@ -253,12 +298,26 @@ proc listSessionPaths(): seq[string] =
       result.add path
   result.sort(order = SortOrder.Descending)
 
-proc resolveSessionPath(id: string): string =
+proc sessionCwd(path: string): string =
+  try: parseJson(readFile(path)){"cwd"}.getStr("")
+  except CatchableError: ""
+
+proc listSessionPathsForCwd(cwd: string): seq[string] =
+  for p in listSessionPaths():
+    let c = sessionCwd(p)
+    if c == cwd or c == "":
+      result.add p
+
+proc resolveSessionPath(id: string, cwd = ""): string =
   ## `id` is bare (no .json) or a full path. Returns "" if not found.
+  ## When `id` is empty and `cwd` is set, prefers sessions whose saved cwd
+  ## matches (or is unknown); otherwise returns the latest of any.
   if id == "":
-    let all = listSessionPaths()
-    if all.len == 0: return ""
-    return all[0]
+    let candidates =
+      if cwd != "": listSessionPathsForCwd(cwd)
+      else: listSessionPaths()
+    if candidates.len == 0: return ""
+    return candidates[0]
   if fileExists(id): return id
   let candidate = sessionDir() / (id & ".json")
   if fileExists(candidate): return candidate
@@ -299,6 +358,7 @@ proc saveSession(session: Session, messages: JsonNode) =
       "created": session.created,
       "updated": $now(),
       "profile": session.profileName,
+      "cwd": session.cwd,
       "usage": {
         "promptTokens": session.usage.promptTokens,
         "completionTokens": session.usage.completionTokens,
@@ -323,6 +383,7 @@ proc loadSessionFile(path: string): (Session, JsonNode) =
   var sess = Session(savePath: path)
   sess.profileName = j{"profile"}.getStr("")
   sess.created = j{"created"}.getStr($now())
+  sess.cwd = j{"cwd"}.getStr("")
   sess.lastPromptTokens = j{"lastPromptTokens"}.getInt(0)
   let u = j{"usage"}
   if u != nil and u.kind == JObject:
@@ -343,12 +404,38 @@ proc firstUserMessage(messages: JsonNode): string =
       return m{"content"}.getStr("")
   ""
 
+proc printSessionList(paths: seq[string], currentPath: string, showCwd: bool) =
+  for p in paths:
+    let id = sessionIdFromPath(p)
+    var count = 0
+    var first = ""
+    var cwd = ""
+    try:
+      let j = parseJson(readFile(p))
+      let msgs = j{"messages"}
+      if msgs != nil and msgs.kind == JArray: count = msgs.len
+      first = firstUserMessage(msgs)
+      cwd = j{"cwd"}.getStr("")
+    except CatchableError: discard
+    let mark = if currentPath == p: "*" else: " "
+    let snip =
+      if first.len == 0: ""
+      elif first.len > 50: "  " & first[0 ..< 47] & "..."
+      else: "  " & first
+    let cwdStr =
+      if showCwd and cwd != "": "  " & cwd.replace(getHomeDir(), "~/")
+      else: ""
+    hint &"  {mark} ", resetStyle, id, fgCyan, styleBright,
+      &"   ({count} msg" & (if count == 1: "" else: "s") & ")",
+      resetStyle, cwdStr, snip, "\n"
+
 # ---------- Context compaction (B.1) ----------
 
 const
   CompactThresholdFrac = 0.8
   CompactKeepRecent = 10
   CompactedMarker = "[compacted — tool output elided; use :show to view]"
+  SupersededMarker = "[superseded — later action on same path elided this]"
 
 proc contextWindowFor(model: string): int =
   let m = model.toLowerAscii
@@ -382,6 +469,100 @@ proc compactHistory*(messages: JsonNode, keepRecent = CompactKeepRecent): int =
     if c.startsWith("[compacted"): continue
     m["content"] = %CompactedMarker
     inc result
+
+proc supersedeCompact*(messages: JsonNode, keepRecent = 2): int =
+  ## Lossless-ish elision for write-happy models: when a `write` or `patch`
+  ## to path P lands later in the conversation, earlier tool-call bodies
+  ## and read results targeting P are replaced with a short marker. Same
+  ## goes for an earlier `read(P)` superseded by any later read or write.
+  ## The very last `keepRecent` messages are left alone so the model still
+  ## sees the result of its most recent actions.
+  if messages == nil or messages.kind != JArray or messages.len < 3: return 0
+  # Map tool_call_id → (path, tool name, assistant msg index, tool_call index)
+  var idInfo = initTable[string, (string, string, int)]()
+  # path → highest message index of any later write or patch; reads only
+  # invalidate earlier reads of the same path, not writes.
+  var lastMut = initTable[string, int]()   # write or patch
+  var lastRead = initTable[string, int]()
+  for i in 0 ..< messages.len:
+    let m = messages[i]
+    if m.kind != JObject: continue
+    if m{"role"}.getStr != "assistant": continue
+    let tcs = m{"tool_calls"}
+    if tcs == nil or tcs.kind != JArray: continue
+    for tc in tcs:
+      let id = tc{"id"}.getStr
+      let fn = tc{"function"}
+      if fn == nil or fn.kind != JObject: continue
+      let name = fn{"name"}.getStr
+      let argsStr = fn{"arguments"}.getStr("")
+      let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
+                 except CatchableError: continue
+      let path = args{"path"}.getStr
+      if path == "": continue
+      idInfo[id] = (path, name, i)
+      case name
+      of "write", "patch": lastMut[path] = i
+      of "read": lastRead[path] = i
+      else: discard
+  let protectFrom = max(0, messages.len - keepRecent)
+  for i in 0 ..< messages.len:
+    if i >= protectFrom: break
+    let m = messages[i]
+    if m.kind != JObject: continue
+    case m{"role"}.getStr
+    of "tool":
+      let id = m{"tool_call_id"}.getStr
+      if id notin idInfo: continue
+      let (path, name, _) = idInfo[id]
+      let mut = lastMut.getOrDefault(path, -1)
+      let rd = lastRead.getOrDefault(path, -1)
+      var superseded = false
+      case name
+      of "read":
+        if mut > i or rd > i: superseded = true
+      of "write", "patch":
+        if mut > i: superseded = true   # superseded by a later edit
+      else: discard
+      if superseded:
+        let c = m{"content"}.getStr("")
+        if c.len > SupersededMarker.len + 32 and
+           not c.startsWith("[superseded") and
+           not c.startsWith("[compacted"):
+          m["content"] = %SupersededMarker
+          inc result
+    of "assistant":
+      let tcs = m{"tool_calls"}
+      if tcs == nil or tcs.kind != JArray: continue
+      for tc in tcs:
+        let id = tc{"id"}.getStr
+        if id notin idInfo: continue
+        let (path, name, callIdx) = idInfo[id]
+        let mut = lastMut.getOrDefault(path, -1)
+        if name notin ["write", "patch"]: continue
+        if mut <= callIdx: continue  # still the latest edit on this path
+        let fn = tc["function"]
+        let argsStr = fn{"arguments"}.getStr("")
+        var args = try: parseJson(if argsStr == "": "{}" else: argsStr)
+                   except CatchableError: continue
+        var changed = false
+        if name == "write":
+          let b = args{"body"}.getStr("")
+          if b.len > 64 and not b.startsWith("[superseded"):
+            args["body"] = %"[superseded]"
+            changed = true
+        elif name == "patch":
+          let edits = args{"edits"}
+          if edits != nil and edits.kind == JArray and edits.len > 0:
+            var bulk = 0
+            for e in edits: bulk += ($e).len
+            if bulk > 128:
+              args["edits"] = %*[{"search": "[superseded]", "replace": "[superseded]"}]
+              changed = true
+        if changed:
+          fn["arguments"] = %( $args )
+          inc result
+    else: discard
 
 type
   ProviderRec = object
@@ -603,6 +784,25 @@ proc humanBytes(n: int): string =
   elif n < 1024 * 1024: &"{n.float/1024:.1f}KB"
   else: &"{n.float/1024/1024:.2f}MB"
 
+proc humanTokens(n: int): string =
+  if n < 1000: $n
+  else: &"{n.float/1000:.1f}k"
+
+proc parseUsage*(u: JsonNode): Usage =
+  ## Parses an OpenAI-compatible `usage` object. Cached-token accounting
+  ## differs by provider: OpenAI/DeepInfra/Anthropic report it under
+  ## `prompt_tokens_details.cached_tokens`; DeepSeek reports it flat as
+  ## `prompt_cache_hit_tokens`. We accept either.
+  if u == nil or u.kind != JObject: return
+  result.promptTokens = u{"prompt_tokens"}.getInt(0)
+  result.completionTokens = u{"completion_tokens"}.getInt(0)
+  result.totalTokens = u{"total_tokens"}.getInt(0)
+  let details = u{"prompt_tokens_details"}
+  if details != nil and details.kind == JObject:
+    result.cachedTokens = details{"cached_tokens"}.getInt(0)
+  if result.cachedTokens == 0:
+    result.cachedTokens = u{"prompt_cache_hit_tokens"}.getInt(0)
+
 # ---------- Model call ----------
 
 proc toolCallToAction*(name: string, args: JsonNode): Action =
@@ -625,20 +825,9 @@ proc toolCallToAction*(name: string, args: JsonNode): Action =
   else:
     Action(kind: akBash, body: "echo 'unknown tool: " & name & "'; exit 1")
 
-proc parseUsage*(u: JsonNode): Usage =
-  ## Parses an OpenAI-compatible `usage` object. Cached-token accounting
-  ## differs by provider: OpenAI/DeepInfra/Anthropic report it under
-  ## `prompt_tokens_details.cached_tokens`; DeepSeek reports it flat as
-  ## `prompt_cache_hit_tokens`. We accept either.
-  if u == nil or u.kind != JObject: return
-  result.promptTokens = u{"prompt_tokens"}.getInt(0)
-  result.completionTokens = u{"completion_tokens"}.getInt(0)
-  result.totalTokens = u{"total_tokens"}.getInt(0)
-  let details = u{"prompt_tokens_details"}
-  if details != nil and details.kind == JObject:
-    result.cachedTokens = details{"cached_tokens"}.getInt(0)
-  if result.cachedTokens == 0:
-    result.cachedTokens = u{"prompt_cache_hit_tokens"}.getInt(0)
+var
+  retryLevel = 0    # carries across calls; each backoff bumps it
+  lastRetryTs = 0.0 # epoch seconds of the last backoff; powers decay
 
 proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: Usage): JsonNode =
   let client = newHttpClient(timeout = 180_000)
@@ -656,13 +845,20 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: U
   body["tool_choice"] = %"auto"
   let bodyStr = $body
   let t0 = epochTime()
-  var spinLabel = &"thinking · session ↑ {sessionUsage.promptTokens} · ↓ {sessionUsage.completionTokens}"
+  # decay retryLevel by one step per full idle minute since last backoff
+  if retryLevel > 0 and lastRetryTs > 0.0:
+    let idleMin = int((t0 - lastRetryTs) / 60.0)
+    if idleMin > 0:
+      retryLevel = max(0, retryLevel - idleMin)
+      lastRetryTs = t0
+  var spinLabel = &"thinking · session ↑ {humanTokens(sessionUsage.promptTokens)} · ↓ {humanTokens(sessionUsage.completionTokens)}"
   if sessionUsage.cachedTokens > 0:
-    spinLabel.add &" · cache {sessionUsage.cachedTokens}"
+    spinLabel.add &" · cache {humanTokens(sessionUsage.cachedTokens)}"
   startSpinner(spinLabel)
-  const MaxAttempts = 3
+  const MaxAttempts = 5
   var resp: Response
   var attempt = 0
+  var level = retryLevel
   while true:
     inc attempt
     var errMsg = ""
@@ -680,30 +876,35 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: U
     if errMsg == "" or attempt >= MaxAttempts or not retryable:
       stopSpinner()
       if errMsg != "":
-        die(errMsg & (if resp.code.int != 0: ": " & resp.body else: ""), ExitApi)
+        raise newException(ApiError,
+          errMsg & (if resp.code.int != 0: ": " & resp.body else: ""))
       break
     let retryAfter = (if errMsg.startsWith("api"):
                        try: parseInt($resp.headers.getOrDefault("retry-after"))
                        except CatchableError: 0
                      else: 0)
-    let backoff = if retryAfter > 0: retryAfter else: 1 shl (attempt - 1)
+    let backoff = if retryAfter > 0: retryAfter else: min(1 shl level, 16)
     stopSpinner()
     stderr.writeLine &"3code: {errMsg}; retry {attempt + 1}/{MaxAttempts} in {backoff}s"
     sleep(backoff * 1000)
     startSpinner(&"retry {attempt + 1}/{MaxAttempts}")
+    inc level
+    retryLevel = level
+    lastRetryTs = epochTime()
   let text = resp.body
   let elapsed = epochTime() - t0
   let j = parseJson(text)
-  if "error" in j: die("api error: " & $j["error"], ExitApi)
+  if "error" in j:
+    raise newException(ApiError, "api error: " & $j["error"])
   if "usage" in j:
     usage = parseUsage(j["usage"])
   if usage.totalTokens > 0:
-    hint &"  ↑ {usage.promptTokens} tok · ↓ {usage.completionTokens} tok"
+    hint &"  ↑ {humanTokens(usage.promptTokens)} tok · ↓ {humanTokens(usage.completionTokens)} tok"
     if usage.cachedTokens > 0:
-      stdout.styledWrite(styleDim, &" · cache {usage.cachedTokens}", resetStyle)
+      stdout.styledWrite(styleDim, &" · cache {humanTokens(usage.cachedTokens)}", resetStyle)
     hint &" · {elapsed.int}s", resetStyle, "\n"
   else:
-    hint &"  ↓ ~{text.len div 4} tok · {elapsed.int}s", resetStyle, "\n"
+    hint &"  ↓ ~{humanTokens(text.len div 4)} tok · {elapsed.int}s", resetStyle, "\n"
   stdout.flushFile
   j["choices"][0]["message"]
 
@@ -789,7 +990,10 @@ proc runAction*(act: Action): tuple[output: string, code: int, diff: string] =
     try: removeDir(tmp) except CatchableError: discard
     let outClip = clipMiddle(rawOut, 4000, 4000)
     let errClip = clipMiddle(rawErr, 2000, 2000)
-    var body = &"$ {cmd}\n"
+    # Body omits the "$ {cmd}" echo — the model already has the command in
+    # its own tool_call arguments; no reason to send it back. The display
+    # layer prepends it from `act.body` for the human.
+    var body = ""
     if outClip.len > 0:
       body.add outClip
       if not outClip.endsWith("\n"): body.add "\n"
@@ -801,7 +1005,9 @@ proc runAction*(act: Action): tuple[output: string, code: int, diff: string] =
   of akRead:
     if not fileExists(act.path):
       return (&"error: {act.path} does not exist", 1, "")
-    let content = readFile(act.path)
+    let content = try: readFile(act.path)
+                  except CatchableError as e:
+                    return (&"error: read {act.path}: {e.msg}", 1, "")
     const MaxLines = 2000
     const MaxBytes = 60 * 1024
     let lines = content.splitLines
@@ -835,29 +1041,35 @@ proc runAction*(act: Action): tuple[output: string, code: int, diff: string] =
       body.add &"\n... [file is {total} lines, {content.len} bytes; showed {shown} lines from line {start + 1}. Use read(path, offset, limit) for a specific range.] ..."
     (body, 0, "")
   of akWrite:
-    let dir = parentDir(act.path)
-    if dir != "": createDir(dir)
-    let before = if fileExists(act.path): readFile(act.path) else: ""
-    writeFile(act.path, act.body)
-    let diff = computeDiff(before, act.body, act.path)
-    (&"wrote {act.path} ({act.body.len} bytes)", 0, diff)
+    try:
+      let dir = parentDir(act.path)
+      if dir != "": createDir(dir)
+      let before = if fileExists(act.path): readFile(act.path) else: ""
+      writeFile(act.path, act.body)
+      let diff = computeDiff(before, act.body, act.path)
+      (&"wrote {act.path} ({act.body.len} bytes)", 0, diff)
+    except CatchableError as e:
+      (&"error: write {act.path}: {e.msg}", 1, "")
   of akPatch:
     if act.edits.len == 0:
       return (&"error: patch has no edits", 1, "")
     if not fileExists(act.path):
       return (&"error: {act.path} does not exist", 1, "")
-    let before = readFile(act.path)
-    var content = before
-    var applied = 0
-    for (s, r) in act.edits:
-      let (next, ok) = replaceFirst(content, s, r)
-      if not ok:
-        return (&"error: SEARCH block did not match in {act.path}:\n{s}", 1, "")
-      content = next
-      inc applied
-    writeFile(act.path, content)
-    let diff = computeDiff(before, content, act.path)
-    (&"patched {act.path} ({applied} edit" & (if applied == 1: "" else: "s") & ")", 0, diff)
+    try:
+      let before = readFile(act.path)
+      var content = before
+      var applied = 0
+      for (s, r) in act.edits:
+        let (next, ok) = replaceFirst(content, s, r)
+        if not ok:
+          return (&"error: SEARCH block did not match in {act.path}:\n{s}", 1, "")
+        content = next
+        inc applied
+      writeFile(act.path, content)
+      let diff = computeDiff(before, content, act.path)
+      (&"patched {act.path} ({applied} edit" & (if applied == 1: "" else: "s") & ")", 0, diff)
+    except CatchableError as e:
+      (&"error: patch {act.path}: {e.msg}", 1, "")
 
 # ---------- Display ----------
 
@@ -892,11 +1104,10 @@ proc trimTrailingBlank(lines: var seq[string]) =
 proc printLine(l: string) =
   if l.startsWith("$ "):
     hintLn l, resetStyle
+  elif l == "[exit 0]":
+    discard
   elif l.startsWith("[exit "):
-    if l == "[exit 0]":
-      stdout.styledWriteLine fgGreen, l, resetStyle
-    else:
-      stdout.styledWriteLine fgRed, styleBright, l, resetStyle
+    stdout.styledWriteLine fgRed, styleBright, l, resetStyle
   else:
     stdout.writeLine l
 
@@ -952,7 +1163,12 @@ proc printDiff(diff: string) =
   for i in lines.len - DiffTail ..< lines.len: paint(lines[i])
 
 proc printActionResult(act: Action, res: string, code: int, idx: int, diff = "") =
-  if act.kind in {akBash, akRead}:
+  if act.kind == akBash:
+    # The body no longer carries the "$ cmd" echo — reconstitute it for
+    # display from the action, then print the real output.
+    printLine("$ " & act.body.strip)
+    printBashCompact(res, idx)
+  elif act.kind == akRead:
     printBashCompact(res, idx)
   else:
     if code == 0:
@@ -1018,6 +1234,8 @@ proc readInput(editor: var minline.LineEditor, done: var bool): string =
   let line = try: editor.readLine("> ")
              except EOFError:
                done = true; return ""
+             except minline.InputCancelled:
+               return ""
   navigatedUp = false
   let s = line.strip
   if s == "": return ""
@@ -1027,6 +1245,8 @@ proc readInput(editor: var minline.LineEditor, done: var bool): string =
       let l = try: editor.readLine("… ")
               except EOFError:
                 done = true; break
+              except minline.InputCancelled:
+                return ""
       if l.strip == "\"\"\"": break
       buf.add l
     return buf.join("\n")
@@ -1034,8 +1254,18 @@ proc readInput(editor: var minline.LineEditor, done: var bool): string =
 
 # ---------- Session loop ----------
 
+var interrupted = false
+  ## Set by the SIGINT hook. Checked between model/tool steps so ctrl-c drops
+  ## back to the prompt without killing the process.
+
+proc installInterruptHook() =
+  setControlCHook(proc() {.noconv.} = interrupted = true)
+
 proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
+  interrupted = false
+  resetLoopTracker(session.loop)
   while true:
+    discard supersedeCompact(messages)
     var usage: Usage
     let msg = callModel(p, messages, usage, session.usage)
     session.usage.promptTokens += usage.promptTokens
@@ -1045,6 +1275,10 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
     session.lastPromptTokens = usage.promptTokens
     messages.add msg
     saveSession(session, messages)
+    if interrupted:
+      stdout.styledWriteLine fgRed, styleBright, "  · interrupted", resetStyle
+      interrupted = false
+      return
     let window = contextWindowFor(p.model)
     if usage.promptTokens > 0 and
        usage.promptTokens.float > CompactThresholdFrac * window.float:
@@ -1052,7 +1286,7 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
       if n > 0:
         hintLn &"  · compacted {n} old tool result" &
           (if n == 1: "" else: "s") &
-          &" (context at {usage.promptTokens}/{window} tokens)",
+          &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)",
           resetStyle
         saveSession(session, messages)
     stdout.write "\n"
@@ -1065,8 +1299,17 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
       if content.strip.len > 0:
         stdout.styledWrite fgCyan, content, resetStyle, "\n"
         stdout.flushFile
+      var halt = false  # Strike-2 trip: stop further tool calls this turn
       for tc in toolCalls:
         let id = tc{"id"}.getStr
+        if interrupted or halt:
+          # still emit a tool response so the assistant message's tool_calls
+          # are all paired; the model sees the cancellation on the next turn.
+          let stopMsg = if halt: "skipped — loop guard paused the turn"
+                        else: "interrupted by user"
+          messages.add %*{"role": "tool", "tool_call_id": id,
+                          "content": stopMsg}
+          continue
         let fn = tc{"function"}
         let name = if fn != nil and fn.kind == JObject: fn{"name"}.getStr else: ""
         let argsStr =
@@ -1086,8 +1329,35 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
         let (r, code, diff) = runAction(act)
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
         printActionResult(act, r, code, idx, diff)
-        messages.add %*{"role": "tool", "tool_call_id": id, "content": r}
+        # Loop guard: fingerprint the call and decide whether to annotate the
+        # tool result (Strike 1) or halt further tool calls (Strike 2). The
+        # guard message is appended to the real tool result rather than
+        # injected as a separate message — the assistant's tool_calls array
+        # already pairs 1:1 with tool responses via tool_call_id, so slipping
+        # in an extra message would break the pairing.
+        let priorStrike = session.loop.strike
+        let strike = trackCall(session.loop, name, args)
+        var toolContent = r
+        if strike > priorStrike:
+          let fp = fingerprint(name, args)
+          let n = session.loop.counts.getOrDefault(fp)
+          if strike == 1:
+            toolContent &= "\n\n[repeat-guard] path=" & fp & " touched " &
+              $n & "x in last " & $session.loop.ring.len &
+              " calls without evident progress; stop and reassess or end the turn."
+          elif strike >= 2:
+            halt = true
+            toolContent &= "\n\n[repeat-guard] second saturation (path=" & fp &
+              "); further tool calls this turn are paused."
+        messages.add %*{"role": "tool", "tool_call_id": id, "content": toolContent}
       saveSession(session, messages)
+      if interrupted:
+        stdout.styledWriteLine fgRed, styleBright, "  · interrupted", resetStyle
+        interrupted = false
+        return
+      if halt:
+        stdout.styledWriteLine fgRed, styleBright, "  paused — looped", resetStyle
+        return
       continue
     if content.strip.len > 0:
       stdout.styledWrite fgCyan, content, resetStyle, "\n"
@@ -1096,6 +1366,63 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
       stdout.styledWriteLine fgRed, styleBright,
         "  (empty reply — no content, no tool calls)", resetStyle
     break
+
+proc runTurnsInteractive(p: Profile, messages: var JsonNode, session: var Session) =
+  try:
+    runTurns(p, messages, session)
+  except ApiError as e:
+    saveSession(session, messages)
+    stdout.styledWriteLine fgRed, styleBright, "  ", e.msg, resetStyle
+
+proc replaySessionTail(messages: JsonNode, toolLog: seq[ToolRecord]) =
+  ## Show the last user turn and everything after, so a resumed session
+  ## drops the user back into context without replaying the whole history.
+  if messages == nil or messages.kind != JArray or messages.len == 0: return
+  var start = messages.len
+  for i in countdown(messages.len - 1, 0):
+    if messages[i]{"role"}.getStr == "user":
+      start = i
+      break
+  if start >= messages.len: return
+  var toolIdx = 0
+  for i in 0 ..< start:
+    let tc = messages[i]{"tool_calls"}
+    if tc != nil and tc.kind == JArray: toolIdx += tc.len
+  for i in start ..< messages.len:
+    let m = messages[i]
+    case m{"role"}.getStr
+    of "user":
+      let c = m{"content"}.getStr("").strip
+      if c.len == 0: continue
+      let shown = if c.len > 400: c[0 ..< 400] & " …" else: c
+      stdout.styledWrite fgWhite, styleBright, "» you  ", resetStyle
+      stdout.write shown, "\n"
+    of "assistant":
+      let c = m{"content"}.getStr("").strip
+      if c.len > 0:
+        stdout.styledWriteLine fgCyan, c, resetStyle
+      let tcs = m{"tool_calls"}
+      if tcs != nil and tcs.kind == JArray:
+        for tc in tcs:
+          inc toolIdx
+          let banner =
+            if toolIdx <= toolLog.len: toolLog[toolIdx - 1].banner
+            else:
+              let fn = tc{"function"}
+              let name = if fn != nil: fn{"name"}.getStr else: "?"
+              let argsStr = if fn != nil: fn{"arguments"}.getStr("") else: ""
+              let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
+                         except CatchableError: newJObject()
+              bannerFor(toolCallToAction(name, args))
+          stdout.styledWrite fgYellow, styleBright, "» ", resetStyle,
+            fgYellow, banner, resetStyle,
+            fgCyan, styleBright, &"   [T{toolIdx}]", resetStyle, "\n"
+    of "tool":
+      let r = m{"content"}.getStr("")
+      if r.len > 0:
+        printBashCompact(r, toolIdx)
+    else: discard
+  stdout.flushFile
 
 proc showTool(arg: string, toolLog: seq[ToolRecord]) =
   if toolLog.len == 0:
@@ -1182,6 +1509,8 @@ proc readRequired(editor: var minline.LineEditor, prompt: string,
             except EOFError:
               stdout.write "\n"
               die "aborted", ExitConfig
+            except minline.InputCancelled:
+              continue
     if s != "": return s
 
 proc readOptional(editor: var minline.LineEditor, prompt: string,
@@ -1190,6 +1519,7 @@ proc readOptional(editor: var minline.LineEditor, prompt: string,
   except EOFError:
     stdout.write "\n"
     die "aborted", ExitConfig
+  except minline.InputCancelled: ""
 
 proc defaultNameFromUrl(url: string): string =
   let host = parseUri(url).hostname
@@ -1525,9 +1855,9 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: var Session,
     if session.usage.totalTokens == 0:
       hintLn "  no tokens used yet", resetStyle
     else:
-      var msg = &"  session: {session.usage.totalTokens} tok  (in {session.usage.promptTokens}, out {session.usage.completionTokens})"
+      var msg = &"  session: {humanTokens(session.usage.totalTokens)} tok  (in {humanTokens(session.usage.promptTokens)}, out {humanTokens(session.usage.completionTokens)})"
       if session.usage.cachedTokens > 0:
-        msg.add &", cache {session.usage.cachedTokens}"
+        msg.add &", cache {humanTokens(session.usage.cachedTokens)}"
       hintLn msg, resetStyle
   of ":clear":
     messages = %* [{"role": "system", "content": buildSystemPrompt(prof)}]
@@ -1537,6 +1867,7 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: var Session,
     if session.savePath != "":
       session.savePath = newSessionPath()
       session.created = $now()
+      session.cwd = getCurrentDir()
     hintLn "  context cleared", resetStyle
   of ":model":
     cmdModel(arg, prof)
@@ -1553,28 +1884,16 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: var Session,
   of ":log":
     listTools(session.toolLog)
   of ":sessions":
-    let paths = listSessionPaths()
+    let showAll = arg.strip.toLowerAscii in ["all", "-a", "--all"]
+    let paths =
+      if showAll: listSessionPaths()
+      else: listSessionPathsForCwd(getCurrentDir())
     if paths.len == 0:
-      hintLn "  no saved sessions", resetStyle
+      hintLn (if showAll: "  no saved sessions"
+              else: "  no saved sessions for this directory  (try `:sessions all`)"),
+        resetStyle
     else:
-      for p in paths:
-        let id = sessionIdFromPath(p)
-        var count = 0
-        var first = ""
-        try:
-          let j = parseJson(readFile(p))
-          let msgs = j{"messages"}
-          if msgs != nil and msgs.kind == JArray: count = msgs.len
-          first = firstUserMessage(msgs)
-        except CatchableError: discard
-        let mark = if session.savePath == p: "*" else: " "
-        let snip =
-          if first.len == 0: ""
-          elif first.len > 60: "  " & first[0 ..< 57] & "..."
-          else: "  " & first
-        hint &"  {mark} ", resetStyle, id, fgCyan, styleBright,
-          &"   ({count} msg" & (if count == 1: "" else: "s") & ")",
-          resetStyle, snip, "\n"
+      printSessionList(paths, session.savePath, showAll)
   of ":compact":
     let n = compactHistory(messages)
     if n == 0:
@@ -1593,7 +1912,8 @@ proc usage() {.noreturn.} =
        3code fetch <url>            # GET url, return readable text
 
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
-  -r, --resume[=ID]    resume latest saved session (or by id)
+  -r, --resume[=ID]    resume latest session from this directory (or by id)
+  -l, --list[=all]     list sessions for this directory (or all) and exit
   -v, --version        print version
   -h, --help           this message
 
@@ -1618,6 +1938,7 @@ proc runFetch(args: seq[string]) =
   stdout.write "\n"
 
 proc main() =
+  installInterruptHook()
   var model = ""
   var args: seq[string]
   var pending = ""  # flag awaiting a space-separated value
@@ -1636,6 +1957,18 @@ proc main() =
       of "r", "resume":
         resume = true
         if v != "": resumeId = v
+      of "l", "list":
+        let showAll = v.toLowerAscii in ["all", "a"]
+        let paths =
+          if showAll: listSessionPaths()
+          else: listSessionPathsForCwd(getCurrentDir())
+        if paths.len == 0:
+          stderr.writeLine (if showAll: "3code: no saved sessions"
+                            else: "3code: no saved sessions for " &
+                                  getCurrentDir() & "  (try --list=all)")
+          quit ExitConfig
+        printSessionList(paths, "", showAll)
+        return
       else: die("unknown option: -" & (if k.len == 1: "" else: "-") & k, ExitUsage)
     of cmdArgument:
       if pending == "model":
@@ -1658,16 +1991,17 @@ proc main() =
   var messages: JsonNode
 
   if resume:
-    let path = resolveSessionPath(resumeId)
+    let path = resolveSessionPath(resumeId, getCurrentDir())
     if path == "":
       if resumeId == "":
-        die("no saved sessions in " & sessionDir(), ExitConfig)
+        die("no saved sessions for " & getCurrentDir(), ExitConfig)
       else:
         die("session not found: " & resumeId, ExitConfig)
     (session, messages) = loadSessionFile(path)
   else:
     messages = %* [{"role": "system", "content": SystemPrompt}]
     session.created = $now()
+    session.cwd = getCurrentDir()
     session.savePath = newSessionPath()
 
   if prompt != "" and not resume:
@@ -1675,9 +2009,13 @@ proc main() =
     session.profileName = prof.name
     messages.add %*{"role": "user", "content": prompt}
     refreshSystemPrompt(messages, prof)
-    runTurns(prof, messages, session)
+    try:
+      runTurns(prof, messages, session)
+    except ApiError as e:
+      saveSession(session, messages)
+      die(e.msg, ExitApi)
     if session.usage.totalTokens > 0:
-      hintLn &"  · {session.usage.totalTokens} tok total", resetStyle
+      hintLn &"  · {humanTokens(session.usage.totalTokens)} tok total", resetStyle
     return
 
   (activeCurrent, activeProviders) = loadStateOrEmpty(configPath())
@@ -1694,10 +2032,13 @@ proc main() =
     hintLn &"  · resumed {sessionIdFromPath(session.savePath)}  " &
       &"({messages.len} msg" & (if messages.len == 1: "" else: "s") & ")",
       resetStyle
+    stdout.write "\n"
+    replaySessionTail(messages, session.toolLog)
+    stdout.write "\n"
     if prompt != "":
       messages.add %*{"role": "user", "content": prompt}
       refreshSystemPrompt(messages, prof)
-      runTurns(prof, messages, session)
+      runTurnsInteractive(prof, messages, session)
   while true:
     var done = false
     let line = readInput(editor, done)
@@ -1714,7 +2055,7 @@ proc main() =
       continue
     messages.add %*{"role": "user", "content": line}
     refreshSystemPrompt(messages, prof)
-    runTurns(prof, messages, session)
+    runTurnsInteractive(prof, messages, session)
 
 when isMainModule:
   main()
