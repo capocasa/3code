@@ -229,6 +229,102 @@ suite "compaction":
     for i in 1 ..< msgs.len:
       check msgs[i]["content"].getStr == big
 
+suite "supersede compaction":
+  # Helper: emit a (assistant-with-tool_call, tool-response) pair that looks
+  # like what the runtime produces. `args` is whatever JSON object the tool
+  # call received; we store it as a JSON-encoded string to match the wire.
+  proc pair(msgs: JsonNode, id, name: string, args: JsonNode, result: string) =
+    msgs.add %*{"role": "assistant", "content": "",
+                "tool_calls": [{
+                  "id": id, "type": "function",
+                  "function": {"name": name, "arguments": $args}
+                }]}
+    msgs.add %*{"role": "tool", "tool_call_id": id, "content": result}
+
+  test "elides read body when later write hits same path":
+    var msgs = newJArray()
+    msgs.add %*{"role": "system", "content": "sys"}
+    let fileBody = "line\n".repeat(300)  # 1500B
+    msgs.pair("r1", "read", %*{"path": "/tmp/foo.nim"}, fileBody)
+    msgs.pair("w1", "write",
+              %*{"path": "/tmp/foo.nim", "body": "new content"},
+              "wrote /tmp/foo.nim (11 bytes)")
+    # Add a couple of trailing protectable messages
+    msgs.add %*{"role": "user", "content": "ok"}
+    msgs.add %*{"role": "assistant", "content": "done"}
+    let n = supersedeCompact(msgs)
+    check n > 0
+    # msgs[2] is the tool response for the read; should now be a marker
+    check msgs[2]["content"].getStr.startsWith("[superseded")
+    # The write's tool response is tiny and not touched
+    check msgs[4]["content"].getStr == "wrote /tmp/foo.nim (11 bytes)"
+
+  test "elides body of earlier write when a later write hits same path":
+    var msgs = newJArray()
+    msgs.add %*{"role": "system", "content": "sys"}
+    let bigBody = "old content ".repeat(20)  # >64 bytes
+    msgs.pair("w1", "write",
+              %*{"path": "/tmp/x.nim", "body": bigBody},
+              "wrote /tmp/x.nim")
+    msgs.pair("w2", "write",
+              %*{"path": "/tmp/x.nim", "body": "fresh"},
+              "wrote /tmp/x.nim")
+    msgs.add %*{"role": "user", "content": "ok"}
+    msgs.add %*{"role": "assistant", "content": "done"}
+    let n = supersedeCompact(msgs)
+    check n > 0
+    # The first write's body should be elided in the assistant message's
+    # tool_call arguments. Arguments are serialized JSON strings.
+    let args0 = parseJson(msgs[1]["tool_calls"][0]["function"]["arguments"].getStr)
+    check args0["body"].getStr.startsWith("[superseded")
+    # The later write keeps its body
+    let args1 = parseJson(msgs[3]["tool_calls"][0]["function"]["arguments"].getStr)
+    check args1["body"].getStr == "fresh"
+
+  test "leaves the most recent action on a path alone":
+    var msgs = newJArray()
+    msgs.add %*{"role": "system", "content": "sys"}
+    let body = "keep me ".repeat(20)
+    msgs.pair("r1", "read", %*{"path": "/tmp/only.nim"}, body)
+    # Add trailing messages so protectFrom doesn't save the read above.
+    msgs.add %*{"role": "user", "content": "u"}
+    msgs.add %*{"role": "assistant", "content": "a"}
+    let n = supersedeCompact(msgs)
+    check n == 0
+    check msgs[2]["content"].getStr == body
+
+  test "does not touch the final keepRecent messages":
+    var msgs = newJArray()
+    msgs.add %*{"role": "system", "content": "sys"}
+    let body = "hello\n".repeat(200)
+    msgs.pair("r1", "read", %*{"path": "/tmp/late.nim"}, body)
+    msgs.pair("w1", "write",
+              %*{"path": "/tmp/late.nim", "body": "x"},
+              "wrote /tmp/late.nim")
+    # With default keepRecent=2, the last two (w1 assistant + tool) are
+    # protected — but the read at index 2 is still eligible.
+    let n = supersedeCompact(msgs, keepRecent = 2)
+    check n > 0
+    check msgs[2]["content"].getStr.startsWith("[superseded")
+    # The write pair at the tail stays intact.
+    let args = parseJson(msgs[3]["tool_calls"][0]["function"]["arguments"].getStr)
+    check args["body"].getStr == "x"
+
+  test "idempotent":
+    var msgs = newJArray()
+    msgs.add %*{"role": "system", "content": "sys"}
+    let body = "hello\n".repeat(200)
+    msgs.pair("r1", "read", %*{"path": "/tmp/i.nim"}, body)
+    msgs.pair("w1", "write",
+              %*{"path": "/tmp/i.nim", "body": "tiny"},
+              "wrote /tmp/i.nim")
+    msgs.add %*{"role": "user", "content": "ok"}
+    msgs.add %*{"role": "assistant", "content": "done"}
+    let first = supersedeCompact(msgs)
+    let second = supersedeCompact(msgs)
+    check first > 0
+    check second == 0
+
 suite "usage parsing":
   test "OpenAI-style prompt_tokens_details.cached_tokens":
     let u = parseUsage(%*{

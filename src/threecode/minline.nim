@@ -78,9 +78,10 @@ type
     max: int 
   LineEditor* = object ## An object representing a line editor, used to process text typed in the terminal.
     completionCallback*: proc(ed: LineEditor): seq[string] {.closure.}
-    history: LineHistory 
-    line: Line 
-    mode: LineEditorMode 
+    history: LineHistory
+    line: Line
+    mode: LineEditorMode
+  InputCancelled* = object of CatchableError ## Raised by the default ctrl+c handler to abort the current input line without quitting.
 
 # Internal Methods
 
@@ -585,9 +586,11 @@ KEYMAP["ctrl+b"] = proc(ed: var LineEditor) =
 KEYMAP["ctrl+f"] = proc(ed: var LineEditor) =
   ed.forward()
 KEYMAP["ctrl+c"] = proc(ed: var LineEditor) =
-  quit(0)
+  stdout.write("\n"); stdout.flushFile()
+  raise newException(InputCancelled, "")
 KEYMAP["ctrl+d"] = proc(ed: var LineEditor) =
-  quit(0)
+  stdout.write("\n"); stdout.flushFile()
+  raise newException(EOFError, "")
 KEYMAP["ctrl+u"] = proc(ed: var LineEditor) =
   ed.clearLine()
 KEYMAP["ctrl+a"] = proc(ed: var LineEditor) =
