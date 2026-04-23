@@ -196,6 +196,36 @@ Done.
     check r == "b\nc"
     removeDir(tmp)
 
+  test "runAction akRead soft-caps unbounded reads at 2000 lines":
+    let tmp = getTempDir() / "3code_test_" & $getCurrentProcessId() & "_rc"
+    createDir(tmp)
+    let p = tmp / "big.txt"
+    var buf = ""
+    for i in 1..3000:
+      buf.add $i & "\n"
+    writeFile(p, buf)
+    let (r, code) = runAction(Action(kind: akRead, path: p))
+    check code == 0
+    check "file is 3000 lines" in r
+    check "showed 2000 lines" in r
+    check r.startsWith("1\n")
+    removeDir(tmp)
+
+  test "runAction akRead honors explicit limit above cap":
+    let tmp = getTempDir() / "3code_test_" & $getCurrentProcessId() & "_rc2"
+    createDir(tmp)
+    let p = tmp / "big.txt"
+    var buf = ""
+    for i in 1..3000:
+      buf.add $i & "\n"
+    writeFile(p, buf)
+    let (r, code) = runAction(
+      Action(kind: akRead, path: p, offset: 1, limit: 2500))
+    check code == 0
+    check "file is 3000" notin r
+    check r.splitLines.len == 2500
+    removeDir(tmp)
+
   test "runAction akRead missing file":
     let (r, code) = runAction(Action(kind: akRead, path: "/nonexistent/xyz"))
     check code != 0
