@@ -23,7 +23,7 @@ template errLn(args: varargs[untyped]) =
   stdout.styledWriteLine(fgRed, styleBright, args, resetStyle)
 
 const SystemPromptText = """
-You are 3code, a minimal coding agent running in a terminal.
+You are 3code, a coding agent running in a terminal.
 
 You act by emitting fenced code blocks. After your turn the harness executes them and replies with their results. Mix prose and action blocks freely.
 
@@ -78,11 +78,12 @@ Before guessing, look things up. Assume you know nothing about this repo until y
 """
 
 const SystemPromptTools = """
-You are 3code, a minimal coding agent running in a terminal.
+You are 3code, a coding agent running in a terminal.
 
-Call the provided tools (`bash`, `write`, `patch`) to take actions. After your turn the harness runs each tool call and feeds results back. You may emit prose alongside tool calls. When the task is done, reply with prose and no tool calls.
+Call the provided tools (`bash`, `read`, `write`, `patch`) to take actions. After your turn the harness runs each tool call and feeds results back. You may emit prose alongside tool calls. When the task is done, reply with prose and no tool calls.
 
 - `bash(command)` — run a shell command; output and exit code come back.
+- `read(path, offset?, limit?)` — read a file, or a line range of it. `offset` is 1-indexed.
 - `write(path, body)` — create or overwrite a file.
 - `patch(path, edits)` — apply exact-match search/replace edits to an existing file. `edits` is an array of `{search, replace}` objects. Each `search` must match the file byte-for-byte, else the edit fails and you retry with a corrected `search`.
 
@@ -90,7 +91,8 @@ Call the provided tools (`bash`, `write`, `patch`) to take actions. After your t
 
 Before guessing, look things up. Assume you know nothing about this repo until you have read it.
 
-- Working directory: use `rg`, `grep -rn`, `find`, `ls`, or `cat` via the `bash` tool to locate the relevant file, function, config key, version, or dependency. Read files rather than inventing their contents.
+- Files: use the `read` tool. Read real contents rather than inventing them.
+- Search: `rg`, `grep -rn`, `find`, `ls` via the `bash` tool.
 - Web: when you need API details, library docs, error-message meanings, or any current fact you are not sure about, call `bash`:
 
     3code web "exact query string"
@@ -114,6 +116,22 @@ let ToolsJson = %*[
           "command": {"type": "string", "description": "Shell command to execute."}
         },
         "required": ["command"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "read",
+      "description": "Read a file. Omit offset/limit to read the whole file; otherwise return a line range. `offset` is 1-indexed.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "offset": {"type": "integer", "description": "1-indexed line to start at."},
+          "limit": {"type": "integer", "description": "Maximum number of lines to return."}
+        },
+        "required": ["path"]
       }
     }
   },
@@ -194,12 +212,14 @@ input:
 """
 
 type
-  ActionKind* = enum akBash, akWrite, akPatch
+  ActionKind* = enum akBash, akRead, akWrite, akPatch
   Action* = object
     kind*: ActionKind
     path*: string
     body*: string
     edits*: seq[(string, string)]
+    offset*: int
+    limit*: int
   Profile = object
     name, url, key, modelPrefix, model, mode: string
   Usage = object
@@ -436,6 +456,10 @@ proc toolCallToAction*(name: string, args: JsonNode): Action =
   case name
   of "bash":
     Action(kind: akBash, body: args{"command"}.getStr)
+  of "read":
+    Action(kind: akRead, path: args{"path"}.getStr,
+           offset: args{"offset"}.getInt(0),
+           limit: args{"limit"}.getInt(0))
   of "write":
     Action(kind: akWrite, path: args{"path"}.getStr, body: args{"body"}.getStr)
   of "patch":
@@ -637,6 +661,19 @@ proc runAction*(act: Action): (string, int) =
     var tail = output
     if tail.len > 8000: tail = tail[0 ..< 4000] & "\n... [truncated] ...\n" & tail[^4000 .. ^1]
     (&"$ {cmd}\n{tail}[exit {code}]", code)
+  of akRead:
+    if not fileExists(act.path):
+      return (&"error: {act.path} does not exist", 1)
+    let content = readFile(act.path)
+    if act.offset <= 0 and act.limit <= 0:
+      return (content, 0)
+    let lines = content.splitLines
+    let start = max(0, act.offset - 1)
+    let endi =
+      if act.limit <= 0: lines.len
+      else: min(lines.len, start + act.limit)
+    if start >= lines.len: ("", 0)
+    else: (lines[start ..< endi].join("\n"), 0)
   of akWrite:
     let dir = parentDir(act.path)
     if dir != "": createDir(dir)
@@ -666,6 +703,12 @@ proc bannerFor(act: Action): string =
   case act.kind
   of akBash:
     "bash   " & previewCmd(act.body)
+  of akRead:
+    if act.offset > 0 or act.limit > 0:
+      let endHint = if act.limit > 0: $(act.offset + act.limit - 1) else: "end"
+      &"read   {act.path}  [lines {max(1, act.offset)}-{endHint}]"
+    else:
+      &"read   {act.path}"
   of akWrite:
     &"write  {act.path}  ({humanBytes(act.body.len)})"
   of akPatch:
@@ -716,7 +759,7 @@ proc printBashCompact(res: string, idx: int) =
   if footer < lines.len: printLine(lines[footer])
 
 proc printActionResult(act: Action, res: string, code: int, idx: int) =
-  if act.kind == akBash:
+  if act.kind in {akBash, akRead}:
     printBashCompact(res, idx)
   else:
     if code == 0:
@@ -871,7 +914,7 @@ proc showTool(arg: string) =
     return
   let rec = toolLog[n-1]
   stdout.styledWriteLine fgYellow, styleBright, &"── T{n}  ", rec.banner, resetStyle
-  if rec.kind == akBash:
+  if rec.kind in {akBash, akRead}:
     for l in rec.output.splitLines: printLine(l)
   else:
     if rec.code == 0:
