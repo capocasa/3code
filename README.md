@@ -87,6 +87,20 @@ Patch with one or more exact-match edits:
 Results go back as the next user message and the loop continues until the
 model stops emitting blocks.
 
+Some 2025+ models (Kimi-K2, qwen3-coder, glm-4.5+, minimax-m2) ignore fence
+instructions and reply via OpenAI tool calls instead. For those, add
+`mode = "tools"` to the `[provider]` block:
+
+    [provider]
+    name = "fireworks"
+    url = "https://api.fireworks.ai/inference/v1"
+    key = "fw_..."
+    mode = "tools"
+    models = "kimi-k2-instruct"
+
+Default is `mode = "text"` (fenced blocks). Same three actions either way —
+`bash`, `write`, `patch` — just a different wire format.
+
 ## Use
 
     3code "add a --dry-run flag to the main command"
@@ -101,7 +115,7 @@ Type `:q`, `exit`, `quit`, or hit Ctrl-D to leave.
 
 By design:
 
-- No tool-use protocol (JSON schemas, structured calls). Text parsing only.
+- Tool-use protocol optional (`mode = "tools"`). Text-fence parsing is default.
 - No permissions, sandbox, or approval prompts. It runs what the model says
   to run, in the current working directory.
 - No streaming. You wait for the full reply, then it executes.

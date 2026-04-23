@@ -1,4 +1,4 @@
-import std/[unittest, os, strutils]
+import std/[unittest, os, strutils, json]
 import threecode
 
 suite "parseActions":
@@ -125,6 +125,47 @@ Done.
   test "stripActions preserves inline prose between actions":
     let s = "First:\n```bash\na\n```\nNext:\n```bash\nb\n```\nEnd."
     check stripActions(s) == "First:\nNext:\nEnd."
+
+  test "toolCallToAction bash":
+    let a = toolCallToAction("bash", %*{"command": "ls -la"})
+    check a.kind == akBash
+    check a.body == "ls -la"
+
+  test "toolCallToAction write":
+    let a = toolCallToAction("write", %*{
+      "path": "src/foo.nim", "body": "echo 1\n"})
+    check a.kind == akWrite
+    check a.path == "src/foo.nim"
+    check a.body == "echo 1\n"
+
+  test "toolCallToAction patch single edit":
+    let a = toolCallToAction("patch", %*{
+      "path": "a.txt",
+      "edits": [{"search": "old", "replace": "new"}]
+    })
+    check a.kind == akPatch
+    check a.path == "a.txt"
+    check a.edits.len == 1
+    check a.edits[0][0] == "old"
+    check a.edits[0][1] == "new"
+
+  test "toolCallToAction patch multiple edits":
+    let a = toolCallToAction("patch", %*{
+      "path": "README.md",
+      "edits": [
+        {"search": "one", "replace": "1"},
+        {"search": "two", "replace": "2"}
+      ]
+    })
+    check a.kind == akPatch
+    check a.edits.len == 2
+    check a.edits[1][0] == "two"
+    check a.edits[1][1] == "2"
+
+  test "toolCallToAction patch tolerates missing edits":
+    let a = toolCallToAction("patch", %*{"path": "x"})
+    check a.kind == akPatch
+    check a.edits.len == 0
 
   test "runAction akPatch reports unmatched":
     let tmp = getTempDir() / "3code_test_" & $getCurrentProcessId() & "_p2"

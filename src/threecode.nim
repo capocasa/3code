@@ -22,7 +22,7 @@ template err(args: varargs[untyped]) =
 template errLn(args: varargs[untyped]) =
   stdout.styledWriteLine(fgRed, styleBright, args, resetStyle)
 
-const SystemPrompt = """
+const SystemPromptText = """
 You are 3code, a minimal coding agent running in a terminal.
 
 You act by emitting fenced code blocks. After your turn the harness executes them and replies with their results. Mix prose and action blocks freely.
@@ -77,6 +77,88 @@ Before guessing, look things up. Assume you know nothing about this repo until y
   Use these freely — one or two searches up front beats a failed attempt. Prefer official docs and source over blogspam.
 """
 
+const SystemPromptTools = """
+You are 3code, a minimal coding agent running in a terminal.
+
+Call the provided tools (`bash`, `write`, `patch`) to take actions. After your turn the harness runs each tool call and feeds results back. You may emit prose alongside tool calls. When the task is done, reply with prose and no tool calls.
+
+- `bash(command)` — run a shell command; output and exit code come back.
+- `write(path, body)` — create or overwrite a file.
+- `patch(path, edits)` — apply exact-match search/replace edits to an existing file. `edits` is an array of `{search, replace}` objects. Each `search` must match the file byte-for-byte, else the edit fails and you retry with a corrected `search`.
+
+## Gathering context
+
+Before guessing, look things up. Assume you know nothing about this repo until you have read it.
+
+- Working directory: use `rg`, `grep -rn`, `find`, `ls`, or `cat` via the `bash` tool to locate the relevant file, function, config key, version, or dependency. Read files rather than inventing their contents.
+- Web: when you need API details, library docs, error-message meanings, or any current fact you are not sure about, call `bash`:
+
+    3code web "exact query string"
+
+  prints a numbered list of result titles / URLs / snippets from DuckDuckGo. Then fetch the most promising one as readable text:
+
+    3code fetch https://example.com/some/page
+
+  Use these freely — one or two searches up front beats a failed attempt. Prefer official docs and source over blogspam.
+"""
+
+let ToolsJson = %*[
+  {
+    "type": "function",
+    "function": {
+      "name": "bash",
+      "description": "Run a shell command. Returns combined stdout/stderr and exit code.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {"type": "string", "description": "Shell command to execute."}
+        },
+        "required": ["command"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "write",
+      "description": "Write a whole file (create or overwrite). Parent directories are created as needed.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "body": {"type": "string"}
+        },
+        "required": ["path", "body"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "patch",
+      "description": "Patch an existing file with one or more exact-match search/replace edits. Each search string must match the current file byte-for-byte.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "edits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "search": {"type": "string"},
+                "replace": {"type": "string"}
+              },
+              "required": ["search", "replace"]
+            }
+          }
+        },
+        "required": ["path", "edits"]
+      }
+    }
+  }
+]
+
 const ConfigExample = """  [settings]
   current = "openai.gpt-4o-mini"
 
@@ -119,7 +201,7 @@ type
     body*: string
     edits*: seq[(string, string)]
   Profile = object
-    name, url, key, modelPrefix, model: string
+    name, url, key, modelPrefix, model, mode: string
   Usage = object
     promptTokens, completionTokens, totalTokens: int
   ToolRecord = object
@@ -139,7 +221,7 @@ proc configPath(): string =
 
 type
   ProviderRec = object
-    name, url, key, modelPrefix: string
+    name, url, key, modelPrefix, mode: string
     models: seq[string]
 
 var activeCurrent: string
@@ -208,6 +290,7 @@ proc parseConfigFile(path: string): (string, seq[ProviderRec]) =
         of "url": prov.url = e.value.strip(chars = {'/', ' '})
         of "key": prov.key = e.value
         of "model_prefix": prov.modelPrefix = e.value
+        of "mode": prov.mode = e.value
         of "models": prov.models = splitModels(e.value)
         else: discard
       else: discard
@@ -237,6 +320,8 @@ proc writeConfigFile(path: string, current: string,
     buf.add "key = " & quoteVal(pr.key) & "\n"
     if pr.modelPrefix != "":
       buf.add "model_prefix = " & quoteVal(pr.modelPrefix) & "\n"
+    if pr.mode != "":
+      buf.add "mode = " & quoteVal(pr.mode) & "\n"
     buf.add "models = " & quoteVal(pr.models.join(" ")) & "\n"
   writeFile(path, buf)
 
@@ -263,7 +348,8 @@ proc buildProfile(current: string, providers: seq[ProviderRec],
       elif model notin pr.models:
         return Profile()
       return Profile(name: pr.name & "." & model, url: pr.url,
-                     key: pr.key, modelPrefix: pr.modelPrefix, model: model)
+                     key: pr.key, modelPrefix: pr.modelPrefix, model: model,
+                     mode: pr.mode)
   Profile()
 
 proc loadProfile(wanted: string): Profile =
@@ -303,7 +389,7 @@ proc loadProfile(wanted: string): Profile =
   elif model notin prov.models:
     die &"provider '{name}': model '{model}' not in models list ({prov.models.join(\", \")})", ExitConfig
   Profile(name: prov.name & "." & model, url: prov.url, key: prov.key,
-          modelPrefix: prov.modelPrefix, model: model)
+          modelPrefix: prov.modelPrefix, model: model, mode: prov.mode)
 
 # ---------- Spinner ----------
 
@@ -343,18 +429,40 @@ proc humanBytes(n: int): string =
 
 # ---------- Model call ----------
 
-proc callModel(p: Profile, messages: JsonNode, usage: var Usage): string =
+proc systemPromptFor*(p: Profile): string =
+  if p.mode == "tools": SystemPromptTools else: SystemPromptText
+
+proc toolCallToAction*(name: string, args: JsonNode): Action =
+  case name
+  of "bash":
+    Action(kind: akBash, body: args{"command"}.getStr)
+  of "write":
+    Action(kind: akWrite, path: args{"path"}.getStr, body: args{"body"}.getStr)
+  of "patch":
+    var act = Action(kind: akPatch, path: args{"path"}.getStr)
+    let edits = args{"edits"}
+    if edits != nil and edits.kind == JArray:
+      for e in edits:
+        act.edits.add (e{"search"}.getStr, e{"replace"}.getStr)
+    act
+  else:
+    Action(kind: akBash, body: "echo 'unknown tool: " & name & "'; exit 1")
+
+proc callModel(p: Profile, messages: JsonNode, usage: var Usage): JsonNode =
   let client = newHttpClient(timeout = -1)
   defer: client.close()
   client.headers = newHttpHeaders({
     "Authorization": "Bearer " & p.key,
     "Content-Type": "application/json"
   })
-  let body = %*{
+  var body = %*{
     "model": p.modelPrefix & p.model,
     "messages": messages,
     "stream": false
   }
+  if p.mode == "tools":
+    body["tools"] = ToolsJson
+    body["tool_choice"] = %"auto"
   let bodyStr = $body
   let t0 = epochTime()
   startSpinner(&"thinking · ↑ ~{bodyStr.len div 4} tok")
@@ -383,7 +491,7 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage): string =
       &"  ↓ ~{text.len div 4} tok · {elapsed.int}s"
   hint info, resetStyle, "\n"
   stdout.flushFile
-  j["choices"][0]["message"]["content"].getStr
+  j["choices"][0]["message"]
 
 proc verifyProfile(p: Profile): (bool, string) =
   let client = newHttpClient(timeout = 20000)
@@ -690,18 +798,50 @@ proc readInput(editor: var minline.LineEditor, done: var bool): string =
 proc runTurns(p: Profile, messages: var JsonNode, session: var Usage) =
   while true:
     var usage: Usage
-    let reply = callModel(p, messages, usage)
+    let msg = callModel(p, messages, usage)
     session.promptTokens += usage.promptTokens
     session.completionTokens += usage.completionTokens
     session.totalTokens += usage.totalTokens
-    messages.add %*{"role": "assistant", "content": reply}
+    messages.add msg
     stdout.write "\n"
-    let prose = stripActions(reply)
+    let content = msg{"content"}.getStr("")
+    let tcNode = msg{"tool_calls"}
+    let toolCalls =
+      if tcNode != nil and tcNode.kind == JArray: tcNode
+      else: newJArray()
+    if toolCalls.len > 0:
+      if content.strip.len > 0:
+        stdout.styledWrite fgCyan, content, resetStyle, "\n"
+        stdout.flushFile
+      for tc in toolCalls:
+        let id = tc{"id"}.getStr
+        let fn = tc{"function"}
+        let name = if fn != nil and fn.kind == JObject: fn{"name"}.getStr else: ""
+        let argsStr =
+          if fn != nil and fn.kind == JObject: fn{"arguments"}.getStr("") else: ""
+        let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
+                   except CatchableError: newJObject()
+        let act = toolCallToAction(name, args)
+        let idx = toolLog.len + 1
+        stdout.styledWrite fgYellow, styleBright, "» ", resetStyle,
+          fgYellow, bannerFor(act), resetStyle,
+          fgCyan, styleBright, &"   [T{idx}]", resetStyle, "\n"
+        stdout.flushFile
+        let (r, code) = runAction(act)
+        toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
+        printActionResult(act, r, code, idx)
+        messages.add %*{"role": "tool", "tool_call_id": id, "content": r}
+      continue
+    let prose = stripActions(content)
     if prose.len > 0:
       stdout.styledWrite fgCyan, prose, resetStyle, "\n"
       stdout.flushFile
-    let actions = parseActions(reply)
-    if actions.len == 0: break
+    let actions = parseActions(content)
+    if actions.len == 0:
+      if content.strip.len == 0:
+        stdout.styledWriteLine fgRed, styleBright,
+          "  (empty reply — no content, no tool calls)", resetStyle
+      break
     var results = ""
     for act in actions:
       let idx = toolLog.len + 1
@@ -1064,7 +1204,7 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: Usage,
       hintLn &"  session: {session.totalTokens} tok  (in {session.promptTokens}, out {session.completionTokens})",
         resetStyle
   of ":clear":
-    messages = %* [{"role": "system", "content": SystemPrompt}]
+    messages = %* [{"role": "system", "content": systemPromptFor(prof)}]
     toolLog.setLen 0
     hintLn "  context cleared", resetStyle
   of ":model":
@@ -1140,11 +1280,11 @@ proc main() =
     else: discard
 
   let prompt = args.join(" ")
-  var messages = %* [{"role": "system", "content": SystemPrompt}]
   var session: Usage
 
   if prompt != "":
     let prof = loadProfile(model)
+    var messages = %* [{"role": "system", "content": systemPromptFor(prof)}]
     messages.add %*{"role": "user", "content": prompt}
     runTurns(prof, messages, session)
     if session.totalTokens > 0:
@@ -1156,6 +1296,7 @@ proc main() =
   var editor = welcome(prof)
   if prof.name == "":
     prof = bootstrapProvider(editor)
+  var messages = %* [{"role": "system", "content": systemPromptFor(prof)}]
   while true:
     var done = false
     let line = readInput(editor, done)
