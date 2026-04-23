@@ -1,23 +1,24 @@
 # Save to ~/.config/3code/config
 #
-# Values are parsed as Nim string literals. Use r"..." (raw strings) for
-# anything containing a colon — parsecfg treats ':' as a key/value separator
-# in unquoted strings. Plain double-quotes work for values without colons.
+# Values are Nim string literals — always wrap them in double quotes.
+# parsecfg treats ':', '=', and '#' as syntax in unquoted values, so
+# unquoted URLs or API keys will silently truncate or drop.
 
-[3code]
-profile = openai
+[state]
+model = "openai.gpt-4o-mini"
+; model = "groq.llama-3.3-70b-versatile"
 
 [openai]
-url = r"https://api.openai.com/v1"
-key = r"sk-..."
-model = "gpt-4o-mini"
+url = "https://api.openai.com/v1"
+key = "sk-..."
+models = "gpt-4o-mini, gpt-4o"
 
 [groq]
-url = r"https://api.groq.com/openai/v1"
-key = r"gsk_..."
-model = "llama-3.3-70b-versatile"
+url = "https://api.groq.com/openai/v1"
+key = "gsk_..."
+models = "llama-3.3-70b-versatile, llama-3.1-8b-instant"
 
 [together]
-url = r"https://api.together.xyz/v1"
-key = r"..."
-model = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+url = "https://api.together.xyz/v1"
+key = "..."
+models = "meta-llama/Llama-3.3-70B-Instruct-Turbo"

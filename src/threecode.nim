@@ -65,15 +65,15 @@ Before guessing, look things up. Assume you know nothing about this repo until y
   Use these freely — one or two searches up front beats a failed attempt. Prefer official docs and source over blogspam.
 """
 
-const ConfigExample = """  [3code]
-  profile = openai
+const ConfigExample = """  [state]
+  model = "openai.gpt-4o-mini"
 
   [openai]
-  url = r"https://api.openai.com/v1"
-  key = r"sk-..."
-  model = "gpt-4o-mini"
+  url = "https://api.openai.com/v1"
+  key = "sk-..."
+  models = "gpt-4o-mini, gpt-4o"
 
-(values are Nim string literals — use r"..." for anything with a colon.)
+(values are Nim string literals — always wrap them in double quotes.)
 """
 
 const HelpText = """
@@ -81,7 +81,7 @@ commands:
   :help         show this message
   :tokens       show token usage for this session
   :clear        reset conversation (keeps system prompt)
-  :model        show current profile and model
+  :model        show current provider and model
   :show [N]     show full output of tool call N (default: last)
   :log          list all tool calls this session
   :q :quit      exit (also Ctrl-D)
@@ -118,33 +118,47 @@ proc die(msg: string, code = 1) {.noreturn.} =
 proc configPath(): string =
   getConfigDir() / "3code" / "config"
 
+proc splitModels(s: string): seq[string] =
+  for m in s.split(','):
+    let t = m.strip
+    if t.len > 0: result.add t
+
 proc loadProfile(wanted: string): Profile =
   let path = configPath()
   if not fileExists(path):
     stderr.writeLine "3code: no config at " & path
     stderr.writeLine ""
-    stderr.writeLine "create it with at least one model profile, e.g.:"
+    stderr.writeLine "create it with at least one provider, e.g.:"
     stderr.writeLine ""
     stderr.writeLine ConfigExample
     quit ExitConfig
   let cfg = loadConfig(path)
   var pick = wanted
   if pick == "":
-    pick = cfg.getSectionValue("3code", "profile")
+    pick = cfg.getSectionValue("state", "model")
   if pick == "":
     for section in cfg.keys:
-      if section != "" and section != "3code":
+      if section != "" and section != "state":
         pick = section
         break
   if pick == "":
-    die "no model profile defined in " & path, ExitConfig
-  let url = cfg.getSectionValue(pick, "url").strip(chars = {'/', ' '})
-  let key = cfg.getSectionValue(pick, "key")
-  let model = cfg.getSectionValue(pick, "model")
-  if url == "": die &"profile [{pick}]: url not set in {path}", ExitConfig
-  if key == "": die &"profile [{pick}]: key not set in {path}", ExitConfig
-  if model == "": die &"profile [{pick}]: model not set in {path}", ExitConfig
-  Profile(name: pick, url: url, key: key, model: model)
+    die "no provider defined in " & path, ExitConfig
+  let dot = pick.find('.')
+  let provider = if dot < 0: pick else: pick[0 ..< dot]
+  var model = if dot < 0: "" else: pick[dot + 1 .. ^1]
+  if not cfg.hasKey(provider):
+    die &"provider [{provider}] not found in {path}", ExitConfig
+  let url = cfg.getSectionValue(provider, "url").strip(chars = {'/', ' '})
+  let key = cfg.getSectionValue(provider, "key")
+  let models = splitModels(cfg.getSectionValue(provider, "models"))
+  if url == "": die &"[{provider}]: url not set in {path}", ExitConfig
+  if key == "": die &"[{provider}]: key not set in {path}", ExitConfig
+  if models.len == 0: die &"[{provider}]: models not set in {path}", ExitConfig
+  if model == "":
+    model = models[0]
+  elif model notin models:
+    die &"[{provider}]: model '{model}' not in models list ({models.join(\", \")})", ExitConfig
+  Profile(name: provider & "." & model, url: url, key: key, model: model)
 
 # ---------- Spinner ----------
 
@@ -416,8 +430,7 @@ proc welcome(p: Profile): minline.LineEditor =
   stdout.styledWriteLine fgCyan, styleBright, "   ─┤  ", resetStyle, fgWhite, styleBright, "3code ", resetStyle, fgBlack, styleBright, "v" & Version
   stdout.styledWriteLine fgCyan, styleBright, "  ╰─╯"
   stdout.write "\n"
-  stdout.styledWriteLine fgBlack, styleBright, "  profile  ", resetStyle, p.name
-  stdout.styledWriteLine fgBlack, styleBright, "  model    ", resetStyle, p.model
+  stdout.styledWriteLine fgBlack, styleBright, "  model    ", resetStyle, p.name
   stdout.write "\n"
   stdout.styledWriteLine fgBlack, styleBright, "  type a prompt. :help for commands. :q or Ctrl-D to exit."
   stdout.flushFile
@@ -535,7 +548,7 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: Usage,
     stdout.styledWriteLine fgBlack, styleBright, "  context cleared", resetStyle
   of ":model":
     stdout.styledWriteLine fgBlack, styleBright,
-      &"  profile {prof.name}  ·  model {prof.model}", resetStyle
+      &"  model  {prof.name}", resetStyle
   of ":show", ":s":
     showTool(arg)
   of ":log", ":l":
@@ -549,7 +562,7 @@ proc usage() {.noreturn.} =
        3code web <query...>         # DuckDuckGo search, plain-text results
        3code fetch <url>            # GET url, return readable text
 
-  -p, --profile NAME   use named profile from config
+  -m, --model PROVIDER[.MODEL]   pick model from config (overrides [state])
   -v, --version        print version
   -h, --help           this message
 
@@ -574,8 +587,9 @@ proc runFetch(args: seq[string]) =
   stdout.write "\n"
 
 proc main() =
-  var profile = ""
+  var model = ""
   var args: seq[string]
+  var pending = ""  # flag awaiting a space-separated value
   var p = initOptParser(commandLineParams())
   for kind, k, v in p.getopt():
     case kind
@@ -583,11 +597,19 @@ proc main() =
       case k
       of "v", "version": echo Version; return
       of "h", "help": usage()
-      of "p", "profile": profile = v
+      of "m", "model":
+        if v != "": model = v
+        else: pending = "model"
       else: die("unknown option: -" & (if k.len == 1: "" else: "-") & k, ExitUsage)
     of cmdArgument:
-      args.add k
+      if pending == "model":
+        model = k
+        pending = ""
+      else:
+        args.add k
     of cmdEnd: discard
+  if pending != "":
+    die("option --" & pending & " requires a value", ExitUsage)
 
   if args.len > 0:
     case args[0]
@@ -596,7 +618,7 @@ proc main() =
     else: discard
 
   let prompt = args.join(" ")
-  let prof = loadProfile(profile)
+  let prof = loadProfile(model)
   var messages = %* [{"role": "system", "content": SystemPrompt}]
   var session: Usage
 

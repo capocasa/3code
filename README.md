@@ -17,26 +17,28 @@ Or clone and `nimble install`.
 
 Write a config file at `~/.config/3code/config`:
 
-    [3code]
-    profile = openai
+    [state]
+    model = "openai.gpt-4o-mini"
 
     [openai]
-    url = r"https://api.openai.com/v1"
-    key = r"sk-..."
-    model = "gpt-4o-mini"
+    url = "https://api.openai.com/v1"
+    key = "sk-..."
+    models = "gpt-4o-mini, gpt-4o"
 
     [groq]
-    url = r"https://api.groq.com/openai/v1"
-    key = r"gsk_..."
-    model = "llama-3.3-70b-versatile"
+    url = "https://api.groq.com/openai/v1"
+    key = "gsk_..."
+    models = "llama-3.3-70b-versatile, llama-3.1-8b-instant"
 
-Values are Nim string literals — use `r"..."` for anything with a colon
-(the INI parser treats `:` as a separator).
+Values are Nim string literals — always wrap them in double quotes.
+parsecfg treats `:`, `=`, and `#` as syntax in unquoted values.
 
-The `[3code]` section picks the default profile. Override per-invocation
-with `-p`:
+Each provider is a section. `models` is a comma-separated list. `[state]
+model` picks the default as `provider.model` (or just `provider` to use
+the first model in its list). Override per-invocation with `-m`:
 
-    3code -p groq "refactor the http client"
+    3code -m groq "refactor the http client"
+    3code -m groq.llama-3.1-8b-instant "quick one-liner"
 
 ## How it works
 
