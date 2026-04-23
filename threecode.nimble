@@ -6,4 +6,3 @@ srcDir        = "src"
 namedBin["threecode"] = "3code"
 
 requires "nim >= 2.0.0"
-requires "minline"

@@ -1,5 +1,5 @@
 import std/[httpclient, json, os, osproc, strutils, strformat, sequtils, streams, terminal, parsecfg, parseopt, times, atomics, critbits, uri]
-import minline
+import threecode/minline
 import threecode/web
 
 const Version = staticRead("../threecode.nimble").splitLines().filterIt(it.startsWith("version")).
