@@ -181,3 +181,75 @@ suite "actions":
     let (r, code, _) = runAction(Action(kind: akRead, path: "/nonexistent/xyz"))
     check code != 0
     check "does not exist" in r
+
+suite "compaction":
+  test "compactHistory leaves short conversations alone":
+    var msgs = %* [
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "hi"},
+      {"role": "assistant", "content": "hello"}
+    ]
+    check compactHistory(msgs) == 0
+    check msgs[1]["content"].getStr == "hi"
+
+  test "compactHistory elides old tool results past keepRecent":
+    var msgs = newJArray()
+    msgs.add %*{"role": "system", "content": "sys"}
+    let big = "x".repeat(5000)
+    for i in 0 ..< 20:
+      msgs.add %*{"role": "user", "content": "q" & $i}
+      msgs.add %*{"role": "assistant", "content": "", "tool_calls": []}
+      msgs.add %*{"role": "tool", "tool_call_id": "t" & $i, "content": big}
+    let n = compactHistory(msgs, keepRecent = 6)
+    check n > 0
+    # earliest tool result is compacted
+    check msgs[3]["content"].getStr.startsWith("[compacted")
+    # last-kept tool result is NOT compacted
+    check msgs[msgs.len - 1]["content"].getStr == big
+
+  test "compactHistory is idempotent":
+    var msgs = newJArray()
+    msgs.add %*{"role": "system", "content": "sys"}
+    let big = "y".repeat(2000)
+    for i in 0 ..< 20:
+      msgs.add %*{"role": "tool", "tool_call_id": "t" & $i, "content": big}
+    let first = compactHistory(msgs, keepRecent = 4)
+    let second = compactHistory(msgs, keepRecent = 4)
+    check first > 0
+    check second == 0
+
+  test "compactHistory skips non-tool messages":
+    var msgs = newJArray()
+    msgs.add %*{"role": "system", "content": "sys"}
+    let big = "z".repeat(1000)
+    for i in 0 ..< 20:
+      msgs.add %*{"role": "user", "content": big}
+      msgs.add %*{"role": "assistant", "content": big}
+    discard compactHistory(msgs, keepRecent = 4)
+    for i in 1 ..< msgs.len:
+      check msgs[i]["content"].getStr == big
+
+suite "tool log serialization":
+  test "round-trips all action kinds":
+    let log = @[
+      ToolRecord(banner: "bash ls", output: "a\nb", code: 0, kind: akBash),
+      ToolRecord(banner: "read x", output: "body", code: 0, kind: akRead),
+      ToolRecord(banner: "write y", output: "wrote y", code: 0, kind: akWrite),
+      ToolRecord(banner: "patch z", output: "patched", code: 1, kind: akPatch),
+    ]
+    let j = toolLogToJson(log)
+    let back = toolLogFromJson(j)
+    check back.len == log.len
+    for i in 0 ..< log.len:
+      check back[i].banner == log[i].banner
+      check back[i].output == log[i].output
+      check back[i].code == log[i].code
+      check back[i].kind == log[i].kind
+
+  test "fromJson tolerates missing fields":
+    let j = %* [{"banner": "x"}]
+    let back = toolLogFromJson(j)
+    check back.len == 1
+    check back[0].banner == "x"
+    check back[0].output == ""
+    check back[0].kind == akBash
