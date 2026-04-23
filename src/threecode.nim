@@ -10,6 +10,18 @@ const
   ExitConfig = 3
   ExitApi = 5
 
+template hint(args: varargs[untyped]) =
+  stdout.styledWrite(fgCyan, styleBright, args, resetStyle)
+
+template hintLn(args: varargs[untyped]) =
+  stdout.styledWriteLine(fgCyan, styleBright, args, resetStyle)
+
+template err(args: varargs[untyped]) =
+  stdout.styledWrite(fgRed, styleBright, args, resetStyle)
+
+template errLn(args: varargs[untyped]) =
+  stdout.styledWriteLine(fgRed, styleBright, args, resetStyle)
+
 const SystemPrompt = """
 You are 3code, a minimal coding agent running in a terminal.
 
@@ -72,7 +84,7 @@ const ConfigExample = """  [settings]
   name = "openai"
   url = "https://api.openai.com/v1"
   key = "sk-..."
-  models = "gpt-4o-mini, gpt-4o"
+  models = "gpt-4o-mini gpt-4o"
 
 (values are Nim string literals — always wrap them in double quotes.)
 """
@@ -82,9 +94,10 @@ commands:
   :help             show this message
   :tokens           show token usage for this session
   :clear            reset conversation (keeps system prompt)
-  :model            show current provider and model
+  :model            list models for current provider (current marked with *)
+  :model X          switch to model X (within current provider)
   :provider         list configured providers (current marked with *)
-  :provider use X[.M]   switch to provider X (optionally model M)
+  :provider X       switch to provider X (model defaults to first in its list)
   :provider add     add a new provider (interactive, verified)
   :provider rm X    remove provider X
   :show [N]         show full output of tool call N (default: last)
@@ -95,7 +108,7 @@ input:
   single-line   just type and press Enter
   multi-line    type three double-quotes on its own line, enter lines, close the same way
   up / down     recall history; down past last clears the line
-  tab           complete :commands, :provider subcommands, provider names
+  tab           complete :commands, provider names, model names
 """
 
 type
@@ -106,7 +119,7 @@ type
     body*: string
     edits*: seq[(string, string)]
   Profile = object
-    name, url, key, model: string
+    name, url, key, modelPrefix, model: string
   Usage = object
     promptTokens, completionTokens, totalTokens: int
   ToolRecord = object
@@ -126,7 +139,7 @@ proc configPath(): string =
 
 type
   ProviderRec = object
-    name, url, key: string
+    name, url, key, modelPrefix: string
     models: seq[string]
 
 var activeCurrent: string
@@ -134,7 +147,13 @@ var activeProviders: seq[ProviderRec]
 
 const CommandNames = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":show", ":log", ":q", ":quit", ":exit"]
-const ProviderSubs = ["list", "use", "add", "rm"]
+
+proc currentProvider(): ProviderRec =
+  let dot = activeCurrent.find('.')
+  let name = if dot < 0: activeCurrent else: activeCurrent[0 ..< dot]
+  for pr in activeProviders:
+    if pr.name == name: return pr
+  ProviderRec()
 
 proc completionFor(line: string): seq[string] =
   let words = line.split(' ')
@@ -144,23 +163,16 @@ proc completionFor(line: string): seq[string] =
     if last == "" or last.startsWith(":"):
       return @CommandNames
     return
-  if words[0] == ":provider":
-    if words.len == 2:
-      return @ProviderSubs
-    if words.len == 3 and words[1] == "use":
-      for pr in activeProviders:
-        result.add pr.name
-        for m in pr.models:
-          result.add pr.name & "." & m
-      return
-    if words.len == 3 and words[1] in ["rm", "remove"]:
-      for pr in activeProviders: result.add pr.name
-      return
+  if words[0] == ":provider" and words.len == 2:
+    for pr in activeProviders: result.add pr.name
+    return
+  if words[0] == ":model" and words.len == 2:
+    for m in currentProvider().models: result.add m
+    return
 
 proc splitModels(s: string): seq[string] =
-  for m in s.split(','):
-    let t = m.strip
-    if t.len > 0: result.add t
+  for m in s.splitWhitespace:
+    if m.len > 0: result.add m
 
 proc parseConfigFile(path: string): (string, seq[ProviderRec]) =
   ## Streaming parse so that repeated [provider] sections accumulate as a list.
@@ -195,6 +207,7 @@ proc parseConfigFile(path: string): (string, seq[ProviderRec]) =
         of "name": prov.name = e.value
         of "url": prov.url = e.value.strip(chars = {'/', ' '})
         of "key": prov.key = e.value
+        of "model_prefix": prov.modelPrefix = e.value
         of "models": prov.models = splitModels(e.value)
         else: discard
       else: discard
@@ -222,7 +235,9 @@ proc writeConfigFile(path: string, current: string,
     buf.add "name = " & quoteVal(pr.name) & "\n"
     buf.add "url = " & quoteVal(pr.url) & "\n"
     buf.add "key = " & quoteVal(pr.key) & "\n"
-    buf.add "models = " & quoteVal(pr.models.join(", ")) & "\n"
+    if pr.modelPrefix != "":
+      buf.add "model_prefix = " & quoteVal(pr.modelPrefix) & "\n"
+    buf.add "models = " & quoteVal(pr.models.join(" ")) & "\n"
   writeFile(path, buf)
 
 proc loadStateOrEmpty(path: string): (string, seq[ProviderRec]) =
@@ -248,7 +263,7 @@ proc buildProfile(current: string, providers: seq[ProviderRec],
       elif model notin pr.models:
         return Profile()
       return Profile(name: pr.name & "." & model, url: pr.url,
-                     key: pr.key, model: model)
+                     key: pr.key, modelPrefix: pr.modelPrefix, model: model)
   Profile()
 
 proc loadProfile(wanted: string): Profile =
@@ -287,7 +302,8 @@ proc loadProfile(wanted: string): Profile =
     model = prov.models[0]
   elif model notin prov.models:
     die &"provider '{name}': model '{model}' not in models list ({prov.models.join(\", \")})", ExitConfig
-  Profile(name: prov.name & "." & model, url: prov.url, key: prov.key, model: model)
+  Profile(name: prov.name & "." & model, url: prov.url, key: prov.key,
+          modelPrefix: prov.modelPrefix, model: model)
 
 # ---------- Spinner ----------
 
@@ -302,7 +318,7 @@ proc spinnerLoop(label: string) {.thread.} =
     let elapsed = epochTime() - start
     try:
       stdout.styledWrite "\r", fgCyan, styleBright, frames[i mod frames.len], resetStyle,
-        fgBlack, styleBright, &"  {label} {elapsed.int}s", resetStyle
+        fgCyan, styleBright, &"  {label} {elapsed.int}s", resetStyle
       stdout.flushFile
     except CatchableError: discard
     sleep 80
@@ -335,7 +351,7 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage): string =
     "Content-Type": "application/json"
   })
   let body = %*{
-    "model": p.model,
+    "model": p.modelPrefix & p.model,
     "messages": messages,
     "stream": false
   }
@@ -360,7 +376,7 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage): string =
     usage.promptTokens = u{"prompt_tokens"}.getInt(0)
     usage.completionTokens = u{"completion_tokens"}.getInt(0)
     usage.totalTokens = u{"total_tokens"}.getInt(0)
-  stdout.styledWrite fgBlack, styleBright,
+  hint
     (if usage.totalTokens > 0:
        &"  ↑ {usage.promptTokens} tok · ↓ {usage.completionTokens} tok · {elapsed.int}s"
      else:
@@ -377,7 +393,7 @@ proc verifyProfile(p: Profile): (bool, string) =
     "Content-Type": "application/json"
   })
   let body = $(%*{
-    "model": p.model,
+    "model": p.modelPrefix & p.model,
     "messages": [%*{"role": "user", "content": "ping"}],
     "max_tokens": 1,
     "stream": false
@@ -468,6 +484,38 @@ proc parseActions*(text: string): seq[Action] =
       continue
     inc i
 
+proc stripActions*(text: string): string =
+  ## Return `text` with every action block elided, so the user sees prose only.
+  ## Mirrors `parseActions` block detection. Collapses runs of blank lines
+  ## created by the elision and trims leading/trailing blank lines.
+  let lines = text.splitLines
+  var kept: seq[string]
+  var i = 0
+  while i < lines.len:
+    let ln = lines[i].strip
+    if ln == "```bash" or ln == "```sh" or ln == "```shell":
+      inc i
+      while i < lines.len and lines[i].strip != "```": inc i
+      if i < lines.len: inc i
+      continue
+    if i + 1 < lines.len and lines[i+1].strip == "```" and looksLikePath(lines[i]):
+      i += 2
+      while i < lines.len and lines[i].strip != "```": inc i
+      if i < lines.len: inc i
+      continue
+    kept.add lines[i]
+    inc i
+  var res: seq[string]
+  var lastBlank = true  # trims leading blank lines
+  for l in kept:
+    let blank = l.strip.len == 0
+    if blank and lastBlank: continue
+    res.add l
+    lastBlank = blank
+  while res.len > 0 and res[^1].strip.len == 0:
+    res.setLen res.len - 1
+  res.join("\n")
+
 proc replaceFirst*(s, needle, repl: string): (string, bool) =
   let idx = s.find(needle)
   if idx < 0: return (s, false)
@@ -526,7 +574,7 @@ proc trimTrailingBlank(lines: var seq[string]) =
 
 proc printLine(l: string) =
   if l.startsWith("$ "):
-    stdout.styledWriteLine fgBlack, styleBright, l, resetStyle
+    hintLn l, resetStyle
   elif l.startsWith("[exit "):
     if l == "[exit 0]":
       stdout.styledWriteLine fgGreen, l, resetStyle
@@ -554,7 +602,7 @@ proc printBashCompact(res: string, idx: int) =
   else:
     for i in header ..< header + CompactHead: printLine(lines[i])
     let hidden = bodyLen - CompactHead - CompactTail
-    stdout.styledWriteLine fgBlack, styleBright,
+    hintLn
       &"  … {hidden} line" & (if hidden == 1: "" else: "s") &
       &" hidden · :show {idx} for full …", resetStyle
     for i in footer - CompactTail ..< footer: printLine(lines[i])
@@ -596,15 +644,22 @@ proc installEditorTweaks() =
     origClear(ed)
     navigatedUp = false
 
+proc showProfile(p: Profile) =
+  if p.name == "": return
+  let dot = p.name.find('.')
+  let provider = if dot < 0: p.name else: p.name[0 ..< dot]
+  stdout.styledWriteLine fgCyan, styleBright, "  provider ", resetStyle, provider
+  stdout.styledWriteLine fgCyan, styleBright, "  model    ", resetStyle, p.model
+
 proc welcome(p: Profile): minline.LineEditor =
   stdout.styledWriteLine fgCyan, styleBright, "  ╭─╮"
-  stdout.styledWriteLine fgCyan, styleBright, "   ─┤  ", resetStyle, fgWhite, styleBright, "3code ", resetStyle, fgBlack, styleBright, "v" & Version
+  stdout.styledWriteLine fgCyan, styleBright, "   ─┤  ", resetStyle, fgWhite, styleBright, "3code ", resetStyle, fgCyan, styleBright, "v" & Version
   stdout.styledWriteLine fgCyan, styleBright, "  ╰─╯"
   stdout.write "\n"
   if p.name != "":
-    stdout.styledWriteLine fgBlack, styleBright, "  model    ", resetStyle, p.name
+    showProfile(p)
     stdout.write "\n"
-    stdout.styledWriteLine fgBlack, styleBright, "  type a prompt. :help for commands. :q or Ctrl-D to exit."
+    stdout.styledWriteLine fgCyan, styleBright, "  type a prompt. :help for commands. :q or Ctrl-D to exit.", resetStyle
   stdout.flushFile
   installEditorTweaks()
   result = minline.initEditor(historyFile = historyFile())
@@ -642,8 +697,10 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Usage) =
     session.totalTokens += usage.totalTokens
     messages.add %*{"role": "assistant", "content": reply}
     stdout.write "\n"
-    stdout.styledWrite fgCyan, reply, resetStyle, "\n"
-    stdout.flushFile
+    let prose = stripActions(reply)
+    if prose.len > 0:
+      stdout.styledWrite fgCyan, prose, resetStyle, "\n"
+      stdout.flushFile
     let actions = parseActions(reply)
     if actions.len == 0: break
     var results = ""
@@ -651,7 +708,7 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Usage) =
       let idx = toolLog.len + 1
       stdout.styledWrite fgYellow, styleBright, "» ", resetStyle,
         fgYellow, bannerFor(act), resetStyle,
-        fgBlack, styleBright, &"   [T{idx}]", resetStyle, "\n"
+        fgCyan, styleBright, &"   [T{idx}]", resetStyle, "\n"
       stdout.flushFile
       let (r, code) = runAction(act)
       toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
@@ -661,7 +718,7 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Usage) =
 
 proc showTool(arg: string) =
   if toolLog.len == 0:
-    stdout.styledWriteLine fgBlack, styleBright, "  no tool calls yet", resetStyle
+    hintLn "  no tool calls yet", resetStyle
     return
   var n = toolLog.len
   if arg != "":
@@ -685,17 +742,17 @@ proc showTool(arg: string) =
 
 proc listTools() =
   if toolLog.len == 0:
-    stdout.styledWriteLine fgBlack, styleBright, "  no tool calls yet", resetStyle
+    hintLn "  no tool calls yet", resetStyle
     return
   for i, rec in toolLog:
     let tag = &"T{i+1}"
     let lines = rec.output.splitLines.len
     let mark = if rec.code == 0: "✓" else: "✗"
     let color = if rec.code == 0: fgGreen else: fgRed
-    stdout.styledWrite fgBlack, styleBright, &"  {tag:>4}  ", resetStyle,
+    hint &"  {tag:>4}  ", resetStyle,
       color, mark, resetStyle, " ",
       rec.banner,
-      fgBlack, styleBright, &"   ({lines} line" & (if lines == 1: "" else: "s") & ")",
+      fgCyan, styleBright, &"   ({lines} line" & (if lines == 1: "" else: "s") & ")",
       resetStyle, "\n"
 
 # ---------- Provider management ----------
@@ -759,6 +816,18 @@ proc defaultNameFromUrl(url: string): string =
   if labels.len >= 2: labels[^2]
   else: labels[0]
 
+proc commonModelPrefix(models: seq[string]): string =
+  if models.len < 2: return ""
+  var prefix = models[0]
+  for m in models[1 .. ^1]:
+    var i = 0
+    while i < prefix.len and i < m.len and prefix[i] == m[i]:
+      inc i
+    prefix = prefix[0 ..< i]
+    if prefix.len == 0: return ""
+  let slash = prefix.rfind('/')
+  if slash < 0: "" else: prefix[0 .. slash]
+
 proc readProviderEntry(editor: var minline.LineEditor): string =
   let prevCb = editor.completionCallback
   editor.completionCallback = proc(ed: LineEditor): seq[string] =
@@ -782,9 +851,9 @@ proc promptNewProvider(editor: var minline.LineEditor): ProviderRec =
       name = entry
       let cu = catalogUrl(name)
       if cu != "":
-        url = cu
-        stdout.styledWriteLine fgBlack, styleBright,
-          "  url                  : ", resetStyle, url
+        let urlEntry = readOptional(editor, &"  url [{cu}]     : ")
+          .strip(chars = {'/', ' '})
+        url = if urlEntry == "": cu else: urlEntry
       else:
         url = readRequired(editor, "  api base url         : ")
           .strip(chars = {'/', ' '})
@@ -800,35 +869,53 @@ proc promptNewProvider(editor: var minline.LineEditor): ProviderRec =
       stdout.styledWriteLine fgRed, &"  name already used: {name}", resetStyle
       continue
     let key = readRequired(editor, "  api key              : ", hidden = true)
-    stdout.styledWrite fgBlack, styleBright, "  fetching models...   ", resetStyle
+    hint "  fetching models...   ", resetStyle
     stdout.flushFile
     let available = fetchModels(url, key)
+    let prefix = commonModelPrefix(available)
     if available.len == 0:
-      stdout.styledWriteLine fgBlack, styleBright,
+      hintLn
         "unavailable — enter manually", resetStyle
     else:
-      stdout.styledWriteLine fgBlack, styleBright,
-        &"{available.len} available", resetStyle
+      let header =
+        if prefix == "": &"{available.len} available"
+        else: &"{available.len} available (prefix: {prefix})"
+      hintLn header, resetStyle
       for m in available:
-        stdout.styledWriteLine fgBlack, styleBright, "    ", resetStyle, m
-    let modelsStr = readRequired(editor, "  models (comma-sep.)  : ")
-    let models = splitModels(modelsStr)
-    if models.len == 0:
-      stdout.styledWriteLine fgRed, "  need at least one model", resetStyle
-      continue
-    let prov = ProviderRec(name: name, url: url, key: key, models: models)
-    let prof = Profile(name: name & "." & models[0], url: url,
-                       key: key, model: models[0])
-    stdout.styledWrite fgBlack, styleBright, "  verifying... ", resetStyle
-    stdout.flushFile
-    let (ok, err) = verifyProfile(prof)
-    if ok:
-      stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
-      return prov
-    stdout.styledWriteLine fgRed, styleBright, "failed", resetStyle
-    stdout.styledWriteLine fgRed, "  " & err, resetStyle
-    stdout.styledWriteLine fgBlack, styleBright,
-      "  try again with corrected values (ctrl+d to quit)", resetStyle
+        let shown = if prefix != "" and m.startsWith(prefix): m[prefix.len .. ^1]
+                    else: m
+        hintLn "    ", resetStyle, shown
+    let prevCb = editor.completionCallback
+    editor.completionCallback = proc(ed: LineEditor): seq[string] =
+      for m in available:
+        if prefix != "" and m.startsWith(prefix): result.add m[prefix.len .. ^1]
+        else: result.add m
+    defer: editor.completionCallback = prevCb
+    var prev = ""
+    while true:
+      let prompt =
+        if prev == "": "  models (space-sep.)  : "
+        else: &"  models [{prev}]  : "
+      let entered = readOptional(editor, prompt)
+      let raw = if entered == "": prev else: entered
+      let models = splitModels(raw)
+      let modelsStr = models.join(" ")
+      if models.len == 0:
+        stdout.styledWriteLine fgRed, "  need at least one model", resetStyle
+        continue
+      let prov = ProviderRec(name: name, url: url, key: key,
+                             modelPrefix: prefix, models: models)
+      let prof = Profile(name: name & "." & models[0], url: url,
+                         key: key, modelPrefix: prefix, model: models[0])
+      hint "  verifying... ", resetStyle
+      stdout.flushFile
+      let (ok, err) = verifyProfile(prof)
+      if ok:
+        stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
+        return prov
+      stdout.styledWriteLine fgRed, styleBright, "failed", resetStyle
+      stdout.styledWriteLine fgRed, "  " & err, resetStyle
+      prev = modelsStr
 
 proc bootstrapProvider(editor: var minline.LineEditor): Profile =
   stdout.styledWriteLine fgYellow, styleBright,
@@ -837,40 +924,39 @@ proc bootstrapProvider(editor: var minline.LineEditor): Profile =
   activeProviders.add prov
   activeCurrent = prov.name & "." & prov.models[0]
   writeConfigFile(configPath(), activeCurrent, activeProviders)
-  stdout.styledWriteLine fgBlack, styleBright,
+  hintLn
     &"  saved to {configPath()}", resetStyle
   buildProfile(activeCurrent, activeProviders, "")
 
 proc cmdProviderList(prof: Profile) =
   if activeProviders.len == 0:
-    stdout.styledWriteLine fgBlack, styleBright, "  no providers", resetStyle
+    hintLn "  no providers", resetStyle
     return
   let curName = if prof.name == "": "" else: prof.name.split('.')[0]
-  let curModel = if prof.name == "": "" else: prof.model
   for pr in activeProviders:
-    let isCur = pr.name == curName
-    let mark = if isCur: "*" else: " "
-    var models = ""
-    for i, m in pr.models:
-      if i > 0: models.add ", "
-      if isCur and m == curModel: models.add "[" & m & "]"
-      else: models.add m
-    stdout.styledWrite fgBlack, styleBright, "  ", mark, " ", resetStyle,
-                       pr.name
-    stdout.styledWriteLine fgBlack, styleBright, "  (" & models & ")",
-                           resetStyle
+    let mark = if pr.name == curName: "*" else: " "
+    hintLn "  ", mark, " ", resetStyle,
+                           pr.name
 
-proc cmdProviderUse(target: string, prof: var Profile) =
-  let np = buildProfile(activeCurrent, activeProviders, target)
-  if np.name == "":
-    stdout.styledWriteLine fgRed,
-      &"  unknown provider or model: {target}", resetStyle
+proc cmdProviderSelect(target: string, prof: var Profile) =
+  var prov: ProviderRec
+  var found = false
+  for pr in activeProviders:
+    if pr.name == target:
+      prov = pr
+      found = true
+      break
+  if not found:
+    stdout.styledWriteLine fgRed, &"  unknown provider: {target}", resetStyle
     return
-  prof = np
-  activeCurrent = target
+  if prov.models.len == 0:
+    stdout.styledWriteLine fgRed,
+      &"  provider {target} has no models", resetStyle
+    return
+  activeCurrent = prov.name & "." & prov.models[0]
+  prof = buildProfile(activeCurrent, activeProviders, "")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
-  stdout.styledWriteLine fgBlack, styleBright,
-    &"  using {prof.name}", resetStyle
+  showProfile(prof)
 
 proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
   let prov = promptNewProvider(editor)
@@ -880,7 +966,7 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   if prof.name == "":
     prof = buildProfile(activeCurrent, activeProviders, "")
-  stdout.styledWriteLine fgBlack, styleBright,
+  hintLn
     &"  added {prov.name}", resetStyle
 
 proc cmdProviderRm(target: string, prof: var Profile) =
@@ -901,32 +987,70 @@ proc cmdProviderRm(target: string, prof: var Profile) =
       activeCurrent = ""
       prof = Profile()
   writeConfigFile(configPath(), activeCurrent, activeProviders)
-  stdout.styledWriteLine fgBlack, styleBright,
+  hintLn
     &"  removed {target}", resetStyle
 
 proc cmdProvider(arg: string, editor: var minline.LineEditor,
                  prof: var Profile) =
   let parts = arg.splitWhitespace()
-  let sub = if parts.len == 0: "list" else: parts[0]
-  case sub
-  of "list", "ls":
+  if parts.len == 0:
     cmdProviderList(prof)
-  of "use":
-    if parts.len < 2:
-      stdout.styledWriteLine fgRed,
-        "  :provider use <name>[.<model>]", resetStyle
-    else:
-      cmdProviderUse(parts[1], prof)
+    return
+  case parts[0]
   of "add":
-    cmdProviderAdd(editor, prof)
+    if parts.len != 1:
+      stdout.styledWriteLine fgRed, "  usage: :provider add", resetStyle
+    else:
+      cmdProviderAdd(editor, prof)
   of "rm", "remove":
-    if parts.len < 2:
-      stdout.styledWriteLine fgRed, "  :provider rm <name>", resetStyle
+    if parts.len != 2:
+      stdout.styledWriteLine fgRed,
+        &"  usage: :provider {parts[0]} <name>", resetStyle
     else:
       cmdProviderRm(parts[1], prof)
   else:
+    if parts.len != 1:
+      stdout.styledWriteLine fgRed,
+        "  usage: :provider [<name> | add | rm <name>]", resetStyle
+    else:
+      cmdProviderSelect(parts[0], prof)
+
+proc cmdModelList(prof: Profile) =
+  let prov = currentProvider()
+  if prov.name == "":
+    hintLn "  no provider selected", resetStyle
+    return
+  if prov.models.len == 0:
+    hintLn
+      &"  {prov.name}: no models", resetStyle
+    return
+  for m in prov.models:
+    let mark = if m == prof.model: "*" else: " "
+    hintLn "  ", mark, " ", resetStyle, m
+
+proc cmdModelSelect(target: string, prof: var Profile) =
+  let prov = currentProvider()
+  if prov.name == "":
+    stdout.styledWriteLine fgRed, "  no provider selected", resetStyle
+    return
+  if target notin prov.models:
+    stdout.styledWriteLine fgRed, &"  unknown model: {target}", resetStyle
+    return
+  activeCurrent = prov.name & "." & target
+  prof = buildProfile(activeCurrent, activeProviders, "")
+  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  showProfile(prof)
+
+proc cmdModel(arg: string, prof: var Profile) =
+  let parts = arg.splitWhitespace()
+  case parts.len
+  of 0:
+    cmdModelList(prof)
+  of 1:
+    cmdModelSelect(parts[0], prof)
+  else:
     stdout.styledWriteLine fgRed,
-      &"  unknown: :provider {sub}", resetStyle
+      "  usage: :model [<name>]", resetStyle
 
 proc handleCommand(cmd: string, messages: var JsonNode, session: Usage,
                    prof: var Profile, editor: var minline.LineEditor): bool =
@@ -941,19 +1065,17 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: Usage,
     stdout.write HelpText
   of ":tokens":
     if session.totalTokens == 0:
-      stdout.styledWriteLine fgBlack, styleBright, "  no tokens used yet", resetStyle
+      hintLn "  no tokens used yet", resetStyle
     else:
-      stdout.styledWriteLine fgBlack, styleBright,
+      hintLn
         &"  session: {session.totalTokens} tok  (in {session.promptTokens}, out {session.completionTokens})",
         resetStyle
   of ":clear":
     messages = %* [{"role": "system", "content": SystemPrompt}]
     toolLog.setLen 0
-    stdout.styledWriteLine fgBlack, styleBright, "  context cleared", resetStyle
+    hintLn "  context cleared", resetStyle
   of ":model":
-    let shown = if prof.name == "": "(none)" else: prof.name
-    stdout.styledWriteLine fgBlack, styleBright,
-      &"  model  {shown}", resetStyle
+    cmdModel(arg, prof)
   of ":provider":
     cmdProvider(arg, editor, prof)
   of ":show":
@@ -1033,7 +1155,7 @@ proc main() =
     messages.add %*{"role": "user", "content": prompt}
     runTurns(prof, messages, session)
     if session.totalTokens > 0:
-      stdout.styledWriteLine fgBlack, styleBright,
+      hintLn
         &"  · {session.totalTokens} tok total", resetStyle
     return
 

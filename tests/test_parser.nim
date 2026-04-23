@@ -110,6 +110,22 @@ Done.
     check code == 0
     removeDir(tmp)
 
+  test "stripActions removes bash blocks":
+    let s = "Plan:\n\n```bash\nls -la\n```\n\nDone."
+    check stripActions(s) == "Plan:\n\nDone."
+
+  test "stripActions removes write blocks":
+    let s = "Writing config.\n\nsrc/foo.nim\n```\necho hi\nmultiline\n```\n\nDone."
+    check stripActions(s) == "Writing config.\n\nDone."
+
+  test "stripActions returns empty for pure action reply":
+    let s = "```bash\nls\n```\n"
+    check stripActions(s) == ""
+
+  test "stripActions preserves inline prose between actions":
+    let s = "First:\n```bash\na\n```\nNext:\n```bash\nb\n```\nEnd."
+    check stripActions(s) == "First:\nNext:\nEnd."
+
   test "runAction akPatch reports unmatched":
     let tmp = getTempDir() / "3code_test_" & $getCurrentProcessId() & "_p2"
     createDir(tmp)
