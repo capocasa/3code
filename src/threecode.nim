@@ -221,7 +221,7 @@ proc spinnerLoop(label: string) {.thread.} =
     let elapsed = epochTime() - start
     try:
       stdout.styledWrite "\r", fgCyan, styleBright, frames[i mod frames.len], resetStyle,
-        fgBlack, styleBright, &"  {label} {elapsed:4.1f}s", resetStyle
+        fgBlack, styleBright, &"  {label} {elapsed.int}s", resetStyle
       stdout.flushFile
     except CatchableError: discard
     sleep 80
@@ -281,9 +281,9 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage): string =
     usage.totalTokens = u{"total_tokens"}.getInt(0)
   stdout.styledWrite fgBlack, styleBright,
     (if usage.totalTokens > 0:
-       &"  ↑ {usage.promptTokens} tok · ↓ {usage.completionTokens} tok · {elapsed:.1f}s"
+       &"  ↑ {usage.promptTokens} tok · ↓ {usage.completionTokens} tok · {elapsed.int}s"
      else:
-       &"  ↓ ~{text.len div 4} tok · {elapsed:.1f}s"),
+       &"  ↓ ~{text.len div 4} tok · {elapsed.int}s"),
     resetStyle, "\n"
   stdout.flushFile
   j["choices"][0]["message"]["content"].getStr
