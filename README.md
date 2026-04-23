@@ -1,9 +1,8 @@
 # 3code
 
-A minimal coding agent. You point it at any OpenAI-compatible chat endpoint,
-give it a task, it reads and writes files and runs shell commands until the
-task is done or you stop it. About 250 lines of Nim, one binary, no web UI,
-no telemetry, no project config.
+A coding agent for any OpenAI-compatible chat endpoint. You give it a task,
+it reads and writes files and runs shell commands until the task is done or
+you stop it. One binary, no web UI, no telemetry, no project config.
 
 The name is a nod to third-party-hosted models: bring your own endpoint.
 
@@ -57,39 +56,16 @@ with `-m`:
 
 ## How it works
 
-Reply → parse → execute → loop. The model is told to emit three kinds of
-fenced blocks:
+Reply → parse → execute → loop. Four tools:
 
-Shell:
+- `bash(command)` — run a shell command.
+- `read(path, offset?, limit?)` — read a file or a line range.
+- `write(path, body)` — create or overwrite a file.
+- `patch(path, edits)` — apply exact-match search/replace edits.
 
-    ```bash
-    nimble test
-    ```
-
-Full-file write (path on the line above the fence):
-
-    src/foo.nim
-    ```
-    echo "hi"
-    ```
-
-Patch with one or more exact-match edits:
-
-    src/foo.nim
-    ```
-    <<<<<<< SEARCH
-    old code that matches byte-for-byte
-    =======
-    new code
-    >>>>>>> REPLACE
-    ```
-
-Results go back as the next user message and the loop continues until the
-model stops emitting blocks.
-
-By default 3code sends the actions as OpenAI tool calls (`bash`, `write`,
-`patch`). Older or OSS-first models that prefer fenced blocks can opt in
-with `mode = "text"` on the `[provider]`:
+Default wire format is OpenAI tool calls. Older or OSS-first models that
+prefer fenced text blocks can opt in with `mode = "text"` on the
+`[provider]`:
 
     [provider]
     name = "local"
@@ -98,7 +74,10 @@ with `mode = "text"` on the `[provider]`:
     mode = "text"
     models = "llama-3-8b"
 
-Same three actions either way — just a different wire format.
+In text mode, `bash` becomes a ```` ```bash ```` fence, `write` is a
+path-line + fenced body, and `patch` is a fenced body with `<<<<<<< SEARCH`
+/ `=======` / `>>>>>>> REPLACE` markers. `read` goes through `bash cat` in
+text mode — no dedicated fence.
 
 ## Use
 
@@ -110,16 +89,14 @@ or drop into interactive:
 
 Type `:q`, `exit`, `quit`, or hit Ctrl-D to leave.
 
-## Limitations
+## Caveats
 
-By design:
-
-- Tool-use protocol optional (`mode = "tools"`). Text-fence parsing is default.
 - No permissions, sandbox, or approval prompts. It runs what the model says
   to run, in the current working directory.
 - No streaming. You wait for the full reply, then it executes.
-- No context management. The conversation grows until you exit.
-- If the model emits a file containing triple backticks, parsing breaks.
+- No context management. The conversation grows until you exit or `:clear`.
+- Text mode breaks if the model emits a file containing triple backticks;
+  tools mode (default) is immune.
 
 Use in a scratch directory or a clean git working tree. `git diff` is your
 safety net.
