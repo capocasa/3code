@@ -3,4 +3,4 @@ tests/test_*
 !tests/test_*.nim
 nimcache/
 
-STATE.md
+.agent/
