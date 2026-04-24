@@ -154,6 +154,7 @@ commands:
   :sessions         list sessions saved in the current directory
   :sessions all     list every saved session (any directory)
   :compact          compact older tool output in context
+  :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -179,8 +180,8 @@ type
     edits*: seq[(string, string)]
     offset*: int
     limit*: int
-  Profile = object
-    name, url, key, modelPrefix, model: string
+  Profile* = object
+    name*, url*, key*, modelPrefix*, model*: string
   Usage* = object
     promptTokens*, completionTokens*, totalTokens*, cachedTokens*: int
   ToolRecord* = object
@@ -573,6 +574,106 @@ proc supersedeCompact*(messages: JsonNode, keepRecent = 2): int =
           inc result
     else: discard
 
+# ---------- Summarization (B.1) ----------
+
+const
+  SummarizeKeepRecent* = 8
+  SummarizeThresholdFrac* = 0.8
+  SummarizeMaxTokens = 500
+  SummaryPrefix* = "Earlier in this session: "
+  SummarizerSystemPrompt* = """You are summarizing an earlier coding session for later recall. Compress the messages below into one paragraph covering: files read/written, commands run and outcomes, current state (tests green? uncommitted changes? what decision was reached?). Omit everything that's been superseded. No filler."""
+
+proc applySummary*(messages: JsonNode, summary: string,
+                  keepRecent = SummarizeKeepRecent): int =
+  ## Rewrites `messages` in place to `[system, synthetic_user_summary,
+  ## ...last keepRecent]` and returns the number of messages collapsed (i.e.
+  ## removed from the middle). Returns 0 without touching `messages` if the
+  ## prerequisites are not met: array shape, a system message at index 0,
+  ## and at least `keepRecent + 4` messages to justify the call.
+  if messages == nil or messages.kind != JArray: return 0
+  if messages.len < keepRecent + 4: return 0
+  if messages[0].kind != JObject: return 0
+  if messages[0]{"role"}.getStr != "system": return 0
+  if summary.strip.len == 0: return 0
+  let system = messages[0]
+  let tailStart = messages.len - keepRecent
+  var tail = newSeq[JsonNode](keepRecent)
+  for i in 0 ..< keepRecent:
+    tail[i] = messages[tailStart + i]
+  let collapsed = tailStart - 1  # messages dropped from the middle
+  let synthetic = %*{"role": "user",
+                     "content": SummaryPrefix & summary.strip}
+  let rebuilt = newJArray()
+  rebuilt.add system
+  rebuilt.add synthetic
+  for m in tail: rebuilt.add m
+  # Replace `messages` contents in place so callers holding the ref see it.
+  messages.elems.setLen 0
+  for m in rebuilt: messages.add m
+  collapsed
+
+proc callSummarizer(p: Profile, messages: JsonNode): string =
+  ## Fires a single meta-call to the model with a dedicated summarizer
+  ## system prompt and no tools. Returns "" on any failure.
+  if p.name == "" or p.url == "" or p.key == "" or p.model == "": return ""
+  # Build a trimmed payload: the summarizer prompt + every non-system
+  # message from the live conversation. Tool_call messages are allowed —
+  # most OpenAI-compatible providers accept them in chat completions even
+  # without a tools parameter as long as the tool/assistant pairing is
+  # intact.
+  let payload = newJArray()
+  payload.add %*{"role": "system", "content": SummarizerSystemPrompt}
+  if messages != nil and messages.kind == JArray:
+    for i in 0 ..< messages.len:
+      let m = messages[i]
+      if i == 0 and m.kind == JObject and m{"role"}.getStr == "system":
+        continue
+      payload.add m
+  let client = newHttpClient(timeout = 120_000)
+  defer: client.close()
+  client.headers = newHttpHeaders({
+    "Authorization": "Bearer " & p.key,
+    "Content-Type": "application/json"
+  })
+  let body = %*{
+    "model": p.modelPrefix & p.model,
+    "messages": payload,
+    "max_tokens": SummarizeMaxTokens,
+    "stream": false
+  }
+  try:
+    let r = client.request(p.url & "/chat/completions", HttpPost, $body)
+    if r.code != Http200:
+      stderr.writeLine "3code: summarize: api " & $r.code
+      return ""
+    let j = parseJson(r.body)
+    if "error" in j:
+      stderr.writeLine "3code: summarize: " & $j["error"]
+      return ""
+    let choices = j{"choices"}
+    if choices == nil or choices.kind != JArray or choices.len == 0: return ""
+    let msg = choices[0]{"message"}
+    if msg == nil or msg.kind != JObject: return ""
+    msg{"content"}.getStr("")
+  except CatchableError as e:
+    stderr.writeLine "3code: summarize: " & e.msg
+    ""
+
+proc summarizeHistory*(messages: JsonNode, p: Profile,
+                      keepRecent = SummarizeKeepRecent): int =
+  ## Collapse old turns into one synthetic user recap via a meta-model call.
+  ## Returns the number of messages dropped; 0 if we bailed (too few
+  ## messages, missing system prompt, empty profile, or the summarizer
+  ## call failed). On failure `messages` is left untouched.
+  if messages == nil or messages.kind != JArray: return 0
+  if messages.len < keepRecent + 4: return 0
+  if messages[0].kind != JObject or messages[0]{"role"}.getStr != "system":
+    return 0
+  if p.name == "": return 0
+  let summary = callSummarizer(p, messages)
+  if summary.strip.len == 0: return 0
+  applySummary(messages, summary, keepRecent)
+
 type
   ProviderRec = object
     name, url, key, modelPrefix: string
@@ -583,7 +684,7 @@ var activeProviders: seq[ProviderRec]
 
 const CommandNames = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":prompt", ":show", ":log", ":sessions", ":compact",
-                      ":q", ":quit", ":exit"]
+                      ":summarize", ":q", ":quit", ":exit"]
 
 proc currentProvider(): ProviderRec =
   let dot = activeCurrent.find('.')
@@ -1918,6 +2019,22 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: var Session,
       hintLn &"  · compacted {n} tool result" &
         (if n == 1: "" else: "s"), resetStyle
       saveSession(session, messages)
+  of ":summarize":
+    if prof.name == "":
+      stdout.styledWriteLine fgRed,
+        "  no provider configured. use :provider add", resetStyle
+    else:
+      hint "  · summarizing... ", resetStyle
+      stdout.flushFile
+      let n = summarizeHistory(messages, prof)
+      if n == 0:
+        stdout.styledWriteLine fgRed, "failed or not worth it", resetStyle
+      else:
+        stdout.styledWriteLine fgCyan, styleBright, "done", resetStyle
+        hintLn &"  · collapsed {n} message" &
+          (if n == 1: "" else: "s") &
+          &" into a synthetic recap", resetStyle
+        saveSession(session, messages)
   else:
     stdout.styledWriteLine fgRed, "unknown command: ", c, "  (try :help)", resetStyle
   return true
