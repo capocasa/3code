@@ -17,10 +17,10 @@ template hintLn(args: varargs[untyped]) =
   stdout.styledWriteLine(fgCyan, styleBright, args, resetStyle)
 
 template err(args: varargs[untyped]) =
-  stdout.styledWrite(fgRed, styleBright, args, resetStyle)
+  stdout.styledWrite(fgRed, args, resetStyle)
 
 template errLn(args: varargs[untyped]) =
-  stdout.styledWriteLine(fgRed, styleBright, args, resetStyle)
+  stdout.styledWriteLine(fgRed, args, resetStyle)
 
 const SystemPrompt = """
 You are 3code, the economical coding agent. One task, done right, few tokens.
@@ -1173,7 +1173,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     var flat = newStringOfCap(tail.len)
     for ch in tail:
       flat.add(if ch == '\n' or ch == '\r': ' ' else: ch)
-    setSpinTicker("  💭 " & flat)
+    setSpinTicker("  … " & flat)
   let outS = p.outputStream
   var line = ""
   while outS.readLine(line):
@@ -1202,10 +1202,12 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
           if c.len > 0:
             if not contentStarted:
               # Clear the ticker from line 2 and let the spinner's next frame
-              # collapse it before we take over the line with content.
+              # collapse it before we take over the line with content. Newline
+              # before content so the cleared spinner area becomes a visual
+              # beat rather than content overwriting where the spinner was.
               setSpinTicker("")
               stopSpinner()
-              stdout.write("\e[36m")  # cyan, matching the per-turn display
+              stdout.write("\n\e[2m")  # dim; spinner area becomes a gap
               contentStarted = true
             accContent &= c
             slurped += c.len
@@ -1317,9 +1319,9 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToken
         elif pct < 60: "◑"
         elif pct < 80: "◕"
         else: "●"
-      &"thinking · {glyph} {pct}%"
+      &"{glyph} {pct}%"
     else:
-      "thinking"
+      ""
   setSpinLabel(baseLabel)
   startSpinner("")
   const MaxAttempts = 8
@@ -1716,13 +1718,13 @@ proc trimTrailingBlank(lines: var seq[string]) =
 
 proc printLine(l: string) =
   if l.startsWith("$ "):
-    hintLn l, resetStyle
+    stdout.styledWriteLine styleDim, "    ", l, resetStyle
   elif l == "[exit 0]":
     discard
   elif l.startsWith("[exit "):
-    stdout.styledWriteLine fgRed, styleBright, l, resetStyle
+    stdout.styledWriteLine styleDim, "    ", l, resetStyle
   else:
-    stdout.writeLine l
+    stdout.styledWriteLine styleDim, "    ", l, resetStyle
 
 proc printBashCompact(res: string, idx: int) =
   var lines = res.splitLines
@@ -1785,9 +1787,9 @@ proc printActionResult(act: Action, res: string, code: int, idx: int, diff = "")
     printBashCompact(res, idx)
   else:
     if code == 0:
-      stdout.styledWriteLine fgGreen, res, resetStyle
+      stdout.styledWriteLine styleDim, "    ", res, resetStyle
     else:
-      stdout.styledWriteLine fgRed, styleBright, res, resetStyle
+      stdout.styledWriteLine fgRed, "    ", res, resetStyle
   if diff.len > 0:
     printDiff(diff)
 
@@ -1835,6 +1837,7 @@ proc welcome(p: Profile): minline.LineEditor =
     showProfile(p)
     stdout.write "\n"
     stdout.styledWriteLine fgCyan, styleBright, "  type a prompt. :help for commands. :q or Ctrl-D to exit.", resetStyle
+    stdout.write "\n"
   stdout.flushFile
   installEditorTweaks()
   result = minline.initEditor(historyFile = historyFile())
@@ -1995,7 +1998,7 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
     messages.add msg
     saveSession(session, messages)
     if interrupted:
-      stdout.styledWriteLine fgRed, styleBright, "  · interrupted", resetStyle
+      stdout.styledWriteLine fgRed, "  · interrupted", resetStyle
       interrupted = false
       return
     let window = contextWindowFor(p.model)
@@ -2031,7 +2034,7 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
       else: newJArray()
     if toolCalls.len > 0:
       if content.strip.len > 0 and not streamedLive:
-        stdout.styledWrite fgCyan, content, resetStyle, "\n"
+        stdout.styledWrite styleDim, content, resetStyle, "\n"
         stdout.flushFile
       var halt = false  # Strike-2 trip: stop further tool calls this turn
       for tc in toolCalls:
@@ -2056,9 +2059,7 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
             newJObject()
         let act = toolCallToAction(name, args)
         let idx = session.toolLog.len + 1
-        stdout.styledWrite fgYellow, styleBright, "» ", resetStyle,
-          fgYellow, bannerFor(act), resetStyle,
-          fgCyan, styleBright, &"   [T{idx}]", resetStyle, "\n"
+        stdout.styledWrite styleDim, "  › ", bannerFor(act), resetStyle, "\n"
         stdout.flushFile
         if session.readCache == nil: session.readCache = newReadCache()
         var (r, code, diff) = runAction(act, session.readCache)
@@ -2077,33 +2078,30 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
         let priorStrike = session.loop.strike
         let strike = trackCall(session.loop, name, args)
         var toolContent = r
-        if strike > priorStrike:
+        # Strike 1 used to append a "stop and reassess" nudge; dropped because
+        # many legit compile-iterate sessions trip it without actually being
+        # stuck. Only the Strike-2 halt survives — that one we want.
+        if strike >= 2 and priorStrike < 2:
           let fp = fingerprint(name, args)
-          let n = session.loop.counts.getOrDefault(fp)
-          if strike == 1:
-            toolContent &= "\n\n[repeat-guard] path=" & fp & " touched " &
-              $n & "x in last " & $session.loop.ring.len &
-              " calls without evident progress; stop and reassess or end the turn."
-          elif strike >= 2:
-            halt = true
-            toolContent &= "\n\n[repeat-guard] second saturation (path=" & fp &
-              "); further tool calls this turn are paused."
+          halt = true
+          toolContent &= "\n\n[repeat-guard] second saturation (path=" & fp &
+            "); further tool calls this turn are paused."
         messages.add %*{"role": "tool", "tool_call_id": id, "content": toolContent}
       saveSession(session, messages)
       if interrupted:
-        stdout.styledWriteLine fgRed, styleBright, "  · interrupted", resetStyle
+        stdout.styledWriteLine fgRed, "  · interrupted", resetStyle
         interrupted = false
         return
       if halt:
-        stdout.styledWriteLine fgRed, styleBright, "  paused — looped", resetStyle
+        stdout.styledWriteLine fgRed, "  paused — looped", resetStyle
         return
       continue
     if content.strip.len > 0:
       if not streamedLive:
-        stdout.styledWrite fgCyan, content, resetStyle, "\n"
+        stdout.styledWrite styleDim, content, resetStyle, "\n"
         stdout.flushFile
     else:
-      stdout.styledWriteLine fgRed, styleBright,
+      stdout.styledWriteLine fgRed,
         "  (empty reply — no content, no tool calls)", resetStyle
     break
 
@@ -2112,7 +2110,7 @@ proc runTurnsInteractive(p: Profile, messages: var JsonNode, session: var Sessio
     runTurns(p, messages, session)
   except ApiError as e:
     saveSession(session, messages)
-    stdout.styledWriteLine fgRed, styleBright, "  ", e.msg, resetStyle
+    stdout.styledWriteLine fgRed, "  ", e.msg, resetStyle
 
 proc replaySessionTail(messages: JsonNode, toolLog: seq[ToolRecord]) =
   ## Show the last user turn and everything after, so a resumed session
@@ -2154,9 +2152,7 @@ proc replaySessionTail(messages: JsonNode, toolLog: seq[ToolRecord]) =
               let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
                          except CatchableError: newJObject()
               bannerFor(toolCallToAction(name, args))
-          stdout.styledWrite fgYellow, styleBright, "» ", resetStyle,
-            fgYellow, banner, resetStyle,
-            fgCyan, styleBright, &"   [T{toolIdx}]", resetStyle, "\n"
+          stdout.styledWrite styleDim, "  › ", banner, resetStyle, "\n"
     of "tool":
       let r = m{"content"}.getStr("")
       if r.len > 0:
@@ -2186,7 +2182,7 @@ proc showTool(arg: string, toolLog: seq[ToolRecord]) =
     if rec.code == 0:
       stdout.styledWriteLine fgGreen, rec.output, resetStyle
     else:
-      stdout.styledWriteLine fgRed, styleBright, rec.output, resetStyle
+      stdout.styledWriteLine fgRed, rec.output, resetStyle
 
 proc listTools(toolLog: seq[ToolRecord]) =
   if toolLog.len == 0:
@@ -2437,7 +2433,7 @@ proc promptNewProvider(editor: var minline.LineEditor): ProviderRec =
     if ok:
       stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
       return prov
-    stdout.styledWriteLine fgRed, styleBright, "failed", resetStyle
+    stdout.styledWriteLine fgRed, "failed", resetStyle
     stdout.styledWriteLine fgRed, "  " & err, resetStyle
     prev = modelsStr
     let choice = readOptional(editor,
@@ -2491,7 +2487,7 @@ proc promptEditProvider(editor: var minline.LineEditor,
       stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
       return ProviderRec(name: name, url: url, key: key,
                          modelPrefix: prefix, models: models)
-    stdout.styledWriteLine fgRed, styleBright, "failed", resetStyle
+    stdout.styledWriteLine fgRed, "failed", resetStyle
     stdout.styledWriteLine fgRed, "  " & err, resetStyle
 
 proc bootstrapProvider(editor: var minline.LineEditor): Profile =
