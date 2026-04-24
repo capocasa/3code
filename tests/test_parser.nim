@@ -386,6 +386,26 @@ suite "summarize (applySummary splicing)":
     check second == 0
     check msgs.len == afterLen
 
+suite "summarize (policy)":
+  test "under threshold: no action":
+    check decideContextAction(10_000, 100_000, 30) == caNone
+    check decideContextAction(79_000, 100_000, 30) == caNone
+
+  test "over threshold with enough history: summarize":
+    check decideContextAction(81_000, 100_000, 30) == caSummarize
+    # boundary: keepRecent + 4 messages is the minimum to summarize
+    check decideContextAction(90_000, 100_000, SummarizeKeepRecent + 4) ==
+          caSummarize
+
+  test "over threshold but too short: compact":
+    check decideContextAction(90_000, 100_000, 5) == caCompact
+    check decideContextAction(90_000, 100_000, SummarizeKeepRecent + 3) ==
+          caCompact
+
+  test "zero window or zero tokens: no action":
+    check decideContextAction(0, 100_000, 30) == caNone
+    check decideContextAction(99_000, 0, 30) == caNone
+
 suite "usage parsing":
   test "OpenAI-style prompt_tokens_details.cached_tokens":
     let u = parseUsage(%*{

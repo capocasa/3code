@@ -659,6 +659,23 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
     stderr.writeLine "3code: summarize: " & e.msg
     ""
 
+type
+  ContextAction* = enum
+    caNone,         ## within budget, nothing to do
+    caSummarize,    ## over threshold and enough history to make it worthwhile
+    caCompact       ## over threshold but too little history to summarize
+
+proc decideContextAction*(promptTokens, windowTokens, msgCount: int,
+                         keepRecent = SummarizeKeepRecent,
+                         threshold = SummarizeThresholdFrac): ContextAction =
+  ## Pure policy helper. Given a fresh usage reading and the current message
+  ## count, decide whether to summarize, compact, or leave things alone.
+  ## Summarization comes first (big lossy win); compaction is the fallback
+  ## when there aren't enough messages to summarize usefully.
+  if promptTokens <= 0 or windowTokens <= 0: return caNone
+  if promptTokens.float <= threshold * windowTokens.float: return caNone
+  if msgCount >= keepRecent + 4: caSummarize else: caCompact
+
 proc summarizeHistory*(messages: JsonNode, p: Profile,
                       keepRecent = SummarizeKeepRecent): int =
   ## Collapse old turns into one synthetic user recap via a meta-model call.
@@ -1397,7 +1414,20 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
       interrupted = false
       return
     let window = contextWindowFor(p.model)
-    if usage.promptTokens > 0 and
+    var summarized = 0
+    case decideContextAction(usage.promptTokens, window, messages.len)
+    of caSummarize:
+      summarized = summarizeHistory(messages, p)
+      if summarized > 0:
+        hintLn &"  · summarized {summarized} old message" &
+          (if summarized == 1: "" else: "s") &
+          &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)",
+          resetStyle
+        saveSession(session, messages)
+    of caCompact, caNone: discard
+    # Fall through: if summarization bailed, still try compaction on the
+    # same turn. Summarization only runs once per turn regardless.
+    if summarized == 0 and usage.promptTokens > 0 and
        usage.promptTokens.float > CompactThresholdFrac * window.float:
       let n = compactHistory(messages)
       if n > 0:
