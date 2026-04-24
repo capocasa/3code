@@ -915,6 +915,12 @@ var interrupted = false
   ## polling / retry backoff so ctrl-c drops back to the prompt without
   ## killing the process.
 
+var contentStreamedLive = false
+  ## Set by `callModel` when the assistant's text content has been streamed
+  ## to stdout chunk-by-chunk during the SSE read; read (and reset) by
+  ## `runTurns` so the same content isn't redrawn a second time at the end
+  ## of the turn.
+
 var spinnerStop: Atomic[bool]
 var spinnerThread: Thread[string]
 
@@ -959,14 +965,20 @@ proc spinnerLoop(unused: string) {.thread.} =
     stdout.flushFile
   except CatchableError: discard
 
+var spinnerRunning = false  # only mutated by main thread
+
 proc startSpinner(label: string) =
+  if spinnerRunning: return
   if label.len > 0: setSpinLabel(label)
   spinnerStop.store(false, moRelaxed)
   createThread(spinnerThread, spinnerLoop, "")
+  spinnerRunning = true
 
 proc stopSpinner() =
+  if not spinnerRunning: return
   spinnerStop.store(true, moRelaxed)
   joinThread(spinnerThread)
+  spinnerRunning = false
 
 proc humanBytes(n: int): string =
   if n < 1024: &"{n}B"
@@ -1103,6 +1115,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   var accContent = ""
   var accTools = initOrderedTable[int, JsonNode]()
   var nonSSE: seq[string]
+  var contentStarted = false
   let outS = p.outputStream
   var line = ""
   while outS.readLine(line):
@@ -1119,9 +1132,14 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
         if delta != nil and delta.kind == JObject:
           let c = delta{"content"}.getStr("")
           if c.len > 0:
+            if not contentStarted:
+              stopSpinner()
+              stdout.write("\e[36m")  # cyan, matching the per-turn display
+              contentStarted = true
             accContent &= c
             slurped += c.len
-            setSpinLabel(baseLabel & &" · ↓ {humanTokens(slurped div 4)}")
+            stdout.write(c)
+            stdout.flushFile()
           let tcDelta = delta{"tool_calls"}
           if tcDelta != nil and tcDelta.kind == JArray:
             for tc in tcDelta:
@@ -1155,6 +1173,12 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     try: p.waitForExit()
     except OSError: -1
   try: p.close() except OSError: discard
+
+  if contentStarted:
+    if not accContent.endsWith("\n"): stdout.write("\n")
+    stdout.write("\e[0m")
+    stdout.flushFile()
+    contentStreamedLive = true
 
   if interrupted:
     result.errMsg = "interrupted by user"
@@ -1906,12 +1930,14 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
         saveSession(session, messages)
     stdout.write "\n"
     let content = msg{"content"}.getStr("")
+    let streamedLive = contentStreamedLive
+    contentStreamedLive = false
     let tcNode = msg{"tool_calls"}
     let toolCalls =
       if tcNode != nil and tcNode.kind == JArray: tcNode
       else: newJArray()
     if toolCalls.len > 0:
-      if content.strip.len > 0:
+      if content.strip.len > 0 and not streamedLive:
         stdout.styledWrite fgCyan, content, resetStyle, "\n"
         stdout.flushFile
       var halt = false  # Strike-2 trip: stop further tool calls this turn
@@ -1980,8 +2006,9 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
         return
       continue
     if content.strip.len > 0:
-      stdout.styledWrite fgCyan, content, resetStyle, "\n"
-      stdout.flushFile
+      if not streamedLive:
+        stdout.styledWrite fgCyan, content, resetStyle, "\n"
+        stdout.flushFile
     else:
       stdout.styledWriteLine fgRed, styleBright,
         "  (empty reply — no content, no tool calls)", resetStyle
