@@ -313,7 +313,7 @@ suite "supersede compaction":
     # The first write's body should be elided in the assistant message's
     # tool_call arguments. Arguments are serialized JSON strings.
     let args0 = parseJson(msgs[1]["tool_calls"][0]["function"]["arguments"].getStr)
-    check args0["body"].getStr.startsWith("[superseded")
+    check "elided" in args0["body"].getStr
     # The later write keeps its body
     let args1 = parseJson(msgs[3]["tool_calls"][0]["function"]["arguments"].getStr)
     check args1["body"].getStr == "fresh"
