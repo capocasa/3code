@@ -244,8 +244,6 @@ proc resolvePath*(path: string): string =
   if p.startsWith("~"): p = expandTilde(p)
   try: absolutePath(p) except CatchableError: p
 
-template canonPath(path: string): string = resolvePath(path)
-
 proc fingerprint(name: string, args: JsonNode): string =
   ## Returns "" when the call should NOT be tracked (e.g. bash, or
   ## write/patch/read with no path argument).
@@ -253,7 +251,7 @@ proc fingerprint(name: string, args: JsonNode): string =
   of "bash": ""
   of "write", "patch", "read":
     let path = if args != nil and args.kind == JObject: args{"path"}.getStr else: ""
-    if path == "": "" else: canonPath(path)
+    if path == "": "" else: resolvePath(path)
   else: ""
 
 proc trackCall*(t: var LoopTracker, name: string, args: JsonNode): int =
@@ -476,6 +474,9 @@ const
   SupersededMarker = "[superseded — later action on same path elided this]"
 
 proc contextWindowFor(model: string): int =
+  ## Heuristic: substring match on well-known model slugs. Cheap, and no
+  ## known collisions exist in practice. Update if a provider ships a
+  ## colliding model name.
   let m = model.toLowerAscii
   if "kimi-k2" in m: 128_000
   elif "qwen3-coder" in m or "qwen3_coder" in m: 262_144
@@ -642,6 +643,8 @@ proc applySummary*(messages: JsonNode, summary: string,
   rebuilt.add synthetic
   for m in tail: rebuilt.add m
   # Replace `messages` contents in place so callers holding the ref see it.
+  # elems is a public exported field on JArray; this is the canonical
+  # way to clear a JArray while keeping ref identity for callers.
   messages.elems.setLen 0
   for m in rebuilt: messages.add m
   collapsed
@@ -1571,7 +1574,7 @@ export DEBIAN_FRONTEND=noninteractive
       body.add "[timed out after 120s — wrap long-running commands or run in the background]"
     else:
       body.add &"[exit {code}]"
-    (body, code, "")
+    return (body, code, "")
   of akRead:
     let path = resolvePath(act.path)
     if not fileExists(path):
@@ -1639,7 +1642,7 @@ export DEBIAN_FRONTEND=noninteractive
     if capped:
       let shown = endi - start
       body.add &"\n... [file is {total} lines, {content.len} bytes; showed {shown} lines from line {start + 1}. Use read(path, offset, limit) for a specific range.] ..."
-    (body, 0, "")
+    return (body, 0, "")
   of akWrite:
     let path = resolvePath(act.path)
     if cache != nil and path in cache.state and fileExists(path):
@@ -1654,9 +1657,9 @@ export DEBIAN_FRONTEND=noninteractive
       if cache != nil:
         cache.state[path] = fileSig(path)
       let diff = computeDiff(before, act.body, path)
-      (&"wrote {path} ({act.body.len} bytes)", 0, diff)
+      return (&"wrote {path} ({act.body.len} bytes)", 0, diff)
     except CatchableError as e:
-      (&"error: write {path}: {e.msg}", 1, "")
+      return (&"error: write {path}: {e.msg}", 1, "")
   of akPatch:
     if act.edits.len == 0:
       return (&"error: patch has no edits", 1, "")
@@ -1682,9 +1685,9 @@ export DEBIAN_FRONTEND=noninteractive
       if cache != nil:
         cache.state[path] = fileSig(path)
       let diff = computeDiff(before, content, path)
-      (&"patched {path} ({applied} edit" & (if applied == 1: "" else: "s") & ")", 0, diff)
+      return (&"patched {path} ({applied} edit" & (if applied == 1: "" else: "s") & ")", 0, diff)
     except CatchableError as e:
-      (&"error: patch {path}: {e.msg}", 1, "")
+      return (&"error: patch {path}: {e.msg}", 1, "")
 
 # ---------- Display ----------
 
@@ -1864,8 +1867,10 @@ proc loadAgentsMd(start: string): string =
     dir = parent
 
 proc shellCapture(cmd: string, timeoutS = 3): string =
-  ## Run a short shell command and return its stdout (trimmed). Empty on
-  ## failure. Used purely to gather context — failures are silent.
+  ## Run a short shell command via `sh -c` and return its stdout (trimmed).
+  ## Empty on failure — used purely to gather context, so failures are silent.
+  ## `cmd` must be a literal, never user-controlled input; no shell escaping
+  ## is performed.
   let tmp = getTempDir() / ("3code_ctx_" & $getCurrentProcessId() & "_" & $epochTime().int64)
   createDir(tmp)
   let outPath = tmp / "out"
