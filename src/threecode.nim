@@ -27,9 +27,9 @@ You are 3code, the economical coding agent. One task, done right, few tokens.
 
 Tools:
 - `bash(command)` — shell; returns stdout/stderr + exit code.
-- `read(path, offset?, limit?)` — file or line range. offset is 1-indexed.
+- `read(path, offset?, limit?)` — file or line range. offset is 1-indexed. Returns lines prefixed with line number + tab (cat -n format); strip the prefix when quoting content.
 - `write(path, body)` — create or overwrite.
-- `patch(path, edits)` — exact-match search/replace on an existing file. Each `search` must be copied byte-for-byte from a prior `read`; paraphrased matches fail.
+- `patch(path, edits)` — exact-match search/replace on an existing file. Each `search` must match the file content byte-for-byte (without the line-number prefix added by `read`); paraphrased matches fail.
 
 The harness runs your tool calls and feeds results back. When done, reply with prose and no tool calls. Dry wit where earned; no forced cheer, no emoji, no "Great question!".
 
@@ -159,9 +159,11 @@ commands:
 
 input:
   single-line   just type and press Enter
-  multi-line    type three double-quotes on its own line, enter lines, close the same way
+  multi-line    end a line with `\` to continue on the next line (use `\\` for a literal trailing backslash)
   up / down     recall history; down past last clears the line
   tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
 
 recommended (cache = documented prompt caching):
   deepinfra  (cache)   qwen3-coder-480b, kimi-k2.5
@@ -198,6 +200,8 @@ type
     mutCounts*: CountTable[string]  # writes+patches only per path → Strike 2
     strike*: int             # 0/1/2
     trippedPaths*: seq[string] # paths that have already tripped this strike
+  ReadCache* = ref object
+    state*: Table[string, (Time, int)]
   Session = object
     usage: Usage
     lastPromptTokens: int
@@ -207,6 +211,7 @@ type
     created: string
     cwd: string
     loop: LoopTracker
+    readCache: ReadCache
   ApiError* = object of CatchableError
 
 const
@@ -1162,6 +1167,12 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: U
     if usage.cachedTokens > 0:
       stdout.styledWrite(styleDim, &" · cache {humanTokens(usage.cachedTokens)}", resetStyle)
     hint &" · {elapsed.int}s", resetStyle, "\n"
+    let window = contextWindowFor(p.model)
+    if window > 0 and usage.promptTokens.float > 0.7 * window.float and
+       usage.promptTokens.float <= CompactThresholdFrac * window.float:
+      stdout.styledWriteLine(styleDim,
+        &"  · context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} — auto-compaction will fire near {humanTokens(int(CompactThresholdFrac * window.float))}; :compact or :summarize to act now",
+        resetStyle)
   else:
     hint &"  ↓ ~{humanTokens(text.len div 4)} · {elapsed.int}s", resetStyle, "\n"
   stdout.flushFile
@@ -1214,6 +1225,55 @@ proc replaceFirst*(s, needle, repl: string): (string, bool) =
   if idx < 0: return (s, false)
   (s[0 ..< idx] & repl & s[idx + needle.len .. ^1], true)
 
+proc levenshteinCapped(a, b: string, cap: int): int =
+  ## Standard edit distance with an early cutoff: returns `cap+1` once the
+  ## minimum row value exceeds `cap`. Cap keeps the cost linear-ish for the
+  ## "compare against every file line" use case.
+  if a.len == 0: return b.len
+  if b.len == 0: return a.len
+  if abs(a.len - b.len) > cap: return cap + 1
+  var prev = newSeq[int](b.len + 1)
+  var curr = newSeq[int](b.len + 1)
+  for j in 0 .. b.len: prev[j] = j
+  for i in 1 .. a.len:
+    curr[0] = i
+    var rowMin = curr[0]
+    for j in 1 .. b.len:
+      let cost = if a[i-1] == b[j-1]: 0 else: 1
+      curr[j] = min(min(curr[j-1] + 1, prev[j] + 1), prev[j-1] + cost)
+      if curr[j] < rowMin: rowMin = curr[j]
+    if rowMin > cap: return cap + 1
+    swap(prev, curr)
+  prev[b.len]
+
+proc nearestLineHint(content, search: string): string =
+  ## When a patch search block didn't match, point the model at the most
+  ## similar non-blank line in the file. Operates on the search's first
+  ## non-empty line. Uses capped edit distance so the cost stays bounded
+  ## even on big files.
+  let lines = content.splitLines
+  var needle = ""
+  for l in search.splitLines:
+    let t = l.strip
+    if t.len > 0:
+      needle = t
+      break
+  if needle.len == 0 or lines.len == 0: return ""
+  let cap = max(8, needle.len div 4)
+  var bestLine = -1
+  var bestDist = high(int)
+  for i, l in lines:
+    let lt = l.strip
+    if lt.len == 0: continue
+    let d = levenshteinCapped(needle, lt, cap)
+    if d <= cap and d < bestDist:
+      bestDist = d
+      bestLine = i + 1
+  if bestLine < 0: return ""
+  let snip = lines[bestLine - 1].strip
+  let trimmed = if snip.len > 80: snip[0 ..< 77] & "..." else: snip
+  &" — nearest match in file: line {bestLine}: \"{trimmed}\""
+
 proc clipMiddle(s: string, head, tail: int): string =
   if s.len <= head + tail: s
   else: s[0 ..< head] & "\n... [truncated] ...\n" & s[^tail .. ^1]
@@ -1234,7 +1294,14 @@ proc computeDiff(before, after, label: string): string =
     else: ""
   try: removeDir(tmp) except CatchableError: discard
 
-proc runAction*(act: Action): tuple[output: string, code: int, diff: string] =
+proc newReadCache*(): ReadCache =
+  ReadCache(state: initTable[string, (Time, int)]())
+
+proc fileSig(path: string): (Time, int) =
+  try: (getLastModificationTime(path), getFileSize(path).int)
+  except CatchableError: (Time(), 0)
+
+proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code: int, diff: string] =
   case act.kind
   of akBash:
     let cmd = act.body.strip
@@ -1242,7 +1309,17 @@ proc runAction*(act: Action): tuple[output: string, code: int, diff: string] =
     createDir(tmp)
     let outPath = tmp / "out"
     let errPath = tmp / "err"
-    let wrapped = &"({cmd}) >\"{outPath}\" 2>\"{errPath}\""
+    let scriptPath = tmp / "cmd.sh"
+    # Pager-killing env keeps `git log`, `systemctl`, `man`, etc. from hanging
+    # on a TTY that doesn't exist. `timeout --foreground` caps runaways while
+    # still propagating terminal SIGINT to the child. Writing the command to
+    # a script avoids the shell-escaping minefield.
+    let script = """export PAGER=cat GIT_PAGER=cat PSQL_PAGER=cat MYSQL_PAGER=cat
+export LESS= TERM=dumb CI=1 NO_COLOR=1 GIT_TERMINAL_PROMPT=0
+export DEBIAN_FRONTEND=noninteractive
+""" & cmd & "\n"
+    writeFile(scriptPath, script)
+    let wrapped = &"timeout --foreground 120s sh \"{scriptPath}\" >\"{outPath}\" 2>\"{errPath}\""
     let code = execShellCmd(wrapped)
     let rawOut = if fileExists(outPath): readFile(outPath) else: ""
     let rawErr = if fileExists(errPath): readFile(errPath) else: ""
@@ -1259,15 +1336,42 @@ proc runAction*(act: Action): tuple[output: string, code: int, diff: string] =
     if errClip.len > 0:
       body.add "[stderr]\n" & errClip
       if not errClip.endsWith("\n"): body.add "\n"
-    body.add &"[exit {code}]"
+    if code == 124:
+      body.add "[timed out after 120s — wrap long-running commands or run in the background]"
+    else:
+      body.add &"[exit {code}]"
     (body, code, "")
   of akRead:
     let path = resolvePath(act.path)
     if not fileExists(path):
       return (&"error: {path} does not exist", 1, "")
+    # Dedupe: full reads with no offset/limit on an unchanged file don't
+    # re-send the body. Ranged reads still go through (the model may want a
+    # different slice than was returned earlier).
+    if cache != nil and act.offset <= 0 and act.limit <= 0 and path in cache.state:
+      let sig = fileSig(path)
+      if sig == cache.state[path]:
+        return (&"[unchanged since prior read of {path}; see earlier read in this session]", 0, "")
     let content = try: readFile(path)
                   except CatchableError as e:
                     return (&"error: read {path}: {e.msg}", 1, "")
+    if cache != nil:
+      cache.state[path] = fileSig(path)
+    # Binary-file guard: scan up to 512 bytes for high-density control chars
+    # (excluding \t\n\r). If too many, refuse — sending a megabyte of garbage
+    # tokens to the model is never useful.
+    block binaryCheck:
+      let scan = min(512, content.len)
+      if scan == 0: break binaryCheck
+      var bad = 0
+      for k in 0 ..< scan:
+        let b = content[k].ord
+        if b == 0:
+          bad = scan  # any NUL is a hard fail
+          break
+        if b < 32 and b notin {9, 10, 13}: inc bad
+      if bad * 20 > scan:  # > 5%
+        return (&"[binary file: {path}, {content.len} bytes — refused]", 0, "")
     const MaxLines = 2000
     const MaxBytes = 60 * 1024
     let lines = content.splitLines
@@ -1293,20 +1397,31 @@ proc runAction*(act: Action): tuple[output: string, code: int, diff: string] =
         bytes += added
         inc k
       if k < endi: endi = k
-    if act.offset <= 0 and not explicitLimit and not capped and endi == total:
-      return (content, 0, "")
-    var body = lines[start ..< endi].join("\n")
+    # Number lines as `   42\tcontent` (cat -n style) so the model can
+    # reference exact line numbers in patches and replies.
+    let lastLineNum = endi  # 1-indexed
+    let width = max(4, ($lastLineNum).len)
+    var numbered: seq[string]
+    for k in start ..< endi:
+      numbered.add align($(k + 1), width) & "\t" & lines[k]
+    var body = numbered.join("\n")
     if capped:
       let shown = endi - start
       body.add &"\n... [file is {total} lines, {content.len} bytes; showed {shown} lines from line {start + 1}. Use read(path, offset, limit) for a specific range.] ..."
     (body, 0, "")
   of akWrite:
     let path = resolvePath(act.path)
+    if cache != nil and path in cache.state and fileExists(path):
+      let sig = fileSig(path)
+      if sig != cache.state[path]:
+        return (&"error: {path} changed on disk since the last read in this session — re-read before writing", 1, "")
     try:
       let dir = parentDir(path)
       if dir != "": createDir(dir)
       let before = if fileExists(path): readFile(path) else: ""
       writeFile(path, act.body)
+      if cache != nil:
+        cache.state[path] = fileSig(path)
       let diff = computeDiff(before, act.body, path)
       (&"wrote {path} ({act.body.len} bytes)", 0, diff)
     except CatchableError as e:
@@ -1317,6 +1432,10 @@ proc runAction*(act: Action): tuple[output: string, code: int, diff: string] =
     let path = resolvePath(act.path)
     if not fileExists(path):
       return (&"error: {path} does not exist", 1, "")
+    if cache != nil and path in cache.state:
+      let sig = fileSig(path)
+      if sig != cache.state[path]:
+        return (&"error: {path} changed on disk since the last read in this session — re-read before patching", 1, "")
     try:
       let before = readFile(path)
       var content = before
@@ -1324,10 +1443,13 @@ proc runAction*(act: Action): tuple[output: string, code: int, diff: string] =
       for (s, r) in act.edits:
         let (next, ok) = replaceFirst(content, s, r)
         if not ok:
-          return (&"error: SEARCH block did not match in {path}:\n{s}", 1, "")
+          let hint = nearestLineHint(content, s)
+          return (&"error: SEARCH block did not match in {path}{hint}:\n{s}", 1, "")
         content = next
         inc applied
       writeFile(path, content)
+      if cache != nil:
+        cache.state[path] = fileSig(path)
       let diff = computeDiff(before, content, path)
       (&"patched {path} ({applied} edit" & (if applied == 1: "" else: "s") & ")", 0, diff)
     except CatchableError as e:
@@ -1492,26 +1614,139 @@ proc welcome(p: Profile): minline.LineEditor =
 
 # Read one logical input. Returns "" to mean "skip" (e.g. empty, or command
 # already handled). Sets `done` when the user wants to exit.
+proc loadAgentsMd(start: string): string =
+  ## Walk from `start` up to the filesystem root. Concatenate every
+  ## AGENTS.md found, child first (closest to cwd takes precedence in
+  ## the model's reading order). Each file is preceded by its path so
+  ## the model can attribute instructions.
+  var dir = absolutePath(start)
+  while true:
+    let candidate = dir / "AGENTS.md"
+    if fileExists(candidate):
+      try:
+        let body = readFile(candidate)
+        if result.len > 0: result.add "\n\n"
+        result.add "# " & candidate & "\n\n" & body
+      except CatchableError: discard
+    let parent = parentDir(dir)
+    if parent == dir or parent == "": break
+    dir = parent
+
+proc shellCapture(cmd: string, timeoutS = 3): string =
+  ## Run a short shell command and return its stdout (trimmed). Empty on
+  ## failure. Used purely to gather context — failures are silent.
+  let tmp = getTempDir() / ("3code_ctx_" & $getCurrentProcessId() & "_" & $epochTime().int64)
+  createDir(tmp)
+  let outPath = tmp / "out"
+  let wrapped = &"timeout {timeoutS}s sh -c \"{cmd}\" >\"{outPath}\" 2>/dev/null"
+  discard execShellCmd(wrapped)
+  result =
+    if fileExists(outPath): readFile(outPath).strip
+    else: ""
+  try: removeDir(tmp) except CatchableError: discard
+
+proc sessionPreamble(cwd: string): string =
+  ## Build a one-shot context block to prepend to the first user message of
+  ## a fresh session: cwd, git state, top-level listing, AGENTS.md content.
+  var lines: seq[string]
+  let home = getHomeDir()
+  let displayCwd =
+    if home != "" and cwd.startsWith(home): "~" & cwd[home.len .. ^1]
+    else: cwd
+  lines.add "cwd: " & displayCwd
+  let inGit = shellCapture("git rev-parse --is-inside-work-tree") == "true"
+  if inGit:
+    let branch = shellCapture("git rev-parse --abbrev-ref HEAD")
+    let dirty = shellCapture("git status --porcelain | wc -l")
+    var gitLine = "git: " & (if branch == "": "(detached)" else: branch)
+    if dirty != "" and dirty != "0":
+      gitLine.add ", " & dirty & " uncommitted"
+    lines.add gitLine
+    let recent = shellCapture("git log --oneline -3")
+    if recent != "":
+      lines.add "recent commits:"
+      for l in recent.splitLines:
+        if l.strip.len > 0: lines.add "  " & l
+  let listing = shellCapture("ls -1 --color=never | head -30")
+  if listing != "":
+    let entries = listing.splitLines.filterIt(it.strip.len > 0)
+    lines.add "files in cwd: " & entries.join(" ")
+  let notes = loadAgentsMd(cwd)
+  result = "<session_context>\n" & lines.join("\n") & "\n</session_context>"
+  if notes.len > 0:
+    result.add "\n\n<project_notes>\n" & notes & "\n</project_notes>"
+
+proc inlineAtFiles(msg: string): string =
+  ## Find @path tokens (whitespace-delimited, must follow whitespace or start
+  ## of input). For each that resolves to an existing regular file under cwd,
+  ## append `\n\n=== {path} ===\n<content>` (capped) to the message. Leave the
+  ## @token visible so the model sees the user's intent.
+  result = msg
+  var seen: seq[string]
+  var i = 0
+  while i < msg.len:
+    let prevOk = i == 0 or msg[i-1] in {' ', '\t', '\n'}
+    if prevOk and msg[i] == '@' and i + 1 < msg.len and msg[i+1] notin {' ', '\t', '\n', '@'}:
+      var j = i + 1
+      while j < msg.len and msg[j] notin {' ', '\t', '\n'}:
+        inc j
+      let raw = msg[i+1 ..< j]
+      let path = resolvePath(raw)
+      if path notin seen and fileExists(path):
+        seen.add path
+        const Cap = 64 * 1024
+        let content =
+          try:
+            let s = readFile(path)
+            if s.len > Cap: s[0 ..< Cap] & "\n... [truncated; file is " & $s.len & " bytes]"
+            else: s
+          except CatchableError as e:
+            "[error reading file: " & e.msg & "]"
+        result.add "\n\n=== " & raw & " ===\n" & content
+      i = j
+    else:
+      inc i
+
+proc isFirstUserMessage(messages: JsonNode): bool =
+  if messages == nil or messages.kind != JArray: return true
+  for m in messages:
+    if m.kind == JObject and m{"role"}.getStr == "user":
+      return false
+  true
+
+proc buildUserMessage(messages: JsonNode, raw: string): string =
+  ## Apply @file inlining always; prepend the session preamble (cwd, git
+  ## state, AGENTS.md, ls) only on the first user message of a session so
+  ## resumed conversations don't re-inject stale context.
+  let body = inlineAtFiles(raw)
+  if isFirstUserMessage(messages):
+    sessionPreamble(getCurrentDir()) & "\n\n" & body
+  else:
+    body
+
 proc readInput(editor: var minline.LineEditor, done: var bool): string =
-  let line = try: editor.readLine("> ")
+  var line = try: editor.readLine("> ")
              except EOFError:
                done = true; return ""
              except minline.InputCancelled:
                return ""
   navigatedUp = false
-  let s = line.strip
-  if s == "": return ""
-  if s == "\"\"\"":
-    var buf: seq[string]
-    while true:
-      let l = try: editor.readLine("… ")
-              except EOFError:
-                done = true; break
-              except minline.InputCancelled:
-                return ""
-      if l.strip == "\"\"\"": break
-      buf.add l
-    return buf.join("\n")
+  # Trailing unescaped `\` continues to the next line, joined with `\n`.
+  # Even count = literal trailing backslashes, no continuation.
+  while true:
+    var trailing = 0
+    var i = line.len - 1
+    while i >= 0 and line[i] == '\\':
+      inc trailing
+      dec i
+    if trailing mod 2 == 0: break
+    let cont = try: editor.readLine("… ")
+               except EOFError:
+                 done = true; break
+               except minline.InputCancelled:
+                 return ""
+    line = line[0 ..< line.len - 1] & "\n" & cont
+  if line.strip == "": return ""
   return line
 
 # ---------- Session loop ----------
@@ -1597,7 +1832,12 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
           fgYellow, bannerFor(act), resetStyle,
           fgCyan, styleBright, &"   [T{idx}]", resetStyle, "\n"
         stdout.flushFile
-        let (r, code, diff) = runAction(act)
+        if session.readCache == nil: session.readCache = newReadCache()
+        var (r, code, diff) = runAction(act, session.readCache)
+        # Empty tool results trip up some models — they treat "" as "the call
+        # broke" and retry endlessly. Substitute a marker so the model has
+        # something concrete to react to.
+        if r.strip.len == 0: r = "[no output]"
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
         printActionResult(act, r, code, idx, diff)
         # Loop guard: fingerprint the call and decide whether to annotate the
@@ -1773,6 +2013,26 @@ proc catalogUrl(name: string): string =
     if n == name: return u
   ""
 
+const KeyPrefixCatalog: seq[(string, string)] = @[
+  ("sk-ant-",  "anthropic"),
+  ("sk-or-",   "openrouter"),
+  ("sk-proj-", "openai"),
+  ("gsk_",     "groq"),
+  ("xai-",     "xai"),
+  ("pplx-",    "perplexity"),
+  ("nvapi-",   "nvidia"),
+  ("fw_",      "fireworks"),
+  ("csk-",     "cerebras"),
+  ("tgp_",     "together"),
+  ("AIza",     "google"),
+]
+
+proc inferProvider(key: string): string =
+  ## Returns catalog provider name, or "" if key prefix is not uniquely identifying.
+  for (p, n) in KeyPrefixCatalog:
+    if key.startsWith(p): return n
+  ""
+
 proc readRequired(editor: var minline.LineEditor, prompt: string,
                   hidden = false): string =
   while true:
@@ -1824,6 +2084,22 @@ proc printRecommended() =
   for line in RecommendedWizardLines:
     stdout.styledWriteLine styleDim, line, resetStyle
 
+proc printSupported() =
+  const indent = "             "  # aligns under "supported: "
+  const wrapAt = 72
+  var line = "supported: "
+  var first = true
+  for (n, _) in ProviderCatalog:
+    let piece = if first: n else: ", " & n
+    if not first and line.len + piece.len > wrapAt:
+      stdout.styledWriteLine styleDim, line & ",", resetStyle
+      line = indent & n
+    else:
+      line.add piece
+    first = false
+  if line.len > 0:
+    stdout.styledWriteLine styleDim, line, resetStyle
+
 proc readProviderEntry(editor: var minline.LineEditor): string =
   let prevCb = editor.completionCallback
   editor.completionCallback = proc(ed: LineEditor): seq[string] =
@@ -1831,99 +2107,136 @@ proc readProviderEntry(editor: var minline.LineEditor): string =
   result = readRequired(editor, "  provider name or url : ")
   editor.completionCallback = prevCb
 
+proc promptNameAndUrl(editor: var minline.LineEditor): (string, string) =
+  let entry = readProviderEntry(editor)
+  var name, url: string
+  if entry.startsWith("http://") or entry.startsWith("https://"):
+    url = entry.strip(chars = {'/', ' '})
+    let suggested = defaultNameFromUrl(url)
+    let namePrompt =
+      if suggested == "": "  name                 : "
+      else: &"  name [{suggested}]     : "
+    name = readOptional(editor, namePrompt)
+    if name == "": name = suggested
+  else:
+    name = entry
+    let cu = catalogUrl(name)
+    if cu != "":
+      let urlEntry = readOptional(editor, &"  url [{cu}]     : ")
+        .strip(chars = {'/', ' '})
+      url = if urlEntry == "": cu else: urlEntry
+    else:
+      url = readRequired(editor, "  api base url         : ")
+        .strip(chars = {'/', ' '})
+  (name, url)
+
 proc promptNewProvider(editor: var minline.LineEditor): ProviderRec =
   printRecommended()
+  printSupported()
   stdout.write "\n"
-  while true:
-    let entry = readProviderEntry(editor)
-    var name, url: string
-    if entry.startsWith("http://") or entry.startsWith("https://"):
-      url = entry.strip(chars = {'/', ' '})
-      let suggested = defaultNameFromUrl(url)
-      let namePrompt =
-        if suggested == "": "  name                 : "
-        else: &"  name [{suggested}]     : "
-      name = readOptional(editor, namePrompt)
-      if name == "": name = suggested
-    else:
-      name = entry
-      let cu = catalogUrl(name)
-      if cu != "":
-        let urlEntry = readOptional(editor, &"  url [{cu}]     : ")
-          .strip(chars = {'/', ' '})
-        url = if urlEntry == "": cu else: urlEntry
-      else:
-        url = readRequired(editor, "  api base url         : ")
-          .strip(chars = {'/', ' '})
-    if name == "":
-      stdout.styledWriteLine fgRed, "  name required", resetStyle
-      continue
-    var clash = false
-    for pr in activeProviders:
-      if pr.name == name:
-        clash = true
-        break
-    if clash:
-      stdout.styledWriteLine fgRed, &"  name already used: {name}", resetStyle
-      continue
-    var key = readRequired(editor, "  api key              : ", hidden = true)
-    hint "  fetching models...   ", resetStyle
-    stdout.flushFile
-    let available = fetchModels(url, key)
-    let prefix = commonModelPrefix(available)
-    if available.len == 0:
-      hintLn "unavailable — enter manually", resetStyle
-    else:
-      let header =
-        if prefix == "": &"{available.len} available"
-        else: &"{available.len} available (prefix: {prefix})"
-      hintLn header, resetStyle
-      for m in available:
-        let shown = if prefix != "" and m.startsWith(prefix): m[prefix.len .. ^1]
-                    else: m
-        hintLn "    ", resetStyle, shown
-    let prevCb = editor.completionCallback
-    editor.completionCallback = proc(ed: LineEditor): seq[string] =
-      for m in available:
-        if prefix != "" and m.startsWith(prefix): result.add m[prefix.len .. ^1]
-        else: result.add m
-    defer: editor.completionCallback = prevCb
-    var prev = ""
+  var key = readRequired(editor, "  api key              : ", hidden = true)
+  var name, url: string
+  let inferred = inferProvider(key)
+  if inferred != "":
+    name = inferred
+    url = catalogUrl(inferred)
+    # uniqueness: suffix -2, -3, ... if clashing
+    var candidate = name
+    var n = 2
+    while activeProviders.anyIt(it.name == candidate):
+      candidate = name & "-" & $n
+      inc n
+    name = candidate
+    hintLn "  detected: ", resetStyle, name, styleDim, " -> ", url, resetStyle
+  else:
     while true:
-      let prompt =
-        if prev == "": "  models (space-sep.)  : "
-        else: &"  models [{prev}]  : "
-      let entered = readOptional(editor, prompt)
-      let raw = if entered == "": prev else: entered
-      let models = splitModels(raw)
-      let modelsStr = models.join(" ")
-      if models.len == 0:
-        stdout.styledWriteLine fgRed, "  need at least one model", resetStyle
+      let (n, u) = promptNameAndUrl(editor)
+      if n == "":
+        stdout.styledWriteLine fgRed, "  name required", resetStyle
         continue
-      let prov = ProviderRec(name: name, url: url, key: key,
-                             modelPrefix: prefix, models: models)
-      let prof = Profile(name: name & "." & models[0], url: url,
-                         key: key, modelPrefix: prefix, model: models[0])
-      hint "  verifying... ", resetStyle
-      stdout.flushFile
-      let (ok, err) = verifyProfile(prof)
-      if ok:
-        stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
-        return prov
-      stdout.styledWriteLine fgRed, styleBright, "failed", resetStyle
-      stdout.styledWriteLine fgRed, "  " & err, resetStyle
-      prev = modelsStr
-      let choice = readOptional(editor,
-        "  [enter]=retry models, k=re-enter key : ").toLowerAscii
-      if choice == "k":
-        key = readRequired(editor,
-          "  api key              : ", hidden = true)
+      var clash = false
+      for pr in activeProviders:
+        if pr.name == n:
+          clash = true
+          break
+      if clash:
+        stdout.styledWriteLine fgRed, &"  name already used: {n}", resetStyle
+        continue
+      name = n
+      url = u
+      break
+  hint "  fetching models...   ", resetStyle
+  stdout.flushFile
+  let available = fetchModels(url, key)
+  let prefix = commonModelPrefix(available)
+  if available.len == 0:
+    hintLn "unavailable — enter manually", resetStyle
+  else:
+    let header =
+      if prefix == "": &"{available.len} available"
+      else: &"{available.len} available (prefix: {prefix})"
+    hintLn header, resetStyle
+    for m in available:
+      let shown = if prefix != "" and m.startsWith(prefix): m[prefix.len .. ^1]
+                  else: m
+      hintLn "    ", resetStyle, shown
+  let prevCb = editor.completionCallback
+  editor.completionCallback = proc(ed: LineEditor): seq[string] =
+    for m in available:
+      if prefix != "" and m.startsWith(prefix): result.add m[prefix.len .. ^1]
+      else: result.add m
+  defer: editor.completionCallback = prevCb
+  var prev = ""
+  while true:
+    let prompt =
+      if prev == "": "  models (space-sep.)  : "
+      else: &"  models [{prev}]  : "
+    let entered = readOptional(editor, prompt)
+    let raw = if entered == "": prev else: entered
+    let models = splitModels(raw)
+    let modelsStr = models.join(" ")
+    if models.len == 0:
+      stdout.styledWriteLine fgRed, "  need at least one model", resetStyle
+      continue
+    let prov = ProviderRec(name: name, url: url, key: key,
+                           modelPrefix: prefix, models: models)
+    let prof = Profile(name: name & "." & models[0], url: url,
+                       key: key, modelPrefix: prefix, model: models[0])
+    hint "  verifying... ", resetStyle
+    stdout.flushFile
+    let (ok, err) = verifyProfile(prof)
+    if ok:
+      stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
+      return prov
+    stdout.styledWriteLine fgRed, styleBright, "failed", resetStyle
+    stdout.styledWriteLine fgRed, "  " & err, resetStyle
+    prev = modelsStr
+    let choice = readOptional(editor,
+      "  [enter]=retry models, k=re-enter key : ").toLowerAscii
+    if choice == "k":
+      key = readRequired(editor,
+        "  api key              : ", hidden = true)
 
 proc promptEditProvider(editor: var minline.LineEditor,
                         existing: ProviderRec): ProviderRec =
   hintLn &"  editing '{existing.name}' (enter to keep, ctrl+d to abort)",
     resetStyle
+  stdout.styledWriteLine styleDim,
+    "  # tip: change name + url to point at a fine-tune deployment", resetStyle
   while true:
+    let newName = readOptional(editor,
+      &"  name [{existing.name}]  : ")
+    let name = if newName == "": existing.name else: newName
+    if name != existing.name:
+      var clash = false
+      for pr in activeProviders:
+        if pr.name != existing.name and pr.name == name:
+          clash = true
+          break
+      if clash:
+        stdout.styledWriteLine fgRed,
+          &"  name already used: {name}", resetStyle
+        continue
     let newUrl = readOptional(editor,
       &"  url [{existing.url}]  : ").strip(chars = {'/', ' '})
     let url = if newUrl == "": existing.url else: newUrl
@@ -1940,14 +2253,14 @@ proc promptEditProvider(editor: var minline.LineEditor,
       stdout.styledWriteLine fgRed, "  need at least one model", resetStyle
       continue
     let prefix = commonModelPrefix(models)
-    let prof = Profile(name: existing.name & "." & models[0], url: url,
+    let prof = Profile(name: name & "." & models[0], url: url,
                        key: key, modelPrefix: prefix, model: models[0])
     hint "  verifying... ", resetStyle
     stdout.flushFile
     let (ok, err) = verifyProfile(prof)
     if ok:
       stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
-      return ProviderRec(name: existing.name, url: url, key: key,
+      return ProviderRec(name: name, url: url, key: key,
                          modelPrefix: prefix, models: models)
     stdout.styledWriteLine fgRed, styleBright, "failed", resetStyle
     stdout.styledWriteLine fgRed, "  " & err, resetStyle
@@ -2002,6 +2315,7 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
   if prof.name == "":
     prof = buildProfile(activeCurrent, activeProviders, "")
   hintLn &"  added {prov.name}", resetStyle
+  showProfile(prof)
 
 proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
                      prof: var Profile) =
@@ -2111,6 +2425,29 @@ proc cmdModel(arg: string, prof: var Profile) =
     stdout.styledWriteLine fgRed,
       "  usage: :model [<name>]", resetStyle
 
+proc levenshtein(a, b: string): int =
+  if a.len == 0: return b.len
+  if b.len == 0: return a.len
+  var prev = newSeq[int](b.len + 1)
+  var curr = newSeq[int](b.len + 1)
+  for j in 0 .. b.len: prev[j] = j
+  for i in 1 .. a.len:
+    curr[0] = i
+    for j in 1 .. b.len:
+      let cost = if a[i-1] == b[j-1]: 0 else: 1
+      curr[j] = min(min(curr[j-1] + 1, prev[j] + 1), prev[j-1] + cost)
+    swap(prev, curr)
+  prev[b.len]
+
+proc nearestCommand(name: string): string =
+  var bestDist = high(int)
+  for c in CommandNames:
+    let d = levenshtein(name.toLowerAscii, c.toLowerAscii)
+    if d < bestDist:
+      bestDist = d
+      result = c
+  if bestDist > 2: result = ""
+
 proc handleCommand(cmd: string, messages: var JsonNode, session: var Session,
                    prof: var Profile, editor: var minline.LineEditor): bool =
   ## returns true if the input was a recognised command
@@ -2190,7 +2527,12 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: var Session,
           &" into a synthetic recap", resetStyle
         saveSession(session, messages)
   else:
-    stdout.styledWriteLine fgRed, "unknown command: ", c, "  (try :help)", resetStyle
+    let suggestion = nearestCommand(name)
+    if suggestion != "":
+      stdout.styledWriteLine fgRed, "unknown command: ", c,
+        fgCyan, styleBright, &"  did you mean {suggestion}?", resetStyle
+    else:
+      stdout.styledWriteLine fgRed, "unknown command: ", c, "  (try :help)", resetStyle
   return true
 
 proc usage() {.noreturn.} =
@@ -2294,7 +2636,7 @@ proc main() =
   if prompt != "" and not resume:
     let prof = loadProfile(model)
     session.profileName = prof.name
-    messages.add %*{"role": "user", "content": prompt}
+    messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
     refreshSystemPrompt(messages, prof)
     try:
       runTurns(prof, messages, session)
@@ -2323,7 +2665,7 @@ proc main() =
     replaySessionTail(messages, session.toolLog)
     stdout.write "\n"
     if prompt != "":
-      messages.add %*{"role": "user", "content": prompt}
+      messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
       refreshSystemPrompt(messages, prof)
       runTurnsInteractive(prof, messages, session)
   while true:
@@ -2340,7 +2682,7 @@ proc main() =
       stdout.styledWriteLine fgRed,
         "  no provider configured. use :provider add", resetStyle
       continue
-    messages.add %*{"role": "user", "content": line}
+    messages.add %*{"role": "user", "content": buildUserMessage(messages, line)}
     refreshSystemPrompt(messages, prof)
     runTurnsInteractive(prof, messages, session)
 

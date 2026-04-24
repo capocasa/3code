@@ -37,8 +37,17 @@ import
   std/exitprocs,
   os
 
+when defined(posix):
+  import posix
+
 if isatty(stdin):
   addExitProc(resetAttributes)
+  # Disable bracketed paste mode on exit so the user's shell doesn't inherit
+  # the paste-wrap markers (which it would then surface as literal `[200~`).
+  addExitProc(proc() {.noconv.} =
+    try: stdout.write("\e[?2004l"); stdout.flushFile()
+    except CatchableError: discard
+  )
 
 when defined(windows):
   proc putchr*(c: cint): cint {.discardable, header: "<conio.h>", importc: "_putch".}
@@ -81,6 +90,8 @@ type
     history: LineHistory
     line: Line
     mode: LineEditorMode
+    hint: string
+    prompt: string
   InputCancelled* = object of CatchableError ## Raised by the default ctrl+c handler to abort the current input line without quitting.
 
 # Internal Methods
@@ -601,8 +612,84 @@ KEYMAP["home"] = proc(ed: var LineEditor) =
   ed.goToStart()
 KEYMAP["end"] = proc(ed: var LineEditor) =
   ed.goToEnd()
+KEYMAP["ctrl+l"] = proc(ed: var LineEditor) =
+  # Clear screen, redraw prompt + current line, restore cursor position.
+  stdout.eraseScreen()
+  stdout.setCursorPos(0, 0)
+  stdout.write(ed.prompt)
+  stdout.write(ed.line.text)
+  let trail = ed.line.text.len - ed.line.position
+  if trail > 0: stdout.cursorBackward(trail)
+  stdout.flushFile()
+when defined(posix):
+  KEYMAP["ctrl+z"] = proc(ed: var LineEditor) =
+    # Suspend ourselves the same way the terminal driver would have. Tear
+    # down the modes we set (bracketed paste, SGR) so the user's shell isn't
+    # left with surprises, then re-establish them on SIGCONT and redraw.
+    stdout.write("\n\e[?2004l")
+    resetAttributes()
+    stdout.flushFile()
+    discard posix.kill(posix.getpid(), posix.SIGTSTP)
+    stdout.write("\e[?2004h")
+    stdout.write(ed.prompt)
+    stdout.write(ed.line.text)
+    let trail = ed.line.text.len - ed.line.position
+    if trail > 0: stdout.cursorBackward(trail)
+    stdout.flushFile()
 
-var keyMapProc {.threadvar.}: proc(ed: var LineEditor) 
+var keyMapProc {.threadvar.}: proc(ed: var LineEditor)
+
+proc clearHint(ed: var LineEditor) =
+  # Erase any ghost-hint characters previously rendered to the right of the
+  # cursor. Caller ensures the cursor sits at the start of the hint area
+  # (which is guaranteed by only rendering when position == text.len).
+  if ed.hint.len == 0:
+    return
+  for _ in 0 ..< ed.hint.len:
+    putchr(32)
+  stdout.cursorBackward(ed.hint.len)
+  stdout.flushFile()
+  ed.hint = ""
+
+proc readBracketedPaste(): tuple[text: string, hasNewline: bool] =
+  # Consume bytes from stdin until we see the bracketed-paste end marker
+  # `\e[201~`. Strip the marker and return the raw paste plus a flag for
+  # whether it contained a line break.
+  while true:
+    let b = getchr()
+    result.text.add b.chr
+    if result.text.endsWith("\e[201~"):
+      result.text.setLen(result.text.len - "\e[201~".len)
+      for c in result.text:
+        if c == '\n' or c == '\r':
+          result.hasNewline = true
+          return
+      return
+
+proc renderHint(ed: var LineEditor) =
+  # Show the tail of the first matching completion as dim text after the
+  # cursor, as a visual cue that tab will complete it. Only fires at end of
+  # line on a non-empty input.
+  if ed.completionCallback.isNil: return
+  if ed.line.text.len == 0: return
+  if ed.line.position != ed.line.text.len: return
+  let compl = ed.completionCallback(ed)
+  if compl.len == 0: return
+  let words = ed.line.text.split(' ')
+  let word = if words.len > 0: words[^1] else: ""
+  let wordLower = word.toLowerAscii
+  var hint = ""
+  for m in compl:
+    if m.len > word.len and m.toLowerAscii.startsWith(wordLower):
+      hint = m[word.len .. ^1]
+      break
+  if hint.len == 0: return
+  stdout.write("\e[2m")
+  stdout.write(hint)
+  stdout.write("\e[22m")
+  stdout.cursorBackward(hint.len)
+  stdout.flushFile()
+  ed.hint = hint
 
 proc readLine*(ed: var LineEditor, prompt="", hidechars = false): string  =
   ## High-level proc to be used instead of **stdin.readLine** to read a line from standard input using the specified **LineEditor** object.
@@ -614,9 +701,12 @@ proc readLine*(ed: var LineEditor, prompt="", hidechars = false): string  =
   # TODO: vim mode — add a normal-mode / insert-mode switch here with
   # hjkl/w/b/e motions, dw/cw, etc. Will likely need an `ed.vimMode` field
   # and a per-keystroke dispatch that differs by mode.
+  if not hidechars:
+    stdout.write("\e[?2004h")  # enable bracketed paste
   stdout.write(prompt)
   stdout.flushFile()
   ed.line = Line(text: "", position: 0)
+  ed.prompt = prompt
   var c = -1 # Used to manage completions
   var esc = false
   while true:
@@ -626,6 +716,7 @@ proc readLine*(ed: var LineEditor, prompt="", hidechars = false): string  =
       c = -1
     else:
       c1 = getchr()
+    ed.clearHint()
     if esc:
       esc = false
       continue
@@ -633,7 +724,8 @@ proc readLine*(ed: var LineEditor, prompt="", hidechars = false): string  =
       stdout.write("\n")
       ed.historyAdd()
       ed.historyFlush()
-      return ed.line.text 
+      if not hidechars: stdout.write("\e[?2004l")
+      return ed.line.text
     elif c1 in {8, 127}:
       KEYMAP["backspace"](ed)
     elif c1 in PRINTABLE:
@@ -688,6 +780,29 @@ proc readLine*(ed: var LineEditor, prompt="", hidechars = false): string  =
             KEYMAP["insert"](ed)
           elif c4 == 126 and c3 == 51:
             KEYMAP["delete"](ed)
+          elif c3 == 50 and c4 == 48:
+            # \e[200~ = bracketed paste start; \e[201~ = stray paste end.
+            let c5 = getchr()
+            let c6 = getchr()
+            if c5 == 48 and c6 == 126:
+              let paste = readBracketedPaste()
+              if paste.hasNewline:
+                ed.clearHint()
+                ed.line.text = ed.line.fromStart & paste.text & (if ed.line.position < ed.line.text.len: ed.line.toEnd else: "")
+                stdout.write("\n")
+                ed.historyAdd()
+                ed.historyFlush()
+                if not hidechars: stdout.write("\e[?2004l")
+                return ed.line.text
+              else:
+                for ch in paste.text:
+                  if ch.ord in PRINTABLE:
+                    if hidechars:
+                      putchr('*'.ord.cint)
+                      ed.line.text &= ch
+                      ed.line.position.inc
+                    else:
+                      ed.printChar(ch.ord)
         elif c3 == 49:
           # Modified arrows: ESC [ 1 ; <mod> <dir>, e.g. ctrl+left = ESC [ 1 ; 5 D
           let c4 = getchr()
@@ -712,6 +827,8 @@ proc readLine*(ed: var LineEditor, prompt="", hidechars = false): string  =
       else:
         esc = true
         continue
+    if not hidechars:
+      ed.renderHint()
 
 proc password*(ed: var LineEditor, prompt=""): string =
   ## Convenience method to use instead of **readLine** to hide the characters inputed by the user.
