@@ -904,7 +904,10 @@ proc spinnerLoop(label: string) {.thread.} =
   while not spinnerStop.load(moRelaxed):
     let elapsed = epochTime() - start
     try:
-      stdout.styledWrite "\r", fgCyan, styleBright, frames[i mod frames.len], resetStyle,
+      # \x1b[2K clears the entire line before redraw so shrinking labels
+      # (e.g. "12s"→"9s" turnover, or a swap to a shorter label) don't leave
+      # ghost characters from the previous frame.
+      stdout.styledWrite "\r\x1b[2K", fgCyan, styleBright, frames[i mod frames.len], resetStyle,
         fgCyan, styleBright, &"  {label} {elapsed.int}s", resetStyle
       stdout.flushFile
     except CatchableError: discard
@@ -1013,10 +1016,11 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: U
   # Decay each category independently — one step per full idle minute.
   decayLevel(serverRetryLevel, serverLastTs, t0)
   decayLevel(rateRetryLevel, rateLastTs, t0)
-  var spinLabel = &"thinking · session ↑ {humanTokens(sessionUsage.promptTokens)} · ↓ {humanTokens(sessionUsage.completionTokens)}"
-  if sessionUsage.cachedTokens > 0:
-    spinLabel.add &" · cache {humanTokens(sessionUsage.cachedTokens)}"
-  startSpinner(spinLabel)
+  # Spinner label stays short and single-purpose — session-cumulative totals
+  # belong in `:tokens`, not on every frame. The per-call readout after the
+  # turn covers the "what just happened" view; ghosting the session-totals
+  # here only invited confusion with the per-call numbers.
+  startSpinner("thinking")
   const MaxAttempts = 8
   var resp: Response
   var attempt = 0
