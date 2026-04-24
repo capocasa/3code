@@ -19,7 +19,8 @@ The name is a nod to third-party-hosted models: bring your own endpoint.
 
     nimble install https://github.com/capocasa/3code
 
-Or clone and `nimble install`.
+Or clone and `nimble install`. Requires `curl` on `PATH` for streaming
+model calls (already installed on basically every POSIX system).
 
 ## Configure
 
