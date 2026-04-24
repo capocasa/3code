@@ -155,6 +155,7 @@ commands:
   :sessions all     list every saved session (any directory)
   :compact          compact older tool output in context
   :summarize        collapse old turns into a synthetic recap (meta model call)
+  :think [on|off]   toggle the reasoning-content ticker (on by default)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -734,7 +735,7 @@ var activeProviders: seq[ProviderRec]
 
 const CommandNames = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":prompt", ":show", ":log", ":sessions", ":compact",
-                      ":summarize", ":q", ":quit", ":exit"]
+                      ":summarize", ":think", ":q", ":quit", ":exit"]
 
 proc currentProvider(): ProviderRec =
   let dot = activeCurrent.find('.')
@@ -921,6 +922,11 @@ var contentStreamedLive = false
   ## `runTurns` so the same content isn't redrawn a second time at the end
   ## of the turn.
 
+var showThinking = true
+  ## When true, reasoning_content deltas from the provider are rendered as
+  ## a one-line ticker embedded in the spinner label. Flipped by `:think on`
+  ## / `:think off`. Has no effect if the provider doesn't emit reasoning.
+
 var spinnerStop: Atomic[bool]
 var spinnerThread: Thread[string]
 
@@ -1098,7 +1104,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     "-H", "Authorization: Bearer " & key,
     "-H", "Content-Type: application/json",
     "-H", "Accept: text/event-stream",
-    "--max-time", "180",
+    "--max-time", "1200",
     "-w", "\n<<3CODE_STATUS>>%{http_code}\n<<3CODE_RETRY>>%header{retry-after}\n",
     "--data-binary", "@" & bodyFile,
     url
@@ -1116,6 +1122,20 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   var accTools = initOrderedTable[int, JsonNode]()
   var nonSSE: seq[string]
   var contentStarted = false
+  # Ticker state: rolling reasoning buffer + throttled update.
+  var thinkingBuf = ""
+  var lastTickerUpdate = 0.0
+  proc refreshTicker() =
+    let now = epochTime()
+    if now - lastTickerUpdate < 0.1: return
+    lastTickerUpdate = now
+    let termW = try: terminalWidth() except CatchableError: 80
+    # baseLabel plus spinner prefix (~4) plus " 3s" suffix (~5) plus " 💭 " (4)
+    let budget = max(20, termW - baseLabel.len - 15)
+    let tail =
+      if thinkingBuf.len > budget: thinkingBuf[thinkingBuf.len - budget .. ^1]
+      else: thinkingBuf
+    setSpinLabel(baseLabel & " · 💭 " & tail)
   let outS = p.outputStream
   var line = ""
   while outS.readLine(line):
@@ -1130,6 +1150,16 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       if choices != nil and choices.kind == JArray and choices.len > 0:
         let delta = choices[0]{"delta"}
         if delta != nil and delta.kind == JObject:
+          # Reasoning chunks arrive on `reasoning_content` (DeepSeek, Qwen,
+          # Kimi) or `reasoning` (a few others). Treat both as ticker input.
+          if showThinking and not contentStarted:
+            var r = delta{"reasoning_content"}.getStr("")
+            if r.len == 0: r = delta{"reasoning"}.getStr("")
+            if r.len > 0:
+              for ch in r:
+                thinkingBuf.add(if ch == '\n' or ch == '\r': ' ' else: ch)
+              slurped += r.len
+              refreshTicker()
           let c = delta{"content"}.getStr("")
           if c.len > 0:
             if not contentStarted:
@@ -2646,6 +2676,16 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: var Session,
       hintLn &"  · compacted {n} tool result" &
         (if n == 1: "" else: "s"), resetStyle
       saveSession(session, messages)
+  of ":think":
+    case arg.strip.toLowerAscii
+    of "", "toggle":
+      showThinking = not showThinking
+    of "on", "show", "yes": showThinking = true
+    of "off", "hide", "no": showThinking = false
+    else:
+      stdout.styledWriteLine fgRed, "  usage: :think [on|off]", resetStyle
+      return true
+    hintLn "  thinking ticker ", (if showThinking: "on" else: "off"), resetStyle
   of ":summarize":
     if prof.name == "":
       stdout.styledWriteLine fgRed,
