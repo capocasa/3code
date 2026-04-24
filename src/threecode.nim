@@ -1263,12 +1263,12 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   if accContent.len > 0 or accTools.len > 0 or accReasoning.len > 0 or
      result.usage.totalTokens > 0:
     var msg = %*{"role": "assistant", "content": accContent}
-    # DeepSeek-R1-style reasoning models REQUIRE the assistant's
-    # reasoning_content to be echoed back on the next turn. Drop this and
-    # the very next API call returns `invalid_request_error`. Other
-    # providers that ignore the field cost nothing for us to carry it.
-    if accReasoning.len > 0:
-      msg["reasoning_content"] = %accReasoning
+    # DeepSeek-R1-style reasoning models REQUIRE the `reasoning_content`
+    # field on every assistant message in history — even when the model
+    # emitted no reasoning on that turn. Drop it and the next API call
+    # fails with `invalid_request_error`. Always set it; other providers
+    # ignore the extra field.
+    msg["reasoning_content"] = %accReasoning
     if accTools.len > 0:
       var tcArr = newJArray()
       var keys = toSeq(accTools.keys).sorted
@@ -1279,7 +1279,22 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     # No SSE data — provider may have returned a plain JSON error body.
     result.errBody = nonSSE.join("\n")
 
+proc ensureReasoningField(messages: JsonNode) =
+  ## DeepSeek-R1 with thinking mode rejects any request whose history
+  ## contains an assistant message without a `reasoning_content` field.
+  ## Backfill an empty string on every assistant message missing it —
+  ## covers sessions persisted before the fix and turns where the model
+  ## emitted no reasoning. The field is unknown-but-ignored on other
+  ## OpenAI-compatible providers, so this is safe to apply unconditionally.
+  if messages == nil or messages.kind != JArray: return
+  for m in messages:
+    if m.kind != JObject: continue
+    if m{"role"}.getStr != "assistant": continue
+    if "reasoning_content" notin m:
+      m["reasoning_content"] = %""
+
 proc callModel(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
+  ensureReasoningField(messages)
   var body = %*{
     "model": p.modelPrefix & p.model,
     "messages": messages,
