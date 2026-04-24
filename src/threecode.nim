@@ -430,6 +430,17 @@ proc firstUserMessage(messages: JsonNode): string =
       return m{"content"}.getStr("")
   ""
 
+proc collapseHome(path: string): string =
+  ## Collapse the user's home dir prefix to `~/`. Guards against the
+  ## `getHomeDir()` trailing-slash footgun that produced things like
+  ## `~e/hellodeepseek` for `/home/carlo/e/hellodeepseek`.
+  let home = getHomeDir()
+  if home.len == 0 or not path.startsWith(home):
+    return path
+  var rel = path[home.len .. ^1]
+  while rel.startsWith("/"): rel = rel[1 .. ^1]
+  if rel.len == 0: "~" else: "~/" & rel
+
 proc printSessionList(paths: seq[string], currentPath: string, showCwd: bool) =
   for p in paths:
     let id = sessionIdFromPath(p)
@@ -449,7 +460,7 @@ proc printSessionList(paths: seq[string], currentPath: string, showCwd: bool) =
       elif first.len > 50: "  " & first[0 ..< 47] & "..."
       else: "  " & first
     let cwdStr =
-      if showCwd and cwd != "": "  " & cwd.replace(getHomeDir(), "~/")
+      if showCwd and cwd != "": "  " & collapseHome(cwd)
       else: ""
     hint &"  {mark} ", resetStyle, id, fgCyan, styleBright,
       &"   ({count} msg" & (if count == 1: "" else: "s") & ")",
@@ -1077,7 +1088,13 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToken
   let spinLabel =
     if window > 0 and lastPromptTokens > 0:
       let pct = int(lastPromptTokens.float / window.float * 100.0)
-      &"thinking · ctx {pct}%"
+      let glyph =
+        if pct < 20: "○"
+        elif pct < 40: "◔"
+        elif pct < 60: "◑"
+        elif pct < 80: "◕"
+        else: "●"
+      &"thinking · {glyph} {pct}%"
     else:
       "thinking"
   startSpinner(spinLabel)
@@ -1660,10 +1677,7 @@ proc sessionPreamble(cwd: string): string =
   ## Build a one-shot context block to prepend to the first user message of
   ## a fresh session: cwd, git state, top-level listing, AGENTS.md content.
   var lines: seq[string]
-  let home = getHomeDir()
-  let displayCwd =
-    if home != "" and cwd.startsWith(home): "~" & cwd[home.len .. ^1]
-    else: cwd
+  let displayCwd = collapseHome(cwd)
   lines.add "cwd: " & displayCwd
   let inGit = shellCapture("git rev-parse --is-inside-work-tree") == "true"
   if inGit:
