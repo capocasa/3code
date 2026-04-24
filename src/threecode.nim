@@ -1,4 +1,4 @@
-import std/[httpclient, json, os, strutils, strformat, sequtils, streams, terminal, parsecfg, parseopt, times, atomics, critbits, uri, algorithm, tables]
+import std/[httpclient, json, os, osproc, locks, strutils, strformat, sequtils, streams, terminal, parsecfg, parseopt, times, atomics, critbits, uri, algorithm, tables]
 import threecode/minline
 import threecode/web
 
@@ -918,12 +918,32 @@ var interrupted = false
 var spinnerStop: Atomic[bool]
 var spinnerThread: Thread[string]
 
-proc spinnerLoop(label: string) {.thread.} =
+# Shared mutable spinner label. The spinner thread reads it every frame; the
+# main thread appends the streamed token counter as chunks arrive.
+var
+  spinLabelLock: Lock
+  spinLabelShared: string
+spinLabelLock.initLock()
+
+proc setSpinLabel(s: string) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    acquire spinLabelLock
+    spinLabelShared = s
+    release spinLabelLock
+
+proc getSpinLabel(): string {.gcsafe.} =
+  {.cast(gcsafe).}:
+    acquire spinLabelLock
+    result = spinLabelShared
+    release spinLabelLock
+
+proc spinnerLoop(unused: string) {.thread.} =
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
   let start = epochTime()
   var i = 0
   while not spinnerStop.load(moRelaxed):
     let elapsed = epochTime() - start
+    let label = getSpinLabel()
     try:
       # \x1b[2K clears the entire line before redraw so shrinking labels
       # (e.g. "12s"→"9s" turnover, or a swap to a shorter label) don't leave
@@ -940,8 +960,9 @@ proc spinnerLoop(label: string) {.thread.} =
   except CatchableError: discard
 
 proc startSpinner(label: string) =
+  if label.len > 0: setSpinLabel(label)
   spinnerStop.store(false, moRelaxed)
-  createThread(spinnerThread, spinnerLoop, label)
+  createThread(spinnerThread, spinnerLoop, "")
 
 proc stopSpinner() =
   spinnerStop.store(true, moRelaxed)
@@ -1018,74 +1039,159 @@ proc decayLevel(level: var int, lastTs: var float, now: float) =
       level = max(0, level - idleMin)
       lastTs = now
 
-# ---- Threaded HTTP plumbing (for ctrl-c during in-flight request) ----
+# ---- Streaming HTTP via curl subprocess ----
 #
-# The HTTP call is a blocking C call; SIGINT sets `interrupted` but the main
-# thread can't see it until the call returns. So we hand the request to a
-# worker thread and poll `httpDone` from the main thread on a short sleep,
-# checking `interrupted` each tick.
-#
-# Invariants:
-# - Only one HTTP request is ever in flight at a time (callModel runs from
-#   the main event loop sequentially). The three globals below are therefore
-#   safe to treat as single-owner.
-# - The worker writes `httpOutcome` *before* storing `true` into `httpDone`
-#   (release). The main thread loads `httpDone` with moAcquire, so once it
-#   observes `true`, the outcome write is fully visible.
-# - On interrupt, we deliberately DO NOT joinThread — the worker keeps
-#   running until the underlying socket times out or the server answers.
-#   That leaks a thread worth of resources; acceptable for a rare keyboard
-#   interrupt, and we're about to return to the REPL anyway.
-type HttpOutcome = object
+# Nim's sync httpclient can't stream; its async one is awkward to mix with
+# our threaded spinner. `curl --no-buffer` with SSE does streaming cleanly,
+# gives us TLS for free, and dies on SIGINT without any extra plumbing
+# (terminal SIGINT reaches the whole foreground process group). The
+# subprocess reads its body from a file to sidestep shell quoting, and a
+# trailing `-w` marker line carries the HTTP status back after the body.
+type StreamOutcome = object
   statusCode: int
-  body: string
   retryAfter: string
-  errMsg: string     # non-empty on transport-level failure (no response)
+  errMsg: string          # non-empty on transport-level failure
+  errBody: string         # non-SSE response body (error responses)
+  assistantMsg: JsonNode  # reconstructed from SSE when status=200
+  usage: Usage
 
-var
-  httpWorker: Thread[tuple[url, key, bodyStr: string, timeoutMs: int]]
-  httpOutcome: HttpOutcome
-  httpDone: Atomic[bool]
+proc accumulateToolCall(dst: JsonNode, delta: JsonNode) =
+  # Merge a tool_calls delta chunk into the accumulator slot. OpenAI-family
+  # providers emit `arguments` as partial strings across chunks; concatenate.
+  if delta.kind != JObject: return
+  if "id" in delta and delta["id"].getStr != "":
+    dst["id"] = delta["id"]
+  if "type" in delta and delta["type"].getStr != "":
+    dst["type"] = delta["type"]
+  let fn = delta{"function"}
+  if fn == nil or fn.kind != JObject: return
+  if fn{"name"}.getStr("") != "":
+    dst["function"]["name"] = %(dst["function"]["name"].getStr & fn{"name"}.getStr)
+  if "arguments" in fn:
+    dst["function"]["arguments"] = %(dst["function"]["arguments"].getStr & fn{"arguments"}.getStr(""))
 
-proc runHttpRequest(ctx: tuple[url, key, bodyStr: string, timeoutMs: int]) {.thread.} =
-  # Fresh client per call — HttpClient isn't safe to share across threads.
-  var outcome = HttpOutcome()
+proc streamHttp(url, key, bodyStr: string, baseLabel: string,
+                slurped: var int): StreamOutcome =
+  # Post `bodyStr` to `url` and consume SSE chunks until `[DONE]`. `slurped`
+  # accumulates an approximate output-character count so the caller can
+  # show a live "↓ Nk" on the spinner; update it inline as chunks arrive.
+  let tmp = getTempDir() / ("3code_stream_" & $getCurrentProcessId() & "_" & $epochTime().int64)
+  createDir(tmp)
+  let bodyFile = tmp / "body.json"
+  writeFile(bodyFile, bodyStr)
+  defer: (try: removeDir(tmp) except CatchableError: discard)
+
+  let args = @[
+    "--no-buffer", "-sS", "-X", "POST",
+    "-H", "Authorization: Bearer " & key,
+    "-H", "Content-Type: application/json",
+    "-H", "Accept: text/event-stream",
+    "--max-time", "180",
+    "-w", "\n<<3CODE_STATUS>>%{http_code}\n<<3CODE_RETRY>>%header{retry-after}\n",
+    "--data-binary", "@" & bodyFile,
+    url
+  ]
+
+  var p: Process
   try:
-    let c = newHttpClient(timeout = ctx.timeoutMs)
-    defer: c.close()
-    c.headers = newHttpHeaders({
-      "Authorization": "Bearer " & ctx.key,
-      "Content-Type": "application/json"
-    })
-    let r = c.request(ctx.url, HttpPost, ctx.bodyStr)
-    outcome.statusCode = r.code.int
-    outcome.body = r.body
-    outcome.retryAfter = $r.headers.getOrDefault("retry-after")
-  except CatchableError as e:
-    outcome.errMsg = e.msg
-  {.cast(gcsafe).}:
-    httpOutcome = outcome
-    httpDone.store(true, moRelease)
+    p = startProcess("curl", args = args,
+                     options = {poUsePath, poStdErrToStdOut})
+  except OSError as e:
+    result.errMsg = "curl launch failed: " & e.msg
+    return
+
+  var accContent = ""
+  var accTools = initOrderedTable[int, JsonNode]()
+  var nonSSE: seq[string]
+  let outS = p.outputStream
+  var line = ""
+  while outS.readLine(line):
+    if interrupted:
+      try: p.terminate() except OSError: discard
+      break
+    if line.startsWith("data: "):
+      let payload = line["data: ".len .. ^1]
+      if payload.strip == "[DONE]": continue
+      let j = try: parseJson(payload) except CatchableError: continue
+      let choices = j{"choices"}
+      if choices != nil and choices.kind == JArray and choices.len > 0:
+        let delta = choices[0]{"delta"}
+        if delta != nil and delta.kind == JObject:
+          let c = delta{"content"}.getStr("")
+          if c.len > 0:
+            accContent &= c
+            slurped += c.len
+            setSpinLabel(baseLabel & &" · ↓ {humanTokens(slurped div 4)}")
+          let tcDelta = delta{"tool_calls"}
+          if tcDelta != nil and tcDelta.kind == JArray:
+            for tc in tcDelta:
+              let idx = tc{"index"}.getInt(0)
+              if idx notin accTools:
+                accTools[idx] = %*{
+                  "id": "", "type": "function",
+                  "function": {"name": "", "arguments": ""}
+                }
+              accumulateToolCall(accTools[idx], tc)
+              # tool args bytes also count as "output" for slurp feel
+              let fn = tc{"function"}
+              if fn != nil:
+                slurped += fn{"arguments"}.getStr("").len
+                setSpinLabel(baseLabel & &" · ↓ {humanTokens(slurped div 4)}")
+      let u = j{"usage"}
+      if u != nil and u.kind == JObject:
+        result.usage = parseUsage(u)
+    elif line.startsWith("<<3CODE_STATUS>>"):
+      let s = line["<<3CODE_STATUS>>".len .. ^1].strip
+      result.statusCode = try: parseInt(s) except ValueError: 0
+    elif line.startsWith("<<3CODE_RETRY>>"):
+      result.retryAfter = line["<<3CODE_RETRY>>".len .. ^1].strip
+    elif line.startsWith("event:") or line.strip.len == 0 or
+         line.startsWith(": "):  # SSE comment
+      discard
+    else:
+      nonSSE.add line
+
+  let exitCode =
+    try: p.waitForExit()
+    except OSError: -1
+  try: p.close() except OSError: discard
+
+  if interrupted:
+    result.errMsg = "interrupted by user"
+    return
+  if exitCode != 0 and exitCode != -1:
+    result.errMsg = "curl exit " & $exitCode &
+      (if nonSSE.len > 0: ": " & nonSSE.join("\n") else: "")
+    return
+
+  # Build assistant message if we saw any SSE content.
+  if accContent.len > 0 or accTools.len > 0 or result.usage.totalTokens > 0:
+    var msg = %*{"role": "assistant", "content": accContent}
+    if accTools.len > 0:
+      var tcArr = newJArray()
+      var keys = toSeq(accTools.keys).sorted
+      for k in keys: tcArr.add accTools[k]
+      msg["tool_calls"] = tcArr
+    result.assistantMsg = msg
+  else:
+    # No SSE data — provider may have returned a plain JSON error body.
+    result.errBody = nonSSE.join("\n")
 
 proc callModel(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   var body = %*{
     "model": p.modelPrefix & p.model,
     "messages": messages,
-    "stream": false
+    "stream": true,
+    "stream_options": {"include_usage": true}
   }
   body["tools"] = ToolsJson
   body["tool_choice"] = %"auto"
   let bodyStr = $body
   let t0 = epochTime()
-  # Decay each category independently — one step per full idle minute.
   decayLevel(serverRetryLevel, serverLastTs, t0)
   decayLevel(rateRetryLevel, rateLastTs, t0)
-  # Spinner shows context-window pressure (lastPromptTokens / window) rather
-  # than session-cumulative totals — the point is to give the user a "how
-  # deep am I" feel that goes DOWN when :compact fires, not a monotonic
-  # running-total guilt meter. Session cumulatives live in `:tokens`.
   let window = contextWindowFor(p.model)
-  let spinLabel =
+  let baseLabel =
     if window > 0 and lastPromptTokens > 0:
       let pct = int(lastPromptTokens.float / window.float * 100.0)
       let glyph =
@@ -1097,72 +1203,57 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToken
       &"thinking · {glyph} {pct}%"
     else:
       "thinking"
-  startSpinner(spinLabel)
+  setSpinLabel(baseLabel)
+  startSpinner("")
   const MaxAttempts = 8
-  var finalBody = ""
+  var outcome: StreamOutcome
   var attempt = 0
   while true:
     inc attempt
-    # Launch the HTTP request on a worker and poll for completion so ctrl-c
-    # during a blocking network call lands promptly instead of on wake-up.
-    httpDone.store(false, moRelaxed)
-    httpOutcome = HttpOutcome()
-    createThread(httpWorker, runHttpRequest,
-      (url: p.url & "/chat/completions", key: p.key,
-       bodyStr: bodyStr, timeoutMs: 180_000))
-    while not httpDone.load(moAcquire):
-      if interrupted:
-        # Do NOT joinThread — the worker will finish in the background when
-        # the socket times out or server answers. We're giving up on its
-        # result; the process usually lives long enough to clean up.
-        stopSpinner()
-        raise newException(ApiError, "interrupted by user")
-      sleep 50
-    let errMsg0 = httpOutcome.errMsg
-    let code = httpOutcome.statusCode
-    let respBody = httpOutcome.body
-    let respRetryAfter = httpOutcome.retryAfter
-    var errMsg = errMsg0
-    if errMsg != "":
-      errMsg = "network: " & errMsg
-    let netFailed = errMsg0 != ""
+    var slurped = 0
+    outcome = streamHttp(p.url & "/chat/completions", p.key, bodyStr,
+                        baseLabel, slurped)
+    if outcome.errMsg == "interrupted by user":
+      stopSpinner()
+      raise newException(ApiError, "interrupted by user")
+    let netFailed = outcome.errMsg != "" and outcome.assistantMsg == nil
+    let code = outcome.statusCode
     let category =
       if netFailed: "server"
       else:
         case code
+        of 0: (if outcome.assistantMsg != nil: "" else: "server")
+        of 200: ""
         of 429: "rate"
         of 500, 502, 503, 504: "server"
         else: ""
     let retryable = category != ""
-    if retryable and errMsg == "":
-      errMsg = "api " & $code
-    if errMsg == "" or attempt >= MaxAttempts or not retryable:
+    var errMsg = outcome.errMsg
+    if errMsg == "" and retryable: errMsg = "api " & $code
+    if not retryable:
       stopSpinner()
-      if errMsg != "":
+      if outcome.assistantMsg == nil:
         raise newException(ApiError,
-          errMsg & (if code != 0: ": " & respBody else: ""))
-      finalBody = respBody
+          errMsg & (if outcome.errBody.len > 0: ": " & outcome.errBody else: ""))
       break
-    let retryAfter =
-      if not netFailed:
-        try: parseInt(respRetryAfter) except CatchableError: 0
-      else: 0
+    if attempt >= MaxAttempts:
+      stopSpinner()
+      raise newException(ApiError,
+        errMsg & (if outcome.errBody.len > 0: ": " & outcome.errBody else: ""))
+    let retryAfter = try: parseInt(outcome.retryAfter) except CatchableError: 0
     let backoff =
       if retryAfter > 0:
         retryAfter
       elif category == "rate":
-        # 429: capacity/rate crunches last minutes, not seconds. Cap at 90s.
-        # "busy"-style 429s with no Retry-After start at ≥16s (max level 4).
-        let isBusy = "busy" in respBody or "capacity" in respBody or
-                     "overloaded" in respBody
+        let isBusy = "busy" in outcome.errBody or
+                     "capacity" in outcome.errBody or
+                     "overloaded" in outcome.errBody
         let base = if isBusy: max(rateRetryLevel, 4) else: rateRetryLevel
         min(1 shl base, 90)
       else:
-        # network / 5xx: short-lived server hiccup, 16s cap is plenty.
         min(1 shl serverRetryLevel, 16)
     stopSpinner()
     stderr.writeLine &"3code: {errMsg}; retry {attempt + 1}/{MaxAttempts} in {backoff}s"
-    # Chunk the sleep so ctrl-c lands within ~100ms instead of up to 90s.
     block wait:
       var remaining = backoff * 1000
       while remaining > 0:
@@ -1172,39 +1263,32 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToken
         remaining -= step
     if interrupted:
       raise newException(ApiError, "interrupted by user during retry backoff")
-    startSpinner(&"retry {attempt + 1}/{MaxAttempts}")
+    setSpinLabel(&"retry {attempt + 1}/{MaxAttempts}")
+    startSpinner("")
     if category == "rate":
       inc rateRetryLevel
       rateLastTs = epochTime()
     else:
       inc serverRetryLevel
       serverLastTs = epochTime()
-  let text = finalBody
+  usage = outcome.usage
   let elapsed = epochTime() - t0
-  let j = parseJson(text)
-  if "error" in j:
-    raise newException(ApiError, "api error: " & $j["error"])
-  if "usage" in j:
-    usage = parseUsage(j["usage"])
   if usage.totalTokens > 0:
-    # ↑ is fresh (non-cached) input — the portion that actually reached the
-    # model's attention. ↺ is the cache-hit input, shown dim. ↓ is output.
     let fresh = max(0, usage.promptTokens - usage.cachedTokens)
     hint &"  ↑ {humanTokens(fresh)}"
     if usage.cachedTokens > 0:
       stdout.styledWrite(styleDim, &" ↺ {humanTokens(usage.cachedTokens)}", resetStyle)
     hint &" · ↓ {humanTokens(usage.completionTokens)} · {elapsed.int}s",
       resetStyle, "\n"
-    let window = contextWindowFor(p.model)
     if window > 0 and usage.promptTokens.float > 0.7 * window.float and
        usage.promptTokens.float <= CompactThresholdFrac * window.float:
       stdout.styledWriteLine(styleDim,
         &"  · context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} — auto-compaction will fire near {humanTokens(int(CompactThresholdFrac * window.float))}; :compact or :summarize to act now",
         resetStyle)
   else:
-    hint &"  ↓ ~{humanTokens(text.len div 4)} · {elapsed.int}s", resetStyle, "\n"
+    hint &"  · {elapsed.int}s", resetStyle, "\n"
   stdout.flushFile
-  j["choices"][0]["message"]
+  outcome.assistantMsg
 
 proc verifyProfile(p: Profile): (bool, string) =
   let client = newHttpClient(timeout = 20000)
