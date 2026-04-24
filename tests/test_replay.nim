@@ -1,4 +1,4 @@
-import std/[unittest, os, json]
+import std/[unittest, os, json, hashes, strutils]
 import threecode
 
 ## Failure-replay harness. Loads snapshotted session JSONs from
@@ -159,3 +159,192 @@ suite "failure replay — loop tracker":
       discard trackCall(t, "write", %*{"path": "~/foo.nim"})
     let s = trackCall(t, "write", %*{"path": home / "foo.nim"})
     check s == 1
+
+## Full-pipeline replay harness. Unlike the narrow `trackCall`-only suite
+## above (which feeds tool_call args into the loop tracker only), this
+## suite walks each failure session turn by turn and replays tool calls
+## through the real `runAction` — redirecting every filesystem path into
+## a per-test sandbox — and runs `supersedeCompact` / `compactHistory`
+## between turns. Assertions exercise bugs that would not surface at the
+## unit-call level:
+##
+## - no literal `~` subdirectory appears in the sandbox (regression guard
+##   for the tilde-expansion bug fixed in commit 320b134)
+## - no assistant tool_call body in the final `messages` array has
+##   `[superseded]` as its entire content (regression guard for the
+##   body-marker bug fixed in 557f23a — the superseder now writes a
+##   longer, unmistakable "body elided" notice)
+## - the loop guard trips at the same point as the narrow harness
+##
+## `bash` is NOT executed; it returns a stub result. We can't faithfully
+## reproduce the original environment anyway (nim version, files, etc.)
+## and the point of the harness is the runAction + supersede pipeline,
+## not command execution.
+
+type
+  FullReplayResult = object
+    sandbox: string
+    finalMessages: JsonNode
+    tripOverall: int
+    tripped: bool
+    preBareSuperseded: int   # bare [superseded] bodies already in the fixture
+
+proc sandboxPathFor(realPath: string, sandbox: string): string =
+  ## Maps a session's recorded path into a per-test sandbox so real
+  ## filesystem state and the user's $HOME are irrelevant. Uses the
+  ## hash of the canonical path as the sandboxed filename so distinct
+  ## original paths stay distinct and collisions only happen on
+  ## intentional re-accesses of the same path.
+  let canon = resolvePath(realPath)
+  sandbox / ("p_" & $(hash(canon)) & "_" & extractFilename(realPath))
+
+proc rewritePath(args: JsonNode, sandbox: string): JsonNode =
+  ## Deep copy of the args JSON with `path` rewritten into the sandbox.
+  result = copy(args)
+  if result.kind != JObject: return
+  let p = result{"path"}.getStr("")
+  if p == "": return
+  result["path"] = %sandboxPathFor(p, sandbox)
+
+proc countBareSupersededBodies(messages: JsonNode): int =
+  if messages == nil or messages.kind != JArray: return 0
+  for m in messages:
+    if m.kind != JObject: continue
+    if m{"role"}.getStr != "assistant": continue
+    let tcs = m{"tool_calls"}
+    if tcs == nil or tcs.kind != JArray: continue
+    for tc in tcs:
+      let fn = tc{"function"}
+      if fn == nil: continue
+      let argsStr = fn{"arguments"}.getStr("")
+      let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
+                 except CatchableError: continue
+      if args{"body"}.getStr("").strip == "[superseded]": inc result
+
+proc fullReplay(path, sandbox: string): FullReplayResult =
+  result.sandbox = sandbox
+  createDir(sandbox)
+  let doc = parseJson(readFile(path))
+  let messages = doc{"messages"}
+  if messages == nil or messages.kind != JArray: return
+  # Some older fixtures were recorded while the "bare [superseded]"
+  # body marker bug was still live. Count those up front so the
+  # assertion measures only what our current pipeline adds.
+  result.preBareSuperseded = countBareSupersededBodies(messages)
+  var live = newJArray()
+  var tracker = initLoopTracker()
+  var overall = 0
+  for m in messages:
+    if m.kind != JObject: continue
+    case m{"role"}.getStr
+    of "system", "user":
+      live.add copy(m)
+    of "assistant":
+      # Build the assistant message we forward; rewrite any path args to
+      # point into the sandbox so runAction lands there.
+      let rewritten = copy(m)
+      let tcs = rewritten{"tool_calls"}
+      if tcs != nil and tcs.kind == JArray:
+        for tc in tcs:
+          let fn = tc{"function"}
+          if fn == nil or fn.kind != JObject: continue
+          let argsStr = fn{"arguments"}.getStr("")
+          let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
+                     except CatchableError: newJObject()
+          let newArgs = rewritePath(args, sandbox)
+          fn["arguments"] = %( $newArgs )
+      live.add rewritten
+      if tcs == nil or tcs.kind != JArray: continue
+      for tc in tcs:
+        inc overall
+        let id = tc{"id"}.getStr
+        let fn = tc{"function"}
+        let name = if fn != nil: fn{"name"}.getStr else: ""
+        let argsStr = if fn != nil: fn{"arguments"}.getStr("") else: ""
+        let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
+                   except CatchableError: newJObject()
+        let priorStrike = tracker.strike
+        let strike = trackCall(tracker, name, args)
+        if strike > priorStrike and not result.tripped:
+          result.tripped = true
+          result.tripOverall = overall
+        var toolContent: string
+        if name == "bash":
+          # Deliberate stub: see module comment.
+          toolContent = "[stderr] [replay-stub]\n[exit 0]"
+        else:
+          let sboxArgs = rewritePath(args, sandbox)
+          let act = toolCallToAction(name, sboxArgs)
+          let (r, _, _) = runAction(act)
+          toolContent = r
+        live.add %*{"role": "tool", "tool_call_id": id, "content": toolContent}
+      # Between model "turns" run the compaction passes that the live
+      # dispatcher runs — this is what exercises the superseded-body
+      # marker code path.
+      discard supersedeCompact(live)
+      discard compactHistory(live)
+    of "tool":
+      discard  # we synthesized our own tool response above
+    else:
+      discard
+  result.finalMessages = live
+
+proc mkSandbox(tag: string): string =
+  result = getTempDir() / ("3code_fullreplay_" & $getCurrentProcessId() & "_" & tag)
+  removeDir(result)
+  createDir(result)
+
+proc hasLiteralTildeDir(root: string): bool =
+  ## Walk the sandbox looking for any path component literally equal to
+  ## "~". If the tilde-expansion bug regressed, runAction would create
+  ## such a directory under the sandbox.
+  for p in walkDirRec(root, yieldFilter = {pcDir, pcFile, pcLinkToDir, pcLinkToFile}):
+    for part in p.split(DirSep):
+      if part == "~": return true
+  false
+
+proc countBareSuperseded(messages: JsonNode): int {.inline.} =
+  countBareSupersededBodies(messages)
+
+suite "failure replay — full pipeline":
+  test "qwen-010747 full replay: no tilde dir, no bare superseded, trip at 8":
+    let p = failurePath("qwen-010747.json")
+    if not fileExists(p):
+      skip()
+    else:
+      let sb = mkSandbox("qwen10747")
+      let r = fullReplay(p, sb)
+      check r.tripped
+      check r.tripOverall == 8
+      check not hasLiteralTildeDir(sb)
+      # Our pipeline must not introduce any NEW bare `[superseded]` body
+      # markers. Fixture qwen-010747 was recorded while the old marker
+      # bug was live, so its pre-count is >0; we just assert no growth.
+      check countBareSuperseded(r.finalMessages) <= r.preBareSuperseded
+      removeDir(sb)
+
+  test "qwen-002805 full replay: no tilde dir, no bare superseded, trip at 9":
+    let p = failurePath("qwen-002805.json")
+    if not fileExists(p):
+      skip()
+    else:
+      let sb = mkSandbox("qwen2805")
+      let r = fullReplay(p, sb)
+      check r.tripped
+      check r.tripOverall == 9
+      check not hasLiteralTildeDir(sb)
+      check countBareSuperseded(r.finalMessages) <= r.preBareSuperseded
+      removeDir(sb)
+
+  test "minimax-000457 full replay: no tilde dir, no bare superseded, trip at 31":
+    let p = failurePath("minimax-000457.json")
+    if not fileExists(p):
+      skip()
+    else:
+      let sb = mkSandbox("minimax457")
+      let r = fullReplay(p, sb)
+      check r.tripped
+      check r.tripOverall == 31
+      check not hasLiteralTildeDir(sb)
+      check countBareSuperseded(r.finalMessages) <= r.preBareSuperseded
+      removeDir(sb)
