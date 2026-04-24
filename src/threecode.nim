@@ -1207,7 +1207,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
               # beat rather than content overwriting where the spinner was.
               setSpinTicker("")
               stopSpinner()
-              stdout.write("\n\e[2m")  # dim; spinner area becomes a gap
+              stdout.write("\n")  # visual beat where the spinner was
               contentStarted = true
             accContent &= c
             slurped += c.len
@@ -1249,7 +1249,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
 
   if contentStarted:
     if not accContent.endsWith("\n"): stdout.write("\n")
-    stdout.write("\e[0m")
+    stdout.write("\n")  # trailing blank line after assistant reply
     stdout.flushFile()
     contentStreamedLive = true
 
@@ -1717,14 +1717,12 @@ proc trimTrailingBlank(lines: var seq[string]) =
     lines.setLen lines.len - 1
 
 proc printLine(l: string) =
-  if l.startsWith("$ "):
-    stdout.styledWriteLine styleDim, "    ", l, resetStyle
-  elif l == "[exit 0]":
+  if l == "[exit 0]":
     discard
   elif l.startsWith("[exit "):
-    stdout.styledWriteLine styleDim, "    ", l, resetStyle
+    stdout.styledWriteLine styleDim, l, resetStyle
   else:
-    stdout.styledWriteLine styleDim, "    ", l, resetStyle
+    stdout.styledWriteLine styleDim, l, resetStyle
 
 proc printBashCompact(res: string, idx: int) =
   var lines = res.splitLines
@@ -1787,9 +1785,9 @@ proc printActionResult(act: Action, res: string, code: int, idx: int, diff = "")
     printBashCompact(res, idx)
   else:
     if code == 0:
-      stdout.styledWriteLine styleDim, "    ", res, resetStyle
+      stdout.styledWriteLine styleDim, res, resetStyle
     else:
-      stdout.styledWriteLine fgRed, "    ", res, resetStyle
+      stdout.styledWriteLine fgRed, res, resetStyle
   if diff.len > 0:
     printDiff(diff)
 
@@ -1828,6 +1826,7 @@ proc showProfile(p: Profile) =
   stdout.styledWriteLine fgCyan, styleBright, "  model    ", resetStyle, p.model
 
 proc welcome(p: Profile): minline.LineEditor =
+  stdout.write "\n"
   stdout.styledWriteLine fgCyan, styleBright, "  ╭─╮"
   stdout.styledWriteLine fgCyan, styleBright, "   ─┤  ", resetStyle, fgWhite, styleBright, "3code ", resetStyle, fgCyan, styleBright, "v" & Version,
     resetStyle, styleDim, "   the economical coding agent"
@@ -1954,7 +1953,7 @@ proc buildUserMessage(messages: JsonNode, raw: string): string =
     body
 
 proc readInput(editor: var minline.LineEditor, done: var bool): string =
-  var line = try: editor.readLine("> ")
+  var line = try: editor.readLine("❯ ")
              except EOFError:
                done = true; return ""
              except minline.InputCancelled:
@@ -1969,7 +1968,7 @@ proc readInput(editor: var minline.LineEditor, done: var bool): string =
       inc trailing
       dec i
     if trailing mod 2 == 0: break
-    let cont = try: editor.readLine("… ")
+    let cont = try: editor.readLine("  ")
                except EOFError:
                  done = true; break
                except minline.InputCancelled:
@@ -2034,7 +2033,7 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
       else: newJArray()
     if toolCalls.len > 0:
       if content.strip.len > 0 and not streamedLive:
-        stdout.styledWrite styleDim, content, resetStyle, "\n"
+        stdout.write content & "\n\n"
         stdout.flushFile
       var halt = false  # Strike-2 trip: stop further tool calls this turn
       for tc in toolCalls:
@@ -2059,11 +2058,11 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
             newJObject()
         let act = toolCallToAction(name, args)
         let idx = session.toolLog.len + 1
-        # Pre-exec banner in default colour — "running" signal. Overwritten
-        # after the call returns with an outcome-coloured banner (green ok,
-        # red error) plus elapsed time. No explicit "spinner" during tool
-        # execution; bash is sync and short enough.
-        stdout.write "  › " & bannerFor(act) & "\n"
+        # Pre-exec: dim bullet + dim banner text — "in flight" signal. After
+        # the call returns we overwrite the line so the bullet only picks up
+        # a colour (green success, red error); the banner text itself stays
+        # dim so the colour acts as a glance cue, not a shout.
+        stdout.styledWrite styleDim, "• ", bannerFor(act), resetStyle, "\n"
         stdout.flushFile
         let toolT0 = epochTime()
         if session.readCache == nil: session.readCache = newReadCache()
@@ -2071,10 +2070,10 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
         let toolElapsed = epochTime() - toolT0
         if r.strip.len == 0: r = "[no output]"
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
-        # Overwrite the pre-exec line with the outcome-coloured version.
         stdout.write "\e[1A\r\e[2K"
-        let outcomeColor = if code == 0: fgGreen else: fgRed
-        stdout.styledWrite outcomeColor, "  › ", bannerFor(act), resetStyle
+        let bulletColor = if code == 0: fgGreen else: fgRed
+        stdout.styledWrite bulletColor, "• ", resetStyle
+        stdout.styledWrite styleDim, bannerFor(act), resetStyle
         if toolElapsed >= 1:
           stdout.styledWrite styleDim, &"  ({toolElapsed.int}s)", resetStyle
         stdout.write "\n"
@@ -2109,7 +2108,7 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
       continue
     if content.strip.len > 0:
       if not streamedLive:
-        stdout.styledWrite styleDim, content, resetStyle, "\n"
+        stdout.write content & "\n\n"
         stdout.flushFile
     else:
       stdout.styledWriteLine fgRed,
@@ -2163,7 +2162,7 @@ proc replaySessionTail(messages: JsonNode, toolLog: seq[ToolRecord]) =
               let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
                          except CatchableError: newJObject()
               bannerFor(toolCallToAction(name, args))
-          stdout.styledWrite styleDim, "  › ", banner, resetStyle, "\n"
+          stdout.styledWrite styleDim, "• ", banner, resetStyle, "\n"
     of "tool":
       let r = m{"content"}.getStr("")
       if r.len > 0:
