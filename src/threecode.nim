@@ -193,8 +193,9 @@ type
     ## Sliding-window per-path saturation detector. `bash` tool calls are
     ## never fingerprinted (thrash is about files, not commands). Reset at
     ## the start of each user turn via `resetLoopTracker`.
-    ring*: seq[string]       # last K fingerprints, oldest at head
-    counts*: CountTable[string]
+    ring*: seq[tuple[fp: string, mut: bool]]  # last K (path, isMutation)
+    counts*: CountTable[string]     # all tracked kinds per path → Strike 1
+    mutCounts*: CountTable[string]  # writes+patches only per path → Strike 2
     strike*: int             # 0/1/2
     trippedPaths*: seq[string] # paths that have already tripped this strike
   Session = object
@@ -220,12 +221,14 @@ proc die(msg: string, code = 1) {.noreturn.} =
 proc initLoopTracker*(): LoopTracker =
   result.ring = @[]
   result.counts = initCountTable[string]()
+  result.mutCounts = initCountTable[string]()
   result.strike = 0
   result.trippedPaths = @[]
 
 proc resetLoopTracker*(t: var LoopTracker) =
   t.ring.setLen 0
   t.counts.clear()
+  t.mutCounts.clear()
   t.strike = 0
   t.trippedPaths.setLen 0
 
@@ -254,19 +257,26 @@ proc trackCall*(t: var LoopTracker, name: string, args: JsonNode): int =
   ## `bash` is not fingerprinted at all and returns the current strike.
   let fp = fingerprint(name, args)
   if fp == "": return t.strike
+  let isMut = name == "write" or name == "patch"
   if t.ring.len >= LoopWindowK:
     let ev = t.ring[0]
     t.ring.delete(0)
-    let c = t.counts.getOrDefault(ev) - 1
-    if c <= 0: t.counts.del ev
-    else: t.counts[ev] = c
-  t.ring.add fp
+    let c = t.counts.getOrDefault(ev.fp) - 1
+    if c <= 0: t.counts.del ev.fp
+    else: t.counts[ev.fp] = c
+    if ev.mut:
+      let mc = t.mutCounts.getOrDefault(ev.fp) - 1
+      if mc <= 0: t.mutCounts.del ev.fp
+      else: t.mutCounts[ev.fp] = mc
+  t.ring.add (fp, isMut)
   t.counts.inc fp
+  if isMut: t.mutCounts.inc fp
   let c = t.counts[fp]
-  # Hard trip: same path hammered ≥2×T in the window → Strike 2 regardless of
-  # whether Strike 1 already fired for this path. Catches models that ignore
-  # the soft warning and keep thrashing the same file.
-  if c >= LoopHardTripT and t.strike < 2:
+  let mc = t.mutCounts.getOrDefault(fp)
+  # Hard trip: same path MUTATED ≥2×T in the window → Strike 2. Reads are
+  # observation, not mutation — they contribute to the Strike-1 soft warning
+  # (concentration is still a signal) but don't force a halt on their own.
+  if mc >= LoopHardTripT and t.strike < 2:
     t.strike = 2
     if fp notin t.trippedPaths: t.trippedPaths.add fp
   elif c >= LoopTripT and fp notin t.trippedPaths:

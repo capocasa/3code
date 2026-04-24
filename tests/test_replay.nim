@@ -133,6 +133,29 @@ suite "failure replay — loop tracker":
     discard trackCall(t, "write", %*{"path": "/tmp/x.nim"})
     check t.strike == 2
 
+  test "reads alone never escalate past Strike 1":
+    # Reading a file you're editing is observation, not thrash. A flood of
+    # reads on one path should still fire Strike 1 (concentration signal)
+    # but must not hard-trip to Strike 2 — that needs actual mutations.
+    var t = initLoopTracker()
+    for i in 0 ..< LoopWindowK:  # 15 reads, past 2×T
+      discard trackCall(t, "read", %*{"path": "/tmp/x.nim"})
+    check t.strike == 1
+
+  test "patches+reads mix trips Strike 2 only on mutation count":
+    # 5 patches + 5 reads = 10 total on one path, but only 5 mutations —
+    # so Strike 1 fires (soft) and Strike 2 does NOT (hard-trip needs 10
+    # mutations). Then 5 more patches push mutations to 10 → Strike 2.
+    var t = initLoopTracker()
+    for i in 0 ..< LoopTripT:
+      discard trackCall(t, "patch", %*{"path": "/tmp/x.nim"})
+    for i in 0 ..< LoopTripT:
+      discard trackCall(t, "read", %*{"path": "/tmp/x.nim"})
+    check t.strike == 1
+    for i in 0 ..< LoopTripT:
+      discard trackCall(t, "patch", %*{"path": "/tmp/x.nim"})
+    check t.strike == 2
+
   test "different path can escalate to Strike 2":
     var t = initLoopTracker()
     for i in 0 ..< LoopTripT:
