@@ -72,6 +72,18 @@ suite "actions":
     check readFile(p) == "hello\n"
     removeDir(tmp)
 
+  test "runAction akPatch error includes nearest line hint":
+    let tmp = getTempDir() / "3code_test_" & $getCurrentProcessId() & "_p3"
+    createDir(tmp)
+    let p = tmp / "a.txt"
+    writeFile(p, "alpha\nbeta gamma delta\nepsilon\n")
+    let (r, code, _) = runAction(
+      Action(kind: akPatch, path: p, edits: @[("beta gimma delta", "x")]))
+    check code != 0
+    check "nearest match" in r
+    check "line 2" in r
+    removeDir(tmp)
+
   test "toolCallToAction bash":
     let a = toolCallToAction("bash", %*{"command": "ls -la"})
     check a.kind == akBash
@@ -134,7 +146,7 @@ suite "actions":
     writeFile(p, "one\ntwo\nthree\n")
     let (r, code, _) = runAction(Action(kind: akRead, path: p))
     check code == 0
-    check r == "one\ntwo\nthree\n"
+    check r == "   1\tone\n   2\ttwo\n   3\tthree"
     removeDir(tmp)
 
   test "runAction akRead line range":
@@ -144,7 +156,7 @@ suite "actions":
     writeFile(p, "a\nb\nc\nd\ne\n")
     let (r, code, _) = runAction(Action(kind: akRead, path: p, offset: 2, limit: 2))
     check code == 0
-    check r == "b\nc"
+    check r == "   2\tb\n   3\tc"
     removeDir(tmp)
 
   test "runAction akRead soft-caps unbounded reads at 2000 lines":
@@ -159,7 +171,7 @@ suite "actions":
     check code == 0
     check "file is 3000 lines" in r
     check "showed 2000 lines" in r
-    check r.startsWith("1\n")
+    check r.startsWith("   1\t1\n")
     removeDir(tmp)
 
   test "runAction akRead honors explicit limit above cap":
@@ -181,6 +193,16 @@ suite "actions":
     let (r, code, _) = runAction(Action(kind: akRead, path: "/nonexistent/xyz"))
     check code != 0
     check "does not exist" in r
+
+  test "runAction akRead refuses binary content":
+    let tmp = getTempDir() / "3code_test_" & $getCurrentProcessId() & "_rb"
+    createDir(tmp)
+    let p = tmp / "bin"
+    writeFile(p, "\x00\x01\x02\x03\x04\x05hello")
+    let (r, code, _) = runAction(Action(kind: akRead, path: p))
+    check code == 0
+    check "binary file" in r
+    removeDir(tmp)
 
   test "runAction akWrite expands ~ to home":
     let sub = "3code_tilde_test_" & $getCurrentProcessId()
@@ -204,7 +226,7 @@ suite "actions":
     let (r, code, _) = runAction(
       Action(kind: akRead, path: "~/" & sub / "a.txt"))
     check code == 0
-    check r == "tilde-read\n"
+    check r == "   1\ttilde-read"
     removeDir(dir)
 
   test "runAction akPatch expands ~ to home":
