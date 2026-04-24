@@ -1040,12 +1040,12 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: U
   if "usage" in j:
     usage = parseUsage(j["usage"])
   if usage.totalTokens > 0:
-    hint &"  ↑ {humanTokens(usage.promptTokens)} tok · ↓ {humanTokens(usage.completionTokens)} tok"
+    hint &"  ↑ {humanTokens(usage.promptTokens)} · ↓ {humanTokens(usage.completionTokens)}"
     if usage.cachedTokens > 0:
       stdout.styledWrite(styleDim, &" · cache {humanTokens(usage.cachedTokens)}", resetStyle)
     hint &" · {elapsed.int}s", resetStyle, "\n"
   else:
-    hint &"  ↓ ~{humanTokens(text.len div 4)} tok · {elapsed.int}s", resetStyle, "\n"
+    hint &"  ↓ ~{humanTokens(text.len div 4)} · {elapsed.int}s", resetStyle, "\n"
   stdout.flushFile
   j["choices"][0]["message"]
 
@@ -2012,7 +2012,7 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: var Session,
     if session.usage.totalTokens == 0:
       hintLn "  no tokens used yet", resetStyle
     else:
-      var msg = &"  session: {humanTokens(session.usage.totalTokens)} tok  (in {humanTokens(session.usage.promptTokens)}, out {humanTokens(session.usage.completionTokens)})"
+      var msg = &"  session: {humanTokens(session.usage.totalTokens)}  (in {humanTokens(session.usage.promptTokens)}, out {humanTokens(session.usage.completionTokens)})"
       if session.usage.cachedTokens > 0:
         msg.add &", cache {humanTokens(session.usage.cachedTokens)}"
       hintLn msg, resetStyle
@@ -2188,7 +2188,7 @@ proc main() =
       saveSession(session, messages)
       die(e.msg, ExitApi)
     if session.usage.totalTokens > 0:
-      hintLn &"  · {humanTokens(session.usage.totalTokens)} tok total", resetStyle
+      hintLn &"  · {humanTokens(session.usage.totalTokens)} total", resetStyle
     return
 
   (activeCurrent, activeProviders) = loadStateOrEmpty(configPath())
