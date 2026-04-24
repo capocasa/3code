@@ -2,7 +2,7 @@ import std/[unittest, os, json, hashes, strutils]
 import threecode
 
 ## Failure-replay harness. Loads snapshotted session JSONs from
-## `.agent/failures/` (gitignored) and feeds their tool_call streams
+## `.agents/archive/failures/` (gitignored) and feeds their tool_call streams
 ## through the production LoopTracker. Asserts the Strike-1 trip point
 ## matches the hand-verified expectation, and that it does not trip
 ## earlier. If a snapshot is missing (e.g. on a CI checkout), the
@@ -55,7 +55,7 @@ proc replay(path: string): ReplayResult =
 
 proc failurePath(name: string): string =
   let repo = currentSourcePath().parentDir.parentDir
-  repo / ".agent" / "failures" / name
+  repo / ".agents" / "archive" / "failures" / name
 
 suite "failure replay — loop tracker":
   test "qwen-010747 trips at overall call 8":
