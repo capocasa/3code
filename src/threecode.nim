@@ -959,9 +959,30 @@ proc toolCallToAction*(name: string, args: JsonNode): Action =
   else:
     Action(kind: akBash, body: "echo 'unknown tool: " & name & "'; exit 1")
 
+proc classifyRetry*(exc: ref CatchableError, code: int): string =
+  ## Returns "server" for network errors and 5xx, "rate" for 429, "" for
+  ## anything else (not retryable). Pure-logic helper for the callModel
+  ## retry block.
+  if exc != nil: return "server"
+  case code
+  of 429: "rate"
+  of 500, 502, 503, 504: "server"
+  else: ""
+
 var
-  retryLevel = 0    # carries across calls; each backoff bumps it
-  lastRetryTs = 0.0 # epoch seconds of the last backoff; powers decay
+  # Retry state split by category — different semantics, different ceilings.
+  # A 5xx burst shouldn't inflate the backoff a later 429 sees, and vice versa.
+  serverRetryLevel = 0    # network errors + 5xx (server hiccup; recovers fast)
+  serverLastTs = 0.0
+  rateRetryLevel = 0      # 429 specifically (rate limit / capacity crunch)
+  rateLastTs = 0.0
+
+proc decayLevel(level: var int, lastTs: var float, now: float) =
+  if level > 0 and lastTs > 0.0:
+    let idleMin = int((now - lastTs) / 60.0)
+    if idleMin > 0:
+      level = max(0, level - idleMin)
+      lastTs = now
 
 proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: Usage): JsonNode =
   let client = newHttpClient(timeout = 180_000)
@@ -979,12 +1000,9 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: U
   body["tool_choice"] = %"auto"
   let bodyStr = $body
   let t0 = epochTime()
-  # decay retryLevel by one step per full idle minute since last backoff
-  if retryLevel > 0 and lastRetryTs > 0.0:
-    let idleMin = int((t0 - lastRetryTs) / 60.0)
-    if idleMin > 0:
-      retryLevel = max(0, retryLevel - idleMin)
-      lastRetryTs = t0
+  # Decay each category independently — one step per full idle minute.
+  decayLevel(serverRetryLevel, serverLastTs, t0)
+  decayLevel(rateRetryLevel, rateLastTs, t0)
   var spinLabel = &"thinking · session ↑ {humanTokens(sessionUsage.promptTokens)} · ↓ {humanTokens(sessionUsage.completionTokens)}"
   if sessionUsage.cachedTokens > 0:
     spinLabel.add &" · cache {humanTokens(sessionUsage.cachedTokens)}"
@@ -992,46 +1010,56 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: U
   const MaxAttempts = 8
   var resp: Response
   var attempt = 0
-  var level = retryLevel
   while true:
     inc attempt
     var errMsg = ""
-    var retryable = false
+    var category = ""
+    var netExc: ref CatchableError = nil
     try:
       resp = client.request(p.url & "/chat/completions", HttpPost, bodyStr)
     except CatchableError as e:
+      netExc = e
       errMsg = "network: " & e.msg
-      retryable = true
-    if errMsg == "":
-      let c = resp.code.int
-      if c == 429 or c == 500 or c == 502 or c == 503 or c == 504:
-        errMsg = "api " & $resp.code
-        retryable = true
+    var code = 0
+    if netExc == nil:
+      code = resp.code.int
+    category = classifyRetry(netExc, code)
+    let retryable = category != ""
+    if retryable and errMsg == "":
+      errMsg = "api " & $resp.code
     if errMsg == "" or attempt >= MaxAttempts or not retryable:
       stopSpinner()
       if errMsg != "":
         raise newException(ApiError,
-          errMsg & (if resp.code.int != 0: ": " & resp.body else: ""))
+          errMsg & (if code != 0: ": " & resp.body else: ""))
       break
-    let retryAfter = (if errMsg.startsWith("api"):
+    let retryAfter = (if netExc == nil:
                        try: parseInt($resp.headers.getOrDefault("retry-after"))
                        except CatchableError: 0
                      else: 0)
-    # Providers that signal "Model busy, retry later" (deepinfra 429, no
-    # Retry-After) need minutes, not seconds. Cap at 90s per attempt; over
-    # 8 attempts that budgets ~4 min of patience before surfacing the error.
-    let isBusy = errMsg.startsWith("api 429") and
-                 ("busy" in resp.body or "capacity" in resp.body or
-                  "overloaded" in resp.body)
-    let base = if isBusy: max(level, 4) else: level  # start 429-busy at ≥16s
-    let backoff = if retryAfter > 0: retryAfter else: min(1 shl base, 90)
+    let backoff =
+      if retryAfter > 0:
+        retryAfter
+      elif category == "rate":
+        # 429: capacity/rate crunches last minutes, not seconds. Cap at 90s.
+        # "busy"-style 429s with no Retry-After start at ≥16s (max level 4).
+        let isBusy = "busy" in resp.body or "capacity" in resp.body or
+                     "overloaded" in resp.body
+        let base = if isBusy: max(rateRetryLevel, 4) else: rateRetryLevel
+        min(1 shl base, 90)
+      else:
+        # network / 5xx: short-lived server hiccup, 16s cap is plenty.
+        min(1 shl serverRetryLevel, 16)
     stopSpinner()
     stderr.writeLine &"3code: {errMsg}; retry {attempt + 1}/{MaxAttempts} in {backoff}s"
     sleep(backoff * 1000)
     startSpinner(&"retry {attempt + 1}/{MaxAttempts}")
-    inc level
-    retryLevel = level
-    lastRetryTs = epochTime()
+    if category == "rate":
+      inc rateRetryLevel
+      rateLastTs = epochTime()
+    else:
+      inc serverRetryLevel
+      serverLastTs = epochTime()
   let text = resp.body
   let elapsed = epochTime() - t0
   let j = parseJson(text)
