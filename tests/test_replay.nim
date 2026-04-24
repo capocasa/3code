@@ -90,6 +90,26 @@ suite "failure replay — loop tracker":
       # overall call 31 (the 5th touch: write/read/read/read/write).
       check r.overallCallAt == 31
 
+  test "deepseek-171117 trips early":
+    # The painful 2026-04-24 deepseek-v4-pro session — 109 bash, 33 patch,
+    # 87 read over 171 turns, $5 of garbage tokens. Bash was untracked
+    # before this fix, so 11 sed -i edits + 1 git checkout + 2 git stash
+    # all slipped past the loop guard. Original ran 229 tool calls before
+    # the user gave up.
+    #
+    # Strike 1 fires at call 15 from concentrated reads on threecode.nim;
+    # Strike 2 (the actual halt) at call 124 from patch saturation —
+    # both well before the first sed -i (call 166) or git checkout
+    # recovery (call 193). The replay harness returns at Strike 1, so we
+    # assert that.
+    let p = failurePath("deepseek-171117.json")
+    if not fileExists(p):
+      skip()
+    else:
+      let r = replay(p)
+      check r.tripped
+      check r.overallCallAt == 15
+
   test "tracker does not trip on short, varied traffic":
     var t = initLoopTracker()
     check trackCall(t, "read", %*{"path": "/a"}) == 0
@@ -182,6 +202,40 @@ suite "failure replay — loop tracker":
       discard trackCall(t, "write", %*{"path": "~/foo.nim"})
     let s = trackCall(t, "write", %*{"path": home / "foo.nim"})
     check s == 1
+
+  test "sed -i bash calls track as patch-equivalent mutations":
+    # Closes the loophole that let the deepseek-v4-pro session of
+    # 2026-04-24 thrash threecode.nim with 11 sed -i edits without ever
+    # tripping the loop guard. T mutations on the same path → Strike 1;
+    # 2×T → Strike 2, regardless of whether they came via `patch` or
+    # via `bash sed -i ... PATH`.
+    var t = initLoopTracker()
+    let cmd = %*{"command": "sed -i 's/foo/bar/' /tmp/x.nim"}
+    for i in 0 ..< LoopTripT:
+      discard trackCall(t, "bash", cmd)
+    check t.strike == 1
+    for i in 0 ..< LoopTripT:
+      discard trackCall(t, "bash", cmd)
+    check t.strike == 2
+
+  test "mixed patch + sed -i on same path adds up to Strike 2":
+    var t = initLoopTracker()
+    for i in 0 ..< LoopTripT:
+      discard trackCall(t, "patch", %*{"path": "/tmp/x.nim"})
+    check t.strike == 1
+    for i in 0 ..< LoopTripT:
+      discard trackCall(t, "bash",
+        %*{"command": "sed -i 's/a/b/' /tmp/x.nim"})
+    check t.strike == 2
+
+  test "read-only bash never enters the ring":
+    var t = initLoopTracker()
+    for c in ["ls", "cat /tmp/x.nim", "grep foo /tmp/x.nim",
+              "git log --oneline", "git stash list", "git stash show",
+              "nimble test", "rg --no-heading --color=never foo /tmp"]:
+      discard trackCall(t, "bash", %*{"command": c})
+    check t.ring.len == 0
+    check t.strike == 0
 
 ## Full-pipeline replay harness. Unlike the narrow `trackCall`-only suite
 ## above (which feeds tool_call args into the loop tracker only), this
