@@ -1056,7 +1056,7 @@ proc runHttpRequest(ctx: tuple[url, key, bodyStr: string, timeoutMs: int]) {.thr
     httpOutcome = outcome
     httpDone.store(true, moRelease)
 
-proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: Usage): JsonNode =
+proc callModel(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   var body = %*{
     "model": p.modelPrefix & p.model,
     "messages": messages,
@@ -1069,11 +1069,18 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: U
   # Decay each category independently — one step per full idle minute.
   decayLevel(serverRetryLevel, serverLastTs, t0)
   decayLevel(rateRetryLevel, rateLastTs, t0)
-  # Spinner label stays short and single-purpose — session-cumulative totals
-  # belong in `:tokens`, not on every frame. The per-call readout after the
-  # turn covers the "what just happened" view; ghosting the session-totals
-  # here only invited confusion with the per-call numbers.
-  startSpinner("thinking")
+  # Spinner shows context-window pressure (lastPromptTokens / window) rather
+  # than session-cumulative totals — the point is to give the user a "how
+  # deep am I" feel that goes DOWN when :compact fires, not a monotonic
+  # running-total guilt meter. Session cumulatives live in `:tokens`.
+  let window = contextWindowFor(p.model)
+  let spinLabel =
+    if window > 0 and lastPromptTokens > 0:
+      let pct = int(lastPromptTokens.float / window.float * 100.0)
+      &"thinking · ctx {pct}%"
+    else:
+      "thinking"
+  startSpinner(spinLabel)
   const MaxAttempts = 8
   var finalBody = ""
   var attempt = 0
@@ -1163,10 +1170,14 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: U
   if "usage" in j:
     usage = parseUsage(j["usage"])
   if usage.totalTokens > 0:
-    hint &"  ↑ {humanTokens(usage.promptTokens)} · ↓ {humanTokens(usage.completionTokens)}"
+    # ↑ is fresh (non-cached) input — the portion that actually reached the
+    # model's attention. ↺ is the cache-hit input, shown dim. ↓ is output.
+    let fresh = max(0, usage.promptTokens - usage.cachedTokens)
+    hint &"  ↑ {humanTokens(fresh)}"
     if usage.cachedTokens > 0:
-      stdout.styledWrite(styleDim, &" · cache {humanTokens(usage.cachedTokens)}", resetStyle)
-    hint &" · {elapsed.int}s", resetStyle, "\n"
+      stdout.styledWrite(styleDim, &" ↺ {humanTokens(usage.cachedTokens)}", resetStyle)
+    hint &" · ↓ {humanTokens(usage.completionTokens)} · {elapsed.int}s",
+      resetStyle, "\n"
     let window = contextWindowFor(p.model)
     if window > 0 and usage.promptTokens.float > 0.7 * window.float and
        usage.promptTokens.float <= CompactThresholdFrac * window.float:
@@ -1760,7 +1771,7 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
   while true:
     discard supersedeCompact(messages)
     var usage: Usage
-    let msg = callModel(p, messages, usage, session.usage)
+    let msg = callModel(p, messages, usage, session.lastPromptTokens)
     session.usage.promptTokens += usage.promptTokens
     session.usage.completionTokens += usage.completionTokens
     session.usage.totalTokens += usage.totalTokens
