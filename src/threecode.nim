@@ -930,11 +930,15 @@ var showThinking = true
 var spinnerStop: Atomic[bool]
 var spinnerThread: Thread[string]
 
-# Shared mutable spinner label. The spinner thread reads it every frame; the
-# main thread appends the streamed token counter as chunks arrive.
+# Shared mutable spinner state. The spinner thread reads these every frame;
+# the main thread updates them as chunks arrive. Two separate lines:
+#   line 1 = the classic spinner (frame + label + elapsed seconds)
+#   line 2 = the reasoning ticker, dim, empty when no thinking is streaming
+# Both fields live under one lock for simplicity — writes are infrequent.
 var
   spinLabelLock: Lock
   spinLabelShared: string
+  spinTickerShared: string
 spinLabelLock.initLock()
 
 proc setSpinLabel(s: string) {.gcsafe.} =
@@ -949,25 +953,53 @@ proc getSpinLabel(): string {.gcsafe.} =
     result = spinLabelShared
     release spinLabelLock
 
+proc setSpinTicker(s: string) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    acquire spinLabelLock
+    spinTickerShared = s
+    release spinLabelLock
+
+proc getSpinTicker(): string {.gcsafe.} =
+  {.cast(gcsafe).}:
+    acquire spinLabelLock
+    result = spinTickerShared
+    release spinLabelLock
+
 proc spinnerLoop(unused: string) {.thread.} =
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
   let start = epochTime()
   var i = 0
+  var tickerActive = false  # whether we reserved line 2 below
   while not spinnerStop.load(moRelaxed):
     let elapsed = epochTime() - start
     let label = getSpinLabel()
+    let ticker = getSpinTicker()
     try:
-      # \x1b[2K clears the entire line before redraw so shrinking labels
-      # (e.g. "12s"→"9s" turnover, or a swap to a shorter label) don't leave
-      # ghost characters from the previous frame.
+      # Line 1: clear and redraw. \x1b[2K keeps ghost chars from stale labels
+      # out of view when the label shrinks.
       stdout.styledWrite "\r\x1b[2K", fgCyan, styleBright, frames[i mod frames.len], resetStyle,
         fgCyan, styleBright, &"  {label} {elapsed.int}s", resetStyle
+      if ticker.len > 0:
+        # Two-line mode: descend to line 2, render dim ticker, return to
+        # line 1 start so the next frame's \r lines up.
+        stdout.write "\n\x1b[2K\x1b[2m"
+        stdout.write ticker
+        stdout.write "\x1b[0m\r\x1b[1A"
+        tickerActive = true
+      elif tickerActive:
+        # Ticker went empty (e.g. content started) — clear the line below
+        # once and stop reserving it.
+        stdout.write "\n\x1b[2K\r\x1b[1A"
+        tickerActive = false
       stdout.flushFile
     except CatchableError: discard
     sleep 80
     inc i
   try:
+    # Clean up: clear line 1; if we were in two-line mode, also line 2.
     stdout.write "\r\x1b[2K"
+    if tickerActive:
+      stdout.write "\n\x1b[2K\r\x1b[1A"
     stdout.flushFile
   except CatchableError: discard
 
@@ -1119,23 +1151,29 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     return
 
   var accContent = ""
+  var accReasoning = ""
   var accTools = initOrderedTable[int, JsonNode]()
   var nonSSE: seq[string]
   var contentStarted = false
-  # Ticker state: rolling reasoning buffer + throttled update.
-  var thinkingBuf = ""
+  # Ticker state: the full reasoning text is retained in `accReasoning` (so
+  # it can be echoed back to the provider — DeepSeek rejects follow-up
+  # requests that drop reasoning_content); the ticker display only shows
+  # the tail that fits on one line. Updates are throttled to ~10Hz.
   var lastTickerUpdate = 0.0
   proc refreshTicker() =
     let now = epochTime()
     if now - lastTickerUpdate < 0.1: return
     lastTickerUpdate = now
     let termW = try: terminalWidth() except CatchableError: 80
-    # baseLabel plus spinner prefix (~4) plus " 3s" suffix (~5) plus " 💭 " (4)
-    let budget = max(20, termW - baseLabel.len - 15)
+    let budget = max(20, termW - 6)  # leave margin for indent + glyph
+    # flatten newlines for single-line display without mutating accReasoning
     let tail =
-      if thinkingBuf.len > budget: thinkingBuf[thinkingBuf.len - budget .. ^1]
-      else: thinkingBuf
-    setSpinLabel(baseLabel & " · 💭 " & tail)
+      if accReasoning.len > budget: accReasoning[accReasoning.len - budget .. ^1]
+      else: accReasoning
+    var flat = newStringOfCap(tail.len)
+    for ch in tail:
+      flat.add(if ch == '\n' or ch == '\r': ' ' else: ch)
+    setSpinTicker("  💭 " & flat)
   let outS = p.outputStream
   var line = ""
   while outS.readLine(line):
@@ -1151,18 +1189,21 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
         let delta = choices[0]{"delta"}
         if delta != nil and delta.kind == JObject:
           # Reasoning chunks arrive on `reasoning_content` (DeepSeek, Qwen,
-          # Kimi) or `reasoning` (a few others). Treat both as ticker input.
-          if showThinking and not contentStarted:
-            var r = delta{"reasoning_content"}.getStr("")
-            if r.len == 0: r = delta{"reasoning"}.getStr("")
-            if r.len > 0:
-              for ch in r:
-                thinkingBuf.add(if ch == '\n' or ch == '\r': ' ' else: ch)
-              slurped += r.len
+          # Kimi) or `reasoning` (a few others). Always accumulate so we can
+          # echo back on the next turn; only render the ticker when enabled.
+          var r = delta{"reasoning_content"}.getStr("")
+          if r.len == 0: r = delta{"reasoning"}.getStr("")
+          if r.len > 0:
+            accReasoning &= r
+            slurped += r.len
+            if showThinking and not contentStarted:
               refreshTicker()
           let c = delta{"content"}.getStr("")
           if c.len > 0:
             if not contentStarted:
+              # Clear the ticker from line 2 and let the spinner's next frame
+              # collapse it before we take over the line with content.
+              setSpinTicker("")
               stopSpinner()
               stdout.write("\e[36m")  # cyan, matching the per-turn display
               contentStarted = true
@@ -1219,8 +1260,15 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     return
 
   # Build assistant message if we saw any SSE content.
-  if accContent.len > 0 or accTools.len > 0 or result.usage.totalTokens > 0:
+  if accContent.len > 0 or accTools.len > 0 or accReasoning.len > 0 or
+     result.usage.totalTokens > 0:
     var msg = %*{"role": "assistant", "content": accContent}
+    # DeepSeek-R1-style reasoning models REQUIRE the assistant's
+    # reasoning_content to be echoed back on the next turn. Drop this and
+    # the very next API call returns `invalid_request_error`. Other
+    # providers that ignore the field cost nothing for us to carry it.
+    if accReasoning.len > 0:
+      msg["reasoning_content"] = %accReasoning
     if accTools.len > 0:
       var tcArr = newJArray()
       var keys = toSeq(accTools.keys).sorted
