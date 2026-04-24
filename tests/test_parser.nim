@@ -509,3 +509,23 @@ suite "tool log serialization":
     check back[0].banner == "x"
     check back[0].output == ""
     check back[0].kind == akBash
+
+suite "retry classifier":
+  test "429 is rate":
+    check classifyRetry(nil, 429) == "rate"
+
+  test "5xx is server":
+    check classifyRetry(nil, 500) == "server"
+    check classifyRetry(nil, 502) == "server"
+    check classifyRetry(nil, 503) == "server"
+    check classifyRetry(nil, 504) == "server"
+
+  test "network exception is server":
+    let e = (ref CatchableError)(msg: "connection refused")
+    check classifyRetry(e, 0) == "server"
+
+  test "2xx / 4xx (non-429) not retryable":
+    check classifyRetry(nil, 200) == ""
+    check classifyRetry(nil, 400) == ""
+    check classifyRetry(nil, 401) == ""
+    check classifyRetry(nil, 404) == ""
