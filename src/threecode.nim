@@ -210,6 +210,7 @@ type
 const
   LoopWindowK* = 15
   LoopTripT* = 5
+  LoopHardTripT* = 10  # 2×T — same path ignored the Strike 1 nudge
 
 proc die(msg: string, code = 1) {.noreturn.} =
   stderr.writeLine "3code: " & msg
@@ -258,7 +259,14 @@ proc trackCall*(t: var LoopTracker, name: string, args: JsonNode): int =
     else: t.counts[ev] = c
   t.ring.add fp
   t.counts.inc fp
-  if t.counts[fp] >= LoopTripT and fp notin t.trippedPaths:
+  let c = t.counts[fp]
+  # Hard trip: same path hammered ≥2×T in the window → Strike 2 regardless of
+  # whether Strike 1 already fired for this path. Catches models that ignore
+  # the soft warning and keep thrashing the same file.
+  if c >= LoopHardTripT and t.strike < 2:
+    t.strike = 2
+    if fp notin t.trippedPaths: t.trippedPaths.add fp
+  elif c >= LoopTripT and fp notin t.trippedPaths:
     t.trippedPaths.add fp
     inc t.strike
   t.strike
@@ -528,7 +536,8 @@ proc supersedeCompact*(messages: JsonNode, keepRecent = 2): int =
         let c = m{"content"}.getStr("")
         if c.len > SupersededMarker.len + 32 and
            not c.startsWith("[superseded") and
-           not c.startsWith("[compacted"):
+           not c.startsWith("[compacted") and
+           "[repeat-guard]" notin c:
           m["content"] = %SupersededMarker
           inc result
     of "assistant":

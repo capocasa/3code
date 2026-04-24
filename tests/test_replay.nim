@@ -119,10 +119,19 @@ suite "failure replay — loop tracker":
     for i in 0 ..< LoopTripT:
       discard trackCall(t, "write", %*{"path": "/tmp/x.nim"})
     check t.strike == 1
-    # Additional touches on the same already-tripped path should not
-    # bump the strike further (ring is still full of the same fp).
+    # One extra touch past the trip is still only Strike 1 — needs to reach
+    # the hard-trip threshold (2×T) before escalating.
     discard trackCall(t, "write", %*{"path": "/tmp/x.nim"})
     check t.strike == 1
+
+  test "same path escalates to Strike 2 at 2×T (hard trip)":
+    var t = initLoopTracker()
+    for i in 0 ..< LoopHardTripT:
+      discard trackCall(t, "write", %*{"path": "/tmp/x.nim"})
+    check t.strike == 2
+    # The guard holds at 2 even if further calls on the same path roll in.
+    discard trackCall(t, "write", %*{"path": "/tmp/x.nim"})
+    check t.strike == 2
 
   test "different path can escalate to Strike 2":
     var t = initLoopTracker()
