@@ -560,16 +560,21 @@ proc supersedeCompact*(messages: JsonNode, keepRecent = 2): int =
         var changed = false
         if name == "write":
           let b = args{"body"}.getStr("")
-          if b.len > 64 and not b.startsWith("[superseded"):
-            args["body"] = %"[superseded]"
+          if b.len > 64 and "elided" notin b:
+            args["body"] = %"[body elided — a later write to this path replaced this one; the current file matches the latest write, not this earlier body]"
             changed = true
         elif name == "patch":
           let edits = args{"edits"}
           if edits != nil and edits.kind == JArray and edits.len > 0:
             var bulk = 0
-            for e in edits: bulk += ($e).len
-            if bulk > 128:
-              args["edits"] = %*[{"search": "[superseded]", "replace": "[superseded]"}]
+            var alreadyElided = false
+            for e in edits:
+              bulk += ($e).len
+              if e.kind == JObject and "elided" in e{"search"}.getStr(""):
+                alreadyElided = true
+            if bulk > 128 and not alreadyElided:
+              args["edits"] = %*[{"search": "[edits elided — superseded]",
+                                   "replace": "[edits elided — superseded]"}]
               changed = true
         if changed:
           fn["arguments"] = %( $args )
