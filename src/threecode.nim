@@ -2059,15 +2059,26 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
             newJObject()
         let act = toolCallToAction(name, args)
         let idx = session.toolLog.len + 1
-        stdout.styledWrite styleDim, "  › ", bannerFor(act), resetStyle, "\n"
+        # Pre-exec banner in default colour — "running" signal. Overwritten
+        # after the call returns with an outcome-coloured banner (green ok,
+        # red error) plus elapsed time. No explicit "spinner" during tool
+        # execution; bash is sync and short enough.
+        stdout.write "  › " & bannerFor(act) & "\n"
         stdout.flushFile
+        let toolT0 = epochTime()
         if session.readCache == nil: session.readCache = newReadCache()
         var (r, code, diff) = runAction(act, session.readCache)
-        # Empty tool results trip up some models — they treat "" as "the call
-        # broke" and retry endlessly. Substitute a marker so the model has
-        # something concrete to react to.
+        let toolElapsed = epochTime() - toolT0
         if r.strip.len == 0: r = "[no output]"
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
+        # Overwrite the pre-exec line with the outcome-coloured version.
+        stdout.write "\e[1A\r\e[2K"
+        let outcomeColor = if code == 0: fgGreen else: fgRed
+        stdout.styledWrite outcomeColor, "  › ", bannerFor(act), resetStyle
+        if toolElapsed >= 1:
+          stdout.styledWrite styleDim, &"  ({toolElapsed.int}s)", resetStyle
+        stdout.write "\n"
+        stdout.flushFile
         printActionResult(act, r, code, idx, diff)
         # Loop guard: fingerprint the call and decide whether to annotate the
         # tool result (Strike 1) or halt further tool calls (Strike 2). The
