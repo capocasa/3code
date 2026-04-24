@@ -182,6 +182,43 @@ suite "actions":
     check code != 0
     check "does not exist" in r
 
+  test "runAction akWrite expands ~ to home":
+    let sub = "3code_tilde_test_" & $getCurrentProcessId()
+    let rel = sub / "foo.txt"
+    let expected = getHomeDir() / rel
+    removeDir(getHomeDir() / sub)
+    let (r, code, _) = runAction(
+      Action(kind: akWrite, path: "~/" & rel, body: "hello\n"))
+    check code == 0
+    check fileExists(expected)
+    check readFile(expected) == "hello\n"
+    check not dirExists(getCurrentDir() / "~")
+    check expected in r
+    removeDir(getHomeDir() / sub)
+
+  test "runAction akRead expands ~ to home":
+    let sub = "3code_tilde_test_r_" & $getCurrentProcessId()
+    let dir = getHomeDir() / sub
+    createDir(dir)
+    writeFile(dir / "a.txt", "tilde-read\n")
+    let (r, code, _) = runAction(
+      Action(kind: akRead, path: "~/" & sub / "a.txt"))
+    check code == 0
+    check r == "tilde-read\n"
+    removeDir(dir)
+
+  test "runAction akPatch expands ~ to home":
+    let sub = "3code_tilde_test_p_" & $getCurrentProcessId()
+    let dir = getHomeDir() / sub
+    createDir(dir)
+    let p = dir / "a.txt"
+    writeFile(p, "one two three\n")
+    let (_, code, _) = runAction(Action(kind: akPatch,
+      path: "~/" & sub / "a.txt", edits: @[("two", "TWO")]))
+    check code == 0
+    check readFile(p) == "one TWO three\n"
+    removeDir(dir)
+
 suite "compaction":
   test "compactHistory leaves short conversations alone":
     var msgs = %* [

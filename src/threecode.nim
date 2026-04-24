@@ -229,11 +229,13 @@ proc resetLoopTracker*(t: var LoopTracker) =
   t.strike = 0
   t.trippedPaths.setLen 0
 
-proc canonPath(path: string): string =
+proc resolvePath*(path: string): string =
   if path.len == 0: return ""
   var p = path
   if p.startsWith("~"): p = expandTilde(p)
   try: absolutePath(p) except CatchableError: p
+
+template canonPath(path: string): string = resolvePath(path)
 
 proc fingerprint(name: string, args: JsonNode): string =
   ## Returns "" when the call should NOT be tracked (e.g. bash, or
@@ -1137,11 +1139,12 @@ proc runAction*(act: Action): tuple[output: string, code: int, diff: string] =
     body.add &"[exit {code}]"
     (body, code, "")
   of akRead:
-    if not fileExists(act.path):
-      return (&"error: {act.path} does not exist", 1, "")
-    let content = try: readFile(act.path)
+    let path = resolvePath(act.path)
+    if not fileExists(path):
+      return (&"error: {path} does not exist", 1, "")
+    let content = try: readFile(path)
                   except CatchableError as e:
-                    return (&"error: read {act.path}: {e.msg}", 1, "")
+                    return (&"error: read {path}: {e.msg}", 1, "")
     const MaxLines = 2000
     const MaxBytes = 60 * 1024
     let lines = content.splitLines
@@ -1175,35 +1178,37 @@ proc runAction*(act: Action): tuple[output: string, code: int, diff: string] =
       body.add &"\n... [file is {total} lines, {content.len} bytes; showed {shown} lines from line {start + 1}. Use read(path, offset, limit) for a specific range.] ..."
     (body, 0, "")
   of akWrite:
+    let path = resolvePath(act.path)
     try:
-      let dir = parentDir(act.path)
+      let dir = parentDir(path)
       if dir != "": createDir(dir)
-      let before = if fileExists(act.path): readFile(act.path) else: ""
-      writeFile(act.path, act.body)
-      let diff = computeDiff(before, act.body, act.path)
-      (&"wrote {act.path} ({act.body.len} bytes)", 0, diff)
+      let before = if fileExists(path): readFile(path) else: ""
+      writeFile(path, act.body)
+      let diff = computeDiff(before, act.body, path)
+      (&"wrote {path} ({act.body.len} bytes)", 0, diff)
     except CatchableError as e:
-      (&"error: write {act.path}: {e.msg}", 1, "")
+      (&"error: write {path}: {e.msg}", 1, "")
   of akPatch:
     if act.edits.len == 0:
       return (&"error: patch has no edits", 1, "")
-    if not fileExists(act.path):
-      return (&"error: {act.path} does not exist", 1, "")
+    let path = resolvePath(act.path)
+    if not fileExists(path):
+      return (&"error: {path} does not exist", 1, "")
     try:
-      let before = readFile(act.path)
+      let before = readFile(path)
       var content = before
       var applied = 0
       for (s, r) in act.edits:
         let (next, ok) = replaceFirst(content, s, r)
         if not ok:
-          return (&"error: SEARCH block did not match in {act.path}:\n{s}", 1, "")
+          return (&"error: SEARCH block did not match in {path}:\n{s}", 1, "")
         content = next
         inc applied
-      writeFile(act.path, content)
-      let diff = computeDiff(before, content, act.path)
-      (&"patched {act.path} ({applied} edit" & (if applied == 1: "" else: "s") & ")", 0, diff)
+      writeFile(path, content)
+      let diff = computeDiff(before, content, path)
+      (&"patched {path} ({applied} edit" & (if applied == 1: "" else: "s") & ")", 0, diff)
     except CatchableError as e:
-      (&"error: patch {act.path}: {e.msg}", 1, "")
+      (&"error: patch {path}: {e.msg}", 1, "")
 
 # ---------- Display ----------
 
