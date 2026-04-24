@@ -97,14 +97,6 @@ Type `:q`, `exit`, `quit`, or hit Ctrl-D to leave.
 Use in a scratch directory or a clean git working tree. `git diff` is your
 safety net.
 
-## Mascot
-
-There isn't one. Once, asked to render Rodin's *Thinker* in ASCII, a model
-produced a figure that looked less contemplative than visibly terrified —
-as if mid-recollection of every design decision that led to it sitting
-there. We named him Ilya. He is realizing what he's done. He remains at
-large.
-
 ## License
 
 MIT.
