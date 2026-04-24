@@ -894,6 +894,11 @@ proc loadProfile(wanted: string): Profile =
 
 # ---------- Spinner ----------
 
+var interrupted = false
+  ## Set by the SIGINT hook. Checked between model/tool steps and during HTTP
+  ## polling / retry backoff so ctrl-c drops back to the prompt without
+  ## killing the process.
+
 var spinnerStop: Atomic[bool]
 var spinnerThread: Thread[string]
 
@@ -997,13 +1002,56 @@ proc decayLevel(level: var int, lastTs: var float, now: float) =
       level = max(0, level - idleMin)
       lastTs = now
 
+# ---- Threaded HTTP plumbing (for ctrl-c during in-flight request) ----
+#
+# The HTTP call is a blocking C call; SIGINT sets `interrupted` but the main
+# thread can't see it until the call returns. So we hand the request to a
+# worker thread and poll `httpDone` from the main thread on a short sleep,
+# checking `interrupted` each tick.
+#
+# Invariants:
+# - Only one HTTP request is ever in flight at a time (callModel runs from
+#   the main event loop sequentially). The three globals below are therefore
+#   safe to treat as single-owner.
+# - The worker writes `httpOutcome` *before* storing `true` into `httpDone`
+#   (release). The main thread loads `httpDone` with moAcquire, so once it
+#   observes `true`, the outcome write is fully visible.
+# - On interrupt, we deliberately DO NOT joinThread — the worker keeps
+#   running until the underlying socket times out or the server answers.
+#   That leaks a thread worth of resources; acceptable for a rare keyboard
+#   interrupt, and we're about to return to the REPL anyway.
+type HttpOutcome = object
+  statusCode: int
+  body: string
+  retryAfter: string
+  errMsg: string     # non-empty on transport-level failure (no response)
+
+var
+  httpWorker: Thread[tuple[url, key, bodyStr: string, timeoutMs: int]]
+  httpOutcome: HttpOutcome
+  httpDone: Atomic[bool]
+
+proc runHttpRequest(ctx: tuple[url, key, bodyStr: string, timeoutMs: int]) {.thread.} =
+  # Fresh client per call — HttpClient isn't safe to share across threads.
+  var outcome = HttpOutcome()
+  try:
+    let c = newHttpClient(timeout = ctx.timeoutMs)
+    defer: c.close()
+    c.headers = newHttpHeaders({
+      "Authorization": "Bearer " & ctx.key,
+      "Content-Type": "application/json"
+    })
+    let r = c.request(ctx.url, HttpPost, ctx.bodyStr)
+    outcome.statusCode = r.code.int
+    outcome.body = r.body
+    outcome.retryAfter = $r.headers.getOrDefault("retry-after")
+  except CatchableError as e:
+    outcome.errMsg = e.msg
+  {.cast(gcsafe).}:
+    httpOutcome = outcome
+    httpDone.store(true, moRelease)
+
 proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: Usage): JsonNode =
-  let client = newHttpClient(timeout = 180_000)
-  defer: client.close()
-  client.headers = newHttpHeaders({
-    "Authorization": "Bearer " & p.key,
-    "Content-Type": "application/json"
-  })
   var body = %*{
     "model": p.modelPrefix & p.model,
     "messages": messages,
@@ -1022,43 +1070,62 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: U
   # here only invited confusion with the per-call numbers.
   startSpinner("thinking")
   const MaxAttempts = 8
-  var resp: Response
+  var finalBody = ""
   var attempt = 0
   while true:
     inc attempt
-    var errMsg = ""
-    var category = ""
-    var netExc: ref CatchableError = nil
-    try:
-      resp = client.request(p.url & "/chat/completions", HttpPost, bodyStr)
-    except CatchableError as e:
-      netExc = e
-      errMsg = "network: " & e.msg
-    var code = 0
-    if netExc == nil:
-      code = resp.code.int
-    category = classifyRetry(netExc, code)
+    # Launch the HTTP request on a worker and poll for completion so ctrl-c
+    # during a blocking network call lands promptly instead of on wake-up.
+    httpDone.store(false, moRelaxed)
+    httpOutcome = HttpOutcome()
+    createThread(httpWorker, runHttpRequest,
+      (url: p.url & "/chat/completions", key: p.key,
+       bodyStr: bodyStr, timeoutMs: 180_000))
+    while not httpDone.load(moAcquire):
+      if interrupted:
+        # Do NOT joinThread — the worker will finish in the background when
+        # the socket times out or server answers. We're giving up on its
+        # result; the process usually lives long enough to clean up.
+        stopSpinner()
+        raise newException(ApiError, "interrupted by user")
+      sleep 50
+    let errMsg0 = httpOutcome.errMsg
+    let code = httpOutcome.statusCode
+    let respBody = httpOutcome.body
+    let respRetryAfter = httpOutcome.retryAfter
+    var errMsg = errMsg0
+    if errMsg != "":
+      errMsg = "network: " & errMsg
+    let netFailed = errMsg0 != ""
+    let category =
+      if netFailed: "server"
+      else:
+        case code
+        of 429: "rate"
+        of 500, 502, 503, 504: "server"
+        else: ""
     let retryable = category != ""
     if retryable and errMsg == "":
-      errMsg = "api " & $resp.code
+      errMsg = "api " & $code
     if errMsg == "" or attempt >= MaxAttempts or not retryable:
       stopSpinner()
       if errMsg != "":
         raise newException(ApiError,
-          errMsg & (if code != 0: ": " & resp.body else: ""))
+          errMsg & (if code != 0: ": " & respBody else: ""))
+      finalBody = respBody
       break
-    let retryAfter = (if netExc == nil:
-                       try: parseInt($resp.headers.getOrDefault("retry-after"))
-                       except CatchableError: 0
-                     else: 0)
+    let retryAfter =
+      if not netFailed:
+        try: parseInt(respRetryAfter) except CatchableError: 0
+      else: 0
     let backoff =
       if retryAfter > 0:
         retryAfter
       elif category == "rate":
         # 429: capacity/rate crunches last minutes, not seconds. Cap at 90s.
         # "busy"-style 429s with no Retry-After start at ≥16s (max level 4).
-        let isBusy = "busy" in resp.body or "capacity" in resp.body or
-                     "overloaded" in resp.body
+        let isBusy = "busy" in respBody or "capacity" in respBody or
+                     "overloaded" in respBody
         let base = if isBusy: max(rateRetryLevel, 4) else: rateRetryLevel
         min(1 shl base, 90)
       else:
@@ -1066,7 +1133,16 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: U
         min(1 shl serverRetryLevel, 16)
     stopSpinner()
     stderr.writeLine &"3code: {errMsg}; retry {attempt + 1}/{MaxAttempts} in {backoff}s"
-    sleep(backoff * 1000)
+    # Chunk the sleep so ctrl-c lands within ~100ms instead of up to 90s.
+    block wait:
+      var remaining = backoff * 1000
+      while remaining > 0:
+        if interrupted: break wait
+        let step = min(100, remaining)
+        sleep(step)
+        remaining -= step
+    if interrupted:
+      raise newException(ApiError, "interrupted by user during retry backoff")
     startSpinner(&"retry {attempt + 1}/{MaxAttempts}")
     if category == "rate":
       inc rateRetryLevel
@@ -1074,7 +1150,7 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, sessionUsage: U
     else:
       inc serverRetryLevel
       serverLastTs = epochTime()
-  let text = resp.body
+  let text = finalBody
   let elapsed = epochTime() - t0
   let j = parseJson(text)
   if "error" in j:
@@ -1439,10 +1515,6 @@ proc readInput(editor: var minline.LineEditor, done: var bool): string =
   return line
 
 # ---------- Session loop ----------
-
-var interrupted = false
-  ## Set by the SIGINT hook. Checked between model/tool steps so ctrl-c drops
-  ## back to the prompt without killing the process.
 
 proc installInterruptHook() =
   setControlCHook(proc() {.noconv.} = interrupted = true)
