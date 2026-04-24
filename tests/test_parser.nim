@@ -325,6 +325,67 @@ suite "supersede compaction":
     check first > 0
     check second == 0
 
+suite "summarize (applySummary splicing)":
+  proc mkConv(turns: int): JsonNode =
+    ## Build [system, (user, assistant, tool)*turns] — len = 1 + 3*turns.
+    result = newJArray()
+    result.add %*{"role": "system", "content": "sys"}
+    for i in 0 ..< turns:
+      result.add %*{"role": "user", "content": "q" & $i}
+      result.add %*{"role": "assistant", "content": "a" & $i,
+                    "tool_calls": []}
+      result.add %*{"role": "tool", "tool_call_id": "t" & $i,
+                    "content": "r" & $i}
+
+  test "rewrites to [system, synthetic, ...last keepRecent]":
+    var msgs = mkConv(10)  # 31 messages
+    let keep = 8
+    let total = msgs.len
+    let n = applySummary(msgs, "did things", keep)
+    check n == total - 1 - keep
+    check msgs.len == keep + 2
+    check msgs[0]["role"].getStr == "system"
+    check msgs[0]["content"].getStr == "sys"
+    check msgs[1]["role"].getStr == "user"
+    check msgs[1]["content"].getStr == SummaryPrefix & "did things"
+    # Last keepRecent messages match the tail of the original.
+    let orig = mkConv(10)
+    for i in 0 ..< keep:
+      check msgs[2 + i]["content"].getStr ==
+            orig[total - keep + i]["content"].getStr
+
+  test "bails on too-few messages":
+    var msgs = mkConv(2)  # 7 messages; keepRecent+4 = 12
+    let before = msgs.len
+    let n = applySummary(msgs, "sum", 8)
+    check n == 0
+    check msgs.len == before
+
+  test "bails when system prompt missing":
+    var msgs = newJArray()
+    for i in 0 ..< 20:
+      msgs.add %*{"role": "user", "content": "q" & $i}
+    let before = msgs.len
+    let n = applySummary(msgs, "sum", 8)
+    check n == 0
+    check msgs.len == before
+
+  test "bails on empty summary":
+    var msgs = mkConv(10)
+    let before = msgs.len
+    check applySummary(msgs, "", 8) == 0
+    check applySummary(msgs, "   \n\t", 8) == 0
+    check msgs.len == before
+
+  test "idempotent: second call on result is a no-op":
+    var msgs = mkConv(10)
+    let first = applySummary(msgs, "recap", 8)
+    check first > 0
+    let afterLen = msgs.len  # 10 < keepRecent+4=12, so second call bails
+    let second = applySummary(msgs, "recap2", 8)
+    check second == 0
+    check msgs.len == afterLen
+
 suite "usage parsing":
   test "OpenAI-style prompt_tokens_details.cached_tokens":
     let u = parseUsage(%*{
