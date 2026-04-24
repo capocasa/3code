@@ -39,7 +39,7 @@ The harness runs your tool calls and feeds results back. When done, reply with p
 - Plan anything beyond a one-liner in 3–8 steps; work them in order.
 - Stay in scope. Don't refactor, reformat, or add comments the user didn't ask for.
 - Match local style: naming, imports, error handling, indentation.
-- Edit surgically. After a file exists, default to `patch`; reserve `write` for new files or deliberate wholesale replacement. Rewriting the same file repeatedly is a smell — each full body rides in context every turn after.
+- Edit surgically. After a file exists, default to `patch`; reserve `write` for new files or deliberate wholesale replacement. Never use `sed -i`, `cat > file`, `tee file`, or `>file` redirects to edit — the loop guard tracks `patch`/`write`, and bash mutations slip past it. Rewriting the same file repeatedly is a smell — each full body rides in context every turn after.
 - Trust your own results. `write` returning "wrote N bytes" is truthful — the file on disk is exactly what you sent. If the written file *looks* wrong, you are wrong, not the tool. Don't `read` back to verify; re-read only for content you don't have.
 - Search before reading: `rg` / `grep -rn` to find the few lines that matter, then `read` with `offset`/`limit` for large files. Don't slurp whole files or trees.
 - Quick jobs, quick scripts. For counts, format checks, data shape, or any multi-step inspection, write a 5-line throwaway under `/tmp/` and run it — faster and more reliable than eyeballing. Match the project's language; default Nim (`nim r /tmp/x.nim`) or shell. Clean up after.
@@ -194,13 +194,16 @@ type
     kind*: ActionKind
   LoopTracker* = object
     ## Sliding-window per-path saturation detector. `bash` tool calls are
-    ## never fingerprinted (thrash is about files, not commands). Reset at
-    ## the start of each user turn via `resetLoopTracker`.
+    ## fingerprinted only when they look like a file mutation (`sed -i`,
+    ## redirects, `tee`, `cp`/`mv`/`rm`, `git checkout/restore`); read-only
+    ## bash is untracked. Reset at the start of each user turn via
+    ## `resetLoopTracker`.
     ring*: seq[tuple[fp: string, mut: bool]]  # last K (path, isMutation)
     counts*: CountTable[string]     # all tracked kinds per path → Strike 1
-    mutCounts*: CountTable[string]  # writes+patches only per path → Strike 2
+    mutCounts*: CountTable[string]  # writes+patches+sed only per path → Strike 2
     strike*: int             # 0/1/2
     trippedPaths*: seq[string] # paths that have already tripped this strike
+    recoveryCmd*: string     # set when Strike 2 fires from a git-recovery hard-trip; "" otherwise
   ReadCache* = ref object
     state*: Table[string, (Time, int)]
   Session = object
@@ -237,6 +240,7 @@ proc resetLoopTracker*(t: var LoopTracker) =
   t.mutCounts.clear()
   t.strike = 0
   t.trippedPaths.setLen 0
+  t.recoveryCmd = ""
 
 proc resolvePath*(path: string): string =
   if path.len == 0: return ""
@@ -244,11 +248,208 @@ proc resolvePath*(path: string): string =
   if p.startsWith("~"): p = expandTilde(p)
   try: absolutePath(p) except CatchableError: p
 
+proc shellTokens*(s: string): seq[string] =
+  ## Tokenize a shell snippet by whitespace, honoring single + double quotes.
+  ## Backslash-escapes the next character outside quotes. Not a real shell
+  ## parser — used only for path extraction in the loop guard.
+  var cur = ""
+  var quote: char = '\0'
+  var i = 0
+  while i < s.len:
+    let c = s[i]
+    if quote != '\0':
+      if c == quote: quote = '\0'
+      else: cur.add c
+      inc i
+    elif c in {'\'', '"'}:
+      quote = c
+      inc i
+    elif c == '\\' and i + 1 < s.len:
+      cur.add s[i+1]
+      i += 2
+    elif c in {' ', '\t', '\n'}:
+      if cur.len > 0: result.add cur; cur = ""
+      inc i
+    else:
+      cur.add c; inc i
+  if cur.len > 0: result.add cur
+
+proc splitStatements*(cmd: string): seq[string] =
+  ## Split on top-level `;`, `&&`, `||`, `|` (not inside quotes). Pipeline
+  ## stages count as separate statements so `tee`/`sed -i` mid-pipeline
+  ## still get extracted. Background `&` is left alone.
+  result.add ""
+  var quote: char = '\0'
+  var i = 0
+  while i < cmd.len:
+    let c = cmd[i]
+    if quote != '\0':
+      result[^1].add c
+      if c == quote: quote = '\0'
+      inc i
+      continue
+    if c in {'\'', '"'}:
+      quote = c
+      result[^1].add c
+      inc i
+      continue
+    if c == ';':
+      result.add ""
+      inc i
+      continue
+    if (c == '&' or c == '|') and i + 1 < cmd.len and cmd[i+1] == c:
+      result.add ""
+      i += 2
+      continue
+    if c == '|':
+      result.add ""
+      inc i
+      continue
+    result[^1].add c
+    inc i
+
+proc bashMutationPath*(cmd: string): string =
+  ## Best-effort: return the first file path that this bash command would
+  ## mutate, or "" if no mutation pattern matches. Closes the loop-guard
+  ## bypass where models reach for `sed -i` instead of `patch`/`write` and
+  ## thrash a file outside the tracker's view.
+  ##
+  ## Recognised patterns (per top-level statement):
+  ## - explicit redirect: `> path`, `>> path`, `>path`, `>>path`
+  ## - `sed -i`, `perl -i` (file is the last positional)
+  ## - `tee [-a] path`
+  ## - `cp/mv path... DEST` (destination is the last positional)
+  ## - `rm path`, `touch path`
+  ## - `git checkout/restore path` (any positional after the subcommand)
+  ## - repo-wide destructives — `git stash [push|pop|apply|drop|clear]`,
+  ##   `git reset --hard`, `git clean -f[d[x]]` — return "." (cwd marker)
+  for stmt in splitStatements(cmd):
+    let raw = shellTokens(stmt.strip)
+    if raw.len == 0: continue
+    var toks: seq[string]
+    var i = 0
+    while i < raw.len:
+      let t = raw[i]
+      if t == ">" or t == ">>":
+        if i + 1 < raw.len: return raw[i+1]
+        i += 2
+        continue
+      if t.startsWith(">") and t.len > 1 and t[1] != '&':
+        return if t.startsWith(">>"): t[2..^1] else: t[1..^1]
+      if t == "<" or t == "2>" or t == "&>" or t == "2>>":
+        i += 2
+        continue
+      if t.startsWith("<") or t.startsWith("2>") or t.startsWith("&>"):
+        inc i
+        continue
+      toks.add t
+      inc i
+    if toks.len == 0: continue
+    case toks[0]
+    of "sed", "perl":
+      var inPlace = false
+      for t in toks[1..^1]:
+        if t == "-i" or t.startsWith("-i.") or t.startsWith("-i'") or
+           t.startsWith("-i\""):
+          inPlace = true; break
+      if inPlace:
+        for j in countdown(toks.len - 1, 1):
+          if not toks[j].startsWith("-"): return toks[j]
+    of "tee":
+      for t in toks[1..^1]:
+        if t.startsWith("-"): continue
+        return t
+    of "cp", "mv":
+      var last = ""
+      for t in toks[1..^1]:
+        if not t.startsWith("-"): last = t
+      if last.len > 0: return last
+    of "rm", "touch":
+      for t in toks[1..^1]:
+        if t.startsWith("-"): continue
+        return t
+    of "git":
+      if toks.len < 2: continue
+      case toks[1]
+      of "checkout", "restore":
+        var last = ""
+        for j in 2..<toks.len:
+          if not toks[j].startsWith("-") and toks[j] != "--": last = toks[j]
+        if last.len > 0: return last
+      of "stash":
+        let sub = if toks.len >= 3: toks[2] else: ""
+        case sub
+        of "", "push", "pop", "apply", "drop", "clear", "create", "store":
+          return "."
+        else: discard  # list, show, branch — read-only
+      of "reset":
+        for t in toks[2..^1]:
+          if t == "--hard": return "."
+      of "clean":
+        for t in toks[2..^1]:
+          if t == "-f" or t == "-fd" or t == "-fdx" or t == "-df": return "."
+      else: discard
+    else: discard
+  ""
+
+proc bashIsRecovery*(cmd: string): string =
+  ## Returns the offending sub-command (`"git checkout src/foo.nim"`,
+  ## `"git stash"`, etc.) when `cmd` looks like the model trying to undo
+  ## its own work mid-session — otherwise `""`. Hard-trips the loop guard
+  ## to Strike 2 on the first occurrence: these commands wipe the working
+  ## tree state the model's plan was based on, so further autonomous turns
+  ## almost always make things worse. Branch switches (`git checkout main`,
+  ## `git checkout v1.2`) are NOT recovery — only path-shaped restores,
+  ## explicit `--` separators, and the wholesale destructives count.
+  for stmt in splitStatements(cmd):
+    let raw = shellTokens(stmt.strip)
+    var toks: seq[string]
+    var i = 0
+    while i < raw.len:
+      let t = raw[i]
+      if t == ">" or t == ">>" or t == "<" or t == "2>" or t == "&>" or t == "2>>":
+        i += 2; continue
+      if t.startsWith(">") or t.startsWith("<") or t.startsWith("2>") or t.startsWith("&>"):
+        inc i; continue
+      toks.add t; inc i
+    if toks.len < 2 or toks[0] != "git": continue
+    case toks[1]
+    of "restore":
+      return toks.join(" ")
+    of "checkout":
+      # Explicit `--` separator → file restore, no question.
+      if "--" in toks[2..^1]: return toks.join(" ")
+      # No `--` — disambiguate by shape. Path-like args (contain `/`) are
+      # file restores; bare names are branch/tag/ref switches.
+      for j in 2..<toks.len:
+        let a = toks[j]
+        if a.startsWith("-"): continue
+        if '/' in a: return toks.join(" ")
+    of "reset":
+      if "--hard" in toks[2..^1]: return toks.join(" ")
+    of "stash":
+      let sub = if toks.len >= 3: toks[2] else: ""
+      case sub
+      of "", "push", "pop", "apply", "drop", "clear", "create", "store":
+        return toks.join(" ")
+      else: discard  # list, show, branch — read-only
+    of "clean":
+      for t in toks[2..^1]:
+        if t == "-f" or t == "-fd" or t == "-fdx" or t == "-df":
+          return toks.join(" ")
+    else: discard
+  ""
+
 proc fingerprint(name: string, args: JsonNode): string =
-  ## Returns "" when the call should NOT be tracked (e.g. bash, or
-  ## write/patch/read with no path argument).
+  ## Returns "" when the call should NOT be tracked. `bash` is normally
+  ## untracked, but commands matching `bashMutationPath` (sed -i, redirects,
+  ## git checkout, etc.) are folded back in as patch-equivalent mutations
+  ## so models can't slip past the loop guard via the shell.
   case name
-  of "bash": ""
+  of "bash":
+    let cmd = if args != nil and args.kind == JObject: args{"command"}.getStr else: ""
+    let path = bashMutationPath(cmd)
+    if path == "": "" else: resolvePath(path)
   of "write", "patch", "read":
     let path = if args != nil and args.kind == JObject: args{"path"}.getStr else: ""
     if path == "": "" else: resolvePath(path)
@@ -257,11 +458,28 @@ proc fingerprint(name: string, args: JsonNode): string =
 proc trackCall*(t: var LoopTracker, name: string, args: JsonNode): int =
   ## Feed a tool call through the detector. Returns the strike level AFTER
   ## this call (0 = no trip, 1 = saturation first seen for this path,
-  ## 2 = second distinct trip → outer loop should halt further tool calls).
-  ## `bash` is not fingerprinted at all and returns the current strike.
+  ## 2 = second distinct trip OR a working-tree-wiping git command →
+  ## outer loop should halt further tool calls).
+  ## Untracked calls (most `bash`, anything missing a path) return the
+  ## current strike unchanged.
+  # Hard short-circuit: any `git checkout <path>` / `git restore` /
+  # `git reset --hard` / `git stash` / `git clean -f` is treated as
+  # immediate Strike 2. These wipe the working-tree state the model's
+  # plan was based on; further autonomous turns make things worse.
+  # Costs one keystroke on a legit branch switch (which doesn't trigger);
+  # saves the next 30 turns when the model is genuinely lost.
+  if name == "bash":
+    let cmd = if args != nil and args.kind == JObject: args{"command"}.getStr else: ""
+    let recovery = bashIsRecovery(cmd)
+    if recovery != "" and t.strike < 2:
+      t.strike = 2
+      t.recoveryCmd = recovery
+      return 2
   let fp = fingerprint(name, args)
   if fp == "": return t.strike
-  let isMut = name == "write" or name == "patch"
+  # bash is a mutation iff it matched a `sed -i` / redirect / git-recovery
+  # pattern in fingerprint — read-only bash returns "" above and exits early.
+  let isMut = name == "write" or name == "patch" or name == "bash"
   if t.ring.len >= LoopWindowK:
     let ev = t.ring[0]
     t.ring.delete(0)
@@ -2097,10 +2315,15 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
         # many legit compile-iterate sessions trip it without actually being
         # stuck. Only the Strike-2 halt survives — that one we want.
         if strike >= 2 and priorStrike < 2:
-          let fp = fingerprint(name, args)
           halt = true
-          toolContent &= "\n\n[repeat-guard] second saturation (path=" & fp &
-            "); further tool calls this turn are paused."
+          if session.loop.recoveryCmd != "":
+            toolContent &= "\n\n[repeat-guard] working-tree recovery detected (`" &
+              session.loop.recoveryCmd &
+              "`); further tool calls this turn are paused. The model's plan was likely based on the working tree as it was before this command — resume only if you've confirmed the new state is what you want."
+          else:
+            let fp = fingerprint(name, args)
+            toolContent &= "\n\n[repeat-guard] second saturation (path=" & fp &
+              "); further tool calls this turn are paused."
         messages.add %*{"role": "tool", "tool_call_id": id, "content": toolContent}
       saveSession(session, messages)
       if interrupted:
@@ -2108,7 +2331,12 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
         interrupted = false
         return
       if halt:
-        stdout.styledWriteLine fgRed, "  paused — looped", resetStyle
+        if session.loop.recoveryCmd != "":
+          stdout.styledWriteLine fgRed,
+            &"  paused — `{session.loop.recoveryCmd}` wiped working-tree state",
+            resetStyle
+        else:
+          stdout.styledWriteLine fgRed, "  paused — looped", resetStyle
         return
       continue
     if content.strip.len > 0:

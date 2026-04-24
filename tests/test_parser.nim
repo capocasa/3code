@@ -649,3 +649,152 @@ models = "m"
     check pf3.key == "k:with=colon#hash"
 
     removeFile(path)
+
+suite "bash mutation detection":
+  # Closes the loop-guard bypass that let the deepseek-v4-pro session of
+  # 2026-04-24 thrash threecode.nim with 11 sed -i edits — bash was
+  # untracked, so none of those mutations counted toward Strike 2.
+
+  test "shellTokens honors single + double quotes and escapes":
+    check shellTokens("a b c") == @["a", "b", "c"]
+    check shellTokens("'a b' c") == @["a b", "c"]
+    check shellTokens("\"a b\" c") == @["a b", "c"]
+    check shellTokens("a\\ b c") == @["a b", "c"]
+    check shellTokens("sed -i 's/x y/z/' file") ==
+      @["sed", "-i", "s/x y/z/", "file"]
+
+  test "splitStatements splits on top-level ; && || |":
+    check splitStatements("a; b").len == 2
+    check splitStatements("a && b || c").len == 3
+    check splitStatements("a | b | c").len == 3
+    # quoted separators stay inside the statement
+    check splitStatements("echo 'a; b'").len == 1
+    check splitStatements("echo \"x && y\" && z").len == 2
+    check splitStatements("echo 'x | y'").len == 1
+
+  test "sed -i fixtures from the painful session":
+    # Verbatim from session 20260424T171117 (deepseek-v4-pro). Each one
+    # MUST extract the file path. These are exactly the 11 calls that
+    # bypassed the loop guard before this fix landed.
+    let cases = @[
+      ("sed -i 's/  while messages.len > 0: messages.delete(0)/  messages.elems.setLen 0/' /tmp/threecode.nim",
+       "/tmp/threecode.nim"),
+      ("sed -i 's/return (\"\", @[])/return (\"\", @[], true, true)/' /tmp/threecode.nim",
+       "/tmp/threecode.nim"),
+      ("sed -i 's/proc replaceFirst(/proc replaceFirst*(/' /tmp/threecode.nim",
+       "/tmp/threecode.nim"),
+      ("sed -i 's/proc saveSession(session/proc saveSession*(session/' /tmp/threecode.nim",
+       "/tmp/threecode.nim"),
+      ("sed -i '1970s/^  navigatedUp = false$/  when isMainModule: navigatedUp = false/' /tmp/threecode.nim",
+       "/tmp/threecode.nim"),
+      ("cd /tmp && sed -i '1811,1826s/^  /    /' src/threecode.nim",
+       "src/threecode.nim"),
+      ("cd /tmp && sed -i '932a\\var bellEnabled = true' src/threecode.nim",
+       "src/threecode.nim"),
+    ]
+    for (cmd, want) in cases:
+      check bashMutationPath(cmd) == want
+
+  test "redirects extracted from anywhere in the command":
+    check bashMutationPath("echo hi > /tmp/x") == "/tmp/x"
+    check bashMutationPath("echo hi >>/tmp/x") == "/tmp/x"
+    check bashMutationPath("nimble test > /tmp/log 2>&1") == "/tmp/log"
+    # `2>` (stderr-only) is not a mutation we care to track
+    check bashMutationPath("nimble test 2>/dev/null") == ""
+
+  test "tee, cp, mv, rm, touch":
+    check bashMutationPath("echo x | tee /tmp/y") == "/tmp/y"
+    check bashMutationPath("tee -a /tmp/y") == "/tmp/y"
+    check bashMutationPath("cp /tmp/a /tmp/b") == "/tmp/b"
+    check bashMutationPath("mv /tmp/a /tmp/b") == "/tmp/b"
+    check bashMutationPath("rm -rf /tmp/junk") == "/tmp/junk"
+    check bashMutationPath("touch /tmp/marker") == "/tmp/marker"
+
+  test "git recovery / file restore":
+    check bashMutationPath("git checkout src/foo.nim") == "src/foo.nim"
+    check bashMutationPath("git checkout -- src/foo.nim") == "src/foo.nim"
+    check bashMutationPath("git restore src/foo.nim") == "src/foo.nim"
+    # repo-wide destructives → cwd marker
+    check bashMutationPath("git stash") == "."
+    check bashMutationPath("git stash push") == "."
+    check bashMutationPath("git stash pop") == "."
+    check bashMutationPath("git reset --hard") == "."
+    check bashMutationPath("git clean -fd") == "."
+    # read-only git: no fingerprint
+    check bashMutationPath("git stash list") == ""
+    check bashMutationPath("git stash show") == ""
+    check bashMutationPath("git log --oneline") == ""
+    check bashMutationPath("git diff src/foo.nim") == ""
+    check bashMutationPath("git status") == ""
+
+  test "read-only commands return empty":
+    for c in ["ls", "ls -la /tmp", "cat /tmp/x", "grep foo /tmp/x",
+              "rg --no-heading foo /tmp", "find /tmp -name '*.nim'",
+              "wc -l /tmp/x", "head -20 /tmp/x", "tail -n 5 /tmp/x",
+              "nimble test", "nimble check", "nim c -r /tmp/x.nim",
+              "echo hello", "true", "false"]:
+      check bashMutationPath(c) == ""
+
+  test "pipelines extract from any stage":
+    # `tee` in the middle of a pipeline is still a write
+    check bashMutationPath("nimble test | tee /tmp/log | head") == "/tmp/log"
+
+  test "multi-statement: first matching mutation wins":
+    check bashMutationPath("ls; sed -i 's/a/b/' /tmp/x.nim") == "/tmp/x.nim"
+    check bashMutationPath("cd /tmp && rm /tmp/x") == "/tmp/x"
+
+suite "git recovery hard-trip":
+  # `git checkout <path>`, `git restore`, `git reset --hard`, `git stash`,
+  # `git clean -f` wipe the working-tree state the model's plan was based
+  # on. Treated as immediate Strike 2; first occurrence halts the turn.
+
+  test "file restore shapes are recovery":
+    check bashIsRecovery("git checkout -- src/foo.nim") != ""
+    check bashIsRecovery("git checkout src/foo.nim") != ""
+    check bashIsRecovery("cd ~/p/3code && git checkout src/threecode.nim") != ""
+    check bashIsRecovery("git restore src/foo.nim") != ""
+    check bashIsRecovery("git restore .") != ""
+
+  test "wholesale destructives are recovery":
+    check bashIsRecovery("git reset --hard") != ""
+    check bashIsRecovery("git reset --hard HEAD~1") != ""
+    check bashIsRecovery("git stash") != ""
+    check bashIsRecovery("git stash push -m wip") != ""
+    check bashIsRecovery("git stash pop") != ""
+    check bashIsRecovery("git stash drop") != ""
+    check bashIsRecovery("git clean -fd") != ""
+    check bashIsRecovery("git clean -fdx") != ""
+
+  test "branch switches are NOT recovery":
+    check bashIsRecovery("git checkout main") == ""
+    check bashIsRecovery("git checkout v1.2.3") == ""
+    check bashIsRecovery("git checkout -b feature") == ""
+    check bashIsRecovery("git checkout HEAD~1") == ""
+    # Remote refs contain `/` but should be allowed — this is a known
+    # false-positive trade-off; if it ever bites, refine here. Branch
+    # switches usually use bare names, so this is rare in practice.
+    # check bashIsRecovery("git checkout origin/main") == ""
+
+  test "read-only git is NOT recovery":
+    check bashIsRecovery("git status") == ""
+    check bashIsRecovery("git diff src/foo.nim") == ""
+    check bashIsRecovery("git log --oneline") == ""
+    check bashIsRecovery("git stash list") == ""
+    check bashIsRecovery("git stash show") == ""
+    check bashIsRecovery("git reset HEAD~1") == ""  # soft reset, no --hard
+    check bashIsRecovery("git clean -n") == ""      # dry-run
+
+  test "trackCall halts immediately on first recovery":
+    var t = initLoopTracker()
+    let s = trackCall(t, "bash",
+      %*{"command": "cd /tmp && git checkout src/foo.nim"})
+    check s == 2
+    check t.strike == 2
+    check t.recoveryCmd != ""
+
+  test "branch switch does not halt":
+    var t = initLoopTracker()
+    let s = trackCall(t, "bash", %*{"command": "git checkout main"})
+    check s == 0
+    check t.strike == 0
+    check t.recoveryCmd == ""
