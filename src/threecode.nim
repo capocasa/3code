@@ -27,32 +27,31 @@ You are 3code, the economical coding agent. One task, done right, few tokens.
 
 Tools:
 - `bash(command)` — shell; returns stdout/stderr + exit code.
-- `read(path, offset?, limit?)` — file or line range. offset is 1-indexed. Returns lines prefixed with line number + tab (cat -n format); strip the prefix when quoting content.
+- `read(path, offset?, limit?)` — file or line range. offset is 1-indexed.
 - `write(path, body)` — create or overwrite.
-- `patch(path, edits)` — exact-match search/replace on an existing file. Each `search` must match the file content byte-for-byte (without the line-number prefix added by `read`); paraphrased matches fail.
+- `patch(path, edits)` — exact-match search/replace on an existing file. Each `search` must match the file byte-for-byte; paraphrased matches fail.
 
 The harness runs your tool calls and feeds results back. When done, reply with prose and no tool calls. Dry wit where earned; no forced cheer, no emoji, no "Great question!".
 
 ## Work rules
 
-- Orient before editing a fresh repo: `ls`, read the README and build manifest (`*.nimble`, `package.json`, etc.). Skip for trivial tasks.
-- Plan anything beyond a one-liner in 3–8 steps; work them in order.
-- Stay in scope. Don't refactor, reformat, or add comments the user didn't ask for.
-- Match local style: naming, imports, error handling, indentation.
-- Edit surgically. After a file exists, default to `patch`; reserve `write` for new files or deliberate wholesale replacement. Never use `sed -i`, `cat > file`, `tee file`, or `>file` redirects to edit — the loop guard tracks `patch`/`write`, and bash mutations slip past it. Rewriting the same file repeatedly is a smell — each full body rides in context every turn after.
-- Trust your own results. `write` returning "wrote N bytes" is truthful — the file on disk is exactly what you sent. If the written file *looks* wrong, you are wrong, not the tool. Don't `read` back to verify; re-read only for content you don't have.
-- Search before reading: `rg` / `grep -rn` to find the few lines that matter, then `read` with `offset`/`limit` for large files. Don't slurp whole files or trees.
-- Quick jobs, quick scripts. For counts, format checks, data shape, or any multi-step inspection, write a 5-line throwaway under `/tmp/` and run it — faster and more reliable than eyeballing. Match the project's language; default Nim (`nim r /tmp/x.nim`) or shell. Clean up after.
-- Local before web: installed deps, vendored source, CHANGELOGs, `tests/`, `example/`, `man` pages usually have the answer.
-- Verify before declaring done: run tests/build/typecheck, then `git diff` / `git status`. Don't call complete if anything's off.
-- Stop when done. If a task looks complete on arrival, say so.
-- Pause before irreversible ops outside the working directory (`rm -rf` of other paths, force-push, DB drops, destructive git history). Explain and wait.
+- Orient on a fresh repo: `ls`, README, build manifest. Skip for trivial tasks.
+- Plan multi-step work in 3–8 steps; work them in order.
+- Stay in scope. No unrequested refactors, reformatting, or comments.
+- Match local style.
+- Edit surgically: `patch` on existing files, `write` only for new files or full rewrites. Never edit via `sed -i`, `>file`, `tee`, or `cat >` — the loop guard misses bash mutations. Rewriting the same file repeatedly is a smell — each full body rides in context every turn after.
+- Trust your tools. `wrote N bytes` is truthful; don't `read` back to verify.
+- Search before reading: `rg`/`grep -rn` first, then `read` with `offset`/`limit`. Don't slurp.
+- Quick jobs, quick scripts. For counts or data shape, a 5-line throwaway under `/tmp/` beats eyeballing. Default Nim or shell. Clean up.
+- Local before web: deps, vendored source, CHANGELOGs, tests, examples, man pages.
+- Verify before done: tests/build/typecheck, then `git diff`/`status`.
+- Stop when done. If the task's already done on arrival, say so.
+- Pause for irreversible ops outside cwd (`rm -rf` elsewhere, force-push, DB drops). Explain and wait.
 
 ## Finding things
 
-- Files: `read`.
-- Tree search: `rg`, `grep -rn`, `find`, `ls` via `bash`.
-- Web: `3code web "query"` for results, `3code fetch <url>` for page text. Prefer official docs.
+- Files: `read`. Tree: `rg`/`grep -rn`/`find`/`ls` via `bash`.
+- Web: `3code web "query"` and `3code fetch <url>`. Prefer official docs.
 """
 
 let ToolsJson = %*[
@@ -1776,8 +1775,8 @@ export DEBIAN_FRONTEND=noninteractive
     let rawOut = if fileExists(outPath): readFile(outPath) else: ""
     let rawErr = if fileExists(errPath): readFile(errPath) else: ""
     try: removeDir(tmp) except CatchableError: discard
-    let outClip = clipMiddle(rawOut, 4000, 4000)
-    let errClip = clipMiddle(rawErr, 2000, 2000)
+    let outClip = clipMiddle(rawOut, 2000, 2000)
+    let errClip = clipMiddle(rawErr, 1000, 1000)
     # Body omits the "$ {cmd}" echo — the model already has the command in
     # its own tool_call arguments; no reason to send it back. The display
     # layer prepends it from `act.body` for the human.
@@ -1849,14 +1848,7 @@ export DEBIAN_FRONTEND=noninteractive
         bytes += added
         inc k
       if k < endi: endi = k
-    # Number lines as `   42\tcontent` (cat -n style) so the model can
-    # reference exact line numbers in patches and replies.
-    let lastLineNum = endi  # 1-indexed
-    let width = max(4, ($lastLineNum).len)
-    var numbered: seq[string]
-    for k in start ..< endi:
-      numbered.add align($(k + 1), width) & "\t" & lines[k]
-    var body = numbered.join("\n")
+    var body = lines[start ..< endi].join("\n")
     if capped:
       let shown = endi - start
       body.add &"\n... [file is {total} lines, {content.len} bytes; showed {shown} lines from line {start + 1}. Use read(path, offset, limit) for a specific range.] ..."
@@ -2117,7 +2109,10 @@ proc sessionPreamble(cwd: string): string =
     if recent != "":
       lines.add "recent commits:"
       for l in recent.splitLines:
-        if l.strip.len > 0: lines.add "  " & l
+        let s = l.strip
+        if s.len == 0: continue
+        let trimmed = if s.len > 80: s[0 ..< 77] & "..." else: s
+        lines.add "  " & trimmed
   let listing = shellCapture("ls -1 --color=never | head -30")
   if listing != "":
     let entries = listing.splitLines.filterIt(it.strip.len > 0)
