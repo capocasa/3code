@@ -146,7 +146,7 @@ suite "actions":
     writeFile(p, "one\ntwo\nthree\n")
     let (r, code, _) = runAction(Action(kind: akRead, path: p))
     check code == 0
-    check r == "   1\tone\n   2\ttwo\n   3\tthree"
+    check r == "one\ntwo\nthree"
     removeDir(tmp)
 
   test "runAction akRead line range":
@@ -156,7 +156,7 @@ suite "actions":
     writeFile(p, "a\nb\nc\nd\ne\n")
     let (r, code, _) = runAction(Action(kind: akRead, path: p, offset: 2, limit: 2))
     check code == 0
-    check r == "   2\tb\n   3\tc"
+    check r == "b\nc"
     removeDir(tmp)
 
   test "runAction akRead soft-caps unbounded reads at 2000 lines":
@@ -171,7 +171,7 @@ suite "actions":
     check code == 0
     check "file is 3000 lines" in r
     check "showed 2000 lines" in r
-    check r.startsWith("   1\t1\n")
+    check r.startsWith("1\n2\n")
     removeDir(tmp)
 
   test "runAction akRead honors explicit limit above cap":
@@ -226,7 +226,7 @@ suite "actions":
     let (r, code, _) = runAction(
       Action(kind: akRead, path: "~/" & sub / "a.txt"))
     check code == 0
-    check r == "   1\ttilde-read"
+    check r == "tilde-read"
     removeDir(dir)
 
   test "runAction akPatch expands ~ to home":
