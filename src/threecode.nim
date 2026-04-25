@@ -54,6 +54,52 @@ The harness runs your tool calls and feeds results back. When done, reply with p
 - Web: `3code web "query"` and `3code fetch <url>`. Prefer official docs.
 """
 
+const SystemPromptText = """
+You are 3code, the economical coding agent. One task, done right, few tokens.
+
+Emit fenced code blocks; the harness runs them and feeds results back. Mix prose and blocks freely. Three forms:
+
+```bash
+ls -la
+```
+
+path/to/file.nim
+```
+echo "hi"
+```
+
+path/to/file.nim
+```
+<<<<<<< SEARCH
+old line
+=======
+new line
+>>>>>>> REPLACE
+```
+
+The path-on-its-own-line form writes the file (creates or overwrites). The `SEARCH/REPLACE` form patches it; multiple pairs allowed in one block; SEARCH must match byte-for-byte. To read, use `bash` (`cat path`, or `sed -n 'A,Bp' path` for a slice). When done, reply with prose and no blocks. Dry wit where earned; no forced cheer, no emoji, no "Great question!".
+
+## Work rules
+
+- Orient on a fresh repo: `ls`, README, build manifest. Skip for trivial tasks.
+- Plan multi-step work in 3–8 steps; work them in order.
+- Stay in scope. No unrequested refactors, reformatting, or comments.
+- Match local style.
+- Edit surgically: SEARCH/REPLACE on existing files, full-file write only for new files. Avoid `sed -i`/`>file`/`tee`/`cat >` — use the patch/write blocks. Rewriting the same file repeatedly is a smell — each full body rides in context every turn after.
+- Trust your tools. `wrote N bytes` is truthful; don't `cat` back to verify.
+- Search before reading: `rg`/`grep -rn` first, then `sed -n` for a slice. Don't slurp.
+- Quick jobs, quick scripts. For counts or data shape, a 5-line throwaway under `/tmp/` beats eyeballing. Default Nim or shell. Clean up.
+- Local before web: deps, vendored source, CHANGELOGs, tests, examples, man pages.
+- Verify before done: tests/build/typecheck, then `git diff`/`status`.
+- Stop when done. If the task's already done on arrival, say so.
+- Pause for irreversible ops outside cwd (`rm -rf` elsewhere, force-push, DB drops). Explain and wait.
+
+## Finding things
+
+- Files: `cat path` via `bash`. Tree: `rg`/`grep -rn`/`find`/`ls` via `bash`.
+- Web: `3code web "query"` and `3code fetch <url>`. Prefer official docs.
+"""
+
 let ToolsJson = %*[
   {
     "type": "function",
@@ -155,6 +201,7 @@ commands:
   :compact          compact older tool output in context
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :think [on|off]   toggle the reasoning-content ticker (on by default)
+  :mode [text|tools] toggle protocol: tool_calls (default) vs parsed fenced blocks
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -184,6 +231,7 @@ type
     limit*: int
   Profile* = object
     name*, url*, key*, modelPrefix*, model*: string
+    mode*: string  ## "" / "tools" → OpenAI tool_calls; "text" → parsed fenced blocks
   Usage* = object
     promptTokens*, completionTokens*, totalTokens*, cachedTokens*: int
   ToolRecord* = object
@@ -506,11 +554,14 @@ proc trackCall*(t: var LoopTracker, name: string, args: JsonNode): int =
   t.strike
 
 proc buildSystemPrompt(p: Profile): string =
-  ## Byte-stable across every call. Provider/model identity deliberately
+  ## Byte-stable within a given mode. Provider/model identity deliberately
   ## does NOT land here: it would vary the system prompt's bytes and kill
   ## prefix caching on Anthropic/OpenAI/DeepInfra where an identical
-  ## prefix can shave 90% off prompt tokens on cache hit.
-  SystemPrompt
+  ## prefix can shave 90% off prompt tokens on cache hit. Switching modes
+  ## (`:mode text` ↔ `:mode tools`) does invalidate cache for one turn —
+  ## that's the experimental cost.
+  if p.mode == "text": SystemPromptText
+  else: SystemPrompt
 
 proc refreshSystemPrompt(messages: JsonNode, p: Profile) =
   if messages == nil or messages.kind != JArray or messages.len == 0: return
@@ -947,7 +998,7 @@ proc summarizeHistory*(messages: JsonNode, p: Profile,
 
 type
   ProviderRec = object
-    name, url, key, modelPrefix: string
+    name, url, key, modelPrefix, mode: string
     models: seq[string]
 
 var activeCurrent: string
@@ -955,7 +1006,7 @@ var activeProviders: seq[ProviderRec]
 
 const CommandNames = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":prompt", ":show", ":log", ":sessions", ":compact",
-                      ":summarize", ":think", ":q", ":quit", ":exit"]
+                      ":summarize", ":think", ":mode", ":q", ":quit", ":exit"]
 
 proc currentProvider(): ProviderRec =
   let dot = activeCurrent.find('.')
@@ -982,6 +1033,9 @@ proc completionFor(line: string): seq[string] =
       return
   if words[0] == ":model" and words.len == 2:
     for m in currentProvider().models: result.add m
+    return
+  if words[0] == ":mode" and words.len == 2:
+    for sub in ["text", "tools", "toggle"]: result.add sub
     return
 
 proc splitModels(s: string): seq[string] =
@@ -1032,6 +1086,7 @@ proc parseConfigFile(path: string): (string, seq[ProviderRec]) =
         of "url": prov.url = v.strip(chars = {'/', ' '})
         of "key": prov.key = v
         of "model_prefix": prov.modelPrefix = v
+        of "mode": prov.mode = v
         of "models": prov.models = splitModels(v)
         else: discard
       else: discard
@@ -1061,6 +1116,8 @@ proc writeConfigFile(path: string, current: string,
     buf.add "key = " & quoteVal(pr.key) & "\n"
     if pr.modelPrefix != "":
       buf.add "model_prefix = " & quoteVal(pr.modelPrefix) & "\n"
+    if pr.mode != "":
+      buf.add "mode = " & quoteVal(pr.mode) & "\n"
     buf.add "models = " & quoteVal(pr.models.join(" ")) & "\n"
   writeFile(path, buf)
 
@@ -1087,7 +1144,8 @@ proc buildProfile(current: string, providers: seq[ProviderRec],
       elif model notin pr.models:
         return Profile()
       return Profile(name: pr.name & "." & model, url: pr.url,
-                     key: pr.key, modelPrefix: pr.modelPrefix, model: model)
+                     key: pr.key, modelPrefix: pr.modelPrefix, model: model,
+                     mode: pr.mode)
   Profile()
 
 proc loadProfile(wanted: string): Profile =
@@ -1127,7 +1185,7 @@ proc loadProfile(wanted: string): Profile =
   elif model notin prov.models:
     die &"provider '{name}': model '{model}' not in models list ({prov.models.join(\", \")})", ExitConfig
   Profile(name: prov.name & "." & model, url: prov.url, key: prov.key,
-          modelPrefix: prov.modelPrefix, model: model)
+          modelPrefix: prov.modelPrefix, model: model, mode: prov.mode)
 
 # ---------- Spinner ----------
 
@@ -1523,8 +1581,9 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToken
     "stream": true,
     "stream_options": {"include_usage": true}
   }
-  body["tools"] = ToolsJson
-  body["tool_choice"] = %"auto"
+  if p.mode != "text":
+    body["tools"] = ToolsJson
+    body["tool_choice"] = %"auto"
   let bodyStr = $body
   let t0 = epochTime()
   decayLevel(serverRetryLevel, serverLastTs, t0)
@@ -1675,6 +1734,103 @@ proc replaceFirst*(s, needle, repl: string): (string, bool) =
   let idx = s.find(needle)
   if idx < 0: return (s, false)
   (s[0 ..< idx] & repl & s[idx + needle.len .. ^1], true)
+
+proc looksLikePath*(s: string): bool =
+  ## Heuristic for the path-on-its-own-line preceding a write/patch fence in
+  ## text mode. Rejects prose (whitespace inside, fence markers, headings).
+  ## Accepts anything containing `/` or `.` — paths typically have one.
+  let t = s.strip
+  if t.len == 0 or t.len > 200: return false
+  if ' ' in t or '\t' in t: return false
+  if t.startsWith("```") or t.startsWith("#"): return false
+  '/' in t or '.' in t
+
+proc parseActions*(text: string): seq[Action] =
+  ## Text-mode parser. Recognises three fenced-block forms:
+  ##   ```bash … ```                              → akBash
+  ##   <path>\n``` … ```                          → akWrite
+  ##   <path>\n``` <<<<<<< SEARCH … >>>>>>> REPLACE … ``` → akPatch
+  ## Multiple SEARCH/REPLACE pairs in one fenced block become one akPatch
+  ## with multiple edits. Anything between blocks is prose for the user.
+  let lines = text.splitLines
+  var i = 0
+  while i < lines.len:
+    let ln = lines[i].strip
+    if ln == "```bash" or ln == "```sh" or ln == "```shell":
+      inc i
+      var body = ""
+      while i < lines.len and lines[i].strip != "```":
+        body.add lines[i] & "\n"
+        inc i
+      if i < lines.len: inc i
+      result.add Action(kind: akBash, body: body)
+      continue
+    if i + 1 < lines.len and lines[i+1].strip == "```" and looksLikePath(lines[i]):
+      let path = lines[i].strip
+      i += 2
+      var body = ""
+      while i < lines.len and lines[i].strip != "```":
+        body.add lines[i] & "\n"
+        inc i
+      if i < lines.len: inc i
+      if "<<<<<<< SEARCH" in body:
+        var act = Action(kind: akPatch, path: path)
+        let blines = body.splitLines
+        var k = 0
+        while k < blines.len:
+          if blines[k].strip == "<<<<<<< SEARCH":
+            inc k
+            var s = ""
+            while k < blines.len and blines[k].strip != "=======":
+              s.add blines[k] & "\n"
+              inc k
+            if k < blines.len: inc k
+            var r = ""
+            while k < blines.len and blines[k].strip != ">>>>>>> REPLACE":
+              r.add blines[k] & "\n"
+              inc k
+            if k < blines.len: inc k
+            act.edits.add (s, r)
+          else:
+            inc k
+        result.add act
+      else:
+        result.add Action(kind: akWrite, path: path, body: body)
+      continue
+    inc i
+
+proc stripActions*(text: string): string =
+  ## Mirror of parseActions: returns prose with every action block elided,
+  ## collapsing the resulting blank-line runs and trimming leading/trailing
+  ## blank lines. Used to suppress the fenced blocks from any post-turn
+  ## reprint of the assistant message (the streamer already showed them).
+  let lines = text.splitLines
+  var kept: seq[string]
+  var i = 0
+  while i < lines.len:
+    let ln = lines[i].strip
+    if ln == "```bash" or ln == "```sh" or ln == "```shell":
+      inc i
+      while i < lines.len and lines[i].strip != "```": inc i
+      if i < lines.len: inc i
+      continue
+    if i + 1 < lines.len and lines[i+1].strip == "```" and looksLikePath(lines[i]):
+      i += 2
+      while i < lines.len and lines[i].strip != "```": inc i
+      if i < lines.len: inc i
+      continue
+    kept.add lines[i]
+    inc i
+  var res: seq[string]
+  var lastBlank = true
+  for l in kept:
+    let blank = l.strip.len == 0
+    if blank and lastBlank: continue
+    res.add l
+    lastBlank = blank
+  while res.len > 0 and res[^1].strip.len == 0:
+    res.setLen res.len - 1
+  res.join("\n")
 
 proc levenshteinCapped(a, b: string, cap: int): int =
   ## Standard edit distance with an early cutoff: returns `cap+1` once the
@@ -2037,6 +2193,8 @@ proc showProfile(p: Profile) =
   let provider = if dot < 0: p.name else: p.name[0 ..< dot]
   stdout.styledWriteLine fgCyan, styleBright, "  provider ", resetStyle, provider
   stdout.styledWriteLine fgCyan, styleBright, "  model    ", resetStyle, p.model
+  if p.mode == "text":
+    stdout.styledWriteLine fgCyan, styleBright, "  mode     ", resetStyle, "text"
 
 proc welcome(p: Profile): minline.LineEditor =
   stdout.write "\n"
@@ -2334,6 +2492,81 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
           stdout.styledWriteLine fgRed, "  paused — looped", resetStyle
         return
       continue
+    if p.mode == "text":
+      # Text-mode action handling: parse fenced blocks out of the assistant
+      # prose, run them, append results back as a user message. Mirrors the
+      # tool_calls path above (banner, loop guard, halt) but without
+      # tool_call_id pairing — there's no tool-role message, just one user
+      # message containing all results.
+      let actions = parseActions(content)
+      if actions.len > 0:
+        if content.strip.len > 0 and not streamedLive:
+          stdout.write content & "\n\n"
+          stdout.flushFile
+        var halt = false
+        var results = "[harness] action results:\n"
+        for act in actions:
+          if interrupted or halt:
+            results.add "--- " & bannerFor(act) & " ---\n" &
+              (if halt: "[skipped — loop guard paused the turn]\n"
+               else: "[interrupted by user]\n")
+            continue
+          let idx = session.toolLog.len + 1
+          stdout.styledWrite styleDim, "• ", bannerFor(act), resetStyle, "\n"
+          stdout.flushFile
+          let toolT0 = epochTime()
+          if session.readCache == nil: session.readCache = newReadCache()
+          var (r, code, diff) = runAction(act, session.readCache)
+          let toolElapsed = epochTime() - toolT0
+          if r.strip.len == 0: r = "[no output]"
+          session.toolLog.add ToolRecord(banner: bannerFor(act), output: r,
+                                         code: code, kind: act.kind)
+          stdout.write "\e[1A\r\e[2K"
+          let bulletColor = if code == 0: fgGreen else: fgRed
+          stdout.styledWrite bulletColor, "• ", resetStyle
+          stdout.styledWrite styleDim, bannerFor(act), resetStyle
+          if toolElapsed >= 1:
+            stdout.styledWrite styleDim, &"  ({toolElapsed.int}s)", resetStyle
+          stdout.write "\n"
+          stdout.flushFile
+          printActionResult(act, r, code, idx, diff)
+          let guardName = case act.kind
+            of akBash: "bash"
+            of akWrite: "write"
+            of akPatch: "patch"
+            of akRead: "read"
+          let guardArgs = case act.kind
+            of akBash: %*{"command": act.body}
+            else: %*{"path": act.path}
+          let priorStrike = session.loop.strike
+          let strike = trackCall(session.loop, guardName, guardArgs)
+          results.add "--- " & bannerFor(act) & " ---\n" & r &
+            (if r.endsWith("\n"): "" else: "\n")
+          if strike >= 2 and priorStrike < 2:
+            halt = true
+            if session.loop.recoveryCmd != "":
+              results.add "\n[repeat-guard] working-tree recovery detected (`" &
+                session.loop.recoveryCmd &
+                "`); further actions this turn are paused.\n"
+            else:
+              let fp = fingerprint(guardName, guardArgs)
+              results.add "\n[repeat-guard] second saturation (path=" & fp &
+                "); further actions this turn are paused.\n"
+        messages.add %*{"role": "user", "content": results}
+        saveSession(session, messages)
+        if interrupted:
+          stdout.styledWriteLine fgRed, "  · interrupted", resetStyle
+          interrupted = false
+          return
+        if halt:
+          if session.loop.recoveryCmd != "":
+            stdout.styledWriteLine fgRed,
+              &"  paused — `{session.loop.recoveryCmd}` wiped working-tree state",
+              resetStyle
+          else:
+            stdout.styledWriteLine fgRed, "  paused — looped", resetStyle
+          return
+        continue
     if content.strip.len > 0:
       if not streamedLive:
         stdout.write content & "\n\n"
@@ -2983,6 +3216,27 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: var Session,
       stdout.styledWriteLine fgRed, "  usage: :think [on|off]", resetStyle
       return true
     hintLn "  thinking ticker ", (if showThinking: "on" else: "off"), resetStyle
+  of ":mode":
+    let want = arg.strip.toLowerAscii
+    let cur = if prof.mode == "text": "text" else: "tools"
+    case want
+    of "":
+      hintLn "  mode: ", cur, "  (toggle with :mode [text|tools])", resetStyle
+      return true
+    of "toggle":
+      prof.mode = if cur == "text": "tools" else: "text"
+    of "text": prof.mode = "text"
+    of "tools", "tool", "tool_calls": prof.mode = ""
+    else:
+      stdout.styledWriteLine fgRed,
+        "  usage: :mode [text|tools|toggle]", resetStyle
+      return true
+    refreshSystemPrompt(messages, prof)
+    let now = if prof.mode == "text": "text" else: "tools"
+    hintLn "  mode → ", now,
+      (if cur != now and messages.len > 1:
+         "  (existing history may confuse the model — :clear if it acts up)"
+       else: ""), resetStyle
   of ":summarize":
     if prof.name == "":
       stdout.styledWriteLine fgRed,
