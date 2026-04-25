@@ -31,3 +31,16 @@ name = "together"
 url = "https://api.together.xyz/v1"
 key = "..."
 models = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+
+# Optional per-provider `mode` selects the agent protocol:
+#   tools (default) — OpenAI tool_calls; harness sends a tool schema
+#   text            — model emits fenced ```bash / path-then-fence / SEARCH/
+#                     REPLACE blocks; harness parses them. No schema sent.
+# The `:mode [text|tools]` REPL command toggles per-session for experiments.
+;
+; [provider]
+; name = "deepseek"
+; url = "https://api.deepseek.com/v1"
+; key = "..."
+; mode = "text"
+; models = "deepseek-chat"

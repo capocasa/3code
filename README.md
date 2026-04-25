@@ -78,8 +78,24 @@ Reply → execute → loop. Four tools, sent as OpenAI tool calls:
 - `write(path, body)`, create or overwrite a file.
 - `patch(path, edits)`, apply exact-match search/replace edits.
 
-Providers without tool-call support aren't supported. Nearly every
-major OpenAI-compatible endpoint has them in 2025.
+Providers without tool-call support aren't supported in the default mode.
+Nearly every major OpenAI-compatible endpoint has them in 2025.
+
+### Text mode (experimental)
+
+`:mode text` swaps the protocol for parsed fenced code blocks. The
+harness sends no tool schema; the model emits `` ```bash …``` `` for
+shell, `path/to/file\n``` …``` ` for whole-file writes, and
+`<<<<<<< SEARCH / ======= / >>>>>>> REPLACE` inside a fenced block for
+patches. The harness parses, runs, and feeds back results as a `user`
+message. `:mode tools` (or `:mode toggle`) flips it back. Pin the
+default per-provider with `mode = "text"` in the config file.
+
+The point: skip the tool schema bytes per request, skip the tool_call
+JSON wrapping per response, work on providers without (or with weak)
+tool-call support. The cost: no `tool` role separation, so the model
+sees results inside a `user` message — older / cheaper models follow
+the convention, frontier ones occasionally narrate around it.
 
 ## Use
 

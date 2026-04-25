@@ -1,6 +1,110 @@
 import std/[unittest, os, strutils, json, times]
 import threecode {.all.}  # exported + private symbols (parseConfigFile, ProviderRec, Session)
 
+suite "text-mode parser":
+  test "parseActions picks up bash blocks":
+    let s = "Some prose.\n\n```bash\nls -la\n```\nTrailing."
+    let a = parseActions(s)
+    check a.len == 1
+    check a[0].kind == akBash
+    check a[0].body.strip == "ls -la"
+
+  test "parseActions accepts ```sh and ```shell aliases":
+    check parseActions("```sh\necho 1\n```\n").len == 1
+    check parseActions("```shell\necho 2\n```\n").len == 1
+
+  test "parseActions picks up write blocks (path on its own line)":
+    let s = "src/foo.nim\n```\necho \"hi\"\n```\n"
+    let a = parseActions(s)
+    check a.len == 1
+    check a[0].kind == akWrite
+    check a[0].path == "src/foo.nim"
+    check a[0].body == "echo \"hi\"\n"
+
+  test "parseActions picks up patch with a single SEARCH/REPLACE pair":
+    let s = """src/foo.nim
+```
+<<<<<<< SEARCH
+old
+=======
+new
+>>>>>>> REPLACE
+```
+"""
+    let a = parseActions(s)
+    check a.len == 1
+    check a[0].kind == akPatch
+    check a[0].path == "src/foo.nim"
+    check a[0].edits.len == 1
+    check a[0].edits[0][0] == "old\n"
+    check a[0].edits[0][1] == "new\n"
+
+  test "parseActions picks up multiple SEARCH/REPLACE pairs in one fence":
+    let s = """README.md
+```
+<<<<<<< SEARCH
+one
+=======
+1
+>>>>>>> REPLACE
+<<<<<<< SEARCH
+two
+=======
+2
+>>>>>>> REPLACE
+```
+"""
+    let a = parseActions(s)
+    check a.len == 1
+    check a[0].kind == akPatch
+    check a[0].edits.len == 2
+
+  test "parseActions handles mixed bash + write in one reply":
+    let s = """Plan:
+
+```bash
+mkdir -p src
+```
+
+src/foo.nim
+```
+let x = 1
+```
+
+Done.
+"""
+    let a = parseActions(s)
+    check a.len == 2
+    check a[0].kind == akBash
+    check a[1].kind == akWrite
+
+  test "parseActions returns empty on prose-only reply":
+    check parseActions("nothing to do here.").len == 0
+    check parseActions("").len == 0
+
+  test "looksLikePath rejects prose, accepts paths":
+    check not looksLikePath("Here is the plan")
+    check not looksLikePath("```")
+    check not looksLikePath("# heading")
+    check looksLikePath("src/foo.nim")
+    check looksLikePath("README.md")
+    check looksLikePath("a/b/c.txt")
+
+  test "stripActions removes bash blocks, keeps prose":
+    let s = "Plan:\n\n```bash\nls -la\n```\n\nDone."
+    check stripActions(s) == "Plan:\n\nDone."
+
+  test "stripActions removes write blocks, keeps prose":
+    let s = "Writing config.\n\nsrc/foo.nim\n```\necho hi\nmore\n```\n\nDone."
+    check stripActions(s) == "Writing config.\n\nDone."
+
+  test "stripActions returns empty for a pure-action reply":
+    check stripActions("```bash\nls\n```\n") == ""
+
+  test "stripActions preserves inline prose between actions":
+    let s = "First:\n```bash\na\n```\nNext:\n```bash\nb\n```\nEnd."
+    check stripActions(s) == "First:\nNext:\nEnd."
+
 suite "actions":
   test "replaceFirst only replaces first occurrence":
     let (out1, ok) = replaceFirst("a X b X c", "X", "Y")
@@ -648,6 +752,39 @@ models = "m"
     let pf3 = buildProfile(cur3, prov3, "")
     check pf3.key == "k:with=colon#hash"
 
+    removeFile(path)
+
+  test "carries `mode = \"text\"` from provider config into Profile":
+    let path = tmpConfig()
+    writeFile(path, """[settings]
+current = "p.m"
+
+[provider]
+name = "p"
+url = "https://x.example/v1"
+key = "k1"
+mode = "text"
+models = "m"
+""")
+    let (cur, prov) = parseConfigFile(path)
+    let pf = buildProfile(cur, prov, "")
+    check pf.mode == "text"
+    removeFile(path)
+
+  test "absent mode in config produces empty Profile.mode (i.e. tools)":
+    let path = tmpConfig()
+    writeFile(path, """[settings]
+current = "p.m"
+
+[provider]
+name = "p"
+url = "https://x.example/v1"
+key = "k1"
+models = "m"
+""")
+    let (cur, prov) = parseConfigFile(path)
+    let pf = buildProfile(cur, prov, "")
+    check pf.mode == ""
     removeFile(path)
 
 suite "bash mutation detection":
