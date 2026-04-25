@@ -1,17 +1,22 @@
 # 3code
 
-**The economical coding agent.**
+**An experiment in getting frontier-plan value from a pay-as-you-go API key.**
 
-A coding agent for any OpenAI-compatible chat endpoint. You give it a task,
-it reads and writes files and runs shell commands until the task is done or
-you stop it. One binary, no web UI, no telemetry, no project config.
+3code is a coding agent for any OpenAI-compatible chat endpoint. You give it
+a task, it reads and writes files and runs shell commands until the task is
+done or you stop it. One binary, no web UI, no telemetry, no project config.
 
-3code exists because other agents splurge tokens. Every design choice is
-weighted against that: a lean system prompt, compact tool output formatting,
-supersede-aware history compaction (earlier full-file writes and reads are
-elided once a later action on the same path lands), and a soft ceiling
-before the context window fills. Bring your own endpoint, pay for the work,
-not for the chatter.
+The premise: a hosted open-weights model behind a third-party endpoint can
+compete with a frontier subscription if the agent stops splurging tokens
+*and* stops splurging the user's attention. Frugality runs both directions
+— small system prompt, terse tool output, supersede-aware history
+compaction (earlier full-file writes and reads are elided once a later
+action on the same path lands), and a soft ceiling before the context window
+fills; plus advanced ergonomics (streaming reasoning ticker, type-ahead,
+tab-completion on commands, supersede + summarize compaction, loop guard,
+session resume, `:show`/`:log`/`:tokens` introspection) so the human
+doesn't have to babysit. Bring your own endpoint, pay for the work, not
+for the chatter.
 
 The name is a nod to third-party-hosted models: bring your own endpoint.
 
