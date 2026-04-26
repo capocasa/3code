@@ -4,14 +4,13 @@ import types
 const Version* = staticRead("../../threecode.nimble").splitLines().filterIt(it.startsWith("version")).
     mapIt(it.split("=")[1].strip().strip(chars = {'"'}))[0]
 
-const KnownGoodCombos*: array[2, (string, string, string)] = [
+const KnownGoodCombos*: array[3, (string, string, string)] = [
     ("cerebras",  "glm-4.7", "glm"),
     ("fireworks", "accounts/fireworks/models/glm-5p1", "glm"),
-    # non-glm combos are commented out while the per-family tool surface
-    # is glm-only. Re-add once their family component is wired in.
+    ("cerebras",  "qwen-3-235b-a22b-instruct-2507", "qwen"),
+    # other qwen endpoints — uncomment once retested under qwen family:
     # ("deepinfra", "qwen3-coder-480b",                              "qwen"),
     # ("together",  "qwen3-coder-480b",                              "qwen"),
-    # ("cerebras",  "qwen-3-235b-a22b-instruct-2507",                "qwen"),
     # ("ovh",       "Qwen3-Coder-30B-A3B-Instruct",                  "qwen"),
     # ("nvidia",    "qwen/qwen3-coder-480b-a35b-instruct",           "qwen"),
     # ("deepinfra", "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",     "qwen"),
@@ -25,6 +24,8 @@ const KnownGoodCombos*: array[2, (string, string, string)] = [
 
 const SystemPromptBase* = """
 You are 3code, the economical coding agent. One task, done right, few tokens.
+
+{{credit}}
 
 {{tools}}
 The harness runs your tool calls and feeds results back. When done, reply with prose and no tool calls. Dry wit where earned; no forced cheer, no emoji, no "Great question!".
@@ -58,6 +59,14 @@ Read: `bash` with `cat path` (whole file) or `sed -n 'A,Bp' path` (slice).
 Edit a line range: `bash` with `command = "ed -s path"` and `stdin = "A,Bc\nnew body\n.\nw\nq\n"` (POSIX line editor; `c` = change lines A through B, `.` on its own line ends the body, `w` writes, `q` quits). Re-read just before so addresses are fresh; the harness errors if the file changed since your last read. For multi-edit scripts in one call, author bottom-up so earlier edits don't shift later addresses. A body line that is literally `.` must be escaped (use `s/^\\.$/&./` after, or split into separate edits).
 """
 
+const QwenTools* = """Tools:
+- `bash(command, stdin?)` — shell; returns stdout/stderr + exit code. Optional `stdin` is piped into the command.
+- `write(path, body)` — create or overwrite a file.
+
+Read: default to `cat path`. Read the raw file with your eyes; don't try to extract the answer with `grep`/`cut`/`awk` pipelines — they're brittle on whitespace and quoting and they hide context. Only use `sed -n 'A,Bp' path` when the file is too large to cat. If a command returns empty or surprising output, NEVER guess the answer — re-run with `cat` and read it.
+Edit: prefer `write` with the full new body for any file under ~150 lines. `cat` it, mentally apply the change, then `write` the whole new file. Don't reach for `ed` unless the file is genuinely large — line-arithmetic is easy to misread, and a corrupted file costs more tokens than a full rewrite. When you do use `ed`: `bash` with `command = "ed -s path"` and `stdin = "A,Bc\nnew body\n.\nw\nq\n"` (POSIX line editor; `c` = change lines A through B, `.` on its own line ends the body, `w` writes, `q` quits). Read immediately before so addresses are fresh.
+"""
+
 let GlmToolsJson* = %*[
   {
     "type": "function",
@@ -89,10 +98,12 @@ let GlmToolsJson* = %*[
   }
 ]
 
-const DefaultSystemPrompt* = SystemPromptBase.replace("{{tools}}", GlmTools)
+const DefaultSystemPrompt* = SystemPromptBase
+    .replace("{{credit}}", "Credit where it's due — to whoever trained the weights driving you and the lab serving them.")
+    .replace("{{tools}}", GlmTools)
   ## Used as the bytes for the placeholder system message in fresh sessions
   ## and unloaded session files. `refreshSystemPrompt` rewrites it on every
-  ## turn so the resolved family for the active profile takes over.
+  ## turn so the resolved profile (model, lab, provider) takes over.
 
 const ConfigExample* = """  [settings]
   current = "openai.gpt-4o-mini"
@@ -175,15 +186,46 @@ proc knownGoodFamily*(provider, model: string): string =
       return combo[2]
   ""
 
+proc displayFamily(family: string): string =
+  case family.toLowerAscii
+  of "glm": "GLM"
+  of "qwen": "Qwen"
+  of "deepseek": "DeepSeek"
+  of "kimi", "moonshot": "Kimi"
+  of "llama": "Llama"
+  of "mistral": "Mistral"
+  of "gemma": "Gemma"
+  else: family
+
+proc buildCredit*(p: Profile): string =
+  ## Dynamic attribution line: model + serving provider, derived from
+  ## the active profile. Bytes change with (provider, family, full model id),
+  ## not within a session — prefix caching survives as long as the user
+  ## doesn't `:provider`/`:model` switch mid-session.
+  let dot = p.name.find('.')
+  let provider = if dot < 0: p.name else: p.name[0 ..< dot]
+  let modelId = p.modelPrefix & p.model
+  let fam = displayFamily(p.family)
+  if provider != "" and fam != "":
+    "Credit where it's due: you're a " & fam & " model (" & modelId &
+      "), served via " & provider & "."
+  elif provider != "" and modelId != "":
+    "Credit where it's due: you're " & modelId & ", served via " & provider & "."
+  else:
+    "Credit where it's due — to whoever trained the weights driving you and the lab serving them."
+
 proc buildSystemPrompt*(p: Profile): string =
-  ## Byte-stable within a given family. Provider/model identity deliberately
-  ## does NOT land here: it would vary the prompt's bytes and kill prefix
-  ## caching on Anthropic/OpenAI/DeepInfra where an identical prefix can
-  ## shave 90% off prompt tokens on cache hit.
+  ## Bytes are stable within a (provider, family, model id) triple — that's
+  ## what the prompt now embeds for credit. Within a session that's constant,
+  ## so prefix caching on Anthropic/OpenAI/DeepInfra still applies; switching
+  ## model or provider mid-session will invalidate the cache.
   let tools = case p.family
+    of "qwen": QwenTools
     of "glm", "": GlmTools
     else: GlmTools
-  SystemPromptBase.replace("{{tools}}", tools)
+  SystemPromptBase
+    .replace("{{credit}}", buildCredit(p))
+    .replace("{{tools}}", tools)
 
 proc refreshSystemPrompt*(messages: JsonNode, p: Profile) =
   if messages == nil or messages.kind != JArray or messages.len == 0: return
