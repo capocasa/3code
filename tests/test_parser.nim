@@ -235,37 +235,41 @@ suite "utf8 byte cut":
 
 suite "known-good model gate":
   test "exact (provider, model) pairs from the seed list match":
-    check isKnownGood(Profile(name: "deepinfra.qwen3-coder-480b",
-                              modelPrefix: "", model: "qwen3-coder-480b"))
-    check isKnownGood(Profile(name: "together.qwen3-coder-480b",
-                              modelPrefix: "", model: "qwen3-coder-480b"))
+    check isKnownGood(Profile(name: "cerebras.glm-4.7",
+                              modelPrefix: "", model: "glm-4.7"))
+    check isKnownGood(Profile(
+      name: "fireworks.accounts/fireworks/models/glm-5p1",
+      modelPrefix: "",
+      model: "accounts/fireworks/models/glm-5p1"))
 
   test "match is case-insensitive on both provider and model":
-    check isKnownGood(Profile(name: "DeepInfra.qwen", modelPrefix: "",
-                              model: "Qwen3-Coder-480B"))
-    check isKnownGood(Profile(name: "TOGETHER.foo", modelPrefix: "",
-                              model: "QWEN3-CODER-480B"))
+    check isKnownGood(Profile(name: "Cerebras.foo", modelPrefix: "",
+                              model: "GLM-4.7"))
+    check isKnownGood(Profile(
+      name: "FIREWORKS.bar", modelPrefix: "",
+      model: "ACCOUNTS/FIREWORKS/MODELS/glm-5p1"))
 
   test "right model on the wrong provider is not known-good":
-    check not isKnownGood(Profile(name: "groq.qwen3-coder-480b",
-                                  modelPrefix: "", model: "qwen3-coder-480b"))
-    check not isKnownGood(Profile(name: "baseten.qwen3c",
-                                  modelPrefix: "", model: "qwen3c"))
+    check not isKnownGood(Profile(name: "groq.glm-4.7",
+                                  modelPrefix: "", model: "glm-4.7"))
+    check not isKnownGood(Profile(name: "openai.glm",
+                                  modelPrefix: "", model: "glm-4.7"))
 
   test "right provider but a different model is not known-good":
-    check not isKnownGood(Profile(name: "deepinfra.kimi-k2.5",
+    check not isKnownGood(Profile(name: "cerebras.kimi-k2.5",
                                   modelPrefix: "", model: "kimi-k2.5"))
-    check not isKnownGood(Profile(name: "together.llama",
+    check not isKnownGood(Profile(name: "fireworks.llama",
                                   modelPrefix: "", model: "Llama-3.3-70B"))
 
-  test "qwen3-coder substring without exact match is not known-good":
+  test "glm substring without exact match is not known-good":
     # Substring match would have accepted these — exact match shouldn't.
-    check not isKnownGood(Profile(name: "deepinfra.qwen3-coder-30b",
-                                  modelPrefix: "", model: "qwen3-coder-30b"))
-    check not isKnownGood(Profile(name: "together.qwen", modelPrefix: "Qwen/",
-                                  model: "Qwen3-Coder-480B-A35B-Instruct-FP8"))
+    check not isKnownGood(Profile(name: "cerebras.glm-4.6",
+                                  modelPrefix: "", model: "glm-4.6"))
+    check not isKnownGood(Profile(name: "fireworks.glm-5",
+                                  modelPrefix: "accounts/fireworks/models/",
+                                  model: "glm-5"))
 
-  test "non-qwen3-coder models are not known-good":
+  test "non-glm models are not known-good":
     check not isKnownGood(Profile(name: "deepseek.deepseek-v3.2",
                                   modelPrefix: "", model: "deepseek-v3.2"))
     check not isKnownGood(Profile(name: "openai.gpt-4o-mini",
@@ -274,11 +278,10 @@ suite "known-good model gate":
   test "empty / malformed profile is not known-good":
     check not isKnownGood(Profile())
     check not isKnownGood(Profile(name: "noProviderDot",
-                                  modelPrefix: "", model: "qwen3-coder-480b"))
+                                  modelPrefix: "", model: "glm-4.7"))
 
   test "gate lets known-good through regardless of --experimental":
-    let prof = Profile(name: "deepinfra.qwen3-coder-480b",
-                       model: "qwen3-coder-480b")
+    let prof = Profile(name: "cerebras.glm-4.7", model: "glm-4.7")
     let prior = experimentalEnabled
     experimentalEnabled = false
     check gateExperimental(prof)
@@ -946,7 +949,7 @@ models = "m"
 
     removeFile(path)
 
-  test "non-known-good profile defaults to mode = \"tools\"":
+  test "non-known-good profile defaults to family = \"glm\"":
     let path = tmpConfig()
     writeFile(path, """[settings]
 current = "p.m"
@@ -959,10 +962,10 @@ models = "m"
 """)
     let (cur, prov) = parseConfigFile(path)
     let pf = buildProfile(cur, prov, "")
-    check pf.mode == "tools"
+    check pf.family == "glm"
     removeFile(path)
 
-  test "provider `mode = \"text\"` is honored only with --experimental":
+  test "provider `family = \"qwen\"` is honored only with --experimental":
     let path = tmpConfig()
     writeFile(path, """[settings]
 current = "p.m"
@@ -971,61 +974,60 @@ current = "p.m"
 name = "p"
 url = "https://x.example/v1"
 key = "k1"
-mode = "text"
+family = "qwen"
 models = "m"
 """)
     let (cur, prov) = parseConfigFile(path)
     let prior = experimentalEnabled
     experimentalEnabled = false
-    check buildProfile(cur, prov, "").mode == "tools"  # config ignored
+    check buildProfile(cur, prov, "").family == "glm"   # config ignored
     experimentalEnabled = true
-    check buildProfile(cur, prov, "").mode == "text"   # config wins
+    check buildProfile(cur, prov, "").family == "qwen"  # config wins
     experimentalEnabled = prior
     removeFile(path)
 
-  test "known-good combo always reports its hardcoded mode":
-    # No mode in config, no provider mode — known-good combo supplies it.
+  test "known-good combo always reports its hardcoded family":
     let path = tmpConfig()
     writeFile(path, """[settings]
-current = "deepinfra.qwen3-coder-480b"
+current = "cerebras.glm-4.7"
 
 [provider]
-name = "deepinfra"
-url = "https://api.deepinfra.com/v1/openai/"
+name = "cerebras"
+url = "https://api.cerebras.ai/v1"
 key = "k"
-models = "qwen3-coder-480b"
+models = "glm-4.7"
 """)
     let (cur, prov) = parseConfigFile(path)
     let pf = buildProfile(cur, prov, "")
-    check pf.mode == "text"
+    check pf.family == "glm"
     removeFile(path)
 
-  test "known-good hardcode wins over provider mode and --experimental":
+  test "known-good hardcode wins over provider family and --experimental":
     let path = tmpConfig()
     writeFile(path, """[settings]
-current = "deepinfra.qwen3-coder-480b"
+current = "cerebras.glm-4.7"
 
 [provider]
-name = "deepinfra"
-url = "https://api.deepinfra.com/v1/openai/"
+name = "cerebras"
+url = "https://api.cerebras.ai/v1"
 key = "k"
-mode = "tools"
-models = "qwen3-coder-480b"
+family = "qwen"
+models = "glm-4.7"
 """)
     let (cur, prov) = parseConfigFile(path)
     let prior = experimentalEnabled
     experimentalEnabled = true
-    check buildProfile(cur, prov, "").mode == "text"  # hardcode wins
+    check buildProfile(cur, prov, "").family == "glm"   # hardcode wins
     experimentalEnabled = prior
     removeFile(path)
 
-  test "knownGoodMode returns hardcoded mode for verified combos":
-    check knownGoodMode(Profile(name: "deepinfra.qwen3-coder-480b",
-                                model: "qwen3-coder-480b")) == "text"
-    check knownGoodMode(Profile(name: "together.qwen3-coder-480b",
-                                model: "qwen3-coder-480b")) == "text"
-    check knownGoodMode(Profile(name: "openai.gpt-4o",
-                                model: "gpt-4o")) == ""
+  test "knownGoodFamily returns hardcoded family for verified combos":
+    check knownGoodFamily(Profile(name: "cerebras.glm-4.7",
+                                  model: "glm-4.7")) == "glm"
+    check knownGoodFamily(Profile(name: "fireworks.accounts/fireworks/models/glm-5p1",
+                                  model: "accounts/fireworks/models/glm-5p1")) == "glm"
+    check knownGoodFamily(Profile(name: "openai.gpt-4o",
+                                  model: "gpt-4o")) == ""
 
   test "firstKnownGoodCombo skips experimental providers, returns first known-good":
     let path = tmpConfig()
@@ -1040,13 +1042,13 @@ key = "sk-1"
 models = "gpt-4o gpt-4o-mini"
 
 [provider]
-name = "deepinfra"
-url = "https://api.deepinfra.com/v1/openai/"
-key = "di-2"
-models = "qwen3-coder-480b"
+name = "cerebras"
+url = "https://api.cerebras.ai/v1"
+key = "cb-2"
+models = "glm-4.7"
 """)
     let (_, providers) = parseConfigFile(path)
-    check firstKnownGoodCombo(providers) == "deepinfra.qwen3-coder-480b"
+    check firstKnownGoodCombo(providers) == "cerebras.glm-4.7"
     removeFile(path)
 
   test "firstKnownGoodCombo returns empty when no known-good provider is configured":
@@ -1069,22 +1071,24 @@ models = "gpt-4o gpt-4o-mini"
     let path = tmpConfig()
     writeFile(path, """
 [settings]
-current = "deepinfra.qwen3-coder-480b"
+current = "cerebras.glm-4.7"
 
 [provider]
-name = "deepinfra"
-key = "di-2"
-models = "qwen3-coder-480b"
+name = "cerebras"
+key = "cb-2"
+models = "glm-4.7"
 
 [provider]
-name = "together"
-url = "https://api.together.xyz/v1"
-key = "tg-1"
-models = "qwen3-coder-480b"
+name = "fireworks"
+url = "https://api.fireworks.ai/inference/v1"
+key = "fw-1"
+model_prefix = "accounts/fireworks/models/"
+models = "glm-5p1"
 """)
     let (_, providers) = parseConfigFile(path)
     # First [provider] has no url → skipped; second is the answer.
-    check firstKnownGoodCombo(providers) == "together.qwen3-coder-480b"
+    check firstKnownGoodCombo(providers) ==
+      "fireworks.glm-5p1"
     removeFile(path)
 
   test "loadProfile-style: non-experimental startup falls back from experimental current":
@@ -1103,10 +1107,10 @@ key = "sk-1"
 models = "gpt-4o gpt-4o-mini"
 
 [provider]
-name = "deepinfra"
-url = "https://api.deepinfra.com/v1/openai/"
-key = "di-2"
-models = "qwen3-coder-480b"
+name = "cerebras"
+url = "https://api.cerebras.ai/v1"
+key = "cb-2"
+models = "glm-4.7"
 """)
     let (current, providers) = parseConfigFile(path)
     let prior = experimentalEnabled
@@ -1115,7 +1119,7 @@ models = "qwen3-coder-480b"
     if not isKnownGood(prof):
       let fb = firstKnownGoodCombo(providers)
       if fb != "": prof = buildProfile(fb, providers, "")
-    check prof.name == "deepinfra.qwen3-coder-480b"
+    check prof.name == "cerebras.glm-4.7"
     # With --experimental, the explicit current is honored as before.
     experimentalEnabled = true
     let prof2 = buildProfile(current, providers, "")
@@ -1127,17 +1131,8 @@ models = "qwen3-coder-480b"
     check splitModels("a b c") == @["a", "b", "c"]
     check splitModels("a, b ,c") == @["a", "b", "c"]
     check splitModels("  ") == newSeq[string]()
-    # Colons are no longer mode markers — they're part of the model name.
+    # Colons are not separators — they're part of the model name.
     check splitModels("x/y:32k") == @["x/y:32k"]
-
-  test "normalizeMode accepts text/tool/tools, rejects others":
-    check normalizeMode("text") == "text"
-    check normalizeMode("Text") == "text"
-    check normalizeMode("tool") == "tools"
-    check normalizeMode("tools") == "tools"
-    check normalizeMode("tool_calls") == "tools"
-    check normalizeMode("foo") == ""
-    check normalizeMode("") == ""
 
 suite "bash mutation detection":
   # Closes the loop-guard bypass that let the deepseek-v4-pro session of
