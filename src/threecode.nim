@@ -9,6 +9,26 @@ const
   ExitUsage = 2
   ExitConfig = 3
   ExitApi = 5
+  ToolsModeEnabled* = true   ## When true, both protocols are live and the
+                             ## resolved Profile.mode picks one. Flip to false
+                             ## to wedge every session into text mode.
+  KnownGoodCombos*: array[8, (string, string, string)] = [
+    ("deepinfra", "qwen3-coder-480b", "text"),
+    ("together",  "qwen3-coder-480b", "text"),
+    ("cerebras",  "qwen-3-235b-a22b-instruct-2507", "text"),
+    ("cerebras",  "glm-4.7", "text"),
+    ("ovh",       "Qwen3-Coder-30B-A3B-Instruct", "text"),
+    ("nvidia",    "qwen/qwen3-coder-480b-a35b-instruct", "text"),
+    ("deepinfra", "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo", "text"),
+    ("fireworks", "accounts/fireworks/models/glm-5p1", "text"),
+  ]
+    ## Verified (provider, model, mode) triples that emit multiple fenced
+    ## blocks per reply with ≥99% reliability. Match is exact and
+    ## case-insensitive on (provider, model). The model side is compared
+    ## against `model_prefix & model` (the full API id). Mode is hardcoded
+    ## here — for known-good combos the user is never asked. Anything
+    ## outside this list is "experimental" and requires `--experimental`
+    ## to run; the wizard prompts for mode at add-time.
 
 template hint(args: varargs[untyped]) =
   stdout.styledWrite(fgCyan, styleBright, args, resetStyle)
@@ -16,20 +36,27 @@ template hint(args: varargs[untyped]) =
 template hintLn(args: varargs[untyped]) =
   stdout.styledWriteLine(fgCyan, styleBright, args, resetStyle)
 
-template err(args: varargs[untyped]) =
-  stdout.styledWrite(fgRed, args, resetStyle)
+template warn(args: varargs[untyped]) =
+  ## Magenta highlight for the "user has to fix something" tier: API
+  ## errors, wizard input validation, unknown command/model, mode gates.
+  ## Pairs cleanly with cyan (`hint`) and avoids the red-means-server-down
+  ## reflex. Anything for the LLM to handle (SEARCH/REPLACE failures,
+  ## parser hiccups, repeat-guard halts, interrupted state) goes through
+  ## `styleDim` instead — those don't need to grab the user's eye.
+  stdout.styledWrite(fgMagenta, args, resetStyle)
 
-template errLn(args: varargs[untyped]) =
-  stdout.styledWriteLine(fgRed, args, resetStyle)
+template warnLn(args: varargs[untyped]) =
+  stdout.styledWriteLine(fgMagenta, args, resetStyle)
 
 const SystemPrompt = """
 You are 3code, the economical coding agent. One task, done right, few tokens.
 
 Tools:
-- `bash(command)` — shell; returns stdout/stderr + exit code.
-- `read(path, offset?, limit?)` — file or line range. offset is 1-indexed.
-- `write(path, body)` — create or overwrite.
-- `patch(path, edits)` — exact-match search/replace on an existing file. Each `search` must match the file byte-for-byte; paraphrased matches fail.
+- `bash(command, stdin?)` — shell; returns stdout/stderr + exit code. Optional `stdin` is piped into the command.
+- `write(path, body)` — create or overwrite a file.
+
+Read: `bash` with `cat path` (whole file) or `sed -n 'A,Bp' path` (slice).
+Edit a line range: `bash` with `command = "ed -s path"` and `stdin = "A,Bc\nnew body\n.\nw\nq\n"` (POSIX line editor; `c` = change lines A through B, `.` on its own line ends the body, `w` writes, `q` quits). Re-read just before so addresses are fresh; the harness errors if the file changed since your last read. For multi-edit scripts in one call, author bottom-up so earlier edits don't shift later addresses. A body line that is literally `.` must be escaped (use `s/^\\.$/&./` after, or split into separate edits).
 
 The harness runs your tool calls and feeds results back. When done, reply with prose and no tool calls. Dry wit where earned; no forced cheer, no emoji, no "Great question!".
 
@@ -39,9 +66,9 @@ The harness runs your tool calls and feeds results back. When done, reply with p
 - Plan multi-step work in 3–8 steps; work them in order.
 - Stay in scope. No unrequested refactors, reformatting, or comments.
 - Match local style.
-- Edit surgically: `patch` on existing files, `write` only for new files or full rewrites. Never edit via `sed -i`, `>file`, `tee`, or `cat >` — the loop guard misses bash mutations. Rewriting the same file repeatedly is a smell — each full body rides in context every turn after.
-- Trust your tools. `wrote N bytes` is truthful; don't `read` back to verify.
-- Search before reading: `rg`/`grep -rn` first, then `read` with `offset`/`limit`. Don't slurp.
+- Edit surgically: `ed -s path` for line-range edits, `write` for new files or full rewrites. Read immediately before editing so addresses are fresh. Rewriting the same file repeatedly is a smell — each full body rides in context every turn after.
+- Trust your tools. `wrote N bytes` is truthful; don't `cat` back to verify.
+- Search before reading: `rg`/`grep -rn` first, then `sed -n 'A,Bp' path` for a slice. Don't slurp.
 - Quick jobs, quick scripts. For counts or data shape, a 5-line throwaway under `/tmp/` beats eyeballing. Default Nim or shell. Clean up.
 - Local before web: deps, vendored source, CHANGELOGs, tests, examples, man pages.
 - Verify before done: tests/build/typecheck, then `git diff`/`status`.
@@ -50,14 +77,14 @@ The harness runs your tool calls and feeds results back. When done, reply with p
 
 ## Finding things
 
-- Files: `read`. Tree: `rg`/`grep -rn`/`find`/`ls` via `bash`.
+- Files: `cat path` / `sed -n 'A,Bp' path` via `bash`. Tree: `rg`/`grep -rn`/`find`/`ls` via `bash`.
 - Web: `3code web "query"` and `3code fetch <url>`. Prefer official docs.
 """
 
 const SystemPromptText = """
 You are 3code, the economical coding agent. One task, done right, few tokens.
 
-Emit fenced code blocks; the harness runs them and feeds results back. Mix prose and blocks freely. Three forms:
+Emit fenced code blocks; the harness runs them and feeds results back. Mix prose and blocks freely. Two forms:
 
 ```bash
 ls -la
@@ -65,19 +92,22 @@ ls -la
 
 path/to/file.nim
 ```
-echo "hi"
+full file body here (creates or overwrites)
 ```
 
-path/to/file.nim
-```
-<<<<<<< SEARCH
-old line
-=======
-new line
->>>>>>> REPLACE
+The path-on-its-own-line form writes the file. To read: `cat path` or `sed -n 'A,Bp' path` in a bash block. To edit lines A–B of an existing file, heredoc into ed:
+
+```bash
+ed -s src/foo.nim <<'EOF'
+42,58c
+new content
+.
+w
+q
+EOF
 ```
 
-The path-on-its-own-line form writes the file (creates or overwrites). The `SEARCH/REPLACE` form patches it; multiple pairs allowed in one block; SEARCH must match byte-for-byte. To read, use `bash` (`cat path`, or `sed -n 'A,Bp' path` for a slice). When done, reply with prose and no blocks. Dry wit where earned; no forced cheer, no emoji, no "Great question!".
+`c` = change lines A through B, `.` on its own line ends the body, `w` writes, `q` quits. Re-read just before so addresses are fresh; the harness errors if the file changed since your last read. For multi-edit scripts in one call, author bottom-up so earlier edits don't shift later addresses. A body line that is literally `.` must be escaped (use `s/^\\.$/&./` after, or split into separate edits). When done, reply with prose and no blocks. Dry wit where earned; no forced cheer, no emoji, no "Great question!".
 
 ## Work rules
 
@@ -85,7 +115,7 @@ The path-on-its-own-line form writes the file (creates or overwrites). The `SEAR
 - Plan multi-step work in 3–8 steps; work them in order.
 - Stay in scope. No unrequested refactors, reformatting, or comments.
 - Match local style.
-- Edit surgically: SEARCH/REPLACE on existing files, full-file write only for new files. Avoid `sed -i`/`>file`/`tee`/`cat >` — use the patch/write blocks. Rewriting the same file repeatedly is a smell — each full body rides in context every turn after.
+- Edit surgically: `ed -s path` for line-range edits, full-file write only for new files. Read immediately before editing so addresses are fresh. Rewriting the same file repeatedly is a smell — each full body rides in context every turn after.
 - Trust your tools. `wrote N bytes` is truthful; don't `cat` back to verify.
 - Search before reading: `rg`/`grep -rn` first, then `sed -n` for a slice. Don't slurp.
 - Quick jobs, quick scripts. For counts or data shape, a 5-line throwaway under `/tmp/` beats eyeballing. Default Nim or shell. Clean up.
@@ -107,23 +137,11 @@ let ToolsJson = %*[
       "name": "bash",
       "parameters": {
         "type": "object",
-        "properties": {"command": {"type": "string"}},
-        "required": ["command"]
-      }
-    }
-  },
-  {
-    "type": "function",
-    "function": {
-      "name": "read",
-      "parameters": {
-        "type": "object",
         "properties": {
-          "path": {"type": "string"},
-          "offset": {"type": "integer"},
-          "limit": {"type": "integer"}
+          "command": {"type": "string"},
+          "stdin": {"type": "string"}
         },
-        "required": ["path"]
+        "required": ["command"]
       }
     }
   },
@@ -138,30 +156,6 @@ let ToolsJson = %*[
           "body": {"type": "string"}
         },
         "required": ["path", "body"]
-      }
-    }
-  },
-  {
-    "type": "function",
-    "function": {
-      "name": "patch",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "path": {"type": "string"},
-          "edits": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "search": {"type": "string"},
-                "replace": {"type": "string"}
-              },
-              "required": ["search", "replace"]
-            }
-          }
-        },
-        "required": ["path", "edits"]
       }
     }
   }
@@ -201,7 +195,9 @@ commands:
   :compact          compact older tool output in context
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :think [on|off]   toggle the reasoning-content ticker (on by default)
-  :mode [text|tools] toggle protocol: tool_calls (default) vs parsed fenced blocks
+  :mode             show the active protocol (tools / text)
+  :mode <text|tools|toggle>   switch protocol (--experimental only;
+                              known-good combos hardcode their mode)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -212,12 +208,11 @@ input:
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
 
-recommended (cache = documented prompt caching):
-  deepinfra  (cache)   qwen3-coder-480b, kimi-k2.5
-  deepseek   (cache)   deepseek-v3.2
-  together             qwen3-coder-480b, kimi-k2.5
-  groq                 kimi-k2.5  (fast, no cache)
-models outside this list are your tokens to burn.
+known good for text-mode multi-tool-call:
+  deepinfra.qwen3-coder-480b   (cache)
+  together.qwen3-coder-480b    (cache)
+
+other combos require --experimental — they're your tokens to burn.
 """
 
 type
@@ -226,6 +221,7 @@ type
     kind*: ActionKind
     path*: string
     body*: string
+    stdin*: string  ## bash-only: piped to the command's stdin
     edits*: seq[(string, string)]
     offset*: int
     limit*: int
@@ -264,6 +260,12 @@ type
     loop: LoopTracker
     readCache: ReadCache
   ApiError* = object of CatchableError
+  ParseIssue* = object
+    ## A syntax problem the text-mode parser surfaced on a fenced block
+    ## (unterminated fence, orphan ```, malformed SEARCH/REPLACE).
+    ## `line` is 1-indexed into the assistant reply.
+    line*: int
+    msg*: string
 
 const
   LoopWindowK* = 15
@@ -294,6 +296,28 @@ proc resolvePath*(path: string): string =
   var p = path
   if p.startsWith("~"): p = expandTilde(p)
   try: absolutePath(p) except CatchableError: p
+
+proc utf8ByteCut*(s: string, n: int): string =
+  ## Slice `s` to at most `n` bytes, backing up to a UTF-8 codepoint
+  ## boundary so the result is valid UTF-8. Strings in JSON request bodies
+  ## must be valid UTF-8 — Pydantic-backed providers (deepinfra) reject
+  ## the body with "There was an error parsing the body" when a naive byte
+  ## slice splits a multi-byte rune (e.g. `→` chopped after two bytes).
+  if s.len <= n: return s
+  var cut = n
+  while cut > 0 and (s[cut].uint8 and 0xC0'u8) == 0x80'u8:
+    dec cut
+  s[0 ..< cut]
+
+proc utf8ByteCutEnd*(s: string, n: int): string =
+  ## Take the last up-to-`n` bytes of `s`, advancing past any leading UTF-8
+  ## continuation byte so the result is valid UTF-8. Mirror of `utf8ByteCut`
+  ## for tail slices (used by `clipMiddle`).
+  if s.len <= n: return s
+  var start = s.len - n
+  while start < s.len and (s[start].uint8 and 0xC0'u8) == 0x80'u8:
+    inc start
+  s[start .. ^1]
 
 proc shellTokens*(s: string): seq[string] =
   ## Tokenize a shell snippet by whitespace, honoring single + double quotes.
@@ -402,6 +426,17 @@ proc bashMutationPath*(cmd: string): string =
       if inPlace:
         for j in countdown(toks.len - 1, 1):
           if not toks[j].startsWith("-"): return toks[j]
+    of "ed", "ex":
+      # Line editors that read a script and write the file. `ed -s file`
+      # / `ex -s -c '…' file` etc. — last positional is the file. Also the
+      # zero-positional case (`ed file`); short flags like `-s`, `-c CMD`,
+      # `-G`, `-V`, `-p PROMPT` get filtered by the leading-dash check.
+      for j in countdown(toks.len - 1, 1):
+        let t = toks[j]
+        if t.startsWith("-"): continue
+        # ex uses `-c CMD` — skip the value if the previous token is `-c`.
+        if j >= 2 and toks[j-1] in ["-c", "-p"]: continue
+        return t
     of "tee":
       for t in toks[1..^1]:
         if t.startsWith("-"): continue
@@ -438,6 +473,65 @@ proc bashMutationPath*(cmd: string): string =
       else: discard
     else: discard
   ""
+
+proc bashReadPath*(cmd: string): tuple[path: string, fullFile: bool] =
+  ## Best-effort: return the file path of a pure single-statement read command,
+  ## with `fullFile = true` for `cat path` (the only form eligible for
+  ## cache-dedupe of unchanged-since-last-read). Returns ("", false) on
+  ## anything compound, piped, redirected, or unrecognised. Used to:
+  ##   - port the read-cache stale-write guard onto cat/sed-n (so `patch`
+  ##     after an external edit still errors)
+  ##   - dedupe a re-read of an unchanged file
+  ##   - count reads toward Strike-1 saturation
+  let stmts = splitStatements(cmd)
+  if stmts.len != 1: return ("", false)
+  let raw = shellTokens(stmts[0].strip)
+  if raw.len == 0: return ("", false)
+  var toks: seq[string]
+  for t in raw:
+    if t == ">" or t == ">>" or t == "<" or t == "2>" or t == "&>" or t == "2>>":
+      return ("", false)
+    if t.startsWith(">") or t.startsWith("<") or
+       t.startsWith("2>") or t.startsWith("&>"):
+      return ("", false)
+    toks.add t
+  if toks.len < 2: return ("", false)
+  case toks[0]
+  of "cat":
+    var paths: seq[string]
+    for t in toks[1..^1]:
+      if t.startsWith("-"): continue
+      paths.add t
+    if paths.len == 1: return (paths[0], true)
+  of "sed":
+    var hasN = false
+    var paths: seq[string]
+    var i = 1
+    while i < toks.len:
+      let t = toks[i]
+      if t == "-n": hasN = true; inc i; continue
+      if t == "-e" or t == "--expression" or t == "-f":
+        i += 2; continue
+      if t.startsWith("-"): inc i; continue
+      paths.add t
+      inc i
+    # `sed -n 'A,Bp' path` → paths = ['A,Bp', path]; the script counts as a
+    # positional but isn't a file. Require exactly two positionals (script +
+    # one file) so we don't false-positive on `sed -n '1p' a b`.
+    if hasN and paths.len == 2: return (paths[1], false)
+  of "head", "tail":
+    var paths: seq[string]
+    var i = 1
+    while i < toks.len:
+      let t = toks[i]
+      if t == "-n" or t == "-c":
+        i += 2; continue
+      if t.startsWith("-"): inc i; continue
+      paths.add t
+      inc i
+    if paths.len == 1: return (paths[0], false)
+  else: discard
+  ("", false)
 
 proc bashIsRecovery*(cmd: string): string =
   ## Returns the offending sub-command (`"git checkout src/foo.nim"`,
@@ -490,17 +584,33 @@ proc bashIsRecovery*(cmd: string): string =
 proc fingerprint(name: string, args: JsonNode): string =
   ## Returns "" when the call should NOT be tracked. `bash` is normally
   ## untracked, but commands matching `bashMutationPath` (sed -i, redirects,
-  ## git checkout, etc.) are folded back in as patch-equivalent mutations
-  ## so models can't slip past the loop guard via the shell.
+  ## git checkout, etc.) are folded back in as patch-equivalent mutations,
+  ## and pure single-file reads via `bashReadPath` (`cat`, `sed -n`, `head`,
+  ## `tail`) are tracked as reads — both so models can't slip past the loop
+  ## guard via the shell now that the dedicated `read` tool is gone.
   case name
   of "bash":
     let cmd = if args != nil and args.kind == JObject: args{"command"}.getStr else: ""
-    let path = bashMutationPath(cmd)
-    if path == "": "" else: resolvePath(path)
+    let mp = bashMutationPath(cmd)
+    if mp != "": return resolvePath(mp)
+    let (rp, _) = bashReadPath(cmd)
+    if rp != "": return resolvePath(rp)
+    ""
   of "write", "patch", "read":
     let path = if args != nil and args.kind == JObject: args{"path"}.getStr else: ""
     if path == "": "" else: resolvePath(path)
   else: ""
+
+proc isMutationCall*(name: string, args: JsonNode): bool =
+  ## Whether a tracked tool call counts as a mutation for the Strike-2
+  ## hard-trip threshold. `read` and read-shaped `bash` reads do not.
+  case name
+  of "write", "patch": true
+  of "read": false
+  of "bash":
+    let cmd = if args != nil and args.kind == JObject: args{"command"}.getStr else: ""
+    bashMutationPath(cmd) != ""
+  else: false
 
 proc trackCall*(t: var LoopTracker, name: string, args: JsonNode): int =
   ## Feed a tool call through the detector. Returns the strike level AFTER
@@ -524,9 +634,10 @@ proc trackCall*(t: var LoopTracker, name: string, args: JsonNode): int =
       return 2
   let fp = fingerprint(name, args)
   if fp == "": return t.strike
-  # bash is a mutation iff it matched a `sed -i` / redirect / git-recovery
-  # pattern in fingerprint — read-only bash returns "" above and exits early.
-  let isMut = name == "write" or name == "patch" or name == "bash"
+  # `bash` can be either a mutation (sed -i, redirects, git mutations) or a
+  # read (cat, sed -n, head, tail) — both fingerprint, but only mutations
+  # count toward the Strike-2 hard trip.
+  let isMut = isMutationCall(name, args)
   if t.ring.len >= LoopWindowK:
     let ev = t.ring[0]
     t.ring.delete(0)
@@ -553,6 +664,43 @@ proc trackCall*(t: var LoopTracker, name: string, args: JsonNode): int =
     inc t.strike
   t.strike
 
+proc effectiveTextMode*(p: Profile): bool =
+  ## Single gate for "should we use the parsed-fenced-block protocol".
+  ## When `ToolsModeEnabled` is false the OpenAI tool_calls path is
+  ## off regardless of `p.mode`; flipping the const re-enables the
+  ## per-session `:mode tools` toggle.
+  not ToolsModeEnabled or p.mode == "text"
+
+proc knownGoodMode*(p: Profile): string =
+  ## Returns the hardcoded mode ("text" / "tools") for a known-good combo,
+  ## or "" if (provider, model) isn't on the list. Match is case-insensitive
+  ## on (provider, full model id incl. prefix).
+  if p.name == "": return ""
+  let dot = p.name.find('.')
+  if dot < 0: return ""
+  let provider = p.name[0 ..< dot].toLowerAscii
+  let modelId = (p.modelPrefix & p.model).toLowerAscii
+  for combo in KnownGoodCombos:
+    if combo[0].toLowerAscii == provider and
+       combo[1].toLowerAscii == modelId: return combo[2]
+  ""
+
+proc isKnownGood*(p: Profile): bool =
+  ## True when (provider name, `model_prefix & model`) exactly matches
+  ## an entry in `KnownGoodCombos` (case-insensitive on both parts).
+  ## Empty profiles return false — caller decides what that means.
+  knownGoodMode(p) != ""
+
+proc knownGoodMode*(provider, model: string): string =
+  ## Convenience overload for the wizard, where we have a candidate
+  ## (provider name, full model id) but no Profile.
+  let p = provider.toLowerAscii
+  let m = model.toLowerAscii
+  for combo in KnownGoodCombos:
+    if combo[0].toLowerAscii == p and combo[1].toLowerAscii == m:
+      return combo[2]
+  ""
+
 proc buildSystemPrompt(p: Profile): string =
   ## Byte-stable within a given mode. Provider/model identity deliberately
   ## does NOT land here: it would vary the system prompt's bytes and kill
@@ -560,7 +708,7 @@ proc buildSystemPrompt(p: Profile): string =
   ## prefix can shave 90% off prompt tokens on cache hit. Switching modes
   ## (`:mode text` ↔ `:mode tools`) does invalidate cache for one turn —
   ## that's the experimental cost.
-  if p.mode == "text": SystemPromptText
+  if effectiveTextMode(p): SystemPromptText
   else: SystemPrompt
 
 proc refreshSystemPrompt(messages: JsonNode, p: Profile) =
@@ -998,11 +1146,63 @@ proc summarizeHistory*(messages: JsonNode, p: Profile,
 
 type
   ProviderRec = object
+    ## In-memory mirror of a [provider] section. `mode` is the optional
+    ## experimental override; only honored when --experimental is on.
+    ## Known-good combos (KnownGoodCombos) ignore it.
     name, url, key, modelPrefix, mode: string
     models: seq[string]
 
+proc findModel(p: ProviderRec, name: string): int =
+  for i, m in p.models:
+    if m == name: return i
+  -1
+
+proc normalizeMode*(s: string): string =
+  ## Accept text/tool/tools (any case); return "text" / "tools" / "".
+  case s.strip.toLowerAscii
+  of "text": "text"
+  of "tool", "tools", "tool_calls": "tools"
+  else: ""
+
 var activeCurrent: string
 var activeProviders: seq[ProviderRec]
+var experimentalEnabled* = false  ## Set by `-x`/`--experimental`. When true,
+                                  ## models outside `KnownGoodPatterns` are
+                                  ## allowed; otherwise the gate refuses them.
+
+proc gateExperimental*(p: Profile): bool =
+  ## True if the profile is allowed to run a turn under current policy:
+  ## empty profile (caller handles that), known-good model, or the
+  ## `--experimental` override. False otherwise — caller should bail out
+  ## and call `explainExperimentalGate` for the user-facing hint.
+  p.name == "" or isKnownGood(p) or experimentalEnabled
+
+proc explainExperimentalGate*(p: Profile) =
+  let dot = p.name.find('.')
+  let display =
+    if dot < 0: p.name
+    else: p.name[0 ..< dot] & " " & p.name[dot+1 .. ^1]
+  stdout.styledWriteLine fgMagenta,
+    "  ", display,
+    " is experimental (start 3code with --experimental to use anyway, not recommended)",
+    resetStyle
+
+proc hasKnownGoodModel*(prov: ProviderRec): bool =
+  for m in prov.models:
+    if knownGoodMode(prov.name, prov.modelPrefix & m) != "": return true
+  false
+
+proc firstKnownGoodCombo*(providers: seq[ProviderRec]): string =
+  ## Returns "<provider>.<model>" of the first (provider, model) pair across
+  ## `providers` that hits a `KnownGoodCombos` entry, or "" if none. Lets a
+  ## non-experimental startup recover when the persisted `current` points at
+  ## an experimental combo.
+  for pr in providers:
+    if pr.url == "" or pr.key == "": continue
+    for m in pr.models:
+      if knownGoodMode(pr.name, pr.modelPrefix & m) != "":
+        return pr.name & "." & m
+  ""
 
 const CommandNames = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":prompt", ":show", ":log", ":sessions", ":compact",
@@ -1026,7 +1226,6 @@ proc completionFor(line: string): seq[string] =
   if words[0] == ":provider":
     if words.len == 2:
       for pr in activeProviders: result.add pr.name
-      for sub in ["add", "edit", "rm"]: result.add sub
       return
     if words.len == 3 and words[1] in ["edit", "rm", "remove"]:
       for pr in activeProviders: result.add pr.name
@@ -1034,13 +1233,19 @@ proc completionFor(line: string): seq[string] =
   if words[0] == ":model" and words.len == 2:
     for m in currentProvider().models: result.add m
     return
-  if words[0] == ":mode" and words.len == 2:
+  if words[0] == ":mode" and words.len == 2 and experimentalEnabled:
     for sub in ["text", "tools", "toggle"]: result.add sub
     return
 
 proc splitModels(s: string): seq[string] =
-  for m in s.splitWhitespace:
+  ## Whitespace- (and comma-) separated list of bare model names. Mode lives
+  ## elsewhere now — KnownGoodCombos hardcodes it; the [provider] `mode = ...`
+  ## key supplies an experimental override.
+  for raw in s.splitWhitespace:
+    let m = raw.strip(chars = {',', ' '})
     if m.len > 0: result.add m
+
+proc formatModels(models: seq[string]): string = models.join(" ")
 
 proc expandEnvValue(s: string): string =
   ## Expand a leading `$VAR` reference (after any surrounding whitespace) to
@@ -1118,12 +1323,24 @@ proc writeConfigFile(path: string, current: string,
       buf.add "model_prefix = " & quoteVal(pr.modelPrefix) & "\n"
     if pr.mode != "":
       buf.add "mode = " & quoteVal(pr.mode) & "\n"
-    buf.add "models = " & quoteVal(pr.models.join(" ")) & "\n"
+    buf.add "models = " & quoteVal(formatModels(pr.models)) & "\n"
   writeFile(path, buf)
 
 proc loadStateOrEmpty(path: string): (string, seq[ProviderRec]) =
   if not fileExists(path): return ("", @[])
   parseConfigFile(path)
+
+proc resolveMode*(prov: ProviderRec, prof: Profile): string =
+  ## Mode is its own state, resolved at profile-build time:
+  ## 1. KnownGoodCombos hardcode (always wins; ignores config and -x)
+  ## 2. provider-level `mode = ...` — only honored under --experimental
+  ## 3. default → "tools"
+  let kg = knownGoodMode(prof)
+  if kg != "": return kg
+  if experimentalEnabled:
+    let m = normalizeMode(prov.mode)
+    if m != "": return m
+  "tools"
 
 proc buildProfile(current: string, providers: seq[ProviderRec],
                   wanted: string): Profile =
@@ -1141,11 +1358,12 @@ proc buildProfile(current: string, providers: seq[ProviderRec],
         return Profile()
       if model == "":
         model = pr.models[0]
-      elif model notin pr.models:
+      if pr.findModel(model) < 0:
         return Profile()
-      return Profile(name: pr.name & "." & model, url: pr.url,
-                     key: pr.key, modelPrefix: pr.modelPrefix, model: model,
-                     mode: pr.mode)
+      var prof = Profile(name: pr.name & "." & model, url: pr.url,
+                         key: pr.key, modelPrefix: pr.modelPrefix, model: model)
+      prof.mode = resolveMode(pr, prof)
+      return prof
   Profile()
 
 proc loadProfile(wanted: string): Profile =
@@ -1182,10 +1400,17 @@ proc loadProfile(wanted: string): Profile =
   if prov.models.len == 0: die &"provider '{name}': models not set in {path}", ExitConfig
   if model == "":
     model = prov.models[0]
-  elif model notin prov.models:
+  if prov.findModel(model) < 0:
     die &"provider '{name}': model '{model}' not in models list ({prov.models.join(\", \")})", ExitConfig
-  Profile(name: prov.name & "." & model, url: prov.url, key: prov.key,
-          modelPrefix: prov.modelPrefix, model: model, mode: prov.mode)
+  var prof = Profile(name: prov.name & "." & model, url: prov.url, key: prov.key,
+                     modelPrefix: prov.modelPrefix, model: model)
+  prof.mode = resolveMode(prov, prof)
+  if wanted == "" and not experimentalEnabled and not isKnownGood(prof):
+    let fallback = firstKnownGoodCombo(providers)
+    if fallback != "":
+      let alt = buildProfile(fallback, providers, "")
+      if alt.name != "": return alt
+  prof
 
 # ---------- Spinner ----------
 
@@ -1325,11 +1550,8 @@ proc parseUsage*(u: JsonNode): Usage =
 proc toolCallToAction*(name: string, args: JsonNode): Action =
   case name
   of "bash":
-    Action(kind: akBash, body: args{"command"}.getStr)
-  of "read":
-    Action(kind: akRead, path: args{"path"}.getStr,
-           offset: args{"offset"}.getInt(0),
-           limit: args{"limit"}.getInt(0))
+    Action(kind: akBash, body: args{"command"}.getStr,
+           stdin: args{"stdin"}.getStr(""))
   of "write":
     Action(kind: akWrite, path: args{"path"}.getStr, body: args{"body"}.getStr)
   of "patch":
@@ -1581,7 +1803,7 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToken
     "stream": true,
     "stream_options": {"include_usage": true}
   }
-  if p.mode != "text":
+  if not effectiveTextMode(p):
     body["tools"] = ToolsJson
     body["tool_choice"] = %"auto"
   let bodyStr = $body
@@ -1745,59 +1967,142 @@ proc looksLikePath*(s: string): bool =
   if t.startsWith("```") or t.startsWith("#"): return false
   '/' in t or '.' in t
 
+proc parseActionsChecked*(text: string):
+    tuple[actions: seq[Action], issues: seq[ParseIssue]] =
+  ## Text-mode parser with syntax-fail detection. Same recognised forms
+  ## as `parseActions`, but additionally flags unterminated fences,
+  ## orphan ``` blocks (no `bash` tag and no preceding path), and
+  ## malformed SEARCH/REPLACE markers inside a patch. The harness
+  ## bounces issues back to the model rather than silently dropping
+  ## the action.
+  let lines = text.splitLines
+  var i = 0
+  while i < lines.len:
+    let ln = lines[i].strip
+    if ln == "```bash" or ln == "```sh" or ln == "```shell":
+      let openLine = i + 1
+      inc i
+      var body = ""
+      var closed = false
+      while i < lines.len:
+        if lines[i].strip == "```":
+          closed = true
+          inc i
+          break
+        body.add lines[i] & "\n"
+        inc i
+      if not closed:
+        result.issues.add ParseIssue(line: openLine,
+          msg: "unterminated ```bash fence (no closing ``` before end of reply)")
+      result.actions.add Action(kind: akBash, body: body)
+      continue
+    if i + 1 < lines.len and lines[i+1].strip == "```" and looksLikePath(lines[i]):
+      let path = lines[i].strip
+      let openLine = i + 2
+      i += 2
+      var body = ""
+      var closed = false
+      while i < lines.len:
+        if lines[i].strip == "```":
+          closed = true
+          inc i
+          break
+        body.add lines[i] & "\n"
+        inc i
+      if not closed:
+        result.issues.add ParseIssue(line: openLine,
+          msg: "unterminated ``` fence for " & path &
+               " (no closing ``` before end of reply)")
+      if "<<<<<<< SEARCH" in body or ">>>>>>> REPLACE" in body:
+        var act = Action(kind: akPatch, path: path)
+        let blines = body.splitLines
+        var k = 0
+        var inSearch = false
+        var inReplace = false
+        var s = ""
+        var r = ""
+        var blockOpenK = -1
+        while k < blines.len:
+          let bln = blines[k].strip
+          let fileLine = openLine + k + 1
+          if bln == "<<<<<<< SEARCH":
+            if inSearch or inReplace:
+              result.issues.add ParseIssue(line: fileLine,
+                msg: "patch for " & path &
+                  ": new <<<<<<< SEARCH before previous block was closed with >>>>>>> REPLACE")
+            inSearch = true
+            inReplace = false
+            s = ""; r = ""
+            blockOpenK = k
+            inc k
+            continue
+          if bln == "=======":
+            if not inSearch:
+              result.issues.add ParseIssue(line: fileLine,
+                msg: "patch for " & path &
+                  ": ======= without a preceding <<<<<<< SEARCH")
+              inc k
+              continue
+            inSearch = false
+            inReplace = true
+            inc k
+            continue
+          if bln == ">>>>>>> REPLACE":
+            if not inReplace:
+              result.issues.add ParseIssue(line: fileLine,
+                msg: "patch for " & path &
+                  ": >>>>>>> REPLACE without a preceding =======")
+              inc k
+              continue
+            act.edits.add (s, r)
+            inSearch = false
+            inReplace = false
+            inc k
+            continue
+          if inSearch: s.add blines[k] & "\n"
+          elif inReplace: r.add blines[k] & "\n"
+          inc k
+        if inSearch or inReplace:
+          let where = if blockOpenK >= 0: openLine + blockOpenK + 1 else: openLine
+          result.issues.add ParseIssue(line: where,
+            msg: "patch for " & path &
+              ": SEARCH/REPLACE block not closed (need <<<<<<< SEARCH … ======= … >>>>>>> REPLACE)")
+        result.actions.add act
+      else:
+        result.actions.add Action(kind: akWrite, path: path, body: body)
+      continue
+    if ln.startsWith("```") and ln.len > 3:
+      let openLine = i + 1
+      let lang = ln[3 ..^ 1]
+      result.issues.add ParseIssue(line: openLine,
+        msg: "```" & lang & " is not a recognised fence — use ```bash for shell, " &
+             "or put 'path/to/file' on the line before ``` to write a file")
+      inc i
+      while i < lines.len and lines[i].strip != "```":
+        inc i
+      if i < lines.len: inc i
+      continue
+    if ln == "```":
+      let openLine = i + 1
+      result.issues.add ParseIssue(line: openLine,
+        msg: "bare ``` with no 'path/to/file' on the previous line — " &
+             "put the path on its own line first, or use ```bash for shell")
+      inc i
+      while i < lines.len and lines[i].strip != "```":
+        inc i
+      if i < lines.len: inc i
+      continue
+    inc i
+
 proc parseActions*(text: string): seq[Action] =
   ## Text-mode parser. Recognises three fenced-block forms:
   ##   ```bash … ```                              → akBash
   ##   <path>\n``` … ```                          → akWrite
   ##   <path>\n``` <<<<<<< SEARCH … >>>>>>> REPLACE … ``` → akPatch
   ## Multiple SEARCH/REPLACE pairs in one fenced block become one akPatch
-  ## with multiple edits. Anything between blocks is prose for the user.
-  let lines = text.splitLines
-  var i = 0
-  while i < lines.len:
-    let ln = lines[i].strip
-    if ln == "```bash" or ln == "```sh" or ln == "```shell":
-      inc i
-      var body = ""
-      while i < lines.len and lines[i].strip != "```":
-        body.add lines[i] & "\n"
-        inc i
-      if i < lines.len: inc i
-      result.add Action(kind: akBash, body: body)
-      continue
-    if i + 1 < lines.len and lines[i+1].strip == "```" and looksLikePath(lines[i]):
-      let path = lines[i].strip
-      i += 2
-      var body = ""
-      while i < lines.len and lines[i].strip != "```":
-        body.add lines[i] & "\n"
-        inc i
-      if i < lines.len: inc i
-      if "<<<<<<< SEARCH" in body:
-        var act = Action(kind: akPatch, path: path)
-        let blines = body.splitLines
-        var k = 0
-        while k < blines.len:
-          if blines[k].strip == "<<<<<<< SEARCH":
-            inc k
-            var s = ""
-            while k < blines.len and blines[k].strip != "=======":
-              s.add blines[k] & "\n"
-              inc k
-            if k < blines.len: inc k
-            var r = ""
-            while k < blines.len and blines[k].strip != ">>>>>>> REPLACE":
-              r.add blines[k] & "\n"
-              inc k
-            if k < blines.len: inc k
-            act.edits.add (s, r)
-          else:
-            inc k
-        result.add act
-      else:
-        result.add Action(kind: akWrite, path: path, body: body)
-      continue
-    inc i
+  ## with multiple edits. Thin wrapper over `parseActionsChecked` that
+  ## drops the issue list — used in spots where we only want the actions.
+  parseActionsChecked(text).actions
 
 proc stripActions*(text: string): string =
   ## Mirror of parseActions: returns prose with every action block elided,
@@ -1878,12 +2183,12 @@ proc nearestLineHint(content, search: string): string =
       bestLine = i + 1
   if bestLine < 0: return ""
   let snip = lines[bestLine - 1].strip
-  let trimmed = if snip.len > 80: snip[0 ..< 77] & "..." else: snip
+  let trimmed = if snip.len > 80: utf8ByteCut(snip, 77) & "..." else: snip
   &" — nearest match in file: line {bestLine}: \"{trimmed}\""
 
 proc clipMiddle(s: string, head, tail: int): string =
   if s.len <= head + tail: s
-  else: s[0 ..< head] & "\n... [truncated] ...\n" & s[^tail .. ^1]
+  else: utf8ByteCut(s, head) & "\n... [truncated] ...\n" & utf8ByteCutEnd(s, tail)
 
 proc computeDiff(before, after, label: string): string =
   if before == after: return ""
@@ -1912,21 +2217,53 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
   case act.kind
   of akBash:
     let cmd = act.body.strip
+    # Sniff bash for the read-cache integration that lived on `akRead` before
+    # the dedicated read tool was dropped. Mutation paths (sed -i, redirects,
+    # …) get the stale-write guard so external edits between read and mutate
+    # still error out. Pure full reads (`cat path`) get the dedupe shortcut.
+    # Both update the cache after a successful run so downstream patch/write
+    # see the latest sig.
+    let mutPath = bashMutationPath(cmd)
+    let (readPath, fullRead) = bashReadPath(cmd)
+    if cache != nil and mutPath != "" and mutPath != ".":
+      let p = resolvePath(mutPath)
+      if p in cache.state and fileExists(p):
+        if fileSig(p) != cache.state[p]:
+          return (&"error: {p} changed on disk since the last read in this session — re-read before mutating", 1, "")
+    if cache != nil and readPath != "" and fullRead:
+      let p = resolvePath(readPath)
+      if fileExists(p) and p in cache.state and fileSig(p) == cache.state[p]:
+        return (&"[unchanged since prior read of {p}; see earlier read in this session]", 0, "")
+    # For bash mutations on a single named path (sed -i, ed -s, redirects),
+    # snapshot before-content so we can synthesize a green/red diff after the
+    # run — keeps the visual feedback `patch` used to give for line-range
+    # edits via ed.
+    let beforeContent =
+      if mutPath != "" and mutPath != "." and fileExists(resolvePath(mutPath)):
+        try: readFile(resolvePath(mutPath))
+        except CatchableError: ""
+      else: ""
+    let beforeExists = mutPath != "" and mutPath != "." and
+                       fileExists(resolvePath(mutPath))
     let tmp = getTempDir() / ("3code_bash_" & $getCurrentProcessId() & "_" & $epochTime().int64)
     createDir(tmp)
     let outPath = tmp / "out"
     let errPath = tmp / "err"
     let scriptPath = tmp / "cmd.sh"
+    let stdinPath = tmp / "stdin"
     # Pager-killing env keeps `git log`, `systemctl`, `man`, etc. from hanging
     # on a TTY that doesn't exist. `timeout --foreground` caps runaways while
     # still propagating terminal SIGINT to the child. Writing the command to
-    # a script avoids the shell-escaping minefield.
+    # a script avoids the shell-escaping minefield. Stdin is always piped
+    # from a file (empty when act.stdin is "") so commands can't block on
+    # the user's terminal.
     let script = """export PAGER=cat GIT_PAGER=cat PSQL_PAGER=cat MYSQL_PAGER=cat
 export LESS= TERM=dumb CI=1 NO_COLOR=1 GIT_TERMINAL_PROMPT=0
 export DEBIAN_FRONTEND=noninteractive
 """ & cmd & "\n"
     writeFile(scriptPath, script)
-    let wrapped = &"timeout --foreground 120s sh \"{scriptPath}\" >\"{outPath}\" 2>\"{errPath}\""
+    writeFile(stdinPath, act.stdin)
+    let wrapped = &"timeout --foreground 120s sh \"{scriptPath}\" <\"{stdinPath}\" >\"{outPath}\" 2>\"{errPath}\""
     let code = execShellCmd(wrapped)
     let rawOut = if fileExists(outPath): readFile(outPath) else: ""
     let rawErr = if fileExists(errPath): readFile(errPath) else: ""
@@ -1947,7 +2284,27 @@ export DEBIAN_FRONTEND=noninteractive
       body.add "[timed out after 120s — wrap long-running commands or run in the background]"
     else:
       body.add &"[exit {code}]"
-    return (body, code, "")
+    if cache != nil and code == 0:
+      if readPath != "":
+        let p = resolvePath(readPath)
+        if fileExists(p): cache.state[p] = fileSig(p)
+      if mutPath != "" and mutPath != ".":
+        let p = resolvePath(mutPath)
+        if fileExists(p): cache.state[p] = fileSig(p)
+    var diff = ""
+    if mutPath != "" and mutPath != "." and code == 0:
+      let p = resolvePath(mutPath)
+      let after =
+        if fileExists(p):
+          try: readFile(p)
+          except CatchableError: ""
+        else: ""
+      # Don't emit a noisy `--- /dev/null` diff for files the command just
+      # created — that doubles the body in context. Only show diffs for
+      # actual edits.
+      if beforeExists and beforeContent != after:
+        diff = computeDiff(beforeContent, after, p)
+    return (body, code, diff)
   of akRead:
     let path = resolvePath(act.path)
     if not fileExists(path):
@@ -2156,14 +2513,25 @@ proc printActionResult(act: Action, res: string, code: int, idx: int, diff = "")
     if code == 0:
       stdout.styledWriteLine styleDim, res, resetStyle
     else:
-      stdout.styledWriteLine fgRed, res, resetStyle
+      # Patch / write failure: only the headline goes to the user — the
+      # full SEARCH body and any nearest-match hint are for the model
+      # (it's already in `res` going back via the tool result). Dumping
+      # a 30-line SEARCH block here just makes the screen shout.
+      let nl = res.find('\n')
+      let head = if nl < 0: res else: res[0 ..< nl]
+      stdout.styledWriteLine styleDim, head, resetStyle
   if diff.len > 0:
     printDiff(diff)
 
 # ---------- History / editor ----------
 
 proc historyFile(): string =
-  getConfigDir() / "3code" / "history"
+  let dir = getConfigDir() / "3code"
+  try:
+    createDir(dir)
+    result = dir / "history"
+  except OSError, IOError:
+    result = ""
 
 # Track up-navigation so "down past last" can return to blank line.
 var navigatedUp: bool = false
@@ -2193,8 +2561,8 @@ proc showProfile(p: Profile) =
   let provider = if dot < 0: p.name else: p.name[0 ..< dot]
   stdout.styledWriteLine fgCyan, styleBright, "  provider ", resetStyle, provider
   stdout.styledWriteLine fgCyan, styleBright, "  model    ", resetStyle, p.model
-  if p.mode == "text":
-    stdout.styledWriteLine fgCyan, styleBright, "  mode     ", resetStyle, "text"
+  let mode = if effectiveTextMode(p): "text" else: "tools"
+  stdout.styledWriteLine fgCyan, styleBright, "  mode     ", resetStyle, mode
 
 proc welcome(p: Profile): minline.LineEditor =
   stdout.write "\n"
@@ -2269,7 +2637,7 @@ proc sessionPreamble(cwd: string): string =
       for l in recent.splitLines:
         let s = l.strip
         if s.len == 0: continue
-        let trimmed = if s.len > 80: s[0 ..< 77] & "..." else: s
+        let trimmed = if s.len > 80: utf8ByteCut(s, 77) & "..." else: s
         lines.add "  " & trimmed
   let listing = shellCapture("ls -1 --color=never | head -30")
   if listing != "":
@@ -2302,7 +2670,7 @@ proc inlineAtFiles(msg: string): string =
         let content =
           try:
             let s = readFile(path)
-            if s.len > Cap: s[0 ..< Cap] & "\n... [truncated; file is " & $s.len & " bytes]"
+            if s.len > Cap: utf8ByteCut(s, Cap) & "\n... [truncated; file is " & $s.len & " bytes]"
             else: s
           except CatchableError as e:
             "[error reading file: " & e.msg & "]"
@@ -2373,7 +2741,7 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
     messages.add msg
     saveSession(session, messages)
     if interrupted:
-      stdout.styledWriteLine fgRed, "  · interrupted", resetStyle
+      stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
       interrupted = false
       return
     let window = contextWindowFor(p.model)
@@ -2447,8 +2815,10 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
         if r.strip.len == 0: r = "[no output]"
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
         stdout.write "\e[1A\r\e[2K"
-        let bulletColor = if code == 0: fgGreen else: fgRed
-        stdout.styledWrite bulletColor, "• ", resetStyle
+        if code == 0:
+          stdout.styledWrite fgGreen, "• ", resetStyle
+        else:
+          stdout.styledWrite styleDim, "• ", resetStyle
         stdout.styledWrite styleDim, bannerFor(act), resetStyle
         if toolElapsed >= 1:
           stdout.styledWrite styleDim, &"  ({toolElapsed.int}s)", resetStyle
@@ -2480,25 +2850,49 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
         messages.add %*{"role": "tool", "tool_call_id": id, "content": toolContent}
       saveSession(session, messages)
       if interrupted:
-        stdout.styledWriteLine fgRed, "  · interrupted", resetStyle
+        stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
         interrupted = false
         return
       if halt:
         if session.loop.recoveryCmd != "":
-          stdout.styledWriteLine fgRed,
+          stdout.styledWriteLine styleDim,
             &"  paused — `{session.loop.recoveryCmd}` wiped working-tree state",
             resetStyle
         else:
-          stdout.styledWriteLine fgRed, "  paused — looped", resetStyle
+          stdout.styledWriteLine styleDim, "  paused — looped", resetStyle
         return
       continue
-    if p.mode == "text":
+    if effectiveTextMode(p):
       # Text-mode action handling: parse fenced blocks out of the assistant
       # prose, run them, append results back as a user message. Mirrors the
       # tool_calls path above (banner, loop guard, halt) but without
       # tool_call_id pairing — there's no tool-role message, just one user
       # message containing all results.
-      let actions = parseActions(content)
+      let (actions, issues) = parseActionsChecked(content)
+      if issues.len > 0:
+        if content.strip.len > 0 and not streamedLive:
+          stdout.write content & "\n\n"
+          stdout.flushFile
+        let plural = if issues.len == 1: "" else: "s"
+        stdout.styledWriteLine styleDim,
+          &"  syntax: {issues.len} unparsable fenced block{plural} — asking model to retry",
+          resetStyle
+        for iss in issues:
+          stdout.styledWriteLine styleDim,
+            &"    line {iss.line}: {iss.msg}", resetStyle
+        var note = "[harness] couldn't parse the fenced action blocks in your reply. " &
+                   "Re-emit with the protocol fixed:\n"
+        for iss in issues:
+          note.add &"- line {iss.line}: {iss.msg}\n"
+        note.add "Forms allowed: ```bash … ```, or 'path/to/file' on its own line then " &
+                 "``` … ``` (write), or the same with <<<<<<< SEARCH … ======= … >>>>>>> REPLACE inside (patch)."
+        messages.add %*{"role": "user", "content": note}
+        saveSession(session, messages)
+        if interrupted:
+          stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
+          interrupted = false
+          return
+        continue
       if actions.len > 0:
         if content.strip.len > 0 and not streamedLive:
           stdout.write content & "\n\n"
@@ -2522,8 +2916,10 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
           session.toolLog.add ToolRecord(banner: bannerFor(act), output: r,
                                          code: code, kind: act.kind)
           stdout.write "\e[1A\r\e[2K"
-          let bulletColor = if code == 0: fgGreen else: fgRed
-          stdout.styledWrite bulletColor, "• ", resetStyle
+          if code == 0:
+            stdout.styledWrite fgGreen, "• ", resetStyle
+          else:
+            stdout.styledWrite styleDim, "• ", resetStyle
           stdout.styledWrite styleDim, bannerFor(act), resetStyle
           if toolElapsed >= 1:
             stdout.styledWrite styleDim, &"  ({toolElapsed.int}s)", resetStyle
@@ -2555,16 +2951,16 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
         messages.add %*{"role": "user", "content": results}
         saveSession(session, messages)
         if interrupted:
-          stdout.styledWriteLine fgRed, "  · interrupted", resetStyle
+          stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
           interrupted = false
           return
         if halt:
           if session.loop.recoveryCmd != "":
-            stdout.styledWriteLine fgRed,
+            stdout.styledWriteLine styleDim,
               &"  paused — `{session.loop.recoveryCmd}` wiped working-tree state",
               resetStyle
           else:
-            stdout.styledWriteLine fgRed, "  paused — looped", resetStyle
+            stdout.styledWriteLine styleDim, "  paused — looped", resetStyle
           return
         continue
     if content.strip.len > 0:
@@ -2572,16 +2968,19 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
         stdout.write content & "\n\n"
         stdout.flushFile
     else:
-      stdout.styledWriteLine fgRed,
+      stdout.styledWriteLine styleDim,
         "  (empty reply — no content, no tool calls)", resetStyle
     break
 
 proc runTurnsInteractive(p: Profile, messages: var JsonNode, session: var Session) =
+  if not gateExperimental(p):
+    explainExperimentalGate(p)
+    return
   try:
     runTurns(p, messages, session)
   except ApiError as e:
     saveSession(session, messages)
-    stdout.styledWriteLine fgRed, "  ", e.msg, resetStyle
+    stdout.styledWriteLine fgMagenta, "  ", e.msg, resetStyle
 
 proc replaySessionTail(messages: JsonNode, toolLog: seq[ToolRecord]) =
   ## Show the last user turn and everything after, so a resumed session
@@ -2639,21 +3038,21 @@ proc showTool(arg: string, toolLog: seq[ToolRecord]) =
   if arg != "":
     try: n = parseInt(arg)
     except ValueError:
-      stdout.styledWriteLine fgRed, "show: not a number: ", arg, resetStyle
+      stdout.styledWriteLine fgMagenta, "show: not a number: ", arg, resetStyle
       return
   if n < 1 or n > toolLog.len:
-    stdout.styledWriteLine fgRed,
+    stdout.styledWriteLine fgMagenta,
       &"show: T{n} out of range (1..{toolLog.len})", resetStyle
     return
   let rec = toolLog[n-1]
-  stdout.styledWriteLine fgYellow, styleBright, &"── T{n}  ", rec.banner, resetStyle
+  stdout.styledWriteLine fgCyan, styleBright, &"── T{n}  ", rec.banner, resetStyle
   if rec.kind in {akBash, akRead}:
     for l in rec.output.splitLines: printLine(l)
   else:
     if rec.code == 0:
       stdout.styledWriteLine fgGreen, rec.output, resetStyle
     else:
-      stdout.styledWriteLine fgRed, rec.output, resetStyle
+      stdout.styledWriteLine styleDim, rec.output, resetStyle
 
 proc listTools(toolLog: seq[ToolRecord]) =
   if toolLog.len == 0:
@@ -2663,7 +3062,7 @@ proc listTools(toolLog: seq[ToolRecord]) =
     let tag = &"T{i+1}"
     let lines = rec.output.splitLines.len
     let mark = if rec.code == 0: "✓" else: "✗"
-    let color = if rec.code == 0: fgGreen else: fgRed
+    let color = if rec.code == 0: fgGreen else: fgDefault
     hint &"  {tag:>4}  ", resetStyle,
       color, mark, resetStyle, " ",
       rec.banner,
@@ -2767,46 +3166,31 @@ proc commonModelPrefix(models: seq[string]): string =
   let slash = prefix.rfind('/')
   if slash < 0: "" else: prefix[0 .. slash]
 
-const RecommendedWizardLines = [
-  "  recommended (cache = documented prompt caching):",
-  "    deepinfra  (cache)   qwen3-coder-480b, kimi-k2.5",
-  "    deepseek   (cache)   deepseek-v3.2",
-  "    together             qwen3-coder-480b, kimi-k2.5",
-  "    groq                 kimi-k2.5  (fast, no cache)",
-  "  models outside this list are your tokens to burn.",
-]
-
-proc printRecommended() =
-  for line in RecommendedWizardLines:
-    stdout.styledWriteLine styleDim, line, resetStyle
-
 proc printSupported() =
-  const indent = "             "  # aligns under "supported: "
-  const wrapAt = 72
-  var line = "supported: "
-  var first = true
-  for (n, _) in ProviderCatalog:
-    let piece = if first: n else: ", " & n
-    if not first and line.len + piece.len > wrapAt:
-      stdout.styledWriteLine styleDim, line & ",", resetStyle
-      line = indent & n
-    else:
-      line.add piece
-    first = false
-  if line.len > 0:
-    stdout.styledWriteLine styleDim, line, resetStyle
+  var seen: seq[string]
+  for (p, _, _) in KnownGoodCombos:
+    if p notin seen: seen.add p
+  stdout.styledWriteLine styleDim, "  supported: ", seen.join(", "), resetStyle
 
 proc readProviderEntry(editor: var minline.LineEditor): string =
   let prevCb = editor.completionCallback
   editor.completionCallback = proc(ed: LineEditor): seq[string] =
-    for (n, _) in ProviderCatalog: result.add n
-  result = readRequired(editor, "  provider name or url : ")
+    if experimentalEnabled:
+      for (n, _) in ProviderCatalog: result.add n
+    else:
+      for (p, _, _) in KnownGoodCombos:
+        if p notin result: result.add p
+  let label =
+    if experimentalEnabled: "  provider name or url : "
+    else: "  provider name        : "
+  result = readRequired(editor, label)
   editor.completionCallback = prevCb
 
 proc promptNameAndUrl(editor: var minline.LineEditor): (string, string) =
   let entry = readProviderEntry(editor)
   var name, url: string
-  if entry.startsWith("http://") or entry.startsWith("https://"):
+  if experimentalEnabled and
+     (entry.startsWith("http://") or entry.startsWith("https://")):
     url = entry.strip(chars = {'/', ' '})
     let suggested = defaultNameFromUrl(url)
     let namePrompt =
@@ -2817,22 +3201,41 @@ proc promptNameAndUrl(editor: var minline.LineEditor): (string, string) =
   else:
     name = entry
     let cu = catalogUrl(name)
-    if cu != "":
-      let urlEntry = readOptional(editor, &"  url [{cu}]     : ")
-        .strip(chars = {'/', ' '})
-      url = if urlEntry == "": cu else: urlEntry
+    if experimentalEnabled:
+      if cu != "":
+        let urlEntry = readOptional(editor, &"  url [{cu}]     : ")
+          .strip(chars = {'/', ' '})
+        url = if urlEntry == "": cu else: urlEntry
+      else:
+        url = readRequired(editor, "  api base url         : ")
+          .strip(chars = {'/', ' '})
     else:
-      url = readRequired(editor, "  api base url         : ")
-        .strip(chars = {'/', ' '})
+      url = cu
   (name, url)
 
+proc curatedFor(provider: string): (string, seq[string]) =
+  ## Returns (commonPrefix, modelsWithoutPrefix) from KnownGoodCombos
+  ## for the given provider name.
+  var fullIds: seq[string]
+  let p = provider.toLowerAscii
+  for c in KnownGoodCombos:
+    if c[0].toLowerAscii == p: fullIds.add c[1]
+  let prefix = commonModelPrefix(fullIds)
+  var stripped: seq[string]
+  for m in fullIds:
+    if prefix != "" and m.startsWith(prefix): stripped.add m[prefix.len .. ^1]
+    else: stripped.add m
+  (prefix, stripped)
+
 proc promptNewProvider(editor: var minline.LineEditor): ProviderRec =
-  printRecommended()
   printSupported()
   stdout.write "\n"
   var key = readRequired(editor, "  api key              : ", hidden = true)
   var name, url: string
-  let inferred = inferProvider(key)
+  var inferred = inferProvider(key)
+  if not experimentalEnabled and inferred != "" and
+     curatedFor(inferred)[1].len == 0:
+    inferred = ""  # not in whitelist; fall through to manual entry
   if inferred != "":
     name = inferred
     url = catalogUrl(inferred)
@@ -2848,7 +3251,7 @@ proc promptNewProvider(editor: var minline.LineEditor): ProviderRec =
     while true:
       let (n, u) = promptNameAndUrl(editor)
       if n == "":
-        stdout.styledWriteLine fgRed, "  name required", resetStyle
+        stdout.styledWriteLine fgMagenta, "  name required", resetStyle
         continue
       var clash = false
       for pr in activeProviders:
@@ -2856,29 +3259,52 @@ proc promptNewProvider(editor: var minline.LineEditor): ProviderRec =
           clash = true
           break
       if clash:
-        stdout.styledWriteLine fgRed, &"  name already used: {n}", resetStyle
+        stdout.styledWriteLine fgMagenta, &"  name already used: {n}", resetStyle
         continue
       name = n
       url = u
       break
+  if not experimentalEnabled:
+    let (prefix, models) = curatedFor(name)
+    for m in models:
+      hintLn "    ", resetStyle, m
+    while true:
+      let prov = ProviderRec(name: name, url: url, key: key,
+                             modelPrefix: prefix, models: models)
+      let prof = Profile(name: name & "." & models[0], url: url,
+                         key: key, modelPrefix: prefix, model: models[0])
+      hint "  verifying... ", resetStyle
+      stdout.flushFile
+      let (ok, err) = verifyProfile(prof)
+      if ok:
+        stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
+        return prov
+      stdout.styledWriteLine fgMagenta, "failed", resetStyle
+      stdout.styledWriteLine fgMagenta, "  " & err, resetStyle
+      let choice = readOptional(editor,
+        "  [enter]=retry, k=re-enter key : ").toLowerAscii
+      if choice == "k":
+        key = readRequired(editor,
+          "  api key              : ", hidden = true)
   hint "  fetching models...   ", resetStyle
   stdout.flushFile
   let available = fetchModels(url, key)
   let prefix = commonModelPrefix(available)
+  let displayed = available
   if available.len == 0:
     hintLn "unavailable — enter manually", resetStyle
   else:
     let header =
-      if prefix == "": &"{available.len} available"
-      else: &"{available.len} available (prefix: {prefix})"
+      if prefix == "": &"{displayed.len} available"
+      else: &"{displayed.len} available (prefix: {prefix})"
     hintLn header, resetStyle
-    for m in available:
+    for m in displayed:
       let shown = if prefix != "" and m.startsWith(prefix): m[prefix.len .. ^1]
                   else: m
       hintLn "    ", resetStyle, shown
   let prevCb = editor.completionCallback
   editor.completionCallback = proc(ed: LineEditor): seq[string] =
-    for m in available:
+    for m in displayed:
       if prefix != "" and m.startsWith(prefix): result.add m[prefix.len .. ^1]
       else: result.add m
   defer: editor.completionCallback = prevCb
@@ -2890,9 +3316,9 @@ proc promptNewProvider(editor: var minline.LineEditor): ProviderRec =
     let entered = readOptional(editor, prompt)
     let raw = if entered == "": prev else: entered
     let models = splitModels(raw)
-    let modelsStr = models.join(" ")
+    let modelsStr = formatModels(models)
     if models.len == 0:
-      stdout.styledWriteLine fgRed, "  need at least one model", resetStyle
+      stdout.styledWriteLine fgMagenta, "  need at least one model", resetStyle
       continue
     let prov = ProviderRec(name: name, url: url, key: key,
                            modelPrefix: prefix, models: models)
@@ -2904,8 +3330,8 @@ proc promptNewProvider(editor: var minline.LineEditor): ProviderRec =
     if ok:
       stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
       return prov
-    stdout.styledWriteLine fgRed, "failed", resetStyle
-    stdout.styledWriteLine fgRed, "  " & err, resetStyle
+    stdout.styledWriteLine fgMagenta, "failed", resetStyle
+    stdout.styledWriteLine fgMagenta, "  " & err, resetStyle
     prev = modelsStr
     let choice = readOptional(editor,
       "  [enter]=retry models, k=re-enter key : ").toLowerAscii
@@ -2930,7 +3356,7 @@ proc promptEditProvider(editor: var minline.LineEditor,
           clash = true
           break
       if clash:
-        stdout.styledWriteLine fgRed,
+        stdout.styledWriteLine fgMagenta,
           &"  name already used: {name}", resetStyle
         continue
     let newUrl = readOptional(editor,
@@ -2939,14 +3365,14 @@ proc promptEditProvider(editor: var minline.LineEditor,
     let newKey = readOptional(editor,
       "  api key [keep existing] : ", hidden = true)
     let key = if newKey == "": existing.key else: newKey
-    let modelsCurrent = existing.models.join(" ")
+    let modelsCurrent = formatModels(existing.models)
     let newModels = readOptional(editor,
       &"  models [{modelsCurrent}]  : ")
     let models =
       if newModels == "": existing.models
       else: splitModels(newModels)
     if models.len == 0:
-      stdout.styledWriteLine fgRed, "  need at least one model", resetStyle
+      stdout.styledWriteLine fgMagenta, "  need at least one model", resetStyle
       continue
     let prefix = commonModelPrefix(models)
     let prof = Profile(name: name & "." & models[0], url: url,
@@ -2958,11 +3384,11 @@ proc promptEditProvider(editor: var minline.LineEditor,
       stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
       return ProviderRec(name: name, url: url, key: key,
                          modelPrefix: prefix, models: models)
-    stdout.styledWriteLine fgRed, "failed", resetStyle
-    stdout.styledWriteLine fgRed, "  " & err, resetStyle
+    stdout.styledWriteLine fgMagenta, "failed", resetStyle
+    stdout.styledWriteLine fgMagenta, "  " & err, resetStyle
 
 proc bootstrapProvider(editor: var minline.LineEditor): Profile =
-  stdout.styledWriteLine fgYellow, styleBright,
+  stdout.styledWriteLine fgMagenta, styleBright,
     "  no provider configured — let's add one. (ctrl+d to quit)", resetStyle
   let prov = promptNewProvider(editor)
   activeProviders.add prov
@@ -2980,7 +3406,11 @@ proc cmdProviderList(prof: Profile) =
     let current = pr.name == curName
     let mark = if current: "*" else: " "
     let tail = if current: &"  [{prof.model}]" else: ""
-    hintLn "  ", mark, " ", resetStyle, pr.name, tail
+    if not experimentalEnabled and not hasKnownGoodModel(pr):
+      stdout.styledWriteLine styleDim,
+        "  ", mark, " ", pr.name, tail, resetStyle
+    else:
+      hintLn "  ", mark, " ", resetStyle, pr.name, tail
 
 proc cmdProviderSelect(target: string, prof: var Profile) =
   var prov: ProviderRec
@@ -2991,16 +3421,20 @@ proc cmdProviderSelect(target: string, prof: var Profile) =
       found = true
       break
   if not found:
-    stdout.styledWriteLine fgRed, &"  unknown provider: {target}", resetStyle
+    stdout.styledWriteLine fgMagenta, &"  unknown provider: {target}", resetStyle
     return
   if prov.models.len == 0:
-    stdout.styledWriteLine fgRed,
+    stdout.styledWriteLine fgMagenta,
       &"  provider {target} has no models", resetStyle
     return
-  activeCurrent = prov.name & "." & prov.models[0]
-  prof = buildProfile(activeCurrent, activeProviders, "")
+  let newCurrent = prov.name & "." & prov.models[0]
+  let candidate = buildProfile(newCurrent, activeProviders, "")
+  activeCurrent = newCurrent
+  prof = candidate
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   showProfile(prof)
+  if not gateExperimental(candidate):
+    explainExperimentalGate(candidate)
 
 proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
   let prov = promptNewProvider(editor)
@@ -3019,7 +3453,7 @@ proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
   for i, pr in activeProviders:
     if pr.name == target: idx = i; break
   if idx < 0:
-    stdout.styledWriteLine fgRed, &"  unknown provider: {target}", resetStyle
+    stdout.styledWriteLine fgMagenta, &"  unknown provider: {target}", resetStyle
     return
   let updated = promptEditProvider(editor, activeProviders[idx])
   activeProviders[idx] = updated
@@ -3027,7 +3461,7 @@ proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
   if curName == target:
     let wantedModel = prof.model
     let model =
-      if wantedModel in updated.models: wantedModel
+      if updated.findModel(wantedModel) >= 0: wantedModel
       else: updated.models[0]
     activeCurrent = updated.name & "." & model
     prof = buildProfile(activeCurrent, activeProviders, "")
@@ -3039,7 +3473,7 @@ proc cmdProviderRm(target: string, prof: var Profile) =
   for i, pr in activeProviders:
     if pr.name == target: idx = i; break
   if idx < 0:
-    stdout.styledWriteLine fgRed, &"  unknown provider: {target}", resetStyle
+    stdout.styledWriteLine fgMagenta, &"  unknown provider: {target}", resetStyle
     return
   activeProviders.delete(idx)
   let curName = if activeCurrent == "": "" else: activeCurrent.split('.')[0]
@@ -3063,24 +3497,24 @@ proc cmdProvider(arg: string, editor: var minline.LineEditor,
   case parts[0]
   of "add":
     if parts.len != 1:
-      stdout.styledWriteLine fgRed, "  usage: :provider add", resetStyle
+      stdout.styledWriteLine fgMagenta, "  usage: :provider add", resetStyle
     else:
       cmdProviderAdd(editor, prof)
   of "edit":
     if parts.len != 2:
-      stdout.styledWriteLine fgRed,
+      stdout.styledWriteLine fgMagenta,
         "  usage: :provider edit <name>", resetStyle
     else:
       cmdProviderEdit(parts[1], editor, prof)
   of "rm", "remove":
     if parts.len != 2:
-      stdout.styledWriteLine fgRed,
+      stdout.styledWriteLine fgMagenta,
         &"  usage: :provider {parts[0]} <name>", resetStyle
     else:
       cmdProviderRm(parts[1], prof)
   else:
     if parts.len != 1:
-      stdout.styledWriteLine fgRed,
+      stdout.styledWriteLine fgMagenta,
         "  usage: :provider [<name> | add | rm <name>]", resetStyle
     else:
       cmdProviderSelect(parts[0], prof)
@@ -3095,18 +3529,28 @@ proc cmdModelList(prof: Profile) =
     return
   for m in prov.models:
     let mark = if m == prof.model: "*" else: " "
-    hintLn "  ", mark, " ", resetStyle, m
+    let kg = knownGoodMode(prov.name, prov.modelPrefix & m)
+    if kg == "" and not experimentalEnabled:
+      stdout.styledWriteLine styleDim, "  ", mark, " ", m, resetStyle
+    else:
+      let modeTag = if kg != "": &"  ({kg}, known-good)" else: ""
+      hintLn "  ", mark, " ", resetStyle, m, styleDim, modeTag, resetStyle
 
 proc cmdModelSelect(target: string, prof: var Profile) =
   let prov = currentProvider()
   if prov.name == "":
-    stdout.styledWriteLine fgRed, "  no provider selected", resetStyle
+    stdout.styledWriteLine fgMagenta, "  no provider selected", resetStyle
     return
-  if target notin prov.models:
-    stdout.styledWriteLine fgRed, &"  unknown model: {target}", resetStyle
+  if prov.findModel(target) < 0:
+    stdout.styledWriteLine fgMagenta, &"  unknown model: {target}", resetStyle
     return
-  activeCurrent = prov.name & "." & target
-  prof = buildProfile(activeCurrent, activeProviders, "")
+  let newCurrent = prov.name & "." & target
+  let candidate = buildProfile(newCurrent, activeProviders, "")
+  if not gateExperimental(candidate):
+    explainExperimentalGate(candidate)
+    return
+  activeCurrent = newCurrent
+  prof = candidate
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   showProfile(prof)
 
@@ -3118,7 +3562,7 @@ proc cmdModel(arg: string, prof: var Profile) =
   of 1:
     cmdModelSelect(parts[0], prof)
   else:
-    stdout.styledWriteLine fgRed,
+    stdout.styledWriteLine fgMagenta,
       "  usage: :model [<name>]", resetStyle
 
 proc levenshtein(a, b: string): int =
@@ -3213,40 +3657,53 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: var Session,
     of "on", "show", "yes": showThinking = true
     of "off", "hide", "no": showThinking = false
     else:
-      stdout.styledWriteLine fgRed, "  usage: :think [on|off]", resetStyle
+      stdout.styledWriteLine fgMagenta, "  usage: :think [on|off]", resetStyle
       return true
     hintLn "  thinking ticker ", (if showThinking: "on" else: "off"), resetStyle
   of ":mode":
     let want = arg.strip.toLowerAscii
-    let cur = if prof.mode == "text": "text" else: "tools"
-    case want
-    of "":
-      hintLn "  mode: ", cur, "  (toggle with :mode [text|tools])", resetStyle
+    let cur = if effectiveTextMode(prof): "text" else: "tools"
+    if want == "":
+      let kg = knownGoodMode(prof)
+      let tail =
+        if kg != "": "  (hardcoded for this combo)"
+        elif not experimentalEnabled: "  (read-only without --experimental)"
+        else: "  (toggle with :mode [text|tools])"
+      hintLn "  mode: ", cur, tail, resetStyle
       return true
+    if not experimentalEnabled:
+      stdout.styledWriteLine fgMagenta,
+        "  mode is hardcoded; pass --experimental to override", resetStyle
+      return true
+    if knownGoodMode(prof) != "":
+      stdout.styledWriteLine fgMagenta,
+        &"  {prof.name} is known-good; mode is hardcoded to {cur}", resetStyle
+      return true
+    case want
     of "toggle":
       prof.mode = if cur == "text": "tools" else: "text"
     of "text": prof.mode = "text"
-    of "tools", "tool", "tool_calls": prof.mode = ""
+    of "tools", "tool", "tool_calls": prof.mode = "tools"
     else:
-      stdout.styledWriteLine fgRed,
+      stdout.styledWriteLine fgMagenta,
         "  usage: :mode [text|tools|toggle]", resetStyle
       return true
     refreshSystemPrompt(messages, prof)
-    let now = if prof.mode == "text": "text" else: "tools"
+    let now = if effectiveTextMode(prof): "text" else: "tools"
     hintLn "  mode → ", now,
       (if cur != now and messages.len > 1:
          "  (existing history may confuse the model — :clear if it acts up)"
        else: ""), resetStyle
   of ":summarize":
     if prof.name == "":
-      stdout.styledWriteLine fgRed,
+      stdout.styledWriteLine fgMagenta,
         "  no provider configured. use :provider add", resetStyle
     else:
       hint "  · summarizing... ", resetStyle
       stdout.flushFile
       let n = summarizeHistory(messages, prof)
       if n == 0:
-        stdout.styledWriteLine fgRed, "failed or not worth it", resetStyle
+        stdout.styledWriteLine styleDim, "failed or not worth it", resetStyle
       else:
         stdout.styledWriteLine fgCyan, styleBright, "done", resetStyle
         hintLn &"  · collapsed {n} message" &
@@ -3256,10 +3713,10 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: var Session,
   else:
     let suggestion = nearestCommand(name)
     if suggestion != "":
-      stdout.styledWriteLine fgRed, "unknown command: ", c,
+      stdout.styledWriteLine fgMagenta, "unknown command: ", c,
         fgCyan, styleBright, &"  did you mean {suggestion}?", resetStyle
     else:
-      stdout.styledWriteLine fgRed, "unknown command: ", c, "  (try :help)", resetStyle
+      stdout.styledWriteLine fgMagenta, "unknown command: ", c, "  (try :help)", resetStyle
   return true
 
 proc usage() {.noreturn.} =
@@ -3270,6 +3727,7 @@ proc usage() {.noreturn.} =
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
   -r, --resume[=ID]    resume latest session from this directory (or by id)
   -l, --list[=all]     list sessions for this directory (or all) and exit
+  -x, --experimental   allow combos outside the known-good list
   -v, --version        print version
   -h, --help           this message
 
@@ -3307,6 +3765,7 @@ proc main() =
       case k
       of "v", "version": echo Version; return
       of "h", "help": usage()
+      of "x", "experimental": experimentalEnabled = true
       of "m", "model":
         if v != "": model = v
         else: pending = "model"
@@ -3362,6 +3821,9 @@ proc main() =
 
   if prompt != "" and not resume:
     let prof = loadProfile(model)
+    if not gateExperimental(prof):
+      explainExperimentalGate(prof)
+      quit ExitConfig
     session.profileName = prof.name
     messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
     refreshSystemPrompt(messages, prof)
@@ -3380,6 +3842,14 @@ proc main() =
     elif resume and session.profileName != "": session.profileName
     else: ""
   var prof = buildProfile(activeCurrent, activeProviders, wantedProfile)
+  if wantedProfile == "" and not experimentalEnabled and prof.name != "" and
+     not isKnownGood(prof):
+    let fallback = firstKnownGoodCombo(activeProviders)
+    if fallback != "":
+      let alt = buildProfile(fallback, activeProviders, "")
+      if alt.name != "":
+        activeCurrent = alt.name
+        prof = alt
   var editor = welcome(prof)
   if prof.name == "":
     prof = bootstrapProvider(editor)
@@ -3406,7 +3876,7 @@ proc main() =
     if t in ["exit", "quit", ":q", ":quit", ":exit"]: break
     if handleCommand(line, messages, session, prof, editor): continue
     if prof.name == "":
-      stdout.styledWriteLine fgRed,
+      stdout.styledWriteLine fgMagenta,
         "  no provider configured. use :provider add", resetStyle
       continue
     messages.add %*{"role": "user", "content": buildUserMessage(messages, line)}
