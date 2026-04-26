@@ -26,7 +26,7 @@ const KnownGoodCombos*: array[2, (string, string, string)] = [
 const SystemPromptBase* = """
 You are 3code, the economical coding agent. One task, done right, few tokens.
 
-$1
+{{tools}}
 The harness runs your tool calls and feeds results back. When done, reply with prose and no tool calls. Dry wit where earned; no forced cheer, no emoji, no "Great question!".
 
 ## Work rules
@@ -89,7 +89,7 @@ let GlmToolsJson* = %*[
   }
 ]
 
-const DefaultSystemPrompt* = SystemPromptBase % [GlmTools]
+const DefaultSystemPrompt* = SystemPromptBase.replace("{{tools}}", GlmTools)
   ## Used as the bytes for the placeholder system message in fresh sessions
   ## and unloaded session files. `refreshSystemPrompt` rewrites it on every
   ## turn so the resolved family for the active profile takes over.
@@ -175,25 +175,15 @@ proc knownGoodFamily*(provider, model: string): string =
       return combo[2]
   ""
 
-proc familyTools*(family: string): string =
-  ## Per-family tool component for the system prompt. Add other families
-  ## here as their tool surface gets validated.
-  case family
-  of "glm", "": GlmTools
-  else: GlmTools
-
-proc familyToolsJson*(family: string): JsonNode =
-  ## Per-family tool schema sent in the chat-completions request body.
-  case family
-  of "glm", "": GlmToolsJson
-  else: GlmToolsJson
-
 proc buildSystemPrompt*(p: Profile): string =
   ## Byte-stable within a given family. Provider/model identity deliberately
   ## does NOT land here: it would vary the prompt's bytes and kill prefix
   ## caching on Anthropic/OpenAI/DeepInfra where an identical prefix can
   ## shave 90% off prompt tokens on cache hit.
-  SystemPromptBase % [familyTools(p.family)]
+  let tools = case p.family
+    of "glm", "": GlmTools
+    else: GlmTools
+  SystemPromptBase.replace("{{tools}}", tools)
 
 proc refreshSystemPrompt*(messages: JsonNode, p: Profile) =
   if messages == nil or messages.kind != JArray or messages.len == 0: return
