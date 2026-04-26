@@ -9,26 +9,24 @@ const
   ExitUsage = 2
   ExitConfig = 3
   ExitApi = 5
-  ToolsModeEnabled* = true   ## When true, both protocols are live and the
-                             ## resolved Profile.mode picks one. Flip to false
-                             ## to wedge every session into text mode.
-  KnownGoodCombos*: array[8, (string, string, string)] = [
-    ("deepinfra", "qwen3-coder-480b", "text"),
-    ("together",  "qwen3-coder-480b", "text"),
-    ("cerebras",  "qwen-3-235b-a22b-instruct-2507", "text"),
-    ("cerebras",  "glm-4.7", "text"),
-    ("ovh",       "Qwen3-Coder-30B-A3B-Instruct", "text"),
-    ("nvidia",    "qwen/qwen3-coder-480b-a35b-instruct", "text"),
-    ("deepinfra", "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo", "text"),
-    ("fireworks", "accounts/fireworks/models/glm-5p1", "text"),
+  KnownGoodCombos*: array[2, (string, string, string)] = [
+    ("cerebras",  "glm-4.7", "glm"),
+    ("fireworks", "accounts/fireworks/models/glm-5p1", "glm"),
+    # non-glm combos are commented out while the per-family tool surface
+    # is glm-only. Re-add once their family component is wired in.
+    # ("deepinfra", "qwen3-coder-480b",                              "qwen"),
+    # ("together",  "qwen3-coder-480b",                              "qwen"),
+    # ("cerebras",  "qwen-3-235b-a22b-instruct-2507",                "qwen"),
+    # ("ovh",       "Qwen3-Coder-30B-A3B-Instruct",                  "qwen"),
+    # ("nvidia",    "qwen/qwen3-coder-480b-a35b-instruct",           "qwen"),
+    # ("deepinfra", "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",     "qwen"),
   ]
-    ## Verified (provider, model, mode) triples that emit multiple fenced
-    ## blocks per reply with ≥99% reliability. Match is exact and
+    ## Verified (provider, model, family) triples. Match is exact and
     ## case-insensitive on (provider, model). The model side is compared
-    ## against `model_prefix & model` (the full API id). Mode is hardcoded
-    ## here — for known-good combos the user is never asked. Anything
-    ## outside this list is "experimental" and requires `--experimental`
-    ## to run; the wizard prompts for mode at add-time.
+    ## against `model_prefix & model` (the full API id). The family slot
+    ## drives which tool component (system-prompt section + JSON schema)
+    ## the harness sends. Anything outside this list is "experimental"
+    ## and requires `--experimental` to run.
 
 template hint(args: varargs[untyped]) =
   stdout.styledWrite(fgCyan, styleBright, args, resetStyle)
@@ -48,16 +46,10 @@ template warn(args: varargs[untyped]) =
 template warnLn(args: varargs[untyped]) =
   stdout.styledWriteLine(fgMagenta, args, resetStyle)
 
-const SystemPrompt = """
+const SystemPromptBase* = """
 You are 3code, the economical coding agent. One task, done right, few tokens.
 
-Tools:
-- `bash(command, stdin?)` — shell; returns stdout/stderr + exit code. Optional `stdin` is piped into the command.
-- `write(path, body)` — create or overwrite a file.
-
-Read: `bash` with `cat path` (whole file) or `sed -n 'A,Bp' path` (slice).
-Edit a line range: `bash` with `command = "ed -s path"` and `stdin = "A,Bc\nnew body\n.\nw\nq\n"` (POSIX line editor; `c` = change lines A through B, `.` on its own line ends the body, `w` writes, `q` quits). Re-read just before so addresses are fresh; the harness errors if the file changed since your last read. For multi-edit scripts in one call, author bottom-up so earlier edits don't shift later addresses. A body line that is literally `.` must be escaped (use `s/^\\.$/&./` after, or split into separate edits).
-
+$1
 The harness runs your tool calls and feeds results back. When done, reply with prose and no tool calls. Dry wit where earned; no forced cheer, no emoji, no "Great question!".
 
 ## Work rules
@@ -81,56 +73,15 @@ The harness runs your tool calls and feeds results back. When done, reply with p
 - Web: `3code web "query"` and `3code fetch <url>`. Prefer official docs.
 """
 
-const SystemPromptText = """
-You are 3code, the economical coding agent. One task, done right, few tokens.
+const GlmTools* = """Tools:
+- `bash(command, stdin?)` — shell; returns stdout/stderr + exit code. Optional `stdin` is piped into the command.
+- `write(path, body)` — create or overwrite a file.
 
-Emit fenced code blocks; the harness runs them and feeds results back. Mix prose and blocks freely. Two forms:
-
-```bash
-ls -la
-```
-
-path/to/file.nim
-```
-full file body here (creates or overwrites)
-```
-
-The path-on-its-own-line form writes the file. To read: `cat path` or `sed -n 'A,Bp' path` in a bash block. To edit lines A–B of an existing file, heredoc into ed:
-
-```bash
-ed -s src/foo.nim <<'EOF'
-42,58c
-new content
-.
-w
-q
-EOF
-```
-
-`c` = change lines A through B, `.` on its own line ends the body, `w` writes, `q` quits. Re-read just before so addresses are fresh; the harness errors if the file changed since your last read. For multi-edit scripts in one call, author bottom-up so earlier edits don't shift later addresses. A body line that is literally `.` must be escaped (use `s/^\\.$/&./` after, or split into separate edits). When done, reply with prose and no blocks. Dry wit where earned; no forced cheer, no emoji, no "Great question!".
-
-## Work rules
-
-- Orient on a fresh repo: `ls`, README, build manifest. Skip for trivial tasks.
-- Plan multi-step work in 3–8 steps; work them in order.
-- Stay in scope. No unrequested refactors, reformatting, or comments.
-- Match local style.
-- Edit surgically: `ed -s path` for line-range edits, full-file write only for new files. Read immediately before editing so addresses are fresh. Rewriting the same file repeatedly is a smell — each full body rides in context every turn after.
-- Trust your tools. `wrote N bytes` is truthful; don't `cat` back to verify.
-- Search before reading: `rg`/`grep -rn` first, then `sed -n` for a slice. Don't slurp.
-- Quick jobs, quick scripts. For counts or data shape, a 5-line throwaway under `/tmp/` beats eyeballing. Default Nim or shell. Clean up.
-- Local before web: deps, vendored source, CHANGELOGs, tests, examples, man pages.
-- Verify before done: tests/build/typecheck, then `git diff`/`status`.
-- Stop when done. If the task's already done on arrival, say so.
-- Pause for irreversible ops outside cwd (`rm -rf` elsewhere, force-push, DB drops). Explain and wait.
-
-## Finding things
-
-- Files: `cat path` via `bash`. Tree: `rg`/`grep -rn`/`find`/`ls` via `bash`.
-- Web: `3code web "query"` and `3code fetch <url>`. Prefer official docs.
+Read: `bash` with `cat path` (whole file) or `sed -n 'A,Bp' path` (slice).
+Edit a line range: `bash` with `command = "ed -s path"` and `stdin = "A,Bc\nnew body\n.\nw\nq\n"` (POSIX line editor; `c` = change lines A through B, `.` on its own line ends the body, `w` writes, `q` quits). Re-read just before so addresses are fresh; the harness errors if the file changed since your last read. For multi-edit scripts in one call, author bottom-up so earlier edits don't shift later addresses. A body line that is literally `.` must be escaped (use `s/^\\.$/&./` after, or split into separate edits).
 """
 
-let ToolsJson = %*[
+let GlmToolsJson* = %*[
   {
     "type": "function",
     "function": {
@@ -160,6 +111,11 @@ let ToolsJson = %*[
     }
   }
 ]
+
+const DefaultSystemPrompt* = SystemPromptBase % [GlmTools]
+  ## Used as the bytes for the placeholder system message in fresh sessions
+  ## and unloaded session files. `refreshSystemPrompt` rewrites it on every
+  ## turn so the resolved family for the active profile takes over.
 
 const ConfigExample = """  [settings]
   current = "openai.gpt-4o-mini"
@@ -195,9 +151,6 @@ commands:
   :compact          compact older tool output in context
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :think [on|off]   toggle the reasoning-content ticker (on by default)
-  :mode             show the active protocol (tools / text)
-  :mode <text|tools|toggle>   switch protocol (--experimental only;
-                              known-good combos hardcode their mode)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -208,9 +161,9 @@ input:
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
 
-known good for text-mode multi-tool-call:
-  deepinfra.qwen3-coder-480b   (cache)
-  together.qwen3-coder-480b    (cache)
+known good (glm family):
+  cerebras.glm-4.7
+  fireworks.accounts/fireworks/models/glm-5p1
 
 other combos require --experimental — they're your tokens to burn.
 """
@@ -227,7 +180,9 @@ type
     limit*: int
   Profile* = object
     name*, url*, key*, modelPrefix*, model*: string
-    mode*: string  ## "" / "tools" → OpenAI tool_calls; "text" → parsed fenced blocks
+    family*: string  ## model family — selects the per-family tool component
+                     ## (system-prompt section + JSON tool schema). "glm" today;
+                     ## empty falls back to the glm component.
   Usage* = object
     promptTokens*, completionTokens*, totalTokens*, cachedTokens*: int
   ToolRecord* = object
@@ -664,17 +619,10 @@ proc trackCall*(t: var LoopTracker, name: string, args: JsonNode): int =
     inc t.strike
   t.strike
 
-proc effectiveTextMode*(p: Profile): bool =
-  ## Single gate for "should we use the parsed-fenced-block protocol".
-  ## When `ToolsModeEnabled` is false the OpenAI tool_calls path is
-  ## off regardless of `p.mode`; flipping the const re-enables the
-  ## per-session `:mode tools` toggle.
-  not ToolsModeEnabled or p.mode == "text"
-
-proc knownGoodMode*(p: Profile): string =
-  ## Returns the hardcoded mode ("text" / "tools") for a known-good combo,
-  ## or "" if (provider, model) isn't on the list. Match is case-insensitive
-  ## on (provider, full model id incl. prefix).
+proc knownGoodFamily*(p: Profile): string =
+  ## Returns the family label ("glm", ...) for a known-good combo, or ""
+  ## if (provider, model) isn't on the list. Match is case-insensitive on
+  ## (provider, full model id incl. prefix).
   if p.name == "": return ""
   let dot = p.name.find('.')
   if dot < 0: return ""
@@ -689,9 +637,9 @@ proc isKnownGood*(p: Profile): bool =
   ## True when (provider name, `model_prefix & model`) exactly matches
   ## an entry in `KnownGoodCombos` (case-insensitive on both parts).
   ## Empty profiles return false — caller decides what that means.
-  knownGoodMode(p) != ""
+  knownGoodFamily(p) != ""
 
-proc knownGoodMode*(provider, model: string): string =
+proc knownGoodFamily*(provider, model: string): string =
   ## Convenience overload for the wizard, where we have a candidate
   ## (provider name, full model id) but no Profile.
   let p = provider.toLowerAscii
@@ -701,15 +649,25 @@ proc knownGoodMode*(provider, model: string): string =
       return combo[2]
   ""
 
-proc buildSystemPrompt(p: Profile): string =
-  ## Byte-stable within a given mode. Provider/model identity deliberately
-  ## does NOT land here: it would vary the system prompt's bytes and kill
-  ## prefix caching on Anthropic/OpenAI/DeepInfra where an identical
-  ## prefix can shave 90% off prompt tokens on cache hit. Switching modes
-  ## (`:mode text` ↔ `:mode tools`) does invalidate cache for one turn —
-  ## that's the experimental cost.
-  if effectiveTextMode(p): SystemPromptText
-  else: SystemPrompt
+proc familyTools*(family: string): string =
+  ## Per-family tool component for the system prompt. Add other families
+  ## here as their tool surface gets validated.
+  case family
+  of "glm", "": GlmTools
+  else: GlmTools
+
+proc familyToolsJson*(family: string): JsonNode =
+  ## Per-family tool schema sent in the chat-completions request body.
+  case family
+  of "glm", "": GlmToolsJson
+  else: GlmToolsJson
+
+proc buildSystemPrompt*(p: Profile): string =
+  ## Byte-stable within a given family. Provider/model identity deliberately
+  ## does NOT land here: it would vary the prompt's bytes and kill prefix
+  ## caching on Anthropic/OpenAI/DeepInfra where an identical prefix can
+  ## shave 90% off prompt tokens on cache hit.
+  SystemPromptBase % [familyTools(p.family)]
 
 proc refreshSystemPrompt(messages: JsonNode, p: Profile) =
   if messages == nil or messages.kind != JArray or messages.len == 0: return
@@ -835,7 +793,7 @@ proc loadSessionFile(path: string): (Session, JsonNode) =
   sess.toolLog = toolLogFromJson(j{"toolLog"})
   var messages = j{"messages"}
   if messages == nil or messages.kind != JArray:
-    messages = %* [{"role": "system", "content": SystemPrompt}]
+    messages = %* [{"role": "system", "content": DefaultSystemPrompt}]
   (sess, messages)
 
 proc firstUserMessage(messages: JsonNode): string =
@@ -1146,23 +1104,16 @@ proc summarizeHistory*(messages: JsonNode, p: Profile,
 
 type
   ProviderRec = object
-    ## In-memory mirror of a [provider] section. `mode` is the optional
+    ## In-memory mirror of a [provider] section. `family` is the optional
     ## experimental override; only honored when --experimental is on.
     ## Known-good combos (KnownGoodCombos) ignore it.
-    name, url, key, modelPrefix, mode: string
+    name, url, key, modelPrefix, family: string
     models: seq[string]
 
 proc findModel(p: ProviderRec, name: string): int =
   for i, m in p.models:
     if m == name: return i
   -1
-
-proc normalizeMode*(s: string): string =
-  ## Accept text/tool/tools (any case); return "text" / "tools" / "".
-  case s.strip.toLowerAscii
-  of "text": "text"
-  of "tool", "tools", "tool_calls": "tools"
-  else: ""
 
 var activeCurrent: string
 var activeProviders: seq[ProviderRec]
@@ -1189,7 +1140,7 @@ proc explainExperimentalGate*(p: Profile) =
 
 proc hasKnownGoodModel*(prov: ProviderRec): bool =
   for m in prov.models:
-    if knownGoodMode(prov.name, prov.modelPrefix & m) != "": return true
+    if knownGoodFamily(prov.name, prov.modelPrefix & m) != "": return true
   false
 
 proc firstKnownGoodCombo*(providers: seq[ProviderRec]): string =
@@ -1200,13 +1151,13 @@ proc firstKnownGoodCombo*(providers: seq[ProviderRec]): string =
   for pr in providers:
     if pr.url == "" or pr.key == "": continue
     for m in pr.models:
-      if knownGoodMode(pr.name, pr.modelPrefix & m) != "":
+      if knownGoodFamily(pr.name, pr.modelPrefix & m) != "":
         return pr.name & "." & m
   ""
 
 const CommandNames = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":prompt", ":show", ":log", ":sessions", ":compact",
-                      ":summarize", ":think", ":mode", ":q", ":quit", ":exit"]
+                      ":summarize", ":think", ":q", ":quit", ":exit"]
 
 proc currentProvider(): ProviderRec =
   let dot = activeCurrent.find('.')
@@ -1233,14 +1184,11 @@ proc completionFor(line: string): seq[string] =
   if words[0] == ":model" and words.len == 2:
     for m in currentProvider().models: result.add m
     return
-  if words[0] == ":mode" and words.len == 2 and experimentalEnabled:
-    for sub in ["text", "tools", "toggle"]: result.add sub
-    return
 
 proc splitModels(s: string): seq[string] =
-  ## Whitespace- (and comma-) separated list of bare model names. Mode lives
-  ## elsewhere now — KnownGoodCombos hardcodes it; the [provider] `mode = ...`
-  ## key supplies an experimental override.
+  ## Whitespace- (and comma-) separated list of bare model names. Family
+  ## lives elsewhere — KnownGoodCombos hardcodes it; the [provider]
+  ## `family = ...` key supplies an experimental override.
   for raw in s.splitWhitespace:
     let m = raw.strip(chars = {',', ' '})
     if m.len > 0: result.add m
@@ -1291,7 +1239,7 @@ proc parseConfigFile(path: string): (string, seq[ProviderRec]) =
         of "url": prov.url = v.strip(chars = {'/', ' '})
         of "key": prov.key = v
         of "model_prefix": prov.modelPrefix = v
-        of "mode": prov.mode = v
+        of "family": prov.family = v
         of "models": prov.models = splitModels(v)
         else: discard
       else: discard
@@ -1321,8 +1269,8 @@ proc writeConfigFile(path: string, current: string,
     buf.add "key = " & quoteVal(pr.key) & "\n"
     if pr.modelPrefix != "":
       buf.add "model_prefix = " & quoteVal(pr.modelPrefix) & "\n"
-    if pr.mode != "":
-      buf.add "mode = " & quoteVal(pr.mode) & "\n"
+    if pr.family != "":
+      buf.add "family = " & quoteVal(pr.family) & "\n"
     buf.add "models = " & quoteVal(formatModels(pr.models)) & "\n"
   writeFile(path, buf)
 
@@ -1330,17 +1278,16 @@ proc loadStateOrEmpty(path: string): (string, seq[ProviderRec]) =
   if not fileExists(path): return ("", @[])
   parseConfigFile(path)
 
-proc resolveMode*(prov: ProviderRec, prof: Profile): string =
-  ## Mode is its own state, resolved at profile-build time:
+proc resolveFamily*(prov: ProviderRec, prof: Profile): string =
+  ## Family is resolved at profile-build time:
   ## 1. KnownGoodCombos hardcode (always wins; ignores config and -x)
-  ## 2. provider-level `mode = ...` — only honored under --experimental
-  ## 3. default → "tools"
-  let kg = knownGoodMode(prof)
+  ## 2. provider-level `family = ...` — only honored under --experimental
+  ## 3. default → "glm" (only family wired up today)
+  let kg = knownGoodFamily(prof)
   if kg != "": return kg
-  if experimentalEnabled:
-    let m = normalizeMode(prov.mode)
-    if m != "": return m
-  "tools"
+  if experimentalEnabled and prov.family.strip != "":
+    return prov.family.strip.toLowerAscii
+  "glm"
 
 proc buildProfile(current: string, providers: seq[ProviderRec],
                   wanted: string): Profile =
@@ -1362,7 +1309,7 @@ proc buildProfile(current: string, providers: seq[ProviderRec],
         return Profile()
       var prof = Profile(name: pr.name & "." & model, url: pr.url,
                          key: pr.key, modelPrefix: pr.modelPrefix, model: model)
-      prof.mode = resolveMode(pr, prof)
+      prof.family = resolveFamily(pr, prof)
       return prof
   Profile()
 
@@ -1404,7 +1351,7 @@ proc loadProfile(wanted: string): Profile =
     die &"provider '{name}': model '{model}' not in models list ({prov.models.join(\", \")})", ExitConfig
   var prof = Profile(name: prov.name & "." & model, url: prov.url, key: prov.key,
                      modelPrefix: prov.modelPrefix, model: model)
-  prof.mode = resolveMode(prov, prof)
+  prof.family = resolveFamily(prov, prof)
   if wanted == "" and not experimentalEnabled and not isKnownGood(prof):
     let fallback = firstKnownGoodCombo(providers)
     if fallback != "":
@@ -1803,9 +1750,8 @@ proc callModel(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToken
     "stream": true,
     "stream_options": {"include_usage": true}
   }
-  if not effectiveTextMode(p):
-    body["tools"] = ToolsJson
-    body["tool_choice"] = %"auto"
+  body["tools"] = familyToolsJson(p.family)
+  body["tool_choice"] = %"auto"
   let bodyStr = $body
   let t0 = epochTime()
   decayLevel(serverRetryLevel, serverLastTs, t0)
@@ -2561,8 +2507,8 @@ proc showProfile(p: Profile) =
   let provider = if dot < 0: p.name else: p.name[0 ..< dot]
   stdout.styledWriteLine fgCyan, styleBright, "  provider ", resetStyle, provider
   stdout.styledWriteLine fgCyan, styleBright, "  model    ", resetStyle, p.model
-  let mode = if effectiveTextMode(p): "text" else: "tools"
-  stdout.styledWriteLine fgCyan, styleBright, "  mode     ", resetStyle, mode
+  let fam = if p.family != "": p.family else: "glm"
+  stdout.styledWriteLine fgCyan, styleBright, "  family   ", resetStyle, fam
 
 proc welcome(p: Profile): minline.LineEditor =
   stdout.write "\n"
@@ -2862,107 +2808,6 @@ proc runTurns(p: Profile, messages: var JsonNode, session: var Session) =
           stdout.styledWriteLine styleDim, "  paused — looped", resetStyle
         return
       continue
-    if effectiveTextMode(p):
-      # Text-mode action handling: parse fenced blocks out of the assistant
-      # prose, run them, append results back as a user message. Mirrors the
-      # tool_calls path above (banner, loop guard, halt) but without
-      # tool_call_id pairing — there's no tool-role message, just one user
-      # message containing all results.
-      let (actions, issues) = parseActionsChecked(content)
-      if issues.len > 0:
-        if content.strip.len > 0 and not streamedLive:
-          stdout.write content & "\n\n"
-          stdout.flushFile
-        let plural = if issues.len == 1: "" else: "s"
-        stdout.styledWriteLine styleDim,
-          &"  syntax: {issues.len} unparsable fenced block{plural} — asking model to retry",
-          resetStyle
-        for iss in issues:
-          stdout.styledWriteLine styleDim,
-            &"    line {iss.line}: {iss.msg}", resetStyle
-        var note = "[harness] couldn't parse the fenced action blocks in your reply. " &
-                   "Re-emit with the protocol fixed:\n"
-        for iss in issues:
-          note.add &"- line {iss.line}: {iss.msg}\n"
-        note.add "Forms allowed: ```bash … ```, or 'path/to/file' on its own line then " &
-                 "``` … ``` (write), or the same with <<<<<<< SEARCH … ======= … >>>>>>> REPLACE inside (patch)."
-        messages.add %*{"role": "user", "content": note}
-        saveSession(session, messages)
-        if interrupted:
-          stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
-          interrupted = false
-          return
-        continue
-      if actions.len > 0:
-        if content.strip.len > 0 and not streamedLive:
-          stdout.write content & "\n\n"
-          stdout.flushFile
-        var halt = false
-        var results = "[harness] action results:\n"
-        for act in actions:
-          if interrupted or halt:
-            results.add "--- " & bannerFor(act) & " ---\n" &
-              (if halt: "[skipped — loop guard paused the turn]\n"
-               else: "[interrupted by user]\n")
-            continue
-          let idx = session.toolLog.len + 1
-          stdout.styledWrite styleDim, "• ", bannerFor(act), resetStyle, "\n"
-          stdout.flushFile
-          let toolT0 = epochTime()
-          if session.readCache == nil: session.readCache = newReadCache()
-          var (r, code, diff) = runAction(act, session.readCache)
-          let toolElapsed = epochTime() - toolT0
-          if r.strip.len == 0: r = "[no output]"
-          session.toolLog.add ToolRecord(banner: bannerFor(act), output: r,
-                                         code: code, kind: act.kind)
-          stdout.write "\e[1A\r\e[2K"
-          if code == 0:
-            stdout.styledWrite fgGreen, "• ", resetStyle
-          else:
-            stdout.styledWrite styleDim, "• ", resetStyle
-          stdout.styledWrite styleDim, bannerFor(act), resetStyle
-          if toolElapsed >= 1:
-            stdout.styledWrite styleDim, &"  ({toolElapsed.int}s)", resetStyle
-          stdout.write "\n"
-          stdout.flushFile
-          printActionResult(act, r, code, idx, diff)
-          let guardName = case act.kind
-            of akBash: "bash"
-            of akWrite: "write"
-            of akPatch: "patch"
-            of akRead: "read"
-          let guardArgs = case act.kind
-            of akBash: %*{"command": act.body}
-            else: %*{"path": act.path}
-          let priorStrike = session.loop.strike
-          let strike = trackCall(session.loop, guardName, guardArgs)
-          results.add "--- " & bannerFor(act) & " ---\n" & r &
-            (if r.endsWith("\n"): "" else: "\n")
-          if strike >= 2 and priorStrike < 2:
-            halt = true
-            if session.loop.recoveryCmd != "":
-              results.add "\n[repeat-guard] working-tree recovery detected (`" &
-                session.loop.recoveryCmd &
-                "`); further actions this turn are paused.\n"
-            else:
-              let fp = fingerprint(guardName, guardArgs)
-              results.add "\n[repeat-guard] second saturation (path=" & fp &
-                "); further actions this turn are paused.\n"
-        messages.add %*{"role": "user", "content": results}
-        saveSession(session, messages)
-        if interrupted:
-          stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
-          interrupted = false
-          return
-        if halt:
-          if session.loop.recoveryCmd != "":
-            stdout.styledWriteLine styleDim,
-              &"  paused — `{session.loop.recoveryCmd}` wiped working-tree state",
-              resetStyle
-          else:
-            stdout.styledWriteLine styleDim, "  paused — looped", resetStyle
-          return
-        continue
     if content.strip.len > 0:
       if not streamedLive:
         stdout.write content & "\n\n"
@@ -3529,7 +3374,7 @@ proc cmdModelList(prof: Profile) =
     return
   for m in prov.models:
     let mark = if m == prof.model: "*" else: " "
-    let kg = knownGoodMode(prov.name, prov.modelPrefix & m)
+    let kg = knownGoodFamily(prov.name, prov.modelPrefix & m)
     if kg == "" and not experimentalEnabled:
       stdout.styledWriteLine styleDim, "  ", mark, " ", m, resetStyle
     else:
@@ -3660,40 +3505,6 @@ proc handleCommand(cmd: string, messages: var JsonNode, session: var Session,
       stdout.styledWriteLine fgMagenta, "  usage: :think [on|off]", resetStyle
       return true
     hintLn "  thinking ticker ", (if showThinking: "on" else: "off"), resetStyle
-  of ":mode":
-    let want = arg.strip.toLowerAscii
-    let cur = if effectiveTextMode(prof): "text" else: "tools"
-    if want == "":
-      let kg = knownGoodMode(prof)
-      let tail =
-        if kg != "": "  (hardcoded for this combo)"
-        elif not experimentalEnabled: "  (read-only without --experimental)"
-        else: "  (toggle with :mode [text|tools])"
-      hintLn "  mode: ", cur, tail, resetStyle
-      return true
-    if not experimentalEnabled:
-      stdout.styledWriteLine fgMagenta,
-        "  mode is hardcoded; pass --experimental to override", resetStyle
-      return true
-    if knownGoodMode(prof) != "":
-      stdout.styledWriteLine fgMagenta,
-        &"  {prof.name} is known-good; mode is hardcoded to {cur}", resetStyle
-      return true
-    case want
-    of "toggle":
-      prof.mode = if cur == "text": "tools" else: "text"
-    of "text": prof.mode = "text"
-    of "tools", "tool", "tool_calls": prof.mode = "tools"
-    else:
-      stdout.styledWriteLine fgMagenta,
-        "  usage: :mode [text|tools|toggle]", resetStyle
-      return true
-    refreshSystemPrompt(messages, prof)
-    let now = if effectiveTextMode(prof): "text" else: "tools"
-    hintLn "  mode → ", now,
-      (if cur != now and messages.len > 1:
-         "  (existing history may confuse the model — :clear if it acts up)"
-       else: ""), resetStyle
   of ":summarize":
     if prof.name == "":
       stdout.styledWriteLine fgMagenta,
@@ -3814,7 +3625,7 @@ proc main() =
         die("session not found: " & resumeId, ExitConfig)
     (session, messages) = loadSessionFile(path)
   else:
-    messages = %* [{"role": "system", "content": SystemPrompt}]
+    messages = %* [{"role": "system", "content": DefaultSystemPrompt}]
     session.created = $now()
     session.cwd = getCurrentDir()
     session.savePath = newSessionPath()
