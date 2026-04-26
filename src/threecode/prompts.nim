@@ -36,7 +36,7 @@ The harness runs your tool calls and feeds results back. When done, reply with p
 - Plan multi-step work in 3–8 steps; work them in order.
 - Stay in scope. No unrequested refactors, reformatting, or comments.
 - Match local style.
-- Edit surgically: `ed -s path` for line-range edits, `write` for new files or full rewrites. Read immediately before editing so addresses are fresh. Rewriting the same file repeatedly is a smell — each full body rides in context every turn after.
+- Edit surgically: `patch` for targeted changes, `write` for new files or full rewrites. Read before patching so search blocks are fresh. Rewriting the same file repeatedly is a smell — each full body rides in context every turn after.
 - Trust your tools. `wrote N bytes` is truthful; don't `cat` back to verify.
 - Search before reading: `rg`/`grep -rn` first, then `sed -n 'A,Bp' path` for a slice. Don't slurp.
 - Quick jobs, quick scripts. For counts or data shape, a 5-line throwaway under `/tmp/` beats eyeballing. Default Nim or shell. Clean up.
@@ -54,17 +54,19 @@ The harness runs your tool calls and feeds results back. When done, reply with p
 const GlmTools* = """Tools:
 - `bash(command, stdin?)` — shell; returns stdout/stderr + exit code. Optional `stdin` is piped into the command.
 - `write(path, body)` — create or overwrite a file.
+- `patch(path, edits)` — targeted edits; `edits` is an array of `{search, replace}` objects; each `search` must match exactly once.
 
 Read: `bash` with `cat path` (whole file) or `sed -n 'A,Bp' path` (slice).
-Edit a line range: `bash` with `command = "ed -s path"` and `stdin = "A,Bc\nnew body\n.\nw\nq\n"` (POSIX line editor; `c` = change lines A through B, `.` on its own line ends the body, `w` writes, `q` quits). Re-read just before so addresses are fresh; the harness errors if the file changed since your last read. For multi-edit scripts in one call, author bottom-up so earlier edits don't shift later addresses. A body line that is literally `.` must be escaped (use `s/^\\.$/&./` after, or split into separate edits).
+Edit: `patch` for surgical changes (include enough context in `search` to be unambiguous); `write` for new files or full rewrites. Read immediately before patching so search blocks are fresh — the harness errors if the file changed since your last read.
 """
 
 const QwenTools* = """Tools:
 - `bash(command, stdin?)` — shell; returns stdout/stderr + exit code. Optional `stdin` is piped into the command.
 - `write(path, body)` — create or overwrite a file.
+- `patch(path, edits)` — targeted edits; `edits` is an array of `{search, replace}` objects; each `search` must match exactly once.
 
 Read: default to `cat path`. Read the raw file with your eyes; don't try to extract the answer with `grep`/`cut`/`awk` pipelines — they're brittle on whitespace and quoting and they hide context. Only use `sed -n 'A,Bp' path` when the file is too large to cat. If a command returns empty or surprising output, NEVER guess the answer — re-run with `cat` and read it.
-Edit: prefer `write` with the full new body for any file under ~150 lines. `cat` it, mentally apply the change, then `write` the whole new file. Don't reach for `ed` unless the file is genuinely large — line-arithmetic is easy to misread, and a corrupted file costs more tokens than a full rewrite. When you do use `ed`: `bash` with `command = "ed -s path"` and `stdin = "A,Bc\nnew body\n.\nw\nq\n"` (POSIX line editor; `c` = change lines A through B, `.` on its own line ends the body, `w` writes, `q` quits). Read immediately before so addresses are fresh.
+Edit: `patch` for surgical changes (include enough context in `search` to be unambiguous); `write` for new files or full rewrites under ~150 lines. Read immediately before patching so search blocks are fresh — the harness errors if the file changed since your last read.
 """
 
 let GlmToolsJson* = %*[
@@ -93,6 +95,30 @@ let GlmToolsJson* = %*[
           "body": {"type": "string"}
         },
         "required": ["path", "body"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "patch",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "edits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "search": {"type": "string"},
+                "replace": {"type": "string"}
+              },
+              "required": ["search", "replace"]
+            }
+          }
+        },
+        "required": ["path", "edits"]
       }
     }
   }
