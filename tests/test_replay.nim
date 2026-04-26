@@ -228,9 +228,11 @@ suite "failure replay — loop tracker":
         %*{"command": "sed -i 's/a/b/' /tmp/x.nim"})
     check t.strike == 2
 
-  test "read-only bash never enters the ring":
+  test "non-read non-mutation bash never enters the ring":
+    # `cat`/`sed -n`/`head`/`tail` ARE tracked now (they replaced the read
+    # tool); everything else stays outside the loop guard's view.
     var t = initLoopTracker()
-    for c in ["ls", "cat /tmp/x.nim", "grep foo /tmp/x.nim",
+    for c in ["ls", "grep foo /tmp/x.nim",
               "git log --oneline", "git stash list", "git stash show",
               "nimble test", "rg --no-heading --color=never foo /tmp"]:
       discard trackCall(t, "bash", %*{"command": c})

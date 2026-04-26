@@ -1,4 +1,4 @@
-import std/[unittest, os, strutils, json, times]
+import std/[unittest, os, strutils, json, times, unicode]
 import threecode {.all.}  # exported + private symbols (parseConfigFile, ProviderRec, Session)
 
 suite "text-mode parser":
@@ -105,6 +105,204 @@ Done.
     let s = "First:\n```bash\na\n```\nNext:\n```bash\nb\n```\nEnd."
     check stripActions(s) == "First:\nNext:\nEnd."
 
+suite "text-mode parser — syntax fail detection":
+  test "well-formed reply produces no issues":
+    let s = "```bash\nls\n```\n\nsrc/x.nim\n```\nlet x = 1\n```\n"
+    let (acts, issues) = parseActionsChecked(s)
+    check acts.len == 2
+    check issues.len == 0
+
+  test "unterminated ```bash fence is flagged":
+    let s = "```bash\nls -la\n"
+    let (_, issues) = parseActionsChecked(s)
+    check issues.len == 1
+    check issues[0].line == 1
+    check "unterminated" in issues[0].msg
+
+  test "unterminated write fence is flagged with the path":
+    let s = "src/foo.nim\n```\nlet x = 1\n"
+    let (_, issues) = parseActionsChecked(s)
+    check issues.len == 1
+    check issues[0].line == 2
+    check "src/foo.nim" in issues[0].msg
+    check "unterminated" in issues[0].msg
+
+  test "orphan ```python fence is flagged":
+    let s = "Here is some python:\n```python\nprint(1)\n```\nDone."
+    let (acts, issues) = parseActionsChecked(s)
+    check acts.len == 0
+    check issues.len == 1
+    check issues[0].line == 2
+    check "```python" in issues[0].msg
+
+  test "bare ``` with no preceding path is flagged":
+    let s = "Some prose.\n```\nlet x = 1\n```\nDone."
+    let (acts, issues) = parseActionsChecked(s)
+    check acts.len == 0
+    check issues.len == 1
+    check issues[0].line == 2
+    check "bare" in issues[0].msg
+
+  test "patch with ======= but no >>>>>>> REPLACE is flagged":
+    let s = """src/a.nim
+```
+<<<<<<< SEARCH
+old
+=======
+new
+```
+"""
+    let (_, issues) = parseActionsChecked(s)
+    check issues.len >= 1
+    var sawUnclosed = false
+    for iss in issues:
+      if "not closed" in iss.msg: sawUnclosed = true
+    check sawUnclosed
+
+  test "patch with ======= without preceding SEARCH is flagged":
+    let s = """src/a.nim
+```
+=======
+new
+>>>>>>> REPLACE
+```
+"""
+    let (_, issues) = parseActionsChecked(s)
+    var sawNoSearch = false
+    for iss in issues:
+      if "without a preceding <<<<<<< SEARCH" in iss.msg: sawNoSearch = true
+    check sawNoSearch
+
+  test "patch with nested SEARCH before previous block closed is flagged":
+    let s = """src/a.nim
+```
+<<<<<<< SEARCH
+old
+<<<<<<< SEARCH
+old2
+=======
+new2
+>>>>>>> REPLACE
+```
+"""
+    let (_, issues) = parseActionsChecked(s)
+    var sawNested = false
+    for iss in issues:
+      if "before previous block was closed" in iss.msg: sawNested = true
+    check sawNested
+
+  test "parseActions stays a thin wrapper of the checked variant":
+    let s = "```bash\nls\n```\n"
+    check parseActions(s) == parseActionsChecked(s).actions
+
+suite "utf8 byte cut":
+  # Pydantic-backed providers (deepinfra) reject the body with
+  # "There was an error parsing the body" when a string contains invalid
+  # UTF-8 — naive byte slicing of `→` (0xE2 0x86 0x92) chopped at byte 2
+  # was triggering this on every fresh session whose recent commit
+  # subjects ran past the 80-byte preamble cap.
+  test "utf8ByteCut backs up off a continuation byte":
+    let s = "tighten bash clip 4k\xE2\x86\x922k"  # → at bytes 20..22
+    # Cut at 22 lands inside the multibyte rune; back up to 20.
+    let r = utf8ByteCut(s, 22)
+    check r == "tighten bash clip 4k"
+    check validateUtf8(r) == -1
+
+  test "utf8ByteCut leaves a clean cut alone":
+    let s = "abcdef"
+    check utf8ByteCut(s, 3) == "abc"
+
+  test "utf8ByteCut returns whole string when n >= len":
+    let s = "→"  # 3 bytes
+    check utf8ByteCut(s, 10) == s
+
+  test "utf8ByteCutEnd advances past leading continuation bytes":
+    let s = "tighten bash clip 4k\xE2\x86\x922k"
+    # Last 4 bytes start at the second byte of `→` (a continuation);
+    # advance past 0x86 0x92 to the start of "2k".
+    let r = utf8ByteCutEnd(s, 4)
+    check r == "2k"
+    check validateUtf8(r) == -1
+
+  test "preamble truncation around → no longer corrupts utf-8":
+    let s = "67120bc economize context: drop cat -n prefix on read, " &
+            "tighten bash clip 4k\xE2\x86\x922k, more"
+    let trimmed = utf8ByteCut(s, 77) & "..."
+    # Used to land mid-rune; now must round down to a codepoint boundary.
+    check validateUtf8(trimmed) == -1
+    # Still a valid JSON-encodable string.
+    check (%trimmed).kind == JString
+
+suite "known-good model gate":
+  test "exact (provider, model) pairs from the seed list match":
+    check isKnownGood(Profile(name: "deepinfra.qwen3-coder-480b",
+                              modelPrefix: "", model: "qwen3-coder-480b"))
+    check isKnownGood(Profile(name: "together.qwen3-coder-480b",
+                              modelPrefix: "", model: "qwen3-coder-480b"))
+
+  test "match is case-insensitive on both provider and model":
+    check isKnownGood(Profile(name: "DeepInfra.qwen", modelPrefix: "",
+                              model: "Qwen3-Coder-480B"))
+    check isKnownGood(Profile(name: "TOGETHER.foo", modelPrefix: "",
+                              model: "QWEN3-CODER-480B"))
+
+  test "right model on the wrong provider is not known-good":
+    check not isKnownGood(Profile(name: "groq.qwen3-coder-480b",
+                                  modelPrefix: "", model: "qwen3-coder-480b"))
+    check not isKnownGood(Profile(name: "baseten.qwen3c",
+                                  modelPrefix: "", model: "qwen3c"))
+
+  test "right provider but a different model is not known-good":
+    check not isKnownGood(Profile(name: "deepinfra.kimi-k2.5",
+                                  modelPrefix: "", model: "kimi-k2.5"))
+    check not isKnownGood(Profile(name: "together.llama",
+                                  modelPrefix: "", model: "Llama-3.3-70B"))
+
+  test "qwen3-coder substring without exact match is not known-good":
+    # Substring match would have accepted these — exact match shouldn't.
+    check not isKnownGood(Profile(name: "deepinfra.qwen3-coder-30b",
+                                  modelPrefix: "", model: "qwen3-coder-30b"))
+    check not isKnownGood(Profile(name: "together.qwen", modelPrefix: "Qwen/",
+                                  model: "Qwen3-Coder-480B-A35B-Instruct-FP8"))
+
+  test "non-qwen3-coder models are not known-good":
+    check not isKnownGood(Profile(name: "deepseek.deepseek-v3.2",
+                                  modelPrefix: "", model: "deepseek-v3.2"))
+    check not isKnownGood(Profile(name: "openai.gpt-4o-mini",
+                                  modelPrefix: "", model: "gpt-4o-mini"))
+
+  test "empty / malformed profile is not known-good":
+    check not isKnownGood(Profile())
+    check not isKnownGood(Profile(name: "noProviderDot",
+                                  modelPrefix: "", model: "qwen3-coder-480b"))
+
+  test "gate lets known-good through regardless of --experimental":
+    let prof = Profile(name: "deepinfra.qwen3-coder-480b",
+                       model: "qwen3-coder-480b")
+    let prior = experimentalEnabled
+    experimentalEnabled = false
+    check gateExperimental(prof)
+    experimentalEnabled = prior
+
+  test "gate refuses experimental model when --experimental is off":
+    let prof = Profile(name: "deepseek.deepseek-v3.2",
+                       model: "deepseek-v3.2")
+    let prior = experimentalEnabled
+    experimentalEnabled = false
+    check not gateExperimental(prof)
+    experimentalEnabled = prior
+
+  test "gate lets experimental model through when --experimental is on":
+    let prof = Profile(name: "deepseek.deepseek-v3.2",
+                       model: "deepseek-v3.2")
+    let prior = experimentalEnabled
+    experimentalEnabled = true
+    check gateExperimental(prof)
+    experimentalEnabled = prior
+
+  test "gate lets empty profile through (caller handles bootstrap)":
+    check gateExperimental(Profile())
+
 suite "actions":
   test "replaceFirst only replaces first occurrence":
     let (out1, ok) = replaceFirst("a X b X c", "X", "Y")
@@ -192,6 +390,14 @@ suite "actions":
     let a = toolCallToAction("bash", %*{"command": "ls -la"})
     check a.kind == akBash
     check a.body == "ls -la"
+    check a.stdin == ""
+
+  test "toolCallToAction bash with stdin":
+    let a = toolCallToAction("bash", %*{
+      "command": "wc -l", "stdin": "one\ntwo\nthree\n"})
+    check a.kind == akBash
+    check a.body == "wc -l"
+    check a.stdin == "one\ntwo\nthree\n"
 
   test "toolCallToAction write":
     let a = toolCallToAction("write", %*{
@@ -228,20 +434,6 @@ suite "actions":
     let a = toolCallToAction("patch", %*{"path": "x"})
     check a.kind == akPatch
     check a.edits.len == 0
-
-  test "toolCallToAction read whole file":
-    let a = toolCallToAction("read", %*{"path": "src/foo.nim"})
-    check a.kind == akRead
-    check a.path == "src/foo.nim"
-    check a.offset == 0
-    check a.limit == 0
-
-  test "toolCallToAction read with range":
-    let a = toolCallToAction("read", %*{
-      "path": "a.txt", "offset": 10, "limit": 5})
-    check a.kind == akRead
-    check a.offset == 10
-    check a.limit == 5
 
   test "runAction akRead whole file":
     let tmp = getTempDir() / "3code_test_" & $getCurrentProcessId() & "_r"
@@ -754,7 +946,23 @@ models = "m"
 
     removeFile(path)
 
-  test "carries `mode = \"text\"` from provider config into Profile":
+  test "non-known-good profile defaults to mode = \"tools\"":
+    let path = tmpConfig()
+    writeFile(path, """[settings]
+current = "p.m"
+
+[provider]
+name = "p"
+url = "https://x.example/v1"
+key = "k1"
+models = "m"
+""")
+    let (cur, prov) = parseConfigFile(path)
+    let pf = buildProfile(cur, prov, "")
+    check pf.mode == "tools"
+    removeFile(path)
+
+  test "provider `mode = \"text\"` is honored only with --experimental":
     let path = tmpConfig()
     writeFile(path, """[settings]
 current = "p.m"
@@ -767,25 +975,169 @@ mode = "text"
 models = "m"
 """)
     let (cur, prov) = parseConfigFile(path)
+    let prior = experimentalEnabled
+    experimentalEnabled = false
+    check buildProfile(cur, prov, "").mode == "tools"  # config ignored
+    experimentalEnabled = true
+    check buildProfile(cur, prov, "").mode == "text"   # config wins
+    experimentalEnabled = prior
+    removeFile(path)
+
+  test "known-good combo always reports its hardcoded mode":
+    # No mode in config, no provider mode — known-good combo supplies it.
+    let path = tmpConfig()
+    writeFile(path, """[settings]
+current = "deepinfra.qwen3-coder-480b"
+
+[provider]
+name = "deepinfra"
+url = "https://api.deepinfra.com/v1/openai/"
+key = "k"
+models = "qwen3-coder-480b"
+""")
+    let (cur, prov) = parseConfigFile(path)
     let pf = buildProfile(cur, prov, "")
     check pf.mode == "text"
     removeFile(path)
 
-  test "absent mode in config produces empty Profile.mode (i.e. tools)":
+  test "known-good hardcode wins over provider mode and --experimental":
     let path = tmpConfig()
     writeFile(path, """[settings]
-current = "p.m"
+current = "deepinfra.qwen3-coder-480b"
 
 [provider]
-name = "p"
-url = "https://x.example/v1"
-key = "k1"
-models = "m"
+name = "deepinfra"
+url = "https://api.deepinfra.com/v1/openai/"
+key = "k"
+mode = "tools"
+models = "qwen3-coder-480b"
 """)
     let (cur, prov) = parseConfigFile(path)
-    let pf = buildProfile(cur, prov, "")
-    check pf.mode == ""
+    let prior = experimentalEnabled
+    experimentalEnabled = true
+    check buildProfile(cur, prov, "").mode == "text"  # hardcode wins
+    experimentalEnabled = prior
     removeFile(path)
+
+  test "knownGoodMode returns hardcoded mode for verified combos":
+    check knownGoodMode(Profile(name: "deepinfra.qwen3-coder-480b",
+                                model: "qwen3-coder-480b")) == "text"
+    check knownGoodMode(Profile(name: "together.qwen3-coder-480b",
+                                model: "qwen3-coder-480b")) == "text"
+    check knownGoodMode(Profile(name: "openai.gpt-4o",
+                                model: "gpt-4o")) == ""
+
+  test "firstKnownGoodCombo skips experimental providers, returns first known-good":
+    let path = tmpConfig()
+    writeFile(path, """
+[settings]
+current = "openai.gpt-4o"
+
+[provider]
+name = "openai"
+url = "https://api.openai.com/v1"
+key = "sk-1"
+models = "gpt-4o gpt-4o-mini"
+
+[provider]
+name = "deepinfra"
+url = "https://api.deepinfra.com/v1/openai/"
+key = "di-2"
+models = "qwen3-coder-480b"
+""")
+    let (_, providers) = parseConfigFile(path)
+    check firstKnownGoodCombo(providers) == "deepinfra.qwen3-coder-480b"
+    removeFile(path)
+
+  test "firstKnownGoodCombo returns empty when no known-good provider is configured":
+    let path = tmpConfig()
+    writeFile(path, """
+[settings]
+current = "openai.gpt-4o"
+
+[provider]
+name = "openai"
+url = "https://api.openai.com/v1"
+key = "sk-1"
+models = "gpt-4o gpt-4o-mini"
+""")
+    let (_, providers) = parseConfigFile(path)
+    check firstKnownGoodCombo(providers) == ""
+    removeFile(path)
+
+  test "firstKnownGoodCombo skips providers missing url or key":
+    let path = tmpConfig()
+    writeFile(path, """
+[settings]
+current = "deepinfra.qwen3-coder-480b"
+
+[provider]
+name = "deepinfra"
+key = "di-2"
+models = "qwen3-coder-480b"
+
+[provider]
+name = "together"
+url = "https://api.together.xyz/v1"
+key = "tg-1"
+models = "qwen3-coder-480b"
+""")
+    let (_, providers) = parseConfigFile(path)
+    # First [provider] has no url → skipped; second is the answer.
+    check firstKnownGoodCombo(providers) == "together.qwen3-coder-480b"
+    removeFile(path)
+
+  test "loadProfile-style: non-experimental startup falls back from experimental current":
+    # Mirrors what loadProfile / the REPL startup do: resolve the config-pointed
+    # current; when not in --experimental and the current is experimental, swap
+    # to the first known-good combo.
+    let path = tmpConfig()
+    writeFile(path, """
+[settings]
+current = "openai.gpt-4o"
+
+[provider]
+name = "openai"
+url = "https://api.openai.com/v1"
+key = "sk-1"
+models = "gpt-4o gpt-4o-mini"
+
+[provider]
+name = "deepinfra"
+url = "https://api.deepinfra.com/v1/openai/"
+key = "di-2"
+models = "qwen3-coder-480b"
+""")
+    let (current, providers) = parseConfigFile(path)
+    let prior = experimentalEnabled
+    experimentalEnabled = false
+    var prof = buildProfile(current, providers, "")
+    if not isKnownGood(prof):
+      let fb = firstKnownGoodCombo(providers)
+      if fb != "": prof = buildProfile(fb, providers, "")
+    check prof.name == "deepinfra.qwen3-coder-480b"
+    # With --experimental, the explicit current is honored as before.
+    experimentalEnabled = true
+    let prof2 = buildProfile(current, providers, "")
+    check prof2.name == "openai.gpt-4o"
+    experimentalEnabled = prior
+    removeFile(path)
+
+  test "splitModels splits on whitespace and commas, ignoring blanks":
+    check splitModels("a b c") == @["a", "b", "c"]
+    check splitModels("a, b ,c") == @["a", "b", "c"]
+    check splitModels("  ") == newSeq[string]()
+    # Colons are no longer mode markers — they're part of the model name.
+    check splitModels("x/y:32k") == @["x/y:32k"]
+
+  test "normalizeMode accepts text/tool/tools, rejects others":
+    check normalizeMode("text") == "text"
+    check normalizeMode("Text") == "text"
+    check normalizeMode("tool") == "tools"
+    check normalizeMode("tools") == "tools"
+    check normalizeMode("tool_calls") == "tools"
+    check normalizeMode("foo") == ""
+    check normalizeMode("") == ""
 
 suite "bash mutation detection":
   # Closes the loop-guard bypass that let the deepseek-v4-pro session of
@@ -839,6 +1191,12 @@ suite "bash mutation detection":
     # `2>` (stderr-only) is not a mutation we care to track
     check bashMutationPath("nimble test 2>/dev/null") == ""
 
+  test "ed and ex line editors":
+    check bashMutationPath("ed -s /tmp/foo.txt") == "/tmp/foo.txt"
+    check bashMutationPath("ed /tmp/foo.txt") == "/tmp/foo.txt"
+    check bashMutationPath("ex -s -c '%s/a/b/g' /tmp/foo.txt") == "/tmp/foo.txt"
+    check bashMutationPath("ex /tmp/foo.txt") == "/tmp/foo.txt"
+
   test "tee, cp, mv, rm, touch":
     check bashMutationPath("echo x | tee /tmp/y") == "/tmp/y"
     check bashMutationPath("tee -a /tmp/y") == "/tmp/y"
@@ -879,6 +1237,111 @@ suite "bash mutation detection":
   test "multi-statement: first matching mutation wins":
     check bashMutationPath("ls; sed -i 's/a/b/' /tmp/x.nim") == "/tmp/x.nim"
     check bashMutationPath("cd /tmp && rm /tmp/x") == "/tmp/x"
+
+suite "bash read detection":
+  # Backfills the read-cache integration that lived on `akRead` before the
+  # dedicated read tool was dropped. `cat path` / `sed -n 'A,Bp' path` /
+  # `head` / `tail` are recognised so a later patch/write can still error
+  # on external edits, and the dedupe-of-unchanged-reads shortcut still
+  # fires for `cat path` (the only "full file" form we recognise).
+
+  test "cat single file is a full read":
+    check bashReadPath("cat foo.nim") == ("foo.nim", true)
+    check bashReadPath("cat /etc/hosts") == ("/etc/hosts", true)
+    check bashReadPath("cat -n foo.nim") == ("foo.nim", true)
+
+  test "cat multi-file or piped is not recognised":
+    check bashReadPath("cat a b") == ("", false)
+    check bashReadPath("cat foo.nim | wc -l") == ("", false)
+    check bashReadPath("cat") == ("", false)
+
+  test "sed -n 'A,Bp' path is a partial read":
+    check bashReadPath("sed -n '1,50p' foo.nim") == ("foo.nim", false)
+    check bashReadPath("sed -n '100,200p' src/threecode.nim") ==
+      ("src/threecode.nim", false)
+    # sed without -n is not a pure read in this sense (could be in-place)
+    check bashReadPath("sed 's/a/b/' foo.nim") == ("", false)
+    # multiple files — bail
+    check bashReadPath("sed -n '1p' a b") == ("", false)
+
+  test "head and tail with single file":
+    check bashReadPath("head -50 foo.nim") == ("foo.nim", false)
+    check bashReadPath("head -n 50 foo.nim") == ("foo.nim", false)
+    check bashReadPath("tail -100 foo.nim") == ("foo.nim", false)
+    check bashReadPath("tail -n 100 foo.nim") == ("foo.nim", false)
+    check bashReadPath("tail -c 4096 foo.nim") == ("foo.nim", false)
+
+  test "redirect / pipe / multi-statement disqualify":
+    check bashReadPath("cat foo.nim > /tmp/x") == ("", false)
+    check bashReadPath("cat foo.nim | grep bar") == ("", false)
+    check bashReadPath("cd /tmp && cat foo.nim") == ("", false)
+    check bashReadPath("cat foo.nim; echo done") == ("", false)
+
+  test "non-read commands return empty":
+    for c in ["ls", "ls -la /tmp", "grep foo /tmp/x",
+              "rg --no-heading foo /tmp", "find /tmp -name '*.nim'",
+              "wc -l /tmp/x", "nimble test", "echo hi"]:
+      check bashReadPath(c) == ("", false)
+
+  test "bash read trips Strike 1 like the old read tool":
+    # 5 cat calls on the same path → Strike 1 (concentration), no Strike 2
+    # (reads aren't mutations).
+    var t = initLoopTracker()
+    for i in 0 ..< LoopTripT:
+      discard trackCall(t, "bash", %*{"command": "cat /tmp/x.nim"})
+    check t.strike == 1
+
+  test "bash read alone never escalates past Strike 1":
+    var t = initLoopTracker()
+    for i in 0 ..< LoopWindowK:  # past 2×T
+      discard trackCall(t, "bash", %*{"command": "cat /tmp/x.nim"})
+    check t.strike == 1
+
+  test "bash read-cache stale-write guard fires on cat then external edit":
+    # The integration the original `read` tool gave us: read a file, file
+    # changes externally, then a `patch` errors instead of clobbering.
+    let tmp = getTempDir() / "3code_test_brc_" & $getCurrentProcessId()
+    createDir(tmp)
+    let p = tmp / "a.txt"
+    writeFile(p, "one\n")
+    let cache = newReadCache()
+    discard runAction(Action(kind: akBash, body: "cat " & p), cache)
+    sleep(1100)  # crude: bump mtime resolution to avoid sig collisions
+    writeFile(p, "two\n")  # external edit
+    let (r, code, _) = runAction(
+      Action(kind: akPatch, path: p, edits: @[("two", "TWO")]), cache)
+    check code != 0
+    check "changed on disk" in r
+    removeDir(tmp)
+
+  test "bash read-cache dedupes unchanged full reads":
+    let tmp = getTempDir() / "3code_test_bdup_" & $getCurrentProcessId()
+    createDir(tmp)
+    let p = tmp / "a.txt"
+    writeFile(p, "one\ntwo\n")
+    let cache = newReadCache()
+    discard runAction(Action(kind: akBash, body: "cat " & p), cache)
+    let (r, code, _) = runAction(Action(kind: akBash, body: "cat " & p), cache)
+    check code == 0
+    check "unchanged since prior read" in r
+    removeDir(tmp)
+
+  test "bash mutation synthesises a diff for the visual feedback":
+    # `ed -s file` style line-range edits replaced the patch tool. Without
+    # diff synthesis the user would see only "[exit 0]" — uninformative.
+    let tmp = getTempDir() / "3code_test_bdiff_" & $getCurrentProcessId()
+    createDir(tmp)
+    let p = tmp / "a.txt"
+    writeFile(p, "one\ntwo\nthree\n")
+    let act = Action(kind: akBash,
+      body: "ed -s " & p,
+      stdin: "2c\nTWO\n.\nw\nq\n")
+    let (_, code, diff) = runAction(act, newReadCache())
+    check code == 0
+    check diff.len > 0
+    check "-two" in diff
+    check "+TWO" in diff
+    removeDir(tmp)
 
 suite "git recovery hard-trip":
   # `git checkout <path>`, `git restore`, `git reset --hard`, `git stash`,
