@@ -28,9 +28,9 @@ proc completionFor*(line: string): seq[string] =
     return
 
 proc readRequired*(editor: var minline.LineEditor, prompt: string,
-                  hidden = false): string =
+                  hidden = false, noHistory = true): string =
   while true:
-    let s = try: editor.readLine(prompt, hidechars = hidden).strip
+    let s = try: editor.readLine(prompt, hidechars = hidden, noHistory = noHistory).strip
             except EOFError:
               stdout.write "\n"
               die "aborted", ExitConfig
@@ -39,8 +39,8 @@ proc readRequired*(editor: var minline.LineEditor, prompt: string,
     if s != "": return s
 
 proc readOptional*(editor: var minline.LineEditor, prompt: string,
-                  hidden = false): string =
-  try: editor.readLine(prompt, hidechars = hidden).strip
+                  hidden = false, noHistory = true): string =
+  try: editor.readLine(prompt, hidechars = hidden, noHistory = noHistory).strip
   except EOFError:
     stdout.write "\n"
     die "aborted", ExitConfig
@@ -133,12 +133,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
       url = u
       break
   if not experimentalEnabled:
-    let baseName = block:
-      var b = name
-      var i = b.len - 1
-      while i >= 0 and b[i] in {'0'..'9'}: dec i
-      if i >= 1 and i < b.len - 1 and b[i] == '-': b[0 ..< i] else: b
-    let (prefix, models) = curatedFor(baseName)
+    let (prefix, models) = curatedFor(name)
     for m in models:
       hintLn "    ", resetStyle, m
     while true:

@@ -691,7 +691,7 @@ proc renderHint(ed: var LineEditor) =
   stdout.flushFile()
   ed.hint = hint
 
-proc readLine*(ed: var LineEditor, prompt="", hidechars = false): string  =
+proc readLine*(ed: var LineEditor, prompt="", hidechars = false, noHistory = false): string  =
   ## High-level proc to be used instead of **stdin.readLine** to read a line from standard input using the specified **LineEditor** object.
   ##
   ## Note that:
@@ -722,7 +722,7 @@ proc readLine*(ed: var LineEditor, prompt="", hidechars = false): string  =
       continue
     elif c1 in {10, 13}:
       stdout.write("\n")
-      ed.historyAdd()
+      if not noHistory and not hidechars: ed.historyAdd()
       ed.historyFlush()
       if not hidechars: stdout.write("\e[?2004l")
       return ed.line.text
@@ -790,7 +790,7 @@ proc readLine*(ed: var LineEditor, prompt="", hidechars = false): string  =
                 ed.clearHint()
                 ed.line.text = ed.line.fromStart & paste.text & (if ed.line.position < ed.line.text.len: ed.line.toEnd else: "")
                 stdout.write("\n")
-                ed.historyAdd()
+                if not noHistory and not hidechars: ed.historyAdd()
                 ed.historyFlush()
                 if not hidechars: stdout.write("\e[?2004l")
                 return ed.line.text

@@ -318,7 +318,7 @@ proc curatedFor*(provider: string): (string, seq[string]) =
   ## Returns (commonPrefix, modelsWithoutPrefix) from KnownGoodCombos
   ## for the given provider name.
   var fullIds: seq[string]
-  let p = provider.toLowerAscii
+  let p = stripProviderSuffix(provider).toLowerAscii
   for c in KnownGoodCombos:
     if c[0].toLowerAscii == p: fullIds.add c[1]
   let prefix = commonModelPrefix(fullIds)
