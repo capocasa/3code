@@ -187,20 +187,14 @@ known good (gpt-oss family):
 other combos require --experimental — they're your tokens to burn.
 """
 
-proc stripProviderSuffix*(name: string): string =
-  ## Strips the -2, -3, ... uniqueness suffix added when a provider name clashes.
-  var i = name.len - 1
-  while i >= 0 and name[i] in {'0'..'9'}: dec i
-  if i >= 1 and i < name.len - 1 and name[i] == '-': name[0 ..< i] else: name
-
 proc knownGoodFamily*(p: Profile): string =
   ## Returns the family label ("glm", ...) for a known-good combo, or ""
   ## if (provider, model) isn't on the list. Match is case-insensitive on
-  ## (provider, full model id incl. prefix). Provider name may carry a -N suffix.
+  ## (provider, full model id incl. prefix).
   if p.name == "": return ""
   let dot = p.name.find('.')
   if dot < 0: return ""
-  let provider = stripProviderSuffix(p.name[0 ..< dot]).toLowerAscii
+  let provider = p.name[0 ..< dot].toLowerAscii
   let modelId = (p.modelPrefix & p.model).toLowerAscii
   for combo in KnownGoodCombos:
     if combo[0].toLowerAscii == provider and
@@ -215,8 +209,8 @@ proc isKnownGood*(p: Profile): bool =
 
 proc knownGoodFamily*(provider, model: string): string =
   ## Convenience overload for the wizard, where we have a candidate
-  ## (provider name, full model id) but no Profile. Provider may carry a -N suffix.
-  let p = stripProviderSuffix(provider).toLowerAscii
+  ## (provider name, full model id) but no Profile.
+  let p = provider.toLowerAscii
   let m = model.toLowerAscii
   for combo in KnownGoodCombos:
     if combo[0].toLowerAscii == p and combo[1].toLowerAscii == m:
