@@ -133,7 +133,12 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
       url = u
       break
   if not experimentalEnabled:
-    let (prefix, models) = curatedFor(name)
+    let baseName = block:
+      var b = name
+      var i = b.len - 1
+      while i >= 0 and b[i] in {'0'..'9'}: dec i
+      if i >= 1 and i < b.len - 1 and b[i] == '-': b[0 ..< i] else: b
+    let (prefix, models) = curatedFor(baseName)
     for m in models:
       hintLn "    ", resetStyle, m
     while true:
