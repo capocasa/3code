@@ -242,6 +242,8 @@ export DEBIAN_FRONTEND=noninteractive
   of akPatch:
     if act.edits.len == 0:
       return (&"error: patch has no edits", 1, "")
+    if act.path.len == 0:
+      return ("error: patch: 'path' argument is required", 1, "")
     let path = resolvePath(act.path)
     if not fileExists(path):
       return (&"error: {path} does not exist", 1, "")
