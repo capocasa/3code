@@ -6,7 +6,7 @@ const Version* = staticRead("../../threecode.nimble").splitLines().filterIt(it.s
 
 const KnownGoodCombos*: array[4, (string, string, string)] = [
     ("cerebras",  "zai-glm-4.7",                                    "glm"),
-    ("fireworks", "glm-5p1",                                         "glm"),
+    ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm"),
     ("cerebras",  "qwen-3-235b-a22b-instruct-2507",                  "qwen"),
     ("deepinfra", "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",       "qwen"),
     # ("nvidia", "qwen/qwen3-coder-480b-a35b-instruct", "qwen"),  # heavy 429s in field test; retest before re-enabling
@@ -170,7 +170,7 @@ input:
 
 known good (glm family):
   cerebras.zai-glm-4.7
-  fireworks.glm-5p1
+  fireworks.glm-5p1  (model_prefix prepended internally)
 known good (qwen family):
   cerebras.qwen-3-235b-a22b-instruct-2507
 
