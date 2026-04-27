@@ -68,11 +68,12 @@ let ToolsJson* = %*[
     "type": "function",
     "function": {
       "name": "bash",
+      "description": "Run a shell command; returns stdout, stderr, and exit code.",
       "parameters": {
         "type": "object",
         "properties": {
-          "command": {"type": "string"},
-          "stdin": {"type": "string"}
+          "command": {"type": "string", "description": "Shell command to run."},
+          "stdin": {"type": "string", "description": "Optional text piped to the command's stdin."}
         },
         "required": ["command"]
       }
@@ -82,11 +83,12 @@ let ToolsJson* = %*[
     "type": "function",
     "function": {
       "name": "write",
+      "description": "Create or overwrite a file with the given content.",
       "parameters": {
         "type": "object",
         "properties": {
-          "path": {"type": "string"},
-          "body": {"type": "string"}
+          "path": {"type": "string", "description": "File path relative to cwd."},
+          "body": {"type": "string", "description": "Full file content."}
         },
         "required": ["path", "body"]
       }
@@ -96,17 +98,19 @@ let ToolsJson* = %*[
     "type": "function",
     "function": {
       "name": "patch",
+      "description": "Apply targeted search-and-replace edits to an existing file.",
       "parameters": {
         "type": "object",
         "properties": {
-          "path": {"type": "string"},
+          "path": {"type": "string", "description": "File path relative to cwd."},
           "edits": {
             "type": "array",
+            "description": "List of edits; each search string must match exactly once.",
             "items": {
               "type": "object",
               "properties": {
-                "search": {"type": "string"},
-                "replace": {"type": "string"}
+                "search": {"type": "string", "description": "Exact text to find."},
+                "replace": {"type": "string", "description": "Text to substitute."}
               },
               "required": ["search", "replace"]
             }
