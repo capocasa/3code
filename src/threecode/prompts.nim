@@ -4,12 +4,12 @@ import types
 const Version* = staticRead("../../threecode.nimble").splitLines().filterIt(it.startsWith("version")).
     mapIt(it.split("=")[1].strip().strip(chars = {'"'}))[0]
 
-const KnownGoodCombos*: array[5, (string, string, string)] = [
+const KnownGoodCombos*: array[4, (string, string, string)] = [
     ("cerebras",  "zai-glm-4.7",                                    "glm"),
     ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm"),
     ("cerebras",  "qwen-3-235b-a22b-instruct-2507",                  "qwen"),
     ("deepinfra", "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",       "qwen"),
-    ("nvidia",    "qwen/qwen3-coder-480b-a35b-instruct",             "qwen"),
+    # ("nvidia", "qwen/qwen3-coder-480b-a35b-instruct", "qwen"),  # heavy 429s in field test; retest before re-enabling
   ]
     ## (provider, model, family) triples. Family drives the system-prompt
     ## branch; it must be set explicitly here — no guessing from model name.
