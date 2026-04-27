@@ -199,6 +199,7 @@ proc main() =
   var pending = ""  # flag awaiting a space-separated value
   var resume = false
   var resumeId = ""
+  var sessionOut = ""
   var p = initOptParser(commandLineParams())
   for kind, k, v in p.getopt():
     case kind
@@ -210,6 +211,9 @@ proc main() =
       of "m", "model":
         if v != "": model = v
         else: pending = "model"
+      of "s", "session":
+        if v != "": sessionOut = v
+        else: pending = "session"
       of "r", "resume":
         resume = true
         if v != "": resumeId = v
@@ -229,6 +233,9 @@ proc main() =
     of cmdArgument:
       if pending == "model":
         model = k
+        pending = ""
+      elif pending == "session":
+        sessionOut = k
         pending = ""
       else:
         args.add k
@@ -258,7 +265,7 @@ proc main() =
     messages = %* [{"role": "system", "content": DefaultSystemPrompt}]
     session.created = $now()
     session.cwd = getCurrentDir()
-    session.savePath = newSessionPath()
+    session.savePath = if sessionOut != "": sessionOut else: newSessionPath()
 
   if prompt != "" and not resume:
     let prof = loadProfile(model)
@@ -275,6 +282,7 @@ proc main() =
       die(e.msg, ExitApi)
     if session.usage.totalTokens > 0:
       hintLn &"  · {humanTokens(session.usage.totalTokens)} total", resetStyle
+    stderr.writeLine "session: " & sessionIdFromPath(session.savePath)
     return
 
   (activeCurrent, activeProviders) = loadStateOrEmpty(configPath())

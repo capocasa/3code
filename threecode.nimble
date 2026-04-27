@@ -1,4 +1,4 @@
-version       = "0.1.0"
+version       = "0.2.0"
 author        = "capocasa"
 description   = "The economical coding agent, for any OpenAI-compatible model endpoint"
 license       = "MIT"
