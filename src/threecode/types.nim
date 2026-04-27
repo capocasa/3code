@@ -6,7 +6,7 @@ const
   ExitApi* = 5
 
 type
-  ActionKind* = enum akBash, akRead, akWrite, akPatch
+  ActionKind* = enum akBash, akRead, akWrite, akPatch, akApplyPatch
   Action* = object
     kind*: ActionKind
     path*: string
@@ -16,10 +16,15 @@ type
     offset*: int
     limit*: int
   Profile* = object
-    name*, url*, key*, modelPrefix*, model*: string
-    family*: string  ## model family — selects the per-family tool component
-                     ## (system-prompt section + JSON tool schema). "glm" today;
-                     ## empty falls back to the glm component.
+    ## Terminology: `model` is the broad name we drive prompt+tools selection
+    ## on ("glm", "qwen", "gpt-oss"). `variant` is the concrete API identifier
+    ## sent on the wire (e.g. "openai/gpt-oss-120b" — what providers call
+    ## "model"). `variantPrefix` is prepended to the variant to form that
+    ## wire value when a provider namespaces its variants.
+    name*, url*, key*, variantPrefix*, variant*: string
+    model*: string  ## "glm" / "qwen" / "gpt-oss" — selects the (prompt, tools)
+                    ## tuple. Set by `resolveModel` from the known-good table
+                    ## or the per-provider `model = ...` experimental override.
   Usage* = object
     promptTokens*, completionTokens*, totalTokens*, cachedTokens*: int
   ToolRecord* = object

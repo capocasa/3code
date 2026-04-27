@@ -23,7 +23,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
       interrupted = false
       return
-    let window = contextWindowFor(p.model)
+    let window = contextWindowFor(p.variant)
     var summarized = 0
     case decideContextAction(usage.promptTokens, window, messages.len)
     of caSummarize:
@@ -70,7 +70,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
                           "content": stopMsg}
           continue
         let fn = tc{"function"}
-        let name = normalizeToolName(if fn != nil and fn.kind == JObject: fn{"name"}.getStr else: "")
+        let name = if fn != nil and fn.kind == JObject: fn{"name"}.getStr else: ""
         let argsStr =
           if fn != nil and fn.kind == JObject: fn{"arguments"}.getStr("") else: ""
         let args =
@@ -79,7 +79,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
             stderr.writeLine "3code: tool_call " & name &
               " has malformed arguments JSON (" & e.msg & "): " & argsStr
             newJObject()
-        let act = toolCallToAction(name, args)
+        let act = toolCallToAction(p.model, name, args)
         let idx = session.toolLog.len + 1
         # Pre-exec: dim bullet + dim banner text — "in flight" signal. After
         # the call returns we overwrite the line so the bullet only picks up
@@ -310,7 +310,7 @@ proc main() =
       &"({messages.len} msg" & (if messages.len == 1: "" else: "s") & ")",
       resetStyle
     stdout.write "\n"
-    replaySessionTail(messages, session.toolLog)
+    replaySessionTail(messages, session.toolLog, prof.model)
     stdout.write "\n"
     if prompt != "":
       messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}

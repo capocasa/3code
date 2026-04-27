@@ -1,4 +1,4 @@
-import std/[json, tables]
+import std/[json, strutils, tables]
 import types, util, shell
 
 const
@@ -21,35 +21,56 @@ proc resetLoopTracker*(t: var LoopTracker) =
   t.trippedPaths.setLen 0
   t.recoveryCmd = ""
 
+proc shellCmd(args: JsonNode): string =
+  ## Extract the command line from a gpt-oss `shell` call. Mirrors
+  ## `dispatchGptOss` in actions.nim — argv array, last element wins.
+  let argv = args{"cmd"}.getElems
+  if argv.len > 0: argv[^1].getStr else: ""
+
 proc fingerprint*(name: string, args: JsonNode): string =
-  ## Returns "" when the call should NOT be tracked. `bash` is normally
-  ## untracked, but commands matching `bashMutationPath` (sed -i, redirects,
-  ## git checkout, etc.) are folded back in as patch-equivalent mutations,
-  ## and pure single-file reads via `bashReadPath` (`cat`, `sed -n`, `head`,
-  ## `tail`) are tracked as reads — both so models can't slip past the loop
-  ## guard via the shell now that the dedicated `read` tool is gone.
+  ## Returns "" when the call should NOT be tracked. `bash` and `shell` are
+  ## normally untracked, but commands matching `bashMutationPath` (sed -i,
+  ## redirects, git checkout, etc.) are folded in as patch-equivalent
+  ## mutations, and pure single-file reads via `bashReadPath` (`cat`,
+  ## `sed -n`, `head`, `tail`) are tracked as reads — both so models can't
+  ## slip past the loop guard via the shell now that the dedicated `read`
+  ## tool is gone.
   case name
-  of "bash":
-    let cmd = if args != nil and args.kind == JObject: args{"command"}.getStr else: ""
+  of "bash", "shell":
+    let cmd = if name == "bash": args{"command"}.getStr
+              else: shellCmd(args)
     let mp = bashMutationPath(cmd)
     if mp != "": return resolvePath(mp)
     let (rp, _) = bashReadPath(cmd)
     if rp != "": return resolvePath(rp)
     ""
   of "write", "patch", "read":
-    let path = if args != nil and args.kind == JObject: args{"path"}.getStr else: ""
+    let path = args{"path"}.getStr
+    if path == "": "" else: resolvePath(path)
+  of "apply_patch":
+    # V4A patches can touch multiple files; the first `*** Update/Add/Delete
+    # File: <path>` line is the dominant target for fingerprinting purposes.
+    let body = args{"input"}.getStr
+    var path = ""
+    for line in body.splitLines:
+      for marker in ["*** Update File: ", "*** Add File: ", "*** Delete File: "]:
+        if line.startsWith(marker):
+          path = line[marker.len .. ^1].strip
+          break
+      if path != "": break
     if path == "": "" else: resolvePath(path)
   else: ""
 
 proc isMutationCall*(name: string, args: JsonNode): bool =
   ## Whether a tracked tool call counts as a mutation for the Strike-2
-  ## hard-trip threshold. `read` and read-shaped `bash` reads do not.
+  ## hard-trip threshold. `read` and read-shaped shell calls do not.
   case name
-  of "write", "patch": true
+  of "write", "patch", "apply_patch": true
   of "read": false
   of "bash":
-    let cmd = if args != nil and args.kind == JObject: args{"command"}.getStr else: ""
-    bashMutationPath(cmd) != ""
+    bashMutationPath(args{"command"}.getStr) != ""
+  of "shell":
+    bashMutationPath(shellCmd(args)) != ""
   else: false
 
 proc trackCall*(t: var LoopTracker, name: string, args: JsonNode): int =
@@ -65,8 +86,9 @@ proc trackCall*(t: var LoopTracker, name: string, args: JsonNode): int =
   # plan was based on; further autonomous turns make things worse.
   # Costs one keystroke on a legit branch switch (which doesn't trigger);
   # saves the next 30 turns when the model is genuinely lost.
-  if name == "bash":
-    let cmd = if args != nil and args.kind == JObject: args{"command"}.getStr else: ""
+  if name == "bash" or name == "shell":
+    let cmd = if name == "bash": args{"command"}.getStr
+              else: shellCmd(args)
     let recovery = bashIsRecovery(cmd)
     if recovery != "" and t.strike < 2:
       t.strike = 2
