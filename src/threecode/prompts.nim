@@ -187,7 +187,7 @@ known good (gpt-oss family):
 other combos require --experimental — they're your tokens to burn.
 """
 
-proc stripProviderSuffix(name: string): string =
+proc stripProviderSuffix*(name: string): string =
   ## Strips the -2, -3, ... uniqueness suffix added when a provider name clashes.
   var i = name.len - 1
   while i >= 0 and name[i] in {'0'..'9'}: dec i
