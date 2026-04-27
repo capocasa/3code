@@ -70,7 +70,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
                           "content": stopMsg}
           continue
         let fn = tc{"function"}
-        let name = if fn != nil and fn.kind == JObject: fn{"name"}.getStr else: ""
+        let name = normalizeToolName(if fn != nil and fn.kind == JObject: fn{"name"}.getStr else: "")
         let argsStr =
           if fn != nil and fn.kind == JObject: fn{"arguments"}.getStr("") else: ""
         let args =

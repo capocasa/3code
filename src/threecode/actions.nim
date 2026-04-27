@@ -1,11 +1,23 @@
 import std/[json, os, strformat, strutils, tables, times]
 import types, util, shell
 
+proc normalizeToolName*(name: string): string =
+  ## gptoss (Harmony format) appends <|channel|>xxx to function names;
+  ## strip everything from <| onward.
+  let idx = name.find("<|")
+  if idx >= 0: name[0 ..< idx]
+  else: name
+
 proc toolCallToAction*(name: string, args: JsonNode): Action =
   case name
   of "bash":
-    Action(kind: akBash, body: args{"command"}.getStr,
-           stdin: args{"stdin"}.getStr(""))
+    var cmd = args{"command"}.getStr
+    if cmd.len == 0:
+      # gptoss Harmony format: cmd = ["bash", "-lc", "actual-command"]
+      let cmdArr = args{"cmd"}
+      if cmdArr != nil and cmdArr.kind == JArray and cmdArr.len > 0:
+        cmd = cmdArr[cmdArr.len - 1].getStr
+    Action(kind: akBash, body: cmd, stdin: args{"stdin"}.getStr(""))
   of "write":
     Action(kind: akWrite, path: args{"path"}.getStr, body: args{"body"}.getStr)
   of "patch":
