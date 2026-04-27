@@ -21,7 +21,10 @@ proc completionFor*(line: string): seq[string] =
       for pr in activeProviders: result.add pr.name
       return
   if words[0] == ":model" and words.len == 2:
-    for m in currentProvider().models: result.add m
+    let prov = currentProvider()
+    for m in prov.models:
+      if experimentalEnabled or knownGoodFamily(prov.name, prov.modelPrefix & m) != "":
+        result.add m
     return
 
 proc readRequired*(editor: var minline.LineEditor, prompt: string,
