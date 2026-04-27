@@ -367,9 +367,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
     "stream": true,
     "stream_options": {"include_usage": true}
   }
-  body["tools"] = case p.family
-    of "glm", "": GlmToolsJson
-    else: GlmToolsJson
+  body["tools"] = ToolsJson
   body["tool_choice"] = %"auto"
   let bodyStr = $body
   let t0 = epochTime()

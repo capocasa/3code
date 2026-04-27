@@ -4,23 +4,16 @@ import types
 const Version* = staticRead("../../threecode.nimble").splitLines().filterIt(it.startsWith("version")).
     mapIt(it.split("=")[1].strip().strip(chars = {'"'}))[0]
 
-const KnownGoodCombos*: array[3, (string, string, string)] = [
-    ("cerebras",  "glm-4.7", "glm"),
-    ("fireworks", "accounts/fireworks/models/glm-5p1", "glm"),
-    ("cerebras",  "qwen-3-235b-a22b-instruct-2507", "qwen"),
-    # other qwen endpoints — uncomment once retested under qwen family:
-    # ("deepinfra", "qwen3-coder-480b",                              "qwen"),
-    # ("together",  "qwen3-coder-480b",                              "qwen"),
-    # ("ovh",       "Qwen3-Coder-30B-A3B-Instruct",                  "qwen"),
-    # ("nvidia",    "qwen/qwen3-coder-480b-a35b-instruct",           "qwen"),
-    # ("deepinfra", "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",     "qwen"),
+const KnownGoodCombos*: array[5, (string, string, string)] = [
+    ("cerebras",  "zai-glm-4.7",                                    "glm"),
+    ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm"),
+    ("cerebras",  "qwen-3-235b-a22b-instruct-2507",                  "qwen"),
+    ("deepinfra", "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",       "qwen"),
+    ("nvidia",    "qwen/qwen3-coder-480b-a35b-instruct",             "qwen"),
   ]
-    ## Verified (provider, model, family) triples. Match is exact and
-    ## case-insensitive on (provider, model). The model side is compared
-    ## against `model_prefix & model` (the full API id). The family slot
-    ## drives which tool component (system-prompt section + JSON schema)
-    ## the harness sends. Anything outside this list is "experimental"
-    ## and requires `--experimental` to run.
+    ## (provider, model, family) triples. Family drives the system-prompt
+    ## branch; it must be set explicitly here — no guessing from model name.
+    ## Anything outside this list requires --experimental to run.
 
 const SystemPromptBase* = """
 You are 3code, the economical coding agent. One task, done right, few tokens.
@@ -69,7 +62,7 @@ Read: default to `cat path`. Read the raw file with your eyes; don't try to extr
 Edit: `patch` for surgical changes (include enough context in `search` to be unambiguous); `write` for new files or full rewrites under ~150 lines. Read immediately before patching so search blocks are fresh — the harness errors if the file changed since your last read.
 """
 
-let GlmToolsJson* = %*[
+let ToolsJson* = %*[
   {
     "type": "function",
     "function": {
@@ -176,8 +169,10 @@ input:
   @path         inline file contents (e.g. @src/foo.nim)
 
 known good (glm family):
-  cerebras.glm-4.7
+  cerebras.zai-glm-4.7
   fireworks.accounts/fireworks/models/glm-5p1
+known good (qwen family):
+  cerebras.qwen-3-235b-a22b-instruct-2507
 
 other combos require --experimental — they're your tokens to burn.
 """

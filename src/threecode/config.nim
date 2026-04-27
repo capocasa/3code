@@ -161,7 +161,7 @@ proc resolveFamily*(prov: ProviderRec, prof: Profile): string =
   ## Family is resolved at profile-build time:
   ## 1. KnownGoodCombos hardcode (always wins; ignores config and -x)
   ## 2. provider-level `family = ...` — only honored under --experimental
-  ## 3. default → "glm" (only family wired up today)
+  ## 3. default → "glm"
   let kg = knownGoodFamily(prof)
   if kg != "": return kg
   if experimentalEnabled and prov.family.strip != "":
