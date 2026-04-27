@@ -4,13 +4,14 @@ import types
 const Version* = staticRead("../../threecode.nimble").splitLines().filterIt(it.startsWith("version")).
     mapIt(it.split("=")[1].strip().strip(chars = {'"'}))[0]
 
-const KnownGoodCombos*: array[6, (string, string, string)] = [
+const KnownGoodCombos*: array[7, (string, string, string)] = [
     ("cerebras",  "zai-glm-4.7",                                    "glm"),
     ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm"),
     ("cerebras",  "qwen-3-235b-a22b-instruct-2507",                  "qwen"),
     ("deepinfra", "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",       "qwen"),
     ("nvidia",    "qwen/qwen3-coder-480b-a35b-instruct",             "qwen"),
     ("nvidia",    "openai/gpt-oss-120b",                             "gpt-oss"),
+    ("nvidia",    "openai/gpt-oss-20b",                              "gpt-oss"),
   ]
     ## (provider, model, family) triples. Family drives the system-prompt
     ## branch; it must be set explicitly here — no guessing from model name.
@@ -181,6 +182,7 @@ known good (qwen family):
   nvidia.qwen/qwen3-coder-480b-a35b-instruct
 known good (gpt-oss family):
   nvidia.openai/gpt-oss-120b
+  nvidia.openai/gpt-oss-20b
 
 other combos require --experimental — they're your tokens to burn.
 """
