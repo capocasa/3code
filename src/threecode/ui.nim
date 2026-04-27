@@ -99,6 +99,11 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
   printSupported()
   stdout.write "\n"
   var key = readRequired(editor, "  api key              : ", hidden = true)
+  # same key already configured?
+  for pr in activeProviders:
+    if pr.key == key:
+      hintLn &"  already configured as {pr.name}", resetStyle
+      return pr
   var name, url: string
   var inferred = inferProvider(key)
   if not experimentalEnabled and inferred != "" and
@@ -107,13 +112,13 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
   if inferred != "":
     name = inferred
     url = catalogUrl(inferred)
-    # uniqueness: suffix -2, -3, ... if clashing
-    var candidate = name
-    var n = 2
-    while activeProviders.anyIt(it.name == candidate):
-      candidate = name & "-" & $n
-      inc n
-    name = candidate
+    # same provider already exists? offer to update key instead
+    for pr in activeProviders:
+      if pr.name == name:
+        hintLn "  detected: ", resetStyle, name, styleDim,
+               " -> already configured, updating key", resetStyle
+        return ProviderRec(name: pr.name, url: pr.url, key: key,
+                           modelPrefix: pr.modelPrefix, models: pr.models)
     hintLn "  detected: ", resetStyle, name, styleDim, " -> ", url, resetStyle
   else:
     while true:
