@@ -353,7 +353,8 @@ proc fullReplay(path, sandbox: string): FullReplayResult =
           toolContent = "[stderr] [replay-stub]\n[exit 0]"
         else:
           let sboxArgs = rewritePath(args, sandbox)
-          let act = toolCallToAction(name, sboxArgs)
+          # Replay fixtures are all qwen sessions (see test ids).
+          let act = toolCallToAction("qwen", name, sboxArgs)
           let (r, _, _) = runAction(act)
           toolContent = r
         live.add %*{"role": "tool", "tool_call_id": id, "content": toolContent}

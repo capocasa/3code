@@ -37,6 +37,9 @@ proc bannerFor*(act: Action): string =
     &"write  {act.path}  ({humanBytes(act.body.len)})"
   of akPatch:
     &"patch  {act.path}  ({act.edits.len} edit" & (if act.edits.len == 1: "" else: "s") & ")"
+  of akApplyPatch:
+    let nl = act.body.count('\n')
+    &"apply_patch  ({nl} line" & (if nl == 1: "" else: "s") & ")"
 
 const
   CompactHead = 3
@@ -133,9 +136,9 @@ proc showProfile*(p: Profile) =
   let dot = p.name.find('.')
   let provider = if dot < 0: p.name else: p.name[0 ..< dot]
   stdout.styledWriteLine fgCyan, styleBright, "  provider ", resetStyle, provider
-  stdout.styledWriteLine fgCyan, styleBright, "  model    ", resetStyle, p.model
-  let fam = if p.family != "": p.family else: "glm"
-  stdout.styledWriteLine fgCyan, styleBright, "  family   ", resetStyle, fam
+  stdout.styledWriteLine fgCyan, styleBright, "  variant  ", resetStyle, p.variant
+  let mdl = if p.model != "": p.model else: "glm"
+  stdout.styledWriteLine fgCyan, styleBright, "  model    ", resetStyle, mdl
 
 # Track up-navigation so "down past last" can return to blank line.
 var navigatedUp*: bool = false
@@ -200,7 +203,7 @@ proc printSessionList*(paths: seq[string], currentPath: string, showCwd: bool) =
       &"   ({count} msg" & (if count == 1: "" else: "s") & ")",
       resetStyle, cwdStr, snip, "\n"
 
-proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord]) =
+proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord], model: string) =
   ## Show the last user turn and everything after, so a resumed session
   ## drops the user back into context without replaying the whole history.
   if messages == nil or messages.kind != JArray or messages.len == 0: return
@@ -239,7 +242,7 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord]) =
               let argsStr = if fn != nil: fn{"arguments"}.getStr("") else: ""
               let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
                          except CatchableError: newJObject()
-              bannerFor(toolCallToAction(name, args))
+              bannerFor(toolCallToAction(model, name, args))
           stdout.styledWrite styleDim, "• ", banner, resetStyle, "\n"
     of "tool":
       let r = m{"content"}.getStr("")

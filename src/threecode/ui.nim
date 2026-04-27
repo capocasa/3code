@@ -1,7 +1,7 @@
 import std/[json, os, sequtils, strformat, strutils, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline
 
-const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
+const CommandNames* = [":help", ":tokens", ":clear", ":variant", ":provider",
                       ":prompt", ":show", ":log", ":sessions", ":compact",
                       ":summarize", ":think", ":q", ":quit", ":exit"]
 
@@ -20,11 +20,11 @@ proc completionFor*(line: string): seq[string] =
     if words.len == 3 and words[1] in ["edit", "rm", "remove"]:
       for pr in activeProviders: result.add pr.name
       return
-  if words[0] == ":model" and words.len == 2:
+  if words[0] == ":variant" and words.len == 2:
     let prov = currentProvider()
-    for m in prov.models:
-      if experimentalEnabled or knownGoodFamily(prov.name, prov.modelPrefix & m) != "":
-        result.add m
+    for v in prov.variants:
+      if experimentalEnabled or knownGoodModel(prov.name, prov.variantPrefix & v) != "":
+        result.add v
     return
 
 proc readRequired*(editor: var minline.LineEditor, prompt: string,
@@ -118,7 +118,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
         hintLn "  detected: ", resetStyle, name, styleDim,
                " -> already configured, updating key", resetStyle
         return ProviderRec(name: pr.name, url: pr.url, key: key,
-                           modelPrefix: pr.modelPrefix, models: pr.models)
+                           variantPrefix: pr.variantPrefix, variants: pr.variants)
     hintLn "  detected: ", resetStyle, name, styleDim, " -> ", url, resetStyle
   else:
     while true:
@@ -138,14 +138,14 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
       url = u
       break
   if not experimentalEnabled:
-    let (prefix, models) = curatedFor(name)
-    for m in models:
-      hintLn "    ", resetStyle, m
+    let (prefix, variants) = curatedFor(name)
+    for v in variants:
+      hintLn "    ", resetStyle, v
     while true:
       let prov = ProviderRec(name: name, url: url, key: key,
-                             modelPrefix: prefix, models: models)
-      let prof = Profile(name: name & "." & models[0], url: url,
-                         key: key, modelPrefix: prefix, model: models[0])
+                             variantPrefix: prefix, variants: variants)
+      let prof = Profile(name: name & "." & variants[0], url: url,
+                         key: key, variantPrefix: prefix, variant: variants[0])
       hint "  verifying... ", resetStyle
       stdout.flushFile
       let (ok, err) = verifyProfile(prof)
@@ -159,10 +159,10 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
       if choice == "k":
         key = readRequired(editor,
           "  api key              : ", hidden = true)
-  hint "  fetching models...   ", resetStyle
+  hint "  fetching variants... ", resetStyle
   stdout.flushFile
-  let available = fetchModels(url, key)
-  let prefix = commonModelPrefix(available)
+  let available = fetchVariants(url, key)
+  let prefix = commonVariantPrefix(available)
   let displayed = available
   if available.len == 0:
     hintLn "unavailable — enter manually", resetStyle
@@ -184,19 +184,19 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
   var prev = ""
   while true:
     let prompt =
-      if prev == "": "  models (space-sep.)  : "
-      else: &"  models [{prev}]  : "
+      if prev == "": "  variants (space-sep.) : "
+      else: &"  variants [{prev}]  : "
     let entered = readOptional(editor, prompt)
     let raw = if entered == "": prev else: entered
-    let models = splitModels(raw)
-    let modelsStr = formatModels(models)
-    if models.len == 0:
-      stdout.styledWriteLine fgMagenta, "  need at least one model", resetStyle
+    let variants = splitVariants(raw)
+    let variantsStr = formatVariants(variants)
+    if variants.len == 0:
+      stdout.styledWriteLine fgMagenta, "  need at least one variant", resetStyle
       continue
     let prov = ProviderRec(name: name, url: url, key: key,
-                           modelPrefix: prefix, models: models)
-    let prof = Profile(name: name & "." & models[0], url: url,
-                       key: key, modelPrefix: prefix, model: models[0])
+                           variantPrefix: prefix, variants: variants)
+    let prof = Profile(name: name & "." & variants[0], url: url,
+                       key: key, variantPrefix: prefix, variant: variants[0])
     hint "  verifying... ", resetStyle
     stdout.flushFile
     let (ok, err) = verifyProfile(prof)
@@ -205,9 +205,9 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
       return prov
     stdout.styledWriteLine fgMagenta, "failed", resetStyle
     stdout.styledWriteLine fgMagenta, "  " & err, resetStyle
-    prev = modelsStr
+    prev = variantsStr
     let choice = readOptional(editor,
-      "  [enter]=retry models, k=re-enter key : ").toLowerAscii
+      "  [enter]=retry variants, k=re-enter key : ").toLowerAscii
     if choice == "k":
       key = readRequired(editor,
         "  api key              : ", hidden = true)
@@ -238,25 +238,25 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     let newKey = readOptional(editor,
       "  api key [keep existing] : ", hidden = true)
     let key = if newKey == "": existing.key else: newKey
-    let modelsCurrent = formatModels(existing.models)
-    let newModels = readOptional(editor,
-      &"  models [{modelsCurrent}]  : ")
-    let models =
-      if newModels == "": existing.models
-      else: splitModels(newModels)
-    if models.len == 0:
-      stdout.styledWriteLine fgMagenta, "  need at least one model", resetStyle
+    let variantsCurrent = formatVariants(existing.variants)
+    let newVariants = readOptional(editor,
+      &"  variants [{variantsCurrent}]  : ")
+    let variants =
+      if newVariants == "": existing.variants
+      else: splitVariants(newVariants)
+    if variants.len == 0:
+      stdout.styledWriteLine fgMagenta, "  need at least one variant", resetStyle
       continue
-    let prefix = commonModelPrefix(models)
-    let prof = Profile(name: name & "." & models[0], url: url,
-                       key: key, modelPrefix: prefix, model: models[0])
+    let prefix = commonVariantPrefix(variants)
+    let prof = Profile(name: name & "." & variants[0], url: url,
+                       key: key, variantPrefix: prefix, variant: variants[0])
     hint "  verifying... ", resetStyle
     stdout.flushFile
     let (ok, err) = verifyProfile(prof)
     if ok:
       stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
       return ProviderRec(name: name, url: url, key: key,
-                         modelPrefix: prefix, models: models)
+                         variantPrefix: prefix, variants: variants)
     stdout.styledWriteLine fgMagenta, "failed", resetStyle
     stdout.styledWriteLine fgMagenta, "  " & err, resetStyle
 
@@ -265,7 +265,7 @@ proc bootstrapProvider*(editor: var minline.LineEditor): Profile =
     "  no provider configured — let's add one. (ctrl+d to quit)", resetStyle
   let prov = promptNewProvider(editor)
   activeProviders.add prov
-  activeCurrent = prov.name & "." & prov.models[0]
+  activeCurrent = prov.name & "." & prov.variants[0]
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   hintLn &"  saved to {configPath()}", resetStyle
   buildProfile(activeCurrent, activeProviders, "")
@@ -280,8 +280,8 @@ proc cmdProviderList(prof: Profile) =
   for pr in activeProviders:
     let current = pr.name == curName
     let mark = if current: "*" else: " "
-    let tail = if current: &"  [{prof.model}]" else: ""
-    if not experimentalEnabled and not hasKnownGoodModel(pr):
+    let tail = if current: &"  [{prof.variant}]" else: ""
+    if not experimentalEnabled and not hasKnownGoodVariant(pr):
       stdout.styledWriteLine styleDim,
         "  ", mark, " ", pr.name, tail, resetStyle
     else:
@@ -298,11 +298,11 @@ proc cmdProviderSelect(target: string, prof: var Profile) =
   if not found:
     stdout.styledWriteLine fgMagenta, &"  unknown provider: {target}", resetStyle
     return
-  if prov.models.len == 0:
+  if prov.variants.len == 0:
     stdout.styledWriteLine fgMagenta,
       &"  provider {target} has no models", resetStyle
     return
-  let newCurrent = prov.name & "." & prov.models[0]
+  let newCurrent = prov.name & "." & prov.variants[0]
   let candidate = buildProfile(newCurrent, activeProviders, "")
   activeCurrent = newCurrent
   prof = candidate
@@ -315,7 +315,7 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
   let prov = promptNewProvider(editor)
   activeProviders.add prov
   if activeCurrent == "":
-    activeCurrent = prov.name & "." & prov.models[0]
+    activeCurrent = prov.name & "." & prov.variants[0]
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   if prof.name == "":
     prof = buildProfile(activeCurrent, activeProviders, "")
@@ -334,11 +334,11 @@ proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
   activeProviders[idx] = updated
   let curName = if activeCurrent == "": "" else: activeCurrent.split('.')[0]
   if curName == target:
-    let wantedModel = prof.model
-    let model =
-      if updated.findModel(wantedModel) >= 0: wantedModel
-      else: updated.models[0]
-    activeCurrent = updated.name & "." & model
+    let wantedVariant = prof.variant
+    let variant =
+      if updated.findVariant(wantedVariant) >= 0: wantedVariant
+      else: updated.variants[0]
+    activeCurrent = updated.name & "." & variant
     prof = buildProfile(activeCurrent, activeProviders, "")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   hintLn &"  updated {target}", resetStyle
@@ -355,7 +355,7 @@ proc cmdProviderRm(target: string, prof: var Profile) =
   if curName == target:
     if activeProviders.len > 0:
       let np = activeProviders[0]
-      activeCurrent = np.name & "." & np.models[0]
+      activeCurrent = np.name & "." & np.variants[0]
       prof = buildProfile(activeCurrent, activeProviders, "")
     else:
       activeCurrent = ""
@@ -394,30 +394,30 @@ proc cmdProvider(arg: string, editor: var minline.LineEditor,
     else:
       cmdProviderSelect(parts[0], prof)
 
-proc cmdModelList(prof: Profile) =
+proc cmdVariantList(prof: Profile) =
   let prov = currentProvider()
   if prov.name == "":
     hintLn "  no provider selected", resetStyle
     return
-  if prov.models.len == 0:
-    hintLn &"  {prov.name}: no models", resetStyle
+  if prov.variants.len == 0:
+    hintLn &"  {prov.name}: no variants", resetStyle
     return
-  for m in prov.models:
-    let mark = if m == prof.model: "*" else: " "
-    let kg = knownGoodFamily(prov.name, prov.modelPrefix & m)
+  for v in prov.variants:
+    let mark = if v == prof.variant: "*" else: " "
+    let kg = knownGoodModel(prov.name, prov.variantPrefix & v)
     if kg == "" and not experimentalEnabled:
-      stdout.styledWriteLine styleDim, "  ", mark, " ", m, resetStyle
+      stdout.styledWriteLine styleDim, "  ", mark, " ", v, resetStyle
     else:
       let modeTag = if kg != "": &"  ({kg}, known-good)" else: ""
-      hintLn "  ", mark, " ", resetStyle, m, styleDim, modeTag, resetStyle
+      hintLn "  ", mark, " ", resetStyle, v, styleDim, modeTag, resetStyle
 
-proc cmdModelSelect(target: string, prof: var Profile) =
+proc cmdVariantSelect(target: string, prof: var Profile) =
   let prov = currentProvider()
   if prov.name == "":
     stdout.styledWriteLine fgMagenta, "  no provider selected", resetStyle
     return
-  if prov.findModel(target) < 0:
-    stdout.styledWriteLine fgMagenta, &"  unknown model: {target}", resetStyle
+  if prov.findVariant(target) < 0:
+    stdout.styledWriteLine fgMagenta, &"  unknown variant: {target}", resetStyle
     return
   let newCurrent = prov.name & "." & target
   let candidate = buildProfile(newCurrent, activeProviders, "")
@@ -429,16 +429,16 @@ proc cmdModelSelect(target: string, prof: var Profile) =
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   showProfile(prof)
 
-proc cmdModel(arg: string, prof: var Profile) =
+proc cmdVariant(arg: string, prof: var Profile) =
   let parts = arg.splitWhitespace()
   case parts.len
   of 0:
-    cmdModelList(prof)
+    cmdVariantList(prof)
   of 1:
-    cmdModelSelect(parts[0], prof)
+    cmdVariantSelect(parts[0], prof)
   else:
     stdout.styledWriteLine fgMagenta,
-      "  usage: :model [<name>]", resetStyle
+      "  usage: :variant [<name>]", resetStyle
 
 proc nearestCommand(name: string): string =
   var bestDist = high(int)
@@ -619,8 +619,8 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
       session.created = $now()
       session.cwd = getCurrentDir()
     hintLn "  context cleared", resetStyle
-  of ":model":
-    cmdModel(arg, prof)
+  of ":variant":
+    cmdVariant(arg, prof)
     session.profileName = prof.name
   of ":provider":
     cmdProvider(arg, editor, prof)

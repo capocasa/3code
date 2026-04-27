@@ -167,7 +167,7 @@ type StreamOutcome = object
   usage: Usage
 
 proc accumulateToolCall(dst: JsonNode, delta: JsonNode) =
-  # Merge a tool_calls delta chunk into the accumulator slot. OpenAI-family
+  # Merge a tool_calls delta chunk into the accumulator slot. OpenAI-style
   # providers emit `arguments` as partial strings across chunks; concatenate.
   if delta.kind != JObject: return
   if "id" in delta and delta["id"].getStr != "":
@@ -362,18 +362,18 @@ template hint(args: varargs[untyped]) =
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   ensureReasoningField(messages)
   var body = %*{
-    "model": p.modelPrefix & p.model,
+    "model": p.variantPrefix & p.variant,
     "messages": messages,
     "stream": true,
     "stream_options": {"include_usage": true}
   }
-  body["tools"] = ToolsJson
+  body["tools"] = setup(p).tools
   body["tool_choice"] = %"auto"
   let bodyStr = $body
   let t0 = epochTime()
   decayLevel(serverRetryLevel, serverLastTs, t0)
   decayLevel(rateRetryLevel, rateLastTs, t0)
-  let window = contextWindowFor(p.model)
+  let window = contextWindowFor(p.variant)
   let baseLabel =
     if window > 0 and lastPromptTokens > 0:
       let pct = int(lastPromptTokens.float / window.float * 100.0)
@@ -481,7 +481,7 @@ proc verifyProfile*(p: Profile): (bool, string) =
     "Content-Type": "application/json"
   })
   let body = $(%*{
-    "model": p.modelPrefix & p.model,
+    "model": p.variantPrefix & p.variant,
     "messages": [%*{"role": "user", "content": "ping"}],
     "max_tokens": 1,
     "stream": false
@@ -498,7 +498,9 @@ proc verifyProfile*(p: Profile): (bool, string) =
   except CatchableError as e:
     return (false, e.msg)
 
-proc fetchModels*(url, key: string): seq[string] =
+proc fetchVariants*(url, key: string): seq[string] =
+  ## GET /models on the provider — that endpoint name is OpenAI's; what it
+  ## returns is the list of variant ids this provider exposes.
   let client = newHttpClient(timeout = 20000)
   defer: client.close()
   client.headers = newHttpHeaders({"Authorization": "Bearer " & key})

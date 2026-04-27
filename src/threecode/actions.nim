@@ -1,34 +1,71 @@
 import std/[json, os, strformat, strutils, tables, times]
 import types, util, shell
 
-proc normalizeToolName*(name: string): string =
-  ## gptoss (Harmony format) appends <|channel|>xxx to function names;
-  ## strip everything from <| onward.
-  let idx = name.find("<|")
-  if idx >= 0: name[0 ..< idx]
-  else: name
+# ---------------------------------------------------------------------------
+# Tool dispatch: strictly per-model.
+#
+# Each model gets its own dispatcher, accepting only the tool names it was
+# actually offered in `prompts.nim`. A model emitting a name outside its
+# offered set lands in the catch-all (probably training leakage) and gets a
+# clear error back — no silent reinterpretation across models.
+#
+# All accessors are nil-safe (`getStr`/`getElems` return defaults for nil
+# or wrong-typed nodes). Garbage args produce an empty-bodied Action;
+# runAction returns a clean error rather than crashing.
+# ---------------------------------------------------------------------------
 
-proc toolCallToAction*(name: string, args: JsonNode): Action =
+proc unknownTool(model, name: string): Action =
+  Action(kind: akBash,
+         body: "echo 'tool not offered to model " & model & ": " & name &
+               "' >&2; exit 1")
+
+proc dispatchGlmOrQwen(name: string, args: JsonNode): Action =
   case name
   of "bash":
-    var cmd = args{"command"}.getStr
-    if cmd.len == 0:
-      # gptoss Harmony format: cmd = ["bash", "-lc", "actual-command"]
-      let cmdArr = args{"cmd"}
-      if cmdArr != nil and cmdArr.kind == JArray and cmdArr.len > 0:
-        cmd = cmdArr[cmdArr.len - 1].getStr
-    Action(kind: akBash, body: cmd, stdin: args{"stdin"}.getStr(""))
+    Action(kind: akBash,
+           body: args{"command"}.getStr,
+           stdin: args{"stdin"}.getStr)
   of "write":
-    Action(kind: akWrite, path: args{"path"}.getStr, body: args{"body"}.getStr)
+    Action(kind: akWrite,
+           path: args{"path"}.getStr,
+           body: args{"body"}.getStr)
   of "patch":
     var act = Action(kind: akPatch, path: args{"path"}.getStr)
-    let edits = args{"edits"}
-    if edits != nil and edits.kind == JArray:
-      for e in edits:
-        act.edits.add (e{"search"}.getStr, e{"replace"}.getStr)
+    for e in args{"edits"}.getElems:
+      act.edits.add (e{"search"}.getStr, e{"replace"}.getStr)
     act
   else:
-    Action(kind: akBash, body: "echo 'unknown tool: " & name & "'; exit 1")
+    unknownTool("glm/qwen", name)
+
+proc stripHarmonyChannel(name: string): string =
+  ## gpt-oss decorates names like `shell<|channel|>commentary`. Strip
+  ## the suffix so dispatch can match on the bare name. Only meaningful
+  ## for gpt-oss — other models don't emit it.
+  let idx = name.find("<|")
+  if idx >= 0: name[0 ..< idx] else: name
+
+proc dispatchGptOss(rawName: string, args: JsonNode): Action =
+  case stripHarmonyChannel(rawName)
+  of "shell":
+    # Harmony argv: cmd = ["bash", "-lc", "<command line>"]. Take the
+    # trailing element and run it through our bash wrapper (PAGER killers,
+    # timeout, stdin pipe).
+    let argv = args{"cmd"}.getElems
+    let line = if argv.len > 0: argv[^1].getStr else: ""
+    Action(kind: akBash, body: line, stdin: args{"stdin"}.getStr)
+  of "apply_patch":
+    Action(kind: akApplyPatch, body: args{"input"}.getStr)
+  else:
+    unknownTool("gpt-oss", rawName)
+
+proc toolCallToAction*(model, name: string, args: JsonNode): Action =
+  ## Routes a tool_call to the dispatcher for the active model. The model
+  ## label comes from `Profile.model` ("glm" / "qwen" / "gpt-oss"); the
+  ## case statement below mirrors `setup` in `prompts.nim`.
+  case model
+  of "glm", "qwen": dispatchGlmOrQwen(name, args)
+  of "gpt-oss": dispatchGptOss(name, args)
+  else: die "unknown model in tool dispatch: '" & model & "'"
 
 proc nearestLineHint(content, search: string): string =
   ## When a patch search block didn't match, point the model at the most
@@ -80,6 +117,78 @@ proc newReadCache*(): ReadCache =
 proc fileSig(path: string): (Time, int) =
   try: (getLastModificationTime(path), getFileSize(path).int)
   except CatchableError: (Time(), 0)
+
+type
+  V4AOpKind = enum vkAdd, vkUpdate, vkDelete
+  V4AOp = object
+    kind: V4AOpKind
+    path: string
+    body: string                  ## vkAdd: full content
+    edits: seq[(string, string)]  ## vkUpdate: one (search, replace) per hunk
+
+proc parseV4APatch(text: string): seq[V4AOp] =
+  ## Parse Codex's V4A format (`*** Begin Patch ... *** End Patch`) into a
+  ## sequence of file operations. Tolerant: hunks may omit the `@@` anchor;
+  ## context lines may omit the leading space (some emitters do).
+  let lines = text.splitLines
+  var i = 0
+  while i < lines.len and not lines[i].startsWith("*** Begin Patch"):
+    inc i
+  if i < lines.len: inc i
+  while i < lines.len:
+    let line = lines[i]
+    if line.startsWith("*** End Patch"): break
+    if line.startsWith("*** Add File: "):
+      let path = line["*** Add File: ".len .. ^1].strip
+      inc i
+      var body = ""
+      while i < lines.len and not lines[i].startsWith("***"):
+        let l = lines[i]
+        if l.len > 0 and l[0] == '+': body.add l[1 .. ^1] & "\n"
+        else: body.add l & "\n"
+        inc i
+      result.add V4AOp(kind: vkAdd, path: path, body: body)
+    elif line.startsWith("*** Delete File: "):
+      let path = line["*** Delete File: ".len .. ^1].strip
+      inc i
+      result.add V4AOp(kind: vkDelete, path: path)
+    elif line.startsWith("*** Update File: "):
+      let path = line["*** Update File: ".len .. ^1].strip
+      inc i
+      var op = V4AOp(kind: vkUpdate, path: path)
+      var search = ""
+      var replace = ""
+      proc flush() =
+        if search.len > 0 or replace.len > 0:
+          op.edits.add (search, replace)
+          search.setLen 0
+          replace.setLen 0
+      while i < lines.len and not lines[i].startsWith("***"):
+        let l = lines[i]
+        if l.startsWith("@@"):
+          flush()
+          inc i
+          continue
+        if l.len == 0:
+          search.add "\n"
+          replace.add "\n"
+        else:
+          case l[0]
+          of '-':
+            search.add l[1 .. ^1] & "\n"
+          of '+':
+            replace.add l[1 .. ^1] & "\n"
+          of ' ':
+            search.add l[1 .. ^1] & "\n"
+            replace.add l[1 .. ^1] & "\n"
+          else:
+            search.add l & "\n"
+            replace.add l & "\n"
+        inc i
+      flush()
+      result.add op
+    else:
+      inc i
 
 proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code: int, diff: string] =
   case act.kind
@@ -281,6 +390,82 @@ export DEBIAN_FRONTEND=noninteractive
       return (&"patched {path} ({applied} edit" & (if applied == 1: "" else: "s") & ")", 0, diff)
     except CatchableError as e:
       return (&"error: patch {path}: {e.msg}", 1, "")
+  of akApplyPatch:
+    let ops = parseV4APatch(act.body)
+    if ops.len == 0:
+      return ("error: apply_patch: no operations parsed (need *** Begin Patch ... *** End Patch with at least one *** Add/Update/Delete File: line)", 1, "")
+    var msgs: seq[string]
+    var diffs = ""
+    var anyFail = false
+    for op in ops:
+      if op.path.len == 0:
+        msgs.add "error: missing path on operation"; anyFail = true
+        continue
+      let path = resolvePath(op.path)
+      case op.kind
+      of vkAdd:
+        try:
+          let dir = parentDir(path)
+          if dir != "": createDir(dir)
+          let before = if fileExists(path): readFile(path) else: ""
+          writeFile(path, op.body)
+          if cache != nil: cache.state[path] = fileSig(path)
+          msgs.add &"added {path} ({op.body.len} bytes)"
+          let d = computeDiff(before, op.body, path)
+          if d.len > 0: diffs.add d
+        except CatchableError as e:
+          msgs.add &"error: add {path}: {e.msg}"
+          anyFail = true
+      of vkUpdate:
+        if not fileExists(path):
+          msgs.add &"error: update {path}: does not exist"
+          anyFail = true
+          continue
+        if cache != nil and path in cache.state and
+           fileSig(path) != cache.state[path]:
+          msgs.add &"error: {path} changed on disk since the last read in this session — re-read before patching"
+          anyFail = true
+          continue
+        try:
+          let before = readFile(path)
+          var content = before
+          var applied = 0
+          var hunkOk = true
+          for (s, r) in op.edits:
+            let (next, ok) = replaceFirst(content, s, r)
+            if not ok:
+              let hint = nearestLineHint(content, s)
+              msgs.add &"error: hunk did not match in {path}{hint}:\n{s}"
+              hunkOk = false
+              anyFail = true
+              break
+            content = next
+            inc applied
+          if hunkOk:
+            writeFile(path, content)
+            if cache != nil: cache.state[path] = fileSig(path)
+            msgs.add &"patched {path} ({applied} hunk" &
+                     (if applied == 1: "" else: "s") & ")"
+            let d = computeDiff(before, content, path)
+            if d.len > 0: diffs.add d
+        except CatchableError as e:
+          msgs.add &"error: update {path}: {e.msg}"
+          anyFail = true
+      of vkDelete:
+        try:
+          if fileExists(path):
+            let before = readFile(path)
+            removeFile(path)
+            if cache != nil: cache.state.del(path)
+            msgs.add &"deleted {path}"
+            let d = computeDiff(before, "", path)
+            if d.len > 0: diffs.add d
+          else:
+            msgs.add &"deleted {path} (already missing)"
+        except CatchableError as e:
+          msgs.add &"error: delete {path}: {e.msg}"
+          anyFail = true
+    return (msgs.join("\n"), (if anyFail: 1 else: 0), diffs)
 
 proc parseActionsChecked*(text: string):
     tuple[actions: seq[Action], issues: seq[ParseIssue]] =
