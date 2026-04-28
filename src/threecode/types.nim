@@ -16,15 +16,18 @@ type
     offset*: int
     limit*: int
   Profile* = object
-    ## Terminology: `model` is the broad name we drive prompt+tools selection
-    ## on ("glm", "qwen", "gpt-oss"). `variant` is the concrete API identifier
-    ## sent on the wire (e.g. "openai/gpt-oss-120b" — what providers call
-    ## "model"). `variantPrefix` is prepended to the variant to form that
-    ## wire value when a provider namespaces its variants.
-    name*, url*, key*, variantPrefix*, variant*: string
-    model*: string  ## "glm" / "qwen" / "gpt-oss" — selects the (prompt, tools)
-                    ## tuple. Set by `resolveModel` from the known-good table
-                    ## or the per-provider `model = ...` experimental override.
+    ## `model` is the API model string sent on the wire (e.g.
+    ## "openai/gpt-oss-120b"). `modelPrefix` is the path-prefix that's
+    ## stored separately in the config so provider namespaces don't get
+    ## repeated for every model in the list; it is concatenated to
+    ## `model` when forming the wire value. The remaining fields are
+    ## metadata pulled out of the known-good table: `family` ("glm" /
+    ## "qwen" / "gpt-oss") drives the (prompt, tools) tuple selection;
+    ## `version` and `variant` (e.g. "3", "480b") are informational
+    ## tags. In experimental mode `family` may also come from the
+    ## per-provider `family = ...` config override.
+    name*, url*, key*, modelPrefix*, model*: string
+    family*, version*, variant*: string
   Usage* = object
     promptTokens*, completionTokens*, totalTokens*, cachedTokens*: int
   ToolRecord* = object

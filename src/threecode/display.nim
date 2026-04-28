@@ -195,9 +195,9 @@ proc showProfile*(p: Profile) =
   let dot = p.name.find('.')
   let provider = if dot < 0: p.name else: p.name[0 ..< dot]
   stdout.styledWriteLine fgCyan, styleBright, "  provider ", resetStyle, provider
-  stdout.styledWriteLine fgCyan, styleBright, "  variant  ", resetStyle, p.variant
-  let mdl = if p.model != "": p.model else: "glm"
-  stdout.styledWriteLine fgCyan, styleBright, "  model    ", resetStyle, mdl
+  stdout.styledWriteLine fgCyan, styleBright, "  model    ", resetStyle, p.model
+  let fam = if p.family != "": p.family else: "glm"
+  stdout.styledWriteLine fgCyan, styleBright, "  family   ", resetStyle, fam
 
 # Track up-navigation so "down past last" can return to blank line.
 var navigatedUp*: bool = false
@@ -262,7 +262,7 @@ proc printSessionList*(paths: seq[string], currentPath: string, showCwd: bool) =
       &"   ({count} msg" & (if count == 1: "" else: "s") & ")",
       resetStyle, cwdStr, snip, "\n"
 
-proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord], model: string) =
+proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord], family: string) =
   ## Show the last user turn and everything after, so a resumed session
   ## drops the user back into context without replaying the whole history.
   if messages == nil or messages.kind != JArray or messages.len == 0: return
@@ -309,7 +309,7 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord], model: str
               let argsStr = if fn != nil: fn{"arguments"}.getStr("") else: ""
               let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
                          except CatchableError: newJObject()
-              bannerFor(toolCallToAction(model, name, args))
+              bannerFor(toolCallToAction(family, name, args))
           stdout.styledWrite fgWhite, styleDim, "• ", banner, resetStyle, "\n"
     of "tool":
       let r = m{"content"}.getStr("")

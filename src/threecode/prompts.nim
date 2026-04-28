@@ -4,19 +4,21 @@ import types, util
 const Version* = staticRead("../../threecode.nimble").splitLines().filterIt(it.startsWith("version")).
     mapIt(it.split("=")[1].strip().strip(chars = {'"'}))[0]
 
-const KnownGoodCombos*: array[8, (string, string, string)] = [
-    ("cerebras",  "zai-glm-4.7",                                    "glm"),
-    ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm"),
-    ("cerebras",  "qwen-3-235b-a22b-instruct-2507",                  "qwen"),
-    ("deepinfra", "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",       "qwen"),
-    ("nvidia",    "qwen/qwen3-coder-480b-a35b-instruct",             "qwen"),
-    ("nvidia",    "openai/gpt-oss-120b",                             "gpt-oss"),
-    ("nvidia",    "openai/gpt-oss-20b",                              "gpt-oss"),
-    ("deepseek",  "deepseek-v4-flash",                               "deepseek"),
+const KnownGoodCombos*: array[8, (string, string, string, string, string)] = [
+    ("cerebras",  "zai-glm-4.7",                                    "glm",      "4",   "7"),
+    ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm",      "5",   "1"),
+    ("cerebras",  "qwen-3-235b-a22b-instruct-2507",                  "qwen",     "3",   "235b"),
+    ("deepinfra", "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",       "qwen",     "3",   "480b"),
+    ("nvidia",    "qwen/qwen3-coder-480b-a35b-instruct",             "qwen",     "3",   "480b"),
+    ("nvidia",    "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b"),
+    ("nvidia",    "openai/gpt-oss-20b",                              "gpt-oss",  "",    "20b"),
+    ("deepseek",  "deepseek-v4-flash",                               "deepseek", "4",   "flash"),
   ]
-    ## (provider, variant, model) triples. Model drives the (prompt, tools)
-    ## branch; it must be set explicitly here — no guessing from the variant
-    ## string. Anything outside this list requires --experimental to run.
+    ## (provider, model, family, version, variant) tuples. `model` is the
+    ## full API id sent on the wire. `family` drives the (prompt, tools)
+    ## branch — it must be set explicitly here, no guessing from the model
+    ## string. `version` and `variant` are informational tags. Anything
+    ## outside this list requires --experimental to run.
 
 # ---------------------------------------------------------------------------
 # Per-model (prompt, tools) pairs.
@@ -556,15 +558,15 @@ let
   gptOssSetup = (prompt: GptOssPreamble, tools: gptOssTools)
 
 proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
-  ## (prompt, tools) for the active model. Unknown model dies — every
+  ## (prompt, tools) for the active family. Unknown family dies — every
   ## entry in `KnownGoodCombos` and every experimental override must
-  ## name a model handled here.
-  case p.model
+  ## name a family handled here.
+  case p.family
   of "glm": glmSetup
   of "qwen": qwenSetup
   of "gpt-oss": gptOssSetup
   of "deepseek": deepseekSetup
-  else: die "unknown model: '" & p.model & "' (no prompt/tools tuple)"
+  else: die "unknown family: '" & p.family & "' (no prompt/tools tuple)"
 
 let DefaultSystemPrompt* = glmSetup.prompt.replace(
     "{{credit}}",
@@ -580,7 +582,7 @@ const ConfigExample* = """  [settings]
   name = "openai"
   url = "https://api.openai.com/v1"
   key = "sk-..."
-  variants = "gpt-4o-mini gpt-4o"
+  models = "gpt-4o-mini gpt-4o"
 
 (values are Nim string literals — always wrap them in double quotes.)
 """
@@ -592,12 +594,12 @@ commands:
   :help             show this message
   :tokens           show token usage for this session
   :clear            reset conversation (keeps system prompt)
-  :variant          list variants for current provider (current marked with *)
-  :variant X        switch to variant X (within current provider)
+  :model            list models for current provider (current marked with *)
+  :model X          switch to model X (within current provider)
   :provider         list configured providers (current marked with *)
-  :provider X       switch to provider X (variant defaults to first in its list)
+  :provider X       switch to provider X (model defaults to first in its list)
   :provider add     add a new provider (interactive, verified)
-  :provider edit X  edit provider X (url, key, variants)
+  :provider edit X  edit provider X (url, key, models)
   :provider rm X    remove provider X
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
@@ -613,7 +615,7 @@ input:
   single-line   just type and press Enter
   multi-line    end a line with `\` to continue on the next line (use `\\` for a literal trailing backslash)
   up / down     recall history; down past last clears the line
-  tab           complete :commands, provider names, variant names
+  tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
 
@@ -632,38 +634,49 @@ known good (deepseek):
 other combos require --experimental — they're your tokens to burn.
 """
 
-proc knownGoodModel*(p: Profile): string =
-  ## Returns the model label ("glm", ...) for a known-good combo, or ""
-  ## if (provider, variant) isn't on the list. Match is case-insensitive on
-  ## (provider, full variant id incl. prefix).
+proc knownGoodFamily*(p: Profile): string =
+  ## Returns the family label ("glm", ...) for a known-good combo, or ""
+  ## if (provider, model) isn't on the list. Match is case-insensitive on
+  ## (provider, full model id incl. prefix).
   if p.name == "": return ""
   let dot = p.name.find('.')
   if dot < 0: return ""
   let provider = p.name[0 ..< dot].toLowerAscii
-  let variant = (p.variantPrefix & p.variant).toLowerAscii
+  let model = (p.modelPrefix & p.model).toLowerAscii
   for combo in KnownGoodCombos:
     if combo[0].toLowerAscii == provider and
-       combo[1].toLowerAscii == variant: return combo[2]
+       combo[1].toLowerAscii == model: return combo[2]
   ""
 
 proc isKnownGood*(p: Profile): bool =
-  ## True when (provider name, `variantPrefix & variant`) exactly matches
+  ## True when (provider name, `modelPrefix & model`) exactly matches
   ## an entry in `KnownGoodCombos` (case-insensitive on both parts).
   ## Empty profiles return false — caller decides what that means.
-  knownGoodModel(p) != ""
+  knownGoodFamily(p) != ""
 
-proc knownGoodModel*(provider, variant: string): string =
+proc knownGoodFamily*(provider, model: string): string =
   ## Convenience overload for the wizard, where we have a candidate
-  ## (provider name, full variant id) but no Profile.
+  ## (provider name, full model id) but no Profile.
   let p = provider.toLowerAscii
-  let v = variant.toLowerAscii
+  let m = model.toLowerAscii
   for combo in KnownGoodCombos:
-    if combo[0].toLowerAscii == p and combo[1].toLowerAscii == v:
+    if combo[0].toLowerAscii == p and combo[1].toLowerAscii == m:
       return combo[2]
   ""
 
-proc displayModel(model: string): string =
-  case model.toLowerAscii
+proc knownGoodTags*(provider, model: string): (string, string, string) =
+  ## Returns (family, version, variant) for a known-good combo, or empty
+  ## strings when no match. Used at profile-build time to populate the
+  ## informational tags on `Profile`.
+  let p = provider.toLowerAscii
+  let m = model.toLowerAscii
+  for combo in KnownGoodCombos:
+    if combo[0].toLowerAscii == p and combo[1].toLowerAscii == m:
+      return (combo[2], combo[3], combo[4])
+  ("", "", "")
+
+proc displayFamily(family: string): string =
+  case family.toLowerAscii
   of "glm": "GLM"
   of "qwen": "Qwen"
   of "gpt-oss": "GPT-OSS"
@@ -672,22 +685,22 @@ proc displayModel(model: string): string =
   of "llama": "Llama"
   of "mistral": "Mistral"
   of "gemma": "Gemma"
-  else: model
+  else: family
 
 proc buildCredit*(p: Profile): string =
-  ## Dynamic attribution line: model + serving provider, derived from
-  ## the active profile. Bytes change with (provider, model, variant),
+  ## Dynamic attribution line: family + model + serving provider, derived
+  ## from the active profile. Bytes change with (provider, family, model),
   ## not within a session — prefix caching survives as long as the user
   ## doesn't `:provider`/`:model` switch mid-session.
   let dot = p.name.find('.')
   let provider = if dot < 0: p.name else: p.name[0 ..< dot]
-  let variant = p.variantPrefix & p.variant
-  let mdl = displayModel(p.model)
-  if provider != "" and mdl != "":
-    "Credit where it's due: you're a " & mdl & " model (" & variant &
+  let model = p.modelPrefix & p.model
+  let fam = displayFamily(p.family)
+  if provider != "" and fam != "":
+    "Credit where it's due: you're a " & fam & " model (" & model &
       "), served via " & provider & "."
-  elif provider != "" and variant != "":
-    "Credit where it's due: you're " & variant & ", served via " & provider & "."
+  elif provider != "" and model != "":
+    "Credit where it's due: you're " & model & ", served via " & provider & "."
   else:
     "Credit where it's due — to whoever trained the weights driving you and the lab serving them."
 

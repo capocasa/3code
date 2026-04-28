@@ -7,11 +7,11 @@ const
   CompactedMarker* = "[compacted — tool output elided; use :show to view]"
   SupersededMarker* = "[superseded — later action on same path elided this]"
 
-proc contextWindowFor*(variant: string): int =
-  ## Heuristic: substring match on well-known variant slugs. Cheap, and no
+proc contextWindowFor*(model: string): int =
+  ## Heuristic: substring match on well-known model slugs. Cheap, and no
   ## known collisions exist in practice. Update if a provider ships a
-  ## colliding variant name.
-  let m = variant.toLowerAscii
+  ## colliding model name.
+  let m = model.toLowerAscii
   if "kimi-k2" in m: 128_000
   elif "qwen3-coder" in m or "qwen3_coder" in m: 262_144
   elif "qwen" in m: 128_000
@@ -184,7 +184,7 @@ proc applySummary*(messages: JsonNode, summary: string,
 proc callSummarizer(p: Profile, messages: JsonNode): string =
   ## Fires a single meta-call to the model with a dedicated summarizer
   ## system prompt and no tools. Returns "" on any failure.
-  if p.name == "" or p.url == "" or p.key == "" or p.variant == "": return ""
+  if p.name == "" or p.url == "" or p.key == "" or p.model == "": return ""
   # Build a trimmed payload: the summarizer prompt + every non-system
   # message from the live conversation. Tool_call messages are allowed —
   # most OpenAI-compatible providers accept them in chat completions even
@@ -205,7 +205,7 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
     "Content-Type": "application/json"
   })
   let body = %*{
-    "model": p.variantPrefix & p.variant,
+    "model": p.modelPrefix & p.model,
     "messages": payload,
     "max_tokens": SummarizeMaxTokens,
     "stream": false

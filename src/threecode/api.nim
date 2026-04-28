@@ -504,7 +504,7 @@ template hint(args: varargs[untyped]) =
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   ensureReasoningField(messages)
   var body = %*{
-    "model": p.variantPrefix & p.variant,
+    "model": p.modelPrefix & p.model,
     "messages": messages,
     "stream": true,
     "stream_options": {"include_usage": true}
@@ -515,7 +515,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   let t0 = epochTime()
   decayLevel(serverRetryLevel, serverLastTs, t0)
   decayLevel(rateRetryLevel, rateLastTs, t0)
-  let window = contextWindowFor(p.variant)
+  let window = contextWindowFor(p.model)
   let baseLabel = contextLabel(lastPromptTokens, window)
   # Blank line above the upcoming spinner / bullet so the assistant
   # output isn't flush against the prior content (user prompt or last
@@ -619,7 +619,7 @@ proc verifyProfile*(p: Profile): (bool, string) =
     "Content-Type": "application/json"
   })
   let body = $(%*{
-    "model": p.variantPrefix & p.variant,
+    "model": p.modelPrefix & p.model,
     "messages": [%*{"role": "user", "content": "ping"}],
     "max_tokens": 1,
     "stream": false
@@ -636,9 +636,9 @@ proc verifyProfile*(p: Profile): (bool, string) =
   except CatchableError as e:
     return (false, e.msg)
 
-proc fetchVariants*(url, key: string): seq[string] =
+proc fetchModels*(url, key: string): seq[string] =
   ## GET /models on the provider — that endpoint name is OpenAI's; what it
-  ## returns is the list of variant ids this provider exposes.
+  ## returns is the list of model ids this provider exposes.
   let client = newHttpClient(timeout = 20000)
   defer: client.close()
   client.headers = newHttpHeaders({"Authorization": "Bearer " & key})
