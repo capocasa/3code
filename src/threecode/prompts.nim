@@ -1,5 +1,5 @@
-import std/[json, sequtils, strutils]
-import types
+import std/[algorithm, hashes, json, os, sequtils, strutils]
+import types, util
 
 const Version* = staticRead("../../threecode.nimble").splitLines().filterIt(it.startsWith("version")).
     mapIt(it.split("=")[1].strip().strip(chars = {'"'}))[0]
@@ -109,6 +109,13 @@ Prefer creating new commits over amending — especially after a pre-commit hook
 
 Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Don't disable TLS verification. If you spot you've written something insecure, fix it immediately.
 
+# Skills
+
+If the task is something other than software development — research, sysadmin, ops, writing, communication, planning — read the matching skill before proceeding. Naming: `role-<persona>.md`, `task-<procedure>.md`, `domain-<knowledge-pack>.md`. Plausible match → `cat` it; irrelevant after reading → drop it silently. The harness shows the user a "loaded skill: <name>" marker — don't restate it.
+
+Available:
+{{skills}}
+
 # Tone and reporting
 
 Write briefly. State results, not deliberation. One short sentence per update at key moments — when you find something, when you change direction, when you hit a blocker. Brief is good; silent is not.
@@ -217,6 +224,13 @@ Prefer creating new commits over amending. Never skip hooks (`--no-verify`) unle
 
 Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Don't disable TLS verification.
 
+# Skills
+
+If the task is something other than software development — research, sysadmin, ops, writing, communication, planning — read the matching skill before proceeding. Naming: `role-<persona>.md`, `task-<procedure>.md`, `domain-<knowledge-pack>.md`. Plausible match → `cat` it; irrelevant after reading → drop it silently. The harness shows the user a "loaded skill: <name>" marker — don't restate it.
+
+Available:
+{{skills}}
+
 # Tone and reporting
 
 Write briefly. State results, not deliberation. End-of-turn: one or two sentences, what changed and what's next.
@@ -319,6 +333,13 @@ Prefer creating new commits over amending. Never skip hooks (`--no-verify`) unle
 
 Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs. Don't disable TLS verification.
 
+# Skills
+
+If the task is something other than software development — research, sysadmin, ops, writing, communication, planning — read the matching skill before proceeding. Naming: `role-<persona>.md`, `task-<procedure>.md`, `domain-<knowledge-pack>.md`. Plausible match → `cat` it; irrelevant after reading → drop it silently. The harness shows the user a "loaded skill: <name>" marker — don't restate it.
+
+Available:
+{{skills}}
+
 # Tone and reporting
 
 Write briefly. State results, not deliberation. End-of-turn: one or two sentences, what changed and what's next.
@@ -412,6 +433,13 @@ Prefer creating new commits over amending — especially after a pre-commit hook
 # Security
 
 Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Don't disable TLS verification. If you spot you've written something insecure, fix it immediately.
+
+# Skills
+
+If the task is something other than software development — research, sysadmin, ops, writing, communication, planning — read the matching skill before proceeding. Naming: `role-<persona>.md`, `task-<procedure>.md`, `domain-<knowledge-pack>.md`. Plausible match → `cat` it; irrelevant after reading → drop it silently. The harness shows the user a "loaded skill: <name>" marker — don't restate it.
+
+Available:
+{{skills}}
 
 # Tone and reporting
 
@@ -663,12 +691,92 @@ proc buildCredit*(p: Profile): string =
   else:
     "Credit where it's due — to whoever trained the weights driving you and the lab serving them."
 
+const BuiltinSkills*: array[6, (string, string)] = [
+  ("role-conversational.md",   staticRead("skills/role-conversational.md")),
+  ("role-sysadmin.md",         staticRead("skills/role-sysadmin.md")),
+  ("role-thinking-partner.md", staticRead("skills/role-thinking-partner.md")),
+  ("role-web-researcher.md",   staticRead("skills/role-web-researcher.md")),
+  ("role-writing.md",          staticRead("skills/role-writing.md")),
+  ("task-debug-systematic.md", staticRead("skills/task-debug-systematic.md")),
+]
+  ## Universal skills compiled into the binary. Materialized to
+  ## `~/.local/share/3code/skills/` on startup; re-extracted whenever
+  ## the contents change (the dir's `VERSION` file holds a content
+  ## fingerprint, not just a version string, so adding or editing a
+  ## built-in skill triggers re-extraction without a manual bump).
+  ## User overrides live in `~/.config/3code/skills/` and are never
+  ## touched by the materializer.
+  ##
+  ## Per-model variants (`skills/<model>/<name>.md`) are not
+  ## implemented yet — see CLAUDE.md "Skills convention" for the
+  ## planned layout and the trigger condition (when a smaller model
+  ## needs hand-holding the others don't).
+
+proc builtinSkillsDir*(): string = userDataRoot() / "skills"
+
+proc skillsFingerprint(): string =
+  var h: Hash = hash(Version)
+  for (name, body) in BuiltinSkills:
+    h = h !& hash(name) !& hash(body)
+  Version & ":" & $(!$h)
+
+proc materializeBuiltinSkills*() =
+  ## Extract `BuiltinSkills` to the data dir when the on-disk
+  ## fingerprint disagrees with the binary's. Idempotent. Failures are
+  ## silent — a read-only home dir shouldn't crash the agent; the
+  ## model just won't see the built-ins, which is recoverable (user
+  ## override or project skill still works).
+  let dir = builtinSkillsDir()
+  let stamp = dir / "VERSION"
+  let want = skillsFingerprint()
+  let installed = try: readFile(stamp).strip except CatchableError: ""
+  if installed == want: return
+  try:
+    createDir(dir)
+    for (name, body) in BuiltinSkills:
+      writeFile(dir / name, body)
+    writeFile(stamp, want)
+  except CatchableError: discard
+
+proc skillsDirs*(): seq[string] =
+  ## Directories searched for skill files, in precedence order (first
+  ## wins on filename collision). Project → user override → built-in.
+  result.add getCurrentDir() / ".3code" / "skills"
+  result.add userConfigRoot() / "skills"
+  result.add builtinSkillsDir()
+
+proc discoverSkills*(): string =
+  ## Filename listing for the `{{skills}}` placeholder. One bullet per
+  ## skill, full path so the model can `cat` it directly. Project skills
+  ## listed first (and shadow user skills with the same name).
+  var seen: seq[string]
+  var lines: seq[string]
+  for dir in skillsDirs():
+    if not dirExists(dir): continue
+    var names: seq[string]
+    for kind, path in walkDir(dir):
+      if kind != pcFile: continue
+      let name = path.extractFilename
+      if not name.endsWith(".md"): continue
+      names.add name
+    names.sort()
+    for name in names:
+      if name in seen: continue
+      seen.add name
+      lines.add "- " & dir / name
+  if lines.len == 0: "(none installed)"
+  else: lines.join("\n")
+
 proc buildSystemPrompt*(p: Profile): string =
   ## Bytes are stable within a (provider, model, variant) triple — that's
   ## what the prompt now embeds for credit. Within a session that's constant,
   ## so prefix caching on Anthropic/OpenAI/DeepInfra still applies; switching
   ## model or provider mid-session will invalidate the cache.
-  setup(p).prompt.replace("{{credit}}", buildCredit(p))
+  ## Skills are discovered fresh on every call so a newly added skill file
+  ## becomes visible on the next turn without restarting the session.
+  setup(p).prompt
+    .replace("{{credit}}", buildCredit(p))
+    .replace("{{skills}}", discoverSkills())
 
 proc refreshSystemPrompt*(messages: JsonNode, p: Profile) =
   if messages == nil or messages.kind != JArray or messages.len == 0: return
