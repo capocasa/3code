@@ -364,6 +364,12 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
         stdout.styledWrite fgWhite, prefix & l, resetStyle, "\n"
       stdout.write "\n"
     of "assistant":
+      # Mirror callModel's leading \n in the live path: a turn that
+      # follows a tool result needs the same blank-line separator. The
+      # first assistant after the user message already gets one from the
+      # user block's trailing \n, so skip then.
+      if i > start and messages[i-1]{"role"}.getStr == "tool":
+        stdout.write "\n"
       let c = m{"content"}.getStr("").strip
       renderAssistantContent(c)
       if asstIdx < turnUsage.len:
