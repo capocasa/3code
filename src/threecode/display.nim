@@ -169,26 +169,94 @@ proc printDiff*(diff: string) =
     " hidden · `git diff` for full …", resetStyle
   for i in lines.len - DiffTail ..< lines.len: paint(lines[i])
 
-proc printActionResult*(act: Action, res: string, code: int, idx: int, diff = "") =
-  if act.kind == akBash:
-    # Banner above already shows the command, so the output section
-    # only carries the real output to avoid a redundant `$ cmd` echo.
+proc printToolResult*(kind: ActionKind, res: string, code: int, idx: int,
+                     diff = "") =
+  ## Body of a tool turn. bash/read fan out via `printBashCompact`
+  ## (different head/tail caps); write/patch print the headline only on
+  ## success, or the first error line on failure. A non-empty `diff` is
+  ## colourised after the body. Banner is drawn separately by
+  ## `renderToolBanner`.
+  if kind == akBash:
     printBashCompact(res, idx)
-  elif act.kind == akRead:
+  elif kind == akRead:
     printBashCompact(res, idx, ReadHead, ReadTail)
   else:
     if code == 0:
       stdout.styledWriteLine styleDim, "  " & res, resetStyle
     else:
-      # Patch / write failure: only the headline goes to the user — the
-      # full SEARCH body and any nearest-match hint are for the model
-      # (it's already in `res` going back via the tool result). Dumping
-      # a 30-line SEARCH block here just makes the screen shout.
+      # Patch / write failure: only the headline goes to the user; the
+      # full SEARCH body lives in `res` which the model still sees via
+      # the tool result. Dumping a 30-line SEARCH block here just shouts.
       let nl = res.find('\n')
       let head = if nl < 0: res else: res[0 ..< nl]
       stdout.styledWriteLine styleDim, "  " & head, resetStyle
   if diff.len > 0:
     printDiff(diff)
+
+proc printActionResult*(act: Action, res: string, code: int, idx: int, diff = "") =
+  printToolResult(act.kind, res, code, idx, diff)
+
+proc contextLabel*(promptTokens, window: int): string =
+  ## "○ 12%" / "◔ 25%" / … / "● 92%". Empty when there's no useful
+  ## number (no window, or no tokens yet). Same shape used by the live
+  ## spinner and the per-turn token summary.
+  if window <= 0 or promptTokens <= 0: return ""
+  let pct = int(promptTokens.float / window.float * 100.0)
+  let glyph =
+    if pct < 20: "○"
+    elif pct < 40: "◔"
+    elif pct < 60: "◑"
+    elif pct < 80: "◕"
+    else: "●"
+  &"{glyph} {pct}%"
+
+proc renderAssistantContent*(content: string) =
+  ## Bullet `● ` (bright white) + dim content; subsequent lines indent two
+  ## spaces. No-op on empty/whitespace. Used by the replay path and by the
+  ## live path when content was buffered (rare: streaming bypasses this).
+  if content.strip.len == 0: return
+  stdout.styledWrite fgWhite, styleBright, "● ", resetStyle
+  let lines = content.splitLines
+  for idx, l in lines:
+    let prefix = if idx == 0: "" else: "  "
+    stdout.styledWrite fgWhite, styleDim, prefix & l & "\n", resetStyle
+  stdout.flushFile
+
+proc renderToolPending*(banner: string) =
+  ## Pre-execution banner: dim bullet + dim banner. Live only; the live
+  ## caller overwrites this line with `renderToolBanner` once the action
+  ## returns. Replay skips this and goes straight to the result form.
+  stdout.styledWrite fgWhite, styleDim, "● ", banner, resetStyle, "\n"
+  stdout.flushFile
+
+proc renderToolBanner*(banner: string, code: int, elapsedS = -1) =
+  ## Final tool banner: green bullet on success, dim white on error, dim
+  ## white banner. Optional `(Ns)` suffix when `elapsedS >= 1` (live);
+  ## replay passes -1 to omit it.
+  if code == 0:
+    stdout.styledWrite fgGreen, "● ", resetStyle
+  else:
+    stdout.styledWrite fgWhite, styleDim, "● ", resetStyle
+  stdout.styledWrite fgWhite, styleDim, banner, resetStyle
+  if elapsedS >= 1:
+    stdout.styledWrite fgWhite, styleDim, &"  ({elapsedS}s)", resetStyle
+  stdout.write "\n"
+  stdout.flushFile
+
+proc renderTokenLine*(usage: Usage, window: int, elapsedS = -1) =
+  ## "○ N%   ↑ Nk   ↺ Nk   ↓ Nk   Ts" — context glyph, fresh, cached,
+  ## generated, optional duration. Empty when usage has no totals. Live
+  ## passes seconds; replay passes -1 to omit the duration.
+  if usage.totalTokens <= 0: return
+  let fresh = max(0, usage.promptTokens - usage.cachedTokens)
+  let ctx = contextLabel(usage.promptTokens, window)
+  var line = if ctx.len > 0: ctx & "   " else: ""
+  line.add tokenSlot("↑", fresh)
+  line.add "   " & tokenSlot("↺", usage.cachedTokens)
+  line.add "   " & tokenSlot("↓", usage.completionTokens)
+  if elapsedS >= 0:
+    line.add "   " & $elapsedS & "s"
+  stdout.styledWrite(styleDim, "  " & line, resetStyle, "\n")
 
 proc showProfile*(p: Profile) =
   if p.name == "": return
@@ -260,9 +328,13 @@ proc printSessionList*(paths: seq[string], currentPath: string, showCwd: bool) =
       &"   ({count} msg" & (if count == 1: "" else: "s") & ")",
       resetStyle, cwdStr, snip, "\n"
 
-proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord], family: string) =
+proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
+                       turnUsage: seq[Usage], window: int, family: string) =
   ## Show the last user turn and everything after, so a resumed session
   ## drops the user back into context without replaying the whole history.
+  ## Renders via the same helpers the live path uses; `turnUsage` carries
+  ## per-assistant-message usage so each assistant block gets the same
+  ## token line as in live (no duration suffix).
   if messages == nil or messages.kind != JArray or messages.len == 0: return
   var start = messages.len
   for i in countdown(messages.len - 1, 0):
@@ -271,9 +343,13 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord], family: st
       break
   if start >= messages.len: return
   var toolIdx = 0
+  var asstIdx = 0
   for i in 0 ..< start:
-    let tc = messages[i]{"tool_calls"}
-    if tc != nil and tc.kind == JArray: toolIdx += tc.len
+    let m = messages[i]
+    if m{"role"}.getStr == "assistant":
+      inc asstIdx
+      let tc = m{"tool_calls"}
+      if tc != nil and tc.kind == JArray: toolIdx += tc.len
   for i in start ..< messages.len:
     let m = messages[i]
     case m{"role"}.getStr
@@ -282,37 +358,50 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord], family: st
       if c.len == 0: continue
       let shown = if c.len > 400: c[0 ..< 400] & " …" else: c
       let userLines = shown.splitLines
+      stdout.write "\n"
       for idx, l in userLines:
         let prefix = if idx == 0: "❯ " else: "  "
         stdout.styledWrite fgWhite, prefix & l, resetStyle, "\n"
+      stdout.write "\n"
     of "assistant":
       let c = m{"content"}.getStr("").strip
-      if c.len > 0:
-        stdout.styledWrite fgWhite, styleBright, "● ", resetStyle
-        let asstLines = c.splitLines
-        var idx = 0
-        for l in asstLines:
-          let prefix = if idx == 0: "" else: "  "
-          stdout.styledWrite fgWhite, styleDim, prefix & l & "\n", resetStyle
-          inc idx
+      renderAssistantContent(c)
+      if asstIdx < turnUsage.len:
+        renderTokenLine(turnUsage[asstIdx], window)
+      inc asstIdx
       let tcs = m{"tool_calls"}
-      if tcs != nil and tcs.kind == JArray:
+      let hasTools = tcs != nil and tcs.kind == JArray and tcs.len > 0
+      if hasTools:
+        stdout.write "\n"
         for tc in tcs:
           inc toolIdx
-          let banner =
-            if toolIdx <= toolLog.len: toolLog[toolIdx - 1].banner
-            else:
-              let fn = tc{"function"}
-              let name = if fn != nil: fn{"name"}.getStr else: "?"
-              let argsStr = if fn != nil: fn{"arguments"}.getStr("") else: ""
-              let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
-                         except CatchableError: newJObject()
-              bannerFor(toolCallToAction(family, name, args))
-          stdout.styledWrite fgWhite, styleDim, "• ", banner, resetStyle, "\n"
+          var banner = ""
+          var code = 0
+          var output = ""
+          var kind = akBash
+          if toolIdx <= toolLog.len:
+            let rec = toolLog[toolIdx - 1]
+            banner = rec.banner
+            code = rec.code
+            output = rec.output
+            kind = rec.kind
+          else:
+            let fn = tc{"function"}
+            let name = if fn != nil: fn{"name"}.getStr else: "?"
+            let argsStr = if fn != nil: fn{"arguments"}.getStr("") else: ""
+            let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
+                       except CatchableError: newJObject()
+            let act = toolCallToAction(family, name, args)
+            banner = bannerFor(act)
+            kind = act.kind
+          renderToolBanner(banner, code)
+          if output.len > 0:
+            printToolResult(kind, output, code, toolIdx)
     of "tool":
-      let r = m{"content"}.getStr("")
-      if r.len > 0:
-        printBashCompact(r, toolIdx)
+      # Result already rendered alongside the assistant's tool_call via
+      # toolLog; nothing to do here. Older sessions without a populated
+      # toolLog will fall through to the printToolResult path above.
+      discard
     else: discard
   stdout.flushFile
 
