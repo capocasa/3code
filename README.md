@@ -107,6 +107,19 @@ or drop into interactive:
 
 Type `:q`, `exit`, `quit`, or hit Ctrl-D to leave.
 
+## Auto-update
+
+Prebuilt binaries from the [install script](https://3code.capocasa.dev/install)
+or GitHub releases quietly self-update on launch (throttled to one
+check per 4h). The next launch after a swap prints one dim line:
+`· updated to vX.Y.Z`.
+
+Source builds (`nimble install`) default to **off** — if you built it,
+you own it. Toggle either way in `~/.config/3code/config`:
+
+    [settings]
+    auto_update = "true"   ; or "false"
+
 ## Caveats
 
 - No permissions, sandbox, or approval prompts. It runs what the model says

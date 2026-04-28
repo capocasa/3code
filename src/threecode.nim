@@ -1,6 +1,6 @@
 import std/[json, os, parseopt, strformat, strutils, terminal, times]
 import threecode/[types, util, prompts, shell, loop, session, compact,
-                  config, actions, api, display, ui, web]
+                  config, actions, api, display, ui, update, web]
 import threecode/minline
 export types, util, prompts, shell, loop, session, compact,
        config, actions, api, display, ui
@@ -214,6 +214,12 @@ proc runFetch(args: seq[string]) =
   stdout.write "\n"
 
 proc main() =
+  # Internal flag for the detached background worker. Run silently and
+  # exit before any other startup work (skill extraction, config load).
+  let cl = commandLineParams()
+  if cl.len == 1 and cl[0] == "--self-update-check":
+    selfUpdateCheck()
+    return
   installInterruptHook()
   materializeBuiltinSkills()
   var model = ""
@@ -270,6 +276,9 @@ proc main() =
     of "web": runWeb(args[1 .. ^1]); return
     of "fetch": runFetch(args[1 .. ^1]); return
     else: discard
+
+  showUpdateNoticeMaybe()
+  spawnBackgroundUpdateMaybe()
 
   let prompt = args.join(" ")
   var session: Session
