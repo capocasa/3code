@@ -56,7 +56,14 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       else: newJArray()
     if toolCalls.len > 0:
       if content.strip.len > 0 and not streamedLive:
-        stdout.write content & "\n\n"
+        stdout.styledWrite fgWhite, styleBright, "● ", resetStyle
+        let lines = content.splitLines
+        var idx = 0
+        for l in lines:
+          let prefix = if idx == 0: "" else: "  "
+          stdout.styledWrite fgWhite, styleDim, prefix & l & "\n", resetStyle
+          inc idx
+        stdout.write "\n"
         stdout.flushFile
       var halt = false  # Strike-2 trip: stop further tool calls this turn
       for tc in toolCalls:
@@ -81,29 +88,36 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
             newJObject()
         let act = toolCallToAction(p.model, name, args)
         let idx = session.toolLog.len + 1
+        let silent = isSkillRead(act)
         # Pre-exec: dim bullet + dim banner text — "in flight" signal. After
         # the call returns we overwrite the line so the bullet only picks up
         # a colour (green success, red error); the banner text itself stays
-        # dim so the colour acts as a glance cue, not a shout.
-        stdout.styledWrite styleDim, "• ", bannerFor(act), resetStyle, "\n"
-        stdout.flushFile
+        # dim so the colour acts as a glance cue, not a shout. Skill loads
+        # skip the banner entirely; the model's own "loaded skill: <name>"
+        # line is the only signal the user sees.
+        if not silent:
+          stdout.styledWrite fgWhite, styleDim, "• ", bannerFor(act), resetStyle, "\n"
+          stdout.flushFile
         let toolT0 = epochTime()
         if session.readCache == nil: session.readCache = newReadCache()
         var (r, code, diff) = runAction(act, session.readCache)
         let toolElapsed = epochTime() - toolT0
         if r.strip.len == 0: r = "[no output]"
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
-        stdout.write "\e[1A\r\e[2K"
-        if code == 0:
-          stdout.styledWrite fgGreen, "• ", resetStyle
+        if not silent:
+          stdout.write "\e[1A\r\e[2K"
+          if code == 0:
+            stdout.styledWrite fgGreen, "• ", resetStyle
+          else:
+            stdout.styledWrite fgWhite, styleDim, "• ", resetStyle
+          stdout.styledWrite fgWhite, styleDim, bannerFor(act), resetStyle
+          if toolElapsed >= 1:
+            stdout.styledWrite fgWhite, styleDim, &"  ({toolElapsed.int}s)", resetStyle
+          stdout.write "\n"
+          stdout.flushFile
+          printActionResult(act, r, code, idx, diff)
         else:
-          stdout.styledWrite styleDim, "• ", resetStyle
-        stdout.styledWrite styleDim, bannerFor(act), resetStyle
-        if toolElapsed >= 1:
-          stdout.styledWrite styleDim, &"  ({toolElapsed.int}s)", resetStyle
-        stdout.write "\n"
-        stdout.flushFile
-        printActionResult(act, r, code, idx, diff)
+          printSkillLoaded(act)
         # Loop guard: fingerprint the call and decide whether to annotate the
         # tool result (Strike 1) or halt further tool calls (Strike 2). The
         # guard message is appended to the real tool result rather than
@@ -143,7 +157,14 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       continue
     if content.strip.len > 0:
       if not streamedLive:
-        stdout.write content & "\n\n"
+        stdout.styledWrite fgWhite, styleBright, "● ", resetStyle
+        let lines = content.splitLines
+        var idx = 0
+        for l in lines:
+          let prefix = if idx == 0: "" else: "  "
+          stdout.styledWrite fgWhite, styleDim, prefix & l & "\n", resetStyle
+          inc idx
+        stdout.write "\n"
         stdout.flushFile
     else:
       stdout.styledWriteLine styleDim,
@@ -194,6 +215,7 @@ proc runFetch(args: seq[string]) =
 
 proc main() =
   installInterruptHook()
+  materializeBuiltinSkills()
   var model = ""
   var args: seq[string]
   var pending = ""  # flag awaiting a space-separated value

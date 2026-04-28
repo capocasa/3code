@@ -1,23 +1,36 @@
-import std/[critbits, json, strformat, strutils, terminal]
+import std/[critbits, json, os, strformat, strutils, terminal]
 import types, util, prompts, session, actions, minline
 
 template hint*(args: varargs[untyped]) =
+  ## Bright cyan + bold — for labels and primary CTAs ("provider",
+  ## "type a prompt."). This is the "look here" tier.
   stdout.styledWrite(fgCyan, styleBright, args, resetStyle)
 
 template hintLn*(args: varargs[untyped]) =
   stdout.styledWriteLine(fgCyan, styleBright, args, resetStyle)
 
+template note*(args: varargs[untyped]) =
+  ## Dim cyan tint — soft greyish-cyan, the harness's "talking to the
+  ## user" voice. Used for help text, error messages, secondary
+  ## instructions, validation hints. Noticeable (cyan hue) but soft
+  ## (dim) — doesn't shout, doesn't hide. Compare:
+  ##   hint = bright cyan + bold (primary)
+  ##   note = dim cyan tint (action-required, secondary)
+  ##   styleDim alone = greyish (FYI: thinking, tokens, tool output)
+  stdout.styledWrite(fgCyan, styleDim, args, resetStyle)
+
+template noteLn*(args: varargs[untyped]) =
+  stdout.styledWriteLine(fgCyan, styleDim, args, resetStyle)
+
 template warn*(args: varargs[untyped]) =
-  ## Magenta highlight for the "user has to fix something" tier: API
-  ## errors, wizard input validation, unknown command/model, mode gates.
-  ## Pairs cleanly with cyan (`hint`) and avoids the red-means-server-down
-  ## reflex. Anything for the LLM to handle (SEARCH/REPLACE failures,
-  ## parser hiccups, repeat-guard halts, interrupted state) goes through
-  ## `styleDim` instead — those don't need to grab the user's eye.
-  stdout.styledWrite(fgMagenta, args, resetStyle)
+  ## Same dim-cyan tint as `note` — error messages now share the
+  ## "harness talking to you" voice rather than a separate magenta
+  ## tier. Errors are action-required; the soft cyan tone keeps them
+  ## visible without shouting.
+  stdout.styledWrite(fgCyan, styleDim, args, resetStyle)
 
 template warnLn*(args: varargs[untyped]) =
-  stdout.styledWriteLine(fgMagenta, args, resetStyle)
+  stdout.styledWriteLine(fgCyan, styleDim, args, resetStyle)
 
 proc previewCmd*(body: string, width = 64): string =
   let first = body.strip.splitLines[0]
@@ -43,8 +56,55 @@ proc bannerFor*(act: Action): string =
 
 const
   CompactHead = 3
-  CompactTail = 10
-  CompactThreshold = CompactHead + CompactTail + 2  # below this, show everything
+  CompactTail = 0
+  ReadHead = 2
+  ReadTail = 5
+
+proc isSkillRead*(act: Action): bool =
+  ## True when the action is a `cat`/`head`/`sed`-style read of a skill
+  ## file (any path under a registered skills dir). The main loop
+  ## suppresses banner + body output for these and prints its own dim
+  ## "loaded skill: <name>" marker so the user sees a single, styled
+  ## signal rather than a tool transcript.
+  let dirs = skillsDirs()
+  case act.kind
+  of akRead:
+    for d in dirs:
+      if act.path.startsWith(d): return true
+  of akBash:
+    for d in dirs:
+      if d in act.body: return true
+  else: discard
+  false
+
+proc skillNameFromAct*(act: Action): string =
+  ## Best-effort extraction of the skill name from a skill-read action.
+  ## Returns the basename without the `.md` suffix, or "" if we can't
+  ## tell. The bash form scans for the first registered skills-dir
+  ## prefix in the command body, then takes the path that follows.
+  var fname = ""
+  case act.kind
+  of akRead:
+    fname = act.path.extractFilename
+  of akBash:
+    let dirs = skillsDirs()
+    for d in dirs:
+      let idx = act.body.find(d)
+      if idx < 0: continue
+      let after = act.body[idx + d.len .. ^1].strip(chars = {'/'}, trailing = false)
+      var endIdx = 0
+      while endIdx < after.len and
+            after[endIdx] notin {' ', '\t', '\n', ';', '|', '&', '"', '\''}:
+        inc endIdx
+      fname = after[0 ..< endIdx].extractFilename
+      break
+  else: discard
+  if fname.endsWith(".md"): fname[0 ..< fname.len - 3] else: fname
+
+proc printSkillLoaded*(act: Action) =
+  let name = skillNameFromAct(act)
+  if name.len == 0: return
+  stdout.styledWriteLine styleDim, "· loaded skill: ", name, resetStyle
 
 proc trimTrailingBlank(lines: var seq[string]) =
   while lines.len > 0 and lines[^1].strip == "":
@@ -53,18 +113,12 @@ proc trimTrailingBlank(lines: var seq[string]) =
 proc printLine*(l: string) =
   if l == "[exit 0]":
     discard
-  elif l.startsWith("[exit "):
-    stdout.styledWriteLine styleDim, l, resetStyle
   else:
-    stdout.styledWriteLine styleDim, l, resetStyle
+    stdout.styledWriteLine styleDim, "  " & l, resetStyle
 
-proc printBashCompact*(res: string, idx: int) =
+proc printBashCompact*(res: string, idx: int, head = CompactHead, tail = CompactTail) =
   var lines = res.splitLines
   trimTrailingBlank(lines)
-  if lines.len <= CompactThreshold:
-    for l in lines: printLine(l)
-    return
-  # keep "$ cmd" line + head body + hidden marker + tail body + "[exit N]"
   var header = 0
   if header < lines.len and lines[header].startsWith("$ "):
     printLine(lines[header]); inc header
@@ -72,14 +126,18 @@ proc printBashCompact*(res: string, idx: int) =
   if footer > 0 and lines[footer-1].startsWith("[exit "):
     dec footer
   let bodyLen = footer - header
-  if bodyLen <= CompactThreshold:
+  let hidden = bodyLen - head - tail
+  # Only truncate when the hidden count exceeds what we'd show in
+  # truncated form (head + tail + marker). Otherwise the marker is
+  # heavier than the saving, so just print all of it.
+  if hidden <= head + tail + 1:
     for i in header ..< footer: printLine(lines[i])
   else:
-    for i in header ..< header + CompactHead: printLine(lines[i])
-    let hidden = bodyLen - CompactHead - CompactTail
-    hintLn &"  … {hidden} line" & (if hidden == 1: "" else: "s") &
+    for i in header ..< header + head: printLine(lines[i])
+    stdout.styledWriteLine styleDim,
+      &"  … {hidden} line" & (if hidden == 1: "" else: "s") &
       &" hidden · :show {idx} for full …", resetStyle
-    for i in footer - CompactTail ..< footer: printLine(lines[i])
+    for i in footer - tail ..< footer: printLine(lines[i])
   if footer < lines.len: printLine(lines[footer])
 
 proc printDiff*(diff: string) =
@@ -90,36 +148,37 @@ proc printDiff*(diff: string) =
     lines.setLen lines.len - 1
   if lines.len == 0: return
   proc paint(l: string) =
+    let s = "  " & l
     if l.startsWith("@@"):
-      stdout.styledWriteLine fgCyan, l, resetStyle
+      stdout.styledWriteLine fgCyan, s, resetStyle
     elif l.startsWith("+++") or l.startsWith("---"):
-      stdout.styledWriteLine styleDim, l, resetStyle
+      stdout.styledWriteLine styleDim, s, resetStyle
     elif l.len > 0 and l[0] == '+':
-      stdout.styledWriteLine fgGreen, l, resetStyle
+      stdout.styledWriteLine fgGreen, s, resetStyle
     elif l.len > 0 and l[0] == '-':
-      stdout.styledWriteLine fgRed, l, resetStyle
+      stdout.styledWriteLine fgRed, s, resetStyle
     else:
-      stdout.writeLine l
+      stdout.writeLine s
   if lines.len <= DiffHead + DiffTail + 2:
     for l in lines: paint(l)
     return
   for i in 0 ..< DiffHead: paint(lines[i])
   let hidden = lines.len - DiffHead - DiffTail
-  hintLn &"  … {hidden} line" & (if hidden == 1: "" else: "s") &
+  stdout.styledWriteLine styleDim,
+    &"  … {hidden} line" & (if hidden == 1: "" else: "s") &
     " hidden · `git diff` for full …", resetStyle
   for i in lines.len - DiffTail ..< lines.len: paint(lines[i])
 
 proc printActionResult*(act: Action, res: string, code: int, idx: int, diff = "") =
   if act.kind == akBash:
-    # The body no longer carries the "$ cmd" echo — reconstitute it for
-    # display from the action, then print the real output.
-    printLine("$ " & act.body.strip)
+    # Banner above already shows the command, so the output section
+    # only carries the real output to avoid a redundant `$ cmd` echo.
     printBashCompact(res, idx)
   elif act.kind == akRead:
-    printBashCompact(res, idx)
+    printBashCompact(res, idx, ReadHead, ReadTail)
   else:
     if code == 0:
-      stdout.styledWriteLine styleDim, res, resetStyle
+      stdout.styledWriteLine styleDim, "  " & res, resetStyle
     else:
       # Patch / write failure: only the headline goes to the user — the
       # full SEARCH body and any nearest-match hint are for the model
@@ -127,7 +186,7 @@ proc printActionResult*(act: Action, res: string, code: int, idx: int, diff = ""
       # a 30-line SEARCH block here just makes the screen shout.
       let nl = res.find('\n')
       let head = if nl < 0: res else: res[0 ..< nl]
-      stdout.styledWriteLine styleDim, head, resetStyle
+      stdout.styledWriteLine styleDim, "  " & head, resetStyle
   if diff.len > 0:
     printDiff(diff)
 
@@ -165,15 +224,15 @@ proc installEditorTweaks*() =
 proc welcome*(p: Profile): minline.LineEditor =
   stdout.write "\n"
   stdout.styledWriteLine fgCyan, styleBright, "  ╭─╮"
-  stdout.styledWriteLine fgCyan, styleBright, "   ─┤  ", resetStyle, fgWhite, styleBright, "3code ", resetStyle, fgCyan, styleBright, "v" & Version,
-    resetStyle, styleDim, "   the economical coding agent"
+  stdout.styledWrite fgCyan, styleBright, "   ─┤  ", resetStyle, fgWhite, styleBright, "3code ", resetStyle, fgCyan, styleBright, "v" & Version, resetStyle
+  stdout.styledWriteLine fgCyan, styleDim, "   the economical coding agent", resetStyle
   stdout.styledWriteLine fgCyan, styleBright, "  ╰─╯"
   stdout.write "\n"
   if p.name != "":
     showProfile(p)
     stdout.write "\n"
-    stdout.styledWriteLine fgCyan, styleBright, "  type a prompt. :help for commands. :q or Ctrl-D to exit.", resetStyle
-    stdout.write "\n"
+    stdout.styledWrite fgCyan, styleBright, "  type a prompt. ", resetStyle
+    stdout.styledWriteLine fgCyan, styleDim, ":help for commands. :q or Ctrl-D to exit.", resetStyle
   stdout.flushFile
   installEditorTweaks()
   result = minline.initEditor(historyFile = historyFile())
@@ -224,12 +283,20 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord], model: str
       let c = m{"content"}.getStr("").strip
       if c.len == 0: continue
       let shown = if c.len > 400: c[0 ..< 400] & " …" else: c
-      stdout.styledWrite fgWhite, styleBright, "» you  ", resetStyle
-      stdout.write shown, "\n"
+      let userLines = shown.splitLines
+      for idx, l in userLines:
+        let prefix = if idx == 0: "❯ " else: "  "
+        stdout.styledWrite fgWhite, prefix & l, resetStyle, "\n"
     of "assistant":
       let c = m{"content"}.getStr("").strip
       if c.len > 0:
-        stdout.styledWriteLine fgCyan, c, resetStyle
+        stdout.styledWrite fgWhite, styleBright, "● ", resetStyle
+        let asstLines = c.splitLines
+        var idx = 0
+        for l in asstLines:
+          let prefix = if idx == 0: "" else: "  "
+          stdout.styledWrite fgWhite, styleDim, prefix & l & "\n", resetStyle
+          inc idx
       let tcs = m{"tool_calls"}
       if tcs != nil and tcs.kind == JArray:
         for tc in tcs:
@@ -243,7 +310,7 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord], model: str
               let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
                          except CatchableError: newJObject()
               bannerFor(toolCallToAction(model, name, args))
-          stdout.styledWrite styleDim, "• ", banner, resetStyle, "\n"
+          stdout.styledWrite fgWhite, styleDim, "• ", banner, resetStyle, "\n"
     of "tool":
       let r = m{"content"}.getStr("")
       if r.len > 0:
