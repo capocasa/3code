@@ -408,7 +408,7 @@ proc cmdModelList(prof: Profile) =
     if kg == "" and not experimentalEnabled:
       stdout.styledWriteLine styleDim, "  ", mark, " ", m, resetStyle
     else:
-      let modeTag = if kg != "": &"  ({kg}, known-good)" else: ""
+      let modeTag = if kg != "": "  (known-good)" else: ""
       hintLn "  ", mark, " ", resetStyle, m, styleDim, modeTag, resetStyle
 
 proc cmdModelSelect(target: string, prof: var Profile) =

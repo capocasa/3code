@@ -619,16 +619,14 @@ input:
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
 
-known good (glm):
+known good:
   cerebras.zai-glm-4.7
   fireworks.glm-5p1
-known good (qwen):
   cerebras.qwen-3-235b-a22b-instruct-2507
+  deepinfra.Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo
   nvidia.qwen/qwen3-coder-480b-a35b-instruct
-known good (gpt-oss):
   nvidia.openai/gpt-oss-120b
   nvidia.openai/gpt-oss-20b
-known good (deepseek):
   deepseek.deepseek-v4-flash
 
 other combos require --experimental — they're your tokens to burn.
@@ -675,31 +673,15 @@ proc knownGoodTags*(provider, model: string): (string, string, string) =
       return (combo[2], combo[3], combo[4])
   ("", "", "")
 
-proc displayFamily(family: string): string =
-  case family.toLowerAscii
-  of "glm": "GLM"
-  of "qwen": "Qwen"
-  of "gpt-oss": "GPT-OSS"
-  of "deepseek": "DeepSeek"
-  of "kimi", "moonshot": "Kimi"
-  of "llama": "Llama"
-  of "mistral": "Mistral"
-  of "gemma": "Gemma"
-  else: family
-
 proc buildCredit*(p: Profile): string =
-  ## Dynamic attribution line: family + model + serving provider, derived
-  ## from the active profile. Bytes change with (provider, family, model),
-  ## not within a session — prefix caching survives as long as the user
-  ## doesn't `:provider`/`:model` switch mid-session.
+  ## Dynamic attribution line: model + serving provider, derived from
+  ## the active profile. Bytes change with (provider, model), not within
+  ## a session — prefix caching survives as long as the user doesn't
+  ## `:provider`/`:model` switch mid-session.
   let dot = p.name.find('.')
   let provider = if dot < 0: p.name else: p.name[0 ..< dot]
   let model = p.modelPrefix & p.model
-  let fam = displayFamily(p.family)
-  if provider != "" and fam != "":
-    "Credit where it's due: you're a " & fam & " model (" & model &
-      "), served via " & provider & "."
-  elif provider != "" and model != "":
+  if provider != "" and model != "":
     "Credit where it's due: you're " & model & ", served via " & provider & "."
   else:
     "Credit where it's due — to whoever trained the weights driving you and the lab serving them."
