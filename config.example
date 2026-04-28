@@ -7,6 +7,7 @@
 [settings]
 current = "baseten.glm5"
 ; current = "openai.gpt-4o-mini"
+; auto_update = "true"    ; on for prebuilt binaries, off for source builds
 
 [provider]
 name = "baseten"

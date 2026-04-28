@@ -40,14 +40,14 @@ jobs:
           echo '--path:"src"' >> nimble.paths
 
       - name: Build
-        run: nimble build -y -d:release
+        run: nimble build -y -d:release -d:autoUpdate
 
       - name: Build x86_64 and create universal binary (macOS)
         if: runner.os == 'macOS'
         run: |
           mv 3code 3code-arm64
           rm -rf ~/.cache/nim/threecode_r
-          nim c -d:release --passC:"-arch x86_64" --passL:"-arch x86_64" --cpu:amd64 -o:3code-x86_64 src/threecode.nim
+          nim c -d:release -d:autoUpdate --passC:"-arch x86_64" --passL:"-arch x86_64" --cpu:amd64 -o:3code-x86_64 src/threecode.nim
           lipo -create 3code-arm64 3code-x86_64 -output 3code
           file 3code
 
