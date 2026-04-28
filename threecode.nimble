@@ -1,6 +1,6 @@
 version       = "0.2.2"
 author        = "Carlo Capocasa"
-description   = "The economical coding agent, for any OpenAI-compatible model endpoint"
+description   = "The economical coding agent. It's so lean you can use it for free!"
 license       = "MIT"
 srcDir        = "src"
 namedBin["threecode"] = "3code"
