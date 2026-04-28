@@ -329,12 +329,12 @@ proc printSessionList*(paths: seq[string], currentPath: string, showCwd: bool) =
       resetStyle, cwdStr, snip, "\n"
 
 proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
-                       turnUsage: seq[Usage], window: int, family: string) =
+                       window: int, family: string) =
   ## Show the last user turn and everything after, so a resumed session
   ## drops the user back into context without replaying the whole history.
-  ## Renders via the same helpers the live path uses; `turnUsage` carries
-  ## per-assistant-message usage so each assistant block gets the same
-  ## token line as in live (no duration suffix).
+  ## Renders via the same helpers the live path uses; usage is read from
+  ## each assistant message's inline `usage` field (legacy sessions saved
+  ## before the inline format simply skip the token line).
   if messages == nil or messages.kind != JArray or messages.len == 0: return
   var start = messages.len
   for i in countdown(messages.len - 1, 0):
@@ -343,11 +343,9 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
       break
   if start >= messages.len: return
   var toolIdx = 0
-  var asstIdx = 0
   for i in 0 ..< start:
     let m = messages[i]
     if m{"role"}.getStr == "assistant":
-      inc asstIdx
       let tc = m{"tool_calls"}
       if tc != nil and tc.kind == JArray: toolIdx += tc.len
   for i in start ..< messages.len:
@@ -372,9 +370,9 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
         stdout.write "\n"
       let c = m{"content"}.getStr("").strip
       renderAssistantContent(c)
-      if asstIdx < turnUsage.len:
-        renderTokenLine(turnUsage[asstIdx], window)
-      inc asstIdx
+      let u = usageFromJson(m{"usage"})
+      if u.totalTokens > 0:
+        renderTokenLine(u, window)
       let tcs = m{"tool_calls"}
       let hasTools = tcs != nil and tcs.kind == JArray and tcs.len > 0
       if hasTools:

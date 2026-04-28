@@ -53,8 +53,6 @@ type
     usage*: Usage
     lastPromptTokens*: int
     toolLog*: seq[ToolRecord]
-    turnUsage*: seq[Usage]    ## per-assistant-message usage, aligned 1:1
-                              ## with assistant messages in `messages`
     savePath*: string
     profileName*: string
     created*: string

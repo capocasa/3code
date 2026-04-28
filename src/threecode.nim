@@ -20,7 +20,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
     session.usage.cachedTokens += usage.cachedTokens
     session.lastPromptTokens = usage.promptTokens
     messages.add msg
-    session.turnUsage.add usage
     saveSession(session, messages)
     if interrupted:
       stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
@@ -332,7 +331,7 @@ proc main() =
       &"({messages.len} msg" & (if messages.len == 1: "" else: "s") & ")",
       resetStyle
     stdout.write "\n"
-    replaySessionTail(messages, session.toolLog, session.turnUsage,
+    replaySessionTail(messages, session.toolLog,
                       contextWindowFor(prof.model), prof.family)
     stdout.write "\n"
     if prompt != "":

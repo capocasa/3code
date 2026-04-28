@@ -657,7 +657,6 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
   of ":clear":
     messages = %* [{"role": "system", "content": buildSystemPrompt(prof)}]
     session.toolLog.setLen 0
-    session.turnUsage.setLen 0
     session.usage = Usage()
     session.lastPromptTokens = 0
     if session.savePath != "":
