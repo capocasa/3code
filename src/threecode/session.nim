@@ -1,8 +1,8 @@
 import std/[algorithm, json, os, strutils, times]
-import types, prompts
+import types, prompts, util
 
 proc sessionDir*(): string =
-  getConfigDir() / "3code" / "sessions"
+  userDataRoot() / "sessions"
 
 proc sessionIdFromPath*(path: string): string =
   let name = path.extractFilename
@@ -127,7 +127,7 @@ proc firstUserMessage*(messages: JsonNode): string =
   ""
 
 proc historyFile*(): string =
-  let dir = getConfigDir() / "3code"
+  let dir = userDataRoot()
   try:
     createDir(dir)
     result = dir / "history"
