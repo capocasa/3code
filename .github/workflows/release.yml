@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            artifact: 3code-linux-amd64
+            ext: tar.gz
+          - os: macos-latest
+            artifact: 3code-macos-universal
+            ext: tar.gz
+          - os: windows-latest
+            artifact: 3code-windows-amd64
+            ext: zip
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: stable
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dependencies
+        run: |
+          nimble install -y --depsOnly
+          nimble setup -y
+          echo '--path:"src"' >> nimble.paths
+
+      - name: Build
+        run: nimble build -y -d:release
+
+      - name: Build x86_64 and create universal binary (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mv 3code 3code-arm64
+          rm -rf ~/.cache/nim/threecode_r
+          nim c -d:release --passC:"-arch x86_64" --passL:"-arch x86_64" --cpu:amd64 -o:3code-x86_64 src/threecode.nim
+          lipo -create 3code-arm64 3code-x86_64 -output 3code
+          file 3code
+
+      - name: Run tests
+        run: nimble test
+
+      - name: Package (Unix)
+        if: matrix.ext == 'tar.gz'
+        run: |
+          mkdir -p ${{ matrix.artifact }}
+          cp 3code ${{ matrix.artifact }}/
+          cp README.md LICENSE ${{ matrix.artifact }}/
+          tar czf ${{ matrix.artifact }}.${{ matrix.ext }} ${{ matrix.artifact }}
+
+      - name: Package (Windows)
+        if: matrix.ext == 'zip'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ${{ matrix.artifact }}
+          Copy-Item 3code.exe ${{ matrix.artifact }}/
+          Copy-Item README.md, LICENSE ${{ matrix.artifact }}/
+          Compress-Archive -Path ${{ matrix.artifact }} -DestinationPath ${{ matrix.artifact }}.${{ matrix.ext }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.${{ matrix.ext }}
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create ${{ github.ref_name }} \
+            --repo ${{ github.repository }} \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            3code-linux-amd64.tar.gz \
+            3code-macos-universal.tar.gz \
+            3code-windows-amd64.zip
