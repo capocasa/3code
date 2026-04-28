@@ -12,35 +12,35 @@ current = "baseten.glm5"
 name = "baseten"
 url = "https://inference.baseten.co/v1"
 key = "..."
-models = "glm5, qwen3c"
+models = "glm5 qwen3c"
 
 [provider]
 name = "openai"
 url = "https://api.openai.com/v1"
 key = "sk-..."
-models = "gpt-4o-mini, gpt-4o"
+models = "gpt-4o-mini gpt-4o"
 
 [provider]
 name = "groq"
 url = "https://api.groq.com/openai/v1"
 key = "gsk_..."
-models = "llama-3.3-70b-versatile, llama-3.1-8b-instant"
+models = "llama-3.3-70b-versatile llama-3.1-8b-instant"
 
 [provider]
 name = "together"
 url = "https://api.together.xyz/v1"
 key = "..."
-models = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+model_prefix = "meta-llama/"
+models = "Llama-3.3-70B-Instruct-Turbo"
 
-# Optional per-provider `mode` selects the agent protocol:
-#   tools (default) — OpenAI tool_calls; harness sends a tool schema
-#   text            — model emits fenced ```bash / path-then-fence / SEARCH/
-#                     REPLACE blocks; harness parses them. No schema sent.
-# The `:mode [text|tools]` REPL command toggles per-session for experiments.
+# `family` is an experimental-only override (only honored under
+# `--experimental`) that picks the system-prompt branch by family
+# name, when the (provider, model) combo isn't on the known-good
+# list. Known-good combos ignore it.
 ;
 ; [provider]
 ; name = "deepseek"
 ; url = "https://api.deepseek.com/v1"
 ; key = "..."
-; mode = "text"
+; family = "deepseek"
 ; models = "deepseek-chat"

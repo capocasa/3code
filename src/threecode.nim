@@ -23,7 +23,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
       interrupted = false
       return
-    let window = contextWindowFor(p.variant)
+    let window = contextWindowFor(p.model)
     var summarized = 0
     case decideContextAction(usage.promptTokens, window, messages.len)
     of caSummarize:
@@ -86,7 +86,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
             stderr.writeLine "3code: tool_call " & name &
               " has malformed arguments JSON (" & e.msg & "): " & argsStr
             newJObject()
-        let act = toolCallToAction(p.model, name, args)
+        let act = toolCallToAction(p.family, name, args)
         let idx = session.toolLog.len + 1
         let silent = isSkillRead(act)
         # Pre-exec: dim bullet + dim banner text — "in flight" signal. After
@@ -332,7 +332,7 @@ proc main() =
       &"({messages.len} msg" & (if messages.len == 1: "" else: "s") & ")",
       resetStyle
     stdout.write "\n"
-    replaySessionTail(messages, session.toolLog, prof.model)
+    replaySessionTail(messages, session.toolLog, prof.family)
     stdout.write "\n"
     if prompt != "":
       messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}

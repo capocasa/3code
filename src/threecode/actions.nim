@@ -14,9 +14,9 @@ import types, util, shell
 # runAction returns a clean error rather than crashing.
 # ---------------------------------------------------------------------------
 
-proc unknownTool(model, name: string): Action =
+proc unknownTool(family, name: string): Action =
   Action(kind: akBash,
-         body: "echo 'tool not offered to model " & model & ": " & name &
+         body: "echo 'tool not offered to family " & family & ": " & name &
                "' >&2; exit 1")
 
 proc dispatchGlmOrQwen(name: string, args: JsonNode): Action =
@@ -58,14 +58,14 @@ proc dispatchGptOss(rawName: string, args: JsonNode): Action =
   else:
     unknownTool("gpt-oss", rawName)
 
-proc toolCallToAction*(model, name: string, args: JsonNode): Action =
-  ## Routes a tool_call to the dispatcher for the active model. The model
-  ## label comes from `Profile.model` ("glm" / "qwen" / "gpt-oss"); the
+proc toolCallToAction*(family, name: string, args: JsonNode): Action =
+  ## Routes a tool_call to the dispatcher for the active family. The family
+  ## label comes from `Profile.family` ("glm" / "qwen" / "gpt-oss"); the
   ## case statement below mirrors `setup` in `prompts.nim`.
-  case model
+  case family
   of "glm", "qwen", "deepseek": dispatchGlmOrQwen(name, args)
   of "gpt-oss": dispatchGptOss(name, args)
-  else: die "unknown model in tool dispatch: '" & model & "'"
+  else: die "unknown family in tool dispatch: '" & family & "'"
 
 proc nearestLineHint(content, search: string): string =
   ## When a patch search block didn't match, point the model at the most

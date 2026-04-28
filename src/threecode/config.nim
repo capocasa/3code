@@ -3,16 +3,18 @@ import types, prompts
 
 type
   ProviderRec* = object
-    ## In-memory mirror of a [provider] section. `model` is the optional
-    ## experimental override (broad name like "glm"/"qwen"/"gpt-oss"); only
-    ## honored when --experimental is on. Known-good combos ignore it.
-    ## `variants` is the list of API ids this provider exposes.
-    name*, url*, key*, variantPrefix*, model*: string
-    variants*: seq[string]
+    ## In-memory mirror of a [provider] section. `family` is the optional
+    ## experimental override (broad name like "glm"/"qwen"/"gpt-oss") used
+    ## to pick a system prompt; only honored when --experimental is on.
+    ## Known-good combos ignore it. `models` is the list of API model ids
+    ## this provider exposes (stored without `modelPrefix`, which carries
+    ## the shared path prefix so it doesn't repeat per model).
+    name*, url*, key*, modelPrefix*, family*: string
+    models*: seq[string]
 
-proc findVariant*(p: ProviderRec, name: string): int =
-  for i, v in p.variants:
-    if v == name: return i
+proc findModel*(p: ProviderRec, name: string): int =
+  for i, m in p.models:
+    if m == name: return i
   -1
 
 var activeCurrent*: string
@@ -38,21 +40,21 @@ proc explainExperimentalGate*(p: Profile) =
     " is experimental (start 3code with --experimental to use anyway, not recommended)",
     resetStyle
 
-proc hasKnownGoodVariant*(prov: ProviderRec): bool =
-  for v in prov.variants:
-    if knownGoodModel(prov.name, prov.variantPrefix & v) != "": return true
+proc hasKnownGoodModel*(prov: ProviderRec): bool =
+  for m in prov.models:
+    if knownGoodFamily(prov.name, prov.modelPrefix & m) != "": return true
   false
 
 proc firstKnownGoodCombo*(providers: seq[ProviderRec]): string =
-  ## Returns "<provider>.<variant>" of the first (provider, variant) pair across
+  ## Returns "<provider>.<model>" of the first (provider, model) pair across
   ## `providers` that hits a `KnownGoodCombos` entry, or "" if none. Lets a
   ## non-experimental startup recover when the persisted `current` points at
   ## an experimental combo.
   for pr in providers:
     if pr.url == "" or pr.key == "": continue
-    for v in pr.variants:
-      if knownGoodModel(pr.name, pr.variantPrefix & v) != "":
-        return pr.name & "." & v
+    for m in pr.models:
+      if knownGoodFamily(pr.name, pr.modelPrefix & m) != "":
+        return pr.name & "." & m
   ""
 
 proc currentProvider*(): ProviderRec =
@@ -62,15 +64,15 @@ proc currentProvider*(): ProviderRec =
     if pr.name == name: return pr
   ProviderRec()
 
-proc splitVariants*(s: string): seq[string] =
-  ## Whitespace- (and comma-) separated list of bare variant names. Model
+proc splitModels*(s: string): seq[string] =
+  ## Whitespace- (and comma-) separated list of bare model names. Family
   ## lives elsewhere — KnownGoodCombos hardcodes it; the [provider]
-  ## `model = ...` key supplies an experimental override.
+  ## `family = ...` key supplies an experimental override.
   for raw in s.splitWhitespace:
-    let v = raw.strip(chars = {',', ' '})
-    if v.len > 0: result.add v
+    let m = raw.strip(chars = {',', ' '})
+    if m.len > 0: result.add m
 
-proc formatVariants*(variants: seq[string]): string = variants.join(" ")
+proc formatModels*(models: seq[string]): string = models.join(" ")
 
 proc expandEnvValue(s: string): string =
   ## Expand a leading `$VAR` reference (after any surrounding whitespace) to
@@ -115,9 +117,9 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec]) =
         of "name": prov.name = v
         of "url": prov.url = v.strip(chars = {'/', ' '})
         of "key": prov.key = v
-        of "variant_prefix": prov.variantPrefix = v
-        of "model": prov.model = v
-        of "variants": prov.variants = splitVariants(v)
+        of "model_prefix": prov.modelPrefix = v
+        of "family": prov.family = v
+        of "models": prov.models = splitModels(v)
         else: discard
       else: discard
     of cfgError:
@@ -144,11 +146,11 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "name = " & quoteVal(pr.name) & "\n"
     buf.add "url = " & quoteVal(pr.url) & "\n"
     buf.add "key = " & quoteVal(pr.key) & "\n"
-    if pr.variantPrefix != "":
-      buf.add "variant_prefix = " & quoteVal(pr.variantPrefix) & "\n"
-    if pr.model != "":
-      buf.add "model = " & quoteVal(pr.model) & "\n"
-    buf.add "variants = " & quoteVal(formatVariants(pr.variants)) & "\n"
+    if pr.modelPrefix != "":
+      buf.add "model_prefix = " & quoteVal(pr.modelPrefix) & "\n"
+    if pr.family != "":
+      buf.add "family = " & quoteVal(pr.family) & "\n"
+    buf.add "models = " & quoteVal(formatModels(pr.models)) & "\n"
   writeFile(path, buf)
 
 proc configPath*(): string =
@@ -158,15 +160,15 @@ proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec]) =
   if not fileExists(path): return ("", @[])
   parseConfigFile(path)
 
-proc resolveModel*(prov: ProviderRec, prof: Profile): string =
-  ## Model is resolved at profile-build time:
+proc resolveFamily*(prov: ProviderRec, prof: Profile): string =
+  ## Family is resolved at profile-build time:
   ## 1. KnownGoodCombos hardcode (always wins; ignores config and -x)
-  ## 2. provider-level `model = ...` — only honored under --experimental
+  ## 2. provider-level `family = ...` — only honored under --experimental
   ## 3. default → "glm"
-  let kg = knownGoodModel(prof)
+  let kg = knownGoodFamily(prof)
   if kg != "": return kg
-  if experimentalEnabled and prov.model.strip != "":
-    return prov.model.strip.toLowerAscii
+  if experimentalEnabled and prov.family.strip != "":
+    return prov.family.strip.toLowerAscii
   "glm"
 
 proc buildProfile*(current: string, providers: seq[ProviderRec],
@@ -178,19 +180,22 @@ proc buildProfile*(current: string, providers: seq[ProviderRec],
   if pick == "": pick = providers[0].name
   let dot = pick.find('.')
   let name = if dot < 0: pick else: pick[0 ..< dot]
-  var variant = if dot < 0: "" else: pick[dot + 1 .. ^1]
+  var model = if dot < 0: "" else: pick[dot + 1 .. ^1]
   for pr in providers:
     if pr.name == name:
-      if pr.url == "" or pr.key == "" or pr.variants.len == 0:
+      if pr.url == "" or pr.key == "" or pr.models.len == 0:
         return Profile()
-      if variant == "":
-        variant = pr.variants[0]
-      if pr.findVariant(variant) < 0:
+      if model == "":
+        model = pr.models[0]
+      if pr.findModel(model) < 0:
         return Profile()
-      var prof = Profile(name: pr.name & "." & variant, url: pr.url,
-                         key: pr.key, variantPrefix: pr.variantPrefix,
-                         variant: variant)
-      prof.model = resolveModel(pr, prof)
+      var prof = Profile(name: pr.name & "." & model, url: pr.url,
+                         key: pr.key, modelPrefix: pr.modelPrefix,
+                         model: model)
+      prof.family = resolveFamily(pr, prof)
+      let (_, ver, vrt) = knownGoodTags(pr.name, pr.modelPrefix & model)
+      prof.version = ver
+      prof.variant = vrt
       return prof
   Profile()
 
@@ -213,7 +218,7 @@ proc loadProfile*(wanted: string): Profile =
     die &"no current provider set in {path} and first [provider] has no name", ExitConfig
   let dot = pick.find('.')
   let name = if dot < 0: pick else: pick[0 ..< dot]
-  var variant = if dot < 0: "" else: pick[dot + 1 .. ^1]
+  var model = if dot < 0: "" else: pick[dot + 1 .. ^1]
   var prov: ProviderRec
   var found = false
   for p in providers:
@@ -225,14 +230,17 @@ proc loadProfile*(wanted: string): Profile =
     die &"provider '{name}' not found in {path}", ExitConfig
   if prov.url == "": die &"provider '{name}': url not set in {path}", ExitConfig
   if prov.key == "": die &"provider '{name}': key not set in {path}", ExitConfig
-  if prov.variants.len == 0: die &"provider '{name}': variants not set in {path}", ExitConfig
-  if variant == "":
-    variant = prov.variants[0]
-  if prov.findVariant(variant) < 0:
-    die &"provider '{name}': variant '{variant}' not in variants list ({prov.variants.join(\", \")})", ExitConfig
-  var prof = Profile(name: prov.name & "." & variant, url: prov.url, key: prov.key,
-                     variantPrefix: prov.variantPrefix, variant: variant)
-  prof.model = resolveModel(prov, prof)
+  if prov.models.len == 0: die &"provider '{name}': models not set in {path}", ExitConfig
+  if model == "":
+    model = prov.models[0]
+  if prov.findModel(model) < 0:
+    die &"provider '{name}': model '{model}' not in models list ({prov.models.join(\", \")})", ExitConfig
+  var prof = Profile(name: prov.name & "." & model, url: prov.url, key: prov.key,
+                     modelPrefix: prov.modelPrefix, model: model)
+  prof.family = resolveFamily(prov, prof)
+  let (_, ver, vrt) = knownGoodTags(prov.name, prov.modelPrefix & model)
+  prof.version = ver
+  prof.variant = vrt
   if wanted == "" and not experimentalEnabled and not isKnownGood(prof):
     let fallback = firstKnownGoodCombo(providers)
     if fallback != "":
@@ -304,8 +312,16 @@ proc defaultNameFromUrl*(url: string): string =
   if labels.len >= 2: labels[^2]
   else: labels[0]
 
-proc commonVariantPrefix*(models: seq[string]): string =
-  if models.len < 2: return ""
+proc commonModelPrefix*(models: seq[string]): string =
+  ## Path-style prefix (everything up to and including the last `/`)
+  ## shared by every entry. For a single model, returns its own path
+  ## prefix so providers like `openai/gpt-oss-120b` get split into a
+  ## `model_prefix` of `openai/` and a bare `gpt-oss-120b`. When no
+  ## entries share a slashed prefix, returns "".
+  if models.len == 0: return ""
+  if models.len == 1:
+    let slash = models[0].rfind('/')
+    return if slash < 0: "" else: models[0][0 .. slash]
   var prefix = models[0]
   for m in models[1 .. ^1]:
     var i = 0
@@ -316,6 +332,14 @@ proc commonVariantPrefix*(models: seq[string]): string =
   let slash = prefix.rfind('/')
   if slash < 0: "" else: prefix[0 .. slash]
 
+proc shortModel*(model: string): string =
+  ## The portion of a model id after the last `/`. Used in `:model`
+  ## listings and other places where the path-style provider namespace
+  ## is redundant. `gpt-oss-120b` for `openai/gpt-oss-120b`,
+  ## `glm-5p1` for `accounts/fireworks/models/glm-5p1`.
+  let slash = model.rfind('/')
+  if slash < 0: model else: model[slash + 1 .. ^1]
+
 proc curatedFor*(provider: string): (string, seq[string]) =
   ## Returns (commonPrefix, modelsWithoutPrefix) from KnownGoodCombos
   ## for the given provider name.
@@ -323,7 +347,7 @@ proc curatedFor*(provider: string): (string, seq[string]) =
   let p = provider.toLowerAscii
   for c in KnownGoodCombos:
     if c[0].toLowerAscii == p: fullIds.add c[1]
-  let prefix = commonVariantPrefix(fullIds)
+  let prefix = commonModelPrefix(fullIds)
   var stripped: seq[string]
   for m in fullIds:
     if prefix != "" and m.startsWith(prefix): stripped.add m[prefix.len .. ^1]
