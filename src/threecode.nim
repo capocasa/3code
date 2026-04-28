@@ -1,4 +1,6 @@
 import std/[json, os, parseopt, strformat, strutils, terminal, times]
+when defined(posix):
+  import std/posix
 import threecode/[types, util, prompts, shell, loop, session, compact,
                   config, actions, api, display, ui, update, web]
 import threecode/minline
@@ -213,7 +215,19 @@ proc runFetch(args: seq[string]) =
   stdout.write capText(text)
   stdout.write "\n"
 
+proc refuseRoot() =
+  ## 3code runs arbitrary shell commands the model proposes — root
+  ## blast radius is unacceptable. The install script also refuses, so
+  ## a normal `curl | sh` user shouldn't ever see this; it's the safety
+  ## net for `sudo 3code`, root containers, etc.
+  when defined(posix):
+    if geteuid() == 0 and getEnv("THREECODE_ALLOW_ROOT").len == 0:
+      stderr.writeLine "3code: refusing to run as root. " &
+        "Run as your normal user. (override: THREECODE_ALLOW_ROOT=1)"
+      quit ExitUsage
+
 proc main() =
+  refuseRoot()
   # Internal flag for the detached background worker. Run silently and
   # exit before any other startup work (skill extraction, config load).
   let cl = commandLineParams()
