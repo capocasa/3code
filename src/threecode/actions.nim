@@ -63,7 +63,7 @@ proc toolCallToAction*(model, name: string, args: JsonNode): Action =
   ## label comes from `Profile.model` ("glm" / "qwen" / "gpt-oss"); the
   ## case statement below mirrors `setup` in `prompts.nim`.
   case model
-  of "glm", "qwen": dispatchGlmOrQwen(name, args)
+  of "glm", "qwen", "deepseek": dispatchGlmOrQwen(name, args)
   of "gpt-oss": dispatchGptOss(name, args)
   else: die "unknown model in tool dispatch: '" & model & "'"
 
@@ -144,6 +144,12 @@ proc parseV4APatch(text: string): seq[V4AOp] =
       var body = ""
       while i < lines.len and not lines[i].startsWith("***"):
         let l = lines[i]
+        if l.startsWith("@@"):
+          raise newException(ValueError,
+            "Add File '" & path & "': '@@' hunk anchor is not valid in an Add File body — emit only '+'-prefixed lines for new files")
+        if l.len > 0 and l[0] == '-':
+          raise newException(ValueError,
+            "Add File '" & path & "': '-'-prefixed line is not valid in an Add File body — emit only '+'-prefixed lines for new files")
         if l.len > 0 and l[0] == '+': body.add l[1 .. ^1] & "\n"
         else: body.add l & "\n"
         inc i
@@ -391,7 +397,11 @@ export DEBIAN_FRONTEND=noninteractive
     except CatchableError as e:
       return (&"error: patch {path}: {e.msg}", 1, "")
   of akApplyPatch:
-    let ops = parseV4APatch(act.body)
+    var ops: seq[V4AOp]
+    try:
+      ops = parseV4APatch(act.body)
+    except ValueError as e:
+      return (&"error: apply_patch: {e.msg}", 1, "")
     if ops.len == 0:
       return ("error: apply_patch: no operations parsed (need *** Begin Patch ... *** End Patch with at least one *** Add/Update/Delete File: line)", 1, "")
     var msgs: seq[string]
