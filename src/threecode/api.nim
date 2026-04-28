@@ -1,5 +1,5 @@
 import std/[algorithm, atomics, httpclient, json, locks, os, osproc, sequtils, streams, strformat, strutils, tables, terminal, times]
-import types, util, prompts, compact
+import types, util, prompts, compact, display
 
 # ---------- Spinner ----------
 
@@ -94,20 +94,6 @@ proc spinnerLoop(unused: string) {.thread.} =
       stdout.write "\n\x1b[2K\r\x1b[1A"
     stdout.flushFile
   except CatchableError: discard
-
-proc contextLabel*(promptTokens, window: int): string =
-  ## "○ 12%" / "◔ 25%" / … / "● 92%" — same shape used by the live spinner
-  ## indicator and the final per-turn token line. Empty string when there's
-  ## no useful context number (no window, or no tokens yet).
-  if window <= 0 or promptTokens <= 0: return ""
-  let pct = int(promptTokens.float / window.float * 100.0)
-  let glyph =
-    if pct < 20: "○"
-    elif pct < 40: "◔"
-    elif pct < 60: "◑"
-    elif pct < 80: "◕"
-    else: "●"
-  &"{glyph} {pct}%"
 
 proc liveLabel*(base: string, slurped: int): string =
   ## Spinner label whose token slots match the per-call summary's shape:
@@ -592,15 +578,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   usage = outcome.usage
   let elapsed = epochTime() - t0
   if usage.totalTokens > 0:
-    let fresh = max(0, usage.promptTokens - usage.cachedTokens)
-    let ctx = contextLabel(usage.promptTokens, window)
-    let line =
-      (if ctx.len > 0: ctx & "   " else: "") &
-      tokenSlot("↑", fresh) &
-      "   " & tokenSlot("↺", usage.cachedTokens) &
-      "   " & tokenSlot("↓", usage.completionTokens) &
-      "   " & $elapsed.int & "s"
-    stdout.styledWrite(styleDim, "  " & line, resetStyle, "\n")
+    renderTokenLine(usage, window, elapsed.int)
     if window > 0 and usage.promptTokens.float > 0.7 * window.float and
        usage.promptTokens.float <= CompactThresholdFrac * window.float:
       stdout.styledWriteLine(styleDim,

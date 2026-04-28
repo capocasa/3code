@@ -20,6 +20,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
     session.usage.cachedTokens += usage.cachedTokens
     session.lastPromptTokens = usage.promptTokens
     messages.add msg
+    session.turnUsage.add usage
     saveSession(session, messages)
     if interrupted:
       stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
@@ -58,15 +59,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       else: newJArray()
     if toolCalls.len > 0:
       if content.strip.len > 0 and not streamedLive:
-        stdout.styledWrite fgWhite, styleBright, "● ", resetStyle
-        let lines = content.splitLines
-        var idx = 0
-        for l in lines:
-          let prefix = if idx == 0: "" else: "  "
-          stdout.styledWrite fgWhite, styleDim, prefix & l & "\n", resetStyle
-          inc idx
+        renderAssistantContent(content)
         stdout.write "\n"
-        stdout.flushFile
       var halt = false  # Strike-2 trip: stop further tool calls this turn
       for tc in toolCalls:
         let id = tc{"id"}.getStr
@@ -91,15 +85,14 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         let act = toolCallToAction(p.family, name, args)
         let idx = session.toolLog.len + 1
         let silent = isSkillRead(act)
-        # Pre-exec: dim bullet + dim banner text — "in flight" signal. After
-        # the call returns we overwrite the line so the bullet only picks up
-        # a colour (green success, red error); the banner text itself stays
-        # dim so the colour acts as a glance cue, not a shout. Skill loads
-        # skip the banner entirely; the model's own "loaded skill: <name>"
-        # line is the only signal the user sees.
+        # Pre-exec: dim bullet + dim banner text — "in flight" signal.
+        # After the call returns we move the cursor up and rewrite the
+        # line via renderToolBanner so the bullet picks up a colour
+        # (green success, dim error) and gains a duration suffix. Skill
+        # loads skip the banner entirely; the model's own
+        # "loaded skill: <name>" line is the only signal the user sees.
         if not silent:
-          stdout.styledWrite fgWhite, styleDim, "• ", bannerFor(act), resetStyle, "\n"
-          stdout.flushFile
+          renderToolPending(bannerFor(act))
         let toolT0 = epochTime()
         if session.readCache == nil: session.readCache = newReadCache()
         var (r, code, diff) = runAction(act, session.readCache)
@@ -108,16 +101,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
         if not silent:
           stdout.write "\e[1A\r\e[2K"
-          if code == 0:
-            stdout.styledWrite fgGreen, "• ", resetStyle
-          else:
-            stdout.styledWrite fgWhite, styleDim, "• ", resetStyle
-          stdout.styledWrite fgWhite, styleDim, bannerFor(act), resetStyle
-          if toolElapsed >= 1:
-            stdout.styledWrite fgWhite, styleDim, &"  ({toolElapsed.int}s)", resetStyle
-          stdout.write "\n"
-          stdout.flushFile
-          printActionResult(act, r, code, idx, diff)
+          renderToolBanner(bannerFor(act), code, toolElapsed.int)
+          printToolResult(act.kind, r, code, idx, diff)
         else:
           printSkillLoaded(act)
         # Loop guard: fingerprint the call and decide whether to annotate the
@@ -159,15 +144,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       continue
     if content.strip.len > 0:
       if not streamedLive:
-        stdout.styledWrite fgWhite, styleBright, "● ", resetStyle
-        let lines = content.splitLines
-        var idx = 0
-        for l in lines:
-          let prefix = if idx == 0: "" else: "  "
-          stdout.styledWrite fgWhite, styleDim, prefix & l & "\n", resetStyle
-          inc idx
-        stdout.write "\n"
-        stdout.flushFile
+        renderAssistantContent(content)
     else:
       stdout.styledWriteLine styleDim,
         "  (empty reply — no content, no tool calls)", resetStyle
@@ -355,7 +332,8 @@ proc main() =
       &"({messages.len} msg" & (if messages.len == 1: "" else: "s") & ")",
       resetStyle
     stdout.write "\n"
-    replaySessionTail(messages, session.toolLog, prof.family)
+    replaySessionTail(messages, session.toolLog, session.turnUsage,
+                      contextWindowFor(prof.model), prof.family)
     stdout.write "\n"
     if prompt != "":
       messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}

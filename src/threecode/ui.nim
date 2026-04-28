@@ -29,22 +29,23 @@ proc completionFor*(line: string): seq[string] =
 
 proc readRequired*(editor: var minline.LineEditor, prompt: string,
                   hidden = false, noHistory = true): string =
+  ## ctrl+c raises `minline.InputCancelled` to the caller; ctrl+d aborts
+  ## the program. Empty input keeps re-prompting.
   while true:
     let s = try: editor.readLine(prompt, hidechars = hidden, noHistory = noHistory).strip
             except EOFError:
               stdout.write "\n"
               die "aborted", ExitConfig
-            except minline.InputCancelled:
-              continue
     if s != "": return s
 
 proc readOptional*(editor: var minline.LineEditor, prompt: string,
                   hidden = false, noHistory = true): string =
+  ## ctrl+c raises `minline.InputCancelled` to the caller; ctrl+d aborts
+  ## the program. Empty input is returned as "".
   try: editor.readLine(prompt, hidechars = hidden, noHistory = noHistory).strip
   except EOFError:
     stdout.write "\n"
     die "aborted", ExitConfig
-  except minline.InputCancelled: ""
 
 # ---------- Provider wizard ----------
 
@@ -214,7 +215,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
 
 proc promptEditProvider*(editor: var minline.LineEditor,
                         existing: ProviderRec): ProviderRec =
-  hintLn &"  editing '{existing.name}' (enter to keep, ctrl+d to abort)",
+  hintLn &"  editing '{existing.name}' (enter to keep, ctrl+c to abort)",
     resetStyle
   stdout.styledWriteLine styleDim,
     "  # tip: change name + url to point at a fine-tune deployment", resetStyle
@@ -262,8 +263,11 @@ proc promptEditProvider*(editor: var minline.LineEditor,
 
 proc bootstrapProvider*(editor: var minline.LineEditor): Profile =
   stdout.styledWriteLine fgMagenta, styleBright,
-    "  no provider configured — let's add one. (ctrl+d to quit)", resetStyle
-  let prov = promptNewProvider(editor)
+    "  no provider configured, let's add one. (ctrl+c or ctrl+d to quit)",
+    resetStyle
+  let prov = try: promptNewProvider(editor)
+             except minline.InputCancelled:
+               die "aborted", ExitConfig
   activeProviders.add prov
   activeCurrent = prov.name & "." & prov.models[0]
   writeConfigFile(configPath(), activeCurrent, activeProviders)
@@ -312,7 +316,10 @@ proc cmdProviderSelect(target: string, prof: var Profile) =
     explainExperimentalGate(candidate)
 
 proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
-  let prov = promptNewProvider(editor)
+  let prov = try: promptNewProvider(editor)
+             except minline.InputCancelled:
+               hintLn "  cancelled", resetStyle
+               return
   activeProviders.add prov
   if activeCurrent == "":
     activeCurrent = prov.name & "." & prov.models[0]
@@ -330,7 +337,10 @@ proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
   if idx < 0:
     stdout.styledWriteLine fgMagenta, &"  unknown provider: {target}", resetStyle
     return
-  let updated = promptEditProvider(editor, activeProviders[idx])
+  let updated = try: promptEditProvider(editor, activeProviders[idx])
+                except minline.InputCancelled:
+                  hintLn "  cancelled", resetStyle
+                  return
   activeProviders[idx] = updated
   let curName = if activeCurrent == "": "" else: activeCurrent.split('.')[0]
   if curName == target:
@@ -647,6 +657,7 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
   of ":clear":
     messages = %* [{"role": "system", "content": buildSystemPrompt(prof)}]
     session.toolLog.setLen 0
+    session.turnUsage.setLen 0
     session.usage = Usage()
     session.lastPromptTokens = 0
     if session.savePath != "":
