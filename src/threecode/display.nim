@@ -196,8 +196,6 @@ proc showProfile*(p: Profile) =
   let provider = if dot < 0: p.name else: p.name[0 ..< dot]
   stdout.styledWriteLine fgCyan, styleBright, "  provider ", resetStyle, provider
   stdout.styledWriteLine fgCyan, styleBright, "  model    ", resetStyle, p.model
-  let fam = if p.family != "": p.family else: "glm"
-  stdout.styledWriteLine fgCyan, styleBright, "  family   ", resetStyle, fam
 
 # Track up-navigation so "down past last" can return to blank line.
 var navigatedUp*: bool = false
