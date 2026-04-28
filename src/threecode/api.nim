@@ -587,6 +587,15 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   else:
     hint &"  · {elapsed.int}s", resetStyle, "\n"
   stdout.flushFile
+  if outcome.assistantMsg != nil and usage.totalTokens > 0:
+    # Attach this turn's usage inline so replay can render the same
+    # token line without a parallel array that drifts under summarization.
+    outcome.assistantMsg["usage"] = %*{
+      "promptTokens": usage.promptTokens,
+      "completionTokens": usage.completionTokens,
+      "totalTokens": usage.totalTokens,
+      "cachedTokens": usage.cachedTokens,
+    }
   outcome.assistantMsg
 
 proc verifyProfile*(p: Profile): (bool, string) =

@@ -71,43 +71,25 @@ proc toolLogFromJson*(node: JsonNode): seq[ToolRecord] =
       kind: k,
     )
 
-proc turnUsageToJson*(usages: seq[Usage]): JsonNode =
-  result = newJArray()
-  for u in usages:
-    result.add %*{
-      "promptTokens": u.promptTokens,
-      "completionTokens": u.completionTokens,
-      "totalTokens": u.totalTokens,
-      "cachedTokens": u.cachedTokens,
-    }
+proc usageToJson*(u: Usage): JsonNode =
+  %*{
+    "promptTokens": u.promptTokens,
+    "completionTokens": u.completionTokens,
+    "totalTokens": u.totalTokens,
+    "cachedTokens": u.cachedTokens,
+  }
 
-proc turnUsageFromJson*(node: JsonNode): seq[Usage] =
-  if node == nil or node.kind != JArray: return
-  for item in node:
-    if item.kind != JObject: continue
-    result.add Usage(
-      promptTokens: item{"promptTokens"}.getInt(0),
-      completionTokens: item{"completionTokens"}.getInt(0),
-      totalTokens: item{"totalTokens"}.getInt(0),
-      cachedTokens: item{"cachedTokens"}.getInt(0),
-    )
-
-proc countAssistants(messages: JsonNode): int =
-  if messages == nil or messages.kind != JArray: return 0
-  for m in messages:
-    if m.kind == JObject and m{"role"}.getStr == "assistant":
-      inc result
+proc usageFromJson*(j: JsonNode): Usage =
+  if j == nil or j.kind != JObject: return
+  Usage(
+    promptTokens: j{"promptTokens"}.getInt(0),
+    completionTokens: j{"completionTokens"}.getInt(0),
+    totalTokens: j{"totalTokens"}.getInt(0),
+    cachedTokens: j{"cachedTokens"}.getInt(0),
+  )
 
 proc saveSession*(session: Session, messages: JsonNode) =
   if session.savePath == "": return
-  # Trim turnUsage to the current assistant count: summarization can
-  # collapse old assistants into one synthetic_user, leaving stale
-  # leading entries that would mis-align with the visible turns.
-  let asstCount = countAssistants(messages)
-  let drop = max(0, session.turnUsage.len - asstCount)
-  let usages =
-    if drop == 0: session.turnUsage
-    else: session.turnUsage[drop .. ^1]
   try:
     createDir(session.savePath.parentDir)
     let body = %*{
@@ -116,16 +98,10 @@ proc saveSession*(session: Session, messages: JsonNode) =
       "updated": $now(),
       "profile": session.profileName,
       "cwd": session.cwd,
-      "usage": {
-        "promptTokens": session.usage.promptTokens,
-        "completionTokens": session.usage.completionTokens,
-        "totalTokens": session.usage.totalTokens,
-        "cachedTokens": session.usage.cachedTokens,
-      },
+      "usage": usageToJson(session.usage),
       "lastPromptTokens": session.lastPromptTokens,
       "messages": messages,
       "toolLog": toolLogToJson(session.toolLog),
-      "turnUsage": turnUsageToJson(usages),
     }
     writeFile(session.savePath, body.pretty)
   except CatchableError as e:
@@ -150,13 +126,9 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
     sess.usage.totalTokens = u{"totalTokens"}.getInt(0)
     sess.usage.cachedTokens = u{"cachedTokens"}.getInt(0)
   sess.toolLog = toolLogFromJson(j{"toolLog"})
-  sess.turnUsage = turnUsageFromJson(j{"turnUsage"})
   var messages = j{"messages"}
   if messages == nil or messages.kind != JArray:
     messages = %* [{"role": "system", "content": DefaultSystemPrompt}]
-  let asstCount = countAssistants(messages)
-  if sess.turnUsage.len > asstCount:
-    sess.turnUsage = sess.turnUsage[sess.turnUsage.len - asstCount .. ^1]
   (sess, messages)
 
 proc firstUserMessage*(messages: JsonNode): string =
