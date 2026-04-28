@@ -452,12 +452,18 @@ proc nearestCommand(name: string): string =
 # ---------- Session preamble + user-input prep ----------
 
 proc loadAgentsMd(start: string): string =
-  ## Walk from `start` up to the filesystem root. Concatenate every
-  ## AGENTS.md found, child first (closest to cwd takes precedence in
-  ## the model's reading order). Each file is preceded by its path so
-  ## the model can attribute instructions.
+  ## Walk from `start` up to the filesystem root. At each level, prefer
+  ## 3CODE.md over AGENTS.md. If 3CODE.md is found, load it and stop
+  ## (never mix both files). Otherwise collect AGENTS.md as before.
   var dir = absolutePath(start)
   while true:
+    let candidate3 = dir / "3CODE.md"
+    if fileExists(candidate3):
+      try:
+        let body = readFile(candidate3)
+        result = "# " & candidate3 & "\n\n" & body
+      except CatchableError: discard
+      break
     let candidate = dir / "AGENTS.md"
     if fileExists(candidate):
       try:
@@ -564,11 +570,19 @@ proc buildUserMessage*(messages: JsonNode, raw: string): string =
     body
 
 proc readInput*(editor: var minline.LineEditor, done: var bool): string =
+  stdout.write "\n"
+  # Plain white while the user types; reset on every exit path so the
+  # rest of the UI keeps its own colours. The LLM body uses fgWhite +
+  # dim (off-white) so plain white reads brighter by contrast.
+  stdout.write "\x1b[37m"
   var line = try: editor.readLine("❯ ")
              except EOFError:
+               stdout.write "\x1b[0m"
                done = true; return ""
              except minline.InputCancelled:
+               stdout.write "\x1b[0m"
                return ""
+  stdout.write "\x1b[0m"
   navigatedUp = false
   # Trailing unescaped `\` continues to the next line, joined with `\n`.
   # Even count = literal trailing backslashes, no continuation.
@@ -579,13 +593,32 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
       inc trailing
       dec i
     if trailing mod 2 == 0: break
+    stdout.write "\x1b[37m"
     let cont = try: editor.readLine("  ")
                except EOFError:
+                 stdout.write "\x1b[0m"
                  done = true; break
                except minline.InputCancelled:
+                 stdout.write "\x1b[0m"
                  return ""
+    stdout.write "\x1b[0m"
     line = line[0 ..< line.len - 1] & "\n" & cont
   if line.strip == "": return ""
+  # Redraw the just-submitted prompt + body in dim so it recedes as
+  # the assistant's reply scrolls below it. Cursor is currently one
+  # row below the last input line; walk up N rows, rewrite each in
+  # dim, and end where we started.
+  let entered = line.splitLines
+  let n = entered.len
+  if n > 0:
+    stdout.write "\x1b[" & $n & "A"
+    var idx = 0
+    for l in entered:
+      let prefix = if idx == 0: "❯ " else: "  "
+      stdout.write "\r\x1b[2K"
+      stdout.styledWrite fgWhite, prefix & l, resetStyle, "\n"
+      inc idx
+    stdout.flushFile
   return line
 
 # ---------- Command dispatcher ----------
@@ -600,15 +633,17 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
   let arg = if sp < 0: "" else: c[sp+1 .. ^1].strip
   case name
   of ":help", ":?":
-    stdout.write HelpText
+    stdout.styledWrite fgCyan, styleDim, HelpText, resetStyle
   of ":tokens":
     if session.usage.totalTokens == 0:
       hintLn "  no tokens used yet", resetStyle
     else:
-      var msg = &"  session: {humanTokens(session.usage.totalTokens)}  (in {humanTokens(session.usage.promptTokens)}, out {humanTokens(session.usage.completionTokens)})"
-      if session.usage.cachedTokens > 0:
-        msg.add &", cache {humanTokens(session.usage.cachedTokens)}"
-      hintLn msg, resetStyle
+      let fresh = max(0, session.usage.promptTokens - session.usage.cachedTokens)
+      let line = tokenSlot("↑", fresh) &
+        "   " & tokenSlot("↺", session.usage.cachedTokens) &
+        "   " & tokenSlot("↓", session.usage.completionTokens) &
+        "   total " & humanTokens(session.usage.totalTokens)
+      stdout.styledWrite(styleDim, line, resetStyle, "\n")
   of ":clear":
     messages = %* [{"role": "system", "content": buildSystemPrompt(prof)}]
     session.toolLog.setLen 0

@@ -95,6 +95,34 @@ proc spinnerLoop(unused: string) {.thread.} =
     stdout.flushFile
   except CatchableError: discard
 
+proc contextLabel*(promptTokens, window: int): string =
+  ## "○ 12%" / "◔ 25%" / … / "● 92%" — same shape used by the live spinner
+  ## indicator and the final per-turn token line. Empty string when there's
+  ## no useful context number (no window, or no tokens yet).
+  if window <= 0 or promptTokens <= 0: return ""
+  let pct = int(promptTokens.float / window.float * 100.0)
+  let glyph =
+    if pct < 20: "○"
+    elif pct < 40: "◔"
+    elif pct < 60: "◑"
+    elif pct < 80: "◕"
+    else: "●"
+  &"{glyph} {pct}%"
+
+proc liveLabel*(base: string, slurped: int): string =
+  ## Spinner label whose token slots match the per-call summary's shape:
+  ## icon hugs value, slots joined with extra space (no `·`), ↑/↺ render
+  ## as dashes until the response closes (the only place a dash means
+  ## "not yet known" rather than "actually zero"). The whole label is
+  ## rendered by the spinner thread in fgCyan + styleBright; the
+  ## placeholders share that intensity so ↑/↺ stay visible alongside ↓.
+  let up = "↑ -"
+  let cached = "↺ -"
+  let down = tokenSlot("↓", slurped div 4)
+  if base.len > 0: base & "   " & up & "   " & cached & "   " & down
+  else: up & "   " & cached & "   " & down
+
+
 var spinnerRunning = false  # only mutated by main thread
 
 proc startSpinner*(label: string) =
@@ -235,6 +263,109 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     for ch in tail:
       flat.add(if ch == '\n' or ch == '\r': ' ' else: ch)
     setSpinTicker("  … " & flat)
+  # Agent text streams at column 0 with no icon. `fgYellow + styleDim`
+  # reads as a soft off-white / very light cream — distinct from user
+  # input (terminal default ≈ bright white) and from the dim greyish-
+  # cyan used for harness FYI text.
+  #
+  # Line buffering layers markdown rendering on top:
+  #   - tables (`| a | b |` rows) buffer into `tableBuf`, flush as
+  #     box-drawn blocks once a non-table line arrives — sub-second
+  #     beat for typical 5-20 row tables, but it's the price of
+  #     column-width-aware alignment.
+  #   - code blocks (between ``` fences) buffer into `codeBuf`, render
+  #     with a dim left bar `┃` per line, fences themselves suppressed.
+  #   - headers (`# H` … `###### H`) render as bold cream, hashes
+  #     stripped.
+  #   - inline `**bold**` and `` `code` `` substituted via ANSI flips
+  #     inside the cream envelope. Strict matching only — malformed
+  #     markers pass through raw.
+  var pendingLine = ""
+  var tableBuf: seq[string]
+  var codeBuf: seq[string]
+  var inCode = false
+  # The lead bullet is printed at column 0 without a trailing newline,
+  # so the first emitted line of content starts on the same row. Track
+  # whether the next emit is the first; suppress the 2-space indent for
+  # that one only. Block constructs (code/table) close the bullet line
+  # with a newline before they render their own indented body.
+  var firstEmit = false
+  proc emitLine(l: string) =
+    let termW = try: terminalWidth() except CatchableError: 80
+    let bodyW = max(20, termW - 2)
+    let chunks = wrapAnsi(applyInlineMd(l), bodyW)
+    var k = 0
+    for chunk in chunks:
+      let prefix = if firstEmit and k == 0: "" else: "  "
+      stdout.styledWrite(fgWhite, styleDim, prefix & chunk & "\n", resetStyle)
+      inc k
+    firstEmit = false
+  proc emitHeader(text: string) =
+    let termW = try: terminalWidth() except CatchableError: 80
+    let bodyW = max(20, termW - 2)
+    let chunks = wrapAnsi(text, bodyW)
+    var k = 0
+    for chunk in chunks:
+      let prefix = if firstEmit and k == 0: "" else: "  "
+      stdout.styledWrite(fgWhite, styleBright, prefix & chunk & "\n", resetStyle)
+      inc k
+    firstEmit = false
+  proc emitCodeLine(l: string) =
+    if firstEmit:
+      stdout.write "\n"
+      firstEmit = false
+    stdout.styledWrite(styleDim, "  ┃ ", resetStyle)
+    stdout.styledWrite(fgWhite, styleDim, l & "\n", resetStyle)
+  proc flushTable() =
+    if tableBuf.len == 0: return
+    if firstEmit:
+      stdout.write "\n"
+      firstEmit = false
+    if tableBuf.len < 2:
+      for r in tableBuf: emitLine(r)
+    else:
+      let termW = try: terminalWidth() except CatchableError: 80
+      let rendered = renderMdTable(tableBuf, maxWidth = termW)
+      stdout.styledWrite(fgWhite, styleDim, rendered, resetStyle)
+    tableBuf.setLen 0
+  proc flushCode() =
+    if codeBuf.len == 0: return
+    for l in codeBuf: emitCodeLine(l)
+    codeBuf.setLen 0
+  proc handleLine(l: string) =
+    if inCode:
+      if isMdFenceLine(l):
+        flushCode()
+        inCode = false
+      else:
+        codeBuf.add l
+      return
+    if isMdFenceLine(l):
+      flushTable()
+      inCode = true
+      return
+    if isMdTableRow(l):
+      tableBuf.add l
+      return
+    flushTable()
+    let (isHdr, hdrText) = detectMdHeader(l)
+    if isHdr:
+      emitHeader(hdrText)
+    else:
+      emitLine(l)
+  proc emitContent(c: string) =
+    for ch in c:
+      if ch == '\n':
+        handleLine(pendingLine)
+        pendingLine = ""
+      else:
+        pendingLine.add ch
+  proc finishContent() =
+    if pendingLine.len > 0:
+      handleLine(pendingLine)
+      pendingLine = ""
+    flushCode()
+    flushTable()
   let outS = p.outputStream
   var line = ""
   while outS.readLine(line):
@@ -262,17 +393,17 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
           let c = delta{"content"}.getStr("")
           if c.len > 0:
             if not contentStarted:
-              # Clear the ticker from line 2 and let the spinner's next frame
-              # collapse it before we take over the line with content. Newline
-              # before content so the cleared spinner area becomes a visual
-              # beat rather than content overwriting where the spinner was.
+              # Stop the spinner and emit the answer bullet at column 0
+              # without a newline; the first content line lands on the same
+              # row right after `● `, subsequent lines indent two spaces.
               setSpinTicker("")
               stopSpinner()
-              stdout.write("\n")  # visual beat where the spinner was
+              stdout.styledWrite(fgWhite, styleBright, "● ", resetStyle)
               contentStarted = true
+              firstEmit = true
             accContent &= c
             slurped += c.len
-            stdout.write(c)
+            emitContent(c)
             stdout.flushFile()
           let tcDelta = delta{"tool_calls"}
           if tcDelta != nil and tcDelta.kind == JArray:
@@ -288,7 +419,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
               let fn = tc{"function"}
               if fn != nil:
                 slurped += fn{"arguments"}.getStr("").len
-                setSpinLabel(baseLabel & &" · ↓ {humanTokens(slurped div 4)}")
+                setSpinLabel(liveLabel(baseLabel, slurped))
       let u = j{"usage"}
       if u != nil and u.kind == JObject:
         result.usage = parseUsage(u)
@@ -309,8 +440,19 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   try: p.close() except OSError: discard
 
   if contentStarted:
-    if not accContent.endsWith("\n"): stdout.write("\n")
-    stdout.write("\n")  # trailing blank line after assistant reply
+    finishContent()
+    # Collapse trailing blank lines so the token line below sits flush
+    # against the last visible content line. accContent's trailing \n
+    # count is used as a proxy for emitted blank lines (rendered tables
+    # always close with a single \n, so this still works when the last
+    # content was a table block).
+    var trailingNl = 0
+    for i in countdown(accContent.len - 1, 0):
+      if accContent[i] == '\n': inc trailingNl
+      else: break
+    if trailingNl > 1:
+      for _ in 0 ..< trailingNl - 1:
+        stdout.write "\x1b[1A\x1b[2K"
     stdout.flushFile()
     contentStreamedLive = true
 
@@ -374,19 +516,12 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   decayLevel(serverRetryLevel, serverLastTs, t0)
   decayLevel(rateRetryLevel, rateLastTs, t0)
   let window = contextWindowFor(p.variant)
-  let baseLabel =
-    if window > 0 and lastPromptTokens > 0:
-      let pct = int(lastPromptTokens.float / window.float * 100.0)
-      let glyph =
-        if pct < 20: "○"
-        elif pct < 40: "◔"
-        elif pct < 60: "◑"
-        elif pct < 80: "◕"
-        else: "●"
-      &"{glyph} {pct}%"
-    else:
-      ""
-  setSpinLabel(baseLabel)
+  let baseLabel = contextLabel(lastPromptTokens, window)
+  # Blank line above the upcoming spinner / bullet so the assistant
+  # output isn't flush against the prior content (user prompt or last
+  # tool output line). Done once per call — retries reuse the same row.
+  stdout.write "\n"
+  setSpinLabel(liveLabel(baseLabel, 0))
   startSpinner("")
   const MaxAttempts = 8
   var outcome: StreamOutcome
@@ -458,11 +593,14 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   let elapsed = epochTime() - t0
   if usage.totalTokens > 0:
     let fresh = max(0, usage.promptTokens - usage.cachedTokens)
-    hint &"  ↑ {humanTokens(fresh)}"
-    if usage.cachedTokens > 0:
-      stdout.styledWrite(styleDim, &" ↺ {humanTokens(usage.cachedTokens)}", resetStyle)
-    hint &" · ↓ {humanTokens(usage.completionTokens)} · {elapsed.int}s",
-      resetStyle, "\n"
+    let ctx = contextLabel(usage.promptTokens, window)
+    let line =
+      (if ctx.len > 0: ctx & "   " else: "") &
+      tokenSlot("↑", fresh) &
+      "   " & tokenSlot("↺", usage.cachedTokens) &
+      "   " & tokenSlot("↓", usage.completionTokens) &
+      "   " & $elapsed.int & "s"
+    stdout.styledWrite(styleDim, "  " & line, resetStyle, "\n")
     if window > 0 and usage.promptTokens.float > 0.7 * window.float and
        usage.promptTokens.float <= CompactThresholdFrac * window.float:
       stdout.styledWriteLine(styleDim,

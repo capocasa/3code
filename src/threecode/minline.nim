@@ -742,7 +742,22 @@ proc readLine*(ed: var LineEditor, prompt="", hidechars = false, noHistory = fal
       s.add(c1)
       let c2 = getchr()
       s.add(c2)
-      if s == KEYSEQS["left"]:
+      template multilineSubmit() {.dirty.} =
+        # Append a trailing `\` (not echoed) so the outer caller's
+        # `\`-continuation loop reads the next line and joins them
+        # with `\n`. Lets multi-line entry work without making the
+        # editor itself multi-line aware.
+        ed.line.text &= "\\"
+        stdout.write("\n")
+        if not noHistory and not hidechars: ed.historyAdd()
+        ed.historyFlush()
+        if not hidechars: stdout.write("\e[?2004l")
+        return ed.line.text
+      if c2 == 13:
+        # Alt+Enter / Esc+Enter — universal multiline newline that
+        # works without any terminal-side keyboard-protocol setup.
+        multilineSubmit()
+      elif s == KEYSEQS["left"]:
         KEYMAP["left"](ed)
       elif s == KEYSEQS["right"]:
         KEYMAP["right"](ed)
@@ -780,6 +795,26 @@ proc readLine*(ed: var LineEditor, prompt="", hidechars = false, noHistory = fal
             KEYMAP["insert"](ed)
           elif c4 == 126 and c3 == 51:
             KEYMAP["delete"](ed)
+          elif c3 == 50 and c4 == 55:
+            # modifyOtherKeys: ESC [ 27 ; <mod> ; <keycode> ~. Detect
+            # Shift+Enter (modifier 2, keycode 13). Other reports are
+            # consumed and dropped — terminals only emit this format
+            # when the user has enabled modifyOtherKeys mode 1.
+            let c5 = getchr()
+            if c5 == 59:
+              var modDigits = ""
+              var ch = getchr()
+              while ch >= 48 and ch <= 57:
+                modDigits.add(ch.chr)
+                ch = getchr()
+              if ch == 59:
+                var keyDigits = ""
+                ch = getchr()
+                while ch >= 48 and ch <= 57:
+                  keyDigits.add(ch.chr)
+                  ch = getchr()
+                if ch == 126 and keyDigits == "13" and modDigits == "2":
+                  multilineSubmit()
           elif c3 == 50 and c4 == 48:
             # \e[200~ = bracketed paste start; \e[201~ = stray paste end.
             let c5 = getchr()
@@ -816,6 +851,19 @@ proc readLine*(ed: var LineEditor, prompt="", hidechars = false, noHistory = fal
               of 65: KEYMAP["up"](ed)    # 'A' — fall back to history up
               of 66: KEYMAP["down"](ed)  # 'B' — fall back to history down
               else: discard
+          elif c4 == 51:
+            # Kitty keyboard protocol Shift+Enter: ESC [ 1 3 ; 2 u.
+            # Only fires when the terminal has progressive-enhancement
+            # level 1 enabled; everything else consumes-and-drops.
+            let c5 = getchr()
+            if c5 == 59:
+              var modDigits = ""
+              var ch = getchr()
+              while ch >= 48 and ch <= 57:
+                modDigits.add(ch.chr)
+                ch = getchr()
+              if ch == 117 and modDigits == "2":
+                multilineSubmit()
     elif c1 in CTRL and KEYMAP.hasKey(KEYNAMES[c1]):
       keyMapProc = KEYMAP[KEYNAMES[c1]]
       keyMapProc(ed)
