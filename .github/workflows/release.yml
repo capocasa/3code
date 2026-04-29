@@ -76,6 +76,51 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}.${{ matrix.ext }}
 
+  pages:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: 3code-*
+          path: dl
+          merge-multiple: true
+
+      - name: Assemble site
+        run: |
+          mkdir -p site/main
+          cp dl/3code-linux-amd64.tar.gz     site/main/
+          cp dl/3code-macos-universal.tar.gz site/main/
+          cp dl/3code-windows-amd64.zip      site/main/
+          cat > site/index.html <<EOF
+          <!doctype html><meta charset=utf-8><title>3code main builds</title>
+          <h1>3code main builds</h1>
+          <p>Per-commit builds from <code>main</code> (commit ${GITHUB_SHA}).</p>
+          <ul>
+            <li><a href="main/3code-linux-amd64.tar.gz">3code-linux-amd64.tar.gz</a></li>
+            <li><a href="main/3code-macos-universal.tar.gz">3code-macos-universal.tar.gz</a></li>
+            <li><a href="main/3code-windows-amd64.zip">3code-windows-amd64.zip</a></li>
+          </ul>
+          EOF
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
   release:
     needs: build
     if: startsWith(github.ref, 'refs/tags/')
