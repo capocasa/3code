@@ -1,5 +1,5 @@
 import std/[critbits, exitprocs, json, os, strformat, strutils, terminal]
-import types, util, prompts, session, actions, minline, statusbar
+import types, util, prompts, session, actions, minline
 
 template hint*(args: varargs[untyped]) =
   ## Bright cyan + bold — for labels and primary CTAs ("provider",
@@ -426,11 +426,6 @@ proc restoreCursor() {.noconv.} =
 proc welcome*(p: Profile): minline.LineEditor =
   setSteadyCursor()
   addExitProc(restoreCursor)
-  # Reserve the bottom 3 rows (thinking, token bar, prompt) and set
-  # the scroll region above them. All subsequent content writes flow
-  # in rows 1..H-3. No-op when stdout isn't a TTY or terminal is too
-  # short — falls back to inline UI.
-  statusbar.enable()
   stdout.write "\n"
   stdout.styledWriteLine fgCyan, styleBright, "  ╭─╮"
   stdout.styledWrite fgCyan, styleBright, "   ─┤  ", resetStyle, fgWhite, styleBright, "3code ", resetStyle, fgCyan, styleBright, "v" & Version, resetStyle

@@ -456,9 +456,13 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       drawLiveStatus(slurped)
       liveStatusActive = false
     else:
-      # Inline (no status bar) path: bar sits on the row right below
-      # content. Collapse any trailing blank rows the model emitted so
-      # the bar lands flush, then redraw + advance cursor past with \n.
+      # Inline path: collapse any trailing blank rows the model emitted
+      # so the per-turn token receipt (rendered by `settlePendingHint`
+      # at the end of the turn) lands flush below the last content
+      # line. No final bar repaint and no extra advance — cursor is
+      # already on the blank row right below content; the receipt's
+      # own trailing `\n` advances past it. The live (bright) bar
+      # exists only while content is actively streaming.
       var trailingNl = 0
       for i in countdown(accContent.len - 1, 0):
         if accContent[i] == '\n': inc trailingNl
@@ -466,8 +470,6 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       if trailingNl > 1:
         for _ in 0 ..< trailingNl - 1:
           stdout.write "\x1b[1A\x1b[2K"
-      drawLiveStatus(slurped)
-      stdout.write "\n"
       liveStatusActive = false
       stdout.flushFile()
     contentStreamedLive = true
