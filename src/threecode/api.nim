@@ -1,5 +1,5 @@
-import std/[algorithm, atomics, httpclient, json, locks, os, osproc, sequtils, streams, strformat, strutils, tables, terminal, times]
-import types, util, prompts, compact, display
+import std/[algorithm, atomics, json, locks, os, osproc, sequtils, streams, strformat, strutils, tables, terminal, times]
+import types, util, prompts, compact, display, statusbar
 
 # ---------- Spinner ----------
 
@@ -13,6 +13,16 @@ var contentStreamedLive*: bool = false
   ## to stdout chunk-by-chunk during the SSE read; read (and reset) by
   ## `runTurns` so the same content isn't redrawn a second time at the end
   ## of the turn.
+
+var pendingHint*: tuple[active: bool, usage: Usage, window: int, elapsed: int]
+  ## Carries the previous turn's accurate token usage forward so the
+  ## **token receipt** can be rendered at the start of the next
+  ## user-driven turn instead of at the end of the call that produced
+  ## the data. Lets the **token bar** drawn by `streamHttp` stay
+  ## visible as the per-turn record while the user reads/types; the
+  ## receipt only "settles" once the next user message hits
+  ## `runTurns` → `settlePendingHint`. Cleared after rendering.
+  ## (See `## Token UI` in `CLAUDE.md` for the full lifecycle.)
 
 var showThinking*: bool = true
   ## When true, reasoning_content deltas from the provider are rendered as
@@ -58,50 +68,78 @@ proc getSpinTicker(): string {.gcsafe.} =
     release spinLabelLock
 
 proc spinnerLoop(unused: string) {.thread.} =
+  ## Status-bar mode: writes the animated frame to the **token bar**
+  ## row (H-1) via `writeAtBar`. While reasoning is streaming, the
+  ## bar slot temporarily shows the reasoning ticker instead of the
+  ## token slots — the next frame after `setSpinTicker("")` repaints
+  ## the slots back, so no row reservation is needed for thinking.
+  ##
+  ## Fallback (no status bar — non-TTY or terminal too small): writes
+  ## inline using \r overwrite of the current row (legacy behavior,
+  ## still uses a second row below for the ticker since we don't have
+  ## anchored slots there).
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
   let start = epochTime()
   var i = 0
-  var tickerActive = false  # whether we reserved line 2 below
+  var tickerActive = false  # inline-mode only; tracks 2-line layout
   while not spinnerStop.load(moRelaxed):
     let elapsed = epochTime() - start
     let label = getSpinLabel()
     let ticker = getSpinTicker()
     try:
-      # Line 1: clear and redraw. \x1b[2K keeps ghost chars from stale labels
-      # out of view when the label shrinks.
-      stdout.styledWrite "\r\x1b[2K", fgCyan, styleBright, frames[i mod frames.len], resetStyle,
-        fgCyan, styleBright, &"  {label} {elapsed.int}s", resetStyle
-      if ticker.len > 0:
-        # Two-line mode: descend to line 2, render dim ticker, return to
-        # line 1 start so the next frame's \r lines up.
-        stdout.write "\n\x1b[2K\x1b[2m"
-        stdout.write ticker
-        stdout.write "\x1b[0m\r\x1b[1A"
-        tickerActive = true
-      elif tickerActive:
-        # Ticker went empty (e.g. content started) — clear the line below
-        # once and stop reserving it.
-        stdout.write "\n\x1b[2K\r\x1b[1A"
-        tickerActive = false
-      stdout.flushFile
+      let frame = frames[i mod frames.len]
+      if statusbar.isActive():
+        # When the ticker has reasoning text, overlay it on the bar
+        # row in dim style so it visually distinct from the bright
+        # token-slot mode. As soon as `ticker` empties (content has
+        # started → main set it to ""), the next frame paints the
+        # bright token slots back.
+        let payload =
+          if ticker.len > 0:
+            "\x1b[36m\x1b[1m" & frame & "\x1b[0m\x1b[2m  " & ticker & "\x1b[0m"
+          else:
+            "\x1b[36m\x1b[1m" & frame & "\x1b[0m\x1b[36m\x1b[1m  " &
+            label & " " & $elapsed.int & "s\x1b[0m"
+        writeAtBar(payload)
+      else:
+        let barText = "\x1b[36m\x1b[1m" & frame & "\x1b[0m\x1b[36m\x1b[1m  " &
+                      label & " " & $elapsed.int & "s\x1b[0m"
+        # Inline fallback: same two-line dance the legacy code did.
+        stdout.write "\r\x1b[2K"
+        stdout.write barText
+        if ticker.len > 0:
+          stdout.write "\n\x1b[2K\x1b[2m"
+          stdout.write ticker
+          stdout.write "\x1b[0m\r\x1b[1A"
+          tickerActive = true
+        elif tickerActive:
+          stdout.write "\n\x1b[2K\r\x1b[1A"
+          tickerActive = false
+        stdout.flushFile
     except CatchableError: discard
     sleep 80
     inc i
   try:
-    # Clean up: clear line 1; if we were in two-line mode, also line 2.
-    stdout.write "\r\x1b[2K"
-    if tickerActive:
-      stdout.write "\n\x1b[2K\r\x1b[1A"
-    stdout.flushFile
+    if statusbar.isActive():
+      # Leave the bar where it was — the post-stream `drawLiveStatus`
+      # redraws it with the static (no-glyph) shape as soon as content
+      # finishes. No thinking row to clear; the ticker overlay was on
+      # the bar row and gets repainted by `drawLiveStatus`.
+      discard
+    else:
+      stdout.write "\r\x1b[2K"
+      if tickerActive:
+        stdout.write "\n\x1b[2K\r\x1b[1A"
+      stdout.flushFile
   except CatchableError: discard
 
 proc liveLabel*(base: string, slurped: int): string =
   ## Spinner label whose token slots match the per-call summary's shape:
-  ## icon hugs value, slots joined by two spaces. ↑/≡ read as `0` until
+  ## icon hugs value, slots joined by two spaces. ↑/↻ read as `0` until
   ## the final usage event closes the response; the spinner thread
   ## renders this in fgCyan + styleBright.
   let up = tokenSlot("↑", 0)
-  let cached = tokenSlot("≡", 0)
+  let cached = tokenSlot("↻", 0)
   let down = tokenSlot("↓", slurped div 4)
   if base.len > 0: base & "  " & up & "  " & cached & "  " & down
   else: up & "  " & cached & "  " & down
@@ -247,10 +285,12 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     for ch in tail:
       flat.add(if ch == '\n' or ch == '\r': ' ' else: ch)
     setSpinTicker("  … " & flat)
-  # Agent text streams at column 0 with no icon. `fgYellow + styleDim`
-  # reads as a soft off-white / very light cream — distinct from user
-  # input (terminal default ≈ bright white) and from the dim greyish-
-  # cyan used for harness FYI text.
+  # Agent text streams at column 0 with no icon. `fgWhite + styleDim`
+  # reads as a soft off-white, distinct from user input (terminal
+  # default, brighter) and from the dim greyish-cyan used for harness
+  # FYI text. Inline `**bold**` and `` `code` `` flip intensity within
+  # this envelope without changing hue, so bold is bright-white-bold,
+  # not yellow.
   #
   # Line buffering layers markdown rendering on top:
   #   - tables (`| a | b |` rows) buffer into `tableBuf`, flush as
@@ -264,109 +304,56 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   #   - inline `**bold**` and `` `code` `` substituted via ANSI flips
   #     inside the cream envelope. Strict matching only — malformed
   #     markers pass through raw.
-  var pendingLine = ""
-  var tableBuf: seq[string]
-  var codeBuf: seq[string]
-  var inCode = false
   # The lead bullet is printed at column 0 without a trailing newline,
-  # so the first emitted line of content starts on the same row. Track
-  # whether the next emit is the first; suppress the 2-space indent for
-  # that one only. Block constructs (code/table) close the bullet line
-  # with a newline before they render their own indented body.
-  var firstEmit = false
-  # Live token status drawn one row below the most-recently-emitted
-  # content line. Refreshed per SSE chunk so the user sees ↓ tick up
-  # while output streams. Each emit clears its row first (so the new
-  # content overwrites the status), then `emitContent` redraws after
-  # the chunk settles. Only draws after at least one full content line
-  # has shipped, so we don't corrupt the bullet row before the first \n.
+  # so the first emitted line of content starts on the same row.
+  # `MarkdownState.firstEmit = false` here means: don't suppress the
+  # 2-space indent on the first line. We flip it to `true` when the
+  # bullet is printed so the first chunk lands directly after `● `.
+  # Same per-line handlers as the replay path so live and resumed
+  # output stay byte-identical.
+  var pendingLine = ""
+  var mdState = initMarkdownState(firstEmit = false)
+  # Live **token bar** updates: in status-bar mode, drawn at the bar
+  # row (H-1) via `writeAtBar`, so it stays put while content scrolls
+  # in the region above. In fallback mode (non-TTY / tiny terminal),
+  # drawn inline below the most-recent content line and overwritten by
+  # subsequent emits via `\x1b[2K`. `liveLineEmitted` gates the legacy
+  # inline path so we don't corrupt the bullet row before the first
+  # \n (status-bar mode doesn't have this concern — the bar row is
+  # separate).
   var liveStatusActive = false
   var liveLineEmitted = false
   let streamT0 = epochTime()
   proc clearLiveStatus() =
     if not liveStatusActive: return
-    stdout.write "\x1b[2K"
+    if statusbar.isActive():
+      clearBar()
+    else:
+      stdout.write "\x1b[2K"
     liveStatusActive = false
   proc drawLiveStatus(slurpedNow: int) =
+    # **Token bar** in stopped/streaming state: same cyan + bright
+    # palette as the spinner, but the animated braille frame slot is
+    # blanked (3 spaces, matching the frame's visual width) so the row
+    # reads as quiet — animation lives only with the actual spinner
+    # while the model is thinking. The dim **token receipt** (different
+    # element) lands at the start of the next user turn via
+    # `settlePendingHint`, just before new output streams.
     let elapsed = (epochTime() - streamT0).int
     let lbl = liveLabel(baseLabel, slurpedNow) & "  " & $elapsed & "s"
-    stdout.styledWrite(styleDim, "  " & lbl, resetStyle)
-    stdout.write "\r"
-    stdout.flushFile
+    let payload = "\x1b[36m\x1b[1m   " & lbl & "\x1b[0m"
+    if statusbar.isActive():
+      writeAtBar(payload)
+    else:
+      stdout.write payload & "\r"
+      stdout.flushFile
     liveStatusActive = true
-  proc emitLine(l: string) =
-    clearLiveStatus()
-    let termW = try: terminalWidth() except CatchableError: 80
-    let bodyW = max(20, termW - 2)
-    let chunks = wrapAnsi(applyInlineMd(l), bodyW)
-    var k = 0
-    for chunk in chunks:
-      let prefix = if firstEmit and k == 0: "" else: "  "
-      stdout.styledWrite(fgWhite, styleDim, prefix & chunk & "\n", resetStyle)
-      inc k
-    firstEmit = false
-    liveLineEmitted = true
-  proc emitHeader(text: string) =
-    clearLiveStatus()
-    let termW = try: terminalWidth() except CatchableError: 80
-    let bodyW = max(20, termW - 2)
-    let chunks = wrapAnsi(text, bodyW)
-    var k = 0
-    for chunk in chunks:
-      let prefix = if firstEmit and k == 0: "" else: "  "
-      stdout.styledWrite(fgWhite, styleBright, prefix & chunk & "\n", resetStyle)
-      inc k
-    firstEmit = false
-    liveLineEmitted = true
-  proc emitCodeLine(l: string) =
-    clearLiveStatus()
-    if firstEmit:
-      stdout.write "\n"
-      firstEmit = false
-    stdout.styledWrite(styleDim, "  ┃ ", resetStyle)
-    stdout.styledWrite(fgWhite, styleDim, l & "\n", resetStyle)
-    liveLineEmitted = true
-  proc flushTable() =
-    if tableBuf.len == 0: return
-    clearLiveStatus()
-    if firstEmit:
-      stdout.write "\n"
-      firstEmit = false
-    if tableBuf.len < 2:
-      for r in tableBuf: emitLine(r)
-    else:
-      let termW = try: terminalWidth() except CatchableError: 80
-      let rendered = renderMdTable(tableBuf, maxWidth = termW)
-      stdout.styledWrite(fgWhite, styleDim, rendered, resetStyle)
-    tableBuf.setLen 0
-    liveLineEmitted = true
-  proc flushCode() =
-    if codeBuf.len == 0: return
-    clearLiveStatus()
-    for l in codeBuf: emitCodeLine(l)
-    codeBuf.setLen 0
-    liveLineEmitted = true
   proc handleLine(l: string) =
-    if inCode:
-      if isMdFenceLine(l):
-        flushCode()
-        inCode = false
-      else:
-        codeBuf.add l
-      return
-    if isMdFenceLine(l):
-      flushTable()
-      inCode = true
-      return
-    if isMdTableRow(l):
-      tableBuf.add l
-      return
-    flushTable()
-    let (isHdr, hdrText) = detectMdHeader(l)
-    if isHdr:
-      emitHeader(hdrText)
-    else:
-      emitLine(l)
+    # Status row gets cleared before any content write so the new line
+    # overwrites it cleanly. Cheap if status was already inactive.
+    clearLiveStatus()
+    if handleMdLine(mdState, l, stdout):
+      liveLineEmitted = true
   proc emitContent(c: string, slurpedNow: int) =
     for ch in c:
       if ch == '\n':
@@ -380,9 +367,8 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     if pendingLine.len > 0:
       handleLine(pendingLine)
       pendingLine = ""
-    flushCode()
-    flushTable()
     clearLiveStatus()
+    discard finishMd(mdState, stdout)
   let outS = p.outputStream
   var line = ""
   while outS.readLine(line):
@@ -413,11 +399,14 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
               # Stop the spinner and emit the answer bullet at column 0
               # without a newline; the first content line lands on the same
               # row right after `● `, subsequent lines indent two spaces.
+              # `setSpinTicker("")` flips the bar back to token-slot mode
+              # for the last spinner frame; `drawLiveStatus` then takes
+              # over once content actually streams.
               setSpinTicker("")
               stopSpinner()
               stdout.styledWrite(fgWhite, styleBright, "● ", resetStyle)
               contentStarted = true
-              firstEmit = true
+              mdState.firstEmit = true
             accContent &= c
             slurped += c.len
             emitContent(c, slurped)
@@ -458,19 +447,29 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
 
   if contentStarted:
     finishContent()
-    # Collapse trailing blank lines so the token line below sits flush
-    # against the last visible content line. accContent's trailing \n
-    # count is used as a proxy for emitted blank lines (rendered tables
-    # always close with a single \n, so this still works when the last
-    # content was a table block).
-    var trailingNl = 0
-    for i in countdown(accContent.len - 1, 0):
-      if accContent[i] == '\n': inc trailingNl
-      else: break
-    if trailingNl > 1:
-      for _ in 0 ..< trailingNl - 1:
-        stdout.write "\x1b[1A\x1b[2K"
-    stdout.flushFile()
+    if statusbar.isActive():
+      # Bar lives on its own row (H-1), so there's nothing to "make
+      # room for" below the content. Redraw it with the final paused-
+      # glyph state — the spinner thread already stopped on first
+      # content, so without this redraw the bar would still show the
+      # last animated frame. Cursor stays in the scroll region.
+      drawLiveStatus(slurped)
+      liveStatusActive = false
+    else:
+      # Inline (no status bar) path: bar sits on the row right below
+      # content. Collapse any trailing blank rows the model emitted so
+      # the bar lands flush, then redraw + advance cursor past with \n.
+      var trailingNl = 0
+      for i in countdown(accContent.len - 1, 0):
+        if accContent[i] == '\n': inc trailingNl
+        else: break
+      if trailingNl > 1:
+        for _ in 0 ..< trailingNl - 1:
+          stdout.write "\x1b[1A\x1b[2K"
+      drawLiveStatus(slurped)
+      stdout.write "\n"
+      liveStatusActive = false
+      stdout.flushFile()
     contentStreamedLive = true
 
   if interrupted:
@@ -518,6 +517,16 @@ proc ensureReasoningField(messages: JsonNode) =
 template hint(args: varargs[untyped]) =
   stdout.styledWrite(fgCyan, styleBright, args, resetStyle)
 
+proc settlePendingHint*() =
+  ## Render the deferred **token receipt** saved by the previous
+  ## `callModel`. Intended to be called from `runTurns` at the start
+  ## of every new user-driven turn so the receipt appears only when
+  ## the user sends the next message, not between tool-chain follow-
+  ## ups within the same turn. No-op when nothing is pending.
+  if pendingHint.active:
+    renderTokenLine(pendingHint.usage, pendingHint.window, pendingHint.elapsed)
+    pendingHint.active = false
+
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   ensureReasoningField(messages)
   var body = %*{
@@ -537,8 +546,19 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   # Blank line above the upcoming spinner / bullet so the assistant
   # output isn't flush against the prior content (user prompt or last
   # tool output line). Done once per call — retries reuse the same row.
-  stdout.write "\n"
+  # Inline mode wants a blank row above the upcoming spinner so the
+  # animated frame doesn't run flush against prior content. Status-
+  # bar mode doesn't need it — the spinner draws on its dedicated row
+  # (H-1), not in the scroll region — and the extra `\n` would just
+  # add a stray blank above the response.
+  if not statusbar.isActive():
+    stdout.write "\n"
   setSpinLabel(liveLabel(baseLabel, 0))
+  # Hide the cursor for the duration of the turn — the steady-block
+  # cursor would otherwise be visible inside the scroll region
+  # wherever the bar/thinking save-and-restore parks it. Restored at
+  # the next input boundary by `readInput`.
+  statusbar.hideCursor()
   startSpinner("")
   const MaxAttempts = 8
   var outcome: StreamOutcome
@@ -609,7 +629,13 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   usage = outcome.usage
   let elapsed = epochTime() - t0
   if usage.totalTokens > 0:
-    renderTokenLine(usage, window, elapsed.int)
+    # Defer the **token receipt** render to the start of the next
+    # user-driven turn. The **token bar** from `streamHttp` is still
+    # on screen with the streaming rough values; the receipt lands
+    # just before the next turn's leading blank line via
+    # `settlePendingHint`. Auto-compaction warnings still fire
+    # immediately so the user can act on them before the next turn.
+    pendingHint = (active: true, usage: usage, window: window, elapsed: elapsed.int)
     if window > 0 and usage.promptTokens.float > 0.7 * window.float and
        usage.promptTokens.float <= CompactThresholdFrac * window.float:
       stdout.styledWriteLine(styleDim,
@@ -630,48 +656,35 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   outcome.assistantMsg
 
 proc verifyProfile*(p: Profile): (bool, string) =
-  let client = newHttpClient(timeout = 20000)
-  defer: client.close()
-  client.headers = newHttpHeaders({
-    "Authorization": "Bearer " & p.key,
-    "Content-Type": "application/json"
-  })
   let body = $(%*{
     "model": p.modelPrefix & p.model,
     "messages": [%*{"role": "user", "content": "ping"}],
     "max_tokens": 1,
     "stream": false
   })
-  try:
-    let r = client.request(p.url & "/chat/completions", HttpPost, body)
-    if r.code == Http200:
-      let j = try: parseJson(r.body)
-              except CatchableError: return (false, "bad json in response")
-      if "error" in j: return (false, $j["error"])
-      return (true, "")
-    let snip = r.body[0 ..< min(200, r.body.len)]
-    return (false, $r.code & ": " & snip)
-  except CatchableError as e:
-    return (false, e.msg)
+  let r = curlRequest(p.url & "/chat/completions", key = p.key,
+                      post = true, jsonBody = body)
+  if r.err.len > 0: return (false, r.err)
+  if r.status == 200:
+    let j = try: parseJson(r.body)
+            except CatchableError: return (false, "bad json in response")
+    if "error" in j: return (false, $j["error"])
+    return (true, "")
+  let snip = r.body[0 ..< min(200, r.body.len)]
+  (false, $r.status & ": " & snip)
 
 proc fetchModels*(url, key: string): seq[string] =
   ## GET /models on the provider — that endpoint name is OpenAI's; what it
   ## returns is the list of model ids this provider exposes.
-  let client = newHttpClient(timeout = 20000)
-  defer: client.close()
-  client.headers = newHttpHeaders({"Authorization": "Bearer " & key})
-  try:
-    let r = client.request(url & "/models", HttpGet)
-    if r.code != Http200: return @[]
-    let j = try: parseJson(r.body) except CatchableError: return @[]
-    let arr = if j.kind == JArray: j
-              elif "data" in j and j["data"].kind == JArray: j["data"]
-              else: return @[]
-    for item in arr:
-      if item.kind == JString: result.add item.getStr
-      elif item.kind == JObject and "id" in item: result.add item["id"].getStr
-  except CatchableError:
-    return @[]
+  let r = curlRequest(url & "/models", key = key)
+  if r.err.len > 0 or r.status != 200: return @[]
+  let j = try: parseJson(r.body) except CatchableError: return @[]
+  let arr = if j.kind == JArray: j
+            elif "data" in j and j["data"].kind == JArray: j["data"]
+            else: return @[]
+  for item in arr:
+    if item.kind == JString: result.add item.getStr
+    elif item.kind == JObject and "id" in item: result.add item["id"].getStr
 
 proc installInterruptHook*() =
   setControlCHook(proc() {.noconv.} = interrupted = true)

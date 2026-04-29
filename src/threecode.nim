@@ -10,6 +10,12 @@ export types, util, prompts, shell, loop, session, compact,
 proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
   interrupted = false
   resetLoopTracker(session.loop)
+  # Safety net for inline-mode (no status bar): in status-bar mode
+  # `readInputStatus` already settled the receipt after Enter, so this
+  # is a no-op there. In inline mode the receipt lands here, after
+  # the user's typed prompt — not ideal positionally, but inline mode
+  # is the non-TTY / tiny-terminal fallback.
+  settlePendingHint()
   while true:
     discard supersedeCompact(messages)
     var usage: Usage
@@ -48,7 +54,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)",
           resetStyle
         saveSession(session, messages)
-    stdout.write "\n"
     let content = msg{"content"}.getStr("")
     let streamedLive = contentStreamedLive
     contentStreamedLive = false
@@ -57,6 +62,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       if tcNode != nil and tcNode.kind == JArray: tcNode
       else: newJArray()
     if toolCalls.len > 0:
+      # Blank row between the streamed content and the first tool
+      # banner so they don't run flush. Only when tools are coming —
+      # content-only turns don't need it (and an unconditional \n
+      # would scroll a stray blank row above the next turn's receipt).
+      stdout.write "\n"
       if content.strip.len > 0 and not streamedLive:
         renderAssistantContent(content)
         stdout.write "\n"
@@ -157,7 +167,13 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode, session: var Sessi
     runTurns(p, messages, session)
   except ApiError as e:
     saveSession(session, messages)
-    stdout.styledWriteLine fgMagenta, "  ", e.msg, resetStyle
+    # User-triggered interrupts are not urgent — they pressed the
+    # button. Render as dim grey hint, reserve magenta for actual
+    # errors the user needs to read.
+    if e.msg.startsWith("interrupted by user"):
+      stdout.styledWriteLine styleDim, "  ", e.msg, resetStyle
+    else:
+      stdout.styledWriteLine fgMagenta, "  ", e.msg, resetStyle
 
 proc usage() {.noreturn.} =
   stderr.writeLine """usage: 3code [options] [prompt...]
