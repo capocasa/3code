@@ -10,12 +10,13 @@ export types, util, prompts, shell, loop, session, compact,
 proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
   interrupted = false
   resetLoopTracker(session.loop)
-  # Safety net for inline-mode (no status bar): in status-bar mode
-  # `readInputStatus` already settled the receipt after Enter, so this
-  # is a no-op there. In inline mode the receipt lands here, after
-  # the user's typed prompt — not ideal positionally, but inline mode
-  # is the non-TTY / tiny-terminal fallback.
-  settlePendingHint()
+  # Render the per-turn token receipt at the end of the turn so it
+  # sits flush below the assistant's final output, not below the
+  # user's next prompt. `defer` covers normal exit (final break) and
+  # all early returns (interrupt, halt). Each `callModel` iteration
+  # overwrites `pendingHint` with the latest usage, so only the
+  # last turn's receipt renders.
+  defer: settlePendingHint()
   while true:
     discard supersedeCompact(messages)
     var usage: Usage
