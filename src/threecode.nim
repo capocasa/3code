@@ -327,10 +327,8 @@ proc main() =
     prof = bootstrapProvider(editor)
   session.profileName = prof.name
   if resume:
-    hintLn &"  · resumed {sessionIdFromPath(session.savePath)}  " &
-      &"({messages.len} msg" & (if messages.len == 1: "" else: "s") & ")",
-      resetStyle
     stdout.write "\n"
+    stdout.styledWriteLine styleDim, &"● resumed {sessionIdFromPath(session.savePath)}", resetStyle
     replaySessionTail(messages, session.toolLog,
                       contextWindowFor(prof.model), prof.family)
     stdout.write "\n"
