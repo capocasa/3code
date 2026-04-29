@@ -23,6 +23,19 @@ const
   Repo = "capocasa/3code"
   ThrottleSecs = 4 * 60 * 60
 
+proc dbgLog(stage: string) =
+  ## Append a timestamped line to `$THREECODE_UPDATE_LOG` if set.
+  ## No-op otherwise. Inherits across `execv` so the grandchild's trace
+  ## lands in the same file as the parent's. Diagnostic only — there is
+  ## no release-mode use of this.
+  let path = getEnv("THREECODE_UPDATE_LOG")
+  if path.len == 0: return
+  try:
+    let f = open(path, fmAppend)
+    defer: f.close()
+    f.writeLine($epochTime().int & " [" & $getCurrentProcessId() & "] " & stage)
+  except CatchableError: discard
+
 const Tarball =
   when defined(linux) and (defined(amd64) or defined(x86_64)):
     "3code-linux-amd64.tar.gz"
@@ -139,20 +152,31 @@ proc selfUpdateCheck*(curVersion = Version, targetPath = "",
   ## "running version" and the binary path so the live pipeline can be
   ## exercised without affecting the installed binary. `force` skips
   ## the config gate (tests + manual invocation override).
-  if not force and not autoUpdateEnabled(): return
-  if Tarball.len == 0: return
+  dbgLog("selfUpdateCheck enter cur=" & curVersion & " force=" & $force)
+  if not force and not autoUpdateEnabled():
+    dbgLog("selfUpdateCheck gate=disabled"); return
+  if Tarball.len == 0:
+    dbgLog("selfUpdateCheck tarball=empty"); return
   let latest = fetchLatestTag()
+  dbgLog("selfUpdateCheck latest=" & latest)
   if latest.len == 0: return
-  if not semverGt(latest, curVersion): return
+  if not semverGt(latest, curVersion):
+    dbgLog("selfUpdateCheck not-newer"); return
   let cache = userDataRoot() / "update"
-  try: createDir(cache) except CatchableError: return
+  try: createDir(cache)
+  except CatchableError as e:
+    dbgLog("selfUpdateCheck mkdir-failed " & e.msg); return
   let tarPath = cache / Tarball
-  if not downloadAsset(latest, Tarball, tarPath): return
+  if not downloadAsset(latest, Tarball, tarPath):
+    dbgLog("selfUpdateCheck download-failed " & tarPath); return
+  dbgLog("selfUpdateCheck downloaded size=" & $getFileSize(tarPath))
   let extractDir = cache / "extract"
   let bin = extractTarball(tarPath, extractDir)
-  if bin.len == 0: return
+  if bin.len == 0:
+    dbgLog("selfUpdateCheck extract-failed"); return
   let dest = if targetPath.len > 0: targetPath else: getAppFilename()
-  discard swapBinary(bin, dest)
+  let ok = swapBinary(bin, dest)
+  dbgLog("selfUpdateCheck swap=" & $ok & " dest=" & dest)
   try: removeFile(tarPath) except CatchableError: discard
   try: removeDir(extractDir) except CatchableError: discard
 
@@ -163,19 +187,29 @@ when defined(posix):
     ## Double-fork + setsid so the worker survives the parent exiting and
     ## SIGHUP from the controlling terminal. Throttle is claimed before
     ## the fork so concurrent launches don't pile up.
-    if not autoUpdateEnabled() or Tarball.len == 0: return
-    if not throttleExpired(): return
+    dbgLog("spawn enter")
+    if not autoUpdateEnabled() or Tarball.len == 0:
+      dbgLog("spawn gate=disabled-or-noplatform"); return
+    if not throttleExpired():
+      dbgLog("spawn throttled"); return
     touchThrottle()
     let pid = posix.fork()
-    if pid < 0: return
+    if pid < 0:
+      dbgLog("spawn fork1-failed"); return
     if pid > 0:
       var status: cint
       discard posix.waitpid(pid, status, 0)
+      dbgLog("spawn parent waitpid done")
       return
+    dbgLog("spawn child1 setsid")
     discard posix.setsid()
     let pid2 = posix.fork()
-    if pid2 < 0: quit(1)
-    if pid2 > 0: quit(0)
+    if pid2 < 0:
+      dbgLog("spawn fork2-failed"); quit(1)
+    if pid2 > 0:
+      dbgLog("spawn intermediate exit")
+      quit(0)
+    dbgLog("spawn grandchild dup2")
     let fd = posix.open("/dev/null", O_RDWR)
     if fd >= 0:
       discard posix.dup2(fd, 0)
@@ -183,8 +217,10 @@ when defined(posix):
       discard posix.dup2(fd, 2)
       if fd > 2: discard posix.close(fd)
     let exe = getAppFilename()
+    dbgLog("spawn grandchild execv " & exe)
     let argv = allocCStringArray([exe, "--self-update-check"])
-    discard posix.execv(exe.cstring, argv)
+    let rc = posix.execv(exe.cstring, argv)
+    dbgLog("spawn grandchild execv-returned rc=" & $rc & " errno=" & $errno)
     quit(1)
 else:
   proc spawnBackgroundUpdateMaybe*() = discard
