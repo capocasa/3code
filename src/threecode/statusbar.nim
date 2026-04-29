@@ -1,5 +1,17 @@
 ## Status bar: two rows reserved at the bottom of the terminal.
 ##
+## DORMANT as of 0.2.7. `enable()` is no longer called from `welcome`,
+## so `isActive()` is permanently false and every call site falls
+## through to the inline path. Apple Terminal handles DECSTBM +
+## `\x1b[s`/`\x1b[u` save-restore-cursor differently enough that
+## streamed content landed on the bar row and got clobbered by the
+## next bar repaint, leaving the LLM reply invisible (token receipts
+## still rendered, since they fire after the spinner/bar lifecycle
+## ends). Linux terminals (gnome-terminal, kitty, alacritty, iTerm2)
+## handle the combo cleanly. Kept around in case we want to revisit
+## with a more portable approach (`\e7`/`\e8`, or gating on
+## `TERM_PROGRAM != "Apple_Terminal"`).
+##
 ##   row H-1  token bar  (always visible; while reasoning is streaming
 ##                        the spinner thread overlays the bar with the
 ##                        reasoning ticker, then snaps back to token
