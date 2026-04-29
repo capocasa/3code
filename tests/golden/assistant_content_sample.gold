@@ -1,0 +1,20 @@
+[37m[1m● [0m[0m[37m[1mHeading One
+[0m[0m[37m[2m  
+[0m[0m[37m[2m  A paragraph with [22m[1mbold word[22m[2m and [22m[1minline code[22m[2m to exercise the
+[0m[0m[37m[2m  inline markdown handlers.
+[0m[0m[37m[2m  
+[0m[0m[37m[1m  Subheading
+[0m[0m[37m[2m  
+[0m[0m[2m  ┃ [0m[0m[37m[2mecho "fenced code"
+[0m[0m[2m  ┃ [0m[0m[37m[2mlet x = 42
+[0m[0m[37m[2m  
+[0m[0m[37m[2m  ┌─────────┬──────────────────┐
+  │ Service │ Cost             │
+  ├─────────┼──────────────────┤
+  │ [22m[1mA[22m[2m       │ free, sort of    │
+  ├─────────┼──────────────────┤
+  │ B       │ $0.17 per minute │
+  └─────────┴──────────────────┘
+[0m[0m[37m[2m  
+[0m[0m[37m[2m  End paragraph.
+[0m[0m
