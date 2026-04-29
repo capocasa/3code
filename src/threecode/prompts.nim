@@ -113,7 +113,11 @@ Don't write code with command injection, XSS, SQL injection, path traversal, or 
 
 # Skills
 
-If the task is something other than software development — research, sysadmin, ops, writing, communication, planning — read the matching skill before proceeding. Naming: `role-<persona>.md`, `task-<procedure>.md`, `domain-<knowledge-pack>.md`. Plausible match → `cat` it; irrelevant after reading → drop it silently. The harness shows the user a "loaded skill: <name>" marker — don't restate it.
+Before reaching for a tool you don't normally use as a coder, scan the listing below and `cat` any plausible match first. The most common miss is web research.
+
+- Web search, fetching a URL, or verifying any claim against the open web: load `role-web-researcher.md` BEFORE running `curl`/`wget` against a website. The skill describes `3code web` and `3code fetch`, which handle bot blocks and HTML extraction; raw `curl` on web pages produces unusable HTML soup. If a fetch fails, report it and stop. Do not invent a confident answer from priors.
+
+For other non-coding work (sysadmin, writing, planning, systematic debugging) the same rule applies: `cat` a plausible skill before acting, drop it silently if irrelevant. Naming: `role-<persona>.md`, `task-<procedure>.md`, `domain-<knowledge-pack>.md`. The harness shows a "loaded skill: <name>" marker; don't restate it.
 
 Available:
 {{skills}}
@@ -228,7 +232,11 @@ Don't write code with command injection, XSS, SQL injection, path traversal, or 
 
 # Skills
 
-If the task is something other than software development — research, sysadmin, ops, writing, communication, planning — read the matching skill before proceeding. Naming: `role-<persona>.md`, `task-<procedure>.md`, `domain-<knowledge-pack>.md`. Plausible match → `cat` it; irrelevant after reading → drop it silently. The harness shows the user a "loaded skill: <name>" marker — don't restate it.
+Before reaching for a tool you don't normally use as a coder, scan the listing below and `cat` any plausible match first. The most common miss is web research.
+
+- Web search, fetching a URL, or verifying any claim against the open web: load `role-web-researcher.md` BEFORE running `curl`/`wget` against a website. The skill describes `3code web` and `3code fetch`, which handle bot blocks and HTML extraction; raw `curl` on web pages produces unusable HTML soup. If a fetch fails, report it and stop. Do not invent a confident answer from priors.
+
+For other non-coding work (sysadmin, writing, planning, systematic debugging) the same rule applies: `cat` a plausible skill before acting, drop it silently if irrelevant. Naming: `role-<persona>.md`, `task-<procedure>.md`, `domain-<knowledge-pack>.md`. The harness shows a "loaded skill: <name>" marker; don't restate it.
 
 Available:
 {{skills}}
@@ -337,7 +345,11 @@ Don't write code with command injection, XSS, SQL injection, path traversal, or 
 
 # Skills
 
-If the task is something other than software development — research, sysadmin, ops, writing, communication, planning — read the matching skill before proceeding. Naming: `role-<persona>.md`, `task-<procedure>.md`, `domain-<knowledge-pack>.md`. Plausible match → `cat` it; irrelevant after reading → drop it silently. The harness shows the user a "loaded skill: <name>" marker — don't restate it.
+Before reaching for a tool you don't normally use as a coder, scan the listing below and `cat` any plausible match first. The most common miss is web research.
+
+- Web search, fetching a URL, or verifying any claim against the open web: load `role-web-researcher.md` BEFORE running `curl`/`wget` against a website. The skill describes `3code web` and `3code fetch`, which handle bot blocks and HTML extraction; raw `curl` on web pages produces unusable HTML soup. If a fetch fails, report it and stop. Do not invent a confident answer from priors.
+
+For other non-coding work (sysadmin, writing, planning, systematic debugging) the same rule applies: `cat` a plausible skill before acting, drop it silently if irrelevant. Naming: `role-<persona>.md`, `task-<procedure>.md`, `domain-<knowledge-pack>.md`. The harness shows a "loaded skill: <name>" marker; don't restate it.
 
 Available:
 {{skills}}
@@ -438,7 +450,11 @@ Don't write code with command injection, XSS, SQL injection, path traversal, or 
 
 # Skills
 
-If the task is something other than software development — research, sysadmin, ops, writing, communication, planning — read the matching skill before proceeding. Naming: `role-<persona>.md`, `task-<procedure>.md`, `domain-<knowledge-pack>.md`. Plausible match → `cat` it; irrelevant after reading → drop it silently. The harness shows the user a "loaded skill: <name>" marker — don't restate it.
+Before reaching for a tool you don't normally use as a coder, scan the listing below and `cat` any plausible match first. The most common miss is web research.
+
+- Web search, fetching a URL, or verifying any claim against the open web: load `role-web-researcher.md` BEFORE running `curl`/`wget` against a website. The skill describes `3code web` and `3code fetch`, which handle bot blocks and HTML extraction; raw `curl` on web pages produces unusable HTML soup. If a fetch fails, report it and stop. Do not invent a confident answer from priors.
+
+For other non-coding work (sysadmin, writing, planning, systematic debugging) the same rule applies: `cat` a plausible skill before acting, drop it silently if irrelevant. Naming: `role-<persona>.md`, `task-<procedure>.md`, `domain-<knowledge-pack>.md`. The harness shows a "loaded skill: <name>" marker; don't restate it.
 
 Available:
 {{skills}}
