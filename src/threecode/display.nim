@@ -53,6 +53,8 @@ proc bannerFor*(act: Action): string =
   of akApplyPatch:
     let nl = act.body.count('\n')
     &"apply_patch  ({nl} line" & (if nl == 1: "" else: "s") & ")"
+  of akError:
+    "error  unknown tool '" & act.path & "'"
 
 const
   CompactHead = 3
@@ -208,7 +210,7 @@ proc contextLabel*(promptTokens, window: int): string =
     elif pct < 60: "◑"
     elif pct < 80: "◕"
     else: "●"
-  &"{glyph} {pct}%"
+  &"{glyph}{pct}%"
 
 proc renderAssistantContent*(content: string) =
   ## Bullet `● ` (bright white) + dim content; subsequent lines indent two
@@ -244,18 +246,19 @@ proc renderToolBanner*(banner: string, code: int, elapsedS = -1) =
   stdout.flushFile
 
 proc renderTokenLine*(usage: Usage, window: int, elapsedS = -1) =
-  ## "○ N%   ↑ Nk   ↺ Nk   ↓ Nk   Ts" — context glyph, fresh, cached,
-  ## generated, optional duration. Empty when usage has no totals. Live
-  ## passes seconds; replay passes -1 to omit the duration.
+  ## "○N%  ↑Nk  ≡Nk  ↓Nk  Ts" — context glyph, fresh, cached, generated,
+  ## optional duration. Two-space separation, no padding inside slots.
+  ## Empty when usage has no totals. Live passes seconds; replay passes
+  ## -1 to omit the duration.
   if usage.totalTokens <= 0: return
   let fresh = max(0, usage.promptTokens - usage.cachedTokens)
   let ctx = contextLabel(usage.promptTokens, window)
-  var line = if ctx.len > 0: ctx & "   " else: ""
+  var line = if ctx.len > 0: ctx & "  " else: ""
   line.add tokenSlot("↑", fresh)
-  line.add "   " & tokenSlot("↺", usage.cachedTokens)
-  line.add "   " & tokenSlot("↓", usage.completionTokens)
+  line.add "  " & tokenSlot("≡", usage.cachedTokens)
+  line.add "  " & tokenSlot("↓", usage.completionTokens)
   if elapsedS >= 0:
-    line.add "   " & $elapsedS & "s"
+    line.add "  " & $elapsedS & "s"
   stdout.styledWrite(styleDim, "  " & line, resetStyle, "\n")
 
 proc showProfile*(p: Profile) =
