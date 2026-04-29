@@ -6,7 +6,7 @@ const
   ExitApi* = 5
 
 type
-  ActionKind* = enum akBash, akRead, akWrite, akPatch, akApplyPatch
+  ActionKind* = enum akBash, akRead, akWrite, akPatch, akApplyPatch, akError
   Action* = object
     kind*: ActionKind
     path*: string
