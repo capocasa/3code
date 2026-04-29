@@ -115,9 +115,9 @@ proc applyInlineMd*(line: string): string =
       if j < line.len and j > i + 1:
         let inner = line[i + 1 ..< j]
         if inner[0] != ' ' and inner[^1] != ' ':
-          # Inline code: bright cream + underline.
-          result.add "\x1b[22m\x1b[1m\x1b[4m\x1b[33m" & inner &
-                     "\x1b[24m\x1b[22m\x1b[2m\x1b[37m"
+          # Inline code: just bold, no color shift, no underline — pops
+          # within the envelope's fgWhite + dim without changing hue.
+          result.add "\x1b[22m\x1b[1m" & inner & "\x1b[22m\x1b[2m"
           i = j + 1
           continue
     result.add line[i]
@@ -311,11 +311,29 @@ proc renderMdTable*(rows: seq[string], indent = "  ", maxWidth = 0): string =
 
 proc tokenSlot*(icon: string, n: int): string =
   ## "icon value" with a single space between — icon hugs its number.
-  ## Slots are joined with extra spacing for visual separation
-  ## (no `·`). Always renders the actual value, including 0 — callers
-  ## that need a placeholder for "not yet known" (e.g. the spinner's
-  ## ↑/↺ before the response closes) build the dashed form themselves.
+  ## Slots are joined with extra spacing for visual separation (no `·`).
+  ## Always renders the actual value, including 0.
   icon & " " & humanTokens(n)
+
+proc stripPreamble*(s: string): string =
+  ## Strip `<session_context>...</session_context>` and
+  ## `<project_notes>...</project_notes>` blocks from a stored user
+  ## message so the replay UI shows the prompt the user typed, not the
+  ## auto-injected context the model needs. Only acts on a leading
+  ## block (`s.strip` starts with `<session_context>`); leaves the
+  ## string alone if either tag appears mid-message — that would be the
+  ## user's own text, not our preamble.
+  if not s.strip.startsWith("<session_context>"): return s
+  result = s
+  for tag in ["session_context", "project_notes"]:
+    let openTag = "<" & tag & ">"
+    let closeTag = "</" & tag & ">"
+    let i = result.find(openTag)
+    if i < 0: continue
+    let j = result.find(closeTag, i + openTag.len)
+    if j < 0: continue
+    result = result[0 ..< i] & result[j + closeTag.len .. ^1]
+  result = result.strip
 
 proc collapseHome*(path: string): string =
   ## Collapse the user's home dir prefix to `~/`. Guards against the

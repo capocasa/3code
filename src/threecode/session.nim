@@ -135,7 +135,7 @@ proc firstUserMessage*(messages: JsonNode): string =
   if messages == nil or messages.kind != JArray: return ""
   for m in messages:
     if m.kind == JObject and m{"role"}.getStr == "user":
-      return m{"content"}.getStr("")
+      return stripPreamble(m{"content"}.getStr(""))
   ""
 
 proc historyFile*(): string =

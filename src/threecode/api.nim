@@ -97,13 +97,11 @@ proc spinnerLoop(unused: string) {.thread.} =
 
 proc liveLabel*(base: string, slurped: int): string =
   ## Spinner label whose token slots match the per-call summary's shape:
-  ## icon hugs value, slots joined with extra space (no `·`), ↑/↺ render
-  ## as dashes until the response closes (the only place a dash means
-  ## "not yet known" rather than "actually zero"). The whole label is
-  ## rendered by the spinner thread in fgCyan + styleBright; the
-  ## placeholders share that intensity so ↑/↺ stay visible alongside ↓.
-  let up = "↑ -"
-  let cached = "↺ -"
+  ## icon hugs value, slots joined with extra space (no `·`). ↑/↺ read
+  ## as `0` until the final usage event closes the response; the spinner
+  ## thread renders this in fgCyan + styleBright.
+  let up = tokenSlot("↑", 0)
+  let cached = tokenSlot("↺", 0)
   let down = tokenSlot("↓", slurped div 4)
   if base.len > 0: base & "   " & up & "   " & cached & "   " & down
   else: up & "   " & cached & "   " & down

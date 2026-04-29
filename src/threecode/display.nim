@@ -352,7 +352,7 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
     let m = messages[i]
     case m{"role"}.getStr
     of "user":
-      let c = m{"content"}.getStr("").strip
+      let c = stripPreamble(m{"content"}.getStr("")).strip
       if c.len == 0: continue
       let shown = if c.len > 400: c[0 ..< 400] & " …" else: c
       let userLines = shown.splitLines
