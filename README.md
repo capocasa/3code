@@ -133,6 +133,7 @@ safety net.
 
 ## Changelog
 
+    0.2.7   fix invisible llm replies on apple terminal (revert 0.2.6 anchored status bar; inline only, one dim receipt at end of turn)
     0.2.6   anchored status bar (token + prompt rows), shared live/replay markdown render, all https via curl (fixes macos ssl across verify/summarize/auto-update)
     0.2.5   prompt: explicit web-research skill trigger, unknown tool returns akError, tighter token slots
     0.2.4   token line: tighter slots, ≡ for cache, live status during stream
