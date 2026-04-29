@@ -14,12 +14,39 @@ import types, util, shell
 # runAction returns a clean error rather than crashing.
 # ---------------------------------------------------------------------------
 
-proc unknownTool(family, name: string): Action =
-  Action(kind: akBash,
-         body: "echo 'tool not offered to family " & family & ": " & name &
-               "' >&2; exit 1")
+proc stripHarmonyChannel(name: string): string =
+  ## gpt-oss decorates names like `shell<|channel|>commentary`. Strip
+  ## the suffix so dispatch can match on the bare name. Only meaningful
+  ## for gpt-oss — other models don't emit it.
+  let idx = name.find("<|")
+  if idx >= 0: name[0 ..< idx] else: name
 
-proc dispatchGlmOrQwen(name: string, args: JsonNode): Action =
+proc unknownTool(family, name: string): Action =
+  ## A tool name the active model wasn't offered. Returns an akError
+  ## action carrying a structured message: state the unknown name plainly
+  ## and, when the misuse is a known cross-model alias (e.g. gpt-oss
+  ## emitting `bash` instead of `shell`), point at the canonical call so
+  ## the model can re-emit on the next turn instead of hallucinating.
+  ## `runAction` short-circuits akError without executing anything; the
+  ## body is forwarded to the model as the tool result content.
+  let bare = stripHarmonyChannel(name)
+  let suggestion =
+    case family
+    of "gpt-oss":
+      case bare
+      of "bash": ". Use `shell({cmd: [\"bash\", \"-lc\", \"...\"]})` for shell commands."
+      of "write", "patch", "edit": ". Use `apply_patch({input: \"*** Begin Patch...\"})` for file edits."
+      else: "."
+    of "glm", "qwen", "deepseek":
+      case bare
+      of "shell": ". Use `bash({command: \"...\"})` for shell commands."
+      of "apply_patch": ". Use `patch({path, edits})` or `write({path, body})` for file edits."
+      else: "."
+    else: "."
+  Action(kind: akError, path: bare,
+         body: "Error: tool '" & bare & "' is not in your toolset" & suggestion)
+
+proc dispatchGlmOrQwen(family, name: string, args: JsonNode): Action =
   case name
   of "bash":
     Action(kind: akBash,
@@ -35,16 +62,9 @@ proc dispatchGlmOrQwen(name: string, args: JsonNode): Action =
       act.edits.add (e{"search"}.getStr, e{"replace"}.getStr)
     act
   else:
-    unknownTool("glm/qwen", name)
+    unknownTool(family, name)
 
-proc stripHarmonyChannel(name: string): string =
-  ## gpt-oss decorates names like `shell<|channel|>commentary`. Strip
-  ## the suffix so dispatch can match on the bare name. Only meaningful
-  ## for gpt-oss — other models don't emit it.
-  let idx = name.find("<|")
-  if idx >= 0: name[0 ..< idx] else: name
-
-proc dispatchGptOss(rawName: string, args: JsonNode): Action =
+proc dispatchGptOss(family, rawName: string, args: JsonNode): Action =
   case stripHarmonyChannel(rawName)
   of "shell":
     # Harmony argv: cmd = ["bash", "-lc", "<command line>"]. Take the
@@ -56,15 +76,15 @@ proc dispatchGptOss(rawName: string, args: JsonNode): Action =
   of "apply_patch":
     Action(kind: akApplyPatch, body: args{"input"}.getStr)
   else:
-    unknownTool("gpt-oss", rawName)
+    unknownTool(family, rawName)
 
 proc toolCallToAction*(family, name: string, args: JsonNode): Action =
   ## Routes a tool_call to the dispatcher for the active family. The family
   ## label comes from `Profile.family` ("glm" / "qwen" / "gpt-oss"); the
   ## case statement below mirrors `setup` in `prompts.nim`.
   case family
-  of "glm", "qwen", "deepseek": dispatchGlmOrQwen(name, args)
-  of "gpt-oss": dispatchGptOss(name, args)
+  of "glm", "qwen", "deepseek": dispatchGlmOrQwen(family, name, args)
+  of "gpt-oss": dispatchGptOss(family, name, args)
   else: die "unknown family in tool dispatch: '" & family & "'"
 
 proc nearestLineHint(content, search: string): string =
@@ -476,6 +496,8 @@ export DEBIAN_FRONTEND=noninteractive
           msgs.add &"error: delete {path}: {e.msg}"
           anyFail = true
     return (msgs.join("\n"), (if anyFail: 1 else: 0), diffs)
+  of akError:
+    return (act.body, 1, "")
 
 proc parseActionsChecked*(text: string):
     tuple[actions: seq[Action], issues: seq[ParseIssue]] =

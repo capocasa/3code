@@ -28,9 +28,10 @@ suite "glm/qwen dispatch":
 
   test "gpt-oss tool name on glm rejected (training leak guard)":
     let act = toolCallToAction("glm", "shell", %*{"cmd": ["x"]})
-    check act.kind == akBash
-    check "tool not offered" in act.body
-    check "glm/qwen" in act.body
+    check act.kind == akError
+    check act.path == "shell"
+    check "is not in your toolset" in act.body
+    check "`bash(" in act.body  # cross-model alias hint
 
 suite "gpt-oss dispatch":
   test "shell takes argv as `cmd` — last element is the command line":
@@ -62,9 +63,10 @@ suite "gpt-oss dispatch":
   test "glm tool name on gpt-oss rejected (training leak guard)":
     let act = toolCallToAction("gpt-oss", "patch",
                                %*{"path": "x", "edits": []})
-    check act.kind == akBash
-    check "tool not offered" in act.body
-    check "gpt-oss" in act.body
+    check act.kind == akError
+    check act.path == "patch"
+    check "is not in your toolset" in act.body
+    check "apply_patch" in act.body  # cross-model alias hint
 
 suite "dispatcher survives malformed args (regression net)":
   # The first ship of `shell` SIGSEGV'd because it called `.kind` on a
