@@ -1,5 +1,6 @@
 import std/[json, os, sequtils, strformat, strutils, terminal, times]
-import types, util, prompts, session, config, api, compact, display, minline
+import types, util, prompts, session, config, api, compact, display, minline,
+       statusbar
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":prompt", ":show", ":log", ":sessions", ":compact",
@@ -579,7 +580,85 @@ proc buildUserMessage*(messages: JsonNode, raw: string): string =
   else:
     body
 
+proc readInputStatus(editor: var minline.LineEditor, done: var bool): string =
+  ## Status-bar mode: read input on the prompt row (H). Multi-line
+  ## continuation (trailing `\`) loops back through the same row,
+  ## accumulating logical lines. On submission, settles the previous
+  ## turn's **token receipt** into the scroll region (right under the
+  ## prior LLM response, before the new echoed prompt) and then echoes
+  ## the typed prompt below it in dim. The receipt is deliberately
+  ## *not* rendered while the user is still typing — that would put a
+  ## record on screen whose data exactly matches the live token bar
+  ## above it. By delaying until Enter, the redundant on-screen window
+  ## collapses to the few milliseconds before the next spinner kicks
+  ## the bar to fresh values.
+  # Re-show the cursor (the streaming path hid it). It'll blink at
+  # the prompt row for the duration of input, then be hidden again
+  # when the next `callModel` starts.
+  statusbar.showCursor()
+  var lines: seq[string]
+  var prefix = "❯ "
+  while true:
+    statusbar.moveCursorToPrompt()
+    stdout.write "\x1b[2K\x1b[37m"
+    let line = try: editor.readLine(prefix)
+               except EOFError:
+                 stdout.write "\x1b[0m"
+                 done = true
+                 break
+               except minline.InputCancelled:
+                 stdout.write "\x1b[0m"
+                 statusbar.moveCursorToPrompt()
+                 stdout.write "\x1b[2K"
+                 stdout.styledWrite fgWhite, "❯ ", resetStyle
+                 statusbar.parkInScroll()
+                 return ""
+    stdout.write "\x1b[0m"
+    lines.add line
+    var trailing = 0
+    var i = line.len - 1
+    while i >= 0 and line[i] == '\\':
+      inc trailing; dec i
+    if trailing mod 2 == 0: break
+    lines[^1] = line[0 ..< line.len - 1]
+    prefix = "  "
+  # Reset the prompt row to a blank `❯ ` (cursor stays after the
+  # prefix, but we'll park in the scroll region below before returning).
+  statusbar.moveCursorToPrompt()
+  stdout.write "\x1b[2K"
+  stdout.styledWrite fgWhite, "❯ ", resetStyle
+  if done or lines.len == 0:
+    statusbar.parkInScroll()
+    return ""
+  let combined = lines.join("\n")
+  if combined.strip == "":
+    statusbar.parkInScroll()
+    return ""
+  # User has committed to a new turn. Settle the previous turn's
+  # receipt now (so it lands in the scroll region right under the
+  # prior LLM response, just above the echo we're about to write),
+  # then echo the typed input in dim. We always emit one `\n` to
+  # space the echo away from whatever's above; on turns that *did*
+  # have a receipt to settle, add a second `\n` so the visible blank
+  # row sits between the model's output (LLM + receipt) and the
+  # next prompt. The very first prompt (no prior turn → nothing to
+  # settle) skips the second `\n`, which is what saves one blank
+  # below the welcome banner.
+  let hadReceipt = api.pendingHint.active
+  statusbar.parkInScroll()
+  api.settlePendingHint()
+  stdout.write "\n"
+  if hadReceipt:
+    stdout.write "\n"
+  for idx, l in lines:
+    let lp = if idx == 0: "❯ " else: "  "
+    stdout.styledWrite fgWhite, styleDim, lp & l, resetStyle, "\n"
+  stdout.flushFile
+  combined
+
 proc readInput*(editor: var minline.LineEditor, done: var bool): string =
+  if statusbar.isActive():
+    return readInputStatus(editor, done)
   stdout.write "\n"
   # Plain white while the user types; reset on every exit path so the
   # rest of the UI keeps its own colours. The LLM body uses fgWhite +
@@ -650,7 +729,7 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
     else:
       let fresh = max(0, session.usage.promptTokens - session.usage.cachedTokens)
       let line = tokenSlot("↑", fresh) &
-        "  " & tokenSlot("≡", session.usage.cachedTokens) &
+        "  " & tokenSlot("↻", session.usage.cachedTokens) &
         "  " & tokenSlot("↓", session.usage.completionTokens) &
         "  total " & humanTokens(session.usage.totalTokens)
       stdout.styledWrite(styleDim, line, resetStyle, "\n")

@@ -1,4 +1,5 @@
-import std/[httpclient, json, strutils, tables]
+import std/[json, strutils, tables]
+import util
 import types
 
 const
@@ -198,35 +199,32 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
       if i == 0 and m.kind == JObject and m{"role"}.getStr == "system":
         continue
       payload.add m
-  let client = newHttpClient(timeout = 120_000)
-  defer: client.close()
-  client.headers = newHttpHeaders({
-    "Authorization": "Bearer " & p.key,
-    "Content-Type": "application/json"
-  })
   let body = %*{
     "model": p.modelPrefix & p.model,
     "messages": payload,
     "max_tokens": SummarizeMaxTokens,
     "stream": false
   }
-  try:
-    let r = client.request(p.url & "/chat/completions", HttpPost, $body)
-    if r.code != Http200:
-      stderr.writeLine "3code: summarize: api " & $r.code
-      return ""
-    let j = parseJson(r.body)
-    if "error" in j:
-      stderr.writeLine "3code: summarize: " & $j["error"]
-      return ""
-    let choices = j{"choices"}
-    if choices == nil or choices.kind != JArray or choices.len == 0: return ""
-    let msg = choices[0]{"message"}
-    if msg == nil or msg.kind != JObject: return ""
-    msg{"content"}.getStr("")
-  except CatchableError as e:
-    stderr.writeLine "3code: summarize: " & e.msg
-    ""
+  let r = curlRequest(p.url & "/chat/completions", key = p.key,
+                      post = true, jsonBody = $body, timeoutSec = 120)
+  if r.err.len > 0:
+    stderr.writeLine "3code: summarize: " & r.err
+    return ""
+  if r.status != 200:
+    stderr.writeLine "3code: summarize: api " & $r.status
+    return ""
+  let j = try: parseJson(r.body)
+          except CatchableError as e:
+            stderr.writeLine "3code: summarize: " & e.msg
+            return ""
+  if "error" in j:
+    stderr.writeLine "3code: summarize: " & $j["error"]
+    return ""
+  let choices = j{"choices"}
+  if choices == nil or choices.kind != JArray or choices.len == 0: return ""
+  let msg = choices[0]{"message"}
+  if msg == nil or msg.kind != JObject: return ""
+  msg{"content"}.getStr("")
 
 type
   ContextAction* = enum

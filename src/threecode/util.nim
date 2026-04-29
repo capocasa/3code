@@ -1,4 +1,56 @@
-import std/[os, sequtils, strformat, strutils]
+import std/[os, osproc, sequtils, streams, strformat, strutils, times]
+
+proc curlRequest*(url: string;
+                  key = ""; userAgent = "";
+                  post = false; jsonBody = "";
+                  outFile = "";
+                  timeoutSec = 20):
+                  tuple[status: int, body: string, err: string] =
+  ## Single non-streaming HTTPS request via system `curl`. Used everywhere
+  ## a one-shot call is needed (provider verify, /models, summarizer, GitHub
+  ## releases poll, asset download) so the whole codebase shares one TLS
+  ## stack. Avoids Nim's std/httpclient + OpenSSL on stock macOS, which
+  ## trips "TLS/SSL connection failed to initiate, socket closed
+  ## prematurely" against most modern endpoints. `curl` uses the system
+  ## trust store and just works. Body lands in `outFile` when provided
+  ## (the asset-download case); otherwise read into `body`. Returns
+  ## status=0 + non-empty `err` on transport-level failure.
+  let tmp = getTempDir() / ("3code_req_" & $getCurrentProcessId() & "_" &
+                            $epochTime().int64)
+  try: createDir(tmp) except CatchableError: discard
+  defer: (try: removeDir(tmp) except CatchableError: discard)
+  let bodyPath = if outFile.len > 0: outFile else: tmp / "resp.body"
+  var args = @["-sSL", "--max-time", $timeoutSec, "-o", bodyPath,
+               "-w", "%{http_code}"]
+  if key.len > 0: args.add(@["-H", "Authorization: Bearer " & key])
+  if userAgent.len > 0: args.add(@["-A", userAgent])
+  if post:
+    let inFile = tmp / "req.body"
+    try: writeFile(inFile, jsonBody)
+    except CatchableError as e:
+      return (0, "", "tempfile write failed: " & e.msg)
+    args.add(@["-X", "POST", "-H", "Content-Type: application/json",
+               "--data-binary", "@" & inFile])
+  args.add url
+  var p: Process
+  try:
+    p = startProcess("curl", args = args,
+                     options = {poUsePath, poStdErrToStdOut})
+  except OSError as e:
+    return (0, "", "curl launch failed: " & e.msg)
+  let raw = p.outputStream.readAll()
+  let exit = p.waitForExit()
+  p.close()
+  if exit != 0:
+    let msg = raw.strip
+    return (0, "", if msg.len > 0: msg else: "curl exit " & $exit)
+  let status = try: parseInt(raw.strip) except CatchableError: 0
+  let body =
+    if outFile.len > 0: ""
+    elif fileExists(bodyPath):
+      try: readFile(bodyPath) except CatchableError: ""
+    else: ""
+  (status, body, "")
 
 proc userConfigRoot*(): string =
   ## XDG config root for 3code: `~/.config/3code/` on Linux,
@@ -78,20 +130,47 @@ proc isMdFenceLine*(line: string): bool =
   let s = line.strip
   s.len >= 3 and s.startsWith("```")
 
+const MarkBoundary = {' ', '\t', '\n', '.', ',', '!', '?', ';', ':',
+                      '(', ')', '[', ']', '{', '}', '"', '\'', '/', '<', '>'}
+
+proc isAtBoundary(line: string, i: int): bool =
+  ## True if `line[i]` is whitespace/punctuation, OR `i` is out of
+  ## bounds (start/end of line). Used to guard italic markers so
+  ## `snake_case` and `5*5` don't accidentally italicize.
+  i < 0 or i >= line.len or line[i] in MarkBoundary
+
 proc applyInlineMd*(line: string): string =
-  ## Strict in-line replacements for `**bold**` and `` `code` `` —
-  ## emits ANSI codes that flip intensity within the agent text's
-  ## `fgWhite + styleDim` envelope and revert to dim afterwards so
-  ## the rest of the line stays in the off-white tone. Bold pops as
-  ## bright white; inline code adds underline so it stays visually
-  ## distinct from bold. Strict means: opening delimiter must be
-  ## immediately followed by a non-space, closing delimiter must be
-  ## immediately preceded by a non-space, and the inner span must
-  ## contain no instance of the delimiter. Unmatched / malformed
-  ## markers pass through verbatim.
+  ## Strict in-line replacements for `***bold-italic***`, `**bold**`,
+  ## `*italic*`/`_italic_`, and `` `code` ``. Emits ANSI within the
+  ## agent text's `fgWhite + styleDim` envelope and reverts afterwards
+  ## so the rest of the line stays in the off-white tone.
+  ## Bold and inline code: `\x1b[1m` (bold/bright). Italic: `\x1b[3m`
+  ## plus `\x1b[4m` so it shows on terminals whose monospace font
+  ## lacks an italic face (italic alone would be invisible there).
+  ## Strict matching: opening delimiter must be immediately followed
+  ## by a non-space, closing delimiter immediately preceded by a
+  ## non-space, and the inner span must not contain the delimiter.
+  ## Italic additionally requires whitespace/punctuation flanking on
+  ## the outside, so `snake_case` and `5*5` survive untouched.
+  ## Unmatched / malformed markers pass through verbatim.
   result = newStringOfCap(line.len + 32)
   var i = 0
   while i < line.len:
+    if i + 2 < line.len and line[i] == '*' and line[i + 1] == '*' and line[i + 2] == '*':
+      # `***text***` — bold + italic. Find a closing `***` triplet.
+      var j = i + 3
+      var found = -1
+      while j + 2 < line.len:
+        if line[j] == '*' and line[j + 1] == '*' and line[j + 2] == '*':
+          found = j; break
+        inc j
+      if found > i + 3:
+        let inner = line[i + 3 ..< found]
+        if inner[0] != ' ' and inner[^1] != ' ' and '*' notin inner:
+          result.add "\x1b[22m\x1b[1m\x1b[3m\x1b[4m" & applyInlineMd(inner) &
+                     "\x1b[24m\x1b[23m\x1b[22m\x1b[2m"
+          i = found + 3
+          continue
     if i + 1 < line.len and line[i] == '*' and line[i + 1] == '*':
       var j = i + 2
       var found = -1
@@ -102,11 +181,47 @@ proc applyInlineMd*(line: string): string =
       if found > i + 2:
         let inner = line[i + 2 ..< found]
         if inner[0] != ' ' and inner[^1] != ' ' and '*' notin inner:
-          # Bold pops as bright cream so it stays within the LLM tone
-          # family — bright white is reserved for user input.
-          result.add "\x1b[22m\x1b[1m\x1b[33m" & inner &
-                     "\x1b[22m\x1b[2m\x1b[37m"
+          # Bold: real bold (bright). Sits inside the dim envelope and
+          # pops out of it. No color change, asterisks dropped. Recurse
+          # so nested italic/code inside (e.g. `**_lazy_**`) renders.
+          result.add "\x1b[22m\x1b[1m" & applyInlineMd(inner) & "\x1b[22m\x1b[2m"
           i = found + 2
+          continue
+    if line[i] == '*' and isAtBoundary(line, i - 1):
+      # Single `*italic*`. Skip past any `**` sequences while looking
+      # for the matching closing `*` so a nested bold doesn't terminate
+      # us early. Closing `*` must be followed by a boundary char.
+      var j = i + 1
+      var found = -1
+      while j < line.len:
+        if line[j] == '*':
+          if j + 1 < line.len and line[j + 1] == '*':
+            j += 2
+            continue
+          if isAtBoundary(line, j + 1):
+            found = j
+            break
+        inc j
+      if found > i + 1:
+        let inner = line[i + 1 ..< found]
+        if inner.len > 0 and inner[0] != ' ' and inner[^1] != ' ' and '*' notin inner:
+          # Italic + underline together: italic ANSI alone is invisible
+          # on terminals whose monospace font lacks an italic face;
+          # underline is universally rendered, so the combo gives a
+          # visible cue everywhere while the italic shows for terminals
+          # that do support it.
+          result.add "\x1b[3m\x1b[4m" & applyInlineMd(inner) & "\x1b[24m\x1b[23m"
+          i = found + 1
+          continue
+    if line[i] == '_' and isAtBoundary(line, i - 1):
+      var j = i + 1
+      while j < line.len and line[j] != '_':
+        inc j
+      if j < line.len and j > i + 1 and isAtBoundary(line, j + 1):
+        let inner = line[i + 1 ..< j]
+        if inner.len > 0 and inner[0] != ' ' and inner[^1] != ' ' and '_' notin inner:
+          result.add "\x1b[3m\x1b[4m" & applyInlineMd(inner) & "\x1b[24m\x1b[23m"
+          i = j + 1
           continue
     if line[i] == '`':
       var j = i + 1
@@ -115,8 +230,7 @@ proc applyInlineMd*(line: string): string =
       if j < line.len and j > i + 1:
         let inner = line[i + 1 ..< j]
         if inner[0] != ' ' and inner[^1] != ' ':
-          # Inline code: just bold, no color shift, no underline — pops
-          # within the envelope's fgWhite + dim without changing hue.
+          # Inline code: bold weight, no color shift.
           result.add "\x1b[22m\x1b[1m" & inner & "\x1b[22m\x1b[2m"
           i = j + 1
           continue
@@ -203,11 +317,13 @@ proc renderMdTable*(rows: seq[string], indent = "  ", maxWidth = 0): string =
   ##
   ## When `maxWidth > 0`, the natural column widths are compressed to
   ## fit `maxWidth` total columns: the widest column is shaved by one
-  ## visible char at a time (cells get truncated with `…`) until the
-  ## row fits, never going below a per-column minimum of 4. If even
-  ## that minimum doesn't fit (too many columns), the table degrades
-  ## to a vertical `label: value` rendering — readable, no overflow,
-  ## but loses the grid.
+  ## visible char at a time until the row fits, never going below a
+  ## per-column minimum of `MinCol`. Cells longer than their column
+  ## are word-wrapped across multiple visual lines so the row stays
+  ## readable. If even `MinCol` per column doesn't fit (too many
+  ## columns for the terminal), the table degrades to a vertical
+  ## `label: value` rendering: readable, no overflow, but loses the
+  ## grid.
   if rows.len == 0: return ""
   let parsed = rows.mapIt(parseMdRow(it))
   var nCols = 0
@@ -221,6 +337,12 @@ proc renderMdTable*(rows: seq[string], indent = "  ", maxWidth = 0): string =
   for i, r in parsed:
     var padded = r
     while padded.len < nCols: padded.add ""
+    # Apply inline markdown to each cell up front: `**bold**` and
+    # `` `code` `` get ANSI styling applied (same as paragraph text),
+    # marker characters dropped. Width math from here on uses
+    # `visibleWidth` so the ANSI escapes don't inflate column widths.
+    for j in 0 ..< padded.len:
+      padded[j] = applyInlineMd(padded[j])
     if i == 0:
       headerRow = padded
     elif not sawSep and isMdSepRow(rows[i]):
@@ -234,14 +356,14 @@ proc renderMdTable*(rows: seq[string], indent = "  ", maxWidth = 0): string =
       widths[j] = max(widths[j], visibleWidth(c))
   let indentLen = visibleWidth(indent)
   let chrome = 1 + 3 * nCols       # leading │ + (` cell ` + │) per col
-  const MinCol = 4
+  const MinCol = 16
   proc widthsTotal(ws: seq[int]): int =
     for w in ws: result += w
   if maxWidth > 0:
     let minLine = indentLen + chrome + nCols * MinCol
     if minLine > maxWidth:
       # Too many columns to render even at minimum width. Fall back to
-      # a vertical record list — one `label: value` line per cell,
+      # a vertical record list: one `label: value` line per cell,
       # blank line between records.
       var fb = ""
       for r in bodyRows:
@@ -259,45 +381,27 @@ proc renderMdTable*(rows: seq[string], indent = "  ", maxWidth = 0): string =
         if widths[j] > widths[maxIdx]: maxIdx = j
       if widths[maxIdx] <= MinCol: break
       widths[maxIdx] -= 1
-  proc trunc(s: string, w: int): string =
-    ## Markdown-balanced cutoff. Walks the cell tracking open `**`
-    ## and `` ` `` spans; when the visible budget runs out, falls
-    ## back to the last position where every span was closed so we
-    ## never leave a dangling `**bold` (instead emits `**bold**` or
-    ## drops the span entirely, whichever fits).
-    if visibleWidth(s) <= w: return s
-    if w <= 0: return ""
-    if w == 1: return "…"
-    let target = w - 1  # reserve one column for the `…` marker
-    var i = 0
-    var visible = 0
-    var lastBalanced = 0
-    var openStar = false
-    var openTick = false
-    while i < s.len and visible < target:
-      if i + 1 < s.len and s[i] == '*' and s[i + 1] == '*':
-        openStar = not openStar
-        i += 2
-        visible += 2
-      elif s[i] == '`':
-        openTick = not openTick
-        inc i
-        inc visible
-      else:
-        if (s[i].uint8 and 0xC0'u8) != 0x80'u8:
-          inc visible
-        inc i
-      if not openStar and not openTick:
-        lastBalanced = i
-    let cut = if openStar or openTick: lastBalanced else: i
-    s[0 ..< cut] & "…"
   proc rowStr(r: seq[string]): string =
-    var cells: seq[string]
-    for j, c in r:
-      let t = trunc(c, widths[j])
-      let pad = widths[j] - visibleWidth(t)
-      cells.add t & " ".repeat(max(0, pad))
-    indent & "│ " & cells.join(" │ ") & " │"
+    ## Render a row across as many visual lines as the tallest wrapped
+    ## cell needs. Each cell wraps via `wrapAnsi`; cells with fewer
+    ## lines pad with blanks so the right border stays aligned.
+    var cellLines = newSeq[seq[string]](nCols)
+    var maxLines = 1
+    for j in 0 ..< nCols:
+      let c = if j < r.len: r[j] else: ""
+      var lines = wrapAnsi(c, widths[j])
+      if lines.len == 0: lines = @[""]
+      cellLines[j] = lines
+      if lines.len > maxLines: maxLines = lines.len
+    var visualRows: seq[string]
+    for k in 0 ..< maxLines:
+      var cells: seq[string]
+      for j in 0 ..< nCols:
+        let txt = if k < cellLines[j].len: cellLines[j][k] else: ""
+        let pad = widths[j] - visibleWidth(txt)
+        cells.add txt & " ".repeat(max(0, pad))
+      visualRows.add indent & "│ " & cells.join(" │ ") & " │"
+    visualRows.join("\n")
   proc sepStr(left, mid, right: string): string =
     var bars: seq[string]
     for w in widths: bars.add "─".repeat(w + 2)
@@ -306,7 +410,10 @@ proc renderMdTable*(rows: seq[string], indent = "  ", maxWidth = 0): string =
   result.add sepStr("┌", "┬", "┐") & "\n"
   result.add rowStr(headerRow) & "\n"
   result.add sepStr("├", "┼", "┤") & "\n"
-  for r in bodyRows: result.add rowStr(r) & "\n"
+  for i, r in bodyRows:
+    if i > 0:
+      result.add sepStr("├", "┼", "┤") & "\n"
+    result.add rowStr(r) & "\n"
   result.add sepStr("└", "┴", "┘") & "\n"
 
 proc tokenSlot*(icon: string, n: int): string =

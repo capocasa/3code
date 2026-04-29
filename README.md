@@ -131,6 +131,15 @@ you own it. Toggle either way in `~/.config/3code/config`:
 Use in a scratch directory or a clean git working tree. `git diff` is your
 safety net.
 
+## Changelog
+
+    0.2.6   anchored status bar (token + prompt rows), shared live/replay markdown render, all https via curl (fixes macos ssl across verify/summarize/auto-update)
+    0.2.5   prompt: explicit web-research skill trigger, unknown tool returns akError, tighter token slots
+    0.2.4   token line: tighter slots, ≡ for cache, live status during stream
+    0.2.3   ui polish: strip preamble from replay, restyle resumed banner, plain inline code
+    0.2.2   share live/replay render helpers, persist per-turn usage, ctrl+c aborts provider wizard
+    0.2.1   refuse to run as root (override: THREECODE_ALLOW_ROOT=1)
+
 ## License
 
 MIT.

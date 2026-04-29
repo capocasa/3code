@@ -1,5 +1,5 @@
-import std/[critbits, json, os, strformat, strutils, terminal]
-import types, util, prompts, session, actions, minline
+import std/[critbits, exitprocs, json, os, strformat, strutils, terminal]
+import types, util, prompts, session, actions, minline, statusbar
 
 template hint*(args: varargs[untyped]) =
   ## Bright cyan + bold — for labels and primary CTAs ("provider",
@@ -210,19 +210,136 @@ proc contextLabel*(promptTokens, window: int): string =
     elif pct < 60: "◑"
     elif pct < 80: "◕"
     else: "●"
-  &"{glyph}{pct}%"
+  # Lone exception to the no-space-inside-slots rule: the half-circles
+  # crowd a digit too tightly without a hair of breathing room.
+  &"{glyph} {pct}%"
 
-proc renderAssistantContent*(content: string) =
-  ## Bullet `● ` (bright white) + dim content; subsequent lines indent two
-  ## spaces. No-op on empty/whitespace. Used by the replay path and by the
-  ## live path when content was buffered (rare: streaming bypasses this).
+type MarkdownState* = ref object
+  ## Per-line markdown rendering state. Shared between the streaming
+  ## path (api.nim feeds chunks line by line as they arrive over SSE)
+  ## and the replay path (display.nim feeds the stored full content).
+  ## Both call `handleMdLine` per line and `finishMd` at end so the
+  ## visible output is byte-identical regardless of who fed the lines.
+  ## `ref` so nested closures inside the handlers can mutate it.
+  firstEmit*: bool
+  tableBuf*: seq[string]
+  codeBuf*: seq[string]
+  inCode*: bool
+
+proc initMarkdownState*(firstEmit = true): MarkdownState =
+  MarkdownState(firstEmit: firstEmit)
+
+proc handleMdLine*(s: MarkdownState, l: string, outFile: File): bool {.discardable.} =
+  ## Route one input line through markdown handlers (headers, fences,
+  ## tables, paragraphs). Returns true if anything was written to
+  ## `outFile` this call (table rows and code-block bodies buffer
+  ## silently until flushed). State accumulates across calls.
+  proc emitLine(l: string) =
+    let termW = try: terminalWidth() except CatchableError: 80
+    let bodyW = max(20, termW - 2)
+    let chunks = wrapAnsi(applyInlineMd(l), bodyW)
+    var k = 0
+    for chunk in chunks:
+      let prefix = if s.firstEmit and k == 0: "" else: "  "
+      outFile.styledWrite(fgWhite, styleDim, prefix & chunk & "\n", resetStyle)
+      inc k
+    s.firstEmit = false
+  proc emitHeader(text: string) =
+    let termW = try: terminalWidth() except CatchableError: 80
+    let bodyW = max(20, termW - 2)
+    let chunks = wrapAnsi(text, bodyW)
+    var k = 0
+    for chunk in chunks:
+      let prefix = if s.firstEmit and k == 0: "" else: "  "
+      outFile.styledWrite(fgWhite, styleBright, prefix & chunk & "\n", resetStyle)
+      inc k
+    s.firstEmit = false
+  proc flushTable(): bool =
+    if s.tableBuf.len == 0: return false
+    if s.firstEmit:
+      outFile.write "\n"
+      s.firstEmit = false
+    if s.tableBuf.len < 2:
+      for r in s.tableBuf: emitLine(r)
+    else:
+      let termW = try: terminalWidth() except CatchableError: 80
+      let rendered = renderMdTable(s.tableBuf, maxWidth = termW)
+      outFile.styledWrite(fgWhite, styleDim, rendered, resetStyle)
+    s.tableBuf.setLen 0
+    true
+  if s.inCode:
+    if isMdFenceLine(l):
+      # close the fence: flush the buffered body, exit code mode
+      var emitted = false
+      for cl in s.codeBuf:
+        if s.firstEmit:
+          outFile.write "\n"
+          s.firstEmit = false
+        outFile.styledWrite(styleDim, "  ┃ ", resetStyle)
+        outFile.styledWrite(fgWhite, styleDim, cl & "\n", resetStyle)
+        emitted = true
+      s.codeBuf.setLen 0
+      s.inCode = false
+      return emitted
+    s.codeBuf.add l
+    return false
+  if isMdFenceLine(l):
+    let flushed = flushTable()
+    s.inCode = true
+    return flushed
+  if isMdTableRow(l):
+    s.tableBuf.add l
+    return false
+  let flushed = flushTable()
+  let (isHdr, hdrText) = detectMdHeader(l)
+  if isHdr:
+    emitHeader(hdrText)
+  else:
+    emitLine(l)
+  result = true or flushed
+
+proc finishMd*(s: MarkdownState, outFile: File): bool {.discardable.} =
+  ## Flush any pending code block or table buffer at end of content.
+  ## Returns true if anything was written.
+  result = false
+  if s.codeBuf.len > 0:
+    for cl in s.codeBuf:
+      if s.firstEmit:
+        outFile.write "\n"
+        s.firstEmit = false
+      outFile.styledWrite(styleDim, "  ┃ ", resetStyle)
+      outFile.styledWrite(fgWhite, styleDim, cl & "\n", resetStyle)
+    s.codeBuf.setLen 0
+    result = true
+  if s.tableBuf.len > 0:
+    if s.firstEmit:
+      outFile.write "\n"
+      s.firstEmit = false
+    if s.tableBuf.len < 2:
+      var nested = initMarkdownState(s.firstEmit)
+      for r in s.tableBuf: handleMdLine(nested, r, outFile)
+      s.firstEmit = nested.firstEmit
+    else:
+      let termW = try: terminalWidth() except CatchableError: 80
+      let rendered = renderMdTable(s.tableBuf, maxWidth = termW)
+      outFile.styledWrite(fgWhite, styleDim, rendered, resetStyle)
+    s.tableBuf.setLen 0
+    result = true
+
+proc renderAssistantContent*(content: string, outFile: File = stdout) =
+  ## Bullet `● ` (bright white) + dim content with full markdown
+  ## structure (headers, fences, tables, inline `**bold**`/`` `code` ``).
+  ## Used by replay and by the live path when content was buffered (rare:
+  ## streaming bypasses this and feeds the same handlers chunk by chunk).
+  ## `outFile` lets tests capture output to a temp file; default is
+  ## stdout.
   if content.strip.len == 0: return
-  stdout.styledWrite fgWhite, styleBright, "● ", resetStyle
-  let lines = content.splitLines
-  for idx, l in lines:
-    let prefix = if idx == 0: "" else: "  "
-    stdout.styledWrite fgWhite, styleDim, prefix & l & "\n", resetStyle
-  stdout.flushFile
+  outFile.styledWrite fgWhite, styleBright, "● ", resetStyle
+  var st = initMarkdownState()
+  for line in content.splitLines:
+    handleMdLine(st, line, outFile)
+  finishMd(st, outFile)
+  outFile.flushFile
 
 proc renderToolPending*(banner: string) =
   ## Pre-execution banner: dim bullet + dim banner. Live only; the live
@@ -246,7 +363,7 @@ proc renderToolBanner*(banner: string, code: int, elapsedS = -1) =
   stdout.flushFile
 
 proc renderTokenLine*(usage: Usage, window: int, elapsedS = -1) =
-  ## "○N%  ↑Nk  ≡Nk  ↓Nk  Ts" — context glyph, fresh, cached, generated,
+  ## "○N%  ↑Nk  ↻Nk  ↓Nk  Ts": context glyph, fresh, cached, generated,
   ## optional duration. Two-space separation, no padding inside slots.
   ## Empty when usage has no totals. Live passes seconds; replay passes
   ## -1 to omit the duration.
@@ -255,7 +372,7 @@ proc renderTokenLine*(usage: Usage, window: int, elapsedS = -1) =
   let ctx = contextLabel(usage.promptTokens, window)
   var line = if ctx.len > 0: ctx & "  " else: ""
   line.add tokenSlot("↑", fresh)
-  line.add "  " & tokenSlot("≡", usage.cachedTokens)
+  line.add "  " & tokenSlot("↻", usage.cachedTokens)
   line.add "  " & tokenSlot("↓", usage.completionTokens)
   if elapsedS >= 0:
     line.add "  " & $elapsedS & "s"
@@ -290,7 +407,30 @@ proc installEditorTweaks*() =
     origClear(ed)
     navigatedUp = false
 
+proc setSteadyCursor() =
+  ## DECSCUSR `\x1b[2 q`: steady block. The blink in 3code adds no
+  ## information (the `❯ ` prompt already marks the input position)
+  ## and competes with the spinner, which is the only animation that
+  ## carries meaning here. Restored to terminal default on exit by the
+  ## `\x1b[0 q` hook below; if 3code is killed abruptly the next CLI
+  ## that sets a cursor style (or a `tput reset`) restores it.
+  stdout.write "\x1b[2 q"
+  stdout.flushFile
+
+proc restoreCursor() {.noconv.} =
+  try:
+    stdout.write "\x1b[0 q"
+    stdout.flushFile
+  except IOError: discard
+
 proc welcome*(p: Profile): minline.LineEditor =
+  setSteadyCursor()
+  addExitProc(restoreCursor)
+  # Reserve the bottom 3 rows (thinking, token bar, prompt) and set
+  # the scroll region above them. All subsequent content writes flow
+  # in rows 1..H-3. No-op when stdout isn't a TTY or terminal is too
+  # short — falls back to inline UI.
+  statusbar.enable()
   stdout.write "\n"
   stdout.styledWriteLine fgCyan, styleBright, "  ╭─╮"
   stdout.styledWrite fgCyan, styleBright, "   ─┤  ", resetStyle, fgWhite, styleBright, "3code ", resetStyle, fgCyan, styleBright, "v" & Version, resetStyle
