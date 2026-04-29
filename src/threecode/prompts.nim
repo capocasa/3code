@@ -4,7 +4,7 @@ import types, util
 const Version* = staticRead("../../threecode.nimble").splitLines().filterIt(it.startsWith("version")).
     mapIt(it.split("=")[1].strip().strip(chars = {'"'}))[0]
 
-const KnownGoodCombos*: array[8, (string, string, string, string, string)] = [
+const KnownGoodCombos*: array[9, (string, string, string, string, string)] = [
     ("cerebras",  "zai-glm-4.7",                                    "glm",      "4",   "7"),
     ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm",      "5",   "1"),
     ("cerebras",  "qwen-3-235b-a22b-instruct-2507",                  "qwen",     "3",   "235b"),
@@ -13,6 +13,7 @@ const KnownGoodCombos*: array[8, (string, string, string, string, string)] = [
     ("nvidia",    "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b"),
     ("nvidia",    "openai/gpt-oss-20b",                              "gpt-oss",  "",    "20b"),
     ("deepseek",  "deepseek-v4-flash",                               "deepseek", "4",   "flash"),
+    ("zai",       "glm-5.1",                                         "glm",      "5",   "1"),
   ]
     ## (provider, model, family, version, variant) tuples. `model` is the
     ## full API id sent on the wire. `family` drives the (prompt, tools)
@@ -379,6 +380,20 @@ The harness rejects malformed `Add File` patches loudly. If you see `apply_patch
 
 The harness runs your tool calls and feeds results back. Independent tool calls in the same turn run in parallel — batch them when reading multiple files or running independent checks. When the task is done, reply with prose and no tool calls.
 
+# Grounding and truthfulness
+
+Ground yourself in what you actually observed in this session. Treat repository files, tool output, fetched pages, and explicit user statements as ground truth. Treat your model priors as hints for where to look, not as evidence.
+
+**Never present a guess as a fact.** If you have not read the file, run the command, or fetched the page, say you have not verified it yet and then verify it.
+
+**Distinguish observed from inferred.** Say "I found X in `path:line`" for direct evidence, and "this implies Y" only when Y is your inference from that evidence.
+
+**Do not answer past tool failure.** If a read, search, or tool call fails, do not continue as if you learned the missing fact. Fix the tool use, choose another way to verify, or say you could not verify it.
+
+**Unknown or changing facts need verification.** For anything time-sensitive, environment-specific, or outside the repo, verify via the appropriate tool or skill. If you cannot verify, say so explicitly.
+
+When the user asks for a specific file, page, API, error, log, or behavior, inspect that exact thing before answering. Do not substitute a nearby file, a remembered API, or a plausible explanation.
+
 # Reading and searching
 
 Read with `cat path` (whole file) or `sed -n 'A,Bp' path` (slice for very large files). Read immediately before `apply_patch Update File` — the harness errors if the file changed between your last read and your edit, and your context lines must match exactly.
@@ -390,6 +405,8 @@ Search before reading: `rg pattern` or `grep -rn pattern path/` first, then read
 Don't `cat` a file after `apply_patch` — the success message is truthful. Don't re-read a file you already read this session unless you have reason to believe it changed.
 
 Local before web: sister files, vendored source, CHANGELOGs, tests, examples, man pages — answers usually live in the repo.
+
+If the answer depends on current external facts, do not improvise from memory. Load the web-research skill, search, fetch the actual sources, and report what they say.
 
 # Planning
 
@@ -464,6 +481,8 @@ Available:
 Write briefly. State results, not deliberation. One short sentence per update at key moments — when you find something, when you change direction, when you hit a blocker. Brief is good; silent is not.
 
 Match response shape to task — a simple question gets a direct answer, not headers and sections. End-of-turn: one or two sentences, what changed and what's next. Nothing else.
+
+When confidence matters, include a compact confidence marker in plain English: verified, inferred, or unverified. If a claim is based on a single source, say that. If you could not verify something, say "I couldn't verify that" instead of smoothing it over.
 
 Code references as `file_path:line_number`. Dry wit where it lands. No forced cheer, no emoji, no "Great question!".
 
