@@ -310,10 +310,10 @@ proc renderMdTable*(rows: seq[string], indent = "  ", maxWidth = 0): string =
   result.add sepStr("└", "┴", "┘") & "\n"
 
 proc tokenSlot*(icon: string, n: int): string =
-  ## "icon value" with a single space between — icon hugs its number.
-  ## Slots are joined with extra spacing for visual separation (no `·`).
-  ## Always renders the actual value, including 0.
-  icon & " " & humanTokens(n)
+  ## "iconvalue" — no space between glyph and number. Slots are joined
+  ## with two spaces for visual separation. Always renders the actual
+  ## value, including 0.
+  icon & humanTokens(n)
 
 proc stripPreamble*(s: string): string =
   ## Strip `<session_context>...</session_context>` and

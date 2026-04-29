@@ -650,9 +650,9 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
     else:
       let fresh = max(0, session.usage.promptTokens - session.usage.cachedTokens)
       let line = tokenSlot("↑", fresh) &
-        "   " & tokenSlot("↺", session.usage.cachedTokens) &
-        "   " & tokenSlot("↓", session.usage.completionTokens) &
-        "   total " & humanTokens(session.usage.totalTokens)
+        "  " & tokenSlot("≡", session.usage.cachedTokens) &
+        "  " & tokenSlot("↓", session.usage.completionTokens) &
+        "  total " & humanTokens(session.usage.totalTokens)
       stdout.styledWrite(styleDim, line, resetStyle, "\n")
   of ":clear":
     messages = %* [{"role": "system", "content": buildSystemPrompt(prof)}]

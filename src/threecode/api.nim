@@ -97,14 +97,14 @@ proc spinnerLoop(unused: string) {.thread.} =
 
 proc liveLabel*(base: string, slurped: int): string =
   ## Spinner label whose token slots match the per-call summary's shape:
-  ## icon hugs value, slots joined with extra space (no `·`). ↑/↺ read
-  ## as `0` until the final usage event closes the response; the spinner
-  ## thread renders this in fgCyan + styleBright.
+  ## icon hugs value, slots joined by two spaces. ↑/≡ read as `0` until
+  ## the final usage event closes the response; the spinner thread
+  ## renders this in fgCyan + styleBright.
   let up = tokenSlot("↑", 0)
-  let cached = tokenSlot("↺", 0)
+  let cached = tokenSlot("≡", 0)
   let down = tokenSlot("↓", slurped div 4)
-  if base.len > 0: base & "   " & up & "   " & cached & "   " & down
-  else: up & "   " & cached & "   " & down
+  if base.len > 0: base & "  " & up & "  " & cached & "  " & down
+  else: up & "  " & cached & "  " & down
 
 
 var spinnerRunning = false  # only mutated by main thread
@@ -274,7 +274,28 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   # that one only. Block constructs (code/table) close the bullet line
   # with a newline before they render their own indented body.
   var firstEmit = false
+  # Live token status drawn one row below the most-recently-emitted
+  # content line. Refreshed per SSE chunk so the user sees ↓ tick up
+  # while output streams. Each emit clears its row first (so the new
+  # content overwrites the status), then `emitContent` redraws after
+  # the chunk settles. Only draws after at least one full content line
+  # has shipped, so we don't corrupt the bullet row before the first \n.
+  var liveStatusActive = false
+  var liveLineEmitted = false
+  let streamT0 = epochTime()
+  proc clearLiveStatus() =
+    if not liveStatusActive: return
+    stdout.write "\x1b[2K"
+    liveStatusActive = false
+  proc drawLiveStatus(slurpedNow: int) =
+    let elapsed = (epochTime() - streamT0).int
+    let lbl = liveLabel(baseLabel, slurpedNow) & "  " & $elapsed & "s"
+    stdout.styledWrite(styleDim, "  " & lbl, resetStyle)
+    stdout.write "\r"
+    stdout.flushFile
+    liveStatusActive = true
   proc emitLine(l: string) =
+    clearLiveStatus()
     let termW = try: terminalWidth() except CatchableError: 80
     let bodyW = max(20, termW - 2)
     let chunks = wrapAnsi(applyInlineMd(l), bodyW)
@@ -284,7 +305,9 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       stdout.styledWrite(fgWhite, styleDim, prefix & chunk & "\n", resetStyle)
       inc k
     firstEmit = false
+    liveLineEmitted = true
   proc emitHeader(text: string) =
+    clearLiveStatus()
     let termW = try: terminalWidth() except CatchableError: 80
     let bodyW = max(20, termW - 2)
     let chunks = wrapAnsi(text, bodyW)
@@ -294,14 +317,18 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       stdout.styledWrite(fgWhite, styleBright, prefix & chunk & "\n", resetStyle)
       inc k
     firstEmit = false
+    liveLineEmitted = true
   proc emitCodeLine(l: string) =
+    clearLiveStatus()
     if firstEmit:
       stdout.write "\n"
       firstEmit = false
     stdout.styledWrite(styleDim, "  ┃ ", resetStyle)
     stdout.styledWrite(fgWhite, styleDim, l & "\n", resetStyle)
+    liveLineEmitted = true
   proc flushTable() =
     if tableBuf.len == 0: return
+    clearLiveStatus()
     if firstEmit:
       stdout.write "\n"
       firstEmit = false
@@ -312,10 +339,13 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       let rendered = renderMdTable(tableBuf, maxWidth = termW)
       stdout.styledWrite(fgWhite, styleDim, rendered, resetStyle)
     tableBuf.setLen 0
+    liveLineEmitted = true
   proc flushCode() =
     if codeBuf.len == 0: return
+    clearLiveStatus()
     for l in codeBuf: emitCodeLine(l)
     codeBuf.setLen 0
+    liveLineEmitted = true
   proc handleLine(l: string) =
     if inCode:
       if isMdFenceLine(l):
@@ -337,19 +367,22 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       emitHeader(hdrText)
     else:
       emitLine(l)
-  proc emitContent(c: string) =
+  proc emitContent(c: string, slurpedNow: int) =
     for ch in c:
       if ch == '\n':
         handleLine(pendingLine)
         pendingLine = ""
       else:
         pendingLine.add ch
+    if liveLineEmitted and pendingLine.len == 0:
+      drawLiveStatus(slurpedNow)
   proc finishContent() =
     if pendingLine.len > 0:
       handleLine(pendingLine)
       pendingLine = ""
     flushCode()
     flushTable()
+    clearLiveStatus()
   let outS = p.outputStream
   var line = ""
   while outS.readLine(line):
@@ -387,7 +420,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
               firstEmit = true
             accContent &= c
             slurped += c.len
-            emitContent(c)
+            emitContent(c, slurped)
             stdout.flushFile()
           let tcDelta = delta{"tool_calls"}
           if tcDelta != nil and tcDelta.kind == JArray:
