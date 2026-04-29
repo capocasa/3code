@@ -143,6 +143,10 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
     let (prefix, models) = curatedFor(name)
     for m in models:
       hintLn "    ", resetStyle, m
+    if models.len == 0:
+      # Provider not in known‑good list; give a clear hint.
+      hintLn &"  provider {name} not known‑good; enable --experimental to use it", resetStyle
+      raise newException(minline.InputCancelled, "")
     while true:
       let prov = ProviderRec(name: name, url: url, key: key,
                              modelPrefix: prefix, models: models)
