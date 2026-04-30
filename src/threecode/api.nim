@@ -1,5 +1,5 @@
 import std/[algorithm, atomics, json, locks, os, osproc, sequtils, streams, strformat, strutils, tables, terminal, times]
-import types, util, prompts, compact, display, statusbar
+import types, util, prompts, compact, display
 
 # ---------- Spinner ----------
 
@@ -15,14 +15,20 @@ var contentStreamedLive*: bool = false
   ## of the turn.
 
 var pendingHint*: tuple[active: bool, usage: Usage, window: int, elapsed: int]
-  ## Carries the previous turn's accurate token usage forward so the
-  ## **token receipt** can be rendered at the start of the next
-  ## user-driven turn instead of at the end of the call that produced
-  ## the data. Lets the **token bar** drawn by `streamHttp` stay
-  ## visible as the per-turn record while the user reads/types; the
-  ## receipt only "settles" once the next user message hits
-  ## `runTurns` → `settlePendingHint`. Cleared after rendering.
-  ## (See `## Token UI` in `CLAUDE.md` for the full lifecycle.)
+  ## Carries the latest iteration's accurate usage forward. Two roles:
+  ##   1. After each `callModel` iteration, used to repaint the **token
+  ##      bar** with accurate values (replacing the live rough ones).
+  ##   2. On user submit (next turn), the saved values become the
+  ##      **token receipt** — the dim repaint of the previous bar's
+  ##      row, leaving the receipt in scroll history while a fresh
+  ##      bar (at zeros) takes its place at the new bottom.
+  ## See `## Token UI` in `CLAUDE.md` for the full lifecycle.
+
+var currentBarLabel*: string
+  ## What's currently shown in the live bar. Updated by every paint
+  ## (live during streaming, accurate after `callModel` parses usage,
+  ## zero on first turn). Used by `withCleared` to repaint the bar
+  ## with the same label after a content write hides it.
 
 var showThinking*: bool = true
   ## When true, reasoning_content deltas from the provider are rendered as
@@ -67,70 +73,245 @@ proc getSpinTicker(): string {.gcsafe.} =
     result = spinTickerShared
     release spinLabelLock
 
-proc spinnerLoop(unused: string) {.thread.} =
-  ## Status-bar mode: writes the animated frame to the **token bar**
-  ## row (H-1) via `writeAtBar`. While reasoning is streaming, the
-  ## bar slot temporarily shows the reasoning ticker instead of the
-  ## token slots — the next frame after `setSpinTicker("")` repaints
-  ## the slots back, so no row reservation is needed for thinking.
+# ---------- Pure byte emitters (testable) ----------
+#
+# CLAUDE.md "Token UI" section is the spec. The bar and prompt are
+# ALWAYS visible — there are no "hidden" states. Tool exec, line emits,
+# and inter-iteration transitions clear them just long enough to write
+# above, then repaint immediately below. Receipts are NOT separate
+# rows — when the user submits, the previous bar's row is repainted
+# dim (the "receipt") and stays in scroll history.
+#
+# Layout (rows at the bottom of the visible content, sliding with the
+# cursor):
+#
+#   row K-1   scratch / thinking-ticker overlay target (always blank
+#             between iterations; ticker overlays it while reasoning
+#             streams, restoring blank when reasoning ends — the row
+#             holds no permanent content).
+#   row K     token bar (cyan + bright). Position 0 carries either the
+#             spinner braille glyph (during streaming) or a space
+#             (idle / between iterations). Position 1 is always a
+#             space. Label starts at column 2.
+#   row K+1   prompt `❯ ` — dim while typing isn't possible, bright
+#             cyan when readline is reading.
+#
+# Emitters:
+#
+#   spinnerBarBytes      bar payload with spinner glyph at col 0.
+#   liveBarBytes         bar payload with space at col 0 (idle / static).
+#   spinnerFooterBytes   per-frame spinner three-row footer.
+#   barFooterBytes       bar + prompt, cursor parked at bar row col 0.
+#   ClearBarPromptBytes  erase bar + prompt rows, cursor at bar row col 0.
+#   SpinnerCleanupBytes  wipes all three spinner footer rows.
+#   receiptBarBytes      dim payload of the bar (for the in-place
+#                        receipt repaint at user-submit time).
+#   submitTransitionBytes  full byte sequence for the user-submit
+#                        transition (walk back, paint receipt, echo
+#                        user input).
+
+const
+  DimPromptColor* = "\x1b[2m\x1b[37m"
+    ## Dim white SGR for the prompt (typing not possible).
+  BrightPromptColor* = "\x1b[1m\x1b[36m"
+    ## Bright cyan SGR for the prompt (readline active / typing-ready).
+
+proc spinnerBarBytes*(frame, label: string, elapsed: int): string =
+  ## Bar row payload during the spinner phase: braille glyph at col 0,
+  ## one space at col 1, then the label. 2-char prefix total — the same
+  ## width as `liveBarBytes`'s "  " so the spinner can be replaced by
+  ## a space without shifting the label.
+  "\x1b[36m\x1b[1m" & frame & "\x1b[0m\x1b[36m\x1b[1m " &
+    label & " " & $elapsed & "s\x1b[0m"
+
+proc liveBarBytes*(label: string): string =
+  ## Bar row payload (no spinner): two leading spaces, then the label.
+  ## Position 0 is the slot that gets overwritten with the spinner
+  ## glyph during streaming.
+  "\x1b[36m\x1b[1m  " & label & "\x1b[0m"
+
+proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int): string =
+  ## Three-row spinner footer. Cursor in: col 0 of the bar row.
+  ## Cursor out: same. The row above (ticker overlay target) is
+  ## cleared every frame so reasoning→no-reasoning is a faithful
+  ## restore as long as that row was blank to begin with (it always
+  ## is — the leading `\n` callModel writes guarantees it).
+  result = "\r\x1b[1A\x1b[2K"
+  if ticker.len > 0:
+    result.add "\x1b[2m"
+    result.add ticker
+    result.add "\x1b[0m"
+  result.add "\n\x1b[2K"
+  result.add spinnerBarBytes(frame, label, elapsed)
+  result.add "\n\x1b[2K" & DimPromptColor & "❯ \x1b[0m"
+  result.add "\r\x1b[1A"
+
+const SpinnerCleanupBytes* =
+  "\r\x1b[1A\x1b[2K\n\x1b[2K\n\x1b[2K\r\x1b[1A"
+
+proc paintBarBytes*(label: string): string =
+  ## Clears the bar row and writes the static-form bar payload. Cursor
+  ## ends at the end of the payload on the bar row.
+  "\r\x1b[2K" & liveBarBytes(label)
+
+proc barFooterBytes*(label, promptColor: string): string =
+  ## Bar at the current row + prompt at the row below, cursor parked
+  ## at col 0 of the bar row. Replaces the old `liveFooterBytes` —
+  ## prompt color is now a parameter (dim while typing impossible,
+  ## bright cyan when readline is active).
+  paintBarBytes(label) &
+    "\n\x1b[2K" & promptColor & "❯ \x1b[0m\r\x1b[1A"
+
+const ClearBarPromptBytes* = "\r\x1b[2K\n\x1b[2K\r\x1b[1A"
+  ## Erase the bar + prompt rows, cursor at col 0 of the bar row.
+  ## Used to make room above before a content write that will push
+  ## bar+prompt one row down.
+
+proc barFooterBelowBytes*(label, promptColor: string): string =
+  ## Paint bar one row below the cursor + prompt two rows below,
+  ## walking the cursor back up to the bullet row at column 2 (right
+  ## after `● `). Used during mid-line streaming where the cursor
+  ## sits at the bullet row, content is accumulating in `pendingLine`
+  ## (in memory, no terminal write yet), and the bar still needs to
+  ## be visible.
   ##
-  ## Fallback (no status bar — non-TTY or terminal too small): writes
-  ## inline using \r overwrite of the current row (legacy behavior,
-  ## still uses a second row below for the ticker since we don't have
-  ## anchored slots there).
+  ## Avoids CSI s/u (SCO save/restore cursor) — those are silently
+  ## ignored on enough terminals (we shipped a regression where each
+  ## refresh stacked another bar in scroll because the cursor never
+  ## returned). `\x1b[2A` walks up 2 rows; `\x1b[3G` sets the column
+  ## to 3 (1-based, == col 2 0-based, the position right after the
+  ## bullet).
+  "\n\x1b[2K" & liveBarBytes(label) &
+    "\n\x1b[2K" & promptColor & "❯ \x1b[0m" &
+    "\x1b[2A\x1b[3G"
+
+const ClearBarBelowBytes* =
+  "\n\x1b[2K\n\x1b[2K\x1b[2A\x1b[3G"
+  ## Erase the bar + prompt rows below the cursor (without
+  ## disturbing the cursor's row content), then walk back up to the
+  ## bullet row at column 2. Same caveat as `barFooterBelowBytes`:
+  ## avoids CSI s/u so it works on terminals that ignore those.
+
+proc receiptBarBytes*(label: string): string =
+  ## In-place dim repaint of the bar row's payload. No leading clear
+  ## — caller has already cleared (or just walked back). No trailing
+  ## newline — caller advances. The byte sequence the user-submit
+  ## transition writes onto the previous turn's bar row to convert it
+  ## into the **token receipt**.
+  if label.len == 0: return ""
+  "\x1b[2m  " & label & "\x1b[0m"
+
+proc submitTransitionBytes*(line: string, hadPending: bool,
+                            receiptLabel: string): string =
+  ## Full byte sequence for the moment the user submits a prompt:
+  ##
+  ##   1. Walk up `splitLines(line).len + 1` rows so the cursor lands
+  ##      on the previous turn's bar row.
+  ##   2. Clear from there to end of screen (wipes bar, prompt, the
+  ##      live readline echo, and anything below).
+  ##   3. If `hadPending`, paint the dim receipt over the bar's old
+  ##      row. Otherwise leave the row blank (first turn — the bar
+  ##      was at zeros and there's no previous turn to receipt).
+  ##   4. Two newlines: advance past the receipt row + leave one
+  ##      blank as the separator between receipt and user echo.
+  ##   5. Echo the user's input line by line (`❯ ` for the first
+  ##      line, `  ` for continuations) so it's part of scroll
+  ##      history rather than a transient readline artefact.
+  ##
+  ## Cursor out: col 0 of the row directly after the last echoed
+  ## line. The next callModel's leading `\n` will turn that row into
+  ## the scratch / ticker-overlay target.
+  let lines = line.splitLines
+  let n = lines.len
+  result = "\x1b[" & $(n + 1) & "A"
+  result.add "\r\x1b[J"
+  if hadPending:
+    result.add receiptBarBytes(receiptLabel)
+  result.add "\n\n"
+  for idx, l in lines:
+    let prefix = if idx == 0: "❯ " else: "  "
+    result.add "\x1b[37m"
+    result.add prefix
+    result.add l
+    result.add "\x1b[0m\n"
+
+# ---------- Bar+prompt runtime helpers ----------
+#
+# The bar and prompt are *always visible*. These helpers hide them
+# just long enough for a content write that would otherwise advance
+# into them, and repaint them immediately below. Each helper also
+# updates `currentBarLabel` so subsequent repaints (after a tool
+# write, after an iteration end, etc.) use the same content.
+
+proc paintBarPrompt*(label, promptColor: string) =
+  ## Write bar + prompt at the cursor's current row, parking cursor
+  ## at col 0 of the bar row. Caches `label` so a later
+  ## `repaintBarPrompt` knows what to draw.
+  currentBarLabel = label
+  stdout.write barFooterBytes(label, promptColor)
+  stdout.flushFile
+
+proc paintBarBelow*(label, promptColor: string) =
+  ## Paint bar + prompt one and two rows below the cursor, restoring
+  ## the cursor to its original (likely mid-line) position. Used
+  ## during streaming to keep the bar visible while content is being
+  ## accumulated in memory and the cursor stays put.
+  currentBarLabel = label
+  stdout.write barFooterBelowBytes(label, promptColor)
+  stdout.flushFile
+
+proc repaintBarPrompt*(promptColor = DimPromptColor) =
+  ## Re-emit the bar+prompt at the cursor's current row using the
+  ## cached `currentBarLabel`. Used by `withCleared` to put the bar
+  ## back after a content write.
+  if currentBarLabel.len == 0: return
+  stdout.write barFooterBytes(currentBarLabel, promptColor)
+  stdout.flushFile
+
+proc clearBarPrompt*() =
+  ## Erase the bar + prompt rows in place. Cursor parks at col 0 of
+  ## the bar row so the caller can write content there (which then
+  ## pushes the next `repaintBarPrompt` one row down).
+  stdout.write ClearBarPromptBytes
+  stdout.flushFile
+
+template withCleared*(body: untyped) =
+  ## Hide bar+prompt for the duration of `body`, repaint them below
+  ## the cursor afterwards. Body writes content (banners, tool
+  ## output, etc.) that advances the cursor by some number of rows;
+  ## the bar+prompt slide along with the cursor.
+  clearBarPrompt()
+  body
+  repaintBarPrompt()
+
+proc spinnerLoop(unused: string) {.thread.} =
+  ## Three-line spinner footer rooted at the cursor row:
+  ##   row N-1   reasoning ticker (overlay, dim) — shown only while
+  ##             reasoning streams; the row above the bar is the
+  ##             leading-`\n` scratch row callModel writes, so the
+  ##             overlay always lands on a blank, and clearing the
+  ##             row is a faithful restore.
+  ##   row N     spinner frame + token-slot bar (cyan + bright)
+  ##   row N+1   dim `❯ ` placeholder, the visible caret while typing
+  ##             isn't possible.
+  ## See `spinnerFooterBytes` for the byte sequence each frame writes.
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
   let start = epochTime()
   var i = 0
-  var tickerActive = false  # inline-mode only; tracks 2-line layout
   while not spinnerStop.load(moRelaxed):
     let elapsed = epochTime() - start
     let label = getSpinLabel()
     let ticker = getSpinTicker()
     try:
       let frame = frames[i mod frames.len]
-      if statusbar.isActive():
-        # When the ticker has reasoning text, overlay it on the bar
-        # row in dim style so it visually distinct from the bright
-        # token-slot mode. As soon as `ticker` empties (content has
-        # started → main set it to ""), the next frame paints the
-        # bright token slots back.
-        let payload =
-          if ticker.len > 0:
-            "\x1b[36m\x1b[1m" & frame & "\x1b[0m\x1b[2m  " & ticker & "\x1b[0m"
-          else:
-            "\x1b[36m\x1b[1m" & frame & "\x1b[0m\x1b[36m\x1b[1m  " &
-            label & " " & $elapsed.int & "s\x1b[0m"
-        writeAtBar(payload)
-      else:
-        let barText = "\x1b[36m\x1b[1m" & frame & "\x1b[0m\x1b[36m\x1b[1m  " &
-                      label & " " & $elapsed.int & "s\x1b[0m"
-        # Inline fallback: same two-line dance the legacy code did.
-        stdout.write "\r\x1b[2K"
-        stdout.write barText
-        if ticker.len > 0:
-          stdout.write "\n\x1b[2K\x1b[2m"
-          stdout.write ticker
-          stdout.write "\x1b[0m\r\x1b[1A"
-          tickerActive = true
-        elif tickerActive:
-          stdout.write "\n\x1b[2K\r\x1b[1A"
-          tickerActive = false
-        stdout.flushFile
+      stdout.write spinnerFooterBytes(frame, label, ticker, elapsed.int)
+      stdout.flushFile
     except CatchableError: discard
     sleep 80
     inc i
   try:
-    if statusbar.isActive():
-      # Leave the bar where it was — the post-stream `drawLiveStatus`
-      # redraws it with the static (no-glyph) shape as soon as content
-      # finishes. No thinking row to clear; the ticker overlay was on
-      # the bar row and gets repainted by `drawLiveStatus`.
-      discard
-    else:
-      stdout.write "\r\x1b[2K"
-      if tickerActive:
-        stdout.write "\n\x1b[2K\r\x1b[1A"
-      stdout.flushFile
+    stdout.write SpinnerCleanupBytes
+    stdout.flushFile
   except CatchableError: discard
 
 proc liveLabel*(base: string, slurped: int): string =
@@ -313,45 +494,36 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   # output stay byte-identical.
   var pendingLine = ""
   var mdState = initMarkdownState(firstEmit = false)
-  # Live **token bar** updates: in status-bar mode, drawn at the bar
-  # row (H-1) via `writeAtBar`, so it stays put while content scrolls
-  # in the region above. In fallback mode (non-TTY / tiny terminal),
-  # drawn inline below the most-recent content line and overwritten by
-  # subsequent emits via `\x1b[2K`. `liveLineEmitted` gates the legacy
-  # inline path so we don't corrupt the bullet row before the first
-  # \n (status-bar mode doesn't have this concern — the bar row is
-  # separate).
-  var liveStatusActive = false
+  # Bar+prompt remain visible the entire time content is streaming.
+  # Two states track where they sit relative to the cursor:
+  #   `liveBarAtCursor`  bar is at the cursor's row + prompt at row+1.
+  #                      Holds after a `\n` paints the bar at the new
+  #                      cursor row. Content writes that overlay the
+  #                      cursor row first need to clear it.
+  #   `liveBarBelow`     bar is at cursor row+1 + prompt at cursor+2.
+  #                      Holds during mid-line streaming (cursor sits
+  #                      on a content row that's accumulating in
+  #                      `pendingLine`, no terminal advance yet). Painted
+  #                      via `barFooterBelowBytes` (CSI s/u save/restore)
+  #                      so it doesn't disturb the cursor row.
+  # Mutually exclusive; both false means the bar isn't painted yet
+  # (pre-bullet) or has been cleared (mid-flush).
+  var liveBarAtCursor = false
+  var liveBarBelow = false
   var liveLineEmitted = false
   let streamT0 = epochTime()
-  proc clearLiveStatus() =
-    if not liveStatusActive: return
-    if statusbar.isActive():
-      clearBar()
-    else:
-      stdout.write "\x1b[2K"
-    liveStatusActive = false
-  proc drawLiveStatus(slurpedNow: int) =
-    # **Token bar** in stopped/streaming state: same cyan + bright
-    # palette as the spinner, but the animated braille frame slot is
-    # blanked (3 spaces, matching the frame's visual width) so the row
-    # reads as quiet — animation lives only with the actual spinner
-    # while the model is thinking. The dim **token receipt** (different
-    # element) lands at the start of the next user turn via
-    # `settlePendingHint`, just before new output streams.
+  proc currentLabel(slurpedNow: int): string =
     let elapsed = (epochTime() - streamT0).int
-    let lbl = liveLabel(baseLabel, slurpedNow) & "  " & $elapsed & "s"
-    let payload = "\x1b[36m\x1b[1m   " & lbl & "\x1b[0m"
-    if statusbar.isActive():
-      writeAtBar(payload)
-    else:
-      stdout.write payload & "\r"
-      stdout.flushFile
-    liveStatusActive = true
+    liveLabel(baseLabel, slurpedNow) & "  " & $elapsed & "s"
   proc handleLine(l: string) =
-    # Status row gets cleared before any content write so the new line
-    # overwrites it cleanly. Cheap if status was already inactive.
-    clearLiveStatus()
+    # Pre-write: if bar is at the cursor's row, clear it before
+    # content writes overlay it. If the bar is below cursor, content
+    # writes cleanly on the cursor row and `\n` advances onto the
+    # old-bar row; the subsequent `paintBarPrompt`'s leading clear
+    # handles that case.
+    if liveBarAtCursor:
+      clearBarPrompt()
+      liveBarAtCursor = false
     if handleMdLine(mdState, l, stdout):
       liveLineEmitted = true
   proc emitContent(c: string, slurpedNow: int) =
@@ -359,16 +531,49 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       if ch == '\n':
         handleLine(pendingLine)
         pendingLine = ""
+        if liveLineEmitted:
+          # Cursor advanced one row past the just-written content.
+          # That row was the previous bar/below position and now
+          # holds stale chrome; `paintBarPrompt`'s leading
+          # `\r\x1b[2K` clears it before painting the new bar.
+          paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
+          liveBarAtCursor = true
+          liveBarBelow = false
       else:
         pendingLine.add ch
-    if liveLineEmitted and pendingLine.len == 0:
-      drawLiveStatus(slurpedNow)
-  proc finishContent() =
+    # End-of-chunk refresh: keep the bar's slurped/elapsed values
+    # current AND keep the bar visible across long mid-line streams.
+    # Whichever state holds, paint with the matching emitter.
+    if contentStarted:
+      if liveBarAtCursor:
+        paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
+      elif liveBarBelow:
+        paintBarBelow(currentLabel(slurpedNow), DimPromptColor)
+  proc finishContent(slurpedNow: int) =
     if pendingLine.len > 0:
       handleLine(pendingLine)
       pendingLine = ""
-    clearLiveStatus()
-    discard finishMd(mdState, stdout)
+      if liveLineEmitted:
+        paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
+        liveBarAtCursor = true
+        liveBarBelow = false
+    # If markdown has buffered content (open code fence, table rows
+    # without a closing non-table line), flushing it writes more
+    # rows above the bar — clear bar+prompt first so the writes
+    # don't conflict, then repaint at the new bottom.
+    if mdState.codeBuf.len > 0 or mdState.tableBuf.len > 0:
+      if liveBarAtCursor:
+        clearBarPrompt()
+        liveBarAtCursor = false
+      elif liveBarBelow:
+        stdout.write ClearBarBelowBytes
+        stdout.flushFile
+        liveBarBelow = false
+      discard finishMd(mdState, stdout)
+      paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
+      liveBarAtCursor = true
+    # else: bar+prompt already in place, leave them alone — avoids
+    # the brief clear→repaint flash we used to ship.
   let outS = p.outputStream
   var line = ""
   while outS.readLine(line):
@@ -399,14 +604,16 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
               # Stop the spinner and emit the answer bullet at column 0
               # without a newline; the first content line lands on the same
               # row right after `● `, subsequent lines indent two spaces.
-              # `setSpinTicker("")` flips the bar back to token-slot mode
-              # for the last spinner frame; `drawLiveStatus` then takes
-              # over once content actually streams.
+              # Then paint bar+prompt one row below so the bar stays
+              # visible while `pendingLine` accumulates in memory before
+              # the first `\n` arrives.
               setSpinTicker("")
               stopSpinner()
               stdout.styledWrite(fgWhite, styleBright, "● ", resetStyle)
               contentStarted = true
               mdState.firstEmit = true
+              paintBarBelow(currentLabel(slurped), DimPromptColor)
+              liveBarBelow = true
             accContent &= c
             slurped += c.len
             emitContent(c, slurped)
@@ -446,32 +653,26 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   try: p.close() except OSError: discard
 
   if contentStarted:
-    finishContent()
-    if statusbar.isActive():
-      # Bar lives on its own row (H-1), so there's nothing to "make
-      # room for" below the content. Redraw it with the final paused-
-      # glyph state — the spinner thread already stopped on first
-      # content, so without this redraw the bar would still show the
-      # last animated frame. Cursor stays in the scroll region.
-      drawLiveStatus(slurped)
-      liveStatusActive = false
-    else:
-      # Inline path: collapse any trailing blank rows the model emitted
-      # so the per-turn token receipt (rendered by `settlePendingHint`
-      # at the end of the turn) lands flush below the last content
-      # line. No final bar repaint and no extra advance — cursor is
-      # already on the blank row right below content; the receipt's
-      # own trailing `\n` advances past it. The live (bright) bar
-      # exists only while content is actively streaming.
-      var trailingNl = 0
-      for i in countdown(accContent.len - 1, 0):
-        if accContent[i] == '\n': inc trailingNl
-        else: break
-      if trailingNl > 1:
-        for _ in 0 ..< trailingNl - 1:
-          stdout.write "\x1b[1A\x1b[2K"
-      liveStatusActive = false
-      stdout.flushFile()
+    finishContent(slurped)
+    # Collapse trailing blank rows the model emitted so the bar lands
+    # flush below the last content line. The bar may currently sit
+    # `trailingNl - 1` rows below where it should; clear it, walk up
+    # the extras, repaint.
+    var trailingNl = 0
+    for i in countdown(accContent.len - 1, 0):
+      if accContent[i] == '\n': inc trailingNl
+      else: break
+    if trailingNl > 1:
+      if liveBarAtCursor:
+        clearBarPrompt()
+        liveBarAtCursor = false
+      elif liveBarBelow:
+        stdout.write ClearBarBelowBytes
+        stdout.flushFile
+        liveBarBelow = false
+      for _ in 0 ..< trailingNl - 1:
+        stdout.write "\x1b[1A\x1b[2K"
+      paintBarPrompt(currentLabel(slurped), DimPromptColor)
     contentStreamedLive = true
 
   if interrupted:
@@ -519,15 +720,40 @@ proc ensureReasoningField(messages: JsonNode) =
 template hint(args: varargs[untyped]) =
   stdout.styledWrite(fgCyan, styleBright, args, resetStyle)
 
-proc settlePendingHint*() =
-  ## Render the deferred **token receipt** saved by the previous
-  ## `callModel`. Intended to be called from `runTurns` at the start
-  ## of every new user-driven turn so the receipt appears only when
-  ## the user sends the next message, not between tool-chain follow-
-  ## ups within the same turn. No-op when nothing is pending.
-  if pendingHint.active:
-    renderTokenLine(pendingHint.usage, pendingHint.window, pendingHint.elapsed)
-    pendingHint.active = false
+proc beginTurn*() =
+  ## Hide the terminal caret for the duration of the turn — the dim
+  ## `❯ ` glyph (still painted, just not blinking) is the only
+  ## visible marker while typing isn't possible.
+  stdout.write "\x1b[?25l"
+  stdout.flushFile
+
+proc endTurn*() =
+  ## Repaint bar+prompt with the bright cyan prompt color (typing
+  ## now possible) and show the terminal caret. The bar's *content*
+  ## is unchanged — it just transitions from "busy" to "ready"
+  ## visually via the prompt color flip.
+  if currentBarLabel.len > 0:
+    stdout.write barFooterBytes(currentBarLabel, BrightPromptColor)
+  stdout.write "\x1b[?25h"
+  stdout.flushFile
+
+proc emitUserSubmit*(line: string) =
+  ## Run the user-submit transition described in `submitTransitionBytes`
+  ## using the current `pendingHint` state. Called from the main loop
+  ## right after the user's input is read but before `runTurns` —
+  ## walks back to the previous turn's bar row, repaints it dim (the
+  ## receipt), echoes the user's input, advances. After this returns
+  ## the cursor is on the row directly after the last echo line; the
+  ## next `callModel`'s leading `\n` sets up the scratch row for the
+  ## new spinner footer.
+  let receiptLabel =
+    if pendingHint.active:
+      tokenLineLabel(pendingHint.usage, pendingHint.window, pendingHint.elapsed)
+    else: ""
+  stdout.write submitTransitionBytes(line, pendingHint.active, receiptLabel)
+  stdout.flushFile
+  pendingHint.active = false
+  currentBarLabel = ""
 
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   ensureReasoningField(messages)
@@ -545,22 +771,20 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   decayLevel(rateRetryLevel, rateLastTs, t0)
   let window = contextWindowFor(p.model)
   let baseLabel = contextLabel(lastPromptTokens, window)
-  # Blank line above the upcoming spinner / bullet so the assistant
-  # output isn't flush against the prior content (user prompt or last
-  # tool output line). Done once per call — retries reuse the same row.
-  # Inline mode wants a blank row above the upcoming spinner so the
-  # animated frame doesn't run flush against prior content. Status-
-  # bar mode doesn't need it — the spinner draws on its dedicated row
-  # (H-1), not in the scroll region — and the extra `\n` would just
-  # add a stray blank above the response.
-  if not statusbar.isActive():
-    stdout.write "\n"
+  # Blank scratch row above the upcoming spinner / bullet. Serves two
+  # purposes: (1) visual separation between the user's echoed prompt
+  # (or prior tool output) and the spinner, and (2) a known-blank
+  # overlay target for the reasoning ticker — the spinner thread
+  # writes the ticker into this row while reasoning streams and clears
+  # it back to blank when reasoning ends, so the original (blank) state
+  # is faithfully restored. Done once per call; retries reuse the same
+  # row.
+  stdout.write "\n"
   setSpinLabel(liveLabel(baseLabel, 0))
-  # Hide the cursor for the duration of the turn — the steady-block
-  # cursor would otherwise be visible inside the scroll region
-  # wherever the bar/thinking save-and-restore parks it. Restored at
-  # the next input boundary by `readInput`.
-  statusbar.hideCursor()
+  # Cursor is hidden for the duration of the entire turn by `runTurns`
+  # so the dim `❯ ` placeholder is the only visible caret. callModel
+  # itself doesn't toggle visibility — touching DECTCEM here would
+  # cause a flicker between callModel iterations within a turn.
   startSpinner("")
   const MaxAttempts = 8
   var outcome: StreamOutcome
@@ -631,29 +855,36 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   usage = outcome.usage
   let elapsed = epochTime() - t0
   if usage.totalTokens > 0:
-    # Defer the **token receipt** render to the start of the next
-    # user-driven turn. The **token bar** from `streamHttp` is still
-    # on screen with the streaming rough values; the receipt lands
-    # just before the next turn's leading blank line via
-    # `settlePendingHint`. Auto-compaction warnings still fire
-    # immediately so the user can act on them before the next turn.
+    # Repaint the bar with accurate values now that `usage` is parsed
+    # — the live values during streaming were rough estimates
+    # (`slurped/4`). `pendingHint` carries the same numbers forward
+    # so the next user-submit's receipt repaints this row dim with
+    # matching content.
+    let label = tokenLineLabel(usage, window, elapsed.int)
+    paintBarPrompt(label, DimPromptColor)
     pendingHint = (active: true, usage: usage, window: window, elapsed: elapsed.int)
     if window > 0 and usage.promptTokens.float > 0.7 * window.float and
        usage.promptTokens.float <= CompactThresholdFrac * window.float:
-      stdout.styledWriteLine(styleDim,
-        &"  · context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} — auto-compaction will fire near {humanTokens(int(CompactThresholdFrac * window.float))}; :compact or :summarize to act now",
-        resetStyle)
+      withCleared:
+        stdout.styledWriteLine(styleDim,
+          &"  · context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} — auto-compaction will fire near {humanTokens(int(CompactThresholdFrac * window.float))}; :compact or :summarize to act now",
+          resetStyle)
   else:
-    hint &"  · {elapsed.int}s", resetStyle, "\n"
+    withCleared:
+      hint &"  · {elapsed.int}s", resetStyle, "\n"
   stdout.flushFile
   if outcome.assistantMsg != nil and usage.totalTokens > 0:
     # Attach this turn's usage inline so replay can render the same
     # token line without a parallel array that drifts under summarization.
+    # `elapsed` and `ts` carry through to the .3log `tokens` record on
+    # save so resumed sessions keep their cost ledger.
     outcome.assistantMsg["usage"] = %*{
       "promptTokens": usage.promptTokens,
       "completionTokens": usage.completionTokens,
       "totalTokens": usage.totalTokens,
       "cachedTokens": usage.cachedTokens,
+      "elapsed": elapsed.int,
+      "ts": now().format("yyyy-MM-dd'T'HH:mm:sszzz"),
     }
   outcome.assistantMsg
 

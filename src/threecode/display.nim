@@ -32,29 +32,10 @@ template warn*(args: varargs[untyped]) =
 template warnLn*(args: varargs[untyped]) =
   stdout.styledWriteLine(fgCyan, styleDim, args, resetStyle)
 
-proc previewCmd*(body: string, width = 64): string =
-  let first = body.strip.splitLines[0]
-  if first.len > width: first[0 ..< width-1] & "…" else: first
-
-proc bannerFor*(act: Action): string =
-  case act.kind
-  of akBash:
-    "bash   " & previewCmd(act.body)
-  of akRead:
-    if act.offset > 0 or act.limit > 0:
-      let endHint = if act.limit > 0: $(act.offset + act.limit - 1) else: "end"
-      &"read   {act.path}  [lines {max(1, act.offset)}-{endHint}]"
-    else:
-      &"read   {act.path}"
-  of akWrite:
-    &"write  {act.path}  ({humanBytes(act.body.len)})"
-  of akPatch:
-    &"patch  {act.path}  ({act.edits.len} edit" & (if act.edits.len == 1: "" else: "s") & ")"
-  of akApplyPatch:
-    let nl = act.body.count('\n')
-    &"apply_patch  ({nl} line" & (if nl == 1: "" else: "s") & ")"
-  of akError:
-    "error  unknown tool '" & act.path & "'"
+# `withCleared` lives in `api.nim` now — it owns `currentBarLabel`,
+# the cached bar payload that drives repaint after a content write.
+# `display.nim`'s job here is purely formatting: receipts, banners,
+# diff coloring, the welcome screen, etc.
 
 const
   CompactHead = 3
@@ -362,21 +343,40 @@ proc renderToolBanner*(banner: string, code: int, elapsedS = -1) =
   stdout.write "\n"
   stdout.flushFile
 
+proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
+  ## Pure label string for the bar / receipt: "○N%  ↑fresh  ↻cached
+  ## ↓completion  Ts" (no styling, no leading spaces — caller wraps
+  ## it in cyan-bright for the bar or dim for the receipt). Empty
+  ## when there's no usage to report.
+  if usage.totalTokens <= 0: return ""
+  let fresh = max(0, usage.promptTokens - usage.cachedTokens)
+  let ctx = contextLabel(usage.promptTokens, window)
+  result = if ctx.len > 0: ctx & "  " else: ""
+  result.add tokenSlot("↑", fresh)
+  result.add "  " & tokenSlot("↻", usage.cachedTokens)
+  result.add "  " & tokenSlot("↓", usage.completionTokens)
+  if elapsedS >= 0:
+    result.add "  " & $elapsedS & "s"
+
+proc tokenLineBytes*(usage: Usage, window: int, elapsedS = -1): string =
+  ## Pure-byte form of the **token receipt** row used by the *replay*
+  ## path (saved sessions). The live path uses `submitTransitionBytes`
+  ## which paints the receipt in place of the previous turn's bar.
+  ## Returns "" when there's no usage. Trailing double `\x1b[0m` reset
+  ## matches the byte sequence Nim's `styledWrite(... , "\n")` macro
+  ## emits; pinned by `tests/test_golden.nim`.
+  let label = tokenLineLabel(usage, window, elapsedS)
+  if label.len == 0: return ""
+  result = "\x1b[2m  " & label & "\x1b[0m\n\x1b[0m"
+
 proc renderTokenLine*(usage: Usage, window: int, elapsedS = -1) =
   ## "○N%  ↑Nk  ↻Nk  ↓Nk  Ts": context glyph, fresh, cached, generated,
   ## optional duration. Two-space separation, no padding inside slots.
   ## Empty when usage has no totals. Live passes seconds; replay passes
   ## -1 to omit the duration.
-  if usage.totalTokens <= 0: return
-  let fresh = max(0, usage.promptTokens - usage.cachedTokens)
-  let ctx = contextLabel(usage.promptTokens, window)
-  var line = if ctx.len > 0: ctx & "  " else: ""
-  line.add tokenSlot("↑", fresh)
-  line.add "  " & tokenSlot("↻", usage.cachedTokens)
-  line.add "  " & tokenSlot("↓", usage.completionTokens)
-  if elapsedS >= 0:
-    line.add "  " & $elapsedS & "s"
-  stdout.styledWrite(styleDim, "  " & line, resetStyle, "\n")
+  let bytes = tokenLineBytes(usage, window, elapsedS)
+  if bytes.len > 0:
+    stdout.write bytes
 
 proc showProfile*(p: Profile) =
   if p.name == "": return
@@ -444,26 +444,17 @@ proc welcome*(p: Profile): minline.LineEditor =
 proc printSessionList*(paths: seq[string], currentPath: string, showCwd: bool) =
   for p in paths:
     let id = sessionIdFromPath(p)
-    var count = 0
-    var first = ""
-    var cwd = ""
-    try:
-      let j = parseJson(readFile(p))
-      let msgs = j{"messages"}
-      if msgs != nil and msgs.kind == JArray: count = msgs.len
-      first = firstUserMessage(msgs)
-      cwd = j{"cwd"}.getStr("")
-    except CatchableError: discard
+    let preview = previewSession(p)
     let mark = if currentPath == p: "*" else: " "
     let snip =
-      if first.len == 0: ""
-      elif first.len > 50: "  " & first[0 ..< 47] & "..."
-      else: "  " & first
+      if preview.firstUser.len == 0: ""
+      elif preview.firstUser.len > 50: "  " & preview.firstUser[0 ..< 47] & "..."
+      else: "  " & preview.firstUser
     let cwdStr =
-      if showCwd and cwd != "": "  " & collapseHome(cwd)
+      if showCwd and preview.cwd != "": "  " & collapseHome(preview.cwd)
       else: ""
     hint &"  {mark} ", resetStyle, id, fgCyan, styleBright,
-      &"   ({count} msg" & (if count == 1: "" else: "s") & ")",
+      &"   ({preview.msgCount} msg" & (if preview.msgCount == 1: "" else: "s") & ")",
       resetStyle, cwdStr, snip, "\n"
 
 proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],

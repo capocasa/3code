@@ -10,13 +10,16 @@ export types, util, prompts, shell, loop, session, compact,
 proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
   interrupted = false
   resetLoopTracker(session.loop)
-  # Render the per-turn token receipt at the end of the turn so it
-  # sits flush below the assistant's final output, not below the
-  # user's next prompt. `defer` covers normal exit (final break) and
-  # all early returns (interrupt, halt). Each `callModel` iteration
-  # overwrites `pendingHint` with the latest usage, so only the
-  # last turn's receipt renders.
-  defer: settlePendingHint()
+  # `beginTurn` hides the terminal cursor for the duration of the
+  # turn (streaming + tool exec); the dim `❯ ` glyph remains on
+  # screen as the visible-but-not-blinking caret. `endTurn` flips
+  # the prompt back to bright cyan and shows the cursor again so
+  # readline lands on a typing-ready row. The token receipt for the
+  # turn that just completed is *not* rendered here — it lives in
+  # `pendingHint` and is painted in place of the previous bar at
+  # user-submit time by `emitUserSubmit`.
+  beginTurn()
+  defer: endTurn()
   while true:
     discard supersedeCompact(messages)
     var usage: Usage
@@ -29,7 +32,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
     messages.add msg
     saveSession(session, messages)
     if interrupted:
-      stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
+      withCleared:
+        stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
       interrupted = false
       return
     let window = contextWindowFor(p.model)
@@ -38,10 +42,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
     of caSummarize:
       summarized = summarizeHistory(messages, p)
       if summarized > 0:
-        hintLn &"  · summarized {summarized} old message" &
-          (if summarized == 1: "" else: "s") &
-          &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)",
-          resetStyle
+        withCleared:
+          hintLn &"  · summarized {summarized} old message" &
+            (if summarized == 1: "" else: "s") &
+            &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)",
+            resetStyle
         saveSession(session, messages)
     of caCompact, caNone: discard
     # Fall through: if summarization bailed, still try compaction on the
@@ -50,10 +55,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
        usage.promptTokens.float > CompactThresholdFrac * window.float:
       let n = compactHistory(messages)
       if n > 0:
-        hintLn &"  · compacted {n} old tool result" &
-          (if n == 1: "" else: "s") &
-          &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)",
-          resetStyle
+        withCleared:
+          hintLn &"  · compacted {n} old tool result" &
+            (if n == 1: "" else: "s") &
+            &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)",
+            resetStyle
         saveSession(session, messages)
     let content = msg{"content"}.getStr("")
     let streamedLive = contentStreamedLive
@@ -64,100 +70,104 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       else: newJArray()
     if toolCalls.len > 0:
       # Blank row between the streamed content and the first tool
-      # banner so they don't run flush. Only when tools are coming —
-      # content-only turns don't need it (and an unconditional \n
-      # would scroll a stray blank row above the next turn's receipt).
-      stdout.write "\n"
-      if content.strip.len > 0 and not streamedLive:
-        renderAssistantContent(content)
+      # banner so they don't run flush. The whole tool-exec block
+      # runs under `withCleared` so bar+prompt are repainted below
+      # each banner / output advance — they remain visible (sliding
+      # down) for the entire tool exec.
+      withCleared:
         stdout.write "\n"
-      var halt = false  # Strike-2 trip: stop further tool calls this turn
-      for tc in toolCalls:
-        let id = tc{"id"}.getStr
-        if interrupted or halt:
-          # still emit a tool response so the assistant message's tool_calls
-          # are all paired; the model sees the cancellation on the next turn.
-          let stopMsg = if halt: "skipped — loop guard paused the turn"
-                        else: "interrupted by user"
-          messages.add %*{"role": "tool", "tool_call_id": id,
-                          "content": stopMsg}
-          continue
-        let fn = tc{"function"}
-        let name = if fn != nil and fn.kind == JObject: fn{"name"}.getStr else: ""
-        let argsStr =
-          if fn != nil and fn.kind == JObject: fn{"arguments"}.getStr("") else: ""
-        let args =
-          try: parseJson(if argsStr == "": "{}" else: argsStr)
-          except CatchableError as e:
-            stderr.writeLine "3code: tool_call " & name &
-              " has malformed arguments JSON (" & e.msg & "): " & argsStr
-            newJObject()
-        let act = toolCallToAction(p.family, name, args)
-        let idx = session.toolLog.len + 1
-        let silent = isSkillRead(act)
-        # Pre-exec: dim bullet + dim banner text — "in flight" signal.
-        # After the call returns we move the cursor up and rewrite the
-        # line via renderToolBanner so the bullet picks up a colour
-        # (green success, dim error) and gains a duration suffix. Skill
-        # loads skip the banner entirely; the model's own
-        # "loaded skill: <name>" line is the only signal the user sees.
-        if not silent:
-          renderToolPending(bannerFor(act))
-        let toolT0 = epochTime()
-        if session.readCache == nil: session.readCache = newReadCache()
-        var (r, code, diff) = runAction(act, session.readCache)
-        let toolElapsed = epochTime() - toolT0
-        if r.strip.len == 0: r = "[no output]"
-        session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
-        if not silent:
-          stdout.write "\e[1A\r\e[2K"
-          renderToolBanner(bannerFor(act), code, toolElapsed.int)
-          printToolResult(act.kind, r, code, idx, diff)
-        else:
-          printSkillLoaded(act)
-        # Loop guard: fingerprint the call and decide whether to annotate the
-        # tool result (Strike 1) or halt further tool calls (Strike 2). The
-        # guard message is appended to the real tool result rather than
-        # injected as a separate message — the assistant's tool_calls array
-        # already pairs 1:1 with tool responses via tool_call_id, so slipping
-        # in an extra message would break the pairing.
-        let priorStrike = session.loop.strike
-        let strike = trackCall(session.loop, name, args)
-        var toolContent = r
-        # Strike 1 used to append a "stop and reassess" nudge; dropped because
-        # many legit compile-iterate sessions trip it without actually being
-        # stuck. Only the Strike-2 halt survives — that one we want.
-        if strike >= 2 and priorStrike < 2:
-          halt = true
-          if session.loop.recoveryCmd != "":
-            toolContent &= "\n\n[repeat-guard] working-tree recovery detected (`" &
-              session.loop.recoveryCmd &
-              "`); further tool calls this turn are paused. The model's plan was likely based on the working tree as it was before this command — resume only if you've confirmed the new state is what you want."
+        if content.strip.len > 0 and not streamedLive:
+          renderAssistantContent(content)
+          stdout.write "\n"
+        var halt = false  # Strike-2 trip: stop further tool calls this turn
+        for tc in toolCalls:
+          let id = tc{"id"}.getStr
+          if interrupted or halt:
+            # still emit a tool response so the assistant message's tool_calls
+            # are all paired; the model sees the cancellation on the next turn.
+            let stopMsg = if halt: "skipped — loop guard paused the turn"
+                          else: "interrupted by user"
+            messages.add %*{"role": "tool", "tool_call_id": id,
+                            "content": stopMsg}
+            continue
+          let fn = tc{"function"}
+          let name = if fn != nil and fn.kind == JObject: fn{"name"}.getStr else: ""
+          let argsStr =
+            if fn != nil and fn.kind == JObject: fn{"arguments"}.getStr("") else: ""
+          let args =
+            try: parseJson(if argsStr == "": "{}" else: argsStr)
+            except CatchableError as e:
+              stderr.writeLine "3code: tool_call " & name &
+                " has malformed arguments JSON (" & e.msg & "): " & argsStr
+              newJObject()
+          let act = toolCallToAction(p.family, name, args)
+          let idx = session.toolLog.len + 1
+          let silent = isSkillRead(act)
+          # Pre-exec: dim bullet + dim banner text — "in flight" signal.
+          # After the call returns we move the cursor up and rewrite the
+          # line via renderToolBanner so the bullet picks up a colour
+          # (green success, dim error) and gains a duration suffix. Skill
+          # loads skip the banner entirely; the model's own
+          # "loaded skill: <name>" line is the only signal the user sees.
+          if not silent:
+            renderToolPending(bannerFor(act))
+          let toolT0 = epochTime()
+          if session.readCache == nil: session.readCache = newReadCache()
+          var (r, code, diff) = runAction(act, session.readCache)
+          let toolElapsed = epochTime() - toolT0
+          if r.strip.len == 0: r = "[no output]"
+          session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
+          if not silent:
+            stdout.write "\e[1A\r\e[2K"
+            renderToolBanner(bannerFor(act), code, toolElapsed.int)
+            printToolResult(act.kind, r, code, idx, diff)
           else:
-            let fp = fingerprint(name, args)
-            toolContent &= "\n\n[repeat-guard] second saturation (path=" & fp &
-              "); further tool calls this turn are paused."
-        messages.add %*{"role": "tool", "tool_call_id": id, "content": toolContent}
-      saveSession(session, messages)
-      if interrupted:
-        stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
-        interrupted = false
-        return
-      if halt:
-        if session.loop.recoveryCmd != "":
-          stdout.styledWriteLine styleDim,
-            &"  paused — `{session.loop.recoveryCmd}` wiped working-tree state",
-            resetStyle
-        else:
-          stdout.styledWriteLine styleDim, "  paused — looped", resetStyle
-        return
+            printSkillLoaded(act)
+          # Loop guard: fingerprint the call and decide whether to annotate the
+          # tool result (Strike 1) or halt further tool calls (Strike 2). The
+          # guard message is appended to the real tool result rather than
+          # injected as a separate message — the assistant's tool_calls array
+          # already pairs 1:1 with tool responses via tool_call_id, so slipping
+          # in an extra message would break the pairing.
+          let priorStrike = session.loop.strike
+          let strike = trackCall(session.loop, name, args)
+          var toolContent = r
+          # Strike 1 used to append a "stop and reassess" nudge; dropped because
+          # many legit compile-iterate sessions trip it without actually being
+          # stuck. Only the Strike-2 halt survives — that one we want.
+          if strike >= 2 and priorStrike < 2:
+            halt = true
+            if session.loop.recoveryCmd != "":
+              toolContent &= "\n\n[repeat-guard] working-tree recovery detected (`" &
+                session.loop.recoveryCmd &
+                "`); further tool calls this turn are paused. The model's plan was likely based on the working tree as it was before this command — resume only if you've confirmed the new state is what you want."
+            else:
+              let fp = fingerprint(name, args)
+              toolContent &= "\n\n[repeat-guard] second saturation (path=" & fp &
+                "); further tool calls this turn are paused."
+          messages.add %*{"role": "tool", "tool_call_id": id, "content": toolContent}
+        saveSession(session, messages)
+        if interrupted:
+          stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
+          interrupted = false
+          return
+        if halt:
+          if session.loop.recoveryCmd != "":
+            stdout.styledWriteLine styleDim,
+              &"  paused — `{session.loop.recoveryCmd}` wiped working-tree state",
+              resetStyle
+          else:
+            stdout.styledWriteLine styleDim, "  paused — looped", resetStyle
+          return
       continue
     if content.strip.len > 0:
       if not streamedLive:
-        renderAssistantContent(content)
+        withCleared:
+          renderAssistantContent(content)
     else:
-      stdout.styledWriteLine styleDim,
-        "  (empty reply — no content, no tool calls)", resetStyle
+      withCleared:
+        stdout.styledWriteLine styleDim,
+          "  (empty reply — no content, no tool calls)", resetStyle
     break
 
 proc runTurnsInteractive*(p: Profile, messages: var JsonNode, session: var Session) =
@@ -343,6 +353,11 @@ proc main() =
   if prof.name == "":
     prof = bootstrapProvider(editor)
   session.profileName = prof.name
+  # Draw the initial token bar + bright cyan prompt at zero values.
+  # From here on the bar+prompt are *always* visible — `emitUserSubmit`
+  # repaints them dim (as the receipt) and re-echoes input on each
+  # user submit, `streamHttp` slides them down per content line, etc.
+  paintBarPrompt(liveLabel("", 0), BrightPromptColor)
   if resume:
     stdout.write "\n"
     stdout.styledWriteLine styleDim, &"● resumed {sessionIdFromPath(session.savePath)}", resetStyle
@@ -362,13 +377,25 @@ proc main() =
     if line == "": continue
     let t = line.strip
     if t in ["exit", "quit", ":q", ":quit", ":exit"]: break
-    if handleCommand(line, messages, session, prof, editor): continue
+    if handleCommand(line, messages, session, prof, editor):
+      # Slash command output advanced the cursor; bar+prompt at the
+      # row where they stood before the user typed are now stale. Drop
+      # a fresh bar+prompt at the new bottom so the chrome stays glued
+      # to the cursor flow.
+      paintBarPrompt(currentBarLabel, BrightPromptColor)
+      continue
     if prof.name == "":
       stdout.styledWriteLine fgMagenta,
         "  no provider configured. use :provider add", resetStyle
       continue
     messages.add %*{"role": "user", "content": buildUserMessage(messages, line)}
     refreshSystemPrompt(messages, prof)
+    # User-submit transition: walk back to the previous turn's bar
+    # row, repaint it dim (the receipt — skipped on the first turn),
+    # echo the user's input as scroll-history content. Cursor lands
+    # on the row directly after the last echo line, where callModel's
+    # leading `\n` will set up the new spinner-footer scratch row.
+    emitUserSubmit(line)
     runTurnsInteractive(prof, messages, session)
 
 when isMainModule:

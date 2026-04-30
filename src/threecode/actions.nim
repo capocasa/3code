@@ -87,6 +87,30 @@ proc toolCallToAction*(family, name: string, args: JsonNode): Action =
   of "gpt-oss": dispatchGptOss(family, name, args)
   else: die "unknown family in tool dispatch: '" & family & "'"
 
+proc previewCmd*(body: string, width = 64): string =
+  let first = body.strip.splitLines[0]
+  if first.len > width: first[0 ..< width-1] & "…" else: first
+
+proc bannerFor*(act: Action): string =
+  case act.kind
+  of akBash:
+    "bash   " & previewCmd(act.body)
+  of akRead:
+    if act.offset > 0 or act.limit > 0:
+      let endHint = if act.limit > 0: $(act.offset + act.limit - 1) else: "end"
+      &"read   {act.path}  [lines {max(1, act.offset)}-{endHint}]"
+    else:
+      &"read   {act.path}"
+  of akWrite:
+    &"write  {act.path}  ({humanBytes(act.body.len)})"
+  of akPatch:
+    &"patch  {act.path}  ({act.edits.len} edit" & (if act.edits.len == 1: "" else: "s") & ")"
+  of akApplyPatch:
+    let nl = act.body.count('\n')
+    &"apply_patch  ({nl} line" & (if nl == 1: "" else: "s") & ")"
+  of akError:
+    "error  unknown tool '" & act.path & "'"
+
 proc nearestLineHint(content, search: string): string =
   ## When a patch search block didn't match, point the model at the most
   ## similar non-blank line in the file. Operates on the search's first

@@ -1,6 +1,5 @@
 import std/[json, os, sequtils, strformat, strutils, terminal, times]
-import types, util, prompts, session, config, api, compact, display, minline,
-       statusbar
+import types, util, prompts, session, config, api, compact, display, minline
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":prompt", ":show", ":log", ":sessions", ":compact",
@@ -187,15 +186,43 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
       if prefix != "" and m.startsWith(prefix): result.add m[prefix.len .. ^1]
       else: result.add shortModel(m)
   defer: editor.completionCallback = prevCb
-  var prev = ""
+  # Pre-populate with known-good models for this provider (KnownGoodCombos order),
+  # shown in the same short form the completion callback uses.
+  var knownGoodInit: seq[string]
+  for combo in KnownGoodCombos:
+    if combo[0].toLowerAscii == name.toLowerAscii:
+      for avail in available:
+        if avail == combo[1]:
+          let shown = if prefix != "" and combo[1].startsWith(prefix):
+                        combo[1][prefix.len .. ^1]
+                      else: shortModel(combo[1])
+          knownGoodInit.add shown
+          break
+  var prev = knownGoodInit.join(" ")
   while true:
     let prompt =
       if prev == "": "  models (space-sep.)  : "
       else: &"  models [{prev}]  : "
     let entered = readOptional(editor, prompt)
     let raw = if entered == "": prev else: entered
-    let models = splitModels(raw)
-    let modelsStr = formatModels(models)
+    let rawModels = splitModels(raw)
+    # When prefix is empty, the wizard displays short model names (e.g.
+    # "gpt-oss-120b") but the API requires the full path prefix
+    # ("openai/gpt-oss-120b"). Resolve each entered name against the
+    # fetched list so the stored model IDs are always wire-correct.
+    var models: seq[string]
+    for rm in rawModels:
+      if prefix != "":
+        models.add rm
+      else:
+        var full = rm
+        for avail in available:
+          if (avail == rm or shortModel(avail) == rm) and "/" in avail:
+            full = avail  # path-prefixed form wins (e.g. openai/gpt-oss-120b)
+            break
+          elif (avail == rm or shortModel(avail) == rm) and full == rm:
+            full = avail  # bare form as fallback
+        models.add full
     if models.len == 0:
       stdout.styledWriteLine fgMagenta, "  need at least one model", resetStyle
       continue
@@ -211,7 +238,11 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
       return prov
     stdout.styledWriteLine fgMagenta, "failed", resetStyle
     stdout.styledWriteLine fgMagenta, "  " & err, resetStyle
-    prev = modelsStr
+    # Show short names in the retry default even when full IDs are stored.
+    var retryShorts: seq[string]
+    for m in models:
+      retryShorts.add if prefix == "": shortModel(m) else: m
+    prev = retryShorts.join(" ")
     let choice = readOptional(editor,
       "  [enter]=retry models, k=re-enter key : ").toLowerAscii
     if choice == "k":
@@ -423,8 +454,8 @@ proc cmdModelList(prof: Profile) =
     if kg == "" and not experimentalEnabled:
       stdout.styledWriteLine styleDim, "  ", mark, " ", m, resetStyle
     else:
-      let modeTag = if kg != "": "  (known-good)" else: ""
-      hintLn "  ", mark, " ", resetStyle, m, styleDim, modeTag, resetStyle
+      let kgSuffix = if experimentalEnabled and kg != "": "*" else: ""
+      hintLn "  ", mark, " ", resetStyle, m & kgSuffix, resetStyle
 
 proc cmdModelSelect(target: string, prof: var Profile) =
   let prov = currentProvider()
@@ -584,98 +615,25 @@ proc buildUserMessage*(messages: JsonNode, raw: string): string =
   else:
     body
 
-proc readInputStatus(editor: var minline.LineEditor, done: var bool): string =
-  ## Status-bar mode: read input on the prompt row (H). Multi-line
-  ## continuation (trailing `\`) loops back through the same row,
-  ## accumulating logical lines. On submission, settles the previous
-  ## turn's **token receipt** into the scroll region (right under the
-  ## prior LLM response, before the new echoed prompt) and then echoes
-  ## the typed prompt below it in dim. The receipt is deliberately
-  ## *not* rendered while the user is still typing — that would put a
-  ## record on screen whose data exactly matches the live token bar
-  ## above it. By delaying until Enter, the redundant on-screen window
-  ## collapses to the few milliseconds before the next spinner kicks
-  ## the bar to fresh values.
-  # Re-show the cursor (the streaming path hid it). It'll blink at
-  # the prompt row for the duration of input, then be hidden again
-  # when the next `callModel` starts.
-  statusbar.showCursor()
-  var lines: seq[string]
-  var prefix = "❯ "
-  while true:
-    statusbar.moveCursorToPrompt()
-    stdout.write "\x1b[2K\x1b[37m"
-    let line = try: editor.readLine(prefix)
-               except EOFError:
-                 stdout.write "\x1b[0m"
-                 done = true
-                 break
-               except minline.InputCancelled:
-                 stdout.write "\x1b[0m"
-                 statusbar.moveCursorToPrompt()
-                 stdout.write "\x1b[2K"
-                 stdout.styledWrite fgWhite, "❯ ", resetStyle
-                 statusbar.parkInScroll()
-                 return ""
-    stdout.write "\x1b[0m"
-    lines.add line
-    var trailing = 0
-    var i = line.len - 1
-    while i >= 0 and line[i] == '\\':
-      inc trailing; dec i
-    if trailing mod 2 == 0: break
-    lines[^1] = line[0 ..< line.len - 1]
-    prefix = "  "
-  # Reset the prompt row to a blank `❯ ` (cursor stays after the
-  # prefix, but we'll park in the scroll region below before returning).
-  statusbar.moveCursorToPrompt()
-  stdout.write "\x1b[2K"
-  stdout.styledWrite fgWhite, "❯ ", resetStyle
-  if done or lines.len == 0:
-    statusbar.parkInScroll()
-    return ""
-  let combined = lines.join("\n")
-  if combined.strip == "":
-    statusbar.parkInScroll()
-    return ""
-  # User has committed to a new turn. Settle the previous turn's
-  # receipt now (so it lands in the scroll region right under the
-  # prior LLM response, just above the echo we're about to write),
-  # then echo the typed input in dim. We always emit one `\n` to
-  # space the echo away from whatever's above; on turns that *did*
-  # have a receipt to settle, add a second `\n` so the visible blank
-  # row sits between the model's output (LLM + receipt) and the
-  # next prompt. The very first prompt (no prior turn → nothing to
-  # settle) skips the second `\n`, which is what saves one blank
-  # below the welcome banner.
-  let hadReceipt = api.pendingHint.active
-  statusbar.parkInScroll()
-  api.settlePendingHint()
-  stdout.write "\n"
-  if hadReceipt:
-    stdout.write "\n"
-  for idx, l in lines:
-    let lp = if idx == 0: "❯ " else: "  "
-    stdout.styledWrite fgWhite, styleDim, lp & l, resetStyle, "\n"
-  stdout.flushFile
-  combined
-
 proc readInput*(editor: var minline.LineEditor, done: var bool): string =
-  if statusbar.isActive():
-    return readInputStatus(editor, done)
-  stdout.write "\n"
-  # Plain white while the user types; reset on every exit path so the
-  # rest of the UI keeps its own colours. The LLM body uses fgWhite +
-  # dim (off-white) so plain white reads brighter by contrast.
-  stdout.write "\x1b[37m"
+  ## Read a line of user input. Entry contract: bar+prompt are visible
+  ## at the current bottom of the cursor's content (bar at row K,
+  ## prompt at row K+1, cursor at K col 0). Walks down to the prompt
+  ## row, clears it (so minline's prompt overwrites the static dim
+  ## `❯ `), reads input. After Enter the cursor is wherever minline
+  ## left it; we don't try to clean up — `emitUserSubmit` will walk
+  ## back to the bar row using `splitLines(line).len + 1` and
+  ## clear-to-end-of-screen from there, repainting the receipt over
+  ## the old bar row.
+  #
+  # Move from bar row down to prompt row + clear (so the bright cyan
+  # `❯ ` minline draws lands on a clean row, replacing the dim glyph).
+  stdout.write "\n\r\x1b[2K"
   var line = try: editor.readLine("❯ ")
              except EOFError:
-               stdout.write "\x1b[0m"
                done = true; return ""
              except minline.InputCancelled:
-               stdout.write "\x1b[0m"
                return ""
-  stdout.write "\x1b[0m"
   navigatedUp = false
   # Trailing unescaped `\` continues to the next line, joined with `\n`.
   # Even count = literal trailing backslashes, no continuation.
@@ -686,32 +644,20 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
       inc trailing
       dec i
     if trailing mod 2 == 0: break
-    stdout.write "\x1b[37m"
     let cont = try: editor.readLine("  ")
                except EOFError:
-                 stdout.write "\x1b[0m"
                  done = true; break
                except minline.InputCancelled:
-                 stdout.write "\x1b[0m"
                  return ""
-    stdout.write "\x1b[0m"
     line = line[0 ..< line.len - 1] & "\n" & cont
-  if line.strip == "": return ""
-  # Redraw the just-submitted prompt + body in dim so it recedes as
-  # the assistant's reply scrolls below it. Cursor is currently one
-  # row below the last input line; walk up N rows, rewrite each in
-  # dim, and end where we started.
-  let entered = line.splitLines
-  let n = entered.len
-  if n > 0:
-    stdout.write "\x1b[" & $n & "A"
-    var idx = 0
-    for l in entered:
-      let prefix = if idx == 0: "❯ " else: "  "
-      stdout.write "\r\x1b[2K"
-      stdout.styledWrite fgWhite, prefix & l, resetStyle, "\n"
-      inc idx
-    stdout.flushFile
+  if line.strip == "":
+    # Empty input: walk back to bar row and repaint bar+prompt so
+    # they stay glued to the cursor's bottom (otherwise each empty
+    # Enter would push the prompt one row lower than the bar).
+    let n = max(1, line.splitLines.len)
+    stdout.write "\x1b[" & $(n + 1) & "A\r\x1b[J"
+    repaintBarPrompt(BrightPromptColor)
+    return ""
   return line
 
 # ---------- Command dispatcher ----------
