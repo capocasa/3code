@@ -14,7 +14,7 @@
 ## "true"`/`"false"` under `[settings]` in `~/.config/3code/config`
 ## wins.
 
-import std/[json, os, parsecfg, parseutils, strutils, terminal, times]
+import std/[httpclient, json, os, parsecfg, parseutils, strutils, terminal, times]
 import prompts, util
 
 const autoUpdate {.booldefine.} = false
@@ -87,23 +87,31 @@ proc touchThrottle() =
   except CatchableError: discard
 
 proc fetchLatestTag(): string =
-  let r = curlRequest("https://api.github.com/repos/" & Repo &
-                      "/releases/latest",
-                      userAgent = "3code-update", timeoutSec = 10)
-  if r.err.len > 0 or r.status div 100 != 2: return ""
   try:
-    let j = parseJson(r.body)
-    return j{"tag_name"}.getStr("")
+    let client = newHttpClient(timeout = 10_000, userAgent = "3code-update",
+                               sslContext = bundledSslContext())
+    defer: client.close()
+    let resp = client.get("https://api.github.com/repos/" & Repo &
+                          "/releases/latest")
+    if resp.code.int div 100 != 2: return ""
+    let j = parseJson(resp.body)
+    j{"tag_name"}.getStr("")
   except CatchableError:
-    return ""
+    ""
 
 proc downloadAsset(tag, asset, dest: string): bool =
   let url = "https://github.com/" & Repo & "/releases/download/" &
             tag & "/" & asset
-  let r = curlRequest(url, userAgent = "3code-update", outFile = dest,
-                      timeoutSec = 60)
-  r.err.len == 0 and r.status div 100 == 2 and
+  try:
+    let client = newHttpClient(timeout = 60_000, userAgent = "3code-update",
+                               sslContext = bundledSslContext())
+    defer: client.close()
+    let resp = client.get(url)
+    if resp.code.int div 100 != 2: return false
+    writeFile(dest, resp.body)
     fileExists(dest) and getFileSize(dest) > 0
+  except CatchableError:
+    false
 
 proc extractArchive(archive, workDir: string): string =
   ## Extract `archive` into `workDir` (wiped first). Returns the path to

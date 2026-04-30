@@ -1,4 +1,4 @@
-import std/[algorithm, atomics, json, locks, net, os, sequtils, strformat, strutils, tables, terminal, times, uri]
+import std/[algorithm, atomics, httpclient, json, locks, net, os, sequtils, strformat, strutils, tables, terminal, times, uri]
 import streamhttp
 import types, util, prompts, compact, display
 
@@ -412,11 +412,27 @@ proc decayLevel(level: var int, lastTs: var float, now: float) =
 #
 # `streamhttp` is a tiny synchronous TLS HTTP/1.1 client we ship as a
 # separate package — it reads chunked SSE bodies line by line on the
-# main thread, blocking on `recv` between chunks. Replaces the old
-# subprocess-curl path. The threaded spinner is unaffected: it paints
-# in its own thread while we block on the socket here, same as it
-# blocked on the curl pipe before. Cancellation on Ctrl-C goes through
-# `conn.close()` instead of `p.terminate()`.
+# main thread, blocking on `recv` between chunks. The threaded spinner
+# paints in its own thread while we block on the socket here.
+# Cancellation on Ctrl-C closes `conn` from the signal hook.
+#
+# Connection reuse: the StreamConn is cached at module scope keyed by
+# host:port and reused across turns to the same provider — saving
+# the TLS handshake (1-2 RTT + crypto) per turn. After a clean body
+# end (chunked terminator), the conn stays alive for the next call.
+# If the server has closed its end during the idle window, the next
+# `sendRequest`/`readResponseHead` raises; we close the cached conn,
+# reconnect once, and retry. Mid-body errors and Ctrl-C also drop the
+# cache so the next turn starts on a fresh socket.
+var cachedStreamConn: StreamConn
+var cachedStreamHostKey: string
+
+proc closeCachedStreamConn() =
+  if cachedStreamConn != nil:
+    try: cachedStreamConn.close() except CatchableError: discard
+    cachedStreamConn = nil
+    cachedStreamHostKey = ""
+
 type StreamOutcome = object
   statusCode: int
   retryAfter: string
@@ -461,31 +477,45 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       if u.query.len > 0: pq.add "?" & u.query
       pq
 
+  let hostKey = host & ":" & $port.uint16
   var conn: StreamConn
-  try:
-    conn = connectTls(host, port, timeoutMs = 1_200_000,
-                      caFile = bundledCaFile())
-  except CatchableError as e:
-    result.errMsg = "TLS connect failed: " & e.msg
-    return
-  defer: conn.close()
-
-  try:
-    conn.sendRequest("POST", pathQuery, host,
-                     headers = [("Authorization", "Bearer " & key),
-                                ("Content-Type", "application/json"),
-                                ("Accept", "text/event-stream")],
-                     body = bodyStr)
-  except CatchableError as e:
-    result.errMsg = "send failed: " & e.msg
-    return
-
   var resp: StreamResponse
-  try:
-    resp = conn.readResponseHead()
-  except CatchableError as e:
-    result.errMsg = "response head: " & e.msg
-    return
+  var attempt = 0
+  while true:
+    if interrupted:
+      closeCachedStreamConn()
+      result.errMsg = "interrupted by user"
+      return
+    inc attempt
+    if cachedStreamConn != nil and cachedStreamHostKey == hostKey:
+      conn = cachedStreamConn
+    else:
+      closeCachedStreamConn()
+      try:
+        conn = connectTls(host, port, timeoutMs = 1_200_000,
+                          caFile = bundledCaFile())
+      except CatchableError as e:
+        result.errMsg = "TLS connect failed: " & e.msg
+        return
+      cachedStreamConn = conn
+      cachedStreamHostKey = hostKey
+    try:
+      conn.sendRequest("POST", pathQuery, host,
+                       headers = [("Authorization", "Bearer " & key),
+                                  ("Content-Type", "application/json"),
+                                  ("Accept", "text/event-stream")],
+                       body = bodyStr)
+      resp = conn.readResponseHead()
+      break
+    except CatchableError as e:
+      # Cached conn was stale (server-side keep-alive timeout, etc.) or
+      # the fresh connect's first send/head failed. Drop the cache and
+      # retry once with a fresh socket; second failure surfaces the
+      # error.
+      closeCachedStreamConn()
+      if attempt >= 2:
+        result.errMsg = "request failed: " & e.msg
+        return
   result.statusCode = resp.status
   result.retryAfter = resp.headers.getOrDefault("retry-after")
 
@@ -628,10 +658,11 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     try: hasLine = conn.readLine(line)
     except CatchableError as e:
       streamErr = e.msg
+      closeCachedStreamConn()
       break
     if not hasLine: break
     if interrupted:
-      try: conn.close() except CatchableError: discard
+      closeCachedStreamConn()
       break
     if line.startsWith("data: "):
       let payload = line["data: ".len .. ^1]
@@ -945,29 +976,44 @@ proc verifyProfile*(p: Profile): (bool, string) =
     "max_tokens": 1,
     "stream": false
   })
-  let r = curlRequest(p.url & "/chat/completions", key = p.key,
-                      post = true, jsonBody = body)
-  if r.err.len > 0: return (false, r.err)
-  if r.status == 200:
-    let j = try: parseJson(r.body)
+  try:
+    let client = newHttpClient(timeout = 20_000, userAgent = "3code",
+                               sslContext = bundledSslContext())
+    defer: client.close()
+    client.headers["Authorization"] = "Bearer " & p.key
+    client.headers["Content-Type"] = "application/json"
+    let resp = client.request(p.url & "/chat/completions",
+                              httpMethod = HttpPost, body = body)
+    if resp.code.int != 200:
+      let snip = resp.body[0 ..< min(200, resp.body.len)]
+      return (false, $resp.code.int & ": " & snip)
+    let j = try: parseJson(resp.body)
             except CatchableError: return (false, "bad json in response")
     if "error" in j: return (false, $j["error"])
-    return (true, "")
-  let snip = r.body[0 ..< min(200, r.body.len)]
-  (false, $r.status & ": " & snip)
+    (true, "")
+  except CatchableError as e:
+    (false, e.msg)
 
 proc fetchModels*(url, key: string): seq[string] =
   ## GET /models on the provider — that endpoint name is OpenAI's; what it
-  ## returns is the list of model ids this provider exposes.
-  let r = curlRequest(url & "/models", key = key)
-  if r.err.len > 0 or r.status != 200: return @[]
-  let j = try: parseJson(r.body) except CatchableError: return @[]
-  let arr = if j.kind == JArray: j
-            elif "data" in j and j["data"].kind == JArray: j["data"]
-            else: return @[]
-  for item in arr:
-    if item.kind == JString: result.add item.getStr
-    elif item.kind == JObject and "id" in item: result.add item["id"].getStr
+  ## returns is the list of model ids this provider exposes. Returns @[]
+  ## on any failure (transport, non-200, malformed JSON).
+  try:
+    let client = newHttpClient(timeout = 20_000, userAgent = "3code",
+                               sslContext = bundledSslContext())
+    defer: client.close()
+    client.headers["Authorization"] = "Bearer " & key
+    let resp = client.get(url & "/models")
+    if resp.code.int != 200: return
+    let j = parseJson(resp.body)
+    let arr = if j.kind == JArray: j
+              elif "data" in j and j["data"].kind == JArray: j["data"]
+              else: return
+    for item in arr:
+      if item.kind == JString: result.add item.getStr
+      elif item.kind == JObject and "id" in item: result.add item["id"].getStr
+  except CatchableError:
+    discard
 
 proc installInterruptHook*() =
   setControlCHook(proc() {.noconv.} = interrupted = true)

@@ -1,4 +1,4 @@
-import std/[json, strutils, tables]
+import std/[httpclient, json, strutils, tables]
 import util
 import types
 
@@ -205,15 +205,25 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
     "max_tokens": SummarizeMaxTokens,
     "stream": false
   }
-  let r = curlRequest(p.url & "/chat/completions", key = p.key,
-                      post = true, jsonBody = $body, timeoutSec = 120)
-  if r.err.len > 0:
-    stderr.writeLine "3code: summarize: " & r.err
+  var status = 0
+  var respBody = ""
+  try:
+    let client = newHttpClient(timeout = 120_000, userAgent = "3code",
+                               sslContext = bundledSslContext())
+    defer: client.close()
+    client.headers["Authorization"] = "Bearer " & p.key
+    client.headers["Content-Type"] = "application/json"
+    let resp = client.request(p.url & "/chat/completions",
+                              httpMethod = HttpPost, body = $body)
+    status = resp.code.int
+    respBody = resp.body
+  except CatchableError as e:
+    stderr.writeLine "3code: summarize: " & e.msg
     return ""
-  if r.status != 200:
-    stderr.writeLine "3code: summarize: api " & $r.status
+  if status != 200:
+    stderr.writeLine "3code: summarize: api " & $status
     return ""
-  let j = try: parseJson(r.body)
+  let j = try: parseJson(respBody)
           except CatchableError as e:
             stderr.writeLine "3code: summarize: " & e.msg
             return ""

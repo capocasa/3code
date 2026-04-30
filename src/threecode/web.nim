@@ -5,7 +5,7 @@
 ## No external binaries, no scripting runtimes — pure Nim httpclient + a
 ## hand-rolled HTML-to-text pass.
 
-import std/[httpclient, strutils, uri, unicode, tables, net]
+import std/[httpclient, strutils, uri, unicode, tables]
 import util
 
 const UserAgent = "Mozilla/5.0 (X11; Linux x86_64) 3code/web"
@@ -17,9 +17,8 @@ type
     title*, url*, snippet*: string
 
 proc newClient(): HttpClient =
-  let ctx = newContext(verifyMode = CVerifyPeer, caFile = bundledCaFile())
   result = newHttpClient(timeout = 20_000, userAgent = UserAgent,
-                         sslContext = ctx)
+                         sslContext = bundledSslContext())
   result.headers = newHttpHeaders({
     "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9"
