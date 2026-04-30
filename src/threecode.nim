@@ -353,11 +353,15 @@ proc main() =
   if prof.name == "":
     prof = bootstrapProvider(editor)
   session.profileName = prof.name
-  # Draw the initial token bar + bright cyan prompt at zero values.
-  # From here on the bar+prompt are *always* visible — `emitUserSubmit`
+  # Draw the initial token bar + bright cyan prompt at zero values,
+  # with one blank row of breathing room above the bar — same shape
+  # as the typing-ready state `endTurn` leaves between turns. From
+  # here on the bar+prompt are *always* visible — `emitUserSubmit`
   # repaints them dim (as the receipt) and re-echoes input on each
   # user submit, `streamHttp` slides them down per content line, etc.
+  stdout.write "\n"
   paintBarPrompt(liveLabel("", 0), BrightPromptColor)
+  currentBarHasGap = true
   if resume:
     stdout.write "\n"
     stdout.styledWriteLine styleDim, &"● resumed {sessionIdFromPath(session.savePath)}", resetStyle
