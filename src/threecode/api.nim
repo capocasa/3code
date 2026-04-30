@@ -680,6 +680,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
           if r.len > 0:
             accReasoning &= r
             slurped += r.len
+            setSpinLabel(liveLabel(baseLabel, slurped))
             if showThinking and not contentStarted:
               refreshTicker()
           let c = delta{"content"}.getStr("")
