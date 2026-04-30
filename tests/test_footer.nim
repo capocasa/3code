@@ -453,56 +453,77 @@ suite "token receipt placement":
   test "receiptBarBytes: empty label → empty bytes":
     check receiptBarBytes("") == ""
 
-  test "submitTransitionBytes: 1-line input, no pending — receipt skipped":
-    # Stage: bar at row 0, prompt at row 1, user types "hello", Enter
-    # lands cursor at row 2.
+  test "submitTransitionBytes: no gap, no pending — receipt skipped":
+    # Stage: bar at row 0 (no gap above), prompt at row 1, user types
+    # "hello", Enter lands cursor at row 2.
     let g = newGrid()
     g.feed barFooterBytes("↑0  ↻0  ↓0  0s", BrightPromptColor)
-    # Cursor at row 0 col 0 (bar row). Walk to prompt row, draw
-    # readline, type "hello", press Enter.
-    g.feed "\n\r\x1b[2K"  # readInput's cursor advance + clear
-    g.feed "❯ hello\n"     # minline draw + Enter
-    # Now feed submitTransitionBytes for non-pending case.
-    g.feed submitTransitionBytes("hello", hadPending = false, "")
-    # Row 0 must NOT be a receipt (no pending). Row 1 blank. Row 2
-    # echo.
-    check "↑3.8k" notin rowText(g, 0)
+    g.feed "\n\r\x1b[2K"
+    g.feed "❯ hello\n"
+    g.feed submitTransitionBytes("hello", hadPending = false,
+                                 hadGap = false, "")
+    # Walk-back nLines+1 = 2 → row 0 (bar row). \x1b[J wipes from
+    # there. No receipt. \n\n + echo.
     check rowText(g, 0).strip == ""
     check rowText(g, 1).strip == ""
     check rowText(g, 2).startsWith("❯ hello")
 
-  test "submitTransitionBytes: 1-line input + pending receipt":
+  test "submitTransitionBytes: no gap + pending receipt":
     let g = newGrid()
     g.feed barFooterBytes(tokenLineLabel(usage, 200_000, 1), BrightPromptColor)
     g.feed "\n\r\x1b[2K"
     g.feed "❯ next\n"
     let label = tokenLineLabel(usage, 200_000, 1)
-    g.feed submitTransitionBytes("next", hadPending = true, label)
-    # Row 0 = receipt (carries `↑3.8k`).
+    g.feed submitTransitionBytes("next", hadPending = true,
+                                 hadGap = false, label)
+    # Row 0 = receipt (carries `↑3.8k`), row 1 = blank, row 2 = echo.
     check "3.8k" in rowText(g, 0)
-    # Row 1 = blank separator.
     check rowText(g, 1).strip == ""
-    # Row 2 = user echo.
     check rowText(g, 2).startsWith("❯ next")
-    # Receipt is dim — verify SGR in the raw bytes.
-    check "\x1b[2m" in submitTransitionBytes("next", true, label)
+    check "\x1b[2m" in submitTransitionBytes("next", true, false, label)
 
-  test "submitTransitionBytes: multi-line input walks back N+1 rows":
+  test "submitTransitionBytes: hadGap=true overwrites the gap row":
+    # Stage typing-ready state: LLM line at row 0, *gap* (blank) at
+    # row 1, bar at row 2, prompt at row 3. User types "next", Enter
+    # lands cursor at row 4.
     let g = newGrid()
-    g.feed barFooterBytes("LBL", BrightPromptColor)
-    # User types "foo" on prompt row, continuation, "bar" on next row.
-    g.feed "\n\r\x1b[2K"
-    g.feed "❯ foo\n"      # row 1
-    g.feed "  bar\n"      # row 2 — continuation
-    # Cursor at row 3 col 0. Feed transition for 2-line input.
+    g.feed "● Hello\n"                                     # row 0
+    g.feed "\n"                                            # row 1: gap
+    g.feed barFooterBytes(tokenLineLabel(usage, 200_000, 1),
+                          BrightPromptColor)               # bar @ 2, prompt @ 3
+    g.feed "\n\r\x1b[2K"                                   # readInput
+    g.feed "❯ next\n"                                      # row 3 echo + Enter
     let label = tokenLineLabel(usage, 200_000, 1)
-    g.feed submitTransitionBytes("foo\nbar", hadPending = true, label)
-    # Walk-back is splitLines.len + 1 = 3 → land on row 0 (bar row).
-    # Receipt repaints row 0; rows 1+ wiped by \x1b[J.
-    check "3.8k" in rowText(g, 0)
-    check rowText(g, 1).strip == ""
-    check rowText(g, 2).startsWith("❯ foo")
-    check rowText(g, 3).startsWith("  bar")
+    g.feed submitTransitionBytes("next", hadPending = true,
+                                 hadGap = true, label)
+    # Walk-back nLines+2 = 3 → row 1 (the gap row). Receipt lands
+    # there, *replacing the blank* — flush against "● Hello" at row 0.
+    check rowText(g, 0).startsWith("● Hello")
+    check "3.8k" in rowText(g, 1)               # receipt on the old gap
+    check rowText(g, 2).strip == ""             # blank separator
+    check rowText(g, 3).startsWith("❯ next")    # user echo
+    # Crucially: no permanent gap survives into scroll history. The
+    # receipt is FLUSH against the LLM content.
+    check rowText(g, 0).strip != ""
+    check rowText(g, 1).strip != ""
+
+  test "submitTransitionBytes: multi-line input + hadGap walks back N+2":
+    let g = newGrid()
+    g.feed "● Hello\n"                # row 0
+    g.feed "\n"                       # row 1: gap
+    g.feed barFooterBytes("LBL", BrightPromptColor)   # bar @ 2, prompt @ 3
+    g.feed "\n\r\x1b[2K"
+    g.feed "❯ foo\n"                  # row 3
+    g.feed "  bar\n"                  # row 4 (continuation)
+    # Cursor at row 5. nLines=2, hadGap=true → walk back 4 → row 1.
+    let label = tokenLineLabel(usage, 200_000, 1)
+    g.feed submitTransitionBytes("foo\nbar", hadPending = true,
+                                 hadGap = true, label)
+    check rowText(g, 0).startsWith("● Hello")
+    check "3.8k" in rowText(g, 1)               # receipt
+    check rowText(g, 2).strip == ""             # blank separator
+    check rowText(g, 3).startsWith("❯ foo")
+    check rowText(g, 4).startsWith("  bar")
 
   test "submitTransitionBytes: cursor lands after echo, ready for callModel \\n":
     let g = newGrid()
@@ -510,7 +531,8 @@ suite "token receipt placement":
     g.feed "\n\r\x1b[2K"
     g.feed "❯ hi\n"
     let label = tokenLineLabel(usage, 200_000, 1)
-    g.feed submitTransitionBytes("hi", true, label)
+    g.feed submitTransitionBytes("hi", hadPending = true, hadGap = false,
+                                 label)
     # Receipt at 0, blank at 1, echo at 2, cursor parked at 3 col 0.
     check g.row == 3
     check g.col == 0
@@ -546,11 +568,38 @@ suite "runTurns boundaries":
     # it. If this fails, someone moved the receipt logic into endTurn.
     withPendingHint:
       let savedLabel = currentBarLabel
+      let savedGap = currentBarHasGap
       currentBarLabel = "LBL"
       endTurn()
       check pendingHint.active
       check pendingHint.usage.totalTokens == 3845
       currentBarLabel = savedLabel
+      currentBarHasGap = savedGap
+
+  test "endTurn sets currentBarHasGap = true":
+    # endTurn transitions to typing-ready: bar+prompt repaint with
+    # bright cyan prompt, AND a one-row gap is added between the
+    # bar and the row above it (breathing room while user reads).
+    let savedLabel = currentBarLabel
+    let savedGap = currentBarHasGap
+    currentBarLabel = "LBL"
+    currentBarHasGap = false
+    endTurn()
+    check currentBarHasGap
+    currentBarLabel = savedLabel
+    currentBarHasGap = savedGap
+
+  test "paintBarPrompt clears currentBarHasGap":
+    # Mid-stream paints (per-\n, end-of-chunk refresh, accurate
+    # repaint after callModel parses usage) — none of these have
+    # a gap. Gap only appears at endTurn.
+    let savedLabel = currentBarLabel
+    let savedGap = currentBarHasGap
+    currentBarHasGap = true
+    paintBarPrompt("LBL", DimPromptColor)
+    check not currentBarHasGap
+    currentBarLabel = savedLabel
+    currentBarHasGap = savedGap
 
   test "emitUserSubmit consumes pendingHint":
     withPendingHint:
@@ -558,13 +607,15 @@ suite "runTurns boundaries":
       emitUserSubmit("hello")
       check not pendingHint.active
 
-  test "emitUserSubmit clears currentBarLabel":
+  test "emitUserSubmit clears currentBarLabel and currentBarHasGap":
     # The new bar is painted by the next callModel iteration — we
     # don't carry the old label across the submit transition.
     withPendingHint:
       currentBarLabel = "LBL"
+      currentBarHasGap = true
       emitUserSubmit("hello")
       check currentBarLabel == ""
+      check not currentBarHasGap
 
 # ---------------- Full turn lifecycle ----------------
 #
@@ -594,7 +645,8 @@ suite "full turn lifecycle":
     g.feed "❯ test prompt\n"      # minline echo + Enter
     # Cursor at row 5 col 0.
     # ---- emitUserSubmit (first turn — pending NOT active) ----
-    g.feed submitTransitionBytes("test prompt", hadPending = false, "")
+    g.feed submitTransitionBytes("test prompt", hadPending = false,
+                                 hadGap = false, "")
     # Walk back 2 rows to bar row 3, \x1b[J wipes from row 3 down.
     # Row 3 stays blank (no receipt — first turn). Row 4 blank,
     # row 5 user echo.
@@ -654,31 +706,28 @@ suite "full turn lifecycle":
     g.feed "\x1b[?25h"
     check not g.cursorHidden
 
-  test "turn 2: receipt morphs turn 1's bar in place":
-    # Stage turn 1 final: bar with iter-1 values, prompt below.
+  test "turn 2: receipt overwrites the gap, lands flush below LLM":
+    # Stage turn 1 typing-ready state: LLM line at row 0, gap at
+    # row 1, bar at row 2, prompt at row 3.
     let g = newGrid()
-    g.feed "● Hello\n"
+    g.feed "● Hello\n"                      # row 0
+    g.feed "\n"                             # row 1: gap
     let iter1Label = tokenLineLabel(usage, 200_000, 1)
     g.feed barFooterBytes(iter1Label, BrightPromptColor)
-    let bar1Row = block:
-      var found = -1
-      for r in 0 ..< g.rows.len:
-        if "3.8k" in rowText(g, r): found = r; break
-      found
-    check bar1Row >= 0
     # ---- readInput (turn 2): walk to prompt row, type, Enter ----
     g.feed "\n\r\x1b[2K"
     g.feed "❯ elaborate\n"
-    # ---- emitUserSubmit (turn 2 — pending IS active) ----
-    g.feed submitTransitionBytes("elaborate", hadPending = true, iter1Label)
-    # Receipt repaints bar1Row dim with the same label content.
-    check "3.8k" in rowText(g, bar1Row)
-    # Row right below = blank separator.
-    check rowText(g, bar1Row + 1).strip == ""
-    # Row two below = user echo.
-    check rowText(g, bar1Row + 2).startsWith("❯ elaborate")
-    # Receipt is dim (in raw bytes).
-    check "\x1b[2m" in submitTransitionBytes("elaborate", true, iter1Label)
+    # ---- emitUserSubmit: hadGap=true ----
+    g.feed submitTransitionBytes("elaborate", hadPending = true,
+                                 hadGap = true, iter1Label)
+    # Receipt lands on the GAP row (row 1), flush below LLM.
+    check rowText(g, 0).startsWith("● Hello")
+    check "3.8k" in rowText(g, 1)               # receipt on old gap
+    check rowText(g, 2).strip == ""             # blank separator
+    check rowText(g, 3).startsWith("❯ elaborate")
+    # Receipt is dim.
+    check "\x1b[2m" in submitTransitionBytes("elaborate", true, true,
+                                             iter1Label)
 
   test "tool exec under withCleared: bar+prompt slide down":
     # Bar at row 0, prompt at row 1. Tool exec writes content above

@@ -30,6 +30,17 @@ var currentBarLabel*: string
   ## zero on first turn). Used by `withCleared` to repaint the bar
   ## with the same label after a content write hides it.
 
+var currentBarHasGap*: bool = false
+  ## Whether there's a one-row blank "gap" between the bar and the
+  ## row above it. Set by `endTurn` (typing-ready state — the gap
+  ## sits between the last LLM line and the bar, breathing room
+  ## while the user reads). Cleared by every `paintBarPrompt` /
+  ## `paintBarBelow` (during streaming, the bar slides flush with
+  ## content — no gap mid-turn). Read by `emitUserSubmit` so the
+  ## receipt repaints the gap row in place — overwriting the blank,
+  ## leaving the receipt flush below the LLM content with no
+  ## permanent gap in scroll history.
+
 var showThinking*: bool = true
   ## When true, reasoning_content deltas from the provider are rendered as
   ## a one-line ticker embedded in the spinner label. Flipped by `:think on`
@@ -201,29 +212,40 @@ proc receiptBarBytes*(label: string): string =
   if label.len == 0: return ""
   "\x1b[2m  " & label & "\x1b[0m"
 
-proc submitTransitionBytes*(line: string, hadPending: bool,
+proc submitTransitionBytes*(line: string, hadPending, hadGap: bool,
                             receiptLabel: string): string =
-  ## Full byte sequence for the moment the user submits a prompt:
+  ## Full byte sequence for the moment the user submits a prompt.
   ##
-  ##   1. Walk up `splitLines(line).len + 1` rows so the cursor lands
-  ##      on the previous turn's bar row.
-  ##   2. Clear from there to end of screen (wipes bar, prompt, the
-  ##      live readline echo, and anything below).
-  ##   3. If `hadPending`, paint the dim receipt over the bar's old
-  ##      row. Otherwise leave the row blank (first turn — the bar
-  ##      was at zeros and there's no previous turn to receipt).
-  ##   4. Two newlines: advance past the receipt row + leave one
-  ##      blank as the separator between receipt and user echo.
-  ##   5. Echo the user's input line by line (`❯ ` for the first
-  ##      line, `  ` for continuations) so it's part of scroll
-  ##      history rather than a transient readline artefact.
+  ## Walks back from the cursor (which sits one row below the user's
+  ## input) to the row that should host the receipt:
   ##
-  ## Cursor out: col 0 of the row directly after the last echoed
-  ## line. The next callModel's leading `\n` will turn that row into
-  ## the scratch / ticker-overlay target.
+  ## - `hadGap = true` (typing-ready state from `endTurn`): there's a
+  ##   blank row above the bar between the last LLM line and the bar.
+  ##   Walk up `splitLines(line).len + 2` so the cursor lands on the
+  ##   *gap* row. The receipt is painted there, *replacing the blank*
+  ##   — leaving the receipt flush against the LLM content with no
+  ##   permanent gap in scroll history.
+  ## - `hadGap = false` (first turn — welcome painted bar without
+  ##   gap, no LLM content to gap from): walk up
+  ##   `splitLines(line).len + 1` to land on the bar row. No receipt
+  ##   to paint anyway (`hadPending` is false on first turn).
+  ##
+  ## Then:
+  ##   1. Clear from cursor to end of screen — wipes (gap), bar,
+  ##      prompt, readline echo, anything below.
+  ##   2. If `hadPending`, paint the dim receipt at this row.
+  ##   3. Two newlines: advance + blank separator between receipt
+  ##      and user echo.
+  ##   4. Echo user input line by line (`❯ ` for first, `  ` for
+  ##      continuations).
+  ##
+  ## Cursor out: col 0 of the row directly after the last echo line.
+  ## The next `callModel`'s leading `\n` sets up the scratch /
+  ## ticker-overlay row.
   let lines = line.splitLines
   let n = lines.len
-  result = "\x1b[" & $(n + 1) & "A"
+  let walkBack = if hadGap: n + 2 else: n + 1
+  result = "\x1b[" & $walkBack & "A"
   result.add "\r\x1b[J"
   if hadPending:
     result.add receiptBarBytes(receiptLabel)
@@ -246,8 +268,11 @@ proc submitTransitionBytes*(line: string, hadPending: bool,
 proc paintBarPrompt*(label, promptColor: string) =
   ## Write bar + prompt at the cursor's current row, parking cursor
   ## at col 0 of the bar row. Caches `label` so a later
-  ## `repaintBarPrompt` knows what to draw.
+  ## `repaintBarPrompt` knows what to draw. Clears `currentBarHasGap`
+  ## — during streaming the bar slides flush with content; only
+  ## `endTurn` paints a gap.
   currentBarLabel = label
+  currentBarHasGap = false
   stdout.write barFooterBytes(label, promptColor)
   stdout.flushFile
 
@@ -257,6 +282,7 @@ proc paintBarBelow*(label, promptColor: string) =
   ## during streaming to keep the bar visible while content is being
   ## accumulated in memory and the cursor stays put.
   currentBarLabel = label
+  currentBarHasGap = false
   stdout.write barFooterBelowBytes(label, promptColor)
   stdout.flushFile
 
@@ -728,32 +754,39 @@ proc beginTurn*() =
   stdout.flushFile
 
 proc endTurn*() =
-  ## Repaint bar+prompt with the bright cyan prompt color (typing
-  ## now possible) and show the terminal caret. The bar's *content*
-  ## is unchanged — it just transitions from "busy" to "ready"
-  ## visually via the prompt color flip.
+  ## Transition to typing-ready state: clear the bar at its current
+  ## row, advance one row to leave a blank "gap" between the last
+  ## content row and the bar, repaint bar+prompt with the bright
+  ## cyan prompt color. Show the terminal caret. The gap is
+  ## one-shot — `emitUserSubmit` overwrites it with the receipt at
+  ## next submit, so it never persists in scroll history.
   if currentBarLabel.len > 0:
-    stdout.write barFooterBytes(currentBarLabel, BrightPromptColor)
+    let label = currentBarLabel
+    clearBarPrompt()
+    stdout.write "\n"
+    stdout.write barFooterBytes(label, BrightPromptColor)
+    currentBarLabel = label
+    currentBarHasGap = true
   stdout.write "\x1b[?25h"
   stdout.flushFile
 
 proc emitUserSubmit*(line: string) =
   ## Run the user-submit transition described in `submitTransitionBytes`
-  ## using the current `pendingHint` state. Called from the main loop
-  ## right after the user's input is read but before `runTurns` —
-  ## walks back to the previous turn's bar row, repaints it dim (the
-  ## receipt), echoes the user's input, advances. After this returns
-  ## the cursor is on the row directly after the last echo line; the
-  ## next `callModel`'s leading `\n` sets up the scratch row for the
-  ## new spinner footer.
+  ## using the current `pendingHint` and `currentBarHasGap` state. The
+  ## receipt overwrites the gap (or the bar's row if no gap), echoes
+  ## the user's input as scroll-history content, and parks the cursor
+  ## ready for the next `callModel`'s leading `\n`.
   let receiptLabel =
     if pendingHint.active:
       tokenLineLabel(pendingHint.usage, pendingHint.window, pendingHint.elapsed)
     else: ""
-  stdout.write submitTransitionBytes(line, pendingHint.active, receiptLabel)
+  let hadGap = currentBarHasGap
+  stdout.write submitTransitionBytes(line, pendingHint.active, hadGap,
+                                     receiptLabel)
   stdout.flushFile
   pendingHint.active = false
   currentBarLabel = ""
+  currentBarHasGap = false
 
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   ensureReasoningField(messages)
