@@ -1,4 +1,16 @@
-import std/[os, osproc, sequtils, streams, strformat, strutils, times]
+import std/[httpclient, net, os, sequtils, strformat, strutils]
+
+proc bundledCaFile*(): string =
+  ## Path to the `cacert.pem` we ship alongside the binary on macOS /
+  ## Windows (see `release.yml`). Returns "" when not present (Linux
+  ## release tarball, dev builds) — `newContext` will scan default
+  ## system cert locations in that case, which works on every Linux
+  ## distro.
+  when defined(macosx) or defined(windows):
+    let p = parentDir(getAppFilename()) / "cacert.pem"
+    if fileExists(p): p else: ""
+  else:
+    ""
 
 proc curlRequest*(url: string;
                   key = ""; userAgent = "";
@@ -6,51 +18,45 @@ proc curlRequest*(url: string;
                   outFile = "";
                   timeoutSec = 20):
                   tuple[status: int, body: string, err: string] =
-  ## Single non-streaming HTTPS request via system `curl`. Used everywhere
-  ## a one-shot call is needed (provider verify, /models, summarizer, GitHub
-  ## releases poll, asset download) so the whole codebase shares one TLS
-  ## stack. Avoids Nim's std/httpclient + OpenSSL on stock macOS, which
-  ## trips "TLS/SSL connection failed to initiate, socket closed
-  ## prematurely" against most modern endpoints. `curl` uses the system
-  ## trust store and just works. Body lands in `outFile` when provided
-  ## (the asset-download case); otherwise read into `body`. Returns
-  ## status=0 + non-empty `err` on transport-level failure.
-  let tmp = getTempDir() / ("3code_req_" & $getCurrentProcessId() & "_" &
-                            $epochTime().int64)
-  try: createDir(tmp) except CatchableError: discard
-  defer: (try: removeDir(tmp) except CatchableError: discard)
-  let bodyPath = if outFile.len > 0: outFile else: tmp / "resp.body"
-  var args = @["-sSL", "--max-time", $timeoutSec, "-o", bodyPath,
-               "-w", "%{http_code}"]
-  if key.len > 0: args.add(@["-H", "Authorization: Bearer " & key])
-  if userAgent.len > 0: args.add(@["-A", userAgent])
-  if post:
-    let inFile = tmp / "req.body"
-    try: writeFile(inFile, jsonBody)
-    except CatchableError as e:
-      return (0, "", "tempfile write failed: " & e.msg)
-    args.add(@["-X", "POST", "-H", "Content-Type: application/json",
-               "--data-binary", "@" & inFile])
-  args.add url
-  var p: Process
+  ## One-shot HTTPS request. Despite the legacy name, this no longer
+  ## shells out to `curl` — it uses Nim's `std/httpclient`. We bundle
+  ## OpenSSL 1.1 (Windows) / OpenSSL 3 (macOS) so the dynlib loader
+  ## finds something workable on every platform; on Linux the system
+  ## OpenSSL is fine. The streaming chat path in `api.nim` still uses
+  ## a curl subprocess (sync httpclient buffers the body before
+  ## returning, can't stream SSE) — see comment there.
+  ##
+  ## Body lands in `outFile` when provided (the asset-download case);
+  ## otherwise read into `body`. Returns status=0 + non-empty `err` on
+  ## transport-level failure (DNS, connect, TLS, timeout).
+  let ua = if userAgent.len > 0: userAgent else: "3code"
+  var client: HttpClient
   try:
-    p = startProcess("curl", args = args,
-                     options = {poUsePath, poStdErrToStdOut})
-  except OSError as e:
-    return (0, "", "curl launch failed: " & e.msg)
-  let raw = p.outputStream.readAll()
-  let exit = p.waitForExit()
-  p.close()
-  if exit != 0:
-    let msg = raw.strip
-    return (0, "", if msg.len > 0: msg else: "curl exit " & $exit)
-  let status = try: parseInt(raw.strip) except CatchableError: 0
-  let body =
-    if outFile.len > 0: ""
-    elif fileExists(bodyPath):
-      try: readFile(bodyPath) except CatchableError: ""
-    else: ""
-  (status, body, "")
+    let ctx = newContext(verifyMode = CVerifyPeer,
+                         caFile = bundledCaFile())
+    client = newHttpClient(timeout = timeoutSec * 1000,
+                           userAgent = ua, sslContext = ctx)
+  except CatchableError as e:
+    return (0, "", "TLS init failed: " & e.msg)
+  defer: (try: client.close() except CatchableError: discard)
+  if key.len > 0:
+    client.headers["Authorization"] = "Bearer " & key
+  try:
+    let resp =
+      if post:
+        client.headers["Content-Type"] = "application/json"
+        client.request(url, httpMethod = HttpPost, body = jsonBody)
+      else:
+        client.request(url, httpMethod = HttpGet)
+    let status = resp.code.int
+    if outFile.len > 0:
+      try: writeFile(outFile, resp.body)
+      except CatchableError as e:
+        return (status, "", "write failed: " & e.msg)
+      return (status, "", "")
+    return (status, resp.body, "")
+  except CatchableError as e:
+    return (0, "", e.msg)
 
 proc userConfigRoot*(): string =
   ## XDG config root for 3code: `~/.config/3code/` on Linux,

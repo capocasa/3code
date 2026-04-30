@@ -54,21 +54,59 @@ jobs:
       - name: Run tests
         run: nimble test
 
-      - name: Package (Unix)
-        if: matrix.ext == 'tar.gz'
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
         run: |
           mkdir -p ${{ matrix.artifact }}
           cp 3code ${{ matrix.artifact }}/
           cp README.md LICENSE ${{ matrix.artifact }}/
           tar czf ${{ matrix.artifact }}.${{ matrix.ext }} ${{ matrix.artifact }}
 
-      - name: Package (Windows)
+      - name: Package (macOS) — bundle OpenSSL dylibs alongside binary
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p ${{ matrix.artifact }}
+          cp 3code ${{ matrix.artifact }}/
+          cp README.md LICENSE ${{ matrix.artifact }}/
+          # Stock macOS ships LibreSSL at /usr/lib/libssl.dylib which trips
+          # TLS handshakes against most modern endpoints. Bundle Homebrew
+          # OpenSSL 3 dylibs and rewrite install names so they're loaded
+          # via @loader_path. Main binary picks them up via DYLD_LIBRARY_PATH
+          # set in main() before any TLS use.
+          OPENSSL_PREFIX="$(brew --prefix openssl@3)"
+          cp "${OPENSSL_PREFIX}/lib/libssl.3.dylib"    ${{ matrix.artifact }}/
+          cp "${OPENSSL_PREFIX}/lib/libcrypto.3.dylib" ${{ matrix.artifact }}/
+          chmod +w ${{ matrix.artifact }}/libssl.3.dylib ${{ matrix.artifact }}/libcrypto.3.dylib
+          install_name_tool -id @loader_path/libcrypto.3.dylib ${{ matrix.artifact }}/libcrypto.3.dylib
+          install_name_tool -id @loader_path/libssl.3.dylib    ${{ matrix.artifact }}/libssl.3.dylib
+          install_name_tool -change "${OPENSSL_PREFIX}/lib/libcrypto.3.dylib" \
+            @loader_path/libcrypto.3.dylib ${{ matrix.artifact }}/libssl.3.dylib
+          # Aliases so dlopen("libssl.dylib") / dlopen("libcrypto.dylib") hit too
+          ln -sf libssl.3.dylib    ${{ matrix.artifact }}/libssl.dylib
+          ln -sf libcrypto.3.dylib ${{ matrix.artifact }}/libcrypto.dylib
+          # CA bundle: Homebrew's OpenSSL has its OPENSSLDIR baked to a
+          # build-time path that won't exist on user systems. Ship the
+          # Mozilla bundle (canonical curl.se source) and point
+          # SSL_CERT_FILE at it from main().
+          curl -fsSL https://curl.se/ca/cacert.pem -o ${{ matrix.artifact }}/cacert.pem
+          tar czf ${{ matrix.artifact }}.${{ matrix.ext }} ${{ matrix.artifact }}
+
+      - name: Package (Windows) — bundle OpenSSL DLLs alongside .exe
         if: matrix.ext == 'zip'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path ${{ matrix.artifact }}
+          New-Item -ItemType Directory -Path ${{ matrix.artifact }} | Out-Null
           Copy-Item 3code.exe ${{ matrix.artifact }}/
           Copy-Item README.md, LICENSE ${{ matrix.artifact }}/
+          # Stock Windows ships no OpenSSL. Nim's std/net dlopens libssl /
+          # libcrypto by hardcoded names; without these DLLs alongside
+          # 3code.exe, any TLS code path dies with
+          #   could not load: (libcrypto-1_1-x64|libeay64).dll
+          # Use the canonical Nim Windows DLL bundle from nim-lang.org;
+          # it also ships a cacert.pem that we point SSL_CERT_FILE at.
+          Invoke-WebRequest -Uri https://nim-lang.org/download/dlls.zip -OutFile dlls.zip
+          Expand-Archive -Path dlls.zip -DestinationPath dlls
+          Copy-Item dlls/libssl-1_1-x64.dll, dlls/libcrypto-1_1-x64.dll, dlls/cacert.pem ${{ matrix.artifact }}/
           Compress-Archive -Path ${{ matrix.artifact }} -DestinationPath ${{ matrix.artifact }}.${{ matrix.ext }}
 
       - uses: actions/upload-artifact@v4

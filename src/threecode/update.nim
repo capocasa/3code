@@ -28,8 +28,14 @@ const Tarball =
     "3code-linux-amd64.tar.gz"
   elif defined(macosx):
     "3code-macos-universal.tar.gz"
+  elif defined(windows) and (defined(amd64) or defined(x86_64)):
+    "3code-windows-amd64.zip"
   else:
     ""  # unsupported platform — no auto-update
+
+const BinName =
+  when defined(windows): "3code.exe"
+  else: "3code"
 
 proc autoUpdateEnabled*(): bool =
   ## Resolution: explicit config value wins; otherwise fall back to the
@@ -99,36 +105,77 @@ proc downloadAsset(tag, asset, dest: string): bool =
   r.err.len == 0 and r.status div 100 == 2 and
     fileExists(dest) and getFileSize(dest) > 0
 
-proc extractTarball(tar, workDir: string): string =
-  ## Extract `tar` into `workDir` (wiped first). Return path to the
-  ## extracted `3code` binary, or "" if not found.
+proc extractArchive(archive, workDir: string): string =
+  ## Extract `archive` into `workDir` (wiped first). Returns the path to
+  ## the directory containing the extracted binary (and any bundled
+  ## sibling libs), or "" on failure. Tarballs on Linux/macOS use
+  ## gzipped tar; Windows ships a zip and Win10's bsdtar handles both via
+  ## `tar -xf` (autodetects compression).
   try: removeDir(workDir) except CatchableError: discard
   try: createDir(workDir) except CatchableError: return ""
-  let rc = execShellCmd("tar -xzf " & quoteShell(tar) & " -C " &
-                        quoteShell(workDir))
+  let cmd =
+    when defined(windows):
+      "tar -xf " & quoteShell(archive) & " -C " & quoteShell(workDir)
+    else:
+      "tar -xzf " & quoteShell(archive) & " -C " & quoteShell(workDir)
+  let rc = execShellCmd(cmd)
   if rc != 0: return ""
   for f in walkDirRec(workDir):
-    if f.extractFilename == "3code":
-      return f
+    if f.extractFilename == BinName:
+      return parentDir(f)
   ""
 
-proc swapBinary(newBin, dest: string): bool =
-  ## Replace `dest` with `newBin`. Stage as `<dest>.new` in the same
-  ## directory (same filesystem, so the final rename is a real atomic
-  ## `rename(2)`), then rename over `dest`. Works on a busy executable
-  ## on Linux/macOS — the running process keeps its old inode.
-  let stage = dest & ".new"
-  let perm = {fpUserRead, fpUserWrite, fpUserExec,
-              fpGroupRead, fpGroupExec,
-              fpOthersRead, fpOthersExec}
-  try:
-    copyFile(newBin, stage)
-    setFilePermissions(stage, perm)
-    moveFile(stage, dest)
-    return true
-  except CatchableError:
-    try: removeFile(stage) except CatchableError: discard
-    return false
+proc swapInstall(srcDir, destBin: string): bool =
+  ## Replace `destBin` and any sibling library files with the new versions
+  ## from `srcDir`. README/LICENSE are skipped — those are zip-bundle
+  ## documentation, not part of the running install.
+  ##
+  ## POSIX: stage each file as `<dest>.new` and atomic-rename. The running
+  ## process keeps the old inode for any file it has open (the .exe / any
+  ## already-mapped libs).
+  ##
+  ## Windows: rename the in-use file to `<dest>.old` first — Windows
+  ## allows rename of an open file (the lock permits DELETE), just not
+  ## overwrite — then write the new file to the target name. `.old`
+  ## cleanup happens at next launch via `cleanupStaleBinaries`.
+  let destDir = parentDir(destBin)
+  for entry in walkDir(srcDir):
+    if entry.kind notin {pcFile, pcLinkToFile}: continue
+    let name = entry.path.extractFilename
+    if name in ["README.md", "LICENSE"]: continue
+    let dest = destDir / name
+    when defined(windows):
+      if fileExists(dest):
+        let stale = dest & ".old"
+        try: removeFile(stale) except CatchableError: discard
+        try: moveFile(dest, stale) except CatchableError: discard
+      try: copyFile(entry.path, dest)
+      except CatchableError: return false
+    else:
+      let stage = dest & ".new"
+      try:
+        copyFile(entry.path, stage)
+        if name == BinName:
+          let perm = {fpUserRead, fpUserWrite, fpUserExec,
+                      fpGroupRead, fpGroupExec,
+                      fpOthersRead, fpOthersExec}
+          setFilePermissions(stage, perm)
+        moveFile(stage, dest)
+      except CatchableError:
+        try: removeFile(stage) except CatchableError: discard
+        return false
+  true
+
+proc cleanupStaleBinaries*() =
+  ## Windows-only: delete `<name>.old` files left behind by `swapInstall`
+  ## from a prior auto-update. They couldn't be deleted at swap time
+  ## because the previous process still held them mapped; the new
+  ## process doesn't, so the delete now succeeds.
+  when defined(windows):
+    let dir = parentDir(getAppFilename())
+    for f in walkDir(dir):
+      if f.kind == pcFile and f.path.endsWith(".old"):
+        try: removeFile(f.path) except CatchableError: discard
 
 proc selfUpdateCheck*(curVersion = Version, targetPath = "",
                       force = false) =
@@ -149,10 +196,10 @@ proc selfUpdateCheck*(curVersion = Version, targetPath = "",
   let tarPath = cache / Tarball
   if not downloadAsset(latest, Tarball, tarPath): return
   let extractDir = cache / "extract"
-  let bin = extractTarball(tarPath, extractDir)
-  if bin.len == 0: return
+  let srcDir = extractArchive(tarPath, extractDir)
+  if srcDir.len == 0: return
   let dest = if targetPath.len > 0: targetPath else: getAppFilename()
-  discard swapBinary(bin, dest)
+  discard swapInstall(srcDir, dest)
   try: removeFile(tarPath) except CatchableError: discard
   try: removeDir(extractDir) except CatchableError: discard
 
@@ -186,6 +233,23 @@ when defined(posix):
     let argv = allocCStringArray([exe, "--self-update-check"])
     discard posix.execv(exe.cstring, argv)
     quit(1)
+elif defined(windows):
+  import std/osproc
+
+  proc spawnBackgroundUpdateMaybe*() =
+    ## Windows: spawn the worker detached via `poDaemon`. The worker
+    ## survives the parent exiting and runs without a console window.
+    ## Throttle is claimed before the spawn so concurrent launches
+    ## don't pile up.
+    if not autoUpdateEnabled() or Tarball.len == 0: return
+    if not throttleExpired(): return
+    touchThrottle()
+    let exe = getAppFilename()
+    try:
+      let p = startProcess(exe, args = ["--self-update-check"],
+                           options = {poDaemon})
+      p.close()
+    except OSError: discard
 else:
   proc spawnBackgroundUpdateMaybe*() = discard
 

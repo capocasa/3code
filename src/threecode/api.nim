@@ -1,4 +1,5 @@
-import std/[algorithm, atomics, json, locks, os, osproc, sequtils, streams, strformat, strutils, tables, terminal, times]
+import std/[algorithm, atomics, json, locks, net, os, sequtils, strformat, strutils, tables, terminal, times, uri]
+import streamhttp
 import types, util, prompts, compact, display
 
 # ---------- Spinner ----------
@@ -407,14 +408,15 @@ proc decayLevel(level: var int, lastTs: var float, now: float) =
       level = max(0, level - idleMin)
       lastTs = now
 
-# ---- Streaming HTTP via curl subprocess ----
+# ---- Streaming HTTP via streamhttp ----
 #
-# Nim's sync httpclient can't stream; its async one is awkward to mix with
-# our threaded spinner. `curl --no-buffer` with SSE does streaming cleanly,
-# gives us TLS for free, and dies on SIGINT without any extra plumbing
-# (terminal SIGINT reaches the whole foreground process group). The
-# subprocess reads its body from a file to sidestep shell quoting, and a
-# trailing `-w` marker line carries the HTTP status back after the body.
+# `streamhttp` is a tiny synchronous TLS HTTP/1.1 client we ship as a
+# separate package — it reads chunked SSE bodies line by line on the
+# main thread, blocking on `recv` between chunks. Replaces the old
+# subprocess-curl path. The threaded spinner is unaffected: it paints
+# in its own thread while we block on the socket here, same as it
+# blocked on the curl pipe before. Cancellation on Ctrl-C goes through
+# `conn.close()` instead of `p.terminate()`.
 type StreamOutcome = object
   statusCode: int
   retryAfter: string
@@ -443,30 +445,49 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   # Post `bodyStr` to `url` and consume SSE chunks until `[DONE]`. `slurped`
   # accumulates an approximate output-character count so the caller can
   # show a live "↓ Nk" on the spinner; update it inline as chunks arrive.
-  let tmp = getTempDir() / ("3code_stream_" & $getCurrentProcessId() & "_" & $epochTime().int64)
-  createDir(tmp)
-  let bodyFile = tmp / "body.json"
-  writeFile(bodyFile, bodyStr)
-  defer: (try: removeDir(tmp) except CatchableError: discard)
-
-  let args = @[
-    "--no-buffer", "-sS", "-X", "POST",
-    "-H", "Authorization: Bearer " & key,
-    "-H", "Content-Type: application/json",
-    "-H", "Accept: text/event-stream",
-    "--max-time", "1200",
-    "-w", "\n<<3CODE_STATUS>>%{http_code}\n<<3CODE_RETRY>>%header{retry-after}\n",
-    "--data-binary", "@" & bodyFile,
-    url
-  ]
-
-  var p: Process
-  try:
-    p = startProcess("curl", args = args,
-                     options = {poUsePath, poStdErrToStdOut})
-  except OSError as e:
-    result.errMsg = "curl launch failed: " & e.msg
+  let u = try: parseUri(url) except CatchableError as e:
+    result.errMsg = "bad url: " & e.msg
     return
+  if u.scheme != "https":
+    result.errMsg = "only https supported, got: " & u.scheme
+    return
+  let host = u.hostname
+  let port =
+    if u.port.len > 0: Port(parseInt(u.port))
+    else: Port(443)
+  let pathQuery =
+    block:
+      var pq = if u.path.len > 0: u.path else: "/"
+      if u.query.len > 0: pq.add "?" & u.query
+      pq
+
+  var conn: StreamConn
+  try:
+    conn = connectTls(host, port, timeoutMs = 1_200_000,
+                      caFile = bundledCaFile())
+  except CatchableError as e:
+    result.errMsg = "TLS connect failed: " & e.msg
+    return
+  defer: conn.close()
+
+  try:
+    conn.sendRequest("POST", pathQuery, host,
+                     headers = [("Authorization", "Bearer " & key),
+                                ("Content-Type", "application/json"),
+                                ("Accept", "text/event-stream")],
+                     body = bodyStr)
+  except CatchableError as e:
+    result.errMsg = "send failed: " & e.msg
+    return
+
+  var resp: StreamResponse
+  try:
+    resp = conn.readResponseHead()
+  except CatchableError as e:
+    result.errMsg = "response head: " & e.msg
+    return
+  result.statusCode = resp.status
+  result.retryAfter = resp.headers.getOrDefault("retry-after")
 
   var accContent = ""
   var accReasoning = ""
@@ -600,11 +621,17 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       liveBarAtCursor = true
     # else: bar+prompt already in place, leave them alone — avoids
     # the brief clear→repaint flash we used to ship.
-  let outS = p.outputStream
   var line = ""
-  while outS.readLine(line):
+  var streamErr = ""
+  while true:
+    var hasLine = false
+    try: hasLine = conn.readLine(line)
+    except CatchableError as e:
+      streamErr = e.msg
+      break
+    if not hasLine: break
     if interrupted:
-      try: p.terminate() except OSError: discard
+      try: conn.close() except CatchableError: discard
       break
     if line.startsWith("data: "):
       let payload = line["data: ".len .. ^1]
@@ -662,21 +689,11 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       let u = j{"usage"}
       if u != nil and u.kind == JObject:
         result.usage = parseUsage(u)
-    elif line.startsWith("<<3CODE_STATUS>>"):
-      let s = line["<<3CODE_STATUS>>".len .. ^1].strip
-      result.statusCode = try: parseInt(s) except ValueError: 0
-    elif line.startsWith("<<3CODE_RETRY>>"):
-      result.retryAfter = line["<<3CODE_RETRY>>".len .. ^1].strip
     elif line.startsWith("event:") or line.strip.len == 0 or
          line.startsWith(": "):  # SSE comment
       discard
     else:
       nonSSE.add line
-
-  let exitCode =
-    try: p.waitForExit()
-    except OSError: -1
-  try: p.close() except OSError: discard
 
   if contentStarted:
     finishContent(slurped)
@@ -704,8 +721,8 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   if interrupted:
     result.errMsg = "interrupted by user"
     return
-  if exitCode != 0 and exitCode != -1:
-    result.errMsg = "curl exit " & $exitCode &
+  if streamErr.len > 0:
+    result.errMsg = "stream read: " & streamErr &
       (if nonSSE.len > 0: ": " & nonSSE.join("\n") else: "")
     return
 

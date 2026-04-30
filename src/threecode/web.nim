@@ -6,6 +6,7 @@
 ## hand-rolled HTML-to-text pass.
 
 import std/[httpclient, strutils, uri, unicode, tables, net]
+import util
 
 const UserAgent = "Mozilla/5.0 (X11; Linux x86_64) 3code/web"
 const DefaultFetchCap = 20_000
@@ -16,7 +17,9 @@ type
     title*, url*, snippet*: string
 
 proc newClient(): HttpClient =
-  result = newHttpClient(timeout = 20_000, userAgent = UserAgent, sslContext = newContext(verifyMode = CVerifyPeer))
+  let ctx = newContext(verifyMode = CVerifyPeer, caFile = bundledCaFile())
+  result = newHttpClient(timeout = 20_000, userAgent = UserAgent,
+                         sslContext = ctx)
   result.headers = newHttpHeaders({
     "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9"

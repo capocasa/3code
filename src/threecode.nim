@@ -229,7 +229,33 @@ proc refuseRoot() =
         "Run as your normal user. (override: THREECODE_ALLOW_ROOT=1)"
       quit ExitUsage
 
+proc setupTlsEnv() =
+  ## macOS: stock LibreSSL at `/usr/lib/libssl.dylib` fails handshakes
+  ## against most modern endpoints, so we ship Homebrew OpenSSL 3 dylibs
+  ## alongside the binary (see `release.yml`). Prepend the binary's
+  ## directory to DYLD_LIBRARY_PATH so `dlopen("libssl.dylib")` (from
+  ## Nim's std/net openssl wrapper) hits ours first. dyld consults the
+  ## env var on every dlopen, so updating it from inside the process
+  ## before any TLS code runs is sufficient.
+  ##
+  ## Windows: DLLs are found next to the .exe by the app-directory
+  ## rule, no path manipulation needed.
+  ##
+  ## CA bundle: bundled OpenSSL on both platforms has its OPENSSLDIR
+  ## baked to a build-runner path that doesn't exist on user systems,
+  ## so verifyMode=CVerifyPeer can't scan default locations. Code that
+  ## opens a TLS context calls `bundledCaFile()` (in util.nim) to feed
+  ## the bundled `cacert.pem` directly to `newContext(caFile = ...)`.
+  ## Linux uses the system trust store and needs nothing here.
+  when defined(macosx):
+    let dir = parentDir(getAppFilename())
+    let cur = getEnv("DYLD_LIBRARY_PATH")
+    let newVal = if cur.len > 0: dir & ":" & cur else: dir
+    putEnv("DYLD_LIBRARY_PATH", newVal)
+
 proc main() =
+  setupTlsEnv()
+  cleanupStaleBinaries()
   refuseRoot()
   # Internal flag for the detached background worker. Run silently and
   # exit before any other startup work (skill extraction, config load).

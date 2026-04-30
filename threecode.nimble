@@ -6,3 +6,4 @@ srcDir        = "src"
 namedBin["threecode"] = "3code"
 
 requires "nim >= 2.0.0"
+requires "https://github.com/capocasa/streamhttp >= 0.1.0"
