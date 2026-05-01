@@ -69,96 +69,109 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       if tcNode != nil and tcNode.kind == JArray: tcNode
       else: newJArray()
     if toolCalls.len > 0:
-      # Blank row between the streamed content and the first tool
-      # banner so they don't run flush. The whole tool-exec block
-      # runs under `withCleared` so bar+prompt are repainted below
-      # each banner / output advance — they remain visible (sliding
-      # down) for the entire tool exec.
+      # Each emit (blank row, assistant content, pending banner, tool
+      # output, halt notice) is wrapped in its own `withCleared` so
+      # bar+prompt are repainted directly below after the write. The
+      # bar+prompt remain on screen for the entire tool exec — including
+      # the seconds while runAction blocks on the bash command between
+      # the pending banner and the timed result. (Wrapping the whole
+      # block in one withCleared is wrong: it clears at start, repaints
+      # at end, so bar/prompt are invisible while the command runs.)
       withCleared:
         stdout.write "\n"
         if content.strip.len > 0 and not streamedLive:
           renderAssistantContent(content)
           stdout.write "\n"
-        var halt = false  # Strike-2 trip: stop further tool calls this turn
-        for tc in toolCalls:
-          let id = tc{"id"}.getStr
-          if interrupted or halt:
-            # still emit a tool response so the assistant message's tool_calls
-            # are all paired; the model sees the cancellation on the next turn.
-            let stopMsg = if halt: "skipped — loop guard paused the turn"
-                          else: "interrupted by user"
-            messages.add %*{"role": "tool", "tool_call_id": id,
-                            "content": stopMsg}
-            continue
-          let fn = tc{"function"}
-          let name = if fn != nil and fn.kind == JObject: fn{"name"}.getStr else: ""
-          let argsStr =
-            if fn != nil and fn.kind == JObject: fn{"arguments"}.getStr("") else: ""
-          let args =
-            try: parseJson(if argsStr == "": "{}" else: argsStr)
-            except CatchableError as e:
-              stderr.writeLine "3code: tool_call " & name &
-                " has malformed arguments JSON (" & e.msg & "): " & argsStr
-              newJObject()
-          let act = toolCallToAction(p.family, name, args)
-          let idx = session.toolLog.len + 1
-          let silent = isSkillRead(act)
-          # Pre-exec: dim bullet + dim banner text — "in flight" signal.
-          # After the call returns we move the cursor up and rewrite the
-          # line via renderToolBanner so the bullet picks up a colour
-          # (green success, dim error) and gains a duration suffix. Skill
-          # loads skip the banner entirely; the model's own
-          # "loaded skill: <name>" line is the only signal the user sees.
-          if not silent:
+      var halt = false  # Strike-2 trip: stop further tool calls this turn
+      for tc in toolCalls:
+        let id = tc{"id"}.getStr
+        if interrupted or halt:
+          # still emit a tool response so the assistant message's tool_calls
+          # are all paired; the model sees the cancellation on the next turn.
+          let stopMsg = if halt: "skipped — loop guard paused the turn"
+                        else: "interrupted by user"
+          messages.add %*{"role": "tool", "tool_call_id": id,
+                          "content": stopMsg}
+          continue
+        let fn = tc{"function"}
+        let name = if fn != nil and fn.kind == JObject: fn{"name"}.getStr else: ""
+        let argsStr =
+          if fn != nil and fn.kind == JObject: fn{"arguments"}.getStr("") else: ""
+        let args =
+          try: parseJson(if argsStr == "": "{}" else: argsStr)
+          except CatchableError as e:
+            stderr.writeLine "3code: tool_call " & name &
+              " has malformed arguments JSON (" & e.msg & "): " & argsStr
+            newJObject()
+        let act = toolCallToAction(p.family, name, args)
+        let idx = session.toolLog.len + 1
+        let silent = isSkillRead(act)
+        # Pre-exec: dim bullet + dim banner text — "in flight" signal.
+        # After the call returns we move the cursor up and rewrite the
+        # line via renderToolBanner so the bullet picks up a colour
+        # (green success, dim error) and gains a duration suffix. Skill
+        # loads skip the banner entirely; the model's own
+        # "loaded skill: <name>" line is the only signal the user sees.
+        # The withCleared wrap repaints bar+prompt directly below the
+        # pending banner — they stay visible while runAction blocks.
+        if not silent:
+          withCleared:
             renderToolPending(bannerFor(act))
-          let toolT0 = epochTime()
-          if session.readCache == nil: session.readCache = newReadCache()
-          var (r, code, diff) = runAction(act, session.readCache)
-          let toolElapsed = epochTime() - toolT0
-          if r.strip.len == 0: r = "[no output]"
-          session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
-          if not silent:
+        let toolT0 = epochTime()
+        if session.readCache == nil: session.readCache = newReadCache()
+        var (r, code, diff) = runAction(act, session.readCache)
+        let toolElapsed = epochTime() - toolT0
+        if r.strip.len == 0: r = "[no output]"
+        session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
+        if not silent:
+          # Cursor parks at bar row after `withCleared` above; `\e[1A\r\e[2K`
+          # walks up to the pending banner row and clears it so renderToolBanner
+          # overwrites it with the timed final form.
+          withCleared:
             stdout.write "\e[1A\r\e[2K"
             renderToolBanner(bannerFor(act), code, toolElapsed.int)
             printToolResult(act.kind, r, code, idx, diff)
-          else:
+        else:
+          withCleared:
             printSkillLoaded(act)
-          # Loop guard: fingerprint the call and decide whether to annotate the
-          # tool result (Strike 1) or halt further tool calls (Strike 2). The
-          # guard message is appended to the real tool result rather than
-          # injected as a separate message — the assistant's tool_calls array
-          # already pairs 1:1 with tool responses via tool_call_id, so slipping
-          # in an extra message would break the pairing.
-          let priorStrike = session.loop.strike
-          let strike = trackCall(session.loop, name, args)
-          var toolContent = r
-          # Strike 1 used to append a "stop and reassess" nudge; dropped because
-          # many legit compile-iterate sessions trip it without actually being
-          # stuck. Only the Strike-2 halt survives — that one we want.
-          if strike >= 2 and priorStrike < 2:
-            halt = true
-            if session.loop.recoveryCmd != "":
-              toolContent &= "\n\n[repeat-guard] working-tree recovery detected (`" &
-                session.loop.recoveryCmd &
-                "`); further tool calls this turn are paused. The model's plan was likely based on the working tree as it was before this command — resume only if you've confirmed the new state is what you want."
-            else:
-              let fp = fingerprint(name, args)
-              toolContent &= "\n\n[repeat-guard] second saturation (path=" & fp &
-                "); further tool calls this turn are paused."
-          messages.add %*{"role": "tool", "tool_call_id": id, "content": toolContent}
-        saveSession(session, messages)
-        if interrupted:
+        # Loop guard: fingerprint the call and decide whether to annotate the
+        # tool result (Strike 1) or halt further tool calls (Strike 2). The
+        # guard message is appended to the real tool result rather than
+        # injected as a separate message — the assistant's tool_calls array
+        # already pairs 1:1 with tool responses via tool_call_id, so slipping
+        # in an extra message would break the pairing.
+        let priorStrike = session.loop.strike
+        let strike = trackCall(session.loop, name, args)
+        var toolContent = r
+        # Strike 1 used to append a "stop and reassess" nudge; dropped because
+        # many legit compile-iterate sessions trip it without actually being
+        # stuck. Only the Strike-2 halt survives — that one we want.
+        if strike >= 2 and priorStrike < 2:
+          halt = true
+          if session.loop.recoveryCmd != "":
+            toolContent &= "\n\n[repeat-guard] working-tree recovery detected (`" &
+              session.loop.recoveryCmd &
+              "`); further tool calls this turn are paused. The model's plan was likely based on the working tree as it was before this command — resume only if you've confirmed the new state is what you want."
+          else:
+            let fp = fingerprint(name, args)
+            toolContent &= "\n\n[repeat-guard] second saturation (path=" & fp &
+              "); further tool calls this turn are paused."
+        messages.add %*{"role": "tool", "tool_call_id": id, "content": toolContent}
+      saveSession(session, messages)
+      if interrupted:
+        withCleared:
           stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
-          interrupted = false
-          return
-        if halt:
+        interrupted = false
+        return
+      if halt:
+        withCleared:
           if session.loop.recoveryCmd != "":
             stdout.styledWriteLine styleDim,
               &"  paused — `{session.loop.recoveryCmd}` wiped working-tree state",
               resetStyle
           else:
             stdout.styledWriteLine styleDim, "  paused — looped", resetStyle
-          return
+        return
       continue
     if content.strip.len > 0:
       if not streamedLive:
