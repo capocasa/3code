@@ -1,5 +1,5 @@
 import std/[critbits, exitprocs, json, os, strformat, strutils, terminal]
-import types, util, prompts, session, actions, minline
+import types, util, config, prompts, session, actions, minline
 
 # Three visible tiers, designed to read on both light + dark terminal
 # backgrounds:
@@ -394,7 +394,7 @@ proc showProfile*(p: Profile) =
   let dot = p.name.find('.')
   let provider = if dot < 0: p.name else: p.name[0 ..< dot]
   stdout.styledWriteLine fgCyan, styleBright, "  provider ", resetStyle, provider
-  stdout.styledWriteLine fgCyan, styleBright, "  model    ", resetStyle, p.model
+  stdout.styledWriteLine fgCyan, styleBright, "  model    ", resetStyle, shortModel(p.model)
 
 # Track up-navigation so "down past last" can return to blank line.
 var navigatedUp*: bool = false

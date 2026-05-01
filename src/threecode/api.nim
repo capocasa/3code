@@ -1000,7 +1000,7 @@ proc emitUserSubmit*(line: string, echoRows = -1) =
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   ensureReasoningField(messages)
   var body = %*{
-    "model": p.modelPrefix & p.model,
+    "model": p.model,
     "messages": messages,
     "stream": true,
     "stream_options": {"include_usage": true}
@@ -1011,7 +1011,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   # we hit (Cerebras + Groq document it; Fireworks/DeepInfra/NVIDIA NIM
   # inherit it) lands there. Forcing "high" while we shake out behavior;
   # drop back to "medium" once we're done testing.
-  if p.model == "gpt-oss":
+  if p.family == "gpt-oss":
     body["reasoning_effort"] = %"high"
   let bodyStr = $body
   let t0 = epochTime()
@@ -1137,7 +1137,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
 
 proc verifyProfile*(p: Profile): (bool, string) =
   let body = $(%*{
-    "model": p.modelPrefix & p.model,
+    "model": p.model,
     "messages": [%*{"role": "user", "content": "ping"}],
     "max_tokens": 1,
     "stream": false

@@ -16,17 +16,14 @@ type
     offset*: int
     limit*: int
   Profile* = object
-    ## `model` is the API model string sent on the wire (e.g.
-    ## "openai/gpt-oss-120b"). `modelPrefix` is the path-prefix that's
-    ## stored separately in the config so provider namespaces don't get
-    ## repeated for every model in the list; it is concatenated to
-    ## `model` when forming the wire value. The remaining fields are
-    ## metadata pulled out of the known-good table: `family` ("glm" /
-    ## "qwen" / "gpt-oss") drives the (prompt, tools) tuple selection;
-    ## `version` and `variant` (e.g. "3", "480b") are informational
-    ## tags. In experimental mode `family` may also come from the
-    ## per-provider `family = ...` config override.
-    name*, url*, key*, modelPrefix*, model*: string
+    ## `model` is the full wire value sent in the API `model` field
+    ## (e.g. "openai/gpt-oss-120b"). Display code shortens it with
+    ## `shortModel(model)` (everything after the last `/`). `family`
+    ## ("glm" / "qwen" / "gpt-oss") drives (prompt, tools) tuple
+    ## selection. `version` and `variant` (e.g. "3", "480b") are
+    ## informational tags from KnownGoodCombos. In experimental mode
+    ## `family` may also come from the per-provider config override.
+    name*, url*, key*, model*: string
     family*, version*, variant*: string
   Usage* = object
     promptTokens*, completionTokens*, totalTokens*, cachedTokens*: int

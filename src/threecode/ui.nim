@@ -1,4 +1,4 @@
-import std/[json, os, sequtils, strformat, strutils, terminal, times]
+import std/[json, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
@@ -23,8 +23,8 @@ proc completionFor*(line: string): seq[string] =
   if words[0] == ":model" and words.len == 2:
     let prov = currentProvider()
     for m in prov.models:
-      if experimentalEnabled or knownGoodFamily(prov.name, prov.modelPrefix & m) != "":
-        result.add m
+      if experimentalEnabled or knownGoodFamily(prov.name, m) != "":
+        result.add shortModel(m)
     return
 
 proc readRequired*(editor: var minline.LineEditor, prompt: string,
@@ -108,7 +108,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
   var name, url: string
   var inferred = inferProvider(key)
   if not experimentalEnabled and inferred != "" and
-     curatedFor(inferred)[1].len == 0:
+     curatedFor(inferred).len == 0:
     inferred = ""  # not in whitelist; fall through to manual entry
   if inferred != "":
     name = inferred
@@ -119,7 +119,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
         hintLn "  detected: ", resetStyle, name, GreyFg,
                " -> already configured, updating key", Reset
         return ProviderRec(name: pr.name, url: pr.url, key: key,
-                           modelPrefix: pr.modelPrefix, models: pr.models)
+                           models: pr.models)
     hintLn "  detected: ", resetStyle, name, GreyFg, " -> ", url, Reset
   else:
     while true:
@@ -139,18 +139,17 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
       url = u
       break
   if not experimentalEnabled:
-    let (prefix, models) = curatedFor(name)
-    for m in models:
-      hintLn "    ", resetStyle, m
-    if models.len == 0:
+    let curated = curatedFor(name)
+    for m in curated:
+      hintLn "    ", resetStyle, shortModel(m)
+    if curated.len == 0:
       # Provider not in known‑good list; give a clear hint.
       hintLn &"  provider {name} not known‑good; enable --experimental to use it", resetStyle
       raise newException(minline.InputCancelled, "")
     while true:
-      let prov = ProviderRec(name: name, url: url, key: key,
-                             modelPrefix: prefix, models: models)
-      let prof = Profile(name: name & "." & models[0], url: url,
-                         key: key, modelPrefix: prefix, model: models[0])
+      let prov = ProviderRec(name: name, url: url, key: key, models: curated)
+      let prof = Profile(name: name & "." & curated[0], url: url,
+                         key: key, model: curated[0])
       hint "  verifying... ", resetStyle
       stdout.flushFile
       let (ok, err) = verifyProfile(prof)
@@ -167,36 +166,24 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
   hint "  fetching models...   ", resetStyle
   stdout.flushFile
   let available = fetchModels(url, key)
-  let prefix = commonModelPrefix(available)
-  let displayed = available
+  let lookup = shortToFull(available)  # short→full, first-occurrence wins
   if available.len == 0:
     hintLn "unavailable — enter manually", resetStyle
   else:
-    let header =
-      if prefix == "": &"{displayed.len} available"
-      else: &"{displayed.len} available (prefix: {prefix})"
-    hintLn header, resetStyle
-    for m in displayed:
-      let shown = if prefix != "" and m.startsWith(prefix): m[prefix.len .. ^1]
-                  else: shortModel(m)
-      hintLn "    ", resetStyle, shown
+    hintLn &"{available.len} available", resetStyle
+    for m in available:
+      hintLn "    ", resetStyle, shortModel(m)
   let prevCb = editor.completionCallback
   editor.completionCallback = proc(ed: LineEditor): seq[string] =
-    for m in displayed:
-      if prefix != "" and m.startsWith(prefix): result.add m[prefix.len .. ^1]
-      else: result.add shortModel(m)
+    for m in available: result.add shortModel(m)
   defer: editor.completionCallback = prevCb
-  # Pre-populate with known-good models for this provider (KnownGoodCombos order),
-  # shown in the same short form the completion callback uses.
+  # Pre-populate with known-good models for this provider (KnownGoodCombos order).
   var knownGoodInit: seq[string]
   for combo in KnownGoodCombos:
     if combo[0].toLowerAscii == name.toLowerAscii:
       for avail in available:
         if avail == combo[1]:
-          let shown = if prefix != "" and combo[1].startsWith(prefix):
-                        combo[1][prefix.len .. ^1]
-                      else: shortModel(combo[1])
-          knownGoodInit.add shown
+          knownGoodInit.add shortModel(combo[1])
           break
   var prev = knownGoodInit.join(" ")
   while true:
@@ -206,30 +193,19 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
     let entered = readOptional(editor, prompt)
     let raw = if entered == "": prev else: entered
     let rawModels = splitModels(raw)
-    # When prefix is empty, the wizard displays short model names (e.g.
-    # "gpt-oss-120b") but the API requires the full path prefix
-    # ("openai/gpt-oss-120b"). Resolve each entered name against the
-    # fetched list so the stored model IDs are always wire-correct.
+    # Resolve each entered name (short or full) to its full id using the
+    # fetched list. If the user typed a short name, `lookup` resolves it;
+    # if they typed a full id that was in the list, it passes through
+    # unchanged; unknown names are kept as-is.
     var models: seq[string]
     for rm in rawModels:
-      if prefix != "":
-        models.add rm
-      else:
-        var full = rm
-        for avail in available:
-          if (avail == rm or shortModel(avail) == rm) and "/" in avail:
-            full = avail  # path-prefixed form wins (e.g. openai/gpt-oss-120b)
-            break
-          elif (avail == rm or shortModel(avail) == rm) and full == rm:
-            full = avail  # bare form as fallback
-        models.add full
+      models.add lookup.getOrDefault(rm, rm)
     if models.len == 0:
       stdout.styledWriteLine fgMagenta, "  need at least one model", resetStyle
       continue
-    let prov = ProviderRec(name: name, url: url, key: key,
-                           modelPrefix: prefix, models: models)
+    let prov = ProviderRec(name: name, url: url, key: key, models: models)
     let prof = Profile(name: name & "." & models[0], url: url,
-                       key: key, modelPrefix: prefix, model: models[0])
+                       key: key, model: models[0])
     hint "  verifying... ", resetStyle
     stdout.flushFile
     let (ok, err) = verifyProfile(prof)
@@ -238,11 +214,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
       return prov
     stdout.styledWriteLine fgMagenta, "failed", resetStyle
     stdout.styledWriteLine fgMagenta, "  " & err, resetStyle
-    # Show short names in the retry default even when full IDs are stored.
-    var retryShorts: seq[string]
-    for m in models:
-      retryShorts.add if prefix == "": shortModel(m) else: m
-    prev = retryShorts.join(" ")
+    prev = models.mapIt(shortModel(it)).join(" ")
     let choice = readOptional(editor,
       "  [enter]=retry models, k=re-enter key : ").toLowerAscii
     if choice == "k":
@@ -275,25 +247,26 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     let newKey = readOptional(editor,
       "  api key [keep existing] : ", hidden = true)
     let key = if newKey == "": existing.key else: newKey
-    let modelsCurrent = formatModels(existing.models)
+    let modelsCurrent = existing.models.mapIt(shortModel(it)).join(" ")
     let newModels = readOptional(editor,
       &"  models [{modelsCurrent}]  : ")
-    let models =
-      if newModels == "": existing.models
-      else: splitModels(newModels)
+    let rawModels = if newModels == "": existing.models
+                   else: splitModels(newModels)
+    # Resolve short names against the existing model list; unknown names
+    # pass through as-is (full id entered by the user for a new model).
+    let existLookup = shortToFull(existing.models)
+    let models = rawModels.mapIt(existLookup.getOrDefault(it, it))
     if models.len == 0:
       stdout.styledWriteLine fgMagenta, "  need at least one model", resetStyle
       continue
-    let prefix = commonModelPrefix(models)
     let prof = Profile(name: name & "." & models[0], url: url,
-                       key: key, modelPrefix: prefix, model: models[0])
+                       key: key, model: models[0])
     hint "  verifying... ", resetStyle
     stdout.flushFile
     let (ok, err) = verifyProfile(prof)
     if ok:
       stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
-      return ProviderRec(name: name, url: url, key: key,
-                         modelPrefix: prefix, models: models)
+      return ProviderRec(name: name, url: url, key: key, models: models)
     stdout.styledWriteLine fgMagenta, "failed", resetStyle
     stdout.styledWriteLine fgMagenta, "  " & err, resetStyle
 
@@ -320,7 +293,7 @@ proc cmdProviderList(prof: Profile) =
   for pr in activeProviders:
     let current = pr.name == curName
     let mark = if current: "*" else: " "
-    let tail = if current: &"  [{prof.model}]" else: ""
+    let tail = if current: &"  [{shortModel(prof.model)}]" else: ""
     if not experimentalEnabled and not hasKnownGoodModel(pr):
       subtleWriteLn(stdout,
         "  " & mark & " " & pr.name & tail)
@@ -450,22 +423,25 @@ proc cmdModelList(prof: Profile) =
     return
   for m in prov.models:
     let mark = if m == prof.model: "*" else: " "
-    let kg = knownGoodFamily(prov.name, prov.modelPrefix & m)
+    let short = shortModel(m)
+    let kg = knownGoodFamily(prov.name, m)
     if kg == "" and not experimentalEnabled:
-      subtleWriteLn(stdout, "  " & mark & " " & m)
+      subtleWriteLn(stdout, "  " & mark & " " & short)
     else:
       let kgSuffix = if experimentalEnabled and kg != "": "*" else: ""
-      hintLn "  ", mark, " ", resetStyle, m & kgSuffix, resetStyle
+      hintLn "  ", mark, " ", resetStyle, short & kgSuffix, resetStyle
 
 proc cmdModelSelect(target: string, prof: var Profile) =
   let prov = currentProvider()
   if prov.name == "":
     stdout.styledWriteLine fgMagenta, "  no provider selected", resetStyle
     return
-  if prov.findModel(target) < 0:
+  let idx = prov.findModel(target)
+  if idx < 0:
     stdout.styledWriteLine fgMagenta, &"  unknown model: {target}", resetStyle
     return
-  let newCurrent = prov.name & "." & target
+  let fullModel = prov.models[idx]
+  let newCurrent = prov.name & "." & fullModel
   let candidate = buildProfile(newCurrent, activeProviders, "")
   if not gateExperimental(candidate):
     explainExperimentalGate(candidate)

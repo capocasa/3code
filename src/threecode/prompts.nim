@@ -919,7 +919,7 @@ proc knownGoodFamily*(p: Profile): string =
   let dot = p.name.find('.')
   if dot < 0: return ""
   let provider = p.name[0 ..< dot].toLowerAscii
-  let model = (p.modelPrefix & p.model).toLowerAscii
+  let model = p.model.toLowerAscii
   for combo in KnownGoodCombos:
     if combo[0].toLowerAscii == provider and
        combo[1].toLowerAscii == model: return combo[2]
@@ -959,9 +959,8 @@ proc buildCredit*(p: Profile): string =
   ## `:provider`/`:model` switch mid-session.
   let dot = p.name.find('.')
   let provider = if dot < 0: p.name else: p.name[0 ..< dot]
-  let model = p.modelPrefix & p.model
-  if provider != "" and model != "":
-    "Credit where it's due: you're " & model & ", served via " & provider & "."
+  if provider != "" and p.model != "":
+    "Credit where it's due: you're " & p.model & ", served via " & provider & "."
   else:
     "Credit where it's due — to whoever trained the weights driving you and the lab serving them."
 

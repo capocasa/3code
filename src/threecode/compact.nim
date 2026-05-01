@@ -200,7 +200,7 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
         continue
       payload.add m
   let body = %*{
-    "model": p.modelPrefix & p.model,
+    "model": p.model,
     "messages": payload,
     "max_tokens": SummarizeMaxTokens,
     "stream": false
