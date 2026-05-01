@@ -126,10 +126,11 @@ proc getSpinTicker(): string {.gcsafe.} =
 #                        user input).
 
 const
-  DimPromptColor* = "\x1b[2m\x1b[37m"
-    ## Dim white SGR for the prompt (typing not possible).
-  BrightPromptColor* = "\x1b[1m\x1b[36m"
-    ## Bright cyan SGR for the prompt (readline active / typing-ready).
+  DimPromptColor* = GreyFg
+    ## Prompt color while typing isn't possible (model streaming,
+    ## tool exec, etc.). Mid-grey 244 — readable on both bg.
+  BrightPromptColor* = CyanFg & BoldOn
+    ## Prompt color when readline is active (typing-ready).
   SyncBegin* = "\x1b[?2026h"
     ## DEC 2026 begin synchronized update — conhost (Win11 modern) and
     ## Windows Terminal commit all bytes between BEGIN and END as one
@@ -150,14 +151,14 @@ proc spinnerBarBytes*(frame, label: string, elapsed: int): string =
   ## one space at col 1, then the label. 2-char prefix total — the same
   ## width as `liveBarBytes`'s "  " so the spinner can be replaced by
   ## a space without shifting the label.
-  "\x1b[36m\x1b[1m" & frame & "\x1b[0m\x1b[36m\x1b[1m " &
-    label & " " & $elapsed & "s\x1b[0m"
+  CyanFg & BoldOn & frame & Reset & CyanFg & BoldOn & " " &
+    label & " " & $elapsed & "s" & Reset
 
 proc liveBarBytes*(label: string): string =
   ## Bar row payload (no spinner): two leading spaces, then the label.
   ## Position 0 is the slot that gets overwritten with the spinner
   ## glyph during streaming.
-  "\x1b[36m\x1b[1m  " & label & "\x1b[0m"
+  CyanFg & BoldOn & "  " & label & Reset
 
 proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int): string =
   ## Three-row spinner footer. Cursor in: col 0 of the bar row.
@@ -167,12 +168,12 @@ proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int): string =
   ## is — the leading `\n` callModel writes guarantees it).
   result = "\r\x1b[1A\x1b[2K"
   if ticker.len > 0:
-    result.add "\x1b[2m"
+    result.add GreyFg
     result.add ticker
-    result.add "\x1b[0m"
+    result.add Reset
   result.add "\n\x1b[2K"
   result.add spinnerBarBytes(frame, label, elapsed)
-  result.add "\n\x1b[2K" & DimPromptColor & "❯ \x1b[0m"
+  result.add "\n\x1b[2K" & DimPromptColor & "❯ " & Reset
   result.add "\r\x1b[1A"
 
 const SpinnerCleanupBytes* =
@@ -189,7 +190,7 @@ proc barFooterBytes*(label, promptColor: string): string =
   ## prompt color is now a parameter (dim while typing impossible,
   ## bright cyan when readline is active).
   paintBarBytes(label) &
-    "\n\x1b[2K" & promptColor & "❯ \x1b[0m\r\x1b[1A"
+    "\n\x1b[2K" & promptColor & "❯ " & Reset & "\r\x1b[1A"
 
 const ClearBarPromptBytes* = "\r\x1b[2K\n\x1b[2K\r\x1b[1A"
   ## Erase the bar + prompt rows, cursor at col 0 of the bar row.
@@ -211,7 +212,7 @@ proc barFooterBelowBytes*(label, promptColor: string): string =
   ## to 3 (1-based, == col 2 0-based, the position right after the
   ## bullet).
   "\n\x1b[2K" & liveBarBytes(label) &
-    "\n\x1b[2K" & promptColor & "❯ \x1b[0m" &
+    "\n\x1b[2K" & promptColor & "❯ " & Reset &
     "\x1b[2A\x1b[3G"
 
 const ClearBarBelowBytes* =
@@ -228,7 +229,7 @@ proc receiptBarBytes*(label: string): string =
   ## transition writes onto the previous turn's bar row to convert it
   ## into the **token receipt**.
   if label.len == 0: return ""
-  "\x1b[2m  " & label & "\x1b[0m"
+  GreyFg & "  " & label & Reset
 
 proc submitTransitionBytes*(line: string, hadPending, hadGap: bool,
                             receiptLabel: string, hasBar = true,
@@ -278,10 +279,9 @@ proc submitTransitionBytes*(line: string, hadPending, hadGap: bool,
   result.add "\n\n"
   for idx, l in lines:
     let prefix = if idx == 0: "❯ " else: "  "
-    result.add "\x1b[37m"
     result.add prefix
     result.add l
-    result.add "\x1b[0m\n"
+    result.add "\n"
 
 # ---------- Bar+prompt runtime helpers ----------
 #
@@ -394,7 +394,7 @@ proc paintPromptOnly*(promptColor: string) =
   ## Leaves `currentBarLabel = ""` and `currentBarHasGap = false` —
   ## the signals `readInput`, `emitUserSubmit`, and the slash-command
   ## repaint use to detect prompt-only mode.
-  stdout.write "\x1b[2K" & promptColor & "❯ \x1b[0m\r"
+  stdout.write "\x1b[2K" & promptColor & "❯ " & Reset & "\r"
   stdout.flushFile
   currentBarLabel = ""
   currentBarHasGap = false
@@ -686,12 +686,10 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     for ch in tail:
       flat.add(if ch == '\n' or ch == '\r': ' ' else: ch)
     setSpinTicker("  … " & flat)
-  # Agent text streams at column 0 with no icon. `fgWhite + styleDim`
-  # reads as a soft off-white, distinct from user input (terminal
-  # default, brighter) and from the dim greyish-cyan used for harness
-  # FYI text. Inline `**bold**` and `` `code` `` flip intensity within
-  # this envelope without changing hue, so bold is bright-white-bold,
-  # not yellow.
+  # Agent text streams at column 0 with no icon, riding the terminal's
+  # default foreground so it reads on both light and dark backgrounds.
+  # Inline `**bold**` and `` `code` `` flip intensity within the line
+  # without changing hue.
   #
   # Line buffering layers markdown rendering on top:
   #   - tables (`| a | b |` rows) buffer into `tableBuf`, flush as
@@ -843,7 +841,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
               # the first `\n` arrives.
               setSpinTicker("")
               stopSpinner()
-              stdout.styledWrite(fgWhite, styleBright, "● ", resetStyle)
+              stdout.styledWrite(fgCyan, styleBright, "● ", resetStyle)
               contentStarted = true
               mdState.firstEmit = true
               paintBarBelow(currentLabel(slurped), DimPromptColor)
@@ -1009,6 +1007,12 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   }
   body["tools"] = setup(p).tools
   body["tool_choice"] = %"auto"
+  # gpt-oss reasoning effort. Harmony default is "medium" and every provider
+  # we hit (Cerebras + Groq document it; Fireworks/DeepInfra/NVIDIA NIM
+  # inherit it) lands there. Forcing "high" while we shake out behavior;
+  # drop back to "medium" once we're done testing.
+  if p.model == "gpt-oss":
+    body["reasoning_effort"] = %"high"
   let bodyStr = $body
   let t0 = epochTime()
   decayLevel(serverRetryLevel, serverLastTs, t0)
@@ -1110,9 +1114,8 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
     if window > 0 and usage.promptTokens.float > 0.7 * window.float and
        usage.promptTokens.float <= CompactThresholdFrac * window.float:
       withCleared:
-        stdout.styledWriteLine(styleDim,
-          &"  · context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} — auto-compaction will fire near {humanTokens(int(CompactThresholdFrac * window.float))}; :compact or :summarize to act now",
-          resetStyle)
+        subtleWriteLn(stdout,
+          &"  · context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} — auto-compaction will fire near {humanTokens(int(CompactThresholdFrac * window.float))}; :compact or :summarize to act now")
   else:
     withCleared:
       hint &"  · {elapsed.int}s", resetStyle, "\n"

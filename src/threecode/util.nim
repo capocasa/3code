@@ -1,5 +1,20 @@
 import std/[net, os, sequtils, strformat, strutils]
 
+# ---------- Color palette ----------
+#
+# Three-tier palette designed to read on both light and dark terminal
+# backgrounds. We don't set a background color (bad form — fights the
+# user's terminal config, leaks seams in scrollback, breaks tmux /
+# transparent terms). We avoid `\x1b[37m` (white fg, invisible on
+# white bg) and `\x1b[2m` (SGR dim, drops below readable contrast on
+# light bg). Cyan is the brand tone; grey 244 is the muted FYI tone.
+
+const
+  CyanFg* = "\x1b[36m"
+  BoldOn* = "\x1b[1m"
+  GreyFg* = "\x1b[38;5;244m"
+  Reset* = "\x1b[0m"
+
 proc bundledCaFile*(): string =
   ## Path to the `cacert.pem` we ship alongside the binary on macOS /
   ## Windows (see `release.yml`). Returns "" when not present (Linux
@@ -113,9 +128,10 @@ proc isAtBoundary(line: string, i: int): bool =
 
 proc applyInlineMd*(line: string): string =
   ## Strict in-line replacements for `***bold-italic***`, `**bold**`,
-  ## `*italic*`/`_italic_`, and `` `code` ``. Emits ANSI within the
-  ## agent text's `fgWhite + styleDim` envelope and reverts afterwards
-  ## so the rest of the line stays in the off-white tone.
+  ## `*italic*`/`_italic_`, and `` `code` ``. Body text rides the
+  ## terminal's default foreground (no envelope SGR), so the reverts
+  ## just cancel bold / italic / underline back to default — no need
+  ## to re-engage `\x1b[2m` (we no longer dim the body).
   ## Bold and inline code: `\x1b[1m` (bold/bright). Italic: `\x1b[3m`
   ## plus `\x1b[4m` so it shows on terminals whose monospace font
   ## lacks an italic face (italic alone would be invisible there).
@@ -139,8 +155,8 @@ proc applyInlineMd*(line: string): string =
       if found > i + 3:
         let inner = line[i + 3 ..< found]
         if inner[0] != ' ' and inner[^1] != ' ' and '*' notin inner:
-          result.add "\x1b[22m\x1b[1m\x1b[3m\x1b[4m" & applyInlineMd(inner) &
-                     "\x1b[24m\x1b[23m\x1b[22m\x1b[2m"
+          result.add "\x1b[1m\x1b[3m\x1b[4m" & applyInlineMd(inner) &
+                     "\x1b[24m\x1b[23m\x1b[22m"
           i = found + 3
           continue
     if i + 1 < line.len and line[i] == '*' and line[i + 1] == '*':
@@ -153,10 +169,10 @@ proc applyInlineMd*(line: string): string =
       if found > i + 2:
         let inner = line[i + 2 ..< found]
         if inner[0] != ' ' and inner[^1] != ' ' and '*' notin inner:
-          # Bold: real bold (bright). Sits inside the dim envelope and
-          # pops out of it. No color change, asterisks dropped. Recurse
-          # so nested italic/code inside (e.g. `**_lazy_**`) renders.
-          result.add "\x1b[22m\x1b[1m" & applyInlineMd(inner) & "\x1b[22m\x1b[2m"
+          # Bold: real bold (bright). No color change, asterisks
+          # dropped. Recurse so nested italic/code inside
+          # (e.g. `**_lazy_**`) renders.
+          result.add "\x1b[1m" & applyInlineMd(inner) & "\x1b[22m"
           i = found + 2
           continue
     if line[i] == '*' and isAtBoundary(line, i - 1):
@@ -203,7 +219,7 @@ proc applyInlineMd*(line: string): string =
         let inner = line[i + 1 ..< j]
         if inner[0] != ' ' and inner[^1] != ' ':
           # Inline code: bold weight, no color shift.
-          result.add "\x1b[22m\x1b[1m" & inner & "\x1b[22m\x1b[2m"
+          result.add "\x1b[1m" & inner & "\x1b[22m"
           i = j + 1
           continue
     result.add line[i]

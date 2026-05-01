@@ -1,36 +1,45 @@
 import std/[critbits, exitprocs, json, os, strformat, strutils, terminal]
 import types, util, prompts, session, actions, minline
 
+# Three visible tiers, designed to read on both light + dark terminal
+# backgrounds:
+#   hint = bold cyan        (primary "look here": labels, CTAs)
+#   note = plain cyan       (secondary: help text, validation, errors)
+#   subtle = grey 244       (FYI: skill markers, tool output, receipts)
+# We avoid SGR `dim` (\x1b[2m) and `fgWhite`: both render below
+# readable contrast on light backgrounds.
+
 template hint*(args: varargs[untyped]) =
-  ## Bright cyan + bold — for labels and primary CTAs ("provider",
-  ## "type a prompt."). This is the "look here" tier.
   stdout.styledWrite(fgCyan, styleBright, args, resetStyle)
 
 template hintLn*(args: varargs[untyped]) =
   stdout.styledWriteLine(fgCyan, styleBright, args, resetStyle)
 
 template note*(args: varargs[untyped]) =
-  ## Dim cyan tint — soft greyish-cyan, the harness's "talking to the
-  ## user" voice. Used for help text, error messages, secondary
-  ## instructions, validation hints. Noticeable (cyan hue) but soft
-  ## (dim) — doesn't shout, doesn't hide. Compare:
-  ##   hint = bright cyan + bold (primary)
-  ##   note = dim cyan tint (action-required, secondary)
-  ##   styleDim alone = greyish (FYI: thinking, tokens, tool output)
-  stdout.styledWrite(fgCyan, styleDim, args, resetStyle)
+  stdout.styledWrite(fgCyan, args, resetStyle)
 
 template noteLn*(args: varargs[untyped]) =
-  stdout.styledWriteLine(fgCyan, styleDim, args, resetStyle)
+  stdout.styledWriteLine(fgCyan, args, resetStyle)
 
 template warn*(args: varargs[untyped]) =
-  ## Same dim-cyan tint as `note` — error messages now share the
-  ## "harness talking to you" voice rather than a separate magenta
-  ## tier. Errors are action-required; the soft cyan tone keeps them
-  ## visible without shouting.
-  stdout.styledWrite(fgCyan, styleDim, args, resetStyle)
+  stdout.styledWrite(fgCyan, args, resetStyle)
 
 template warnLn*(args: varargs[untyped]) =
-  stdout.styledWriteLine(fgCyan, styleDim, args, resetStyle)
+  stdout.styledWriteLine(fgCyan, args, resetStyle)
+
+proc subtleWrite*(outFile: File, body: string) =
+  ## FYI tier — grey 244, readable on both backgrounds. Replaces
+  ## styledWrite(styleDim, ..., resetStyle) which is invisible on
+  ## white terminals.
+  outFile.write GreyFg
+  outFile.write body
+  outFile.write Reset
+
+proc subtleWriteLn*(outFile: File, body: string) =
+  outFile.write GreyFg
+  outFile.write body
+  outFile.write Reset
+  outFile.write "\n"
 
 # `withCleared` lives in `api.nim` now — it owns `currentBarLabel`,
 # the cached bar payload that drives repaint after a content write.
@@ -87,7 +96,7 @@ proc skillNameFromAct*(act: Action): string =
 proc printSkillLoaded*(act: Action) =
   let name = skillNameFromAct(act)
   if name.len == 0: return
-  stdout.styledWriteLine styleDim, "· loaded skill: ", name, resetStyle
+  subtleWriteLn(stdout, "· loaded skill: " & name)
 
 proc trimTrailingBlank(lines: var seq[string]) =
   while lines.len > 0 and lines[^1].strip == "":
@@ -97,7 +106,7 @@ proc printLine*(l: string) =
   if l == "[exit 0]":
     discard
   else:
-    stdout.styledWriteLine styleDim, "  " & l, resetStyle
+    subtleWriteLn(stdout, "  " & l)
 
 proc printBashCompact*(res: string, idx: int, head = CompactHead, tail = CompactTail) =
   var lines = res.splitLines
@@ -117,9 +126,9 @@ proc printBashCompact*(res: string, idx: int, head = CompactHead, tail = Compact
     for i in header ..< footer: printLine(lines[i])
   else:
     for i in header ..< header + head: printLine(lines[i])
-    stdout.styledWriteLine styleDim,
+    subtleWriteLn(stdout,
       &"  … {hidden} line" & (if hidden == 1: "" else: "s") &
-      &" hidden · :show {idx} for full …", resetStyle
+      &" hidden · :show {idx} for full …")
     for i in footer - tail ..< footer: printLine(lines[i])
   if footer < lines.len: printLine(lines[footer])
 
@@ -135,7 +144,7 @@ proc printDiff*(diff: string) =
     if l.startsWith("@@"):
       stdout.styledWriteLine fgCyan, s, resetStyle
     elif l.startsWith("+++") or l.startsWith("---"):
-      stdout.styledWriteLine styleDim, s, resetStyle
+      subtleWriteLn(stdout, s)
     elif l.len > 0 and l[0] == '+':
       stdout.styledWriteLine fgGreen, s, resetStyle
     elif l.len > 0 and l[0] == '-':
@@ -147,9 +156,9 @@ proc printDiff*(diff: string) =
     return
   for i in 0 ..< DiffHead: paint(lines[i])
   let hidden = lines.len - DiffHead - DiffTail
-  stdout.styledWriteLine styleDim,
+  subtleWriteLn(stdout,
     &"  … {hidden} line" & (if hidden == 1: "" else: "s") &
-    " hidden · `git diff` for full …", resetStyle
+    " hidden · `git diff` for full …")
   for i in lines.len - DiffTail ..< lines.len: paint(lines[i])
 
 proc printToolResult*(kind: ActionKind, res: string, code: int, idx: int,
@@ -165,14 +174,14 @@ proc printToolResult*(kind: ActionKind, res: string, code: int, idx: int,
     printBashCompact(res, idx, ReadHead, ReadTail)
   else:
     if code == 0:
-      stdout.styledWriteLine styleDim, "  " & res, resetStyle
+      subtleWriteLn(stdout, "  " & res)
     else:
       # Patch / write failure: only the headline goes to the user; the
       # full SEARCH body lives in `res` which the model still sees via
       # the tool result. Dumping a 30-line SEARCH block here just shouts.
       let nl = res.find('\n')
       let head = if nl < 0: res else: res[0 ..< nl]
-      stdout.styledWriteLine styleDim, "  " & head, resetStyle
+      subtleWriteLn(stdout, "  " & head)
   if diff.len > 0:
     printDiff(diff)
 
@@ -223,7 +232,7 @@ proc handleMdLine*(s: MarkdownState, l: string, outFile: File): bool {.discardab
     var k = 0
     for chunk in chunks:
       let prefix = if s.firstEmit and k == 0: "" else: "  "
-      outFile.styledWrite(fgWhite, styleDim, prefix & chunk & "\n", resetStyle)
+      outFile.write(prefix & chunk & "\n")
       inc k
     s.firstEmit = false
   proc emitHeader(text: string) =
@@ -233,7 +242,7 @@ proc handleMdLine*(s: MarkdownState, l: string, outFile: File): bool {.discardab
     var k = 0
     for chunk in chunks:
       let prefix = if s.firstEmit and k == 0: "" else: "  "
-      outFile.styledWrite(fgWhite, styleBright, prefix & chunk & "\n", resetStyle)
+      outFile.styledWrite(styleBright, prefix & chunk & "\n", resetStyle)
       inc k
     s.firstEmit = false
   proc flushTable(): bool =
@@ -246,7 +255,7 @@ proc handleMdLine*(s: MarkdownState, l: string, outFile: File): bool {.discardab
     else:
       let termW = try: terminalWidth() except CatchableError: 80
       let rendered = renderMdTable(s.tableBuf, maxWidth = termW)
-      outFile.styledWrite(fgWhite, styleDim, rendered, resetStyle)
+      outFile.write(rendered)
     s.tableBuf.setLen 0
     true
   if s.inCode:
@@ -257,8 +266,8 @@ proc handleMdLine*(s: MarkdownState, l: string, outFile: File): bool {.discardab
         if s.firstEmit:
           outFile.write "\n"
           s.firstEmit = false
-        outFile.styledWrite(styleDim, "  ┃ ", resetStyle)
-        outFile.styledWrite(fgWhite, styleDim, cl & "\n", resetStyle)
+        subtleWrite(outFile, "  ┃ ")
+        outFile.write(cl & "\n")
         emitted = true
       s.codeBuf.setLen 0
       s.inCode = false
@@ -289,8 +298,8 @@ proc finishMd*(s: MarkdownState, outFile: File): bool {.discardable.} =
       if s.firstEmit:
         outFile.write "\n"
         s.firstEmit = false
-      outFile.styledWrite(styleDim, "  ┃ ", resetStyle)
-      outFile.styledWrite(fgWhite, styleDim, cl & "\n", resetStyle)
+      subtleWrite(outFile, "  ┃ ")
+      outFile.write(cl & "\n")
     s.codeBuf.setLen 0
     result = true
   if s.tableBuf.len > 0:
@@ -304,7 +313,7 @@ proc finishMd*(s: MarkdownState, outFile: File): bool {.discardable.} =
     else:
       let termW = try: terminalWidth() except CatchableError: 80
       let rendered = renderMdTable(s.tableBuf, maxWidth = termW)
-      outFile.styledWrite(fgWhite, styleDim, rendered, resetStyle)
+      outFile.write(rendered)
     s.tableBuf.setLen 0
     result = true
 
@@ -316,7 +325,7 @@ proc renderAssistantContent*(content: string, outFile: File = stdout) =
   ## `outFile` lets tests capture output to a temp file; default is
   ## stdout.
   if content.strip.len == 0: return
-  outFile.styledWrite fgWhite, styleBright, "● ", resetStyle
+  outFile.styledWrite fgCyan, styleBright, "● ", resetStyle
   var st = initMarkdownState()
   for line in content.splitLines:
     handleMdLine(st, line, outFile)
@@ -324,23 +333,24 @@ proc renderAssistantContent*(content: string, outFile: File = stdout) =
   outFile.flushFile
 
 proc renderToolPending*(banner: string) =
-  ## Pre-execution banner: dim bullet + dim banner. Live only; the live
+  ## Pre-execution banner: grey bullet + grey banner. Live only; the live
   ## caller overwrites this line with `renderToolBanner` once the action
   ## returns. Replay skips this and goes straight to the result form.
-  stdout.styledWrite fgWhite, styleDim, "● ", banner, resetStyle, "\n"
+  subtleWrite(stdout, "● " & banner)
+  stdout.write "\n"
   stdout.flushFile
 
 proc renderToolBanner*(banner: string, code: int, elapsedS = -1) =
-  ## Final tool banner: green bullet on success, dim white on error, dim
-  ## white banner. Optional `(Ns)` suffix when `elapsedS >= 1` (live);
-  ## replay passes -1 to omit it.
+  ## Final tool banner: green bullet on success, grey on error, grey
+  ## banner. Optional `(Ns)` suffix when `elapsedS >= 1` (live); replay
+  ## passes -1 to omit it.
   if code == 0:
     stdout.styledWrite fgGreen, "● ", resetStyle
   else:
-    stdout.styledWrite fgWhite, styleDim, "● ", resetStyle
-  stdout.styledWrite fgWhite, styleDim, banner, resetStyle
+    subtleWrite(stdout, "● ")
+  subtleWrite(stdout, banner)
   if elapsedS >= 1:
-    stdout.styledWrite fgWhite, styleDim, &"  ({elapsedS}s)", resetStyle
+    subtleWrite(stdout, &"  ({elapsedS}s)")
   stdout.write "\n"
   stdout.flushFile
 
@@ -368,7 +378,7 @@ proc tokenLineBytes*(usage: Usage, window: int, elapsedS = -1): string =
   ## emits; pinned by `tests/test_golden.nim`.
   let label = tokenLineLabel(usage, window, elapsedS)
   if label.len == 0: return ""
-  result = "\x1b[2m  " & label & "\x1b[0m\n\x1b[0m"
+  result = GreyFg & "  " & label & Reset & "\n" & Reset
 
 proc renderTokenLine*(usage: Usage, window: int, elapsedS = -1) =
   ## "○N%  ↑Nk  ↻Nk  ↓Nk  Ts": context glyph, fresh, cached, generated,
@@ -429,15 +439,15 @@ proc welcome*(p: Profile): minline.LineEditor =
   addExitProc(restoreCursor)
   stdout.write "\n"
   stdout.styledWriteLine fgCyan, styleBright, "  ╭─╮"
-  stdout.styledWrite fgCyan, styleBright, "   ─┤  ", resetStyle, fgWhite, styleBright, "3code ", resetStyle, fgCyan, styleBright, "v" & Version, resetStyle
-  stdout.styledWriteLine fgCyan, styleDim, "   the economical coding agent", resetStyle
+  stdout.styledWrite fgCyan, styleBright, "   ─┤  ", resetStyle, styleBright, "3code ", resetStyle, fgCyan, styleBright, "v" & Version, resetStyle
+  subtleWriteLn(stdout, "   the economical coding agent")
   stdout.styledWriteLine fgCyan, styleBright, "  ╰─╯"
   stdout.write "\n"
   if p.name != "":
     showProfile(p)
     stdout.write "\n"
     stdout.styledWrite fgCyan, styleBright, "  type a prompt. ", resetStyle
-    stdout.styledWriteLine fgCyan, styleDim, ":help for commands. :q or Ctrl-D to exit.", resetStyle
+    subtleWriteLn(stdout, ":help for commands. :q or Ctrl-D to exit.")
   stdout.flushFile
   installEditorTweaks()
   result = minline.initEditor(historyFile = historyFile())
@@ -520,7 +530,7 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
       stdout.write "\n"
       for idx, l in userLines:
         let prefix = if idx == 0: "❯ " else: "  "
-        stdout.styledWrite fgWhite, prefix & l, resetStyle, "\n"
+        stdout.write prefix & l & "\n"
       stdout.write "\n"
     of "assistant":
       # Mirror callModel's leading \n in the live path: a turn that
@@ -594,7 +604,7 @@ proc showTool*(arg: string, toolLog: seq[ToolRecord]) =
     if rec.code == 0:
       stdout.styledWriteLine fgGreen, rec.output, resetStyle
     else:
-      stdout.styledWriteLine styleDim, rec.output, resetStyle
+      subtleWriteLn(stdout, rec.output)
 
 proc listTools*(toolLog: seq[ToolRecord]) =
   if toolLog.len == 0:

@@ -1,5 +1,5 @@
 import std/[unicode, unittest, strutils, parseutils, json, os]
-import threecode/[api, display, types, compact]
+import threecode/[api, display, types, util, compact]
 
 ## Self-eval for the streaming footer layout.
 ##
@@ -444,10 +444,10 @@ suite "token receipt placement":
     check tokenLineLabel(Usage(), 200_000) == ""
     check tokenLineLabel(usage, 200_000) != ""
 
-  test "receiptBarBytes: dim payload, no leading clear, no \\n":
+  test "receiptBarBytes: grey payload, no leading clear, no \\n":
     let bytes = receiptBarBytes("○ 2%  ↑3.8k  ↻0  ↓45  1s")
-    check bytes.startsWith("\x1b[2m  ")
-    check bytes.endsWith("\x1b[0m")
+    check bytes.startsWith(GreyFg & "  ")
+    check bytes.endsWith(Reset)
     check '\n' notin bytes
 
   test "receiptBarBytes: empty label → empty bytes":
@@ -480,7 +480,7 @@ suite "token receipt placement":
     check "3.8k" in rowText(g, 0)
     check rowText(g, 1).strip == ""
     check rowText(g, 2).startsWith("❯ next")
-    check "\x1b[2m" in submitTransitionBytes("next", true, false, label)
+    check GreyFg in submitTransitionBytes("next", true, false, label)
 
   test "submitTransitionBytes: hadGap=true overwrites the gap row":
     # Stage typing-ready state: LLM line at row 0, *gap* (blank) at
@@ -699,9 +699,10 @@ suite "runTurns boundaries":
 # Replay the byte stream a real turn produces and pin which row
 # carries what at every checkpoint.
 
-# styledWrite(fgWhite, styleDim, "<text>\n", resetStyle) emits this.
+# Markdown body now rides the terminal's default fg (no envelope SGR);
+# stdout.write(text & "\n") is the byte form.
 proc styledLineBytes(text: string): string =
-  "\x1b[37m\x1b[2m" & text & "\n\x1b[0m\x1b[0m"
+  text & "\n"
 
 suite "full turn lifecycle":
   let usage = Usage(
@@ -742,7 +743,7 @@ suite "full turn lifecycle":
     check "❯" in rowText(g, 8)
     # ---- content arrives ----
     g.feed SpinnerCleanupBytes
-    g.feed "\x1b[37m\x1b[1m● \x1b[0m"
+    g.feed "\x1b[36m\x1b[1m● \x1b[0m"
     g.feed styledLineBytes("Hello")
     g.feed barFooterBytes("↑0  ↻0  ↓5  1s", DimPromptColor)
     # Bar visible during streaming.
@@ -802,9 +803,9 @@ suite "full turn lifecycle":
     check "3.8k" in rowText(g, 1)               # receipt on old gap
     check rowText(g, 2).strip == ""             # blank separator
     check rowText(g, 3).startsWith("❯ elaborate")
-    # Receipt is dim.
-    check "\x1b[2m" in submitTransitionBytes("elaborate", true, true,
-                                             iter1Label)
+    # Receipt is grey.
+    check GreyFg in submitTransitionBytes("elaborate", true, true,
+                                          iter1Label)
 
   test "tool exec under withCleared: bar+prompt slide down":
     # Bar at row 0, prompt at row 1. Tool exec writes content above
@@ -825,6 +826,66 @@ suite "full turn lifecycle":
     check rowText(g, 2).strip != ""
     check rowText(g, 3).strip != ""
 
+  test "tool exec: bar+prompt visible during runAction (per-write withCleared)":
+    # Production sequence: paintBarPrompt → withCleared(renderToolPending)
+    # → runAction (no writes) → withCleared(\e[1A clear + renderToolBanner
+    # + printToolResult). The KEY property: between the pending banner
+    # and runAction, bar+prompt must be visible — runAction can take
+    # seconds (a bash command), and the user sees a frozen screen if
+    # bar+prompt are gone for that whole time.
+    #
+    # Wrapping the whole block in ONE withCleared is the bug we're
+    # guarding against: clearBarPrompt fires once at start, repaintBarPrompt
+    # fires once at end, so during runAction (mid-block) bar/prompt are
+    # cleared and not yet repainted.
+    let g = newGrid()
+    # Initial: bar at row 0, prompt at row 1.
+    g.feed barFooterBytes("LBL  1s", DimPromptColor)
+    check "LBL" in rowText(g, 0)
+    check "❯" in rowText(g, 1)
+    # withCleared(renderToolPending): clear → "  bash   ls\n" → repaint.
+    g.feed ClearBarPromptBytes
+    g.feed "  bash   ls\n"
+    g.feed barFooterBytes("LBL  1s", DimPromptColor)
+    # CHECKPOINT: this is the moment runAction starts. Bar+prompt MUST
+    # be visible here, with the pending banner above.
+    let pendingBarRow = block:
+      var found = -1
+      for r in 0 ..< g.rows.len:
+        if "LBL" in rowText(g, r): found = r; break
+      found
+    check pendingBarRow >= 0
+    check "❯" in rowText(g, pendingBarRow + 1)
+    check "bash" in rowText(g, pendingBarRow - 1)
+    # No blank between pending banner and bar.
+    check rowText(g, pendingBarRow - 1).strip != ""
+    check rowText(g, pendingBarRow).strip != ""
+    check rowText(g, pendingBarRow + 1).strip != ""
+    # Now runAction "completes" (no writes). Then result phase:
+    # withCleared(\e[1A clear pending + final banner + output + repaint).
+    g.feed ClearBarPromptBytes        # clearBarPrompt
+    g.feed "\x1b[1A\r\x1b[2K"         # walk up to pending row, clear it
+    g.feed "  bash   ls  (1s)\n"      # final banner overwrites pending
+    g.feed "  total 16\n"             # tool output
+    g.feed "  [exit 0]\n"             # tool output
+    g.feed barFooterBytes("LBL  2s", DimPromptColor)
+    # FINAL: bar+prompt at the bottom, output above, no blank between bar
+    # and prompt.
+    let finalBarRow = block:
+      var found = -1
+      for r in 0 ..< g.rows.len:
+        if "LBL" in rowText(g, r): found = r
+      found
+    check finalBarRow >= 0
+    check "❯" in rowText(g, finalBarRow + 1)
+    check rowText(g, finalBarRow).strip != ""
+    check rowText(g, finalBarRow + 1).strip != ""
+    # The pending banner row was overwritten with the timed final form.
+    var foundFinal = false
+    for r in 0 ..< g.rows.len:
+      if "(1s)" in rowText(g, r): foundFinal = true
+    check foundFinal
+
   test "iter 2 stream end: bar at new bottom with no blank above prompt":
     let g = newGrid()
     # Iter 1 stream end.
@@ -839,7 +900,7 @@ suite "full turn lifecycle":
     g.feed "\n"
     g.feed spinnerFooterBytes("⠋", "ctx 5%  ↑0  ↻0  ↓0", "", 0)
     g.feed SpinnerCleanupBytes
-    g.feed "\x1b[37m\x1b[1m● \x1b[0m"
+    g.feed "\x1b[36m\x1b[1m● \x1b[0m"
     g.feed styledLineBytes("iter 2 content")
     g.feed barFooterBytes("ctx 5%  ↑0  ↻0  ↓14  1s", DimPromptColor)
     g.feed ClearBarPromptBytes
@@ -891,7 +952,7 @@ suite "full turn lifecycle":
     # Now callModel's leading \n + content + paintBarPrompt paints
     # the bar; from here the normal lifecycle resumes.
     g.feed "\n"                                            # scratch
-    g.feed "\x1b[37m\x1b[1m● \x1b[0m"
+    g.feed "\x1b[36m\x1b[1m● \x1b[0m"
     g.feed styledLineBytes("hi back")
     g.feed barFooterBytes("ctx 1%  ↑10  ↻0  ↓7  1s", DimPromptColor)
     let barRow = block:
@@ -905,7 +966,7 @@ suite "full turn lifecycle":
   test "multi-line content in one chunk: bar painted after every \\n":
     # Per-line repaint pattern: bar visible at every checkpoint.
     let g = newGrid()
-    g.feed "\x1b[37m\x1b[1m● \x1b[0m"
+    g.feed "\x1b[36m\x1b[1m● \x1b[0m"
     g.feed styledLineBytes("Line 1")
     g.feed barFooterBytes("lbl  1s", DimPromptColor)
     check "Line 1" in rowText(g, 0)

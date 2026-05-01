@@ -14,7 +14,7 @@
 ## "true"`/`"false"` under `[settings]` in `~/.config/3code/config`
 ## wins.
 
-import std/[httpclient, json, os, parsecfg, parseutils, strutils, terminal, times]
+import std/[httpclient, json, os, parsecfg, parseutils, strutils, times]
 import prompts, util
 
 const autoUpdate {.booldefine.} = false
@@ -274,8 +274,7 @@ proc showUpdateNoticeMaybe*() =
     except CatchableError: discard
   if prev.len > 0 and prev != Version:
     try:
-      stderr.styledWriteLine(styleDim,
-        "  · updated to v" & Version, resetStyle)
+      stderr.write(GreyFg & "  · updated to v" & Version & Reset & "\n")
     except CatchableError:
       try: stderr.writeLine "  · updated to v" & Version
       except CatchableError: discard

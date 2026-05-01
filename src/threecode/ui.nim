@@ -53,7 +53,7 @@ proc printSupported() =
   var seen: seq[string]
   for combo in KnownGoodCombos:
     if combo[0] notin seen: seen.add combo[0]
-  stdout.styledWriteLine styleDim, "  supported: ", seen.join(", "), resetStyle
+  subtleWriteLn(stdout, "  supported: " & seen.join(", "))
 
 proc readProviderEntry(editor: var minline.LineEditor): string =
   let prevCb = editor.completionCallback
@@ -116,11 +116,11 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
     # same provider already exists? offer to update key instead
     for pr in activeProviders:
       if pr.name == name:
-        hintLn "  detected: ", resetStyle, name, styleDim,
-               " -> already configured, updating key", resetStyle
+        hintLn "  detected: ", resetStyle, name, GreyFg,
+               " -> already configured, updating key", Reset
         return ProviderRec(name: pr.name, url: pr.url, key: key,
                            modelPrefix: pr.modelPrefix, models: pr.models)
-    hintLn "  detected: ", resetStyle, name, styleDim, " -> ", url, resetStyle
+    hintLn "  detected: ", resetStyle, name, GreyFg, " -> ", url, Reset
   else:
     while true:
       let (n, u) = promptNameAndUrl(editor)
@@ -253,8 +253,8 @@ proc promptEditProvider*(editor: var minline.LineEditor,
                         existing: ProviderRec): ProviderRec =
   hintLn &"  editing '{existing.name}' (enter to keep, ctrl+c to abort)",
     resetStyle
-  stdout.styledWriteLine styleDim,
-    "  # tip: change name + url to point at a fine-tune deployment", resetStyle
+  subtleWriteLn(stdout,
+    "  # tip: change name + url to point at a fine-tune deployment")
   while true:
     let newName = readOptional(editor,
       &"  name [{existing.name}]  : ")
@@ -322,8 +322,8 @@ proc cmdProviderList(prof: Profile) =
     let mark = if current: "*" else: " "
     let tail = if current: &"  [{prof.model}]" else: ""
     if not experimentalEnabled and not hasKnownGoodModel(pr):
-      stdout.styledWriteLine styleDim,
-        "  ", mark, " ", pr.name, tail, resetStyle
+      subtleWriteLn(stdout,
+        "  " & mark & " " & pr.name & tail)
     else:
       hintLn "  ", mark, " ", resetStyle, pr.name, tail
 
@@ -452,7 +452,7 @@ proc cmdModelList(prof: Profile) =
     let mark = if m == prof.model: "*" else: " "
     let kg = knownGoodFamily(prov.name, prov.modelPrefix & m)
     if kg == "" and not experimentalEnabled:
-      stdout.styledWriteLine styleDim, "  ", mark, " ", m, resetStyle
+      subtleWriteLn(stdout, "  " & mark & " " & m)
     else:
       let kgSuffix = if experimentalEnabled and kg != "": "*" else: ""
       hintLn "  ", mark, " ", resetStyle, m & kgSuffix, resetStyle
@@ -666,7 +666,7 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
   let arg = if sp < 0: "" else: c[sp+1 .. ^1].strip
   case name
   of ":help", ":?":
-    stdout.styledWrite fgCyan, styleDim, HelpText, resetStyle
+    subtleWrite(stdout, HelpText)
   of ":tokens":
     if session.usage.totalTokens == 0:
       hintLn "  no tokens used yet", resetStyle
@@ -676,7 +676,7 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
         "  " & tokenSlot("↻", session.usage.cachedTokens) &
         "  " & tokenSlot("↓", session.usage.completionTokens) &
         "  total " & humanTokens(session.usage.totalTokens)
-      stdout.styledWrite(styleDim, line, resetStyle, "\n")
+      subtleWriteLn(stdout, line)
   of ":clear":
     messages = %* [{"role": "system", "content": buildSystemPrompt(prof)}]
     session.toolLog.setLen 0
@@ -739,7 +739,7 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
       stdout.flushFile
       let n = summarizeHistory(messages, prof)
       if n == 0:
-        stdout.styledWriteLine styleDim, "failed or not worth it", resetStyle
+        subtleWriteLn(stdout, "failed or not worth it")
       else:
         stdout.styledWriteLine fgCyan, styleBright, "done", resetStyle
         hintLn &"  · collapsed {n} message" &
