@@ -72,16 +72,43 @@ proc hasKnownGoodModel*(prov: ProviderRec): bool =
     if knownGoodFamily(prov.name, m) != "": return true
   false
 
+proc orderedModels*(prov: ProviderRec): seq[string] =
+  ## Models in the order they should be presented to the user and used
+  ## for default selection:
+  ##   1. Known-good models in KnownGoodCombos order (curated quality ranking).
+  ##   2. Experimental models in config-file order, appended after.
+  ## This way the best-tested model is always first regardless of how the
+  ## config was written or the API listed them.
+  let p = prov.name.toLowerAscii
+  for combo in KnownGoodCombos:
+    if combo[0].toLowerAscii == p:
+      for m in prov.models:
+        if m == combo[1]:
+          result.add m
+          break
+  for m in prov.models:
+    if knownGoodFamily(prov.name, m) == "":
+      result.add m
+
+proc firstModel*(prov: ProviderRec): string =
+  ## First model in KnownGoodCombos order, or `models[0]` if none are
+  ## known-good (e.g. a provider added with --experimental).
+  let ordered = orderedModels(prov)
+  if ordered.len > 0: ordered[0]
+  elif prov.models.len > 0: prov.models[0]
+  else: ""
+
 proc firstKnownGoodCombo*(providers: seq[ProviderRec]): string =
-  ## Returns "<provider>.<model>" of the first (provider, model) pair across
-  ## `providers` that hits a `KnownGoodCombos` entry, or "" if none. Lets a
-  ## non-experimental startup recover when the persisted `current` points at
-  ## an experimental combo.
-  for pr in providers:
-    if pr.url == "" or pr.key == "": continue
-    for m in pr.models:
-      if knownGoodFamily(pr.name, m) != "":
-        return pr.name & "." & m
+  ## "<provider>.<model>" of the first known-good (provider, model) pair
+  ## across `providers`, walking KnownGoodCombos order so the curated
+  ## ranking drives the fallback, not config-file order.
+  for combo in KnownGoodCombos:
+    for pr in providers:
+      if pr.url == "" or pr.key == "": continue
+      if pr.name.toLowerAscii != combo[0].toLowerAscii: continue
+      for m in pr.models:
+        if m == combo[1]:
+          return pr.name & "." & m
   ""
 
 proc currentProvider*(): ProviderRec =
@@ -219,10 +246,13 @@ proc buildProfile*(current: string, providers: seq[ProviderRec],
     if pr.name == name:
       if pr.url == "" or pr.key == "" or pr.models.len == 0:
         return Profile()
-      let idx = if model == "": 0 else: pr.findModel(model)
-      if idx < 0:
-        return Profile()
-      let fullModel = pr.models[idx]
+      let fullModel =
+        if model == "": firstModel(pr)
+        else:
+          let i = pr.findModel(model)
+          if i < 0: return Profile()
+          pr.models[i]
+      if fullModel == "": return Profile()
       var prof = Profile(name: pr.name & "." & fullModel, url: pr.url,
                          key: pr.key, model: fullModel)
       prof.family = resolveFamily(pr, prof)
@@ -264,10 +294,15 @@ proc loadProfile*(wanted: string): Profile =
   if prov.url == "": die &"provider '{name}': url not set in {path}", ExitConfig
   if prov.key == "": die &"provider '{name}': key not set in {path}", ExitConfig
   if prov.models.len == 0: die &"provider '{name}': models not set in {path}", ExitConfig
-  let idx = if model == "": 0 else: prov.findModel(model)
-  if idx < 0:
-    die &"provider '{name}': model '{model}' not in models list ({prov.models.join(\", \")})", ExitConfig
-  let fullModel = prov.models[idx]
+  let fullModel =
+    if model == "": firstModel(prov)
+    else:
+      let i = prov.findModel(model)
+      if i < 0:
+        die &"provider '{name}': model '{model}' not in models list ({prov.models.join(\", \")})", ExitConfig
+      prov.models[i]
+  if fullModel == "":
+    die &"provider '{name}': models list is empty", ExitConfig
   var prof = Profile(name: prov.name & "." & fullModel, url: prov.url,
                      key: prov.key, model: fullModel)
   prof.family = resolveFamily(prov, prof)

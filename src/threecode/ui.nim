@@ -22,7 +22,7 @@ proc completionFor*(line: string): seq[string] =
       return
   if words[0] == ":model" and words.len == 2:
     let prov = currentProvider()
-    for m in prov.models:
+    for m in orderedModels(prov):
       if experimentalEnabled or knownGoodFamily(prov.name, m) != "":
         result.add shortModel(m)
     return
@@ -278,7 +278,7 @@ proc bootstrapProvider*(editor: var minline.LineEditor): Profile =
              except minline.InputCancelled:
                die "aborted", ExitConfig
   activeProviders.add prov
-  activeCurrent = prov.name & "." & prov.models[0]
+  activeCurrent = prov.name & "." & firstModel(prov)
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   hintLn &"  saved to {configPath()}", resetStyle
   buildProfile(activeCurrent, activeProviders, "")
@@ -315,7 +315,7 @@ proc cmdProviderSelect(target: string, prof: var Profile) =
     stdout.styledWriteLine fgMagenta,
       &"  provider {target} has no models", resetStyle
     return
-  let newCurrent = prov.name & "." & prov.models[0]
+  let newCurrent = prov.name & "." & firstModel(prov)
   let candidate = buildProfile(newCurrent, activeProviders, "")
   activeCurrent = newCurrent
   prof = candidate
@@ -331,7 +331,7 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
                return
   activeProviders.add prov
   if activeCurrent == "":
-    activeCurrent = prov.name & "." & prov.models[0]
+    activeCurrent = prov.name & "." & firstModel(prov)
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   if prof.name == "":
     prof = buildProfile(activeCurrent, activeProviders, "")
@@ -356,7 +356,7 @@ proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
     let wantedModel = prof.model
     let model =
       if updated.findModel(wantedModel) >= 0: wantedModel
-      else: updated.models[0]
+      else: firstModel(updated)
     activeCurrent = updated.name & "." & model
     prof = buildProfile(activeCurrent, activeProviders, "")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
@@ -374,7 +374,7 @@ proc cmdProviderRm(target: string, prof: var Profile) =
   if curName == target:
     if activeProviders.len > 0:
       let np = activeProviders[0]
-      activeCurrent = np.name & "." & np.models[0]
+      activeCurrent = np.name & "." & firstModel(np)
       prof = buildProfile(activeCurrent, activeProviders, "")
     else:
       activeCurrent = ""
@@ -421,7 +421,7 @@ proc cmdModelList(prof: Profile) =
   if prov.models.len == 0:
     hintLn &"  {prov.name}: no models", resetStyle
     return
-  for m in prov.models:
+  for m in orderedModels(prov):
     let mark = if m == prof.model: "*" else: " "
     let short = shortModel(m)
     let kg = knownGoodFamily(prov.name, m)
