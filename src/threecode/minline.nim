@@ -120,6 +120,7 @@ type
     submitted*: bool
     canceled*: bool
     eof*: bool
+    hidechars*: bool
   InputCancelled* = object of CatchableError
 
 const
@@ -772,6 +773,7 @@ proc resetForRead(ed: var LineEditor, prompt: string, hidechars: bool) =
   ed.submitted = false
   ed.canceled = false
   ed.eof = false
+  ed.hidechars = hidechars
   if ed.getWidth != nil:
     let w = ed.getWidth()
     if w > 0: ed.width = w
@@ -846,11 +848,27 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
         if c5 == 48 and c6 == 126:
           let paste = readBracketedPaste(ed)
           if paste.len > 0:
-            var clean = newStringOfCap(paste.len)
-            for ch in paste:
-              if ch == '\r': discard
-              else: clean.add ch
-            ed.insertText(clean)
+            if ed.hidechars:
+              # Hidden inputs (api keys): drop CR/LF and any non-printable
+              # byte, append the rest to the buffer directly, write one `*`
+              # per kept byte. Avoids `insertText` -> `fullRedraw` (which
+              # would render the cleartext key on screen) and avoids
+              # `c1 == 10/13` early-submit if the clipboard had a trailing
+              # newline that the terminal happens to send raw.
+              var stars = 0
+              for ch in paste:
+                if ch.ord in PRINTABLE:
+                  ed.line.text.add ch
+                  inc ed.line.position
+                  inc stars
+              if stars > 0:
+                ed.write repeat('*', stars)
+            else:
+              var clean = newStringOfCap(paste.len)
+              for ch in paste:
+                if ch == '\r': discard
+                else: clean.add ch
+              ed.insertText(clean)
         return false
       if c3 == 51 and c4 == 59:
         # ESC [ 3 ; <mod> ~  (e.g. shift+delete)
@@ -897,8 +915,11 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
   ed.write = write
   ed.getWidth = getWidth
   resetForRead(ed, prompt, hidechars)
-  if not hidechars:
-    ed.write "\x1b[?2004h"
+  # Enable bracketed paste in both modes. For hidden inputs (api keys),
+  # this lets the bracketed-paste handler atomically capture the paste
+  # and mask it as `*`s, instead of letting the per-byte loop see
+  # embedded CR/LF (early submit) or drop high UTF-8 bytes silently.
+  ed.write "\x1b[?2004h"
   fullRedraw(ed)
   while true:
     let c1 = ed.getCh()
@@ -913,8 +934,7 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
       if not noHistory and not hidechars:
         ed.historyAdd()
       ed.historyFlush()
-      if not hidechars:
-        ed.write "\x1b[?2004l"
+      ed.write "\x1b[?2004l"
       ed.submitted = true
       return ed.line.text
     if c1 == 8 or c1 == 127:
@@ -940,8 +960,7 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
           if not noHistory and not hidechars:
             ed.historyAdd()
           ed.historyFlush()
-          if not hidechars:
-            ed.write "\x1b[?2004l"
+          ed.write "\x1b[?2004l"
           ed.submitted = true
           return ed.line.text
         if nxt in PRINTABLE:

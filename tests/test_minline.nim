@@ -189,7 +189,8 @@ const
   # modifyOtherKeys Shift+Enter: ESC [ 27 ; 2 ; 13 ~.
   KModkSE* = @[27, 91, 50, 55, 59, 50, 59, 49, 51, 126]
 
-proc run(d: Driver, ed: var LineEditor, prompt = "> "): string =
+proc run(d: Driver, ed: var LineEditor, prompt = "> ",
+         hidechars = false): string =
   let getCh: GetChProc = proc(): int =
     if d.pos >= d.keystrokes.len: return -1
     let k = d.keystrokes[d.pos]
@@ -199,7 +200,8 @@ proc run(d: Driver, ed: var LineEditor, prompt = "> "): string =
     d.output.add s
     d.grid.feed s
   let widthProc: WidthProc = proc(): int = d.width
-  ed.readLineWith(prompt, getCh, write, getWidth = widthProc)
+  ed.readLineWith(prompt, getCh, write, hidechars = hidechars,
+                  getWidth = widthProc)
 
 # ---------------- Atomic-redraw invariant ----------------
 
@@ -576,3 +578,35 @@ suite "minline editor: bracketed paste":
     d.push KEnter
     check d.run(ed, prompt = "> ") == "line1\nline2"
     check ed.echoRows == 2
+
+  test "hidechars: bracketed paste captures key, screen shows only `*`s":
+    # Regression for the Ghostty-on-macOS auth-failure report. Pasting an
+    # api key in hidden mode must:
+    #   1. Land the full key in `ed.line.text` (no early submit on
+    #      embedded CR/LF, no silent drops of high UTF-8 bytes from a
+    #      stray NBSP/BOM in the clipboard).
+    #   2. Render only `*` masks on screen, never the cleartext key.
+    var ed = initEditor()
+    let d = newDriver()
+    # ESC [ 200 ~  "sk-abc<NBSP>123\n"  ESC [ 201 ~  Enter
+    d.push @[27, 91, 50, 48, 48, 126]
+    d.pushString "sk-abc"
+    d.push @[0xC2, 0xA0]  # UTF-8 NBSP, must be silently dropped
+    d.pushString "123\n"  # trailing newline inside paste, must NOT submit
+    d.push @[27, 91, 50, 48, 49, 126]
+    d.push KEnter
+    let got = d.run(ed, prompt = "> ", hidechars = true)
+    check got == "sk-abc123"
+    # Screen must not contain the key plaintext; just `*`s after the prompt.
+    let row0 = rowText(d.grid, 0)
+    check "sk-abc" notin row0
+    check "123" notin row0
+    check row0.startsWith("> *********")  # 9 stars: sk-abc + 123
+
+  test "hidechars: per-byte typed key still works (no bracketed paste)":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "secret42"
+    d.push KEnter
+    check d.run(ed, prompt = "> ", hidechars = true) == "secret42"
+    check rowText(d.grid, 0).startsWith("> ********")
