@@ -4,9 +4,10 @@ import types, util
 const Version* = staticRead("../../threecode.nimble").splitLines().filterIt(it.startsWith("version")).
     mapIt(it.split("=")[1].strip().strip(chars = {'"'}))[0]
 
-const KnownGoodCombos*: array[11, (string, string, string, string, string)] = [
+const KnownGoodCombos*: array[12, (string, string, string, string, string)] = [
     ("cerebras",  "zai-glm-4.7",                                    "glm",      "4",   "7"),
     ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm",      "5",   "1"),
+    ("nvidia",    "z-ai/glm4.7",                                     "glm",      "4",   "7"),
     ("cerebras",  "qwen-3-235b-a22b-instruct-2507",                  "qwen",     "3",   "235b"),
     ("deepinfra", "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",       "qwen",     "3",   "480b"),
     ("nvidia",    "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b"),
@@ -726,6 +727,7 @@ input:
 known good:
   cerebras.zai-glm-4.7
   fireworks.glm-5p1
+  nvidia.z-ai/glm4.7
   cerebras.qwen-3-235b-a22b-instruct-2507
   deepinfra.Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo
   nvidia.openai/gpt-oss-120b
