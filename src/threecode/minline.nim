@@ -764,25 +764,33 @@ proc resetForRead(ed: var LineEditor, prompt: string, hidechars: bool) =
     let w = ed.getWidth()
     if w > 0: ed.width = w
 
-proc handleEscape(ed: var LineEditor): bool =
+proc handleEscape*(ed: var LineEditor, c1: int): bool =
   ## Process a single escape sequence starting just after the leading
-  ## ``ESC`` byte. Returns ``true`` if the sequence requested a submit
+  ## prefix byte ``c1`` (POSIX: ESC = 27; Windows console: 0 or 224 for
+  ## extended keys). Returns ``true`` if the sequence requested a submit
   ## (Shift+Enter / Alt+Enter — these now insert a real newline rather
   ## than backslash-continuation).
   let c2 = ed.getCh()
   if c2 < 0: return false
+  # Two-byte sequences. On Windows arrows / nav keys arrive as ``[224, X]``
+  # and KEYSEQS holds the same shape; on POSIX KEYSEQS values are 3+ bytes
+  # so this two-byte check is always a no-op there.
+  var s = @[c1.Key, c2.Key]
+  if s == KEYSEQS["left"]:   ed.back();             return false
+  if s == KEYSEQS["right"]:  ed.forward();          return false
+  if s == KEYSEQS["up"]:     KEYMAP["up"](ed);      return false
+  if s == KEYSEQS["down"]:   KEYMAP["down"](ed);    return false
+  if s == KEYSEQS["home"]:   ed.goToStart();        return false
+  if s == KEYSEQS["end"]:    ed.goToEnd();          return false
+  if s == KEYSEQS["delete"]: ed.deleteNext();       return false
+  if s == KEYSEQS["insert"]: KEYMAP["insert"](ed);  return false
+  # Everything below is POSIX-specific (ESC + CR for Alt/Shift+Enter,
+  # CSI ``ESC [`` sequences, modifyOtherKeys, bracketed paste, kitty
+  # extensions). Windows' 0/224 prefixes have no further structure.
+  if c1 != 27: return false
   if c2 == 13:
     ed.insertNewline()
     return false
-  var s = @[27.Key, c2.Key]
-  if s == KEYSEQS["left"]:   ed.back();  return false
-  if s == KEYSEQS["right"]:  ed.forward(); return false
-  if s == KEYSEQS["up"]:     KEYMAP["up"](ed);   return false
-  if s == KEYSEQS["down"]:   KEYMAP["down"](ed); return false
-  if s == KEYSEQS["home"]:   ed.goToStart(); return false
-  if s == KEYSEQS["end"]:    ed.goToEnd();   return false
-  if s == KEYSEQS["delete"]: ed.deleteNext(); return false
-  if s == KEYSEQS["insert"]: KEYMAP["insert"](ed); return false
   if c2 == 91:  # CSI
     let c3 = ed.getCh()
     if c3 < 0: return false
@@ -928,7 +936,7 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
           ed.printChar(nxt)
       continue
     if c1 in ESCAPES:
-      discard handleEscape(ed)
+      discard handleEscape(ed, c1)
       continue
     if c1 in CTRL and KEYMAP.hasKey(KEYNAMES[c1]):
       KEYMAP[KEYNAMES[c1]](ed)
