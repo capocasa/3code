@@ -217,7 +217,8 @@ proc receiptBarBytes*(label: string): string =
   "\x1b[2m  " & label & "\x1b[0m"
 
 proc submitTransitionBytes*(line: string, hadPending, hadGap: bool,
-                            receiptLabel: string, hasBar = true): string =
+                            receiptLabel: string, hasBar = true,
+                            echoRows = -1): string =
   ## Full byte sequence for the moment the user submits a prompt.
   ##
   ## Walks back from the cursor (which sits one row below the user's
@@ -251,7 +252,7 @@ proc submitTransitionBytes*(line: string, hadPending, hadGap: bool,
   ## The next `callModel`'s leading `\n` sets up the scratch /
   ## ticker-overlay row.
   let lines = line.splitLines
-  let n = lines.len
+  let n = if echoRows > 0: echoRows else: lines.len
   let walkBack =
     if not hasBar: n
     elif hadGap: n + 2
@@ -963,7 +964,7 @@ proc endTurn*() =
   stdout.write "\x1b[?25h"
   stdout.flushFile
 
-proc emitUserSubmit*(line: string) =
+proc emitUserSubmit*(line: string, echoRows = -1) =
   ## Run the user-submit transition described in `submitTransitionBytes`
   ## using the current `pendingHint`, `currentBarHasGap`, and
   ## `currentBarLabel` state. The receipt overwrites the gap (or the
@@ -971,6 +972,12 @@ proc emitUserSubmit*(line: string) =
   ## content, and parks the cursor ready for the next `callModel`'s
   ## leading `\n`. When `currentBarLabel` is empty (prompt-only
   ## startup state), the walk-back skips the (non-existent) bar row.
+  ##
+  ## ``echoRows`` should be the visual row count occupied by the
+  ## rendered input (the editor exposes this via ``LineEditor.echoRows``)
+  ## so wrap-affected logical lines are walked back over correctly. When
+  ## negative, the legacy ``splitLines(line).len`` is used (still
+  ## correct as long as no logical line wraps).
   let receiptLabel =
     if pendingHint.active:
       tokenLineLabel(pendingHint.usage, pendingHint.window, pendingHint.elapsed)
@@ -978,7 +985,7 @@ proc emitUserSubmit*(line: string) =
   let hadGap = currentBarHasGap
   let hasBar = currentBarLabel.len > 0
   stdout.write submitTransitionBytes(line, pendingHint.active, hadGap,
-                                     receiptLabel, hasBar)
+                                     receiptLabel, hasBar, echoRows)
   stdout.flushFile
   pendingHint.active = false
   currentBarLabel = ""

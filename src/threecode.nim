@@ -449,7 +449,7 @@ proc main() =
     # echo the user's input as scroll-history content. Cursor lands
     # on the row directly after the last echo line, where callModel's
     # leading `\n` will set up the new spinner-footer scratch row.
-    emitUserSubmit(line)
+    emitUserSubmit(line, editor.echoRows)
     runTurnsInteractive(prof, messages, session)
 
 when isMainModule:

@@ -632,32 +632,19 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
     stdout.write "\r\x1b[2K"
   else:
     stdout.write "\n\r\x1b[2K"
-  var line = try: editor.readLine("❯ ")
+  let line = try: editor.readLine("❯ ")
              except EOFError:
                done = true; return ""
              except minline.InputCancelled:
                return ""
   navigatedUp = false
-  # Trailing unescaped `\` continues to the next line, joined with `\n`.
-  # Even count = literal trailing backslashes, no continuation.
-  while true:
-    var trailing = 0
-    var i = line.len - 1
-    while i >= 0 and line[i] == '\\':
-      inc trailing
-      dec i
-    if trailing mod 2 == 0: break
-    let cont = try: editor.readLine("  ")
-               except EOFError:
-                 done = true; break
-               except minline.InputCancelled:
-                 return ""
-    line = line[0 ..< line.len - 1] & "\n" & cont
   if line.strip == "":
     # Empty input: walk back to the prompt-row floor so the chrome
     # stays glued to the cursor's bottom (otherwise each empty Enter
     # would push the prompt one row lower than the bar).
-    let n = max(1, line.splitLines.len)
+    # The editor reports the visual rows the rendered input occupied;
+    # use that so wrap-affected lines walk back the right amount.
+    let n = max(1, editor.echoRows)
     if currentBarLabel.len == 0:
       stdout.write "\x1b[" & $n & "A\r\x1b[J"
       paintPromptOnly(BrightPromptColor)

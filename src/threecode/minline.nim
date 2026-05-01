@@ -1,36 +1,33 @@
-## This module provides a simple, limited but fully-functional line editing library written in pure Nim.
+## Multiline line editor.
 ##
-## To use this library, you must first initialize a **LineEditor** object using the **initEditor** method,
-## and then use the **readLine** method to capture standard input instead of **stdout.readLine**:
+## The editor stores the full input as a single ``string`` whose bytes may
+## include ``'\n'`` to mark logical line breaks. ``position`` is a byte
+## offset into that string. Cursor motion is implemented in two layers:
 ##
-## .. code-block:: nim
-##    var ed = initEditor(historyFile = "history.txt")
-##    while true:
-##      let str = ed.readLine("-> ")
-##      echo "You typed: ", str
+## * **Logical** — left/right step over runes (`'\n'` counts as one cell);
+##   home/end snap to the current logical line; word-left/right cross
+##   newlines.
+## * **Visual** — up/down move by one *visual* row (which may be the
+##   wrapped tail of a long logical line, or a previous logical line);
+##   the column is preserved as best-effort.
 ##
-## Optionally, you can also configure custom key bindings for keys and key sequences:
+## After every keystroke the entire buffer is repainted in place. The
+## render walks the cursor back to the row where the prompt was first
+## drawn (we track the cursor's row offset from that anchor in
+## ``renderRow``), erases to end of screen, prints the prompt, the text
+## (wrapping at terminal width with the continuation prompt prefixed to
+## each logical line), and finally walks the cursor to the visual
+## position computed from the current ``position``.
 ##
-## .. code-block:: nim
-##    KEYMAP["ctrl+k"] = proc(ed: var LineEditor) =
-##      ed.clearLine()
-##
-## Additionally, you can also configure a **completionCallback** proc to trigger auto-completion by pressing TAB:
-##
-## .. code-block:: nim
-##    ed.completionCallback = proc(ed: LineEditor): seq[string] =
-##      return @["copy", "list", "delete", "move", "remove"]
-##
-## **Note** When compared to the readline or linenoise libraries, this module has the following limitations:
-##
-## * It is only possible to edit one line of text at a time. When using the **readLine** method, it will not be possible to physically go to the next line (this simplifies things a bit...).
-## * No UTF8 support, only ASCII characters are supported.
-## * No support for colorized output.
-## * Only limited support for Emacs keybindings, no support for Vi mode and Vi keybindings.
+## All terminal IO goes through the ``write``/``getCh`` procs passed to
+## ``readLineWith`` — the public ``readLine`` wires them to ``stdout`` /
+## ``getchr``. Tests drive the editor through the ``…With`` form against
+## an in-memory grid, no PTY required.
 
 import
   critbits,
   terminal,
+  unicode,
   deques,
   sequtils,
   strutils,
@@ -39,6 +36,23 @@ import
 
 when defined(posix):
   import posix
+
+# SIGWINCH: set on resize. Read by the readLine driver between keystrokes
+# so the editor can pick up the new terminal width and redraw cleanly.
+# The handler stays lightweight (just a flag) — no allocation, no
+# stdio writes — to play nicely with whatever signal mask is in effect.
+var resizePending* {.threadvar.}: bool
+
+when defined(posix):
+  var SIGWINCH {.importc, header: "<signal.h>".}: cint
+  proc winchHandler(sig: cint) {.noconv.} =
+    resizePending = true
+  if isatty(stdin):
+    var sa: Sigaction
+    discard sigemptyset(sa.sa_mask)
+    sa.sa_flags = SA_RESTART
+    sa.sa_handler = winchHandler
+    discard sigaction(SIGWINCH, sa, nil)
 
 if isatty(stdin):
   addExitProc(resetAttributes)
@@ -68,467 +82,561 @@ else:
 # Types
 
 type
-  Key* = int ## The ASCII code of a keyboard key.
-  KeySeq* = seq[Key] ## A sequence of one or more Keys.
-  KeyCallback* = proc(ed: var LineEditor) {.closure.} ## A proc that can be bound to a key or a key sequence to access line editing functionalities.
-  LineError* = ref Exception ## A generic minline error.
-  LineEditorError* = ref Exception ## An error occured in the LineEditor.
-  LineEditorMode* = enum ## The *mode* a LineEditor operates in (insert or replace).
+  Key* = int
+  KeySeq* = seq[Key]
+  KeyCallback* = proc(ed: var LineEditor) {.closure.}
+  LineError* = ref Exception
+  LineEditorError* = ref Exception
+  LineEditorMode* = enum
     mdInsert
-    mdReplace 
-  Line* = object ## An object representing a line of text.
-    text: string 
-    position: int 
-  LineHistory* = object ## An object representing the history of all commands typed in a LineEditor.
-    file: string 
-    tainted: bool 
-    position: int 
-    queue: Deque[string] 
-    max: int 
-  LineEditor* = object ## An object representing a line editor, used to process text typed in the terminal.
+    mdReplace
+  Line* = object
+    text*: string
+    position*: int
+  LineHistory* = object
+    file*: string
+    tainted*: bool
+    position*: int
+    queue*: Deque[string]
+    max*: int
+  WriteProc* = proc(s: string) {.closure.}
+  GetChProc* = proc(): int {.closure.}
+  WidthProc* = proc(): int {.closure.}
+  LineEditor* = object
     completionCallback*: proc(ed: LineEditor): seq[string] {.closure.}
-    history: LineHistory
-    line: Line
-    mode: LineEditorMode
-    hint: string
-    prompt: string
-  InputCancelled* = object of CatchableError ## Raised by the default ctrl+c handler to abort the current input line without quitting.
+    history*: LineHistory
+    line*: Line
+    mode*: LineEditorMode
+    prompt*: string
+    contPrompt*: string
+    promptW*: int
+    contPromptW*: int
+    width*: int
+    renderRow*: int
+    write*: WriteProc
+    getCh*: GetChProc
+    getWidth*: WidthProc
+    echoRows*: int
+    submitted*: bool
+    canceled*: bool
+    eof*: bool
+  InputCancelled* = object of CatchableError
 
-# Internal Methods
+const
+  CTRL*        = {0 .. 31}
+  DIGIT*       = {48 .. 57}
+  LETTER*      = {65 .. 122}
+  UPPERLETTER* = {65 .. 90}
+  LOWERLETTER* = {97 .. 122}
+  PRINTABLE*   = {32 .. 126}
+when defined(windows):
+  const
+    ESCAPES* = {0, 22, 224}
+else:
+  const
+    ESCAPES* = {27}
 
-proc empty(line: Line): bool =
-  return line.text.len <= 0
+# ---------- Pure helpers (testable without IO) ----------
 
-proc full(line: Line): bool =
-  return line.position >= line.text.len
+proc visualCols*(s: string): int =
+  ## Number of cells `s` would occupy when printed. Counts each rune as
+  ## one cell. Skips ANSI CSI sequences `ESC [ ... <final>` so escape
+  ## codes embedded in a colored prompt don't inflate the count. Wide
+  ## CJK and combining marks are not handled — fine for our prompts.
+  var i = 0
+  while i < s.len:
+    let b = s[i]
+    if b == '\x1b' and i + 1 < s.len and s[i + 1] == '[':
+      var j = i + 2
+      while j < s.len and (s[j] in {'0'..'9'} or s[j] == ';' or s[j] == '?'):
+        inc j
+      if j < s.len: inc j  # consume final byte
+      i = j
+    else:
+      let rl = max(1, runeLenAt(s, i))
+      inc result
+      i += rl
 
-proc first(line: Line): int =
-  if line.empty:
-    raise LineError(msg: "Line is empty!")
-  return 0
+proc runeStartBefore(text: string, p: int): int =
+  ## Returns the byte offset of the rune that ends at `p` (i.e. position
+  ## one rune to the left of `p`).
+  if p <= 0: return 0
+  var q = p - 1
+  while q > 0 and (byte(text[q]) and 0xC0'u8) == 0x80'u8:
+    dec q
+  q
 
-proc last(line: Line): int =
-  if line.empty:
-    raise LineError(msg: "Line is empty!")
-  return line.text.len-1
+proc runeLenSafe(text: string, i: int): int =
+  if i >= text.len: return 0
+  let n = runeLenAt(text, i)
+  if n <= 0: 1 else: n
 
-proc fromStart(line: Line): string =
-  if line.empty:
-    return ""
-  return line.text[line.first..line.position-1]
+proc cursorVisual*(text: string, position, promptW, contW, width: int): (int, int) =
+  ## (visualRow, visualCol) of the cursor when ``text[0 ..< position]``
+  ## has been rendered into a ``width``-wide grid with ``promptW`` cells
+  ## reserved before the first logical line and ``contW`` cells reserved
+  ## before each subsequent logical line.
+  if width <= 0: return (0, 0)
+  var row = 0
+  var col = promptW
+  var i = 0
+  while i < position and i < text.len:
+    let c = text[i]
+    if c == '\n':
+      inc row
+      col = contW
+      inc i
+    else:
+      if col >= width:
+        inc row
+        col = 0
+      inc col
+      i += runeLenSafe(text, i)
+  (row, col)
 
-proc toEnd(line: Line): string =
-  if line.empty:
-    return ""
-  return line.text[line.position..line.last]
+proc totalRows*(text: string, promptW, contW, width: int): int =
+  ## Number of visual rows the rendered buffer occupies, always ``>= 1``.
+  if width <= 0: return 1
+  var row = 0
+  var col = promptW
+  var i = 0
+  while i < text.len:
+    let c = text[i]
+    if c == '\n':
+      inc row
+      col = contW
+      inc i
+    else:
+      if col >= width:
+        inc row
+        col = 0
+      inc col
+      i += runeLenSafe(text, i)
+  row + 1
 
-proc back*(ed: var LineEditor, n=1) =
-  ## Move the cursor back by **n** characters on the current line (unless the beginning of the line is reached).
-  if ed.line.position <= 0:
-    return
-  stdout.cursorBackward(n)
-  ed.line.position = ed.line.position - n
+proc renderBuffer*(text, prompt, cont: string, width: int): string =
+  ## Bytes that paint the buffer. Visual rows are joined with ``"\r\n"``
+  ## and no trailing newline is emitted. The prompt is written verbatim
+  ## (so callers can include color escapes); its display width is taken
+  ## via ``visualCols``. Same for the continuation prompt.
+  let promptW = visualCols(prompt)
+  let contW = visualCols(cont)
+  if width <= 0: return prompt & text
+  var col = promptW
+  result = prompt
+  var i = 0
+  while i < text.len:
+    let c = text[i]
+    if c == '\n':
+      result.add "\r\n"
+      result.add cont
+      col = contW
+      inc i
+    else:
+      let rl = runeLenSafe(text, i)
+      if col >= width:
+        result.add "\r\n"
+        col = 0
+      result.add text[i ..< i + rl]
+      inc col
+      i += rl
 
-proc forward*(ed: var LineEditor, n=1) =
-  ## Move the cursor forward by **n** characters on the current line (unless the beginning of the line is reached).
-  if ed.line.full:
-    return
-  stdout.cursorForward(n)
-  ed.line.position += n
+# History
 
-proc wordLeft*(ed: var LineEditor) =
-  ## Move the cursor to the start of the current word (or the previous word
-  ## if already at a word boundary). Whitespace is the word separator.
-  var pos = ed.line.position
-  while pos > 0 and ed.line.text[pos-1] == ' ':
-    dec pos
-  while pos > 0 and ed.line.text[pos-1] != ' ':
-    dec pos
-  let delta = ed.line.position - pos
-  if delta > 0:
-    stdout.cursorBackward(delta)
-    ed.line.position = pos
-
-proc wordRight*(ed: var LineEditor) =
-  ## Move the cursor forward to the start of the next word.
-  var pos = ed.line.position
-  let n = ed.line.text.len
-  while pos < n and ed.line.text[pos] != ' ':
-    inc pos
-  while pos < n and ed.line.text[pos] == ' ':
-    inc pos
-  let delta = pos - ed.line.position
-  if delta > 0:
-    stdout.cursorForward(delta)
-    ed.line.position = pos
-
-proc `[]`( q: Deque[string], pos: int): string =
+proc `[]`(q: Deque[string], pos: int): string =
   var c = 0
   for e in q.items:
     if c == pos:
       result = e
       break
-    c.inc
+    inc c
 
-proc `[]=`( q: var Deque[string], pos: int, s: string) =
+proc `[]=`(q: var Deque[string], pos: int, s: string) =
   var c = 0
   for e in q.mitems:
     if c == pos:
       e = s
       break
-    c.inc
+    inc c
 
-proc add(h: var LineHistory, s: string, force=false) =
-  if s == "" and not force:
-    return
+proc encodeHistEntry(s: string): string =
+  ## Encode an entry for the on-disk history file: ``\`` -> ``\\``,
+  ## newline -> ``\n``. Keeps each entry on a single physical line.
+  result = newStringOfCap(s.len + 8)
+  for ch in s:
+    case ch
+    of '\\': result.add "\\\\"
+    of '\n': result.add "\\n"
+    of '\r': discard
+    else: result.add ch
+
+proc decodeHistEntry(s: string): string =
+  result = newStringOfCap(s.len)
+  var i = 0
+  while i < s.len:
+    if s[i] == '\\' and i + 1 < s.len:
+      case s[i + 1]
+      of '\\': result.add '\\'; i += 2
+      of 'n': result.add '\n'; i += 2
+      else: result.add s[i]; inc i
+    else:
+      result.add s[i]; inc i
+
+proc add(h: var LineHistory, s: string, force = false) =
+  if s == "" and not force: return
   if h.queue.len >= h.max:
     discard h.queue.popFirst
   if h.tainted:
-    h.queue[h.queue.len-1] = s
+    h.queue[h.queue.len - 1] = s
   else:
     h.queue.addLast s
 
 proc previous(h: var LineHistory): string =
-  if h.queue.len == 0 or h.position <= 0:
-    return ""
-  h.position.dec
+  if h.queue.len == 0 or h.position <= 0: return ""
+  dec h.position
   result = h.queue[h.position]
 
 proc next(h: var LineHistory): string =
-  if h.queue.len == 0 or h.position >= h.queue.len-1:
-    return ""
-  h.position.inc
+  if h.queue.len == 0 or h.position >= h.queue.len - 1: return ""
+  inc h.position
   result = h.queue[h.position]
 
-# Public API
-
-proc deletePrevious*(ed: var LineEditor) =
-  ## Move the cursor to the left by one character (unless at the beginning of the line) and delete the existing character, if any.
-  if ed.line.position <= 0:
-    return
-  if not ed.line.empty:
-    if ed.line.full:
-      stdout.cursorBackward
-      putchr(32)
-      stdout.cursorBackward
-      ed.line.position.dec
-      ed.line.text = ed.line.text[0..ed.line.last-1]
-    else:
-      let rest = ed.line.toEnd & " "
-      ed.back
-      for i in rest:
-        putchr i.ord.cint
-      ed.line.text = ed.line.fromStart & ed.line.text[ed.line.position+1..ed.line.last]
-      stdout.cursorBackward(rest.len)
-  
-proc deleteNext*(ed: var LineEditor) =
-  ## Move the cursor to the right by one character (unless at the end of the line) and delete the existing character, if any.
-  if not ed.line.empty:
-    if not ed.line.full:
-      let rest = ed.line.toEnd[1..^1] & " "
-      for c in rest:
-        putchr c.ord.cint
-      stdout.cursorBackward(rest.len)
-      ed.line.text = ed.line.fromStart & ed.line.toEnd[1..^1]
-
-proc printChar*(ed: var LineEditor, c: int) =  
-  ## Prints the character **c** to the current line. If in the middle of the line, the following characters are shifted right or replaced depending on the editor mode.
-  if ed.line.full:
-    putchr(c.cint)
-    ed.line.text &= c.chr
-    ed.line.position += 1
-  else:
-    if ed.mode == mdInsert:
-      putchr(c.cint)
-      let rest = ed.line.toEnd
-      ed.line.text.insert($c.chr, ed.line.position)
-      ed.line.position += 1
-      for j in rest:
-        putchr(j.ord.cint)
-        ed.line.position += 1
-      ed.back(rest.len)
-    else: 
-      putchr(c.cint)
-      ed.line.text[ed.line.position] = c.chr
-      ed.line.position += 1
-
-proc changeLine*(ed: var LineEditor, s: string) =
-  ## Replaces the contents of the current line with the string **s**.
-  let text = ed.line.text
-  let diff = text.len - s.len
-  let position = ed.line.position
-  if position > 0:
-    stdout.cursorBackward(position)
-  for c in s:
-    putchr(c.ord.cint)
-  ed.line.position = s.len
-  ed.line.text = s
-  if diff > 0:
-    for i in 0.countup(diff-1):
-      putchr(32)
-    stdout.cursorBackward(diff)
-
-proc addToLineAtPosition(ed: var LineEditor, s: string) =
-  for c in s:
-    ed.printChar(c.ord.cint)
-
-proc clearLine*(ed: var LineEditor) =
-  ## Clears the contents of the current line and reset the cursor position to the beginning of the line.
-  stdout.cursorBackward(ed.line.position+1)
-  for i in ed.line.text:
-    putchr(32)
-  putchr(32)
-  putchr(32)
-  stdout.cursorBackward(ed.line.text.len+1)
-  ed.line.position = 0
-  ed.line.text = ""
-
-proc goToStart*(ed: var LineEditor) =
-  ## Move the cursor to the beginning of the line.
-  if ed.line.position <= 0:
-    return
-  try:
-    stdout.cursorBackward(ed.line.position)
-    ed.line.position = 0
-  except:
-    discard
-
-proc goToEnd*(ed: var LineEditor) =
-  ## Move the cursor to the end of the line.
-  if ed.line.full:
-    return
-  let diff = ed.line.text.len - ed.line.position
-  stdout.cursorForward(diff)
-  ed.line.position = ed.line.text.len
-
 proc historyInit*(size = 256, file: string = ""): LineHistory =
-  ## Creates a new **LineHistory** object with the specified **size** and **file**.
   result.file = file
   result.queue = initDeque[string](size)
   result.position = 0
   result.tainted = false
   result.max = size
-  if file == "":
-    return
+  if file == "": return
   if result.file.fileExists:
     let lines = result.file.readFile.split("\n")
     for line in lines:
       if line != "":
-        result.add line
-    result.position = lines.len
+        result.add decodeHistEntry(line)
+    result.position = result.queue.len
   else:
     result.file.writeFile("")
 
 proc historyAdd*(ed: var LineEditor, force = false) =
-  ## Adds the current editor line to the history. If **force** is set to **true**, the line will be added even if it's blank.
   ed.history.add ed.line.text, force
-  if ed.history.file == "":
-    return
-  ed.history.file.writeFile(toSeq(ed.history.queue.items).join("\n"))
-
-proc historyPrevious*(ed: var LineEditor) =
-  ## Replaces the contents of the current line with the previous line stored in the history (if any).
-  ## The current line will be added to the history and the hisory will be marked as *tainted*.
-  let s = ed.history.previous
-  if s == "":
-    return
-  let pos = ed.history.position
-  var current: int
-  if ed.history.tainted:
-    current = ed.history.queue.len-2
-  else:
-    current = ed.history.queue.len-1
-  if pos == current and ed.history.queue[current] != ed.line.text:
-    ed.historyAdd(force = true)
-    ed.history.tainted = true
-  if s != "":
-    ed.changeLine(s)
-  
-proc historyNext*(ed: var LineEditor) =
-  ## Replaces the contents of the current line with the following line stored in the history (if any).
-  let s = ed.history.next
-  if s == "":
-    return
-  ed.changeLine(s)
+  if ed.history.file == "": return
+  let encoded = toSeq(ed.history.queue.items).mapIt(encodeHistEntry(it)).join("\n")
+  ed.history.file.writeFile(encoded)
 
 proc historyFlush*(ed: var LineEditor) =
-  ## If there is at least one entry in the history, it sets the position of the cursor to the last element and sets the **tainted** flag to **false**.
   if ed.history.queue.len > 0:
     ed.history.position = ed.history.queue.len
     ed.history.tainted = false
 
-proc completeLine*(ed: var LineEditor): int =
-  ## If a **completionCallback** proc has been specified for the current editor, attempts to auto-complete the current line by running **completionProc**
-  ## to return a list of possible values. It is possible to cycle through the matches by pressing the same key that triggered this proc.
-  ##
-  ## The matches provided will be filtered based on the contents of the line when this proc was first triggered. If a match starts with the contents of the line, it
-  ## will be displayed.
-  ##
-  ## The following is a real-world example of a **completionCallback** used to complete the last word on the line with valid file paths.
-  ##
-  ## .. code-block:: nim
-  ##   import sequtils, strutils, ospath
-  ##
-  ##   ed.completionCallback = proc(ed: LineEditor): seq[string] =
-  ##     var words = ed.lineText.split(" ")
-  ##     var word: string
-  ##     if words.len == 0:
-  ##       word = ed.lineText
-  ##     else:
-  ##       word = words[words.len-1]
-  ##     var f = word[1..^1]
-  ##     if f == "":
-  ##       f = getCurrentDir().replace("\\", "/")  
-  ##       return toSeq(walkDir(f, true))
-  ##         .mapIt("\"$1" % it.path.replace("\\", "/"))
-  ##     elif f.dirExists:
-  ##       f = f.replace("\\", "/")
-  ##       if f[f.len-1] != '/':
-  ##         f = f & "/"
-  ##       return toSeq(walkDir(f, true))
-  ##         .mapIt("\"$1$2" % [f, it.path.replace("\\", "/")])
-  ##     else:
-  ##       var dir: string
-  ##       if f.contains("/") or dir.contains("\\"):
-  ##         dir = f.parentDir
-  ##         let file = f.extractFileName
-  ##         return toSeq(walkDir(dir, true))
-  ##           .filterIt(it.path.toLowerAscii.startsWith(file.toLowerAscii))
-  ##           .mapIt("\"$1/$2" % [dir, it.path.replace("\\", "/")])
-  ##       else:
-  ##         dir = getCurrentDir()
-  ##         return toSeq(walkDir(dir, true))
-  ##           .filterIt(it.path.toLowerAscii.startsWith(f.toLowerAscii))
-  ##           .mapIt("\"$1" % [it.path.replace("\\", "/")])
-  ##
-  if ed.completionCallback.isNil:
-    return
-  let compl = ed.completionCallback(ed)
-  let position = ed.line.position
-  let words = ed.line.fromStart.split(" ")
-  var word: string
-  if words.len > 0:
-    word = words[words.len-1]
-  else:
-    word = ed.line.fromStart
-  var matches = compl.filterIt(it.toLowerAscii.startsWith(word.toLowerAscii))
-  if ed.line.fromStart.len > 0 and matches.len > 0:
-    for i in 0..word.len-1:
-      ed.deletePrevious
-  var n = 0
-  if matches.len > 0:
-    ed.addToLineAtPosition(matches[0])
-  else:
-    return -1
-  var ch = getchr()
-  while ch == 9:
-    n.inc
-    if n < matches.len:
-      let diff = ed.line.position - position
-      for i in 0.countup(diff-1 + word.len):
-        ed.deletePrevious
-      ed.addToLineAtPosition(matches[n])
-      ch = getchr()
+# ---------- Render ----------
+
+proc emitMoveUp(ed: var LineEditor, n: int) =
+  if n <= 0: return
+  ed.write "\x1b[" & $n & "A"
+
+proc emitMoveDown(ed: var LineEditor, n: int) =
+  if n <= 0: return
+  ed.write "\x1b[" & $n & "B"
+
+proc emitColumn(ed: var LineEditor, col: int) =
+  ## Set cursor to absolute column ``col`` (0-based) on the current row.
+  ed.write "\r"
+  if col > 0:
+    ed.write "\x1b[" & $col & "C"
+
+proc fullRedraw*(ed: var LineEditor) =
+  ## Wipe the previously rendered area, repaint prompt + buffer, place
+  ## the cursor at the visual position derived from ``ed.line.position``.
+  ## Updates ``ed.renderRow`` to match.
+  if ed.getWidth != nil:
+    let w = ed.getWidth()
+    if w > 0: ed.width = w
+  let width = max(2, ed.width)
+  # Walk back to the anchor row, col 0, then erase.
+  if ed.renderRow > 0:
+    ed.write "\x1b[" & $ed.renderRow & "A"
+  ed.write "\r\x1b[J"
+  ed.write renderBuffer(ed.line.text, ed.prompt, ed.contPrompt, width)
+  let pw = if ed.promptW > 0: ed.promptW else: visualCols(ed.prompt)
+  let cw = if ed.contPromptW > 0: ed.contPromptW else: visualCols(ed.contPrompt)
+  ed.promptW = pw
+  ed.contPromptW = cw
+  let total = totalRows(ed.line.text, pw, cw, width)
+  let endRow = total - 1
+  let (targetRow, targetCol) = cursorVisual(ed.line.text, ed.line.position,
+                                            pw, cw, width)
+  if endRow > targetRow:
+    emitMoveUp(ed, endRow - targetRow)
+  emitColumn(ed, targetCol)
+  ed.renderRow = targetRow
+
+proc parkAtEnd(ed: var LineEditor) =
+  ## After submit, leave the cursor at column 0 of the row directly
+  ## below the rendered input — the contract every external transition
+  ## (``submitTransitionBytes`` etc.) was already written against.
+  let width = max(2, ed.width)
+  let total = totalRows(ed.line.text, ed.promptW, ed.contPromptW, width)
+  let endRow = total - 1
+  if ed.renderRow < endRow:
+    emitMoveDown(ed, endRow - ed.renderRow)
+  ed.write "\r\n"
+  ed.echoRows = total
+  ed.renderRow = 0
+
+# ---------- Edit ops (multiline-aware) ----------
+
+proc back*(ed: var LineEditor, n = 1) =
+  ## Step the cursor left by ``n`` runes / newlines.
+  for _ in 0 ..< n:
+    if ed.line.position <= 0: break
+    if ed.line.text[ed.line.position - 1] == '\n':
+      dec ed.line.position
     else:
-      n = -1
-  return ch
+      ed.line.position = runeStartBefore(ed.line.text, ed.line.position)
+  fullRedraw(ed)
 
-proc lineText*(ed: LineEditor): string =
-  ## Returns the contents of the current line.
-  return ed.line.text
-  
-proc initEditor*(mode = mdInsert, historySize = 256, historyFile: string = ""): LineEditor =
-  ## Creates a **LineEditor** object.
-  result.mode = mode
-  result.history = historyInit(historySize, historyFile)
+proc forward*(ed: var LineEditor, n = 1) =
+  for _ in 0 ..< n:
+    if ed.line.position >= ed.line.text.len: break
+    if ed.line.text[ed.line.position] == '\n':
+      inc ed.line.position
+    else:
+      ed.line.position += runeLenSafe(ed.line.text, ed.line.position)
+  fullRedraw(ed)
 
-# Character sets
-const
-  CTRL*        = {0 .. 31}    ## Control characters.
-  DIGIT*       = {48 .. 57}   ## Digits.
-  LETTER*      = {65 .. 122}  ## Letters.
-  UPPERLETTER* = {65 .. 90}   ## Uppercase letters.
-  LOWERLETTER* = {97 .. 122}  ## Lowercase letters.
-  PRINTABLE*   = {32 .. 126}  ## Printable characters.
-when defined(windows):
-  const
-    ESCAPES* = {0, 22, 224}   ## Escape characters.
-else:
-  const
-    ESCAPES* = {27}           ## Escape characters.
+proc deletePrevious*(ed: var LineEditor) =
+  if ed.line.position <= 0: return
+  let start =
+    if ed.line.text[ed.line.position - 1] == '\n': ed.line.position - 1
+    else: runeStartBefore(ed.line.text, ed.line.position)
+  ed.line.text = ed.line.text[0 ..< start] &
+                 ed.line.text[ed.line.position .. ^1]
+  ed.line.position = start
+  fullRedraw(ed)
+
+proc deleteNext*(ed: var LineEditor) =
+  if ed.line.position >= ed.line.text.len: return
+  let stop =
+    if ed.line.text[ed.line.position] == '\n': ed.line.position + 1
+    else: ed.line.position + runeLenSafe(ed.line.text, ed.line.position)
+  ed.line.text = ed.line.text[0 ..< ed.line.position] &
+                 ed.line.text[stop .. ^1]
+  fullRedraw(ed)
+
+proc insertText*(ed: var LineEditor, s: string) =
+  ## Insert ``s`` at the current position. Replace mode overwrites runes
+  ## within the current logical line; newlines in ``s`` always insert.
+  if s.len == 0: return
+  if ed.mode == mdInsert or s.contains('\n'):
+    ed.line.text = ed.line.text[0 ..< ed.line.position] & s &
+                   ed.line.text[ed.line.position .. ^1]
+    ed.line.position += s.len
+  else:
+    var p = ed.line.position
+    var i = 0
+    while i < s.len:
+      let rl = runeLenSafe(s, i)
+      if p < ed.line.text.len and ed.line.text[p] != '\n':
+        let oldRl = runeLenSafe(ed.line.text, p)
+        ed.line.text = ed.line.text[0 ..< p] & s[i ..< i + rl] &
+                       ed.line.text[p + oldRl .. ^1]
+      else:
+        ed.line.text = ed.line.text[0 ..< p] & s[i ..< i + rl] &
+                       ed.line.text[p .. ^1]
+      p += rl
+      i += rl
+    ed.line.position = p
+  fullRedraw(ed)
+
+proc printChar*(ed: var LineEditor, c: int) =
+  ed.insertText($c.chr)
+
+proc insertNewline*(ed: var LineEditor) =
+  ed.insertText("\n")
+
+proc changeLine*(ed: var LineEditor, s: string) =
+  ## Replace the entire buffer.
+  ed.line.text = s
+  ed.line.position = s.len
+  fullRedraw(ed)
+
+proc clearLine*(ed: var LineEditor) =
+  ## Empty the buffer.
+  ed.changeLine("")
+
+proc goToStart*(ed: var LineEditor) =
+  ## Move to the start of the current logical line.
+  var p = ed.line.position
+  while p > 0 and ed.line.text[p - 1] != '\n':
+    dec p
+  ed.line.position = p
+  fullRedraw(ed)
+
+proc goToEnd*(ed: var LineEditor) =
+  ## Move to the end of the current logical line.
+  var p = ed.line.position
+  while p < ed.line.text.len and ed.line.text[p] != '\n':
+    inc p
+  ed.line.position = p
+  fullRedraw(ed)
+
+proc goToBufferStart*(ed: var LineEditor) =
+  ed.line.position = 0
+  fullRedraw(ed)
+
+proc goToBufferEnd*(ed: var LineEditor) =
+  ed.line.position = ed.line.text.len
+  fullRedraw(ed)
+
+proc isWordChar(b: char): bool {.inline.} =
+  b != ' ' and b != '\t' and b != '\n'
+
+proc wordLeft*(ed: var LineEditor) =
+  var p = ed.line.position
+  while p > 0 and not isWordChar(ed.line.text[p - 1]):
+    dec p
+  while p > 0 and isWordChar(ed.line.text[p - 1]):
+    dec p
+  ed.line.position = p
+  fullRedraw(ed)
+
+proc wordRight*(ed: var LineEditor) =
+  var p = ed.line.position
+  let n = ed.line.text.len
+  while p < n and isWordChar(ed.line.text[p]):
+    inc p
+  while p < n and not isWordChar(ed.line.text[p]):
+    inc p
+  ed.line.position = p
+  fullRedraw(ed)
+
+proc deleteWordLeft*(ed: var LineEditor) =
+  let stop = ed.line.position
+  var p = ed.line.position
+  while p > 0 and not isWordChar(ed.line.text[p - 1]):
+    dec p
+  while p > 0 and isWordChar(ed.line.text[p - 1]):
+    dec p
+  if p == stop: return
+  ed.line.text = ed.line.text[0 ..< p] & ed.line.text[stop .. ^1]
+  ed.line.position = p
+  fullRedraw(ed)
+
+proc visualUp*(ed: var LineEditor) =
+  ## Move up by one visual row, preserving the visual column as best as
+  ## possible. If already on the top visual row of the buffer, fall back
+  ## to ``historyPrevious`` (Emacs convention).
+
+  let width = max(2, ed.width)
+  let pw = ed.promptW
+  let cw = ed.contPromptW
+  let (curR, curC) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
+  if curR == 0:
+    return  # caller decides whether to invoke history
+  var bestP = ed.line.position
+  var bestDiff = high(int)
+  var i = 0
+  while i <= ed.line.text.len:
+    let (r, c) = cursorVisual(ed.line.text, i, pw, cw, width)
+    if r == curR - 1:
+      let d = abs(c - curC)
+      if d < bestDiff:
+        bestDiff = d
+        bestP = i
+    elif r >= curR:
+      break
+    if i < ed.line.text.len:
+      if ed.line.text[i] == '\n': inc i
+      else: i += runeLenSafe(ed.line.text, i)
+    else:
+      inc i
+  ed.line.position = bestP
+  fullRedraw(ed)
+
+proc visualDown*(ed: var LineEditor) =
+  let width = max(2, ed.width)
+  let pw = ed.promptW
+  let cw = ed.contPromptW
+  let (curR, curC) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
+  let total = totalRows(ed.line.text, pw, cw, width)
+  if curR >= total - 1: return
+  var bestP = ed.line.position
+  var bestDiff = high(int)
+  var seenTarget = false
+  var i = 0
+  while i <= ed.line.text.len:
+    let (r, c) = cursorVisual(ed.line.text, i, pw, cw, width)
+    if r == curR + 1:
+      seenTarget = true
+      let d = abs(c - curC)
+      if d < bestDiff:
+        bestDiff = d
+        bestP = i
+    elif r > curR + 1:
+      break
+    if i < ed.line.text.len:
+      if ed.line.text[i] == '\n': inc i
+      else: i += runeLenSafe(ed.line.text, i)
+    else:
+      inc i
+  if seenTarget:
+    ed.line.position = bestP
+    fullRedraw(ed)
+
+proc historyPrevious*(ed: var LineEditor) =
+  ## Replace the buffer with the previous history entry, if any.
+  let s = ed.history.previous
+  if s == "": return
+  let pos = ed.history.position
+  var current: int
+  if ed.history.tainted:
+    current = ed.history.queue.len - 2
+  else:
+    current = ed.history.queue.len - 1
+  if pos == current and ed.history.queue[current] != ed.line.text:
+    ed.historyAdd(force = true)
+    ed.history.tainted = true
+  ed.changeLine(s)
+
+proc historyNext*(ed: var LineEditor) =
+  let s = ed.history.next
+  if s == "": return
+  ed.changeLine(s)
+
+proc lineText*(ed: LineEditor): string = ed.line.text
 
 # Key Names
-var KEYNAMES* {.threadvar.}: array[0..31, string] ## The following strings can be used in keymaps instead of the correspinding ASCII codes:
-##
-## .. code-block:: nim
-##    KEYNAMES[1]    =    "ctrl+a"
-##    KEYNAMES[2]    =    "ctrl+b"
-##    KEYNAMES[3]    =    "ctrl+c"
-##    KEYNAMES[4]    =    "ctrl+d"
-##    KEYNAMES[5]    =    "ctrl+e"
-##    KEYNAMES[6]    =    "ctrl+f"
-##    KEYNAMES[7]    =    "ctrl+g"
-##    KEYNAMES[8]    =    "ctrl+h"
-##    KEYNAMES[9]    =    "ctrl+i"
-##    KEYNAMES[9]    =    "tab"
-##    KEYNAMES[10]   =    "ctrl+j"
-##    KEYNAMES[11]   =    "ctrl+k"
-##    KEYNAMES[12]   =    "ctrl+l"
-##    KEYNAMES[13]   =    "ctrl+m"
-##    KEYNAMES[14]   =    "ctrl+n"
-##    KEYNAMES[15]   =    "ctrl+o"
-##    KEYNAMES[16]   =    "ctrl+p"
-##    KEYNAMES[17]   =    "ctrl+q"
-##    KEYNAMES[18]   =    "ctrl+r"
-##    KEYNAMES[19]   =    "ctrl+s"
-##    KEYNAMES[20]   =    "ctrl+t"
-##    KEYNAMES[21]   =    "ctrl+u"
-##    KEYNAMES[22]   =    "ctrl+v"
-##    KEYNAMES[23]   =    "ctrl+w"
-##    KEYNAMES[24]   =    "ctrl+x"
-##    KEYNAMES[25]   =    "ctrl+y"
-##    KEYNAMES[26]   =    "ctrl+z"
+var KEYNAMES* {.threadvar.}: array[0 .. 31, string]
 
-KEYNAMES[1]    =    "ctrl+a"
-KEYNAMES[2]    =    "ctrl+b"
-KEYNAMES[3]    =    "ctrl+c"
-KEYNAMES[4]    =    "ctrl+d"
-KEYNAMES[5]    =    "ctrl+e"
-KEYNAMES[6]    =    "ctrl+f"
-KEYNAMES[7]    =    "ctrl+g"
-KEYNAMES[8]    =    "ctrl+h"
-KEYNAMES[9]    =    "ctrl+i"
-KEYNAMES[9]    =    "tab"
-KEYNAMES[10]   =    "ctrl+j"
-KEYNAMES[11]   =    "ctrl+k"
-KEYNAMES[12]   =    "ctrl+l"
-KEYNAMES[13]   =    "ctrl+m"
-KEYNAMES[14]   =    "ctrl+n"
-KEYNAMES[15]   =    "ctrl+o"
-KEYNAMES[16]   =    "ctrl+p"
-KEYNAMES[17]   =    "ctrl+q"
-KEYNAMES[18]   =    "ctrl+r"
-KEYNAMES[19]   =    "ctrl+s"
-KEYNAMES[20]   =    "ctrl+t"
-KEYNAMES[21]   =    "ctrl+u"
-KEYNAMES[22]   =    "ctrl+v"
-KEYNAMES[23]   =    "ctrl+w"
-KEYNAMES[24]   =    "ctrl+x"
-KEYNAMES[25]   =    "ctrl+y"
-KEYNAMES[26]   =    "ctrl+z"
+KEYNAMES[1]    = "ctrl+a"
+KEYNAMES[2]    = "ctrl+b"
+KEYNAMES[3]    = "ctrl+c"
+KEYNAMES[4]    = "ctrl+d"
+KEYNAMES[5]    = "ctrl+e"
+KEYNAMES[6]    = "ctrl+f"
+KEYNAMES[7]    = "ctrl+g"
+KEYNAMES[8]    = "ctrl+h"
+KEYNAMES[9]    = "ctrl+i"
+KEYNAMES[9]    = "tab"
+KEYNAMES[10]   = "ctrl+j"
+KEYNAMES[11]   = "ctrl+k"
+KEYNAMES[12]   = "ctrl+l"
+KEYNAMES[13]   = "ctrl+m"
+KEYNAMES[14]   = "ctrl+n"
+KEYNAMES[15]   = "ctrl+o"
+KEYNAMES[16]   = "ctrl+p"
+KEYNAMES[17]   = "ctrl+q"
+KEYNAMES[18]   = "ctrl+r"
+KEYNAMES[19]   = "ctrl+s"
+KEYNAMES[20]   = "ctrl+t"
+KEYNAMES[21]   = "ctrl+u"
+KEYNAMES[22]   = "ctrl+v"
+KEYNAMES[23]   = "ctrl+w"
+KEYNAMES[24]   = "ctrl+x"
+KEYNAMES[25]   = "ctrl+y"
+KEYNAMES[26]   = "ctrl+z"
 
-# Key Sequences
-var KEYSEQS* {.threadvar.}: CritBitTree[KeySeq] ## The following key sequences are defined and are used internally by **LineEditor**:
-##
-## .. code-block:: nim
-##    KEYSEQS["up"]         = @[27, 91, 65]      # Windows: @[224, 72]
-##    KEYSEQS["down"]       = @[27, 91, 66]      # Windows: @[224, 80]
-##    KEYSEQS["right"]      = @[27, 91, 67]      # Windows: @[224, 77]
-##    KEYSEQS["left"]       = @[27, 91, 68]      # Windows: @[224, 75]
-##    KEYSEQS["home"]       = @[27, 91, 72]      # Windows: @[224, 71]
-##    KEYSEQS["end"]        = @[27, 91, 70]      # Windows: @[224, 79]
-##    KEYSEQS["insert"]     = @[27, 91, 50, 126] # Windows: @[224, 82]
-##    KEYSEQS["delete"]     = @[27, 91, 51, 126] # Windows: @[224, 83]
+var KEYSEQS* {.threadvar.}: CritBitTree[KeySeq]
 
 when defined(windows):
   KEYSEQS["up"]         = @[224, 72]
@@ -549,351 +657,309 @@ else:
   KEYSEQS["insert"]     = @[27, 91, 50, 126]
   KEYSEQS["delete"]     = @[27, 91, 51, 126]
 
-# Key Mappings
-var KEYMAP* {.threadvar.}: CritBitTree[KeyCallBack] ## The following key mappings are configured by default:
-##
-## * backspace: **deletePrevious**
-## * delete: **deleteNext**
-## * insert: *toggle editor mode*
-## * down: **historyNext**
-## * up: **historyPrevious**
-## * ctrl+n: **historyNext**
-## * ctrl+p: **historyPrevious**
-## * left: **back**
-## * right: **forward**
-## * ctrl+b: **back**
-## * ctrl+f: **forward**
-## * ctrl+c: *quits the program*
-## * ctrl+d: *quits the program*
-## * ctrl+u: **clearLine**
-## * ctrl+a: **goToStart**
-## * ctrl+e: **goToEnd**
-## * home: **goToStart**
-## * end: **goToEnd**
+var KEYMAP* {.threadvar.}: CritBitTree[KeyCallback]
 
-KEYMAP["backspace"] = proc(ed: var LineEditor) =
-  ed.deletePrevious()
-KEYMAP["delete"] = proc(ed: var LineEditor) =
-  ed.deleteNext()
-KEYMAP["insert"] = proc(ed: var LineEditor) =
-  if ed.mode == mdInsert:
-    ed.mode = mdReplace
-  else:
-    ed.mode = mdInsert
-KEYMAP["down"] = proc(ed: var LineEditor) =
-  ed.historyNext()
-KEYMAP["up"] = proc(ed: var LineEditor) =
-  ed.historyPrevious()
-KEYMAP["ctrl+n"] = proc(ed: var LineEditor) =
-  ed.historyNext()
-KEYMAP["ctrl+p"] = proc(ed: var LineEditor) =
-  ed.historyPrevious()
-KEYMAP["left"] = proc(ed: var LineEditor) =
-  ed.back()
-KEYMAP["right"] = proc(ed: var LineEditor) =
-  ed.forward()
-KEYMAP["ctrl+b"] = proc(ed: var LineEditor) =
-  ed.back()
-KEYMAP["ctrl+f"] = proc(ed: var LineEditor) =
-  ed.forward()
-KEYMAP["ctrl+c"] = proc(ed: var LineEditor) =
-  stdout.write("\n"); stdout.flushFile()
+KEYMAP["backspace"] = proc(ed: var LineEditor) = ed.deletePrevious()
+KEYMAP["delete"]    = proc(ed: var LineEditor) = ed.deleteNext()
+KEYMAP["insert"]    = proc(ed: var LineEditor) =
+  ed.mode = if ed.mode == mdInsert: mdReplace else: mdInsert
+KEYMAP["down"]      = proc(ed: var LineEditor) =
+  ## Down — visual row first; if already at the last visual row, fall
+  ## through to history-next (matches readline / Emacs feel).
+  let pw = ed.promptW; let cw = ed.contPromptW
+  let width = max(2, ed.width)
+  let (curR, _) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
+  let total = totalRows(ed.line.text, pw, cw, width)
+  if curR >= total - 1: ed.historyNext()
+  else: ed.visualDown()
+KEYMAP["up"]        = proc(ed: var LineEditor) =
+  let pw = ed.promptW; let cw = ed.contPromptW
+  let width = max(2, ed.width)
+  let (curR, _) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
+  if curR <= 0: ed.historyPrevious()
+  else: ed.visualUp()
+KEYMAP["ctrl+n"]    = proc(ed: var LineEditor) = ed.historyNext()
+KEYMAP["ctrl+p"]    = proc(ed: var LineEditor) = ed.historyPrevious()
+KEYMAP["left"]      = proc(ed: var LineEditor) = ed.back()
+KEYMAP["right"]     = proc(ed: var LineEditor) = ed.forward()
+KEYMAP["ctrl+b"]    = proc(ed: var LineEditor) = ed.back()
+KEYMAP["ctrl+f"]    = proc(ed: var LineEditor) = ed.forward()
+KEYMAP["ctrl+u"]    = proc(ed: var LineEditor) = ed.clearLine()
+KEYMAP["ctrl+a"]    = proc(ed: var LineEditor) = ed.goToStart()
+KEYMAP["ctrl+e"]    = proc(ed: var LineEditor) = ed.goToEnd()
+KEYMAP["home"]      = proc(ed: var LineEditor) = ed.goToStart()
+KEYMAP["end"]       = proc(ed: var LineEditor) = ed.goToEnd()
+KEYMAP["ctrl+w"]    = proc(ed: var LineEditor) = ed.deleteWordLeft()
+KEYMAP["ctrl+c"]    = proc(ed: var LineEditor) =
+  ed.canceled = true
   raise newException(InputCancelled, "")
-KEYMAP["ctrl+d"] = proc(ed: var LineEditor) =
-  stdout.write("\n"); stdout.flushFile()
+KEYMAP["ctrl+d"]    = proc(ed: var LineEditor) =
+  ed.eof = true
   raise newException(EOFError, "")
-KEYMAP["ctrl+u"] = proc(ed: var LineEditor) =
-  ed.clearLine()
-KEYMAP["ctrl+a"] = proc(ed: var LineEditor) =
-  ed.goToStart()
-KEYMAP["ctrl+e"] = proc(ed: var LineEditor) =
-  ed.goToEnd()
-KEYMAP["home"] = proc(ed: var LineEditor) =
-  ed.goToStart()
-KEYMAP["end"] = proc(ed: var LineEditor) =
-  ed.goToEnd()
-KEYMAP["ctrl+l"] = proc(ed: var LineEditor) =
-  # Clear screen, redraw prompt + current line, restore cursor position.
-  stdout.eraseScreen()
-  stdout.setCursorPos(0, 0)
-  stdout.write(ed.prompt)
-  stdout.write(ed.line.text)
-  let trail = ed.line.text.len - ed.line.position
-  if trail > 0: stdout.cursorBackward(trail)
-  stdout.flushFile()
+KEYMAP["ctrl+l"]    = proc(ed: var LineEditor) =
+  ed.write "\x1b[H\x1b[2J"
+  ed.renderRow = 0
+  fullRedraw(ed)
 when defined(posix):
-  KEYMAP["ctrl+z"] = proc(ed: var LineEditor) =
-    # Suspend ourselves the same way the terminal driver would have. Tear
-    # down the modes we set (bracketed paste, SGR) so the user's shell isn't
-    # left with surprises, then re-establish them on SIGCONT and redraw.
-    stdout.write("\n\e[?2004l")
+  KEYMAP["ctrl+z"]  = proc(ed: var LineEditor) =
+    ed.write "\n\e[?2004l"
     resetAttributes()
     stdout.flushFile()
     discard posix.kill(posix.getpid(), posix.SIGTSTP)
-    stdout.write("\e[?2004h")
-    stdout.write(ed.prompt)
-    stdout.write(ed.line.text)
-    let trail = ed.line.text.len - ed.line.position
-    if trail > 0: stdout.cursorBackward(trail)
-    stdout.flushFile()
+    ed.write "\e[?2004h"
+    ed.renderRow = 0
+    fullRedraw(ed)
 
-var keyMapProc {.threadvar.}: proc(ed: var LineEditor)
+# ---------- Completion ----------
 
-proc clearHint(ed: var LineEditor) =
-  # Erase any ghost-hint characters previously rendered to the right of the
-  # cursor. Caller ensures the cursor sits at the start of the hint area
-  # (which is guaranteed by only rendering when position == text.len).
-  if ed.hint.len == 0:
-    return
-  for _ in 0 ..< ed.hint.len:
-    putchr(32)
-  stdout.cursorBackward(ed.hint.len)
-  stdout.flushFile()
-  ed.hint = ""
-
-proc readBracketedPaste(): tuple[text: string, hasNewline: bool] =
-  # Consume bytes from stdin until we see the bracketed-paste end marker
-  # `\e[201~`. Strip the marker and return the raw paste plus a flag for
-  # whether it contained a line break.
-  while true:
-    let b = getchr()
-    result.text.add b.chr
-    if result.text.endsWith("\e[201~"):
-      result.text.setLen(result.text.len - "\e[201~".len)
-      for c in result.text:
-        if c == '\n' or c == '\r':
-          result.hasNewline = true
-          return
-      return
-
-proc renderHint(ed: var LineEditor) =
-  # Show the tail of the first matching completion as dim text after the
-  # cursor, as a visual cue that tab will complete it. Only fires at end of
-  # line on a non-empty input.
+proc completeLine*(ed: var LineEditor): int =
   if ed.completionCallback.isNil: return
-  if ed.line.text.len == 0: return
-  if ed.line.position != ed.line.text.len: return
   let compl = ed.completionCallback(ed)
-  if compl.len == 0: return
-  let words = ed.line.text.split(' ')
-  let word = if words.len > 0: words[^1] else: ""
-  let wordLower = word.toLowerAscii
-  var hint = ""
-  for m in compl:
-    if m.len > word.len and m.toLowerAscii.startsWith(wordLower):
-      hint = m[word.len .. ^1]
+  let position = ed.line.position
+  let words = ed.line.text[0 ..< position].split({' ', '\n'})
+  var word = if words.len > 0: words[^1] else: ""
+  var matches = compl.filterIt(it.toLowerAscii.startsWith(word.toLowerAscii))
+  if matches.len == 0: return -1
+  if word.len > 0:
+    for _ in 0 ..< word.len: ed.deletePrevious()
+  ed.insertText(matches[0])
+  var n = 0
+  var ch = ed.getCh()
+  while ch == 9:
+    inc n
+    if n < matches.len:
+      for _ in 0 ..< matches[n - 1].len: ed.deletePrevious()
+      ed.insertText(matches[n])
+      ch = ed.getCh()
+    else:
+      n = -1
       break
-  if hint.len == 0: return
-  stdout.write("\e[2m")
-  stdout.write(hint)
-  stdout.write("\e[22m")
-  stdout.cursorBackward(hint.len)
-  stdout.flushFile()
-  ed.hint = hint
+  return ch
 
-proc readLine*(ed: var LineEditor, prompt="", hidechars = false, noHistory = false): string  =
-  ## High-level proc to be used instead of **stdin.readLine** to read a line from standard input using the specified **LineEditor** object.
-  ##
-  ## Note that:
-  ## * **prompt** is a string (that *cannot* contain escape codes, so it cannot be colored) that will be prepended at the start of the line and
-  ##   not included in the contents of the line itself.
-  ## * If **hidechars** is set to **true**, asterisks will be printed to stdout instead of the characters entered by the user.
-  # TODO: vim mode — add a normal-mode / insert-mode switch here with
-  # hjkl/w/b/e motions, dw/cw, etc. Will likely need an `ed.vimMode` field
-  # and a per-keystroke dispatch that differs by mode.
-  if not hidechars:
-    stdout.write("\e[?2004h")  # enable bracketed paste
-  stdout.write(prompt)
-  stdout.flushFile()
+# ---------- Bracketed paste ----------
+
+proc readBracketedPaste(ed: var LineEditor): string =
+  while true:
+    let b = ed.getCh()
+    if b < 0: return result
+    result.add b.chr
+    if result.endsWith("\e[201~"):
+      result.setLen(result.len - "\e[201~".len)
+      return result
+
+# ---------- readLine driver ----------
+
+proc initEditor*(mode = mdInsert, historySize = 256, historyFile: string = ""): LineEditor =
+  result.mode = mode
+  result.history = historyInit(historySize, historyFile)
+  result.width = 80
+  result.contPrompt = "  "
+
+proc resetForRead(ed: var LineEditor, prompt: string, hidechars: bool) =
   ed.line = Line(text: "", position: 0)
   ed.prompt = prompt
-  var c = -1 # Used to manage completions
-  var esc = false
+  if ed.contPrompt.len == 0:
+    ed.contPrompt = "  "
+  ed.promptW = visualCols(prompt)
+  ed.contPromptW = visualCols(ed.contPrompt)
+  ed.renderRow = 0
+  ed.echoRows = 0
+  ed.submitted = false
+  ed.canceled = false
+  ed.eof = false
+  if ed.getWidth != nil:
+    let w = ed.getWidth()
+    if w > 0: ed.width = w
+
+proc handleEscape(ed: var LineEditor): bool =
+  ## Process a single escape sequence starting just after the leading
+  ## ``ESC`` byte. Returns ``true`` if the sequence requested a submit
+  ## (Shift+Enter / Alt+Enter — these now insert a real newline rather
+  ## than backslash-continuation).
+  let c2 = ed.getCh()
+  if c2 < 0: return false
+  if c2 == 13:
+    ed.insertNewline()
+    return false
+  var s = @[27.Key, c2.Key]
+  if s == KEYSEQS["left"]:   ed.back();  return false
+  if s == KEYSEQS["right"]:  ed.forward(); return false
+  if s == KEYSEQS["up"]:     KEYMAP["up"](ed);   return false
+  if s == KEYSEQS["down"]:   KEYMAP["down"](ed); return false
+  if s == KEYSEQS["home"]:   ed.goToStart(); return false
+  if s == KEYSEQS["end"]:    ed.goToEnd();   return false
+  if s == KEYSEQS["delete"]: ed.deleteNext(); return false
+  if s == KEYSEQS["insert"]: KEYMAP["insert"](ed); return false
+  if c2 == 91:  # CSI
+    let c3 = ed.getCh()
+    if c3 < 0: return false
+    s.add c3.Key
+    if s == KEYSEQS["right"]:  ed.forward(); return false
+    if s == KEYSEQS["left"]:   ed.back();    return false
+    if s == KEYSEQS["up"]:     KEYMAP["up"](ed);   return false
+    if s == KEYSEQS["down"]:   KEYMAP["down"](ed); return false
+    if s == KEYSEQS["home"]:   ed.goToStart(); return false
+    if s == KEYSEQS["end"]:    ed.goToEnd();   return false
+    if c3 == 50 or c3 == 51:
+      let c4 = ed.getCh()
+      if c4 < 0: return false
+      if c4 == 126 and c3 == 50:
+        KEYMAP["insert"](ed); return false
+      if c4 == 126 and c3 == 51:
+        ed.deleteNext(); return false
+      if c3 == 50 and c4 == 55:
+        # modifyOtherKeys: ESC [ 27 ; <mod> ; <key> ~
+        let c5 = ed.getCh()
+        if c5 == 59:
+          var modDigits = ""
+          var ch = ed.getCh()
+          while ch >= 48 and ch <= 57:
+            modDigits.add ch.chr
+            ch = ed.getCh()
+          if ch == 59:
+            var keyDigits = ""
+            ch = ed.getCh()
+            while ch >= 48 and ch <= 57:
+              keyDigits.add ch.chr
+              ch = ed.getCh()
+            if ch == 126 and keyDigits == "13" and modDigits == "2":
+              ed.insertNewline()
+              return false
+        return false
+      if c3 == 50 and c4 == 48:
+        # bracketed paste start: ESC [ 200 ~
+        let c5 = ed.getCh()
+        let c6 = ed.getCh()
+        if c5 == 48 and c6 == 126:
+          let paste = readBracketedPaste(ed)
+          if paste.len > 0:
+            var clean = newStringOfCap(paste.len)
+            for ch in paste:
+              if ch == '\r': discard
+              else: clean.add ch
+            ed.insertText(clean)
+        return false
+      if c3 == 51 and c4 == 59:
+        # ESC [ 3 ; <mod> ~  (e.g. shift+delete)
+        let modCh = ed.getCh()
+        let final = ed.getCh()
+        if final == 126 and modCh == 53:  # ctrl+delete
+          ed.deleteWordLeft()
+        return false
+    elif c3 == 49:
+      # ESC [ 1 ; <mod> <dir>
+      let c4 = ed.getCh()
+      if c4 == 59:
+        let modifier = ed.getCh()
+        let direction = ed.getCh()
+        if modifier == 53:  # ctrl
+          case direction
+          of 68: wordLeft(ed)
+          of 67: wordRight(ed)
+          of 65: KEYMAP["up"](ed)
+          of 66: KEYMAP["down"](ed)
+          else: discard
+      elif c4 == 51:
+        # Kitty Shift+Enter: ESC [ 1 3 ; 2 u
+        let c5 = ed.getCh()
+        if c5 == 59:
+          var modDigits = ""
+          var ch = ed.getCh()
+          while ch >= 48 and ch <= 57:
+            modDigits.add ch.chr
+            ch = ed.getCh()
+          if ch == 117 and modDigits == "2":
+            ed.insertNewline()
+      return false
+  return false
+
+proc readLineWith*(ed: var LineEditor, prompt: string,
+                   getCh: GetChProc, write: WriteProc,
+                   hidechars = false, noHistory = false,
+                   getWidth: WidthProc = nil): string =
+  ## Pluggable form of ``readLine``. Provides the same behavior as
+  ## ``readLine`` but with explicit IO procs so tests can drive the
+  ## editor against a fake terminal.
+  ed.getCh = getCh
+  ed.write = write
+  ed.getWidth = getWidth
+  resetForRead(ed, prompt, hidechars)
+  if not hidechars:
+    ed.write "\x1b[?2004h"
+  fullRedraw(ed)
   while true:
-    var c1: int
-    if c > 0:
-      c1 = c
-      c = -1
-    else:
-      c1 = getchr()
-    ed.clearHint()
-    if esc:
-      esc = false
-      continue
-    elif c1 in {10, 13}:
-      stdout.write("\n")
-      if not noHistory and not hidechars: ed.historyAdd()
+    let c1 = ed.getCh()
+    if resizePending:
+      resizePending = false
+      fullRedraw(ed)
+    if c1 < 0:
+      ed.eof = true
+      raise newException(EOFError, "")
+    if c1 == 10 or c1 == 13:
+      parkAtEnd(ed)
+      if not noHistory and not hidechars:
+        ed.historyAdd()
       ed.historyFlush()
-      if not hidechars: stdout.write("\e[?2004l")
+      if not hidechars:
+        ed.write "\x1b[?2004l"
+      ed.submitted = true
       return ed.line.text
-    elif c1 in {8, 127}:
-      KEYMAP["backspace"](ed)
-    elif c1 in PRINTABLE:
+    if c1 == 8 or c1 == 127:
+      ed.deletePrevious()
+      continue
+    if c1 in PRINTABLE:
       if hidechars:
-        putchr('*'.ord.cint)
-        ed.line.text &= c1.chr
-        ed.line.position.inc
+        ed.line.text.add c1.chr
+        inc ed.line.position
+        ed.write "*"
       else:
         ed.printChar(c1)
-    elif c1 == 9: # TAB
-      c = ed.completeLine()
-    elif c1 in ESCAPES:
-      var s = newSeq[Key](0)
-      s.add(c1)
-      let c2 = getchr()
-      s.add(c2)
-      template multilineSubmit() {.dirty.} =
-        # Append a trailing `\` (not echoed) so the outer caller's
-        # `\`-continuation loop reads the next line and joins them
-        # with `\n`. Lets multi-line entry work without making the
-        # editor itself multi-line aware.
-        ed.line.text &= "\\"
-        stdout.write("\n")
-        if not noHistory and not hidechars: ed.historyAdd()
-        ed.historyFlush()
-        if not hidechars: stdout.write("\e[?2004l")
-        return ed.line.text
-      if c2 == 13:
-        # Alt+Enter / Esc+Enter — universal multiline newline that
-        # works without any terminal-side keyboard-protocol setup.
-        multilineSubmit()
-      elif s == KEYSEQS["left"]:
-        KEYMAP["left"](ed)
-      elif s == KEYSEQS["right"]:
-        KEYMAP["right"](ed)
-      elif s == KEYSEQS["up"]:
-        KEYMAP["up"](ed)
-      elif s == KEYSEQS["down"]:
-        KEYMAP["down"](ed)
-      elif s == KEYSEQS["home"]:
-        KEYMAP["home"](ed)
-      elif s == KEYSEQS["end"]:
-        KEYMAP["end"](ed)
-      elif s == KEYSEQS["delete"]:
-        KEYMAP["delete"](ed)
-      elif s == KEYSEQS["insert"]:
-        KEYMAP["insert"](ed)
-      elif c2 == 91:
-        let c3 = getchr()
-        s.add(c3)
-        if s == KEYSEQS["right"]:
-          KEYMAP["right"](ed)
-        elif s == KEYSEQS["left"]:
-          KEYMAP["left"](ed)
-        elif s == KEYSEQS["up"]:
-          KEYMAP["up"](ed)
-        elif s == KEYSEQS["down"]:
-          KEYMAP["down"](ed)
-        elif s == KEYSEQS["home"]:
-          KEYMAP["home"](ed)
-        elif s == KEYSEQS["end"]:
-          KEYMAP["end"](ed)
-        elif c3 in {50, 51}:
-          let c4 = getchr()
-          s.add(c4)
-          if c4 == 126 and c3 == 50:
-            KEYMAP["insert"](ed)
-          elif c4 == 126 and c3 == 51:
-            KEYMAP["delete"](ed)
-          elif c3 == 50 and c4 == 55:
-            # modifyOtherKeys: ESC [ 27 ; <mod> ; <keycode> ~. Detect
-            # Shift+Enter (modifier 2, keycode 13). Other reports are
-            # consumed and dropped — terminals only emit this format
-            # when the user has enabled modifyOtherKeys mode 1.
-            let c5 = getchr()
-            if c5 == 59:
-              var modDigits = ""
-              var ch = getchr()
-              while ch >= 48 and ch <= 57:
-                modDigits.add(ch.chr)
-                ch = getchr()
-              if ch == 59:
-                var keyDigits = ""
-                ch = getchr()
-                while ch >= 48 and ch <= 57:
-                  keyDigits.add(ch.chr)
-                  ch = getchr()
-                if ch == 126 and keyDigits == "13" and modDigits == "2":
-                  multilineSubmit()
-          elif c3 == 50 and c4 == 48:
-            # \e[200~ = bracketed paste start; \e[201~ = stray paste end.
-            let c5 = getchr()
-            let c6 = getchr()
-            if c5 == 48 and c6 == 126:
-              let paste = readBracketedPaste()
-              if paste.hasNewline:
-                ed.clearHint()
-                ed.line.text = ed.line.fromStart & paste.text & (if ed.line.position < ed.line.text.len: ed.line.toEnd else: "")
-                stdout.write("\n")
-                if not noHistory and not hidechars: ed.historyAdd()
-                ed.historyFlush()
-                if not hidechars: stdout.write("\e[?2004l")
-                return ed.line.text
-              else:
-                for ch in paste.text:
-                  if ch.ord in PRINTABLE:
-                    if hidechars:
-                      putchr('*'.ord.cint)
-                      ed.line.text &= ch
-                      ed.line.position.inc
-                    else:
-                      ed.printChar(ch.ord)
-        elif c3 == 49:
-          # Modified arrows: ESC [ 1 ; <mod> <dir>, e.g. ctrl+left = ESC [ 1 ; 5 D
-          let c4 = getchr()
-          if c4 == 59:
-            let modifier = getchr()
-            let direction = getchr()
-            if modifier == 53:  # ctrl
-              case direction
-              of 68: wordLeft(ed)   # 'D'
-              of 67: wordRight(ed)  # 'C'
-              of 65: KEYMAP["up"](ed)    # 'A' — fall back to history up
-              of 66: KEYMAP["down"](ed)  # 'B' — fall back to history down
-              else: discard
-          elif c4 == 51:
-            # Kitty keyboard protocol Shift+Enter: ESC [ 1 3 ; 2 u.
-            # Only fires when the terminal has progressive-enhancement
-            # level 1 enabled; everything else consumes-and-drops.
-            let c5 = getchr()
-            if c5 == 59:
-              var modDigits = ""
-              var ch = getchr()
-              while ch >= 48 and ch <= 57:
-                modDigits.add(ch.chr)
-                ch = getchr()
-              if ch == 117 and modDigits == "2":
-                multilineSubmit()
-    elif c1 in CTRL and KEYMAP.hasKey(KEYNAMES[c1]):
-      keyMapProc = KEYMAP[KEYNAMES[c1]]
-      keyMapProc(ed)
-    else:
-      # Assuming unhandled two-values escape sequence; do nothing.
-      if esc:
-        esc = false
-        continue
-      else:
-        esc = true
-        continue
-    if not hidechars:
-      ed.renderHint()
+      continue
+    if c1 == 9:
+      let nxt = ed.completeLine()
+      if nxt > 0:
+        # The completion absorbed a trailing keystroke we should treat
+        # as the next char. Re-dispatch via a tiny tail-call by
+        # synthesising a tiny `pending` slot — but we don't have one;
+        # so handle the common "Enter after completion" case here.
+        if nxt == 10 or nxt == 13:
+          parkAtEnd(ed)
+          if not noHistory and not hidechars:
+            ed.historyAdd()
+          ed.historyFlush()
+          if not hidechars:
+            ed.write "\x1b[?2004l"
+          ed.submitted = true
+          return ed.line.text
+        if nxt in PRINTABLE:
+          ed.printChar(nxt)
+      continue
+    if c1 in ESCAPES:
+      discard handleEscape(ed)
+      continue
+    if c1 in CTRL and KEYMAP.hasKey(KEYNAMES[c1]):
+      KEYMAP[KEYNAMES[c1]](ed)
+      continue
+    # Unknown byte: ignore.
 
-proc password*(ed: var LineEditor, prompt=""): string =
-  ## Convenience method to use instead of **readLine** to hide the characters inputed by the user.
-  return ed.readLine(prompt, true)
- 
+proc readLine*(ed: var LineEditor, prompt = "", hidechars = false,
+               noHistory = false): string =
+  let getCh: GetChProc = proc(): int = getchr().int
+  let write: WriteProc = proc(s: string) =
+    stdout.write s
+    stdout.flushFile()
+  let getWidth: WidthProc = proc(): int =
+    try: terminalWidth() except CatchableError: 80
+  ed.readLineWith(prompt, getCh, write, hidechars = hidechars,
+                  noHistory = noHistory, getWidth = getWidth)
+
+proc password*(ed: var LineEditor, prompt = ""): string =
+  ed.readLine(prompt, true)
+
 when isMainModule:
-  #proc testChar() =
-  #  while true:
-  #    let a = getchr()
-  #    echo "\n->", a
-  #    if a == 3:
-  #      quit(0)
-  #
-  #testChar()
-  proc testLineEditor() =
+  proc test() =
     var ed = initEditor(historyFile = "")
     while true:
-      echo "---", ed.readLine("-> "), "---"
-
-  testLineEditor()
+      let s = ed.readLine("-> ")
+      stdout.writeLine "got: " & s.replace("\n", "\\n")
+  test()

@@ -718,8 +718,13 @@ commands:
 
 input:
   single-line   just type and press Enter
-  multi-line    end a line with `\` to continue on the next line (use `\\` for a literal trailing backslash)
-  up / down     recall history; down past last clears the line
+  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  arrows        full cursor navigation across lines and visual wraps
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
