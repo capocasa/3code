@@ -16,6 +16,9 @@ jobs:
           - os: ubuntu-22.04
             artifact: 3code-linux-amd64
             ext: tar.gz
+          - os: ubuntu-22.04-arm
+            artifact: 3code-linux-arm64
+            ext: tar.gz
           - os: macos-latest
             artifact: 3code-macos-universal
             ext: tar.gz
@@ -137,6 +140,7 @@ jobs:
         run: |
           mkdir -p site/main
           cp dl/3code-linux-amd64.tar.gz     site/main/
+          cp dl/3code-linux-arm64.tar.gz     site/main/
           cp dl/3code-macos-universal.tar.gz site/main/
           cp dl/3code-windows-amd64.zip      site/main/
           cat > site/index.html <<EOF
@@ -145,6 +149,7 @@ jobs:
           <p>Per-commit builds from <code>main</code> (commit ${GITHUB_SHA}).</p>
           <ul>
             <li><a href="main/3code-linux-amd64.tar.gz">3code-linux-amd64.tar.gz</a></li>
+            <li><a href="main/3code-linux-arm64.tar.gz">3code-linux-arm64.tar.gz</a></li>
             <li><a href="main/3code-macos-universal.tar.gz">3code-macos-universal.tar.gz</a></li>
             <li><a href="main/3code-windows-amd64.zip">3code-windows-amd64.zip</a></li>
           </ul>
@@ -180,5 +185,6 @@ jobs:
             --title "${{ github.ref_name }}" \
             --generate-notes \
             3code-linux-amd64.tar.gz \
+            3code-linux-arm64.tar.gz \
             3code-macos-universal.tar.gz \
             3code-windows-amd64.zip

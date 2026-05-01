@@ -26,6 +26,8 @@ const
 const Tarball =
   when defined(linux) and (defined(amd64) or defined(x86_64)):
     "3code-linux-amd64.tar.gz"
+  elif defined(linux) and (defined(arm64) or defined(aarch64)):
+    "3code-linux-arm64.tar.gz"
   elif defined(macosx):
     "3code-macos-universal.tar.gz"
   elif defined(windows) and (defined(amd64) or defined(x86_64)):
