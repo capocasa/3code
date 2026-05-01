@@ -286,20 +286,11 @@ proc add(h: var LineHistory, s: string, force = false) =
   if s == "" and not force: return
   if h.queue.len >= h.max:
     discard h.queue.popFirst
+    if h.position > 0: dec h.position
   if h.tainted:
     h.queue[h.queue.len - 1] = s
   else:
     h.queue.addLast s
-
-proc previous(h: var LineHistory): string =
-  if h.queue.len == 0 or h.position <= 0: return ""
-  dec h.position
-  result = h.queue[h.position]
-
-proc next(h: var LineHistory): string =
-  if h.queue.len == 0 or h.position >= h.queue.len - 1: return ""
-  inc h.position
-  result = h.queue[h.position]
 
 proc historyInit*(size = 256, file: string = ""): LineHistory =
   result.file = file
@@ -584,24 +575,26 @@ proc visualDown*(ed: var LineEditor) =
     fullRedraw(ed)
 
 proc historyPrevious*(ed: var LineEditor) =
-  ## Replace the buffer with the previous history entry, if any.
-  let s = ed.history.previous
-  if s == "": return
-  let pos = ed.history.position
-  var current: int
-  if ed.history.tainted:
-    current = ed.history.queue.len - 2
-  else:
-    current = ed.history.queue.len - 1
-  if pos == current and ed.history.queue[current] != ed.line.text:
+  ## Replace the buffer with the previous history entry, if any. The
+  ## first up from the user's draft state saves that draft into a slot
+  ## past the last real entry so a later down can restore it (even if
+  ## the draft is the empty string).
+  if ed.history.queue.len == 0 or ed.history.position <= 0: return
+  let nextPos = ed.history.position - 1
+  let current =
+    if ed.history.tainted: ed.history.queue.len - 2
+    else: ed.history.queue.len - 1
+  if nextPos == current and ed.history.queue[current] != ed.line.text:
     ed.historyAdd(force = true)
     ed.history.tainted = true
-  ed.changeLine(s)
+  ed.history.position = nextPos
+  ed.changeLine(ed.history.queue[nextPos])
 
 proc historyNext*(ed: var LineEditor) =
-  let s = ed.history.next
-  if s == "": return
-  ed.changeLine(s)
+  if ed.history.queue.len == 0 or
+     ed.history.position >= ed.history.queue.len - 1: return
+  inc ed.history.position
+  ed.changeLine(ed.history.queue[ed.history.position])
 
 proc lineText*(ed: LineEditor): string = ed.line.text
 
