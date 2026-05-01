@@ -1,4 +1,7 @@
-import std/[algorithm, atomics, httpclient, json, locks, net, os, sequtils, strformat, strutils, tables, terminal, times, uri]
+import std/[algorithm, atomics, httpclient, json, locks, nativesockets, net, os, sequtils, strformat, strutils, tables, terminal, times, uri]
+when defined(posix):
+  import std/posix
+  import posix/termios
 import streamhttp
 import types, util, prompts, compact, display
 
@@ -426,12 +429,98 @@ proc decayLevel(level: var int, lastTs: var float, now: float) =
 # cache so the next turn starts on a fresh socket.
 var cachedStreamConn: StreamConn
 var cachedStreamHostKey: string
+# Mirror of the cached conn's fd, kept current so the SIGINT hook and
+# the stdin watcher thread can `posix.shutdown` it without touching
+# the GC'd `StreamConn` ref. Set/cleared alongside `cachedStreamConn`.
+var cachedStreamFd: SocketHandle = osInvalidSocket
 
 proc closeCachedStreamConn() =
   if cachedStreamConn != nil:
     try: cachedStreamConn.close() except CatchableError: discard
     cachedStreamConn = nil
     cachedStreamHostKey = ""
+  cachedStreamFd = osInvalidSocket
+
+proc shutdownCachedStreamFd() {.gcsafe.} =
+  ## Async-signal-safe: only the `shutdown` syscall, no allocation, no
+  ## Nim GC traffic. Forces a blocking `recv` on `cachedStreamConn` to
+  ## return so the streamHttp loop observes `interrupted` and bails.
+  ## Safe to call from a SIGINT hook or from the stdin watcher thread.
+  when defined(posix):
+    let fd = cachedStreamFd
+    if fd != osInvalidSocket:
+      discard posix.shutdown(fd, SHUT_RDWR.cint)
+
+# ---- Stream-time stdin cancel watcher ----
+#
+# During streamHttp's read loop, a tiny POSIX-only watcher thread polls
+# stdin in non-canonical/no-isig/no-echo mode and shuts down the cached
+# socket on the first ctrl-c (`\x03`) or ESC (`\x1b`) byte. The SIGINT
+# hook covers ctrl-c too, but only when the terminal is in cooked mode
+# at the moment the keystroke arrives — keeping a dedicated watcher
+# means cancel works the same way whether the kernel turns ctrl-c into
+# SIGINT or we read the raw byte ourselves, and ESC works at all (no
+# signal path exists for it).
+when defined(posix):
+  var
+    cancelWatcherStop: Atomic[bool]
+    cancelWatcherThread: Thread[void]
+    cancelWatcherActive: bool
+    cancelOrigTermios: Termios
+    cancelOrigTermiosValid: bool
+
+  proc cancelWatcherLoop() {.thread, nimcall.} =
+    while not cancelWatcherStop.load(moRelaxed):
+      var pfd: TPollfd
+      pfd.fd = 0.cint  # STDIN_FILENO
+      pfd.events = POLLIN
+      let r = poll(addr pfd, 1.Tnfds, 100.cint)
+      if r > 0 and (pfd.revents and POLLIN) != 0:
+        var buf: array[64, char]
+        let n = posix.read(0.cint, addr buf[0], buf.len)
+        if n > 0:
+          for i in 0 ..< n.int:
+            let b = buf[i].uint8
+            if b == 0x03 or b == 0x1b:
+              {.cast(gcsafe).}:
+                interrupted = true
+                shutdownCachedStreamFd()
+              return
+        # else: spurious wakeup or EOF on stdin; loop and re-check stop.
+
+  proc startCancelWatcher() =
+    if cancelWatcherActive: return
+    if isatty(0.cint) == 0: return
+    var t: Termios
+    if tcGetAttr(0.cint, addr t) != 0: return
+    cancelOrigTermios = t
+    cancelOrigTermiosValid = true
+    # Disable canonical line buffering, signal generation (so ctrl-c
+    # arrives as `\x03` instead of SIGINT), and local echo. VMIN/VTIME
+    # don't really matter — we only ever read after `poll` says there's
+    # data — but pin them so a non-poll caller doesn't accidentally
+    # block.
+    t.c_lflag = t.c_lflag and not Cflag(ICANON or ECHO or ISIG)
+    t.c_cc[VMIN] = 0.char
+    t.c_cc[VTIME] = 0.char
+    if tcSetAttr(0.cint, TCSANOW, addr t) != 0:
+      cancelOrigTermiosValid = false
+      return
+    cancelWatcherStop.store(false, moRelaxed)
+    createThread(cancelWatcherThread, cancelWatcherLoop)
+    cancelWatcherActive = true
+
+  proc stopCancelWatcher() =
+    if not cancelWatcherActive: return
+    cancelWatcherStop.store(true, moRelaxed)
+    joinThread(cancelWatcherThread)
+    cancelWatcherActive = false
+    if cancelOrigTermiosValid:
+      discard tcSetAttr(0.cint, TCSANOW, addr cancelOrigTermios)
+      cancelOrigTermiosValid = false
+else:
+  proc startCancelWatcher() = discard
+  proc stopCancelWatcher() = discard
 
 type StreamOutcome = object
   statusCode: int
@@ -499,6 +588,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
         return
       cachedStreamConn = conn
       cachedStreamHostKey = hostKey
+      cachedStreamFd = conn.getFd
     try:
       conn.sendRequest("POST", pathQuery, host,
                        headers = [("Authorization", "Bearer " & key),
@@ -653,6 +743,12 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     # the brief clear→repaint flash we used to ship.
   var line = ""
   var streamErr = ""
+  # Watch stdin for ctrl-c / ESC for the entire body read. Without this
+  # the keystrokes are buffered (cooked mode) until the first SSE chunk
+  # arrives, so cancel during the model's pre-data "thinking" gap is
+  # invisible.
+  startCancelWatcher()
+  defer: stopCancelWatcher()
   while true:
     var hasLine = false
     try: hasLine = conn.readLine(line)
@@ -751,6 +847,10 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     contentStreamedLive = true
 
   if interrupted:
+    # Drop the cache: the SIGINT hook / watcher already shut down the
+    # fd, so the conn is half-closed. Reusing it on the next turn
+    # would fail on first send. The next call will reconnect cleanly.
+    closeCachedStreamConn()
     result.errMsg = "interrupted by user"
     return
   if streamErr.len > 0:
@@ -1017,4 +1117,10 @@ proc fetchModels*(url, key: string): seq[string] =
     discard
 
 proc installInterruptHook*() =
-  setControlCHook(proc() {.noconv.} = interrupted = true)
+  setControlCHook(proc() {.noconv.} =
+    interrupted = true
+    # Wake any blocking `recv` on the in-flight stream socket so the
+    # caller can observe `interrupted` and bail. Without this, ctrl-c
+    # before the first SSE chunk just sets a flag while `recv` keeps
+    # blocking until data arrives.
+    shutdownCachedStreamFd())
