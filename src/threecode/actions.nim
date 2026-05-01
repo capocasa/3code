@@ -22,59 +22,76 @@ proc stripHarmonyChannel(name: string): string =
   if idx >= 0: name[0 ..< idx] else: name
 
 proc unknownTool(family, name: string): Action =
-  ## A tool name the active model wasn't offered. Returns an akError
-  ## action carrying a structured message: state the unknown name plainly
-  ## and, when the misuse is a known cross-model alias (e.g. gpt-oss
-  ## emitting `bash` instead of `shell`), point at the canonical call so
-  ## the model can re-emit on the next turn instead of hallucinating.
-  ## `runAction` short-circuits akError without executing anything; the
-  ## body is forwarded to the model as the tool result content.
+  ## A tool name no dispatcher recognised, even after alias routing.
+  ## Returns an akError action with a short, plain message so the
+  ## model gets a structured reply instead of a silent confab. Most
+  ## common misnames (`bash`/`shell`, `write`/`patch`/`edit`,
+  ## `apply_patch`/`applypatch`/`apply-patch`) are aliased upstream
+  ## and never reach this path.
   let bare = stripHarmonyChannel(name)
-  let suggestion =
-    case family
-    of "gpt-oss":
-      case bare
-      of "bash": ". Use `shell({cmd: [\"bash\", \"-lc\", \"...\"]})` for shell commands."
-      of "write", "patch", "edit": ". Use `apply_patch({input: \"*** Begin Patch...\"})` for file edits."
-      else: "."
-    of "glm", "qwen", "deepseek":
-      case bare
-      of "shell": ". Use `bash({command: \"...\"})` for shell commands."
-      of "apply_patch": ". Use `patch({path, edits})` or `write({path, body})` for file edits."
-      else: "."
-    else: "."
   Action(kind: akError, path: bare,
-         body: "Error: tool '" & bare & "' is not in your toolset" & suggestion)
+         body: "Error: tool '" & bare & "' is not available. " &
+               "This harness exposes shell-style commands and file " &
+               "edits; re-emit using the tools you were offered.")
+
+proc bashAction(args: JsonNode): Action =
+  ## Accepts both shapes that show up in practice:
+  ## - glm/qwen `bash`: `{command: "...", stdin?: "..."}`
+  ## - gpt-oss/Codex `shell`: `{cmd: ["bash", "-lc", "..."]}`
+  ## Either way the result is an akBash with the command line as body.
+  ## When both keys are present, `command` wins (same shape the previous
+  ## glm/qwen dispatcher used). All accessors are nil-safe — `getStr`
+  ## and `getElems` return defaults for missing keys or wrong types.
+  let cmdStr = args{"command"}.getStr
+  if cmdStr.len > 0:
+    return Action(kind: akBash, body: cmdStr,
+                  stdin: args{"stdin"}.getStr)
+  let argv = args{"cmd"}.getElems
+  let line = if argv.len > 0: argv[^1].getStr else: ""
+  Action(kind: akBash, body: line, stdin: args{"stdin"}.getStr)
+
+proc writeAction(args: JsonNode): Action =
+  Action(kind: akWrite,
+         path: args{"path"}.getStr,
+         body: args{"body"}.getStr)
+
+proc patchAction(args: JsonNode): Action =
+  var act = Action(kind: akPatch, path: args{"path"}.getStr)
+  for e in args{"edits"}.getElems:
+    act.edits.add (e{"search"}.getStr, e{"replace"}.getStr)
+  act
+
+proc applyPatchAction(args: JsonNode): Action =
+  Action(kind: akApplyPatch, body: args{"input"}.getStr)
 
 proc dispatchGlmOrQwen(family, name: string, args: JsonNode): Action =
   case name
-  of "bash":
-    Action(kind: akBash,
-           body: args{"command"}.getStr,
-           stdin: args{"stdin"}.getStr)
-  of "write":
-    Action(kind: akWrite,
-           path: args{"path"}.getStr,
-           body: args{"body"}.getStr)
-  of "patch":
-    var act = Action(kind: akPatch, path: args{"path"}.getStr)
-    for e in args{"edits"}.getElems:
-      act.edits.add (e{"search"}.getStr, e{"replace"}.getStr)
-    act
+  # Canonical names (the schema we offer glm/qwen/deepseek):
+  of "bash": bashAction(args)
+  of "write": writeAction(args)
+  of "patch": patchAction(args)
+  # Aliases — gpt-oss-shape names that show up as training leakage.
+  # Lossless: `shell` → akBash, `apply_patch` → akApplyPatch (we have
+  # the V4A parser), `edit` → akPatch (same shape as patch). Routed
+  # silently rather than warning the model out of it.
+  of "shell": bashAction(args)
+  of "apply_patch", "applypatch", "apply-patch": applyPatchAction(args)
+  of "edit": patchAction(args)
   else:
     unknownTool(family, name)
 
 proc dispatchGptOss(family, rawName: string, args: JsonNode): Action =
   case stripHarmonyChannel(rawName)
-  of "shell":
-    # Harmony argv: cmd = ["bash", "-lc", "<command line>"]. Take the
-    # trailing element and run it through our bash wrapper (PAGER killers,
-    # timeout, stdin pipe).
-    let argv = args{"cmd"}.getElems
-    let line = if argv.len > 0: argv[^1].getStr else: ""
-    Action(kind: akBash, body: line, stdin: args{"stdin"}.getStr)
-  of "apply_patch":
-    Action(kind: akApplyPatch, body: args{"input"}.getStr)
+  # Canonical names (the schema we offer gpt-oss):
+  of "shell": bashAction(args)
+  of "apply_patch": applyPatchAction(args)
+  # Aliases — glm/qwen-shape names that show up as training leakage,
+  # plus the misspellings Codex's own prompt warns about. Routed
+  # silently rather than warning the model out of it.
+  of "bash": bashAction(args)
+  of "applypatch", "apply-patch": applyPatchAction(args)
+  of "write": writeAction(args)
+  of "patch", "edit": patchAction(args)
   else:
     unknownTool(family, rawName)
 
