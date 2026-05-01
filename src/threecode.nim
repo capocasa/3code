@@ -190,10 +190,12 @@ proc usage() {.noreturn.} =
   stderr.writeLine """usage: 3code [options] [prompt...]
        3code web <query...>         # DuckDuckGo search, plain-text results
        3code fetch <url>            # GET url, return readable text
+       3code good                   # list known-good provider/variant combos
 
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
   -r, --resume[=ID]    resume latest session from this directory (or by id)
   -l, --list[=all]     list sessions for this directory (or all) and exit
+  -g, --good           list known-good provider/variant combos and exit
   -x, --experimental   allow combos outside the known-good list
   -v, --version        print version
   -h, --help           this message
@@ -278,6 +280,7 @@ proc main() =
       case k
       of "v", "version": echo Version; return
       of "h", "help": usage()
+      of "g", "good": printKnownGood(); return
       of "x", "experimental": experimentalEnabled = true
       of "m", "model":
         if v != "": model = v
@@ -318,6 +321,7 @@ proc main() =
     case args[0]
     of "web": runWeb(args[1 .. ^1]); return
     of "fetch": runFetch(args[1 .. ^1]); return
+    of "good": printKnownGood(); return
     else: discard
 
   showUpdateNoticeMaybe()

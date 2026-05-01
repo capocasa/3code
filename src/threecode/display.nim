@@ -442,6 +442,29 @@ proc welcome*(p: Profile): minline.LineEditor =
   installEditorTweaks()
   result = minline.initEditor(historyFile = historyFile())
 
+proc printKnownGood*() =
+  ## List every `(provider, variant)` combo in `KnownGoodCombos` along
+  ## with its model + version tags. Powers `--good` / `3code good` so a
+  ## user can survey the curated catalog without configuring anything.
+  echo "known-good provider/variant combos:"
+  echo ""
+  var maxId = 0
+  for c in KnownGoodCombos:
+    let id = c[0] & "." & c[1]
+    if id.len > maxId: maxId = id.len
+  for c in KnownGoodCombos:
+    let id = c[0] & "." & c[1]
+    let v =
+      if c[3].len > 0 and c[4].len > 0: c[3] & "." & c[4]
+      elif c[3].len > 0: c[3]
+      else: c[4]
+    let tag = if v.len > 0: c[2] & " " & v else: c[2]
+    echo "  ", id.alignLeft(maxId), "  ", tag
+  echo ""
+  echo "pass any of these to --model, e.g. 3code --model ", KnownGoodCombos[0][0],
+       ".", KnownGoodCombos[0][1]
+  echo "other combos require --experimental."
+
 proc printSessionList*(paths: seq[string], currentPath: string, showCwd: bool) =
   for p in paths:
     let id = sessionIdFromPath(p)
