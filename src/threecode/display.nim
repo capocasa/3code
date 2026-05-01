@@ -365,7 +365,7 @@ proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
   result = if ctx.len > 0: ctx & "  " else: ""
   result.add tokenSlot("↑", fresh)
   result.add "  " & tokenSlot("↻", usage.cachedTokens)
-  result.add "  " & tokenSlot("↓", usage.completionTokens)
+  result.add "  ↓" & humanTokens(usage.completionTokens).alignLeft(4)
   if elapsedS >= 0:
     result.add "  " & $elapsedS & "s"
 
