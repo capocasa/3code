@@ -130,6 +130,20 @@ const
     ## Dim white SGR for the prompt (typing not possible).
   BrightPromptColor* = "\x1b[1m\x1b[36m"
     ## Bright cyan SGR for the prompt (readline active / typing-ready).
+  SyncBegin* = "\x1b[?2026h"
+    ## DEC 2026 begin synchronized update — conhost (Win11 modern) and
+    ## Windows Terminal commit all bytes between BEGIN and END as one
+    ## atomic frame. Terminals that don't recognize the mode ignore it
+    ## silently. Wrapping per-frame paints (bar, spinner ticker)
+    ## eliminates the mid-frame partial-paint flicker conhost shows.
+  SyncEnd* = "\x1b[?2026l"
+    ## End synchronized update.
+
+proc syncWrite*(s: string) =
+  ## Single-flush write of ``s`` wrapped in DEC 2026 synchronized
+  ## output, so conhost paints it as one atomic frame.
+  stdout.write SyncBegin & s & SyncEnd
+  stdout.flushFile
 
 proc spinnerBarBytes*(frame, label: string, elapsed: int): string =
   ## Bar row payload during the spinner phase: braille glyph at col 0,
@@ -285,8 +299,7 @@ proc paintBarPrompt*(label, promptColor: string) =
   ## `endTurn` paints a gap.
   currentBarLabel = label
   currentBarHasGap = false
-  stdout.write barFooterBytes(label, promptColor)
-  stdout.flushFile
+  syncWrite barFooterBytes(label, promptColor)
 
 proc paintBarBelow*(label, promptColor: string) =
   ## Paint bar + prompt one and two rows below the cursor, restoring
@@ -295,23 +308,20 @@ proc paintBarBelow*(label, promptColor: string) =
   ## accumulated in memory and the cursor stays put.
   currentBarLabel = label
   currentBarHasGap = false
-  stdout.write barFooterBelowBytes(label, promptColor)
-  stdout.flushFile
+  syncWrite barFooterBelowBytes(label, promptColor)
 
 proc repaintBarPrompt*(promptColor = DimPromptColor) =
   ## Re-emit the bar+prompt at the cursor's current row using the
   ## cached `currentBarLabel`. Used by `withCleared` to put the bar
   ## back after a content write.
   if currentBarLabel.len == 0: return
-  stdout.write barFooterBytes(currentBarLabel, promptColor)
-  stdout.flushFile
+  syncWrite barFooterBytes(currentBarLabel, promptColor)
 
 proc clearBarPrompt*() =
   ## Erase the bar + prompt rows in place. Cursor parks at col 0 of
   ## the bar row so the caller can write content there (which then
   ## pushes the next `repaintBarPrompt` one row down).
-  stdout.write ClearBarPromptBytes
-  stdout.flushFile
+  syncWrite ClearBarPromptBytes
 
 template withCleared*(body: untyped) =
   ## Hide bar+prompt for the duration of `body`, repaint them below
@@ -342,14 +352,12 @@ proc spinnerLoop(unused: string) {.thread.} =
     let ticker = getSpinTicker()
     try:
       let frame = frames[i mod frames.len]
-      stdout.write spinnerFooterBytes(frame, label, ticker, elapsed.int)
-      stdout.flushFile
+      syncWrite spinnerFooterBytes(frame, label, ticker, elapsed.int)
     except CatchableError: discard
     sleep 80
     inc i
   try:
-    stdout.write SpinnerCleanupBytes
-    stdout.flushFile
+    syncWrite SpinnerCleanupBytes
   except CatchableError: discard
 
 proc liveLabel*(base: string, slurped: int): string =

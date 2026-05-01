@@ -339,15 +339,18 @@ proc fullRedraw*(ed: var LineEditor) =
   ## Wipe the previously rendered area, repaint prompt + buffer, place
   ## the cursor at the visual position derived from ``ed.line.position``.
   ## Updates ``ed.renderRow`` to match.
+  ##
+  ## All bytes for the repaint are coalesced into a single ``write``
+  ## call so the underlying ``stdout.flushFile`` runs once per keystroke
+  ## (was: ~5 flushes per redraw, visible on Windows conhost as flicker
+  ## because conhost paints between flushes). The whole thing is also
+  ## wrapped in DEC 2026 synchronized-output (``CSI ? 2026 h/l``) so
+  ## conhost treats the repaint as one atomic frame; terminals that
+  ## don't recognize the mode ignore it silently.
   if ed.getWidth != nil:
     let w = ed.getWidth()
     if w > 0: ed.width = w
   let width = max(2, ed.width)
-  # Walk back to the anchor row, col 0, then erase.
-  if ed.renderRow > 0:
-    ed.write "\x1b[" & $ed.renderRow & "A"
-  ed.write "\r\x1b[J"
-  ed.write renderBuffer(ed.line.text, ed.prompt, ed.contPrompt, width)
   let pw = if ed.promptW > 0: ed.promptW else: visualCols(ed.prompt)
   let cw = if ed.contPromptW > 0: ed.contPromptW else: visualCols(ed.contPrompt)
   ed.promptW = pw
@@ -356,9 +359,18 @@ proc fullRedraw*(ed: var LineEditor) =
   let endRow = total - 1
   let (targetRow, targetCol) = cursorVisual(ed.line.text, ed.line.position,
                                             pw, cw, width)
+  var buf = "\x1b[?2026h"
+  if ed.renderRow > 0:
+    buf.add "\x1b[" & $ed.renderRow & "A"
+  buf.add "\r\x1b[J"
+  buf.add renderBuffer(ed.line.text, ed.prompt, ed.contPrompt, width)
   if endRow > targetRow:
-    emitMoveUp(ed, endRow - targetRow)
-  emitColumn(ed, targetCol)
+    buf.add "\x1b[" & $(endRow - targetRow) & "A"
+  buf.add "\r"
+  if targetCol > 0:
+    buf.add "\x1b[" & $targetCol & "C"
+  buf.add "\x1b[?2026l"
+  ed.write buf
   ed.renderRow = targetRow
 
 proc parkAtEnd(ed: var LineEditor) =

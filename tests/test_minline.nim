@@ -201,6 +201,48 @@ proc run(d: Driver, ed: var LineEditor, prompt = "> "): string =
   let widthProc: WidthProc = proc(): int = d.width
   ed.readLineWith(prompt, getCh, write, getWidth = widthProc)
 
+# ---------------- Atomic-redraw invariant ----------------
+
+suite "minline: atomic single-flush redraw":
+  ## On Windows conhost, splitting a redraw across multiple writes /
+  ## flushes (or omitting DEC 2026 synchronized output) makes conhost
+  ## paint mid-frame, which manifests as flicker. The editor's
+  ## ``fullRedraw`` MUST emit one buffered write per call, wrapped in
+  ## ``CSI ? 2026 h`` ... ``CSI ? 2026 l``, or the flicker comes back.
+
+  test "fullRedraw: exactly one write per call, sync-wrapped":
+    var ed = initEditor()
+    ed.line.text = "hello world"
+    ed.line.position = 11
+    ed.prompt = "❯ "
+    ed.contPrompt = "  "
+    ed.width = 80
+    ed.renderRow = 0
+    var writes: seq[string] = @[]
+    ed.write = proc(s: string) = writes.add s
+    ed.getWidth = proc(): int = 80
+    fullRedraw(ed)
+    check writes.len == 1
+    check writes[0].startsWith("\x1b[?2026h")
+    check writes[0].endsWith("\x1b[?2026l")
+    check "❯ hello world" in writes[0]
+
+  test "fullRedraw: multi-line buffer also fits in one sync frame":
+    var ed = initEditor()
+    ed.line.text = "first\nsecond"
+    ed.line.position = 12
+    ed.prompt = "❯ "
+    ed.contPrompt = "  "
+    ed.width = 80
+    ed.renderRow = 0
+    var writes: seq[string] = @[]
+    ed.write = proc(s: string) = writes.add s
+    ed.getWidth = proc(): int = 80
+    fullRedraw(ed)
+    check writes.len == 1
+    check writes[0].startsWith("\x1b[?2026h")
+    check writes[0].endsWith("\x1b[?2026l")
+
 # ---------------- Pure helper tests ----------------
 
 suite "minline pure helpers":
