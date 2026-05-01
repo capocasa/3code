@@ -5,3 +5,4 @@ nimcache/
 
 .agents/
 src/threecode.out
+tests/golden/*.actual
