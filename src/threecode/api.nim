@@ -217,20 +217,24 @@ proc receiptBarBytes*(label: string): string =
   "\x1b[2m  " & label & "\x1b[0m"
 
 proc submitTransitionBytes*(line: string, hadPending, hadGap: bool,
-                            receiptLabel: string): string =
+                            receiptLabel: string, hasBar = true): string =
   ## Full byte sequence for the moment the user submits a prompt.
   ##
   ## Walks back from the cursor (which sits one row below the user's
   ## input) to the row that should host the receipt:
   ##
+  ## - `hasBar = false` (prompt-only startup state — no token bar
+  ##   painted yet, no prior turn): walk up `splitLines(line).len` so
+  ##   the cursor lands on the row that held the static prompt. No
+  ##   receipt to paint (`hadPending` is false in this state).
   ## - `hadGap = true` (typing-ready state from `endTurn`): there's a
   ##   blank row above the bar between the last LLM line and the bar.
   ##   Walk up `splitLines(line).len + 2` so the cursor lands on the
   ##   *gap* row. The receipt is painted there, *replacing the blank*
   ##   — leaving the receipt flush against the LLM content with no
   ##   permanent gap in scroll history.
-  ## - `hadGap = false` (first turn — welcome painted bar without
-  ##   gap, no LLM content to gap from): walk up
+  ## - `hadGap = false` + `hasBar = true` (first turn — welcome
+  ##   painted bar without gap, no LLM content to gap from): walk up
   ##   `splitLines(line).len + 1` to land on the bar row. No receipt
   ##   to paint anyway (`hadPending` is false on first turn).
   ##
@@ -248,7 +252,10 @@ proc submitTransitionBytes*(line: string, hadPending, hadGap: bool,
   ## ticker-overlay row.
   let lines = line.splitLines
   let n = lines.len
-  let walkBack = if hadGap: n + 2 else: n + 1
+  let walkBack =
+    if not hasBar: n
+    elif hadGap: n + 2
+    else: n + 1
   result = "\x1b[" & $walkBack & "A"
   result.add "\r\x1b[J"
   if hadPending:
@@ -354,6 +361,43 @@ proc liveLabel*(base: string, slurped: int): string =
   let down = tokenSlot("↓", slurped div 4)
   if base.len > 0: base & "  " & up & "  " & cached & "  " & down
   else: up & "  " & cached & "  " & down
+
+proc paintInitialBar*(p: Profile) =
+  ## Welcome-time paint: one blank gap row, then bar+prompt at zero
+  ## values *with* a `○ 0%` context indicator (the empty-circle glyph
+  ## is the same one a populated bar carries — at startup we just
+  ## haven't sent a request yet, so promptTokens is 0). Bright cyan
+  ## prompt — typing-ready. Sets `currentBarHasGap = true` to match
+  ## `endTurn`'s shape between turns.
+  stdout.write "\n"
+  let window = contextWindowFor(p.model)
+  let baseLabel = contextLabel(0, window)
+  paintBarPrompt(liveLabel(baseLabel, 0), BrightPromptColor)
+  currentBarHasGap = true
+
+proc paintPromptOnly*(promptColor: string) =
+  ## Paint just the prompt `❯ ` at the cursor's current row, no token
+  ## bar above. Used in the pre-first-turn startup state where we have
+  ## no real token values yet — the bar stays hidden until the first
+  ## model response brings them. Cursor parks at col 0 of the prompt
+  ## row.
+  ##
+  ## Leaves `currentBarLabel = ""` and `currentBarHasGap = false` —
+  ## the signals `readInput`, `emitUserSubmit`, and the slash-command
+  ## repaint use to detect prompt-only mode.
+  stdout.write "\x1b[2K" & promptColor & "❯ \x1b[0m\r"
+  stdout.flushFile
+  currentBarLabel = ""
+  currentBarHasGap = false
+
+proc paintInitialPrompt*(p: Profile) =
+  ## Welcome-time paint when starting fresh (no prior session, no
+  ## prior usage to show): one blank gap row, then just the bright
+  ## cyan prompt — the token bar stays hidden until the first model
+  ## response. Mirrors the shape `endTurn` would leave between turns,
+  ## minus the bar.
+  stdout.write "\n"
+  paintPromptOnly(BrightPromptColor)
 
 
 var spinnerRunning = false  # only mutated by main thread
@@ -921,17 +965,20 @@ proc endTurn*() =
 
 proc emitUserSubmit*(line: string) =
   ## Run the user-submit transition described in `submitTransitionBytes`
-  ## using the current `pendingHint` and `currentBarHasGap` state. The
-  ## receipt overwrites the gap (or the bar's row if no gap), echoes
-  ## the user's input as scroll-history content, and parks the cursor
-  ## ready for the next `callModel`'s leading `\n`.
+  ## using the current `pendingHint`, `currentBarHasGap`, and
+  ## `currentBarLabel` state. The receipt overwrites the gap (or the
+  ## bar's row if no gap), echoes the user's input as scroll-history
+  ## content, and parks the cursor ready for the next `callModel`'s
+  ## leading `\n`. When `currentBarLabel` is empty (prompt-only
+  ## startup state), the walk-back skips the (non-existent) bar row.
   let receiptLabel =
     if pendingHint.active:
       tokenLineLabel(pendingHint.usage, pendingHint.window, pendingHint.elapsed)
     else: ""
   let hadGap = currentBarHasGap
+  let hasBar = currentBarLabel.len > 0
   stdout.write submitTransitionBytes(line, pendingHint.active, hadGap,
-                                     receiptLabel)
+                                     receiptLabel, hasBar)
   stdout.flushFile
   pendingHint.active = false
   currentBarLabel = ""

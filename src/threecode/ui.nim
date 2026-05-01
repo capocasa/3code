@@ -616,19 +616,22 @@ proc buildUserMessage*(messages: JsonNode, raw: string): string =
     body
 
 proc readInput*(editor: var minline.LineEditor, done: var bool): string =
-  ## Read a line of user input. Entry contract: bar+prompt are visible
-  ## at the current bottom of the cursor's content (bar at row K,
-  ## prompt at row K+1, cursor at K col 0). Walks down to the prompt
-  ## row, clears it (so minline's prompt overwrites the static dim
-  ## `❯ `), reads input. After Enter the cursor is wherever minline
-  ## left it; we don't try to clean up — `emitUserSubmit` will walk
-  ## back to the bar row using `splitLines(line).len + 1` and
-  ## clear-to-end-of-screen from there, repainting the receipt over
-  ## the old bar row.
-  #
-  # Move from bar row down to prompt row + clear (so the bright cyan
-  # `❯ ` minline draws lands on a clean row, replacing the dim glyph).
-  stdout.write "\n\r\x1b[2K"
+  ## Read a line of user input. Entry contract: the chrome at the
+  ## bottom of the cursor's content is either bar+prompt (bar at K,
+  ## prompt at K+1, cursor at K col 0) or prompt-only (prompt at K,
+  ## cursor at K col 0 — the pre-first-turn startup state, signalled
+  ## by `currentBarLabel == ""`). In bar mode we walk down one row to
+  ## the prompt and clear; in prompt-only mode we clear in place so
+  ## minline's bright cyan `❯ ` overwrites the static dim glyph. After
+  ## Enter the cursor is wherever minline left it; we don't try to
+  ## clean up — `emitUserSubmit` walks back using
+  ## `splitLines(line).len + (1 if bar / 2 if gap / 0 if prompt-only)`
+  ## and clear-to-end-of-screen from there.
+  if currentBarLabel.len == 0:
+    # Prompt-only mode: cursor sits on the prompt row already.
+    stdout.write "\r\x1b[2K"
+  else:
+    stdout.write "\n\r\x1b[2K"
   var line = try: editor.readLine("❯ ")
              except EOFError:
                done = true; return ""
@@ -651,12 +654,16 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
                  return ""
     line = line[0 ..< line.len - 1] & "\n" & cont
   if line.strip == "":
-    # Empty input: walk back to bar row and repaint bar+prompt so
-    # they stay glued to the cursor's bottom (otherwise each empty
-    # Enter would push the prompt one row lower than the bar).
+    # Empty input: walk back to the prompt-row floor so the chrome
+    # stays glued to the cursor's bottom (otherwise each empty Enter
+    # would push the prompt one row lower than the bar).
     let n = max(1, line.splitLines.len)
-    stdout.write "\x1b[" & $(n + 1) & "A\r\x1b[J"
-    repaintBarPrompt(BrightPromptColor)
+    if currentBarLabel.len == 0:
+      stdout.write "\x1b[" & $n & "A\r\x1b[J"
+      paintPromptOnly(BrightPromptColor)
+    else:
+      stdout.write "\x1b[" & $(n + 1) & "A\r\x1b[J"
+      repaintBarPrompt(BrightPromptColor)
     return ""
   return line
 

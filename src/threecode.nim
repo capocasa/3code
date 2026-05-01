@@ -379,25 +379,41 @@ proc main() =
   if prof.name == "":
     prof = bootstrapProvider(editor)
   session.profileName = prof.name
-  # Draw the initial token bar + bright cyan prompt at zero values,
-  # with one blank row of breathing room above the bar — same shape
-  # as the typing-ready state `endTurn` leaves between turns. From
-  # here on the bar+prompt are *always* visible — `emitUserSubmit`
-  # repaints them dim (as the receipt) and re-echoes input on each
-  # user submit, `streamHttp` slides them down per content line, etc.
-  stdout.write "\n"
-  paintBarPrompt(liveLabel("", 0), BrightPromptColor)
-  currentBarHasGap = true
+  # Draw the initial chrome at the bottom of the welcome screen. On
+  # resume with prior usage we paint bar+prompt carrying the last
+  # response's tokens (typing-ready shape from `endTurn`). On resume
+  # without usage we still paint the bar at zeros. On a fresh start
+  # we paint *just* the prompt — the bar stays hidden until the first
+  # model response brings real values to put in it. From the first
+  # `paintBarPrompt` onward the bar+prompt are always visible.
   if resume:
     stdout.write "\n"
     stdout.styledWriteLine styleDim, &"● resumed {sessionIdFromPath(session.savePath)}", resetStyle
-    replaySessionTail(messages, session.toolLog,
-                      contextWindowFor(prof.model), prof.family)
-    stdout.write "\n"
+    let window = contextWindowFor(prof.model)
+    let lastUsage = replaySessionTail(messages, session.toolLog,
+                                      window, prof.family)
+    if lastUsage.totalTokens > 0:
+      # Same shape as `endTurn`: gap row + bar+prompt with bright cyan
+      # (typing-ready) prompt, carrying the last response's usage so
+      # the bar replaces what would otherwise be the last receipt.
+      # `pendingHint` is primed so the next user submit converts this
+      # bar into the dim receipt for that response.
+      stdout.write "\n"
+      let label = tokenLineLabel(lastUsage, window)
+      stdout.write barFooterBytes(label, BrightPromptColor)
+      stdout.flushFile
+      currentBarLabel = label
+      currentBarHasGap = true
+      pendingHint = (active: true, usage: lastUsage,
+                     window: window, elapsed: -1)
+    else:
+      paintInitialBar(prof)
     if prompt != "":
       messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
       refreshSystemPrompt(messages, prof)
       runTurnsInteractive(prof, messages, session)
+  else:
+    paintInitialPrompt(prof)
   while true:
     var done = false
     let line = readInput(editor, done)
@@ -408,11 +424,15 @@ proc main() =
     let t = line.strip
     if t in ["exit", "quit", ":q", ":quit", ":exit"]: break
     if handleCommand(line, messages, session, prof, editor):
-      # Slash command output advanced the cursor; bar+prompt at the
-      # row where they stood before the user typed are now stale. Drop
-      # a fresh bar+prompt at the new bottom so the chrome stays glued
-      # to the cursor flow.
-      paintBarPrompt(currentBarLabel, BrightPromptColor)
+      # Slash command output advanced the cursor; the chrome at the
+      # row where it stood before the user typed is now stale. Drop a
+      # fresh copy at the new bottom so it stays glued to the cursor
+      # flow. In prompt-only mode (pre-first-turn) the chrome is just
+      # the prompt; otherwise it's bar+prompt.
+      if currentBarLabel.len == 0:
+        paintPromptOnly(BrightPromptColor)
+      else:
+        paintBarPrompt(currentBarLabel, BrightPromptColor)
       continue
     if prof.name == "":
       stdout.styledWriteLine fgMagenta,

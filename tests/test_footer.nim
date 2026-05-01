@@ -1,5 +1,5 @@
-import std/[unicode, unittest, strutils, parseutils]
-import threecode/[api, display, types]
+import std/[unicode, unittest, strutils, parseutils, json, os]
+import threecode/[api, display, types, compact]
 
 ## Self-eval for the streaming footer layout.
 ##
@@ -537,6 +537,37 @@ suite "token receipt placement":
     check g.row == 3
     check g.col == 0
 
+  test "submitTransitionBytes: hasBar=false walks back N (prompt-only)":
+    # Prompt-only startup state: no bar painted, prompt at row 0,
+    # user types "hello", Enter lands cursor at row 1.
+    let g = newGrid()
+    g.feed "\x1b[2K" & BrightPromptColor & "❯ \x1b[0m\r"
+    g.feed "\r\x1b[2K"             # readInput's in-place clear
+    g.feed "❯ hello\n"             # minline echo + Enter
+    g.feed submitTransitionBytes("hello", hadPending = false,
+                                 hadGap = false, "", hasBar = false)
+    # Walk-back nLines=1 → row 0 (the prompt row). \x1b[J wipes from
+    # there. No receipt (first turn). \n\n + echo at row 2.
+    check rowText(g, 0).strip == ""
+    check rowText(g, 1).strip == ""
+    check rowText(g, 2).startsWith("❯ hello")
+    check g.row == 3
+    check g.col == 0
+
+  test "submitTransitionBytes: hasBar=false multi-line walks back N":
+    let g = newGrid()
+    g.feed "\x1b[2K" & BrightPromptColor & "❯ \x1b[0m\r"
+    g.feed "\r\x1b[2K"
+    g.feed "❯ foo\n"
+    g.feed "  bar\n"
+    # Cursor at row 2. nLines=2, hasBar=false → walk back 2 → row 0.
+    g.feed submitTransitionBytes("foo\nbar", hadPending = false,
+                                 hadGap = false, "", hasBar = false)
+    check rowText(g, 0).strip == ""
+    check rowText(g, 1).strip == ""
+    check rowText(g, 2).startsWith("❯ foo")
+    check rowText(g, 3).startsWith("  bar")
+
 # ---------------- runTurns lifecycle ----------------
 #
 # The key state-flag invariant: `pendingHint.active` is set after
@@ -616,6 +647,52 @@ suite "runTurns boundaries":
       emitUserSubmit("hello")
       check currentBarLabel == ""
       check not currentBarHasGap
+
+  test "paintInitialBar: startup label leads with `○ 0%` context":
+    # Bug: welcome-time paint passed an empty base to liveLabel, so
+    # the bar showed `↑0  ↻0  ↓0` with no context indicator. Should
+    # match the shape a populated bar carries: glyph + percent first.
+    let savedLabel = currentBarLabel
+    let savedGap = currentBarHasGap
+    let p = Profile(model: "glm-4.7")
+    paintInitialBar(p)
+    check currentBarLabel.startsWith("○ 0%")
+    check "↑0" in currentBarLabel
+    check currentBarHasGap
+    currentBarLabel = savedLabel
+    currentBarHasGap = savedGap
+
+  test "paintInitialPrompt: prompt-only, no bar, no stale state":
+    # Fresh-startup paint hides the token bar and shows just the
+    # bright cyan prompt. `currentBarLabel` and `currentBarHasGap`
+    # are the signals readInput / emitUserSubmit / the slash-command
+    # repaint use to detect prompt-only mode — must end up cleared
+    # even if a previous run left them populated.
+    let savedLabel = currentBarLabel
+    let savedGap = currentBarHasGap
+    currentBarLabel = "stale"
+    currentBarHasGap = true
+    let p = Profile(model: "glm-4.7")
+    paintInitialPrompt(p)
+    check currentBarLabel == ""
+    check not currentBarHasGap
+    currentBarLabel = savedLabel
+    currentBarHasGap = savedGap
+
+  test "paintPromptOnly: clears state, paints in place":
+    # Used by readInput's empty-Enter handler and the slash-command
+    # repaint when in prompt-only mode. Resets the bar-mode signals
+    # so the next readInput knows to clear in place rather than walk
+    # down to a non-existent bar row.
+    let savedLabel = currentBarLabel
+    let savedGap = currentBarHasGap
+    currentBarLabel = "stale"
+    currentBarHasGap = true
+    paintPromptOnly(BrightPromptColor)
+    check currentBarLabel == ""
+    check not currentBarHasGap
+    currentBarLabel = savedLabel
+    currentBarHasGap = savedGap
 
 # ---------------- Full turn lifecycle ----------------
 #
@@ -784,6 +861,47 @@ suite "full turn lifecycle":
     g.feed "\x1b[?25h"
     check not g.cursorHidden
 
+  test "fresh startup: prompt-only → first turn paints bar, no stale row":
+    # Welcome paints banner, paintInitialPrompt drops one blank gap
+    # row + the bright cyan prompt — no token bar above. User types,
+    # emitUserSubmit walks back N (hasBar=false) so the prompt's row
+    # is wiped, NOT some non-existent bar row. After the first turn's
+    # callModel paints the bar, the layout is back to normal.
+    let g = newGrid()
+    g.feed "  type a prompt.\n"
+    # paintInitialPrompt: blank gap + prompt, cursor at col 0 of prompt row.
+    g.feed "\n"
+    g.feed "\x1b[2K" & BrightPromptColor & "❯ \x1b[0m\r"
+    let promptRow = g.row
+    check rowText(g, promptRow).startsWith("❯")
+    check rowText(g, promptRow - 1).strip == ""
+    # No bar row above the prompt: the row above is just the gap.
+    check "↑" notin rowText(g, promptRow - 1)
+    # readInput in prompt-only mode: clear in place (no walk-down).
+    g.feed "\r\x1b[2K"
+    g.feed "❯ hello\n"           # minline echo
+    # Cursor at promptRow + 1.
+    # emitUserSubmit with hasBar=false walks back N=1 to promptRow,
+    # clears, \n\n + echo. No receipt (first turn).
+    g.feed submitTransitionBytes("hello", hadPending = false,
+                                 hadGap = false, "", hasBar = false)
+    check rowText(g, promptRow).strip == ""               # cleared
+    check rowText(g, promptRow + 1).strip == ""           # blank separator
+    check rowText(g, promptRow + 2).startsWith("❯ hello") # echo
+    # Now callModel's leading \n + content + paintBarPrompt paints
+    # the bar; from here the normal lifecycle resumes.
+    g.feed "\n"                                            # scratch
+    g.feed "\x1b[37m\x1b[1m● \x1b[0m"
+    g.feed styledLineBytes("hi back")
+    g.feed barFooterBytes("ctx 1%  ↑10  ↻0  ↓7  1s", DimPromptColor)
+    let barRow = block:
+      var found = -1
+      for r in 0 ..< g.rows.len:
+        if "↓7" in rowText(g, r): found = r; break
+      found
+    check barRow >= 0
+    check "❯" in rowText(g, barRow + 1)
+
   test "multi-line content in one chunk: bar painted after every \\n":
     # Per-line repaint pattern: bar visible at every checkpoint.
     let g = newGrid()
@@ -805,3 +923,104 @@ suite "full turn lifecycle":
     check "Line 3" in rowText(g, 2)
     check "lbl" in rowText(g, 3)
     check "❯" in rowText(g, 4)
+
+# ---------------- Resume bar shape ----------------
+#
+# On `-r`, after replaying the tail, the live token bar at the bottom
+# should carry the *last response's* usage (so the user sees what the
+# previous turn cost without needing the inline receipt above), and
+# that response's inline receipt is suppressed. `pendingHint` is
+# primed so the next user submit converts the bar into the receipt.
+
+suite "resume bar":
+  proc replayTo(s: string, messages: JsonNode): (string, Usage) =
+    let path = getTempDir() / "3code_resume_capture_" & s
+    let saved = stdout
+    let f = open(path, fmWrite)
+    stdout = f
+    var u: Usage
+    try:
+      u = replaySessionTail(messages, @[], 200_000, "glm")
+    finally:
+      stdout.flushFile
+      stdout = saved
+      close(f)
+    let captured = readFile(path)
+    try: removeFile(path) except OSError: discard
+    (captured, u)
+
+  test "replaySessionTail returns last assistant's usage":
+    let messages = parseJson("""[
+      {"role":"system","content":"sys"},
+      {"role":"user","content":"hi"},
+      {"role":"assistant","content":"first answer",
+       "usage":{"promptTokens":100,"completionTokens":10,
+                "totalTokens":110,"cachedTokens":0}},
+      {"role":"user","content":"again"},
+      {"role":"assistant","content":"second answer",
+       "usage":{"promptTokens":200,"completionTokens":20,
+                "totalTokens":220,"cachedTokens":50}}
+    ]""")
+    let (_, last) = replayTo("ret", messages)
+    check last.totalTokens == 220
+    check last.promptTokens == 200
+    check last.completionTokens == 20
+    check last.cachedTokens == 50
+
+  test "replaySessionTail suppresses last assistant's receipt":
+    # The last response's token line lives in the bottom bar (painted
+    # by the resume code in `main`), not as a scrollback receipt. So
+    # the last `↓20` should NOT appear in the replay output.
+    let messages = parseJson("""[
+      {"role":"user","content":"again"},
+      {"role":"assistant","content":"second answer",
+       "usage":{"promptTokens":200,"completionTokens":20,
+                "totalTokens":220,"cachedTokens":50}}
+    ]""")
+    let (captured, _) = replayTo("suppress", messages)
+    check "second answer" in captured
+    check "↓20" notin captured
+
+  test "replaySessionTail keeps non-last receipts in scrollback":
+    # Only the *last* assistant in the replayed tail gets the bar
+    # treatment. Earlier assistant iterations within the same user turn
+    # (multi-iteration: tool call → tool result → final answer) keep
+    # their inline receipts so the user sees token cost per iteration.
+    let messages = parseJson("""[
+      {"role":"user","content":"go"},
+      {"role":"assistant","content":"answer one",
+       "tool_calls":[{"id":"t1","function":{"name":"bash",
+                                            "arguments":"{\"command\":\"ls\"}"}}],
+       "usage":{"promptTokens":100,"completionTokens":11,
+                "totalTokens":111,"cachedTokens":0}},
+      {"role":"tool","tool_call_id":"t1","content":"out"},
+      {"role":"assistant","content":"answer two",
+       "usage":{"promptTokens":200,"completionTokens":22,
+                "totalTokens":222,"cachedTokens":0}}
+    ]""")
+    let (captured, _) = replayTo("keep", messages)
+    check "↓11" in captured
+    check "↓22" notin captured
+
+  test "post-replay bar carries last response's tokens at bottom":
+    # The byte sequence main writes after replay when lastUsage > 0:
+    # gap row + bar+prompt with bright cyan prompt. Pin it via the
+    # grid renderer.
+    let g = newGrid()
+    let lastUsage = Usage(
+      promptTokens: 200, completionTokens: 20,
+      totalTokens: 220, cachedTokens: 50,
+    )
+    g.feed "● resumed abc123\n"
+    g.feed "(replayed content here)\n"
+    g.feed "\n"
+    let label = tokenLineLabel(lastUsage, 200_000)
+    g.feed barFooterBytes(label, BrightPromptColor)
+    var barRow = -1
+    for r in 0 ..< g.rows.len:
+      if "↓20" in rowText(g, r):
+        barRow = r; break
+    check barRow >= 0
+    check "↑150" in rowText(g, barRow)
+    check "↻50" in rowText(g, barRow)
+    check "❯" in rowText(g, barRow + 1)

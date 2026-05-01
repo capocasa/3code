@@ -181,9 +181,10 @@ proc printActionResult*(act: Action, res: string, code: int, idx: int, diff = ""
 
 proc contextLabel*(promptTokens, window: int): string =
   ## "○ 12%" / "◔ 25%" / … / "● 92%". Empty when there's no useful
-  ## number (no window, or no tokens yet). Same shape used by the live
-  ## spinner and the per-turn token summary.
-  if window <= 0 or promptTokens <= 0: return ""
+  ## number (no window). Previously also omitted when there were no tokens yet,
+  ## which hid the context indicator at startup. We now always show a bullet
+  ## with a percentage, defaulting to 0% when `promptTokens` is zero.
+  if window <= 0: return ""
   let pct = int(promptTokens.float / window.float * 100.0)
   let glyph =
     if pct < 20: "○"
@@ -458,12 +459,15 @@ proc printSessionList*(paths: seq[string], currentPath: string, showCwd: bool) =
       resetStyle, cwdStr, snip, "\n"
 
 proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
-                       window: int, family: string) =
+                       window: int, family: string): Usage =
   ## Show the last user turn and everything after, so a resumed session
   ## drops the user back into context without replaying the whole history.
   ## Renders via the same helpers the live path uses; usage is read from
   ## each assistant message's inline `usage` field (legacy sessions saved
-  ## before the inline format simply skip the token line).
+  ## before the inline format simply skip the token line). The last
+  ## assistant's inline receipt is suppressed and its usage is returned
+  ## instead — the caller paints the live token bar with it, so the
+  ## resumed shape matches the post-`endTurn` typing-ready state.
   if messages == nil or messages.kind != JArray or messages.len == 0: return
   var start = messages.len
   for i in countdown(messages.len - 1, 0):
@@ -471,6 +475,11 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
       start = i
       break
   if start >= messages.len: return
+  var lastAssistant = -1
+  for i in countdown(messages.len - 1, start):
+    if messages[i]{"role"}.getStr == "assistant":
+      lastAssistant = i
+      break
   var toolIdx = 0
   for i in 0 ..< start:
     let m = messages[i]
@@ -500,7 +509,9 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
       let c = m{"content"}.getStr("").strip
       renderAssistantContent(c)
       let u = usageFromJson(m{"usage"})
-      if u.totalTokens > 0:
+      if i == lastAssistant:
+        result = u
+      elif u.totalTokens > 0:
         renderTokenLine(u, window)
       let tcs = m{"tool_calls"}
       let hasTools = tcs != nil and tcs.kind == JArray and tcs.len > 0
