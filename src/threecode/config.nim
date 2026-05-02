@@ -1,4 +1,4 @@
-import std/[os, parsecfg, streams, strformat, strutils, tables, terminal, uri]
+import std/[os, parsecfg, sequtils, streams, strformat, strutils, tables, terminal, uri]
 import types, prompts
 
 type
@@ -13,6 +13,13 @@ type
     ## ids on load and never written back out.
     name*, url*, key*, modelPrefix*, family*: string
     models*: seq[string]
+    reasoning*: string  ## persisted current reasoning level for this
+                        ## provider ("low" / "medium" / "high"), empty if
+                        ## the user hasn't picked one — `buildProfile`
+                        ## then falls back to the known-good default.
+    reasonings*: seq[string]  ## available reasoning levels for `:reasoning`
+                              ## listing. Empty means "fall back to the
+                              ## family default" (`defaultReasoningsFor`).
 
 proc shortModel*(model: string): string =
   ## Everything after the last `/` in a model id. This is the
@@ -183,6 +190,8 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec]) =
         of "model_prefix": prov.modelPrefix = v
         of "family": prov.family = v
         of "models": prov.models = splitModels(v)
+        of "reasoning": prov.reasoning = v.strip.toLowerAscii
+        of "reasonings": prov.reasonings = splitModels(v).mapIt(it.toLowerAscii)
         else: discard
       else: discard
     of cfgError:
@@ -212,6 +221,10 @@ proc writeConfigFile*(path: string, current: string,
     if pr.family != "":
       buf.add "family = " & quoteVal(pr.family) & "\n"
     buf.add "models = " & quoteVal(formatModels(pr.models)) & "\n"
+    if pr.reasoning != "":
+      buf.add "reasoning = " & quoteVal(pr.reasoning) & "\n"
+    if pr.reasonings.len > 0:
+      buf.add "reasonings = " & quoteVal(formatModels(pr.reasonings)) & "\n"
   writeFile(path, buf)
 
 proc configPath*(): string =
@@ -231,6 +244,25 @@ proc resolveFamily*(prov: ProviderRec, prof: Profile): string =
   if experimentalEnabled and prov.family.strip != "":
     return prov.family.strip.toLowerAscii
   "glm"
+
+proc resolveReasoning*(prov: ProviderRec, prof: Profile): string =
+  ## Reasoning level resolution at profile-build time:
+  ## 1. provider config `reasoning = ...` (user picked / persisted)
+  ## 2. KnownGoodCombos default for this (provider, model)
+  ## 3. "" — caller treats as "no wire param"
+  if prov.reasoning != "": return prov.reasoning
+  let dot = prof.name.find('.')
+  if dot >= 0:
+    let kg = knownGoodReasoning(prof.name[0 ..< dot], prof.model)
+    if kg != "": return kg
+  ""
+
+proc availableReasonings*(prov: ProviderRec, family: string): seq[string] =
+  ## Levels offered by `:reasoning` for the active provider+model. The
+  ## per-provider config override wins; otherwise fall back to the
+  ## family's default list.
+  if prov.reasonings.len > 0: prov.reasonings
+  else: defaultReasoningsFor(family)
 
 proc buildProfile*(current: string, providers: seq[ProviderRec],
                   wanted: string): Profile =
@@ -259,6 +291,7 @@ proc buildProfile*(current: string, providers: seq[ProviderRec],
       let (_, ver, vrt) = knownGoodTags(pr.name, fullModel)
       prof.version = ver
       prof.variant = vrt
+      prof.reasoning = resolveReasoning(pr, prof)
       return prof
   Profile()
 
@@ -309,6 +342,7 @@ proc loadProfile*(wanted: string): Profile =
   let (_, ver, vrt) = knownGoodTags(prov.name, fullModel)
   prof.version = ver
   prof.variant = vrt
+  prof.reasoning = resolveReasoning(prov, prof)
   if wanted == "" and not experimentalEnabled and not isKnownGood(prof):
     let fallback = firstKnownGoodCombo(providers)
     if fallback != "":

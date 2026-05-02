@@ -2,8 +2,9 @@ import std/[json, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
-                      ":prompt", ":show", ":log", ":sessions", ":compact",
-                      ":summarize", ":think", ":q", ":quit", ":exit"]
+                      ":reasoning", ":prompt", ":show", ":log", ":sessions",
+                      ":compact", ":summarize", ":think",
+                      ":q", ":quit", ":exit"]
 
 proc completionFor*(line: string): seq[string] =
   let words = line.split(' ')
@@ -25,6 +26,9 @@ proc completionFor*(line: string): seq[string] =
     for m in orderedModels(prov):
       if experimentalEnabled or knownGoodFamily(prov.name, m) != "":
         result.add shortModel(m)
+    return
+  if words[0] == ":reasoning" and words.len == 2:
+    for r in ReasoningLevels: result.add r
     return
 
 proc readRequired*(editor: var minline.LineEditor, prompt: string,
@@ -462,6 +466,50 @@ proc cmdModel(arg: string, prof: var Profile) =
     stdout.styledWriteLine fgMagenta,
       "  usage: :model [<name>]", resetStyle
 
+proc cmdReasoningList(prof: Profile) =
+  let prov = currentProvider()
+  if prov.name == "":
+    hintLn "  no provider selected", resetStyle
+    return
+  let levels = availableReasonings(prov, prof.family)
+  if levels.len == 0:
+    hintLn &"  {prof.family}: no reasoning knob", resetStyle
+    return
+  for r in levels:
+    let mark = if r == prof.reasoning: "*" else: " "
+    hintLn "  ", mark, " ", resetStyle, r
+
+proc cmdReasoningSelect(target: string, prof: var Profile) =
+  let prov = currentProvider()
+  if prov.name == "":
+    stdout.styledWriteLine fgMagenta, "  no provider selected", resetStyle
+    return
+  let value = target.toLowerAscii
+  let levels = availableReasonings(prov, prof.family)
+  if value notin levels:
+    stdout.styledWriteLine fgMagenta,
+      &"  unknown reasoning level: {target} (choose from {levels.join(\" \")})",
+      resetStyle
+    return
+  prof.reasoning = value
+  for i, pr in activeProviders:
+    if pr.name == prov.name:
+      activeProviders[i].reasoning = value
+      break
+  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  showProfile(prof)
+
+proc cmdReasoning(arg: string, prof: var Profile) =
+  let parts = arg.splitWhitespace()
+  case parts.len
+  of 0:
+    cmdReasoningList(prof)
+  of 1:
+    cmdReasoningSelect(parts[0], prof)
+  else:
+    stdout.styledWriteLine fgMagenta,
+      "  usage: :reasoning [<level>]", resetStyle
+
 proc nearestCommand(name: string): string =
   var bestDist = high(int)
   for c in CommandNames:
@@ -672,6 +720,8 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
   of ":provider":
     cmdProvider(arg, editor, prof)
     session.profileName = prof.name
+  of ":reasoning":
+    cmdReasoning(arg, prof)
   of ":prompt":
     let sp = buildSystemPrompt(prof)
     stdout.write sp

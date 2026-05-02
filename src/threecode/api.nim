@@ -1007,8 +1007,14 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   }
   body["tools"] = setup(p).tools
   body["tool_choice"] = %"auto"
-  if p.family == "gpt-oss":
-    body["reasoning_effort"] = %"high"
+  if p.reasoning.len > 0:
+    case p.family
+    of "gpt-oss":
+      body["reasoning_effort"] = %p.reasoning
+    of "glm":
+      let on = p.reasoning != "low"
+      body["thinking"] = %*{"type": (if on: "enabled" else: "disabled")}
+    else: discard
   let bodyStr = $body
   let t0 = epochTime()
   decayLevel(serverRetryLevel, serverLastTs, t0)

@@ -29,6 +29,10 @@ type
     ## `family` may also come from the per-provider config override.
     name*, url*, key*, model*: string
     family*, version*, variant*: string
+    reasoning*: string  ## reasoning/thinking effort level: "low", "medium",
+                        ## "high", or "" when the model has no such knob.
+                        ## Mapped to a wire field in `callModel` per family
+                        ## (gpt-oss: `reasoning_effort`; glm: `thinking.type`).
   Usage* = object
     promptTokens*, completionTokens*, totalTokens*, cachedTokens*: int
   ToolRecord* = object

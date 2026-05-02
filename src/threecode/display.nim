@@ -396,8 +396,10 @@ proc showProfile*(p: Profile) =
   if p.name == "": return
   let dot = p.name.find('.')
   let provider = if dot < 0: p.name else: p.name[0 ..< dot]
-  stdout.styledWriteLine fgCyan, styleBright, "  provider ", resetStyle, provider
-  stdout.styledWriteLine fgCyan, styleBright, "  model    ", resetStyle, shortModel(p.model)
+  stdout.styledWriteLine fgCyan, styleBright, "  provider  ", resetStyle, provider
+  stdout.styledWriteLine fgCyan, styleBright, "  model     ", resetStyle, shortModel(p.model)
+  if p.reasoning != "":
+    stdout.styledWriteLine fgCyan, styleBright, "  reasoning ", resetStyle, p.reasoning
 
 # Track up-navigation so "down past last" can return to blank line.
 var navigatedUp*: bool = false
