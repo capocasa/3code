@@ -483,15 +483,17 @@ proc loadAgentsMd(start: string): string =
     if fileExists(candidate3):
       try:
         let body = readFile(candidate3)
-        result = "# " & candidate3 & "\n\n" & body
+        if not isBinaryContent(body):
+          result = "# " & candidate3 & "\n\n" & body
       except CatchableError: discard
       break
     let candidate = dir / "AGENTS.md"
     if fileExists(candidate):
       try:
         let body = readFile(candidate)
-        if result.len > 0: result.add "\n\n"
-        result.add "# " & candidate & "\n\n" & body
+        if not isBinaryContent(body):
+          if result.len > 0: result.add "\n\n"
+          result.add "# " & candidate & "\n\n" & body
       except CatchableError: discard
     let parent = parentDir(dir)
     if parent == dir or parent == "": break
@@ -565,7 +567,8 @@ proc inlineAtFiles*(msg: string): string =
         let content =
           try:
             let s = readFile(path)
-            if s.len > Cap: utf8ByteCut(s, Cap) & "\n... [truncated; file is " & $s.len & " bytes]"
+            if isBinaryContent(s): "[binary file: " & raw & " — skipped]"
+            elif s.len > Cap: utf8ByteCut(s, Cap) & "\n... [truncated; file is " & $s.len & " bytes]"
             else: s
           except CatchableError as e:
             "[error reading file: " & e.msg & "]"

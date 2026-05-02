@@ -446,6 +446,18 @@ proc replaceFirst*(s, needle, repl: string): (string, bool) =
   if idx < 0: return (s, false)
   (s[0 ..< idx] & repl & s[idx + needle.len .. ^1], true)
 
+proc isBinaryContent*(s: string): bool =
+  ## Scan the first 512 bytes for binary indicators: any NUL byte, or
+  ## >5% non-printable control chars (excluding \t \n \r).
+  let scan = min(512, s.len)
+  if scan == 0: return false
+  var bad = 0
+  for k in 0 ..< scan:
+    let b = s[k].ord
+    if b == 0: return true
+    if b < 32 and b notin {9, 10, 13}: inc bad
+  bad * 20 > scan
+
 proc looksLikePath*(s: string): bool =
   ## Heuristic for the path-on-its-own-line preceding a write/patch fence in
   ## text mode. Rejects prose (whitespace inside, fence markers, headings).

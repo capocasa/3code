@@ -365,21 +365,8 @@ export DEBIAN_FRONTEND=noninteractive
                     return (&"error: read {path}: {e.msg}", 1, "")
     if cache != nil:
       cache.state[path] = fileSig(path)
-    # Binary-file guard: scan up to 512 bytes for high-density control chars
-    # (excluding \t\n\r). If too many, refuse — sending a megabyte of garbage
-    # tokens to the model is never useful.
-    block binaryCheck:
-      let scan = min(512, content.len)
-      if scan == 0: break binaryCheck
-      var bad = 0
-      for k in 0 ..< scan:
-        let b = content[k].ord
-        if b == 0:
-          bad = scan  # any NUL is a hard fail
-          break
-        if b < 32 and b notin {9, 10, 13}: inc bad
-      if bad * 20 > scan:  # > 5%
-        return (&"[binary file: {path}, {content.len} bytes — refused]", 0, "")
+    if isBinaryContent(content):
+      return (&"[binary file: {path}, {content.len} bytes — refused]", 0, "")
     const MaxLines = 2000
     const MaxBytes = 60 * 1024
     let lines = content.splitLines
