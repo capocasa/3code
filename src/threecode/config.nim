@@ -352,6 +352,7 @@ proc loadProfile*(wanted: string): Profile =
 
 const ProviderCatalog*: seq[(string, string)] = @[
   ("anthropic",   "https://api.anthropic.com/v1"),
+  ("arcee",       "https://conductor.arcee.ai/v1"),
   ("baseten",     "https://inference.baseten.co/v1"),
   ("cerebras",    "https://api.cerebras.ai/v1"),
   ("deepinfra",   "https://api.deepinfra.com/v1/openai"),
@@ -360,7 +361,9 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("friendli",    "https://api.friendli.ai/serverless/v1"),
   ("google",      "https://generativelanguage.googleapis.com/v1beta/openai"),
   ("groq",        "https://api.groq.com/openai/v1"),
+  ("huggingface", "https://router.huggingface.co/v1"),
   ("hyperbolic",  "https://api.hyperbolic.xyz/v1"),
+  ("inceptron",   "https://api.inceptron.io/v1"),
   ("mistral",     "https://api.mistral.ai/v1"),
   ("moonshot",    "https://api.moonshot.ai/v1"),
   ("moonshot-cn", "https://api.moonshot.cn/v1"),
@@ -381,6 +384,10 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("zai",         "https://api.z.ai/api/paas/v4"),
   ("zai-coding",  "https://api.z.ai/api/coding/paas/v4"),
 ]
+  ## Skipped on purpose: `cortects.ai` is a router (an OpenAI-compatible
+  ## front-end that fans out to other providers' models), so adding it
+  ## here would just duplicate the underlying providers we already list.
+  ## Routers belong in user config when wanted, not in the catalog.
 
 proc catalogUrl*(name: string): string =
   for (n, u) in ProviderCatalog:

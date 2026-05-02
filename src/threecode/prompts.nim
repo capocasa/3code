@@ -4,19 +4,47 @@ import types, util
 const Version* = staticRead("../../threecode.nimble").splitLines().filterIt(it.startsWith("version")).
     mapIt(it.split("=")[1].strip().strip(chars = {'"'}))[0]
 
-const KnownGoodCombos*: array[12, (string, string, string, string, string, string)] = [
-    ("cerebras",  "zai-glm-4.7",                                     "glm",      "4",   "7",     "low"),
-    ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm",      "5",   "1",     "low"),
-    ("nvidia",    "z-ai/glm4.7",                                     "glm",      "4",   "7",     "low"),
-    ("cerebras",  "qwen-3-235b-a22b-instruct-2507",                  "qwen",     "3",   "235b",  "medium"),
-    ("deepinfra", "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",       "qwen",     "3",   "480b",  "medium"),
-    ("nvidia",    "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",  "high"),
-    ("nvidia",    "openai/gpt-oss-20b",                              "gpt-oss",  "",    "20b",   "high"),
-    ("nvidia",    "qwen/qwen3-coder-480b-a35b-instruct",             "qwen",     "3",   "480b",  "medium"),
-    ("deepseek",  "deepseek-v4-flash",                               "deepseek", "4",   "flash", "medium"),
-    ("deepseek",  "deepseek-chat",                                   "deepseek", "3",   "",      "medium"),
-    ("deepseek",  "deepseek-reasoner",                               "deepseek", "r1",  "",      "medium"),
-    ("zai",       "glm-5.1",                                         "glm",      "5",   "1",     "low"),
+const KnownGoodCombos*: array[36, (string, string, string, string, string, string)] = [
+    # glm
+    ("baseten",   "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "low"),
+    ("baseten",   "zai-org/GLM-5",                                   "glm",      "5",   "",          "low"),
+    ("cerebras",  "zai-glm-4.7",                                     "glm",      "4",   "7",         "low"),
+    ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm",      "5",   "1",         "low"),
+    ("nebius",    "zai-org/GLM-5",                                   "glm",      "5",   "",          "low"),
+    ("nvidia",    "z-ai/glm4.7",                                     "glm",      "4",   "7",         "low"),
+    ("together",  "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "low"),
+    ("zai",       "glm-5.1",                                         "glm",      "5",   "1",         "low"),
+    # qwen
+    ("cerebras",  "qwen-3-235b-a22b-instruct-2507",                  "qwen",     "3",   "235b",      "medium"),
+    ("deepinfra", "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",       "qwen",     "3",   "480b",      "medium"),
+    ("nvidia",    "qwen/qwen3-coder-480b-a35b-instruct",             "qwen",     "3",   "480b",      "medium"),
+    ("ovh",       "Qwen3-Coder-30B-A3B-Instruct",                    "qwen",     "3",   "30b",       "medium"),
+    ("together",  "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8",         "qwen",     "3",   "480b-fp8",  "medium"),
+    ("together",  "Qwen/Qwen3.6-Plus",                               "qwen",     "3.6", "plus",      "medium"),
+    # gpt-oss
+    ("baseten",   "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "high"),
+    ("cerebras",  "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "high"),
+    ("groq",      "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "high"),
+    ("groq",      "openai/gpt-oss-20b",                              "gpt-oss",  "",    "20b",       "high"),
+    ("nebius",    "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "high"),
+    ("nebius",    "openai/gpt-oss-120b-fast",                        "gpt-oss",  "",    "120b-fast", "high"),
+    ("nvidia",    "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "high"),
+    ("nvidia",    "openai/gpt-oss-20b",                              "gpt-oss",  "",    "20b",       "high"),
+    ("ovh",       "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "high"),
+    ("ovh",       "gpt-oss-20b",                                     "gpt-oss",  "",    "20b",       "high"),
+    ("sambanova", "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "high"),
+    ("together",  "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "high"),
+    ("together",  "openai/gpt-oss-20b",                              "gpt-oss",  "",    "20b",       "high"),
+    # deepseek
+    ("baseten",   "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "medium"),
+    ("deepseek",  "deepseek-chat",                                   "deepseek", "3",   "",          "medium"),
+    ("deepseek",  "deepseek-reasoner",                               "deepseek", "r1",  "",          "medium"),
+    ("deepseek",  "deepseek-v4-flash",                               "deepseek", "4",   "flash",     "medium"),
+    ("nebius",    "deepseek-ai/DeepSeek-V3.2",                       "deepseek", "3.2", "",          "medium"),
+    ("nebius",    "deepseek-ai/DeepSeek-V3.2-fast",                  "deepseek", "3.2", "fast",      "medium"),
+    ("sambanova", "DeepSeek-V3.2",                                   "deepseek", "3.2", "",          "medium"),
+    ("together",  "deepseek-ai/DeepSeek-R1",                         "deepseek", "r1",  "",          "medium"),
+    ("together",  "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "medium"),
   ]
     ## (provider, model, family, version, variant, reasoning) tuples.
     ## `model` is the full API id sent on the wire. `family` drives the
@@ -838,20 +866,9 @@ input:
   @path         inline file contents (e.g. @src/foo.nim)
 
 known good:
-  cerebras.zai-glm-4.7
-  fireworks.glm-5p1
-  nvidia.z-ai/glm4.7
-  cerebras.qwen-3-235b-a22b-instruct-2507
-  deepinfra.Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo
-  nvidia.openai/gpt-oss-120b
-  nvidia.openai/gpt-oss-20b
-  nvidia.qwen/qwen3-coder-480b-a35b-instruct
-  deepseek.deepseek-v4-flash
-  deepseek.deepseek-chat
-  deepseek.deepseek-reasoner
-  zai.glm-5.1
-
-other combos require --experimental — they're your tokens to burn.
+  glm, qwen, gpt-oss, deepseek across baseten, cerebras, deepinfra,
+  deepseek, fireworks, groq, nebius, nvidia, ovh, sambanova, together, zai.
+  run `3code --good` for the full list. other combos require --experimental.
 """
 
 proc knownGoodFamily*(p: Profile): string =

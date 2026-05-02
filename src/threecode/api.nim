@@ -946,6 +946,37 @@ proc ensureReasoningField(messages: JsonNode) =
 template hint(args: varargs[untyped]) =
   stdout.styledWrite(fgCyan, styleBright, args, resetStyle)
 
+proc providerOf(p: Profile): string =
+  ## Lower-case provider name from `Profile.name` ("nvidia.openai/gpt-oss-120b"
+  ## → "nvidia"). "" when no dot.
+  let dot = p.name.find('.')
+  if dot < 0: "" else: p.name[0 ..< dot].toLowerAscii
+
+proc applyGptOssReasoning(p: Profile, body: JsonNode) =
+  body["reasoning_effort"] = %p.reasoning
+
+proc applyGlmReasoning(p: Profile, body: JsonNode) =
+  ## `thinking: {type}` is z.ai's first-party knob — accepted on
+  ## api.z.ai (provider names `zai` / `zai-coding`) and rejected
+  ## elsewhere (nvidia replies "Validation: Unsupported parameter(s):
+  ## `thinking`"). Other glm-serving providers (baseten, nebius,
+  ## together, fireworks, cerebras) get nothing on the wire — they
+  ## just always think; `:reasoning low` is silently inert there.
+  case providerOf(p)
+  of "zai", "zai-coding":
+    let on = p.reasoning != "low"
+    body["thinking"] = %*{"type": (if on: "enabled" else: "disabled")}
+  else: discard
+
+proc applyReasoning*(p: Profile, body: JsonNode) =
+  ## Per-family wire mapping for `Profile.reasoning`. Adding a new
+  ## family means: (1) extend `reasoningSupported` in prompts.nim,
+  ## (2) write an `applyXReasoning` proc, (3) add a case branch.
+  case p.family
+  of "gpt-oss": applyGptOssReasoning(p, body)
+  of "glm": applyGlmReasoning(p, body)
+  else: discard
+
 proc beginTurn*() =
   ## Hide the terminal caret for the duration of the turn — the dim
   ## `❯ ` glyph (still painted, just not blinking) is the only
@@ -1008,13 +1039,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   body["tools"] = setup(p).tools
   body["tool_choice"] = %"auto"
   if p.reasoning.len > 0:
-    case p.family
-    of "gpt-oss":
-      body["reasoning_effort"] = %p.reasoning
-    of "glm":
-      let on = p.reasoning != "low"
-      body["thinking"] = %*{"type": (if on: "enabled" else: "disabled")}
-    else: discard
+    applyReasoning(p, body)
   let bodyStr = $body
   let t0 = epochTime()
   decayLevel(serverRetryLevel, serverLastTs, t0)
