@@ -1007,11 +1007,8 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   }
   body["tools"] = setup(p).tools
   body["tool_choice"] = %"auto"
-  # gpt-oss gets less stable in long coding sessions when forced high.
-  # Keep the provider/Harmony default explicit here; profile-level tuning can
-  # make this dynamic later.
   if p.family == "gpt-oss":
-    body["reasoning_effort"] = %"medium"
+    body["reasoning_effort"] = %"high"
   let bodyStr = $body
   let t0 = epochTime()
   decayLevel(serverRetryLevel, serverLastTs, t0)
