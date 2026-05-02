@@ -195,6 +195,16 @@ proc recordToToolCall(r: Record): JsonNode =
       %*{"path": path, "edits": arr}
     of "apply_patch":
       %*{"input": sectionText(sections, "")}
+    of "update_plan", "todo":
+      var items = newJArray()
+      for s in sections:
+        if s[0] == "item":
+          var lines = s[1].splitLines
+          let status = if lines.len > 0: lines[0].strip else: "pending"
+          let text = if lines.len > 1: lines[1 .. ^1].join("\n").strip else: ""
+          if text.len > 0:
+            items.add %*{"text": text, "status": status}
+      %*{"items": items}
     else:
       newJObject()
   %*{
@@ -328,6 +338,17 @@ proc emitToolUse(s: var string, tc: JsonNode) =
     emitRecord s, "tool_use " & id & " patch " & path, body
   of "apply_patch":
     emitRecord s, "tool_use " & id & " apply_patch", args{"input"}.getStr("")
+  of "update_plan", "todo":
+    var body = ""
+    let items =
+      if args{"items"} != nil and args{"items"}.kind == JArray: args{"items"}
+      else: args{"steps"}
+    for item in items.getElems:
+      if body.len > 0 and not body.endsWith("\n"): body.add "\n"
+      body.add "-- item --\n"
+      body.add item{"status"}.getStr("pending") & "\n"
+      body.add item{"text"}.getStr(item{"description"}.getStr(""))
+    emitRecord s, "tool_use " & id & " " & name, body
   else:
     # Unknown tool name: preserve the JSON args verbatim in the body so
     # nothing is lost. Tool name itself stays in the header.
@@ -465,6 +486,16 @@ proc buildToolLogFromMessages(messages: JsonNode,
           a
         of "apply_patch":
           Action(kind: akApplyPatch, body: args{"input"}.getStr)
+        of "update_plan", "todo":
+          var a = Action(kind: akPlan)
+          let items =
+            if args{"items"} != nil and args{"items"}.kind == JArray: args{"items"}
+            else: args{"steps"}
+          for item in items.getElems:
+            let text = item{"text"}.getStr(item{"description"}.getStr)
+            if text.len > 0:
+              a.plan.add PlanItem(text: text, status: item{"status"}.getStr)
+          a
         else:
           Action(kind: akError, path: name)
       result.add ToolRecord(
@@ -473,6 +504,34 @@ proc buildToolLogFromMessages(messages: JsonNode,
         code: exitByCallId.getOrDefault(id, 0),
         kind: act.kind,
       )
+
+proc buildPlanFromMessages(messages: JsonNode,
+                           exitByCallId: Table[string, int]): seq[PlanItem] =
+  for m in messages:
+    if m.kind != JObject: continue
+    if m{"role"}.getStr != "assistant": continue
+    let tcs = m{"tool_calls"}
+    if tcs == nil or tcs.kind != JArray: continue
+    for tc in tcs:
+      let id = tc{"id"}.getStr
+      if exitByCallId.getOrDefault(id, 0) != 0: continue
+      let fn = tc{"function"}
+      let rawName = if fn != nil: fn{"name"}.getStr else: ""
+      var name = rawName
+      let pipe = name.find("<|")
+      if pipe >= 0: name = name[0 ..< pipe]
+      if name != "update_plan" and name != "todo": continue
+      let argsStr = if fn != nil: fn{"arguments"}.getStr("") else: ""
+      let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
+                 except CatchableError: newJObject()
+      let items =
+        if args{"items"} != nil and args{"items"}.kind == JArray: args{"items"}
+        else: args{"steps"}
+      result.setLen 0
+      for item in items.getElems:
+        let text = item{"text"}.getStr(item{"description"}.getStr)
+        if text.len > 0:
+          result.add PlanItem(text: text, status: item{"status"}.getStr)
 
 proc loadSessionFile*(path: string): (Session, JsonNode) =
   let raw = try: readFile(path)
@@ -548,6 +607,7 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
     for m in messages: backfill.add m
     messages = backfill
   sess.toolLog = buildToolLogFromMessages(messages, exitByCallId)
+  sess.plan = buildPlanFromMessages(messages, exitByCallId)
   (sess, messages)
 
 # ---------- session listing helpers ----------

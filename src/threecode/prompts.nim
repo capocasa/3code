@@ -35,6 +35,7 @@ Approach each question with genuine curiosity. Before answering, consider the br
 - `bash(command, stdin?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command.
 - `write(path, body)` — create or overwrite a file with `body`.
 - `patch(path, edits)` — apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
+- `update_plan(items)` — update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
 
 **For source edits, use `patch`.** Do not use `ed`, `sed -i`, or shell heredocs to rewrite files — line-arithmetic drifts and corrupts under sequential edits. `write` for new files or full rewrites; `patch` for surgical changes; `bash` for non-edit operations only.
 
@@ -52,7 +53,7 @@ Local before web: sister files, vendored source, CHANGELOGs, tests, examples, ma
 
 # Planning
 
-For multi-step work, plan in 3–8 steps before executing. State the plan briefly, then work through it in order. Skip the explicit plan for trivial tasks.
+For non-trivial multi-step work, call `update_plan` before editing or running long command sequences. Keep 3–7 concrete steps, with at most one `in_progress`. Skip it for trivial tasks.
 
 When the task is unfamiliar, orient first: `ls`, README, build manifest, skim relevant source. For a fresh repo this is 2–4 reads, not 20. If you find a `CLAUDE.md` or `AGENTS.md`, read it.
 
@@ -138,6 +139,7 @@ Credit where it's due: you're Qwen, Alibaba's open-source coding model.
 - `bash(command, stdin?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command.
 - `write(path, body)` — create or overwrite a file with `body`.
 - `patch(path, edits)` — apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
+- `update_plan(items)` — update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
 
 For source edits, use `patch`. `write` for new files or full rewrites; `bash` for non-edit operations only.
 
@@ -169,7 +171,7 @@ Local before web: sister files, vendored source, CHANGELOGs, tests, examples, ma
 
 # Planning
 
-For multi-step work, plan in 3–8 steps before executing. State the plan briefly, then work through it in order.
+For non-trivial multi-step work, call `update_plan` before editing or running long command sequences. Keep 3–7 concrete steps, with at most one `in_progress`.
 
 When the task is unfamiliar, orient first: `ls`, README, build manifest, skim relevant source. If you find a `CLAUDE.md` or `AGENTS.md`, read it.
 
@@ -257,6 +259,7 @@ You are precise and rigorous. Think through problems carefully before responding
 - `bash(command, stdin?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command.
 - `write(path, body)` — create or overwrite a file with `body`.
 - `patch(path, edits)` — apply targeted edits. `edits` is a list of `{search, replace}` objects; each `search` must match exactly once.
+- `update_plan(items)` — update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
 
 For source edits, use `patch`. `write` for new files or full rewrites; `bash` for non-edit operations only.
 
@@ -280,7 +283,7 @@ Local before web: sister files, vendored source, CHANGELOGs, tests, examples, ma
 
 # Planning — required, not optional
 
-**Before any tool call beyond initial orientation, state your plan in 3–8 steps.** Then execute in order. Don't drift mid-plan; if the plan needs revision, rewrite it.
+**Before any tool call beyond initial orientation, call `update_plan` with 3–7 concrete steps.** Then execute in order. Don't drift mid-plan; if the plan needs revision, update it.
 
 When the task is unfamiliar, orient first: `ls`, README, build manifest, skim relevant source. **Cap orientation at 5–6 reads.** After that, you have enough to start writing code.
 
@@ -414,9 +417,9 @@ Before making tool calls, send a brief preamble to the user explaining what you'
 
 ## Planning
 
-For non-trivial multi-step work, state a brief, step-by-step plan up front: a short list of 1-sentence steps (no more than 5-7 words each) with a status for each (`pending`, `in_progress`, `completed`). Update it as you go: mark each finished step `completed` and the next one `in_progress`. There should always be exactly one `in_progress` step until everything is done. You can mark multiple items complete at once.
+For non-trivial work, call `update_plan` before shell/edit tools. Keep 3-7 concrete steps. Exactly one step should be `in_progress` until the work is complete. Update the plan when a step completes or the approach changes.
 
-If all steps are complete, say so. After stating or updating the plan, do not repeat the full plan back; summarize the change made and highlight any important context or next step. If the plan needs revision mid-task, restate it with an explanation of why.
+Do not use the plan for trivial one-step answers. The plan is a work contract: follow it, revise it explicitly when reality changes, then continue.
 
 Use a plan when:
 
@@ -483,7 +486,7 @@ You MUST adhere to the following criteria when solving queries:
 - Working on the repo(s) in the current environment is allowed, even if they are proprietary.
 - Analyzing code for vulnerabilities is allowed.
 - Showing user code and tool call details is allowed.
-- Use the `apply_patch` tool to edit files: `apply_patch({"input": "*** Begin Patch\n*** Update File: path/to/file.py\n@@ def example():\n- pass\n+ return 123\n*** End Patch"})`.
+- Use only the offered tools. For gpt-oss coding work, that means `shell`, `apply_patch`, and `update_plan`; never invent `bash`, `patch`, `edit`, `applypatch`, or `apply-patch`.
 
 If completing the user's task requires writing or modifying files, your code and final answer should follow these coding guidelines, though user instructions (e.g. AGENTS.md / CLAUDE.md) may override these guidelines:
 
@@ -771,6 +774,31 @@ let glmAndQwenTools = %*[
         "required": ["path", "edits"]
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "update_plan",
+      "description": "Create or update the current todo plan for non-trivial work. Use 3-7 concrete items; keep at most one item in_progress.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "description": "Todo items in execution order.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {"type": "string", "description": "Concrete step to perform."},
+                "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]}
+              },
+              "required": ["text", "status"]
+            }
+          }
+        },
+        "required": ["items"]
+      }
+    }
   }
 ]
 
@@ -797,16 +825,41 @@ let gptOssTools = %*[
     "type": "function",
     "function": {
       "name": "apply_patch",
-      "description": "Apply a V4A diff (Codex format). Wrap operations in *** Begin Patch ... *** End Patch.",
+      "description": "Apply a V4A diff (Codex format) to source files. Use this for edits, not shell redirection or sed -i. Patch text must start with *** Begin Patch and end with *** End Patch. Each operation uses *** Add File, *** Update File, or *** Delete File with relative paths only. Add File bodies use only + lines. Update hunks use context, - removed lines, and + added lines.",
       "parameters": {
         "type": "object",
         "properties": {
           "input": {
             "type": "string",
-            "description": "V4A patch text starting with '*** Begin Patch' and ending with '*** End Patch'."
+            "description": "V4A patch text: *** Begin Patch ... file operations ... *** End Patch."
           }
         },
         "required": ["input"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "update_plan",
+      "description": "Create or update the current todo plan for non-trivial work. Use 3-7 concrete items; keep at most one item in_progress.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "description": "Todo items in execution order.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {"type": "string", "description": "Concrete step to perform."},
+                "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]}
+              },
+              "required": ["text", "status"]
+            }
+          }
+        },
+        "required": ["items"]
       }
     }
   }

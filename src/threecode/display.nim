@@ -172,6 +172,9 @@ proc printToolResult*(kind: ActionKind, res: string, code: int, idx: int,
     printBashCompact(res, idx)
   elif kind == akRead:
     printBashCompact(res, idx, ReadHead, ReadTail)
+  elif kind == akPlan:
+    for line in res.splitLines:
+      subtleWriteLn(stdout, "  " & line)
   else:
     if code == 0:
       subtleWriteLn(stdout, "  " & res)

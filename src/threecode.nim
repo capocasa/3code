@@ -120,6 +120,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         let toolT0 = epochTime()
         if session.readCache == nil: session.readCache = newReadCache()
         var (r, code, diff) = runAction(act, session.readCache)
+        if act.kind == akPlan and code == 0:
+          session.plan = act.plan
         let toolElapsed = epochTime() - toolT0
         if r.strip.len == 0: r = "[no output]"
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)

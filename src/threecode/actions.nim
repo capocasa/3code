@@ -64,12 +64,25 @@ proc patchAction(args: JsonNode): Action =
 proc applyPatchAction(args: JsonNode): Action =
   Action(kind: akApplyPatch, body: args{"input"}.getStr)
 
+proc planAction(args: JsonNode): Action =
+  var act = Action(kind: akPlan)
+  let src =
+    if args{"items"} != nil and args{"items"}.kind == JArray: args{"items"}
+    else: args{"steps"}
+  for it in src.getElems:
+    let text = it{"text"}.getStr(it{"description"}.getStr)
+    let status = it{"status"}.getStr
+    if text.len > 0:
+      act.plan.add PlanItem(text: text, status: status)
+  act
+
 proc dispatchGlmOrQwen(family, name: string, args: JsonNode): Action =
   case name
   # Canonical names (the schema we offer glm/qwen/deepseek):
   of "bash": bashAction(args)
   of "write": writeAction(args)
   of "patch": patchAction(args)
+  of "update_plan", "todo": planAction(args)
   # Aliases — gpt-oss-shape names that show up as training leakage.
   # Lossless: `shell` → akBash, `apply_patch` → akApplyPatch (we have
   # the V4A parser), `edit` → akPatch (same shape as patch). Routed
@@ -85,6 +98,7 @@ proc dispatchGptOss(family, rawName: string, args: JsonNode): Action =
   # Canonical names (the schema we offer gpt-oss):
   of "shell": bashAction(args)
   of "apply_patch": applyPatchAction(args)
+  of "update_plan", "todo": planAction(args)
   # Aliases — glm/qwen-shape names that show up as training leakage,
   # plus the misspellings Codex's own prompt warns about. Routed
   # silently rather than warning the model out of it.
@@ -125,6 +139,8 @@ proc bannerFor*(act: Action): string =
   of akApplyPatch:
     let nl = act.body.count('\n')
     &"apply_patch  ({nl} line" & (if nl == 1: "" else: "s") & ")"
+  of akPlan:
+    &"plan   ({act.plan.len} item" & (if act.plan.len == 1: "" else: "s") & ")"
   of akError:
     "error  unknown tool '" & act.path & "'"
 
@@ -524,6 +540,21 @@ export DEBIAN_FRONTEND=noninteractive
           msgs.add &"error: delete {path}: {e.msg}"
           anyFail = true
     return (msgs.join("\n"), (if anyFail: 1 else: 0), diffs)
+  of akPlan:
+    if act.plan.len == 0:
+      return ("error: update_plan requires at least one item", 1, "")
+    var inProgress = 0
+    var lines: seq[string]
+    for item in act.plan:
+      let status =
+        case item.status
+        of "pending", "in_progress", "completed": item.status
+        else: "pending"
+      if status == "in_progress": inc inProgress
+      lines.add status & ": " & item.text
+    if inProgress > 1:
+      return ("error: update_plan must have at most one in_progress item", 1, "")
+    return (lines.join("\n"), 0, "")
   of akError:
     return (act.body, 1, "")
 

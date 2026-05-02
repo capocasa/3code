@@ -52,6 +52,17 @@ suite "glm/qwen dispatch":
     check act.path == "x.nim"
     check act.edits == @[("a", "b")]
 
+  test "update_plan captures todo items":
+    let act = toolCallToAction("glm", "update_plan",
+      %*{"items": [
+        {"text": "Inspect prompt", "status": "completed"},
+        {"text": "Patch tools", "status": "in_progress"}
+      ]})
+    check act.kind == akPlan
+    check act.plan.len == 2
+    check act.plan[1].text == "Patch tools"
+    check act.plan[1].status == "in_progress"
+
 suite "gpt-oss dispatch":
   test "shell takes argv as `cmd` — last element is the command line":
     # Captured live from nvidia.openai/gpt-oss-120b. Canonical name
@@ -116,6 +127,27 @@ suite "gpt-oss dispatch":
     let a2 = toolCallToAction("gpt-oss", "apply-patch", %*{"input": v4a})
     check a1.kind == akApplyPatch
     check a2.kind == akApplyPatch
+
+  test "todo aliases to plan on gpt-oss":
+    let act = toolCallToAction("gpt-oss", "todo",
+      %*{"steps": [
+        {"description": "Read code", "status": "completed"},
+        {"description": "Run tests", "status": "pending"}
+      ]})
+    check act.kind == akPlan
+    check act.plan.len == 2
+    check act.plan[0].text == "Read code"
+
+  test "update_plan validates single in-progress item":
+    let act = toolCallToAction("gpt-oss", "update_plan",
+      %*{"items": [
+        {"text": "One", "status": "in_progress"},
+        {"text": "Two", "status": "in_progress"}
+      ]})
+    let (outp, code, diff) = runAction(act)
+    check code == 1
+    check diff == ""
+    check "at most one in_progress" in outp
 
   test "truly unknown tool falls through to akError":
     let act = toolCallToAction("gpt-oss", "browse_web", %*{})

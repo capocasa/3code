@@ -6,13 +6,17 @@ const
   ExitApi* = 5
 
 type
-  ActionKind* = enum akBash, akRead, akWrite, akPatch, akApplyPatch, akError
+  PlanItem* = object
+    text*: string
+    status*: string
+  ActionKind* = enum akBash, akRead, akWrite, akPatch, akApplyPatch, akPlan, akError
   Action* = object
     kind*: ActionKind
     path*: string
     body*: string
     stdin*: string  ## bash-only: piped to the command's stdin
     edits*: seq[(string, string)]
+    plan*: seq[PlanItem]
     offset*: int
     limit*: int
   Profile* = object
@@ -54,6 +58,7 @@ type
     profileName*: string
     created*: string
     cwd*: string
+    plan*: seq[PlanItem]
     loop*: LoopTracker
     readCache*: ReadCache
   ApiError* = object of CatchableError
