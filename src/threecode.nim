@@ -29,10 +29,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
     session.usage.totalTokens += usage.totalTokens
     session.usage.cachedTokens += usage.cachedTokens
     session.lastPromptTokens = usage.promptTokens
-    if usage.totalTokens > 0:
-      let sesLabel = tokenLineLabel(session.usage, pendingHint.window, pendingHint.elapsed)
-      paintBarPrompt(sesLabel, DimPromptColor)
-      pendingHint.usage = session.usage
     messages.add msg
     saveSession(session, messages)
     if interrupted:
