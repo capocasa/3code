@@ -658,6 +658,8 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
     session.toolLog.setLen 0
     session.usage = Usage()
     session.lastPromptTokens = 0
+    currentBarLabel = ""
+    pendingHint.active = false
     if session.savePath != "":
       session.savePath = newSessionPath()
       session.created = $now()
