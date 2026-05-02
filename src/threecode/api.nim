@@ -1007,12 +1007,11 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   }
   body["tools"] = setup(p).tools
   body["tool_choice"] = %"auto"
-  # gpt-oss reasoning effort. Harmony default is "medium" and every provider
-  # we hit (Cerebras + Groq document it; Fireworks/DeepInfra/NVIDIA NIM
-  # inherit it) lands there. Forcing "high" while we shake out behavior;
-  # drop back to "medium" once we're done testing.
+  # gpt-oss gets less stable in long coding sessions when forced high.
+  # Keep the provider/Harmony default explicit here; profile-level tuning can
+  # make this dynamic later.
   if p.family == "gpt-oss":
-    body["reasoning_effort"] = %"high"
+    body["reasoning_effort"] = %"medium"
   let bodyStr = $body
   let t0 = epochTime()
   decayLevel(serverRetryLevel, serverLastTs, t0)
