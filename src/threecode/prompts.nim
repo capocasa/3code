@@ -4,19 +4,9 @@ import types, util
 const Version* = staticRead("../../threecode.nimble").splitLines().filterIt(it.startsWith("version")).
     mapIt(it.split("=")[1].strip().strip(chars = {'"'}))[0]
 
-const KnownGoodCombos*: array[12, (string, string, string, string, string)] = [
-    ("cerebras",  "zai-glm-4.7",                                    "glm",      "4",   "7"),
-    ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm",      "5",   "1"),
-    ("nvidia",    "z-ai/glm4.7",                                     "glm",      "4",   "7"),
-    ("cerebras",  "qwen-3-235b-a22b-instruct-2507",                  "qwen",     "3",   "235b"),
-    ("deepinfra", "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",       "qwen",     "3",   "480b"),
+const KnownGoodCombos*: array[2, (string, string, string, string, string)] = [
     ("nvidia",    "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b"),
     ("nvidia",    "openai/gpt-oss-20b",                              "gpt-oss",  "",    "20b"),
-    ("nvidia",    "qwen/qwen3-coder-480b-a35b-instruct",             "qwen",     "3",   "480b"),
-    ("deepseek",  "deepseek-v4-flash",                               "deepseek", "4",   "flash"),
-    ("deepseek",  "deepseek-chat",                                   "deepseek", "3",   ""),
-    ("deepseek",  "deepseek-reasoner",                               "deepseek", "r1",  ""),
-    ("zai",       "glm-5.1",                                         "glm",      "5",   "1"),
   ]
     ## (provider, model, family, version, variant) tuples. `model` is the
     ## full API id sent on the wire. `family` drives the (prompt, tools)
