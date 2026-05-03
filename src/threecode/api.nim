@@ -968,6 +968,26 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
     body["thinking"] = %*{"type": (if on: "enabled" else: "disabled")}
   else: discard
 
+proc applyStreamingOptions*(p: Profile, body: JsonNode) =
+  ## Provider-specific additions for SSE fidelity. Z.ai only streams
+  ## reasoning/tool-call deltas during tool turns when `tool_stream` is set;
+  ## without it, GLM-5.1 can buffer the useful progress and emit usage at
+  ## the end.
+  if p.family == "glm":
+    case providerOf(p)
+    of "zai", "zai-coding":
+      body["tool_stream"] = %true
+    else: discard
+
+proc applyGenerationDefaults*(p: Profile, body: JsonNode) =
+  ## Known-good generation policy. Temperature is intentionally hardcoded
+  ## for now; later a user override can resolve before this writes the field.
+  let d = knownGoodGeneration(p)
+  if d.temperature >= 0.0:
+    body["temperature"] = %d.temperature
+  if d.maxTokens > 0:
+    body["max_tokens"] = %d.maxTokens
+
 proc applyReasoning*(p: Profile, body: JsonNode) =
   ## Per-family wire mapping for `Profile.reasoning`. Adding a new
   ## family means: (1) extend `reasoningSupported` in prompts.nim,
@@ -1038,6 +1058,8 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   }
   body["tools"] = setup(p).tools
   body["tool_choice"] = %"auto"
+  applyStreamingOptions(p, body)
+  applyGenerationDefaults(p, body)
   if p.reasoning.len > 0:
     applyReasoning(p, body)
   let bodyStr = $body
