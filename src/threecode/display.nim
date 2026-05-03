@@ -106,7 +106,11 @@ proc printLine*(l: string) =
   if l == "[exit 0]":
     discard
   else:
-    subtleWriteLn(stdout, "  " & l)
+    let termW = try: terminalWidth() except CatchableError: 80
+    let bodyW = max(20, termW - 2)
+    let chunks = wrapAnsi(l, bodyW)
+    for i, chunk in chunks:
+      subtleWriteLn(stdout, "  " & chunk)
 
 proc printBashCompact*(res: string, idx: int, head = CompactHead, tail = CompactTail) =
   var lines = res.splitLines
@@ -140,17 +144,20 @@ proc printDiff*(diff: string) =
     lines.setLen lines.len - 1
   if lines.len == 0: return
   proc paint(l: string) =
-    let s = "  " & l
-    if l.startsWith("@@"):
-      stdout.styledWriteLine fgCyan, s, resetStyle
-    elif l.startsWith("+++") or l.startsWith("---"):
-      subtleWriteLn(stdout, s)
-    elif l.len > 0 and l[0] == '+':
-      stdout.styledWriteLine fgGreen, s, resetStyle
-    elif l.len > 0 and l[0] == '-':
-      stdout.styledWriteLine fgRed, s, resetStyle
-    else:
-      stdout.writeLine s
+    let termW = try: terminalWidth() except CatchableError: 80
+    let bodyW = max(20, termW - 2)
+    let chunks = wrapAnsi("  " & l, bodyW)
+    for chunk in chunks:
+      if l.startsWith("@@"):
+        stdout.styledWriteLine fgCyan, chunk, resetStyle
+      elif l.startsWith("+++") or l.startsWith("---"):
+        subtleWriteLn(stdout, chunk)
+      elif l.len > 0 and l[0] == '+':
+        stdout.styledWriteLine fgGreen, chunk, resetStyle
+      elif l.len > 0 and l[0] == '-':
+        stdout.styledWriteLine fgRed, chunk, resetStyle
+      else:
+        stdout.writeLine chunk
   if lines.len <= DiffHead + DiffTail + 2:
     for l in lines: paint(l)
     return
@@ -173,18 +180,23 @@ proc printToolResult*(kind: ActionKind, res: string, code: int, idx: int,
   elif kind == akRead:
     printBashCompact(res, idx, ReadHead, ReadTail)
   elif kind == akPlan:
+    let termW = try: terminalWidth() except CatchableError: 80
+    let bodyW = max(20, termW - 2)
     for line in res.splitLines:
-      subtleWriteLn(stdout, "  " & line)
+      for chunk in wrapAnsi(line, bodyW):
+        subtleWriteLn(stdout, "  " & chunk)
   else:
+    let termW = try: terminalWidth() except CatchableError: 80
+    let bodyW = max(20, termW - 2)
     if code == 0:
-      subtleWriteLn(stdout, "  " & res)
+      for line in res.splitLines:
+        for chunk in wrapAnsi(line, bodyW):
+          subtleWriteLn(stdout, "  " & chunk)
     else:
-      # Patch / write failure: only the headline goes to the user; the
-      # full SEARCH body lives in `res` which the model still sees via
-      # the tool result. Dumping a 30-line SEARCH block here just shouts.
       let nl = res.find('\n')
       let head = if nl < 0: res else: res[0 ..< nl]
-      subtleWriteLn(stdout, "  " & head)
+      for chunk in wrapAnsi(head, bodyW):
+        subtleWriteLn(stdout, "  " & chunk)
   if diff.len > 0:
     printDiff(diff)
 
@@ -606,10 +618,14 @@ proc showTool*(arg: string, toolLog: seq[ToolRecord]) =
   if rec.kind in {akBash, akRead}:
     for l in rec.output.splitLines: printLine(l)
   else:
-    if rec.code == 0:
-      stdout.styledWriteLine fgGreen, rec.output, resetStyle
-    else:
-      subtleWriteLn(stdout, rec.output)
+    let termW = try: terminalWidth() except CatchableError: 80
+    let bodyW = max(20, termW - 2)
+    for line in rec.output.splitLines:
+      for chunk in wrapAnsi(line, bodyW):
+        if rec.code == 0:
+          stdout.styledWriteLine fgGreen, "  " & chunk, resetStyle
+        else:
+          subtleWriteLn(stdout, "  " & chunk)
 
 proc listTools*(toolLog: seq[ToolRecord]) =
   if toolLog.len == 0:
