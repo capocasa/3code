@@ -84,7 +84,7 @@ const KnownGoodCombos*: array[36, KnownGoodCombo] = [
 # fluent with it). Adding a new model means adding a new tuple here.
 # ---------------------------------------------------------------------------
 
-const GlmPreamble = """You are 3code, an economical coding agent. One task, done right, few tokens.
+const GlmPreamble = """You are the GLM edition of 3code, the economical coding agent.
 
 Act first, explain after. Don't narrate your plan before executing it — just execute.
 
@@ -147,9 +147,7 @@ Available:
 Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one on what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 """
 
-const QwenPreamble = """You are 3code, an economical coding agent. One task, done right, few tokens.
-
-Credit where it's due: you're Qwen, Alibaba's open-source coding model.
+const QwenPreamble = """You are the Qwen edition of 3code, the economical coding agent.
 
 # Tools
 
@@ -265,9 +263,7 @@ Code references as `file_path:line_number`. No forced cheer, no emoji, no "Great
 If the task was already done before you arrived, say so and stop.
 """
 
-const DeepSeekPreamble = """You are 3code, an economical coding agent. One task, done right, few tokens.
-
-Credit where it's due: you're DeepSeek, an open-source coding model.
+const DeepSeekPreamble = """You are the Deepseek edition of 3code, the economical coding agent.
 
 You are precise and rigorous. Think through problems carefully before responding. For code, reason about the approach and potential failure modes before writing. Be direct. Show your reasoning when it adds clarity.
 
@@ -381,9 +377,9 @@ Code references as `file_path:line_number`. No forced cheer, no emoji, no "Great
 If the task was already done before you arrived, say so and stop.
 """
 
-const GptOssPreamble = """You are 3code, a coding agent running in a terminal-based coding harness. You are expected to be precise, safe, and helpful.
+const GptOssPreamble = """You are the GPT edition of 3code, the economical coding agent.
 
-{{credit}}
+You run in a terminal-based coding harness. You are expected to be precise, safe, and helpful.
 
 Your capabilities:
 
@@ -729,7 +725,9 @@ let glmAndQwenTools = %*[
         "required": ["items"]
       }
     }
-  }
+  },
+  webSearchTool,
+  webFetchTool
 ]
 
 let gptOssTools = %*[
@@ -792,7 +790,9 @@ let gptOssTools = %*[
         "required": ["items"]
       }
     }
-  }
+  },
+  webSearchTool,
+  webFetchTool
 ]
 
 let
