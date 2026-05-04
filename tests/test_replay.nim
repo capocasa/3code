@@ -13,9 +13,9 @@ import threecode
 ## indexing differ, adjust — but document why"), the trip points
 ## asserted here are the overall 1-based tool-call index into the
 ## session's tool_calls stream, counting bash (which is the natural
-## number the user sees in a `[Tn]` banner). With K=15/T=5 and
-## bash excluded from the ring: qwen-010747 trips at overall call 8,
-## qwen-002805 at call 9, minimax-000457 at call 31.
+## number the user sees in a `[Tn]` banner). With K=25/T=8, reads
+## excluded from the ring, and only mutations tracked: trip points
+## may differ from the old K=15/T=5 regime.
 
 type
   ReplayResult = object
@@ -153,37 +153,44 @@ suite "failure replay — loop tracker":
     discard trackCall(t, "write", %*{"path": "/tmp/x.nim"})
     check t.strike == 2
 
-  test "reads alone never escalate past Strike 1":
-    # Reading a file you're editing is observation, not thrash. A flood of
-    # reads on one path should still fire Strike 1 (concentration signal)
-    # but must not hard-trip to Strike 2 — that needs actual mutations.
+  test "reads alone never trip the guard":
+    # Reads are observation, not action. They are completely excluded from
+    # the ring — no concentration signal, no strike escalation.
     var t = initLoopTracker()
-    for i in 0 ..< LoopWindowK:  # 15 reads, past 2×T
+    for i in 0 ..< LoopWindowK + 10:
       discard trackCall(t, "read", %*{"path": "/tmp/x.nim"})
-    check t.strike == 1
+    check t.strike == 0
+    check t.ring.len == 0
 
   test "patches+reads mix trips Strike 2 only on mutation count":
-    # 5 patches + 5 reads = 10 total on one path, but only 5 mutations —
-    # so Strike 1 fires (soft) and Strike 2 does NOT (hard-trip needs 10
-    # mutations). Then 5 more patches push mutations to 10 → Strike 2.
+    # Reads are excluded from the ring entirely. Only patches count.
+    # T patches → Strike 1; 2×T patches → Strike 2. Reads in between
+    # are invisible to the tracker.
     var t = initLoopTracker()
     for i in 0 ..< LoopTripT:
       discard trackCall(t, "patch", %*{"path": "/tmp/x.nim"})
+    check t.strike == 1
+    # Reads don't move the needle at all.
     for i in 0 ..< LoopTripT:
       discard trackCall(t, "read", %*{"path": "/tmp/x.nim"})
     check t.strike == 1
+    # More patches push mutations to 2×T → Strike 2.
     for i in 0 ..< LoopTripT:
       discard trackCall(t, "patch", %*{"path": "/tmp/x.nim"})
     check t.strike == 2
 
-  test "different path can escalate to Strike 2":
+  test "different paths each tripping Strike 1 does NOT escalate to Strike 2":
+    # Two different paths each hitting T mutations should each fire
+    # Strike 1 independently, but Strike 2 requires a single path
+    # reaching the hard-trip threshold (2×T) — not two soft trips on
+    # different paths. This was a major false-positive source.
     var t = initLoopTracker()
     for i in 0 ..< LoopTripT:
       discard trackCall(t, "write", %*{"path": "/tmp/a.nim"})
     check t.strike == 1
     for i in 0 ..< LoopTripT:
       discard trackCall(t, "write", %*{"path": "/tmp/b.nim"})
-    check t.strike == 2
+    check t.strike == 1  # still 1, not 2
 
   test "reset clears state":
     var t = initLoopTracker()
@@ -228,13 +235,16 @@ suite "failure replay — loop tracker":
         %*{"command": "sed -i 's/a/b/' /tmp/x.nim"})
     check t.strike == 2
 
-  test "non-read non-mutation bash never enters the ring":
-    # `cat`/`sed -n`/`head`/`tail` ARE tracked now (they replaced the read
-    # tool); everything else stays outside the loop guard's view.
+  test "non-mutation bash never enters the ring":
+    # `cat`/`sed -n`/`head`/`tail` are read-shaped and excluded from
+    # tracking (reads are observation). Everything else stays outside
+    # the loop guard's view too.
     var t = initLoopTracker()
     for c in ["ls", "grep foo /tmp/x.nim",
               "git log --oneline", "git stash list", "git stash show",
-              "nimble test", "rg --no-heading --color=never foo /tmp"]:
+              "nimble test", "rg --no-heading --color=never foo /tmp",
+              "cat /tmp/x.nim", "sed -n '1,10p' /tmp/x.nim",
+              "head -5 /tmp/x.nim", "tail -5 /tmp/x.nim"]:
       discard trackCall(t, "bash", %*{"command": c})
     check t.ring.len == 0
     check t.strike == 0

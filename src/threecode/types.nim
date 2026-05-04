@@ -41,17 +41,16 @@ type
     code*: int
     kind*: ActionKind
   LoopTracker* = object
-    ## Sliding-window per-path saturation detector. `bash` tool calls are
-    ## fingerprinted only when they look like a file mutation (`sed -i`,
-    ## redirects, `tee`, `cp`/`mv`/`rm`, `git checkout/restore`); read-only
-    ## bash is untracked. Reset at the start of each user turn via
-    ## `resetLoopTracker`.
+    ## Sliding-window per-path saturation detector. Only mutations
+    ## (write, patch, sed -i, redirects, etc.) and web calls are tracked —
+    ## reads are observation and excluded. Reset at the start of each user
+    ## turn via `resetLoopTracker`.
     ring*: seq[tuple[fp: string, mut: bool]]  # last K (path, isMutation)
-    counts*: CountTable[string]     # all tracked kinds per path → Strike 1
-    mutCounts*: CountTable[string]  # writes+patches+sed only per path → Strike 2
+    mutCounts*: CountTable[string]  # writes+patches+sed+web only per path
     strike*: int             # 0/1/2
     trippedPaths*: seq[string] # paths that have already tripped this strike
     recoveryCmd*: string     # set when Strike 2 fires from a git-recovery hard-trip; "" otherwise
+    turnCalls*: int          # total tool calls this turn (for budget cap)
   ReadCache* = ref object
     state*: Table[string, (Time, int)]
   Session* = object

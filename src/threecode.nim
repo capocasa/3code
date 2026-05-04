@@ -82,7 +82,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         if content.strip.len > 0 and not streamedLive:
           renderAssistantContent(content)
           stdout.write "\n"
-      var halt = false  # Strike-2 trip: stop further tool calls this turn
+      var halt = false  # Strike-2 trip or budget cap: stop further tool calls this turn
       for tc in toolCalls:
         let id = tc{"id"}.getStr
         if interrupted or halt:
@@ -145,9 +145,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         let priorStrike = session.loop.strike
         let strike = trackCall(session.loop, name, args)
         var toolContent = r
-        # Strike 1 used to append a "stop and reassess" nudge; dropped because
-        # many legit compile-iterate sessions trip it without actually being
-        # stuck. Only the Strike-2 halt survives — that one we want.
+        # Strike 1 is a soft signal (mutation concentration on one path) —
+        # no nudge is injected. Strike 2 halts the turn. The turn-call
+        # budget (TurnCallBudget) is a separate backstop that also halts.
         if strike >= 2 and priorStrike < 2:
           halt = true
           if session.loop.recoveryCmd != "":
@@ -156,8 +156,12 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
               "`); further tool calls this turn are paused. The model's plan was likely based on the working tree as it was before this command — resume only if you've confirmed the new state is what you want."
           else:
             let fp = fingerprint(name, args)
-            toolContent &= "\n\n[repeat-guard] second saturation (path=" & fp &
+            toolContent &= "\n\n[repeat-guard] mutation saturation (path=" & fp &
               "); further tool calls this turn are paused."
+        elif session.loop.turnCalls >= TurnCallBudget and priorStrike < 2:
+          halt = true
+          toolContent &= "\n\n[repeat-guard] turn budget exceeded (" &
+            $TurnCallBudget & " tool calls); further tool calls this turn are paused."
         messages.add %*{"role": "tool", "tool_call_id": id, "content": toolContent}
       saveSession(session, messages)
       if interrupted:
@@ -170,6 +174,10 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           if session.loop.recoveryCmd != "":
             stdout.styledWriteLine styleDim,
               &"  paused — `{session.loop.recoveryCmd}` wiped working-tree state",
+              resetStyle
+          elif session.loop.turnCalls >= TurnCallBudget:
+            stdout.styledWriteLine styleDim,
+              &"  paused — turn budget exceeded ({TurnCallBudget} calls)",
               resetStyle
           else:
             stdout.styledWriteLine styleDim, "  paused — looped", resetStyle
