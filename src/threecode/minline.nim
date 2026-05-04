@@ -312,6 +312,12 @@ proc historyInit*(size = 256, file: string = ""): LineHistory =
 proc historyAdd*(ed: var LineEditor, force = false) =
   ed.history.add ed.line.text, force
   if ed.history.file == "": return
+  # Avoid persisting a forced empty entry. Such entries are needed only for
+  # in‑memory navigation (e.g., restoring an empty draft after pressing Up).
+  # Writing them would introduce a blank line as the first history item when
+  # the file is later reloaded.
+  if force and ed.line.text == "":
+    return
   let encoded = toSeq(ed.history.queue.items).mapIt(encodeHistEntry(it)).join("\n")
   ed.history.file.writeFile(encoded)
 
@@ -598,6 +604,9 @@ proc historyPrevious*(ed: var LineEditor) =
     if ed.history.tainted: ed.history.queue.len - 2
     else: ed.history.queue.len - 1
   if nextPos == current and ed.history.queue[current] != ed.line.text:
+    # Only add a forced entry if the current line is non‑empty. Adding a
+    # forced empty entry creates a spurious blank history entry that becomes
+    # the first item when the history file is later persisted and reloaded.
     ed.historyAdd(force = true)
     ed.history.tainted = true
   ed.history.position = nextPos
