@@ -1,6 +1,6 @@
 ## Web helpers: fetch a URL and return readable text, or run a DuckDuckGo
-## search and return a compact list of hits. Both are exposed as `3code fetch`
-## and `3code web` subcommands so the agent can invoke them from a bash block.
+## search and return a compact list of hits. Exposed to the agent as native
+## `web_search` and `web_fetch` tool calls (dispatched in actions.nim).
 ##
 ## No external binaries, no scripting runtimes — pure Nim httpclient + a
 ## hand-rolled HTML-to-text pass.

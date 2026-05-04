@@ -2,7 +2,7 @@ import std/[json, os, parseopt, strformat, strutils, terminal, times]
 when defined(posix):
   import std/posix
 import threecode/[types, util, prompts, shell, loop, session, compact,
-                  config, actions, api, display, ui, update, web]
+                  config, actions, api, display, ui, update]
 import threecode/minline
 export types, util, prompts, shell, loop, session, compact,
        config, actions, api, display, ui
@@ -203,8 +203,6 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode, session: var Sessi
 
 proc usage() {.noreturn.} =
   stderr.writeLine """usage: 3code [options] [prompt...]
-       3code web <query...>         # DuckDuckGo search, plain-text results
-       3code fetch <url>            # GET url, return readable text
        3code good                   # list known-good provider/variant combos
 
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
@@ -218,22 +216,6 @@ proc usage() {.noreturn.} =
 config: """ & configPath()
   quit ExitUsage
 
-proc runWeb(args: seq[string]) =
-  if args.len == 0:
-    die "web: missing query", ExitUsage
-  let query = args.join(" ")
-  let hits = try: webSearch(query)
-             except CatchableError as e: die("web: " & e.msg, ExitApi)
-  stdout.write formatHits(hits)
-  if hits.len > 0: stdout.write "\n"
-
-proc runFetch(args: seq[string]) =
-  if args.len != 1:
-    die "fetch: expected one url", ExitUsage
-  let text = try: fetchUrl(args[0])
-             except CatchableError as e: die("fetch: " & e.msg, ExitApi)
-  stdout.write capText(text)
-  stdout.write "\n"
 
 proc refuseRoot() =
   ## 3code runs arbitrary shell commands the model proposes — root
@@ -334,8 +316,6 @@ proc main() =
 
   if args.len > 0:
     case args[0]
-    of "web": runWeb(args[1 .. ^1]); return
-    of "fetch": runFetch(args[1 .. ^1]); return
     of "good": printKnownGood(); return
     else: discard
 

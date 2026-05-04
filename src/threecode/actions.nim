@@ -1,5 +1,5 @@
 import std/[json, os, strformat, strutils, tables, times]
-import types, util, shell
+import types, util, shell, web
 
 # ---------------------------------------------------------------------------
 # Tool dispatch: strictly per-model.
@@ -83,6 +83,8 @@ proc dispatchGlmOrQwen(family, name: string, args: JsonNode): Action =
   of "write": writeAction(args)
   of "patch": patchAction(args)
   of "update_plan", "todo": planAction(args)
+  of "web_search": Action(kind: akWebSearch, body: args{"query"}.getStr)
+  of "web_fetch": Action(kind: akWebFetch, body: args{"url"}.getStr)
   # Aliases — gpt-oss-shape names that show up as training leakage.
   # Lossless: `shell` → akBash, `apply_patch` → akApplyPatch (we have
   # the V4A parser), `edit` → akPatch (same shape as patch). Routed
@@ -99,6 +101,8 @@ proc dispatchGptOss(family, rawName: string, args: JsonNode): Action =
   of "shell": bashAction(args)
   of "apply_patch": applyPatchAction(args)
   of "update_plan", "todo": planAction(args)
+  of "web_search": Action(kind: akWebSearch, body: args{"query"}.getStr)
+  of "web_fetch": Action(kind: akWebFetch, body: args{"url"}.getStr)
   # Aliases — glm/qwen-shape names that show up as training leakage,
   # plus the misspellings Codex's own prompt warns about. Routed
   # silently rather than warning the model out of it.
@@ -141,6 +145,10 @@ proc bannerFor*(act: Action): string =
     &"apply_patch  ({nl} line" & (if nl == 1: "" else: "s") & ")"
   of akPlan:
     &"plan   ({act.plan.len} item" & (if act.plan.len == 1: "" else: "s") & ")"
+  of akWebSearch:
+    "web    search " & act.body
+  of akWebFetch:
+    "web    fetch " & act.body
   of akError:
     "error  unknown tool '" & act.path & "'"
 
@@ -555,6 +563,22 @@ export DEBIAN_FRONTEND=noninteractive
     if inProgress > 1:
       return ("error: update_plan must have at most one in_progress item", 1, "")
     return (lines.join("\n"), 0, "")
+  of akWebSearch:
+    if act.body.len == 0:
+      return ("error: web_search requires a query", 1, "")
+    try:
+      let hits = webSearch(act.body)
+      return (formatHits(hits), 0, "")
+    except CatchableError as e:
+      return ("error: web_search: " & e.msg, 1, "")
+  of akWebFetch:
+    if act.body.len == 0:
+      return ("error: web_fetch requires a url", 1, "")
+    try:
+      let text = fetchUrl(act.body)
+      return (capText(text), 0, "")
+    except CatchableError as e:
+      return ("error: web_fetch: " & e.msg, 1, "")
   of akError:
     return (act.body, 1, "")
 

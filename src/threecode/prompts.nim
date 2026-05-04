@@ -94,6 +94,8 @@ Act first, explain after. Don't narrate your plan before executing it — just e
 - `write(path, body)` — create or overwrite a file with `body`.
 - `patch(path, edits)` — apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
 - `update_plan(items)` — update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
+- `web_search(query)` — search the web via DuckDuckGo. Returns titles, URLs, and snippets.
+- `web_fetch(url)` — fetch a URL and return readable text (boilerplate stripped). Use to read pages found via `web_search`.
 
 **For source edits, use `patch`.** Do not use `ed`, `sed -i`, or shell heredocs to rewrite files — line-arithmetic drifts and corrupts under sequential edits. `write` for new files or full rewrites; `patch` for surgical changes; `bash` for non-edit operations only.
 
@@ -135,9 +137,13 @@ Prefer new commits over amending. Never skip hooks unless explicitly asked. Stag
 
 Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Don't disable TLS verification. If you spot something insecure, fix it immediately.
 
+# Web research
+
+Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you'd read the page — fetch it. Prefer primary sources (official docs, spec, repo) over aggregators. Two independent sources before claiming a fact; mark single-source claims. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question. If searches don't turn up a clear answer, say so — don't guess.
+
 # Skills
 
-Before using unfamiliar tools (especially web research), `cat` a matching skill file from the list below. Skills handle bot blocks, HTML extraction, etc. If a fetch fails, report it — don't invent answers.
+Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
 Available:
 {{skills}}
@@ -155,6 +161,8 @@ const QwenPreamble = """You are the Qwen edition of 3code, the economical coding
 - `write(path, body)` — create or overwrite a file with `body`.
 - `patch(path, edits)` — apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
 - `update_plan(items)` — update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
+- `web_search(query)` — search the web via DuckDuckGo. Returns titles, URLs, and snippets.
+- `web_fetch(url)` — fetch a URL and return readable text with boilerplate stripped.
 
 For source edits, use `patch`. `write` for new files or full rewrites; `bash` for non-edit operations only.
 
@@ -243,13 +251,13 @@ Prefer creating new commits over amending. Never skip hooks (`--no-verify`) unle
 
 Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Don't disable TLS verification.
 
+# Web research
+
+Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you'd read the page — fetch it. Prefer primary sources over aggregators. Two independent sources before claiming a fact; mark single-source claims. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question. If searches don't turn up a clear answer, say so — don't guess.
+
 # Skills
 
-Before reaching for a tool you don't normally use as a coder, scan the listing below and `cat` any plausible match first. The most common miss is web research.
-
-- Web search, fetching a URL, or verifying any claim against the open web: load `role-web-researcher.md` BEFORE running `curl`/`wget` against a website. The skill describes `3code web` and `3code fetch`, which handle bot blocks and HTML extraction; raw `curl` on web pages produces unusable HTML soup. If a fetch fails, report it and stop. Do not invent a confident answer from priors.
-
-For other non-coding work (sysadmin, writing, planning, systematic debugging) the same rule applies: `cat` a plausible skill before acting, drop it silently if irrelevant. Naming: `role-<persona>.md`, `task-<procedure>.md`, `domain-<knowledge-pack>.md`. The harness shows a "loaded skill: <name>" marker; don't restate it.
+Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
 Available:
 {{skills}}
@@ -273,6 +281,8 @@ You are precise and rigorous. Think through problems carefully before responding
 - `write(path, body)` — create or overwrite a file with `body`.
 - `patch(path, edits)` — apply targeted edits. `edits` is a list of `{search, replace}` objects; each `search` must match exactly once.
 - `update_plan(items)` — update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
+- `web_search(query)` — search the web via DuckDuckGo. Returns titles, URLs, and snippets.
+- `web_fetch(url)` — fetch a URL and return readable text with boilerplate stripped.
 
 For source edits, use `patch`. `write` for new files or full rewrites; `bash` for non-edit operations only.
 
@@ -357,13 +367,13 @@ Prefer creating new commits over amending. Never skip hooks (`--no-verify`) unle
 
 Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs. Don't disable TLS verification.
 
+# Web research
+
+Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you'd read the page — fetch it. Prefer primary sources over aggregators. Two independent sources before claiming a fact; mark single-source claims. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question. If searches don't turn up a clear answer, say so — don't guess.
+
 # Skills
 
-Before reaching for a tool you don't normally use as a coder, scan the listing below and `cat` any plausible match first. The most common miss is web research.
-
-- Web search, fetching a URL, or verifying any claim against the open web: load `role-web-researcher.md` BEFORE running `curl`/`wget` against a website. The skill describes `3code web` and `3code fetch`, which handle bot blocks and HTML extraction; raw `curl` on web pages produces unusable HTML soup. If a fetch fails, report it and stop. Do not invent a confident answer from priors.
-
-For other non-coding work (sysadmin, writing, planning, systematic debugging) the same rule applies: `cat` a plausible skill before acting, drop it silently if irrelevant. Naming: `role-<persona>.md`, `task-<procedure>.md`, `domain-<knowledge-pack>.md`. The harness shows a "loaded skill: <name>" marker; don't restate it.
+Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
 Available:
 {{skills}}
@@ -454,7 +464,7 @@ You MUST adhere to the following criteria when solving queries:
 - Working on the repo(s) in the current environment is allowed, even if they are proprietary.
 - Analyzing code for vulnerabilities is allowed.
 - Showing user code and tool call details is allowed.
-- Use only the offered tools. For gpt-oss coding work, that means `shell`, `apply_patch`, and `update_plan`; never invent `bash`, `patch`, `edit`, `applypatch`, or `apply-patch`.
+- Use only the offered tools. For gpt-oss coding work, that means `shell`, `apply_patch`, `update_plan`, `web_search`, and `web_fetch`; never invent `bash`, `patch`, `edit`, `applypatch`, or `apply-patch`.
 
 If completing the user's task requires writing or modifying files, your code and final answer should follow these coding guidelines, though user instructions (e.g. AGENTS.md / CLAUDE.md) may override these guidelines:
 
@@ -602,13 +612,17 @@ You can invoke apply_patch like:
 apply_patch({"input": "*** Begin Patch\n*** Add File: hello.txt\n+Hello, world!\n*** End Patch\n"})
 ```
 
+# Web research
+
+- `web_search(query)` — DuckDuckGo search; returns titles, URLs, snippets.
+- `web_fetch(url)` — GET a URL; returns readable text (boilerplate stripped).
+- Search first, then fetch. Don't paraphrase a snippet as if you'd read the page.
+- Prefer primary sources. Two independent sources before claiming a fact. Date-check fast-moving topics.
+- Don't invent URLs. Cap at ~5 fetches per question. If searches don't find it, say so — don't guess.
+
 # Skills
 
-Before reaching for a tool you don't normally use as a coder, scan the listing below and `cat` any plausible match first. The most common miss is web research.
-
-- Web search, fetching a URL, or verifying any claim against the open web: load `role-web-researcher.md` BEFORE running `curl`/`wget` against a website. The skill describes `3code web` and `3code fetch`, which handle bot blocks and HTML extraction; raw `curl` on web pages produces unusable HTML soup. If a fetch fails, report it and stop. Do not invent a confident answer from priors.
-
-For other non-coding work (sysadmin, writing, planning, systematic debugging) the same rule applies: `cat` a plausible skill before acting, drop it silently if irrelevant. Naming: `role-<persona>.md`, `task-<procedure>.md`, `domain-<knowledge-pack>.md`. The harness shows a "loaded skill: <name>" marker; don't restate it.
+Before using unfamiliar non-coding tools, `cat` a matching skill file from the list below.
 
 Available:
 {{skills}}
@@ -971,11 +985,10 @@ proc buildCredit*(p: Profile): string =
   else:
     "Credit where it's due — to whoever trained the weights driving you and the lab serving them."
 
-const BuiltinSkills*: array[6, (string, string)] = [
+const BuiltinSkills*: array[5, (string, string)] = [
   ("role-conversational.md",   staticRead("skills/role-conversational.md")),
   ("role-sysadmin.md",         staticRead("skills/role-sysadmin.md")),
   ("role-thinking-partner.md", staticRead("skills/role-thinking-partner.md")),
-  ("role-web-researcher.md",   staticRead("skills/role-web-researcher.md")),
   ("role-writing.md",          staticRead("skills/role-writing.md")),
   ("task-debug-systematic.md", staticRead("skills/task-debug-systematic.md")),
 ]
