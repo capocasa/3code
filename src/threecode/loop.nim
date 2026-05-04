@@ -28,6 +28,18 @@ proc shellCmd(args: JsonNode): string =
   let argv = args{"cmd"}.getElems
   if argv.len > 0: argv[^1].getStr else: ""
 
+proc bashCmd(args: JsonNode): string =
+  ## Extract the command line for a `bash` tool call.
+  ## Supports both the canonical `{command: "..."}` shape and the
+  ## legacy `{cmd: ["bash", "-lc", "..."]}` shape used by gpt‑oss.
+  let cmdStr = args{"command"}.getStr
+  if cmdStr.len > 0:
+    return cmdStr
+  let argv = args{"cmd"}.getElems
+  if argv.len > 0:
+    return argv[^1].getStr
+  return ""
+
 proc fingerprint*(name: string, args: JsonNode): string =
   ## Returns "" when the call should NOT be tracked. Only mutations and
   ## web calls are tracked — reads are observation and don't indicate
@@ -36,7 +48,7 @@ proc fingerprint*(name: string, args: JsonNode): string =
   ## and `web_fetch` by URL so repetitive search loops are caught.
   case name
   of "bash", "shell":
-    let cmd = if name == "bash": args{"command"}.getStr
+    let cmd = if name == "bash": bashCmd(args)
               else: shellCmd(args)
     let mp = bashMutationPath(cmd)
     if mp != "": return resolvePath(mp)
@@ -93,7 +105,7 @@ proc trackCall*(t: var LoopTracker, name: string, args: JsonNode): int =
   # immediate Strike 2. These wipe the working-tree state the model's
   # plan was based on; further autonomous turns make things worse.
   if name == "bash" or name == "shell":
-    let cmd = if name == "bash": args{"command"}.getStr
+    let cmd = if name == "bash": bashCmd(args)
               else: shellCmd(args)
     let recovery = bashIsRecovery(cmd)
     if recovery != "" and t.strike < 2:
