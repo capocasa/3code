@@ -1,5 +1,5 @@
 import std/[json, os, sequtils, strformat, strutils, tables, terminal, times]
-import types, util, prompts, session, config, api, compact, display, minline
+import types, util, prompts, session, config, api, compact, display, minline, loop
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":prompt", ":show", ":log", ":sessions",
@@ -709,6 +709,11 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
     session.toolLog.setLen 0
     session.usage = Usage()
     session.lastPromptTokens = 0
+    session.loop = initLoopTracker()
+    session.readCache = nil
+    session.plan.setLen 0
+    pendingHint = (active: false, usage: Usage(), window: 0, elapsed: 0)
+    currentBarLabel = ""
     if session.savePath != "":
       session.savePath = newSessionPath()
       session.created = $now()

@@ -179,6 +179,8 @@ proc printToolResult*(kind: ActionKind, res: string, code: int, idx: int,
     printBashCompact(res, idx)
   elif kind == akRead:
     printBashCompact(res, idx, ReadHead, ReadTail)
+  elif kind in {akWebSearch, akWebFetch}:
+    printBashCompact(res, idx)
   elif kind == akPlan:
     let termW = try: terminalWidth() except CatchableError: 80
     let bodyW = max(20, termW - 2)
@@ -615,7 +617,7 @@ proc showTool*(arg: string, toolLog: seq[ToolRecord]) =
     return
   let rec = toolLog[n-1]
   stdout.styledWriteLine fgCyan, styleBright, &"── T{n}  ", rec.banner, resetStyle
-  if rec.kind in {akBash, akRead}:
+  if rec.kind in {akBash, akRead, akWebSearch, akWebFetch}:
     for l in rec.output.splitLines: printLine(l)
   else:
     let termW = try: terminalWidth() except CatchableError: 80
