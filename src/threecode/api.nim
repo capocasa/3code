@@ -988,6 +988,33 @@ proc applyGenerationDefaults*(p: Profile, body: JsonNode) =
   if d.maxTokens > 0:
     body["max_tokens"] = %d.maxTokens
 
+proc applyDeepseekReasoning(p: Profile, body: JsonNode) =
+  ## DeepSeek V4 maps thinking on/off + reasoning_effort (high/max only;
+  ## low/medium silently become high). For economical coding we follow
+  ## DeepSeek’s recommendation for coding tasks: temperature 0.0, which
+  ## yields deterministic output and reduces token waste.
+  ##   low    → thinking disabled, temperature 0.0
+  ##   medium → thinking enabled, effort low,   temperature 0.0
+  ##   high   → thinking enabled, effort medium,temperature 0.0
+  ## Temperature is overridden here (after applyGenerationDefaults) because
+  ## thinking mode ignores it — but we still set it explicitly for all
+  ## levels to keep behavior deterministic.
+  case p.reasoning
+  of "low":
+    body["thinking"] = %*{"type": "disabled"}
+    body["temperature"] = %0.0
+  of "medium":
+    body["thinking"] = %*{"type": "enabled"}
+    # Map to low reasoning effort for DeepSeek
+    body["reasoning_effort"] = %"low"
+    body["temperature"] = %0.0
+  of "high":
+    body["thinking"] = %*{"type": "enabled"}
+    # Map to medium reasoning effort for DeepSeek
+    body["reasoning_effort"] = %"medium"
+    body["temperature"] = %0.0
+  else: discard
+
 proc applyReasoning*(p: Profile, body: JsonNode) =
   ## Per-family wire mapping for `Profile.reasoning`. Adding a new
   ## family means: (1) extend `reasoningSupported` in prompts.nim,
@@ -995,6 +1022,7 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   case p.family
   of "gpt-oss": applyGptOssReasoning(p, body)
   of "glm": applyGlmReasoning(p, body)
+  of "deepseek": applyDeepseekReasoning(p, body)
   else: discard
 
 proc beginTurn*() =
