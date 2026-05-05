@@ -24,7 +24,7 @@ type
     temperature*: float  ## negative means omit the field
     maxTokens*: int      ## <= 0 means omit the field
 
-const KnownGoodCombos*: array[36, KnownGoodCombo] = [
+const KnownGoodCombos*: array[37, KnownGoodCombo] = [
     # glm
     ("baseten",   "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "low",    0.2, 8192, false),
     ("baseten",   "zai-org/GLM-5",                                   "glm",      "5",   "",          "low",    0.2, 8192, false),
@@ -56,15 +56,16 @@ const KnownGoodCombos*: array[36, KnownGoodCombo] = [
     ("together",  "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
     ("together",  "openai/gpt-oss-20b",                              "gpt-oss",  "",    "20b",       "medium", 0.2, 4096, false),
     # deepseek
-    ("baseten",   "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "medium", 0.2, 8192, false),
+    ("baseten",   "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false),
     ("deepseek",  "deepseek-chat",                                   "deepseek", "3",   "",          "medium", 0.2, 8192, false),
     ("deepseek",  "deepseek-reasoner",                               "deepseek", "r1",  "",          "medium", 0.2, 8192, false),
-    ("deepseek",  "deepseek-v4-flash",                               "deepseek", "4",   "flash",     "medium", 0.2, 4096, false),
+    ("deepseek",  "deepseek-v4-flash",                               "deepseek", "4",   "flash",     "low",    0.2, 4096, false),
+    ("deepseek",  "deepseek-v4-pro",                                 "deepseek", "4",   "pro",       "low",    0.2, 8192, false),
     ("nebius",    "deepseek-ai/DeepSeek-V3.2",                       "deepseek", "3.2", "",          "medium", 0.2, 8192, false),
     ("nebius",    "deepseek-ai/DeepSeek-V3.2-fast",                  "deepseek", "3.2", "fast",      "medium", 0.2, 4096, false),
     ("sambanova", "DeepSeek-V3.2",                                   "deepseek", "3.2", "",          "medium", 0.2, 8192, false),
     ("together",  "deepseek-ai/DeepSeek-R1",                         "deepseek", "r1",  "",          "medium", 0.2, 8192, false),
-    ("together",  "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "medium", 0.2, 8192, false),
+    ("together",  "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false),
   ]
     ## (provider, model, family, version, variant, reasoning, temperature,
     ## maxTokens) tuples.
@@ -987,7 +988,7 @@ const ReasoningLevels* = ["low", "medium", "high"]
 proc reasoningSupported*(family: string): bool =
   ## True when `family` has a wire field for reasoning effort. Drives
   ## whether `:reasoning` switching has any effect for the active model.
-  family == "gpt-oss" or family == "glm"
+  family == "gpt-oss" or family == "glm" or family == "deepseek"
 
 proc defaultReasoningsFor*(family: string): seq[string] =
   ## Available levels per family for the `:reasoning` listing. Empty when

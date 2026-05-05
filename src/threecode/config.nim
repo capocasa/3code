@@ -19,7 +19,7 @@ type
                         ## then falls back to the known-good default.
     reasonings*: seq[string]  ## available reasoning levels for `:reasoning`
                               ## listing. Empty means "fall back to the
-                              ## family default" (`defaultReasoningsFor`).
+                              ## model default" (`defaultReasoningsFor`).
 
 proc shortModel*(model: string): string =
   ## Everything after the last `/` in a model id. This is the

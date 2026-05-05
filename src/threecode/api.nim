@@ -1155,7 +1155,7 @@ proc applyDeepseekReasoning(p: Profile, body: JsonNode) =
 
 proc applyReasoning*(p: Profile, body: JsonNode) =
   ## Per-family wire mapping for `Profile.reasoning`. Adding a new
-  ## family means: (1) extend `reasoningSupported` in prompts.nim,
+  ## family means: (1) set `reasoning` in the known-good combo table,
   ## (2) write an `applyXReasoning` proc, (3) add a case branch.
   case p.family
   of "gpt-oss": applyGptOssReasoning(p, body)
