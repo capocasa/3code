@@ -32,9 +32,14 @@ suite "web helpers":
   test "parseSearchHits extracts title / url / snippet":
     let html = """
       <div class="results">
-        <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa&amp;rut=x">Title <b>One</b></a>
-        <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa">Snippet <b>one</b> text.</a>
-        <a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fb">Title Two</a>
+        <div class="result css-x">
+          <a class="result-title result-link css-y" href="https://example.com/a" target="_blank" rel="noopener nofollow noreferrer" data-testid="gl-title-link"><h2 class="wgl-title css-z">Title <b>One</b></h2></a>
+          <p class="description css-w"><b>Snippet</b> one text.</p>
+        </div>
+        <div class="result css-x">
+          <a class="result-title result-link css-y" href="https://example.com/b?x=1&amp;y=2" data-testid="gl-title-link"><h2 class="wgl-title css-z">Title Two</h2></a>
+          <p class="description css-w">Second snippet.</p>
+        </div>
       </div>
     """
     let hits = parseSearchHits(html)
@@ -43,7 +48,8 @@ suite "web helpers":
     check hits[0].url == "https://example.com/a"
     check "Snippet one text." in hits[0].snippet
     check hits[1].title == "Title Two"
-    check hits[1].url == "https://example.com/b"
+    check hits[1].url == "https://example.com/b?x=1&y=2"
+    check "Second snippet." in hits[1].snippet
 
   test "capText middle-truncates oversize input":
     let s = "a".repeat(30_000)

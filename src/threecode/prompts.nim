@@ -99,7 +99,7 @@ Act first, explain after. Don't narrate your plan before executing it — just e
 - `write(path, body)` — create or overwrite a file with `body`.
 - `patch(path, edits)` — apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
 - `update_plan(items)` — update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
-- `web_search(query)` — search the web via DuckDuckGo. Returns titles, URLs, and snippets.
+- `web_search(query)` — search the web. Returns titles, URLs, and snippets.
 - `web_fetch(url)` — fetch a URL and return readable text (boilerplate stripped). Use to read pages found via `web_search`.
 
 **For source edits, use `patch`.** Do not use `ed`, `sed -i`, or shell heredocs to rewrite files — line-arithmetic drifts and corrupts under sequential edits. `write` for new files or full rewrites; `patch` for surgical changes; `bash` for non-edit operations only.
@@ -166,7 +166,7 @@ const QwenPreamble = """You are the Qwen edition of 3code, the economical coding
 - `write(path, body)` — create or overwrite a file with `body`.
 - `patch(path, edits)` — apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
 - `update_plan(items)` — update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
-- `web_search(query)` — search the web via DuckDuckGo. Returns titles, URLs, and snippets.
+- `web_search(query)` — search the web. Returns titles, URLs, and snippets.
 - `web_fetch(url)` — fetch a URL and return readable text with boilerplate stripped.
 
 For source edits, use `patch`. `write` for new files or full rewrites; `bash` for non-edit operations only.
@@ -288,7 +288,7 @@ Reserve step-by-step reasoning for planning non-trivial work and debugging failu
 - `write(path, body)` — create or overwrite a file with `body`.
 - `patch(path, edits)` — apply targeted edits. `edits` is a list of `{search, replace}` objects; each `search` must match exactly once.
 - `update_plan(items)` — update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
-- `web_search(query)` — search the web via DuckDuckGo. Returns titles, URLs, and snippets.
+- `web_search(query)` — search the web. Returns titles, URLs, and snippets.
 - `web_fetch(url)` — fetch a URL and return readable text with boilerplate stripped.
 
 For source edits, use `patch`. `write` for new files or full rewrites; `bash` for non-edit operations only.
@@ -619,7 +619,7 @@ apply_patch({"input": "*** Begin Patch\n*** Add File: hello.txt\n+Hello, world!\
 
 # Web research
 
-- `web_search(query)` — DuckDuckGo search; returns titles, URLs, snippets.
+- `web_search(query)` — web search; returns titles, URLs, snippets.
 - `web_fetch(url)` — GET a URL; returns readable text (boilerplate stripped).
 - Search first, then fetch. Don't paraphrase a snippet as if you'd read the page.
 - Prefer primary sources. Two independent sources before claiming a fact. Date-check fast-moving topics.
@@ -637,7 +637,7 @@ let webSearchTool = %*{
   "type": "function",
   "function": {
     "name": "web_search",
-    "description": "Search the web via DuckDuckGo. Returns titles, URLs, and snippets for up to 10 results.",
+    "description": "Search the web. Returns titles, URLs, and snippets for up to 10 results.",
     "parameters": {
       "type": "object",
       "properties": {

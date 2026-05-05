@@ -1,5 +1,5 @@
 import std/[os, parsecfg, sequtils, streams, strformat, strutils, tables, terminal, uri]
-import types, prompts
+import types, prompts, web
 
 type
   ProviderRec* = object
@@ -53,6 +53,10 @@ proc findModel*(p: ProviderRec, name: string): int =
 
 var activeCurrent*: string
 var activeProviders*: seq[ProviderRec]
+var activeSearchUrl*: string = DefaultSearchUrl
+  ## Resolved at config load. Overridden by `[settings]` `search-url = "..."`.
+  ## Persisted back to disk only when it differs from `DefaultSearchUrl`,
+  ## so users who never customize keep a clean config.
 var experimentalEnabled*: bool = false
   ## Set by `-x`/`--experimental`. When true, models outside `KnownGoodCombos`
   ## are allowed; otherwise the gate refuses them.
@@ -144,9 +148,12 @@ proc expandEnvValue(s: string): string =
     return getEnv(t[1 .. ^1])
   s
 
-proc parseConfigFile*(path: string): (string, seq[ProviderRec]) =
+proc parseConfigFile*(path: string): (string, string, seq[ProviderRec]) =
   ## Streaming parse so that repeated [provider] sections accumulate as a list.
+  ## Returns `(current, searchUrl, providers)`. `searchUrl` is "" when the
+  ## key was absent; the caller decides whether to fall back to the default.
   var current = ""
+  var searchUrl = ""
   var providers: seq[ProviderRec]
   var section = ""
   var prov: ProviderRec
@@ -181,7 +188,10 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec]) =
       let v = expandEnvValue(e.value)
       case section
       of "settings":
-        if e.key == "current": current = v
+        case e.key
+        of "current": current = v
+        of "search-url", "search_url": searchUrl = v
+        else: discard
       of "provider":
         case e.key
         of "name": prov.name = v
@@ -197,7 +207,7 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec]) =
     of cfgError:
       die &"{path}: {e.msg}", ExitConfig
   p.close
-  (current, providers)
+  (current, searchUrl, providers)
 
 proc quoteVal(s: string): string =
   result = "\""
@@ -213,6 +223,8 @@ proc writeConfigFile*(path: string, current: string,
   createDir(path.parentDir)
   var buf = "[settings]\n"
   buf.add "current = " & quoteVal(current) & "\n"
+  if activeSearchUrl != "" and activeSearchUrl != DefaultSearchUrl:
+    buf.add "search-url = " & quoteVal(activeSearchUrl) & "\n"
   for pr in providers:
     buf.add "\n[provider]\n"
     buf.add "name = " & quoteVal(pr.name) & "\n"
@@ -231,8 +243,12 @@ proc configPath*(): string =
   getConfigDir() / "3code" / "config"
 
 proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec]) =
+  ## Returns `(current, providers)` and updates `activeSearchUrl` as a side
+  ## effect when the config sets `search-url`. Missing file is benign.
   if not fileExists(path): return ("", @[])
-  parseConfigFile(path)
+  let (current, searchUrl, providers) = parseConfigFile(path)
+  if searchUrl != "": activeSearchUrl = searchUrl
+  (current, providers)
 
 proc resolveFamily*(prov: ProviderRec, prof: Profile): string =
   ## Family is resolved at profile-build time:
@@ -304,7 +320,8 @@ proc loadProfile*(wanted: string): Profile =
     stderr.writeLine ""
     stderr.writeLine ConfigExample
     quit ExitConfig
-  let (current, providers) = parseConfigFile(path)
+  let (current, searchUrl, providers) = parseConfigFile(path)
+  if searchUrl != "": activeSearchUrl = searchUrl
   if providers.len == 0:
     die &"no [provider] section in {path}", ExitConfig
   var pick = wanted

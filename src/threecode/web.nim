@@ -1,8 +1,8 @@
-## Web helpers: fetch a URL and return readable text, or run a DuckDuckGo
+## Web helpers: fetch a URL and return readable text, or run a Startpage
 ## search and return a compact list of hits. Exposed to the agent as native
 ## `web_search` and `web_fetch` tool calls (dispatched in actions.nim).
 ##
-## No external binaries, no scripting runtimes — pure Nim httpclient + a
+## No external binaries, no scripting runtimes, pure Nim httpclient + a
 ## hand-rolled HTML-to-text pass.
 
 import std/[httpclient, strutils, uri, unicode, tables]
@@ -11,6 +11,14 @@ import util
 const UserAgent = "Mozilla/5.0 (X11; Linux x86_64) 3code/web"
 const DefaultFetchCap = 20_000
 const SearchResultCap = 10
+
+# Startpage's `do/search` endpoint returns a server-rendered SERP whose
+# anchors carry the real target URL (no redirector to unwrap) and whose
+# results are tagged with a stable `data-testid="gl-title-link"`. The
+# `cat=web` filter restricts to web hits (skipping the Wikipedia info-card
+# and image/news shelves) so the parser sees a clean stream of organic
+# results. Append the URL-encoded query directly.
+const DefaultSearchUrl* = "https://www.startpage.com/do/search?cat=web&q="
 
 type
   SearchHit* = object
@@ -153,63 +161,62 @@ proc capText*(s: string, cap = DefaultFetchCap): string =
   let half = cap div 2
   s[0 ..< half] & "\n... [truncated " & $(s.len - cap) & " chars] ...\n" & s[^half .. ^1]
 
-# ---------- DuckDuckGo search ----------
+# ---------- Startpage search ----------
 
 proc innerText(html: string, afterTagOpen: int, closeTag: string): string =
-  # Slice from just after the opening tag to the matching closing tag, then
-  # strip inner markup (DDG wraps query terms in <b>...</b>).
   let close = html.find(closeTag, afterTagOpen)
   let raw = if close < 0: html[afterTagOpen .. ^1]
             else: html[afterTagOpen ..< close]
   stripHtml(raw).replace("\n", " ").strip
 
-proc parseDdgUrl(href: string): string =
-  # href looks like "//duckduckgo.com/l/?uddg=<encoded>&rut=..." (with &amp;)
-  let h = href.replace("&amp;", "&")
-  let key = "uddg="
-  let k = h.find(key)
-  if k < 0:
-    return (if h.startsWith("//"): "https:" & h else: h)
-  let rest = h[k + key.len .. ^1]
-  let amp = rest.find('&')
-  let enc = if amp < 0: rest else: rest[0 ..< amp]
-  try: decodeUrl(enc) except CatchableError: enc
+proc extractAttr(tag: string, name: string): string =
+  let key = name & "=\""
+  let k = tag.find(key)
+  if k < 0: return ""
+  let s = k + key.len
+  let e = tag.find('"', s)
+  if e < 0: return ""
+  tag[s ..< e].replace("&amp;", "&")
 
 proc parseSearchHits*(html: string): seq[SearchHit] =
-  ## Extract result__a titles/urls and result__snippet text from DDG HTML.
+  ## Extract Startpage organic web results. Each hit's anchor carries
+  ## `data-testid="gl-title-link"` and the title sits inside an `<h2>`;
+  ## the snippet follows in a `<p class="description ...">`. Class names
+  ## are stable identifiers; the surrounding emotion-css hashes are not,
+  ## so we never match on them.
+  let marker = "data-testid=\"gl-title-link\""
   var i = 0
   while result.len < SearchResultCap:
-    let aMark = html.find("class=\"result__a\"", i)
-    if aMark < 0: break
-    # find href attribute on this anchor (scan backwards to '<a' then forward)
-    let tagStart = html.rfind('<', 0, aMark)
-    if tagStart < 0: break
-    let tagEnd = html.find('>', aMark)
-    if tagEnd < 0: break
-    let tag = html[tagStart .. tagEnd]
+    let mk = html.find(marker, i)
+    if mk < 0: break
+    let tagStart = html.rfind('<', 0, mk)
+    let tagEnd = html.find('>', mk)
+    if tagStart < 0 or tagEnd < 0: break
+    let anchor = html[tagStart .. tagEnd]
     var hit: SearchHit
-    let hrefKey = "href=\""
-    let hk = tag.find(hrefKey)
-    if hk >= 0:
-      let he = tag.find('"', hk + hrefKey.len)
-      if he > 0:
-        hit.url = parseDdgUrl(tag[hk + hrefKey.len ..< he])
-    hit.title = innerText(html, tagEnd + 1, "</a>")
-    # look for a snippet after this anchor, before the next result__a
-    let nextA = html.find("class=\"result__a\"", tagEnd)
-    let snipMark = html.find("class=\"result__snippet\"", tagEnd)
-    if snipMark > 0 and (nextA < 0 or snipMark < nextA):
-      let snipTagEnd = html.find('>', snipMark)
-      if snipTagEnd > 0:
-        hit.snippet = innerText(html, snipTagEnd + 1, "</a>")
+    hit.url = extractAttr(anchor, "href")
+    let h2Open = html.find("<h2", tagEnd)
+    if h2Open >= 0 and h2Open < html.find("</a>", tagEnd):
+      let h2GT = html.find('>', h2Open)
+      if h2GT > 0:
+        hit.title = innerText(html, h2GT + 1, "</h2>")
+    let aClose = html.find("</a>", tagEnd)
+    let nextMk = html.find(marker, tagEnd + marker.len)
+    let scanEnd = if nextMk < 0: html.len else: nextMk
+    let descKey = "class=\"description"
+    let descMk = html.find(descKey, aClose)
+    if descMk > 0 and descMk < scanEnd:
+      let descGT = html.find('>', descMk)
+      if descGT > 0:
+        hit.snippet = innerText(html, descGT + 1, "</p>")
     if hit.title.len > 0 or hit.url.len > 0:
       result.add hit
-    i = tagEnd + 1
+    i = if nextMk < 0: html.len else: nextMk
 
-proc webSearch*(query: string): seq[SearchHit] =
+proc webSearch*(query: string, searchUrl = DefaultSearchUrl): seq[SearchHit] =
   let client = newClient()
   defer: client.close()
-  let url = "https://html.duckduckgo.com/html/?q=" & encodeUrl(query)
+  let url = searchUrl & encodeUrl(query)
   let resp = client.get(url)
   if resp.code.int div 100 != 2:
     raise newException(IOError, "HTTP " & $resp.code & " searching")

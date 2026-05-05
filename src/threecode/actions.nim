@@ -1,5 +1,5 @@
 import std/[json, os, strformat, strutils, tables, times]
-import types, util, shell, web
+import types, util, shell, web, config
 
 # ---------------------------------------------------------------------------
 # Tool dispatch: strictly per-model.
@@ -567,7 +567,7 @@ export DEBIAN_FRONTEND=noninteractive
     if act.body.len == 0:
       return ("error: web_search requires a query", 1, "")
     try:
-      let hits = webSearch(act.body)
+      let hits = webSearch(act.body, activeSearchUrl)
       return (formatHits(hits), 0, "")
     except CatchableError as e:
       return ("error: web_search: " & e.msg, 1, "")
