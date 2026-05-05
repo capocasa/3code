@@ -341,9 +341,11 @@ export DEBIAN_FRONTEND=noninteractive
     writeFile(stdinPath, act.stdin)
     let wrapped = &"timeout --foreground 120s sh \"{scriptPath}\" <\"{stdinPath}\" >\"{outPath}\" 2>\"{errPath}\""
     let code = execShellCmd(wrapped)
-    let rawOut = if fileExists(outPath): readFile(outPath) else: ""
+    var rawOut = if fileExists(outPath): readFile(outPath) else: ""
     let rawErr = if fileExists(errPath): readFile(errPath) else: ""
     try: removeDir(tmp) except CatchableError: discard
+    if isBinaryContent(rawOut):
+      rawOut = &"[binary output: {rawOut.len} bytes — not shown]"
     let outClip = clipMiddle(rawOut, 2000, 2000)
     let errClip = clipMiddle(rawErr, 1000, 1000)
     # Body omits the "$ {cmd}" echo — the model already has the command in
