@@ -1371,27 +1371,40 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
     }
   outcome.assistantMsg
 
-proc verifyProfile*(p: Profile): (bool, string) =
-  let body = $(%*{
+proc verifyBody*(p: Profile): string =
+  ## JSON body for the provider-verification ping.  Kept as a named proc
+  ## so the test suite can assert it matches the streaming convention used
+  ## by `callModel` (both must send `"stream": true`).
+  $(%*{
     "model": p.model,
     "messages": [%*{"role": "user", "content": "ping"}],
     "max_tokens": 1,
-    "stream": false
+    "stream": true
   })
+
+proc verifyProfile*(p: Profile): (bool, string) =
+  let body = verifyBody(p)
   try:
     let client = newHttpClient(timeout = 20_000, userAgent = "3code",
                                sslContext = bundledSslContext())
     defer: client.close()
     client.headers["Authorization"] = "Bearer " & p.key
     client.headers["Content-Type"] = "application/json"
+    client.headers["Accept"] = "text/event-stream"
     let resp = client.request(p.url & "/chat/completions",
                               httpMethod = HttpPost, body = body)
     if resp.code.int != 200:
       let snip = resp.body[0 ..< min(200, resp.body.len)]
       return (false, $resp.code.int & ": " & snip)
-    let j = try: parseJson(resp.body)
-            except CatchableError: return (false, "bad json in response")
-    if "error" in j: return (false, $j["error"])
+    # Streaming response — look for an error object in the first SSE chunk
+    # or just accept any 200 as success (we only need to know the endpoint
+    # is reachable and the key works).
+    if resp.body.len > 0:
+      let sse = resp.body
+      if sse.contains("\"error\""):
+        let start = max(0, sse.find("{"))
+        let snip = sse[start ..< min(start + 200, sse.len)]
+        return (false, snip)
     (true, "")
   except CatchableError as e:
     (false, e.msg)

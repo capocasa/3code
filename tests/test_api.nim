@@ -87,6 +87,15 @@ suite "xml tool_call fallback":
     let args = parseJson(r.calls[0]{"function"}{"arguments"}.getStr)
     check args{"body"}.getStr == "line1\nline2"
 
+  test "verifyBody sends stream:true matching callModel":
+    let p = Profile(name: "zai.glm-5.1", model: "glm-5.1", family: "glm")
+    let body = parseJson(verifyBody(p))
+    check body{"stream"}.getBool == true
+    check body{"model"}.getStr == "glm-5.1"
+    check body{"max_tokens"}.getInt == 1
+    check body{"messages"}.len == 1
+    check body{"messages"}[0]{"role"}.getStr == "user"
+
   test "fallback flag is per-known-good entry":
     check xmlToolCallsFallback(Profile(name: "nvidia.z-ai/glm4.7",
       model: "z-ai/glm4.7", family: "glm")) == true
