@@ -1,4 +1,4 @@
-import std/[algorithm, atomics, httpclient, json, locks, nativesockets, net, os, sequtils, strformat, strutils, tables, terminal, times, uri]
+import std/[algorithm, atomics, hashes, httpclient, json, locks, nativesockets, net, os, sequtils, strformat, strutils, tables, terminal, times, uri]
 when defined(posix):
   import std/posix
   import posix/termios
@@ -583,6 +583,66 @@ type StreamOutcome = object
   assistantMsg: JsonNode  # reconstructed from SSE when status=200
   usage: Usage
 
+proc parseXmlToolCalls*(content: string): tuple[cleaned: string, calls: seq[JsonNode]] =
+  ## Extract GLM/Qwen native `<tool_call>NAME<arg_key>K</arg_key>
+  ## <arg_value>V</arg_value>...</tool_call>` blocks from `content` and
+  ## promote them to OpenAI-style `tool_calls` entries. Returns the
+  ## content with those blocks removed and the synthesized calls.
+  ##
+  ## Some endpoints (e.g. nvidia z-ai/glm4.7 mid-turn) leak the model's
+  ## chat-template tokens into the SSE content stream instead of parsing
+  ## them into `tool_calls` deltas. This parser is the fallback.
+  const
+    Open  = "<tool_call>"
+    Close = "</tool_call>"
+    KOpen = "<arg_key>"
+    KClose = "</arg_key>"
+    VOpen = "<arg_value>"
+    VClose = "</arg_value>"
+  var cleaned = ""
+  var calls: seq[JsonNode] = @[]
+  var i = 0
+  while i < content.len:
+    let openIdx = content.find(Open, i)
+    if openIdx < 0:
+      cleaned.add content[i .. ^1]
+      break
+    cleaned.add content[i ..< openIdx]
+    let closeIdx = content.find(Close, openIdx + Open.len)
+    if closeIdx < 0:
+      # Unterminated: keep tail as content rather than lose data.
+      cleaned.add content[openIdx .. ^1]
+      break
+    let inner = content[openIdx + Open.len ..< closeIdx]
+    let firstK = inner.find(KOpen)
+    let name =
+      if firstK < 0: inner.strip()
+      else: inner[0 ..< firstK].strip()
+    var args = newJObject()
+    var p = (if firstK < 0: inner.len else: firstK)
+    while p < inner.len:
+      let kStart = inner.find(KOpen, p)
+      if kStart < 0: break
+      let kEnd = inner.find(KClose, kStart + KOpen.len)
+      if kEnd < 0: break
+      let key = inner[kStart + KOpen.len ..< kEnd].strip()
+      let vStart = inner.find(VOpen, kEnd + KClose.len)
+      if vStart < 0: break
+      let vEnd = inner.find(VClose, vStart + VOpen.len)
+      if vEnd < 0: break
+      let value = inner[vStart + VOpen.len ..< vEnd]
+      if key.len > 0: args[key] = %value
+      p = vEnd + VClose.len
+    if name.len > 0:
+      calls.add %*{
+        "id": "xmltc-" & $calls.len & "-" & toHex(hash(content[openIdx ..< closeIdx + Close.len]).uint64, 8),
+        "type": "function",
+        "function": {"name": name, "arguments": $args}
+      }
+    i = closeIdx + Close.len
+  result.cleaned = cleaned.strip(leading = false)
+  result.calls = calls
+
 proc accumulateToolCall(dst: JsonNode, delta: JsonNode) =
   # Merge a tool_calls delta chunk into the accumulator slot. OpenAI-style
   # providers emit `arguments` as partial strings across chunks; concatenate.
@@ -598,11 +658,61 @@ proc accumulateToolCall(dst: JsonNode, delta: JsonNode) =
   if "arguments" in fn:
     dst["function"]["arguments"] = %(dst["function"]["arguments"].getStr & fn{"arguments"}.getStr(""))
 
+type XmlToolFilter = object
+  ## Streaming filter that drops `<tool_call>...</tool_call>` blocks from
+  ## live content output. State persists across SSE chunks so a tag may
+  ## span chunk boundaries.
+  pending: string
+  inside: bool
+
+const
+  XmlOpenTag = "<tool_call>"
+  XmlCloseTag = "</tool_call>"
+
+proc feed(f: var XmlToolFilter, c: string): string =
+  ## Append `c` to the filter and return the bytes safe to render now.
+  ## Bytes inside a `<tool_call>` block are dropped; bytes that might be
+  ## the start of an open tag are held back until we know.
+  f.pending.add c
+  result = ""
+  while f.pending.len > 0:
+    if f.inside:
+      let idx = f.pending.find(XmlCloseTag)
+      if idx < 0:
+        let keep = min(f.pending.len, XmlCloseTag.len - 1)
+        f.pending = f.pending[f.pending.len - keep .. ^1]
+        return
+      f.pending = f.pending[idx + XmlCloseTag.len .. ^1]
+      f.inside = false
+    else:
+      let idx = f.pending.find(XmlOpenTag)
+      if idx < 0:
+        let safeUpTo = f.pending.len - min(f.pending.len, XmlOpenTag.len - 1)
+        if safeUpTo > 0:
+          result.add f.pending[0 ..< safeUpTo]
+          f.pending = f.pending[safeUpTo .. ^1]
+        return
+      if idx > 0: result.add f.pending[0 ..< idx]
+      f.pending = f.pending[idx + XmlOpenTag.len .. ^1]
+      f.inside = true
+
+proc flushTail(f: var XmlToolFilter): string =
+  ## At end-of-stream, anything still pending outside a tool_call block
+  ## is real content — emit it. (Pending bytes inside an unterminated
+  ## block are dropped; that's expected: the parser will treat the block
+  ## as malformed and the post-stream history will retain raw content.)
+  if f.inside: return ""
+  result = f.pending
+  f.pending = ""
+
 proc streamHttp(url, key, bodyStr: string, baseLabel: string,
-                slurped: var int): StreamOutcome =
+                slurped: var int, suppressXml: bool): StreamOutcome =
   # Post `bodyStr` to `url` and consume SSE chunks until `[DONE]`. `slurped`
   # accumulates an approximate output-character count so the caller can
   # show a live "↓ Nk" on the spinner; update it inline as chunks arrive.
+  # `suppressXml` enables a streaming filter that drops the model's
+  # `<tool_call>...</tool_call>` chat-template tags from live output for
+  # endpoints that leak them into delta.content (see xmlToolCallsFallback).
   let u = try: parseUri(url) except CatchableError as e:
     result.errMsg = "bad url: " & e.msg
     return
@@ -667,6 +777,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   var accTools = initOrderedTable[int, JsonNode]()
   var nonSSE: seq[string]
   var contentStarted = false
+  var xmlFilter = XmlToolFilter()
   # Ticker state: the full reasoning text is retained in `accReasoning` (so
   # it can be echoed back to the provider — DeepSeek rejects follow-up
   # requests that drop reasoning_content); the ticker display only shows
@@ -832,24 +943,28 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
               refreshTicker()
           let c = delta{"content"}.getStr("")
           if c.len > 0:
-            if not contentStarted:
-              # Stop the spinner and emit the answer bullet at column 0
-              # without a newline; the first content line lands on the same
-              # row right after `● `, subsequent lines indent two spaces.
-              # Then paint bar+prompt one row below so the bar stays
-              # visible while `pendingLine` accumulates in memory before
-              # the first `\n` arrives.
-              setSpinTicker("")
-              stopSpinner()
-              stdout.styledWrite(fgCyan, styleBright, "● ", resetStyle)
-              contentStarted = true
-              mdState.firstEmit = true
-              paintBarBelow(currentLabel(slurped), DimPromptColor)
-              liveBarBelow = true
             accContent &= c
             slurped += c.len
-            emitContent(c, slurped)
-            stdout.flushFile()
+            let visible =
+              if suppressXml: feed(xmlFilter, c)
+              else: c
+            if visible.len > 0:
+              if not contentStarted:
+                # Stop the spinner and emit the answer bullet at column 0
+                # without a newline; the first content line lands on the same
+                # row right after `● `, subsequent lines indent two spaces.
+                # Then paint bar+prompt one row below so the bar stays
+                # visible while `pendingLine` accumulates in memory before
+                # the first `\n` arrives.
+                setSpinTicker("")
+                stopSpinner()
+                stdout.styledWrite(fgCyan, styleBright, "● ", resetStyle)
+                contentStarted = true
+                mdState.firstEmit = true
+                paintBarBelow(currentLabel(slurped), DimPromptColor)
+                liveBarBelow = true
+              emitContent(visible, slurped)
+              stdout.flushFile()
           let tcDelta = delta{"tool_calls"}
           if tcDelta != nil and tcDelta.kind == JArray:
             for tc in tcDelta:
@@ -873,6 +988,20 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       discard
     else:
       nonSSE.add line
+
+  if suppressXml:
+    let tail = flushTail(xmlFilter)
+    if tail.len > 0:
+      if not contentStarted:
+        setSpinTicker("")
+        stopSpinner()
+        stdout.styledWrite(fgCyan, styleBright, "● ", resetStyle)
+        contentStarted = true
+        mdState.firstEmit = true
+        paintBarBelow(currentLabel(slurped), DimPromptColor)
+        liveBarBelow = true
+      emitContent(tail, slurped)
+      stdout.flushFile()
 
   if contentStarted:
     finishContent(slurped)
@@ -955,17 +1084,26 @@ proc providerOf(p: Profile): string =
 proc applyGptOssReasoning(p: Profile, body: JsonNode) =
   body["reasoning_effort"] = %p.reasoning
 
+
 proc applyGlmReasoning(p: Profile, body: JsonNode) =
   ## `thinking: {type}` is z.ai's first-party knob — accepted on
   ## api.z.ai (provider names `zai` / `zai-coding`) and rejected
   ## elsewhere (nvidia replies "Validation: Unsupported parameter(s):
-  ## `thinking`"). Other glm-serving providers (baseten, nebius,
-  ## together, fireworks, cerebras) get nothing on the wire — they
-  ## just always think; `:reasoning low` is silently inert there.
+  ## `thinking`"). NVIDIA NIM exposes the same knob via vLLM's
+  ## `chat_template_kwargs.enable_thinking`, and turning thinking off
+  ## there has the side benefit of stabilising tool-call template
+  ## emission (the streamed reasoning→tool_call transition is what
+  ## sometimes leaks `<tool_call>` tags into delta.content). Other
+  ## glm-serving providers (baseten, nebius, together, fireworks,
+  ## cerebras) get nothing on the wire — they just always think;
+  ## `:reasoning low` is silently inert there.
   case providerOf(p)
   of "zai", "zai-coding":
     let on = p.reasoning != "low"
     body["thinking"] = %*{"type": (if on: "enabled" else: "disabled")}
+  of "nvidia":
+    let on = p.reasoning != "low"
+    body["chat_template_kwargs"] = %*{"enable_thinking": on}
   else: discard
 
 proc applyStreamingOptions*(p: Profile, body: JsonNode) =
@@ -1082,8 +1220,13 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
     "model": p.model,
     "messages": messages,
     "stream": true,
-    "stream_options": {"include_usage": true}
   }
+  # Include usage in streaming responses only for providers that support it (e.g., OpenAI).
+  # Fireworks and other non‑OpenAI endpoints reject the `include_usage` field.
+  # Include usage in streaming responses for all providers except Fireworks,
+  # which rejects the `include_usage` field.
+  if providerOf(p) != "fireworks":
+    body["stream_options"] = %*{"include_usage": true}
   body["tools"] = setup(p).tools
   body["tool_choice"] = %"auto"
   applyStreamingOptions(p, body)
@@ -1118,7 +1261,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
     inc attempt
     var slurped = 0
     outcome = streamHttp(p.url & "/chat/completions", p.key, bodyStr,
-                        baseLabel, slurped)
+                        baseLabel, slurped, xmlToolCallsFallback(p))
     if outcome.errMsg == "interrupted by user":
       stopSpinner()
       raise newException(ApiError, "interrupted by user")
@@ -1141,6 +1284,22 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       if outcome.assistantMsg == nil:
         raise newException(ApiError,
           errMsg & (if outcome.errBody.len > 0: ": " & outcome.errBody else: ""))
+      # Promote any leaked GLM/Qwen native `<tool_call>...</tool_call>`
+      # blocks in the assistant content to synthetic OpenAI tool_calls.
+      # Some endpoints (notably nvidia z-ai/glm4.7) don't reliably
+      # translate the model's chat template into OpenAI deltas mid-turn.
+      if xmlToolCallsFallback(p):
+        let msg = outcome.assistantMsg
+        let content = msg{"content"}.getStr("")
+        if content.contains("<tool_call>"):
+          let parsed = parseXmlToolCalls(content)
+          if parsed.calls.len > 0:
+            msg["content"] = %parsed.cleaned
+            var tcArr =
+              if "tool_calls" in msg: msg["tool_calls"]
+              else: newJArray()
+            for call in parsed.calls: tcArr.add call
+            msg["tool_calls"] = tcArr
       break
     if attempt >= MaxAttempts:
       stopSpinner()

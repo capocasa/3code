@@ -6,6 +6,10 @@ const Version* = staticRead("../../threecode.nimble").splitLines().filterIt(it.s
 
 type
   KnownGoodCombo* = tuple[
+    # `xmlToolCalls`: endpoint sometimes leaks the model's native
+    # `<tool_call>...</tool_call>` chat template into delta.content
+    # instead of OpenAI tool_calls. When true, callModel scans content
+    # for those tags and promotes them to synthetic tool_calls.
     provider: string,
     model: string,
     family: string,
@@ -13,7 +17,8 @@ type
     variant: string,
     reasoning: string,
     temperature: float,
-    maxTokens: int
+    maxTokens: int,
+    xmlToolCalls: bool
   ]
   GenerationDefaults* = object
     temperature*: float  ## negative means omit the field
@@ -21,45 +26,45 @@ type
 
 const KnownGoodCombos*: array[36, KnownGoodCombo] = [
     # glm
-    ("baseten",   "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "low",    0.2, 8192),
-    ("baseten",   "zai-org/GLM-5",                                   "glm",      "5",   "",          "low",    0.2, 8192),
-    ("cerebras",  "zai-glm-4.7",                                     "glm",      "4",   "7",         "low",    0.2, 8192),
-    ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm",      "5",   "1",         "low",    0.2, 8192),
-    ("nebius",    "zai-org/GLM-5",                                   "glm",      "5",   "",          "low",    0.2, 8192),
-    ("nvidia",    "z-ai/glm4.7",                                     "glm",      "4",   "7",         "low",    0.2, 8192),
-    ("together",  "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "low",    0.2, 8192),
-    ("zai",       "glm-5.1",                                         "glm",      "5",   "1",         "low",    0.2, 8192),
+    ("baseten",   "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "low",    0.2, 8192, false),
+    ("baseten",   "zai-org/GLM-5",                                   "glm",      "5",   "",          "low",    0.2, 8192, false),
+    ("cerebras",  "zai-glm-4.7",                                     "glm",      "4",   "7",         "low",    0.2, 8192, false),
+    ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm",      "5",   "1",         "low",    0.2, 8192, false),
+    ("nebius",    "zai-org/GLM-5",                                   "glm",      "5",   "",          "low",    0.2, 8192, false),
+    ("nvidia",    "z-ai/glm4.7",                                     "glm",      "4",   "7",         "low",    0.2, 8192, true),
+    ("together",  "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "low",    0.2, 8192, false),
+    ("zai",       "glm-5.1",                                         "glm",      "5",   "1",         "low",    0.2, 8192, false),
     # qwen
-    ("cerebras",  "qwen-3-235b-a22b-instruct-2507",                  "qwen",     "3",   "235b",      "medium", 0.2, 8192),
-    ("deepinfra", "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",       "qwen",     "3",   "480b",      "medium", 0.2, 8192),
-    ("nvidia",    "qwen/qwen3-coder-480b-a35b-instruct",             "qwen",     "3",   "480b",      "medium", 0.2, 8192),
-    ("ovh",       "Qwen3-Coder-30B-A3B-Instruct",                    "qwen",     "3",   "30b",       "medium", 0.2, 4096),
-    ("together",  "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8",         "qwen",     "3",   "480b-fp8",  "medium", 0.2, 8192),
-    ("together",  "Qwen/Qwen3.6-Plus",                               "qwen",     "3.6", "plus",      "medium", 0.2, 8192),
+    ("cerebras",  "qwen-3-235b-a22b-instruct-2507",                  "qwen",     "3",   "235b",      "medium", 0.2, 8192, false),
+    ("deepinfra", "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",       "qwen",     "3",   "480b",      "medium", 0.2, 8192, false),
+    ("nvidia",    "qwen/qwen3-coder-480b-a35b-instruct",             "qwen",     "3",   "480b",      "medium", 0.2, 8192, false),
+    ("ovh",       "Qwen3-Coder-30B-A3B-Instruct",                    "qwen",     "3",   "30b",       "medium", 0.2, 4096, false),
+    ("together",  "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8",         "qwen",     "3",   "480b-fp8",  "medium", 0.2, 8192, false),
+    ("together",  "Qwen/Qwen3.6-Plus",                               "qwen",     "3.6", "plus",      "medium", 0.2, 8192, false),
     # gpt-oss
-    ("baseten",   "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192),
-    ("cerebras",  "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192),
-    ("groq",      "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192),
-    ("groq",      "openai/gpt-oss-20b",                              "gpt-oss",  "",    "20b",       "medium", 0.2, 4096),
-    ("nebius",    "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192),
-    ("nebius",    "openai/gpt-oss-120b-fast",                        "gpt-oss",  "",    "120b-fast", "medium", 0.2, 4096),
-    ("nvidia",    "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192),
-    ("nvidia",    "openai/gpt-oss-20b",                              "gpt-oss",  "",    "20b",       "medium", 0.2, 4096),
-    ("ovh",       "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192),
-    ("ovh",       "gpt-oss-20b",                                     "gpt-oss",  "",    "20b",       "medium", 0.2, 4096),
-    ("sambanova", "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192),
-    ("together",  "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192),
-    ("together",  "openai/gpt-oss-20b",                              "gpt-oss",  "",    "20b",       "medium", 0.2, 4096),
+    ("baseten",   "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
+    ("cerebras",  "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
+    ("groq",      "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
+    ("groq",      "openai/gpt-oss-20b",                              "gpt-oss",  "",    "20b",       "medium", 0.2, 4096, false),
+    ("nebius",    "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
+    ("nebius",    "openai/gpt-oss-120b-fast",                        "gpt-oss",  "",    "120b-fast", "medium", 0.2, 4096, false),
+    ("nvidia",    "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
+    ("nvidia",    "openai/gpt-oss-20b",                              "gpt-oss",  "",    "20b",       "medium", 0.2, 4096, false),
+    ("ovh",       "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
+    ("ovh",       "gpt-oss-20b",                                     "gpt-oss",  "",    "20b",       "medium", 0.2, 4096, false),
+    ("sambanova", "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
+    ("together",  "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
+    ("together",  "openai/gpt-oss-20b",                              "gpt-oss",  "",    "20b",       "medium", 0.2, 4096, false),
     # deepseek
-    ("baseten",   "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "medium", 0.2, 8192),
-    ("deepseek",  "deepseek-chat",                                   "deepseek", "3",   "",          "medium", 0.2, 8192),
-    ("deepseek",  "deepseek-reasoner",                               "deepseek", "r1",  "",          "medium", 0.2, 8192),
-    ("deepseek",  "deepseek-v4-flash",                               "deepseek", "4",   "flash",     "medium", 0.2, 4096),
-    ("nebius",    "deepseek-ai/DeepSeek-V3.2",                       "deepseek", "3.2", "",          "medium", 0.2, 8192),
-    ("nebius",    "deepseek-ai/DeepSeek-V3.2-fast",                  "deepseek", "3.2", "fast",      "medium", 0.2, 4096),
-    ("sambanova", "DeepSeek-V3.2",                                   "deepseek", "3.2", "",          "medium", 0.2, 8192),
-    ("together",  "deepseek-ai/DeepSeek-R1",                         "deepseek", "r1",  "",          "medium", 0.2, 8192),
-    ("together",  "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "medium", 0.2, 8192),
+    ("baseten",   "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "medium", 0.2, 8192, false),
+    ("deepseek",  "deepseek-chat",                                   "deepseek", "3",   "",          "medium", 0.2, 8192, false),
+    ("deepseek",  "deepseek-reasoner",                               "deepseek", "r1",  "",          "medium", 0.2, 8192, false),
+    ("deepseek",  "deepseek-v4-flash",                               "deepseek", "4",   "flash",     "medium", 0.2, 4096, false),
+    ("nebius",    "deepseek-ai/DeepSeek-V3.2",                       "deepseek", "3.2", "",          "medium", 0.2, 8192, false),
+    ("nebius",    "deepseek-ai/DeepSeek-V3.2-fast",                  "deepseek", "3.2", "fast",      "medium", 0.2, 4096, false),
+    ("sambanova", "DeepSeek-V3.2",                                   "deepseek", "3.2", "",          "medium", 0.2, 8192, false),
+    ("together",  "deepseek-ai/DeepSeek-R1",                         "deepseek", "r1",  "",          "medium", 0.2, 8192, false),
+    ("together",  "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "medium", 0.2, 8192, false),
   ]
     ## (provider, model, family, version, variant, reasoning, temperature,
     ## maxTokens) tuples.
@@ -955,6 +960,23 @@ proc knownGoodGeneration*(p: Profile): GenerationDefaults =
   let dot = p.name.find('.')
   if dot < 0: return GenerationDefaults(temperature: -1.0, maxTokens: 0)
   knownGoodGeneration(p.name[0 ..< dot], p.model)
+
+proc xmlToolCallsFallback*(p: Profile): bool =
+  ## True when this (provider, model) is known to occasionally leak the
+  ## model's native `<tool_call>...</tool_call>` chat template into
+  ## `delta.content` instead of OpenAI `tool_calls`. Used by `callModel`
+  ## to enable a content scan that promotes those blocks to synthetic
+  ## tool calls. Defaults to false for everything not in the known-good
+  ## list.
+  if p.name == "": return false
+  let dot = p.name.find('.')
+  if dot < 0: return false
+  let provider = p.name[0 ..< dot].toLowerAscii
+  let model = p.model.toLowerAscii
+  for combo in KnownGoodCombos:
+    if combo[0].toLowerAscii == provider and combo[1].toLowerAscii == model:
+      return combo[8]
+  false
 
 const ReasoningLevels* = ["low", "medium", "high"]
   ## Universal abstract reasoning levels. Wire-level translation is

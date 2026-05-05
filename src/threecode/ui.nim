@@ -163,10 +163,13 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
       stdout.styledWriteLine fgMagenta, "failed", resetStyle
       stdout.styledWriteLine fgMagenta, "  " & err, resetStyle
       let choice = readOptional(editor,
-        "  [enter]=retry, k=re-enter key : ").toLowerAscii
+        "  [enter]=retry, k=re-enter key, c=cancel : ").toLowerAscii
       if choice == "k":
         key = readRequired(editor,
           "  api key              : ", hidden = true)
+      elif choice == "c":
+        # User wants to abort the provider addition
+        raise newException(minline.InputCancelled, "cancelled by user")
   hint "  fetching models...   ", resetStyle
   stdout.flushFile
   let available = fetchModels(url, key)
@@ -220,10 +223,12 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
     stdout.styledWriteLine fgMagenta, "  " & err, resetStyle
     prev = models.mapIt(shortModel(it)).join(" ")
     let choice = readOptional(editor,
-      "  [enter]=retry models, k=re-enter key : ").toLowerAscii
+      "  [enter]=retry models, k=re-enter key, c=cancel : ").toLowerAscii
     if choice == "k":
       key = readRequired(editor,
         "  api key              : ", hidden = true)
+    elif choice == "c":
+      raise newException(minline.InputCancelled, "cancelled by user")
 
 proc promptEditProvider*(editor: var minline.LineEditor,
                         existing: ProviderRec): ProviderRec =
