@@ -635,6 +635,23 @@ Available:
 {{skills}}
 """
 
+let readFileTool = %*{
+  "type": "function",
+  "function": {
+    "name": "read",
+    "description": "Read a file and return its contents. Lines over 2KB are skipped. Without offset/limit, capped at 250 lines; explicit offset/limit raises the cap to 2000 lines.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {"type": "string", "description": "File path relative to cwd."},
+        "offset": {"type": "integer", "description": "1-based start line (optional)."},
+        "limit": {"type": "integer", "description": "Max lines to return (optional). -1 means no line cap (up to hard limit)."}
+      },
+      "required": ["path"]
+    }
+  }
+}
+
 let webSearchTool = %*{
   "type": "function",
   "function": {
@@ -681,6 +698,7 @@ let glmAndQwenTools = %*[
       }
     }
   },
+  readFileTool,
   {
     "type": "function",
     "function": {
@@ -770,6 +788,7 @@ let gptOssTools = %*[
       }
     }
   },
+  readFileTool,
   {
     "type": "function",
     "function": {
