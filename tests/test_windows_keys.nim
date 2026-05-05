@@ -45,8 +45,8 @@ proc setupWindowsLikeKEYSEQS() =
   KEYSEQS["insert"] = @[224, 82]
 
 proc seedHistory(ed: var LineEditor, entries: seq[string]) =
-  for e in entries: ed.history.queue.addLast e
-  ed.history.position = ed.history.queue.len
+  for e in entries: ed.history.entries.addLast e
+  ed.history.cursor = -1
 
 proc resetEditorBuffer(ed: var LineEditor, text: string) =
   ed.line.text = text

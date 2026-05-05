@@ -31,6 +31,7 @@ import
   deques,
   sequtils,
   strutils,
+  tables,
   std/exitprocs,
   os
 
@@ -94,11 +95,24 @@ type
     text*: string
     position*: int
   LineHistory* = object
+    ## Two pieces of state, deliberately separate:
+    ##
+    ## * ``entries`` is the persistent, on-disk log. New submissions are
+    ##   appended (after dedup + skip-empty); the file mirrors it byte for
+    ##   byte at all times.
+    ## * The navigation view (``cursor``, ``drafts``, ``cursorPos``) is
+    ##   pure in-memory state for the current ``readLine`` call. ``cursor``
+    ##   is ``-1`` when the user is on their own draft, otherwise the
+    ##   index into ``entries`` they're viewing. Edits the user makes
+    ##   while parked on any view are stashed in ``drafts``/``cursorPos``
+    ##   so navigating Up then Down brings them back exactly where they
+    ##   left off (text + cursor). The view is wiped on submit.
     file*: string
-    tainted*: bool
-    position*: int
-    queue*: Deque[string]
+    entries*: Deque[string]
     max*: int
+    cursor*: int
+    drafts*: Table[int, string]
+    cursorPos*: Table[int, int]
   WriteProc* = proc(s: string) {.closure.}
   GetChProc* = proc(): int {.closure.}
   WidthProc* = proc(): int {.closure.}
@@ -243,26 +257,23 @@ proc renderBuffer*(text, prompt, cont: string, width: int): string =
       i += rl
 
 # History
-
-proc `[]`(q: Deque[string], pos: int): string =
-  var c = 0
-  for e in q.items:
-    if c == pos:
-      result = e
-      break
-    inc c
-
-proc `[]=`(q: var Deque[string], pos: int, s: string) =
-  var c = 0
-  for e in q.mitems:
-    if c == pos:
-      e = s
-      break
-    inc c
+#
+# Two responsibilities, kept separate:
+#
+# 1. Persistence — `entries` is the on-disk log. `historyAdd` is the only
+#    mutator: it skips empty submissions, dedupes against the previous
+#    entry, evicts the oldest when at capacity, and rewrites the file.
+# 2. Navigation — Up/Down walk a view over `entries` plus a virtual
+#    "draft" slot at index -1 that holds the in-progress text the user
+#    had typed before they started navigating. The view is `cursor` plus
+#    the `drafts`/`cursorPos` tables. Both tables are keyed by the same
+#    int as `cursor`, so -1 reaches the user's own draft and 0..N-1 reach
+#    in-memory edits to history entries. Submit clears the view.
 
 proc encodeHistEntry(s: string): string =
   ## Encode an entry for the on-disk history file: ``\`` -> ``\\``,
-  ## newline -> ``\n``. Keeps each entry on a single physical line.
+  ## newline -> ``\n``. Keeps each entry on a single physical line so
+  ## the file stays human-readable (`cat ~/.local/share/.../history`).
   result = newStringOfCap(s.len + 8)
   for ch in s:
     case ch
@@ -283,48 +294,57 @@ proc decodeHistEntry(s: string): string =
     else:
       result.add s[i]; inc i
 
-proc add(h: var LineHistory, s: string, force = false) =
-  if s == "" and not force: return
-  if h.queue.len >= h.max:
-    discard h.queue.popFirst
-    if h.position > 0: dec h.position
-  if h.tainted:
-    h.queue[h.queue.len - 1] = s
-  else:
-    h.queue.addLast s
+proc clearNav(h: var LineHistory) =
+  h.cursor = -1
+  h.drafts.clear()
+  h.cursorPos.clear()
+
+proc persist(h: LineHistory) =
+  if h.file == "": return
+  let encoded = toSeq(h.entries.items).mapIt(encodeHistEntry(it)).join("\n")
+  h.file.writeFile(encoded)
 
 proc historyInit*(size = 256, file: string = ""): LineHistory =
   result.file = file
-  result.queue = initDeque[string](size)
-  result.position = 0
-  result.tainted = false
+  result.entries = initDeque[string](size)
   result.max = size
+  result.cursor = -1
+  result.drafts = initTable[int, string]()
+  result.cursorPos = initTable[int, int]()
   if file == "": return
   if result.file.fileExists:
     let lines = result.file.readFile.split("\n")
     for line in lines:
-      if line != "":
-        result.add decodeHistEntry(line)
-    result.position = result.queue.len
+      if line == "": continue
+      let entry = decodeHistEntry(line)
+      # On load, drop consecutive duplicates so a previously-buggy file
+      # converges to a clean state on first run.
+      if result.entries.len > 0 and result.entries[result.entries.len - 1] == entry:
+        continue
+      if result.entries.len >= result.max:
+        discard result.entries.popFirst
+      result.entries.addLast entry
   else:
     result.file.writeFile("")
 
-proc historyAdd*(ed: var LineEditor, force = false) =
-  ed.history.add ed.line.text, force
-  if ed.history.file == "": return
-  # Avoid persisting a forced empty entry. Such entries are needed only for
-  # in‑memory navigation (e.g., restoring an empty draft after pressing Up).
-  # Writing them would introduce a blank line as the first history item when
-  # the file is later reloaded.
-  if force and ed.line.text == "":
+proc historyAdd*(ed: var LineEditor) =
+  ## Append the just-submitted line to the persistent log. Empty
+  ## submissions and consecutive duplicates are dropped — they're noise
+  ## when scrolling back. Writes the file atomically each time.
+  let s = ed.line.text
+  if s == "": return
+  let h = addr ed.history
+  if h[].entries.len > 0 and h[].entries[h[].entries.len - 1] == s:
     return
-  let encoded = toSeq(ed.history.queue.items).mapIt(encodeHistEntry(it)).join("\n")
-  ed.history.file.writeFile(encoded)
+  while h[].entries.len >= h[].max:
+    discard h[].entries.popFirst
+  h[].entries.addLast s
+  persist(h[])
 
 proc historyFlush*(ed: var LineEditor) =
-  if ed.history.queue.len > 0:
-    ed.history.position = ed.history.queue.len
-    ed.history.tainted = false
+  ## Reset the navigation view. Called once per submitted line so the
+  ## next ``readLine`` starts fresh on the user's draft slot.
+  ed.history.clearNav()
 
 # ---------- Render ----------
 
@@ -593,30 +613,55 @@ proc visualDown*(ed: var LineEditor) =
     ed.line.position = bestP
     fullRedraw(ed)
 
+proc loadView(ed: var LineEditor, idx: int) =
+  ## Pull the buffer + cursor for view ``idx`` into the editor.
+  ## ``idx == -1`` is the user's draft; ``0..entries.len-1`` is a
+  ## history entry. Pending edits (``drafts[idx]``) win over the
+  ## persistent text; absent entries fall back to the canonical text
+  ## with the cursor parked at the end.
+  let text =
+    if idx == -1:
+      ed.history.drafts.getOrDefault(-1, "")
+    elif ed.history.drafts.hasKey(idx):
+      ed.history.drafts[idx]
+    else:
+      ed.history.entries[idx]
+  let pos =
+    if ed.history.cursorPos.hasKey(idx): ed.history.cursorPos[idx]
+    else: text.len
+  ed.line.text = text
+  ed.line.position = clamp(pos, 0, text.len)
+  fullRedraw(ed)
+
+proc stashView(ed: var LineEditor) =
+  ## Save the live buffer into the slot we're about to leave so coming
+  ## back finds it intact.
+  ed.history.drafts[ed.history.cursor] = ed.line.text
+  ed.history.cursorPos[ed.history.cursor] = ed.line.position
+
 proc historyPrevious*(ed: var LineEditor) =
-  ## Replace the buffer with the previous history entry, if any. The
-  ## first up from the user's draft state saves that draft into a slot
-  ## past the last real entry so a later down can restore it (even if
-  ## the draft is the empty string).
-  if ed.history.queue.len == 0 or ed.history.position <= 0: return
-  let nextPos = ed.history.position - 1
-  let current =
-    if ed.history.tainted: ed.history.queue.len - 2
-    else: ed.history.queue.len - 1
-  if nextPos == current and ed.history.queue[current] != ed.line.text:
-    # Only add a forced entry if the current line is non‑empty. Adding a
-    # forced empty entry creates a spurious blank history entry that becomes
-    # the first item when the history file is later persisted and reloaded.
-    ed.historyAdd(force = true)
-    ed.history.tainted = true
-  ed.history.position = nextPos
-  ed.changeLine(ed.history.queue[nextPos])
+  ## Step one entry older. From the draft slot (cursor == -1) this lands
+  ## on the newest entry. Already at the oldest? Do nothing — including
+  ## not stashing, so a no-op Up doesn't perturb anything.
+  if ed.history.entries.len == 0: return
+  let target =
+    if ed.history.cursor == -1: ed.history.entries.len - 1
+    elif ed.history.cursor > 0: ed.history.cursor - 1
+    else: return
+  ed.stashView()
+  ed.history.cursor = target
+  ed.loadView(target)
 
 proc historyNext*(ed: var LineEditor) =
-  if ed.history.queue.len == 0 or
-     ed.history.position >= ed.history.queue.len - 1: return
-  inc ed.history.position
-  ed.changeLine(ed.history.queue[ed.history.position])
+  ## Step one entry newer. Past the last entry, fall back to the
+  ## user's draft. On the draft already? No-op.
+  if ed.history.cursor == -1: return
+  let target =
+    if ed.history.cursor < ed.history.entries.len - 1: ed.history.cursor + 1
+    else: -1
+  ed.stashView()
+  ed.history.cursor = target
+  ed.loadView(target)
 
 proc lineText*(ed: LineEditor): string = ed.line.text
 
@@ -754,13 +799,24 @@ proc completeLine*(ed: var LineEditor): int =
 # ---------- Bracketed paste ----------
 
 proc readBracketedPaste(ed: var LineEditor): string =
+  # Read characters until the bracketed paste end sequence ESC [ 201 ~
+  # The previous implementation built the entire string and used
+  # `endsWith` on each iteration, which can be inefficient for large
+  # pastes. Here we detect the terminator by checking the last five
+  # characters directly, avoiding a full scan each loop.
+  const endSeq = "\e[201~"
+  const endLen = endSeq.len
   while true:
     let b = ed.getCh()
-    if b < 0: return result
-    result.add b.chr
-    if result.endsWith("\e[201~"):
-      result.setLen(result.len - "\e[201~".len)
+    if b < 0:
       return result
+    result.add b.chr
+    if result.len >= endLen:
+      # Compare the tail of the buffer with the end sequence.
+      if result[result.len - endLen ..< result.len] == endSeq:
+        # Remove the terminator and return the paste content.
+        result.setLen(result.len - endLen)
+        return result
 
 # ---------- readLine driver ----------
 
