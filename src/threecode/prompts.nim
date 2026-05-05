@@ -24,7 +24,7 @@ type
     temperature*: float  ## negative means omit the field
     maxTokens*: int      ## <= 0 means omit the field
 
-const KnownGoodCombos*: array[37, KnownGoodCombo] = [
+const KnownGoodCombos*: array[38, KnownGoodCombo] = [
     # glm
     ("baseten",   "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "low",    0.2, 8192, false),
     ("baseten",   "zai-org/GLM-5",                                   "glm",      "5",   "",          "low",    0.2, 8192, false),
@@ -34,6 +34,7 @@ const KnownGoodCombos*: array[37, KnownGoodCombo] = [
     ("nvidia",    "z-ai/glm4.7",                                     "glm",      "4",   "7",         "low",    0.2, 8192, true),
     ("together",  "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "low",    0.2, 8192, false),
     ("zai",       "glm-5.1",                                         "glm",      "5",   "1",         "low",    0.2, 8192, false),
+    ("zaicode",   "glm-5.1",                                         "glm",      "5",   "1",         "low",    0.2, 8192, false),
     # qwen
     ("cerebras",  "qwen-3-235b-a22b-instruct-2507",                  "qwen",     "3",   "235b",      "medium", 0.2, 8192, false),
     ("deepinfra", "Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo",       "qwen",     "3",   "480b",      "medium", 0.2, 8192, false),
@@ -892,7 +893,7 @@ input:
 
 known good:
   glm, qwen, gpt-oss, deepseek across baseten, cerebras, deepinfra,
-  deepseek, fireworks, groq, nebius, nvidia, ovh, sambanova, together, zai.
+  deepseek, fireworks, groq, nebius, nvidia, ovh, sambanova, together, zai, zaicode.
   run `3code --good` for the full list. other combos require --experimental.
 """
 

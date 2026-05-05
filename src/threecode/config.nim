@@ -400,6 +400,7 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("xai",         "https://api.x.ai/v1"),
   ("zai",         "https://api.z.ai/api/paas/v4"),
   ("zai-coding",  "https://api.z.ai/api/coding/paas/v4"),
+  ("zaicode",      "https://api.z.ai/api/coding/paas/v4"),
 ]
   ## Skipped on purpose: `cortects.ai` is a router (an OpenAI-compatible
   ## front-end that fans out to other providers' models), so adding it

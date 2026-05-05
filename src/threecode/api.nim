@@ -1098,7 +1098,7 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
   ## cerebras) get nothing on the wire — they just always think;
   ## `:reasoning low` is silently inert there.
   case providerOf(p)
-  of "zai", "zai-coding":
+  of "zai", "zai-coding", "zaicode":
     let on = p.reasoning != "low"
     body["thinking"] = %*{"type": (if on: "enabled" else: "disabled")}
   of "nvidia":
@@ -1113,7 +1113,7 @@ proc applyStreamingOptions*(p: Profile, body: JsonNode) =
   ## the end.
   if p.family == "glm":
     case providerOf(p)
-    of "zai", "zai-coding":
+    of "zai", "zai-coding", "zaicode":
       body["tool_stream"] = %true
     else: discard
 
