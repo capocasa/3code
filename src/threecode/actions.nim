@@ -50,6 +50,12 @@ proc bashAction(args: JsonNode): Action =
   let line = if argv.len > 0: argv[^1].getStr else: ""
   Action(kind: akBash, body: line, stdin: args{"stdin"}.getStr)
 
+proc readAction(args: JsonNode): Action =
+  Action(kind: akRead,
+         path:  args{"path"}.getStr,
+         offset: args{"offset"}.getInt,
+         limit:  args{"limit"}.getInt)
+
 proc writeAction(args: JsonNode): Action =
   Action(kind: akWrite,
          path: args{"path"}.getStr,
@@ -80,6 +86,7 @@ proc dispatchGlmOrQwen(family, name: string, args: JsonNode): Action =
   case name
   # Canonical names (the schema we offer glm/qwen/deepseek):
   of "bash": bashAction(args)
+  of "read": readAction(args)
   of "write": writeAction(args)
   of "patch": patchAction(args)
   of "update_plan", "todo": planAction(args)
@@ -99,6 +106,7 @@ proc dispatchGptOss(family, rawName: string, args: JsonNode): Action =
   case stripHarmonyChannel(rawName)
   # Canonical names (the schema we offer gpt-oss):
   of "shell": bashAction(args)
+  of "read": readAction(args)
   of "apply_patch": applyPatchAction(args)
   of "update_plan", "todo": planAction(args)
   of "web_search": Action(kind: akWebSearch, body: args{"query"}.getStr)
@@ -391,35 +399,44 @@ export DEBIAN_FRONTEND=noninteractive
       cache.state[path] = fileSig(path)
     if isBinaryContent(content):
       return (&"[binary file: {path}, {content.len} bytes — refused]", 0, "")
+    const DefaultLineCap = 250
     const MaxLines = 2000
     const MaxBytes = 60 * 1024
+    const LineSkipBytes = 2048
     let lines = content.splitLines
     let total =
       if lines.len > 0 and lines[^1] == "": lines.len - 1
       else: lines.len
     let start = max(0, act.offset - 1)
     if start >= total: return ("", 0, "")
-    let explicitLimit = act.limit > 0
-    var endi = if explicitLimit: min(total, start + act.limit) else: total
-    var capped = false
-    if not explicitLimit:
-      if endi - start > MaxLines:
-        endi = start + MaxLines
+    let explicit = act.offset > 0 or act.limit != 0
+    let hardCap = if explicit: MaxLines else: DefaultLineCap
+    # Compute effective end, respecting hardCap, MaxBytes, and LineSkipBytes.
+    var endi = min(total, start + hardCap)
+    if act.limit > 0:
+      endi = min(endi, start + act.limit)
+    var capped = endi < total or (act.limit > 0 and endi - start < act.limit)
+    var skipped = 0
+    var bytes = 0
+    var outLines: seq[string]
+    for k in start ..< endi:
+      let ln = lines[k]
+      if ln.len > LineSkipBytes:
+        outLines.add &"[skipped: {ln.len} bytes, single line]"
+        inc skipped
+        bytes += 40
+      else:
+        outLines.add ln
+        bytes += ln.len + 1
+      if bytes > MaxBytes:
         capped = true
-      var bytes = 0
-      var k = start
-      while k < endi:
-        let added = lines[k].len + 1
-        if bytes + added > MaxBytes:
-          capped = true
-          break
-        bytes += added
-        inc k
-      if k < endi: endi = k
-    var body = lines[start ..< endi].join("\n")
+        break
+    var body = outLines.join("\n")
     if capped:
-      let shown = endi - start
+      let shown = outLines.len
       body.add &"\n... [file is {total} lines, {content.len} bytes; showed {shown} lines from line {start + 1}. Use read(path, offset, limit) for a specific range.] ..."
+    elif skipped > 0:
+      body.add &"\n... [{skipped} line(s) skipped: over {LineSkipBytes} bytes each] ..."
     return (body, 0, "")
   of akWrite:
     let path = resolvePath(act.path)
