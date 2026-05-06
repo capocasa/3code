@@ -648,7 +648,7 @@ suite "runTurns boundaries":
       check currentBarLabel == ""
       check not currentBarHasGap
 
-  test "paintInitialBar: startup label leads with `○ 0%` context":
+  test "paintInitialBar: startup label leads with `○0%` context":
     # Bug: welcome-time paint passed an empty base to liveLabel, so
     # the bar showed `        ↓0` with no context indicator. Should
     # match the shape a populated bar carries: glyph + percent first.
@@ -656,7 +656,7 @@ suite "runTurns boundaries":
     let savedGap = currentBarHasGap
     let p = Profile(model: "glm-4.7")
     paintInitialBar(p)
-    check currentBarLabel.startsWith("○ 0%")
+    check currentBarLabel.startsWith("○0%")
     check "  " in currentBarLabel
     check currentBarHasGap
     currentBarLabel = savedLabel

@@ -427,10 +427,8 @@ proc installEditorTweaks*() =
     origUp(ed)
     navigatedUp = true
   KEYMAP["down"] = proc(ed: var LineEditor) =
-    let before = ed.lineText
     origDown(ed)
-    if navigatedUp and ed.lineText == before:
-      ed.changeLine("")
+    if navigatedUp:
       navigatedUp = false
   # also reset the flag when the line is cleared via ctrl+u
   let origClear = KEYMAP["ctrl+u"]
