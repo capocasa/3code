@@ -340,7 +340,7 @@ proc renderAssistantContent*(content: string, outFile: File = stdout) =
   ## `outFile` lets tests capture output to a temp file; default is
   ## stdout.
   if content.strip.len == 0: return
-  outFile.styledWrite fgCyan, styleBright, "● ", resetStyle
+  outFile.styledWrite styleBright, "● ", resetStyle
   var st = initMarkdownState()
   for line in content.splitLines:
     handleMdLine(st, line, outFile)
@@ -353,9 +353,9 @@ proc toolIcon*(kind: ActionKind): string =
   of akRead: "●"
   of akWrite: "✎"
   of akPatch, akApplyPatch: "✂"
-  of akPlan: "☐"
-  of akWebSearch: "🔍"
-  of akWebFetch: "🌐"
+  of akPlan: "▸"
+  of akWebSearch: "⌕"
+  of akWebFetch: "⇊"
   of akError: "✕"
 
 proc renderToolPending*(banner: string, kind: ActionKind) =
@@ -368,18 +368,14 @@ proc renderToolPending*(banner: string, kind: ActionKind) =
   stdout.flushFile
 
 proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -1) =
-  ## Final tool banner. For bash: green/grey ● on success/error.
-  ## For other tool types: the icon from `toolIcon` in text color.
+  ## Final tool banner: green ● on success (code 0), red ● on error.
   ## Optional `(Ns)` suffix when `elapsedS >= 1` (live); replay
   ## passes -1 to omit it.
   let icon = toolIcon(kind)
-  if kind == akBash:
-    if code == 0:
-      stdout.styledWrite fgGreen, icon & " ", resetStyle
-    else:
-      subtleWrite(stdout, icon & " ")
+  if code == 0:
+    stdout.styledWrite fgGreen, icon & " ", resetStyle
   else:
-    stdout.write icon & " "
+    stdout.styledWrite fgRed, icon & " ", resetStyle
   subtleWrite(stdout, banner)
   if elapsedS >= 1:
     subtleWrite(stdout, &"  ({elapsedS}s)")

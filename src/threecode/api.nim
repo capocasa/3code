@@ -962,7 +962,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
                 # the first `\n` arrives.
                 setSpinTicker("")
                 stopSpinner()
-                stdout.styledWrite(fgCyan, styleBright, "● ", resetStyle)
+                stdout.styledWrite(styleBright, "● ", resetStyle)
                 contentStarted = true
                 mdState.firstEmit = true
                 paintBarBelow(currentLabel(slurped), DimPromptColor)
@@ -999,7 +999,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       if not contentStarted:
         setSpinTicker("")
         stopSpinner()
-        stdout.styledWrite(fgCyan, styleBright, "● ", resetStyle)
+        stdout.styledWrite(styleBright, "● ", resetStyle)
         contentStarted = true
         mdState.firstEmit = true
         paintBarBelow(currentLabel(slurped), DimPromptColor)

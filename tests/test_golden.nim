@@ -151,15 +151,15 @@ suite "golden: render helpers":
 
   test "renderToolBanner — success with elapsed":
     let bytes = captureStdout(proc() =
-      renderToolBanner("bash   echo hello", code = 0, elapsedS = 2))
+      renderToolBanner("bash   echo hello", akBash, code = 0, elapsedS = 2))
     goldCheck("tool_banner_ok", bytes)
 
   test "renderToolBanner — error, no elapsed (replay)":
     let bytes = captureStdout(proc() =
-      renderToolBanner("bash   exit 1", code = 1))
+      renderToolBanner("bash   exit 1", akBash, code = 1))
     goldCheck("tool_banner_err_replay", bytes)
 
   test "renderToolPending — dim leading bullet":
     let bytes = captureStdout(proc() =
-      renderToolPending("read   src/foo.nim"))
+      renderToolPending("read   src/foo.nim", akRead))
     goldCheck("tool_pending", bytes)
