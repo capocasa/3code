@@ -190,7 +190,7 @@ proc rowText*(g: Grid, r: int): string =
 suite "bar payload geometry":
   test "liveBarBytes: 2-space prefix, label starts at col 2":
     let g = newGrid()
-    g.feed liveBarBytes("○ 0%  ↑0  ↻0  ↓0  0s")
+    g.feed liveBarBytes("○ 0%          ↓0  0s")
     let row = rowText(g, 0)
     # Position 0 and 1 are blank, label starts at col 2.
     check row[0] == ' '
@@ -201,7 +201,7 @@ suite "bar payload geometry":
 
   test "spinnerBarBytes: spinner glyph at col 0, space at col 1":
     let g = newGrid()
-    g.feed spinnerBarBytes("⠋", "○ 0%  ↑0  ↻0  ↓0", 1)
+    g.feed spinnerBarBytes("⠋", "○ 0%          ↓0", 1)
     let row = rowText(g, 0)
     # Column 0 is the braille glyph (spinner overwrites the leading
     # space); column 1 stays a space; label content from col 2.
@@ -351,7 +351,7 @@ suite "mid-line bar visibility":
     # must already be visible. Bullet at row 0, bar at row 1, prompt
     # at row 2.
     g.feed "● "
-    g.feed barFooterBelowBytes("↑0  ↻0  ↓5  1s", DimPromptColor)
+    g.feed barFooterBelowBytes("        ↓5  1s", DimPromptColor)
     # Cursor at row 0 col 2. Content writes there.
     g.feed "Hello"
     check rowText(g, 0).startsWith("● Hello")
@@ -445,7 +445,7 @@ suite "token receipt placement":
     check tokenLineLabel(usage, 200_000) != ""
 
   test "receiptBarBytes: grey payload, no leading clear, no \\n":
-    let bytes = receiptBarBytes("○ 2%  ↑3.8k  ↻0  ↓45  1s")
+    let bytes = receiptBarBytes("○ 2%  ↑3.8k      ↓45  1s")
     check bytes.startsWith(GreyFg & "  ")
     check bytes.endsWith(Reset)
     check '\n' notin bytes
@@ -457,7 +457,7 @@ suite "token receipt placement":
     # Stage: bar at row 0 (no gap above), prompt at row 1, user types
     # "hello", Enter lands cursor at row 2.
     let g = newGrid()
-    g.feed barFooterBytes("↑0  ↻0  ↓0  0s", BrightPromptColor)
+    g.feed barFooterBytes("        ↓0  0s", BrightPromptColor)
     g.feed "\n\r\x1b[2K"
     g.feed "❯ hello\n"
     g.feed submitTransitionBytes("hello", hadPending = false,
@@ -650,14 +650,14 @@ suite "runTurns boundaries":
 
   test "paintInitialBar: startup label leads with `○ 0%` context":
     # Bug: welcome-time paint passed an empty base to liveLabel, so
-    # the bar showed `↑0  ↻0  ↓0` with no context indicator. Should
+    # the bar showed `        ↓0` with no context indicator. Should
     # match the shape a populated bar carries: glyph + percent first.
     let savedLabel = currentBarLabel
     let savedGap = currentBarHasGap
     let p = Profile(model: "glm-4.7")
     paintInitialBar(p)
     check currentBarLabel.startsWith("○ 0%")
-    check "↑0" in currentBarLabel
+    check "  " in currentBarLabel
     check currentBarHasGap
     currentBarLabel = savedLabel
     currentBarHasGap = savedGap
@@ -714,9 +714,9 @@ suite "full turn lifecycle":
     let g = newGrid()
     # ---- welcome paints initial bar+prompt at zeros ----
     g.feed "  ╭─╮\n   ─┤  3code v0.0\n  ╰─╯\n"
-    g.feed barFooterBytes("↑0  ↻0  ↓0", BrightPromptColor)
+    g.feed barFooterBytes("        ↓0", BrightPromptColor)
     # Bar at row 3, prompt at row 4, cursor at row 3 col 0.
-    check "↑0" in rowText(g, 3)
+    check "  " in rowText(g, 3)
     check "❯" in rowText(g, 4)
     # ---- readInput: walk down to prompt row, clear, type, Enter ----
     g.feed "\n\r\x1b[2K"          # readInput's advance + clear
@@ -737,7 +737,7 @@ suite "full turn lifecycle":
     check g.cursorHidden
     # ---- callModel: leading \n + spinner ----
     g.feed "\n"
-    g.feed spinnerFooterBytes("⠋", "↑0  ↻0  ↓0", "", 0)
+    g.feed spinnerFooterBytes("⠋", "        ↓0", "", 0)
     # Bar at row 7 (cursor advance), prompt at row 8, scratch at row 6.
     check "⠋" in rowText(g, 7)
     check "❯" in rowText(g, 8)
@@ -745,7 +745,7 @@ suite "full turn lifecycle":
     g.feed SpinnerCleanupBytes
     g.feed "\x1b[36m\x1b[1m● \x1b[0m"
     g.feed styledLineBytes("Hello")
-    g.feed barFooterBytes("↑0  ↻0  ↓5  1s", DimPromptColor)
+    g.feed barFooterBytes("        ↓5  1s", DimPromptColor)
     # Bar visible during streaming.
     let barRow = block:
       var found = -1
@@ -757,7 +757,7 @@ suite "full turn lifecycle":
     # Second content line.
     g.feed ClearBarPromptBytes
     g.feed styledLineBytes("  World")
-    g.feed barFooterBytes("↑0  ↻0  ↓11  2s", DimPromptColor)
+    g.feed barFooterBytes("        ↓11  2s", DimPromptColor)
     let barRow2 = block:
       var found = -1
       for r in 0 ..< g.rows.len:
@@ -767,7 +767,7 @@ suite "full turn lifecycle":
     check "❯" in rowText(g, barRow2 + 1)
     # ---- streamHttp finishContent + final paintBarPrompt ----
     g.feed ClearBarPromptBytes
-    g.feed barFooterBytes("↑0  ↻0  ↓11  2s", DimPromptColor)
+    g.feed barFooterBytes("        ↓11  2s", DimPromptColor)
     # ---- callModel post-stream: repaint with accurate values ----
     g.feed barFooterBytes(tokenLineLabel(usage, 200_000, 2), DimPromptColor)
     let finalBarRow = block:
@@ -890,21 +890,21 @@ suite "full turn lifecycle":
     let g = newGrid()
     # Iter 1 stream end.
     g.feed "● iter 1 content\n"
-    g.feed barFooterBytes("↑0  ↻0  ↓18  1s", DimPromptColor)
+    g.feed barFooterBytes("        ↓18  1s", DimPromptColor)
     # Tool exec under withCleared.
     g.feed ClearBarPromptBytes
     g.feed "  bash   ls\n"
     g.feed "  total 16\n"
-    g.feed barFooterBytes("↑0  ↻0  ↓18  1s", DimPromptColor)
+    g.feed barFooterBytes("        ↓18  1s", DimPromptColor)
     # Iter 2: callModel \n + spinner + content + finalise.
     g.feed "\n"
-    g.feed spinnerFooterBytes("⠋", "ctx 5%  ↑0  ↻0  ↓0", "", 0)
+    g.feed spinnerFooterBytes("⠋", "ctx 5%          ↓0", "", 0)
     g.feed SpinnerCleanupBytes
     g.feed "\x1b[36m\x1b[1m● \x1b[0m"
     g.feed styledLineBytes("iter 2 content")
-    g.feed barFooterBytes("ctx 5%  ↑0  ↻0  ↓14  1s", DimPromptColor)
+    g.feed barFooterBytes("ctx 5%          ↓14  1s", DimPromptColor)
     g.feed ClearBarPromptBytes
-    g.feed barFooterBytes("ctx 5%  ↑0  ↻0  ↓14  1s", DimPromptColor)
+    g.feed barFooterBytes("ctx 5%          ↓14  1s", DimPromptColor)
     # Final state: iter 2 bar visible with prompt directly below.
     let bar2Row = block:
       var found = -1
@@ -954,7 +954,7 @@ suite "full turn lifecycle":
     g.feed "\n"                                            # scratch
     g.feed "\x1b[36m\x1b[1m● \x1b[0m"
     g.feed styledLineBytes("hi back")
-    g.feed barFooterBytes("ctx 1%  ↑10  ↻0  ↓7  1s", DimPromptColor)
+    g.feed barFooterBytes("ctx 1%  ↑10      ↓7  1s", DimPromptColor)
     let barRow = block:
       var found = -1
       for r in 0 ..< g.rows.len:
