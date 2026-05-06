@@ -161,7 +161,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         elif session.loop.turnCalls >= TurnCallBudget and priorStrike < 2:
           halt = true
           toolContent &= "\n\n[repeat-guard] turn budget exceeded (" &
-            $TurnCallBudget & " tool calls); further tool calls this turn are paused."
+            $TurnCallBudget & " tracked calls); further tool calls this turn are paused."
         messages.add %*{"role": "tool", "tool_call_id": id, "content": toolContent}
       saveSession(session, messages)
       if interrupted:
@@ -177,7 +177,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
               resetStyle
           elif session.loop.turnCalls >= TurnCallBudget:
             stdout.styledWriteLine styleDim,
-              &"  paused — turn budget exceeded ({TurnCallBudget} calls)",
+              &"  paused — turn budget exceeded ({TurnCallBudget} tracked calls)",
               resetStyle
           else:
             stdout.styledWriteLine styleDim, "  paused — looped", resetStyle

@@ -135,6 +135,9 @@ type
     canceled*: bool
     eof*: bool
     hidechars*: bool
+    complPrefix*: string       ## original prefix before first completion
+    complMatches*: seq[string] ## current match list
+    complIndex*: int           ## current match index (-1 = none)
   InputCancelled* = object of CatchableError
 
 const
@@ -772,29 +775,50 @@ when defined(posix):
 
 # ---------- Completion ----------
 
-proc completeLine*(ed: var LineEditor): int =
-  if ed.completionCallback.isNil: return
-  let compl = ed.completionCallback(ed)
+proc complCurrentWord(ed: LineEditor): string =
   let position = ed.line.position
   let words = ed.line.text[0 ..< position].split({' ', '\n'})
-  var word = if words.len > 0: words[^1] else: ""
-  var matches = compl.filterIt(it.toLowerAscii.startsWith(word.toLowerAscii))
-  if matches.len == 0: return -1
-  if word.len > 0:
-    for _ in 0 ..< word.len: ed.deletePrevious()
-  ed.insertText(matches[0])
-  var n = 0
+  if words.len > 0: words[^1] else: ""
+
+proc complAdvance(ed: var LineEditor; offset: int) =
+  ## Move completion by `offset` steps (+1 forward, -1 backward).
+  ## Initialises state on first call; cycles on subsequent calls.
+  if ed.completionCallback.isNil: return
+  let word = ed.complCurrentWord()
+  # Fresh cycle: user just typed a new prefix
+  if ed.complIndex < 0 or ed.complIndex >= ed.complMatches.len or word != ed.complMatches[ed.complIndex]:
+    ed.complPrefix = word
+    ed.complMatches = ed.completionCallback(ed)
+      .filterIt(it.toLowerAscii.startsWith(ed.complPrefix.toLowerAscii))
+    if ed.complMatches.len == 0:
+      ed.complIndex = -1
+      return
+    ed.complIndex = 0
+    if ed.complPrefix.len > 0:
+      for _ in 0 ..< ed.complPrefix.len: ed.deletePrevious()
+    ed.insertText(ed.complMatches[0])
+    return
+  # Continue existing cycle
+  if ed.complMatches.len == 0: return
+  let oldIdx = ed.complIndex
+  ed.complIndex = (ed.complIndex + offset + ed.complMatches.len) mod ed.complMatches.len
+  for _ in 0 ..< ed.complMatches[oldIdx].len: ed.deletePrevious()
+  ed.insertText(ed.complMatches[ed.complIndex])
+
+proc completeLine*(ed: var LineEditor): int =
+  ## First Tab: insert first match. Subsequent Tabs: cycle forward.
+  ## Returns the non-Tab keystroke that broke the cycle.
+  ed.complAdvance(+1)
+  if ed.complIndex == -1: return -1
   var ch = ed.getCh()
   while ch == 9:
-    inc n
-    if n < matches.len:
-      for _ in 0 ..< matches[n - 1].len: ed.deletePrevious()
-      ed.insertText(matches[n])
-      ch = ed.getCh()
-    else:
-      n = -1
-      break
+    ed.complAdvance(+1)
+    ch = ed.getCh()
+  ed.complIndex = -1
   return ch
+
+proc reverseCompleteLine*(ed: var LineEditor) =
+  ed.complAdvance(-1)
 
 # ---------- Bracketed paste ----------
 
@@ -880,6 +904,10 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
     if s == KEYSEQS["down"]:   KEYMAP["down"](ed); return false
     if s == KEYSEQS["home"]:   ed.goToStart(); return false
     if s == KEYSEQS["end"]:    ed.goToEnd();   return false
+    if c3 == 90:
+      # Shift+Tab: reverse completion
+      ed.reverseCompleteLine()
+      return false
     if c3 == 50 or c3 == 51:
       let c4 = ed.getCh()
       if c4 < 0: return false

@@ -256,15 +256,28 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     let newKey = readOptional(editor,
       "  api key [keep existing] : ", hidden = true)
     let key = if newKey == "": existing.key else: newKey
+    hint "  fetching models...   ", resetStyle
+    stdout.flushFile
+    let available = fetchModels(url, key)
+    let prevCb = editor.completionCallback
+    editor.completionCallback = proc(ed: LineEditor): seq[string] =
+      available.mapIt(shortModel(it))
+    defer: editor.completionCallback = prevCb
+    if available.len == 0:
+      hintLn "  unavailable — enter manually", resetStyle
+    else:
+      hintLn &"  {available.len} available", resetStyle
+      for m in available:
+        hintLn "    ", resetStyle, shortModel(m)
     let modelsCurrent = existing.models.mapIt(shortModel(it)).join(" ")
     let newModels = readOptional(editor,
       &"  models [{modelsCurrent}]  : ")
     let rawModels = if newModels == "": existing.models
                    else: splitModels(newModels)
-    # Resolve short names against the existing model list; unknown names
-    # pass through as-is (full id entered by the user for a new model).
-    let existLookup = shortToFull(existing.models)
-    let models = rawModels.mapIt(existLookup.getOrDefault(it, it))
+    # Resolve short names against the fetched model list; unknown names
+    # pass through as-is (full id entered by the user).
+    let lookup = shortToFull(available)
+    let models = rawModels.mapIt(lookup.getOrDefault(it, it))
     if models.len == 0:
       stdout.styledWriteLine fgMagenta, "  need at least one model", resetStyle
       continue

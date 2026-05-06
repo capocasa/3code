@@ -1157,6 +1157,21 @@ proc applyDeepseekReasoning(p: Profile, body: JsonNode) =
     body["temperature"] = %0.0
   else: discard
 
+proc applyMinimaxReasoning(p: Profile, body: JsonNode) =
+  ## MiniMax M2.x uses vLLM's `chat_template_kwargs.enable_thinking`
+  ## to toggle reasoning. NVIDIA NIM exposes the same knob. Thinking
+  ## is disabled at "low" for snappy responses; "medium" and "high"
+  ## enable it with increasing effort. Temperature is pinned to 0.2
+  ## per MiniMax's recommended deployment settings.
+  case p.reasoning
+  of "low":
+    body["chat_template_kwargs"] = %*{"enable_thinking": false}
+  of "medium":
+    body["chat_template_kwargs"] = %*{"enable_thinking": true}
+  of "high":
+    body["chat_template_kwargs"] = %*{"enable_thinking": true}
+  else: discard
+
 proc applyReasoning*(p: Profile, body: JsonNode) =
   ## Per-family wire mapping for `Profile.reasoning`. Adding a new
   ## family means: (1) set `reasoning` in the known-good combo table,
@@ -1165,6 +1180,7 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "gpt-oss": applyGptOssReasoning(p, body)
   of "glm": applyGlmReasoning(p, body)
   of "deepseek": applyDeepseekReasoning(p, body)
+  of "minimax": applyMinimaxReasoning(p, body)
   else: discard
 
 proc beginTurn*() =

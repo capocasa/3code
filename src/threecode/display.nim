@@ -363,20 +363,26 @@ proc renderToolPending*(banner: string, kind: ActionKind) =
   ## caller overwrites this line with `renderToolBanner` once the action
   ## returns. Replay skips this and goes straight to the result form.
   let icon = toolIcon(kind)
-  subtleWrite(stdout, icon & " " & banner)
+  let text = if kind == akBash: "$ " & banner else: banner
+  subtleWrite(stdout, icon & " " & text)
   stdout.write "\n"
   stdout.flushFile
 
 proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -1) =
-  ## Final tool banner: green ● on success (code 0), red ● on error.
+  ## Final tool banner. Bash uses red/green by exit code; everything
+  ## else uses subtle grey (same as the pending state).
   ## Optional `(Ns)` suffix when `elapsedS >= 1` (live); replay
   ## passes -1 to omit it.
   let icon = toolIcon(kind)
-  if code == 0:
-    stdout.styledWrite fgGreen, icon & " ", resetStyle
+  let text = if kind == akBash: "$ " & banner else: banner
+  if kind == akBash:
+    if code == 0:
+      stdout.styledWrite fgGreen, icon & " ", resetStyle
+    else:
+      stdout.styledWrite fgRed, icon & " ", resetStyle
   else:
-    stdout.styledWrite fgRed, icon & " ", resetStyle
-  subtleWrite(stdout, banner)
+    subtleWrite(stdout, icon & " ")
+  subtleWrite(stdout, text)
   if elapsedS >= 1:
     subtleWrite(stdout, &"  ({elapsedS}s)")
   stdout.write "\n"

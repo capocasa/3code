@@ -5,7 +5,7 @@ const
   LoopWindowK* = 25
   LoopTripT* = 8
   LoopHardTripT* = 16  # 2×T — same path mutated past the nudge
-  TurnCallBudget* = 40  # hard cap on tool calls per turn
+  TurnCallBudget* = 60  # hard cap on tracked (mutation/web) calls per turn
 
 proc initLoopTracker*(): LoopTracker =
   result.ring = @[]
@@ -99,7 +99,6 @@ proc trackCall*(t: var LoopTracker, name: string, args: JsonNode): int =
   ## (write, patch, sed -i, redirects, etc.) and web calls (web_search,
   ## web_fetch) are tracked. Web calls count as non-mutations: they
   ## contribute to Strike 1 (concentration signal) but not Strike 2.
-  inc t.turnCalls
   # Hard short-circuit: any `git checkout <path>` / `git restore` /
   # `git reset --hard` / `git stash` / `git clean -f` is treated as
   # immediate Strike 2. These wipe the working-tree state the model's
@@ -113,7 +112,8 @@ proc trackCall*(t: var LoopTracker, name: string, args: JsonNode): int =
       t.recoveryCmd = recovery
       return 2
   let fp = fingerprint(name, args)
-  if fp == "": return t.strike
+  if fp == "": return t.strike  # reads/plans don't count toward budget
+  inc t.turnCalls  # only tracked calls (mutations + web) count
   let isMut = isMutationCall(name, args)
   if t.ring.len >= LoopWindowK:
     let ev = t.ring[0]

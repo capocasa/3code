@@ -24,7 +24,7 @@ type
     temperature*: float  ## negative means omit the field
     maxTokens*: int      ## <= 0 means omit the field
 
-const KnownGoodCombos*: array[38, KnownGoodCombo] = [
+const KnownGoodCombos*: array[40, KnownGoodCombo] = [
     # glm
     ("baseten",   "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "low",    0.2, 8192, false),
     ("baseten",   "zai-org/GLM-5",                                   "glm",      "5",   "",          "low",    0.2, 8192, false),
@@ -67,6 +67,9 @@ const KnownGoodCombos*: array[38, KnownGoodCombo] = [
     ("sambanova", "DeepSeek-V3.2",                                   "deepseek", "3.2", "",          "medium", 0.2, 8192, false),
     ("together",  "deepseek-ai/DeepSeek-R1",                         "deepseek", "r1",  "",          "medium", 0.2, 8192, false),
     ("together",  "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false),
+    # minimax
+    ("nvidia",    "minimaxai/minimax-m2.5",                            "minimax",  "2",   "5",         "low",    0.2, 8192, false),
+    ("nvidia",    "minimaxai/minimax-m2.7",                            "minimax",  "2",   "7",         "low",    0.2, 8192, false),
   ]
     ## (provider, model, family, version, variant, reasoning, temperature,
     ## maxTokens) tuples.
@@ -840,6 +843,7 @@ let
   qwenSetup = (prompt: QwenPreamble, tools: glmAndQwenTools)
   deepseekSetup = (prompt: DeepSeekPreamble, tools: glmAndQwenTools)
   gptOssSetup = (prompt: GptOssPreamble, tools: gptOssTools)
+  minimaxSetup = (prompt: GlmPreamble, tools: glmAndQwenTools)
 
 proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   ## (prompt, tools) for the active family. Unknown family dies — every
@@ -850,6 +854,7 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   of "qwen": qwenSetup
   of "gpt-oss": gptOssSetup
   of "deepseek": deepseekSetup
+  of "minimax": minimaxSetup
   else: die "unknown family: '" & p.family & "' (no prompt/tools tuple)"
 
 let DefaultSystemPrompt* = glmSetup.prompt.replace(
@@ -1008,7 +1013,8 @@ const ReasoningLevels* = ["low", "medium", "high"]
 proc reasoningSupported*(family: string): bool =
   ## True when `family` has a wire field for reasoning effort. Drives
   ## whether `:reasoning` switching has any effect for the active model.
-  family == "gpt-oss" or family == "glm" or family == "deepseek"
+  family == "gpt-oss" or family == "glm" or family == "deepseek" or
+    family == "minimax"
 
 proc defaultReasoningsFor*(family: string): seq[string] =
   ## Available levels per family for the `:reasoning` listing. Empty when
