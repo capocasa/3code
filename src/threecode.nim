@@ -182,6 +182,17 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           else:
             stdout.styledWriteLine styleDim, "  paused — looped", resetStyle
         return
+      # Model-initiated next turn: emit a receipt of the previous
+      # callModel's token usage before the new callModel starts streaming
+      # and resets the bar to zeros. Without this receipt the accurate
+      # input/cache values flash for only milliseconds — unreadable.
+      if pendingHint.active:
+        let rl = tokenLineLabel(pendingHint.usage, pendingHint.window,
+                                pendingHint.elapsed)
+        if rl.len > 0:
+          withCleared:
+            subtleWriteLn(stdout, "  " & rl)
+        pendingHint.active = false
       continue
     if content.strip.len > 0:
       if not streamedLive:
