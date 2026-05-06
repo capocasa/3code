@@ -407,11 +407,9 @@ proc renderMdTable*(rows: seq[string], indent = "  ", maxWidth = 0): string =
 proc tokenSlot*(icon: string, n: int): string =
   ## "iconvalue" — no space between glyph and number. Slots are joined
   ## with two spaces for visual separation. When the value is 0 the
-  ## icon+value pair (2 visual cols) is replaced by two spaces so the
-  ## downstream ↓ token column stays aligned. During streaming, input
-  ## and cache tokens read as 0 until the final usage event arrives;
-  ## replacing them avoids flashing misleading zeros.
-  if n == 0: "  "
+  ## slot is omitted entirely (returns ""); the caller strips the
+  ## preceding spacer too so no dangling gaps appear.
+  if n == 0: ""
   else: icon & humanTokens(n)
 
 proc stripPreamble*(s: string): string =

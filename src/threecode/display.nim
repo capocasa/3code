@@ -218,9 +218,7 @@ proc contextLabel*(promptTokens, window: int): string =
     elif pct < 60: "◑"
     elif pct < 80: "◕"
     else: "●"
-  # Lone exception to the no-space-inside-slots rule: the half-circles
-  # crowd a digit too tightly without a hair of breathing room.
-  &"{glyph} {pct}%"
+  &"{glyph}{pct}%"
 
 type MarkdownState* = ref object
   ## Per-line markdown rendering state. Shared between the streaming
@@ -379,12 +377,15 @@ proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
   if usage.totalTokens <= 0: return ""
   let fresh = max(0, usage.promptTokens - usage.cachedTokens)
   let ctx = contextLabel(usage.promptTokens, window)
-  result = if ctx.len > 0: ctx & "  " else: ""
-  result.add tokenSlot("↑", fresh)
-  result.add "  " & tokenSlot("↻", usage.cachedTokens)
-  result.add "  ↓" & humanTokens(usage.completionTokens).alignLeft(4)
-  if elapsedS >= 0:
-    result.add "  " & $elapsedS & "s"
+  var parts: seq[string]
+  if ctx.len > 0: parts.add ctx
+  let ts1 = tokenSlot("↑", fresh)
+  if ts1.len > 0: parts.add ts1
+  let ts2 = tokenSlot("↻", usage.cachedTokens)
+  if ts2.len > 0: parts.add ts2
+  parts.add "↓" & humanTokens(usage.completionTokens).alignLeft(4)
+  if elapsedS >= 0: parts.add $elapsedS & "s"
+  result = parts.join("  ")
 
 proc tokenLineBytes*(usage: Usage, window: int, elapsedS = -1): string =
   ## Pure-byte form of the **token receipt** row used by the *replay*
