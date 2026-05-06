@@ -347,22 +347,39 @@ proc renderAssistantContent*(content: string, outFile: File = stdout) =
   finishMd(st, outFile)
   outFile.flushFile
 
-proc renderToolPending*(banner: string) =
+proc toolIcon*(kind: ActionKind): string =
+  case kind
+  of akBash: "●"
+  of akRead: "●"
+  of akWrite: "✎"
+  of akPatch, akApplyPatch: "✂"
+  of akPlan: "☐"
+  of akWebSearch: "🔍"
+  of akWebFetch: "🌐"
+  of akError: "✕"
+
+proc renderToolPending*(banner: string, kind: ActionKind) =
   ## Pre-execution banner: grey bullet + grey banner. Live only; the live
   ## caller overwrites this line with `renderToolBanner` once the action
   ## returns. Replay skips this and goes straight to the result form.
-  subtleWrite(stdout, "● " & banner)
+  let icon = toolIcon(kind)
+  subtleWrite(stdout, icon & " " & banner)
   stdout.write "\n"
   stdout.flushFile
 
-proc renderToolBanner*(banner: string, code: int, elapsedS = -1) =
-  ## Final tool banner: green bullet on success, grey on error, grey
-  ## banner. Optional `(Ns)` suffix when `elapsedS >= 1` (live); replay
+proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -1) =
+  ## Final tool banner. For bash: green/grey ● on success/error.
+  ## For other tool types: the icon from `toolIcon` in text color.
+  ## Optional `(Ns)` suffix when `elapsedS >= 1` (live); replay
   ## passes -1 to omit it.
-  if code == 0:
-    stdout.styledWrite fgGreen, "● ", resetStyle
+  let icon = toolIcon(kind)
+  if kind == akBash:
+    if code == 0:
+      stdout.styledWrite fgGreen, icon & " ", resetStyle
+    else:
+      subtleWrite(stdout, icon & " ")
   else:
-    subtleWrite(stdout, "● ")
+    stdout.write icon & " "
   subtleWrite(stdout, banner)
   if elapsedS >= 1:
     subtleWrite(stdout, &"  ({elapsedS}s)")
@@ -590,7 +607,7 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
             let act = toolCallToAction(family, name, args)
             banner = bannerFor(act)
             kind = act.kind
-          renderToolBanner(banner, code)
+          renderToolBanner(banner, kind, code)
           if output.len > 0:
             printToolResult(kind, output, code, toolIdx)
     of "tool":

@@ -135,30 +135,31 @@ proc previewCmd*(body: string, width = 64): string =
   if first.len > width: first[0 ..< width-1] & "…" else: first
 
 proc bannerFor*(act: Action): string =
+  ## Returns the parameter portion of the tool banner (no icon/prefix).
   case act.kind
   of akBash:
-    "bash   " & previewCmd(act.body)
+    previewCmd(act.body)
   of akRead:
     if act.offset > 0 or act.limit > 0:
       let endHint = if act.limit > 0: $(act.offset + act.limit - 1) else: "end"
-      &"read   {act.path}  [lines {max(1, act.offset)}-{endHint}]"
+      &"{act.path}  [lines {max(1, act.offset)}-{endHint}]"
     else:
-      &"read   {act.path}"
+      act.path
   of akWrite:
-    &"write  {act.path}  ({humanBytes(act.body.len)})"
+    &"{act.path}  ({humanBytes(act.body.len)})"
   of akPatch:
-    &"patch  {act.path}  ({act.edits.len} edit" & (if act.edits.len == 1: "" else: "s") & ")"
+    &"{act.path}  ({act.edits.len} edit" & (if act.edits.len == 1: "" else: "s") & ")"
   of akApplyPatch:
     let nl = act.body.count('\n')
-    &"apply_patch  ({nl} line" & (if nl == 1: "" else: "s") & ")"
+    &"({nl} line" & (if nl == 1: "" else: "s") & ")"
   of akPlan:
-    &"plan   ({act.plan.len} item" & (if act.plan.len == 1: "" else: "s") & ")"
+    &"({act.plan.len} item" & (if act.plan.len == 1: "" else: "s") & ")"
   of akWebSearch:
-    "web    search " & act.body
+    act.body
   of akWebFetch:
-    "web    fetch " & act.body
+    act.body
   of akError:
-    "error  unknown tool '" & act.path & "'"
+    "unknown tool '" & act.path & "'"
 
 proc nearestLineHint(content, search: string): string =
   ## When a patch search block didn't match, point the model at the most

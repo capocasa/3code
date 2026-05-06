@@ -116,7 +116,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         # pending banner — they stay visible while runAction blocks.
         if not silent:
           withCleared:
-            renderToolPending(bannerFor(act))
+            renderToolPending(bannerFor(act), act.kind)
         let toolT0 = epochTime()
         if session.readCache == nil: session.readCache = newReadCache()
         var (r, code, diff) = runAction(act, session.readCache)
@@ -131,7 +131,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           # overwrites it with the timed final form.
           withCleared:
             stdout.write "\e[1A\r\e[2K"
-            renderToolBanner(bannerFor(act), code, toolElapsed.int)
+            renderToolBanner(bannerFor(act), act.kind, code, toolElapsed.int)
             printToolResult(act.kind, r, code, idx, diff)
         else:
           withCleared:
