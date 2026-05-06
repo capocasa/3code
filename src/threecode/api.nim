@@ -1029,6 +1029,18 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
         stdout.write "\x1b[1A\x1b[2K"
       paintBarPrompt(currentLabel(slurped), DimPromptColor)
     contentStreamedLive = true
+    # Normalize cursor to bar row col 0. The streaming loop may have left
+    # the cursor in the content area (liveBarBelow case); move it down to
+    # the bar row before inserting the ticker row and restarting the spinner.
+    if liveBarBelow:
+      syncWrite "\x1b[1B"        # bar is 1 row below cursor
+    # Now cursor is at bar row col 0.
+    # Insert a blank row above the bar (ticker row for the spinner)
+    # and restart the spinner so the elapsed time keeps ticking during
+    # post-streaming processing (tool-call parsing, usage calculation).
+    syncWrite "\x1b[L\x1b[1B"
+    setSpinLabel(liveLabel(baseLabel, slurped))
+    startSpinner("")
 
   if interrupted:
     # Drop the cache: the SIGINT hook / watcher already shut down the
@@ -1365,6 +1377,9 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
     # so the next user-submit's receipt repaints this row dim with
     # matching content.
     let label = tokenLineLabel(usage, window, elapsed.int)
+    if contentStreamedLive:
+      # Remove the ticker row inserted by the post-streaming spinner restart.
+      syncWrite "\r\x1b[1A\x1b[M"
     paintBarPrompt(label, DimPromptColor)
     pendingHint = (active: true, usage: usage, window: window, elapsed: elapsed.int)
     if window > 0 and usage.promptTokens.float > 0.7 * window.float and
