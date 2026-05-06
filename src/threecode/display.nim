@@ -383,7 +383,8 @@ proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
   if ts1.len > 0: parts.add ts1
   let ts2 = tokenSlot("↻", usage.cachedTokens)
   if ts2.len > 0: parts.add ts2
-  parts.add "↓" & humanTokens(usage.completionTokens).alignLeft(4)
+  let ts3 = tokenSlot("↓", usage.completionTokens)
+  if ts3.len > 0: parts.add ts3
   if elapsedS >= 0: parts.add $elapsedS & "s"
   result = parts.join("  ")
 

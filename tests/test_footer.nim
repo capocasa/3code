@@ -657,7 +657,6 @@ suite "runTurns boundaries":
     let p = Profile(model: "glm-4.7")
     paintInitialBar(p)
     check currentBarLabel.startsWith("○0%")
-    check "  " in currentBarLabel
     check currentBarHasGap
     currentBarLabel = savedLabel
     currentBarHasGap = savedGap

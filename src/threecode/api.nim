@@ -365,11 +365,15 @@ proc liveLabel*(base: string, slurped: int): string =
   ## icon hugs value, slots joined by two spaces. ↑/↻ read as `0` until
   ## the final usage event closes the response; the spinner thread
   ## renders this in fgCyan + styleBright.
+  var parts: seq[string]
+  if base.len > 0: parts.add base
   let up = tokenSlot("↑", 0)
+  if up.len > 0: parts.add up
   let cached = tokenSlot("↻", 0)
+  if cached.len > 0: parts.add cached
   let down = tokenSlot("↓", slurped div 4)
-  if base.len > 0: base & "  " & up & "  " & cached & "  " & down
-  else: up & "  " & cached & "  " & down
+  if down.len > 0: parts.add down
+  parts.join("  ")
 
 proc paintInitialBar*(p: Profile) =
   ## Welcome-time paint: one blank gap row, then bar+prompt at zero
