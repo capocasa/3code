@@ -1109,6 +1109,16 @@ proc discoverSkills*(): string =
   if lines.len == 0: "(none installed)"
   else: lines.join("\n")
 
+proc findSystemPromptOverride*(family: string): string =
+  ## Look for <family>.txt in project `.3code/` then `userConfigRoot()`.
+  ## Returns the file path if found and experimental mode is on, else "".
+  if not experimentalEnabled: return ""
+  let local = getCurrentDir() / ".3code" / family & ".txt"
+  if fileExists(local): return local
+  let global = userConfigRoot() / family & ".txt"
+  if fileExists(global): return global
+  ""
+
 proc buildSystemPrompt*(p: Profile): string =
   ## Bytes are stable within a (provider, model, variant) triple — that's
   ## what the prompt now embeds for credit. Within a session that's constant,
@@ -1116,6 +1126,12 @@ proc buildSystemPrompt*(p: Profile): string =
   ## model or provider mid-session will invalidate the cache.
   ## Skills are discovered fresh on every call so a newly added skill file
   ## becomes visible on the next turn without restarting the session.
+  let override = findSystemPromptOverride(p.family)
+  if override != "":
+    stderr.writeLine "3code: system prompt overridden by " & override
+    return readFile(override)
+      .replace("{{credit}}", buildCredit(p))
+      .replace("{{skills}}", discoverSkills())
   setup(p).prompt
     .replace("{{credit}}", buildCredit(p))
     .replace("{{skills}}", discoverSkills())

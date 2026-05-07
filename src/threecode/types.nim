@@ -1,5 +1,8 @@
 import std/[tables, times]
 
+var experimentalEnabled*: bool = false
+  ## Set by `-x`/`--experimental`.
+
 const
   ExitUsage* = 2
   ExitConfig* = 3

@@ -57,9 +57,6 @@ var activeSearchUrl*: string = DefaultSearchUrl
   ## Resolved at config load. Overridden by `[settings]` `search-url = "..."`.
   ## Persisted back to disk only when it differs from `DefaultSearchUrl`,
   ## so users who never customize keep a clean config.
-var experimentalEnabled*: bool = false
-  ## Set by `-x`/`--experimental`. When true, models outside `KnownGoodCombos`
-  ## are allowed; otherwise the gate refuses them.
 
 proc gateExperimental*(p: Profile): bool =
   ## True if the profile is allowed to run a turn under current policy:
