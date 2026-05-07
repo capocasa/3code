@@ -874,7 +874,9 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
   ## (Shift+Enter / Alt+Enter — these now insert a real newline rather
   ## than backslash-continuation).
   let c2 = ed.getCh()
-  if c2 < 0: return false
+  if c2 < 0:
+    ed.canceled = true
+    return false
   # Two-byte sequences. On Windows arrows / nav keys arrive as ``[224, X]``
   # and KEYSEQS holds the same shape; on POSIX KEYSEQS values are 3+ bytes
   # so this two-byte check is always a no-op there.
