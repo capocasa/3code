@@ -163,6 +163,23 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           toolContent &= "\n\n[repeat-guard] turn budget exceeded (" &
             $TurnCallBudget & " tracked calls); further tool calls this turn are paused."
         messages.add %*{"role": "tool", "tool_call_id": id, "content": toolContent}
+        if act.kind == akContextClear:
+          # Rebuild messages: keep system prompt, drop everything else,
+          # add a synthetic user message with summary + instructions.
+          let sys = if messages.len > 0 and
+                       messages[0]{"role"}.getStr == "system": messages[0]
+                    else: %*{"role": "system", "content": ""}
+          let freshMsg = act.summary & "\n\n" & act.instructions
+          let rebuilt = newJArray()
+          rebuilt.add sys
+          rebuilt.add %*{"role": "user", "content": freshMsg}
+          messages.elems.setLen 0
+          for m in rebuilt: messages.add m
+          withCleared:
+            stdout.styledWriteLine styleDim,
+              "  · context cleared — fresh session with summary", resetStyle
+          saveSession(session, messages)
+          return
       saveSession(session, messages)
       if interrupted:
         withCleared:

@@ -106,8 +106,7 @@ Act first, explain after. Don't narrate your plan before executing it — just e
 - `update_plan(items)` — update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
 - `web_search(query)` — search the web. Returns titles, URLs, and snippets.
 - `web_fetch(url)` — fetch a URL and return readable text (boilerplate stripped). Use to read pages found via `web_search`.
-
-**For source edits, use `patch`.** Do not use `ed`, `sed -i`, or shell heredocs to rewrite files — line-arithmetic drifts and corrupts under sequential edits. `write` for new files or full rewrites; `patch` for surgical changes; `bash` for non-edit operations only.
+- `context_clear(summary, instructions)` — clear conversation history and start fresh. Provide a concise `summary` of current state and `instructions` for the new context. The new session sees only the summary and instructions. Do not use `ed`, `sed -i`, or shell heredocs to rewrite files — line-arithmetic drifts and corrupts under sequential edits. `write` for new files or full rewrites; `patch` for surgical changes; `bash` for non-edit operations only.
 
 The harness runs your tool calls and feeds results back. Independent tool calls in the same turn run in parallel — batch them when reading multiple files or running independent checks. When the task is done, reply with prose and no tool calls.
 
@@ -173,6 +172,8 @@ const QwenPreamble = """You are the Qwen edition of 3code, the economical coding
 - `update_plan(items)` — update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
 - `web_search(query)` — search the web. Returns titles, URLs, and snippets.
 - `web_fetch(url)` — fetch a URL and return readable text with boilerplate stripped.
+- `context_clear(summary, instructions)` — clear conversation history and start fresh. Provide a concise `summary` of current state and `instructions` for the new context.
+- `context_clear(summary, instructions)` — clear conversation history and start fresh. Provide a concise `summary` of current state and `instructions` for the new context.
 
 For source edits, use `patch`. `write` for new files or full rewrites; `bash` for non-edit operations only.
 
@@ -474,7 +475,7 @@ You MUST adhere to the following criteria when solving queries:
 - Working on the repo(s) in the current environment is allowed, even if they are proprietary.
 - Analyzing code for vulnerabilities is allowed.
 - Showing user code and tool call details is allowed.
-- Use only the offered tools. For gpt-oss coding work, that means `shell`, `apply_patch`, `update_plan`, `web_search`, and `web_fetch`; never invent `bash`, `patch`, `edit`, `applypatch`, or `apply-patch`.
+- Use only the offered tools. For gpt-oss coding work, that means `shell`, `apply_patch`, `update_plan`, `web_search`, `web_fetch`, and `context_clear`; never invent `bash`, `patch`, `edit`, `applypatch`, or `apply-patch`.
 
 If completing the user's task requires writing or modifying files, your code and final answer should follow these coding guidelines, though user instructions (e.g. AGENTS.md / CLAUDE.md) may override these guidelines:
 
@@ -626,6 +627,7 @@ apply_patch({"input": "*** Begin Patch\n*** Add File: hello.txt\n+Hello, world!\
 
 - `web_search(query)` — web search; returns titles, URLs, snippets.
 - `web_fetch(url)` — GET a URL; returns readable text (boilerplate stripped).
+- `context_clear(summary, instructions)` — clear conversation history and start fresh. Provide a concise `summary` of current state and `instructions` for the new context.
 - Search first, then fetch. Don't paraphrase a snippet as if you'd read the page.
 - Prefer primary sources. Two independent sources before claiming a fact. Date-check fast-moving topics.
 - Don't invent URLs. Cap at ~5 fetches per question. If searches don't find it, say so — don't guess.
@@ -681,6 +683,22 @@ let webFetchTool = %*{
         "url": {"type": "string", "description": "URL to fetch."}
       },
       "required": ["url"]
+    }
+  }
+}
+
+let contextClearTool = %*{
+  "type": "function",
+  "function": {
+    "name": "context_clear",
+    "description": "Clear the conversation context and start a fresh session with a summary of current state and new instructions. The summary and instructions become the first user message in the new context. Use this to hand off work between chunks in a multi-stage implementation, or when context is saturated.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "summary": {"type": "string", "description": "Summary of work done so far: files changed, tests status, open questions, current state of the implementation."},
+        "instructions": {"type": "string", "description": "Instructions for the fresh-context agent. Should start with reading a specific file or taking a specific first action."}
+      },
+      "required": ["summary", "instructions"]
     }
   }
 }
@@ -769,7 +787,8 @@ let glmAndQwenTools = %*[
     }
   },
   webSearchTool,
-  webFetchTool
+  webFetchTool,
+  contextClearTool
 ]
 
 let gptOssTools = %*[
@@ -835,7 +854,8 @@ let gptOssTools = %*[
     }
   },
   webSearchTool,
-  webFetchTool
+  webFetchTool,
+  contextClearTool
 ]
 
 let
@@ -1034,12 +1054,13 @@ proc buildCredit*(p: Profile): string =
   else:
     "Credit where it's due — to whoever trained the weights driving you and the lab serving them."
 
-const BuiltinSkills*: array[5, (string, string)] = [
+const BuiltinSkills*: array[6, (string, string)] = [
   ("role-conversational.md",   staticRead("skills/role-conversational.md")),
   ("role-sysadmin.md",         staticRead("skills/role-sysadmin.md")),
   ("role-thinking-partner.md", staticRead("skills/role-thinking-partner.md")),
   ("role-writing.md",          staticRead("skills/role-writing.md")),
   ("task-debug-systematic.md", staticRead("skills/task-debug-systematic.md")),
+  ("task-chunked-implementation.md", staticRead("skills/task-chunked-implementation.md")),
 ]
   ## Universal skills compiled into the binary. Materialized to
   ## `~/.local/share/3code/skills/` on startup; re-extracted whenever

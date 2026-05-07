@@ -12,7 +12,7 @@ type
   PlanItem* = object
     text*: string
     status*: string
-  ActionKind* = enum akBash, akRead, akWrite, akPatch, akApplyPatch, akPlan, akWebSearch, akWebFetch, akError
+  ActionKind* = enum akBash, akRead, akWrite, akPatch, akApplyPatch, akPlan, akWebSearch, akWebFetch, akContextClear, akError
   Action* = object
     kind*: ActionKind
     path*: string
@@ -20,6 +20,8 @@ type
     stdin*: string  ## bash-only: piped to the command's stdin
     edits*: seq[(string, string)]
     plan*: seq[PlanItem]
+    summary*: string  ## context_clear: summary of current state
+    instructions*: string  ## context_clear: instructions for fresh context
     offset*: int
     limit*: int
   Profile* = object
