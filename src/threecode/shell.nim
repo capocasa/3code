@@ -73,8 +73,8 @@ proc bashMutationPath*(cmd: string): string =
   ## - `cp/mv path... DEST` (destination is the last positional)
   ## - `rm path`, `touch path`
   ## - `git checkout/restore path` (any positional after the subcommand)
-  ## - repo-wide destructives — `git stash [push|pop|apply|drop|clear]`,
-  ##   `git reset --hard`, `git clean -f[d[x]]` — return "." (cwd marker)
+  ## - repo-wide destructives — `git reset --hard`, `git clean -f[d[x]]`
+  ##   — return "." (cwd marker)
   for stmt in splitStatements(cmd):
     let raw = shellTokens(stmt.strip)
     if raw.len == 0: continue
@@ -139,12 +139,6 @@ proc bashMutationPath*(cmd: string): string =
         for j in 2..<toks.len:
           if not toks[j].startsWith("-") and toks[j] != "--": last = toks[j]
         if last.len > 0: return last
-      of "stash":
-        let sub = if toks.len >= 3: toks[2] else: ""
-        case sub
-        of "", "push", "pop", "apply", "drop", "clear", "create", "store":
-          return "."
-        else: discard  # list, show, branch — read-only
       of "reset":
         for t in toks[2..^1]:
           if t == "--hard": return "."
@@ -216,7 +210,7 @@ proc bashReadPath*(cmd: string): tuple[path: string, fullFile: bool] =
 
 proc bashIsRecovery*(cmd: string): string =
   ## Returns the offending sub-command (`"git checkout src/foo.nim"`,
-  ## `"git stash"`, etc.) when `cmd` looks like the model trying to undo
+  ## `"git reset --hard"`, etc.) when `cmd` looks like the model trying to undo
   ## its own work mid-session — otherwise `""`. Hard-trips the loop guard
   ## to Strike 2 on the first occurrence: these commands wipe the working
   ## tree state the model's plan was based on, so further autonomous turns
@@ -249,12 +243,6 @@ proc bashIsRecovery*(cmd: string): string =
         if '/' in a: return toks.join(" ")
     of "reset":
       if "--hard" in toks[2..^1]: return toks.join(" ")
-    of "stash":
-      let sub = if toks.len >= 3: toks[2] else: ""
-      case sub
-      of "", "push", "pop", "apply", "drop", "clear", "create", "store":
-        return toks.join(" ")
-      else: discard  # list, show, branch — read-only
     of "clean":
       for t in toks[2..^1]:
         if t == "-f" or t == "-fd" or t == "-fdx" or t == "-df":

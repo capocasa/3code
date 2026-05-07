@@ -100,7 +100,7 @@ proc trackCall*(t: var LoopTracker, name: string, args: JsonNode): int =
   ## web_fetch) are tracked. Web calls count as non-mutations: they
   ## contribute to Strike 1 (concentration signal) but not Strike 2.
   # Hard short-circuit: any `git checkout <path>` / `git restore` /
-  # `git reset --hard` / `git stash` / `git clean -f` is treated as
+  # `git reset --hard` / `git clean -f` is treated as
   # immediate Strike 2. These wipe the working-tree state the model's
   # plan was based on; further autonomous turns make things worse.
   if name == "bash" or name == "shell":
