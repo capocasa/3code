@@ -207,7 +207,7 @@ proc cursorVisual*(text: string, position, promptW, contW, width: int): (int, in
     else:
       if col >= width:
         inc row
-        col = 0
+        col = contW
       inc col
       i += runeLenSafe(text, i)
   (row, col)
@@ -227,7 +227,7 @@ proc totalRows*(text: string, promptW, contW, width: int): int =
     else:
       if col >= width:
         inc row
-        col = 0
+        col = contW
       inc col
       i += runeLenSafe(text, i)
   row + 1
@@ -254,7 +254,8 @@ proc renderBuffer*(text, prompt, cont: string, width: int): string =
       let rl = runeLenSafe(text, i)
       if col >= width:
         result.add "\r\n"
-        col = 0
+        result.add cont
+        col = contW
       result.add text[i ..< i + rl]
       inc col
       i += rl
