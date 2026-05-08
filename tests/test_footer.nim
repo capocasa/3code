@@ -738,7 +738,7 @@ suite "full turn lifecycle":
     check "❯" in rowText(g, 8)
     # ---- content arrives ----
     g.feed SpinnerCleanupBytes
-    g.feed "\x1b[36m\x1b[1m● \x1b[0m"
+    g.feed "\x1b[96m\x1b[1m● \x1b[0m"
     g.feed styledLineBytes("Hello")
     g.feed barFooterBytes("        ↓5  1s", DimPromptColor)
     # Bar visible during streaming.
@@ -886,7 +886,7 @@ suite "full turn lifecycle":
     g.feed "\n"
     g.feed spinnerFooterBytes("⠋", "ctx 5%          ↓0", "", 0)
     g.feed SpinnerCleanupBytes
-    g.feed "\x1b[36m\x1b[1m● \x1b[0m"
+    g.feed "\x1b[96m\x1b[1m● \x1b[0m"
     g.feed styledLineBytes("iter 2 content")
     g.feed barFooterBytes("ctx 5%          ↓14  1s", DimPromptColor)
     g.feed ClearBarPromptBytes
@@ -940,7 +940,7 @@ suite "full turn lifecycle":
     # Now callModel's leading \n + content + paintBarPrompt paints
     # the bar; from here the normal lifecycle resumes.
     g.feed "\n"                                            # scratch
-    g.feed "\x1b[36m\x1b[1m● \x1b[0m"
+    g.feed "\x1b[96m\x1b[1m● \x1b[0m"
     g.feed styledLineBytes("hi back")
     g.feed barFooterBytes("ctx 1%  ↑10      ↓7  1s", DimPromptColor)
     let barRow = block:
@@ -954,7 +954,7 @@ suite "full turn lifecycle":
   test "multi-line content in one chunk: bar painted after every \\n":
     # Per-line repaint pattern: bar visible at every checkpoint.
     let g = newGrid()
-    g.feed "\x1b[36m\x1b[1m● \x1b[0m"
+    g.feed "\x1b[96m\x1b[1m● \x1b[0m"
     g.feed styledLineBytes("Line 1")
     g.feed barFooterBytes("lbl  1s", DimPromptColor)
     check "Line 1" in rowText(g, 0)
