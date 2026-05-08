@@ -1,0 +1,8 @@
+nimTitle	update	threecode/update.html	module threecode/update		0
+nim	autoUpdateEnabled	threecode/update.html#autoUpdateEnabled	proc autoUpdateEnabled(): bool		42
+nim	parseSemver	threecode/update.html#parseSemver,string	proc parseSemver(s: string): seq[int]		59
+nim	semverGt	threecode/update.html#semverGt,string,string	proc semverGt(a, b: string): bool		67
+nim	cleanupStaleBinaries	threecode/update.html#cleanupStaleBinaries	proc cleanupStaleBinaries()		179
+nim	selfUpdateCheck	threecode/update.html#selfUpdateCheck,string	proc selfUpdateCheck(curVersion = Version; targetPath = ""; force = false)		190
+nim	spawnBackgroundUpdateMaybe	threecode/update.html#spawnBackgroundUpdateMaybe	proc spawnBackgroundUpdateMaybe()		219
+nim	showUpdateNoticeMaybe	threecode/update.html#showUpdateNoticeMaybe	proc showUpdateNoticeMaybe()		266

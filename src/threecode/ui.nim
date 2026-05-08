@@ -1,3 +1,14 @@
+## REPL command dispatch and provider/model wizards.
+##
+## Handles all `:cmd` input that is not a prompt to the model. The command set
+## is narrow by design: introspection (`:show`, `:log`, `:tokens`), context
+## management (`:clear`, `:compact`, `:summarize`), provider/model switching
+## (`:provider`, `:model`, `:reasoning`), and thinking control (`:think`).
+##
+## Tab-completion in `tabComplete` walks `KnownGoodCombos` and the live
+## provider list to offer only valid model names. The provider-add wizard in
+## `runProviderAdd` validates the API key with a one-token probe before saving.
+
 import std/[json, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline, loop
 

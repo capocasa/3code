@@ -1,0 +1,10 @@
+nimTitle	actions	threecode/actions.html	module threecode/actions		0
+nim	toolCallToAction	threecode/actions.html#toolCallToAction,string,string,JsonNode	proc toolCallToAction(family, name: string; args: JsonNode): Action		149
+nim	previewCmd	threecode/actions.html#previewCmd,string,int	proc previewCmd(body: string; width = 64): string		158
+nim	bannerFor	threecode/actions.html#bannerFor,Action	proc bannerFor(act: Action): string		162
+nim	computeDiff	threecode/actions.html#computeDiff,string,string,string	proc computeDiff(before, after, label: string): string		219
+nim	newReadCache	threecode/actions.html#newReadCache	proc newReadCache(): ReadCache		235
+nim	runAction	threecode/actions.html#runAction,Action,ReadCache	proc runAction(act: Action; cache: ReadCache = nil): tuple[output: string, code: int,\n    diff: string]		320
+nim	parseActionsChecked	threecode/actions.html#parseActionsChecked,string	proc parseActionsChecked(text: string): tuple[actions: seq[Action],\n    issues: seq[ParseIssue]]		632
+nim	parseActions	threecode/actions.html#parseActions,string	proc parseActions(text: string): seq[Action]		759
+nim	stripActions	threecode/actions.html#stripActions,string	proc stripActions(text: string): string		769

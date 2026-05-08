@@ -1,3 +1,21 @@
+## Tool dispatch: translate model tool_call JSON into Actions, then execute.
+##
+## Two stages, intentionally separated:
+##
+## **Parse**: `dispatchGlm`, `dispatchGptOss`, etc. accept raw args JSON and
+## return an `Action` value. Each family gets its own dispatcher that accepts
+## only the tools it was offered in `prompts.nim`. A name outside that set
+## returns an `akError` action with a plain message back to the model - no
+## crash, no silent reinterpretation across families.
+##
+## **Execute**: `runAction` drives `akBash` (subprocess), `akRead` (file read
+## with optional window), `akWrite`/`akPatch` (file mutations, read-cache
+## update), `akWebSearch`/`akWebFetch` (native HTTP), and `akContextClear`
+## (returns a sentinel that triggers a context wipe in the outer loop).
+##
+## The read cache tracks the last-seen mtime and size of every `read` so
+## `patch` can reject stale edits when the file changed since last read.
+
 import std/[json, os, strformat, strutils, tables, times]
 import types, util, shell, web, config
 
@@ -615,7 +633,7 @@ proc parseActionsChecked*(text: string):
     tuple[actions: seq[Action], issues: seq[ParseIssue]] =
   ## Text-mode parser with syntax-fail detection. Same recognised forms
   ## as `parseActions`, but additionally flags unterminated fences,
-  ## orphan ``` blocks (no `bash` tag and no preceding path), and
+  ## orphan code-fence blocks (no `bash` tag and no preceding path), and
   ## malformed SEARCH/REPLACE markers inside a patch. The harness
   ## bounces issues back to the model rather than silently dropping
   ## the action.
@@ -740,9 +758,9 @@ proc parseActionsChecked*(text: string):
 
 proc parseActions*(text: string): seq[Action] =
   ## Text-mode parser. Recognises three fenced-block forms:
-  ##   ```bash … ```                              → akBash
-  ##   <path>\n``` … ```                          → akWrite
-  ##   <path>\n``` <<<<<<< SEARCH … >>>>>>> REPLACE … ``` → akPatch
+  ##   [bash fence]                               -> akBash
+  ##   <path> then [code fence]                   -> akWrite
+  ##   <path> then [SEARCH/REPLACE fence]         -> akPatch
   ## Multiple SEARCH/REPLACE pairs in one fenced block become one akPatch
   ## with multiple edits. Thin wrapper over `parseActionsChecked` that
   ## drops the issue list — used in spots where we only want the actions.

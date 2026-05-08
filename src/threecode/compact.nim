@@ -1,3 +1,20 @@
+## Context window management: supersede-aware elision and LLM summarization.
+##
+## Two complementary strategies keep the context from filling up:
+##
+## **Supersede compaction** (nearly lossless): when a later write or patch to
+## path P exists, earlier reads and writes for P are replaced with a one-line
+## marker. The model's next turn still sees the latest state; it loses the
+## history of intermediate edits, which it would not use anyway.
+##
+## **Summarization**: when the context crosses `SummarizeThresholdFrac`, a
+## meta-call to the same model (with a dedicated terse system prompt) produces
+## a one-paragraph recap. That recap replaces everything except the system
+## prompt and the last `SummarizeKeepRecent` messages.
+##
+## Supersede runs before every `callModel`. Summarization runs at most once per
+## turn and only when there are enough messages to justify the meta-call cost.
+
 import std/[httpclient, json, strutils, tables]
 import util
 import types

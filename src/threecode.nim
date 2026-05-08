@@ -1,3 +1,29 @@
+## Entry point and outer REPL loop.
+##
+## `main` parses CLI args, sets up the session, and runs the interactive loop.
+## `runTurns` is the inner driver: it calls the model, dispatches tool calls,
+## updates the session, and handles compaction - repeating until the model
+## emits no tool calls or the loop guard trips.
+##
+## Module graph overview::
+##
+##   threecode (entry)
+##     ├── api          HTTP + SSE streaming + spinner
+##     ├── actions      tool_call JSON → Action → execute
+##     ├── loop         mutation-saturation loop guard
+##     ├── compact      supersede elision + LLM summarization
+##     ├── session      .3log persistence (save + load)
+##     ├── display      terminal rendering (markdown, token bar, replays)
+##     ├── ui           REPL :commands + provider wizard
+##     ├── config       config file parse + profile resolution
+##     ├── prompts      KnownGoodCombos + per-family (prompt, tools)
+##     ├── shell        shell command parsing for loop guard
+##     ├── web          native web search + URL fetch
+##     ├── update       background auto-update
+##     ├── util         string utils, ANSI palette, markdown helpers
+##     ├── types        shared types + globals
+##     └── minline      readline-style input
+
 import std/[json, os, parseopt, strformat, strutils, terminal, times]
 when defined(posix):
   import std/posix

@@ -1,6 +1,24 @@
+## HTTP client, SSE streaming, spinner, and thinking ticker.
+##
+## `callModel` is the single outbound call: it sends the messages array as an
+## OpenAI-compatible chat completions request, reads the Server-Sent Events
+## stream chunk by chunk, and returns a completed assistant `JsonNode` plus
+## a `Usage` record.
+##
+## The spinner runs on a background thread so the braille animation stays
+## smooth while the main thread blocks on I/O. The thinking ticker - a dim
+## one-liner above the spinner showing the model's `reasoning_content` deltas
+## - is cleared when the model transitions from reasoning to output.
+##
+## XML tool call recovery handles a gpt-oss quirk: some nvidia-hosted variants
+## leak the model's native `<tool_call>` chat template into `delta.content`
+## instead of the OpenAI `tool_calls` field. When `xmlToolCalls` is set for a
+## combo, `callModel` promotes those tags to synthetic tool_calls so the rest
+## of the pipeline sees a uniform shape.
+
 import std/[algorithm, atomics, hashes, httpclient, json, locks, nativesockets, net, os, sequtils, strformat, strutils, tables, terminal, times, uri]
 when defined(posix):
-  import std/posix
+  import std/posix except SocketHandle
   import posix/termios
 import streamhttp
 import types, util, prompts, compact, display
@@ -108,7 +126,7 @@ proc getSpinTicker(): string {.gcsafe.} =
 #             spinner braille glyph (during streaming) or a space
 #             (idle / between iterations). Position 1 is always a
 #             space. Label starts at column 2.
-#   row K+1   prompt `❯ ` — dim while typing isn't possible, bright
+#   row K+1   prompt ❯ — dim while typing isn't possible, bright
 #             cyan when readline is reading.
 #
 # Emitters:
@@ -260,7 +278,7 @@ proc submitTransitionBytes*(line: string, hadPending, hadGap: bool,
   ##   2. If `hadPending`, paint the dim receipt at this row.
   ##   3. Two newlines: advance + blank separator between receipt
   ##      and user echo.
-  ##   4. Echo user input line by line (`❯ ` for first, `  ` for
+  ##   4. Echo user input line by line (❯ for first, continuation indent for
   ##      continuations).
   ##
   ## Cursor out: col 0 of the row directly after the last echo line.
@@ -345,7 +363,7 @@ proc spinnerLoop(unused: string) {.thread.} =
   ##             overlay always lands on a blank, and clearing the
   ##             row is a faithful restore.
   ##   row N     spinner frame + token-slot bar (cyan + bright)
-  ##   row N+1   dim `❯ ` placeholder, the visible caret while typing
+  ##   row N+1   dim ❯ placeholder, the visible caret while typing
   ##             isn't possible.
   ## See `spinnerFooterBytes` for the byte sequence each frame writes.
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -394,7 +412,7 @@ proc paintInitialBar*(p: Profile) =
   currentBarHasGap = true
 
 proc paintPromptOnly*(promptColor: string) =
-  ## Paint just the prompt `❯ ` at the cursor's current row, no token
+  ## Paint just the prompt ❯ at the cursor's current row, no token
   ## bar above. Used in the pre-first-turn startup state where we have
   ## no real token values yet — the bar stays hidden until the first
   ## model response brings them. Cursor parks at col 0 of the prompt
@@ -511,7 +529,7 @@ proc shutdownCachedStreamFd() {.gcsafe.} =
   when defined(posix):
     let fd = cachedStreamFd
     if fd != osInvalidSocket:
-      discard posix.shutdown(fd, SHUT_RDWR.cint)
+      discard posix.shutdown(posix.SocketHandle(fd), SHUT_RDWR.cint)
 
 # ---- Stream-time stdin cancel watcher ----
 #
@@ -1217,7 +1235,7 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
 
 proc beginTurn*() =
   ## Hide the terminal caret for the duration of the turn — the dim
-  ## `❯ ` glyph (still painted, just not blinking) is the only
+  ## ❯ glyph (still painted, just not blinking) is the only
   ## visible marker while typing isn't possible.
   stdout.write "\x1b[?25l"
   stdout.flushFile
@@ -1317,7 +1335,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   stdout.write "\n"
   setSpinLabel(liveLabel(baseLabel, 0))
   # Cursor is hidden for the duration of the entire turn by `runTurns`
-  # so the dim `❯ ` placeholder is the only visible caret. callModel
+  # so the dim ❯ placeholder is the only visible caret. callModel
   # itself doesn't toggle visibility — touching DECTCEM here would
   # cause a flicker between callModel iterations within a turn.
   startSpinner("")

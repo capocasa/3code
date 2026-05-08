@@ -1,3 +1,9 @@
+## Shared types and process-level globals.
+##
+## All types that cross module boundaries live here to avoid import cycles.
+## `experimentalEnabled` is a global because every module that validates a
+## profile needs it, and threading it through every call site is noise.
+
 import std/[tables, times]
 
 var experimentalEnabled*: bool = false
@@ -10,10 +16,13 @@ const
 
 type
   PlanItem* = object
+    ## One item in a model-emitted `update_plan` / `todo` list.
     text*: string
     status*: string
   ActionKind* = enum akBash, akRead, akWrite, akPatch, akApplyPatch, akPlan, akWebSearch, akWebFetch, akContextClear, akError
   Action* = object
+    ## The parsed, tool-agnostic representation of a single model tool call.
+    ## `runAction` in actions.nim consumes this and produces the tool result.
     kind*: ActionKind
     path*: string
     body*: string
@@ -72,7 +81,7 @@ type
   ApiError* = object of CatchableError
   ParseIssue* = object
     ## A syntax problem the text-mode parser surfaced on a fenced block
-    ## (unterminated fence, orphan ```, malformed SEARCH/REPLACE).
+    ## (unterminated fence, orphan code-fence, malformed SEARCH/REPLACE).
     ## `line` is 1-indexed into the assistant reply.
     line*: int
     msg*: string

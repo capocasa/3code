@@ -1,3 +1,17 @@
+## Session persistence in the human-readable `.3log` format.
+##
+## `.3log` is an append-friendly, diff-friendly flat-text format. Each record
+## is a header line (role and space-separated args) followed by body lines
+## indented two spaces. The format is both the on-disk representation and the
+## session audit trail - readable without tooling and diffable in git.
+##
+## The system prompt is intentionally omitted on save: it is rebuilt from the
+## profile on every resume, saving several KB per session and ensuring the
+## prompt is always current (not a stale snapshot from when the session started).
+##
+## On load, the full OpenAI-shape `messages` JsonNode array is reconstructed
+## from the records so the session can be resumed mid-conversation with no loss.
+
 import std/[algorithm, json, os, strutils, tables, times]
 import types, prompts, util, actions
 

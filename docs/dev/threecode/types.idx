@@ -1,0 +1,27 @@
+nimTitle	types	threecode/types.html	module threecode/types		0
+nim	experimentalEnabled	threecode/types.html#experimentalEnabled	var experimentalEnabled		9
+nim	ExitUsage	threecode/types.html#ExitUsage	const ExitUsage		13
+nim	ExitConfig	threecode/types.html#ExitConfig	const ExitConfig		14
+nim	ExitApi	threecode/types.html#ExitApi	const ExitApi		15
+nim	PlanItem	threecode/types.html#PlanItem	object PlanItem		18
+nim	akBash	threecode/types.html#akBash	ActionKind.akBash		22
+nim	akRead	threecode/types.html#akRead	ActionKind.akRead		22
+nim	akWrite	threecode/types.html#akWrite	ActionKind.akWrite		22
+nim	akPatch	threecode/types.html#akPatch	ActionKind.akPatch		22
+nim	akApplyPatch	threecode/types.html#akApplyPatch	ActionKind.akApplyPatch		22
+nim	akPlan	threecode/types.html#akPlan	ActionKind.akPlan		22
+nim	akWebSearch	threecode/types.html#akWebSearch	ActionKind.akWebSearch		22
+nim	akWebFetch	threecode/types.html#akWebFetch	ActionKind.akWebFetch		22
+nim	akContextClear	threecode/types.html#akContextClear	ActionKind.akContextClear		22
+nim	akError	threecode/types.html#akError	ActionKind.akError		22
+nim	ActionKind	threecode/types.html#ActionKind	enum ActionKind		22
+nim	Action	threecode/types.html#Action	object Action		23
+nim	Profile	threecode/types.html#Profile	object Profile		36
+nim	Usage	threecode/types.html#Usage	object Usage		50
+nim	ToolRecord	threecode/types.html#ToolRecord	object ToolRecord		52
+nim	LoopTracker	threecode/types.html#LoopTracker	object LoopTracker		57
+nim	ReadCache	threecode/types.html#ReadCache	type ReadCache		68
+nim	Session	threecode/types.html#Session	object Session		70
+nim	ApiError	threecode/types.html#ApiError	object ApiError		81
+nim	ParseIssue	threecode/types.html#ParseIssue	object ParseIssue		82
+nim	die	threecode/types.html#die,string,int	proc die(msg: string; code = 1)		89

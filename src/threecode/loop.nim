@@ -1,3 +1,14 @@
+## Loop guard: sliding-window mutation-saturation detector.
+##
+## Tracks tool calls within a window of `LoopWindowK` entries. Only mutations
+## (write, patch, bash-with-redirects, etc.) and web calls count - reads are
+## excluded as observation, not action. When a single path is mutated
+## `LoopTripT` times (Strike 1, nudge) or `LoopHardTripT` times (Strike 2,
+## halt), the outer loop in `threecode.nim` stops issuing further tool calls.
+## `git reset --hard` and similar recovery commands hard-trip to Strike 2
+## immediately: these wipe working-tree state the model's plan relied on, so
+## further autonomous turns almost always make things worse.
+
 import std/[json, strutils, tables]
 import types, util, shell
 

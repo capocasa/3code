@@ -1,0 +1,6 @@
+nimTitle	shell	threecode/shell.html	module threecode/shell		0
+nim	shellTokens	threecode/shell.html#shellTokens,string	proc shellTokens(s: string): seq[string]		11
+nim	splitStatements	threecode/shell.html#splitStatements,string	proc splitStatements(cmd: string): seq[string]		37
+nim	bashMutationPath	threecode/shell.html#bashMutationPath,string	proc bashMutationPath(cmd: string): string		71
+nim	bashReadPath	threecode/shell.html#bashReadPath,string	proc bashReadPath(cmd: string): tuple[path: string, fullFile: bool]		160
+nim	bashIsRecovery	threecode/shell.html#bashIsRecovery,string	proc bashIsRecovery(cmd: string): string		219

@@ -129,7 +129,7 @@ proc isAtBoundary(line: string, i: int): bool =
 
 proc applyInlineMd*(line: string): string =
   ## Strict in-line replacements for `***bold-italic***`, `**bold**`,
-  ## `*italic*`/`_italic_`, and `` `code` ``. Body text rides the
+  ## `*italic*` / `_italic_`, and backtick-code. Body text rides the
   ## terminal's default foreground (no envelope SGR), so the reverts
   ## just cancel bold / italic / underline back to default — no need
   ## to re-engage `\x1b[2m` (we no longer dim the body).

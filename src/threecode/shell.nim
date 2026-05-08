@@ -1,3 +1,11 @@
+## Shell command analysis for the loop guard.
+##
+## Does NOT run any commands - pure parsing only. Tokenizes shell snippets and
+## extracts the mutation target (if any) so the loop guard can track file
+## writes that bypass the `write`/`patch` tools (sed -i, tee, cp, mv, etc.).
+## Recovery detection (`git reset --hard`, `git checkout <path>`) hard-trips
+## the guard immediately without waiting for the saturation threshold.
+
 import std/strutils
 
 proc shellTokens*(s: string): seq[string] =

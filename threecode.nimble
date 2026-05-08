@@ -7,3 +7,11 @@ namedBin["threecode"] = "3code"
 
 requires "nim >= 2.0.0"
 requires "streamhttp >= 0.1.2"
+
+task docs, "Build HTML manual from docs/manual.md":
+  withDir "docs":
+    exec "nim md2html --docCmd:skip --outdir:. manual.md"
+    mvFile("manual.html", "index.html")
+
+task devdocs, "Build developer HTML docs from source":
+  exec "nim doc --project --outdir:docs/dev src/threecode.nim"

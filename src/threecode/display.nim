@@ -1,3 +1,20 @@
+## Terminal rendering: markdown, token bar, tool banners, and session replay.
+##
+## All terminal output except user-input lines goes through this module.
+##
+## - **Markdown rendering**: headers, fences, tables, bold/italic/code pass
+##   through `printLine` which calls `applyInlineMd` and wraps at terminal
+##   width. Tables buffer rows and render aligned box-drawing via `renderMdTable`.
+## - **Token bar**: the live bar during streaming (`paintBarBelow`/`paintBarPrompt`)
+##   and the dim receipt in scroll history after each turn (`renderTokenLine`).
+## - **Tool banners**: per-kind glyph and path header for each tool call result.
+## - **Session replay**: `replaySession` reprints a loaded session in the same
+##   visual style as a live session, reusing the same render helpers.
+##
+## The three-tier colour palette (bold cyan for hints, plain cyan for notes,
+## grey-244 for subtle FYI output) avoids SGR `dim` and `fgWhite` which render
+## below readable contrast on light terminal backgrounds.
+
 import std/[critbits, exitprocs, json, os, strformat, strutils, terminal]
 import types, util, config, prompts, session, actions, minline
 
@@ -337,7 +354,7 @@ proc finishMd*(s: MarkdownState, outFile: File): bool {.discardable.} =
 
 proc renderAssistantContent*(content: string, outFile: File = stdout) =
   ## Bullet `● ` (bright white) + dim content with full markdown
-  ## structure (headers, fences, tables, inline `**bold**`/`` `code` ``).
+  ## structure (headers, fences, tables, inline bold and backtick-code).
   ## Used by replay and by the live path when content was buffered (rare:
   ## streaming bypasses this and feeds the same handlers chunk by chunk).
   ## `outFile` lets tests capture output to a temp file; default is

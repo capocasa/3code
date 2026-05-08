@@ -1,0 +1,10 @@
+nimTitle	web	threecode/web.html	module threecode/web		0
+nim	DefaultSearchUrl	threecode/web.html#DefaultSearchUrl	const DefaultSearchUrl		21
+nim	SearchHit	threecode/web.html#SearchHit	object SearchHit		24
+nim	decodeEntities	threecode/web.html#decodeEntities,string	proc decodeEntities(s: string): string		47
+nim	stripHtml	threecode/web.html#stripHtml,string	proc stripHtml(html: string): string		83
+nim	fetchUrl	threecode/web.html#fetchUrl,string	proc fetchUrl(url: string): string		144
+nim	capText	threecode/web.html#capText,string	proc capText(s: string; cap = DefaultFetchCap): string		159
+nim	parseSearchHits	threecode/web.html#parseSearchHits,string	proc parseSearchHits(html: string): seq[SearchHit]		181
+nim	webSearch	threecode/web.html#webSearch,string	proc webSearch(query: string; searchUrl = DefaultSearchUrl): seq[SearchHit]		216
+nim	formatHits	threecode/web.html#formatHits,seq[SearchHit]	proc formatHits(hits: seq[SearchHit]): string		225

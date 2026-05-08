@@ -1,3 +1,18 @@
+## Known-good model registry and per-family (prompt, tools) pairs.
+##
+## `KnownGoodCombos` is the single source of truth for validated
+## provider/model pairings. Each entry bundles the full wire model id, a
+## family tag that drives tool and prompt selection, default reasoning effort,
+## temperature, and max_tokens cap.
+##
+## Each model family gets its own system prompt and tool schema. The tool
+## surface is chosen to match what the model was trained on: gpt-oss gets
+## Codex's `shell`+`apply_patch`, GLM and DeepSeek get `bash`/`read`/
+## `write`/`patch`. Adding a new family means adding a system prompt constant,
+## a tool schema constant, and a new branch in `systemPromptFor`/`toolsFor`.
+##
+## Anything outside `KnownGoodCombos` requires `--experimental` to run.
+
 import std/[algorithm, hashes, json, os, sequtils, strutils]
 import types, util
 

@@ -1,0 +1,65 @@
+nimTitle	minline	threecode/minline.html	module threecode/minline		0
+nim	resizePending	threecode/minline.html#resizePending	var resizePending		45
+nim	putchr	threecode/minline.html#putchr,cint	proc putchr(c: cint)		72
+nim	getchr	threecode/minline.html#getchr	proc getchr(): cint		77
+nim	Key	threecode/minline.html#Key	type Key		85
+nim	KeySeq	threecode/minline.html#KeySeq	type KeySeq		86
+nim	KeyCallback	threecode/minline.html#KeyCallback	type KeyCallback		87
+nim	LineError	threecode/minline.html#LineError	type LineError		88
+nim	LineEditorError	threecode/minline.html#LineEditorError	type LineEditorError		89
+nim	mdInsert	threecode/minline.html#mdInsert	LineEditorMode.mdInsert		90
+nim	mdReplace	threecode/minline.html#mdReplace	LineEditorMode.mdReplace		90
+nim	LineEditorMode	threecode/minline.html#LineEditorMode	enum LineEditorMode		90
+nim	Line	threecode/minline.html#Line	object Line		93
+nim	LineHistory	threecode/minline.html#LineHistory	object LineHistory		96
+nim	WriteProc	threecode/minline.html#WriteProc	type WriteProc		115
+nim	GetChProc	threecode/minline.html#GetChProc	type GetChProc		116
+nim	WidthProc	threecode/minline.html#WidthProc	type WidthProc		117
+nim	LineEditor	threecode/minline.html#LineEditor	object LineEditor		118
+nim	InputCancelled	threecode/minline.html#InputCancelled	object InputCancelled		140
+nim	CTRL	threecode/minline.html#CTRL	const CTRL		143
+nim	DIGIT	threecode/minline.html#DIGIT	const DIGIT		144
+nim	LETTER	threecode/minline.html#LETTER	const LETTER		145
+nim	UPPERLETTER	threecode/minline.html#UPPERLETTER	const UPPERLETTER		146
+nim	LOWERLETTER	threecode/minline.html#LOWERLETTER	const LOWERLETTER		147
+nim	PRINTABLE	threecode/minline.html#PRINTABLE	const PRINTABLE		148
+nim	ESCAPES	threecode/minline.html#ESCAPES	const ESCAPES		154
+nim	visualCols	threecode/minline.html#visualCols,string	proc visualCols(s: string): int		158
+nim	cursorVisual	threecode/minline.html#cursorVisual,string,int,int,int,int	proc cursorVisual(text: string; position, promptW, contW, width: int): (int, int)		191
+nim	totalRows	threecode/minline.html#totalRows,string,int,int,int	proc totalRows(text: string; promptW, contW, width: int): int		214
+nim	renderBuffer	threecode/minline.html#renderBuffer,string,string,string,int	proc renderBuffer(text, prompt, cont: string; width: int): string		234
+nim	historyInit	threecode/minline.html#historyInit,int,string	proc historyInit(size = 256; file: string = ""): LineHistory		310
+nim	historyAdd	threecode/minline.html#historyAdd,LineEditor	proc historyAdd(ed: var LineEditor)		333
+nim	historyFlush	threecode/minline.html#historyFlush,LineEditor	proc historyFlush(ed: var LineEditor)		347
+nim	fullRedraw	threecode/minline.html#fullRedraw,LineEditor	proc fullRedraw(ed: var LineEditor)		368
+nim	back	threecode/minline.html#back,LineEditor,int	proc back(ed: var LineEditor; n = 1)		421
+nim	forward	threecode/minline.html#forward,LineEditor,int	proc forward(ed: var LineEditor; n = 1)		431
+nim	deletePrevious	threecode/minline.html#deletePrevious,LineEditor	proc deletePrevious(ed: var LineEditor)		440
+nim	deleteNext	threecode/minline.html#deleteNext,LineEditor	proc deleteNext(ed: var LineEditor)		450
+nim	insertText	threecode/minline.html#insertText,LineEditor,string	proc insertText(ed: var LineEditor; s: string)		459
+nim	printChar	threecode/minline.html#printChar,LineEditor,int	proc printChar(ed: var LineEditor; c: int)		484
+nim	insertNewline	threecode/minline.html#insertNewline,LineEditor	proc insertNewline(ed: var LineEditor)		487
+nim	changeLine	threecode/minline.html#changeLine,LineEditor,string	proc changeLine(ed: var LineEditor; s: string)		490
+nim	clearLine	threecode/minline.html#clearLine,LineEditor	proc clearLine(ed: var LineEditor)		496
+nim	goToStart	threecode/minline.html#goToStart,LineEditor	proc goToStart(ed: var LineEditor)		500
+nim	goToEnd	threecode/minline.html#goToEnd,LineEditor	proc goToEnd(ed: var LineEditor)		508
+nim	goToBufferStart	threecode/minline.html#goToBufferStart,LineEditor	proc goToBufferStart(ed: var LineEditor)		516
+nim	goToBufferEnd	threecode/minline.html#goToBufferEnd,LineEditor	proc goToBufferEnd(ed: var LineEditor)		520
+nim	wordLeft	threecode/minline.html#wordLeft,LineEditor	proc wordLeft(ed: var LineEditor)		527
+nim	wordRight	threecode/minline.html#wordRight,LineEditor	proc wordRight(ed: var LineEditor)		536
+nim	deleteWordLeft	threecode/minline.html#deleteWordLeft,LineEditor	proc deleteWordLeft(ed: var LineEditor)		546
+nim	visualUp	threecode/minline.html#visualUp,LineEditor	proc visualUp(ed: var LineEditor)		558
+nim	visualDown	threecode/minline.html#visualDown,LineEditor	proc visualDown(ed: var LineEditor)		589
+nim	historyPrevious	threecode/minline.html#historyPrevious,LineEditor	proc historyPrevious(ed: var LineEditor)		645
+nim	historyNext	threecode/minline.html#historyNext,LineEditor	proc historyNext(ed: var LineEditor)		658
+nim	lineText	threecode/minline.html#lineText,LineEditor	proc lineText(ed: LineEditor): string		669
+nim	KEYNAMES	threecode/minline.html#KEYNAMES	var KEYNAMES		672
+nim	KEYSEQS	threecode/minline.html#KEYSEQS	var KEYSEQS		702
+nim	KEYMAP	threecode/minline.html#KEYMAP	var KEYMAP		723
+nim	completeLine	threecode/minline.html#completeLine,LineEditor	proc completeLine(ed: var LineEditor): int		808
+nim	reverseCompleteLine	threecode/minline.html#reverseCompleteLine,LineEditor	proc reverseCompleteLine(ed: var LineEditor)		820
+nim	initEditor	threecode/minline.html#initEditor,int,string	proc initEditor(mode = mdInsert; historySize = 256; historyFile: string = ""): LineEditor		847
+nim	handleEscape	threecode/minline.html#handleEscape,LineEditor,int	proc handleEscape(ed: var LineEditor; c1: int): bool		870
+nim	readLineWith	threecode/minline.html#readLineWith,LineEditor,string,GetChProc,WriteProc,WidthProc	proc readLineWith(ed: var LineEditor; prompt: string; getCh: GetChProc;\n             write: WriteProc; hidechars = false; noHistory = false;\n             getWidth: WidthProc = nil): string		1002
+nim	readLine	threecode/minline.html#readLine,LineEditor,string	proc readLine(ed: var LineEditor; prompt = ""; hidechars = false; noHistory = false): string		1079
+nim	password	threecode/minline.html#password,LineEditor,string	proc password(ed: var LineEditor; prompt = ""): string		1090
