@@ -133,7 +133,7 @@ proc toolCallToAction*(family, name: string, args: JsonNode): Action =
   ## label comes from `Profile.family` ("glm" / "qwen" / "gpt-oss"); the
   ## case statement below mirrors `setup` in `prompts.nim`.
   case family
-  of "glm", "qwen", "deepseek": dispatchGlmOrQwen(family, name, args)
+  of "glm", "qwen", "deepseek", "minimax": dispatchGlmOrQwen(family, name, args)
   of "gpt-oss": dispatchGptOss(family, name, args)
   else: die "unknown family in tool dispatch: '" & family & "'"
 

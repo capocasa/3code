@@ -143,3 +143,33 @@ suite "api: applyReasoning — unknown family":
     check "thinking" notin body
     check "reasoning_effort" notin body
     check "chat_template_kwargs" notin body
+
+suite "api: stripInternalFields":
+  test "strips usage from assistant messages":
+    let messages = %*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "hi"},
+      {"role": "assistant", "content": "hello", "usage": {"promptTokens": 100}}
+    ]
+    let stripped = stripInternalFields(messages)
+    check stripped.len == 3
+    check "usage" notin stripped[2]
+    check stripped[2]["content"].getStr == "hello"
+
+  test "preserves messages without usage":
+    let messages = %*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "hi"}
+    ]
+    let stripped = stripInternalFields(messages)
+    check stripped.len == 2
+    check stripped[0]["content"].getStr == "sys"
+
+  test "strips reasoning_content when not deepseek":
+    let messages = %*[
+      {"role": "assistant", "content": "hi", "usage": {"promptTokens": 5},
+       "reasoning_content": "thinking..."}
+    ]
+    let stripped = stripInternalFields(messages)
+    check "usage" notin stripped[0]
+    check stripped[0].hasKey("reasoning_content")

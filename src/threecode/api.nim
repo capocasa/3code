@@ -1079,7 +1079,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     # No SSE data — provider may have returned a plain JSON error body.
     result.errBody = nonSSE.join("\n")
 
-proc stripInternalFields(messages: JsonNode): JsonNode =
+proc stripInternalFields*(messages: JsonNode): JsonNode =
   ## Return a wire-safe copy of `messages` with internal bookkeeping fields
   ## removed. `usage` is stored on assistant messages for local replay but
   ## rejected by strict validators (fireworks, glm-5p1, etc.).
@@ -1292,6 +1292,15 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   if p.reasoning.len > 0:
     applyReasoning(p, body)
   let bodyStr = $body
+  if "\"usage\"" in bodyStr:
+    stderr.writeLine "3code: BUG: usage in wireMessages"
+    for i, m in wireMessages:
+      if m.kind == JObject and "usage" in m:
+        stderr.writeLine "  wireMessages[" & $i & "] has usage role=" & m{"role"}.getStr
+    stderr.writeLine "3code: original messages:"
+    for i, m in messages:
+      if m.kind == JObject and "usage" in m:
+        stderr.writeLine "  messages[" & $i & "] has usage role=" & m{"role"}.getStr
   let t0 = epochTime()
   decayLevel(serverRetryLevel, serverLastTs, t0)
   decayLevel(rateRetryLevel, rateLastTs, t0)
