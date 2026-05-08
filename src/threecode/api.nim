@@ -1479,26 +1479,31 @@ proc verifyProfile*(p: Profile): (bool, string) =
   except CatchableError as e:
     (false, e.msg)
 
-proc fetchModels*(url, key: string): seq[string] =
-  ## GET /models on the provider — that endpoint name is OpenAI's; what it
-  ## returns is the list of model ids this provider exposes. Returns @[]
-  ## on any failure (transport, non-200, malformed JSON).
+proc fetchModels*(url, key: string): (seq[string], string) =
+  ## GET /models on the provider. Returns (models, error) — error is empty on
+  ## success. Callers are responsible for displaying the error.
   try:
     let client = newHttpClient(timeout = 20_000, userAgent = "3code",
                                sslContext = bundledSslContext())
     defer: client.close()
     client.headers["Authorization"] = "Bearer " & key
     let resp = client.get(url & "/models")
-    if resp.code.int != 200: return
+    if resp.code.int != 200:
+      return (@[], "HTTP " & $resp.code.int & " — " &
+                   resp.body[0 ..< min(120, resp.body.len)])
     let j = parseJson(resp.body)
     let arr = if j.kind == JArray: j
               elif "data" in j and j["data"].kind == JArray: j["data"]
-              else: return
+              else:
+                return (@[], "unexpected response shape: " &
+                             resp.body[0 ..< min(120, resp.body.len)])
+    var models: seq[string]
     for item in arr:
-      if item.kind == JString: result.add item.getStr
-      elif item.kind == JObject and "id" in item: result.add item["id"].getStr
-  except CatchableError:
-    discard
+      if item.kind == JString: models.add item.getStr
+      elif item.kind == JObject and "id" in item: models.add item["id"].getStr
+    return (models, "")
+  except CatchableError as e:
+    return (@[], e.msg)
 
 proc installInterruptHook*() =
   setControlCHook(proc() {.noconv.} =

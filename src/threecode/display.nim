@@ -27,6 +27,12 @@ template warn*(args: varargs[untyped]) =
 template warnLn*(args: varargs[untyped]) =
   stdout.styledWriteLine(fgCyan, args, resetStyle)
 
+template err*(args: varargs[untyped]) =
+  stdout.styledWrite(fgMagenta, args, resetStyle)
+
+template errLn*(args: varargs[untyped]) =
+  stdout.styledWriteLine(fgMagenta, args, resetStyle)
+
 proc subtleWrite*(outFile: File, body: string) =
   ## FYI tier — grey 244, readable on both backgrounds. Replaces
   ## styledWrite(styleDim, ..., resetStyle) which is invisible on

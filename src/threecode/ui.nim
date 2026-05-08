@@ -129,7 +129,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
     while true:
       let (n, u) = promptNameAndUrl(editor)
       if n == "":
-        stdout.styledWriteLine fgMagenta, "  name required", resetStyle
+        errLn "  name required"
         continue
       var clash = false
       for pr in activeProviders:
@@ -137,7 +137,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
           clash = true
           break
       if clash:
-        stdout.styledWriteLine fgMagenta, &"  name already used: {n}", resetStyle
+        errLn &"  name already used: {n}"
         continue
       name = n
       url = u
@@ -160,8 +160,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
       if ok:
         stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
         return prov
-      stdout.styledWriteLine fgMagenta, "failed", resetStyle
-      stdout.styledWriteLine fgMagenta, "  " & err, resetStyle
+      errLn "  failed: " & err
       let choice = readOptional(editor,
         "  [enter]=retry, k=re-enter key, c=cancel : ").toLowerAscii
       if choice == "k":
@@ -172,9 +171,11 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
         raise newException(minline.InputCancelled, "cancelled by user")
   hint "  fetching models...   ", resetStyle
   stdout.flushFile
-  let available = fetchModels(url, key)
-  let lookup = shortToFull(available)  # short→full, first-occurrence wins
-  if available.len == 0:
+  let (available, fetchErr) = fetchModels(url, key)
+  let lookup = shortToFull(available)
+  if fetchErr.len > 0:
+    errLn "unavailable — ", fetchErr
+  elif available.len == 0:
     hintLn "unavailable — enter manually", resetStyle
   else:
     hintLn &"{available.len} available", resetStyle
@@ -208,7 +209,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
     for rm in rawModels:
       models.add lookup.getOrDefault(rm, rm)
     if models.len == 0:
-      stdout.styledWriteLine fgMagenta, "  need at least one model", resetStyle
+      errLn "  need at least one model"
       continue
     let prov = ProviderRec(name: name, url: url, key: key, models: models)
     let prof = Profile(name: name & "." & models[0], url: url,
@@ -219,8 +220,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
     if ok:
       stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
       return prov
-    stdout.styledWriteLine fgMagenta, "failed", resetStyle
-    stdout.styledWriteLine fgMagenta, "  " & err, resetStyle
+    errLn "  failed: " & err
     prev = models.mapIt(shortModel(it)).join(" ")
     let choice = readOptional(editor,
       "  [enter]=retry models, k=re-enter key, c=cancel : ").toLowerAscii
@@ -247,8 +247,7 @@ proc promptEditProvider*(editor: var minline.LineEditor,
           clash = true
           break
       if clash:
-        stdout.styledWriteLine fgMagenta,
-          &"  name already used: {name}", resetStyle
+        errLn &"  name already used: {name}"
         continue
     let newUrl = readOptional(editor,
       &"  url [{existing.url}]  : ").strip(chars = {'/', ' '})
@@ -258,12 +257,14 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     let key = if newKey == "": existing.key else: newKey
     hint "  fetching models...   ", resetStyle
     stdout.flushFile
-    let available = fetchModels(url, key)
+    let (available, fetchErr) = fetchModels(url, key)
     let prevCb = editor.completionCallback
     editor.completionCallback = proc(ed: LineEditor): seq[string] =
       available.mapIt(shortModel(it))
     defer: editor.completionCallback = prevCb
-    if available.len == 0:
+    if fetchErr.len > 0:
+      errLn "  unavailable — ", fetchErr
+    elif available.len == 0:
       hintLn "  unavailable — enter manually", resetStyle
     else:
       hintLn &"  {available.len} available", resetStyle
@@ -279,7 +280,7 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     let lookup = shortToFull(available)
     let models = rawModels.mapIt(lookup.getOrDefault(it, it))
     if models.len == 0:
-      stdout.styledWriteLine fgMagenta, "  need at least one model", resetStyle
+      errLn "  need at least one model"
       continue
     let prof = Profile(name: name & "." & models[0], url: url,
                        key: key, model: models[0])
@@ -289,8 +290,7 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     if ok:
       stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
       return ProviderRec(name: name, url: url, key: key, models: models)
-    stdout.styledWriteLine fgMagenta, "failed", resetStyle
-    stdout.styledWriteLine fgMagenta, "  " & err, resetStyle
+    errLn "  failed: " & err
 
 proc bootstrapProvider*(editor: var minline.LineEditor): Profile =
   stdout.styledWriteLine fgMagenta, styleBright,
@@ -331,11 +331,10 @@ proc cmdProviderSelect(target: string, prof: var Profile) =
       found = true
       break
   if not found:
-    stdout.styledWriteLine fgMagenta, &"  unknown provider: {target}", resetStyle
+    errLn &"  unknown provider: {target}"
     return
   if prov.models.len == 0:
-    stdout.styledWriteLine fgMagenta,
-      &"  provider {target} has no models", resetStyle
+    errLn &"  provider {target} has no models"
     return
   let newCurrent = prov.name & "." & firstModel(prov)
   let candidate = buildProfile(newCurrent, activeProviders, "")
@@ -366,7 +365,7 @@ proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
   for i, pr in activeProviders:
     if pr.name == target: idx = i; break
   if idx < 0:
-    stdout.styledWriteLine fgMagenta, &"  unknown provider: {target}", resetStyle
+    errLn &"  unknown provider: {target}"
     return
   let updated = try: promptEditProvider(editor, activeProviders[idx])
                 except minline.InputCancelled:
@@ -389,7 +388,7 @@ proc cmdProviderRm(target: string, prof: var Profile) =
   for i, pr in activeProviders:
     if pr.name == target: idx = i; break
   if idx < 0:
-    stdout.styledWriteLine fgMagenta, &"  unknown provider: {target}", resetStyle
+    errLn &"  unknown provider: {target}"
     return
   activeProviders.delete(idx)
   let curName = if activeCurrent == "": "" else: activeCurrent.split('.')[0]
@@ -413,25 +412,22 @@ proc cmdProvider(arg: string, editor: var minline.LineEditor,
   case parts[0]
   of "add":
     if parts.len != 1:
-      stdout.styledWriteLine fgMagenta, "  usage: :provider add", resetStyle
+      errLn "  usage: :provider add"
     else:
       cmdProviderAdd(editor, prof)
   of "edit":
     if parts.len != 2:
-      stdout.styledWriteLine fgMagenta,
-        "  usage: :provider edit <name>", resetStyle
+      errLn "  usage: :provider edit <name>"
     else:
       cmdProviderEdit(parts[1], editor, prof)
   of "rm", "remove":
     if parts.len != 2:
-      stdout.styledWriteLine fgMagenta,
-        &"  usage: :provider {parts[0]} <name>", resetStyle
+      errLn &"  usage: :provider {parts[0]} <name>"
     else:
       cmdProviderRm(parts[1], prof)
   else:
     if parts.len != 1:
-      stdout.styledWriteLine fgMagenta,
-        "  usage: :provider [<name> | add | rm <name>]", resetStyle
+      errLn "  usage: :provider [<name> | add | rm <name>]"
     else:
       cmdProviderSelect(parts[0], prof)
 
@@ -456,11 +452,11 @@ proc cmdModelList(prof: Profile) =
 proc cmdModelSelect(target: string, prof: var Profile) =
   let prov = currentProvider()
   if prov.name == "":
-    stdout.styledWriteLine fgMagenta, "  no provider selected", resetStyle
+    errLn "  no provider selected"
     return
   let idx = prov.findModel(target)
   if idx < 0:
-    stdout.styledWriteLine fgMagenta, &"  unknown model: {target}", resetStyle
+    errLn &"  unknown model: {target}"
     return
   let fullModel = prov.models[idx]
   let newCurrent = prov.name & "." & fullModel
@@ -481,8 +477,7 @@ proc cmdModel(arg: string, prof: var Profile) =
   of 1:
     cmdModelSelect(parts[0], prof)
   else:
-    stdout.styledWriteLine fgMagenta,
-      "  usage: :model [<name>]", resetStyle
+    errLn "  usage: :model [<name>]"
 
 proc cmdReasoningList(prof: Profile) =
   let prov = currentProvider()
@@ -500,14 +495,12 @@ proc cmdReasoningList(prof: Profile) =
 proc cmdReasoningSelect(target: string, prof: var Profile) =
   let prov = currentProvider()
   if prov.name == "":
-    stdout.styledWriteLine fgMagenta, "  no provider selected", resetStyle
+    errLn "  no provider selected"
     return
   let value = target.toLowerAscii
   let levels = availableReasonings(prov, prof.family)
   if value notin levels:
-    stdout.styledWriteLine fgMagenta,
-      &"  unknown reasoning level: {target} (choose from {levels.join(\" \")})",
-      resetStyle
+    errLn &"  unknown reasoning level: {target} (choose from {levels.join(\" \")})"
     return
   prof.reasoning = value
   for i, pr in activeProviders:
@@ -525,8 +518,7 @@ proc cmdReasoning(arg: string, prof: var Profile) =
   of 1:
     cmdReasoningSelect(parts[0], prof)
   else:
-    stdout.styledWriteLine fgMagenta,
-      "  usage: :reasoning [<level>]", resetStyle
+    errLn "  usage: :reasoning [<level>]"
 
 proc nearestCommand(name: string): string =
   var bestDist = high(int)
@@ -779,13 +771,12 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
     of "on", "show", "yes": showThinking = true
     of "off", "hide", "no": showThinking = false
     else:
-      stdout.styledWriteLine fgMagenta, "  usage: :think [on|off]", resetStyle
+      errLn "  usage: :think [on|off]"
       return true
     hintLn "  thinking ticker ", (if showThinking: "on" else: "off"), resetStyle
   of ":summarize":
     if prof.name == "":
-      stdout.styledWriteLine fgMagenta,
-        "  no provider configured. use :provider add", resetStyle
+      errLn "  no provider configured. use :provider add"
     else:
       hint "  · summarizing... ", resetStyle
       stdout.flushFile
@@ -801,8 +792,7 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
   else:
     let suggestion = nearestCommand(name)
     if suggestion != "":
-      stdout.styledWriteLine fgMagenta, "unknown command: ", c,
-        fgCyan, styleBright, &"  did you mean {suggestion}?", resetStyle
+      errLn "  unknown command: " & c & "  did you mean " & suggestion & "?"
     else:
-      stdout.styledWriteLine fgMagenta, "unknown command: ", c, "  (try :help)", resetStyle
+      errLn "  unknown command: " & c & "  (try :help)"
   return true
