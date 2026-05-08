@@ -73,11 +73,11 @@ suite "shell: bashMutationPath":
   test "detects rm":
     check bashMutationPath("rm /tmp/junk.txt") == "/tmp/junk.txt"
 
-  test "detects git stash (returns dot)":
-    check bashMutationPath("git stash") == "."
+  test "git stash is not flagged":
+    check bashMutationPath("git stash") == ""
 
-  test "detects git stash push (returns dot)":
-    check bashMutationPath("git stash push") == "."
+  test "git stash push is not flagged":
+    check bashMutationPath("git stash push") == ""
 
   test "detects git reset --hard (returns dot)":
     check bashMutationPath("git reset --hard HEAD") == "."
@@ -139,8 +139,8 @@ suite "shell: bashIsRecovery":
   test "does not flag branch checkout":
     check bashIsRecovery("git checkout main") == ""
 
-  test "detects git stash as recovery":
-    check bashIsRecovery("git stash") != ""
+  test "git stash is not recovery":
+    check bashIsRecovery("git stash") == ""
 
   test "returns empty for normal commands":
     check bashIsRecovery("ls -la") == ""

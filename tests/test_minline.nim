@@ -271,14 +271,13 @@ suite "minline pure helpers":
     check c == 4  # contW(2) + "bc"(2)
 
   test "cursorVisual: visual wrap when col reaches width":
-    # width = 5, prompt = 2 -> 3 chars fit on row 0 (cols 2,3,4),
-    # next char wraps to row 1 col 0.
+    # width = 5, prompt = 2, contW = 2 -> 3 data cells per row.
     let (r0, c0) = cursorVisual("abc", 3, 2, 2, 5)
     check r0 == 0
     check c0 == 5  # cursor parked one past last cell of row 0
     let (r1, c1) = cursorVisual("abcd", 4, 2, 2, 5)
     check r1 == 1
-    check c1 == 1  # 'd' on row 1 col 0, cursor after it at col 1
+    check c1 == 3  # 'd' on row 1 after cont(2), cursor at contW+1 = 3
 
   test "totalRows: empty is 1":
     check totalRows("", 2, 2, 80) == 1
@@ -288,16 +287,16 @@ suite "minline pure helpers":
     check totalRows("a\nb\nc", 2, 2, 80) == 3
 
   test "totalRows: wraps long line at width":
-    # width 5, prompt 2 -> 3 cells per first row, 5 cells per wrap row.
+    # width 5, prompt 2, contW 2 -> 3 data cells per row.
     check totalRows("abc", 2, 2, 5) == 1   # exactly fills row 0
     check totalRows("abcd", 2, 2, 5) == 2  # 'd' wraps to row 1
-    check totalRows("abcdefgh", 2, 2, 5) == 2  # 'abc' row0, 'defgh' row1
-    check totalRows("abcdefghi", 2, 2, 5) == 3 # 'abc','defgh','i'
+    check totalRows("abcdefgh", 2, 2, 5) == 3  # 'abc','def','gh'
+    check totalRows("abcdefghi", 2, 2, 5) == 3 # 'abc','def','ghi'
 
   test "renderBuffer: prompt + text, joined by \\r\\n on wrap":
     let bytes = renderBuffer("abcd", "P ", "  ", 5)
-    # 'P abc' on row 0, 'd' on row 1 (after \r\n).
-    check bytes == "P abc\r\nd"
+    # 'P abc' on row 0, continuation + 'd' on row 1 (after \r\n).
+    check bytes == "P abc\r\n  d"
 
   test "renderBuffer: continuation prompt for logical lines":
     let bytes = renderBuffer("ab\ncd", "P ", "..", 80)
@@ -477,7 +476,7 @@ suite "minline editor: terminal-width wrap":
     discard d.run(ed, prompt = "> ")
     check ed.echoRows == 2
     check rowText(d.grid, 0) == "> abcdefgh"
-    check rowText(d.grid, 1).startsWith("ijkl")
+    check rowText(d.grid, 1).startsWith("  ijkl")
 
   test "edit on wrapped row updates layout in place":
     var ed = initEditor()
@@ -490,7 +489,7 @@ suite "minline editor: terminal-width wrap":
     d.push KEnter
     discard d.run(ed, prompt = "> ")
     check rowText(d.grid, 0) == "> abcdefgh"
-    check rowText(d.grid, 1).startsWith("iXj")
+    check rowText(d.grid, 1).startsWith("  iXj")
 
   test "Up arrow on wrapped row moves to previous visual row, same logical line":
     var ed = initEditor()
@@ -499,11 +498,11 @@ suite "minline editor: terminal-width wrap":
     d.push KUp                   # cursor on row 0
     d.pushString "?"
     d.push KEnter
-    # Cursor was at end (after 'l') -> visual col 4 on row 1.
-    # Up to row 0 col 4 -> between 'b' and 'c' (since prompt is at cols 0..1,
-    # 'a' at col 2, ..., 'h' at col 9). Col 4 means before 'c'.
+    # Cursor was at end (after 'l') -> visual col 6 on row 1
+    # (contW=2 + "ijkl" -> cols 2..6). Up to row 0 col 6 -> after 'd'
+    # (prompt 0..1, 'a'=2, 'b'=3, 'c'=4, 'd'=5, col 6 is after 'd').
     let result = d.run(ed, prompt = "> ")
-    check result == "ab?cdefghijkl"
+    check result == "abcd?efghijkl"
 
 # ---------------- Driver: terminal resize ----------------
 
