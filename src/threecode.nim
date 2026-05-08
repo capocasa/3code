@@ -95,6 +95,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       if tcNode != nil and tcNode.kind == JArray: tcNode
       else: newJArray()
     if toolCalls.len > 0:
+      debugOut $toolCalls.len & " tool calls"
       # Each emit (blank row, assistant content, pending banner, tool
       # output, halt notice) is wrapped in its own `withCleared` so
       # bar+prompt are repainted directly below after the write. The
@@ -132,31 +133,22 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         let act = toolCallToAction(p.family, name, args)
         let idx = session.toolLog.len + 1
         let silent = isSkillRead(act)
-        # Pre-exec: dim bullet + dim banner text — "in flight" signal.
-        # After the call returns we move the cursor up and rewrite the
-        # line via renderToolBanner so the bullet picks up a colour
-        # (green success, dim error) and gains a duration suffix. Skill
-        # loads skip the banner entirely; the model's own
-        # "loaded skill: <name>" line is the only signal the user sees.
-        # The withCleared wrap repaints bar+prompt directly below the
-        # pending banner — they stay visible while runAction blocks.
-        if not silent:
-          withCleared:
-            renderToolPending(bannerFor(act), act.kind)
+        # Bar tick repaints the token bar with an incrementing elapsed
+        # counter during tool execution. The result banner is printed
+        # after completion inside `withCleared`.
+        startBarTick(currentBarLabel)
         let toolT0 = epochTime()
         if session.readCache == nil: session.readCache = newReadCache()
         var (r, code, diff) = runAction(act, session.readCache)
         if act.kind == akPlan and code == 0:
           session.plan = act.plan
+        discard stopBarTick()
         let toolElapsed = epochTime() - toolT0
+        debugOut &"tool done: {act.kind} code={code} elapsed={toolElapsed:.2f}"
         if r.strip.len == 0: r = "[no output]"
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
         if not silent:
-          # Cursor parks at bar row after `withCleared` above; `\e[1A\r\e[2K`
-          # walks up to the pending banner row and clears it so renderToolBanner
-          # overwrites it with the timed final form.
           withCleared:
-            stdout.write "\e[1A\r\e[2K"
             renderToolBanner(bannerFor(act), act.kind, code, toolElapsed.int)
             printToolResult(act.kind, r, code, idx, diff)
         else:
@@ -236,6 +228,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           withCleared:
             subtleWriteLn(stdout, "  " & rl)
         pendingHint.active = false
+      debugOut "runTurns: loop continue"
       continue
     if content.strip.len > 0:
       if not streamedLive:
@@ -273,6 +266,7 @@ proc usage() {.noreturn.} =
   -l, --list[=all]     list sessions for this directory (or all) and exit
   -g, --good           list known-good provider/variant combos and exit
   -x, --experimental   allow combos outside the known-good list
+  -D, --debug          colored debug trace to stderr
   -v, --version        print version
   -h, --help           this message
 
@@ -343,6 +337,7 @@ proc main() =
       of "h", "help": usage()
       of "g", "good": printKnownGood(); return
       of "x", "experimental": experimentalEnabled = true
+      of "D", "debug": debugEnabled = true
       of "i", "interactive": forceInteractive = true
       of "m", "model":
         if v != "": model = v

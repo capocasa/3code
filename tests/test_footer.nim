@@ -821,51 +821,43 @@ suite "full turn lifecycle":
     check rowText(g, 2).strip != ""
     check rowText(g, 3).strip != ""
 
-  test "tool exec: bar+prompt visible during runAction (per-write withCleared)":
-    # Production sequence: paintBarPrompt → withCleared(renderToolPending)
-    # → runAction (no writes) → withCleared(\e[1A clear + renderToolBanner
-    # + printToolResult). The KEY property: between the pending banner
-    # and runAction, bar+prompt must be visible — runAction can take
-    # seconds (a bash command), and the user sees a frozen screen if
-    # bar+prompt are gone for that whole time.
-    #
-    # Wrapping the whole block in ONE withCleared is the bug we're
-    # guarding against: clearBarPrompt fires once at start, repaintBarPrompt
-    # fires once at end, so during runAction (mid-block) bar/prompt are
-    # cleared and not yet repainted.
+  test "tool exec: bar+prompt visible during runAction (bar tick)":
+    # Production sequence: paintBarPrompt → withCleared(\n + content)
+    # → startBarTick → runAction (no writes, bar ticks) → stopBarTick
+    # → withCleared(renderToolBanner + printToolResult + repaint).
+    # The KEY property: during runAction the bar stays visible and ticks
+    # elapsed seconds — runAction can take seconds and the user sees a
+    # live counter instead of a frozen screen.
     let g = newGrid()
     # Initial: bar at row 0, prompt at row 1.
-    g.feed barFooterBytes("LBL  1s", DimPromptColor)
+    g.feed barFooterBytes("LBL  0s", DimPromptColor)
     check "LBL" in rowText(g, 0)
     check "❯" in rowText(g, 1)
-    # withCleared(renderToolPending): clear → "  bash   ls\n" → repaint.
+    # withCleared writes \n + assistant content, repaints bar.
     g.feed ClearBarPromptBytes
-    g.feed "  bash   ls\n"
+    g.feed "\n"
+    g.feed barFooterBytes("LBL  0s", DimPromptColor)
+    # Bar tick: bar label updates with elapsed (simulated as one frame).
     g.feed barFooterBytes("LBL  1s", DimPromptColor)
-    # CHECKPOINT: this is the moment runAction starts. Bar+prompt MUST
-    # be visible here, with the pending banner above.
-    let pendingBarRow = block:
+    # CHECKPOINT: this is the moment during runAction. Bar+prompt MUST
+    # be visible with ticking counter.
+    let barRow = block:
       var found = -1
       for r in 0 ..< g.rows.len:
-        if "LBL" in rowText(g, r): found = r; break
+        if "LBL  1s" in rowText(g, r): found = r; break
       found
-    check pendingBarRow >= 0
-    check "❯" in rowText(g, pendingBarRow + 1)
-    check "bash" in rowText(g, pendingBarRow - 1)
-    # No blank between pending banner and bar.
-    check rowText(g, pendingBarRow - 1).strip != ""
-    check rowText(g, pendingBarRow).strip != ""
-    check rowText(g, pendingBarRow + 1).strip != ""
-    # Now runAction "completes" (no writes). Then result phase:
-    # withCleared(\e[1A clear pending + final banner + output + repaint).
-    g.feed ClearBarPromptBytes        # clearBarPrompt
-    g.feed "\x1b[1A\r\x1b[2K"         # walk up to pending row, clear it
-    g.feed "  bash   ls  (1s)\n"      # final banner overwrites pending
-    g.feed "  total 16\n"             # tool output
-    g.feed "  [exit 0]\n"             # tool output
+    check barRow >= 0
+    check "❯" in rowText(g, barRow + 1)
+    check rowText(g, barRow).strip != ""
+    check rowText(g, barRow + 1).strip != ""
+    # runAction completes, stopBarTick. Result phase:
+    # withCleared clears bar, writes result, repaints.
+    g.feed ClearBarPromptBytes
+    g.feed "  bash   ls  (1s)\n"
+    g.feed "  total 16\n"
+    g.feed "  [exit 0]\n"
     g.feed barFooterBytes("LBL  2s", DimPromptColor)
-    # FINAL: bar+prompt at the bottom, output above, no blank between bar
-    # and prompt.
+    # FINAL: bar+prompt at the bottom, output above.
     let finalBarRow = block:
       var found = -1
       for r in 0 ..< g.rows.len:
@@ -875,7 +867,6 @@ suite "full turn lifecycle":
     check "❯" in rowText(g, finalBarRow + 1)
     check rowText(g, finalBarRow).strip != ""
     check rowText(g, finalBarRow + 1).strip != ""
-    # The pending banner row was overwritten with the timed final form.
     var foundFinal = false
     for r in 0 ..< g.rows.len:
       if "(1s)" in rowText(g, r): foundFinal = true

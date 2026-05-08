@@ -15,7 +15,7 @@
 ## grey-244 for subtle FYI output) avoids SGR `dim` and `fgWhite` which render
 ## below readable contrast on light terminal backgrounds.
 
-import std/[critbits, exitprocs, json, os, strformat, strutils, terminal]
+import std/[critbits, exitprocs, json, os, strformat, strutils, terminal, times]
 import types, util, config, prompts, session, actions, minline
 
 # Three visible tiers, designed to read on both light + dark terminal
@@ -49,6 +49,16 @@ template err*(args: varargs[untyped]) =
 
 template errLn*(args: varargs[untyped]) =
   stdout.styledWriteLine(fgMagenta, args, resetStyle)
+
+proc debugOut*(msg: string) =
+  if not debugEnabled: return
+  let t = epochTime().formatFloat(ffDecimal, 3)
+  stderr.styledWriteLine(fgBlue, "[dbg ", t, "] ", msg, resetStyle)
+
+proc debugOut*(msg, tag: string) =
+  if not debugEnabled: return
+  let t = epochTime().formatFloat(ffDecimal, 3)
+  stderr.styledWriteLine(fgBlue, "[dbg ", t, "] ", styleBright, tag, resetStyle, fgBlue, " ", msg, resetStyle)
 
 proc subtleWrite*(outFile: File, body: string) =
   ## FYI tier — grey 244, readable on both backgrounds. Replaces

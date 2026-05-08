@@ -8,6 +8,8 @@ import std/[tables, times]
 
 var experimentalEnabled*: bool = false
   ## Set by `-x`/`--experimental`.
+var debugEnabled*: bool = false
+  ## Set by `-D`/`--debug`.
 
 const
   ExitUsage* = 2

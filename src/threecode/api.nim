@@ -23,6 +23,31 @@ when defined(posix):
 import streamhttp
 import types, util, prompts, compact, display
 
+const providerStub {.booldefine.} = false
+when providerStub:
+  var stubResponseIdx = 0
+  proc loadStubResponses(): seq[JsonNode] =
+    ## Read stub_responses.json: a JSON array of assistant-message objects.
+    ## Each element is an OpenAI-shape assistant message (role, content,
+    ## tool_calls). Re-read on every call so edits take effect mid-session.
+    const path = "stub_responses.json"
+    if not fileExists(path):
+      stderr.writeLine "3code: stub: " & path & " not found"
+      quit 1
+    let raw = readFile(path)
+    try: parseJson(raw).getElems
+    except CatchableError:
+      stderr.writeLine "3code: stub: malformed JSON in " & path
+      quit 1
+  proc stubCallModel(messages: JsonNode): JsonNode =
+    let responses = loadStubResponses()
+    if stubResponseIdx >= responses.len:
+      stderr.writeLine "3code: stub: response index " & $stubResponseIdx &
+        " out of range (" & $responses.len & " responses)"
+      quit 1
+    result = responses[stubResponseIdx]
+    inc stubResponseIdx
+
 # ---------- Spinner ----------
 
 var interrupted*: bool = false
@@ -320,6 +345,7 @@ proc paintBarPrompt*(label, promptColor: string) =
   ## `repaintBarPrompt` knows what to draw. Clears `currentBarHasGap`
   ## — during streaming the bar slides flush with content; only
   ## `endTurn` paints a gap.
+  debugOut "paintBarPrompt label=" & label[0..min(30, label.len-1)]
   currentBarLabel = label
   currentBarHasGap = false
   syncWrite barFooterBytes(label, promptColor)
@@ -351,8 +377,10 @@ template withCleared*(body: untyped) =
   ## the cursor afterwards. Body writes content (banners, tool
   ## output, etc.) that advances the cursor by some number of rows;
   ## the bar+prompt slide along with the cursor.
+  debugOut &"withCleared enter barLabel={currentBarLabel.len}"
   clearBarPrompt()
   body
+  debugOut "withCleared exit"
   repaintBarPrompt()
 
 proc spinnerLoop(unused: string) {.thread.} =
@@ -438,7 +466,53 @@ proc paintInitialPrompt*(p: Profile) =
 
 var spinnerRunning = false  # only mutated by main thread
 
+# --- Bar tick: repaints the token bar with an incrementing elapsed counter
+#     during tool execution. No spinner icon, just the bar label + time.
+
+var barTickStop: Atomic[bool]
+var barTickThread: Thread[void]
+var barTickRunning = false
+var barTickStart: float
+var barTickBase: string
+var barTickLock: Lock
+barTickLock.initLock()
+
+proc barTickLoop() {.thread.} =
+  while not barTickStop.load(moRelaxed):
+    var base: string
+    {.cast(gcsafe).}:
+      acquire barTickLock
+      base = barTickBase
+      release barTickLock
+    let elapsed = (epochTime() - barTickStart).int
+    let label = base & "  " & $elapsed & "s"
+    syncWrite barFooterBytes(label, DimPromptColor)
+    sleep 500
+
+proc startBarTick*(base: string) =
+  debugOut "startBarTick"
+  if barTickRunning: return
+  {.cast(gcsafe).}:
+    acquire barTickLock
+    barTickBase = base
+    release barTickLock
+  barTickStart = epochTime()
+  barTickStop.store(false, moRelaxed)
+  createThread(barTickThread, barTickLoop)
+  barTickRunning = true
+
+proc stopBarTick*(): int =
+  ## Stops the bar tick and returns elapsed seconds.
+  debugOut "stopBarTick"
+  if not barTickRunning: return 0
+  let elapsed = (epochTime() - barTickStart).int
+  barTickStop.store(true, moRelaxed)
+  joinThread(barTickThread)
+  barTickRunning = false
+  return elapsed
+
 proc startSpinner*(label: string) =
+  debugOut "startSpinner"
   if spinnerRunning: return
   if label.len > 0: setSpinLabel(label)
   spinnerStop.store(false, moRelaxed)
@@ -446,6 +520,7 @@ proc startSpinner*(label: string) =
   spinnerRunning = true
 
 proc stopSpinner*() =
+  debugOut "stopSpinner"
   if not spinnerRunning: return
   spinnerStop.store(true, moRelaxed)
   joinThread(spinnerThread)
@@ -734,6 +809,7 @@ proc flushTail(f: var XmlToolFilter): string =
 
 proc streamHttp(url, key, bodyStr: string, baseLabel: string,
                 slurped: var int, suppressXml: bool): StreamOutcome =
+  debugOut "streamHttp start"
   # Post `bodyStr` to `url` and consume SSE chunks until `[DONE]`. `slurped`
   # accumulates an approximate output-character count so the caller can
   # show a live "↓ Nk" on the spinner; update it inline as chunks arrive.
@@ -1096,6 +1172,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   else:
     # No SSE data — provider may have returned a plain JSON error body.
     result.errBody = nonSSE.join("\n")
+  debugOut &"streamHttp end — contentStarted={contentStarted} accTools={accTools.len}"
 
 proc stripInternalFields*(messages: JsonNode): JsonNode =
   ## Return a wire-safe copy of `messages` with internal bookkeeping fields
@@ -1285,6 +1362,15 @@ proc emitUserSubmit*(line: string, echoRows = -1) =
   currentBarHasGap = false
 
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
+  when providerStub:
+    startSpinner("stub")
+    sleep 500  # simulate thinking
+    stopSpinner()
+    result = stubCallModel(messages)
+    debugOut &"callModel stub idx={stubResponseIdx-1}"
+    paintBarPrompt("stub 0s", DimPromptColor)
+    return
+  debugOut "callModel start"
   if p.family == "deepseek":
     ensureReasoningField(messages)
   let wireMessages = stripInternalFields(messages)
@@ -1457,7 +1543,8 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       "elapsed": elapsed.int,
       "ts": now().format("yyyy-MM-dd'T'HH:mm:sszzz"),
     }
-  outcome.assistantMsg
+  debugOut &"callModel end streamedLive={contentStreamedLive} usage={usage.totalTokens}"
+  return outcome.assistantMsg
 
 proc verifyBody*(p: Profile): string =
   ## JSON body for the provider-verification ping.  Kept as a named proc
