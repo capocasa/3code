@@ -417,7 +417,7 @@ proc tokenLineBytes*(usage: Usage, window: int, elapsedS = -1): string =
   ## emits; pinned by `tests/test_golden.nim`.
   let label = tokenLineLabel(usage, window, elapsedS)
   if label.len == 0: return ""
-  result = GreyFg & "  " & label & Reset & "\n" & Reset
+  result = CyanFg & "  " & label & Reset & "\n" & Reset
 
 proc renderTokenLine*(usage: Usage, window: int, elapsedS = -1) =
   ## "○N%  ↑Nk  ↻Nk  ↓Nk  Ts": context glyph, fresh, cached, generated,

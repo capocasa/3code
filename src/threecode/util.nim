@@ -11,6 +11,7 @@ import std/[net, os, sequtils, strformat, strutils]
 
 const
   CyanFg* = "\x1b[36m"
+  DimCyanFg* = "\x1b[96m"
   BoldOn* = "\x1b[1m"
   GreyFg* = "\x1b[38;5;244m"
   Reset* = "\x1b[0m"

@@ -444,9 +444,9 @@ suite "token receipt placement":
     check tokenLineLabel(Usage(), 200_000) == ""
     check tokenLineLabel(usage, 200_000) != ""
 
-  test "receiptBarBytes: grey payload, no leading clear, no \\n":
+  test "receiptBarBytes: cyan payload, no leading clear, no \\n":
     let bytes = receiptBarBytes("○ 2%  ↑3.8k      ↓45  1s")
-    check bytes.startsWith(GreyFg & "  ")
+    check bytes.startsWith(CyanFg & "  ")
     check bytes.endsWith(Reset)
     check '\n' notin bytes
 
@@ -480,7 +480,7 @@ suite "token receipt placement":
     check "3.8k" in rowText(g, 0)
     check rowText(g, 1).strip == ""
     check rowText(g, 2).startsWith("❯ next")
-    check GreyFg in submitTransitionBytes("next", true, false, label)
+    check CyanFg in submitTransitionBytes("next", true, false, label)
 
   test "submitTransitionBytes: hadGap=true overwrites the gap row":
     # Stage typing-ready state: LLM line at row 0, *gap* (blank) at
@@ -798,8 +798,8 @@ suite "full turn lifecycle":
     check "3.8k" in rowText(g, 1)               # receipt on old gap
     check rowText(g, 2).strip == ""             # blank separator
     check rowText(g, 3).startsWith("❯ elaborate")
-    # Receipt is grey.
-    check GreyFg in submitTransitionBytes("elaborate", true, true,
+    # Receipt is cyan.
+    check CyanFg in submitTransitionBytes("elaborate", true, true,
                                           iter1Label)
 
   test "tool exec under withCleared: bar+prompt slide down":
