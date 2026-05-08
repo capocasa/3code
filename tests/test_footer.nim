@@ -547,11 +547,9 @@ suite "token receipt placement":
     g.feed submitTransitionBytes("hello", hadPending = false,
                                  hadGap = false, "", hasBar = false)
     # Walk-back nLines=1 → row 0 (the prompt row). \x1b[J wipes from
-    # there. No receipt (first turn). \n\n + echo at row 2.
-    check rowText(g, 0).strip == ""
-    check rowText(g, 1).strip == ""
-    check rowText(g, 2).startsWith("❯ hello")
-    check g.row == 3
+    # there. No receipt, no bar — echo goes directly on the cleared row.
+    check rowText(g, 0).startsWith("❯ hello")
+    check g.row == 1
     check g.col == 0
 
   test "submitTransitionBytes: hasBar=false multi-line walks back N":
@@ -563,10 +561,8 @@ suite "token receipt placement":
     # Cursor at row 2. nLines=2, hasBar=false → walk back 2 → row 0.
     g.feed submitTransitionBytes("foo\nbar", hadPending = false,
                                  hadGap = false, "", hasBar = false)
-    check rowText(g, 0).strip == ""
-    check rowText(g, 1).strip == ""
-    check rowText(g, 2).startsWith("❯ foo")
-    check rowText(g, 3).startsWith("  bar")
+    check rowText(g, 0).startsWith("❯ foo")
+    check rowText(g, 1).startsWith("  bar")
 
 # ---------------- runTurns lifecycle ----------------
 #
@@ -925,8 +921,11 @@ suite "full turn lifecycle":
     # Welcome paints banner, paintInitialPrompt drops one blank gap
     # row + the bright cyan prompt — no token bar above. User types,
     # emitUserSubmit walks back N (hasBar=false) so the prompt's row
-    # is wiped, NOT some non-existent bar row. After the first turn's
-    # callModel paints the bar, the layout is back to normal.
+    # is wiped, NOT some non-existent bar row. With no bar and no
+    # pending receipt, only one \n is emitted (the cleared prompt row
+    # itself becomes the separator), so the echo lands directly below
+    # the gap. After the first turn's callModel paints the bar, the
+    # layout is back to normal.
     let g = newGrid()
     g.feed "  type a prompt.\n"
     # paintInitialPrompt: blank gap + prompt, cursor at col 0 of prompt row.
@@ -942,12 +941,11 @@ suite "full turn lifecycle":
     g.feed "❯ hello\n"           # minline echo
     # Cursor at promptRow + 1.
     # emitUserSubmit with hasBar=false walks back N=1 to promptRow,
-    # clears, \n\n + echo. No receipt (first turn).
+    # clears, echo goes directly on the cleared row (no newline needed
+    # when there's no bar and no receipt — the gap row above persists).
     g.feed submitTransitionBytes("hello", hadPending = false,
                                  hadGap = false, "", hasBar = false)
-    check rowText(g, promptRow).strip == ""               # cleared
-    check rowText(g, promptRow + 1).strip == ""           # blank separator
-    check rowText(g, promptRow + 2).startsWith("❯ hello") # echo
+    check rowText(g, promptRow).startsWith("❯ hello")          # echo on cleared row
     # Now callModel's leading \n + content + paintBarPrompt paints
     # the bar; from here the normal lifecycle resumes.
     g.feed "\n"                                            # scratch

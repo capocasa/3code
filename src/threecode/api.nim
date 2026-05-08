@@ -276,7 +276,12 @@ proc submitTransitionBytes*(line: string, hadPending, hadGap: bool,
   result.add "\r\x1b[J"
   if hadPending:
     result.add receiptBarBytes(receiptLabel)
-  result.add "\n\n"
+    result.add "\n\n"
+  elif hasBar:
+    result.add "\n\n"
+  # hasBar=false: cursor is on the cleared prompt row after walkback;
+  # the gap row from paintInitialPrompt already provides the separator.
+  # No extra newline — echo goes directly on the cleared row.
   for idx, l in lines:
     let prefix = if idx == 0: "❯ " else: "  "
     result.add prefix
@@ -1074,6 +1079,21 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     # No SSE data — provider may have returned a plain JSON error body.
     result.errBody = nonSSE.join("\n")
 
+proc stripInternalFields(messages: JsonNode): JsonNode =
+  ## Return a wire-safe copy of `messages` with internal bookkeeping fields
+  ## removed. `usage` is stored on assistant messages for local replay but
+  ## rejected by strict validators (fireworks, glm-5p1, etc.).
+  if messages == nil or messages.kind != JArray: return messages
+  result = newJArray()
+  for m in messages:
+    if m.kind != JObject or "usage" notin m:
+      result.add m
+      continue
+    var clean = newJObject()
+    for k, v in m.pairs:
+      if k != "usage": clean[k] = v
+    result.add clean
+
 proc ensureReasoningField(messages: JsonNode) =
   ## DeepSeek-R1 with thinking mode rejects any request whose history
   ## contains an assistant message without a `reasoning_content` field.
@@ -1250,7 +1270,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   ensureReasoningField(messages)
   var body = %*{
     "model": p.model,
-    "messages": messages,
+    "messages": stripInternalFields(messages),
     "stream": true,
   }
   # Include usage in streaming responses only for providers that support it (e.g., OpenAI).
