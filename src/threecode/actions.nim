@@ -370,8 +370,6 @@ export DEBIAN_FRONTEND=noninteractive
       if not errClip.endsWith("\n"): body.add "\n"
     if code == 124:
       body.add "[timed out after 120s — wrap long-running commands or run in the background]"
-    else:
-      body.add &"[exit {code}]"
     if cache != nil and code == 0:
       if readPath != "":
         let p = resolvePath(readPath)

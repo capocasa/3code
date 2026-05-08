@@ -103,14 +103,11 @@ proc trimTrailingBlank(lines: var seq[string]) =
     lines.setLen lines.len - 1
 
 proc printLine*(l: string) =
-  if l == "[exit 0]":
-    discard
-  else:
-    let termW = try: terminalWidth() except CatchableError: 80
-    let bodyW = max(20, termW - 2)
-    let chunks = wrapAnsi(l, bodyW)
-    for i, chunk in chunks:
-      subtleWriteLn(stdout, "  " & chunk)
+  let termW = try: terminalWidth() except CatchableError: 80
+  let bodyW = max(20, termW - 2)
+  let chunks = wrapAnsi(l, bodyW)
+  for i, chunk in chunks:
+    subtleWriteLn(stdout, "  " & chunk)
 
 proc printBashCompact*(res: string, idx: int, head = CompactHead, tail = CompactTail) =
   var lines = res.splitLines
