@@ -243,6 +243,7 @@ proc usage() {.noreturn.} =
 
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
   -r, --resume[=ID]    resume latest session from this directory (or by id)
+  -i, --interactive    run prompt then continue interactively
   -l, --list[=all]     list sessions for this directory (or all) and exit
   -g, --good           list known-good provider/variant combos and exit
   -x, --experimental   allow combos outside the known-good list
@@ -306,6 +307,7 @@ proc main() =
   var resume = false
   var resumeId = ""
   var sessionOut = ""
+  var forceInteractive = false
   var p = initOptParser(commandLineParams())
   for kind, k, v in p.getopt():
     case kind
@@ -315,6 +317,7 @@ proc main() =
       of "h", "help": usage()
       of "g", "good": printKnownGood(); return
       of "x", "experimental": experimentalEnabled = true
+      of "i", "interactive": forceInteractive = true
       of "m", "model":
         if v != "": model = v
         else: pending = "model"
@@ -376,7 +379,7 @@ proc main() =
     session.cwd = getCurrentDir()
     session.savePath = if sessionOut != "": sessionOut else: newSessionPath()
 
-  if prompt != "" and not resume:
+  if prompt != "" and not resume and not forceInteractive:
     let prof = loadProfile(model)
     if not gateExperimental(prof):
       explainExperimentalGate(prof)
@@ -449,6 +452,10 @@ proc main() =
       runTurnsInteractive(prof, messages, session)
   else:
     paintInitialPrompt(prof)
+    if prompt != "":
+      messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
+      refreshSystemPrompt(messages, prof)
+      runTurnsInteractive(prof, messages, session)
   while true:
     var done = false
     let line = readInput(editor, done)
