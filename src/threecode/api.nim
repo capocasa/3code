@@ -1267,10 +1267,16 @@ proc emitUserSubmit*(line: string, echoRows = -1) =
   currentBarHasGap = false
 
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
-  ensureReasoningField(messages)
+  if p.family == "deepseek":
+    ensureReasoningField(messages)
+  let wireMessages = stripInternalFields(messages)
+  if p.family != "deepseek":
+    for m in wireMessages:
+      if m.kind == JObject and m{"role"}.getStr == "assistant":
+        m.delete("reasoning_content")
   var body = %*{
     "model": p.model,
-    "messages": stripInternalFields(messages),
+    "messages": wireMessages,
     "stream": true,
   }
   # Include usage in streaming responses only for providers that support it (e.g., OpenAI).
