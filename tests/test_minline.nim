@@ -609,3 +609,84 @@ suite "minline editor: bracketed paste":
     d.push KEnter
     check d.run(ed, prompt = "> ", hidechars = true) == "secret42"
     check rowText(d.grid, 0).startsWith("> ********")
+
+
+# ---------------- SIGWINCH / EINTR ----------------
+
+# ---------------- SIGWINCH / EINTR ----------------
+
+template sigGetCh(keys: seq[int]; ki: var int; body: untyped): untyped =
+  ## Read from `keys` where -1 = raise IOError (SIGWINCH EINTR).
+  let idx = ki
+  inc ki
+  if keys[idx] == -1:
+    resizePending = true
+    raise newException(IOError, "Interrupted system call")
+  body = keys[idx]
+
+suite "minline editor: SIGWINCH EINTR":
+  test "SIGWINCH before first keypress recovers":
+    var ed = initEditor()
+    ed.width = 20
+    var keys: seq[int] = @[-1]
+    keys.add toSeq("hello".mapIt(it.ord))
+    keys.add KEnter
+    var ki = 0
+    let getCh: GetChProc = proc(): int =
+      let idx = ki; inc ki
+      if keys[idx] == -1:
+        resizePending = true
+        raise newException(IOError, "Interrupted system call")
+      result = keys[idx]
+    let write = proc(s: string) = discard
+    let result = ed.readLineWith("> ", getCh, write)
+    check result == "hello"
+
+  test "SIGWINCH mid-input rewraps and continues":
+    var ed = initEditor()
+    ed.width = 20
+    var keys: seq[int] = toSeq("abcdefghij".mapIt(it.ord))
+    keys.add -1  # SIGWINCH: shrink width
+    keys.add toSeq("kl".mapIt(it.ord))
+    keys.add KEnter
+    var ki = 0
+    let getCh: GetChProc = proc(): int =
+      let idx = ki; inc ki
+      if keys[idx] == -1:
+        resizePending = true
+        ed.width = 10
+        raise newException(IOError, "Interrupted system call")
+      result = keys[idx]
+    var grid: seq[string]
+    let write = proc(s: string) =
+      for line in s.split("\r\n"):
+        grid.add(line)
+    let result = ed.readLineWith("> ", getCh, write)
+    check result == "abcdefghijkl"
+    check ed.echoRows >= 2
+
+  test "rapid consecutive SIGWINCH recovers":
+    var ed = initEditor()
+    ed.width = 80
+    var keys: seq[int] = @[-1, -1]
+    keys.add toSeq("x".mapIt(it.ord))
+    keys.add KEnter
+    var ki = 0
+    let getCh: GetChProc = proc(): int =
+      let idx = ki; inc ki
+      if keys[idx] == -1:
+        resizePending = true
+        raise newException(IOError, "Interrupted system call")
+      result = keys[idx]
+    let write = proc(s: string) = discard
+    let result = ed.readLineWith("> ", getCh, write)
+    check result == "x"
+
+  test "non-SIGWINCH IOError re-raises":
+    var ed = initEditor()
+    ed.width = 80
+    let getCh: GetChProc = proc(): int =
+      raise newException(IOError, "real I/O error")
+    let write = proc(s: string) = discard
+    expect IOError:
+      discard ed.readLineWith("> ", getCh, write)

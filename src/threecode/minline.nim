@@ -46,24 +46,13 @@ var resizePending* {.threadvar.}: bool
 
 when defined(posix):
   var SIGWINCH {.importc, header: "<signal.h>".}: cint
-  var sigwinchPipe: array[2, cint]
-  var sigwinchDummy: char = 'w'
   proc winchHandler(sig: cint) {.noconv.} =
     resizePending = true
-    discard posix.write(sigwinchPipe[1], addr sigwinchDummy, 1)
-  proc installSigwinch*() =
-    if isatty(stdin):
-      discard pipe(sigwinchPipe)
-      discard fcntl(sigwinchPipe[0], F_SETFL,
-                    fcntl(sigwinchPipe[0], F_GETFL) or O_NONBLOCK)
-      discard fcntl(sigwinchPipe[1], F_SETFL,
-                    fcntl(sigwinchPipe[1], F_GETFL) or O_NONBLOCK)
-      var sa: Sigaction
-      discard sigemptyset(sa.sa_mask)
-      sa.sa_flags = SA_RESTART
-      sa.sa_handler = winchHandler
-      discard sigaction(SIGWINCH, sa, nil)
-  installSigwinch()
+  if isatty(stdin):
+    var sa: Sigaction
+    discard sigemptyset(sa.sa_mask)
+    sa.sa_handler = winchHandler
+    discard sigaction(SIGWINCH, sa, nil)
 
 if isatty(stdin):
   addExitProc(resetAttributes)
@@ -1028,12 +1017,17 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
   ed.write "\x1b[?2004h"
   fullRedraw(ed)
   while true:
-    let c1 = ed.getCh()
-    if resizePending:
-      resizePending = false
-      fullRedraw(ed)
-    if c1 == -2:
-      continue
+    var c1: int
+    while true:
+      try:
+        c1 = ed.getCh()
+        break
+      except IOError:
+        if resizePending:
+          resizePending = false
+          fullRedraw(ed)
+          continue
+        raise
     if c1 < 0:
       ed.eof = true
       raise newException(EOFError, "")
@@ -1084,27 +1078,7 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
 
 proc readLine*(ed: var LineEditor, prompt = "", hidechars = false,
                noHistory = false): string =
-  when defined(posix):
-    let getCh: GetChProc = proc(): int =
-      while true:
-        var fds: TFdSet
-        FD_ZERO(fds)
-        FD_SET(STDIN_FILENO, fds)
-        FD_SET(sigwinchPipe[0], fds)
-        let maxFd = max(STDIN_FILENO, sigwinchPipe[0]) + 1
-        let n = select(maxFd.cint, addr fds, nil, nil, nil)
-        if n < 0:
-          if osLastError().int == EINTR.int: continue
-          return -1
-        if bool(FD_ISSET(sigwinchPipe[0], fds)):
-          var buf: array[64, char]
-          discard posix.read(sigwinchPipe[0], buf[0].addr, 64)
-        if bool(FD_ISSET(STDIN_FILENO, fds)):
-          return getch().ord
-        # pipe-only (no stdin): return sentinel to let loop check resizePending
-        return -2
-  else:
-    let getCh: GetChProc = proc(): int = getchr().int
+  let getCh: GetChProc = proc(): int = getchr().int
   let write: WriteProc = proc(s: string) =
     stdout.write s
     stdout.flushFile()
