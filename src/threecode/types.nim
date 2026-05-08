@@ -21,7 +21,7 @@ type
     ## One item in a model-emitted `update_plan` / `todo` list.
     text*: string
     status*: string
-  ActionKind* = enum akBash, akRead, akWrite, akPatch, akApplyPatch, akPlan, akWebSearch, akWebFetch, akContextClear, akError
+  ActionKind* = enum akBash, akRead, akWrite, akPatch, akApplyPatch, akPlan, akWebSearch, akWebFetch, akClear, akError
   Action* = object
     ## The parsed, tool-agnostic representation of a single model tool call.
     ## `runAction` in actions.nim consumes this and produces the tool result.
@@ -31,8 +31,7 @@ type
     stdin*: string  ## bash-only: piped to the command's stdin
     edits*: seq[(string, string)]
     plan*: seq[PlanItem]
-    summary*: string  ## context_clear: summary of current state
-    instructions*: string  ## context_clear: instructions for fresh context
+    prompt*: string  ## clear: prompt for the fresh context
     offset*: int
     limit*: int
   Profile* = object

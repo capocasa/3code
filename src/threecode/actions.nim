@@ -10,7 +10,7 @@
 ##
 ## **Execute**: `runAction` drives `akBash` (subprocess), `akRead` (file read
 ## with optional window), `akWrite`/`akPatch` (file mutations, read-cache
-## update), `akWebSearch`/`akWebFetch` (native HTTP), and `akContextClear`
+## update), `akWebSearch`/`akWebFetch` (native HTTP), and `akClear`
 ## (returns a sentinel that triggers a context wipe in the outer loop).
 ##
 ## The read cache tracks the last-seen mtime and size of every `read` so
@@ -100,10 +100,9 @@ proc planAction(args: JsonNode): Action =
       act.plan.add PlanItem(text: text, status: status)
   act
 
-proc contextClearAction(args: JsonNode): Action =
-  Action(kind: akContextClear,
-         summary: args{"summary"}.getStr(""),
-         instructions: args{"instructions"}.getStr(""))
+proc clearAction(args: JsonNode): Action =
+  Action(kind: akClear,
+         prompt: args{"prompt"}.getStr(""))
 
 proc dispatchGlmOrQwen(family, name: string, args: JsonNode): Action =
   case name
@@ -115,7 +114,7 @@ proc dispatchGlmOrQwen(family, name: string, args: JsonNode): Action =
   of "update_plan", "todo": planAction(args)
   of "web_search": Action(kind: akWebSearch, body: args{"query"}.getStr)
   of "web_fetch": Action(kind: akWebFetch, body: args{"url"}.getStr)
-  of "context_clear": contextClearAction(args)
+  of "clear": clearAction(args)
   # Aliases — gpt-oss-shape names that show up as training leakage.
   # Lossless: `shell` → akBash, `apply_patch` → akApplyPatch (we have
   # the V4A parser), `edit` → akPatch (same shape as patch). Routed
@@ -135,7 +134,7 @@ proc dispatchGptOss(family, rawName: string, args: JsonNode): Action =
   of "update_plan", "todo": planAction(args)
   of "web_search": Action(kind: akWebSearch, body: args{"query"}.getStr)
   of "web_fetch": Action(kind: akWebFetch, body: args{"url"}.getStr)
-  of "context_clear": contextClearAction(args)
+  of "clear": clearAction(args)
   # Aliases — glm/qwen-shape names that show up as training leakage,
   # plus the misspellings Codex's own prompt warns about. Routed
   # silently rather than warning the model out of it.
@@ -183,7 +182,7 @@ proc bannerFor*(act: Action): string =
     act.body
   of akWebFetch:
     act.body
-  of akContextClear:
+  of akClear:
     "context clear"
   of akError:
     "unknown tool '" & act.path & "'"
@@ -624,7 +623,7 @@ export DEBIAN_FRONTEND=noninteractive
       return (capText(text), 0, "")
     except CatchableError as e:
       return ("error: web_fetch: " & e.msg, 1, "")
-  of akContextClear:
+  of akClear:
     return ("context cleared", 0, "")
   of akError:
     return (act.body, 1, "")

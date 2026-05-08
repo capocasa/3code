@@ -386,7 +386,7 @@ proc toolIcon*(kind: ActionKind): string =
   of akPlan: "▸"
   of akWebSearch: "⌕"
   of akWebFetch: "⇊"
-  of akContextClear: "⟳"
+  of akClear: "⟳"
   of akError: "✕"
 
 proc renderToolPending*(banner: string, kind: ActionKind) =
