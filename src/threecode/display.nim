@@ -380,8 +380,8 @@ proc renderAssistantContent*(content: string, outFile: File = stdout) =
 proc toolIcon*(kind: ActionKind): string =
   case kind
   of akBash: "$"
-  of akRead: "●"
-  of akWrite: "✎"
+  of akRead: "r"
+  of akWrite: "w"
   of akPatch, akApplyPatch: "✂"
   of akPlan: "▸"
   of akWebSearch: "⌕"
