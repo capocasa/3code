@@ -379,7 +379,7 @@ proc renderAssistantContent*(content: string, outFile: File = stdout) =
 
 proc toolIcon*(kind: ActionKind): string =
   case kind
-  of akBash: "●"
+  of akBash: "$"
   of akRead: "●"
   of akWrite: "✎"
   of akPatch, akApplyPatch: "✂"
@@ -394,8 +394,7 @@ proc renderToolPending*(banner: string, kind: ActionKind) =
   ## caller overwrites this line with `renderToolBanner` once the action
   ## returns. Replay skips this and goes straight to the result form.
   let icon = toolIcon(kind)
-  let text = if kind == akBash: "$ " & banner else: banner
-  subtleWrite(stdout, icon & " " & text)
+  subtleWrite(stdout, icon & " " & banner)
   stdout.write "\n"
   stdout.flushFile
 
@@ -405,7 +404,6 @@ proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -
   ## Optional `(Ns)` suffix when `elapsedS >= 1` (live); replay
   ## passes -1 to omit it.
   let icon = toolIcon(kind)
-  let text = if kind == akBash: "$ " & banner else: banner
   if kind == akBash:
     if code == 0:
       stdout.styledWrite fgGreen, icon & " ", resetStyle
@@ -413,7 +411,7 @@ proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -
       stdout.styledWrite fgRed, icon & " ", resetStyle
   else:
     subtleWrite(stdout, icon & " ")
-  subtleWrite(stdout, text)
+  subtleWrite(stdout, banner)
   if elapsedS >= 1:
     subtleWrite(stdout, &"  ({elapsedS}s)")
   stdout.write "\n"
