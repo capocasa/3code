@@ -260,7 +260,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
                                 pendingHint.elapsed)
         if rl.len > 0:
           withCleared:
-            stdout.writeLine CyanFg & " " & rl & Reset
+            stdout.writeLine CyanFg & "  " & rl & Reset
         pendingHint.active = false
       debugOut "runTurns: loop continue"
       continue

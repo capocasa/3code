@@ -166,7 +166,7 @@ proc bannerFor*(act: Action): string =
   of akRead:
     if act.offset > 0 or act.limit > 0:
       let endHint = if act.limit > 0: $(act.offset + act.limit - 1) else: "end"
-      &"{act.path}  {max(1, act.offset)}-{endHint}"
+      &"{act.path} {max(1, act.offset)}-{endHint}"
     else:
       act.path
   of akWrite:
