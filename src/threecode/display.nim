@@ -131,6 +131,11 @@ proc printSkillLoaded*(act: Action) =
   if name.len == 0: return
   subtleWriteLn(stdout, "· loaded skill: " & name)
 
+proc printStreamingLine*(line: string) =
+  ## Print a single line of streaming bash output. The bar tick is stopped
+  ## during streaming so plain stdout writes are safe (no lock contention).
+  subtleWriteLn(stdout, " " & line)
+
 proc trimTrailingBlank(lines: var seq[string]) =
   while lines.len > 0 and lines[^1].strip == "":
     lines.setLen lines.len - 1

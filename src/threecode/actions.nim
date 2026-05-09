@@ -17,7 +17,7 @@
 ## `patch` can reject stale edits when the file changed since last read.
 
 import std/[json, os, strformat, strutils, tables, times]
-import types, util, shell, web, config
+import types, util, shell, web, config, streamexec
 
 # ---------------------------------------------------------------------------
 # Tool dispatch: strictly per-model.
@@ -233,7 +233,7 @@ proc computeDiff*(before, after, label: string): string =
 proc newReadCache*(): ReadCache =
   ReadCache(state: initTable[string, (Time, int)]())
 
-proc fileSig(path: string): (Time, int) =
+proc fileSig*(path: string): (Time, int) =
   try: (getLastModificationTime(path), getFileSize(path).int)
   except CatchableError: (Time(), 0)
 
@@ -625,6 +625,61 @@ export DEBIAN_FRONTEND=noninteractive
     return ("", 0, "")
   of akError:
     return (act.body, 1, "")
+
+proc runActionStreaming*(act: Action, cache: ReadCache = nil,
+    onLine: proc(line: string) = nil): tuple[output: string, code: int, diff: string] =
+  ## Like `runAction` but streams bash stdout line-by-line via `onLine`.
+  ## Non-bash actions delegate to `runAction` (no streaming needed).
+  if act.kind != akBash:
+    return runAction(act, cache)
+  let cmd = act.body.strip
+  let mutPath = bashMutationPath(cmd)
+  let (readPath, _) = bashReadPath(cmd)
+  let beforeContent =
+    if mutPath != "" and mutPath != "." and fileExists(resolvePath(mutPath)):
+      try: readFile(resolvePath(mutPath))
+      except CatchableError: ""
+    else: ""
+  let beforeExists = mutPath != "" and mutPath != "." and
+                       fileExists(resolvePath(mutPath))
+  let (rawOut, rawErr, code) = runStreamingBash(act, cache, onLine)
+  # Cache early-return paths: runStreamingBash returns the error body
+  # directly with code != 0 (or 0 for unchanged-read). Detect and
+  # short-circuit.
+  if rawOut.startsWith("error:") or rawOut.startsWith("[unchanged"):
+    return (rawOut, code, "")
+  var out2 = rawOut
+  if isBinaryContent(out2):
+    out2 = &"[binary output: {out2.len} bytes — not shown]"
+  let outClip = clipMiddle(out2, 2000, 2000)
+  let errClip = clipMiddle(rawErr, 1000, 1000)
+  var body = ""
+  if outClip.len > 0:
+    body.add outClip
+    if not outClip.endsWith("\n"): body.add "\n"
+  if errClip.len > 0:
+    body.add "[stderr]\n" & errClip
+    if not errClip.endsWith("\n"): body.add "\n"
+  if code == 124:
+    body.add "[timed out after 120s — wrap long-running commands or run in the background]"
+  if cache != nil and code == 0:
+    if readPath != "":
+      let p = resolvePath(readPath)
+      if fileExists(p): cache.state[p] = fileSig(p)
+    if mutPath != "" and mutPath != ".":
+      let p = resolvePath(mutPath)
+      if fileExists(p): cache.state[p] = fileSig(p)
+  var diff = ""
+  if mutPath != "" and mutPath != "." and code == 0:
+    let p = resolvePath(mutPath)
+    let after =
+      if fileExists(p):
+        try: readFile(p)
+        except CatchableError: ""
+      else: ""
+    if beforeExists and beforeContent != after:
+      diff = computeDiff(beforeContent, after, p)
+  return (body, code, diff)
 
 proc parseActionsChecked*(text: string):
     tuple[actions: seq[Action], issues: seq[ParseIssue]] =

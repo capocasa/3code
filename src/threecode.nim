@@ -140,10 +140,17 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         startBarTick(currentBarLabel)
         let toolT0 = epochTime()
         if session.readCache == nil: session.readCache = newReadCache()
-        var (r, code, diff) = runAction(act, session.readCache)
+        var (r, code, diff) =
+          if act.kind == akBash:
+            discard stopBarTick()
+            runActionStreaming(act, session.readCache,
+              proc(line: string) = printStreamingLine(line))
+          else:
+            var res = runAction(act, session.readCache)
+            discard stopBarTick()
+            res
         if act.kind == akPlan and code == 0:
           session.plan = act.plan
-        discard stopBarTick()
         let toolElapsed = epochTime() - toolT0
         debugOut &"tool done: {act.kind} code={code} elapsed={toolElapsed:.2f}"
 
