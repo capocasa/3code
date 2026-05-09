@@ -143,7 +143,7 @@ proc trimTrailingBlank(lines: var seq[string]) =
 proc printLine*(l: string) =
   let termW = try: terminalWidth() except CatchableError: 80
   let bodyW = max(20, termW - 3)
-  let chunks = wrapAnsi(l, bodyW)
+  let chunks = charWrapAnsi(l, bodyW)
   for i, chunk in chunks:
     subtleWriteLn(stdout, "  " & chunk)
 

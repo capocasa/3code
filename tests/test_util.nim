@@ -159,3 +159,22 @@ suite "util: levenshteinCapped":
 
   test "early exit on length gap":
     check levenshteinCapped("a", "abcdefg", 3) == 4
+
+suite "util: charWrapAnsi":
+  test "short string fits in one line":
+    check charWrapAnsi("hello", 10) == @["hello"]
+
+  test "wraps at exact character boundary":
+    check charWrapAnsi("abcdefghij", 5) == @["abcde", "fghij"]
+
+  test "wraps mid-word":
+    check charWrapAnsi("abcdefghijklmnop", 4) == @["abcd", "efgh", "ijkl", "mnop"]
+
+  test "handles empty string":
+    check charWrapAnsi("", 10) == @[""]
+
+  test "handles zero width":
+    check charWrapAnsi("hello", 0) == @["hello"]
+
+  test "single character width":
+    check charWrapAnsi("abc", 1) == @["a", "b", "c"]

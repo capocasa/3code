@@ -274,6 +274,43 @@ proc wrapAnsi*(s: string, width: int): seq[string] =
   if line.len > 0:
     result.add line
 
+proc charWrapAnsi*(s: string, width: int): seq[string] =
+  ## Character-wrap: break at exactly `width` visible columns, even
+  ## mid-word. ANSI CSI escapes pass through without counting toward
+  ## width. Lines that fit are returned as-is.
+  if width <= 0 or s.len == 0:
+    result.add s
+    return
+  var line = ""
+  var lineW = 0
+  var i = 0
+  while i < s.len:
+    if s[i] == '\x1b' and i + 1 < s.len and s[i + 1] == '[':
+      let start = i
+      i += 2
+      while i < s.len and s[i] notin {'A'..'Z', 'a'..'z'}:
+        inc i
+      if i < s.len: inc i
+      line.add s[start ..< i]
+      continue
+    let start = i
+    if (s[i].uint8 and 0xC0'u8) != 0x80'u8:
+      # start of a visible character
+      inc i
+      while i < s.len and (s[i].uint8 and 0xC0'u8) == 0x80'u8:
+        inc i
+      if lineW + 1 > width:
+        result.add line
+        line = s[start ..< i]
+        lineW = 1
+      else:
+        line.add s[start ..< i]
+        inc lineW
+    else:
+      inc i
+  if line.len > 0:
+    result.add line
+
 proc isMdTableRow*(line: string): bool =
   ## A markdown-table row both opens and closes with a `|`. Rejects
   ## bare prose that happens to contain a pipe.
