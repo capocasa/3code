@@ -10,7 +10,7 @@ import std/[net, os, sequtils, strformat, strutils]
 # light bg). Cyan is the brand tone; grey 244 is the muted FYI tone.
 
 const
-  CyanFg* = "\x1b[96m"
+  CyanFg* = "\x1b[36m"
   BoldOn* = "\x1b[1m"
   GreyFg* = "\x1b[38;5;244m"
   Reset* = "\x1b[0m"

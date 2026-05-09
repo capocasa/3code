@@ -178,16 +178,12 @@ proc printDiff*(diff: string) =
     let bodyW = max(20, termW - 2)
     let chunks = wrapAnsi("  " & l, bodyW)
     for chunk in chunks:
-      if l.startsWith("@@"):
-        stdout.styledWriteLine fgCyan, chunk, resetStyle
-      elif l.startsWith("+++") or l.startsWith("---"):
-        subtleWriteLn(stdout, chunk)
-      elif l.len > 0 and l[0] == '+':
+      if l.len > 0 and l[0] == '+':
         stdout.styledWriteLine fgGreen, chunk, resetStyle
       elif l.len > 0 and l[0] == '-':
         stdout.styledWriteLine fgRed, chunk, resetStyle
       else:
-        stdout.writeLine chunk
+        subtleWriteLn(stdout, chunk)
   if lines.len <= DiffHead + DiffTail + 2:
     for l in lines: paint(l)
     return
@@ -382,7 +378,7 @@ proc toolIcon*(kind: ActionKind): string =
   of akBash: "$"
   of akRead: "r"
   of akWrite: "w"
-  of akPatch, akApplyPatch: "✂"
+  of akPatch, akApplyPatch: "p"
   of akPlan: "▸"
   of akWebSearch: "⌕"
   of akWebFetch: "⇊"
@@ -399,10 +395,9 @@ proc renderToolPending*(banner: string, kind: ActionKind) =
   stdout.flushFile
 
 proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -1) =
-  ## Final tool banner. Bash uses red/green by exit code; everything
-  ## else uses subtle grey (same as the pending state).
-  ## Optional `(Ns)` suffix when `elapsedS >= 1` (live); replay
-  ## passes -1 to omit it.
+  ## Final tool banner. Bash uses red/green icon by exit code; all
+  ## banners render in default (white) text. Optional `(Ns)` suffix
+  ## when `elapsedS >= 1` (live); replay passes -1 to omit it.
   let icon = toolIcon(kind)
   if kind == akBash:
     if code == 0:
@@ -410,8 +405,8 @@ proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -
     else:
       stdout.styledWrite fgRed, icon & " ", resetStyle
   else:
-    subtleWrite(stdout, icon & " ")
-  subtleWrite(stdout, banner)
+    stdout.write icon & " "
+  stdout.write banner
   if elapsedS >= 1:
     subtleWrite(stdout, &"  ({elapsedS}s)")
   stdout.write "\n"

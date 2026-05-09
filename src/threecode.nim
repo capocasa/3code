@@ -145,7 +145,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         discard stopBarTick()
         let toolElapsed = epochTime() - toolT0
         debugOut &"tool done: {act.kind} code={code} elapsed={toolElapsed:.2f}"
-        if r.strip.len == 0: r = "[no output]"
+
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
         if not silent:
           withCleared:

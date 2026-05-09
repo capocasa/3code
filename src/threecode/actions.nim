@@ -166,16 +166,15 @@ proc bannerFor*(act: Action): string =
   of akRead:
     if act.offset > 0 or act.limit > 0:
       let endHint = if act.limit > 0: $(act.offset + act.limit - 1) else: "end"
-      &"{act.path}  [lines {max(1, act.offset)}-{endHint}]"
+      &"{act.path}  {max(1, act.offset)}-{endHint}"
     else:
       act.path
   of akWrite:
     &"{act.path}  ({humanBytes(act.body.len)})"
   of akPatch:
-    &"{act.path}  ({act.edits.len} edit" & (if act.edits.len == 1: "" else: "s") & ")"
+    act.path
   of akApplyPatch:
-    let nl = act.body.count('\n')
-    &"({nl} line" & (if nl == 1: "" else: "s") & ")"
+    act.path
   of akPlan:
     &"({act.plan.len} item" & (if act.plan.len == 1: "" else: "s") & ")"
   of akWebSearch:
@@ -509,7 +508,7 @@ export DEBIAN_FRONTEND=noninteractive
       if cache != nil:
         cache.state[path] = fileSig(path)
       let diff = computeDiff(before, content, path)
-      return (&"patched {path} ({applied} edit" & (if applied == 1: "" else: "s") & ")", 0, diff)
+      return ("", 0, diff)
     except CatchableError as e:
       return (&"error: patch {path}: {e.msg}", 1, "")
   of akApplyPatch:
@@ -570,8 +569,7 @@ export DEBIAN_FRONTEND=noninteractive
           if hunkOk:
             writeFile(path, content)
             if cache != nil: cache.state[path] = fileSig(path)
-            msgs.add &"patched {path} ({applied} hunk" &
-                     (if applied == 1: "" else: "s") & ")"
+            discard applied
             let d = computeDiff(before, content, path)
             if d.len > 0: diffs.add d
         except CatchableError as e:
