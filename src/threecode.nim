@@ -134,17 +134,27 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         let act = toolCallToAction(p.family, name, args)
         let idx = session.toolLog.len + 1
         let silent = isSkillRead(act)
-        # Bar tick repaints the token bar with an incrementing elapsed
-        # counter during tool execution. The result banner is printed
-        # after completion inside `withCleared`.
         startBarTick(currentBarLabel)
         let toolT0 = epochTime()
         if session.readCache == nil: session.readCache = newReadCache()
         var (r, code, diff) =
           if act.kind == akBash:
             discard stopBarTick()
-            runActionStreaming(act, session.readCache,
-              proc(line: string) = printStreamingLine(line))
+            clearBarPrompt()
+            renderToolBanner(bannerFor(act), akBash, -1)
+            stdout.flushFile()
+            var sv = initStreamingView(StreamMaxLines)
+            let result = runActionStreaming(act, session.readCache,
+              proc(line: string) = sv.addLine(line))
+            sv.erase()
+            # Also erase the initial banner row (cursor is now just below it)
+            stdout.write "\x1b[1A\x1b[2K"
+            let elapsed = (epochTime() - toolT0).int
+            renderToolBanner(bannerFor(act), akBash, result.code, elapsed)
+            printToolResult(akBash, result.output, result.code, idx,
+              result.diff)
+            repaintBarPrompt()
+            result
           else:
             var res = runAction(act, session.readCache)
             discard stopBarTick()
@@ -155,10 +165,12 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         debugOut &"tool done: {act.kind} code={code} elapsed={toolElapsed:.2f}"
 
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
-        if not silent:
+        if not silent and act.kind != akBash:
           withCleared:
             renderToolBanner(bannerFor(act), act.kind, code, toolElapsed.int)
             printToolResult(act.kind, r, code, idx, diff)
+        elif not silent:
+          discard  # bash already rendered above
         else:
           withCleared:
             printSkillLoaded(act)

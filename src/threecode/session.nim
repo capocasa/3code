@@ -500,6 +500,11 @@ proc buildToolLogFromMessages(messages: JsonNode,
           a
         of "apply_patch":
           Action(kind: akApplyPatch, body: args{"input"}.getStr)
+        of "read":
+          Action(kind: akRead,
+                 path: args{"path"}.getStr,
+                 offset: args{"offset"}.getInt,
+                 limit: args{"limit"}.getInt)
         of "update_plan", "todo":
           var a = Action(kind: akPlan)
           let items =
@@ -510,6 +515,21 @@ proc buildToolLogFromMessages(messages: JsonNode,
             if text.len > 0:
               a.plan.add PlanItem(text: text, status: item{"status"}.getStr)
           a
+        of "web_search":
+          Action(kind: akWebSearch, body: args{"query"}.getStr)
+        of "web_fetch":
+          Action(kind: akWebFetch, body: args{"url"}.getStr)
+        of "clear":
+          Action(kind: akClear, body: args{"prompt"}.getStr)
+        of "edit":
+          var a = Action(kind: akPatch, path: args{"path"}.getStr)
+          let edits = args{"edits"}
+          if edits != nil and edits.kind == JArray:
+            for e in edits:
+              a.edits.add (e{"search"}.getStr, e{"replace"}.getStr)
+          a
+        of "applypatch", "apply-patch":
+          Action(kind: akApplyPatch, body: args{"input"}.getStr)
         else:
           Action(kind: akError, path: name)
       result.add ToolRecord(

@@ -131,10 +131,51 @@ proc printSkillLoaded*(act: Action) =
   if name.len == 0: return
   subtleWriteLn(stdout, "· loaded skill: " & name)
 
+const StreamMaxLines* = 8
+
+proc eraseRows(n: int) =
+  ## Erase n rows above the cursor: move up, clear line, repeat.
+  for _ in 0..<n:
+    stdout.write "\x1b[1A\x1b[2K"
+
 proc printStreamingLine*(line: string) =
-  ## Print a single line of streaming bash output. The bar tick is stopped
-  ## during streaming so plain stdout writes are safe (no lock contention).
+  ## Print a single line of streaming bash output. Legacy path used
+  ## by non-viewport callers.
   subtleWriteLn(stdout, "  " & line)
+
+type
+  StreamingView* = object
+    ## Fixed-height viewport for streaming bash output. Lines append
+    ## normally until `maxLines` is reached, then the oldest line is
+    ## pushed off the top to make room at the bottom.
+    maxLines*: int
+    total*: int       ## total lines received (not just visible)
+    onScreen*: int    ## lines currently occupying terminal rows (≤ maxLines)
+    buf*: seq[string] ## ring buffer of last maxLines lines
+
+proc initStreamingView*(maxLines = StreamMaxLines): StreamingView =
+  result = StreamingView(maxLines: maxLines, buf: @[])
+
+proc addLine*(v: var StreamingView, line: string) =
+  ## Add one line to the viewport. For the first `maxLines` lines, appends
+  ## normally. After that, erases the entire viewport and reprints the
+  ## tail, giving the illusion of scrolling.
+  inc v.total
+  v.buf.add line
+  if v.total <= v.maxLines:
+    subtleWriteLn(stdout, "  " & line)
+    inc v.onScreen
+  else:
+    eraseRows(v.onScreen)
+    let start = v.buf.len - v.maxLines
+    for i in start..<v.buf.len:
+      subtleWriteLn(stdout, "  " & v.buf[i])
+    stdout.flushFile()
+
+proc erase*(v: var StreamingView) =
+  ## Remove all on-screen rows, leaving cursor where the viewport started.
+  eraseRows(v.onScreen)
+  v.onScreen = 0
 
 proc trimTrailingBlank(lines: var seq[string]) =
   while lines.len > 0 and lines[^1].strip == "":
