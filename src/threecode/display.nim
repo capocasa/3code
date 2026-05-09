@@ -181,14 +181,14 @@ proc printDiff*(diff: string) =
   proc paint(l: string) =
     let termW = try: terminalWidth() except CatchableError: 80
     let bodyW = max(20, termW - 2)
-    let chunks = wrapAnsi("  " & l, bodyW)
+    let chunks = wrapAnsi(l, bodyW)
     for chunk in chunks:
       if l.len > 0 and l[0] == '+':
-        stdout.styledWriteLine fgGreen, chunk, resetStyle
+        stdout.styledWriteLine fgGreen, "  " & chunk, resetStyle
       elif l.len > 0 and l[0] == '-':
-        stdout.styledWriteLine fgRed, chunk, resetStyle
+        stdout.styledWriteLine fgRed, "  " & chunk, resetStyle
       else:
-        subtleWriteLn(stdout, chunk)
+        subtleWriteLn(stdout, "  " & chunk)
   if lines.len <= DiffHead + DiffTail + 2:
     for l in lines: paint(l)
     return
@@ -445,7 +445,7 @@ proc tokenLineBytes*(usage: Usage, window: int, elapsedS = -1): string =
   ## emits; pinned by `tests/test_golden.nim`.
   let label = tokenLineLabel(usage, window, elapsedS)
   if label.len == 0: return ""
-  result = CyanFg & " " & label & Reset & "\n" & Reset
+  result = CyanFg & "  " & label & Reset & "\n" & Reset
 
 proc renderTokenLine*(usage: Usage, window: int, elapsedS = -1) =
   ## "○N%  ↑Nk  ↻Nk  ↓Nk  Ts": context glyph, fresh, cached, generated,
