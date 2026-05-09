@@ -110,6 +110,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           renderAssistantContent(content)
           stdout.write "\n"
       var halt = false  # Strike-2 trip or budget cap: stop further tool calls this turn
+      var cleared = false  # akClear: rebuild and continue loop
       for tc in toolCalls:
         let id = tc{"id"}.getStr
         if interrupted or halt:
@@ -182,22 +183,39 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
             $TurnCallBudget & " tracked calls); further tool calls this turn are paused."
         messages.add %*{"role": "tool", "tool_call_id": id, "content": toolContent}
         if act.kind == akClear:
-          # Rebuild messages: keep system prompt, drop everything else,
-          # add a synthetic user message with summary + instructions.
-          let sys = if messages.len > 0 and
-                       messages[0]{"role"}.getStr == "system": messages[0]
-                    else: %*{"role": "system", "content": ""}
-          let freshMsg = act.prompt
+          # Rebuild: fresh system prompt + synthetic user message, then
+          # continue the loop so the model processes the prompt.
+          let freshMsg = act.body
           let rebuilt = newJArray()
-          rebuilt.add sys
+          rebuilt.add %*{"role": "system", "content": buildSystemPrompt(p)}
           rebuilt.add %*{"role": "user", "content": freshMsg}
           messages.elems.setLen 0
           for m in rebuilt: messages.add m
+          session.toolLog.setLen 0
+          session.usage = Usage()
+          session.lastPromptTokens = 0
+          session.loop = initLoopTracker()
+          session.readCache = nil
+          session.plan.setLen 0
+          pendingHint = (active: false, usage: Usage(), window: 0, elapsed: 0)
+          currentBarLabel = ""
+          if session.savePath != "":
+            session.savePath = newSessionPath()
+            session.created = $now()
+            session.cwd = getCurrentDir()
           withCleared:
-            stdout.styledWriteLine styleDim,
-              "  · context cleared — fresh session with summary", resetStyle
+            stdout.write OffWhiteFg
+            for line in freshMsg.strip.splitLines:
+              stdout.write "  "
+              stdout.write line
+              stdout.write "\n"
+            stdout.write Reset
           saveSession(session, messages)
-          return
+          cleared = true
+          break
+      if cleared:
+        pendingHint.active = false
+        continue
       saveSession(session, messages)
       if interrupted:
         withCleared:

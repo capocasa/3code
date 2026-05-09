@@ -102,7 +102,7 @@ proc planAction(args: JsonNode): Action =
 
 proc clearAction(args: JsonNode): Action =
   Action(kind: akClear,
-         prompt: args{"prompt"}.getStr(""))
+         body: args{"prompt"}.getStr(""))
 
 proc dispatchGlmOrQwen(family, name: string, args: JsonNode): Action =
   case name
@@ -182,7 +182,7 @@ proc bannerFor*(act: Action): string =
   of akWebFetch:
     act.body
   of akClear:
-    "context clear"
+    "context cleared"
   of akError:
     "unknown tool '" & act.path & "'"
 
@@ -622,7 +622,7 @@ export DEBIAN_FRONTEND=noninteractive
     except CatchableError as e:
       return ("error: web_fetch: " & e.msg, 1, "")
   of akClear:
-    return ("context cleared", 0, "")
+    return ("", 0, "")
   of akError:
     return (act.body, 1, "")
 

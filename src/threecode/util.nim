@@ -13,6 +13,7 @@ const
   CyanFg* = "\x1b[36m"
   BoldOn* = "\x1b[1m"
   GreyFg* = "\x1b[38;5;244m"
+  OffWhiteFg* = "\x1b[38;5;252m"
   Reset* = "\x1b[0m"
 
 proc bundledCaFile*(): string =

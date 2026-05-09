@@ -31,7 +31,6 @@ type
     stdin*: string  ## bash-only: piped to the command's stdin
     edits*: seq[(string, string)]
     plan*: seq[PlanItem]
-    prompt*: string  ## clear: prompt for the fresh context
     offset*: int
     limit*: int
   Profile* = object
