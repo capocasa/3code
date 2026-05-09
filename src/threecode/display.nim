@@ -441,17 +441,12 @@ proc renderToolPending*(banner: string, kind: ActionKind) =
   stdout.flushFile
 
 proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -1) =
-  ## Final tool banner. Bash uses red/green icon by exit code; all
-  ## banners render in default (white) text. Optional `(Ns)` suffix
-  ## when `elapsedS >= 1` (live); replay passes -1 to omit it.
+  ## Final tool banner. Icons render in default text color regardless of
+  ## exit code. `code` is retained so a future error glyph can be added
+  ## without plumbing changes. Optional `(Ns)` suffix when `elapsedS >= 1`
+  ## (live); replay passes -1 to omit it.
   let icon = toolIcon(kind)
-  if kind == akBash:
-    if code == 0:
-      stdout.styledWrite fgGreen, icon & " ", resetStyle
-    else:
-      stdout.styledWrite fgRed, icon & " ", resetStyle
-  else:
-    stdout.write icon & " "
+  stdout.write icon & " "
   stdout.write banner
   if elapsedS >= 1:
     subtleWrite(stdout, &"  ({elapsedS}s)")
