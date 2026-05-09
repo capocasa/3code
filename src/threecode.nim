@@ -189,17 +189,17 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         if strike >= 2 and priorStrike < 2:
           halt = true
           if session.loop.recoveryCmd != "":
-            toolContent &= "\n\n[repeat-guard] working-tree recovery detected (`" &
+            toolContent &= "\n\n⊘ [repeat-guard] working-tree recovery (`" &
               session.loop.recoveryCmd &
-              "`); further tool calls this turn are paused. The model's plan was likely based on the working tree as it was before this command — resume only if you've confirmed the new state is what you want."
+              "`); further tool calls paused. The model's plan was likely based on the working tree as it was before this command — resume only if you've confirmed the new state is what you want."
           else:
             let fp = fingerprint(name, args)
-            toolContent &= "\n\n[repeat-guard] mutation saturation (path=" & fp &
-              "); further tool calls this turn are paused."
+            toolContent &= "\n\n⊘ [repeat-guard] mutation saturation (" & fp &
+              "); further tool calls paused."
         elif session.loop.turnCalls >= TurnCallBudget and priorStrike < 2:
           halt = true
-          toolContent &= "\n\n[repeat-guard] turn budget exceeded (" &
-            $TurnCallBudget & " tracked calls); further tool calls this turn are paused."
+          toolContent &= "\n\n⊘ [repeat-guard] turn budget exceeded (" &
+            $TurnCallBudget & " tracked calls); further tool calls paused."
         messages.add %*{"role": "tool", "tool_call_id": id, "content": toolContent}
         if act.kind == akClear:
           # Rebuild: fresh system prompt + synthetic user message, then
@@ -244,15 +244,12 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       if halt:
         withCleared:
           if session.loop.recoveryCmd != "":
-            stdout.styledWriteLine styleDim,
-              &"  paused — `{session.loop.recoveryCmd}` wiped working-tree state",
-              resetStyle
+            errLn "⊘  working-tree recovery: `",
+              session.loop.recoveryCmd, "` wiped state"
           elif session.loop.turnCalls >= TurnCallBudget:
-            stdout.styledWriteLine styleDim,
-              &"  paused — turn budget exceeded ({TurnCallBudget} tracked calls)",
-              resetStyle
+            errLn &"⊘  turn budget exceeded ({TurnCallBudget} tracked calls)"
           else:
-            stdout.styledWriteLine styleDim, "  paused — looped", resetStyle
+            errLn "⊘  mutation saturation"
         return
       # Model-initiated next turn: emit a receipt of the previous
       # callModel's token usage before the new callModel starts streaming
