@@ -170,7 +170,7 @@ proc bannerFor*(act: Action): string =
     else:
       act.path
   of akWrite:
-    &"{act.path}  ({humanBytes(act.body.len)})"
+    act.path
   of akPatch:
     act.path
   of akApplyPatch:

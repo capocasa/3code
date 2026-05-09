@@ -42,11 +42,9 @@ suite "actions: bannerFor":
     check "foo.txt" in b
     check "10" in b
 
-  test "write shows path and size":
+  test "write shows path":
     let act = Action(kind: akWrite, path: "out.txt", body: "hello world!")
-    let b = bannerFor(act)
-    check "out.txt" in b
-    check "B" in b
+    check bannerFor(act) == "out.txt"
 
   test "patch shows path":
     let act = Action(kind: akPatch, path: "fix.nim")
