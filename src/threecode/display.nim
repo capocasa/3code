@@ -140,7 +140,7 @@ proc printLine*(l: string) =
   let bodyW = max(20, termW - 2)
   let chunks = wrapAnsi(l, bodyW)
   for i, chunk in chunks:
-    subtleWriteLn(stdout, "  " & chunk)
+    subtleWriteLn(stdout, " " & chunk)
 
 proc printBashCompact*(res: string, idx: int, head = CompactHead, tail = CompactTail) =
   var lines = res.splitLines
@@ -176,7 +176,7 @@ proc printDiff*(diff: string) =
   proc paint(l: string) =
     let termW = try: terminalWidth() except CatchableError: 80
     let bodyW = max(20, termW - 2)
-    let chunks = wrapAnsi("  " & l, bodyW)
+    let chunks = wrapAnsi(" " & l, bodyW)
     for chunk in chunks:
       if l.len > 0 and l[0] == '+':
         stdout.styledWriteLine fgGreen, chunk, resetStyle
@@ -212,19 +212,19 @@ proc printToolResult*(kind: ActionKind, res: string, code: int, idx: int,
     let bodyW = max(20, termW - 2)
     for line in res.splitLines:
       for chunk in wrapAnsi(line, bodyW):
-        subtleWriteLn(stdout, "  " & chunk)
+        subtleWriteLn(stdout, " " & chunk)
   else:
     let termW = try: terminalWidth() except CatchableError: 80
     let bodyW = max(20, termW - 2)
     if code == 0:
       for line in res.splitLines:
         for chunk in wrapAnsi(line, bodyW):
-          subtleWriteLn(stdout, "  " & chunk)
+          subtleWriteLn(stdout, " " & chunk)
     else:
       let nl = res.find('\n')
       let head = if nl < 0: res else: res[0 ..< nl]
       for chunk in wrapAnsi(head, bodyW):
-        subtleWriteLn(stdout, "  " & chunk)
+        subtleWriteLn(stdout, " " & chunk)
   if diff.len > 0:
     printDiff(diff)
 
@@ -440,7 +440,7 @@ proc tokenLineBytes*(usage: Usage, window: int, elapsedS = -1): string =
   ## emits; pinned by `tests/test_golden.nim`.
   let label = tokenLineLabel(usage, window, elapsedS)
   if label.len == 0: return ""
-  result = CyanFg & "  " & label & Reset & "\n" & Reset
+  result = CyanFg & " " & label & Reset & "\n" & Reset
 
 proc renderTokenLine*(usage: Usage, window: int, elapsedS = -1) =
   ## "○N%  ↑Nk  ↻Nk  ↓Nk  Ts": context glyph, fresh, cached, generated,
@@ -668,9 +668,9 @@ proc showTool*(arg: string, toolLog: seq[ToolRecord]) =
     for line in rec.output.splitLines:
       for chunk in wrapAnsi(line, bodyW):
         if rec.code == 0:
-          stdout.styledWriteLine fgGreen, "  " & chunk, resetStyle
+          stdout.styledWriteLine fgGreen, " " & chunk, resetStyle
         else:
-          subtleWriteLn(stdout, "  " & chunk)
+          subtleWriteLn(stdout, " " & chunk)
 
 proc listTools*(toolLog: seq[ToolRecord]) =
   if toolLog.len == 0:

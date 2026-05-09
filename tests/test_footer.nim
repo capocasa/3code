@@ -446,7 +446,7 @@ suite "token receipt placement":
 
   test "receiptBarBytes: cyan payload, no leading clear, no \\n":
     let bytes = receiptBarBytes("○ 2%  ↑3.8k      ↓45  1s")
-    check bytes.startsWith(CyanFg & "  ")
+    check bytes.startsWith(CyanFg & " ")
     check bytes.endsWith(Reset)
     check '\n' notin bytes
 

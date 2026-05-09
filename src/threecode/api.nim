@@ -272,7 +272,7 @@ proc receiptBarBytes*(label: string): string =
   ## transition writes onto the previous turn's bar row to convert it
   ## into the **token receipt**.
   if label.len == 0: return ""
-  CyanFg & "  " & label & Reset
+  CyanFg & " " & label & Reset
 
 proc submitTransitionBytes*(line: string, hadPending, hadGap: bool,
                             receiptLabel: string, hasBar = true,
