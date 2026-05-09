@@ -21,7 +21,7 @@ when defined(posix):
   import std/posix except SocketHandle
   import posix/termios
 import streamhttp
-import types, util, prompts, compact, display
+import types, util, prompts, compact, display, bufprompt
 
 const providerStub {.booldefine.} = false
 when providerStub:
@@ -639,8 +639,31 @@ when defined(posix):
             if b == 0x03 or b == 0x1b:
               {.cast(gcsafe).}:
                 interrupted = true
+                clearBuffer()
                 shutdownCachedStreamFd()
               return
+            elif b == 0x0a or b == 0x0d:  # Enter
+              {.cast(gcsafe).}:
+                acquire(bufLock)
+                bufferedInput.add '\n'
+                release(bufLock)
+              bufferLineReady.store(true, moRelease)
+            elif b == 0x08 or b == 0x7f:  # Backspace / DEL
+              {.cast(gcsafe).}:
+                acquire(bufLock)
+                if bufferedInput.len > 0:
+                  bufferedInput.setLen(bufferedInput.len - 1)
+                release(bufLock)
+            elif b >= 0x20 and b <= 0x7e:  # Printable ASCII
+              {.cast(gcsafe).}:
+                acquire(bufLock)
+                bufferedInput.add b.char
+                release(bufLock)
+            elif b >= 0x80:  # UTF-8 continuation
+              {.cast(gcsafe).}:
+                acquire(bufLock)
+                bufferedInput.add b.char
+                release(bufLock)
         # else: spurious wakeup or EOF on stdin; loop and re-check stop.
 
   proc startCancelWatcher() =

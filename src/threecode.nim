@@ -24,17 +24,18 @@
 ##     ├── types        shared types + globals
 ##     └── minline      readline-style input
 
-import std/[json, os, parseopt, strformat, strutils, terminal, times]
+import std/[atomics, json, os, parseopt, strformat, strutils, terminal, times]
 when defined(posix):
   import std/posix
 import threecode/[types, util, prompts, shell, loop, session, compact,
-                  config, actions, api, display, ui, update]
+                  config, actions, api, display, ui, update, bufprompt]
 import threecode/minline
 export types, util, prompts, shell, loop, session, compact,
        config, actions, api, display, ui
 
 proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
   interrupted = false
+  clearBuffer()
   resetLoopTracker(session.loop)
   # `beginTurn` hides the terminal cursor for the duration of the
   # turn (streaming + tool exec); the dim `❯ ` glyph remains on
@@ -61,6 +62,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       withCleared:
         stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
       interrupted = false
+      clearBuffer()
       return
     let window = contextWindowFor(p.model)
     var summarized = 0
@@ -228,6 +230,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         withCleared:
           stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
         interrupted = false
+        clearBuffer()
         return
       if halt:
         withCleared:
@@ -504,7 +507,21 @@ proc main() =
       runTurnsInteractive(prof, messages, session)
   while true:
     var done = false
-    let line = readInput(editor, done)
+    var line: string
+    var fromBuffer = false
+    if bufferLineReady.load(moAcquire):
+      line = drainBufferedLine()
+      if line != "":
+        fromBuffer = true
+        withCleared:
+          stdout.write "\n"
+          stdout.styledWriteLine styleDim, "  · queued: ", resetStyle
+          for sl in line.splitLines:
+            stdout.write "    "
+            stdout.write sl
+            stdout.write "\n"
+    if not fromBuffer:
+      line = readInput(editor, done)
     if done:
       echo ""
       break
