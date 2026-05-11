@@ -82,27 +82,36 @@ else:
 
   proc getchr*(): cint =
     ## Retrieves an ASCII character from stdin.
+    ##
+    ## Open-coded raw-mode read (rather than `terminal.getch`) for two
+    ## reasons: (1) we deliberately leave `c_oflag` alone so OPOST/ONLCR
+    ## stay on — the spinner and bar-tick threads emit bare ``\n``
+    ## expecting CRLF translation, and a SIGWINCH that interrupted
+    ## `terminal.getch`'s `readChar` would bypass its `tcSetAttr` restore
+    ## and leave OPOST permanently disabled, which manifests as the dim
+    ## prompt drifting right by the bar payload's width on every repaint
+    ## after a resize. (2) `try/finally` around the read guarantees the
+    ## original termios is restored on signal interruption.
     stdout.flushFile()
     when defined(posix):
       let fd = getFileHandle(stdin)
       var oldMode: Termios
-      discard fd.tcGetAttr(addr oldMode)
-      var rawMode = oldMode
-      rawMode.c_iflag = rawMode.c_iflag and not Cflag(BRKINT or ICRNL or
+      if fd.tcGetAttr(addr oldMode) != 0:
+        return getch().ord.cint
+      var newMode = oldMode
+      newMode.c_iflag = newMode.c_iflag and not Cflag(BRKINT or ICRNL or
         INPCK or ISTRIP or IXON)
-      rawMode.c_oflag = rawMode.c_oflag and not Cflag(OPOST)
-      rawMode.c_cflag = (rawMode.c_cflag and not Cflag(CSIZE or PARENB)) or CS8
-      rawMode.c_lflag = rawMode.c_lflag and not Cflag(ECHO or ICANON or
+      newMode.c_cflag = (newMode.c_cflag and not Cflag(CSIZE or PARENB)) or CS8
+      newMode.c_lflag = newMode.c_lflag and not Cflag(ECHO or ICANON or
         IEXTEN or ISIG)
-      rawMode.c_cc[VMIN] = char(1)
-      rawMode.c_cc[VTIME] = char(0)
-      discard fd.tcSetAttr(TCSANOW, addr rawMode)
-      var ch: char
-      let n = posix.read(fd.cint, addr ch, 1)
-      discard fd.tcSetAttr(TCSADRAIN, addr oldMode)
-      if n == 1:
-        return ch.ord.cint
-      return -1
+      newMode.c_cc[VMIN] = 1.char
+      newMode.c_cc[VTIME] = 0.char
+      if fd.tcSetAttr(TCSAFLUSH, addr newMode) != 0:
+        return getch().ord.cint
+      try:
+        return stdin.readChar().ord.cint
+      finally:
+        discard fd.tcSetAttr(TCSADRAIN, addr oldMode)
     else:
       return getch().ord.cint
 
