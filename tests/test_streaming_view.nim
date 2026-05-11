@@ -19,7 +19,7 @@ proc captureStdout(name: string, body: proc()): string =
 suite "streaming view scroll area":
   test "keeps only the latest maxLines visible after scrolling":
     let captured = captureStdout("tail") do ():
-      var v = initStreamingView(maxLines = 3)
+      var v = initStreamingView(maxLines = 3, idx = 12)
       v.addLine("one")
       v.addLine("two")
       v.addLine("three")
@@ -27,11 +27,27 @@ suite "streaming view scroll area":
 
     var g = newGrid()
     g.feed captured
-    check rowText(g, 0).strip == "two"
+    check "2 lines omitted :show 12 for full" in rowText(g, 0)
     check rowText(g, 1).strip == "three"
     check rowText(g, 2).strip == "four"
     check "one" notin rowText(g, 0)
     check g.row == 3
+    check g.col == 0
+
+  test "overflow keeps marker plus latest tail within max height":
+    let captured = captureStdout("overflow") do ():
+      var v = initStreamingView(maxLines = 8, idx = 1234)
+      for i in 1 .. 9:
+        v.addLine("line " & $i)
+
+    var g = newGrid()
+    g.feed captured
+    check "2 lines omitted :show 1234 for full" in rowText(g, 0)
+    for i in 3 .. 9:
+      check rowText(g, i - 2).strip == "line " & $i
+    check "line 1" notin rowText(g, 0)
+    check "line 2" notin rowText(g, 0)
+    check g.row == 8
     check g.col == 0
 
   test "erase clears the whole visible viewport in place":
@@ -63,5 +79,5 @@ suite "streaming view scroll area":
 
     var g = newGrid()
     g.feed captured
-    check rowText(g, 0).strip == "beta"
+    check "2 lines omitted" in rowText(g, 0)
     check rowText(g, 1).strip == "gamma"

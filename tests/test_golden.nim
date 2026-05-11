@@ -1,4 +1,4 @@
-import std/[unittest, os, posix, times]
+import std/[unittest, os, posix, strutils, times]
 import threecode/[types, display]
 
 ## Golden-file tests: pin the exact byte output of the render helpers so
@@ -108,6 +108,13 @@ let x = 42
 End paragraph."""
 
 suite "golden: render helpers":
+  test "display line helpers emit CRLF for raw terminal mode":
+    let bytes = captureStdout(proc() =
+      hintLn "  model-a"
+      subtleWriteLn(stdout, "  model-b"))
+    check "\r\n" in bytes
+    check "\n  model-b" notin bytes
+
   test "renderAssistantContent — full markdown sample":
     let bytes = captureFile(proc(f: File) =
       renderAssistantContent(Sample, f))

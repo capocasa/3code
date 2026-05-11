@@ -143,7 +143,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
             clearBarPrompt()
             renderToolBanner(bannerFor(act), akBash, -1)
             stdout.flushFile()
-            var sv = initStreamingView(StreamMaxLines)
+            var sv = initStreamingView(StreamMaxLines, idx)
             let result = runActionStreaming(act, session.readCache,
               proc(line: string) = sv.addLine(line))
             sv.erase()

@@ -30,25 +30,29 @@ template hint*(args: varargs[untyped]) =
   stdout.styledWrite(fgCyan, styleBright, args, resetStyle)
 
 template hintLn*(args: varargs[untyped]) =
-  stdout.styledWriteLine(fgCyan, styleBright, args, resetStyle)
+  stdout.styledWrite(fgCyan, styleBright, args, resetStyle)
+  stdout.write "\r\n"
 
 template note*(args: varargs[untyped]) =
   stdout.styledWrite(fgCyan, args, resetStyle)
 
 template noteLn*(args: varargs[untyped]) =
-  stdout.styledWriteLine(fgCyan, args, resetStyle)
+  stdout.styledWrite(fgCyan, args, resetStyle)
+  stdout.write "\r\n"
 
 template warn*(args: varargs[untyped]) =
   stdout.styledWrite(fgCyan, args, resetStyle)
 
 template warnLn*(args: varargs[untyped]) =
-  stdout.styledWriteLine(fgCyan, args, resetStyle)
+  stdout.styledWrite(fgCyan, args, resetStyle)
+  stdout.write "\r\n"
 
 template err*(args: varargs[untyped]) =
   stdout.styledWrite(fgMagenta, args, resetStyle)
 
 template errLn*(args: varargs[untyped]) =
-  stdout.styledWriteLine(fgMagenta, args, resetStyle)
+  stdout.styledWrite(fgMagenta, args, resetStyle)
+  stdout.write "\r\n"
 
 proc debugOut*(msg: string) =
   if not debugEnabled: return
@@ -72,7 +76,7 @@ proc subtleWriteLn*(outFile: File, body: string) =
   outFile.write GreyFg
   outFile.write body
   outFile.write Reset
-  outFile.write "\n"
+  outFile.write "\r\n"
 
 # `withCleared` lives in `api.nim` now — it owns `currentBarLabel`,
 # the cached bar payload that drives repaint after a content write.
@@ -149,17 +153,27 @@ type
     ## normally until `maxLines` is reached, then the oldest line is
     ## pushed off the top to make room at the bottom.
     maxLines*: int
+    idx*: int         ## tool call index for the :show hint
     total*: int       ## total lines received (not just visible)
     onScreen*: int    ## lines currently occupying terminal rows (≤ maxLines)
     buf*: seq[string] ## ring buffer of last maxLines lines
 
-proc initStreamingView*(maxLines = StreamMaxLines): StreamingView =
-  result = StreamingView(maxLines: maxLines, buf: @[])
+proc initStreamingView*(maxLines = StreamMaxLines, idx = 0): StreamingView =
+  result = StreamingView(maxLines: maxLines, idx: idx, buf: @[])
+
+proc omittedLine(v: StreamingView): string =
+  let hidden = max(0, v.total - (v.maxLines - 1))
+  let show =
+    if v.idx > 0: " :show " & $v.idx & " for full"
+    else: ""
+  &"... {hidden} line" & (if hidden == 1: "" else: "s") &
+    " omitted" & show
 
 proc addLine*(v: var StreamingView, line: string) =
   ## Add one line to the viewport. For the first `maxLines` lines, appends
-  ## normally. After that, erases the entire viewport and reprints the
-  ## tail, giving the illusion of scrolling.
+  ## normally. After that, erases the entire viewport and reprints an
+  ## omission marker plus the latest tail, giving the illusion of a
+  ## bounded scroll area.
   inc v.total
   v.buf.add line
   if v.total <= v.maxLines:
@@ -167,9 +181,12 @@ proc addLine*(v: var StreamingView, line: string) =
     inc v.onScreen
   else:
     eraseRows(v.onScreen)
-    let start = v.buf.len - v.maxLines
+    subtleWriteLn(stdout, "  " & omittedLine(v))
+    let tailLines = max(0, v.maxLines - 1)
+    let start = max(0, v.buf.len - tailLines)
     for i in start..<v.buf.len:
       subtleWriteLn(stdout, "  " & v.buf[i])
+    v.onScreen = min(v.maxLines, v.total)
     stdout.flushFile()
 
 proc erase*(v: var StreamingView) =

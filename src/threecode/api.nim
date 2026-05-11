@@ -219,8 +219,14 @@ proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int): string =
   result.add "\n\x1b[2K" & DimPromptColor & "❯ " & Reset
   result.add "\r\x1b[1A"
 
-const SpinnerCleanupBytes* =
-  "\r\x1b[1A\x1b[2K\n\x1b[2K\n\x1b[2K\r\x1b[1A"
+proc spinnerCleanupBytes*(tickerRows = 1): string =
+  ## Erase spinner ticker + bar + prompt, cursor at col 0 of the bar
+  ## row. Clears to end-of-screen from the ticker row so wrapped
+  ## spinner labels/tickers left by terminal reflow are removed too.
+  let rows = max(1, tickerRows)
+  "\r\x1b[" & $rows & "A\x1b[J\n"
+
+const SpinnerCleanupBytes* = "\r\x1b[1A\x1b[J\n"
 
 proc paintBarBytes*(label: string): string =
   ## Clears the bar row and writes the static-form bar payload. Cursor
@@ -235,10 +241,13 @@ proc barFooterBytes*(label, promptColor: string): string =
   paintBarBytes(label) &
     "\n\x1b[2K" & promptColor & "❯ " & Reset & "\r\x1b[1A"
 
-const ClearBarPromptBytes* = "\r\x1b[2K\n\x1b[2K\r\x1b[1A"
-  ## Erase the bar + prompt rows, cursor at col 0 of the bar row.
-  ## Used to make room above before a content write that will push
-  ## bar+prompt one row down.
+const ClearBarPromptBytes* = "\r\x1b[J"
+  ## Erase the bar + prompt area, cursor at col 0 of the bar row.
+  ## This intentionally clears to end-of-screen rather than exactly
+  ## two rows: after terminal width shrink, an already-painted token
+  ## bar may have reflowed into multiple visual rows. The footer owns
+  ## everything below its anchor, so clearing from the anchor is the
+  ## stable recovery operation before content pushes the footer down.
 
 proc barFooterBelowBytes*(label, promptColor: string): string =
   ## Paint bar one row below the cursor + prompt two rows below,
@@ -258,12 +267,12 @@ proc barFooterBelowBytes*(label, promptColor: string): string =
     "\n\x1b[2K" & promptColor & "❯ " & Reset &
     "\x1b[2A\x1b[3G"
 
-const ClearBarBelowBytes* =
-  "\n\x1b[2K\n\x1b[2K\x1b[2A\x1b[3G"
+const ClearBarBelowBytes* = "\n\r\x1b[J\x1b[1A\x1b[3G"
   ## Erase the bar + prompt rows below the cursor (without
   ## disturbing the cursor's row content), then walk back up to the
-  ## bullet row at column 2. Same caveat as `barFooterBelowBytes`:
-  ## avoids CSI s/u so it works on terminals that ignore those.
+  ## bullet row at column 2. Clears to end-of-screen because a resize
+  ## can reflow the already-painted bar/prompt into more than two
+  ## visual rows.
 
 proc receiptBarBytes*(label: string): string =
   ## In-place dim repaint of the bar row's payload. No leading clear
@@ -397,10 +406,12 @@ proc spinnerLoop(unused: string) {.thread.} =
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
   let start = epochTime()
   var i = 0
+  var lastTicker = ""
   while not spinnerStop.load(moRelaxed):
     let elapsed = epochTime() - start
     let label = getSpinLabel()
     let ticker = getSpinTicker()
+    lastTicker = ticker
     try:
       let frame = frames[i mod frames.len]
       syncWrite spinnerFooterBytes(frame, label, ticker, elapsed.int)
@@ -408,7 +419,11 @@ proc spinnerLoop(unused: string) {.thread.} =
     sleep 80
     inc i
   try:
-    syncWrite SpinnerCleanupBytes
+    let termW = try: terminalWidth() except CatchableError: 80
+    let tickerRows =
+      if lastTicker.len == 0: 1
+      else: max(1, (visibleWidth(lastTicker) + max(1, termW) - 1) div max(1, termW))
+    syncWrite spinnerCleanupBytes(tickerRows)
   except CatchableError: discard
 
 proc liveLabel*(base: string, slurped: int): string =
