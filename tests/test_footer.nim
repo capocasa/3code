@@ -39,6 +39,9 @@ suite "bar payload geometry":
     # The context glyph and label content follow immediately.
     check row.len >= 3
     check row[2 .. ^1].startsWith("○")
+    # liveBarBytes uses bold cyan for all bar cells.
+    check g.cellFg(0, 2) == colCyan
+    check hasAttr(g.cellAttr(0, 2), saBold)
 
   test "spinnerBarBytes: spinner glyph at col 0, space at col 1":
     let g = newGrid()
@@ -52,6 +55,11 @@ suite "bar payload geometry":
     check row[r0len] == ' '
     # Label content right after.
     check "○ 0%" in row
+    # spinnerBarBytes: glyph and label are bold cyan.
+    check g.cellFg(0, 0) == colCyan
+    check hasAttr(g.cellAttr(0, 0), saBold)
+    check g.cellFg(0, 2) == colCyan
+    check hasAttr(g.cellAttr(0, 2), saBold)
 
   test "spinner and live bar share label column":
     # The same label rendered with/without the spinner must land at
@@ -63,8 +71,13 @@ suite "bar payload geometry":
     g1.feed liveBarBytes("LBL")
     let g2 = newGrid()
     g2.feed spinnerBarBytes("⠋", "LBL", 0)
-    check g1.rows[0][2] == Rune('L')
-    check g2.rows[0][2] == Rune('L')
+    check g1.rows[0][2].rune == Rune('L')
+    check g2.rows[0][2].rune == Rune('L')
+    # Both live bar and spinner bar use bold cyan on the label.
+    check hasAttr(g1.cellAttr(0, 2), saBold)
+    check g1.cellFg(0, 2) == colCyan
+    check hasAttr(g2.cellAttr(0, 2), saBold)
+    check g2.cellFg(0, 2) == colCyan
 
 # ---------------- bar+prompt footer ----------------
 
@@ -76,6 +89,12 @@ suite "bar+prompt footer":
     check "❯" in rowText(g, 1)
     check g.row == 0
     check g.col == 0
+    # Bar row cells are bold cyan.
+    check g.cellFg(0, 0) == colCyan
+    check hasAttr(g.cellAttr(0, 0), saBold)
+    # Dim prompt: grey-244.
+    check g.cellFg(1, 0) == col256
+    check g.cellAt(1, 0).fgColorIdx == 244
 
   test "barFooterBytes parks cursor at bar row col 0":
     let g = newGrid()
@@ -117,6 +136,11 @@ suite "bar+prompt footer":
     # No blank separator between bar (row 2) and prompt (row 3).
     check rowText(g, 2).strip != ""
     check rowText(g, 3).strip != ""
+    # Bar at row 2 is bold cyan; prompt at row 3 is dim grey-244.
+    check g.cellFg(2, 0) == colCyan
+    check hasAttr(g.cellAttr(2, 0), saBold)
+    check g.cellFg(3, 0) == col256
+    check g.cellAt(3, 0).fgColorIdx == 244
 
   test "prompt color toggles between dim and bright cyan":
     # Same label, different prompt color — the bar payload is the
@@ -126,6 +150,18 @@ suite "bar+prompt footer":
     check DimPromptColor in barFooterBytes("LBL", DimPromptColor)
     check BrightPromptColor in barFooterBytes("LBL", BrightPromptColor)
     check DimPromptColor notin barFooterBytes("LBL", BrightPromptColor)
+    # Grid-level: dim prompt cell is grey-244.
+    block:
+      let gd = newGrid()
+      gd.feed barFooterBytes("LBL", DimPromptColor)
+      check gd.cellFg(1, 0) == col256
+      check gd.cellAt(1, 0).fgColorIdx == 244
+    # Grid-level: bright prompt cell is bold cyan.
+    block:
+      let gb = newGrid()
+      gb.feed barFooterBytes("LBL", BrightPromptColor)
+      check gb.cellFg(1, 0) == colCyan
+      check hasAttr(gb.cellAttr(1, 0), saBold)
 
 # ---------------- mid-line bar visibility ----------------
 #
@@ -155,6 +191,11 @@ suite "mid-line bar visibility":
     # each refresh stacked another bar in scroll).
     check g.row == 0
     check g.col == 2
+    # Bar at row 1 is bold cyan; prompt at row 2 is dim grey-244.
+    check g.cellFg(1, 0) == colCyan
+    check hasAttr(g.cellAttr(1, 0), saBold)
+    check g.cellFg(2, 0) == col256
+    check g.cellAt(2, 0).fgColorIdx == 244
 
   test "ClearBarBelowBytes wipes bar+prompt below, walks cursor to col 2":
     let g = newGrid()
@@ -198,6 +239,11 @@ suite "mid-line bar visibility":
     check rowText(g, 0).startsWith("● Hello")
     check "↓5" in rowText(g, 1)
     check "❯" in rowText(g, 2)
+    # Bar at row 1 is bold cyan; prompt at row 2 is dim grey-244.
+    check g.cellFg(1, 0) == colCyan
+    check hasAttr(g.cellAttr(1, 0), saBold)
+    check g.cellFg(2, 0) == col256
+    check g.cellAt(2, 0).fgColorIdx == 244
 
   test "transition mid-line → \\n: bar replaces below-bar at-cursor":
     let g = newGrid()
@@ -217,6 +263,9 @@ suite "mid-line bar visibility":
     check "❯" in rowText(g, 2)
     # No double bar — old bar at row 1 was overwritten cleanly.
     check rowText(g, 1).count("LBL") == 1
+    # After transition, bar at row 1 is still bold cyan.
+    check g.cellFg(1, 0) == colCyan
+    check hasAttr(g.cellAttr(1, 0), saBold)
 
 # ---------------- spinner footer ----------------
 
@@ -231,6 +280,11 @@ suite "spinner footer":
     check "❯" in rowText(g, 2)
     check g.row == 1
     check g.col == 0
+    # Spinner bar at row 1 is bold cyan; prompt at row 2 is dim grey-244.
+    check g.cellFg(1, 0) == colCyan
+    check hasAttr(g.cellAttr(1, 0), saBold)
+    check g.cellFg(2, 0) == col256
+    check g.cellAt(2, 0).fgColorIdx == 244
 
   test "ticker overlay populated when reasoning":
     let g = newGrid()
@@ -239,6 +293,11 @@ suite "spinner footer":
     check "pondering" in rowText(g, 0)
     check "⠋" in rowText(g, 1)
     check "❯" in rowText(g, 2)
+    # Ticker at row 0 is grey-244; bar at row 1 is bold cyan.
+    check g.cellFg(0, 0) == col256
+    check g.cellAt(0, 0).fgColorIdx == 244
+    check g.cellFg(1, 0) == colCyan
+    check hasAttr(g.cellAttr(1, 0), saBold)
 
   test "reasoning → no-reasoning restores blank above bar":
     let g = newGrid()
@@ -248,6 +307,8 @@ suite "spinner footer":
     g.feed spinnerFooterBytes("⠙", "lbl", "", 2)
     check rowText(g, 0).strip == ""
     check "⠙" in rowText(g, 1)
+    # Ticker row 0 is now blank — no residual SGR from earlier reasoning.
+    check g.cellFg(0, 0) == colDefault
 
   test "spinner cleanup wipes all three footer rows":
     let g = newGrid()
@@ -322,6 +383,9 @@ suite "token receipt placement":
     check rowText(g, 1).strip == ""
     check rowText(g, 2).startsWith("❯ next")
     check CyanFg in submitTransitionBytes("next", true, false, label)
+    # Receipt row 0 cells are cyan (no bold — receipt is dim repaint).
+    check g.cellFg(0, 0) == colCyan
+    check not hasAttr(g.cellAttr(0, 0), saBold)
 
   test "submitTransitionBytes: hadGap=true overwrites the gap row":
     # Stage typing-ready state: LLM line at row 0, *gap* (blank) at
@@ -347,6 +411,9 @@ suite "token receipt placement":
     # receipt is FLUSH against the LLM content.
     check rowText(g, 0).strip != ""
     check rowText(g, 1).strip != ""
+    # Receipt row 1 cells are cyan (no bold — receipt is dim repaint).
+    check g.cellFg(1, 0) == colCyan
+    check not hasAttr(g.cellAttr(1, 0), saBold)
 
   test "submitTransitionBytes: multi-line input + hadGap walks back N+2":
     let g = newGrid()
@@ -577,11 +644,19 @@ suite "full turn lifecycle":
     # Bar at row 7 (cursor advance), prompt at row 8, scratch at row 6.
     check "⠋" in rowText(g, 7)
     check "❯" in rowText(g, 8)
+    # Spinner bar row is bold cyan, prompt row is dim grey.
+    check g.cellFg(7, 0) == colCyan
+    check hasAttr(g.cellAttr(7, 0), saBold)
+    check g.cellFg(8, 0) == col256
+    check g.cellAt(8, 0).fgColorIdx == 244
     # ---- content arrives ----
     g.feed SpinnerCleanupBytes
     g.feed "\x1b[96m\x1b[1m● \x1b[0m"
     g.feed styledLineBytes("Hello")
     g.feed barFooterBytes("        ↓5  1s", DimPromptColor)
+    # Bullet cell is bright cyan + bold.
+    check g.cellFg(7, 0) == colBrightCyan
+    check hasAttr(g.cellAttr(7, 0), saBold)
     # Bar visible during streaming.
     let barRow = block:
       var found = -1
@@ -590,6 +665,11 @@ suite "full turn lifecycle":
       found
     check barRow >= 0
     check "❯" in rowText(g, barRow + 1)
+    # Bar is bold cyan, prompt is dim (grey-244).
+    check hasAttr(g.cellAttr(barRow, 0), saBold)
+    check g.cellFg(barRow, 0) == colCyan
+    check g.cellAt(barRow + 1, 0).fgColor == col256
+    check g.cellAt(barRow + 1, 0).fgColorIdx == 244
     # Second content line.
     g.feed ClearBarPromptBytes
     g.feed styledLineBytes("  World")
@@ -619,6 +699,9 @@ suite "full turn lifecycle":
     g.feed barFooterBytes(tokenLineLabel(usage, 200_000, 2), BrightPromptColor)
     g.feed "\x1b[?25h"
     check not g.cursorHidden
+    # Bright prompt: bold cyan.
+    check g.cellFg(finalBarRow + 1, 0) == colCyan
+    check hasAttr(g.cellAttr(finalBarRow + 1, 0), saBold)
 
   test "turn 2: receipt overwrites the gap, lands flush below LLM":
     # Stage turn 1 typing-ready state: LLM line at row 0, gap at
@@ -642,6 +725,8 @@ suite "full turn lifecycle":
     # Receipt is cyan.
     check CyanFg in submitTransitionBytes("elaborate", true, true,
                                           iter1Label)
+    # Grid-level: receipt row has cyan cells (no bold — receipt is dim).
+    check g.cellFg(1, 0) == colCyan
 
   test "tool exec under withCleared: bar+prompt slide down":
     # Bar at row 0, prompt at row 1. Tool exec writes content above
@@ -661,6 +746,11 @@ suite "full turn lifecycle":
     # No blank between bar and prompt.
     check rowText(g, 2).strip != ""
     check rowText(g, 3).strip != ""
+    # Bar row cells are bold cyan, dim prompt is grey-244.
+    check hasAttr(g.cellAttr(2, 0), saBold)
+    check g.cellFg(2, 0) == colCyan
+    check g.cellAt(3, 0).fgColor == col256
+    check g.cellAt(3, 0).fgColorIdx == 244
 
   test "tool exec: bar+prompt visible during runAction (bar tick)":
     # Production sequence: paintBarPrompt → withCleared(\n + content)
@@ -691,6 +781,11 @@ suite "full turn lifecycle":
     check "❯" in rowText(g, barRow + 1)
     check rowText(g, barRow).strip != ""
     check rowText(g, barRow + 1).strip != ""
+    # During runAction: bar is bold cyan, prompt is dim grey-244.
+    check hasAttr(g.cellAttr(barRow, 0), saBold)
+    check g.cellFg(barRow, 0) == colCyan
+    check g.cellAt(barRow + 1, 0).fgColor == col256
+    check g.cellAt(barRow + 1, 0).fgColorIdx == 244
     # runAction completes, stopBarTick. Result phase:
     # withCleared clears bar, writes result, repaints.
     g.feed ClearBarPromptBytes
