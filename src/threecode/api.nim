@@ -1397,7 +1397,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   let wireMessages = stripInternalFields(messages)
   if p.family != "deepseek":
     for m in wireMessages:
-      if m.kind == JObject and m{"role"}.getStr == "assistant":
+      if m.kind == JObject and m{"role"}.getStr == "assistant" and m.contains("reasoning_content"):
         m.delete("reasoning_content")
   var body = %*{
     "model": p.model,
