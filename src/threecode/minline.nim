@@ -37,6 +37,7 @@ import
 
 when defined(posix):
   import posix
+  import std/termios
 
 # SIGWINCH: set on resize. Read by the readLine driver between keystrokes
 # so the editor can pick up the new terminal width and redraw cleanly.
@@ -81,8 +82,35 @@ else:
 
   proc getchr*(): cint =
     ## Retrieves an ASCII character from stdin.
+    ##
+    ## Open-coded raw-mode read (rather than `terminal.getch`) for two
+    ## reasons: (1) we deliberately leave `c_oflag` alone so OPOST/ONLCR
+    ## stay on — the spinner and bar-tick threads emit bare ``\n``
+    ## expecting CRLF translation, and a SIGWINCH that interrupted
+    ## `terminal.getch`'s `readChar` would bypass its `tcSetAttr` restore
+    ## and leave OPOST permanently disabled, which manifests as the dim
+    ## prompt drifting right by the bar payload's width on every repaint
+    ## after a resize. (2) `try/finally` around the read guarantees the
+    ## original termios is restored on signal interruption.
     stdout.flushFile()
-    return getch().ord.cint
+    let fd = getFileHandle(stdin)
+    var oldMode: Termios
+    if fd.tcGetAttr(addr oldMode) != 0:
+      return getch().ord.cint
+    var newMode = oldMode
+    newMode.c_iflag = newMode.c_iflag and not Cflag(BRKINT or ICRNL or
+      INPCK or ISTRIP or IXON)
+    newMode.c_cflag = (newMode.c_cflag and not Cflag(CSIZE or PARENB)) or CS8
+    newMode.c_lflag = newMode.c_lflag and not Cflag(ECHO or ICANON or
+      IEXTEN or ISIG)
+    newMode.c_cc[VMIN] = 1.char
+    newMode.c_cc[VTIME] = 0.char
+    if fd.tcSetAttr(TCSAFLUSH, addr newMode) != 0:
+      return getch().ord.cint
+    try:
+      return stdin.readChar().ord.cint
+    finally:
+      discard fd.tcSetAttr(TCSADRAIN, addr oldMode)
 
 # Types
 
