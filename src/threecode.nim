@@ -141,19 +141,27 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         var (r, code, diff) =
           if act.kind == akBash:
             discard stopBarTick()
-            clearBarPrompt()
+            let termH = try: terminalHeight() except CatchableError: 24
+            # Scrolling region: rows 1..termH-2, leaving bar+prompt
+            # pinned at the bottom two rows.
+            stdout.write &"\x1b[1;{termH - 2}r"
+            # Cursor at bottom of scrolling region
+            stdout.write &"\x1b[{termH - 2};1H"
             renderToolBanner(bannerFor(act), akBash, -1)
             stdout.flushFile()
             var sv = initStreamingView(StreamMaxLines, idx)
             let result = runActionStreaming(act, session.readCache,
               proc(line: string) = sv.addLine(line))
             sv.erase()
-            # Also erase the initial banner row (cursor is now just below it)
+            # Erase the initial banner row
             stdout.write "\x1b[1A\x1b[2K"
             let elapsed = (epochTime() - toolT0).int
             renderToolBanner(bannerFor(act), akBash, result.code, elapsed)
             printToolResult(akBash, result.output, result.code, idx,
               result.diff)
+            # Reset scrolling region, position cursor at bar row
+            stdout.write "\x1b[r"
+            stdout.write &"\x1b[{termH - 1};1H"
             repaintBarPrompt()
             result
           else:
