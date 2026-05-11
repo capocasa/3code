@@ -126,6 +126,18 @@ suite "minline pure helpers":
     let bytes = renderBuffer("ab\ncd", "P ", "..", 80)
     check bytes == "P ab\r\n..cd"
 
+  test "renderBuffer: colored prompt styles only prompt cells":
+    let bytes = renderBuffer("hello", "\x1b[1;36m❯ \x1b[0m", "  ", 80)
+    let g = newGrid()
+    g.feed bytes
+    check rowText(g, 0) == "❯ hello"
+    check g.cellFg(0, 0) == colCyan
+    check hasAttr(g.cellAttr(0, 0), saBold)
+    check g.cellFg(0, 1) == colCyan
+    check hasAttr(g.cellAttr(0, 1), saBold)
+    check g.cellFg(0, 2) == colDefault
+    check not hasAttr(g.cellAttr(0, 2), saBold)
+
 # ---------------- Driver: basic typing & submit ----------------
 
 suite "minline editor: basic typing":
@@ -360,6 +372,18 @@ suite "minline editor: terminal resize":
 # ---------------- Driver: rendered prompt + content ----------------
 
 suite "minline editor: render correctness":
+  test "colored prompt survives redraw and resets before input":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "hello"
+    d.push KEnter
+    discard d.run(ed, prompt = "\x1b[1;36m❯ \x1b[0m")
+    check rowText(d.grid, 0) == "❯ hello"
+    check d.grid.cellFg(0, 0) == colCyan
+    check hasAttr(d.grid.cellAttr(0, 0), saBold)
+    check d.grid.cellFg(0, 2) == colDefault
+    check not hasAttr(d.grid.cellAttr(0, 2), saBold)
+
   test "second logical line is prefixed with continuation prompt '  '":
     var ed = initEditor()
     let d = newDriver()
