@@ -209,7 +209,12 @@ proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int): string =
   ## cleared every frame so reasoning→no-reasoning is a faithful
   ## restore as long as that row was blank to begin with (it always
   ## is — the leading `\n` callModel writes guarantees it).
-  result = "\r\x1b[1A\x1b[2K"
+  # Re-assert hide-cursor every frame. Some terminals (older conhost,
+  # a few VTE variants) transiently re-show the caret on cursor
+  # movement or on sync-update end, so a single `?25l` from beginTurn
+  # isn't enough — at 80ms cadence the re-shown caret is visible as a
+  # flicker glued to the braille glyph. Cheap, idempotent.
+  result = "\x1b[?25l\r\x1b[1A\x1b[2K"
   if ticker.len > 0:
     result.add GreyFg
     result.add ticker
@@ -514,7 +519,11 @@ proc barTickLoop() {.thread.} =
       release barTickLock
     let elapsed = (epochTime() - barTickStart).int
     let label = base & "  " & $elapsed & "s"
-    syncWrite barFooterBytes(label, DimPromptColor)
+    # Re-assert hide-cursor each tick — same rationale as
+    # `spinnerFooterBytes`: some terminals transiently re-show the
+    # caret on cursor movement, and beginTurn's one-shot `?25l`
+    # isn't enough to keep it hidden over a long-running tool.
+    syncWrite "\x1b[?25l" & barFooterBytes(label, DimPromptColor)
     sleep 500
 
 proc startBarTick*(base: string) =
