@@ -1,10 +1,10 @@
 ## Streaming bash execution using osproc.startProcess.
 ##
 ## Runs a shell command with stdout piped for line-by-line reading.
-## Each complete stdout line is forwarded to the `onLine` callback for
-## live display.  stderr is written to a temp file (read after exit).
-## Returns raw output, raw stderr, and the exit code — clipping and
-## post-processing live in `actions.nim`.
+## stderr is merged into stdout (2>&1) so it appears inline as it would
+## in a real terminal. Each complete line is forwarded to the `onLine`
+## callback for live display. Returns the raw merged output and the
+## exit code — clipping and post-processing live in `actions.nim`.
 
 import std/[os, osproc, streams, strformat, strutils, tables, times]
 import types, util, shell
@@ -15,7 +15,7 @@ proc localFileSig(path: string): (Time, int) =
 
 proc runStreamingBash*(act: Action, cache: ReadCache,
                        onLine: proc(line: string) = nil):
-    tuple[rawOut: string, rawErr: string, code: int] =
+    tuple[rawOut: string, code: int] =
   let cmd = act.body.strip
   let mutPath = bashMutationPath(cmd)
   let (readPath, fullRead) = bashReadPath(cmd)
@@ -24,16 +24,15 @@ proc runStreamingBash*(act: Action, cache: ReadCache,
     let p = resolvePath(mutPath)
     if cache.state.hasKey(p) and fileExists(p):
       if localFileSig(p) != cache.state[p]:
-        return (&"error: {p} changed on disk since the last read in this session — re-read before mutating", "", 1)
+        return (&"error: {p} changed on disk since the last read in this session — re-read before mutating", 1)
 
   if cache != nil and readPath != "" and fullRead:
     let p = resolvePath(readPath)
     if fileExists(p) and cache.state.hasKey(p) and localFileSig(p) == cache.state[p]:
-      return (&"[unchanged since prior read of {p}; see earlier read in this session]", "", 0)
+      return (&"[unchanged since prior read of {p}; see earlier read in this session]", 0)
 
   let tmp = getTempDir() / ("3code_bash_" & $getCurrentProcessId() & "_" & $epochTime().int64)
   createDir(tmp)
-  let errPath = tmp / "err"
   let scriptPath = tmp / "cmd.sh"
   let stdinPath = tmp / "stdin"
 
@@ -44,7 +43,7 @@ export DEBIAN_FRONTEND=noninteractive
   writeFile(scriptPath, script)
   writeFile(stdinPath, act.stdin)
 
-  let wrapped = &"timeout --foreground 120s sh \"{scriptPath}\" <\"{stdinPath}\" 2>\"{errPath}\""
+  let wrapped = &"timeout --foreground 120s sh \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
 
   var p = startProcess("/bin/sh", args = ["-c", wrapped],
                        options = {poStdErrToStdOut, poUsePath})
@@ -70,7 +69,6 @@ export DEBIAN_FRONTEND=noninteractive
   let code = p.waitForExit()
   p.close()
 
-  let rawErr = if fileExists(errPath): readFile(errPath) else: ""
   try: removeDir(tmp) except CatchableError: discard
 
-  return (rawOut, rawErr, code)
+  return (rawOut, code)

@@ -714,17 +714,17 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
   let arg = if sp < 0: "" else: c[sp+1 .. ^1].strip
   case name
   of ":help", ":?":
-    subtleWrite(stdout, HelpText)
+    renderHelp()
   of ":tokens":
     if session.usage.totalTokens == 0:
-      hintLn "  no tokens used yet", resetStyle
+      cmdResponse "no tokens used yet"
     else:
       let fresh = max(0, session.usage.promptTokens - session.usage.cachedTokens)
       let line = tokenSlot("↑", fresh) &
         "  " & tokenSlot("↻", session.usage.cachedTokens) &
         "  " & tokenSlot("↓", session.usage.completionTokens) &
         "  total " & humanTokens(session.usage.totalTokens)
-      subtleWriteLn(stdout, line)
+      cmdResponse line
   of ":clear":
     messages = %* [{"role": "system", "content": buildSystemPrompt(prof)}]
     session.toolLog.setLen 0
@@ -739,7 +739,7 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
       session.savePath = newSessionPath()
       session.created = $now()
       session.cwd = getCurrentDir()
-    hintLn "  context cleared", resetStyle
+    cmdResponse "context cleared"
   of ":model":
     cmdModel(arg, prof)
     session.profileName = prof.name
@@ -749,9 +749,7 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
   of ":reasoning":
     cmdReasoning(arg, prof)
   of ":prompt":
-    let sp = buildSystemPrompt(prof)
-    stdout.write sp
-    if not sp.endsWith("\n"): stdout.write "\n"
+    cmdResponse buildSystemPrompt(prof)
   of ":show":
     showTool(arg, session.toolLog)
   of ":log":
@@ -762,18 +760,16 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
       if showAll: listSessionPaths()
       else: listSessionPathsForCwd(getCurrentDir())
     if paths.len == 0:
-      hintLn (if showAll: "  no saved sessions"
-              else: "  no saved sessions for this directory  (try `:sessions all`)"),
-        resetStyle
+      cmdResponse (if showAll: "no saved sessions"
+                   else: "no saved sessions for this directory  (try `:sessions all`)")
     else:
       printSessionList(paths, session.savePath, showAll)
   of ":compact":
     let n = compactHistory(messages)
     if n == 0:
-      hintLn "  nothing to compact", resetStyle
+      cmdResponse "nothing to compact"
     else:
-      hintLn &"  · compacted {n} tool result" &
-        (if n == 1: "" else: "s"), resetStyle
+      cmdResponse &"compacted {n} tool result" & (if n == 1: "" else: "s")
       saveSession(session, messages)
   of ":think":
     case arg.strip.toLowerAscii
@@ -782,28 +778,25 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
     of "on", "show", "yes": showThinking = true
     of "off", "hide", "no": showThinking = false
     else:
-      errLn "  usage: :think [on|off]"
+      cmdError "usage: :think [on|off]"
       return true
-    hintLn "  thinking ticker ", (if showThinking: "on" else: "off"), resetStyle
+    cmdResponse "thinking ticker " & (if showThinking: "on" else: "off")
   of ":summarize":
     if prof.name == "":
-      errLn "  no provider configured. use :provider add"
+      cmdError "no provider configured. use :provider add"
     else:
-      hint "  · summarizing... ", resetStyle
-      stdout.flushFile
       let n = summarizeHistory(messages, prof)
       if n == 0:
-        subtleWriteLn(stdout, "failed or not worth it")
+        cmdResponse "summarize: failed or not worth it"
       else:
-        stdout.styledWriteLine fgCyan, styleBright, "done", resetStyle
-        hintLn &"  · collapsed {n} message" &
+        cmdResponse &"collapsed {n} message" &
           (if n == 1: "" else: "s") &
-          &" into a synthetic recap", resetStyle
+          " into a synthetic recap"
         saveSession(session, messages)
   else:
     let suggestion = nearestCommand(name)
     if suggestion != "":
-      errLn "  unknown command: " & c & "  did you mean " & suggestion & "?"
+      cmdError "unknown command: " & c & "  did you mean " & suggestion & "?"
     else:
-      errLn "  unknown command: " & c & "  (try :help)"
+      cmdError "unknown command: " & c & "  (try :help)"
   return true

@@ -64,6 +64,49 @@ proc debugOut*(msg, tag: string) =
   let t = epochTime().formatFloat(ffDecimal, 3)
   stderr.styledWriteLine(fgBlue, "[dbg ", t, "] ", styleBright, tag, resetStyle, fgBlue, " ", msg, resetStyle)
 
+proc cmdResponse*(body: string) =
+  ## System-command response. One blank line above and below, no
+  ## indentation, default terminal color (matching LLM output).
+  ## Distinguishes system feedback from model replies.
+  stdout.write "\n"
+  stdout.write body
+  if not body.endsWith("\n"): stdout.write "\n"
+  stdout.write "\n"
+  stdout.flushFile
+
+proc cmdError*(body: string) =
+  ## Actionable error from a system command — non-bold magenta, no
+  ## indent, blank lines above and below.
+  stdout.write "\n"
+  stdout.styledWrite(fgMagenta, body, resetStyle)
+  if not body.endsWith("\n"): stdout.write "\n"
+  stdout.write "\n"
+  stdout.flushFile
+
+proc renderHelp*() =
+  ## :help body in default terminal color. `3code` highlighted bright
+  ## bold cyan; `:command` tokens highlighted bright white.
+  stdout.write "\n"
+  for line in HelpText.splitLines:
+    var i = 0
+    while i < line.len:
+      if i + 5 <= line.len and line[i ..< i + 5] == "3code":
+        stdout.styledWrite(fgCyan, styleBright, "3code", resetStyle)
+        i += 5
+      elif line[i] == ':' and i + 1 < line.len and
+           line[i + 1] in {'a'..'z', 'A'..'Z', '?'}:
+        var j = i + 1
+        while j < line.len and line[j] in {'a'..'z', 'A'..'Z', '?'}:
+          inc j
+        stdout.styledWrite(fgWhite, styleBright, line[i ..< j], resetStyle)
+        i = j
+      else:
+        stdout.write line[i]
+        inc i
+    stdout.write "\n"
+  stdout.write "\n"
+  stdout.flushFile
+
 proc subtleWrite*(outFile: File, body: string) =
   ## FYI tier — grey 244, readable on both backgrounds. Replaces
   ## styledWrite(styleDim, ..., resetStyle) which is invisible on
@@ -312,7 +355,15 @@ proc printToolResult*(kind: ActionKind, res: string, code: int, idx: int,
   if kind == akBash:
     printBashScroll(res, idx)
   elif kind == akRead:
-    printCompactHeadTail(res, idx, ReadHead, ReadTail)
+    # Strip the trailing "... [N lines hidden, use offset/limit] ..."
+    # markers that runAction appends for the model. The display already
+    # shows the requested line range in the tool-call banner, so
+    # repeating it in the body is just noise to the user.
+    var lines = res.splitLines
+    while lines.len > 0 and lines[^1].startsWith("... [") and
+          lines[^1].endsWith("] ..."):
+      lines.setLen(lines.len - 1)
+    printCompactHeadTail(lines.join("\n"), idx, ReadHead, ReadTail)
   elif kind in {akWebSearch, akWebFetch}:
     printCompactHeadTail(res, idx)
   elif kind == akPlan:

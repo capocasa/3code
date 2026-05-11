@@ -350,7 +350,6 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
     let tmp = getTempDir() / ("3code_bash_" & $getCurrentProcessId() & "_" & $epochTime().int64)
     createDir(tmp)
     let outPath = tmp / "out"
-    let errPath = tmp / "err"
     let scriptPath = tmp / "cmd.sh"
     let stdinPath = tmp / "stdin"
     # Pager-killing env keeps `git log`, `systemctl`, `man`, etc. from hanging
@@ -365,15 +364,13 @@ export DEBIAN_FRONTEND=noninteractive
 """ & cmd & "\n"
     writeFile(scriptPath, script)
     writeFile(stdinPath, act.stdin)
-    let wrapped = &"timeout --foreground 120s sh \"{scriptPath}\" <\"{stdinPath}\" >\"{outPath}\" 2>\"{errPath}\""
+    let wrapped = &"timeout --foreground 120s sh \"{scriptPath}\" <\"{stdinPath}\" >\"{outPath}\" 2>&1"
     let code = execShellCmd(wrapped)
     var rawOut = if fileExists(outPath): readFile(outPath) else: ""
-    let rawErr = if fileExists(errPath): readFile(errPath) else: ""
     try: removeDir(tmp) except CatchableError: discard
     if isBinaryContent(rawOut):
       rawOut = &"[binary output: {rawOut.len} bytes — not shown]"
     let outClip = clipMiddle(rawOut, 2000, 2000)
-    let errClip = clipMiddle(rawErr, 1000, 1000)
     # Body omits the "$ {cmd}" echo — the model already has the command in
     # its own tool_call arguments; no reason to send it back. The display
     # layer prepends it from `act.body` for the human.
@@ -381,9 +378,6 @@ export DEBIAN_FRONTEND=noninteractive
     if outClip.len > 0:
       body.add outClip
       if not outClip.endsWith("\n"): body.add "\n"
-    if errClip.len > 0:
-      body.add "[stderr]\n" & errClip
-      if not errClip.endsWith("\n"): body.add "\n"
     if code == 124:
       body.add "[timed out after 120s — wrap long-running commands or run in the background]"
     if cache != nil and code == 0:
@@ -642,7 +636,7 @@ proc runActionStreaming*(act: Action, cache: ReadCache = nil,
     else: ""
   let beforeExists = mutPath != "" and mutPath != "." and
                        fileExists(resolvePath(mutPath))
-  let (rawOut, rawErr, code) = runStreamingBash(act, cache, onLine)
+  let (rawOut, code) = runStreamingBash(act, cache, onLine)
   # Cache early-return paths: runStreamingBash returns the error body
   # directly with code != 0 (or 0 for unchanged-read). Detect and
   # short-circuit.
@@ -652,14 +646,10 @@ proc runActionStreaming*(act: Action, cache: ReadCache = nil,
   if isBinaryContent(out2):
     out2 = &"[binary output: {out2.len} bytes — not shown]"
   let outClip = clipMiddle(out2, 2000, 2000)
-  let errClip = clipMiddle(rawErr, 1000, 1000)
   var body = ""
   if outClip.len > 0:
     body.add outClip
     if not outClip.endsWith("\n"): body.add "\n"
-  if errClip.len > 0:
-    body.add "[stderr]\n" & errClip
-    if not errClip.endsWith("\n"): body.add "\n"
   if code == 124:
     body.add "[timed out after 120s — wrap long-running commands or run in the background]"
   if cache != nil and code == 0:

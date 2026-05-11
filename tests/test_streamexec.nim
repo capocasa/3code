@@ -5,17 +5,16 @@ suite "streamexec: basic streaming":
   test "streams stdout lines":
     var lines: seq[string]
     let act = Action(kind: akBash, body: "echo hello && echo world")
-    let (rawOut, rawErr, code) = runStreamingBash(act, nil,
+    let (rawOut, code) = runStreamingBash(act, nil,
       proc(line: string) = lines.add(line))
     check code == 0
     check lines == @["hello", "world"]
     check rawOut == "hello\nworld\n"
-    check rawErr == ""
 
   test "handles empty output":
     var lines: seq[string]
     let act = Action(kind: akBash, body: "true")
-    let (rawOut, _, code) = runStreamingBash(act, nil,
+    let (rawOut, code) = runStreamingBash(act, nil,
       proc(line: string) = lines.add(line))
     check code == 0
     check lines.len == 0
@@ -24,7 +23,7 @@ suite "streamexec: basic streaming":
   test "handles single line without trailing newline":
     var lines: seq[string]
     let act = Action(kind: akBash, body: "printf 'no newline'")
-    let (rawOut, _, code) = runStreamingBash(act, nil,
+    let (rawOut, code) = runStreamingBash(act, nil,
       proc(line: string) = lines.add(line))
     check code == 0
     check lines == @["no newline"]
@@ -32,62 +31,61 @@ suite "streamexec: basic streaming":
 
   test "preserves exit code":
     let act = Action(kind: akBash, body: "exit 42")
-    let (_, _, code) = runStreamingBash(act, nil, nil)
+    let (_, code) = runStreamingBash(act, nil, nil)
     check code == 42
 
   test "exit code 1":
     let act = Action(kind: akBash, body: "false")
-    let (_, _, code) = runStreamingBash(act, nil, nil)
+    let (_, code) = runStreamingBash(act, nil, nil)
     check code == 1
 
 suite "streamexec: stderr handling":
-  test "captures stderr separately":
+  test "stderr appears inline in stdout":
     var lines: seq[string]
     let act = Action(kind: akBash, body: "echo out; echo err >&2")
-    let (rawOut, rawErr, code) = runStreamingBash(act, nil,
+    let (rawOut, code) = runStreamingBash(act, nil,
       proc(line: string) = lines.add(line))
     check code == 0
-    # With poStdErrToStdOut, stderr lines also appear in stdout stream
     check "out" in rawOut
-    check "err" in rawErr
+    check "err" in rawOut
 
   test "stderr-only command":
     let act = Action(kind: akBash, body: "echo only_stderr >&2")
-    let (_, rawErr, code) = runStreamingBash(act, nil, nil)
+    let (rawOut, code) = runStreamingBash(act, nil, nil)
     check code == 0
-    check rawErr.contains("only_stderr")
+    check rawOut.contains("only_stderr")
 
 suite "streamexec: stdin piping":
   test "pipes stdin to command":
     let act = Action(kind: akBash, body: "cat", stdin: "hello from stdin\n")
     var lines: seq[string]
-    let (rawOut, _, code) = runStreamingBash(act, nil,
+    let (rawOut, code) = runStreamingBash(act, nil,
       proc(line: string) = lines.add(line))
     check code == 0
     check "hello from stdin" in rawOut
 
   test "empty stdin does not hang":
     let act = Action(kind: akBash, body: "echo done", stdin: "")
-    let (rawOut, _, code) = runStreamingBash(act, nil, nil)
+    let (rawOut, code) = runStreamingBash(act, nil, nil)
     check code == 0
     check rawOut.contains("done")
 
 suite "streamexec: env vars":
   test "PAGER is set to cat":
     let act = Action(kind: akBash, body: "echo $PAGER")
-    let (rawOut, _, code) = runStreamingBash(act, nil, nil)
+    let (rawOut, code) = runStreamingBash(act, nil, nil)
     check code == 0
     check rawOut.strip == "cat"
 
   test "TERM is set to dumb":
     let act = Action(kind: akBash, body: "echo $TERM")
-    let (rawOut, _, code) = runStreamingBash(act, nil, nil)
+    let (rawOut, code) = runStreamingBash(act, nil, nil)
     check code == 0
     check rawOut.strip == "dumb"
 
   test "NO_COLOR is set":
     let act = Action(kind: akBash, body: "echo $NO_COLOR")
-    let (rawOut, _, code) = runStreamingBash(act, nil, nil)
+    let (rawOut, code) = runStreamingBash(act, nil, nil)
     check code == 0
     check rawOut.strip == "1"
 
@@ -95,7 +93,7 @@ suite "streamexec: multi-line output":
   test "streams many lines":
     var lines: seq[string]
     let act = Action(kind: akBash, body: "seq 1 10")
-    let (rawOut, _, code) = runStreamingBash(act, nil,
+    let (rawOut, code) = runStreamingBash(act, nil,
       proc(line: string) = lines.add(line))
     check code == 0
     check lines.len == 10
@@ -107,7 +105,7 @@ suite "streamexec: multi-line output":
     var lines: seq[string]
     let act = Action(kind: akBash,
       body: "for i in 1 2 3; do echo \"line $i\"; sleep 0.1; done")
-    let (_, _, code) = runStreamingBash(act, nil,
+    let (_, code) = runStreamingBash(act, nil,
       proc(line: string) = lines.add(line))
     check code == 0
     check lines == @["line 1", "line 2", "line 3"]
@@ -116,7 +114,7 @@ suite "streamexec: special characters":
   test "handles output with special shell chars":
     var lines: seq[string]
     let act = Action(kind: akBash, body: "echo 'hello world' && echo 'a|b>c'")
-    let (_, _, code) = runStreamingBash(act, nil,
+    let (_, code) = runStreamingBash(act, nil,
       proc(line: string) = lines.add(line))
     check code == 0
     check "hello world" in lines
@@ -125,7 +123,7 @@ suite "streamexec: special characters":
   test "handles empty lines in output":
     var lines: seq[string]
     let act = Action(kind: akBash, body: "echo 'a'; echo ''; echo 'b'")
-    let (_, _, code) = runStreamingBash(act, nil,
+    let (_, code) = runStreamingBash(act, nil,
       proc(line: string) = lines.add(line))
     check code == 0
     check lines == @["a", "", "b"]
@@ -133,7 +131,7 @@ suite "streamexec: special characters":
   test "handles unicode output":
     var lines: seq[string]
     let act = Action(kind: akBash, body: "echo '● ○ ◔ ◑ ◕'")
-    let (_, _, code) = runStreamingBash(act, nil,
+    let (_, code) = runStreamingBash(act, nil,
       proc(line: string) = lines.add(line))
     check code == 0
     check lines[0].contains("●")
@@ -141,13 +139,13 @@ suite "streamexec: special characters":
 suite "streamexec: callback is optional":
   test "nil callback works":
     let act = Action(kind: akBash, body: "echo hello")
-    let (rawOut, _, code) = runStreamingBash(act, nil, nil)
+    let (rawOut, code) = runStreamingBash(act, nil, nil)
     check code == 0
     check rawOut == "hello\n"
 
   test "default callback is nil":
     let act = Action(kind: akBash, body: "echo hello")
-    let (rawOut, _, code) = runStreamingBash(act, nil)
+    let (rawOut, code) = runStreamingBash(act, nil)
     check code == 0
     check rawOut == "hello\n"
 
@@ -158,7 +156,7 @@ suite "streamexec: file mutation snapshot":
     let filePath = tmpDir / "target.txt"
     writeFile(filePath, "original content\n")
     let act = Action(kind: akBash, body: "echo 'new content' > " & filePath)
-    let (_, _, code) = runStreamingBash(act, nil, nil)
+    let (_, code) = runStreamingBash(act, nil, nil)
     check code == 0
     let content = readFile(filePath)
     check content == "new content\n"
@@ -205,11 +203,12 @@ suite "runActionStreaming: bash post-processing":
     # Output should be clipped (body < raw 10000 chars)
     check output.len < 10000
 
-  test "captures stderr with [stderr] prefix":
+  test "merges stderr inline with stdout":
     let act = Action(kind: akBash, body: "echo out; echo err >&2")
     let (output, code, _) = runActionStreaming(act, nil, nil)
     check code == 0
-    check "[stderr]" in output
+    check "[stderr]" notin output
+    check "out" in output
     check "err" in output
 
   test "propagates non-zero exit code":

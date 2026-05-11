@@ -931,7 +931,7 @@ const ConfigExample* = """  [settings]
 """
 
 const HelpText* = """
-3code — the economical coding agent. bring your own third-party endpoint.
+3code — the economical coding agent.
 
 commands:
   :help             show this message
@@ -968,11 +968,6 @@ input:
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
-
-known good:
-  glm, qwen, gpt-oss, deepseek across baseten, cerebras, deepinfra,
-  deepseek, fireworks, groq, nebius, nvidia, ovh, sambanova, together, zai, zaicode.
-  run `3code --good` for the full list. other combos require --experimental.
 """
 
 proc knownGoodFamily*(p: Profile): string =
