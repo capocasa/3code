@@ -310,3 +310,26 @@ suite "full turn lifecycle":
     check "lbl" in rowText(g, 3)
     check "❯" in rowText(g, 4)
 
+  test "long repaint sequence keeps only the latest footer":
+    let g = newGrid()
+    for i in 0 ..< 8:
+      if i > 0:
+        g.feed ClearBarPromptBytes
+      g.feed "line " & $i & "\n"
+      g.feed barFooterBytes("LBL " & $i, DimPromptColor)
+
+    var barRow = -1
+    var labelCount = 0
+    for r in 0 ..< g.rows.len:
+      if "LBL" in rowText(g, r):
+        inc labelCount
+      if "LBL 7" in rowText(g, r):
+        barRow = r
+    check labelCount == 1
+    check barRow >= 0
+    check "line 7" in rowText(g, barRow - 1)
+    check "❯" in rowText(g, barRow + 1)
+    check g.cellFg(barRow, 0) == colCyan
+    check hasAttr(g.cellAttr(barRow, 0), saBold)
+    check g.cellFg(barRow + 1, 0) == col256
+    check g.cellAt(barRow + 1, 0).fgColorIdx == 244

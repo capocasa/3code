@@ -110,3 +110,7 @@ suite "resume bar":
     check "↑150" in rowText(g, barRow)
     check "↻50" in rowText(g, barRow)
     check "❯" in rowText(g, barRow + 1)
+    check g.cellFg(barRow, 0) == colCyan
+    check hasAttr(g.cellAttr(barRow, 0), saBold)
+    check g.cellFg(barRow + 1, 0) == colCyan
+    check hasAttr(g.cellAttr(barRow + 1, 0), saBold)
