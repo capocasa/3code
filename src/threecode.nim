@@ -129,7 +129,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         let args =
           try: parseJson(if argsStr == "": "{}" else: argsStr)
           except CatchableError as e:
-            stderr.writeLine "3code: tool_call " & name &
+            debugOut "tool_call " & name &
               " has malformed arguments JSON (" & e.msg & "): " & argsStr
             newJObject()
         let act = toolCallToAction(p.family, name, args)
