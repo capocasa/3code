@@ -136,6 +136,10 @@ proc printSkillLoaded*(act: Action) =
   subtleWriteLn(stdout, "· loaded skill: " & name)
 
 const StreamMaxLines* = 8
+  ## Maximum lines shown in the bash scroll area, both during live
+  ## streaming (`StreamingView`) and in the static post-stream
+  ## rendering (`printBashScroll`). Configurable so tests can shrink
+  ## the viewport.
 
 proc eraseRows(n: int) =
   ## Erase n rows above the cursor: move up, clear line, repeat.
@@ -147,6 +151,16 @@ proc printStreamingLine*(line: string) =
   ## by non-viewport callers.
   subtleWriteLn(stdout, "  " & line)
 
+proc indentedRowCount(l: string): int =
+  ## Number of visual terminal rows a single `printLine(l)` call
+  ## occupies, accounting for soft-wrap at the terminal width. The
+  ## streaming viewport needs this to erase the correct number of
+  ## rows when long lines wrap (the prior implementation counted
+  ## logical lines and undercounted when output wrapped).
+  let termW = try: terminalWidth() except CatchableError: 80
+  let bodyW = max(20, termW - 3)
+  result = max(1, charWrapAnsi(l, bodyW).len)
+
 type
   StreamingView* = object
     ## Fixed-height viewport for streaming bash output. Lines append
@@ -155,11 +169,22 @@ type
     maxLines*: int
     idx*: int         ## tool call index for the :show hint
     total*: int       ## total lines received (not just visible)
-    onScreen*: int    ## lines currently occupying terminal rows (≤ maxLines)
+    onScreen*: int    ## visual rows currently on screen (post-wrap)
     buf*: seq[string] ## ring buffer of last maxLines lines
 
 proc initStreamingView*(maxLines = StreamMaxLines, idx = 0): StreamingView =
   result = StreamingView(maxLines: maxLines, idx: idx, buf: @[])
+
+proc trimTrailingBlank(lines: var seq[string]) =
+  while lines.len > 0 and lines[^1].strip == "":
+    lines.setLen lines.len - 1
+
+proc printLine*(l: string) =
+  let termW = try: terminalWidth() except CatchableError: 80
+  let bodyW = max(20, termW - 3)
+  let chunks = charWrapAnsi(l, bodyW)
+  for i, chunk in chunks:
+    subtleWriteLn(stdout, "  " & chunk)
 
 proc omittedLine(v: StreamingView): string =
   let hidden = max(0, v.total - (v.maxLines - 1))
@@ -173,20 +198,24 @@ proc addLine*(v: var StreamingView, line: string) =
   ## Add one line to the viewport. For the first `maxLines` lines, appends
   ## normally. After that, erases the entire viewport and reprints an
   ## omission marker plus the latest tail, giving the illusion of a
-  ## bounded scroll area.
+  ## bounded scroll area. Visual rows are tracked separately so that
+  ## wrapped long lines erase cleanly.
   inc v.total
   v.buf.add line
   if v.total <= v.maxLines:
-    subtleWriteLn(stdout, "  " & line)
-    inc v.onScreen
+    printLine(line)
+    v.onScreen += indentedRowCount(line)
   else:
     eraseRows(v.onScreen)
-    subtleWriteLn(stdout, "  " & omittedLine(v))
+    v.onScreen = 0
+    let mark = omittedLine(v)
+    printLine(mark)
+    v.onScreen += indentedRowCount(mark)
     let tailLines = max(0, v.maxLines - 1)
     let start = max(0, v.buf.len - tailLines)
     for i in start..<v.buf.len:
-      subtleWriteLn(stdout, "  " & v.buf[i])
-    v.onScreen = min(v.maxLines, v.total)
+      printLine(v.buf[i])
+      v.onScreen += indentedRowCount(v.buf[i])
     stdout.flushFile()
 
 proc erase*(v: var StreamingView) =
@@ -194,18 +223,33 @@ proc erase*(v: var StreamingView) =
   eraseRows(v.onScreen)
   v.onScreen = 0
 
-proc trimTrailingBlank(lines: var seq[string]) =
-  while lines.len > 0 and lines[^1].strip == "":
-    lines.setLen lines.len - 1
+proc printBashScroll*(res: string, idx: int, maxLines = StreamMaxLines) =
+  ## Static scroll-area render for completed bash output. Mirrors the
+  ## shape of the live `StreamingView`: up to `maxLines` lines verbatim,
+  ## or an "... N lines omitted" marker plus the latest (maxLines - 1)
+  ## lines when the body overflows. Terminal output is uniquely
+  ## understood as streaming, so this matches the live view rather than
+  ## the head/tail compact used by other tool kinds.
+  var lines = res.splitLines
+  trimTrailingBlank(lines)
+  if lines.len <= maxLines:
+    for l in lines: printLine(l)
+    return
+  let tailLen = max(0, maxLines - 1)
+  let hidden = lines.len - tailLen
+  let show = if idx > 0: " :show " & $idx & " for full" else: ""
+  subtleWriteLn(stdout,
+    &"  ... {hidden} line" & (if hidden == 1: "" else: "s") &
+    " omitted" & show)
+  for i in lines.len - tailLen ..< lines.len:
+    printLine(lines[i])
 
-proc printLine*(l: string) =
-  let termW = try: terminalWidth() except CatchableError: 80
-  let bodyW = max(20, termW - 3)
-  let chunks = charWrapAnsi(l, bodyW)
-  for i, chunk in chunks:
-    subtleWriteLn(stdout, "  " & chunk)
-
-proc printBashCompact*(res: string, idx: int, head = CompactHead, tail = CompactTail) =
+proc printCompactHeadTail*(res: string, idx: int,
+                           head = CompactHead, tail = CompactTail) =
+  ## Head/tail truncation for non-bash tool kinds that don't have the
+  ## streaming-terminal semantics (read, web search, web fetch). Keeps
+  ## the first `head` and last `tail` lines with an "N lines hidden"
+  ## marker in the middle. Bash uses `printBashScroll` instead.
   var lines = res.splitLines
   trimTrailingBlank(lines)
   var header = 0
@@ -259,17 +303,18 @@ proc printDiff*(diff: string) =
 
 proc printToolResult*(kind: ActionKind, res: string, code: int, idx: int,
                      diff = "") =
-  ## Body of a tool turn. bash/read fan out via `printBashCompact`
-  ## (different head/tail caps); write/patch print the headline only on
-  ## success, or the first error line on failure. A non-empty `diff` is
-  ## colourised after the body. Banner is drawn separately by
-  ## `renderToolBanner`.
+  ## Body of a tool turn. bash uses the scroll-area shape via
+  ## `printBashScroll` (streaming-style: marker + tail), read/web use
+  ## the head/tail compact via `printCompactHeadTail`; write/patch
+  ## print the headline only on success, or the first error line on
+  ## failure. A non-empty `diff` is colourised after the body. Banner
+  ## is drawn separately by `renderToolBanner`.
   if kind == akBash:
-    printBashCompact(res, idx)
+    printBashScroll(res, idx)
   elif kind == akRead:
-    printBashCompact(res, idx, ReadHead, ReadTail)
+    printCompactHeadTail(res, idx, ReadHead, ReadTail)
   elif kind in {akWebSearch, akWebFetch}:
-    printBashCompact(res, idx)
+    printCompactHeadTail(res, idx)
   elif kind == akPlan:
     let termW = try: terminalWidth() except CatchableError: 80
     let bodyW = max(20, termW - 3)
