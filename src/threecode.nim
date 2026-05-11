@@ -138,36 +138,47 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         startBarTick(currentBarLabel)
         let toolT0 = epochTime()
         if session.readCache == nil: session.readCache = newReadCache()
-        var (r, code, diff) =
-          if act.kind == akBash:
-            discard stopBarTick()
-            let termH = try: terminalHeight() except CatchableError: 24
-            # Scrolling region: rows 1..termH-2, leaving bar+prompt
-            # pinned at the bottom two rows.
-            stdout.write &"\x1b[1;{termH - 2}r"
-            # Cursor at bottom of scrolling region
-            stdout.write &"\x1b[{termH - 2};1H"
-            renderToolBanner(bannerFor(act), akBash, -1)
-            stdout.flushFile()
-            var sv = initStreamingView(StreamMaxLines, idx)
-            let result = runActionStreaming(act, session.readCache,
-              proc(line: string) = sv.addLine(line))
-            sv.erase()
-            # Erase the initial banner row
-            stdout.write "\x1b[1A\x1b[2K"
-            let elapsed = (epochTime() - toolT0).int
-            renderToolBanner(bannerFor(act), akBash, result.code, elapsed)
-            printToolResult(akBash, result.output, result.code, idx,
-              result.diff)
-            # Reset scrolling region, position cursor at bar row
-            stdout.write "\x1b[r"
-            stdout.write &"\x1b[{termH - 1};1H"
-            repaintBarPrompt()
-            result
-          else:
-            var res = runAction(act, session.readCache)
-            discard stopBarTick()
-            res
+        # try/finally guarantees `stopBarTick` runs even if `runAction`
+        # raises. Without this, an unhandled exception in a non-bash
+        # action leaves the bar-tick thread painting the bottom row
+        # with an ever-growing seconds counter and no spinner glyph —
+        # the symptom users see is a frozen-looking bar with an
+        # incrementing timer and a Ctrl-C that does nothing because
+        # the main thread has already unwound past the tool block.
+        var r: string
+        var code: int
+        var diff: string
+        try:
+          (r, code, diff) =
+            if act.kind == akBash:
+              discard stopBarTick()
+              let termH = try: terminalHeight() except CatchableError: 24
+              # Scrolling region: rows 1..termH-2, leaving bar+prompt
+              # pinned at the bottom two rows.
+              stdout.write &"\x1b[1;{termH - 2}r"
+              # Cursor at bottom of scrolling region
+              stdout.write &"\x1b[{termH - 2};1H"
+              renderToolBanner(bannerFor(act), akBash, -1)
+              stdout.flushFile()
+              var sv = initStreamingView(StreamMaxLines, idx)
+              let result = runActionStreaming(act, session.readCache,
+                proc(line: string) = sv.addLine(line))
+              sv.erase()
+              # Erase the initial banner row
+              stdout.write "\x1b[1A\x1b[2K"
+              let elapsed = (epochTime() - toolT0).int
+              renderToolBanner(bannerFor(act), akBash, result.code, elapsed)
+              printToolResult(akBash, result.output, result.code, idx,
+                result.diff)
+              # Reset scrolling region, position cursor at bar row
+              stdout.write "\x1b[r"
+              stdout.write &"\x1b[{termH - 1};1H"
+              repaintBarPrompt()
+              result
+            else:
+              runAction(act, session.readCache)
+        finally:
+          discard stopBarTick()
         if act.kind == akPlan and code == 0:
           session.plan = act.plan
         let toolElapsed = epochTime() - toolT0

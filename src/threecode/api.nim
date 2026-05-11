@@ -1345,6 +1345,13 @@ proc endTurn*() =
   ## cyan prompt color. Show the terminal caret. The gap is
   ## one-shot — `emitUserSubmit` overwrites it with the receipt at
   ## next submit, so it never persists in scroll history.
+  # Defensive: nothing should be animating between turns. If a tool
+  # path leaked the bar-tick thread (e.g. an uncaught exception
+  # past the per-tool stopBarTick), the thread would otherwise keep
+  # painting the bottom row with a ticking seconds counter forever.
+  # Idempotent — these are no-ops when the threads aren't running.
+  discard stopBarTick()
+  stopSpinner()
   if currentBarLabel.len > 0:
     let label = currentBarLabel
     clearBarPrompt()
