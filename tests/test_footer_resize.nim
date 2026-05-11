@@ -361,3 +361,24 @@ suite "footer width-aware emission":
     check "\x1b[1A" in barFooterBytes("LBL", DimPromptColor)
     check "\x1b[2A" in barFooterBelowBytes("LBL", DimPromptColor)
     check "\x1b[1A" in spinnerFooterBytes("⠋", "LBL", "", 1)
+
+  test "bar emitters write `\\r\\n` not bare `\\n` between rows":
+    # OPOST/ONLCR is documented as required by the bar emitters (each
+    # bar/prompt break uses a bare `\n` relying on the terminal to add
+    # CR). But after a SIGWINCH-shrink we have observed OPOST being
+    # left off — the prompt then lands at the bar payload's end column
+    # instead of col 0 because LF without CR moves the cursor down
+    # without resetting the column. Belt-and-braces: explicit `\r`
+    # before every `\n` makes the rows OPOST-independent.
+    proc hasBareLfBetweenRows(s: string): bool =
+      var i = 0
+      while i < s.len:
+        if s[i] == '\n':
+          if i == 0: return true
+          if s[i - 1] != '\r': return true
+        inc i
+      false
+    check not hasBareLfBetweenRows(barFooterBytes("LBL", DimPromptColor, 80))
+    check not hasBareLfBetweenRows(
+      barFooterBelowBytes("LBL", DimPromptColor, 80))
+    check not hasBareLfBetweenRows(spinnerFooterBytes("⠋", "LBL", "", 1, 80))

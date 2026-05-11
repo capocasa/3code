@@ -242,6 +242,14 @@ proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int,
   # visual rows; the trailing back-walk must compensate so the cursor
   # parks on the bar's *first* wrap row, not its last. `termW = 0`
   # falls back to the legacy single-row walk.
+  # Emit explicit CR before every `\n` instead of relying on OPOST/ONLCR
+  # to translate LF to CRLF. The previous SIGWINCH fix preserves OPOST
+  # through the editor's `getchr`, but the dim prompt still drifts right
+  # after a shrink-then-content sequence — some path (terminal reflow
+  # of an in-flight raw-mode capture elsewhere, a tool subprocess
+  # leaving termios with OPOST off, etc.) can still flip it off
+  # mid-session. Belt-and-braces: with explicit `\r`, the spinner /
+  # bar / prompt rows snap to col 0 regardless of OPOST state.
   let barCells = labelCells(label) + 4 + ($elapsed).len
   let barRows = barWrapRows(barCells, termW)
   result = "\x1b[?25l\r\x1b[1A\x1b[2K"
@@ -249,9 +257,9 @@ proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int,
     result.add GreyFg
     result.add ticker
     result.add Reset
-  result.add "\n\x1b[2K"
+  result.add "\r\n\x1b[2K"
   result.add spinnerBarBytes(frame, label, elapsed)
-  result.add "\n\x1b[2K" & DimPromptColor & "❯ " & Reset
+  result.add "\r\n\x1b[2K" & DimPromptColor & "❯ " & Reset
   result.add "\r\x1b[" & $barRows & "A"
 
 proc spinnerCleanupBytes*(tickerRows = 1): string =
@@ -281,9 +289,11 @@ proc barFooterBytes*(label, promptColor: string, termW = 0): string =
   ## the only position from which `ClearBarPromptBytes` can erase the
   ## whole bar+prompt block cleanly. Passing `0` keeps the old
   ## single-row back-walk for callers that haven't been width-aware.
+  # Explicit `\r` before `\n` so the prompt row reaches col 0 even when
+  # OPOST/ONLCR is off — see `spinnerFooterBytes` for the rationale.
   let barRows = barWrapRows(2 + labelCells(label), termW)
   paintBarBytes(label) &
-    "\n\x1b[2K" & promptColor & "❯ " & Reset &
+    "\r\n\x1b[2K" & promptColor & "❯ " & Reset &
     "\r\x1b[" & $barRows & "A"
 
 const ClearBarPromptBytes* = "\r\x1b[J"
@@ -310,9 +320,11 @@ proc barFooterBelowBytes*(label, promptColor: string, termW = 0): string =
   ## column to 3 (1-based, == col 2 0-based, right after the bullet).
   ## With a wrapped bar (post-shrink) `n` is larger than the
   ## single-row default of 2.
+  # Explicit `\r` before each `\n` so the bar and prompt rows reach
+  # col 0 even when OPOST/ONLCR is off — see `spinnerFooterBytes`.
   let barRows = barWrapRows(2 + labelCells(label), termW)
-  "\n\x1b[2K" & liveBarBytes(label) &
-    "\n\x1b[2K" & promptColor & "❯ " & Reset &
+  "\r\n\x1b[2K" & liveBarBytes(label) &
+    "\r\n\x1b[2K" & promptColor & "❯ " & Reset &
     "\x1b[" & $(barRows + 1) & "A\x1b[3G"
 
 const ClearBarBelowBytes* = "\n\r\x1b[J\x1b[1A\x1b[3G"
