@@ -924,6 +924,15 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   var nonSSE: seq[string]
   var contentStarted = false
   var xmlFilter = XmlToolFilter()
+  # Completion signals. A clean upstream EOF without either `[DONE]` or a
+  # non-empty `finish_reason` means the SSE stream was cut mid-response
+  # (server-side keepalive timeout, LB drop, etc.). We need to detect that
+  # because Nim's `readLine` returns `false` on graceful FIN and the loop
+  # exits without raising — so partial deltas would otherwise be returned
+  # as if they were a complete assistant turn, leaving the bullet `· Xs`
+  # marker on screen and stranding the user with an unfinished job.
+  var sawDone = false
+  var sawFinish = false
   # Ticker state: the full reasoning text is retained in `accReasoning` (so
   # it can be echoed back to the provider — DeepSeek rejects follow-up
   # requests that drop reasoning_content); the ticker display only shows
@@ -1070,10 +1079,15 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       break
     if line.startsWith("data: "):
       let payload = line["data: ".len .. ^1]
-      if payload.strip == "[DONE]": continue
+      if payload.strip == "[DONE]":
+        sawDone = true
+        continue
       let j = try: parseJson(payload) except CatchableError: continue
       let choices = j{"choices"}
       if choices != nil and choices.kind == JArray and choices.len > 0:
+        let fr = choices[0]{"finish_reason"}
+        if fr != nil and fr.kind == JString and fr.getStr.len > 0:
+          sawFinish = true
         let delta = choices[0]{"delta"}
         if delta != nil and delta.kind == JObject:
           # Reasoning chunks arrive on `reasoning_content` (DeepSeek, Qwen,
@@ -1194,6 +1208,19 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   if streamErr.len > 0:
     result.errMsg = "stream read: " & streamErr &
       (if nonSSE.len > 0: ": " & nonSSE.join("\n") else: "")
+    return
+
+  # Truncation guard: 200 OK with partial choice deltas but neither `[DONE]`
+  # nor a `finish_reason` means the upstream socket closed before the model
+  # was finished. Surface it as a retryable server error rather than handing
+  # the caller a half-formed assistant turn (would otherwise show as a lone
+  # `· Xs` line with no token bar and no tool_calls, prompting the user as
+  # if the model had simply stopped).
+  let gotAnyDelta = accContent.len > 0 or accTools.len > 0 or accReasoning.len > 0
+  if result.statusCode == 200 and gotAnyDelta and
+     not sawDone and not sawFinish:
+    closeCachedStreamConn()
+    result.errMsg = "stream truncated before completion"
     return
 
   # Build assistant message if we saw any SSE content.
