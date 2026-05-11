@@ -34,6 +34,12 @@ key = "gsk_..."
 models = "llama-3.3-70b-versatile llama-3.1-8b-instant"
 
 [provider]
+name = "openrouter"
+url = "https://openrouter.ai/api/v1"
+key = "sk-or-..."
+models = "openai/gpt-oss-120b"
+
+[provider]
 name = "together"
 url = "https://api.together.xyz/v1"
 key = "..."

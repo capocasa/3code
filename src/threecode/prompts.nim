@@ -71,6 +71,7 @@ const KnownGoodCombos* = [
     ("ovh",       "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
     ("sambanova", "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
     ("deepinfra", "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
+    ("openrouter", "openai/gpt-oss-120b",                           "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
 
     # deepseek
     ("baseten",   "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false),
