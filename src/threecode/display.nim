@@ -555,10 +555,9 @@ proc renderToolPending*(banner: string, kind: ActionKind) =
 
 proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -1) =
   ## Final tool banner. Icons render in default text color regardless of
-  ## exit code. `code` is retained so a future error glyph can be added
-  ## without plumbing changes. Optional `(Ns)` suffix when `elapsedS >= 1`
+  ## exit code. Optional `(Ns)` suffix when `elapsedS >= 1`
   ## (live); replay passes -1 to omit it.
-  let icon = toolIcon(kind)
+  let icon = if kind == akBash and code > 0: "¤" else: toolIcon(kind)
   stdout.write icon & " "
   stdout.write banner
   if elapsedS >= 1:
