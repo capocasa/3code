@@ -7,6 +7,7 @@ namedBin["threecode"] = "3code"
 
 requires "nim >= 2.0.0"
 requires "streamhttp >= 0.1.2"
+requires "ttty >= 0.1.0"
 
 task docs, "Build HTML manual from docs/manual.md":
   withDir "docs":
