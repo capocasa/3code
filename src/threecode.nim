@@ -25,6 +25,7 @@
 ##     └── minline      readline-style input
 
 import std/[json, os, parseopt, strformat, strutils, terminal, times]
+import std/exitprocs
 when defined(posix):
   import std/posix
 import threecode/[types, util, prompts, shell, loop, session, compact,
@@ -467,6 +468,23 @@ proc main() =
         activeCurrent = alt.name
         prof = alt
   var editor = welcome(prof)
+  # Ensure the cancel watcher's termios restore is registered as an exit
+  # proc. The minline restoreTerminal exit proc handles cursor + colors;
+  # this one restores stdin's termios if the cancel watcher put it in raw
+  # mode and the process exits mid-stream.
+  addExitProc(restoreCancelTermios)
+  when defined(posix):
+    # SIGTERM / SIGHUP: the default handler kills the process without
+    # running exit procs, leaving the terminal broken. Install handlers
+    # that restore terminal state first.
+    proc termRestoreAndQuit(sig: cint) {.noconv.} =
+      minline.restoreTerminal()
+      restoreCancelTermios()
+      # Re-raise with default handler so the exit code reflects the signal.
+      signal(sig, SIG_DFL)
+      discard posix.raise(sig)
+    signal(SIGTERM, termRestoreAndQuit)
+    signal(SIGHUP, termRestoreAndQuit)
   editor.completionCallback = proc(ed: minline.LineEditor): seq[string] =
     completionFor(ed.lineText)
   if prof.name == "":

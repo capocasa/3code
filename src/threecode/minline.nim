@@ -54,14 +54,19 @@ when defined(posix):
     sa.sa_handler = winchHandler
     discard sigaction(SIGWINCH, sa, nil)
 
+proc restoreTerminal*() {.noconv.} =
+  ## Single point of terminal restore. Registered once as an exit proc
+  ## and called from signal handlers. Covers cursor visibility, color/style
+  ## reset, and bracketed-paste teardown.
+  try:
+    stdout.write "\x1b[?25h"   # show cursor
+    stdout.write "\x1b[0m"     # reset attributes (colors, bold, dim, etc.)
+    stdout.write "\x1b[?2004l" # disable bracketed paste
+    stdout.flushFile()
+  except CatchableError: discard
+
 if isatty(stdin):
-  addExitProc(resetAttributes)
-  # Disable bracketed paste mode on exit so the user's shell doesn't inherit
-  # the paste-wrap markers (which it would then surface as literal `[200~`).
-  addExitProc(proc() {.noconv.} =
-    try: stdout.write("\e[?2004l"); stdout.flushFile()
-    except CatchableError: discard
-  )
+  addExitProc(restoreTerminal)
 
 when defined(windows):
   proc putchr*(c: cint): cint {.discardable, header: "<conio.h>", importc: "_putch".}

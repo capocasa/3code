@@ -644,7 +644,7 @@ proc setSteadyCursor() =
   stdout.write "\x1b[2 q"
   stdout.flushFile
 
-proc restoreCursor() {.noconv.} =
+proc restoreCursorStyle() {.noconv.} =
   try:
     stdout.write "\x1b[0 q"
     stdout.flushFile
@@ -652,7 +652,7 @@ proc restoreCursor() {.noconv.} =
 
 proc welcome*(p: Profile): minline.LineEditor =
   setSteadyCursor()
-  addExitProc(restoreCursor)
+  addExitProc(restoreCursorStyle)
   stdout.write "\n"
   stdout.styledWriteLine fgCyan, styleBright, "  ╭─╮"
   stdout.styledWrite fgCyan, styleBright, "   ─┤  ", resetStyle, styleBright, "3code ", resetStyle, fgCyan, styleBright, "v" & Version, resetStyle

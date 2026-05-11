@@ -689,9 +689,14 @@ when defined(posix):
     if cancelOrigTermiosValid:
       discard tcSetAttr(0.cint, TCSANOW, addr cancelOrigTermios)
       cancelOrigTermiosValid = false
+  proc restoreCancelTermios*() {.noconv.} =
+    if cancelOrigTermiosValid:
+      discard tcSetAttr(0.cint, TCSANOW, addr cancelOrigTermios)
+      cancelOrigTermiosValid = false
 else:
   proc startCancelWatcher() = discard
   proc stopCancelWatcher() = discard
+  proc restoreCancelTermios*() {.noconv.} = discard
 
 type StreamOutcome = object
   statusCode: int
