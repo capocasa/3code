@@ -203,7 +203,28 @@ proc liveBarBytes*(label: string): string =
   ## glyph during streaming.
   CyanFg & BoldOn & "  " & label & Reset
 
-proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int): string =
+proc labelCells(label: string): int =
+  ## Visible cells the (plain-text, no-SGR) bar/spinner label occupies.
+  ## Labels come from `liveLabel` / `tokenLineLabel` — both build the
+  ## string from glyphs and digits joined by spaces, no escape codes.
+  ## One cell per rune; wide CJK glyphs are not used in our labels.
+  var i = 0
+  while i < label.len:
+    let rl = max(1, runeLenAt(label, i))
+    inc result
+    i += rl
+
+proc barWrapRows(visibleCells, termW: int): int =
+  ## Visual rows a bar payload of `visibleCells` cells occupies on a
+  ## terminal `termW` wide. `termW = 0` means "unknown" — caller is
+  ## the legacy single-row path and gets `1`. Otherwise round up,
+  ## never less than 1.
+  if termW <= 0 or visibleCells <= 0: return 1
+  result = (visibleCells + termW - 1) div termW
+  if result < 1: result = 1
+
+proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int,
+                         termW = 0): string =
   ## Three-row spinner footer. Cursor in: col 0 of the bar row.
   ## Cursor out: same. The row above (ticker overlay target) is
   ## cleared every frame so reasoning→no-reasoning is a faithful
@@ -214,6 +235,15 @@ proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int): string =
   # movement or on sync-update end, so a single `?25l` from beginTurn
   # isn't enough — at 80ms cadence the re-shown caret is visible as a
   # flicker glued to the braille glyph. Cheap, idempotent.
+  #
+  # Bar payload visible width = "<frame> <label> <elapsed>s" = label
+  # cells + 4 (frame + 2 spaces + "s") + digits of `elapsed`. When
+  # `termW > 0` and the payload exceeds it, the bar wraps to `barRows`
+  # visual rows; the trailing back-walk must compensate so the cursor
+  # parks on the bar's *first* wrap row, not its last. `termW = 0`
+  # falls back to the legacy single-row walk.
+  let barCells = labelCells(label) + 4 + ($elapsed).len
+  let barRows = barWrapRows(barCells, termW)
   result = "\x1b[?25l\r\x1b[1A\x1b[2K"
   if ticker.len > 0:
     result.add GreyFg
@@ -222,7 +252,7 @@ proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int): string =
   result.add "\n\x1b[2K"
   result.add spinnerBarBytes(frame, label, elapsed)
   result.add "\n\x1b[2K" & DimPromptColor & "❯ " & Reset
-  result.add "\r\x1b[1A"
+  result.add "\r\x1b[" & $barRows & "A"
 
 proc spinnerCleanupBytes*(tickerRows = 1): string =
   ## Erase spinner ticker + bar + prompt, cursor at col 0 of the bar
@@ -238,13 +268,23 @@ proc paintBarBytes*(label: string): string =
   ## ends at the end of the payload on the bar row.
   "\r\x1b[2K" & liveBarBytes(label)
 
-proc barFooterBytes*(label, promptColor: string): string =
+proc barFooterBytes*(label, promptColor: string, termW = 0): string =
   ## Bar at the current row + prompt at the row below, cursor parked
   ## at col 0 of the bar row. Replaces the old `liveFooterBytes` —
   ## prompt color is now a parameter (dim while typing impossible,
   ## bright cyan when readline is active).
+  ##
+  ## `termW` is the current terminal column count (0 = unknown). When
+  ## the bar payload (`"  " & label`) is wider than `termW`, the bar
+  ## wraps to multiple visual rows. The trailing back-walk must climb
+  ## *all* of them so the cursor parks on the bar's first wrap row —
+  ## the only position from which `ClearBarPromptBytes` can erase the
+  ## whole bar+prompt block cleanly. Passing `0` keeps the old
+  ## single-row back-walk for callers that haven't been width-aware.
+  let barRows = barWrapRows(2 + labelCells(label), termW)
   paintBarBytes(label) &
-    "\n\x1b[2K" & promptColor & "❯ " & Reset & "\r\x1b[1A"
+    "\n\x1b[2K" & promptColor & "❯ " & Reset &
+    "\r\x1b[" & $barRows & "A"
 
 const ClearBarPromptBytes* = "\r\x1b[J"
   ## Erase the bar + prompt area, cursor at col 0 of the bar row.
@@ -254,7 +294,7 @@ const ClearBarPromptBytes* = "\r\x1b[J"
   ## everything below its anchor, so clearing from the anchor is the
   ## stable recovery operation before content pushes the footer down.
 
-proc barFooterBelowBytes*(label, promptColor: string): string =
+proc barFooterBelowBytes*(label, promptColor: string, termW = 0): string =
   ## Paint bar one row below the cursor + prompt two rows below,
   ## walking the cursor back up to the bullet row at column 2 (right
   ## after `● `). Used during mid-line streaming where the cursor
@@ -265,12 +305,15 @@ proc barFooterBelowBytes*(label, promptColor: string): string =
   ## Avoids CSI s/u (SCO save/restore cursor) — those are silently
   ## ignored on enough terminals (we shipped a regression where each
   ## refresh stacked another bar in scroll because the cursor never
-  ## returned). `\x1b[2A` walks up 2 rows; `\x1b[3G` sets the column
-  ## to 3 (1-based, == col 2 0-based, the position right after the
-  ## bullet).
+  ## returned). The trailing `\x1b[<n>A\x1b[3G` walks back up to the
+  ## bullet row (`n` = bar wrap rows + 1 for the prompt row) and sets
+  ## column to 3 (1-based, == col 2 0-based, right after the bullet).
+  ## With a wrapped bar (post-shrink) `n` is larger than the
+  ## single-row default of 2.
+  let barRows = barWrapRows(2 + labelCells(label), termW)
   "\n\x1b[2K" & liveBarBytes(label) &
     "\n\x1b[2K" & promptColor & "❯ " & Reset &
-    "\x1b[2A\x1b[3G"
+    "\x1b[" & $(barRows + 1) & "A\x1b[3G"
 
 const ClearBarBelowBytes* = "\n\r\x1b[J\x1b[1A\x1b[3G"
   ## Erase the bar + prompt rows below the cursor (without
@@ -366,6 +409,13 @@ proc submitTransitionBytes*(line: string, hadPending, hadGap: bool,
 # updates `currentBarLabel` so subsequent repaints (after a tool
 # write, after an iteration end, etc.) use the same content.
 
+proc currentTermW(): int =
+  ## Best-effort terminal column count for the width-aware bar emitters.
+  ## Returns 0 when stdout is not a tty (test harnesses, redirected
+  ## runs) so the emitters fall back to the single-row default rather
+  ## than guessing a width that doesn't match what the consumer sees.
+  try: terminalWidth() except CatchableError: 0
+
 proc paintBarPrompt*(label, promptColor: string) =
   ## Write bar + prompt at the cursor's current row, parking cursor
   ## at col 0 of the bar row. Caches `label` so a later
@@ -375,7 +425,7 @@ proc paintBarPrompt*(label, promptColor: string) =
   debugOut "paintBarPrompt label=" & label[0..min(30, label.len-1)]
   currentBarLabel = label
   currentBarHasGap = false
-  syncWrite barFooterBytes(label, promptColor)
+  syncWrite barFooterBytes(label, promptColor, currentTermW())
 
 proc paintBarBelow*(label, promptColor: string) =
   ## Paint bar + prompt one and two rows below the cursor, restoring
@@ -384,14 +434,14 @@ proc paintBarBelow*(label, promptColor: string) =
   ## accumulated in memory and the cursor stays put.
   currentBarLabel = label
   currentBarHasGap = false
-  syncWrite barFooterBelowBytes(label, promptColor)
+  syncWrite barFooterBelowBytes(label, promptColor, currentTermW())
 
 proc repaintBarPrompt*(promptColor = DimPromptColor) =
   ## Re-emit the bar+prompt at the cursor's current row using the
   ## cached `currentBarLabel`. Used by `withCleared` to put the bar
   ## back after a content write.
   if currentBarLabel.len == 0: return
-  syncWrite barFooterBytes(currentBarLabel, promptColor)
+  syncWrite barFooterBytes(currentBarLabel, promptColor, currentTermW())
 
 proc clearBarPrompt*() =
   ## Erase the bar + prompt rows in place. Cursor parks at col 0 of
@@ -432,7 +482,8 @@ proc spinnerLoop(unused: string) {.thread.} =
     lastTicker = ticker
     try:
       let frame = frames[i mod frames.len]
-      syncWrite spinnerFooterBytes(frame, label, ticker, elapsed.int)
+      syncWrite spinnerFooterBytes(frame, label, ticker, elapsed.int,
+                                   currentTermW())
     except CatchableError: discard
     sleep 80
     inc i
@@ -523,7 +574,8 @@ proc barTickLoop() {.thread.} =
     # `spinnerFooterBytes`: some terminals transiently re-show the
     # caret on cursor movement, and beginTurn's one-shot `?25l`
     # isn't enough to keep it hidden over a long-running tool.
-    syncWrite "\x1b[?25l" & barFooterBytes(label, DimPromptColor)
+    syncWrite "\x1b[?25l" &
+      barFooterBytes(label, DimPromptColor, currentTermW())
     sleep 500
 
 proc startBarTick*(base: string) =
@@ -1405,7 +1457,7 @@ proc endTurn*() =
     let label = currentBarLabel
     clearBarPrompt()
     stdout.write "\n"
-    stdout.write barFooterBytes(label, BrightPromptColor)
+    stdout.write barFooterBytes(label, BrightPromptColor, currentTermW())
     currentBarLabel = label
     currentBarHasGap = true
   stdout.write "\x1b[?25h"

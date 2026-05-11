@@ -530,7 +530,8 @@ proc main() =
       # bar into the dim receipt for that response.
       stdout.write "\n"
       let label = tokenLineLabel(lastUsage, window)
-      stdout.write barFooterBytes(label, BrightPromptColor)
+      let tw = try: terminalWidth() except CatchableError: 0
+      stdout.write barFooterBytes(label, BrightPromptColor, tw)
       stdout.flushFile
       currentBarLabel = label
       currentBarHasGap = true
