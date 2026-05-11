@@ -1,42 +1,7 @@
-import std/[unittest, parseutils, deques, os, strutils]
+import std/[unittest, parseutils, os, strutils, deques]
 import threecode/minline
+import minline_testutils
 import ttty/grid
-
-type
-  Driver = ref object
-    keystrokes: seq[int]
-    pos: int
-    output: string
-    grid: Grid
-    width: int
-
-proc newDriver(width = 80): Driver =
-  Driver(keystrokes: @[], pos: 0, output: "", grid: newGrid(), width: width)
-proc push(d: Driver, ks: openArray[int]) =
-  for k in ks: d.keystrokes.add k
-proc pushString(d: Driver, s: string) =
-  for ch in s: d.keystrokes.add ch.int
-
-const
-  KEnter*    = @[13]
-  KUp*       = @[27, 91, 65]
-  KDown*     = @[27, 91, 66]
-  KAltEnter* = @[27, 13]
-  KCtrlC*    = @[3]
-  KCtrlU*    = @[21]
-
-proc run(d: Driver, ed: var LineEditor, prompt = "> "): string =
-  let getCh: GetChProc = proc(): int =
-    if d.pos >= d.keystrokes.len: return -1
-    let k = d.keystrokes[d.pos]; inc d.pos; return k
-  let write: WriteProc = proc(s: string) =
-    d.output.add s; d.grid.feed s
-  let widthProc: WidthProc = proc(): int = d.width
-  ed.readLineWith(prompt, getCh, write, getWidth = widthProc)
-
-proc seedHistory(ed: var LineEditor, entries: seq[string]) =
-  for e in entries: ed.history.entries.addLast e
-  ed.history.cursor = -1
 
 proc runUntilCancel(d: Driver, ed: var LineEditor, prompt = "> ") =
   d.push KCtrlC

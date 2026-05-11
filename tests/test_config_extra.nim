@@ -128,6 +128,17 @@ suite "config: firstKnownGoodCombo":
     check firstKnownGoodCombo(providers) == ""
 
 suite "config: currentProvider":
+  var savedCurrent: string
+  var savedProviders: seq[ProviderRec]
+
+  setup:
+    savedCurrent = activeCurrent
+    savedProviders = activeProviders
+
+  teardown:
+    activeCurrent = savedCurrent
+    activeProviders = savedProviders
+
   test "returns matching provider":
     activeCurrent = "test.model-a"
     activeProviders = @[
@@ -136,9 +147,6 @@ suite "config: currentProvider":
     ]
     let p = currentProvider()
     check p.name == "test"
-    # reset globals
-    activeCurrent = ""
-    activeProviders = @[]
 
   test "returns empty when no match":
     activeCurrent = "nonexistent.model"
@@ -147,6 +155,3 @@ suite "config: currentProvider":
     ]
     let p = currentProvider()
     check p.name == ""
-    # reset globals
-    activeCurrent = ""
-    activeProviders = @[]

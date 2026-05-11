@@ -5,10 +5,6 @@ import threecode/bufprompt
 proc resetState() =
   clearBuffer()
   bufferLineReady.store(false, moRelaxed)
-  # Re-seed with empty under lock for a clean slate.
-  acquire(bufLock)
-  bufferedInput = ""
-  release(bufLock)
 
 suite "bufprompt: drainBufferedLine basics":
   test "returns empty when buffer is empty":
@@ -17,50 +13,38 @@ suite "bufprompt: drainBufferedLine basics":
 
   test "returns empty when no newline present":
     resetState()
-    acquire(bufLock)
-    bufferedInput = "partial input without newline"
-    release(bufLock)
+    feedBuffer("partial input without newline")
     check drainBufferedLine() == ""
 
   test "returns single line and clears it":
     resetState()
-    acquire(bufLock)
-    bufferedInput = "hello world\n"
-    release(bufLock)
+    feedBuffer("hello world\n")
     check drainBufferedLine() == "hello world"
     # Buffer should now be empty
     check drainBufferedLine() == ""
 
   test "returns first line, leaves remainder":
     resetState()
-    acquire(bufLock)
-    bufferedInput = "line one\nline two\n"
-    release(bufLock)
+    feedBuffer("line one\nline two\n")
     check drainBufferedLine() == "line one"
     check drainBufferedLine() == "line two"
     check drainBufferedLine() == ""
 
   test "handles multiple lines with trailing content":
     resetState()
-    acquire(bufLock)
-    bufferedInput = "a\nb\npartial"
-    release(bufLock)
+    feedBuffer("a\nb\npartial")
     check drainBufferedLine() == "a"
     check drainBufferedLine() == "b"
     check drainBufferedLine() == ""
 
   test "preserves UTF-8 content":
     resetState()
-    acquire(bufLock)
-    bufferedInput = "café résumé 🧡\n"
-    release(bufLock)
+    feedBuffer("café résumé 🧡\n")
     check drainBufferedLine() == "café résumé 🧡"
 
   test "handles empty line between newlines":
     resetState()
-    acquire(bufLock)
-    bufferedInput = "\n\n"
-    release(bufLock)
+    feedBuffer("\n\n")
     check drainBufferedLine() == ""
     check drainBufferedLine() == ""
     check drainBufferedLine() == ""
@@ -78,18 +62,14 @@ suite "bufprompt: bufferLineReady flag":
   test "drainBufferedLine clears flag when no more complete lines remain":
     resetState()
     bufferLineReady.store(true, moRelease)
-    acquire(bufLock)
-    bufferedInput = "only line\n"
-    release(bufLock)
+    feedBuffer("only line\n")
     discard drainBufferedLine()
     check bufferLineReady.load(moAcquire) == false
 
   test "drainBufferedLine keeps flag true when more complete lines remain":
     resetState()
     bufferLineReady.store(true, moRelease)
-    acquire(bufLock)
-    bufferedInput = "first\nsecond\n"
-    release(bufLock)
+    feedBuffer("first\nsecond\n")
     discard drainBufferedLine()
     check bufferLineReady.load(moAcquire) == true
     discard drainBufferedLine()
@@ -98,23 +78,16 @@ suite "bufprompt: bufferLineReady flag":
   test "drainBufferedLine does not set flag for incomplete input":
     resetState()
     bufferLineReady.store(false, moRelaxed)
-    acquire(bufLock)
-    bufferedInput = "no newline here"
-    release(bufLock)
+    feedBuffer("no newline here")
     check drainBufferedLine() == ""
     check bufferLineReady.load(moAcquire) == false
 
 suite "bufprompt: clearBuffer":
   test "clears buffered content":
     resetState()
-    acquire(bufLock)
-    bufferedInput = "some text\nmore\n"
-    release(bufLock)
+    feedBuffer("some text\nmore\n")
     bufferLineReady.store(true, moRelease)
     clearBuffer()
-    acquire(bufLock)
-    check bufferedInput == ""
-    release(bufLock)
     check drainBufferedLine() == ""
 
   test "resets bufferLineReady to false":
@@ -127,9 +100,6 @@ suite "bufprompt: clearBuffer":
     resetState()
     clearBuffer()
     clearBuffer()
-    acquire(bufLock)
-    check bufferedInput == ""
-    release(bufLock)
     check bufferLineReady.load(moAcquire) == false
 
 # Thread-safety is documented but not unit-tested; the lock-based
