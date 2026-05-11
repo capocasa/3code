@@ -98,7 +98,7 @@ proc renderHelp*() =
         var j = i + 1
         while j < line.len and line[j] in {'a'..'z', 'A'..'Z', '?'}:
           inc j
-        stdout.styledWrite(fgWhite, styleBright, line[i ..< j], resetStyle)
+        stdout.styledWrite(fgWhite, line[i ..< j], resetStyle)
         i = j
       else:
         stdout.write line[i]

@@ -931,7 +931,7 @@ const ConfigExample* = """  [settings]
 """
 
 const HelpText* = """
-3code — the economical coding agent.
+3code the economical coding agent
 
 commands:
   :help             show this message
