@@ -16,7 +16,7 @@
 ## combo, `callModel` promotes those tags to synthetic tool_calls so the rest
 ## of the pipeline sees a uniform shape.
 
-import std/[algorithm, atomics, hashes, httpclient, json, locks, nativesockets, net, os, sequtils, strformat, strutils, tables, terminal, times, uri]
+import std/[algorithm, atomics, hashes, httpclient, json, locks, nativesockets, net, os, sequtils, strformat, strutils, tables, terminal, times, unicode, uri]
 when defined(posix):
   import std/posix except SocketHandle
   import posix/termios
@@ -334,10 +334,23 @@ proc submitTransitionBytes*(line: string, hadPending, hadGap: bool,
   # hasBar=false: cursor is on the cleared prompt row after walkback;
   # the gap row from paintInitialPrompt already provides the separator.
   # No extra newline — echo goes directly on the cleared row.
+  let termW = try: terminalWidth() except CatchableError: 0
   for idx, l in lines:
     let prefix = if idx == 0: "❯ " else: "  "
     result.add prefix
-    result.add l
+    if termW <= 0:
+      result.add l
+    else:
+      var col = 2  # prefix width — "❯ " and "  " both render as 2 cells
+      var i = 0
+      while i < l.len:
+        let rl = max(1, runeLenAt(l, i))
+        if col >= termW:
+          result.add "\n  "
+          col = 2
+        result.add l[i ..< i + rl]
+        inc col
+        i += rl
     result.add "\n"
 
 # ---------- Bar+prompt runtime helpers ----------
