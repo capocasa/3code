@@ -480,6 +480,30 @@ suite "minline editor: bracketed paste":
     check d.run(ed, prompt = "> ", hidechars = true) == "secret42"
     check rowText(d.grid, 0).startsWith("> ********")
 
+  test "bracketed paste disable is written even when read exits abnormally":
+    # Regression for the macOS api-key paste crash. If readLineWith
+    # raises (ctrl+c, EOF, or the wizard's ESC->cancel path) before
+    # reaching its own `\e[?2004l` write on the submit branch, the host
+    # terminal stays in bracketed-paste mode. The shell then receives
+    # the next paste wrapped in `\e[200~ … \e[201~` and prints it as
+    # literal text. The `defer` in readLineWith must always emit the
+    # disable sequence.
+    block ctrlC:
+      var ed = initEditor()
+      let d = newDriver()
+      d.push CtrlC
+      expect InputCancelled:
+        discard d.run(ed, prompt = "> ")
+      check "\x1b[?2004h" in d.terminal.output
+      check "\x1b[?2004l" in d.terminal.output
+    block bareEsc:
+      var ed = initEditor()
+      let d = newDriver()
+      d.push Esc
+      expect InputCancelled:
+        discard d.run(ed, prompt = "> ")
+      check "\x1b[?2004l" in d.terminal.output
+
 
 # ---------------- SIGWINCH / EINTR ----------------
 

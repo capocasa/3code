@@ -1075,7 +1075,15 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
   # this lets the bracketed-paste handler atomically capture the paste
   # and mask it as `*`s, instead of letting the per-byte loop see
   # embedded CR/LF (early submit) or drop high UTF-8 bytes silently.
+  # The matching disable is also in `defer` so the host terminal doesn't
+  # stay in bracketed-paste mode after EOFError / InputCancelled, which
+  # otherwise causes the shell to swallow the next paste as literal
+  # `[200~…[201~` instead of input.
   ed.write "\x1b[?2004h"
+  defer:
+    # Idempotent: the normal-submit paths also write this before
+    # returning. A second copy on top of that is harmless.
+    try: ed.write "\x1b[?2004l" except CatchableError: discard
   fullRedraw(ed)
   while true:
     var c1: int
@@ -1139,15 +1147,60 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
 
 proc readLine*(ed: var LineEditor, prompt = "", hidechars = false,
                noHistory = false): string =
-  let getCh: GetChProc = proc(): int = getchr().int
   let write: WriteProc = proc(s: string) =
     stdout.write s
     stdout.flushFile()
   let getWidth: WidthProc = proc(): int =
     try: terminalWidth() except CatchableError: 80
-  ed.readLineWith(prompt, getCh, write, hidechars = hidechars,
-                  noHistory = noHistory, getWidth = getWidth,
-                  hasPendingInput = terminalHasPendingInput)
+  when defined(posix):
+    # Set raw mode ONCE for the whole line read; restore on exit. The
+    # previous getchr() flipped termios in/out of raw mode per byte,
+    # which leaves the terminal in cooked mode between reads with ECHO
+    # + ICANON + ISIG. That visibly echoed paste bytes onscreen (so
+    # bracketed-paste `[200~…[201~` showed up next to the api-key
+    # prompt instead of being captured atomically), and could turn a
+    # signal-interrupted read into a spurious EOF that aborted the
+    # wizard with "3code: aborted".
+    let fd = getFileHandle(stdin)
+    var oldMode: Termios
+    var haveOldMode = false
+    if isatty(fd) != 0 and fd.tcGetAttr(addr oldMode) == 0:
+      haveOldMode = true
+      var rawMode = oldMode
+      rawMode.c_iflag = rawMode.c_iflag and not Cflag(BRKINT or ICRNL or
+        INPCK or ISTRIP or IXON)
+      rawMode.c_oflag = rawMode.c_oflag and not Cflag(OPOST)
+      rawMode.c_cflag = (rawMode.c_cflag and not Cflag(CSIZE or PARENB)) or CS8
+      rawMode.c_lflag = rawMode.c_lflag and not Cflag(ECHO or ICANON or
+        IEXTEN or ISIG)
+      rawMode.c_cc[VMIN] = char(1)
+      rawMode.c_cc[VTIME] = char(0)
+      discard fd.tcSetAttr(TCSANOW, addr rawMode)
+    defer:
+      if haveOldMode:
+        discard fd.tcSetAttr(TCSADRAIN, addr oldMode)
+    let getCh: GetChProc = proc(): int =
+      stdout.flushFile()
+      while true:
+        var ch: char
+        let n = posix.read(fd.cint, addr ch, 1)
+        if n == 1: return ch.ord.int
+        # EINTR from SIGWINCH (and friends): retry. The outer driver
+        # uses `resizePending` to redraw on the next iteration; we
+        # surface EINTR as IOError so it can do that.
+        if n < 0 and errno == EINTR:
+          if resizePending:
+            raise newException(IOError, "interrupted")
+          continue
+        return -1
+    ed.readLineWith(prompt, getCh, write, hidechars = hidechars,
+                    noHistory = noHistory, getWidth = getWidth,
+                    hasPendingInput = terminalHasPendingInput)
+  else:
+    let getCh: GetChProc = proc(): int = getchr().int
+    ed.readLineWith(prompt, getCh, write, hidechars = hidechars,
+                    noHistory = noHistory, getWidth = getWidth,
+                    hasPendingInput = terminalHasPendingInput)
 
 proc password*(ed: var LineEditor, prompt = ""): string =
   ed.readLine(prompt, true)
