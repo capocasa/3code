@@ -2,6 +2,7 @@
 tests/test_*
 !tests/test_*.nim
 nimcache/
+config.local.nims
 
 .agents/
 src/threecode.out
