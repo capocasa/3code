@@ -23,6 +23,14 @@ when defined(posix):
 import streamhttp
 import types, util, prompts, compact, display
 
+type
+  VerifyProfileHook* = proc(p: Profile): (bool, string) {.closure.}
+  FetchModelsHook* = proc(url, key: string): (seq[string], string) {.closure.}
+
+var
+  verifyProfileHook*: VerifyProfileHook
+  fetchModelsHook*: FetchModelsHook
+
 const providerStub {.booldefine.} = false
 when providerStub:
   var stubResponseIdx = 0
@@ -1611,6 +1619,8 @@ proc verifyBody*(p: Profile): string =
   })
 
 proc verifyProfile*(p: Profile): (bool, string) =
+  if verifyProfileHook != nil:
+    return verifyProfileHook(p)
   let body = verifyBody(p)
   try:
     let client = newHttpClient(timeout = 20_000, userAgent = "3code",
@@ -1640,6 +1650,8 @@ proc verifyProfile*(p: Profile): (bool, string) =
 proc fetchModels*(url, key: string): (seq[string], string) =
   ## GET /models on the provider. Returns (models, error) — error is empty on
   ## success. Callers are responsible for displaying the error.
+  if fetchModelsHook != nil:
+    return fetchModelsHook(url, key)
   try:
     let client = newHttpClient(timeout = 20_000, userAgent = "3code",
                                sslContext = bundledSslContext())
