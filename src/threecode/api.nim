@@ -116,6 +116,22 @@ var
   spinTickerShared: string
 spinLabelLock.initLock()
 
+type LiveMarkdownStream* = object
+  ## Incremental renderer for assistant content during provider streaming.
+  ## It buffers input until markdown line/block boundaries, renders through
+  ## the same MarkdownState used by replay, and keeps the token footer sliding
+  ## below whatever rendered bytes are emitted.
+  baseLabel: string
+  started: bool
+  md: MarkdownState
+  pendingLine: string
+  utf8Pending: string
+  streamT0: float
+  liveBarAtCursor: bool
+  liveBarBelow: bool
+  liveLineEmitted: bool
+  liveCol: int
+
 proc setSpinLabel(s: string) {.gcsafe.} =
   {.cast(gcsafe).}:
     acquire spinLabelLock
@@ -564,6 +580,130 @@ proc stopSpinner*() =
   joinThread(spinnerThread)
   spinnerRunning = false
 
+proc initLiveMarkdownStream*(baseLabel: string): LiveMarkdownStream =
+  LiveMarkdownStream(baseLabel: baseLabel, md: initMarkdownState(),
+    streamT0: epochTime(), liveCol: 2)
+
+proc currentLabel(s: LiveMarkdownStream, slurpedNow: int): string =
+  let elapsed = (epochTime() - s.streamT0).int
+  liveLabel(s.baseLabel, slurpedNow) & "  " & $elapsed & "s"
+
+proc utf8LenAt(s: string, i: int): int =
+  let b = s[i].uint8
+  if (b and 0x80'u8) == 0'u8: 1
+  elif (b and 0xE0'u8) == 0xC0'u8: 2
+  elif (b and 0xF0'u8) == 0xE0'u8: 3
+  elif (b and 0xF8'u8) == 0xF0'u8: 4
+  else: 1
+
+proc captureMd(s: var LiveMarkdownStream, line: string,
+               finish = false): string =
+  let path = getTempDir() / "3code_live_md_" & $getCurrentProcessId()
+  let f = open(path, fmWrite)
+  defer:
+    try: removeFile(path) except OSError: discard
+  if finish:
+    discard finishMd(s.md, f)
+  else:
+    discard handleMdLine(s.md, line, f)
+  f.flushFile
+  close(f)
+  result = readFile(path)
+
+proc startContent(s: var LiveMarkdownStream, slurpedNow: int) =
+  if s.started: return
+  setSpinTicker("")
+  stopSpinner()
+  stdout.styledWrite(styleBright, "● ", resetStyle)
+  s.started = true
+  paintBarBelow(s.currentLabel(slurpedNow), DimPromptColor)
+  s.liveBarBelow = true
+
+proc advanceLiveCol(s: var LiveMarkdownStream, text: string) =
+  let termW = max(1, try: terminalWidth() except CatchableError: 80)
+  s.liveCol += visibleWidth(text)
+  while s.liveCol >= termW:
+    s.liveCol -= termW
+
+proc writeLiveSegment(s: var LiveMarkdownStream, text: string) =
+  if text.len == 0: return
+  if s.liveBarAtCursor:
+    clearBarPrompt()
+    s.liveBarAtCursor = false
+  elif s.liveBarBelow:
+    clearBarBelowAtCol(s.liveCol)
+    s.liveBarBelow = false
+  stdout.write text
+  s.advanceLiveCol(text)
+  s.liveLineEmitted = true
+
+proc writeRendered(s: var LiveMarkdownStream, bytes: string,
+                   slurpedNow: int) =
+  var i = 0
+  while i < bytes.len:
+    if bytes[i] == '\n':
+      if s.liveBarBelow:
+        clearBarBelowAtCol(s.liveCol)
+        s.liveBarBelow = false
+      stdout.write "\n"
+      s.liveCol = 0
+      if s.liveLineEmitted:
+        paintBarPrompt(s.currentLabel(slurpedNow), DimPromptColor)
+        s.liveBarAtCursor = true
+      inc i
+    else:
+      let start = i
+      while i < bytes.len and bytes[i] != '\n':
+        inc i
+      s.writeLiveSegment(bytes[start ..< i])
+  if s.started:
+    if s.liveBarAtCursor:
+      paintBarPrompt(s.currentLabel(slurpedNow), DimPromptColor)
+    else:
+      paintBarBelowAtCol(s.currentLabel(slurpedNow), DimPromptColor, s.liveCol)
+      s.liveBarBelow = true
+
+proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
+  if chunk.len == 0: return
+  s.startContent(slurpedNow)
+  var data = s.utf8Pending & chunk
+  s.utf8Pending = ""
+  var i = 0
+  while i < data.len:
+    if data[i] == '\n':
+      let rendered = s.captureMd(s.pendingLine)
+      s.pendingLine = ""
+      if rendered.len > 0:
+        s.writeRendered(rendered, slurpedNow)
+      inc i
+    else:
+      let charLen = utf8LenAt(data, i)
+      if i + charLen > data.len:
+        s.utf8Pending = data[i .. ^1]
+        break
+      s.pendingLine.add data[i ..< i + charLen]
+      i += charLen
+  stdout.flushFile()
+
+proc finishContent*(s: var LiveMarkdownStream, slurpedNow: int) =
+  if s.utf8Pending.len > 0:
+    s.pendingLine.add s.utf8Pending
+    s.utf8Pending = ""
+  if s.pendingLine.len > 0:
+    let rendered = s.captureMd(s.pendingLine)
+    s.pendingLine = ""
+    if rendered.len > 0:
+      s.startContent(slurpedNow)
+      s.writeRendered(rendered, slurpedNow)
+  let tail = s.captureMd("", finish = true)
+  if tail.len > 0:
+    s.startContent(slurpedNow)
+    s.writeRendered(tail, slurpedNow)
+  if s.started and s.liveBarBelow:
+    paintBarPrompt(s.currentLabel(slurpedNow), DimPromptColor)
+    s.liveBarAtCursor = true
+    s.liveBarBelow = false
+
 when providerStub:
   proc stubUsage(content: string): Usage =
     result.promptTokens = 100
@@ -574,90 +714,17 @@ when providerStub:
     ## Provider-stub streaming path. It intentionally exercises the
     ## same footer geometry as live SSE, including chunked newlines, so
     ## terminal regressions show up in local/manual stub runs.
-    var liveBarAtCursor = false
-    var liveBarBelow = false
-    var liveLineEmitted = false
-    var liveAtLineStart = true
-    var liveFirstLine = true
-    var liveCol = 2
-    let streamT0 = epochTime()
-
-    proc currentLabel(slurpedNow: int): string =
-      let elapsed = (epochTime() - streamT0).int
-      liveLabel(baseLabel, slurpedNow) & "  " & $elapsed & "s"
-
-    proc advanceLiveCol(s: string) =
-      let termW = max(1, try: terminalWidth() except CatchableError: 80)
-      liveCol += visibleWidth(s)
-      while liveCol >= termW:
-        liveCol -= termW
-
-    proc writeLiveText(s: string) =
-      if liveBarAtCursor:
-        clearBarPrompt()
-        liveBarAtCursor = false
-      elif liveBarBelow:
-        clearBarBelowAtCol(liveCol)
-        liveBarBelow = false
-      if liveAtLineStart:
-        if not liveFirstLine:
-          stdout.write "  "
-          liveCol = 2
-        liveAtLineStart = false
-        liveFirstLine = false
-      stdout.write s
-      advanceLiveCol(s)
-      liveLineEmitted = true
-
-    proc utf8LenAt(s: string, i: int): int =
-      let b = s[i].uint8
-      if (b and 0x80'u8) == 0'u8: 1
-      elif (b and 0xE0'u8) == 0xC0'u8: 2
-      elif (b and 0xF0'u8) == 0xE0'u8: 3
-      elif (b and 0xF8'u8) == 0xF0'u8: 4
-      else: 1
-
-    proc emitByteChunk(c: string, slurpedNow: int) =
-      var i = 0
-      while i < c.len:
-        if c[i] == '\n':
-          if liveBarBelow:
-            clearBarBelowAtCol(liveCol)
-            liveBarBelow = false
-          stdout.write "\n"
-          liveAtLineStart = true
-          liveCol = 0
-          if liveLineEmitted:
-            paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
-            liveBarAtCursor = true
-          inc i
-        else:
-          let charLen = utf8LenAt(c, i)
-          writeLiveText(c[i ..< min(i + charLen, c.len)])
-          i += charLen
-      if liveBarAtCursor:
-        paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
-      else:
-        paintBarBelowAtCol(currentLabel(slurpedNow), DimPromptColor, liveCol)
-        liveBarBelow = true
-
     if content.strip.len == 0: return
-    setSpinTicker("")
-    stopSpinner()
-    stdout.styledWrite(styleBright, "● ", resetStyle)
-    paintBarBelow(currentLabel(slurped), DimPromptColor)
-    liveBarBelow = true
+    var live = initLiveMarkdownStream(baseLabel)
     var i = 0
     while i < content.len:
       let charLen = utf8LenAt(content, i)
       let chunk = content[i ..< min(i + charLen, content.len)]
       slurped += chunk.len
-      emitByteChunk(chunk, slurped)
-      stdout.flushFile()
+      live.feedContent(chunk, slurped)
       sleep 15
       i += charLen
-    if liveBarBelow:
-      paintBarPrompt(currentLabel(slurped), DimPromptColor)
+    live.finishContent(slurped)
     contentStreamedLive = true
 
 proc parseUsage*(u: JsonNode): Usage =
@@ -1045,6 +1112,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   var accTools = initOrderedTable[int, JsonNode]()
   var nonSSE: seq[string]
   var contentStarted = false
+  var live = initLiveMarkdownStream(baseLabel)
   var xmlFilter = XmlToolFilter()
   # Ticker state: the full reasoning text is retained in `accReasoning` (so
   # it can be echoed back to the provider — DeepSeek rejects follow-up
@@ -1065,121 +1133,6 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     for ch in tail:
       flat.add(if ch == '\n' or ch == '\r': ' ' else: ch)
     setSpinTicker("  … " & flat)
-  # Agent text streams at column 0 with no icon, riding the terminal's
-  # default foreground so it reads on both light and dark backgrounds.
-  # Replay and non-streaming fallback still use the markdown renderer; the
-  # live SSE path writes simple text chunks immediately. That avoids the
-  # prior line-buffered delay where the token counter advanced but no text
-  # appeared until the first newline or end-of-stream.
-  # Bar+prompt remain visible the entire time content is streaming.
-  # Two states track where they sit relative to the cursor:
-  #   `liveBarAtCursor`  bar is at the cursor's row + prompt at row+1.
-  #                      Holds after a `\n` paints the bar at the new
-  #                      cursor row. Content writes that overlay the
-  #                      cursor row first need to clear it.
-  #   `liveBarBelow`     bar is at cursor row+1 + prompt at cursor+2.
-  #                      Holds during mid-line streaming while the cursor
-  #                      sits on an in-progress content row. Repainted
-  #                      via a column-aware below-cursor footer so it
-  #                      doesn't disturb the cursor row.
-  # Mutually exclusive; both false means the bar isn't painted yet
-  # (pre-bullet) or has been cleared (mid-flush).
-  var liveBarAtCursor = false
-  var liveBarBelow = false
-  var liveLineEmitted = false
-  var liveAtLineStart = true
-  var liveFirstLine = true
-  var liveCol = 2
-  var liveUtf8Pending = ""
-  let streamT0 = epochTime()
-  proc currentLabel(slurpedNow: int): string =
-    let elapsed = (epochTime() - streamT0).int
-    liveLabel(baseLabel, slurpedNow) & "  " & $elapsed & "s"
-  proc advanceLiveCol(s: string) =
-    let termW = max(1, try: terminalWidth() except CatchableError: 80)
-    liveCol += visibleWidth(s)
-    while liveCol >= termW:
-      liveCol -= termW
-  proc writeLiveText(s: string) =
-    # Pre-write: if bar is at the cursor's row, clear it before
-    # content writes overlay it. If the bar is below cursor, content
-    # writes cleanly on the cursor row and `\n` advances onto the
-    # old-bar row; the subsequent `paintBarPrompt`'s leading clear
-    # handles that case.
-    if liveBarAtCursor:
-      clearBarPrompt()
-      liveBarAtCursor = false
-    elif liveBarBelow:
-      clearBarBelowAtCol(liveCol)
-      liveBarBelow = false
-    if liveAtLineStart:
-      if not liveFirstLine:
-        stdout.write "  "
-        liveCol = 2
-      liveAtLineStart = false
-      liveFirstLine = false
-    stdout.write s
-    advanceLiveCol(s)
-    liveLineEmitted = true
-  proc utf8LenAt(s: string, i: int): int =
-    let b = s[i].uint8
-    if (b and 0x80'u8) == 0'u8: 1
-    elif (b and 0xE0'u8) == 0xC0'u8: 2
-    elif (b and 0xF0'u8) == 0xE0'u8: 3
-    elif (b and 0xF8'u8) == 0xF0'u8: 4
-    else: 1
-  proc emitLiveBytes(c: string, slurpedNow: int) =
-    var data = liveUtf8Pending & c
-    liveUtf8Pending = ""
-    var i = 0
-    while i < data.len:
-      if data[i] == '\n':
-        if liveBarBelow:
-          # Clear the below-cursor footer before emitting the newline.
-          # Otherwise a real terminal can scroll that old bar into
-          # history before the next repaint has a chance to erase it.
-          clearBarBelowAtCol(liveCol)
-          liveBarBelow = false
-        stdout.write "\n"
-        liveAtLineStart = true
-        liveCol = 0
-        if liveLineEmitted:
-          # Cursor advanced one row past the just-written content.
-          # That row was the previous bar/below position and now
-          # holds stale chrome; `paintBarPrompt`'s leading
-          # `\r\x1b[2K` clears it before painting the new bar.
-          paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
-          liveBarAtCursor = true
-          liveBarBelow = false
-        inc i
-      else:
-        let charLen = utf8LenAt(data, i)
-        if i + charLen > data.len:
-          liveUtf8Pending = data[i .. ^1]
-          break
-        writeLiveText(data[i ..< i + charLen])
-        i += charLen
-  proc emitContent(c: string, slurpedNow: int) =
-    emitLiveBytes(c, slurpedNow)
-    # End-of-chunk refresh: keep the bar's slurped/elapsed values
-    # current AND keep the bar visible across long mid-line streams.
-    # Whichever state holds, paint with the matching emitter.
-    if contentStarted:
-      if liveBarAtCursor:
-        paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
-      else:
-        paintBarBelowAtCol(currentLabel(slurpedNow), DimPromptColor, liveCol)
-        liveBarBelow = true
-  proc finishContent(slurpedNow: int) =
-    if liveUtf8Pending.len > 0:
-      writeLiveText(liveUtf8Pending)
-      liveUtf8Pending = ""
-    if liveLineEmitted and liveBarBelow:
-      paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
-      liveBarAtCursor = true
-      liveBarBelow = false
-    # Else: bar+prompt already in place, leave it alone — avoids the
-    # brief clear→repaint flash we used to ship.
   var line = ""
   var streamErr = ""
   # Watch stdin for ctrl-c / ESC for the entire body read. Without this
@@ -1226,20 +1179,8 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
               if suppressXml: feed(xmlFilter, c)
               else: c
             if visible.len > 0:
-              if not contentStarted:
-                # Stop the spinner and emit the answer bullet at column 0
-                # without a newline; the first content line lands on the same
-                # row right after `● `, subsequent lines indent two spaces.
-                # Then paint bar+prompt one row below so the bar stays
-                # visible while this first chunk is written immediately.
-                setSpinTicker("")
-                stopSpinner()
-                stdout.styledWrite(styleBright, "● ", resetStyle)
-                contentStarted = true
-                paintBarBelow(currentLabel(slurped), DimPromptColor)
-                liveBarBelow = true
-              emitContent(visible, slurped)
-              stdout.flushFile()
+              live.feedContent(visible, slurped)
+              contentStarted = live.started
           let tcDelta = delta{"tool_calls"}
           if tcDelta != nil and tcDelta.kind == JArray:
             for tc in tcDelta:
@@ -1267,18 +1208,11 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   if suppressXml:
     let tail = flushTail(xmlFilter)
     if tail.len > 0:
-      if not contentStarted:
-        setSpinTicker("")
-        stopSpinner()
-        stdout.styledWrite(styleBright, "● ", resetStyle)
-        contentStarted = true
-        paintBarBelow(currentLabel(slurped), DimPromptColor)
-        liveBarBelow = true
-      emitContent(tail, slurped)
-      stdout.flushFile()
+      live.feedContent(tail, slurped)
+      contentStarted = live.started
 
   if contentStarted:
-    finishContent(slurped)
+    live.finishContent(slurped)
     # Collapse trailing blank rows the model emitted so the bar lands
     # flush below the last content line. The bar may currently sit
     # `trailingNl - 1` rows below where it should; clear it, walk up
@@ -1288,21 +1222,21 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       if accContent[i] == '\n': inc trailingNl
       else: break
     if trailingNl > 1:
-      if liveBarAtCursor:
+      if live.liveBarAtCursor:
         clearBarPrompt()
-        liveBarAtCursor = false
-      elif liveBarBelow:
+        live.liveBarAtCursor = false
+      elif live.liveBarBelow:
         stdout.write ClearBarBelowBytes
         stdout.flushFile
-        liveBarBelow = false
+        live.liveBarBelow = false
       for _ in 0 ..< trailingNl - 1:
         stdout.write "\x1b[1A\x1b[2K"
-      paintBarPrompt(currentLabel(slurped), DimPromptColor)
+      paintBarPrompt(live.currentLabel(slurped), DimPromptColor)
     contentStreamedLive = true
     # Normalize cursor to bar row col 0. The streaming loop may have left
     # the cursor in the content area (liveBarBelow case); move it down to
     # the bar row before inserting the ticker row and restarting the spinner.
-    if liveBarBelow:
+    if live.liveBarBelow:
       syncWrite "\x1b[1B"        # bar is 1 row below cursor
     # Now cursor is at bar row col 0.
     # Insert a blank row above the bar (ticker row for the spinner)
