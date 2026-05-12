@@ -1,4 +1,4 @@
-import std/[json, unittest]
+import std/[json, tables, unittest]
 import threecode/[api, types]
 
 suite "api: parseUsage":
@@ -173,3 +173,26 @@ suite "api: stripInternalFields":
     let stripped = stripInternalFields(messages)
     check "usage" notin stripped[0]
     check stripped[0].hasKey("reasoning_content")
+
+  test "strips interrupted marker from assistant messages":
+    let messages = %*[
+      {"role": "assistant", "content": "partial", "interrupted": true}
+    ]
+    let stripped = stripInternalFields(messages)
+    check "interrupted" notin stripped[0]
+    check stripped[0]["content"].getStr == "partial"
+
+suite "api: buildStreamAssistantMsg":
+  test "returns nil when stream produced no assistant data":
+    let tools = initOrderedTable[int, JsonNode]()
+    check buildStreamAssistantMsg("", "", tools, Usage()) == nil
+
+  test "marks interrupted partial content":
+    let tools = initOrderedTable[int, JsonNode]()
+    let msg = buildStreamAssistantMsg("partial answer", "", tools, Usage(),
+                                      wasInterrupted = true)
+    check msg != nil
+    check msg{"role"}.getStr == "assistant"
+    check msg{"content"}.getStr == "partial answer"
+    check msg{"interrupted"}.getBool == true
+    check msg.hasKey("reasoning_content")

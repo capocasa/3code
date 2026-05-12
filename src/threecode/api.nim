@@ -249,23 +249,29 @@ const ClearBarPromptBytes* = "\r\x1b[J"
   ## everything below its anchor, so clearing from the anchor is the
   ## stable recovery operation before content pushes the footer down.
 
-proc barFooterBelowBytes*(label, promptColor: string): string =
+proc barFooterBelowAtColBytes*(label, promptColor: string, col: int): string =
   ## Paint bar one row below the cursor + prompt two rows below,
-  ## walking the cursor back up to the bullet row at column 2 (right
-  ## after `● `). Used during mid-line streaming where the cursor
-  ## sits at the bullet row, content is accumulating in `pendingLine`
-  ## (in memory, no terminal write yet), and the bar still needs to
-  ## be visible.
+  ## walking the cursor back up to the content row at `col`. Used
+  ## during mid-line streaming where the cursor sits on an in-progress
+  ## content row and the bar still needs to be visible underneath it.
   ##
   ## Avoids CSI s/u (SCO save/restore cursor) — those are silently
   ## ignored on enough terminals (we shipped a regression where each
   ## refresh stacked another bar in scroll because the cursor never
-  ## returned). `\x1b[2A` walks up 2 rows; `\x1b[3G` sets the column
-  ## to 3 (1-based, == col 2 0-based, the position right after the
-  ## bullet).
+  ## returned). `\x1b[2A` walks up 2 rows; `G` uses a 1-based column.
   "\n\x1b[2K" & liveBarBytes(label) &
     "\n\x1b[2K" & promptColor & "❯ " & Reset &
-    "\x1b[2A\x1b[3G"
+    "\x1b[2A\x1b[" & $(max(0, col) + 1) & "G"
+
+proc barFooterBelowBytes*(label, promptColor: string): string =
+  ## Compatibility wrapper for the canonical pre-text state: cursor
+  ## returns to column 2, right after `● `.
+  barFooterBelowAtColBytes(label, promptColor, 2)
+
+proc clearBarBelowAtColBytes*(col: int): string =
+  ## Erase the bar + prompt rows below the current cursor row and
+  ## restore the cursor to `col` on that original row.
+  "\n\r\x1b[J\x1b[1A\x1b[" & $(max(0, col) + 1) & "G"
 
 const ClearBarBelowBytes* = "\n\r\x1b[J\x1b[1A\x1b[3G"
   ## Erase the bar + prompt rows below the cursor (without
@@ -367,6 +373,14 @@ proc paintBarBelow*(label, promptColor: string) =
   currentBarLabel = label
   currentBarHasGap = false
   syncWrite barFooterBelowBytes(label, promptColor)
+
+proc paintBarBelowAtCol(label, promptColor: string, col: int) =
+  currentBarLabel = label
+  currentBarHasGap = false
+  syncWrite barFooterBelowAtColBytes(label, promptColor, col)
+
+proc clearBarBelowAtCol(col: int) =
+  syncWrite clearBarBelowAtColBytes(col)
 
 proc repaintBarPrompt*(promptColor = DimPromptColor) =
   ## Re-emit the bar+prompt at the cursor's current row using the
@@ -639,6 +653,11 @@ when defined(posix):
     cancelOrigTermios: Termios
     cancelOrigTermiosValid: bool
 
+  proc restoreCancelTermios*() {.noconv, gcsafe.} =
+    if cancelOrigTermiosValid:
+      discard tcSetAttr(0.cint, TCSANOW, addr cancelOrigTermios)
+      cancelOrigTermiosValid = false
+
   proc cancelWatcherLoop() {.thread, nimcall.} =
     while not cancelWatcherStop.load(moRelaxed):
       var pfd: TPollfd
@@ -655,6 +674,7 @@ when defined(posix):
               {.cast(gcsafe).}:
                 interrupted = true
                 shutdownCachedStreamFd()
+                restoreCancelTermios()
               return
             else: discard
         # else: spurious wakeup or EOF on stdin; loop and re-check stop.
@@ -687,12 +707,7 @@ when defined(posix):
     joinThread(cancelWatcherThread)
     cancelWatcherActive = false
     if cancelOrigTermiosValid:
-      discard tcSetAttr(0.cint, TCSANOW, addr cancelOrigTermios)
-      cancelOrigTermiosValid = false
-  proc restoreCancelTermios*() {.noconv.} =
-    if cancelOrigTermiosValid:
-      discard tcSetAttr(0.cint, TCSANOW, addr cancelOrigTermios)
-      cancelOrigTermiosValid = false
+      restoreCancelTermios()
 else:
   proc startCancelWatcher() = discard
   proc stopCancelWatcher() = discard
@@ -705,6 +720,30 @@ type StreamOutcome = object
   errBody: string         # non-SSE response body (error responses)
   assistantMsg: JsonNode  # reconstructed from SSE when status=200
   usage: Usage
+
+proc buildStreamAssistantMsg*(content, reasoning: string,
+                              tools: OrderedTable[int, JsonNode],
+                              usage: Usage,
+                              wasInterrupted = false): JsonNode =
+  ## Build the assistant message reconstructed from an SSE stream.
+  ## Returns nil when the stream produced no assistant data.
+  if content.len == 0 and tools.len == 0 and reasoning.len == 0 and
+     usage.totalTokens == 0:
+    return nil
+  result = %*{"role": "assistant", "content": content}
+  # DeepSeek-R1-style reasoning models REQUIRE the `reasoning_content`
+  # field on every assistant message in history — even when the model
+  # emitted no reasoning on that turn. Drop it and the next API call
+  # fails with `invalid_request_error`. Always set it; other providers
+  # ignore the extra field.
+  result["reasoning_content"] = %reasoning
+  if tools.len > 0:
+    var tcArr = newJArray()
+    var keys = toSeq(tools.keys).sorted
+    for k in keys: tcArr.add tools[k]
+    result["tool_calls"] = tcArr
+  if wasInterrupted:
+    result["interrupted"] = %true
 
 proc parseXmlToolCalls*(content: string): tuple[cleaned: string, calls: seq[JsonNode]] =
   ## Extract GLM/Qwen native `<tool_call>NAME<arg_key>K</arg_key>
@@ -923,30 +962,10 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     setSpinTicker("  … " & flat)
   # Agent text streams at column 0 with no icon, riding the terminal's
   # default foreground so it reads on both light and dark backgrounds.
-  # Inline `**bold**` and `` `code` `` flip intensity within the line
-  # without changing hue.
-  #
-  # Line buffering layers markdown rendering on top:
-  #   - tables (`| a | b |` rows) buffer into `tableBuf`, flush as
-  #     box-drawn blocks once a non-table line arrives — sub-second
-  #     beat for typical 5-20 row tables, but it's the price of
-  #     column-width-aware alignment.
-  #   - code blocks (between ``` fences) buffer into `codeBuf`, render
-  #     with a dim left bar `┃` per line, fences themselves suppressed.
-  #   - headers (`# H` … `###### H`) render as bold cream, hashes
-  #     stripped.
-  #   - inline `**bold**` and `` `code` `` substituted via ANSI flips
-  #     inside the cream envelope. Strict matching only — malformed
-  #     markers pass through raw.
-  # The lead bullet is printed at column 0 without a trailing newline,
-  # so the first emitted line of content starts on the same row.
-  # `MarkdownState.firstEmit = false` here means: don't suppress the
-  # 2-space indent on the first line. We flip it to `true` when the
-  # bullet is printed so the first chunk lands directly after `● `.
-  # Same per-line handlers as the replay path so live and resumed
-  # output stay byte-identical.
-  var pendingLine = ""
-  var mdState = initMarkdownState(firstEmit = false)
+  # Replay and non-streaming fallback still use the markdown renderer; the
+  # live SSE path writes simple text chunks immediately. That avoids the
+  # prior line-buffered delay where the token counter advanced but no text
+  # appeared until the first newline or end-of-stream.
   # Bar+prompt remain visible the entire time content is streaming.
   # Two states track where they sit relative to the cursor:
   #   `liveBarAtCursor`  bar is at the cursor's row + prompt at row+1.
@@ -954,21 +973,29 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   #                      cursor row. Content writes that overlay the
   #                      cursor row first need to clear it.
   #   `liveBarBelow`     bar is at cursor row+1 + prompt at cursor+2.
-  #                      Holds during mid-line streaming (cursor sits
-  #                      on a content row that's accumulating in
-  #                      `pendingLine`, no terminal advance yet). Painted
-  #                      via `barFooterBelowBytes` (CSI s/u save/restore)
-  #                      so it doesn't disturb the cursor row.
+  #                      Holds during mid-line streaming while the cursor
+  #                      sits on an in-progress content row. Repainted
+  #                      via a column-aware below-cursor footer so it
+  #                      doesn't disturb the cursor row.
   # Mutually exclusive; both false means the bar isn't painted yet
   # (pre-bullet) or has been cleared (mid-flush).
   var liveBarAtCursor = false
   var liveBarBelow = false
   var liveLineEmitted = false
+  var liveAtLineStart = true
+  var liveFirstLine = true
+  var liveCol = 2
+  var liveUtf8Pending = ""
   let streamT0 = epochTime()
   proc currentLabel(slurpedNow: int): string =
     let elapsed = (epochTime() - streamT0).int
     liveLabel(baseLabel, slurpedNow) & "  " & $elapsed & "s"
-  proc handleLine(l: string) =
+  proc advanceLiveCol(s: string) =
+    let termW = max(1, try: terminalWidth() except CatchableError: 80)
+    liveCol += visibleWidth(s)
+    while liveCol >= termW:
+      liveCol -= termW
+  proc writeLiveText(s: string) =
     # Pre-write: if bar is at the cursor's row, clear it before
     # content writes overlay it. If the bar is below cursor, content
     # writes cleanly on the cursor row and `\n` advances onto the
@@ -977,13 +1004,34 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     if liveBarAtCursor:
       clearBarPrompt()
       liveBarAtCursor = false
-    if handleMdLine(mdState, l, stdout):
-      liveLineEmitted = true
-  proc emitContent(c: string, slurpedNow: int) =
-    for ch in c:
-      if ch == '\n':
-        handleLine(pendingLine)
-        pendingLine = ""
+    elif liveBarBelow:
+      clearBarBelowAtCol(liveCol)
+      liveBarBelow = false
+    if liveAtLineStart:
+      if not liveFirstLine:
+        stdout.write "  "
+        liveCol = 2
+      liveAtLineStart = false
+      liveFirstLine = false
+    stdout.write s
+    advanceLiveCol(s)
+    liveLineEmitted = true
+  proc utf8LenAt(s: string, i: int): int =
+    let b = s[i].uint8
+    if (b and 0x80'u8) == 0'u8: 1
+    elif (b and 0xE0'u8) == 0xC0'u8: 2
+    elif (b and 0xF0'u8) == 0xE0'u8: 3
+    elif (b and 0xF8'u8) == 0xF0'u8: 4
+    else: 1
+  proc emitLiveBytes(c: string, slurpedNow: int) =
+    var data = liveUtf8Pending & c
+    liveUtf8Pending = ""
+    var i = 0
+    while i < data.len:
+      if data[i] == '\n':
+        stdout.write "\n"
+        liveAtLineStart = true
+        liveCol = 0
         if liveLineEmitted:
           # Cursor advanced one row past the just-written content.
           # That row was the previous bar/below position and now
@@ -992,41 +1040,35 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
           paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
           liveBarAtCursor = true
           liveBarBelow = false
+        inc i
       else:
-        pendingLine.add ch
+        let charLen = utf8LenAt(data, i)
+        if i + charLen > data.len:
+          liveUtf8Pending = data[i .. ^1]
+          break
+        writeLiveText(data[i ..< i + charLen])
+        i += charLen
+  proc emitContent(c: string, slurpedNow: int) =
+    emitLiveBytes(c, slurpedNow)
     # End-of-chunk refresh: keep the bar's slurped/elapsed values
     # current AND keep the bar visible across long mid-line streams.
     # Whichever state holds, paint with the matching emitter.
     if contentStarted:
       if liveBarAtCursor:
         paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
-      elif liveBarBelow:
-        paintBarBelow(currentLabel(slurpedNow), DimPromptColor)
+      else:
+        paintBarBelowAtCol(currentLabel(slurpedNow), DimPromptColor, liveCol)
+        liveBarBelow = true
   proc finishContent(slurpedNow: int) =
-    if pendingLine.len > 0:
-      handleLine(pendingLine)
-      pendingLine = ""
-      if liveLineEmitted:
-        paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
-        liveBarAtCursor = true
-        liveBarBelow = false
-    # If markdown has buffered content (open code fence, table rows
-    # without a closing non-table line), flushing it writes more
-    # rows above the bar — clear bar+prompt first so the writes
-    # don't conflict, then repaint at the new bottom.
-    if mdState.codeBuf.len > 0 or mdState.tableBuf.len > 0:
-      if liveBarAtCursor:
-        clearBarPrompt()
-        liveBarAtCursor = false
-      elif liveBarBelow:
-        stdout.write ClearBarBelowBytes
-        stdout.flushFile
-        liveBarBelow = false
-      discard finishMd(mdState, stdout)
+    if liveUtf8Pending.len > 0:
+      writeLiveText(liveUtf8Pending)
+      liveUtf8Pending = ""
+    if liveLineEmitted and liveBarBelow:
       paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
       liveBarAtCursor = true
-    # else: bar+prompt already in place, leave them alone — avoids
-    # the brief clear→repaint flash we used to ship.
+      liveBarBelow = false
+    # Else: bar+prompt already in place, leave it alone — avoids the
+    # brief clear→repaint flash we used to ship.
   var line = ""
   var streamErr = ""
   # Watch stdin for ctrl-c / ESC for the entire body read. Without this
@@ -1078,13 +1120,11 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
                 # without a newline; the first content line lands on the same
                 # row right after `● `, subsequent lines indent two spaces.
                 # Then paint bar+prompt one row below so the bar stays
-                # visible while `pendingLine` accumulates in memory before
-                # the first `\n` arrives.
+                # visible while this first chunk is written immediately.
                 setSpinTicker("")
                 stopSpinner()
                 stdout.styledWrite(styleBright, "● ", resetStyle)
                 contentStarted = true
-                mdState.firstEmit = true
                 paintBarBelow(currentLabel(slurped), DimPromptColor)
                 liveBarBelow = true
               emitContent(visible, slurped)
@@ -1121,7 +1161,6 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
         stopSpinner()
         stdout.styledWrite(styleBright, "● ", resetStyle)
         contentStarted = true
-        mdState.firstEmit = true
         paintBarBelow(currentLabel(slurped), DimPromptColor)
         liveBarBelow = true
       emitContent(tail, slurped)
@@ -1163,6 +1202,9 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     startSpinner("")
 
   if interrupted:
+    if result.assistantMsg == nil:
+      result.assistantMsg = buildStreamAssistantMsg(accContent, accReasoning,
+        accTools, result.usage, interrupted)
     # Drop the cache: the SIGINT hook / watcher already shut down the
     # fd, so the conn is half-closed. Reusing it on the next turn
     # would fail on first send. The next call will reconnect cleanly.
@@ -1175,22 +1217,10 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     return
 
   # Build assistant message if we saw any SSE content.
-  if accContent.len > 0 or accTools.len > 0 or accReasoning.len > 0 or
-     result.usage.totalTokens > 0:
-    var msg = %*{"role": "assistant", "content": accContent}
-    # DeepSeek-R1-style reasoning models REQUIRE the `reasoning_content`
-    # field on every assistant message in history — even when the model
-    # emitted no reasoning on that turn. Drop it and the next API call
-    # fails with `invalid_request_error`. Always set it; other providers
-    # ignore the extra field.
-    msg["reasoning_content"] = %accReasoning
-    if accTools.len > 0:
-      var tcArr = newJArray()
-      var keys = toSeq(accTools.keys).sorted
-      for k in keys: tcArr.add accTools[k]
-      msg["tool_calls"] = tcArr
-    result.assistantMsg = msg
-  else:
+  if result.assistantMsg == nil:
+    result.assistantMsg = buildStreamAssistantMsg(accContent, accReasoning,
+      accTools, result.usage, interrupted)
+  if result.assistantMsg == nil:
     # No SSE data — provider may have returned a plain JSON error body.
     result.errBody = nonSSE.join("\n")
   debugOut &"streamHttp end — contentStarted={contentStarted} accTools={accTools.len}"
@@ -1202,12 +1232,12 @@ proc stripInternalFields*(messages: JsonNode): JsonNode =
   if messages == nil or messages.kind != JArray: return messages
   result = newJArray()
   for m in messages:
-    if m.kind != JObject or "usage" notin m:
+    if m.kind != JObject or ("usage" notin m and "interrupted" notin m):
       result.add m
       continue
     var clean = newJObject()
     for k, v in m.pairs:
-      if k != "usage": clean[k] = v
+      if k != "usage" and k != "interrupted": clean[k] = v
     result.add clean
 
 proc ensureReasoningField(messages: JsonNode) =
@@ -1456,7 +1486,9 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
                         baseLabel, slurped, xmlToolCallsFallback(p))
     if outcome.errMsg == "interrupted by user":
       stopSpinner()
-      raise newException(ApiError, "interrupted by user")
+      if outcome.assistantMsg == nil:
+        raise newException(ApiError, "interrupted by user")
+      break
     let netFailed = outcome.errMsg != "" and outcome.assistantMsg == nil
     let code = outcome.statusCode
     let category =

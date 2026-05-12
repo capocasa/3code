@@ -197,6 +197,33 @@ suite "mid-line bar visibility":
     check g.cellFg(2, 0) == col256
     check g.cellAt(2, 0).fgColorIdx == 244
 
+  test "barFooterBelowAtColBytes restores cursor after streamed text":
+    let g = newGrid()
+    g.feed "● Hello"
+    g.feed barFooterBelowAtColBytes("LBL  1s", DimPromptColor, 7)
+    g.feed " world"
+    check rowText(g, 0).startsWith("● Hello world")
+    check "LBL" in rowText(g, 1)
+    check "❯" in rowText(g, 2)
+    check g.row == 0
+    check g.col == 13
+
+  test "stream chunk repaint clears old below-footer before appending text":
+    let g = newGrid()
+    g.feed "● "
+    g.feed barFooterBelowBytes("OLD  0s", DimPromptColor)
+    g.feed clearBarBelowAtColBytes(2)
+    g.feed "Hello"
+    g.feed barFooterBelowAtColBytes("MID  1s", DimPromptColor, 7)
+    g.feed clearBarBelowAtColBytes(7)
+    g.feed " there"
+    g.feed barFooterBelowAtColBytes("NEW  2s", DimPromptColor, 13)
+    check rowText(g, 0).startsWith("● Hello there")
+    check "OLD" notin rowText(g, 0)
+    check "MID" notin rowText(g, 0)
+    check "NEW" in rowText(g, 1)
+    check "❯" in rowText(g, 2)
+
   test "ClearBarBelowBytes wipes bar+prompt below, walks cursor to col 2":
     let g = newGrid()
     g.feed "● "
@@ -266,4 +293,3 @@ suite "mid-line bar visibility":
     # After transition, bar at row 1 is still bold cyan.
     check g.cellFg(1, 0) == colCyan
     check hasAttr(g.cellAttr(1, 0), saBold)
-
