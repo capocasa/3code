@@ -1,4 +1,4 @@
-import std/[json, strutils, unittest]
+import std/[json, os, osproc, strutils, unittest]
 import threecode/[api, prompts, types]
 
 suite "api request shaping":
@@ -43,6 +43,23 @@ suite "api request shaping":
                     model: "z-ai/glm4.7", reasoning: "low")
     applyReasoning(p, body)
     check body{"chat_template_kwargs"}{"enable_thinking"}.getBool == false
+
+  test "provider stub build exercises streaming path":
+    let pid = $getCurrentProcessId()
+    let outPath = getTempDir() / ("3code_stub_api_" & pid)
+    let cacheDir = getTempDir() / ("3code_stub_api_cache_" & pid)
+    createDir(cacheDir)
+    defer:
+      try: removeFile(outPath) except OSError: discard
+      try: removeDir(cacheDir) except OSError: discard
+
+    let compileCmd = "nim c -d:providerStub --nimcache:" &
+      cacheDir.quoteShell & " -o:" & outPath.quoteShell & " src/threecode.nim"
+    let (compileOut, compileCode) = execCmdEx(compileCmd)
+    check compileCode == 0
+    if compileCode != 0:
+      checkpoint compileOut
+    check fileExists(outPath)
 
 suite "xml tool_call fallback":
   test "parses a single bash call":

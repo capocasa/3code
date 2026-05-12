@@ -1,6 +1,7 @@
 import std/[unicode, unittest, strutils, parseutils, json, os]
 import threecode/[api, display, types, util, compact]
 import ttty/grid
+import ttty/terminal
 
 ## Self-eval for the streaming footer layout.
 ##
@@ -293,3 +294,73 @@ suite "mid-line bar visibility":
     # After transition, bar at row 1 is still bold cyan.
     check g.cellFg(1, 0) == colCyan
     check hasAttr(g.cellAttr(1, 0), saBold)
+
+  test "finite terminal scrollback does not retain streamed footer receipts":
+    proc countRows(g: Grid, needle: string): int =
+      for r in 0 ..< g.rows.len:
+        if needle in rowText(g, r):
+          inc result
+
+    proc feedLiveMarkdown(g: Grid, clearBeforeNewline: bool) =
+      let lines = [
+        "Here is placeholder text with a markdown table.",
+        "---",
+        "## Placeholder Section",
+        "Praesent libero. Sed cursus ante dapibus diam.",
+        "### Sample Table",
+        "| Column A | Column B | Column C |",
+        "|----------|----------|----------|",
+        "| Row 1-A  | Row 1-B  | Row 1-C  |",
+        "| Row 2-A  | Row 2-B  | Row 2-C  |",
+        "| Row 3-A  | Row 3-B  | Row 3-C  |",
+        "---"
+      ]
+      var col = 2
+      var barAtCursor = false
+      var step = 0
+
+      proc label(): string =
+        "STREAM ↓" & $step
+
+      proc clearBarIfNeeded() =
+        if barAtCursor:
+          g.feed ClearBarPromptBytes
+          barAtCursor = false
+
+      g.feed "\x1b[1;6r\x1b[5;1H"
+      g.feed "● "
+      g.feed barFooterBelowAtColBytes(label(), DimPromptColor, col)
+      for idx, line in lines:
+        clearBarIfNeeded()
+        if idx > 0:
+          g.feed "  "
+          col = 2
+        g.feed line
+        col += visibleWidth(line)
+        inc step
+        g.feed barFooterBelowAtColBytes(label(), DimPromptColor, col)
+        if clearBeforeNewline:
+          g.feed clearBarBelowAtColBytes(col)
+        g.feed "\n"
+        col = 0
+        inc step
+        g.feed barFooterBytes(label(), DimPromptColor)
+        barAtCursor = true
+
+    block:
+      let term = newTerminal(width = 80, height = 6, scrollback = 80)
+      feedLiveMarkdown(term.grid, clearBeforeNewline = true)
+      let g = term.grid
+      let barCount = countRows(g, "STREAM ↓")
+      check barCount == 1
+      check countRows(g, "❯") == 1
+      let barRow = block:
+        var found = -1
+        for r in 0 ..< g.rows.len:
+          if "STREAM ↓" in rowText(g, r):
+            found = r
+        found
+      check barRow >= 0
+      check "❯" in rowText(g, barRow + 1)
+      for r in 0 ..< barRow:
+        check "STREAM ↓" notin rowText(g, r)

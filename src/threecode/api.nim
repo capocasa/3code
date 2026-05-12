@@ -47,6 +47,7 @@ when providerStub:
     except CatchableError:
       stderr.writeLine "3code: stub: malformed JSON in " & path
       quit 1
+
   proc stubCallModel(messages: JsonNode): JsonNode =
     let responses = loadStubResponses()
     if stubResponseIdx >= responses.len:
@@ -563,6 +564,102 @@ proc stopSpinner*() =
   joinThread(spinnerThread)
   spinnerRunning = false
 
+when providerStub:
+  proc stubUsage(content: string): Usage =
+    result.promptTokens = 100
+    result.completionTokens = max(1, content.len div 4)
+    result.totalTokens = result.promptTokens + result.completionTokens
+
+  proc streamStubContent(content, baseLabel: string, slurped: var int) =
+    ## Provider-stub streaming path. It intentionally exercises the
+    ## same footer geometry as live SSE, including chunked newlines, so
+    ## terminal regressions show up in local/manual stub runs.
+    var liveBarAtCursor = false
+    var liveBarBelow = false
+    var liveLineEmitted = false
+    var liveAtLineStart = true
+    var liveFirstLine = true
+    var liveCol = 2
+    let streamT0 = epochTime()
+
+    proc currentLabel(slurpedNow: int): string =
+      let elapsed = (epochTime() - streamT0).int
+      liveLabel(baseLabel, slurpedNow) & "  " & $elapsed & "s"
+
+    proc advanceLiveCol(s: string) =
+      let termW = max(1, try: terminalWidth() except CatchableError: 80)
+      liveCol += visibleWidth(s)
+      while liveCol >= termW:
+        liveCol -= termW
+
+    proc writeLiveText(s: string) =
+      if liveBarAtCursor:
+        clearBarPrompt()
+        liveBarAtCursor = false
+      elif liveBarBelow:
+        clearBarBelowAtCol(liveCol)
+        liveBarBelow = false
+      if liveAtLineStart:
+        if not liveFirstLine:
+          stdout.write "  "
+          liveCol = 2
+        liveAtLineStart = false
+        liveFirstLine = false
+      stdout.write s
+      advanceLiveCol(s)
+      liveLineEmitted = true
+
+    proc utf8LenAt(s: string, i: int): int =
+      let b = s[i].uint8
+      if (b and 0x80'u8) == 0'u8: 1
+      elif (b and 0xE0'u8) == 0xC0'u8: 2
+      elif (b and 0xF0'u8) == 0xE0'u8: 3
+      elif (b and 0xF8'u8) == 0xF0'u8: 4
+      else: 1
+
+    proc emitByteChunk(c: string, slurpedNow: int) =
+      var i = 0
+      while i < c.len:
+        if c[i] == '\n':
+          if liveBarBelow:
+            clearBarBelowAtCol(liveCol)
+            liveBarBelow = false
+          stdout.write "\n"
+          liveAtLineStart = true
+          liveCol = 0
+          if liveLineEmitted:
+            paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
+            liveBarAtCursor = true
+          inc i
+        else:
+          let charLen = utf8LenAt(c, i)
+          writeLiveText(c[i ..< min(i + charLen, c.len)])
+          i += charLen
+      if liveBarAtCursor:
+        paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
+      else:
+        paintBarBelowAtCol(currentLabel(slurpedNow), DimPromptColor, liveCol)
+        liveBarBelow = true
+
+    if content.strip.len == 0: return
+    setSpinTicker("")
+    stopSpinner()
+    stdout.styledWrite(styleBright, "● ", resetStyle)
+    paintBarBelow(currentLabel(slurped), DimPromptColor)
+    liveBarBelow = true
+    var i = 0
+    while i < content.len:
+      let charLen = utf8LenAt(content, i)
+      let chunk = content[i ..< min(i + charLen, content.len)]
+      slurped += chunk.len
+      emitByteChunk(chunk, slurped)
+      stdout.flushFile()
+      sleep 15
+      i += charLen
+    if liveBarBelow:
+      paintBarPrompt(currentLabel(slurped), DimPromptColor)
+    contentStreamedLive = true
+
 proc parseUsage*(u: JsonNode): Usage =
   ## Parses an OpenAI-compatible `usage` object. Cached-token accounting
   ## differs by provider: OpenAI/DeepInfra/Anthropic report it under
@@ -1037,6 +1134,12 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     var i = 0
     while i < data.len:
       if data[i] == '\n':
+        if liveBarBelow:
+          # Clear the below-cursor footer before emitting the newline.
+          # Otherwise a real terminal can scroll that old bar into
+          # history before the next repaint has a chance to erase it.
+          clearBarBelowAtCol(liveCol)
+          liveBarBelow = false
         stdout.write "\n"
         liveAtLineStart = true
         liveCol = 0
@@ -1422,12 +1525,35 @@ proc emitUserSubmit*(line: string, echoRows = -1) =
 
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   when providerStub:
-    startSpinner("stub")
-    sleep 500  # simulate thinking
-    stopSpinner()
+    let stubT0 = epochTime()
+    let stubWindow = contextWindowFor(p.model)
+    let stubBaseLabel = contextLabel(lastPromptTokens, stubWindow)
+    stdout.write "\n"
+    setSpinLabel(liveLabel(stubBaseLabel, 0))
+    startSpinner("")
+    sleep 300  # simulate thinking
     result = stubCallModel(messages)
+    if result.kind == JObject and "role" notin result:
+      result["role"] = %"assistant"
     debugOut &"callModel stub idx={stubResponseIdx-1}"
-    paintBarPrompt("stub 0s", DimPromptColor)
+    var slurped = 0
+    streamStubContent(result{"content"}.getStr(""), stubBaseLabel, slurped)
+    stopSpinner()
+    usage = stubUsage(result{"content"}.getStr(""))
+    let stubElapsed = (epochTime() - stubT0).int
+    let stubLabel = tokenLineLabel(usage, stubWindow, stubElapsed)
+    paintBarPrompt(stubLabel, DimPromptColor)
+    pendingHint = (active: true, usage: usage, window: stubWindow,
+                   elapsed: stubElapsed)
+    if result.kind == JObject:
+      result["usage"] = %*{
+        "promptTokens": usage.promptTokens,
+        "completionTokens": usage.completionTokens,
+        "totalTokens": usage.totalTokens,
+        "cachedTokens": usage.cachedTokens,
+        "elapsed": stubElapsed,
+        "ts": now().format("yyyy-MM-dd'T'HH:mm:sszzz"),
+      }
     return
   debugOut "callModel start"
   if p.family == "deepseek":
