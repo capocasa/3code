@@ -37,6 +37,7 @@ import
 
 when defined(posix):
   import posix
+  import std/termios
 
 # SIGWINCH: set on resize. Read by the readLine driver between keystrokes
 # so the editor can pick up the new terminal width and redraw cleanly.
@@ -82,7 +83,28 @@ else:
   proc getchr*(): cint =
     ## Retrieves an ASCII character from stdin.
     stdout.flushFile()
-    return getch().ord.cint
+    when defined(posix):
+      let fd = getFileHandle(stdin)
+      var oldMode: Termios
+      discard fd.tcGetAttr(addr oldMode)
+      var rawMode = oldMode
+      rawMode.c_iflag = rawMode.c_iflag and not Cflag(BRKINT or ICRNL or
+        INPCK or ISTRIP or IXON)
+      rawMode.c_oflag = rawMode.c_oflag and not Cflag(OPOST)
+      rawMode.c_cflag = (rawMode.c_cflag and not Cflag(CSIZE or PARENB)) or CS8
+      rawMode.c_lflag = rawMode.c_lflag and not Cflag(ECHO or ICANON or
+        IEXTEN or ISIG)
+      rawMode.c_cc[VMIN] = char(1)
+      rawMode.c_cc[VTIME] = char(0)
+      discard fd.tcSetAttr(TCSANOW, addr rawMode)
+      var ch: char
+      let n = posix.read(fd.cint, addr ch, 1)
+      discard fd.tcSetAttr(TCSADRAIN, addr oldMode)
+      if n == 1:
+        return ch.ord.cint
+      return -1
+    else:
+      return getch().ord.cint
 
 # Types
 
@@ -90,6 +112,7 @@ type
   Key* = int
   KeySeq* = seq[Key]
   KeyCallback* = proc(ed: var LineEditor) {.closure.}
+  HasPendingInputProc* = proc(): bool {.closure.}
   LineError* = ref Exception
   LineEditorError* = ref Exception
   LineEditorMode* = enum
@@ -133,6 +156,7 @@ type
     renderRow*: int
     write*: WriteProc
     getCh*: GetChProc
+    hasPendingInput*: HasPendingInputProc
     getWidth*: WidthProc
     echoRows*: int
     submitted*: bool
@@ -157,6 +181,12 @@ when defined(windows):
 else:
   const
     ESCAPES* = {27}
+
+const EscapeTailPollMs* = 250
+  ## Wait long enough for terminal multi-byte escape tails that can be
+  ## split from the leading ESC by the terminal/PTY stack. Too short a
+  ## window misclassifies modified keys as bare Escape and leaves their
+  ## tail bytes to be printed as normal input.
 
 # ---------- Pure helpers (testable without IO) ----------
 
@@ -847,6 +877,27 @@ proc readBracketedPaste(ed: var LineEditor): string =
         result.setLen(result.len - endLen)
         return result
 
+proc terminalHasPendingInput*(): bool =
+  ## Return whether stdin has input waiting after a short poll.
+  ## Used to distinguish bare Escape from ESC-prefixed key sequences.
+  when defined(posix):
+    if isatty(0.cint) != 0:
+      var pfd: TPollfd
+      pfd.fd = 0.cint
+      pfd.events = POLLIN
+      let r = poll(addr pfd, 1.Tnfds, EscapeTailPollMs.cint)
+      return r > 0 and (pfd.revents and POLLIN) != 0
+  true
+
+proc hasPendingEscapeTail(ed: LineEditor): bool =
+  ## POSIX terminals send a bare Escape with the same leading byte used
+  ## by arrow-key CSI sequences. Wait briefly for a tail byte; if none
+  ## arrives, treat it as a standalone cancel key.
+  if ed.hasPendingInput != nil:
+    ed.hasPendingInput()
+  else:
+    terminalHasPendingInput()
+
 # ---------- readLine driver ----------
 
 proc initEditor*(mode = mdInsert, historySize = 256, historyFile: string = ""): LineEditor =
@@ -878,10 +929,13 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
   ## extended keys). Returns ``true`` if the sequence requested a submit
   ## (Shift+Enter / Alt+Enter — these now insert a real newline rather
   ## than backslash-continuation).
+  if c1 == 27 and not ed.hasPendingEscapeTail():
+    KEYMAP["ctrl+c"](ed)
+    return false
   let c2 = ed.getCh()
   if c2 < 0:
     ed.canceled = true
-    return false
+    raise newException(InputCancelled, "")
   # Two-byte sequences. On Windows arrows / nav keys arrive as ``[224, X]``
   # and KEYSEQS holds the same shape; on POSIX KEYSEQS values are 3+ bytes
   # so this two-byte check is always a no-op there.
@@ -895,7 +949,7 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
   if s == KEYSEQS["delete"]: ed.deleteNext();       return false
   if s == KEYSEQS["insert"]: KEYMAP["insert"](ed);  return false
   # Everything below is POSIX-specific (ESC + CR for Alt/Shift+Enter,
-  # CSI ``ESC [`` sequences, modifyOtherKeys, bracketed paste, kitty
+  # CSI ``ESC [`` sequences, XMod, bracketed paste, kitty
   # extensions). Windows' 0/224 prefixes have no further structure.
   if c1 != 27: return false
   if c2 == 13:
@@ -923,7 +977,7 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
       if c4 == 126 and c3 == 51:
         ed.deleteNext(); return false
       if c3 == 50 and c4 == 55:
-        # modifyOtherKeys: ESC [ 27 ; <mod> ; <key> ~
+        # XMod: xterm modifyOtherKeys, ESC [ 27 ; <mod> ; <key> ~
         let c5 = ed.getCh()
         if c5 == 59:
           var modDigits = ""
@@ -1007,13 +1061,15 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
 proc readLineWith*(ed: var LineEditor, prompt: string,
                    getCh: GetChProc, write: WriteProc,
                    hidechars = false, noHistory = false,
-                   getWidth: WidthProc = nil): string =
+                   getWidth: WidthProc = nil,
+                   hasPendingInput: HasPendingInputProc = nil): string =
   ## Pluggable form of ``readLine``. Provides the same behavior as
   ## ``readLine`` but with explicit IO procs so tests can drive the
   ## editor against a fake terminal.
   ed.getCh = getCh
   ed.write = write
   ed.getWidth = getWidth
+  ed.hasPendingInput = hasPendingInput
   resetForRead(ed, prompt, hidechars)
   # Enable bracketed paste in both modes. For hidden inputs (api keys),
   # this lets the bracketed-paste handler atomically capture the paste
@@ -1090,7 +1146,8 @@ proc readLine*(ed: var LineEditor, prompt = "", hidechars = false,
   let getWidth: WidthProc = proc(): int =
     try: terminalWidth() except CatchableError: 80
   ed.readLineWith(prompt, getCh, write, hidechars = hidechars,
-                  noHistory = noHistory, getWidth = getWidth)
+                  noHistory = noHistory, getWidth = getWidth,
+                  hasPendingInput = terminalHasPendingInput)
 
 proc password*(ed: var LineEditor, prompt = ""): string =
   ed.readLine(prompt, true)

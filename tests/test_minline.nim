@@ -1,4 +1,4 @@
-import std/[unittest, strutils, parseutils, sequtils]
+import std/[unittest, strutils, sequtils]
 import threecode/minline
 import minline_testutils
 import ttty/grid
@@ -145,7 +145,7 @@ suite "minline editor: basic typing":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "hello"
-    d.push KEnter
+    d.push Enter
     let got = d.run(ed, prompt = "> ")
     check got == "hello"
     check ed.echoRows == 1
@@ -154,7 +154,7 @@ suite "minline editor: basic typing":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "hello"
-    d.push KEnter
+    d.push Enter
     discard d.run(ed, prompt = "> ")
     check rowText(d.grid, 0).startsWith("> hello")
 
@@ -162,62 +162,70 @@ suite "minline editor: basic typing":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "abc"
-    d.push KBack
-    d.push KBack
-    d.push KBack
-    d.push KEnter
+    d.push Backspace
+    d.push Backspace
+    d.push Backspace
+    d.push Enter
     check d.run(ed, prompt = "> ") == ""
 
 # ---------------- Driver: cursor navigation ----------------
 
 suite "minline editor: cursor navigation":
+  test "bare Escape cancels like Ctrl+C":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "draft"
+    d.push Esc
+    expect InputCancelled:
+      discard d.run(ed, prompt = "> ")
+
   test "left arrow before middle character, then insert":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "abcd"
     # Move cursor between b and c.
-    d.push KLeft; d.push KLeft
+    d.push Left; d.push Left
     d.pushString "X"
-    d.push KEnter
+    d.push Enter
     check d.run(ed, prompt = "> ") == "abXcd"
 
   test "Home jumps to start of current logical line":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "first"
-    d.push KAltEnter   # newline
+    d.push AltEnter   # newline
     d.pushString "second"
-    d.push KHome
+    d.push Home
     d.pushString "X"
-    d.push KEnter
+    d.push Enter
     check d.run(ed, prompt = "> ") == "first\nXsecond"
 
   test "End jumps to end of current logical line, not buffer end":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "ab"
-    d.push KAltEnter
+    d.push AltEnter
     d.pushString "cd"
-    d.push KUp         # to line 1
-    d.push KHome
-    d.push KEnd        # end of line 1 == position 2 (just 'ab')
+    d.push Up         # to line 1
+    d.push Home
+    d.push End        # end of line 1 == position 2 (just 'ab')
     d.pushString "Z"
-    d.push KEnter
+    d.push Enter
     check d.run(ed, prompt = "> ") == "abZ\ncd"
 
   test "Ctrl+Right and Ctrl+Left jump words across newlines":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "foo bar"
-    d.push KAltEnter
+    d.push AltEnter
     d.pushString "baz qux"
     # Cursor at end. Ctrl+Left x4 should land at start of "foo".
-    d.push KCtrlLeft  # before 'qux'
-    d.push KCtrlLeft  # before 'baz'
-    d.push KCtrlLeft  # before 'bar'
-    d.push KCtrlLeft  # before 'foo'
+    d.push CtrlLeft  # before 'qux'
+    d.push CtrlLeft  # before 'baz'
+    d.push CtrlLeft  # before 'bar'
+    d.push CtrlLeft  # before 'foo'
     d.pushString "<"
-    d.push KEnter
+    d.push Enter
     check d.run(ed, prompt = "> ") == "<foo bar\nbaz qux"
 
 # ---------------- Driver: multiline newlines ----------------
@@ -227,9 +235,9 @@ suite "minline editor: newline insertion (multiline)":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "first"
-    d.push KAltEnter
+    d.push AltEnter
     d.pushString "second"
-    d.push KEnter
+    d.push Enter
     check d.run(ed, prompt = "> ") == "first\nsecond"
     check ed.echoRows == 2
 
@@ -237,19 +245,33 @@ suite "minline editor: newline insertion (multiline)":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "a"
-    d.push KKittyShiftEnter
+    d.push Kitty: Shift + Enter
     d.pushString "b"
-    d.push KEnter
+    d.push Enter
     check d.run(ed, prompt = "> ") == "a\nb"
 
-  test "modifyOtherKeys Shift+Enter sequence inserts a newline":
+  test "XMod Shift+Enter sequence inserts a newline":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "x"
-    d.push KModkSE
+    d.push XMod: Shift + Enter
     d.pushString "y"
-    d.push KEnter
+    d.push Enter
     check d.run(ed, prompt = "> ") == "x\ny"
+    check rowText(d.grid, 0) == "> x"
+    check rowText(d.grid, 1).startsWith("  y")
+
+  test "late escape tails are not printed into the terminal grid":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pendingInput = proc(): bool = false
+    d.pushString "x"
+    d.push XMod: Shift + Enter
+    expect InputCancelled:
+      discard d.run(ed, prompt = "> ")
+    check rowText(d.grid, 0) == "> x"
+    for r in 0..<d.grid.rows.len:
+      check "[" notin rowText(d.grid, r)
 
   test "trailing backslash stays literal — no continuation":
     # The old behaviour appended `\` to the line and re-prompted for a
@@ -257,46 +279,46 @@ suite "minline editor: newline insertion (multiline)":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "abc\\"
-    d.push KEnter
+    d.push Enter
     check d.run(ed, prompt = "> ") == "abc\\"
 
   test "backspace at start of second logical line joins lines":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "ab"
-    d.push KAltEnter
+    d.push AltEnter
     d.pushString "cd"
-    d.push KHome     # cursor at start of "cd"
-    d.push KBack     # remove the newline
-    d.push KEnter
+    d.push Home     # cursor at start of "cd"
+    d.push Backspace     # remove the newline
+    d.push Enter
     check d.run(ed, prompt = "> ") == "abcd"
 
   test "Up arrow moves to previous visual row, preserving column":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "abcd"
-    d.push KAltEnter
+    d.push AltEnter
     d.pushString "efgh"
     # Cursor at end of "efgh" (col 6 with prompt "> ").
-    d.push KUp
+    d.push Up
     # Now should be at end of "abcd" (col 6) — same column.
     d.pushString "X"
-    d.push KEnter
+    d.push Enter
     check d.run(ed, prompt = "> ") == "abcdX\nefgh"
 
   test "Down arrow moves to next visual row":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "abcd"
-    d.push KAltEnter
+    d.push AltEnter
     d.pushString "efgh"
-    d.push KHome
-    d.push KUp        # row 0, col 0 (would go to history) — actually
+    d.push Home
+    d.push Up        # row 0, col 0 (would go to history) — actually
                       # falls through to historyPrevious at top row;
                       # since history is empty, no change.
-    d.push KDown      # back to row 1 col 0
+    d.push Down      # back to row 1 col 0
     d.pushString "Y"
-    d.push KEnter
+    d.push Enter
     check d.run(ed, prompt = "> ") == "abcd\nYefgh"
 
 # ---------------- Driver: visual wrap ----------------
@@ -308,7 +330,7 @@ suite "minline editor: terminal-width wrap":
     # Prompt "> " (width 2) leaves 8 cells on row 0.
     # Type 12 chars: first 8 on row 0, next 4 on row 1.
     d.pushString "abcdefghijkl"
-    d.push KEnter
+    d.push Enter
     discard d.run(ed, prompt = "> ")
     check ed.echoRows == 2
     check rowText(d.grid, 0) == "> abcdefgh"
@@ -320,9 +342,9 @@ suite "minline editor: terminal-width wrap":
     # width 10, prompt "> " (2) -> 8 cells fit on row 0.
     # 10 chars span row 0 ("abcdefgh") + row 1 ("ij").
     d.pushString "abcdefghij"
-    d.push KLeft               # cursor between i and j, on row 1
+    d.push Left               # cursor between i and j, on row 1
     d.pushString "X"           # text becomes abcdefghiXj
-    d.push KEnter
+    d.push Enter
     discard d.run(ed, prompt = "> ")
     check rowText(d.grid, 0) == "> abcdefgh"
     check rowText(d.grid, 1).startsWith("  iXj")
@@ -331,9 +353,9 @@ suite "minline editor: terminal-width wrap":
     var ed = initEditor()
     let d = newDriver(width = 10)
     d.pushString "abcdefghijkl"  # row 0: "abcdefgh", row 1: "ijkl"
-    d.push KUp                   # cursor on row 0
+    d.push Up                   # cursor on row 0
     d.pushString "?"
-    d.push KEnter
+    d.push Enter
     # Cursor was at end (after 'l') -> visual col 6 on row 1
     # (contW=2 + "ijkl" -> cols 2..6). Up to row 0 col 6 -> after 'd'
     # (prompt 0..1, 'a'=2, 'b'=3, 'c'=4, 'd'=5, col 6 is after 'd').
@@ -348,13 +370,13 @@ suite "minline editor: terminal resize":
     let d = newDriver(width = 20)
     d.pushString "abcdefghijklmnop"
     # All fits on one row at width 20.
-    d.push KLeft
-    d.push KLeft  # cursor between n and o
+    d.push Left
+    d.push Left  # cursor between n and o
     # Resize: shrink the terminal.
     d.width = 8
     # Insert a char — triggers re-render at new width.
     d.pushString "X"
-    d.push KEnter
+    d.push Enter
     check d.run(ed, prompt = "> ") == "abcdefghijklmnXop"
 
   test "echoRows reflects post-resize layout":
@@ -363,7 +385,7 @@ suite "minline editor: terminal resize":
     d.pushString "abcdefghijklmnop"
     d.width = 8
     d.pushString " "  # trigger re-render
-    d.push KEnter
+    d.push Enter
     discard d.run(ed, prompt = "> ")
     # After resize: prompt "> " (2) + 17 chars. Row 0 holds 6 chars,
     # row 1 holds 8, row 2 holds 3.
@@ -376,7 +398,7 @@ suite "minline editor: render correctness":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "hello"
-    d.push KEnter
+    d.push Enter
     discard d.run(ed, prompt = "\x1b[1;36m❯ \x1b[0m")
     check rowText(d.grid, 0) == "❯ hello"
     check d.grid.cellFg(0, 0) == colCyan
@@ -388,9 +410,9 @@ suite "minline editor: render correctness":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "ab"
-    d.push KAltEnter
+    d.push AltEnter
     d.pushString "cd"
-    d.push KEnter
+    d.push Enter
     discard d.run(ed, prompt = "> ")
     check rowText(d.grid, 0).startsWith("> ab")
     check rowText(d.grid, 1).startsWith("  cd")
@@ -399,17 +421,17 @@ suite "minline editor: render correctness":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "abcdef"
-    d.push KCtrlU
+    d.push CtrlU
     d.pushString "xy"
-    d.push KEnter
+    d.push Enter
     check d.run(ed, prompt = "> ") == "xy"
 
   test "Ctrl+W deletes the previous word":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "foo bar baz"
-    d.push KCtrlW
-    d.push KEnter
+    d.push CtrlW
+    d.push Enter
     check d.run(ed, prompt = "> ") == "foo bar "
 
 # ---------------- Driver: bracketed paste ----------------
@@ -422,7 +444,7 @@ suite "minline editor: bracketed paste":
     d.push @[27, 91, 50, 48, 48, 126]
     d.pushString "line1\nline2"
     d.push @[27, 91, 50, 48, 49, 126]
-    d.push KEnter
+    d.push Enter
     check d.run(ed, prompt = "> ") == "line1\nline2"
     check ed.echoRows == 2
 
@@ -441,7 +463,7 @@ suite "minline editor: bracketed paste":
     d.push @[0xC2, 0xA0]  # UTF-8 NBSP, must be silently dropped
     d.pushString "123\n"  # trailing newline inside paste, must NOT submit
     d.push @[27, 91, 50, 48, 49, 126]
-    d.push KEnter
+    d.push Enter
     let got = d.run(ed, prompt = "> ", hidechars = true)
     check got == "sk-abc123"
     # Screen must not contain the key plaintext; just `*`s after the prompt.
@@ -454,7 +476,7 @@ suite "minline editor: bracketed paste":
     var ed = initEditor()
     let d = newDriver()
     d.pushString "secret42"
-    d.push KEnter
+    d.push Enter
     check d.run(ed, prompt = "> ", hidechars = true) == "secret42"
     check rowText(d.grid, 0).startsWith("> ********")
 
@@ -478,7 +500,7 @@ suite "minline editor: SIGWINCH EINTR":
     ed.width = 20
     var keys: seq[int] = @[-1]
     keys.add toSeq("hello".mapIt(it.ord))
-    keys.add KEnter
+    keys.add Enter
     var ki = 0
     let getCh: GetChProc = proc(): int =
       let idx = ki; inc ki
@@ -496,7 +518,7 @@ suite "minline editor: SIGWINCH EINTR":
     var keys: seq[int] = toSeq("abcdefghij".mapIt(it.ord))
     keys.add -1  # SIGWINCH: shrink width
     keys.add toSeq("kl".mapIt(it.ord))
-    keys.add KEnter
+    keys.add Enter
     var ki = 0
     let getCh: GetChProc = proc(): int =
       let idx = ki; inc ki
@@ -518,7 +540,7 @@ suite "minline editor: SIGWINCH EINTR":
     ed.width = 80
     var keys: seq[int] = @[-1, -1]
     keys.add toSeq("x".mapIt(it.ord))
-    keys.add KEnter
+    keys.add Enter
     var ki = 0
     let getCh: GetChProc = proc(): int =
       let idx = ki; inc ki

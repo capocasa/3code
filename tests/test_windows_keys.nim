@@ -14,23 +14,15 @@
 
 import std/[unittest, deques, critbits]
 import threecode/minline
+import ttty
 
 # Inline driver: feeds the leftover bytes (everything after the
-# prefix) through ``ed.getCh`` so handleEscape can read them as if
-# they came from the console.
-type
-  ByteSource = ref object
-    bytes: seq[int]
-    pos: int
-
-proc src(bs: openArray[int]): ByteSource =
-  ByteSource(bytes: @bs, pos: 0)
-
-proc wire(ed: var LineEditor, b: ByteSource) =
-  ed.getCh = proc(): int =
-    if b.pos >= b.bytes.len: return -1
-    let k = b.bytes[b.pos]; inc b.pos; return k
-  ed.write = proc(s: string) = discard
+# prefix) through `ttty.Terminal` so handleEscape reads them from the
+# same input queue shape used by the line-editor tests.
+proc wire(ed: var LineEditor, terminal: Terminal) =
+  ed.getCh = proc(): int = terminal.read()
+  ed.write = proc(s: string) =
+    terminal.write s
   ed.getWidth = proc(): int = 80
 
 proc setupWindowsLikeKEYSEQS() =
@@ -64,8 +56,9 @@ suite "windows console key dispatch":
     var ed = initEditor()
     seedHistory(ed, @["older"])
     resetEditorBuffer(ed, "draft")
-    let b = src([72])  # second byte; first byte (224) is c1 to handleEscape
-    ed.wire b
+    let terminal = newTerminal(width = 80)
+    terminal.push [72] # second byte; first byte (224) is c1 to handleEscape
+    ed.wire terminal
     discard handleEscape(ed, 224)
     check ed.line.text == "older"
 
@@ -73,12 +66,12 @@ suite "windows console key dispatch":
     var ed = initEditor()
     seedHistory(ed, @["older"])
     resetEditorBuffer(ed, "draft")
-    let b = src([72])
-    ed.wire b
+    let terminal = newTerminal(width = 80)
+    terminal.push [72]
+    ed.wire terminal
     discard handleEscape(ed, 224)  # up — saves draft, shows "older"
     check ed.line.text == "older"
-    let b2 = src([80])
-    ed.wire b2
+    terminal.push [80]
     discard handleEscape(ed, 224)  # down — restore draft
     check ed.line.text == "draft"
 
@@ -86,20 +79,24 @@ suite "windows console key dispatch":
     var ed = initEditor()
     resetEditorBuffer(ed, "abc")
     check ed.line.position == 3
-    ed.wire src([75])  # left
+    let terminal = newTerminal(width = 80)
+    ed.wire terminal
+    terminal.push [75] # left
     discard handleEscape(ed, 224)
     check ed.line.position == 2
-    ed.wire src([77])  # right
+    terminal.push [77] # right
     discard handleEscape(ed, 224)
     check ed.line.position == 3
 
   test "Windows home/end snap to logical line":
     var ed = initEditor()
     resetEditorBuffer(ed, "hello")
-    ed.wire src([71])  # home
+    let terminal = newTerminal(width = 80)
+    ed.wire terminal
+    terminal.push [71] # home
     discard handleEscape(ed, 224)
     check ed.line.position == 0
-    ed.wire src([79])  # end
+    terminal.push [79] # end
     discard handleEscape(ed, 224)
     check ed.line.position == 5
 
@@ -107,14 +104,18 @@ suite "windows console key dispatch":
     var ed = initEditor()
     resetEditorBuffer(ed, "abcd")
     ed.line.position = 1
-    ed.wire src([83])  # delete
+    let terminal = newTerminal(width = 80)
+    terminal.push [83] # delete
+    ed.wire terminal
     discard handleEscape(ed, 224)
     check ed.line.text == "acd"
 
   test "Windows prefix that doesn't match a known key is a no-op":
     var ed = initEditor()
     resetEditorBuffer(ed, "abc")
-    ed.wire src([99])  # arbitrary unmapped second byte
+    let terminal = newTerminal(width = 80)
+    terminal.push [99] # arbitrary unmapped second byte
+    ed.wire terminal
     discard handleEscape(ed, 224)
     check ed.line.text == "abc"
     check ed.line.position == 3
