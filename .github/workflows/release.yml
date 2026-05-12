@@ -42,15 +42,24 @@ jobs:
           nimble setup -y
           echo '--path:"src"' >> nimble.paths
 
+      - name: Compute build flags
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "BUILD_FLAGS=-d:autoUpdate" >> "$GITHUB_ENV"
+          else
+            echo "BUILD_FLAGS=-d:versionSuffix=-main-${GITHUB_SHA:0:8}" >> "$GITHUB_ENV"
+          fi
+
       - name: Build
-        run: nimble build -y -d:release -d:autoUpdate
+        run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
 
       - name: Build x86_64 and create universal binary (macOS)
         if: runner.os == 'macOS'
         run: |
           mv 3code 3code-arm64
           rm -rf ~/.cache/nim/threecode_r
-          nim c -d:release -d:autoUpdate --passC:"-arch x86_64" --passL:"-arch x86_64" --cpu:amd64 -o:3code-x86_64 src/threecode.nim
+          nim c -d:release ${{ env.BUILD_FLAGS }} --passC:"-arch x86_64" --passL:"-arch x86_64" --cpu:amd64 -o:3code-x86_64 src/threecode.nim
           lipo -create 3code-arm64 3code-x86_64 -output 3code
           file 3code
 
