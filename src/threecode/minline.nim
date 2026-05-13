@@ -415,18 +415,11 @@ proc emitColumn(ed: var LineEditor, col: int) =
   if col > 0:
     ed.write "\x1b[" & $col & "C"
 
-proc fullRedraw*(ed: var LineEditor) =
-  ## Wipe the previously rendered area, repaint prompt + buffer, place
-  ## the cursor at the visual position derived from ``ed.line.position``.
-  ## Updates ``ed.renderRow`` to match.
-  ##
-  ## All bytes for the repaint are coalesced into a single ``write``
-  ## call so the underlying ``stdout.flushFile`` runs once per keystroke
-  ## (was: ~5 flushes per redraw, visible on Windows conhost as flicker
-  ## because conhost paints between flushes). The whole thing is also
-  ## wrapped in DEC 2026 synchronized-output (``CSI ? 2026 h/l``) so
-  ## conhost treats the repaint as one atomic frame; terminals that
-  ## don't recognize the mode ignore it silently.
+proc redrawBytes*(ed: var LineEditor): string =
+  ## Build a full editor repaint and update ``ed.renderRow`` to the
+  ## cursor's new visual row. Callers that share a render lock with
+  ## other terminal chrome can embed these bytes in a larger atomic
+  ## frame; ``fullRedraw`` is the ordinary standalone writer.
   if ed.getWidth != nil:
     let w = ed.getWidth()
     if w > 0: ed.width = w
@@ -450,8 +443,22 @@ proc fullRedraw*(ed: var LineEditor) =
   if targetCol > 0:
     buf.add "\x1b[" & $targetCol & "C"
   buf.add "\x1b[?2026l"
-  ed.write buf
   ed.renderRow = targetRow
+  result = buf
+
+proc fullRedraw*(ed: var LineEditor) =
+  ## Wipe the previously rendered area, repaint prompt + buffer, place
+  ## the cursor at the visual position derived from ``ed.line.position``.
+  ## Updates ``ed.renderRow`` to match.
+  ##
+  ## All bytes for the repaint are coalesced into a single ``write``
+  ## call so the underlying ``stdout.flushFile`` runs once per keystroke
+  ## (was: ~5 flushes per redraw, visible on Windows conhost as flicker
+  ## because conhost paints between flushes). The whole thing is also
+  ## wrapped in DEC 2026 synchronized-output (``CSI ? 2026 h/l``) so
+  ## conhost treats the repaint as one atomic frame; terminals that
+  ## don't recognize the mode ignore it silently.
+  ed.write ed.redrawBytes()
   if ed.postRedraw != nil:
     ed.postRedraw(ed)
 

@@ -356,6 +356,35 @@ proc syncWrite*(s: string) =
   stdout.write SyncBegin & s & SyncEnd
   stdout.flushFile
 
+proc syncTurnFooterWrite*(s: string) {.gcsafe.} =
+  ## Like ``syncWrite`` for turn-time footer animations, but if the
+  ## background input editor is active, repaint the footer from the bar
+  ## anchor and then restore the editor's prompt/input row in the same
+  ## synchronized frame. Otherwise spinner/bar ticks park the physical
+  ## cursor on the token bar and the next typed character echoes there.
+  {.cast(gcsafe).}:
+    acquire renderLock
+    try:
+      if inputThreadRunning and inputState.turnActive and inputEditor != nil:
+        let edPtr = inputEditor
+        stdout.write SyncBegin
+        let up = edPtr[].renderRow + 1
+        stdout.write "\r"
+        if up > 0:
+          stdout.write "\x1b[" & $up & "A"
+        stdout.write s
+        stdout.write "\x1b[" & $up & "B"
+        stdout.write edPtr[].redrawBytes()
+        if edPtr[].postRedraw != nil:
+          edPtr[].postRedraw(edPtr[])
+        stdout.write SyncEnd
+        stdout.flushFile
+      else:
+        stdout.write SyncBegin & s & SyncEnd
+        stdout.flushFile
+    finally:
+      release renderLock
+
 proc spinnerBarBytes*(frame, label: string, elapsed: int): string =
   ## Bar row payload during the spinner phase: braille glyph at col 0,
   ## one space at col 1, then the label. 2-char prefix total — the same
@@ -694,8 +723,8 @@ proc spinnerLoop(unused: string) {.thread.} =
     lastTicker = ticker
     try:
       let frame = frames[i mod frames.len]
-      syncWrite spinnerFooterBytes(frame, label, ticker, elapsed.int,
-                                   currentTermW())
+      syncTurnFooterWrite spinnerFooterBytes(frame, label, ticker, elapsed.int,
+                                             currentTermW())
     except CatchableError: discard
     sleep 80
     inc i
@@ -786,7 +815,7 @@ proc barTickLoop() {.thread.} =
     # `spinnerFooterBytes`: some terminals transiently re-show the
     # caret on cursor movement, and beginTurn's one-shot `?25l`
     # isn't enough to keep it hidden over a long-running tool.
-    syncWrite "\x1b[?25l" &
+    syncTurnFooterWrite "\x1b[?25l" &
       barFooterBytes(label, DimPromptColor, currentTermW())
     sleep 500
 
@@ -1825,7 +1854,10 @@ proc inputThreadProc() {.thread.} =
               stdout.write "\x1b[1B"
             else:
               paintPromptOnly(TurnPromptColor)
-            edPtr[].fullRedraw()
+            stdout.write edPtr[].redrawBytes()
+            if edPtr[].postRedraw != nil:
+              edPtr[].postRedraw(edPtr[])
+            stdout.flushFile()
           if text.strip in [":q", ":quit", ":exit"]:
             inputState.cmdWasQuit = true
             interrupted = true

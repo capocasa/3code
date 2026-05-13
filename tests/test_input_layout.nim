@@ -53,13 +53,21 @@ suite "input thread layout during turns":
     let typedOnBarRow =
       barRow >= 0 and "h" in rowText(ft.grid, barRow)
     let cursorOnPromptRow = ft.grid.row == promptRow
+    syncTurnFooterWrite barFooterBytes("LBL  4s", DimPromptColor)
+    ft.feedKeys("i")
+    let tickPromptRow = captureUntil(ft, "❯ hi")
+    let tickTypedOnPromptRow =
+      tickPromptRow == promptRow and "❯ hi" in rowText(ft.grid, promptRow)
+    let tickTypedOnBarRow =
+      barRow >= 0 and "hi" in rowText(ft.grid, barRow)
+    let tickCursorOnPromptRow = ft.grid.row == promptRow
 
     ft.feedKeys("\r")
     sleep 100
     endTurn()
 
     ft.drain()
-    check inputState.queuedText == "h"
+    check inputState.queuedText == "hi"
     check promptRow >= 1
     check barRow >= 0
     check "LBL" in rowText(ft.grid, barRow)
@@ -67,6 +75,9 @@ suite "input thread layout during turns":
     check typedOnPromptRow
     check not typedOnBarRow
     check cursorOnPromptRow
+    check tickTypedOnPromptRow
+    check not tickTypedOnBarRow
+    check tickCursorOnPromptRow
 
   test "beginTurn input thread keeps prompt below token bar after submit":
     ## This final-grid check covers the submitted state. It is not a
