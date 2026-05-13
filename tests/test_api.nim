@@ -61,6 +61,51 @@ suite "api request shaping":
       checkpoint compileOut
     check fileExists(outPath)
 
+  test "provider stub covers common network failure aliases":
+    let pid = $getCurrentProcessId()
+    let probePath = getTempDir() / ("tc_stub_failures_" & pid & ".nim")
+    let outPath = getTempDir() / ("tc_stub_failures_" & pid)
+    let cacheDir = getTempDir() / ("tc_stub_failures_cache_" & pid)
+    createDir(cacheDir)
+    defer:
+      try: removeFile(probePath) except OSError: discard
+      try: removeFile(outPath) except OSError: discard
+      try: removeDir(cacheDir) except OSError: discard
+    writeFile(probePath, """
+import threecode/api
+
+doAssert parseStubFailure("dns") == sfDns
+doAssert parseStubFailure("network-unreachable") == sfNetworkUnreachable
+doAssert parseStubFailure("connection-refused") == sfConnectionRefused
+doAssert parseStubFailure("connect-timeout") == sfConnectTimeout
+doAssert parseStubFailure("certificate") == sfCertificate
+doAssert parseStubFailure("broken-pipe") == sfBrokenPipe
+doAssert parseStubFailure("connection-reset") == sfConnectionReset
+doAssert parseStubFailure("eof") == sfEof
+doAssert parseStubFailure("read-timeout") == sfReadTimeout
+doAssert parseStubFailure("silent-then-ok") == sfSilentThenOk
+doAssert parseStubFailure("malformed-sse") == sfMalformedSse
+doAssert parseStubFailure("invalid-json") == sfInvalidJson
+doAssert stubHttpStatus(parseStubFailure("400")) == 400
+doAssert stubHttpStatus(parseStubFailure("401")) == 401
+doAssert stubHttpStatus(parseStubFailure("403")) == 403
+doAssert stubHttpStatus(parseStubFailure("408")) == 408
+doAssert stubHttpStatus(parseStubFailure("409")) == 409
+doAssert stubHttpStatus(parseStubFailure("425")) == 425
+doAssert stubHttpStatus(parseStubFailure("429")) == 429
+doAssert stubHttpStatus(parseStubFailure("500")) == 500
+doAssert stubHttpStatus(parseStubFailure("502")) == 502
+doAssert stubHttpStatus(parseStubFailure("503")) == 503
+doAssert stubHttpStatus(parseStubFailure("504")) == 504
+""")
+    let compileCmd = "nim c -d:ssl -d:providerStub --path:src --nimcache:" &
+      cacheDir.quoteShell & " -o:" & outPath.quoteShell & " " &
+      probePath.quoteShell
+    let (compileOut, compileCode) = execCmdEx(compileCmd)
+    check compileCode == 0
+    if compileCode != 0:
+      checkpoint compileOut
+
 suite "xml tool_call fallback":
   test "parses a single bash call":
     let raw = "Sure. <tool_call>bash<arg_key>command</arg_key>" &

@@ -127,7 +127,7 @@ export DEBIAN_FRONTEND=noninteractive
   writeFile(scriptPath, script)
   writeFile(stdinPath, act.stdin)
 
-  let wrapped = &"timeout --foreground 120s sh \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
+  let wrapped = &"exec timeout --foreground 120s sh \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
 
   var p = startProcess("/bin/sh", args = ["-c", wrapped],
                        options = {poStdErrToStdOut, poUsePath})

@@ -137,6 +137,27 @@ when providerStub:
     else:
       result = fallback
 
+  proc stubRetryAfter(j: JsonNode): string =
+    if j != nil and j.kind == JObject:
+      result = j{"retryAfter"}.getStr("")
+
+  proc stubErrBody(f: StubFailure, j: JsonNode): string =
+    if j != nil and j.kind == JObject and "body" in j:
+      return j{"body"}.getStr
+    case f
+    of sfHttp400: """{"error":"bad request"}"""
+    of sfHttp401: """{"error":"unauthorized"}"""
+    of sfHttp403: """{"error":"forbidden"}"""
+    of sfHttp408: """{"error":"request timeout"}"""
+    of sfHttp409: """{"error":"conflict"}"""
+    of sfHttp425: """{"error":"too early"}"""
+    of sfHttp429: """{"error":"rate limit"}"""
+    of sfHttp500: """{"error":"server error"}"""
+    of sfHttp502: """{"error":"bad gateway"}"""
+    of sfHttp503: """{"error":"service unavailable"}"""
+    of sfHttp504: """{"error":"gateway timeout"}"""
+    else: ""
+
   proc loadStubResponses(): seq[JsonNode] =
     ## Read stub_responses.json: a JSON array of assistant-message objects.
     ## Each element is an OpenAI-shape assistant message (role, content,
@@ -903,6 +924,17 @@ proc classifyRetry*(exc: ref CatchableError, code: int): string =
   of 500, 502, 503, 504: "server"
   else: ""
 
+proc retryCategory*(errMsg: string, assistantMsg: JsonNode, statusCode: int): string =
+  let netFailed = errMsg != "" and assistantMsg == nil
+  if netFailed:
+    return "server"
+  case statusCode
+  of 0:
+    if assistantMsg == nil: "server" else: ""
+  of 429: "rate"
+  of 500, 502, 503, 504: "server"
+  else: ""
+
 var
   # Retry state split by category — different semantics, different ceilings.
   # A 5xx burst shouldn't inflate the backoff a later 429 sees, and vice versa.
@@ -1262,7 +1294,9 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
                                   ("Content-Type", "application/json"),
                                   ("Accept", "text/event-stream")],
                        body = bodyStr)
+      markProviderActivity()
       resp = conn.readResponseHead()
+      markProviderActivity()
       break
     except CatchableError as e:
       # Cached conn was stale (server-side keep-alive timeout, etc.) or
@@ -1304,12 +1338,6 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     setSpinTicker("  … " & flat)
   var line = ""
   var streamErr = ""
-  # Watch stdin for ctrl-c / ESC for the entire body read. Without this
-  # the keystrokes are buffered (cooked mode) until the first SSE chunk
-  # arrives, so cancel during the model's pre-data "thinking" gap is
-  # invisible.
-  startCancelWatcher()
-  defer: stopCancelWatcher()
   while true:
     var hasLine = false
     try: hasLine = conn.readLine(line)
@@ -1318,6 +1346,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       closeCachedStreamConn()
       break
     if not hasLine: break
+    markProviderActivity()
     if interrupted:
       closeCachedStreamConn()
       break
@@ -1631,36 +1660,104 @@ proc emitUserSubmit*(line: string, echoRows = -1) =
 
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   when providerStub:
-    let stubT0 = epochTime()
-    let stubWindow = contextWindowFor(p.model)
-    let stubBaseLabel = contextLabel(lastPromptTokens, stubWindow)
-    stdout.write "\n"
-    setSpinLabel(liveLabel(stubBaseLabel, 0))
-    startSpinner("")
-    sleep 300  # simulate thinking
-    result = stubCallModel(messages)
-    if result.kind == JObject and "role" notin result:
-      result["role"] = %"assistant"
-    debugOut &"callModel stub idx={stubResponseIdx-1}"
-    var slurped = 0
-    streamStubContent(result{"content"}.getStr(""), stubBaseLabel, slurped)
-    stopSpinner()
-    usage = stubUsage(result{"content"}.getStr(""))
-    let stubElapsed = (epochTime() - stubT0).int
-    let stubLabel = tokenLineLabel(usage, stubWindow, stubElapsed)
-    paintBarPrompt(stubLabel, DimPromptColor)
-    pendingHint = (active: true, usage: usage, window: stubWindow,
-                   elapsed: stubElapsed)
-    if result.kind == JObject:
-      result["usage"] = %*{
-        "promptTokens": usage.promptTokens,
-        "completionTokens": usage.completionTokens,
-        "totalTokens": usage.totalTokens,
-        "cachedTokens": usage.cachedTokens,
-        "elapsed": stubElapsed,
-        "ts": now().format("yyyy-MM-dd'T'HH:mm:sszzz"),
-      }
-    return
+    block:
+      let stubT0 = epochTime()
+      let stubWindow = contextWindowFor(p.model)
+      let stubBaseLabel = contextLabel(lastPromptTokens, stubWindow)
+      stdout.write "\n"
+      setSpinLabel(liveLabel(stubBaseLabel, 0))
+      startSpinner("")
+      startQuietWatch(liveLabel(stubBaseLabel, 0))
+      startCancelWatcher()
+      defer:
+        stopQuietWatch()
+        stopCancelWatcher()
+      const StubMaxAttempts = 8
+      var attempt = 0
+      var lastFailure = sfNone
+      while true:
+        inc attempt
+        let node = stubCallModel(messages)
+        if node.kind == JObject and node{"failure"}.getStr("").len > 0:
+          lastFailure = parseStubFailure(node{"failure"}.getStr)
+          let delayMs = stubDelayMs(node, "delayMs", 300)
+          var remaining = delayMs
+          while remaining > 0:
+            if interrupted:
+              stopSpinner()
+              raise newException(ApiError, "interrupted by user")
+            let step = min(100, remaining)
+            sleep(step)
+            remaining -= step
+          let code = stubHttpStatus(lastFailure)
+          var errMsg =
+            if code > 0: "api " & $code
+            else: stubTransportError(lastFailure)
+          if errMsg.len == 0:
+            errMsg = stubFailureName(lastFailure)
+          let category = retryCategory(errMsg, nil, code)
+          if category.len == 0 or attempt >= StubMaxAttempts:
+            stopSpinner()
+            raise newException(ApiError,
+              errMsg & (if stubErrBody(lastFailure, node).len > 0:
+                ": " & stubErrBody(lastFailure, node) else: ""))
+          let retryAfter = try: parseInt(stubRetryAfter(node)) except CatchableError: 0
+          let backoff =
+            if retryAfter > 0: retryAfter
+            elif category == "rate": min(1 shl rateRetryLevel, 90)
+            else: min(1 shl serverRetryLevel, 16)
+          stopSpinner()
+          stderr.writeLine &"3code: {errMsg}; retry {attempt + 1}/{StubMaxAttempts} in {backoff}s"
+          var waitMs = backoff * 1000
+          while waitMs > 0:
+            if interrupted:
+              raise newException(ApiError, "interrupted by user during retry backoff")
+            let step = min(100, waitMs)
+            sleep(step)
+            waitMs -= step
+          if category == "rate":
+            inc rateRetryLevel
+            rateLastTs = epochTime()
+          else:
+            inc serverRetryLevel
+            serverLastTs = epochTime()
+          setSpinLabel(&"retry {attempt + 1}/{StubMaxAttempts}")
+          startSpinner("")
+        else:
+          result = node
+          break
+      if result.kind == JObject and "role" notin result:
+        result["role"] = %"assistant"
+      debugOut &"callModel stub idx={stubResponseIdx-1} failure={stubFailureName(lastFailure)}"
+      var slurped = 0
+      let preStreamDelay = stubDelayMs(result, "preStreamDelayMs", 0)
+      if preStreamDelay > 0:
+        var remaining = preStreamDelay
+        while remaining > 0:
+          if interrupted:
+            stopSpinner()
+            raise newException(ApiError, "interrupted by user")
+          let step = min(100, remaining)
+          sleep(step)
+          remaining -= step
+      streamStubContent(result{"content"}.getStr(""), stubBaseLabel, slurped)
+      stopSpinner()
+      usage = stubUsage(result{"content"}.getStr(""))
+      let stubElapsed = (epochTime() - stubT0).int
+      let stubLabel = tokenLineLabel(usage, stubWindow, stubElapsed)
+      paintBarPrompt(stubLabel, DimPromptColor)
+      pendingHint = (active: true, usage: usage, window: stubWindow,
+                     elapsed: stubElapsed)
+      if result.kind == JObject:
+        result["usage"] = %*{
+          "promptTokens": usage.promptTokens,
+          "completionTokens": usage.completionTokens,
+          "totalTokens": usage.totalTokens,
+          "cachedTokens": usage.cachedTokens,
+          "elapsed": stubElapsed,
+          "ts": now().format("yyyy-MM-dd'T'HH:mm:sszzz"),
+        }
+      return
   debugOut "callModel start"
   if p.family == "deepseek":
     ensureReasoningField(messages)
@@ -1716,6 +1813,11 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   # itself doesn't toggle visibility — touching DECTCEM here would
   # cause a flicker between callModel iterations within a turn.
   startSpinner("")
+  startQuietWatch(liveLabel(baseLabel, 0))
+  startCancelWatcher()
+  defer:
+    stopQuietWatch()
+    stopCancelWatcher()
   const MaxAttempts = 8
   var outcome: StreamOutcome
   var attempt = 0
@@ -1729,17 +1831,8 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       if outcome.assistantMsg == nil:
         raise newException(ApiError, "interrupted by user")
       break
-    let netFailed = outcome.errMsg != "" and outcome.assistantMsg == nil
     let code = outcome.statusCode
-    let category =
-      if netFailed: "server"
-      else:
-        case code
-        of 0: (if outcome.assistantMsg != nil: "" else: "server")
-        of 200: ""
-        of 429: "rate"
-        of 500, 502, 503, 504: "server"
-        else: ""
+    let category = retryCategory(outcome.errMsg, outcome.assistantMsg, code)
     let retryable = category != ""
     var errMsg = outcome.errMsg
     if errMsg == "" and retryable: errMsg = "api " & $code

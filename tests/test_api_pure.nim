@@ -77,6 +77,25 @@ suite "api: classifyRetry":
     let e = newException(CatchableError, "timeout")
     check classifyRetry(e, 429) == "server"  # exception wins
 
+suite "api: retryCategory":
+  test "network failures retry as server":
+    check retryCategory("stream read: connection reset by peer", nil, 0) == "server"
+
+  test "429 retries as rate":
+    check retryCategory("", nil, 429) == "rate"
+
+  test "5xx statuses retry as server":
+    for code in [500, 502, 503, 504]:
+      check retryCategory("", nil, code) == "server"
+
+  test "nonretryable auth and request statuses do not retry":
+    for code in [400, 401, 403, 408, 409, 425]:
+      check retryCategory("", nil, code) == ""
+
+  test "assistant message without status is success":
+    let msg = %*{"role": "assistant", "content": "ok"}
+    check retryCategory("", msg, 0) == ""
+
 suite "api: applyReasoning — gpt-oss":
   test "sets reasoning_effort for gpt-oss":
     var body = %*{"stream": true}
