@@ -815,8 +815,11 @@ proc barTickLoop() {.thread.} =
     # `spinnerFooterBytes`: some terminals transiently re-show the
     # caret on cursor movement, and beginTurn's one-shot `?25l`
     # isn't enough to keep it hidden over a long-running tool.
-    syncTurnFooterWrite "\x1b[?25l" &
-      barFooterBytes(label, DimPromptColor, currentTermW())
+    let tw = currentTermW()
+    let th = try: terminalHeight() except CatchableError: 24
+    let pos = "\x1b[" & $(th - 1) & ";1H"
+    syncTurnFooterWrite "\x1b[?25l" & pos &
+      barFooterBytes(label, DimPromptColor, tw)
     sleep 500
 
 proc startBarTick*(base: string) =
@@ -1809,7 +1812,7 @@ proc inputThreadProc() {.thread.} =
         inputState.autoSend = false
     edPtr[].postRedraw = proc(ed: var minline.LineEditor) =
       if inputState.autoSend and ed.line.position == ed.line.text.len:
-        stdout.write OffWhiteFg & "▻" & Reset
+        stdout.write OffWhiteFg & "⏳" & Reset
         stdout.write "\x1b[1D"
         stdout.flushFile
 
@@ -1838,6 +1841,7 @@ proc inputThreadProc() {.thread.} =
         rawMode.c_cc[VTIME] = 0.char
         discard fd.tcSetAttr(TCSANOW, addr rawMode)
 
+    edPtr[].submitIcon = OffWhiteFg & "⏳" & Reset
     while inputState.turnActive:
       try:
         let text = minline.readLineWith(edPtr[], "❯ ", getCh, writeProc)

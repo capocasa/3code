@@ -41,6 +41,10 @@ when defined(posix):
       if n <= 0:
         break
 
+  proc isAlive(pid: Pid): bool {.inline.} =
+    ## Check if a process is still alive using kill(pid, 0).
+    posix.kill(pid, 0) == 0
+
   proc toolCancelLoop() {.thread, nimcall.} =
     while not toolCancelStop.load(moRelaxed):
       var pfd: TPollfd
@@ -58,6 +62,11 @@ when defined(posix):
               let pid = toolCancelPid.load(moRelaxed)
               if pid > 0:
                 discard posix.kill(Pid(pid), SIGTERM)
+                for _ in 0..<20:
+                  if not isAlive(Pid(pid)): break
+                  sleep(100)
+                if isAlive(Pid(pid)):
+                  discard posix.kill(Pid(pid), SIGKILL)
               return
 
   proc startToolCancelWatcher(pid: int) =

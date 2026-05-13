@@ -1,7 +1,8 @@
 import std/[os, unittest, strutils]
 import ttty/grid
-import threecode/[api, types, minline]
+import threecode/[api, types, minline, util]
 import harness
+import minline_testutils
 
 ## Functional tests for input-thread prompt layout during turns.
 ##
@@ -178,3 +179,63 @@ suite "input thread layout during turns":
     # BUG: prompt and typed char overwrite bar row
     check "❯" in rowText(ft.grid, 0)   # prompt on bar row
     check "h" in rowText(ft.grid, 0)   # typed char on bar row
+
+  test "submit during turn shows icon at end of text, not below":
+    ## After pressing Enter during an active spinner, a clock/hourglass
+    ## icon should appear at the end of the submitted text on the same
+    ## row, not on a separate row below pushing the text up.
+    var ft = newFakeTerm()
+    defer: ft.close()
+
+    paintBarPrompt("LBL  3s", DimPromptColor)
+    clearBarPrompt()
+    currentBarLabel = "LBL  3s"
+    stdout.write barFooterBytes("LBL  3s", TurnPromptColor)
+    stdout.write "\x1b[1B"
+    stdout.flushFile()
+
+    var ed = minline.initEditor()
+    ed.width = 80
+    ed.submitIcon = OffWhiteFg & "⏳" & Reset
+    ft.feedKeys("hi\r")
+
+    let getCh: minline.GetChProc = proc(): int =
+      try: stdin.readChar().ord
+      except: -1
+    let writeProc: minline.WriteProc = proc(s: string) =
+      stdout.write s
+      stdout.flushFile
+    let text = minline.readLineWith(ed, "\xe2\x9d\xaf ", getCh, writeProc,
+                                     hidechars = false)
+
+    ft.drain()
+    check text == "hi"
+    # The icon must be on the same row as the text, not below
+    check "⏳" in rowText(ft.grid, 1)   # icon on text row (row 1)
+    check "hi" in rowText(ft.grid, 1)   # text also on row 1
+    check "⏳" notin rowText(ft.grid, 2)  # icon NOT on the row below
+
+  test "submitIcon + multiline: parkAtEnd leaves cursor one row below":
+    # Regression: parkAtEnd used to skip \r\n after the submit icon,
+    # leaving the cursor on the last input row instead of one below.
+    # submitTransitionBytes assumes the cursor is one row below,
+    # so the walkback overshot by one, destroying the row above
+    # the bar (assistant output or gap row).
+    var ed = minline.initEditor()
+    ed.width = 80
+    ed.submitIcon = OffWhiteFg & "\xE2\x8F\xB3" & Reset
+    let d = newDriver()
+    d.pushString "line1"
+    d.push AltEnter
+    d.pushString "line2"
+    d.push AltEnter
+    d.pushString "line3"
+    d.push Enter
+    let text = d.run(ed, "> ")
+    check text == "line1\nline2\nline3"
+    check ed.echoRows == 3
+    # After parkAtEnd: icon on last text row, cursor at col 0 one row below.
+    check d.grid.row == 3
+    check d.grid.col == 0
+    check "line3" in rowText(d.grid, 2)
+    check "\xE2\x8F\xB3" in rowText(d.grid, 2)

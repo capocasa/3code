@@ -156,6 +156,7 @@ type
     completionCallback*: proc(ed: LineEditor): seq[string] {.closure.}
     onMutate*: proc(ed: var LineEditor) {.closure.}
     postRedraw*: proc(ed: var LineEditor) {.closure.}
+    submitIcon*: string ## Icon written at end of text before submit newline (set before readLineWith).
     prefillText*: string
     history*: LineHistory
     line*: Line
@@ -471,6 +472,8 @@ proc parkAtEnd(ed: var LineEditor) =
   let endRow = total - 1
   if ed.renderRow < endRow:
     emitMoveDown(ed, endRow - ed.renderRow)
+  if ed.submitIcon.len > 0:
+    ed.write ed.submitIcon
   ed.write "\r\n"
   ed.echoRows = total
   ed.renderRow = 0
