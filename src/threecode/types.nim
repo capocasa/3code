@@ -86,6 +86,15 @@ type
     line*: int
     msg*: string
 
+  InputState* = object
+    ## Shared between main thread and input thread during turns.
+    ## All fields accessed under renderLock unless noted.
+    turnActive*: bool       ## true while input thread should run
+    autoSend*: bool         ## true after Enter queues text for auto-send
+    queuedText*: string     ## text queued for auto-send
+    residualText*: string   ## partial editor text when input thread exits
+    cmdWasQuit*: bool       ## :q/:exit was issued during the turn
+
 proc die*(msg: string, code = 1) {.noreturn.} =
   stderr.writeLine "3code: " & msg
   quit code

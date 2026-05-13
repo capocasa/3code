@@ -21,7 +21,7 @@ when defined(posix):
   import std/posix except SocketHandle
   import posix/termios
 import streamhttp
-import types, util, prompts, compact, display
+import types, util, prompts, compact, display, minline
 
 const providerStub {.booldefine.} = false
 when providerStub:
@@ -95,6 +95,16 @@ var showThinking*: bool = true
 
 var spinnerStop: Atomic[bool]
 var spinnerThread: Thread[string]
+
+var renderLock*: Lock    ## Spinlock serializing cursor work between main+input threads
+initLock(renderLock)
+var inputState*: InputState
+var inputThread: Thread[void]
+var inputEditor*: ptr minline.LineEditor
+var inputProfile*: ptr Profile
+var inputSession*: ptr Session
+var inputMessages*: ptr JsonNode
+var turnHandleCommand*: proc(cmd: string): bool
 
 # Shared mutable spinner state. The spinner thread reads these every frame;
 # the main thread updates them as chunks arrive. Two separate lines:
@@ -174,6 +184,8 @@ const
     ## tool exec, etc.). Mid-grey 244 — readable on both bg.
   BrightPromptColor* = CyanFg & BoldOn
     ## Prompt color when readline is active (typing-ready).
+  TurnPromptColor* = OffWhiteFg & BoldOn
+    ## Prompt color during turns — bright white to encourage typing.
   SyncBegin* = "\x1b[?2026h"
     ## DEC 2026 begin synchronized update — conhost (Win11 modern) and
     ## Windows Terminal commit all bytes between BEGIN and END as one
@@ -378,10 +390,12 @@ template withCleared*(body: untyped) =
   ## output, etc.) that advances the cursor by some number of rows;
   ## the bar+prompt slide along with the cursor.
   debugOut &"withCleared enter barLabel={currentBarLabel.len}"
+  acquire renderLock
   clearBarPrompt()
   body
   debugOut "withCleared exit"
   repaintBarPrompt()
+  release renderLock
 
 proc spinnerLoop(unused: string) {.thread.} =
   ## Three-line spinner footer rooted at the cursor row:
@@ -1013,8 +1027,11 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   # the keystrokes are buffered (cooked mode) until the first SSE chunk
   # arrives, so cancel during the model's pre-data "thinking" gap is
   # invisible.
-  startCancelWatcher()
-  defer: stopCancelWatcher()
+  # Cancel watcher: skip when the input thread is active (it handles
+  # ctrl-c via its own readLine loop — both threads can't poll stdin).
+  if not inputState.turnActive:
+    startCancelWatcher()
+    defer: stopCancelWatcher()
   while true:
     var hasLine = false
     try: hasLine = conn.readLine(line)
@@ -1311,20 +1328,118 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "minimax": applyMinimaxReasoning(p, body)
   else: discard
 
+proc inputThreadProc() {.thread.} =
+  ## Input thread: runs readline during model turns. Queues regular text
+  ## for auto-send, executes `:` commands immediately.
+  {.cast(gcsafe).}:
+    template tryRender(body: untyped) =
+      acquire renderLock
+      body
+      release renderLock
+    var edPtr = inputEditor
+    var profPtr = inputProfile
+    var sessPtr = inputSession
+    var msgsPtr = inputMessages
+    when defined(posix):
+      let getCh: minline.GetChProc = proc(): int =
+        ## Poll stdin with 200ms timeout so we can check turnActive.
+        if not inputState.turnActive:
+          return -1
+        var pfd: Tpollfd
+        pfd.fd = STDIN_FILENO
+        pfd.events = POLLIN
+        while inputState.turnActive:
+          let r = poll(addr pfd, 1.Tnfds, 200.cint)
+          if r < 0:
+            if errno == EINTR: continue
+            return -1
+          if r > 0 and (pfd.revents and POLLIN) != 0:
+            return stdin.readChar().ord
+        return -1  # turnActive went false
+    else:
+      let getCh: minline.GetChProc = proc(): int =
+        if not inputState.turnActive: return -1
+        getchr().int
+    let writeProc: minline.WriteProc = proc(s: string) =
+      tryRender:
+        stdout.write s
+        stdout.flushFile
+    edPtr[].onMutate = proc(ed: var minline.LineEditor) =
+      if inputState.autoSend:
+        inputState.autoSend = false
+    edPtr[].postRedraw = proc(ed: var minline.LineEditor) =
+      if inputState.autoSend and ed.line.position == ed.line.text.len:
+        stdout.write(OffWhiteFg & "\xe2\x96\xbb" & Reset)
+        stdout.write("\x1b[1D")  # move cursor back one column
+        stdout.flushFile
+    # Paint the prompt in turn color (bright white)
+    tryRender:
+      clearBarPrompt()
+      stdout.write barFooterBytes(currentBarLabel, TurnPromptColor)
+      stdout.write "\x1b[1B"  # barFooterBytes parks cursor on bar row; move to prompt row
+      stdout.flushFile
+    # Put terminal in raw mode for the duration of readLineWith.
+    when defined(posix):
+      var inputOrigTermios: Termios
+      let inputFd = getFileHandle(stdin)
+      discard inputFd.tcGetAttr(addr inputOrigTermios)
+      var rawMode = inputOrigTermios
+      rawMode.c_lflag = rawMode.c_lflag and not Cflag(ECHO or ICANON or IEXTEN or ISIG)
+      rawMode.c_cc[VMIN] = 1.char
+      rawMode.c_cc[VTIME] = 0.char
+      discard inputFd.tcSetAttr(TCSANOW, addr rawMode)
+    while inputState.turnActive:
+      try:
+        let text = minline.readLineWith(edPtr[], "\xe2\x9d\xaf ",  # "\u276f "
+          getCh, writeProc, hidechars = false)
+        if text == "": continue
+        if text[0] == ':':
+          # Execute command immediately
+          tryRender:
+            clearBarPrompt()
+          discard turnHandleCommand(text)
+          tryRender:
+            paintBarPrompt(currentBarLabel, TurnPromptColor)
+            edPtr[].fullRedraw()
+          if text.strip in [":q", ":quit", ":exit"]:
+            inputState.cmdWasQuit = true
+            interrupted = true
+            break
+        else:
+          # Queue text for auto-send
+          tryRender:
+            inputState.queuedText = text
+            inputState.autoSend = true
+      except minline.InputCancelled:
+        interrupted = true
+        break
+      except EOFError:
+        break
+      except CatchableError:
+        break
+    # Restore terminal mode
+    when defined(posix):
+      discard inputFd.tcSetAttr(TCSADRAIN, addr inputOrigTermios)
+    # Save residual editor text for outer REPL to pick up
+    inputState.residualText = edPtr[].line.text
+    edPtr[].onMutate = nil
+    edPtr[].postRedraw = nil
+
 proc beginTurn*() =
-  ## Hide the terminal caret for the duration of the turn — the dim
-  ## ❯ glyph (still painted, just not blinking) is the only
-  ## visible marker while typing isn't possible.
+  ## Hide the terminal caret for the duration of the turn. The dim
+  ## ❯ glyph stays visible; the input thread provides a bright-white
+  ## prompt for buffered typing.
   stdout.write "\x1b[?25l"
   stdout.flushFile
+  inputState = InputState(turnActive: true)
+  createThread(inputThread, inputThreadProc)
 
 proc endTurn*() =
-  ## Transition to typing-ready state: clear the bar at its current
-  ## row, advance one row to leave a blank "gap" between the last
-  ## content row and the bar, repaint bar+prompt with the bright
-  ## cyan prompt color. Show the terminal caret. The gap is
-  ## one-shot — `emitUserSubmit` overwrites it with the receipt at
-  ## next submit, so it never persists in scroll history.
+  ## Transition to typing-ready state: stop the input thread, join it,
+  ## clear the bar at its current row, advance one row to leave a blank
+  ## "gap", repaint bar+prompt with bright cyan. Show the terminal caret.
+  inputState.turnActive = false
+  joinThread(inputThread)
   if currentBarLabel.len > 0:
     let label = currentBarLabel
     clearBarPrompt()

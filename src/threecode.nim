@@ -511,6 +511,14 @@ proc main() =
       messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
       refreshSystemPrompt(messages, prof)
       runTurnsInteractive(prof, messages, session)
+    # Wire up buffered-prompt globals so the input thread spawned by
+    # beginTurn can access the editor, profile, session, and messages.
+    inputEditor = addr(editor)
+    inputMessages = addr(messages)
+    inputSession = addr(session)
+    inputProfile = addr(prof)
+    turnHandleCommand = proc(cmd: string): bool =
+      handleCommand(cmd, messages, session, prof, editor)
   while true:
     var done = false
     var line = readInput(editor, done)
@@ -544,6 +552,23 @@ proc main() =
     # leading `\n` will set up the new spinner-footer scratch row.
     emitUserSubmit(line, editor.echoRows)
     runTurnsInteractive(prof, messages, session)
+    # Buffered-prompt handoff: if the input thread left residual text
+    # (user was typing when the turn ended), pre-fill the editor so
+    # the next readInput starts with that text.
+    if inputState.residualText.len > 0:
+      editor.prefillText = inputState.residualText
+      inputState.residualText = ""
+    if inputState.queuedText.len > 0 and inputState.autoSend:
+      let queued = inputState.queuedText
+      inputState.queuedText = ""
+      inputState.autoSend = false
+      messages.add %*{"role": "user", "content": buildUserMessage(messages, queued)}
+      refreshSystemPrompt(messages, prof)
+      emitUserSubmit(queued, editor.echoRows)
+      runTurnsInteractive(prof, messages, session)
+      if inputState.residualText.len > 0:
+        editor.prefillText = inputState.residualText
+        inputState.residualText = ""
 
 when isMainModule:
   main()
