@@ -34,10 +34,115 @@ var
 const providerStub {.booldefine.} = false
 when providerStub:
   var stubResponseIdx = 0
+  type StubFailure* = enum
+    sfNone, sfDns, sfNetworkUnreachable, sfConnectionRefused,
+    sfConnectTimeout, sfTls, sfCertificate, sfBrokenPipe,
+    sfConnectionReset, sfEof, sfReadTimeout, sfSilentThenOk,
+    sfMalformedSse, sfInvalidJson, sfHttp400, sfHttp401, sfHttp403,
+    sfHttp408, sfHttp409, sfHttp425, sfHttp429, sfHttp500, sfHttp502,
+    sfHttp503, sfHttp504
+
+  proc parseStubFailure*(s: string): StubFailure =
+    case s.strip.toLowerAscii.replace("_", "-")
+    of "", "none": sfNone
+    of "dns", "name-resolution", "resolve": sfDns
+    of "network-unreachable", "net-unreachable", "unreachable", "enetunreach":
+      sfNetworkUnreachable
+    of "connection-refused", "refused", "econnrefused": sfConnectionRefused
+    of "connect-timeout", "timeout-connect", "etimedout": sfConnectTimeout
+    of "tls", "ssl": sfTls
+    of "certificate", "cert", "cert-expired", "cert-verify": sfCertificate
+    of "broken-pipe", "epipe": sfBrokenPipe
+    of "connection-reset", "reset", "econnreset": sfConnectionReset
+    of "eof", "closed": sfEof
+    of "read-timeout", "timeout-read", "stall": sfReadTimeout
+    of "silent-then-ok", "flaky-silent": sfSilentThenOk
+    of "malformed-sse", "bad-sse": sfMalformedSse
+    of "invalid-json", "bad-json": sfInvalidJson
+    of "400", "http-400", "bad-request": sfHttp400
+    of "401", "http-401", "unauthorized", "auth": sfHttp401
+    of "403", "http-403", "forbidden": sfHttp403
+    of "408", "http-408", "request-timeout": sfHttp408
+    of "409", "http-409", "conflict": sfHttp409
+    of "425", "http-425", "too-early": sfHttp425
+    of "429", "http-429", "rate": sfHttp429
+    of "500", "http-500": sfHttp500
+    of "502", "http-502": sfHttp502
+    of "503", "http-503": sfHttp503
+    of "504", "http-504": sfHttp504
+    else: sfNone
+
+  proc stubFailureName*(f: StubFailure): string =
+    case f
+    of sfNone: "none"
+    of sfConnectTimeout: "connect timeout"
+    of sfDns: "dns failure"
+    of sfNetworkUnreachable: "network unreachable"
+    of sfConnectionRefused: "connection refused"
+    of sfTls: "tls failure"
+    of sfCertificate: "certificate failure"
+    of sfBrokenPipe: "broken pipe"
+    of sfConnectionReset: "connection reset"
+    of sfEof: "unexpected eof"
+    of sfReadTimeout: "read timeout"
+    of sfSilentThenOk: "silent connection"
+    of sfMalformedSse: "malformed sse"
+    of sfInvalidJson: "invalid json"
+    of sfHttp400: "api 400"
+    of sfHttp401: "api 401"
+    of sfHttp403: "api 403"
+    of sfHttp408: "api 408"
+    of sfHttp409: "api 409"
+    of sfHttp425: "api 425"
+    of sfHttp429: "api 429"
+    of sfHttp500: "api 500"
+    of sfHttp502: "api 502"
+    of sfHttp503: "api 503"
+    of sfHttp504: "api 504"
+
+  proc stubHttpStatus*(f: StubFailure): int =
+    case f
+    of sfHttp400: 400
+    of sfHttp401: 401
+    of sfHttp403: 403
+    of sfHttp408: 408
+    of sfHttp409: 409
+    of sfHttp425: 425
+    of sfHttp429: 429
+    of sfHttp500: 500
+    of sfHttp502: 502
+    of sfHttp503: 503
+    of sfHttp504: 504
+    else: 0
+
+  proc stubTransportError*(f: StubFailure): string =
+    case f
+    of sfDns: "TLS connect failed: name or service not known"
+    of sfNetworkUnreachable: "TLS connect failed: network is unreachable"
+    of sfConnectionRefused: "TLS connect failed: connection refused"
+    of sfConnectTimeout: "TLS connect failed: operation timed out"
+    of sfTls: "TLS connect failed: handshake failed"
+    of sfCertificate: "TLS connect failed: certificate verify failed"
+    of sfBrokenPipe: "request failed: broken pipe"
+    of sfConnectionReset: "stream read: connection reset by peer"
+    of sfEof: "stream read: EOF before end of response"
+    of sfReadTimeout: "stream read: operation timed out"
+    of sfMalformedSse: "stream read: malformed chunked transfer encoding"
+    of sfInvalidJson: "stream read: invalid JSON in SSE data"
+    else: ""
+
+  proc stubDelayMs(j: JsonNode, key: string, fallback = 0): int =
+    if j != nil and j.kind == JObject:
+      result = j{key}.getInt(fallback)
+    else:
+      result = fallback
+
   proc loadStubResponses(): seq[JsonNode] =
     ## Read stub_responses.json: a JSON array of assistant-message objects.
     ## Each element is an OpenAI-shape assistant message (role, content,
-    ## tool_calls). Re-read on every call so edits take effect mid-session.
+    ## tool_calls), or `{failure: "...", delayMs: N}` to exercise retry /
+    ## flaky-network paths. Re-read on every call so edits take effect
+    ## mid-session.
     const path = "stub_responses.json"
     if not fileExists(path):
       stderr.writeLine "3code: stub: " & path & " not found"
@@ -104,6 +209,10 @@ var showThinking*: bool = true
 
 var spinnerStop: Atomic[bool]
 var spinnerThread: Thread[string]
+var quietStop: Atomic[bool]
+var quietThread: Thread[string]
+var quietRunning = false
+var lastProviderActivity: Atomic[int]
 
 # Shared mutable spinner state. The spinner thread reads these every frame;
 # the main thread updates them as chunks arrive. Two separate lines:
@@ -580,6 +689,37 @@ proc stopSpinner*() =
   joinThread(spinnerThread)
   spinnerRunning = false
 
+proc nowMs(): int =
+  int(epochTime() * 1000.0)
+
+proc markProviderActivity*() =
+  lastProviderActivity.store(nowMs(), moRelaxed)
+
+proc quietWatchLoop(baseLabel: string) {.thread.} =
+  var shown = false
+  while not quietStop.load(moRelaxed):
+    let idleMs = nowMs() - lastProviderActivity.load(moRelaxed)
+    if idleMs >= 15_000:
+      setSpinLabel("network quiet; still waiting")
+      shown = true
+    elif shown:
+      setSpinLabel(baseLabel)
+      shown = false
+    sleep 500
+
+proc startQuietWatch(baseLabel: string) =
+  if quietRunning: return
+  markProviderActivity()
+  quietStop.store(false, moRelaxed)
+  createThread(quietThread, quietWatchLoop, baseLabel)
+  quietRunning = true
+
+proc stopQuietWatch() =
+  if not quietRunning: return
+  quietStop.store(true, moRelaxed)
+  joinThread(quietThread)
+  quietRunning = false
+
 proc initLiveMarkdownStream*(baseLabel: string): LiveMarkdownStream =
   LiveMarkdownStream(baseLabel: baseLabel, md: initMarkdownState(),
     streamT0: epochTime(), liveCol: 2)
@@ -851,6 +991,23 @@ when defined(posix):
             else: discard
         # else: spurious wakeup or EOF on stdin; loop and re-check stop.
 
+  proc drainCancelInput() =
+    ## Drop keystrokes pressed while the dim prompt is visible. Input is
+    ## locked during provider work; carrying buffered Enter bytes into the
+    ## next prompt turns an accidental keypress into a blank submission.
+    if isatty(0.cint) == 0: return
+    while true:
+      var pfd: TPollfd
+      pfd.fd = 0.cint
+      pfd.events = POLLIN
+      let r = poll(addr pfd, 1.Tnfds, 0.cint)
+      if r <= 0 or (pfd.revents and POLLIN) == 0:
+        break
+      var buf: array[64, char]
+      let n = posix.read(0.cint, addr buf[0], buf.len)
+      if n <= 0:
+        break
+
   proc startCancelWatcher() =
     if cancelWatcherActive: return
     if isatty(0.cint) == 0: return
@@ -878,6 +1035,7 @@ when defined(posix):
     cancelWatcherStop.store(true, moRelaxed)
     joinThread(cancelWatcherThread)
     cancelWatcherActive = false
+    drainCancelInput()
     if cancelOrigTermiosValid:
       restoreCancelTermios()
 else:
