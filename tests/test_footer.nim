@@ -412,60 +412,68 @@ suite "token receipt placement":
 # repaint) and is consumed by the next `emitUserSubmit`.
 
 
-# ---------------- streaming input cursor (repro + fix) ----------------
+# ---------------- streaming input thread cursor (functional) ----------------
 
-suite "streaming input cursor":
-  test "BUG: fullRedraw after barFooterBytes renders prompt on bar row":
-    # Reproduce the bug. barFooterBytes parks cursor at bar row col 0.
-    # readLineWith calls resetForRead(ed) which sets ed.renderRow = 0,
-    # then fullRedraw. Since renderRow==0, fullRedraw does NOT move the
-    # cursor up — it renders the prompt on the bar row (row 0), overwriting
-    # the token bar content. This is the bug.
-    let g = newGrid()
-    g.feed barFooterBytes("LBL  3s", DimPromptColor)
-    check g.row == 0  # cursor on bar row
-    check g.col == 0
-    # Simulate readLineWith → resetForRead → fullRedraw(renderRow=0)
-    var ed = minline.initEditor()
-    ed.line.text = "h"
-    ed.line.position = 1
-    ed.prompt = "❯ "
-    ed.contPrompt = "  "
-    ed.width = 80
-    ed.renderRow = 0  # resetForRead sets this
-    ed.write = proc(s: string) = g.feed(s)
-    ed.getWidth = proc(): int = 80
-    minline.fullRedraw(ed)
-    # BUG: the prompt "❯ " and text "h" land on row 0 (bar row),
-    # overwriting the token bar.
-    check "❯" in rowText(g, 0)   # prompt overwrote bar row — the bug
-    check "h" in rowText(g, 0)   # typed char also on bar row
+suite "streaming input thread cursor":
+  ## Functional test: drive readLineWith through a ttty grid with fake
+  ## keystrokes, replicating the exact code path inputThreadProc takes.
+  ##
+  ## inputThreadProc does:
+  ##   1. barFooterBytes(label, TurnPromptColor)  → cursor on bar row
+  ##   2. "\x1b[1B"                                 → cursor down to prompt row
+  ##   3. readLineWith(ed, "❯ ", getCh, write)     → resetForRead + fullRedraw
+  ##
+  ## Without step 2, readLineWith's fullRedraw (renderRow=0) renders the
+  ## prompt on whatever row the cursor is on — the bar row — overwriting
+  ## the token bar.
 
-  test "FIX: cursor-down before readLineWith lands prompt on correct row":
-    # Same setup but with the \x1b[1B fix: move cursor from bar row down
-    # to prompt row before fullRedraw runs.
+  test "readLineWith after barFooterBytes: prompt and typing on caret row":
     let g = newGrid()
-    g.feed barFooterBytes("LBL  3s", DimPromptColor)
-    check g.row == 0  # cursor on bar row
-    # The fix: move cursor down to prompt row
+    # Step 1: paint bar+prompt (as inputThreadProc does)
+    g.feed barFooterBytes("LBL  3s", TurnPromptColor)
+    check g.row == 0  # barFooterBytes parks cursor on bar row
+    # Step 2: the fix — move cursor down to prompt row
     g.feed "\x1b[1B"
-    check g.row == 1  # now on prompt row
-    # Same fullRedraw as before
+    check g.row == 1
+    # Step 3: drive readLineWith with fake input: type "hi", Enter
     var ed = minline.initEditor()
-    ed.line.text = "h"
-    ed.line.position = 1
-    ed.prompt = "❯ "
-    ed.contPrompt = "  "
     ed.width = 80
-    ed.renderRow = 0  # resetForRead sets this
-    ed.write = proc(s: string) = g.feed(s)
-    ed.getWidth = proc(): int = 80
-    minline.fullRedraw(ed)
-    # FIX: prompt and typed char are on row 1 (prompt/caret row)
-    check "❯" in rowText(g, 1)   # prompt on caret row
-    check "h" in rowText(g, 1)   # typed char on caret row
-    check "❯" notin rowText(g, 0)  # bar row untouched by prompt
-    check "h" notin rowText(g, 0)  # bar row untouched by typed char
+    let keystrokes = @['h'.int, 'i'.int, 13]  # 13 = Enter
+    var kpos = 0
+    let getCh: minline.GetChProc = proc(): int =
+      if kpos >= keystrokes.len: return -1
+      let k = keystrokes[kpos]; inc kpos; return k
+    let write: minline.WriteProc = proc(s: string) = g.feed(s)
+    let getWidth: minline.WidthProc = proc(): int = 80
+    let text = ed.readLineWith("\xe2\x9d\xaf ", getCh, write,
+                                hidechars = false, getWidth = getWidth)
+    check text == "hi"
+    # The prompt and typed text must be on row 1 (caret row), not row 0 (bar row)
+    check "❯" in rowText(g, 1)    # prompt on caret row
+    check "hi" in rowText(g, 1)   # typed text on caret row
+    check "❯" notin rowText(g, 0) # bar row untouched
+    check "LBL" in rowText(g, 0)  # bar content preserved
+
+  test "BUG REPRO: readLineWith without cursor-down paints prompt on bar row":
+    # Same setup but skip the \x1b[1B fix — the bug should manifest.
+    let g = newGrid()
+    g.feed barFooterBytes("LBL  3s", TurnPromptColor)
+    check g.row == 0
+    # Deliberately skip g.feed "\x1b[1B" — cursor stays on bar row
+    var ed = minline.initEditor()
+    ed.width = 80
+    var kpos = 0
+    let keystrokes = @['h'.int, 13]
+    let getCh: minline.GetChProc = proc(): int =
+      if kpos >= keystrokes.len: return -1
+      let k = keystrokes[kpos]; inc kpos; return k
+    let write: minline.WriteProc = proc(s: string) = g.feed(s)
+    let getWidth: minline.WidthProc = proc(): int = 80
+    discard ed.readLineWith("\xe2\x9d\xaf ", getCh, write,
+                             hidechars = false, getWidth = getWidth)
+    # BUG: prompt and typed char land on row 0 (bar row), overwriting bar
+    check "❯" in rowText(g, 0)   # prompt overwrote bar row — the bug
+    check "LBL" notin rowText(g, 0) # bar content destroyed
 suite "runTurns boundaries":
   let usage = Usage(
     promptTokens: 3800, completionTokens: 45,
