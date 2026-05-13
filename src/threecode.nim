@@ -46,7 +46,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
   # `pendingHint` and is painted in place of the previous bar at
   # user-submit time by `emitUserSubmit`.
   beginTurn()
-  defer: endTurn()
+  defer: endTurn(repaintPrompt = not interrupted)
   while true:
     discard supersedeCompact(messages)
     var usage: Usage
@@ -295,7 +295,7 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode, session: var Sessi
     # button. Render as dim grey hint, reserve magenta for actual
     # errors the user needs to read.
     if e.msg.startsWith("interrupted by user"):
-      stdout.styledWriteLine styleDim, "  ", e.msg, resetStyle
+      stderr.writeLine e.msg
     else:
       stdout.styledWriteLine fgMagenta, "  ", e.msg, resetStyle
 

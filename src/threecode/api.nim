@@ -529,6 +529,17 @@ proc clearBarPrompt*() =
   ## pushes the next `repaintBarPrompt` one row down).
   syncWrite ClearBarPromptBytes
 
+proc endTurnBytes*(label, promptColor: string, repaintPrompt: bool): string =
+  ## Byte sequence for leaving model/tool mode. Normal completion repaints
+  ## the typing-ready footer; exceptional user interrupts only clear the
+  ## owned footer area so the caller's feedback lands as plain output.
+  if label.len > 0:
+    result.add ClearBarPromptBytes
+    if repaintPrompt:
+      result.add "\n"
+      result.add barFooterBytes(label, promptColor)
+  result.add "\x1b[?25h"
+
 template withCleared*(body: untyped) =
   ## Hide bar+prompt for the duration of `body`, repaint them below
   ## the cursor afterwards. Body writes content (banners, tool
@@ -1571,7 +1582,7 @@ proc beginTurn*() =
   stdout.write "\x1b[?25l"
   stdout.flushFile
 
-proc endTurn*() =
+proc endTurn*(repaintPrompt = true) =
   ## Transition to typing-ready state: clear the bar at its current
   ## row, advance one row to leave a blank "gap" between the last
   ## content row and the bar, repaint bar+prompt with the bright
@@ -1580,12 +1591,15 @@ proc endTurn*() =
   ## next submit, so it never persists in scroll history.
   if currentBarLabel.len > 0:
     let label = currentBarLabel
-    clearBarPrompt()
-    stdout.write "\n"
-    stdout.write barFooterBytes(label, BrightPromptColor)
-    currentBarLabel = label
-    currentBarHasGap = true
-  stdout.write "\x1b[?25h"
+    stdout.write endTurnBytes(label, BrightPromptColor, repaintPrompt)
+    if repaintPrompt:
+      currentBarLabel = label
+      currentBarHasGap = true
+    else:
+      currentBarLabel = ""
+      currentBarHasGap = false
+  else:
+    stdout.write endTurnBytes("", BrightPromptColor, repaintPrompt)
   stdout.flushFile
 
 proc emitUserSubmit*(line: string, echoRows = -1) =
