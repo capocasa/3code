@@ -351,6 +351,9 @@ proc clearNav(h: var LineHistory) =
 
 proc persist(h: LineHistory) =
   if h.file == "": return
+  let dir = parentDir(h.file)
+  if dir.len > 0:
+    createDir(dir)
   let encoded = toSeq(h.entries.items).mapIt(encodeHistEntry(it)).join("\n")
   h.file.writeFile(encoded)
 
@@ -1098,6 +1101,11 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
   ed.write = write
   ed.getWidth = getWidth
   ed.hasPendingInput = hasPendingInput
+  defer:
+    ed.getCh = nil
+    ed.write = nil
+    ed.getWidth = nil
+    ed.hasPendingInput = nil
   resetForRead(ed, prompt, hidechars)
   # Enable bracketed paste in both modes. For hidden inputs (api keys),
   # this lets the bracketed-paste handler atomically capture the paste

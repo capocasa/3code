@@ -77,15 +77,13 @@ proc newFakeTerm*(): FakeTerm =
     discard close(outFds[1])
     discard tcGetAttr(fileno(stdin), addr result.origTermios)
 
-proc drain*(ft: FakeTerm) =
-  ## Restore stdout to real terminal, then read all captured output
-  ## from the pipe into the grid. Must be called before assertions
-  ## (which need real stdout for test output). Can be called multiple
-  ## times — each call captures output since the last drain.
+proc capture*(ft: FakeTerm) =
+  ## Read currently captured stdout into the grid without restoring
+  ## stdout. Use this for mid-interaction assertions, then call
+  ## `drain()` before running unittest checks so failures print to the
+  ## real terminal.
   when defined(posix):
     stdout.flushFile()
-    discard dup2(SavedFdOut, fileno(stdout))
-    ft.drained = true
     var buf: array[4096, char]
     var wait = 50.cint
     while true:
@@ -100,6 +98,17 @@ proc drain*(ft: FakeTerm) =
       copyMem(s[0].addr, buf[0].addr, n)
       ft.grid.feed s
       wait = 0
+
+proc drain*(ft: FakeTerm) =
+  ## Restore stdout to real terminal, then read all captured output
+  ## from the pipe into the grid. Must be called before assertions
+  ## (which need real stdout for test output). Can be called multiple
+  ## times — each call captures output since the last drain.
+  when defined(posix):
+    stdout.flushFile()
+    discard dup2(SavedFdOut, fileno(stdout))
+    ft.drained = true
+    ft.capture()
 
 proc feedKeys*(ft: FakeTerm, keys: string) =
   ## Write keystrokes to the PTY master (simulates user typing).

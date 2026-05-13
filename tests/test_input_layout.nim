@@ -10,11 +10,68 @@ import harness
 ## reads from stdin (fed by PTY master with synthetic keystrokes).
 ## The grid is then asserted on for correct row/column placement.
 
+proc lastRow(g: Grid, needle: string): int =
+  result = -1
+  for r in 0..<g.rows.len:
+    if needle in rowText(g, r):
+      result = r
+
+proc captureUntil(ft: FakeTerm, needle: string): int =
+  result = -1
+  for _ in 0..<20:
+    sleep 20
+    ft.capture()
+    result = lastRow(ft.grid, needle)
+    if result >= 0:
+      return
+
 suite "input thread layout during turns":
-  test "beginTurn input thread keeps prompt below token bar":
+  test "beginTurn input thread echoes typed text on prompt row":
     ## Exercise the production path, not just a hand-built escape
     ## sequence. This catches the real regression where the buffered
     ## prompt was rendered one row too high and overwrote the token bar.
+    var ft = newFakeTerm()
+    defer: ft.close()
+
+    var ed = minline.initEditor()
+    inputEditor = addr(ed)
+    defer:
+      inputEditor = nil
+      inputState = InputState()
+      currentBarLabel = ""
+      currentBarHasGap = false
+
+    paintBarPrompt("LBL  3s", DimPromptColor)
+    beginTurn()
+
+    let promptRow = captureUntil(ft, "❯")
+    let barRow = promptRow - 1
+    ft.feedKeys("h")
+    let typedPromptRow = captureUntil(ft, "❯ h")
+    let typedOnPromptRow =
+      typedPromptRow == promptRow and "❯ h" in rowText(ft.grid, promptRow)
+    let typedOnBarRow =
+      barRow >= 0 and "h" in rowText(ft.grid, barRow)
+    let cursorOnPromptRow = ft.grid.row == promptRow
+
+    ft.feedKeys("\r")
+    sleep 100
+    endTurn()
+
+    ft.drain()
+    check inputState.queuedText == "h"
+    check promptRow >= 1
+    check barRow >= 0
+    check "LBL" in rowText(ft.grid, barRow)
+    check "❯" in rowText(ft.grid, promptRow)
+    check typedOnPromptRow
+    check not typedOnBarRow
+    check cursorOnPromptRow
+
+  test "beginTurn input thread keeps prompt below token bar after submit":
+    ## This final-grid check covers the submitted state. It is not a
+    ## substitute for the half-typed assertion above, which catches the
+    ## visible flicker.
     var ft = newFakeTerm()
     defer: ft.close()
 
@@ -31,9 +88,9 @@ suite "input thread layout during turns":
     beginTurn()
     sleep 200
     endTurn()
-    check inputState.queuedText == "hi"
 
     ft.drain()
+    check inputState.queuedText == "hi"
     check "LBL" in rowText(ft.grid, 0)
     check "❯" notin rowText(ft.grid, 0)
     check "hi" notin rowText(ft.grid, 0)
