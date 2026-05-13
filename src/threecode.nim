@@ -509,6 +509,38 @@ proc main() =
   if prof.name == "":
     prof = bootstrapProvider(editor)
   session.profileName = prof.name
+  inputEditor = addr(editor)
+  inputMessages = addr(messages)
+  inputSession = addr(session)
+  inputProfile = addr(prof)
+  turnHandleCommand = proc(cmd: string): bool =
+    handleCommand(cmd, messages, session, prof, editor)
+
+  proc handleBufferedAfterTurn(): bool =
+    if inputState.cmdWasQuit:
+      return true
+    if inputState.queuedText.len > 0 and inputState.autoSend:
+      let queued = inputState.queuedText
+      let echoRows = inputState.queuedEchoRows
+      inputState.queuedText = ""
+      inputState.queuedEchoRows = 0
+      inputState.autoSend = false
+      if inputState.residualText == queued:
+        inputState.residualText = ""
+      if prof.name == "":
+        editor.prefillText = queued
+        return false
+      messages.add %*{"role": "user",
+                      "content": buildUserMessage(messages, queued)}
+      refreshSystemPrompt(messages, prof)
+      emitUserSubmit(queued, echoRows)
+      runTurnsInteractive(prof, messages, session)
+      return handleBufferedAfterTurn()
+    if inputState.residualText.len > 0:
+      editor.prefillText = inputState.residualText
+      inputState.residualText = ""
+    false
+
   # Draw the initial chrome at the bottom of the welcome screen. On
   # resume with prior usage we paint bar+prompt carrying the last
   # response's tokens (typing-ready shape from `endTurn`). On resume
@@ -543,12 +575,14 @@ proc main() =
       messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
       refreshSystemPrompt(messages, prof)
       runTurnsInteractive(prof, messages, session)
+      if handleBufferedAfterTurn(): return
   else:
     paintInitialPrompt(prof)
     if prompt != "":
       messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
       refreshSystemPrompt(messages, prof)
       runTurnsInteractive(prof, messages, session)
+      if handleBufferedAfterTurn(): return
   while true:
     var done = false
     var line = readInput(editor, done)
@@ -582,6 +616,7 @@ proc main() =
     # leading `\n` will set up the new spinner-footer scratch row.
     emitUserSubmit(line, editor.echoRows)
     runTurnsInteractive(prof, messages, session)
+    if handleBufferedAfterTurn(): break
 
 when isMainModule:
   main()

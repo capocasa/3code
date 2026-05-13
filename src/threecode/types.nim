@@ -85,6 +85,15 @@ type
     ## `line` is 1-indexed into the assistant reply.
     line*: int
     msg*: string
+  InputState* = object
+    ## Shared between the main thread and the buffered prompt thread during
+    ## model/tool turns.
+    turnActive*: bool
+    autoSend*: bool
+    queuedText*: string
+    queuedEchoRows*: int
+    residualText*: string
+    cmdWasQuit*: bool
 
 proc die*(msg: string, code = 1) {.noreturn.} =
   stderr.writeLine "3code: " & msg

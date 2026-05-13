@@ -154,6 +154,9 @@ type
   WidthProc* = proc(): int {.closure.}
   LineEditor* = object
     completionCallback*: proc(ed: LineEditor): seq[string] {.closure.}
+    onMutate*: proc(ed: var LineEditor) {.closure.}
+    postRedraw*: proc(ed: var LineEditor) {.closure.}
+    prefillText*: string
     history*: LineHistory
     line*: Line
     mode*: LineEditorMode
@@ -446,6 +449,8 @@ proc fullRedraw*(ed: var LineEditor) =
   buf.add "\x1b[?2026l"
   ed.write buf
   ed.renderRow = targetRow
+  if ed.postRedraw != nil:
+    ed.postRedraw(ed)
 
 proc parkAtEnd(ed: var LineEditor) =
   ## After submit, leave the cursor at column 0 of the row directly
@@ -489,6 +494,8 @@ proc deletePrevious*(ed: var LineEditor) =
   ed.line.text = ed.line.text[0 ..< start] &
                  ed.line.text[ed.line.position .. ^1]
   ed.line.position = start
+  if ed.onMutate != nil:
+    ed.onMutate(ed)
   fullRedraw(ed)
 
 proc deleteNext*(ed: var LineEditor) =
@@ -498,6 +505,8 @@ proc deleteNext*(ed: var LineEditor) =
     else: ed.line.position + runeLenSafe(ed.line.text, ed.line.position)
   ed.line.text = ed.line.text[0 ..< ed.line.position] &
                  ed.line.text[stop .. ^1]
+  if ed.onMutate != nil:
+    ed.onMutate(ed)
   fullRedraw(ed)
 
 proc insertText*(ed: var LineEditor, s: string) =
@@ -523,6 +532,8 @@ proc insertText*(ed: var LineEditor, s: string) =
       p += rl
       i += rl
     ed.line.position = p
+  if ed.onMutate != nil:
+    ed.onMutate(ed)
   fullRedraw(ed)
 
 proc printChar*(ed: var LineEditor, c: int) =
@@ -535,6 +546,8 @@ proc changeLine*(ed: var LineEditor, s: string) =
   ## Replace the entire buffer.
   ed.line.text = s
   ed.line.position = s.len
+  if ed.onMutate != nil:
+    ed.onMutate(ed)
   fullRedraw(ed)
 
 proc clearLine*(ed: var LineEditor) =
@@ -597,6 +610,8 @@ proc deleteWordLeft*(ed: var LineEditor) =
   if p == stop: return
   ed.line.text = ed.line.text[0 ..< p] & ed.line.text[stop .. ^1]
   ed.line.position = p
+  if ed.onMutate != nil:
+    ed.onMutate(ed)
   fullRedraw(ed)
 
 proc visualUp*(ed: var LineEditor) =
@@ -916,7 +931,11 @@ proc initEditor*(mode = mdInsert, historySize = 256, historyFile: string = ""): 
   result.contPrompt = "  "
 
 proc resetForRead(ed: var LineEditor, prompt: string, hidechars: bool) =
-  ed.line = Line(text: "", position: 0)
+  if ed.prefillText.len > 0:
+    ed.line = Line(text: ed.prefillText, position: ed.prefillText.len)
+    ed.prefillText = ""
+  else:
+    ed.line = Line(text: "", position: 0)
   ed.prompt = prompt
   if ed.contPrompt.len == 0:
     ed.contPrompt = "  "

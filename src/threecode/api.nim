@@ -21,7 +21,7 @@ when defined(posix):
   import std/posix except SocketHandle
   import posix/termios
 import streamhttp
-import types, util, prompts, compact, display
+import types, util, prompts, compact, display, minline
 
 type
   VerifyProfileHook* = proc(p: Profile): (bool, string) {.closure.}
@@ -234,6 +234,16 @@ var quietStop: Atomic[bool]
 var quietThread: Thread[string]
 var quietRunning = false
 var lastProviderActivity: Atomic[int]
+var renderLock*: Lock
+initLock(renderLock)
+var inputState*: InputState
+var inputThread: Thread[void]
+var inputThreadRunning = false
+var inputEditor*: ptr minline.LineEditor
+var inputProfile*: ptr Profile
+var inputSession*: ptr Session
+var inputMessages*: ptr JsonNode
+var turnHandleCommand*: proc(cmd: string): bool
 
 # Shared mutable spinner state. The spinner thread reads these every frame;
 # the main thread updates them as chunks arrive. Two separate lines:
@@ -329,6 +339,8 @@ const
     ## tool exec, etc.). Mid-grey 244 — readable on both bg.
   BrightPromptColor* = CyanFg & BoldOn
     ## Prompt color when readline is active (typing-ready).
+  TurnPromptColor* = OffWhiteFg & BoldOn
+    ## Prompt color while a turn is running but buffered typing is active.
   SyncBegin* = "\x1b[?2026h"
     ## DEC 2026 begin synchronized update — conhost (Win11 modern) and
     ## Windows Terminal commit all bytes between BEGIN and END as one
@@ -651,10 +663,14 @@ template withCleared*(body: untyped) =
   ## output, etc.) that advances the cursor by some number of rows;
   ## the bar+prompt slide along with the cursor.
   debugOut &"withCleared enter barLabel={currentBarLabel.len}"
-  clearBarPrompt()
-  body
-  debugOut "withCleared exit"
-  repaintBarPrompt()
+  acquire renderLock
+  try:
+    clearBarPrompt()
+    body
+    debugOut "withCleared exit"
+    repaintBarPrompt()
+  finally:
+    release renderLock
 
 proc spinnerLoop(unused: string) {.thread.} =
   ## Three-line spinner footer rooted at the cursor row:
@@ -1717,12 +1733,137 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "minimax": applyMinimaxReasoning(p, body)
   else: discard
 
+proc inputThreadProc() {.thread.} =
+  ## Runs readline while the model or a tool owns the turn. Completed text is
+  ## queued for the outer REPL to send as soon as the current turn settles;
+  ## partial text is handed back as the next prompt's prefill.
+  {.cast(gcsafe).}:
+    if inputEditor == nil:
+      return
+    template withRender(body: untyped) =
+      acquire renderLock
+      try:
+        body
+      finally:
+        release renderLock
+
+    let edPtr = inputEditor
+    when defined(posix):
+      let fd = getFileHandle(stdin)
+      let getCh: minline.GetChProc = proc(): int =
+        var pfd: Tpollfd
+        pfd.fd = STDIN_FILENO
+        pfd.events = POLLIN
+        while inputState.turnActive:
+          let r = poll(addr pfd, 1.Tnfds, 200.cint)
+          if r < 0:
+            if errno == EINTR:
+              continue
+            return -1
+          if r > 0 and (pfd.revents and POLLIN) != 0:
+            var ch: char
+            if posix.read(fd.cint, addr ch, 1) == 1:
+              return ch.ord.int
+            return -1
+        -1
+    else:
+      let getCh: minline.GetChProc = proc(): int =
+        if inputState.turnActive: getchr().int else: -1
+
+    let writeProc: minline.WriteProc = proc(s: string) =
+      withRender:
+        stdout.write s
+        stdout.flushFile
+
+    edPtr[].onMutate = proc(ed: var minline.LineEditor) =
+      if inputState.autoSend:
+        inputState.autoSend = false
+    edPtr[].postRedraw = proc(ed: var minline.LineEditor) =
+      if inputState.autoSend and ed.line.position == ed.line.text.len:
+        stdout.write OffWhiteFg & "▻" & Reset
+        stdout.write "\x1b[1D"
+        stdout.flushFile
+
+    withRender:
+      if currentBarLabel.len > 0:
+        clearBarPrompt()
+        stdout.write barFooterBytes(currentBarLabel, TurnPromptColor,
+                                    currentTermW())
+        stdout.write "\x1b[1B"
+      else:
+        stdout.write "\r\x1b[2K" & TurnPromptColor & "❯ " & Reset
+      stdout.flushFile
+
+    when defined(posix):
+      var oldMode: Termios
+      var haveOldMode = false
+      if isatty(fd) != 0 and fd.tcGetAttr(addr oldMode) == 0:
+        haveOldMode = true
+        var rawMode = oldMode
+        rawMode.c_iflag = rawMode.c_iflag and not Cflag(BRKINT or ICRNL or
+          INPCK or ISTRIP or IXON)
+        rawMode.c_cflag = (rawMode.c_cflag and not Cflag(CSIZE or PARENB)) or CS8
+        rawMode.c_lflag = rawMode.c_lflag and not Cflag(ECHO or ICANON or
+          IEXTEN or ISIG)
+        rawMode.c_cc[VMIN] = 1.char
+        rawMode.c_cc[VTIME] = 0.char
+        discard fd.tcSetAttr(TCSANOW, addr rawMode)
+
+    while inputState.turnActive:
+      try:
+        let text = minline.readLineWith(edPtr[], "❯ ", getCh, writeProc)
+        if text.len == 0:
+          continue
+        if text[0] == ':':
+          withRender:
+            clearBarPrompt()
+          if turnHandleCommand != nil:
+            discard turnHandleCommand(text)
+          withRender:
+            if currentBarLabel.len > 0:
+              paintBarPrompt(currentBarLabel, TurnPromptColor)
+              stdout.write "\x1b[1B"
+            else:
+              paintPromptOnly(TurnPromptColor)
+            edPtr[].fullRedraw()
+          if text.strip in [":q", ":quit", ":exit"]:
+            inputState.cmdWasQuit = true
+            interrupted = true
+            break
+        else:
+          withRender:
+            inputState.queuedText = text
+            inputState.queuedEchoRows = edPtr[].echoRows
+            inputState.autoSend = true
+      except minline.InputCancelled:
+        interrupted = true
+        break
+      except EOFError:
+        break
+      except CatchableError:
+        break
+
+    when defined(posix):
+      if haveOldMode:
+        discard fd.tcSetAttr(TCSADRAIN, addr oldMode)
+    inputState.residualText = edPtr[].line.text
+    edPtr[].onMutate = nil
+    edPtr[].postRedraw = nil
+    edPtr[].getCh = nil
+    edPtr[].write = nil
+    edPtr[].getWidth = nil
+    edPtr[].hasPendingInput = nil
+
 proc beginTurn*() =
   ## Hide the terminal caret for the duration of the turn — the dim
   ## ❯ glyph (still painted, just not blinking) is the only
   ## visible marker while typing isn't possible.
   stdout.write "\x1b[?25l"
   stdout.flushFile
+  if inputEditor != nil and not inputThreadRunning:
+    inputState = InputState(turnActive: true)
+    createThread(inputThread, inputThreadProc)
+    inputThreadRunning = true
 
 proc endTurn*(repaintPrompt = true) =
   ## Transition to typing-ready state: clear the bar at its current
@@ -1738,6 +1879,10 @@ proc endTurn*(repaintPrompt = true) =
   # Idempotent — these are no-ops when the threads aren't running.
   discard stopBarTick()
   stopSpinner()
+  if inputThreadRunning:
+    inputState.turnActive = false
+    joinThread(inputThread)
+    inputThreadRunning = false
   if currentBarLabel.len > 0:
     let label = currentBarLabel
     stdout.write endTurnBytes(label, BrightPromptColor, repaintPrompt,
@@ -1789,10 +1934,13 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       setSpinLabel(liveLabel(stubBaseLabel, 0))
       startSpinner("")
       startQuietWatch(liveLabel(stubBaseLabel, 0))
-      startCancelWatcher()
+      let cancelWatcherStarted = not inputThreadRunning
+      if cancelWatcherStarted:
+        startCancelWatcher()
       defer:
         stopQuietWatch()
-        stopCancelWatcher()
+        if cancelWatcherStarted:
+          stopCancelWatcher()
       const StubMaxAttempts = 8
       var attempt = 0
       var lastFailure = sfNone
@@ -1935,10 +2083,13 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   # cause a flicker between callModel iterations within a turn.
   startSpinner("")
   startQuietWatch(liveLabel(baseLabel, 0))
-  startCancelWatcher()
+  let cancelWatcherStarted = not inputThreadRunning
+  if cancelWatcherStarted:
+    startCancelWatcher()
   defer:
     stopQuietWatch()
-    stopCancelWatcher()
+    if cancelWatcherStarted:
+      stopCancelWatcher()
   const MaxAttempts = 8
   var outcome: StreamOutcome
   var attempt = 0
