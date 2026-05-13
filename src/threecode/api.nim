@@ -811,6 +811,8 @@ proc writeLiveSegment(s: var LiveMarkdownStream, text: string) =
 
 proc writeRendered(s: var LiveMarkdownStream, bytes: string,
                    slurpedNow: int) =
+  if bytes.len == 0: return
+  s.startContent(slurpedNow)
   var i = 0
   while i < bytes.len:
     if bytes[i] == '\n':
@@ -837,7 +839,6 @@ proc writeRendered(s: var LiveMarkdownStream, bytes: string,
 
 proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
   if chunk.len == 0: return
-  s.startContent(slurpedNow)
   var data = s.utf8Pending & chunk
   s.utf8Pending = ""
   var i = 0
@@ -845,8 +846,7 @@ proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
     if data[i] == '\n':
       let rendered = s.captureMd(s.pendingLine)
       s.pendingLine = ""
-      if rendered.len > 0:
-        s.writeRendered(rendered, slurpedNow)
+      s.writeRendered(rendered, slurpedNow)
       inc i
     else:
       let charLen = utf8LenAt(data, i)
@@ -864,13 +864,9 @@ proc finishContent*(s: var LiveMarkdownStream, slurpedNow: int) =
   if s.pendingLine.len > 0:
     let rendered = s.captureMd(s.pendingLine)
     s.pendingLine = ""
-    if rendered.len > 0:
-      s.startContent(slurpedNow)
-      s.writeRendered(rendered, slurpedNow)
+    s.writeRendered(rendered, slurpedNow)
   let tail = s.captureMd("", finish = true)
-  if tail.len > 0:
-    s.startContent(slurpedNow)
-    s.writeRendered(tail, slurpedNow)
+  s.writeRendered(tail, slurpedNow)
   if s.started and s.liveBarBelow:
     paintBarPrompt(s.currentLabel(slurpedNow), DimPromptColor)
     s.liveBarAtCursor = true

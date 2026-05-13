@@ -22,6 +22,26 @@ proc screenText(g: Grid, rows = 20): string =
     result.add "\n"
 
 suite "streaming markdown":
+  test "partial first line does not paint bullet before visible text":
+    let captured = captureStdout("partial_first_line") do ():
+      var live = initLiveMarkdownStream("○0%")
+      live.feedContent("Now I have a complete picture.", 30)
+
+    check captured == ""
+
+  test "finish flushes partial first line with bullet and footer":
+    let captured = captureStdout("finish_partial_first_line") do ():
+      var live = initLiveMarkdownStream("○0%")
+      live.feedContent("Now I have a complete picture.", 30)
+      live.finishContent(30)
+
+    var g = newGrid()
+    g.feed captured
+    let screen = screenText(g)
+    check "● Now I have a complete picture." in screen
+    check "○0%" in screen
+    check "❯" in screen
+
   test "live stream renders markdown table through ttty grid":
     let content = """Here is test data:
 
