@@ -8,6 +8,11 @@ import ttty/grid
 proc styledLineBytes(text: string): string =
   text & "\n"
 
+proc countRows(g: Grid, needle: string): int =
+  for r in 0 ..< g.rows.len:
+    if needle in rowText(g, r):
+      inc result
+
 suite "full turn lifecycle":
   let usage = Usage(
     promptTokens: 3800, completionTokens: 45,
@@ -103,6 +108,18 @@ suite "full turn lifecycle":
     # Bright prompt: bold cyan.
     check g.cellFg(finalBarRow + 1, 0) == colCyan
     check hasAttr(g.cellAttr(finalBarRow + 1, 0), saBold)
+
+  test "retry-backoff interrupt clears footer before feedback":
+    let g = newGrid()
+    let label = "ctx 1%  ↑0  ↻0  ↓0"
+    g.feed barFooterBytes(label, DimPromptColor)
+
+    g.feed endTurnBytes(label, BrightPromptColor, repaintPrompt = false)
+    g.feed "interrupted by user during retry backoff\n"
+
+    check countRows(g, "❯") == 0
+    check rowText(g, 0).startsWith("interrupted by user during retry backoff")
+    check not rowText(g, 0).startsWith("  interrupted")
 
   test "turn 2: receipt overwrites the gap, lands flush below LLM":
     # Stage turn 1 typing-ready state: LLM line at row 0, gap at

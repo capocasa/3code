@@ -16,8 +16,13 @@
 import std/[algorithm, hashes, json, os, sequtils, strutils]
 import types, util
 
+const versionSuffix* {.strdefine.} = ""
+  ## Set via `-d:versionSuffix=-main-<sha8>` for non-release builds so the
+  ## reported version distinguishes commits on main from the tagged release.
+  ## Empty for `nimble install` and tagged release builds.
+
 const Version* = staticRead("../../threecode.nimble").splitLines().filterIt(it.startsWith("version")).
-    mapIt(it.split("=")[1].strip().strip(chars = {'"'}))[0]
+    mapIt(it.split("=")[1].strip().strip(chars = {'"'}))[0] & versionSuffix
 
 type
   KnownGoodCombo* = tuple[
@@ -71,6 +76,7 @@ const KnownGoodCombos* = [
     ("ovh",       "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
     ("sambanova", "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
     ("deepinfra", "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
+    ("openrouter", "openai/gpt-oss-120b",                           "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
 
     # deepseek
     ("baseten",   "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false),

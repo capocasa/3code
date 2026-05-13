@@ -17,6 +17,11 @@ const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":compact", ":summarize", ":think",
                       ":q", ":quit", ":exit"]
 
+type WizardReadLineHook* = proc(prompt: string, hidden,
+                                noHistory: bool): string {.closure.}
+
+var wizardReadLineHook*: WizardReadLineHook
+
 proc completionFor*(line: string): seq[string] =
   let words = line.split(' ')
   if words.len == 0: return
@@ -47,16 +52,23 @@ proc readRequired*(editor: var minline.LineEditor, prompt: string,
   ## ctrl+c raises `minline.InputCancelled` to the caller; ctrl+d aborts
   ## the program. Empty input keeps re-prompting.
   while true:
-    let s = try: editor.readLine(prompt, hidechars = hidden, noHistory = noHistory).strip
-            except EOFError:
-              stdout.write "\n"
-              die "aborted", ExitConfig
+    let s =
+      if wizardReadLineHook != nil:
+        wizardReadLineHook(prompt, hidden, noHistory).strip
+      else:
+        try: editor.readLine(prompt, hidechars = hidden,
+                             noHistory = noHistory).strip
+        except EOFError:
+          stdout.write "\n"
+          die "aborted", ExitConfig
     if s != "": return s
 
 proc readOptional*(editor: var minline.LineEditor, prompt: string,
                   hidden = false, noHistory = true): string =
   ## ctrl+c raises `minline.InputCancelled` to the caller; ctrl+d aborts
   ## the program. Empty input is returned as "".
+  if wizardReadLineHook != nil:
+    return wizardReadLineHook(prompt, hidden, noHistory).strip
   try: editor.readLine(prompt, hidechars = hidden, noHistory = noHistory).strip
   except EOFError:
     stdout.write "\n"
@@ -161,19 +173,43 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
       # Provider not in known‑good list; give a clear hint.
       hintLn &"  provider {name} not known‑good; enable --experimental to use it", resetStyle
       raise newException(minline.InputCancelled, "")
+    let lookup = shortToFull(curated)
+    var prev = curated.mapIt(shortModel(it)).join(" ")
+    let prevCb = editor.completionCallback
+    editor.completionCallback = proc(ed: LineEditor): seq[string] =
+      for m in curated: result.add shortModel(m)
+    defer: editor.completionCallback = prevCb
     while true:
-      let prov = ProviderRec(name: name, url: url, key: key, models: curated)
-      let prof = Profile(name: name & "." & curated[0], url: url,
-                         key: key, model: curated[0])
-      hint "  verifying... ", resetStyle
-      stdout.flushFile
-      let (ok, err) = verifyProfile(prof)
-      if ok:
-        stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
-        return prov
-      errLn "  failed: " & err
+      let entered = readOptional(editor, &"  models [{prev}]  : ")
+      let raw = if entered == "": prev else: entered
+      let rawModels = splitModels(raw)
+      var models: seq[string]
+      var unknown: seq[string]
+      for rm in rawModels:
+        let resolved = lookup.getOrDefault(rm, rm)
+        if resolved in curated:
+          models.add resolved
+        else:
+          unknown.add rm
+      if models.len == 0:
+        errLn "  need at least one model"
+      elif unknown.len > 0:
+        errLn "  unknown known-good model: " & unknown.join(", ")
+        prev = models.mapIt(shortModel(it)).join(" ")
+      else:
+        let prov = ProviderRec(name: name, url: url, key: key, models: models)
+        let prof = Profile(name: name & "." & models[0], url: url,
+                           key: key, model: models[0])
+        hint "  verifying... ", resetStyle
+        stdout.flushFile
+        let (ok, err) = verifyProfile(prof)
+        if ok:
+          stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
+          return prov
+        errLn "  failed: " & err
+        prev = models.mapIt(shortModel(it)).join(" ")
       let choice = readOptional(editor,
-        "  [enter]=retry, k=re-enter key, c=cancel : ").toLowerAscii
+        "  [enter]=retry models, k=re-enter key, c=cancel : ").toLowerAscii
       if choice == "k":
         key = readRequired(editor,
           "  api key              : ", hidden = true)

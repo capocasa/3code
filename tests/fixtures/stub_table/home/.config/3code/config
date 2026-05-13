@@ -1,0 +1,8 @@
+[settings]
+current = "nvidia.openai/gpt-oss-120b"
+
+[provider]
+name = "nvidia"
+url = "https://example.invalid/v1"
+key = "stub-key"
+models = "openai/gpt-oss-120b"

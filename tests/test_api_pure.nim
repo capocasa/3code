@@ -1,4 +1,4 @@
-import std/[json, unittest]
+import std/[json, tables, unittest]
 import threecode/[api, types]
 
 suite "api: parseUsage":
@@ -76,6 +76,25 @@ suite "api: classifyRetry":
   test "exception takes priority over code":
     let e = newException(CatchableError, "timeout")
     check classifyRetry(e, 429) == "server"  # exception wins
+
+suite "api: retryCategory":
+  test "network failures retry as server":
+    check retryCategory("stream read: connection reset by peer", nil, 0) == "server"
+
+  test "429 retries as rate":
+    check retryCategory("", nil, 429) == "rate"
+
+  test "5xx statuses retry as server":
+    for code in [500, 502, 503, 504]:
+      check retryCategory("", nil, code) == "server"
+
+  test "nonretryable auth and request statuses do not retry":
+    for code in [400, 401, 403, 408, 409, 425]:
+      check retryCategory("", nil, code) == ""
+
+  test "assistant message without status is success":
+    let msg = %*{"role": "assistant", "content": "ok"}
+    check retryCategory("", msg, 0) == ""
 
 suite "api: applyReasoning — gpt-oss":
   test "sets reasoning_effort for gpt-oss":
@@ -173,3 +192,26 @@ suite "api: stripInternalFields":
     let stripped = stripInternalFields(messages)
     check "usage" notin stripped[0]
     check stripped[0].hasKey("reasoning_content")
+
+  test "strips interrupted marker from assistant messages":
+    let messages = %*[
+      {"role": "assistant", "content": "partial", "interrupted": true}
+    ]
+    let stripped = stripInternalFields(messages)
+    check "interrupted" notin stripped[0]
+    check stripped[0]["content"].getStr == "partial"
+
+suite "api: buildStreamAssistantMsg":
+  test "returns nil when stream produced no assistant data":
+    let tools = initOrderedTable[int, JsonNode]()
+    check buildStreamAssistantMsg("", "", tools, Usage()) == nil
+
+  test "marks interrupted partial content":
+    let tools = initOrderedTable[int, JsonNode]()
+    let msg = buildStreamAssistantMsg("partial answer", "", tools, Usage(),
+                                      wasInterrupted = true)
+    check msg != nil
+    check msg{"role"}.getStr == "assistant"
+    check msg{"content"}.getStr == "partial answer"
+    check msg{"interrupted"}.getBool == true
+    check msg.hasKey("reasoning_content")

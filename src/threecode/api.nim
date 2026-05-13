@@ -23,13 +23,147 @@ when defined(posix):
 import streamhttp
 import types, util, prompts, compact, display
 
+type
+  VerifyProfileHook* = proc(p: Profile): (bool, string) {.closure.}
+  FetchModelsHook* = proc(url, key: string): (seq[string], string) {.closure.}
+
+var
+  verifyProfileHook*: VerifyProfileHook
+  fetchModelsHook*: FetchModelsHook
+
 const providerStub {.booldefine.} = false
 when providerStub:
   var stubResponseIdx = 0
+  type StubFailure* = enum
+    sfNone, sfDns, sfNetworkUnreachable, sfConnectionRefused,
+    sfConnectTimeout, sfTls, sfCertificate, sfBrokenPipe,
+    sfConnectionReset, sfEof, sfReadTimeout, sfSilentThenOk,
+    sfMalformedSse, sfInvalidJson, sfHttp400, sfHttp401, sfHttp403,
+    sfHttp408, sfHttp409, sfHttp425, sfHttp429, sfHttp500, sfHttp502,
+    sfHttp503, sfHttp504
+
+  proc parseStubFailure*(s: string): StubFailure =
+    case s.strip.toLowerAscii.replace("_", "-")
+    of "", "none": sfNone
+    of "dns", "name-resolution", "resolve": sfDns
+    of "network-unreachable", "net-unreachable", "unreachable", "enetunreach":
+      sfNetworkUnreachable
+    of "connection-refused", "refused", "econnrefused": sfConnectionRefused
+    of "connect-timeout", "timeout-connect", "etimedout": sfConnectTimeout
+    of "tls", "ssl": sfTls
+    of "certificate", "cert", "cert-expired", "cert-verify": sfCertificate
+    of "broken-pipe", "epipe": sfBrokenPipe
+    of "connection-reset", "reset", "econnreset": sfConnectionReset
+    of "eof", "closed": sfEof
+    of "read-timeout", "timeout-read", "stall": sfReadTimeout
+    of "silent-then-ok", "flaky-silent": sfSilentThenOk
+    of "malformed-sse", "bad-sse": sfMalformedSse
+    of "invalid-json", "bad-json": sfInvalidJson
+    of "400", "http-400", "bad-request": sfHttp400
+    of "401", "http-401", "unauthorized", "auth": sfHttp401
+    of "403", "http-403", "forbidden": sfHttp403
+    of "408", "http-408", "request-timeout": sfHttp408
+    of "409", "http-409", "conflict": sfHttp409
+    of "425", "http-425", "too-early": sfHttp425
+    of "429", "http-429", "rate": sfHttp429
+    of "500", "http-500": sfHttp500
+    of "502", "http-502": sfHttp502
+    of "503", "http-503": sfHttp503
+    of "504", "http-504": sfHttp504
+    else: sfNone
+
+  proc stubFailureName*(f: StubFailure): string =
+    case f
+    of sfNone: "none"
+    of sfConnectTimeout: "connect timeout"
+    of sfDns: "dns failure"
+    of sfNetworkUnreachable: "network unreachable"
+    of sfConnectionRefused: "connection refused"
+    of sfTls: "tls failure"
+    of sfCertificate: "certificate failure"
+    of sfBrokenPipe: "broken pipe"
+    of sfConnectionReset: "connection reset"
+    of sfEof: "unexpected eof"
+    of sfReadTimeout: "read timeout"
+    of sfSilentThenOk: "silent connection"
+    of sfMalformedSse: "malformed sse"
+    of sfInvalidJson: "invalid json"
+    of sfHttp400: "api 400"
+    of sfHttp401: "api 401"
+    of sfHttp403: "api 403"
+    of sfHttp408: "api 408"
+    of sfHttp409: "api 409"
+    of sfHttp425: "api 425"
+    of sfHttp429: "api 429"
+    of sfHttp500: "api 500"
+    of sfHttp502: "api 502"
+    of sfHttp503: "api 503"
+    of sfHttp504: "api 504"
+
+  proc stubHttpStatus*(f: StubFailure): int =
+    case f
+    of sfHttp400: 400
+    of sfHttp401: 401
+    of sfHttp403: 403
+    of sfHttp408: 408
+    of sfHttp409: 409
+    of sfHttp425: 425
+    of sfHttp429: 429
+    of sfHttp500: 500
+    of sfHttp502: 502
+    of sfHttp503: 503
+    of sfHttp504: 504
+    else: 0
+
+  proc stubTransportError*(f: StubFailure): string =
+    case f
+    of sfDns: "TLS connect failed: name or service not known"
+    of sfNetworkUnreachable: "TLS connect failed: network is unreachable"
+    of sfConnectionRefused: "TLS connect failed: connection refused"
+    of sfConnectTimeout: "TLS connect failed: operation timed out"
+    of sfTls: "TLS connect failed: handshake failed"
+    of sfCertificate: "TLS connect failed: certificate verify failed"
+    of sfBrokenPipe: "request failed: broken pipe"
+    of sfConnectionReset: "stream read: connection reset by peer"
+    of sfEof: "stream read: EOF before end of response"
+    of sfReadTimeout: "stream read: operation timed out"
+    of sfMalformedSse: "stream read: malformed chunked transfer encoding"
+    of sfInvalidJson: "stream read: invalid JSON in SSE data"
+    else: ""
+
+  proc stubDelayMs(j: JsonNode, key: string, fallback = 0): int =
+    if j != nil and j.kind == JObject:
+      result = j{key}.getInt(fallback)
+    else:
+      result = fallback
+
+  proc stubRetryAfter(j: JsonNode): string =
+    if j != nil and j.kind == JObject:
+      result = j{"retryAfter"}.getStr("")
+
+  proc stubErrBody(f: StubFailure, j: JsonNode): string =
+    if j != nil and j.kind == JObject and "body" in j:
+      return j{"body"}.getStr
+    case f
+    of sfHttp400: """{"error":"bad request"}"""
+    of sfHttp401: """{"error":"unauthorized"}"""
+    of sfHttp403: """{"error":"forbidden"}"""
+    of sfHttp408: """{"error":"request timeout"}"""
+    of sfHttp409: """{"error":"conflict"}"""
+    of sfHttp425: """{"error":"too early"}"""
+    of sfHttp429: """{"error":"rate limit"}"""
+    of sfHttp500: """{"error":"server error"}"""
+    of sfHttp502: """{"error":"bad gateway"}"""
+    of sfHttp503: """{"error":"service unavailable"}"""
+    of sfHttp504: """{"error":"gateway timeout"}"""
+    else: ""
+
   proc loadStubResponses(): seq[JsonNode] =
     ## Read stub_responses.json: a JSON array of assistant-message objects.
     ## Each element is an OpenAI-shape assistant message (role, content,
-    ## tool_calls). Re-read on every call so edits take effect mid-session.
+    ## tool_calls), or `{failure: "...", delayMs: N}` to exercise retry /
+    ## flaky-network paths. Re-read on every call so edits take effect
+    ## mid-session.
     const path = "stub_responses.json"
     if not fileExists(path):
       stderr.writeLine "3code: stub: " & path & " not found"
@@ -39,6 +173,7 @@ when providerStub:
     except CatchableError:
       stderr.writeLine "3code: stub: malformed JSON in " & path
       quit 1
+
   proc stubCallModel(messages: JsonNode): JsonNode =
     let responses = loadStubResponses()
     if stubResponseIdx >= responses.len:
@@ -95,6 +230,10 @@ var showThinking*: bool = true
 
 var spinnerStop: Atomic[bool]
 var spinnerThread: Thread[string]
+var quietStop: Atomic[bool]
+var quietThread: Thread[string]
+var quietRunning = false
+var lastProviderActivity: Atomic[int]
 
 # Shared mutable spinner state. The spinner thread reads these every frame;
 # the main thread updates them as chunks arrive. Two separate lines:
@@ -106,6 +245,22 @@ var
   spinLabelShared: string
   spinTickerShared: string
 spinLabelLock.initLock()
+
+type LiveMarkdownStream* = object
+  ## Incremental renderer for assistant content during provider streaming.
+  ## It buffers input until markdown line/block boundaries, renders through
+  ## the same MarkdownState used by replay, and keeps the token footer sliding
+  ## below whatever rendered bytes are emitted.
+  baseLabel: string
+  started: bool
+  md: MarkdownState
+  pendingLine: string
+  utf8Pending: string
+  streamT0: float
+  liveBarAtCursor: bool
+  liveBarBelow: bool
+  liveLineEmitted: bool
+  liveCol: int
 
 proc setSpinLabel(s: string) {.gcsafe.} =
   {.cast(gcsafe).}:
@@ -304,20 +459,19 @@ const ClearBarPromptBytes* = "\r\x1b[J"
   ## everything below its anchor, so clearing from the anchor is the
   ## stable recovery operation before content pushes the footer down.
 
-proc barFooterBelowBytes*(label, promptColor: string, termW = 0): string =
+proc barFooterBelowAtColBytes*(label, promptColor: string, col: int,
+                               termW = 0): string =
   ## Paint bar one row below the cursor + prompt two rows below,
-  ## walking the cursor back up to the bullet row at column 2 (right
-  ## after `● `). Used during mid-line streaming where the cursor
-  ## sits at the bullet row, content is accumulating in `pendingLine`
-  ## (in memory, no terminal write yet), and the bar still needs to
-  ## be visible.
+  ## walking the cursor back up to the content row at `col`. Used
+  ## during mid-line streaming where the cursor sits on an in-progress
+  ## content row and the bar still needs to be visible underneath it.
   ##
   ## Avoids CSI s/u (SCO save/restore cursor) — those are silently
   ## ignored on enough terminals (we shipped a regression where each
   ## refresh stacked another bar in scroll because the cursor never
-  ## returned). The trailing `\x1b[<n>A\x1b[3G` walks back up to the
-  ## bullet row (`n` = bar wrap rows + 1 for the prompt row) and sets
-  ## column to 3 (1-based, == col 2 0-based, right after the bullet).
+  ## returned). The trailing `\x1b[<n>A\x1b[<col>G` walks back up to the
+  ## content row (`n` = bar wrap rows + 1 for the prompt row) and sets
+  ## the cursor column (1-based).
   ## With a wrapped bar (post-shrink) `n` is larger than the
   ## single-row default of 2.
   # Explicit `\r` before each `\n` so the bar and prompt rows reach
@@ -325,7 +479,17 @@ proc barFooterBelowBytes*(label, promptColor: string, termW = 0): string =
   let barRows = barWrapRows(2 + labelCells(label), termW)
   "\r\n\x1b[2K" & liveBarBytes(label) &
     "\r\n\x1b[2K" & promptColor & "❯ " & Reset &
-    "\x1b[" & $(barRows + 1) & "A\x1b[3G"
+    "\x1b[" & $(barRows + 1) & "A\x1b[" & $(max(0, col) + 1) & "G"
+
+proc barFooterBelowBytes*(label, promptColor: string, termW = 0): string =
+  ## Compatibility wrapper for the canonical pre-text state: cursor
+  ## returns to column 2, right after `● `.
+  barFooterBelowAtColBytes(label, promptColor, 2, termW)
+
+proc clearBarBelowAtColBytes*(col: int): string =
+  ## Erase the bar + prompt rows below the current cursor row and
+  ## restore the cursor to `col` on that original row.
+  "\n\r\x1b[J\x1b[1A\x1b[" & $(max(0, col) + 1) & "G"
 
 const ClearBarBelowBytes* = "\n\r\x1b[J\x1b[1A\x1b[3G"
   ## Erase the bar + prompt rows below the cursor (without
@@ -448,6 +612,14 @@ proc paintBarBelow*(label, promptColor: string) =
   currentBarHasGap = false
   syncWrite barFooterBelowBytes(label, promptColor, currentTermW())
 
+proc paintBarBelowAtCol(label, promptColor: string, col: int) =
+  currentBarLabel = label
+  currentBarHasGap = false
+  syncWrite barFooterBelowAtColBytes(label, promptColor, col, currentTermW())
+
+proc clearBarBelowAtCol(col: int) =
+  syncWrite clearBarBelowAtColBytes(col)
+
 proc repaintBarPrompt*(promptColor = DimPromptColor) =
   ## Re-emit the bar+prompt at the cursor's current row using the
   ## cached `currentBarLabel`. Used by `withCleared` to put the bar
@@ -460,6 +632,18 @@ proc clearBarPrompt*() =
   ## the bar row so the caller can write content there (which then
   ## pushes the next `repaintBarPrompt` one row down).
   syncWrite ClearBarPromptBytes
+
+proc endTurnBytes*(label, promptColor: string, repaintPrompt: bool,
+                   termW = 0): string =
+  ## Byte sequence for leaving model/tool mode. Normal completion repaints
+  ## the typing-ready footer; exceptional user interrupts only clear the
+  ## owned footer area so the caller's feedback lands as plain output.
+  if label.len > 0:
+    result.add ClearBarPromptBytes
+    if repaintPrompt:
+      result.add "\n"
+      result.add barFooterBytes(label, promptColor, termW)
+  result.add "\x1b[?25h"
 
 template withCleared*(body: untyped) =
   ## Hide bar+prompt for the duration of `body`, repaint them below
@@ -627,6 +811,180 @@ proc stopSpinner*() =
   joinThread(spinnerThread)
   spinnerRunning = false
 
+proc nowMs(): int =
+  int(epochTime() * 1000.0)
+
+proc markProviderActivity*() =
+  lastProviderActivity.store(nowMs(), moRelaxed)
+
+proc quietWatchLoop(baseLabel: string) {.thread.} =
+  var shown = false
+  while not quietStop.load(moRelaxed):
+    let idleMs = nowMs() - lastProviderActivity.load(moRelaxed)
+    if idleMs >= 15_000:
+      setSpinLabel("network quiet; still waiting")
+      shown = true
+    elif shown:
+      setSpinLabel(baseLabel)
+      shown = false
+    sleep 500
+
+proc startQuietWatch(baseLabel: string) =
+  if quietRunning: return
+  markProviderActivity()
+  quietStop.store(false, moRelaxed)
+  createThread(quietThread, quietWatchLoop, baseLabel)
+  quietRunning = true
+
+proc stopQuietWatch() =
+  if not quietRunning: return
+  quietStop.store(true, moRelaxed)
+  joinThread(quietThread)
+  quietRunning = false
+
+proc initLiveMarkdownStream*(baseLabel: string): LiveMarkdownStream =
+  LiveMarkdownStream(baseLabel: baseLabel, md: initMarkdownState(),
+    streamT0: epochTime(), liveCol: 2)
+
+proc currentLabel(s: LiveMarkdownStream, slurpedNow: int): string =
+  let elapsed = (epochTime() - s.streamT0).int
+  liveLabel(s.baseLabel, slurpedNow) & "  " & $elapsed & "s"
+
+proc utf8LenAt(s: string, i: int): int =
+  let b = s[i].uint8
+  if (b and 0x80'u8) == 0'u8: 1
+  elif (b and 0xE0'u8) == 0xC0'u8: 2
+  elif (b and 0xF0'u8) == 0xE0'u8: 3
+  elif (b and 0xF8'u8) == 0xF0'u8: 4
+  else: 1
+
+proc captureMd(s: var LiveMarkdownStream, line: string,
+               finish = false): string =
+  let path = getTempDir() / "3code_live_md_" & $getCurrentProcessId()
+  let f = open(path, fmWrite)
+  defer:
+    try: removeFile(path) except OSError: discard
+  if finish:
+    discard finishMd(s.md, f)
+  else:
+    discard handleMdLine(s.md, line, f)
+  f.flushFile
+  close(f)
+  result = readFile(path)
+
+proc startContent(s: var LiveMarkdownStream, slurpedNow: int) =
+  if s.started: return
+  setSpinTicker("")
+  stopSpinner()
+  stdout.styledWrite(styleBright, "● ", resetStyle)
+  s.started = true
+  paintBarBelow(s.currentLabel(slurpedNow), DimPromptColor)
+  s.liveBarBelow = true
+
+proc advanceLiveCol(s: var LiveMarkdownStream, text: string) =
+  let termW = max(1, try: terminalWidth() except CatchableError: 80)
+  s.liveCol += visibleWidth(text)
+  while s.liveCol >= termW:
+    s.liveCol -= termW
+
+proc writeLiveSegment(s: var LiveMarkdownStream, text: string) =
+  if text.len == 0: return
+  if s.liveBarAtCursor:
+    clearBarPrompt()
+    s.liveBarAtCursor = false
+  elif s.liveBarBelow:
+    clearBarBelowAtCol(s.liveCol)
+    s.liveBarBelow = false
+  stdout.write text
+  s.advanceLiveCol(text)
+  s.liveLineEmitted = true
+
+proc writeRendered(s: var LiveMarkdownStream, bytes: string,
+                   slurpedNow: int) =
+  if bytes.len == 0: return
+  s.startContent(slurpedNow)
+  var i = 0
+  while i < bytes.len:
+    if bytes[i] == '\n':
+      if s.liveBarBelow:
+        clearBarBelowAtCol(s.liveCol)
+        s.liveBarBelow = false
+      stdout.write "\n"
+      s.liveCol = 0
+      if s.liveLineEmitted:
+        paintBarPrompt(s.currentLabel(slurpedNow), DimPromptColor)
+        s.liveBarAtCursor = true
+      inc i
+    else:
+      let start = i
+      while i < bytes.len and bytes[i] != '\n':
+        inc i
+      s.writeLiveSegment(bytes[start ..< i])
+  if s.started:
+    if s.liveBarAtCursor:
+      paintBarPrompt(s.currentLabel(slurpedNow), DimPromptColor)
+    else:
+      paintBarBelowAtCol(s.currentLabel(slurpedNow), DimPromptColor, s.liveCol)
+      s.liveBarBelow = true
+
+proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
+  if chunk.len == 0: return
+  var data = s.utf8Pending & chunk
+  s.utf8Pending = ""
+  var i = 0
+  while i < data.len:
+    if data[i] == '\n':
+      let rendered = s.captureMd(s.pendingLine)
+      s.pendingLine = ""
+      s.writeRendered(rendered, slurpedNow)
+      inc i
+    else:
+      let charLen = utf8LenAt(data, i)
+      if i + charLen > data.len:
+        s.utf8Pending = data[i .. ^1]
+        break
+      s.pendingLine.add data[i ..< i + charLen]
+      i += charLen
+  stdout.flushFile()
+
+proc finishContent*(s: var LiveMarkdownStream, slurpedNow: int) =
+  if s.utf8Pending.len > 0:
+    s.pendingLine.add s.utf8Pending
+    s.utf8Pending = ""
+  if s.pendingLine.len > 0:
+    let rendered = s.captureMd(s.pendingLine)
+    s.pendingLine = ""
+    s.writeRendered(rendered, slurpedNow)
+  let tail = s.captureMd("", finish = true)
+  s.writeRendered(tail, slurpedNow)
+  if s.started and s.liveBarBelow:
+    paintBarPrompt(s.currentLabel(slurpedNow), DimPromptColor)
+    s.liveBarAtCursor = true
+    s.liveBarBelow = false
+
+when providerStub:
+  proc stubUsage(content: string): Usage =
+    result.promptTokens = 100
+    result.completionTokens = max(1, content.len div 4)
+    result.totalTokens = result.promptTokens + result.completionTokens
+
+  proc streamStubContent(content, baseLabel: string, slurped: var int) =
+    ## Provider-stub streaming path. It intentionally exercises the
+    ## same footer geometry as live SSE, including chunked newlines, so
+    ## terminal regressions show up in local/manual stub runs.
+    if content.strip.len == 0: return
+    var live = initLiveMarkdownStream(baseLabel)
+    var i = 0
+    while i < content.len:
+      let charLen = utf8LenAt(content, i)
+      let chunk = content[i ..< min(i + charLen, content.len)]
+      slurped += chunk.len
+      live.feedContent(chunk, slurped)
+      sleep 15
+      i += charLen
+    live.finishContent(slurped)
+    contentStreamedLive = true
+
 proc parseUsage*(u: JsonNode): Usage =
   ## Parses an OpenAI-compatible `usage` object. Cached-token accounting
   ## differs by provider: OpenAI/DeepInfra/Anthropic report it under
@@ -648,6 +1006,17 @@ proc classifyRetry*(exc: ref CatchableError, code: int): string =
   ## retry block.
   if exc != nil: return "server"
   case code
+  of 429: "rate"
+  of 500, 502, 503, 504: "server"
+  else: ""
+
+proc retryCategory*(errMsg: string, assistantMsg: JsonNode, statusCode: int): string =
+  let netFailed = errMsg != "" and assistantMsg == nil
+  if netFailed:
+    return "server"
+  case statusCode
+  of 0:
+    if assistantMsg == nil: "server" else: ""
   of 429: "rate"
   of 500, 502, 503, 504: "server"
   else: ""
@@ -725,6 +1094,11 @@ when defined(posix):
     cancelOrigTermios: Termios
     cancelOrigTermiosValid: bool
 
+  proc restoreCancelTermios*() {.noconv, gcsafe.} =
+    if cancelOrigTermiosValid:
+      discard tcSetAttr(0.cint, TCSANOW, addr cancelOrigTermios)
+      cancelOrigTermiosValid = false
+
   proc cancelWatcherLoop() {.thread, nimcall.} =
     while not cancelWatcherStop.load(moRelaxed):
       var pfd: TPollfd
@@ -741,9 +1115,27 @@ when defined(posix):
               {.cast(gcsafe).}:
                 interrupted = true
                 shutdownCachedStreamFd()
+                restoreCancelTermios()
               return
             else: discard
         # else: spurious wakeup or EOF on stdin; loop and re-check stop.
+
+  proc drainCancelInput() =
+    ## Drop keystrokes pressed while the dim prompt is visible. Input is
+    ## locked during provider work; carrying buffered Enter bytes into the
+    ## next prompt turns an accidental keypress into a blank submission.
+    if isatty(0.cint) == 0: return
+    while true:
+      var pfd: TPollfd
+      pfd.fd = 0.cint
+      pfd.events = POLLIN
+      let r = poll(addr pfd, 1.Tnfds, 0.cint)
+      if r <= 0 or (pfd.revents and POLLIN) == 0:
+        break
+      var buf: array[64, char]
+      let n = posix.read(0.cint, addr buf[0], buf.len)
+      if n <= 0:
+        break
 
   proc startCancelWatcher() =
     if cancelWatcherActive: return
@@ -772,13 +1164,9 @@ when defined(posix):
     cancelWatcherStop.store(true, moRelaxed)
     joinThread(cancelWatcherThread)
     cancelWatcherActive = false
+    drainCancelInput()
     if cancelOrigTermiosValid:
-      discard tcSetAttr(0.cint, TCSANOW, addr cancelOrigTermios)
-      cancelOrigTermiosValid = false
-  proc restoreCancelTermios*() {.noconv.} =
-    if cancelOrigTermiosValid:
-      discard tcSetAttr(0.cint, TCSANOW, addr cancelOrigTermios)
-      cancelOrigTermiosValid = false
+      restoreCancelTermios()
 else:
   proc startCancelWatcher() = discard
   proc stopCancelWatcher() = discard
@@ -791,6 +1179,30 @@ type StreamOutcome = object
   errBody: string         # non-SSE response body (error responses)
   assistantMsg: JsonNode  # reconstructed from SSE when status=200
   usage: Usage
+
+proc buildStreamAssistantMsg*(content, reasoning: string,
+                              tools: OrderedTable[int, JsonNode],
+                              usage: Usage,
+                              wasInterrupted = false): JsonNode =
+  ## Build the assistant message reconstructed from an SSE stream.
+  ## Returns nil when the stream produced no assistant data.
+  if content.len == 0 and tools.len == 0 and reasoning.len == 0 and
+     usage.totalTokens == 0:
+    return nil
+  result = %*{"role": "assistant", "content": content}
+  # DeepSeek-R1-style reasoning models REQUIRE the `reasoning_content`
+  # field on every assistant message in history — even when the model
+  # emitted no reasoning on that turn. Drop it and the next API call
+  # fails with `invalid_request_error`. Always set it; other providers
+  # ignore the extra field.
+  result["reasoning_content"] = %reasoning
+  if tools.len > 0:
+    var tcArr = newJArray()
+    var keys = toSeq(tools.keys).sorted
+    for k in keys: tcArr.add tools[k]
+    result["tool_calls"] = tcArr
+  if wasInterrupted:
+    result["interrupted"] = %true
 
 proc parseXmlToolCalls*(content: string): tuple[cleaned: string, calls: seq[JsonNode]] =
   ## Extract GLM/Qwen native `<tool_call>NAME<arg_key>K</arg_key>
@@ -968,7 +1380,9 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
                                   ("Content-Type", "application/json"),
                                   ("Accept", "text/event-stream")],
                        body = bodyStr)
+      markProviderActivity()
       resp = conn.readResponseHead()
+      markProviderActivity()
       break
     except CatchableError as e:
       # Cached conn was stale (server-side keep-alive timeout, etc.) or
@@ -987,6 +1401,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   var accTools = initOrderedTable[int, JsonNode]()
   var nonSSE: seq[string]
   var contentStarted = false
+  var live = initLiveMarkdownStream(baseLabel)
   var xmlFilter = XmlToolFilter()
   # Completion signals. A clean upstream EOF without either `[DONE]` or a
   # non-empty `finish_reason` means the SSE stream was cut mid-response
@@ -1016,120 +1431,8 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     for ch in tail:
       flat.add(if ch == '\n' or ch == '\r': ' ' else: ch)
     setSpinTicker("  … " & flat)
-  # Agent text streams at column 0 with no icon, riding the terminal's
-  # default foreground so it reads on both light and dark backgrounds.
-  # Inline `**bold**` and `` `code` `` flip intensity within the line
-  # without changing hue.
-  #
-  # Line buffering layers markdown rendering on top:
-  #   - tables (`| a | b |` rows) buffer into `tableBuf`, flush as
-  #     box-drawn blocks once a non-table line arrives — sub-second
-  #     beat for typical 5-20 row tables, but it's the price of
-  #     column-width-aware alignment.
-  #   - code blocks (between ``` fences) buffer into `codeBuf`, render
-  #     with a dim left bar `┃` per line, fences themselves suppressed.
-  #   - headers (`# H` … `###### H`) render as bold cream, hashes
-  #     stripped.
-  #   - inline `**bold**` and `` `code` `` substituted via ANSI flips
-  #     inside the cream envelope. Strict matching only — malformed
-  #     markers pass through raw.
-  # The lead bullet is printed at column 0 without a trailing newline,
-  # so the first emitted line of content starts on the same row.
-  # `MarkdownState.firstEmit = false` here means: don't suppress the
-  # 2-space indent on the first line. We flip it to `true` when the
-  # bullet is printed so the first chunk lands directly after `● `.
-  # Same per-line handlers as the replay path so live and resumed
-  # output stay byte-identical.
-  var pendingLine = ""
-  var mdState = initMarkdownState(firstEmit = false)
-  # Bar+prompt remain visible the entire time content is streaming.
-  # Two states track where they sit relative to the cursor:
-  #   `liveBarAtCursor`  bar is at the cursor's row + prompt at row+1.
-  #                      Holds after a `\n` paints the bar at the new
-  #                      cursor row. Content writes that overlay the
-  #                      cursor row first need to clear it.
-  #   `liveBarBelow`     bar is at cursor row+1 + prompt at cursor+2.
-  #                      Holds during mid-line streaming (cursor sits
-  #                      on a content row that's accumulating in
-  #                      `pendingLine`, no terminal advance yet). Painted
-  #                      via `barFooterBelowBytes` (CSI s/u save/restore)
-  #                      so it doesn't disturb the cursor row.
-  # Mutually exclusive; both false means the bar isn't painted yet
-  # (pre-bullet) or has been cleared (mid-flush).
-  var liveBarAtCursor = false
-  var liveBarBelow = false
-  var liveLineEmitted = false
-  let streamT0 = epochTime()
-  proc currentLabel(slurpedNow: int): string =
-    let elapsed = (epochTime() - streamT0).int
-    liveLabel(baseLabel, slurpedNow) & "  " & $elapsed & "s"
-  proc handleLine(l: string) =
-    # Pre-write: if bar is at the cursor's row, clear it before
-    # content writes overlay it. If the bar is below cursor, content
-    # writes cleanly on the cursor row and `\n` advances onto the
-    # old-bar row; the subsequent `paintBarPrompt`'s leading clear
-    # handles that case.
-    if liveBarAtCursor:
-      clearBarPrompt()
-      liveBarAtCursor = false
-    if handleMdLine(mdState, l, stdout):
-      liveLineEmitted = true
-  proc emitContent(c: string, slurpedNow: int) =
-    for ch in c:
-      if ch == '\n':
-        handleLine(pendingLine)
-        pendingLine = ""
-        if liveLineEmitted:
-          # Cursor advanced one row past the just-written content.
-          # That row was the previous bar/below position and now
-          # holds stale chrome; `paintBarPrompt`'s leading
-          # `\r\x1b[2K` clears it before painting the new bar.
-          paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
-          liveBarAtCursor = true
-          liveBarBelow = false
-      else:
-        pendingLine.add ch
-    # End-of-chunk refresh: keep the bar's slurped/elapsed values
-    # current AND keep the bar visible across long mid-line streams.
-    # Whichever state holds, paint with the matching emitter.
-    if contentStarted:
-      if liveBarAtCursor:
-        paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
-      elif liveBarBelow:
-        paintBarBelow(currentLabel(slurpedNow), DimPromptColor)
-  proc finishContent(slurpedNow: int) =
-    if pendingLine.len > 0:
-      handleLine(pendingLine)
-      pendingLine = ""
-      if liveLineEmitted:
-        paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
-        liveBarAtCursor = true
-        liveBarBelow = false
-    # If markdown has buffered content (open code fence, table rows
-    # without a closing non-table line), flushing it writes more
-    # rows above the bar — clear bar+prompt first so the writes
-    # don't conflict, then repaint at the new bottom.
-    if mdState.codeBuf.len > 0 or mdState.tableBuf.len > 0:
-      if liveBarAtCursor:
-        clearBarPrompt()
-        liveBarAtCursor = false
-      elif liveBarBelow:
-        stdout.write ClearBarBelowBytes
-        stdout.flushFile
-        liveBarBelow = false
-      discard finishMd(mdState, stdout)
-      paintBarPrompt(currentLabel(slurpedNow), DimPromptColor)
-      liveBarAtCursor = true
-    # else: bar+prompt already in place, leave them alone — avoids
-    # the brief clear→repaint flash we used to ship.
   var line = ""
   var streamErr = ""
-  # Watch stdin for ctrl-c / ESC for the entire body read. Without this
-  # the keystrokes are buffered (cooked mode) until the first SSE chunk
-  # arrives, so cancel during the model's pre-data "thinking" gap is
-  # invisible.
-  startCancelWatcher()
-  defer: stopCancelWatcher()
   while true:
     var hasLine = false
     try: hasLine = conn.readLine(line)
@@ -1138,6 +1441,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       closeCachedStreamConn()
       break
     if not hasLine: break
+    markProviderActivity()
     if interrupted:
       closeCachedStreamConn()
       break
@@ -1173,22 +1477,8 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
               if suppressXml: feed(xmlFilter, c)
               else: c
             if visible.len > 0:
-              if not contentStarted:
-                # Stop the spinner and emit the answer bullet at column 0
-                # without a newline; the first content line lands on the same
-                # row right after `● `, subsequent lines indent two spaces.
-                # Then paint bar+prompt one row below so the bar stays
-                # visible while `pendingLine` accumulates in memory before
-                # the first `\n` arrives.
-                setSpinTicker("")
-                stopSpinner()
-                stdout.styledWrite(styleBright, "● ", resetStyle)
-                contentStarted = true
-                mdState.firstEmit = true
-                paintBarBelow(currentLabel(slurped), DimPromptColor)
-                liveBarBelow = true
-              emitContent(visible, slurped)
-              stdout.flushFile()
+              live.feedContent(visible, slurped)
+              contentStarted = live.started
           let tcDelta = delta{"tool_calls"}
           if tcDelta != nil and tcDelta.kind == JArray:
             for tc in tcDelta:
@@ -1216,19 +1506,11 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   if suppressXml:
     let tail = flushTail(xmlFilter)
     if tail.len > 0:
-      if not contentStarted:
-        setSpinTicker("")
-        stopSpinner()
-        stdout.styledWrite(styleBright, "● ", resetStyle)
-        contentStarted = true
-        mdState.firstEmit = true
-        paintBarBelow(currentLabel(slurped), DimPromptColor)
-        liveBarBelow = true
-      emitContent(tail, slurped)
-      stdout.flushFile()
+      live.feedContent(tail, slurped)
+      contentStarted = live.started
 
   if contentStarted:
-    finishContent(slurped)
+    live.finishContent(slurped)
     # Collapse trailing blank rows the model emitted so the bar lands
     # flush below the last content line. The bar may currently sit
     # `trailingNl - 1` rows below where it should; clear it, walk up
@@ -1238,21 +1520,21 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       if accContent[i] == '\n': inc trailingNl
       else: break
     if trailingNl > 1:
-      if liveBarAtCursor:
+      if live.liveBarAtCursor:
         clearBarPrompt()
-        liveBarAtCursor = false
-      elif liveBarBelow:
+        live.liveBarAtCursor = false
+      elif live.liveBarBelow:
         stdout.write ClearBarBelowBytes
         stdout.flushFile
-        liveBarBelow = false
+        live.liveBarBelow = false
       for _ in 0 ..< trailingNl - 1:
         stdout.write "\x1b[1A\x1b[2K"
-      paintBarPrompt(currentLabel(slurped), DimPromptColor)
+      paintBarPrompt(live.currentLabel(slurped), DimPromptColor)
     contentStreamedLive = true
     # Normalize cursor to bar row col 0. The streaming loop may have left
     # the cursor in the content area (liveBarBelow case); move it down to
     # the bar row before inserting the ticker row and restarting the spinner.
-    if liveBarBelow:
+    if live.liveBarBelow:
       syncWrite "\x1b[1B"        # bar is 1 row below cursor
     # Now cursor is at bar row col 0.
     # Insert a blank row above the bar (ticker row for the spinner)
@@ -1263,6 +1545,9 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     startSpinner("")
 
   if interrupted:
+    if result.assistantMsg == nil:
+      result.assistantMsg = buildStreamAssistantMsg(accContent, accReasoning,
+        accTools, result.usage, interrupted)
     # Drop the cache: the SIGINT hook / watcher already shut down the
     # fd, so the conn is half-closed. Reusing it on the next turn
     # would fail on first send. The next call will reconnect cleanly.
@@ -1288,22 +1573,10 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     return
 
   # Build assistant message if we saw any SSE content.
-  if accContent.len > 0 or accTools.len > 0 or accReasoning.len > 0 or
-     result.usage.totalTokens > 0:
-    var msg = %*{"role": "assistant", "content": accContent}
-    # DeepSeek-R1-style reasoning models REQUIRE the `reasoning_content`
-    # field on every assistant message in history — even when the model
-    # emitted no reasoning on that turn. Drop it and the next API call
-    # fails with `invalid_request_error`. Always set it; other providers
-    # ignore the extra field.
-    msg["reasoning_content"] = %accReasoning
-    if accTools.len > 0:
-      var tcArr = newJArray()
-      var keys = toSeq(accTools.keys).sorted
-      for k in keys: tcArr.add accTools[k]
-      msg["tool_calls"] = tcArr
-    result.assistantMsg = msg
-  else:
+  if result.assistantMsg == nil:
+    result.assistantMsg = buildStreamAssistantMsg(accContent, accReasoning,
+      accTools, result.usage, interrupted)
+  if result.assistantMsg == nil:
     # No SSE data — provider may have returned a plain JSON error body.
     result.errBody = nonSSE.join("\n")
   debugOut &"streamHttp end — contentStarted={contentStarted} accTools={accTools.len}"
@@ -1315,12 +1588,12 @@ proc stripInternalFields*(messages: JsonNode): JsonNode =
   if messages == nil or messages.kind != JArray: return messages
   result = newJArray()
   for m in messages:
-    if m.kind != JObject or "usage" notin m:
+    if m.kind != JObject or ("usage" notin m and "interrupted" notin m):
       result.add m
       continue
     var clean = newJObject()
     for k, v in m.pairs:
-      if k != "usage": clean[k] = v
+      if k != "usage" and k != "interrupted": clean[k] = v
     result.add clean
 
 proc ensureReasoningField(messages: JsonNode) =
@@ -1451,7 +1724,7 @@ proc beginTurn*() =
   stdout.write "\x1b[?25l"
   stdout.flushFile
 
-proc endTurn*() =
+proc endTurn*(repaintPrompt = true) =
   ## Transition to typing-ready state: clear the bar at its current
   ## row, advance one row to leave a blank "gap" between the last
   ## content row and the bar, repaint bar+prompt with the bright
@@ -1467,12 +1740,16 @@ proc endTurn*() =
   stopSpinner()
   if currentBarLabel.len > 0:
     let label = currentBarLabel
-    clearBarPrompt()
-    stdout.write "\n"
-    stdout.write barFooterBytes(label, BrightPromptColor, currentTermW())
-    currentBarLabel = label
-    currentBarHasGap = true
-  stdout.write "\x1b[?25h"
+    stdout.write endTurnBytes(label, BrightPromptColor, repaintPrompt,
+                              currentTermW())
+    if repaintPrompt:
+      currentBarLabel = label
+      currentBarHasGap = true
+    else:
+      currentBarLabel = ""
+      currentBarHasGap = false
+  else:
+    stdout.write endTurnBytes("", BrightPromptColor, repaintPrompt)
   stdout.flushFile
 
 proc emitUserSubmit*(line: string, echoRows = -1) =
@@ -1504,13 +1781,104 @@ proc emitUserSubmit*(line: string, echoRows = -1) =
 
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   when providerStub:
-    startSpinner("stub")
-    sleep 500  # simulate thinking
-    stopSpinner()
-    result = stubCallModel(messages)
-    debugOut &"callModel stub idx={stubResponseIdx-1}"
-    paintBarPrompt("stub 0s", DimPromptColor)
-    return
+    block:
+      let stubT0 = epochTime()
+      let stubWindow = contextWindowFor(p.model)
+      let stubBaseLabel = contextLabel(lastPromptTokens, stubWindow)
+      stdout.write "\n"
+      setSpinLabel(liveLabel(stubBaseLabel, 0))
+      startSpinner("")
+      startQuietWatch(liveLabel(stubBaseLabel, 0))
+      startCancelWatcher()
+      defer:
+        stopQuietWatch()
+        stopCancelWatcher()
+      const StubMaxAttempts = 8
+      var attempt = 0
+      var lastFailure = sfNone
+      while true:
+        inc attempt
+        let node = stubCallModel(messages)
+        if node.kind == JObject and node{"failure"}.getStr("").len > 0:
+          lastFailure = parseStubFailure(node{"failure"}.getStr)
+          let delayMs = stubDelayMs(node, "delayMs", 300)
+          var remaining = delayMs
+          while remaining > 0:
+            if interrupted:
+              stopSpinner()
+              raise newException(ApiError, "interrupted by user")
+            let step = min(100, remaining)
+            sleep(step)
+            remaining -= step
+          let code = stubHttpStatus(lastFailure)
+          var errMsg =
+            if code > 0: "api " & $code
+            else: stubTransportError(lastFailure)
+          if errMsg.len == 0:
+            errMsg = stubFailureName(lastFailure)
+          let category = retryCategory(errMsg, nil, code)
+          if category.len == 0 or attempt >= StubMaxAttempts:
+            stopSpinner()
+            raise newException(ApiError,
+              errMsg & (if stubErrBody(lastFailure, node).len > 0:
+                ": " & stubErrBody(lastFailure, node) else: ""))
+          let retryAfter = try: parseInt(stubRetryAfter(node)) except CatchableError: 0
+          let backoff =
+            if retryAfter > 0: retryAfter
+            elif category == "rate": min(1 shl rateRetryLevel, 90)
+            else: min(1 shl serverRetryLevel, 16)
+          stopSpinner()
+          stderr.writeLine &"3code: {errMsg}; retry {attempt + 1}/{StubMaxAttempts} in {backoff}s"
+          var waitMs = backoff * 1000
+          while waitMs > 0:
+            if interrupted:
+              raise newException(ApiError, "interrupted by user during retry backoff")
+            let step = min(100, waitMs)
+            sleep(step)
+            waitMs -= step
+          if category == "rate":
+            inc rateRetryLevel
+            rateLastTs = epochTime()
+          else:
+            inc serverRetryLevel
+            serverLastTs = epochTime()
+          setSpinLabel(&"retry {attempt + 1}/{StubMaxAttempts}")
+          startSpinner("")
+        else:
+          result = node
+          break
+      if result.kind == JObject and "role" notin result:
+        result["role"] = %"assistant"
+      debugOut &"callModel stub idx={stubResponseIdx-1} failure={stubFailureName(lastFailure)}"
+      var slurped = 0
+      let preStreamDelay = stubDelayMs(result, "preStreamDelayMs", 0)
+      if preStreamDelay > 0:
+        var remaining = preStreamDelay
+        while remaining > 0:
+          if interrupted:
+            stopSpinner()
+            raise newException(ApiError, "interrupted by user")
+          let step = min(100, remaining)
+          sleep(step)
+          remaining -= step
+      streamStubContent(result{"content"}.getStr(""), stubBaseLabel, slurped)
+      stopSpinner()
+      usage = stubUsage(result{"content"}.getStr(""))
+      let stubElapsed = (epochTime() - stubT0).int
+      let stubLabel = tokenLineLabel(usage, stubWindow, stubElapsed)
+      paintBarPrompt(stubLabel, DimPromptColor)
+      pendingHint = (active: true, usage: usage, window: stubWindow,
+                     elapsed: stubElapsed)
+      if result.kind == JObject:
+        result["usage"] = %*{
+          "promptTokens": usage.promptTokens,
+          "completionTokens": usage.completionTokens,
+          "totalTokens": usage.totalTokens,
+          "cachedTokens": usage.cachedTokens,
+          "elapsed": stubElapsed,
+          "ts": now().format("yyyy-MM-dd'T'HH:mm:sszzz"),
+        }
+      return
   debugOut "callModel start"
   if p.family == "deepseek":
     ensureReasoningField(messages)
@@ -1566,6 +1934,11 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   # itself doesn't toggle visibility — touching DECTCEM here would
   # cause a flicker between callModel iterations within a turn.
   startSpinner("")
+  startQuietWatch(liveLabel(baseLabel, 0))
+  startCancelWatcher()
+  defer:
+    stopQuietWatch()
+    stopCancelWatcher()
   const MaxAttempts = 8
   var outcome: StreamOutcome
   var attempt = 0
@@ -1576,18 +1949,11 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
                         baseLabel, slurped, xmlToolCallsFallback(p))
     if outcome.errMsg == "interrupted by user":
       stopSpinner()
-      raise newException(ApiError, "interrupted by user")
-    let netFailed = outcome.errMsg != "" and outcome.assistantMsg == nil
+      if outcome.assistantMsg == nil:
+        raise newException(ApiError, "interrupted by user")
+      break
     let code = outcome.statusCode
-    let category =
-      if netFailed: "server"
-      else:
-        case code
-        of 0: (if outcome.assistantMsg != nil: "" else: "server")
-        of 200: ""
-        of 429: "rate"
-        of 500, 502, 503, 504: "server"
-        else: ""
+    let category = retryCategory(outcome.errMsg, outcome.assistantMsg, code)
     let retryable = category != ""
     var errMsg = outcome.errMsg
     if errMsg == "" and retryable: errMsg = "api " & $code
@@ -1699,6 +2065,8 @@ proc verifyBody*(p: Profile): string =
   })
 
 proc verifyProfile*(p: Profile): (bool, string) =
+  if verifyProfileHook != nil:
+    return verifyProfileHook(p)
   let body = verifyBody(p)
   try:
     let client = newHttpClient(timeout = 20_000, userAgent = "3code",
@@ -1728,6 +2096,8 @@ proc verifyProfile*(p: Profile): (bool, string) =
 proc fetchModels*(url, key: string): (seq[string], string) =
   ## GET /models on the provider. Returns (models, error) — error is empty on
   ## success. Callers are responsible for displaying the error.
+  if fetchModelsHook != nil:
+    return fetchModelsHook(url, key)
   try:
     let client = newHttpClient(timeout = 20_000, userAgent = "3code",
                                sslContext = bundledSslContext())

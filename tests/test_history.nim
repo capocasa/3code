@@ -1,10 +1,10 @@
-import std/[unittest, parseutils, os, strutils, deques]
+import std/[unittest, os, strutils, deques]
 import threecode/minline
 import minline_testutils
 import ttty/grid
 
 proc runUntilCancel(d: Driver, ed: var LineEditor, prompt = "> ") =
-  d.push KCtrlC
+  d.push CtrlC
   try: discard d.run(ed, prompt) except InputCancelled: discard
 
 # ---------- History navigation ----------
@@ -15,7 +15,7 @@ suite "history navigation":
     seedHistory(ed, @["short"])
     let d = newDriver()
     d.pushString "draft"
-    d.push KUp; d.push KDown; d.push KEnter
+    d.push Up; d.push Down; d.push Enter
     check d.run(ed, prompt = "> ") == "draft"
 
   test "Up→Down restores multi-line draft":
@@ -23,12 +23,12 @@ suite "history navigation":
     seedHistory(ed, @["short"])
     let d = newDriver()
     d.pushString "first"
-    d.push KAltEnter
+    d.push AltEnter
     d.pushString "second"
-    d.push KUp   # visualUp from row 1 to row 0
-    d.push KUp   # historyPrevious — saves draft
-    d.push KDown # historyNext — restore draft
-    d.push KEnter
+    d.push Up   # visualUp from row 1 to row 0
+    d.push Up   # historyPrevious — saves draft
+    d.push Down # historyNext — restore draft
+    d.push Enter
     check d.run(ed, prompt = "> ") == "first\nsecond"
 
   test "Up→Down→Up→Down preserves draft across repeated nav":
@@ -36,7 +36,7 @@ suite "history navigation":
     seedHistory(ed, @["short"])
     let d = newDriver()
     d.pushString "draft"
-    d.push KUp; d.push KDown; d.push KUp; d.push KDown; d.push KEnter
+    d.push Up; d.push Down; d.push Up; d.push Down; d.push Enter
     check d.run(ed, prompt = "> ") == "draft"
 
   test "deep walk through history then back to draft":
@@ -44,9 +44,9 @@ suite "history navigation":
     seedHistory(ed, @["a", "b", "c"])
     let d = newDriver()
     d.pushString "draft"
-    d.push KUp; d.push KUp; d.push KUp     # walk to oldest
-    d.push KDown; d.push KDown; d.push KDown # back to draft
-    d.push KEnter
+    d.push Up; d.push Up; d.push Up     # walk to oldest
+    d.push Down; d.push Down; d.push Down # back to draft
+    d.push Enter
     check d.run(ed, prompt = "> ") == "draft"
 
   test "Up→Down restores empty draft (was: silently dropped)":
@@ -57,7 +57,7 @@ suite "history navigation":
     var ed = initEditor()
     seedHistory(ed, @["a"])
     let d = newDriver()
-    d.push KUp; d.push KDown; d.push KEnter
+    d.push Up; d.push Down; d.push Enter
     check d.run(ed, prompt = "> ") == ""
 
   test "Ctrl+U → Up → Down restores cleared (empty) draft":
@@ -65,10 +65,10 @@ suite "history navigation":
     seedHistory(ed, @["foo"])
     let d = newDriver()
     d.pushString "abc"
-    d.push KCtrlU         # clear -> draft = ""
-    d.push KUp            # save empty draft
-    d.push KDown          # should return to ""
-    d.push KEnter
+    d.push CtrlU         # clear -> draft = ""
+    d.push Up            # save empty draft
+    d.push Down          # should return to ""
+    d.push Enter
     check d.run(ed, prompt = "> ") == ""
 
   test "history entry that happens to be empty is reachable":
@@ -79,8 +79,8 @@ suite "history navigation":
     seedHistory(ed, @["a", "", "c"])
     let d = newDriver()
     d.pushString "draft"
-    d.push KUp; d.push KUp     # save draft, walk back through "c", land on ""
-    d.push KEnter
+    d.push Up; d.push Up     # save draft, walk back through "c", land on ""
+    d.push Enter
     check d.run(ed, prompt = "> ") == ""
 
   test "no extra rows after Up→Down to single-line draft":
@@ -88,7 +88,7 @@ suite "history navigation":
     seedHistory(ed, @["short"])
     let d = newDriver()
     d.pushString "draft"
-    d.push KUp; d.push KDown
+    d.push Up; d.push Down
     runUntilCancel(d, ed, "> ")
     check rowText(d.grid, 0) == "> draft"
     check rowText(d.grid, 1) == ""
@@ -98,9 +98,9 @@ suite "history navigation":
     seedHistory(ed, @["short"])
     let d = newDriver()
     d.pushString "first"
-    d.push KAltEnter
+    d.push AltEnter
     d.pushString "second"
-    d.push KUp; d.push KUp; d.push KDown
+    d.push Up; d.push Up; d.push Down
     runUntilCancel(d, ed, "> ")
     check rowText(d.grid, 0) == "> first"
     check rowText(d.grid, 1) == "  second"
@@ -116,19 +116,19 @@ suite "history navigation, deep walk":
     d.pushString "draft"
     # Walk all the way to the oldest, then back, and submit the draft.
     # If any step lost an entry the final line.text would be wrong.
-    d.push KUp   # five
-    d.push KUp   # four
-    d.push KUp   # three
-    d.push KUp   # two
-    d.push KUp   # one
-    d.push KUp   # already at oldest, no-op
-    d.push KDown # two
-    d.push KDown # three
-    d.push KDown # four
-    d.push KDown # five
-    d.push KDown # draft
-    d.push KDown # already on draft, no-op
-    d.push KEnter
+    d.push Up   # five
+    d.push Up   # four
+    d.push Up   # three
+    d.push Up   # two
+    d.push Up   # one
+    d.push Up   # already at oldest, no-op
+    d.push Down # two
+    d.push Down # three
+    d.push Down # four
+    d.push Down # five
+    d.push Down # draft
+    d.push Down # already on draft, no-op
+    d.push Enter
     check d.run(ed, prompt = "> ") == "draft"
 
   test "Up→Up→Down lands on the second-newest, not the newest":
@@ -138,10 +138,10 @@ suite "history navigation, deep walk":
     seedHistory(ed, @["older", "newer"])
     let d = newDriver()
     d.pushString "carefully crafted prompt"
-    d.push KUp   # newer
-    d.push KUp   # older
-    d.push KDown # back to newer
-    d.push KEnter
+    d.push Up   # newer
+    d.push Up   # older
+    d.push Down # back to newer
+    d.push Enter
     check d.run(ed, prompt = "> ") == "newer"
 
   test "Up to oldest, Down all the way, draft survives intact":
@@ -149,9 +149,9 @@ suite "history navigation, deep walk":
     seedHistory(ed, @["a", "b", "c", "d"])
     let d = newDriver()
     d.pushString "my draft"
-    for _ in 0 ..< 4: d.push KUp
-    for _ in 0 ..< 4: d.push KDown
-    d.push KEnter
+    for _ in 0 ..< 4: d.push Up
+    for _ in 0 ..< 4: d.push Down
+    d.push Enter
     check d.run(ed, prompt = "> ") == "my draft"
 
 # ---------- Editing while navigating ----------
@@ -162,10 +162,10 @@ suite "history editing":
     seedHistory(ed, @["alpha", "beta", "gamma"])
     let d = newDriver()
     # Walk back to "beta" (middle), append "!", submit.
-    d.push KUp   # gamma
-    d.push KUp   # beta
+    d.push Up   # gamma
+    d.push Up   # beta
     d.pushString "!"
-    d.push KEnter
+    d.push Enter
     check d.run(ed) == "beta!"
     # Original "beta" is untouched in entries, and "beta!" is appended.
     check ed.history.entries.len == 4
@@ -180,12 +180,12 @@ suite "history editing":
     var ed = initEditor()
     seedHistory(ed, @["alpha", "beta", "gamma"])
     let d = newDriver()
-    d.push KUp   # gamma
-    d.push KUp   # beta
+    d.push Up   # gamma
+    d.push Up   # beta
     d.pushString "X"   # line is now "betaX"
-    d.push KUp   # alpha
-    d.push KDown # back to beta — should be "betaX", not "beta"
-    d.push KEnter
+    d.push Up   # alpha
+    d.push Down # back to beta — should be "betaX", not "beta"
+    d.push Enter
     check d.run(ed) == "betaX"
 
   test "draft survives walking deep into history and back":
@@ -193,10 +193,10 @@ suite "history editing":
     seedHistory(ed, @["a", "b", "c"])
     let d = newDriver()
     d.pushString "carefully crafted prompt"
-    d.push KUp; d.push KUp; d.push KUp     # walk to oldest
-    d.push KUp                              # past-oldest no-op
-    d.push KDown; d.push KDown; d.push KDown # back to draft
-    d.push KEnter
+    d.push Up; d.push Up; d.push Up     # walk to oldest
+    d.push Up                              # past-oldest no-op
+    d.push Down; d.push Down; d.push Down # back to draft
+    d.push Enter
     check d.run(ed) == "carefully crafted prompt"
 
 # ---------- Add semantics ----------
@@ -206,7 +206,7 @@ suite "history add":
     var ed = initEditor()
     seedHistory(ed, @["one"])
     let d = newDriver()
-    d.push KEnter
+    d.push Enter
     check d.run(ed) == ""
     check ed.history.entries.len == 1
     check ed.history.entries[0] == "one"
@@ -216,7 +216,7 @@ suite "history add":
     seedHistory(ed, @["foo"])
     let d = newDriver()
     d.pushString "foo"
-    d.push KEnter
+    d.push Enter
     check d.run(ed) == "foo"
     check ed.history.entries.len == 1
 
@@ -225,7 +225,7 @@ suite "history add":
     seedHistory(ed, @["foo", "bar"])
     let d = newDriver()
     d.pushString "foo"
-    d.push KEnter
+    d.push Enter
     check d.run(ed) == "foo"
     check ed.history.entries.len == 3
     check ed.history.entries[2] == "foo"
@@ -240,13 +240,13 @@ suite "history file":
       var ed = initEditor(historyFile = path)
       let d = newDriver()
       d.pushString "first"
-      d.push KEnter
+      d.push Enter
       check d.run(ed) == "first"
     block:
       var ed = initEditor(historyFile = path)
       let d = newDriver()
       d.pushString "second"
-      d.push KEnter
+      d.push Enter
       check d.run(ed) == "second"
     block:
       var ed = initEditor(historyFile = path)
@@ -265,14 +265,14 @@ suite "history file":
       var ed = initEditor(historyFile = path)
       let d = newDriver()
       d.pushString "real entry"
-      d.push KEnter
+      d.push Enter
       check d.run(ed) == "real entry"
     block:
       # Simulate: open editor, type a draft, walk into history, abort.
       var ed = initEditor(historyFile = path)
       let d = newDriver()
       d.pushString "transient draft"
-      d.push KUp     # peek at "real entry"
+      d.push Up     # peek at "real entry"
       runUntilCancel(d, ed)
       # File must still hold only the one persisted entry.
       let raw = readFile(path)
@@ -300,10 +300,10 @@ suite "history cursor preservation":
     let d = newDriver()
     d.pushString "abcdef"
     # Three lefts.
-    d.push @[27, 91, 68]
-    d.push @[27, 91, 68]
-    d.push @[27, 91, 68]
-    d.push KUp; d.push KDown
+    d.push Left
+    d.push Left
+    d.push Left
+    d.push Up; d.push Down
     d.pushString "Z"
-    d.push KEnter
+    d.push Enter
     check d.run(ed) == "abcZdef"
