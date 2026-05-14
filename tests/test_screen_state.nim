@@ -1,5 +1,5 @@
 import std/unittest
-import threecode/[screen, types]
+import threecode/[api, screen, types]
 
 suite "screen state":
   test "footer bar and pending receipt live in one state object":
@@ -27,3 +27,16 @@ suite "screen state":
     check s.footer.barLabel == ""
     check not s.footer.hasGap
     check not s.footer.pendingHint.active
+
+  test "footer paint helpers update shared screen state":
+    let saved = screenState
+    defer:
+      screenState = saved
+
+    paintBarPrompt("LBL", DimPromptColor)
+    check screenState.footer.barLabel == "LBL"
+    check not screenState.footer.hasGap
+
+    paintInitialPrompt(Profile())
+    check screenState.footer.barLabel == ""
+    check not screenState.footer.hasGap

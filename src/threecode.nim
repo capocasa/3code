@@ -238,7 +238,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           session.readCache = nil
           session.plan.setLen 0
           clearPendingHint(screenState)
-          currentBarLabel = ""
+          clearFooterBar(screenState)
           if session.savePath != "":
             session.savePath = newSessionPath()
             session.created = $now()
@@ -254,7 +254,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           cleared = true
           break
       if cleared:
-        pendingHint.active = false
+        clearPendingHint(screenState)
         continue
       saveSession(session, messages)
       if interrupted:
@@ -282,7 +282,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         if rl.len > 0:
           withCleared:
             stdout.writeLine CyanFg & "  " & rl & Reset
-        pendingHint.active = false
+        clearPendingHint(screenState)
       debugOut "runTurns: loop continue"
       continue
     if content.strip.len > 0:
@@ -566,8 +566,7 @@ proc main() =
       let tw = try: terminalWidth() except CatchableError: 0
       stdout.write barFooterBytes(label, BrightPromptColor, tw)
       stdout.flushFile
-      currentBarLabel = label
-      currentBarHasGap = true
+      setFooterBar(screenState, label, hasGap = true)
       setPendingHint(screenState, lastUsage, window, -1)
     else:
       paintInitialBar(prof)

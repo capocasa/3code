@@ -645,8 +645,7 @@ proc paintBarPrompt*(label, promptColor: string) =
   ## — during streaming the bar slides flush with content; only
   ## `endTurn` paints a gap.
   debugOut "paintBarPrompt label=" & label[0..min(30, label.len-1)]
-  currentBarLabel = label
-  currentBarHasGap = false
+  setFooterBar(screenState, label)
   syncWrite barFooterBytes(label, promptColor, currentTermW())
 
 proc paintBarBelow*(label, promptColor: string) =
@@ -654,13 +653,11 @@ proc paintBarBelow*(label, promptColor: string) =
   ## the cursor to its original (likely mid-line) position. Used
   ## during streaming to keep the bar visible while content is being
   ## accumulated in memory and the cursor stays put.
-  currentBarLabel = label
-  currentBarHasGap = false
+  setFooterBar(screenState, label)
   syncWrite barFooterBelowBytes(label, promptColor, currentTermW())
 
 proc paintBarBelowAtCol(label, promptColor: string, col: int) =
-  currentBarLabel = label
-  currentBarHasGap = false
+  setFooterBar(screenState, label)
   syncWrite barFooterBelowAtColBytes(label, promptColor, col, currentTermW())
 
 proc clearBarBelowAtCol(col: int) =
@@ -767,7 +764,7 @@ proc paintInitialBar*(p: Profile) =
   let window = contextWindowFor(p.model)
   let baseLabel = contextLabel(0, window)
   paintBarPrompt(liveLabel(baseLabel, 0), BrightPromptColor)
-  currentBarHasGap = true
+  setFooterBar(screenState, currentBarLabel, hasGap = true)
 
 proc paintPromptOnly*(promptColor: string) =
   ## Paint just the prompt ❯ at the cursor's current row, no token
@@ -781,8 +778,7 @@ proc paintPromptOnly*(promptColor: string) =
   ## repaint use to detect prompt-only mode.
   stdout.write "\x1b[2K" & promptColor & "❯ " & Reset & "\r"
   stdout.flushFile
-  currentBarLabel = ""
-  currentBarHasGap = false
+  clearFooterBar(screenState)
 
 proc paintInitialPrompt*(p: Profile) =
   ## Welcome-time paint when starting fresh (no prior session, no
@@ -1929,11 +1925,9 @@ proc endTurn*(repaintPrompt = true) =
     stdout.write endTurnBytes(label, BrightPromptColor, repaintPrompt,
                               currentTermW())
     if repaintPrompt:
-      currentBarLabel = label
-      currentBarHasGap = true
+      setFooterBar(screenState, label, hasGap = true)
     else:
-      currentBarLabel = ""
-      currentBarHasGap = false
+      clearFooterBar(screenState)
   else:
     stdout.write endTurnBytes("", BrightPromptColor, repaintPrompt)
   stdout.flushFile
@@ -1961,9 +1955,8 @@ proc emitUserSubmit*(line: string, echoRows = -1) =
   stdout.write submitTransitionBytes(line, pendingHint.active, hadGap,
                                      receiptLabel, hasBar, echoRows)
   stdout.flushFile
-  pendingHint.active = false
-  currentBarLabel = ""
-  currentBarHasGap = false
+  clearPendingHint(screenState)
+  clearFooterBar(screenState)
 
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   when providerStub:

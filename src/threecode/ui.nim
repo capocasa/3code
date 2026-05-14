@@ -770,7 +770,7 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
     session.readCache = nil
     session.plan.setLen 0
     clearPendingHint(screenState)
-    currentBarLabel = ""
+    clearFooterBar(screenState)
     if session.savePath != "":
       session.savePath = newSessionPath()
       session.created = $now()
