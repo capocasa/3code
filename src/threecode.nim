@@ -25,7 +25,7 @@
 ##     ├── types        shared types + globals
 ##     └── minline      readline-style input
 
-import std/[json, os, parseopt, strformat, strutils, terminal, times]
+import std/[json, locks, os, parseopt, strformat, strutils, terminal, times]
 import std/exitprocs
 when defined(posix):
   import std/posix
@@ -112,14 +112,17 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           renderAssistantContent(content)
           stdout.write "\n"
       var halt = false  # Strike-2 trip or budget cap: stop further tool calls this turn
+      var queuedUser = false # User submitted while tools were running.
       var cleared = false  # akClear: rebuild and continue loop
       for tc in toolCalls:
         let id = tc{"id"}.getStr
         if interrupted or halt:
           # still emit a tool response so the assistant message's tool_calls
           # are all paired; the model sees the cancellation on the next turn.
-          let stopMsg = if halt: "skipped — loop guard paused the turn"
-                        else: "interrupted by user"
+          let stopMsg =
+            if queuedUser: "skipped — user entered a new prompt"
+            elif halt: "skipped — loop guard paused the turn"
+            else: "interrupted by user"
           messages.add %*{"role": "tool", "tool_call_id": id,
                           "content": stopMsg}
           continue
@@ -221,6 +224,17 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           toolContent &= "\n\n⊘ [repeat-guard] turn budget exceeded (" &
             $TurnCallBudget & " tracked calls); further tool calls paused."
         messages.add %*{"role": "tool", "tool_call_id": id, "content": toolContent}
+        acquire inputStateLock
+        try:
+          if inputState.autoSend:
+            # Pair any remaining tool calls with skipped results, then return
+            # to the interactive loop. That loop drains the queued user text
+            # and starts the next model call, so user intent wins at the first
+            # safe boundary after the active tool process finishes.
+            queuedUser = true
+            halt = true
+        finally:
+          release inputStateLock
         if act.kind == akClear:
           # Rebuild: fresh system prompt + synthetic user message, then
           # continue the loop so the model processes the prompt.
@@ -260,6 +274,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         screenWriteTranscript:
           stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
         interrupted = false
+        return
+      if queuedUser:
         return
       if halt:
         screenWriteTranscript:
@@ -517,16 +533,29 @@ proc main() =
     handleCommand(cmd, messages, session, prof, editor)
 
   proc handleBufferedAfterTurn(): bool =
-    if inputState.cmdWasQuit:
-      return true
-    if inputState.queuedText.len > 0 and inputState.autoSend:
-      let queued = inputState.queuedText
-      let echoRows = inputState.queuedEchoRows
-      inputState.queuedText = ""
-      inputState.queuedEchoRows = 0
-      inputState.autoSend = false
-      if inputState.residualText == queued:
+    var cmdWasQuit = false
+    var queued = ""
+    var echoRows = 0
+    var residual = ""
+    acquire inputStateLock
+    try:
+      cmdWasQuit = inputState.cmdWasQuit
+      if inputState.queuedText.len > 0 and inputState.autoSend:
+        queued = inputState.queuedText
+        echoRows = inputState.queuedEchoRows
+        inputState.queuedText = ""
+        inputState.queuedEchoRows = 0
+        inputState.autoSend = false
+        if inputState.residualText == queued:
+          inputState.residualText = ""
+      if queued.len == 0 and inputState.residualText.len > 0:
+        residual = inputState.residualText
         inputState.residualText = ""
+    finally:
+      release inputStateLock
+    if cmdWasQuit:
+      return true
+    if queued.len > 0:
       if prof.name == "":
         editor.prefillText = queued
         return false
@@ -536,9 +565,8 @@ proc main() =
       emitUserSubmit(queued, echoRows)
       runTurnsInteractive(prof, messages, session)
       return handleBufferedAfterTurn()
-    if inputState.residualText.len > 0:
-      editor.prefillText = inputState.residualText
-      inputState.residualText = ""
+    if residual.len > 0:
+      editor.prefillText = residual
     false
 
   # Draw the initial chrome at the bottom of the welcome screen. On

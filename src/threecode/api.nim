@@ -196,6 +196,10 @@ var contentStreamedLive*: bool = false
   ## `runTurns` so the same content isn't redrawn a second time at the end
   ## of the turn.
 
+const DeferredSubmitMarker* = "*"
+  ## Single-cell, monochrome marker shown after deferred input while it is
+  ## queued to auto-send at the next turn boundary.
+
 var screenState* = initScreenState()
   ## Explicit state for the normal scrollback transcript's volatile footer.
   ## Rendering still happens in this module, but prompt/bar/ticker data now
@@ -242,6 +246,8 @@ var lastProviderActivity: Atomic[int]
 var renderLock*: Lock
 initLock(renderLock)
 var inputState*: InputState
+var inputStateLock*: Lock
+initLock(inputStateLock)
 var inputTurnActive: Atomic[bool]
 var inputThread: Thread[void]
 var inputThreadRunning* = false
@@ -1959,20 +1965,28 @@ proc inputThreadProc() {.thread.} =
         stdout.flushFile
 
     edPtr[].onMutate = proc(ed: var minline.LineEditor) =
-      if inputState.autoSend:
-        inputState.autoSend = false
-        inputState.queuedText = ""
-        inputState.queuedEchoRows = 0
-        ed.renderSuffix = ""
+      acquire inputStateLock
+      try:
+        if inputState.autoSend:
+          inputState.autoSend = false
+          inputState.queuedText = ""
+          inputState.queuedEchoRows = 0
+          ed.renderSuffix = ""
+      finally:
+        release inputStateLock
     edPtr[].onSubmit = proc(ed: var minline.LineEditor) =
-      inputState.queuedText = ed.line.text
-      inputState.queuedEchoRows = minline.totalRows(ed.line.text, ed.promptW,
-                                                    ed.contPromptW,
-                                                    max(2, ed.width))
-      inputState.autoSend = ed.line.text.len > 0
+      acquire inputStateLock
+      try:
+        inputState.queuedText = ed.line.text
+        inputState.queuedEchoRows = minline.totalRows(ed.line.text, ed.promptW,
+                                                      ed.contPromptW,
+                                                      max(2, ed.width))
+        inputState.autoSend = ed.line.text.len > 0
+      finally:
+        release inputStateLock
       ed.line.position = ed.line.text.len
       ed.renderSuffix =
-        if inputState.autoSend: OffWhiteFg & "⏳" & Reset
+        if ed.line.text.len > 0: DeferredSubmitMarker
         else: ""
     edPtr[].postRedraw = proc(ed: var minline.LineEditor) =
       discard
@@ -1996,7 +2010,7 @@ proc inputThreadProc() {.thread.} =
         discard fd.tcSetAttr(TCSANOW, addr rawMode)
 
     edPtr[].deferSubmit = true
-    edPtr[].submitIcon = OffWhiteFg & "⏳" & Reset
+    edPtr[].submitIcon = DeferredSubmitMarker
     while turnActive():
       try:
         let text = minline.readLineWith(edPtr[], "❯ ", getCh, writeProc,
@@ -2015,21 +2029,33 @@ proc inputThreadProc() {.thread.} =
               edPtr[].postRedraw(edPtr[])
             stdout.flushFile()
           if text.strip in [":q", ":quit", ":exit"]:
-            inputState.cmdWasQuit = true
+            acquire inputStateLock
+            try:
+              inputState.cmdWasQuit = true
+            finally:
+              release inputStateLock
             interrupted = true
             break
         else:
           withRender:
-            inputState.queuedText = text
-            inputState.queuedEchoRows = edPtr[].echoRows
-            inputState.autoSend = true
+            acquire inputStateLock
+            try:
+              inputState.queuedText = text
+              inputState.queuedEchoRows = edPtr[].echoRows
+              inputState.autoSend = true
+            finally:
+              release inputStateLock
             emitScreenEvent setPromptModeEvent(pmBufferedInput)
       except minline.InputCancelled:
         requestTurnInterrupt()
         break
       except EOFError:
         if edPtr[].line.text.len == 0:
-          inputState.cmdWasQuit = true
+          acquire inputStateLock
+          try:
+            inputState.cmdWasQuit = true
+          finally:
+            release inputStateLock
           requestTurnInterrupt()
         break
       except CatchableError:
@@ -2038,9 +2064,13 @@ proc inputThreadProc() {.thread.} =
     when defined(posix):
       if haveOldMode:
         discard fd.tcSetAttr(TCSADRAIN, addr oldMode)
-    inputState.residualText = edPtr[].line.text
-    if inputState.autoSend and inputState.queuedText == inputState.residualText:
-      inputState.residualText = ""
+    acquire inputStateLock
+    try:
+      inputState.residualText = edPtr[].line.text
+      if inputState.autoSend and inputState.queuedText == inputState.residualText:
+        inputState.residualText = ""
+    finally:
+      release inputStateLock
     edPtr[].onMutate = nil
     edPtr[].onSubmit = nil
     edPtr[].postRedraw = nil
@@ -2059,7 +2089,11 @@ proc beginTurn*() =
   stdout.flushFile
   emitScreenEvent setPromptModeEvent(pmTurnRunning)
   if inputEditor != nil and not inputThreadRunning:
-    inputState = InputState(turnActive: true)
+    acquire inputStateLock
+    try:
+      inputState = InputState(turnActive: true)
+    finally:
+      release inputStateLock
     inputTurnActive.store(true, moRelease)
     createThread(inputThread, inputThreadProc)
     inputThreadRunning = true
@@ -2080,7 +2114,11 @@ proc endTurn*(repaintPrompt = true) =
   stopSpinner()
   let hadInputThread = inputThreadRunning
   if inputThreadRunning:
-    inputState.turnActive = false
+    acquire inputStateLock
+    try:
+      inputState.turnActive = false
+    finally:
+      release inputStateLock
     inputTurnActive.store(false, moRelease)
     joinThread(inputThread)
     inputThreadRunning = false

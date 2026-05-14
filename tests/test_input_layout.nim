@@ -1,4 +1,4 @@
-import std/[os, unittest, strutils]
+import std/[locks, os, unittest, strutils]
 import ttty/grid
 import threecode/[api, types, minline, util, screen]
 import harness
@@ -52,8 +52,12 @@ proc feedKeyBytes(ft: FakeTerm, keys: openArray[int]; delayMs = 0) =
 proc waitForQueuedText(expected: string; timeoutMs = 6000): bool =
   var waited = 0
   while waited < timeoutMs:
-    if inputState.queuedText == expected:
-      return true
+    acquire inputStateLock
+    try:
+      if inputState.queuedText == expected:
+        return true
+    finally:
+      release inputStateLock
     sleep 20
     waited += 20
 
@@ -222,7 +226,7 @@ suite "input thread layout during turns":
 
     var ed = minline.initEditor()
     ed.width = 80
-    ed.submitIcon = OffWhiteFg & "⏳" & Reset
+    ed.submitIcon = DeferredSubmitMarker
     ft.feedKeys("hi\r")
 
     let getCh: minline.GetChProc = proc(): int =
@@ -237,9 +241,9 @@ suite "input thread layout during turns":
     ft.drain()
     check text == "hi"
     # The icon must be on the same row as the text, not below
-    check "⏳" in rowText(ft.grid, 1)   # icon on text row (row 1)
+    check DeferredSubmitMarker in rowText(ft.grid, 1)   # icon on text row (row 1)
     check "hi" in rowText(ft.grid, 1)   # text also on row 1
-    check "⏳" notin rowText(ft.grid, 2)  # icon NOT on the row below
+    check DeferredSubmitMarker notin rowText(ft.grid, 2)  # icon NOT on the row below
 
   test "transcript append preserves live buffered editor":
     var ft = newFakeTerm()
@@ -428,7 +432,7 @@ suite "input thread layout during turns":
     # the bar (assistant output or gap row).
     var ed = minline.initEditor()
     ed.width = 80
-    ed.submitIcon = OffWhiteFg & "\xE2\x8F\xB3" & Reset
+    ed.submitIcon = DeferredSubmitMarker
     let d = newDriver()
     d.pushString "line1"
     d.push AltEnter
@@ -443,4 +447,4 @@ suite "input thread layout during turns":
     check d.grid.row == 3
     check d.grid.col == 0
     check "line3" in rowText(d.grid, 2)
-    check "\xE2\x8F\xB3" in rowText(d.grid, 2)
+    check DeferredSubmitMarker in rowText(d.grid, 2)
