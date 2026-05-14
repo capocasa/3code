@@ -31,6 +31,7 @@ proc pushString*(d: Driver, s: string) =
 
 const
   CtrlC* = KeyCtrlC
+  CtrlD* = @[4]
   Esc* = KeyEsc
   Enter* = KeyEnter
   Left* = KeyLeft

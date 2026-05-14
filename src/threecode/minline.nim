@@ -121,6 +121,7 @@ type
   Key* = int
   KeySeq* = seq[Key]
   KeyCallback* = proc(ed: var LineEditor) {.closure.}
+  SubmitCallback* = proc(ed: var LineEditor) {.closure.}
   HasPendingInputProc* = proc(): bool {.closure.}
   LineError* = ref Exception
   LineEditorError* = ref Exception
@@ -155,8 +156,10 @@ type
   LineEditor* = object
     completionCallback*: proc(ed: LineEditor): seq[string] {.closure.}
     onMutate*: proc(ed: var LineEditor) {.closure.}
+    onSubmit*: SubmitCallback
     postRedraw*: proc(ed: var LineEditor) {.closure.}
     submitIcon*: string ## Icon written at end of text before submit newline (set before readLineWith).
+    renderSuffix*: string ## Transient suffix rendered after the buffer, not part of submitted text.
     prefillText*: string
     history*: LineHistory
     line*: Line
@@ -173,6 +176,7 @@ type
     getWidth*: WidthProc
     echoRows*: int
     submitted*: bool
+    deferSubmit*: bool
     canceled*: bool
     eof*: bool
     hidechars*: bool
@@ -429,7 +433,8 @@ proc redrawBytes*(ed: var LineEditor): string =
   let cw = if ed.contPromptW > 0: ed.contPromptW else: visualCols(ed.contPrompt)
   ed.promptW = pw
   ed.contPromptW = cw
-  let total = totalRows(ed.line.text, pw, cw, width)
+  let renderedText = ed.line.text & ed.renderSuffix
+  let total = totalRows(renderedText, pw, cw, width)
   let endRow = total - 1
   let (targetRow, targetCol) = cursorVisual(ed.line.text, ed.line.position,
                                             pw, cw, width)
@@ -437,7 +442,7 @@ proc redrawBytes*(ed: var LineEditor): string =
   if ed.renderRow > 0:
     buf.add "\x1b[" & $ed.renderRow & "A"
   buf.add "\r\x1b[J"
-  buf.add renderBuffer(ed.line.text, ed.prompt, ed.contPrompt, width)
+  buf.add renderBuffer(renderedText, ed.prompt, ed.contPrompt, width)
   if endRow > targetRow:
     buf.add "\x1b[" & $(endRow - targetRow) & "A"
   buf.add "\r"
@@ -829,8 +834,10 @@ KEYMAP["ctrl+c"]    = proc(ed: var LineEditor) =
   ed.canceled = true
   raise newException(InputCancelled, "")
 KEYMAP["ctrl+d"]    = proc(ed: var LineEditor) =
-  ed.eof = true
-  raise newException(EOFError, "")
+  if ed.line.text.len == 0:
+    ed.eof = true
+    raise newException(EOFError, "")
+  ed.deleteNext()
 KEYMAP["ctrl+l"]    = proc(ed: var LineEditor) =
   ed.write "\x1b[H\x1b[2J"
   ed.renderRow = 0
@@ -957,6 +964,7 @@ proc resetForRead(ed: var LineEditor, prompt: string, hidechars: bool) =
   ed.renderRow = 0
   ed.echoRows = 0
   ed.submitted = false
+  ed.renderSuffix = ""
   ed.canceled = false
   ed.eof = false
   ed.hidechars = hidechars
@@ -1147,6 +1155,12 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
       ed.eof = true
       raise newException(EOFError, "")
     if c1 == 10 or c1 == 13:
+      if ed.deferSubmit:
+        ed.submitted = true
+        if ed.onSubmit != nil:
+          ed.onSubmit(ed)
+        fullRedraw(ed)
+        continue
       parkAtEnd(ed)
       if not noHistory and not hidechars:
         ed.historyAdd()
@@ -1173,6 +1187,12 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
         # synthesising a tiny `pending` slot — but we don't have one;
         # so handle the common "Enter after completion" case here.
         if nxt == 10 or nxt == 13:
+          if ed.deferSubmit:
+            ed.submitted = true
+            if ed.onSubmit != nil:
+              ed.onSubmit(ed)
+            fullRedraw(ed)
+            continue
           parkAtEnd(ed)
           if not noHistory and not hidechars:
             ed.historyAdd()

@@ -711,11 +711,7 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
   ## clean up — `emitUserSubmit` walks back using
   ## `splitLines(line).len + (1 if bar / 2 if gap / 0 if prompt-only)`
   ## and clear-to-end-of-screen from there.
-  if currentBarLabel.len == 0:
-    # Prompt-only mode: cursor sits on the prompt row already.
-    stdout.write "\r\x1b[2K"
-  else:
-    stdout.write "\n\r\x1b[2K"
+  enterPromptInput(BrightPromptColor)
   let line = try: editor.readLine("❯ ")
              except EOFError:
                done = true; return ""
@@ -728,13 +724,7 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
     # would push the prompt one row lower than the bar).
     # The editor reports the visual rows the rendered input occupied;
     # use that so wrap-affected lines walk back the right amount.
-    let n = max(1, editor.echoRows)
-    if currentBarLabel.len == 0:
-      stdout.write "\x1b[" & $n & "A\r\x1b[J"
-      paintPromptOnly(BrightPromptColor)
-    else:
-      stdout.write "\x1b[" & $(n + 1) & "A\r\x1b[J"
-      repaintBarPrompt(BrightPromptColor)
+    resetPromptInputAfterEmpty(editor.echoRows, BrightPromptColor)
     return ""
   return line
 

@@ -1,6 +1,6 @@
 import std/[os, unittest, strutils]
 import ttty/grid
-import threecode/[api, types, minline, util]
+import threecode/[api, types, minline, util, screen]
 import harness
 import minline_testutils
 
@@ -39,8 +39,7 @@ suite "input thread layout during turns":
     defer:
       inputEditor = nil
       inputState = InputState()
-      currentBarLabel = ""
-      currentBarHasGap = false
+      emitScreenEvent clearBarEvent()
 
     paintBarPrompt("LBL  3s", DimPromptColor)
     beginTurn()
@@ -71,8 +70,6 @@ suite "input thread layout during turns":
     check inputState.queuedText == "hi"
     check promptRow >= 1
     check barRow >= 0
-    check "LBL" in rowText(ft.grid, barRow)
-    check "❯" in rowText(ft.grid, promptRow)
     check typedOnPromptRow
     check not typedOnBarRow
     check cursorOnPromptRow
@@ -92,8 +89,7 @@ suite "input thread layout during turns":
     defer:
       inputEditor = nil
       inputState = InputState()
-      currentBarLabel = ""
-      currentBarHasGap = false
+      emitScreenEvent clearBarEvent()
 
     paintBarPrompt("LBL  3s", DimPromptColor)
     ft.feedKeys("hi\r")
@@ -103,10 +99,10 @@ suite "input thread layout during turns":
 
     ft.drain()
     check inputState.queuedText == "hi"
-    check "LBL" in rowText(ft.grid, 0)
-    check "❯" notin rowText(ft.grid, 0)
-    check "hi" notin rowText(ft.grid, 0)
-    check "❯" in rowText(ft.grid, 1)
+    check "LBL" in rowText(ft.grid, 1)
+    check "❯" notin rowText(ft.grid, 1)
+    check "hi" notin rowText(ft.grid, 1)
+    check "❯" in rowText(ft.grid, 2)
 
   test "typing during turn: prompt and text on caret row":
     ## Real-world scenario: the model is streaming a response. The bar
@@ -120,12 +116,10 @@ suite "input thread layout during turns":
     # Main thread painted the bar before the turn
     paintBarPrompt("LBL  3s", DimPromptColor)
 
-    # Input thread starts: clears, repaints bar+prompt with fix
-    clearBarPrompt()
-    currentBarLabel = "LBL  3s"
-    stdout.write barFooterBytes("LBL  3s", TurnPromptColor)
-    stdout.write "\x1b[1B"  # cursor down: bar row -> prompt row
-    stdout.flushFile()
+    # Input thread starts: clears, repaints bar+prompt, and parks on
+    # the prompt row through the same helper used by production.
+    emitScreenEvent setBarEvent("LBL  3s")
+    enterPromptInput(TurnPromptColor)
 
     # readLineWith runs: user types "hi" and Enter
     var ed = minline.initEditor()
@@ -149,18 +143,13 @@ suite "input thread layout during turns":
     check "❯" notin rowText(ft.grid, 0)    # prompt NOT on bar row
     check "hi" notin rowText(ft.grid, 0)    # typed text NOT on bar row
 
-  test "BUG REPRO: without cursor-down, typed text lands on bar row":
-    ## Same scenario but skip the \x1b[1B. The prompt and typed text
-    ## overwrite the bar row — the bug.
+  test "enterPromptInput parks buffered editor on prompt row":
     var ft = newFakeTerm()
     defer: ft.close()
 
     paintBarPrompt("LBL  3s", DimPromptColor)
-    clearBarPrompt()
-    currentBarLabel = "LBL  3s"
-    stdout.write barFooterBytes("LBL  3s", TurnPromptColor)
-    stdout.flushFile()
-    # Deliberately skip: stdout.write "\x1b[1B"
+    emitScreenEvent setBarEvent("LBL  3s")
+    enterPromptInput(TurnPromptColor)
 
     var ed = minline.initEditor()
     ed.width = 80
@@ -176,9 +165,10 @@ suite "input thread layout during turns":
                                   hidechars = false)
 
     ft.drain()
-    # BUG: prompt and typed char overwrite bar row
-    check "❯" in rowText(ft.grid, 0)   # prompt on bar row
-    check "h" in rowText(ft.grid, 0)   # typed char on bar row
+    check "LBL" in rowText(ft.grid, 0)
+    check "❯" in rowText(ft.grid, 1)
+    check "h" in rowText(ft.grid, 1)
+    check "h" notin rowText(ft.grid, 0)
 
   test "submit during turn shows icon at end of text, not below":
     ## After pressing Enter during an active spinner, a clock/hourglass
@@ -188,11 +178,8 @@ suite "input thread layout during turns":
     defer: ft.close()
 
     paintBarPrompt("LBL  3s", DimPromptColor)
-    clearBarPrompt()
-    currentBarLabel = "LBL  3s"
-    stdout.write barFooterBytes("LBL  3s", TurnPromptColor)
-    stdout.write "\x1b[1B"
-    stdout.flushFile()
+    emitScreenEvent setBarEvent("LBL  3s")
+    enterPromptInput(TurnPromptColor)
 
     var ed = minline.initEditor()
     ed.width = 80
@@ -214,6 +201,41 @@ suite "input thread layout during turns":
     check "⏳" in rowText(ft.grid, 1)   # icon on text row (row 1)
     check "hi" in rowText(ft.grid, 1)   # text also on row 1
     check "⏳" notin rowText(ft.grid, 2)  # icon NOT on the row below
+
+  test "transcript append preserves live buffered editor":
+    var ft = newFakeTerm()
+    defer: ft.close()
+
+    paintBarPrompt("LBL  3s", DimPromptColor)
+    emitScreenEvent setBarEvent("LBL  3s")
+    enterPromptInput(TurnPromptColor)
+
+    var ed = minline.initEditor()
+    ed.line = minline.Line(text: "draft", position: "draft".len)
+    ed.prompt = "❯ "
+    ed.contPrompt = "  "
+    ed.promptW = minline.visualCols(ed.prompt)
+    ed.contPromptW = minline.visualCols(ed.contPrompt)
+    ed.width = 80
+    stdout.write ed.redrawBytes()
+    stdout.flushFile()
+
+    inputEditor = addr(ed)
+    inputThreadRunning = true
+    inputState = InputState(turnActive: true)
+    defer:
+      inputEditor = nil
+      inputThreadRunning = false
+      inputState = InputState()
+      emitScreenEvent clearBarEvent()
+
+    screenWriteTranscript:
+      stdout.write "OUT\n"
+
+    ft.drain()
+    check rowText(ft.grid, 0).startsWith("OUT")
+    check "LBL" in rowText(ft.grid, 1)
+    check "❯ draft" in rowText(ft.grid, 2)
 
   test "submitIcon + multiline: parkAtEnd leaves cursor one row below":
     # Regression: parkAtEnd used to skip \r\n after the submit icon,

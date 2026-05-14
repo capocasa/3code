@@ -179,6 +179,21 @@ suite "minline editor: cursor navigation":
     expect InputCancelled:
       discard d.run(ed, prompt = "> ")
 
+  test "Ctrl+D exits only from an empty prompt":
+    block nonEmpty:
+      var ed = initEditor()
+      let d = newDriver()
+      d.pushString "draft"
+      d.push CtrlD
+      d.push Enter
+      check d.run(ed, prompt = "> ") == "draft"
+    block empty:
+      var ed = initEditor()
+      let d = newDriver()
+      d.push CtrlD
+      expect EOFError:
+        discard d.run(ed, prompt = "> ")
+
   test "left arrow before middle character, then insert":
     var ed = initEditor()
     let d = newDriver()
@@ -281,6 +296,32 @@ suite "minline editor: newline insertion (multiline)":
     d.pushString "abc\\"
     d.push Enter
     check d.run(ed, prompt = "> ") == "abc\\"
+
+  test "deferred submit keeps multiline editor open and suffix is editable":
+    var ed = initEditor()
+    var submits: seq[string]
+    ed.deferSubmit = true
+    ed.onSubmit = proc(e: var LineEditor) =
+      submits.add e.line.text
+      e.line.position = e.line.text.len
+      e.renderSuffix = " *"
+    ed.onMutate = proc(e: var LineEditor) =
+      e.renderSuffix = ""
+
+    let d = newDriver()
+    d.pushString "line1"
+    d.push AltEnter
+    d.pushString "line2"
+    d.push Enter
+    d.pushString " edited"
+    d.push Enter
+    d.push CtrlC
+
+    expect InputCancelled:
+      discard d.run(ed, prompt = "> ")
+    check submits == @["line1\nline2", "line1\nline2 edited"]
+    check ed.line.text == "line1\nline2 edited"
+    check rowText(d.grid, 1).contains("line2 edited *")
 
   test "backspace at start of second logical line joins lines":
     var ed = initEditor()

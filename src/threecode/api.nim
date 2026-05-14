@@ -243,7 +243,7 @@ var renderLock*: Lock
 initLock(renderLock)
 var inputState*: InputState
 var inputThread: Thread[void]
-var inputThreadRunning = false
+var inputThreadRunning* = false
 var inputEditor*: ptr minline.LineEditor
 var inputProfile*: ptr Profile
 var inputSession*: ptr Session
@@ -696,6 +696,35 @@ proc clearBarPrompt*() =
   ## pushes the next `repaintBarPrompt` one row down).
   screenRenderSync ClearBarPromptBytes
 
+proc paintPromptOnly*(promptColor: string)
+
+proc enterPromptInput*(promptColor: string) =
+  ## Prepare the physical cursor for either immediate input or buffered
+  ## input during a running turn. In bar mode, repaint the shared
+  ## bar+prompt footer and park on the prompt row. In prompt-only mode,
+  ## clear the prompt row in place. The line editor writes its own prompt
+  ## glyph after this, so the prepainted glyph is only a stable visual
+  ## placeholder.
+  if currentBarLabel.len > 0:
+    clearBarPrompt()
+    stdout.write barFooterBytes(currentBarLabel, promptColor, currentTermW())
+    stdout.write "\x1b[1B"
+  else:
+    stdout.write "\r\x1b[2K" & promptColor & "❯ " & Reset & "\r"
+  stdout.flushFile
+
+proc resetPromptInputAfterEmpty*(echoRows: int; promptColor: string) =
+  ## Empty submission should leave the prompt/footer at the same visual
+  ## floor instead of drifting downward. `echoRows` is the editor's visual
+  ## input height, including wraps.
+  let n = max(1, echoRows)
+  if currentBarLabel.len == 0:
+    stdout.write "\x1b[" & $n & "A\r\x1b[J"
+    paintPromptOnly(promptColor)
+  else:
+    stdout.write "\x1b[" & $(n + 1) & "A\r\x1b[J"
+    repaintBarPrompt(promptColor)
+
 proc enterToolViewport*(termH: int) =
   ## Enter the bounded live tool-output viewport while preserving the
   ## footer rows at the bottom of the normal terminal buffer.
@@ -727,14 +756,26 @@ proc endTurnBytes*(label, promptColor: string, repaintPrompt: bool,
 template screenWriteTranscript*(body: untyped) =
   ## Commit transcript output while preserving the volatile footer.
   ## The footer is cleared, body writes normal scrollback content, then
-  ## the footer is repainted below the new cursor position.
+  ## the footer is repainted below the new cursor position. If the
+  ## buffered prompt is active, restore that live editor in the same
+  ## render-locked critical section so appended transcript rows do not
+  ## erase in-progress multiline input.
   debugOut &"screenWriteTranscript enter barLabel={currentBarLabel.len}"
   acquire renderLock
   try:
+    if inputThreadRunning and inputState.turnActive and inputEditor != nil:
+      let up = inputEditor[].renderRow + 1
+      stdout.write "\r"
+      if up > 0:
+        stdout.write "\x1b[" & $up & "A"
     clearBarPrompt()
     body
     debugOut "screenWriteTranscript exit"
     repaintBarPrompt()
+    if inputThreadRunning and inputState.turnActive and inputEditor != nil:
+      stdout.write "\x1b[1B"
+      stdout.write inputEditor[].redrawBytes()
+      stdout.flushFile
   finally:
     release renderLock
 
@@ -1852,21 +1893,24 @@ proc inputThreadProc() {.thread.} =
     edPtr[].onMutate = proc(ed: var minline.LineEditor) =
       if inputState.autoSend:
         inputState.autoSend = false
+        inputState.queuedText = ""
+        inputState.queuedEchoRows = 0
+        ed.renderSuffix = ""
+    edPtr[].onSubmit = proc(ed: var minline.LineEditor) =
+      inputState.queuedText = ed.line.text
+      inputState.queuedEchoRows = minline.totalRows(ed.line.text, ed.promptW,
+                                                    ed.contPromptW,
+                                                    max(2, ed.width))
+      inputState.autoSend = ed.line.text.len > 0
+      ed.line.position = ed.line.text.len
+      ed.renderSuffix =
+        if inputState.autoSend: OffWhiteFg & "⏳" & Reset
+        else: ""
     edPtr[].postRedraw = proc(ed: var minline.LineEditor) =
-      if inputState.autoSend and ed.line.position == ed.line.text.len:
-        stdout.write OffWhiteFg & "⏳" & Reset
-        stdout.write "\x1b[1D"
-        stdout.flushFile
+      discard
 
     withRender:
-      if currentBarLabel.len > 0:
-        clearBarPrompt()
-        stdout.write barFooterBytes(currentBarLabel, TurnPromptColor,
-                                    currentTermW())
-        stdout.write "\x1b[1B"
-      else:
-        stdout.write "\r\x1b[2K" & TurnPromptColor & "❯ " & Reset
-      stdout.flushFile
+      enterPromptInput(TurnPromptColor)
 
     when defined(posix):
       var oldMode: Termios
@@ -1883,6 +1927,7 @@ proc inputThreadProc() {.thread.} =
         rawMode.c_cc[VTIME] = 0.char
         discard fd.tcSetAttr(TCSANOW, addr rawMode)
 
+    edPtr[].deferSubmit = true
     edPtr[].submitIcon = OffWhiteFg & "⏳" & Reset
     while inputState.turnActive:
       try:
@@ -1895,11 +1940,7 @@ proc inputThreadProc() {.thread.} =
           if turnHandleCommand != nil:
             discard turnHandleCommand(text)
           withRender:
-            if currentBarLabel.len > 0:
-              paintBarPrompt(currentBarLabel, TurnPromptColor)
-              stdout.write "\x1b[1B"
-            else:
-              paintPromptOnly(TurnPromptColor)
+            enterPromptInput(TurnPromptColor)
             stdout.write edPtr[].redrawBytes()
             if edPtr[].postRedraw != nil:
               edPtr[].postRedraw(edPtr[])
@@ -1918,6 +1959,9 @@ proc inputThreadProc() {.thread.} =
         interrupted = true
         break
       except EOFError:
+        if edPtr[].line.text.len == 0:
+          inputState.cmdWasQuit = true
+          interrupted = true
         break
       except CatchableError:
         break
@@ -1926,8 +1970,13 @@ proc inputThreadProc() {.thread.} =
       if haveOldMode:
         discard fd.tcSetAttr(TCSADRAIN, addr oldMode)
     inputState.residualText = edPtr[].line.text
+    if inputState.autoSend and inputState.queuedText == inputState.residualText:
+      inputState.residualText = ""
     edPtr[].onMutate = nil
+    edPtr[].onSubmit = nil
     edPtr[].postRedraw = nil
+    edPtr[].deferSubmit = false
+    edPtr[].renderSuffix = ""
     edPtr[].getCh = nil
     edPtr[].write = nil
     edPtr[].getWidth = nil
@@ -1959,10 +2008,18 @@ proc endTurn*(repaintPrompt = true) =
   # Idempotent — these are no-ops when the threads aren't running.
   discard stopBarTick()
   stopSpinner()
+  let hadInputThread = inputThreadRunning
   if inputThreadRunning:
     inputState.turnActive = false
     joinThread(inputThread)
     inputThreadRunning = false
+  if hadInputThread and inputEditor != nil:
+    let up =
+      if currentBarLabel.len > 0: inputEditor[].renderRow + 1
+      else: inputEditor[].renderRow
+    stdout.write "\r"
+    if up > 0:
+      stdout.write "\x1b[" & $up & "A"
   if currentBarLabel.len > 0:
     let label = currentBarLabel
     stdout.write endTurnBytes(label, BrightPromptColor, repaintPrompt,
