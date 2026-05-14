@@ -137,6 +137,85 @@ doAssert "SHOULD_NOT_BE_CALLED" notin $messages
     if runCode != 0:
       checkpoint runOut
 
+  test "provider stub skips pending tools when autosend is queued during API call":
+    let pid = $getCurrentProcessId()
+    let probeDir = getTempDir() / ("tc_autosend_api_probe_" & pid)
+    let probePath = probeDir / "probe.nim"
+    let outPath = probeDir / "probe"
+    let cacheDir = probeDir / "nimcache"
+    createDir(probeDir)
+    createDir(cacheDir)
+    defer:
+      try: removeDir(probeDir) except OSError: discard
+
+    writeFile(probeDir / "stub_responses.json", """[{
+  "role": "assistant",
+  "content": null,
+  "preStreamDelayMs": 300,
+  "tool_calls": [{
+    "id": "call_1",
+    "type": "function",
+    "function": {
+      "name": "bash",
+      "arguments": "{\"command\":\"echo SHOULD_NOT_RUN\"}"
+    }
+  }]
+},{
+  "role": "assistant",
+  "content": "SHOULD_NOT_BE_CALLED"
+}]""")
+    writeFile(probePath, """
+import std/[json, locks, os, strutils]
+import threecode
+
+var messages = %*[
+  {"role": "system", "content": "sys"},
+  {"role": "user", "content": "first"}
+]
+var session: Session
+session.savePath = ""
+session.readCache = newReadCache()
+let profile = Profile(name: "stub", family: "glm", model: "stub-model")
+
+proc queueAutosend() {.thread, gcsafe.} =
+  sleep 100
+  {.cast(gcsafe).}:
+    acquire inputStateLock
+    try:
+      inputState.queuedText = "cut me a release"
+      inputState.queuedEchoRows = 1
+      inputState.autoSend = true
+    finally:
+      release inputStateLock
+
+var t: Thread[void]
+createThread(t, queueAutosend)
+runTurns(profile, messages, session)
+joinThread(t)
+
+acquire inputStateLock
+let queued = inputState.autoSend
+release inputStateLock
+doAssert queued
+doAssert messages.len == 4
+doAssert messages[2]{"role"}.getStr == "assistant"
+doAssert messages[3]{"role"}.getStr == "tool"
+doAssert "skipped" in messages[3]{"content"}.getStr
+doAssert "SHOULD_NOT_RUN" notin messages[3]{"content"}.getStr
+doAssert "SHOULD_NOT_BE_CALLED" notin $messages
+""")
+    let compileCmd = "nim c -d:ssl -d:providerStub --threads:on --path:src --nimcache:" &
+      cacheDir.quoteShell & " -o:" & outPath.quoteShell & " " &
+      probePath.quoteShell
+    let (compileOut, compileCode) = execCmdEx(compileCmd)
+    check compileCode == 0
+    if compileCode != 0:
+      checkpoint compileOut
+    let (runOut, runCode) = execCmdEx(outPath.quoteShell, workingDir = probeDir)
+    check runCode == 0
+    if runCode != 0:
+      checkpoint runOut
+
   test "provider stub covers common network failure aliases":
     let pid = $getCurrentProcessId()
     let probePath = getTempDir() / ("tc_stub_failures_" & pid & ".nim")

@@ -2148,6 +2148,9 @@ proc endTurn*(repaintPrompt = true) =
     stdout.write "\r"
     if up > 0:
       stdout.write "\x1b[" & $up & "A"
+  if screenState.footer.ticker.len > 0:
+    emitScreenEvent clearTickerEvent()
+    stdout.write "\r\x1b[1A\x1b[2K\x1b[1B"
   if currentBarLabel.len > 0:
     let label = currentBarLabel
     stdout.write endTurnBytes(label, BrightPromptColor, repaintPrompt,

@@ -98,6 +98,19 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       if tcNode != nil and tcNode.kind == JArray: tcNode
       else: newJArray()
     if toolCalls.len > 0:
+      var queuedBeforeTools = false
+      acquire inputStateLock
+      try:
+        queuedBeforeTools = inputState.autoSend
+      finally:
+        release inputStateLock
+      if queuedBeforeTools:
+        for tc in toolCalls:
+          let id = tc{"id"}.getStr
+          messages.add %*{"role": "tool", "tool_call_id": id,
+                          "content": "skipped — user entered a new prompt"}
+        saveSession(session, messages)
+        return
       debugOut $toolCalls.len & " tool calls"
       # Each emit (blank row, assistant content, pending banner, tool
       # output, halt notice) is wrapped in `screenWriteTranscript` so
