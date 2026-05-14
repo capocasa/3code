@@ -30,13 +30,14 @@ import std/exitprocs
 when defined(posix):
   import std/posix
 import threecode/[types, util, prompts, shell, loop, session, compact,
-                  config, actions, api, display, ui, update, screen]
+                  config, actions, api, display, ui, update, screen,
+                  streamexec]
 import threecode/minline
 export types, util, prompts, shell, loop, session, compact,
        config, actions, api, display, ui, screen
 
 proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
-  interrupted = false
+  clearInterrupted()
   resetLoopTracker(session.loop)
   # `beginTurn` hides the terminal cursor for the duration of the
   # turn (streaming + tool exec); the dim `❯ ` glyph remains on
@@ -47,7 +48,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
   # `pendingHint` and is painted in place of the previous bar at
   # user-submit time by `emitUserSubmit`.
   beginTurn()
-  defer: endTurn(repaintPrompt = not interrupted)
+  defer: endTurn(repaintPrompt = not isInterrupted())
   while true:
     discard supersedeCompact(messages)
     var usage: Usage
@@ -59,10 +60,10 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
     session.lastPromptTokens = usage.promptTokens
     messages.add msg
     saveSession(session, messages)
-    if interrupted:
+    if isInterrupted():
       screenWriteTranscript:
         stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
-      interrupted = false
+      clearInterrupted()
       return
     let window = contextWindowFor(p.model)
     var summarized = 0
@@ -116,7 +117,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       var cleared = false  # akClear: rebuild and continue loop
       for tc in toolCalls:
         let id = tc{"id"}.getStr
-        if interrupted or halt:
+        if isInterrupted() or halt:
           # still emit a tool response so the assistant message's tool_calls
           # are all paired; the model sees the cancellation on the next turn.
           let stopMsg =
@@ -164,15 +165,24 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
                 renderToolBanner(bannerFor(act), akBash, -1)
                 stdout.flushFile()
                 var sv = initStreamingView(StreamMaxLines, idx)
-                let result = runActionStreaming(act, session.readCache,
-                  proc(line: string) = sv.addLine(line))
-                sv.erase()
-                # Erase the initial banner row
-                stdout.write "\x1b[1A\x1b[2K"
-                let elapsed = (epochTime() - toolT0).int
-                renderToolBanner(bannerFor(act), akBash, result.code, elapsed)
-                printToolResult(akBash, result.output, result.code, idx,
-                  result.diff)
+                let promptOwnsStdin = inputEditor != nil
+                setToolStdinWatcherEnabled(not promptOwnsStdin)
+                var result: typeof(runActionStreaming(act, session.readCache))
+                try:
+                  result = runActionStreaming(act, session.readCache,
+                    proc(line: string) =
+                      withRenderLock:
+                        sv.addLine(line))
+                finally:
+                  setToolStdinWatcherEnabled(true)
+                withRenderLock:
+                  sv.erase()
+                  # Erase the initial banner row
+                  stdout.write "\x1b[1A\x1b[2K"
+                  let elapsed = (epochTime() - toolT0).int
+                  renderToolBanner(bannerFor(act), akBash, result.code, elapsed)
+                  printToolResult(akBash, result.output, result.code, idx,
+                    result.diff)
                 result
               finally:
                 # Reset scrolling region, position cursor at bar row.
@@ -270,10 +280,10 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         emitScreenEvent clearPendingHintEvent()
         continue
       saveSession(session, messages)
-      if interrupted:
+      if isInterrupted():
         screenWriteTranscript:
           stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
-        interrupted = false
+        clearInterrupted()
         return
       if queuedUser:
         return

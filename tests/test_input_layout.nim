@@ -64,7 +64,7 @@ proc waitForQueuedText(expected: string; timeoutMs = 6000): bool =
 proc waitForInterrupt(timeoutMs = 2000): bool =
   var waited = 0
   while waited < timeoutMs:
-    if interrupted:
+    if isInterrupted():
       return true
     sleep 20
     waited += 20
@@ -382,11 +382,11 @@ suite "input thread layout during turns":
 
     var ed = minline.initEditor()
     inputEditor = addr(ed)
-    interrupted = false
+    clearInterrupted()
     defer:
       inputEditor = nil
       inputState = InputState()
-      interrupted = false
+      clearInterrupted()
       emitScreenEvent clearBarEvent()
 
     paintBarPrompt("LBL  3s", DimPromptColor)
@@ -397,7 +397,7 @@ suite "input thread layout during turns":
     endTurn()
 
     ft.drain()
-    check interrupted
+    check isInterrupted()
     check not inputState.autoSend
 
   test "beginTurn input thread handles empty Ctrl-D as exit":
@@ -406,11 +406,11 @@ suite "input thread layout during turns":
 
     var ed = minline.initEditor()
     inputEditor = addr(ed)
-    interrupted = false
+    clearInterrupted()
     defer:
       inputEditor = nil
       inputState = InputState()
-      interrupted = false
+      clearInterrupted()
       emitScreenEvent clearBarEvent()
 
     paintBarPrompt("LBL  3s", DimPromptColor)
@@ -422,7 +422,7 @@ suite "input thread layout during turns":
 
     ft.drain()
     check inputState.cmdWasQuit
-    check interrupted
+    check isInterrupted()
 
   test "submitIcon + multiline: parkAtEnd leaves cursor one row below":
     # Regression: parkAtEnd used to skip \r\n after the submit icon,

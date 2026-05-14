@@ -17,15 +17,21 @@ when defined(posix):
     toolCancelStop: Atomic[bool]
     toolCancelHit: Atomic[bool]
     toolCancelPid: Atomic[int]
+    toolStdinWatcherEnabled: Atomic[bool]
     toolCancelThread: Thread[void]
     toolCancelActive: bool
     toolCancelOrig: Termios
     toolCancelOrigValid: bool
 
+  toolStdinWatcherEnabled.store(true, moRelaxed)
+
   proc cancelActiveTool*() {.gcsafe.} =
     let pid = toolCancelPid.load(moRelaxed)
     if pid > 0:
       discard posix.kill(Pid(pid), SIGTERM)
+
+  proc setToolStdinWatcherEnabled*(enabled: bool) {.gcsafe.} =
+    toolStdinWatcherEnabled.store(enabled, moRelease)
 
   proc restoreToolCancelTermios() =
     if toolCancelOrigValid:
@@ -75,6 +81,7 @@ when defined(posix):
               return
 
   proc startToolCancelWatcher(pid: int) =
+    if not toolStdinWatcherEnabled.load(moAcquire): return
     if toolCancelActive: return
     if isatty(0.cint) == 0: return
     var t: Termios
@@ -105,6 +112,7 @@ when defined(posix):
     toolCancelHit.load(moRelaxed)
 else:
   proc cancelActiveTool*() = discard
+  proc setToolStdinWatcherEnabled*(enabled: bool) = discard
   proc startToolCancelWatcher(pid: int) = discard
   proc stopToolCancelWatcher(): bool = false
 

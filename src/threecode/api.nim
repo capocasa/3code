@@ -185,10 +185,19 @@ when providerStub:
 
 # ---------- Spinner ----------
 
-var interrupted*: bool = false
-  ## Set by the SIGINT hook. Checked between model/tool steps and during HTTP
-  ## polling / retry backoff so ctrl-c drops back to the prompt without
-  ## killing the process.
+var interruptedFlag: Atomic[bool]
+  ## Set by the SIGINT hook and buffered prompt key path. Checked between
+  ## model/tool steps and during HTTP polling / retry backoff so ctrl-c drops
+  ## back to the prompt without killing the process.
+
+proc isInterrupted*(): bool {.gcsafe.} =
+  interruptedFlag.load(moAcquire)
+
+proc setInterrupted*(value: bool) {.gcsafe.} =
+  interruptedFlag.store(value, moRelease)
+
+proc clearInterrupted*() {.gcsafe.} =
+  setInterrupted(false)
 
 var contentStreamedLive*: bool = false
   ## Set by `callModel` when the assistant's text content has been streamed
@@ -245,6 +254,24 @@ var quietRunning = false
 var lastProviderActivity: Atomic[int]
 var renderLock*: Lock
 initLock(renderLock)
+var renderLockDepth {.threadvar.}: int
+
+template withRenderLock*(body: untyped) =
+  ## Serialize terminal writes across the main thread, spinner/ticker threads,
+  ## and the always-live prompt input thread. The depth counter makes the lock
+  ## reentrant within one thread, which keeps existing helpers that call other
+  ## render helpers from deadlocking.
+  if renderLockDepth > 0:
+    body
+  else:
+    acquire renderLock
+    inc renderLockDepth
+    try:
+      body
+    finally:
+      dec renderLockDepth
+      release renderLock
+
 var inputState*: InputState
 var inputStateLock*: Lock
 initLock(inputStateLock)
@@ -375,8 +402,9 @@ const
 proc screenRenderSync*(s: string) =
   ## Single-flush write of ``s`` wrapped in DEC 2026 synchronized
   ## output, so conhost paints it as one atomic frame.
-  stdout.write SyncBegin & s & SyncEnd
-  stdout.flushFile
+  withRenderLock:
+    stdout.write SyncBegin & s & SyncEnd
+    stdout.flushFile
 
 proc syncWrite*(s: string) =
   ## Compatibility wrapper for older tests/callers; prefer
@@ -401,8 +429,7 @@ proc screenRenderFooterFrame*(s: string) {.gcsafe.} =
   ## synchronized frame. Otherwise spinner/bar ticks park the physical
   ## cursor on the token bar and the next typed character echoes there.
   {.cast(gcsafe).}:
-    acquire renderLock
-    try:
+    withRenderLock:
       if inputThreadRunning and inputEditor != nil:
         let edPtr = inputEditor
         stdout.write SyncBegin
@@ -420,8 +447,6 @@ proc screenRenderFooterFrame*(s: string) {.gcsafe.} =
       else:
         stdout.write SyncBegin & s & SyncEnd
         stdout.flushFile
-    finally:
-      release renderLock
 
 proc syncTurnFooterWrite*(s: string) {.gcsafe.} =
   ## Compatibility wrapper for older tests/callers; prefer
@@ -802,8 +827,7 @@ template screenWriteTranscript*(body: untyped) =
   ## render-locked critical section so appended transcript rows do not
   ## erase in-progress multiline input.
   debugOut &"screenWriteTranscript enter barLabel={currentBarLabel.len}"
-  acquire renderLock
-  try:
+  withRenderLock:
     if inputThreadRunning and inputEditor != nil:
       let up = inputEditor[].renderRow + 1
       stdout.write "\r"
@@ -817,8 +841,6 @@ template screenWriteTranscript*(body: untyped) =
       stdout.write "\x1b[1B"
       stdout.write inputEditor[].redrawBytes()
       stdout.flushFile
-  finally:
-    release renderLock
 
 template withCleared*(body: untyped) =
   ## Compatibility alias while older tests and callers move to the
@@ -1251,7 +1273,7 @@ proc closeCachedStreamConn() =
 proc shutdownCachedStreamFd() {.gcsafe.} =
   ## Async-signal-safe: only the `shutdown` syscall, no allocation, no
   ## Nim GC traffic. Forces a blocking `recv` on `cachedStreamConn` to
-  ## return so the streamHttp loop observes `interrupted` and bails.
+  ## return so the streamHttp loop observes the interrupt flag and bails.
   ## Safe to call from a SIGINT hook or from the stdin watcher thread.
   when defined(posix):
     let fd = cachedStreamFd
@@ -1264,7 +1286,7 @@ proc requestTurnInterrupt*() {.gcsafe.} =
   ## blocking HTTP reads must be woken and active tool subprocesses must
   ## be signalled, otherwise Ctrl-C appears to do nothing until the
   ## provider or command produces output.
-  interrupted = true
+  setInterrupted(true)
   shutdownCachedStreamFd()
   cancelActiveTool()
 
@@ -1547,7 +1569,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   var resp: StreamResponse
   var attempt = 0
   while true:
-    if interrupted:
+    if isInterrupted():
       closeCachedStreamConn()
       result.errMsg = "interrupted by user"
       return
@@ -1633,7 +1655,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       break
     if not hasLine: break
     markProviderActivity()
-    if interrupted:
+    if isInterrupted():
       closeCachedStreamConn()
       break
     if line.startsWith("data: "):
@@ -1735,10 +1757,10 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     setSpinLabel(liveLabel(baseLabel, slurped))
     startSpinner("")
 
-  if interrupted:
+  if isInterrupted():
     if result.assistantMsg == nil:
       result.assistantMsg = buildStreamAssistantMsg(accContent, accReasoning,
-        accTools, result.usage, interrupted)
+        accTools, result.usage, isInterrupted())
     # Drop the cache: the SIGINT hook / watcher already shut down the
     # fd, so the conn is half-closed. Reusing it on the next turn
     # would fail on first send. The next call will reconnect cleanly.
@@ -1766,7 +1788,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   # Build assistant message if we saw any SSE content.
   if result.assistantMsg == nil:
     result.assistantMsg = buildStreamAssistantMsg(accContent, accReasoning,
-      accTools, result.usage, interrupted)
+      accTools, result.usage, isInterrupted())
   if result.assistantMsg == nil:
     # No SSE data — provider may have returned a plain JSON error body.
     result.errBody = nonSSE.join("\n")
@@ -1916,11 +1938,8 @@ proc inputThreadProc() {.thread.} =
     if inputEditor == nil:
       return
     template withRender(body: untyped) =
-      acquire renderLock
-      try:
+      withRenderLock:
         body
-      finally:
-        release renderLock
 
     let edPtr = inputEditor
     template turnActive(): bool =
@@ -2034,7 +2053,7 @@ proc inputThreadProc() {.thread.} =
               inputState.cmdWasQuit = true
             finally:
               release inputStateLock
-            interrupted = true
+            setInterrupted(true)
             break
         else:
           withRender:
@@ -2179,7 +2198,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       setSpinLabel(liveLabel(stubBaseLabel, 0))
       startSpinner("")
       startQuietWatch(liveLabel(stubBaseLabel, 0))
-      let cancelWatcherStarted = not inputThreadRunning
+      let cancelWatcherStarted = inputEditor == nil
       if cancelWatcherStarted:
         startCancelWatcher()
       defer:
@@ -2197,7 +2216,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
           let delayMs = stubDelayMs(node, "delayMs", 300)
           var remaining = delayMs
           while remaining > 0:
-            if interrupted:
+            if isInterrupted():
               stopSpinner()
               raise newException(ApiError, "interrupted by user")
             let step = min(100, remaining)
@@ -2224,7 +2243,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
           stderr.writeLine &"3code: {errMsg}; retry {attempt + 1}/{StubMaxAttempts} in {backoff}s"
           var waitMs = backoff * 1000
           while waitMs > 0:
-            if interrupted:
+            if isInterrupted():
               raise newException(ApiError, "interrupted by user during retry backoff")
             let step = min(100, waitMs)
             sleep(step)
@@ -2248,7 +2267,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       if preStreamDelay > 0:
         var remaining = preStreamDelay
         while remaining > 0:
-          if interrupted:
+          if isInterrupted():
             stopSpinner()
             raise newException(ApiError, "interrupted by user")
           let step = min(100, remaining)
@@ -2327,7 +2346,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   # cause a flicker between callModel iterations within a turn.
   startSpinner("")
   startQuietWatch(liveLabel(baseLabel, 0))
-  let cancelWatcherStarted = not inputThreadRunning
+  let cancelWatcherStarted = inputEditor == nil
   if cancelWatcherStarted:
     startCancelWatcher()
   defer:
@@ -2395,11 +2414,11 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
     block wait:
       var remaining = backoff * 1000
       while remaining > 0:
-        if interrupted: break wait
+        if isInterrupted(): break wait
         let step = min(100, remaining)
         sleep(step)
         remaining -= step
-    if interrupted:
+    if isInterrupted():
       raise newException(ApiError, "interrupted by user during retry backoff")
     setSpinLabel(&"retry {attempt + 1}/{MaxAttempts}")
     startSpinner("")
