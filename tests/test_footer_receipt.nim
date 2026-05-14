@@ -1,5 +1,5 @@
 import std/[unittest, strutils, json, os]
-import threecode/[api, display, types, util, compact]
+import threecode/[api, display, types, util, compact, screen]
 import ttty/grid
 
 ## Token receipt placement and runTurns lifecycle boundary tests.
@@ -30,14 +30,23 @@ suite "token receipt placement":
     check tokenLineLabel(Usage(), 200_000) == ""
     check tokenLineLabel(usage, 200_000) != ""
 
-  test "receiptBarBytes: cyan payload, no leading clear, no \\n":
-    let bytes = receiptBarBytes("○ 2%  ↑3.8k      ↓45  1s")
-    check bytes.startsWith(CyanFg & " ")
-    check bytes.endsWith(Reset)
-    check '\n' notin bytes
+  test "receiptBarBytes: cyan payload stays on one visible row":
+    let g = newGrid()
+    g.feed receiptBarBytes("○ 2%  ↑3.8k      ↓45  1s")
+    check "3.8k" in rowText(g, 0)
+    check "↓45" in rowText(g, 0)
+    check rowText(g, 1).strip == ""
+    check g.row == 0
+    check g.cellFg(0, 0) == colCyan
+    check not hasAttr(g.cellAttr(0, 0), saBold)
 
-  test "receiptBarBytes: empty label → empty bytes":
-    check receiptBarBytes("") == ""
+  test "receiptBarBytes: empty label leaves the visible row unchanged":
+    let g = newGrid()
+    g.feed "before"
+    let beforeRow = rowText(g, 0)
+    g.feed receiptBarBytes("")
+    check rowText(g, 0) == beforeRow
+    check g.row == 0
 
   test "submitTransitionBytes: no gap, no pending — receipt skipped":
     # Stage: bar at row 0 (no gap above), prompt at row 1, user types
@@ -66,7 +75,6 @@ suite "token receipt placement":
     check "3.8k" in rowText(g, 0)
     check rowText(g, 1).strip == ""
     check rowText(g, 2).startsWith("❯ next")
-    check CyanFg in submitTransitionBytes("next", true, false, label)
     # Receipt row 0 cells are cyan (no bold — receipt is dim repaint).
     check g.cellFg(0, 0) == colCyan
     check not hasAttr(g.cellAttr(0, 0), saBold)
@@ -170,8 +178,7 @@ suite "runTurns boundaries":
 
   template withPendingHint(body: untyped) =
     let saved = pendingHint
-    pendingHint = (active: true, usage: usage,
-                   window: 200_000, elapsed: 1)
+    setPendingHint(screenState, usage, 200_000, 1)
     body
     pendingHint = saved
 

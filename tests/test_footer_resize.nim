@@ -354,31 +354,43 @@ suite "footer width-aware emission":
     check g.col == 0
     check countRows(g, "❯") == 1
 
-  test "legacy callers (termW=0) still get the single-row back-walk":
-    # Default-arg behavior: emitters that don't know the width must keep
-    # emitting the pre-fix `\x1b[1A` so existing callers and golden
-    # captures don't shift.
-    check "\x1b[1A" in barFooterBytes("LBL", DimPromptColor)
-    check "\x1b[2A" in barFooterBelowBytes("LBL", DimPromptColor)
-    check "\x1b[1A" in spinnerFooterBytes("⠋", "LBL", "", 1)
+  test "default-width callers keep visible footer placement":
+    let g = newGrid()
+    g.feed barFooterBytes("LBL", DimPromptColor)
+    check "LBL" in rowText(g, 0)
+    check "❯" in rowText(g, 1)
+    check g.row == 0
+    check g.col == 0
 
-  test "bar emitters write `\\r\\n` not bare `\\n` between rows":
-    # OPOST/ONLCR is documented as required by the bar emitters (each
-    # bar/prompt break uses a bare `\n` relying on the terminal to add
-    # CR). But after a SIGWINCH-shrink we have observed OPOST being
-    # left off — the prompt then lands at the bar payload's end column
-    # instead of col 0 because LF without CR moves the cursor down
-    # without resetting the column. Belt-and-braces: explicit `\r`
-    # before every `\n` makes the rows OPOST-independent.
-    proc hasBareLfBetweenRows(s: string): bool =
-      var i = 0
-      while i < s.len:
-        if s[i] == '\n':
-          if i == 0: return true
-          if s[i - 1] != '\r': return true
-        inc i
-      false
-    check not hasBareLfBetweenRows(barFooterBytes("LBL", DimPromptColor, 80))
-    check not hasBareLfBetweenRows(
-      barFooterBelowBytes("LBL", DimPromptColor, 80))
-    check not hasBareLfBetweenRows(spinnerFooterBytes("⠋", "LBL", "", 1, 80))
+    let below = newGrid()
+    below.feed "● "
+    below.feed barFooterBelowBytes("LBL", DimPromptColor)
+    check "LBL" in rowText(below, 1)
+    check "❯" in rowText(below, 2)
+    check below.row == 0
+    check below.col == 2
+
+    let spin = newGrid()
+    spin.feed "\n"
+    spin.feed spinnerFooterBytes("⠋", "LBL", "", 1)
+    check "LBL" in rowText(spin, 1)
+    check "❯" in rowText(spin, 2)
+    check spin.row == 1
+    check spin.col == 0
+
+  test "footer rows re-anchor visibly from drifted columns":
+    let g = newGrid()
+    g.feed "          "
+    g.feed barFooterBytes("LBL", DimPromptColor, 80)
+    check "LBL" in rowText(g, 0)
+    check rowText(g, 1).startsWith("❯")
+    check g.row == 0
+    check g.col == 0
+
+    let below = newGrid()
+    below.feed "● partial"
+    below.feed barFooterBelowAtColBytes("LBL", DimPromptColor, 9, 80)
+    check "LBL" in rowText(below, 1)
+    check rowText(below, 2).startsWith("❯")
+    check below.row == 0
+    check below.col == 9

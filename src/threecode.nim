@@ -20,6 +20,7 @@
 ##     ├── shell        shell command parsing for loop guard
 ##     ├── web          native web search + URL fetch
 ##     ├── update       background auto-update
+##     ├── screen       explicit volatile footer state
 ##     ├── util         string utils, ANSI palette, markdown helpers
 ##     ├── types        shared types + globals
 ##     └── minline      readline-style input
@@ -29,10 +30,10 @@ import std/exitprocs
 when defined(posix):
   import std/posix
 import threecode/[types, util, prompts, shell, loop, session, compact,
-                  config, actions, api, display, ui, update]
+                  config, actions, api, display, ui, update, screen]
 import threecode/minline
 export types, util, prompts, shell, loop, session, compact,
-       config, actions, api, display, ui
+       config, actions, api, display, ui, screen
 
 proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
   interrupted = false
@@ -236,7 +237,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           session.loop = initLoopTracker()
           session.readCache = nil
           session.plan.setLen 0
-          pendingHint = (active: false, usage: Usage(), window: 0, elapsed: 0)
+          clearPendingHint(screenState)
           currentBarLabel = ""
           if session.savePath != "":
             session.savePath = newSessionPath()
@@ -567,8 +568,7 @@ proc main() =
       stdout.flushFile
       currentBarLabel = label
       currentBarHasGap = true
-      pendingHint = (active: true, usage: lastUsage,
-                     window: window, elapsed: -1)
+      setPendingHint(screenState, lastUsage, window, -1)
     else:
       paintInitialBar(prof)
     if prompt != "":

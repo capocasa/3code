@@ -140,10 +140,7 @@ suite "full turn lifecycle":
     check "3.8k" in rowText(g, 1)               # receipt on old gap
     check rowText(g, 2).strip == ""             # blank separator
     check rowText(g, 3).startsWith("❯ elaborate")
-    # Receipt is cyan.
-    check CyanFg in submitTransitionBytes("elaborate", true, true,
-                                          iter1Label)
-    # Grid-level: receipt row has cyan cells (no bold — receipt is dim).
+    # Receipt row has cyan cells (no bold — receipt is dim).
     check g.cellFg(1, 0) == colCyan
 
   test "tool exec under withCleared: bar+prompt slide down":

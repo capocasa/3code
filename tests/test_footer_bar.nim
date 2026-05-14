@@ -144,20 +144,12 @@ suite "bar+prompt footer":
     check g.cellAt(3, 0).fgColorIdx == 244
 
   test "prompt color toggles between dim and bright cyan":
-    # Same label, different prompt color — the bar payload is the
-    # same; only the prompt SGR differs. Bytes assertion only (the
-    # grid renderer doesn't track SGR).
-    check DimPromptColor != BrightPromptColor
-    check DimPromptColor in barFooterBytes("LBL", DimPromptColor)
-    check BrightPromptColor in barFooterBytes("LBL", BrightPromptColor)
-    check DimPromptColor notin barFooterBytes("LBL", BrightPromptColor)
-    # Grid-level: dim prompt cell is grey-244.
+    # Same label, different prompt color: verify the visible cell state.
     block:
       let gd = newGrid()
       gd.feed barFooterBytes("LBL", DimPromptColor)
       check gd.cellFg(1, 0) == col256
       check gd.cellAt(1, 0).fgColorIdx == 244
-    # Grid-level: bright prompt cell is bold cyan.
     block:
       let gb = newGrid()
       gb.feed barFooterBytes("LBL", BrightPromptColor)

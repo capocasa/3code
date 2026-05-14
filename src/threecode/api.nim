@@ -21,7 +21,7 @@ when defined(posix):
   import std/posix except SocketHandle
   import posix/termios
 import streamhttp
-import types, util, prompts, compact, display, minline
+import types, util, prompts, compact, display, minline, screen
 
 type
   VerifyProfileHook* = proc(p: Profile): (bool, string) {.closure.}
@@ -196,7 +196,12 @@ var contentStreamedLive*: bool = false
   ## `runTurns` so the same content isn't redrawn a second time at the end
   ## of the turn.
 
-var pendingHint*: tuple[active: bool, usage: Usage, window: int, elapsed: int]
+var screenState* = initScreenState()
+  ## Explicit state for the normal scrollback transcript's volatile footer.
+  ## Rendering still happens in this module, but prompt/bar/ticker data now
+  ## has one home instead of separate process-level globals.
+
+template pendingHint*(): untyped = screenState.footer.pendingHint
   ## Carries the latest iteration's accurate usage forward. Two roles:
   ##   1. After each `callModel` iteration, used to repaint the **token
   ##      bar** with accurate values (replacing the live rough ones).
@@ -206,13 +211,13 @@ var pendingHint*: tuple[active: bool, usage: Usage, window: int, elapsed: int]
   ##      bar (at zeros) takes its place at the new bottom.
   ## See `## Token UI` in `CLAUDE.md` for the full lifecycle.
 
-var currentBarLabel*: string
+template currentBarLabel*(): untyped = screenState.footer.barLabel
   ## What's currently shown in the live bar. Updated by every paint
   ## (live during streaming, accurate after `callModel` parses usage,
   ## zero on first turn). Used by `withCleared` to repaint the bar
   ## with the same label after a content write hides it.
 
-var currentBarHasGap*: bool = false
+template currentBarHasGap*(): untyped = screenState.footer.hasGap
   ## Whether there's a one-row blank "gap" between the bar and the
   ## row above it. Set by `endTurn` (typing-ready state — the gap
   ## sits between the last LLM line and the bar, breathing room
@@ -2051,8 +2056,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       let stubElapsed = (epochTime() - stubT0).int
       let stubLabel = tokenLineLabel(usage, stubWindow, stubElapsed)
       paintBarPrompt(stubLabel, DimPromptColor)
-      pendingHint = (active: true, usage: usage, window: stubWindow,
-                     elapsed: stubElapsed)
+      setPendingHint(screenState, usage, stubWindow, stubElapsed)
       if result.kind == JObject:
         result["usage"] = %*{
           "promptTokens": usage.promptTokens,
@@ -2214,7 +2218,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       # Remove the ticker row inserted by the post-streaming spinner restart.
       syncWrite "\r\x1b[1A\x1b[M"
     paintBarPrompt(label, DimPromptColor)
-    pendingHint = (active: true, usage: usage, window: window, elapsed: elapsed.int)
+    setPendingHint(screenState, usage, window, elapsed.int)
     if window > 0 and usage.promptTokens.float > 0.7 * window.float and
        usage.promptTokens.float <= CompactThresholdFrac * window.float:
       withCleared:

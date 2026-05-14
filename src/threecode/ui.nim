@@ -10,7 +10,7 @@
 ## `runProviderAdd` validates the API key with a one-token probe before saving.
 
 import std/[json, os, sequtils, strformat, strutils, tables, terminal, times]
-import types, util, prompts, session, config, api, compact, display, minline, loop
+import types, util, prompts, session, config, api, compact, display, minline, loop, screen
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":prompt", ":show", ":log", ":sessions",
@@ -769,7 +769,7 @@ proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
     session.loop = initLoopTracker()
     session.readCache = nil
     session.plan.setLen 0
-    pendingHint = (active: false, usage: Usage(), window: 0, elapsed: 0)
+    clearPendingHint(screenState)
     currentBarLabel = ""
     if session.savePath != "":
       session.savePath = newSessionPath()

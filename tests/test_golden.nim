@@ -1,5 +1,6 @@
 import std/[unittest, os, posix, strutils, times]
 import threecode/[types, display]
+import ttty/grid
 
 ## Golden-file tests: pin the exact byte output of the render helpers so
 ## any change to spacing, ANSI sequences, glyphs, dim/bright choices, or
@@ -108,12 +109,14 @@ let x = 42
 End paragraph."""
 
 suite "golden: render helpers":
-  test "display line helpers emit CRLF for raw terminal mode":
+  test "display line helpers render separate visible rows":
     let bytes = captureStdout(proc() =
       hintLn "  model-a"
       subtleWriteLn(stdout, "  model-b"))
-    check "\r\n" in bytes
-    check "\n  model-b" notin bytes
+    let g = newGrid()
+    g.feed bytes
+    check rowText(g, 0).startsWith("  model-a")
+    check rowText(g, 1).startsWith("  model-b")
 
   test "renderAssistantContent — full markdown sample":
     let bytes = captureFile(proc(f: File) =
