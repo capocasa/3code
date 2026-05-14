@@ -242,6 +242,7 @@ var lastProviderActivity: Atomic[int]
 var renderLock*: Lock
 initLock(renderLock)
 var inputState*: InputState
+var inputTurnActive: Atomic[bool]
 var inputThread: Thread[void]
 var inputThreadRunning* = false
 var inputEditor*: ptr minline.LineEditor
@@ -1916,27 +1917,41 @@ proc inputThreadProc() {.thread.} =
         release renderLock
 
     let edPtr = inputEditor
+    template turnActive(): bool =
+      inputTurnActive.load(moAcquire)
     when defined(posix):
-      let fd = getFileHandle(stdin)
-      let getCh: minline.GetChProc = proc(): int =
+      let fd = STDIN_FILENO.cint
+      var pendingInput: seq[int]
+      proc fillPending(waitMs: cint): bool =
+        if pendingInput.len > 0:
+          return true
         var pfd: Tpollfd
         pfd.fd = STDIN_FILENO
         pfd.events = POLLIN
-        while inputState.turnActive:
-          let r = poll(addr pfd, 1.Tnfds, 200.cint)
-          if r < 0:
-            if errno == EINTR:
-              continue
-            return -1
-          if r > 0 and (pfd.revents and POLLIN) != 0:
-            var ch: char
-            if posix.read(fd.cint, addr ch, 1) == 1:
-              return ch.ord.int
-            return -1
+        let r = poll(addr pfd, 1.Tnfds, waitMs)
+        if r <= 0 or (pfd.revents and POLLIN) == 0:
+          return false
+        var ch: char
+        let n = posix.read(fd, addr ch, 1)
+        if n == 1:
+          pendingInput.add ch.ord.int
+        pendingInput.len > 0
+
+      let getCh: minline.GetChProc = proc(): int =
+        while turnActive():
+          if pendingInput.len > 0 or fillPending(200.cint):
+            result = pendingInput[0]
+            pendingInput.delete(0)
+            return
+          if errno == EINTR:
+            continue
         -1
+      let hasPendingInput: minline.HasPendingInputProc = proc(): bool =
+        pendingInput.len > 0 or fillPending(minline.EscapeTailPollMs.cint)
     else:
       let getCh: minline.GetChProc = proc(): int =
-        if inputState.turnActive: getchr().int else: -1
+        if turnActive(): getchr().int else: -1
+      let hasPendingInput: minline.HasPendingInputProc = nil
 
     let writeProc: minline.WriteProc = proc(s: string) =
       withRender:
@@ -1982,9 +1997,10 @@ proc inputThreadProc() {.thread.} =
 
     edPtr[].deferSubmit = true
     edPtr[].submitIcon = OffWhiteFg & "⏳" & Reset
-    while inputState.turnActive:
+    while turnActive():
       try:
-        let text = minline.readLineWith(edPtr[], "❯ ", getCh, writeProc)
+        let text = minline.readLineWith(edPtr[], "❯ ", getCh, writeProc,
+                                        hasPendingInput = hasPendingInput)
         if text.len == 0:
           continue
         if text[0] == ':':
@@ -2044,6 +2060,7 @@ proc beginTurn*() =
   emitScreenEvent setPromptModeEvent(pmTurnRunning)
   if inputEditor != nil and not inputThreadRunning:
     inputState = InputState(turnActive: true)
+    inputTurnActive.store(true, moRelease)
     createThread(inputThread, inputThreadProc)
     inputThreadRunning = true
 
@@ -2064,6 +2081,7 @@ proc endTurn*(repaintPrompt = true) =
   let hadInputThread = inputThreadRunning
   if inputThreadRunning:
     inputState.turnActive = false
+    inputTurnActive.store(false, moRelease)
     joinThread(inputThread)
     inputThreadRunning = false
   if hadInputThread and inputEditor != nil:

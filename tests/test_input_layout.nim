@@ -3,6 +3,8 @@ import ttty/grid
 import threecode/[api, types, minline, util, screen]
 import harness
 import minline_testutils
+when defined(posix):
+  import posix
 
 ## Functional tests for input-thread prompt layout during turns.
 ##
@@ -25,6 +27,43 @@ proc captureUntil(ft: FakeTerm, needle: string): int =
     result = lastRow(ft.grid, needle)
     if result >= 0:
       return
+
+proc feedKeyBytes(ft: FakeTerm, keys: openArray[int]; delayMs = 0) =
+  if delayMs == 0:
+    var s = newStringOfCap(keys.len)
+    for k in keys:
+      s.add char(k)
+    when defined(posix):
+      let n = posix.write(ft.ptm, s[0].addr, s.len)
+      doAssert n == s.len
+    else:
+      harness.feedKeys(ft, s)
+    return
+  for k in keys:
+    when defined(posix):
+      var ch = char(k)
+      let n = posix.write(ft.ptm, addr ch, 1)
+      doAssert n == 1
+    else:
+      harness.feedKeys(ft, $char(k))
+    if delayMs > 0:
+      sleep delayMs
+
+proc waitForQueuedText(expected: string; timeoutMs = 6000): bool =
+  var waited = 0
+  while waited < timeoutMs:
+    if inputState.queuedText == expected:
+      return true
+    sleep 20
+    waited += 20
+
+proc waitForInterrupt(timeoutMs = 2000): bool =
+  var waited = 0
+  while waited < timeoutMs:
+    if interrupted:
+      return true
+    sleep 20
+    waited += 20
 
 suite "input thread layout during turns":
   test "beginTurn input thread echoes typed text on prompt row":
@@ -272,6 +311,114 @@ suite "input thread layout during turns":
     check "LBL  4s" in rowText(ft.grid, 1)
     check "❯ one" in rowText(ft.grid, 2)
     check "  two" in rowText(ft.grid, 3)
+
+  test "beginTurn input thread handles Shift-Enter as multiline":
+    var ft = newFakeTerm()
+    defer: ft.close()
+
+    var ed = minline.initEditor()
+    inputEditor = addr(ed)
+    defer:
+      inputEditor = nil
+      inputState = InputState()
+      emitScreenEvent clearBarEvent()
+
+    paintBarPrompt("LBL  3s", DimPromptColor)
+    beginTurn()
+    discard captureUntil(ft, "❯")
+    sleep 100
+    check ed.deferSubmit
+    ft.feedKeys("and othe")
+    feedKeyBytes(ft, @[27, 91, 50, 55, 59, 50, 59, 49, 51, 126], 0)
+    ft.feedKeys("dff\r")
+    check waitForQueuedText("and othe\ndff")
+    endTurn()
+
+    ft.drain()
+    check ed.line.text == "and othe\ndff"
+    check inputState.autoSend
+    check inputState.queuedText == "and othe\ndff"
+    check "27;2;13" notin inputState.queuedText
+    for r in 0..<ft.grid.rows.len:
+      check "27;2;13" notin rowText(ft.grid, r)
+
+  test "beginTurn input thread handles delayed Shift-Enter tail":
+    var ft = newFakeTerm()
+    defer: ft.close()
+
+    var ed = minline.initEditor()
+    inputEditor = addr(ed)
+    defer:
+      inputEditor = nil
+      inputState = InputState()
+      emitScreenEvent clearBarEvent()
+
+    paintBarPrompt("LBL  3s", DimPromptColor)
+    beginTurn()
+    discard captureUntil(ft, "❯")
+    sleep 100
+    check ed.deferSubmit
+    ft.feedKeys("and othe")
+    feedKeyBytes(ft, @[27, 91, 50, 55, 59, 50, 59, 49, 51, 126], 10)
+    ft.feedKeys("dff\r")
+    check waitForQueuedText("and othe\ndff")
+    endTurn()
+
+    ft.drain()
+    check ed.line.text == "and othe\ndff"
+    check inputState.autoSend
+    check inputState.queuedText == "and othe\ndff"
+    check "27;2;13" notin inputState.queuedText
+    for r in 0..<ft.grid.rows.len:
+      check "27;2;13" notin rowText(ft.grid, r)
+
+  test "beginTurn input thread handles Ctrl-C cancel":
+    var ft = newFakeTerm()
+    defer: ft.close()
+
+    var ed = minline.initEditor()
+    inputEditor = addr(ed)
+    interrupted = false
+    defer:
+      inputEditor = nil
+      inputState = InputState()
+      interrupted = false
+      emitScreenEvent clearBarEvent()
+
+    paintBarPrompt("LBL  3s", DimPromptColor)
+    beginTurn()
+    discard captureUntil(ft, "❯")
+    ft.feedKeys("\x03")
+    check waitForInterrupt()
+    endTurn()
+
+    ft.drain()
+    check interrupted
+    check not inputState.autoSend
+
+  test "beginTurn input thread handles empty Ctrl-D as exit":
+    var ft = newFakeTerm()
+    defer: ft.close()
+
+    var ed = minline.initEditor()
+    inputEditor = addr(ed)
+    interrupted = false
+    defer:
+      inputEditor = nil
+      inputState = InputState()
+      interrupted = false
+      emitScreenEvent clearBarEvent()
+
+    paintBarPrompt("LBL  3s", DimPromptColor)
+    beginTurn()
+    discard captureUntil(ft, "❯")
+    ft.feedKeys("\x04")
+    check waitForInterrupt()
+    endTurn()
+
+    ft.drain()
+    check inputState.cmdWasQuit
+    check interrupted
 
   test "submitIcon + multiline: parkAtEnd leaves cursor one row below":
     # Regression: parkAtEnd used to skip \r\n after the submit icon,

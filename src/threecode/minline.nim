@@ -109,7 +109,10 @@ else:
       if fd.tcSetAttr(TCSAFLUSH, addr newMode) != 0:
         return getch().ord.cint
       try:
-        return stdin.readChar().ord.cint
+        var ch: char
+        if posix.read(fd.cint, addr ch, 1) == 1:
+          return ch.ord.cint
+        return -1
       finally:
         discard fd.tcSetAttr(TCSADRAIN, addr oldMode)
     else:
@@ -860,6 +863,109 @@ when defined(posix):
     ed.renderRow = 0
     fullRedraw(ed)
 
+proc initKeyTables*() =
+  ## ``KEYNAMES``, ``KEYSEQS`` and ``KEYMAP`` are thread-local because
+  ## display code may temporarily override callbacks. New input threads
+  ## therefore must populate their own copies before reading keys.
+  if KEYMAP.hasKey("ctrl+c") and KEYSEQS.hasKey("left"):
+    return
+  KEYNAMES[1]    = "ctrl+a"
+  KEYNAMES[2]    = "ctrl+b"
+  KEYNAMES[3]    = "ctrl+c"
+  KEYNAMES[4]    = "ctrl+d"
+  KEYNAMES[5]    = "ctrl+e"
+  KEYNAMES[6]    = "ctrl+f"
+  KEYNAMES[7]    = "ctrl+g"
+  KEYNAMES[8]    = "ctrl+h"
+  KEYNAMES[9]    = "tab"
+  KEYNAMES[10]   = "ctrl+j"
+  KEYNAMES[11]   = "ctrl+k"
+  KEYNAMES[12]   = "ctrl+l"
+  KEYNAMES[13]   = "ctrl+m"
+  KEYNAMES[14]   = "ctrl+n"
+  KEYNAMES[15]   = "ctrl+o"
+  KEYNAMES[16]   = "ctrl+p"
+  KEYNAMES[17]   = "ctrl+q"
+  KEYNAMES[18]   = "ctrl+r"
+  KEYNAMES[19]   = "ctrl+s"
+  KEYNAMES[20]   = "ctrl+t"
+  KEYNAMES[21]   = "ctrl+u"
+  KEYNAMES[22]   = "ctrl+v"
+  KEYNAMES[23]   = "ctrl+w"
+  KEYNAMES[24]   = "ctrl+x"
+  KEYNAMES[25]   = "ctrl+y"
+  KEYNAMES[26]   = "ctrl+z"
+
+  when defined(windows):
+    KEYSEQS["up"]         = @[224, 72]
+    KEYSEQS["down"]       = @[224, 80]
+    KEYSEQS["right"]      = @[224, 77]
+    KEYSEQS["left"]       = @[224, 75]
+    KEYSEQS["home"]       = @[224, 71]
+    KEYSEQS["end"]        = @[224, 79]
+    KEYSEQS["insert"]     = @[224, 82]
+    KEYSEQS["delete"]     = @[224, 83]
+  else:
+    KEYSEQS["up"]         = @[27, 91, 65]
+    KEYSEQS["down"]       = @[27, 91, 66]
+    KEYSEQS["right"]      = @[27, 91, 67]
+    KEYSEQS["left"]       = @[27, 91, 68]
+    KEYSEQS["home"]       = @[27, 91, 72]
+    KEYSEQS["end"]        = @[27, 91, 70]
+    KEYSEQS["insert"]     = @[27, 91, 50, 126]
+    KEYSEQS["delete"]     = @[27, 91, 51, 126]
+
+  KEYMAP["backspace"] = proc(ed: var LineEditor) = ed.deletePrevious()
+  KEYMAP["delete"]    = proc(ed: var LineEditor) = ed.deleteNext()
+  KEYMAP["insert"]    = proc(ed: var LineEditor) =
+    ed.mode = if ed.mode == mdInsert: mdReplace else: mdInsert
+  KEYMAP["down"]      = proc(ed: var LineEditor) =
+    let pw = ed.promptW; let cw = ed.contPromptW
+    let width = max(2, ed.width)
+    let (curR, _) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
+    let total = totalRows(ed.line.text, pw, cw, width)
+    if curR >= total - 1: ed.historyNext()
+    else: ed.visualDown()
+  KEYMAP["up"]        = proc(ed: var LineEditor) =
+    let pw = ed.promptW; let cw = ed.contPromptW
+    let width = max(2, ed.width)
+    let (curR, _) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
+    if curR <= 0: ed.historyPrevious()
+    else: ed.visualUp()
+  KEYMAP["ctrl+n"]    = proc(ed: var LineEditor) = ed.historyNext()
+  KEYMAP["ctrl+p"]    = proc(ed: var LineEditor) = ed.historyPrevious()
+  KEYMAP["left"]      = proc(ed: var LineEditor) = ed.back()
+  KEYMAP["right"]     = proc(ed: var LineEditor) = ed.forward()
+  KEYMAP["ctrl+b"]    = proc(ed: var LineEditor) = ed.back()
+  KEYMAP["ctrl+f"]    = proc(ed: var LineEditor) = ed.forward()
+  KEYMAP["ctrl+u"]    = proc(ed: var LineEditor) = ed.clearLine()
+  KEYMAP["ctrl+a"]    = proc(ed: var LineEditor) = ed.goToStart()
+  KEYMAP["ctrl+e"]    = proc(ed: var LineEditor) = ed.goToEnd()
+  KEYMAP["home"]      = proc(ed: var LineEditor) = ed.goToStart()
+  KEYMAP["end"]       = proc(ed: var LineEditor) = ed.goToEnd()
+  KEYMAP["ctrl+w"]    = proc(ed: var LineEditor) = ed.deleteWordLeft()
+  KEYMAP["ctrl+c"]    = proc(ed: var LineEditor) =
+    ed.canceled = true
+    raise newException(InputCancelled, "")
+  KEYMAP["ctrl+d"]    = proc(ed: var LineEditor) =
+    if ed.line.text.len == 0:
+      ed.eof = true
+      raise newException(EOFError, "")
+    ed.deleteNext()
+  KEYMAP["ctrl+l"]    = proc(ed: var LineEditor) =
+    ed.write "\x1b[H\x1b[2J"
+    ed.renderRow = 0
+    fullRedraw(ed)
+  when defined(posix):
+    KEYMAP["ctrl+z"]  = proc(ed: var LineEditor) =
+      ed.write "\n\e[?2004l"
+      resetAttributes()
+      stdout.flushFile()
+      discard posix.kill(posix.getpid(), posix.SIGTSTP)
+      ed.write "\e[?2004h"
+      ed.renderRow = 0
+      fullRedraw(ed)
+
 # ---------- Completion ----------
 
 proc complCurrentWord(ed: LineEditor): string =
@@ -986,10 +1092,21 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
   ## extended keys). Returns ``true`` if the sequence requested a submit
   ## (Shift+Enter / Alt+Enter — these now insert a real newline rather
   ## than backslash-continuation).
-  if c1 == 27 and not ed.hasPendingEscapeTail():
+  if c1 == 27 and not ed.deferSubmit and not ed.hasPendingEscapeTail():
     KEYMAP["ctrl+c"](ed)
     return false
-  let c2 = ed.getCh()
+
+  template escCh(retries: int = 3): int =
+    block:
+      var r = ed.getCh()
+      if r < 0 and ed.deferSubmit:
+        for _ in 0 ..< retries:
+          r = ed.getCh()
+          if r >= 0:
+            break
+      r
+
+  let c2 = escCh()
   if c2 < 0:
     ed.canceled = true
     raise newException(InputCancelled, "")
@@ -1013,7 +1130,7 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
     ed.insertNewline()
     return false
   if c2 == 91:  # CSI
-    let c3 = ed.getCh()
+    let c3 = escCh(25)
     if c3 < 0: return false
     s.add c3.Key
     if s == KEYSEQS["right"]:  ed.forward(); return false
@@ -1027,7 +1144,7 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
       ed.reverseCompleteLine()
       return false
     if c3 == 50 or c3 == 51:
-      let c4 = ed.getCh()
+      let c4 = escCh()
       if c4 < 0: return false
       if c4 == 126 and c3 == 50:
         KEYMAP["insert"](ed); return false
@@ -1035,27 +1152,27 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
         ed.deleteNext(); return false
       if c3 == 50 and c4 == 55:
         # XMod: xterm modifyOtherKeys, ESC [ 27 ; <mod> ; <key> ~
-        let c5 = ed.getCh()
+        let c5 = escCh()
         if c5 == 59:
           var modDigits = ""
-          var ch = ed.getCh()
+          var ch = escCh()
           while ch >= 48 and ch <= 57:
             modDigits.add ch.chr
-            ch = ed.getCh()
+            ch = escCh()
           if ch == 59:
             var keyDigits = ""
-            ch = ed.getCh()
+            ch = escCh()
             while ch >= 48 and ch <= 57:
               keyDigits.add ch.chr
-              ch = ed.getCh()
+              ch = escCh()
             if ch == 126 and keyDigits == "13" and modDigits == "2":
               ed.insertNewline()
               return false
         return false
       if c3 == 50 and c4 == 48:
         # bracketed paste start: ESC [ 200 ~
-        let c5 = ed.getCh()
-        let c6 = ed.getCh()
+        let c5 = escCh()
+        let c6 = escCh()
         if c5 == 48 and c6 == 126:
           let paste = readBracketedPaste(ed)
           if paste.len > 0:
@@ -1083,17 +1200,17 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
         return false
       if c3 == 51 and c4 == 59:
         # ESC [ 3 ; <mod> ~  (e.g. shift+delete)
-        let modCh = ed.getCh()
-        let final = ed.getCh()
+        let modCh = escCh()
+        let final = escCh()
         if final == 126 and modCh == 53:  # ctrl+delete
           ed.deleteWordLeft()
         return false
     elif c3 == 49:
       # ESC [ 1 ; <mod> <dir>
-      let c4 = ed.getCh()
+      let c4 = escCh()
       if c4 == 59:
-        let modifier = ed.getCh()
-        let direction = ed.getCh()
+        let modifier = escCh()
+        let direction = escCh()
         if modifier == 53:  # ctrl
           case direction
           of 68: wordLeft(ed)
@@ -1103,13 +1220,13 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
           else: discard
       elif c4 == 51:
         # Kitty Shift+Enter: ESC [ 1 3 ; 2 u
-        let c5 = ed.getCh()
+        let c5 = escCh()
         if c5 == 59:
           var modDigits = ""
-          var ch = ed.getCh()
+          var ch = escCh()
           while ch >= 48 and ch <= 57:
             modDigits.add ch.chr
-            ch = ed.getCh()
+            ch = escCh()
           if ch == 117 and modDigits == "2":
             ed.insertNewline()
       return false
@@ -1123,6 +1240,7 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
   ## Pluggable form of ``readLine``. Provides the same behavior as
   ## ``readLine`` but with explicit IO procs so tests can drive the
   ## editor against a fake terminal.
+  initKeyTables()
   ed.getCh = getCh
   ed.write = write
   ed.getWidth = getWidth
