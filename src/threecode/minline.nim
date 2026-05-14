@@ -452,6 +452,14 @@ proc redrawBytes*(ed: var LineEditor): string =
   ed.renderRow = targetRow
   result = buf
 
+proc renderedRows*(ed: LineEditor): int =
+  ## Visual rows currently owned by the editor, including any transient
+  ## suffix such as the buffered-submit hourglass.
+  let width = max(2, ed.width)
+  let pw = if ed.promptW > 0: ed.promptW else: visualCols(ed.prompt)
+  let cw = if ed.contPromptW > 0: ed.contPromptW else: visualCols(ed.contPrompt)
+  totalRows(ed.line.text & ed.renderSuffix, pw, cw, width)
+
 proc fullRedraw*(ed: var LineEditor) =
   ## Wipe the previously rendered area, repaint prompt + buffer, place
   ## the cursor at the visual position derived from ``ed.line.position``.

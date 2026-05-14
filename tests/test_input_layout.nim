@@ -237,6 +237,42 @@ suite "input thread layout during turns":
     check "LBL" in rowText(ft.grid, 1)
     check "❯ draft" in rowText(ft.grid, 2)
 
+  test "footer frame preserves multiline live editor height":
+    var ft = newFakeTerm()
+    defer: ft.close()
+
+    stdout.write "OUT\n"
+    paintBarPrompt("LBL  3s", DimPromptColor)
+    emitScreenEvent setBarEvent("LBL  3s")
+    stdout.write "\x1b[1B"
+
+    var ed = minline.initEditor()
+    ed.line = minline.Line(text: "one\ntwo", position: "one\ntwo".len)
+    ed.prompt = "❯ "
+    ed.contPrompt = "  "
+    ed.promptW = minline.visualCols(ed.prompt)
+    ed.contPromptW = minline.visualCols(ed.contPrompt)
+    ed.width = 80
+    stdout.write ed.redrawBytes()
+    stdout.flushFile()
+
+    inputEditor = addr(ed)
+    inputThreadRunning = true
+    inputState = InputState(turnActive: true)
+    defer:
+      inputEditor = nil
+      inputThreadRunning = false
+      inputState = InputState()
+      emitScreenEvent clearBarEvent()
+
+    screenRenderFooterFrame spinnerBarFrameBytes("⠋", "LBL  4s", "", 4)
+
+    ft.drain()
+    check rowText(ft.grid, 0).startsWith("OUT")
+    check "LBL  4s" in rowText(ft.grid, 1)
+    check "❯ one" in rowText(ft.grid, 2)
+    check "  two" in rowText(ft.grid, 3)
+
   test "submitIcon + multiline: parkAtEnd leaves cursor one row below":
     # Regression: parkAtEnd used to skip \r\n after the submit icon,
     # leaving the cursor on the last input row instead of one below.

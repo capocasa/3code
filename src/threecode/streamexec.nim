@@ -22,6 +22,11 @@ when defined(posix):
     toolCancelOrig: Termios
     toolCancelOrigValid: bool
 
+  proc cancelActiveTool*() {.gcsafe.} =
+    let pid = toolCancelPid.load(moRelaxed)
+    if pid > 0:
+      discard posix.kill(Pid(pid), SIGTERM)
+
   proc restoreToolCancelTermios() =
     if toolCancelOrigValid:
       discard tcSetAttr(0.cint, TCSANOW, addr toolCancelOrig)
@@ -59,9 +64,9 @@ when defined(posix):
             let b = buf[i].uint8
             if b == 0x03 or b == 0x1b:
               toolCancelHit.store(true, moRelaxed)
+              cancelActiveTool()
               let pid = toolCancelPid.load(moRelaxed)
               if pid > 0:
-                discard posix.kill(Pid(pid), SIGTERM)
                 for _ in 0..<20:
                   if not isAlive(Pid(pid)): break
                   sleep(100)
@@ -99,6 +104,7 @@ when defined(posix):
     toolCancelPid.store(0, moRelaxed)
     toolCancelHit.load(moRelaxed)
 else:
+  proc cancelActiveTool*() = discard
   proc startToolCancelWatcher(pid: int) = discard
   proc stopToolCancelWatcher(): bool = false
 

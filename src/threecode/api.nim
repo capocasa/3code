@@ -21,7 +21,7 @@ when defined(posix):
   import std/posix except SocketHandle
   import posix/termios
 import streamhttp
-import types, util, prompts, compact, display, minline, screen
+import types, util, prompts, compact, display, minline, screen, streamexec
 
 type
   VerifyProfileHook* = proc(p: Profile): (bool, string) {.closure.}
@@ -376,6 +376,17 @@ proc syncWrite*(s: string) =
   ## `screenRenderSync` at new rendering boundaries.
   screenRenderSync(s)
 
+proc liveEditorRows(): int =
+  if inputThreadRunning and inputEditor != nil:
+    max(1, minline.renderedRows(inputEditor[]))
+  else:
+    1
+
+proc liveBarRow(termH: int): int =
+  ## 1-based terminal row for the token bar when a variable-height
+  ## editor footer is active. The editor owns the rows below it.
+  max(1, termH - liveEditorRows())
+
 proc screenRenderFooterFrame*(s: string) {.gcsafe.} =
   ## Like ``screenRenderSync`` for turn-time footer animations, but if the
   ## background input editor is active, repaint the footer from the bar
@@ -385,7 +396,7 @@ proc screenRenderFooterFrame*(s: string) {.gcsafe.} =
   {.cast(gcsafe).}:
     acquire renderLock
     try:
-      if inputThreadRunning and inputState.turnActive and inputEditor != nil:
+      if inputThreadRunning and inputEditor != nil:
         let edPtr = inputEditor
         stdout.write SyncBegin
         let up = edPtr[].renderRow + 1
@@ -482,6 +493,25 @@ proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int,
   result.add spinnerBarBytes(frame, label, elapsed)
   result.add "\r\n\x1b[2K" & DimPromptColor & "❯ " & Reset
   result.add "\r\x1b[" & $barRows & "A"
+
+proc spinnerBarFrameBytes*(frame, label, ticker: string, elapsed: int,
+                           termW = 0): string =
+  ## Spinner/ticker frame for a variable-height live editor footer.
+  ## Cursor in/out: token bar row. The editor rows below are not touched;
+  ## the caller redraws them after this frame.
+  let barCells = labelCells(label) + 4 + ($elapsed).len
+  let barRows = barWrapRows(barCells, termW)
+  result = "\x1b[?25l\r\x1b[1A"
+  if ticker.len > 0:
+    result.add "\x1b[2K"
+    result.add GreyFg
+    result.add ticker
+    result.add Reset
+  result.add "\r\n\x1b[2K"
+  result.add spinnerBarBytes(frame, label, elapsed)
+  result.add "\r"
+  if barRows > 1:
+    result.add "\x1b[" & $(barRows - 1) & "A"
 
 proc spinnerCleanupBytes*(tickerRows = 1): string =
   ## Erase spinner ticker + bar + prompt, cursor at col 0 of the bar
@@ -727,17 +757,21 @@ proc resetPromptInputAfterEmpty*(echoRows: int; promptColor: string) =
 
 proc enterToolViewport*(termH: int) =
   ## Enter the bounded live tool-output viewport while preserving the
-  ## footer rows at the bottom of the normal terminal buffer.
+  ## footer rows at the bottom of the normal terminal buffer. The footer
+  ## is token bar + the live editor's visual rows, so multiline buffered
+  ## input reduces the scrolling region instead of being overwritten.
   emitScreenEvent setModeEvent(smToolStreaming)
-  stdout.write &"\x1b[1;{termH - 2}r"
-  stdout.write &"\x1b[{termH - 2};1H"
+  let footerRows = 1 + liveEditorRows()
+  let scrollBottom = max(1, termH - footerRows)
+  stdout.write &"\x1b[1;{scrollBottom}r"
+  stdout.write &"\x1b[{scrollBottom};1H"
   stdout.flushFile()
 
 proc leaveToolViewport*(termH: int) =
   ## Leave the bounded live tool-output viewport and return to normal
   ## transcript rendering with the cursor on the bar row.
   stdout.write "\x1b[r"
-  stdout.write &"\x1b[{termH - 1};1H"
+  stdout.write &"\x1b[{liveBarRow(termH)};1H"
   stdout.flushFile()
   emitScreenEvent setModeEvent(smNormal)
 
@@ -763,7 +797,7 @@ template screenWriteTranscript*(body: untyped) =
   debugOut &"screenWriteTranscript enter barLabel={currentBarLabel.len}"
   acquire renderLock
   try:
-    if inputThreadRunning and inputState.turnActive and inputEditor != nil:
+    if inputThreadRunning and inputEditor != nil:
       let up = inputEditor[].renderRow + 1
       stdout.write "\r"
       if up > 0:
@@ -772,7 +806,7 @@ template screenWriteTranscript*(body: untyped) =
     body
     debugOut "screenWriteTranscript exit"
     repaintBarPrompt()
-    if inputThreadRunning and inputState.turnActive and inputEditor != nil:
+    if inputThreadRunning and inputEditor != nil:
       stdout.write "\x1b[1B"
       stdout.write inputEditor[].redrawBytes()
       stdout.flushFile
@@ -807,17 +841,22 @@ proc spinnerLoop(unused: string) {.thread.} =
     lastTicker = ticker
     try:
       let frame = frames[i mod frames.len]
-      screenRenderFooterFrame spinnerFooterBytes(frame, label, ticker, elapsed.int,
-                                             currentTermW())
+      if inputThreadRunning and inputEditor != nil:
+        screenRenderFooterFrame spinnerBarFrameBytes(frame, label, ticker,
+                                                     elapsed.int, currentTermW())
+      else:
+        screenRenderFooterFrame spinnerFooterBytes(frame, label, ticker,
+                                                   elapsed.int, currentTermW())
     except CatchableError: discard
     sleep 80
     inc i
   try:
     let termW = try: terminalWidth() except CatchableError: 80
-    let tickerRows =
-      if lastTicker.len == 0: 1
-      else: max(1, (visibleWidth(lastTicker) + max(1, termW) - 1) div max(1, termW))
-    screenRenderSync spinnerCleanupBytes(tickerRows)
+    if not inputThreadRunning:
+      let tickerRows =
+        if lastTicker.len == 0: 1
+        else: max(1, (visibleWidth(lastTicker) + max(1, termW) - 1) div max(1, termW))
+      screenRenderSync spinnerCleanupBytes(tickerRows)
   except CatchableError: discard
 
 proc liveLabel*(base: string, slurped: int): string =
@@ -900,9 +939,14 @@ proc barTickLoop() {.thread.} =
     # isn't enough to keep it hidden over a long-running tool.
     let tw = currentTermW()
     let th = try: terminalHeight() except CatchableError: 24
-    let pos = "\x1b[" & $(th - 1) & ";1H"
-    screenRenderFooterFrame "\x1b[?25l" & pos &
-      barFooterBytes(label, DimPromptColor, tw)
+    let row = liveBarRow(th)
+    let pos = "\x1b[" & $row & ";1H"
+    let frame =
+      if inputThreadRunning and inputEditor != nil:
+        "\x1b[?25l" & pos & paintBarBytes(label)
+      else:
+        "\x1b[?25l" & pos & barFooterBytes(label, DimPromptColor, tw)
+    screenRenderFooterFrame frame
     sleep 500
 
 proc startBarTick*(base: string) =
@@ -1207,6 +1251,16 @@ proc shutdownCachedStreamFd() {.gcsafe.} =
     if fd != osInvalidSocket:
       discard posix.shutdown(posix.SocketHandle(fd), SHUT_RDWR.cint)
 
+proc requestTurnInterrupt*() {.gcsafe.} =
+  ## One cancellation path for signal hooks, buffered prompt keys, and
+  ## stream/tool stdin watchers. Setting the flag alone is not enough:
+  ## blocking HTTP reads must be woken and active tool subprocesses must
+  ## be signalled, otherwise Ctrl-C appears to do nothing until the
+  ## provider or command produces output.
+  interrupted = true
+  shutdownCachedStreamFd()
+  cancelActiveTool()
+
 # ---- Stream-time stdin cancel watcher ----
 #
 # During streamHttp's read loop, a tiny POSIX-only watcher thread polls
@@ -1244,8 +1298,7 @@ when defined(posix):
             let b = buf[i].uint8
             if b == 0x03 or b == 0x1b:
               {.cast(gcsafe).}:
-                interrupted = true
-                shutdownCachedStreamFd()
+                requestTurnInterrupt()
                 restoreCancelTermios()
               return
             else: discard
@@ -1956,12 +2009,12 @@ proc inputThreadProc() {.thread.} =
             inputState.autoSend = true
             emitScreenEvent setPromptModeEvent(pmBufferedInput)
       except minline.InputCancelled:
-        interrupted = true
+        requestTurnInterrupt()
         break
       except EOFError:
         if edPtr[].line.text.len == 0:
           inputState.cmdWasQuit = true
-          interrupted = true
+          requestTurnInterrupt()
         break
       except CatchableError:
         break
@@ -2409,9 +2462,4 @@ proc fetchModels*(url, key: string): (seq[string], string) =
 
 proc installInterruptHook*() =
   setControlCHook(proc() {.noconv.} =
-    interrupted = true
-    # Wake any blocking `recv` on the in-flight stream socket so the
-    # caller can observe `interrupted` and bail. Without this, ctrl-c
-    # before the first SSE chunk just sets a flag while `recv` keeps
-    # blocking until data arrives.
-    shutdownCachedStreamFd())
+    requestTurnInterrupt())
