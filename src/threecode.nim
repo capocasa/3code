@@ -151,6 +151,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         try:
           (r, code, diff) =
             if act.kind == akBash:
+              discard stopBarTick()
               let termH = try: terminalHeight() except CatchableError: 24
               # Scrolling region: rows 1..termH-2, leaving bar+prompt
               # pinned at the bottom two rows.
