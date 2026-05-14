@@ -143,12 +143,12 @@ suite "full turn lifecycle":
     # Receipt row has cyan cells (no bold — receipt is dim).
     check g.cellFg(1, 0) == colCyan
 
-  test "tool exec under withCleared: bar+prompt slide down":
+  test "tool exec under transcript write: bar+prompt slide down":
     # Bar at row 0, prompt at row 1. Tool exec writes content above
     # via clearBarPrompt + body + repaintBarPrompt-like sequence.
     let g = newGrid()
     g.feed barFooterBytes("LBL", DimPromptColor)
-    # withCleared body: clear → write → repaint.
+    # Transcript write body: clear → write → repaint.
     g.feed ClearBarPromptBytes
     g.feed "  bash   ls\n"
     g.feed "  total 16\n"
@@ -168,9 +168,9 @@ suite "full turn lifecycle":
     check g.cellAt(3, 0).fgColorIdx == 244
 
   test "tool exec: bar+prompt visible during runAction (bar tick)":
-    # Production sequence: paintBarPrompt → withCleared(\n + content)
+    # Production sequence: paintBarPrompt → screenWriteTranscript(\n + content)
     # → startBarTick → runAction (no writes, bar ticks) → stopBarTick
-    # → withCleared(renderToolBanner + printToolResult + repaint).
+    # → screenWriteTranscript(renderToolBanner + printToolResult + repaint).
     # The KEY property: during runAction the bar stays visible and ticks
     # elapsed seconds — runAction can take seconds and the user sees a
     # live counter instead of a frozen screen.
@@ -179,7 +179,7 @@ suite "full turn lifecycle":
     g.feed barFooterBytes("LBL  0s", DimPromptColor)
     check "LBL" in rowText(g, 0)
     check "❯" in rowText(g, 1)
-    # withCleared writes \n + assistant content, repaints bar.
+    # screenWriteTranscript writes \n + assistant content, repaints bar.
     g.feed ClearBarPromptBytes
     g.feed "\n"
     g.feed barFooterBytes("LBL  0s", DimPromptColor)
@@ -202,7 +202,7 @@ suite "full turn lifecycle":
     check g.cellAt(barRow + 1, 0).fgColor == col256
     check g.cellAt(barRow + 1, 0).fgColorIdx == 244
     # runAction completes, stopBarTick. Result phase:
-    # withCleared clears bar, writes result, repaints.
+    # screenWriteTranscript clears bar, writes result, repaints.
     g.feed ClearBarPromptBytes
     g.feed "  bash   ls  (1s)\n"
     g.feed "  total 16\n"
@@ -228,7 +228,7 @@ suite "full turn lifecycle":
     # Iter 1 stream end.
     g.feed "● iter 1 content\n"
     g.feed barFooterBytes("        ↓18  1s", DimPromptColor)
-    # Tool exec under withCleared.
+    # Tool exec under screenWriteTranscript.
     g.feed ClearBarPromptBytes
     g.feed "  bash   ls\n"
     g.feed "  total 16\n"

@@ -60,7 +60,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
     messages.add msg
     saveSession(session, messages)
     if interrupted:
-      withCleared:
+      screenWriteTranscript:
         stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
       interrupted = false
       return
@@ -70,7 +70,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
     of caSummarize:
       summarized = summarizeHistory(messages, p)
       if summarized > 0:
-        withCleared:
+        screenWriteTranscript:
           hintLn &"  · summarized {summarized} old message" &
             (if summarized == 1: "" else: "s") &
             &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)",
@@ -83,7 +83,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
        usage.promptTokens.float > CompactThresholdFrac * window.float:
       let n = compactHistory(messages)
       if n > 0:
-        withCleared:
+        screenWriteTranscript:
           hintLn &"  · compacted {n} old tool result" &
             (if n == 1: "" else: "s") &
             &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)",
@@ -99,14 +99,14 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
     if toolCalls.len > 0:
       debugOut $toolCalls.len & " tool calls"
       # Each emit (blank row, assistant content, pending banner, tool
-      # output, halt notice) is wrapped in its own `withCleared` so
+      # output, halt notice) is wrapped in `screenWriteTranscript` so
       # bar+prompt are repainted directly below after the write. The
       # bar+prompt remain on screen for the entire tool exec — including
       # the seconds while runAction blocks on the bash command between
       # the pending banner and the timed result. (Wrapping the whole
-      # block in one withCleared is wrong: it clears at start, repaints
+      # block in one transcript write is wrong: it clears at start, repaints
       # at end, so bar/prompt are invisible while the command runs.)
-      withCleared:
+      screenWriteTranscript:
         stdout.write "\n"
         if content.strip.len > 0 and not streamedLive:
           renderAssistantContent(content)
@@ -156,26 +156,25 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
               let termH = try: terminalHeight() except CatchableError: 24
               # Scrolling region: rows 1..termH-2, leaving bar+prompt
               # pinned at the bottom two rows.
-              stdout.write &"\x1b[1;{termH - 2}r"
-              # Cursor at bottom of scrolling region
-              stdout.write &"\x1b[{termH - 2};1H"
-              renderToolBanner(bannerFor(act), akBash, -1)
-              stdout.flushFile()
-              var sv = initStreamingView(StreamMaxLines, idx)
-              let result = runActionStreaming(act, session.readCache,
-                proc(line: string) = sv.addLine(line))
-              sv.erase()
-              # Erase the initial banner row
-              stdout.write "\x1b[1A\x1b[2K"
-              let elapsed = (epochTime() - toolT0).int
-              renderToolBanner(bannerFor(act), akBash, result.code, elapsed)
-              printToolResult(akBash, result.output, result.code, idx,
-                result.diff)
-              # Reset scrolling region, position cursor at bar row
-              stdout.write "\x1b[r"
-              stdout.write &"\x1b[{termH - 1};1H"
-              repaintBarPrompt()
-              result
+              enterToolViewport(termH)
+              try:
+                renderToolBanner(bannerFor(act), akBash, -1)
+                stdout.flushFile()
+                var sv = initStreamingView(StreamMaxLines, idx)
+                let result = runActionStreaming(act, session.readCache,
+                  proc(line: string) = sv.addLine(line))
+                sv.erase()
+                # Erase the initial banner row
+                stdout.write "\x1b[1A\x1b[2K"
+                let elapsed = (epochTime() - toolT0).int
+                renderToolBanner(bannerFor(act), akBash, result.code, elapsed)
+                printToolResult(akBash, result.output, result.code, idx,
+                  result.diff)
+                result
+              finally:
+                # Reset scrolling region, position cursor at bar row.
+                leaveToolViewport(termH)
+                repaintBarPrompt()
             else:
               runAction(act, session.readCache)
         finally:
@@ -187,13 +186,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
 
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
         if not silent and act.kind != akBash:
-          withCleared:
+          screenWriteTranscript:
             renderToolBanner(bannerFor(act), act.kind, code, toolElapsed.int)
             printToolResult(act.kind, r, code, idx, diff)
         elif not silent:
           discard  # bash already rendered above
         else:
-          withCleared:
+          screenWriteTranscript:
             printSkillLoaded(act)
         # Loop guard: fingerprint the call and decide whether to annotate the
         # tool result (Strike 1) or halt further tool calls (Strike 2). The
@@ -237,13 +236,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           session.loop = initLoopTracker()
           session.readCache = nil
           session.plan.setLen 0
-          clearPendingHint(screenState)
-          clearFooterBar(screenState)
+          emitScreenEvent clearPendingHintEvent()
+          emitScreenEvent clearBarEvent()
           if session.savePath != "":
             session.savePath = newSessionPath()
             session.created = $now()
             session.cwd = getCurrentDir()
-          withCleared:
+          screenWriteTranscript:
             stdout.write OffWhiteFg
             for line in freshMsg.strip.splitLines:
               stdout.write "  "
@@ -254,16 +253,16 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           cleared = true
           break
       if cleared:
-        clearPendingHint(screenState)
+        emitScreenEvent clearPendingHintEvent()
         continue
       saveSession(session, messages)
       if interrupted:
-        withCleared:
+        screenWriteTranscript:
           stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
         interrupted = false
         return
       if halt:
-        withCleared:
+        screenWriteTranscript:
           if session.loop.recoveryCmd != "":
             errLn "⊘  working-tree recovery: `",
               session.loop.recoveryCmd, "` wiped state"
@@ -280,17 +279,17 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         let rl = tokenLineLabel(pendingHint.usage, pendingHint.window,
                                 pendingHint.elapsed)
         if rl.len > 0:
-          withCleared:
+          screenWriteTranscript:
             stdout.writeLine CyanFg & "  " & rl & Reset
-        clearPendingHint(screenState)
+        emitScreenEvent clearPendingHintEvent()
       debugOut "runTurns: loop continue"
       continue
     if content.strip.len > 0:
       if not streamedLive:
-        withCleared:
+        screenWriteTranscript:
           renderAssistantContent(content)
     else:
-      withCleared:
+      screenWriteTranscript:
         stdout.styledWriteLine styleDim,
           "  (empty reply — no content, no tool calls)", resetStyle
     break
@@ -566,8 +565,8 @@ proc main() =
       let tw = try: terminalWidth() except CatchableError: 0
       stdout.write barFooterBytes(label, BrightPromptColor, tw)
       stdout.flushFile
-      setFooterBar(screenState, label, hasGap = true)
-      setPendingHint(screenState, lastUsage, window, -1)
+      emitScreenEvent setBarEvent(label, hasGap = true)
+      emitScreenEvent setPendingHintEvent(lastUsage, window, -1)
     else:
       paintInitialBar(prof)
     if prompt != "":

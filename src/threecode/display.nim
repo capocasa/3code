@@ -121,8 +121,9 @@ proc subtleWriteLn*(outFile: File, body: string) =
   outFile.write Reset
   outFile.write "\r\n"
 
-# `withCleared` lives in `api.nim` now — it owns `currentBarLabel`,
-# the cached bar payload that drives repaint after a content write.
+# `screenWriteTranscript` lives in `api.nim` now — it owns
+# `currentBarLabel`, the cached bar payload that drives repaint after a
+# content write.
 # `display.nim`'s job here is purely formatting: receipts, banners,
 # diff coloring, the welcome screen, etc.
 

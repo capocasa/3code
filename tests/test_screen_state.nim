@@ -2,6 +2,27 @@ import std/unittest
 import threecode/[api, screen, types]
 
 suite "screen state":
+  test "events reduce to visible footer state":
+    var s = initScreenState()
+    s.apply setModeEvent(smToolStreaming)
+    s.apply setPromptModeEvent(pmTurnRunning)
+    s.apply setBarEvent("LBL", hasGap = true)
+    s.apply setTickerEvent("thinking")
+
+    check s.mode == smToolStreaming
+    check s.footer.promptMode == pmTurnRunning
+    check s.footer.barLabel == "LBL"
+    check s.footer.hasGap
+    check s.footer.ticker == "thinking"
+
+    s.apply clearTickerEvent()
+    s.apply clearBarEvent()
+    s.apply setModeEvent(smNormal)
+    check s.mode == smNormal
+    check s.footer.ticker == ""
+    check s.footer.barLabel == ""
+    check not s.footer.hasGap
+
   test "footer bar and pending receipt live in one state object":
     var s = initScreenState()
     check s.mode == smNormal

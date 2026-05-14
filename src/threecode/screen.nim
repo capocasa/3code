@@ -35,20 +35,105 @@ type
     mode*: ScreenMode
     footer*: FooterState
 
+  ScreenEventKind* = enum
+    seSetMode,
+    seSetPromptMode,
+    seSetBar,
+    seClearBar,
+    seSetTicker,
+    seClearTicker,
+    seSetPendingHint,
+    seClearPendingHint
+
+  ScreenEvent* = object
+    case kind*: ScreenEventKind
+    of seSetMode:
+      mode*: ScreenMode
+    of seSetPromptMode:
+      promptMode*: PromptMode
+    of seSetBar:
+      barLabel*: string
+      barHasGap*: bool
+    of seSetTicker:
+      ticker*: string
+    of seSetPendingHint:
+      usage*: Usage
+      window*: int
+      elapsed*: int
+    of seClearBar, seClearTicker, seClearPendingHint:
+      discard
+
 proc initScreenState*(): ScreenState =
   ScreenState(mode: smNormal, footer: FooterState(promptMode: pmIdle))
 
+proc setModeEvent*(mode: ScreenMode): ScreenEvent =
+  ScreenEvent(kind: seSetMode, mode: mode)
+
+proc setPromptModeEvent*(mode: PromptMode): ScreenEvent =
+  ScreenEvent(kind: seSetPromptMode, promptMode: mode)
+
+proc setBarEvent*(label: string; hasGap = false): ScreenEvent =
+  ScreenEvent(kind: seSetBar, barLabel: label, barHasGap: hasGap)
+
+proc clearBarEvent*(): ScreenEvent =
+  ScreenEvent(kind: seClearBar)
+
+proc setTickerEvent*(ticker: string): ScreenEvent =
+  ScreenEvent(kind: seSetTicker, ticker: ticker)
+
+proc clearTickerEvent*(): ScreenEvent =
+  ScreenEvent(kind: seClearTicker)
+
+proc setPendingHintEvent*(usage: Usage; window, elapsed: int): ScreenEvent =
+  ScreenEvent(kind: seSetPendingHint, usage: usage, window: window,
+              elapsed: elapsed)
+
+proc clearPendingHintEvent*(): ScreenEvent =
+  ScreenEvent(kind: seClearPendingHint)
+
+proc apply*(s: var ScreenState; ev: ScreenEvent) =
+  case ev.kind
+  of seSetMode:
+    s.mode = ev.mode
+  of seSetPromptMode:
+    s.footer.promptMode = ev.promptMode
+  of seSetBar:
+    s.footer.barLabel = ev.barLabel
+    s.footer.hasGap = ev.barHasGap
+  of seClearBar:
+    s.footer.barLabel = ""
+    s.footer.hasGap = false
+  of seSetTicker:
+    s.footer.ticker = ev.ticker
+  of seClearTicker:
+    s.footer.ticker = ""
+  of seSetPendingHint:
+    s.footer.pendingHint = PendingHint(active: true, usage: ev.usage,
+                                       window: ev.window,
+                                       elapsed: ev.elapsed)
+  of seClearPendingHint:
+    s.footer.pendingHint = PendingHint()
+
 proc setFooterBar*(s: var ScreenState; label: string; hasGap = false) =
-  s.footer.barLabel = label
-  s.footer.hasGap = hasGap
+  s.apply setBarEvent(label, hasGap)
 
 proc clearFooterBar*(s: var ScreenState) =
-  s.footer.barLabel = ""
-  s.footer.hasGap = false
+  s.apply clearBarEvent()
 
 proc setPendingHint*(s: var ScreenState; usage: Usage; window, elapsed: int) =
-  s.footer.pendingHint = PendingHint(active: true, usage: usage,
-                                     window: window, elapsed: elapsed)
+  s.apply setPendingHintEvent(usage, window, elapsed)
 
 proc clearPendingHint*(s: var ScreenState) =
-  s.footer.pendingHint = PendingHint()
+  s.apply clearPendingHintEvent()
+
+proc setFooterTicker*(s: var ScreenState; ticker: string) =
+  s.apply setTickerEvent(ticker)
+
+proc clearFooterTicker*(s: var ScreenState) =
+  s.apply clearTickerEvent()
+
+proc setScreenMode*(s: var ScreenState; mode: ScreenMode) =
+  s.apply setModeEvent(mode)
+
+proc setPromptMode*(s: var ScreenState; mode: PromptMode) =
+  s.apply setPromptModeEvent(mode)
