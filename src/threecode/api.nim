@@ -445,18 +445,12 @@ proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
   ## only code allowed to paint those rows.
   if not liveEditorFooterAnchored():
     return
-  refreshEditorWidth(ed)
-  var bytes = SyncBegin & "\x1b[?25l\r"
-  if inputEditorReady.load(moAcquire):
-    bytes.add "\x1b[" & $(ed.renderRow + 1) & "A"
-  bytes.add "\x1b[J"
-  if currentBarLabel.len > 0:
-    bytes.add paintBarBytes(currentBarLabel)
-  else:
-    bytes.add "\r\x1b[2K"
-  bytes.add "\r\n"
-  ed.write bytes
-  ed.renderRow = 0
+  terminal_owner.beginEditorRedraw(
+    ed,
+    inputEditorReady.load(moAcquire),
+    currentBarLabel,
+    paintBarBytes(currentBarLabel),
+    SyncBegin)
 
 proc screenRenderFooterFrame*(s: string) {.gcsafe.} =
   ## Like ``screenRenderSync`` for turn-time footer animations, but if the
@@ -920,11 +914,15 @@ proc enterPromptInput*(promptColor: string) =
   ## placeholder.
   if currentBarLabel.len > 0:
     clearBarPrompt()
-    stdout.write barFooterBytes(currentBarLabel, promptColor, currentTermW())
-    stdout.write "\x1b[1B"
+    terminal_owner.enterPromptInput(
+      true,
+      barFooterBytes(currentBarLabel, promptColor, currentTermW()),
+      "")
   else:
-    stdout.write "\r\x1b[2K" & promptColor & "❯ " & Reset & "\r"
-  stdout.flushFile
+    terminal_owner.enterPromptInput(
+      false,
+      "",
+      "\r\x1b[2K" & promptColor & "❯ " & Reset & "\r")
 
 proc resetPromptInputAfterEmpty*(echoRows: int; promptColor: string) =
   ## Empty submission should leave the prompt/footer at the same visual
@@ -932,11 +930,21 @@ proc resetPromptInputAfterEmpty*(echoRows: int; promptColor: string) =
   ## input height, including wraps.
   let n = max(1, echoRows)
   if currentBarLabel.len == 0:
-    stdout.write "\x1b[" & $n & "A\r\x1b[J"
-    paintPromptOnly(promptColor)
+    terminal_owner.resetPromptInputAfterEmpty(
+      false,
+      n,
+      "\x1b[2K" & promptColor & "❯ " & Reset & "\r",
+      "")
+    emitScreenEvent clearBarEvent()
   else:
-    stdout.write "\x1b[" & $(n + 1) & "A\r\x1b[J"
-    repaintBarPrompt(promptColor)
+    let cursor =
+      if promptColor == DimPromptColor: "\x1b[?25l"
+      else: "\x1b[?25h"
+    terminal_owner.resetPromptInputAfterEmpty(
+      true,
+      n,
+      "",
+      cursor & barFooterBytes(currentBarLabel, promptColor, currentTermW()))
 
 proc enterToolViewport*(termH: int) =
   ## Enter the bounded live tool-output viewport while preserving the
@@ -946,20 +954,16 @@ proc enterToolViewport*(termH: int) =
   emitScreenEvent setModeEvent(smToolStreaming)
   let footerRows = 1 + liveEditorRows()
   let scrollBottom = max(1, termH - footerRows)
-  stdout.write &"\x1b[1;{scrollBottom}r"
-  stdout.write &"\x1b[{scrollBottom};1H"
-  stdout.flushFile()
+  terminal_owner.setToolViewport(true, scrollBottom, liveBarRow(termH),
+                                 liveEditorFooterAnchored())
 
 proc leaveToolViewport*(termH: int) =
   ## Leave the bounded live tool-output viewport and return to normal
   ## transcript rendering with the cursor on the bar row.
   if liveEditorFooterAnchored():
-    stdout.write "\x1b[r"
-    stdout.flushFile()
+    terminal_owner.setToolViewport(false, termH, liveBarRow(termH), true)
   else:
-    stdout.write "\x1b[r"
-    stdout.write &"\x1b[{liveBarRow(termH)};1H"
-    stdout.flushFile()
+    terminal_owner.setToolViewport(false, termH, liveBarRow(termH), false)
   emitScreenEvent setModeEvent(smNormal)
 
 proc endTurnBytes*(label, promptColor: string, repaintPrompt: bool,
@@ -1084,7 +1088,7 @@ proc paintInitialBar*(p: Profile) =
   ## haven't sent a request yet, so promptTokens is 0). Bright cyan
   ## prompt — typing-ready. Sets `currentBarHasGap = true` to match
   ## `endTurn`'s shape between turns.
-  stdout.write "\n"
+  terminal_owner.writeRaw("\n")
   let window = contextWindowFor(p.model)
   let baseLabel = contextLabel(0, window)
   paintBarPrompt(liveLabel(baseLabel, 0), BrightPromptColor)
@@ -1100,8 +1104,7 @@ proc paintPromptOnly*(promptColor: string) =
   ## Leaves `currentBarLabel = ""` and `currentBarHasGap = false` —
   ## the signals `readInput`, `emitUserSubmit`, and the slash-command
   ## repaint use to detect prompt-only mode.
-  stdout.write "\x1b[2K" & promptColor & "❯ " & Reset & "\r"
-  stdout.flushFile
+  terminal_owner.writeRaw("\x1b[2K" & promptColor & "❯ " & Reset & "\r")
   emitScreenEvent clearBarEvent()
 
 proc paintInitialPrompt*(p: Profile) =
@@ -1262,18 +1265,19 @@ proc startContent(s: var LiveMarkdownStream, slurpedNow: int) =
   let hadBufferedSubmit = bufferedSubmitTurn.load(moRelaxed)
   bufferedSubmitTurn.store(false, moRelaxed)
   stopSpinner()
-  if inputThreadRunning and inputEditor != nil:
-    stdout.write "\r"
-    if hadBufferedSubmit:
-      discard
-    elif hadSpinnerFrame:
-      stdout.write "\x1b[1A\x1b[2K"
-    else:
-      clearBarPrompt()
-  stdout.styledWrite(styleBright, "● ", resetStyle)
-  s.started = true
-  paintBarBelow(s.currentLabel(slurpedNow), DimPromptColor)
-  s.liveBarBelow = true
+  withRenderLock:
+    if inputThreadRunning and inputEditor != nil:
+      stdout.write "\r"
+      if hadBufferedSubmit:
+        discard
+      elif hadSpinnerFrame:
+        stdout.write "\x1b[1A\x1b[2K"
+      else:
+        clearBarPrompt()
+    stdout.styledWrite(styleBright, "● ", resetStyle)
+    s.started = true
+    paintBarBelow(s.currentLabel(slurpedNow), DimPromptColor)
+    s.liveBarBelow = true
 
 proc advanceLiveCol(s: var LiveMarkdownStream, text: string) =
   let termW = max(1, try: terminalWidth() except CatchableError: 80)
@@ -1331,23 +1335,24 @@ proc suppressLiveAssistantStream(): bool =
 proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
   if chunk.len == 0: return
   if suppressLiveAssistantStream(): return
-  var data = s.utf8Pending & chunk
-  s.utf8Pending = ""
-  var i = 0
-  while i < data.len:
-    if data[i] == '\n':
-      let rendered = s.captureMd(s.pendingLine)
-      s.pendingLine = ""
-      s.writeRendered(rendered, slurpedNow)
-      inc i
-    else:
-      let charLen = utf8LenAt(data, i)
-      if i + charLen > data.len:
-        s.utf8Pending = data[i .. ^1]
-        break
-      s.pendingLine.add data[i ..< i + charLen]
-      i += charLen
-  stdout.flushFile()
+  withRenderLock:
+    var data = s.utf8Pending & chunk
+    s.utf8Pending = ""
+    var i = 0
+    while i < data.len:
+      if data[i] == '\n':
+        let rendered = s.captureMd(s.pendingLine)
+        s.pendingLine = ""
+        s.writeRendered(rendered, slurpedNow)
+        inc i
+      else:
+        let charLen = utf8LenAt(data, i)
+        if i + charLen > data.len:
+          s.utf8Pending = data[i .. ^1]
+          break
+        s.pendingLine.add data[i ..< i + charLen]
+        i += charLen
+    stdout.flushFile()
 
 proc finishContent*(s: var LiveMarkdownStream, slurpedNow: int) =
   if suppressLiveAssistantStream(): return
@@ -1972,16 +1977,17 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       if accContent[i] == '\n': inc trailingNl
       else: break
     if trailingNl > 1:
-      if live.liveBarAtCursor:
-        clearBarPrompt()
-        live.liveBarAtCursor = false
-      elif live.liveBarBelow:
-        stdout.write ClearBarBelowBytes
-        stdout.flushFile
-        live.liveBarBelow = false
-      for _ in 0 ..< trailingNl - 1:
-        stdout.write "\x1b[1A\x1b[2K"
-      paintBarPrompt(live.currentLabel(slurped), DimPromptColor)
+      withRenderLock:
+        if live.liveBarAtCursor:
+          clearBarPrompt()
+          live.liveBarAtCursor = false
+        elif live.liveBarBelow:
+          stdout.write ClearBarBelowBytes
+          stdout.flushFile
+          live.liveBarBelow = false
+        for _ in 0 ..< trailingNl - 1:
+          stdout.write "\x1b[1A\x1b[2K"
+        paintBarPrompt(live.currentLabel(slurped), DimPromptColor)
     contentStreamedLive = true
     # Normalize cursor to bar row col 0. The streaming loop may have left
     # the cursor in the content area (liveBarBelow case); move it down to
@@ -2218,9 +2224,7 @@ proc inputThreadProc() {.thread.} =
       let hasPendingInput: minline.HasPendingInputProc = nil
 
     let writeProc: minline.WriteProc = proc(s: string) =
-      withRender:
-        stdout.write s
-        stdout.flushFile
+      terminal_owner.writeRaw(s)
 
     edPtr[].onMutate = proc(ed: var minline.LineEditor) =
       acquire inputStateLock
@@ -2249,9 +2253,7 @@ proc inputThreadProc() {.thread.} =
     edPtr[].preRedraw = proc(ed: var minline.LineEditor) =
       reserveEditorFooterForRedraw(ed)
     edPtr[].postRedraw = proc(ed: var minline.LineEditor) =
-      stdout.write "\x1b[?25h"
-      stdout.write SyncEnd
-      stdout.flushFile()
+      terminal_owner.finishEditorRedraw(SyncEnd)
       inputEditorReady.store(true, moRelease)
 
     when defined(posix):
@@ -2286,10 +2288,9 @@ proc inputThreadProc() {.thread.} =
             discard turnHandleCommand(text)
           withRender:
             enterPromptInput(TurnPromptColor)
-            stdout.write edPtr[].redrawBytes()
+            terminal_owner.writeRaw(edPtr[].redrawBytes())
             if edPtr[].postRedraw != nil:
               edPtr[].postRedraw(edPtr[])
-            stdout.flushFile()
           if text.strip in [":q", ":quit", ":exit"]:
             acquire inputStateLock
             try:
@@ -2348,8 +2349,7 @@ proc beginTurn*() =
   ## Hide the terminal caret for the duration of the turn — the dim
   ## ❯ glyph (still painted, just not blinking) is the only
   ## visible marker while typing isn't possible.
-  stdout.write "\x1b[?25l"
-  stdout.flushFile
+  terminal_owner.hideCaret()
   emitScreenEvent setPromptModeEvent(pmTurnRunning)
   if inputEditor != nil and not inputThreadRunning:
     acquire inputStateLock
@@ -2391,29 +2391,31 @@ proc endTurn*(repaintPrompt = true) =
     joinThread(inputThread)
     inputThreadRunning = false
   leaveTurnScrollRegion()
-  if hadInputThread and inputEditor != nil:
-    let up =
-      if currentBarLabel.len > 0: inputEditor[].renderRow + 1
-      else: inputEditor[].renderRow
-    stdout.write "\r"
-    if up > 0:
-      stdout.write "\x1b[" & $up & "A"
-  if screenState.footer.ticker.len > 0:
+  let hadTicker = screenState.footer.ticker.len > 0
+  if hadTicker:
     emitScreenEvent clearTickerEvent()
-    stdout.write "\r\x1b[1A\x1b[2K\x1b[1B"
+  let hadBar = currentBarLabel.len > 0
+  var bytes = ""
+  var label = ""
+  if hadBar:
+    label = currentBarLabel
+    bytes = endTurnBytes(label, BrightPromptColor, repaintPrompt, currentTermW())
+  else:
+    bytes = endTurnBytes("", BrightPromptColor, repaintPrompt)
+  terminal_owner.endTurn(
+    hadInputThread,
+    inputEditor,
+    hadBar,
+    bytes,
+    hadTicker,
+    "\r\x1b[1A\x1b[2K\x1b[1B")
   if currentBarLabel.len > 0:
-    let label = currentBarLabel
-    stdout.write endTurnBytes(label, BrightPromptColor, repaintPrompt,
-                              currentTermW())
     if repaintPrompt:
       emitScreenEvent setBarEvent(label, hasGap = true)
     else:
       emitScreenEvent clearBarEvent()
-  else:
-    stdout.write endTurnBytes("", BrightPromptColor, repaintPrompt)
   if repaintPrompt:
     emitScreenEvent setPromptModeEvent(pmIdle)
-  stdout.flushFile
 
 proc emitUserSubmit*(line: string, echoRows = -1) =
   ## Run the user-submit transition described in `submitTransitionBytes`
@@ -2435,9 +2437,9 @@ proc emitUserSubmit*(line: string, echoRows = -1) =
     else: ""
   let hadGap = currentBarHasGap
   let hasBar = currentBarLabel.len > 0
-  stdout.write submitTransitionBytes(line, pendingHint.active, hadGap,
-                                     receiptLabel, hasBar, echoRows)
-  stdout.flushFile
+  terminal_owner.submitUser(
+    submitTransitionBytes(line, pendingHint.active, hadGap, receiptLabel,
+                          hasBar, echoRows))
   emitScreenEvent clearPendingHintEvent()
   emitScreenEvent clearBarEvent()
 
@@ -2452,12 +2454,11 @@ proc emitBufferedUserSubmit*(line: string) =
   let hadGap = currentBarHasGap
   let hasBar = currentBarLabel.len > 0
   let editorRows = max(1, minline.totalRows(line, 2, 2, currentTermW()))
-  stdout.write "\r"
-  if hasBar:
-    stdout.write "\x1b[" & $(editorRows + 1) & "A"
-  stdout.write bufferedSubmitTransitionBytes(line, pendingHint.active, hadGap,
-                                             receiptLabel, hasBar)
-  stdout.flushFile
+  terminal_owner.submitBufferedUser(
+    editorRows,
+    hasBar,
+    bufferedSubmitTransitionBytes(line, pendingHint.active, hadGap,
+                                  receiptLabel, hasBar))
   bufferedSubmitTurn.store(false, moRelaxed)
   emitScreenEvent clearPendingHintEvent()
   emitScreenEvent clearBarEvent()
@@ -2470,8 +2471,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       let stubBaseLabel = contextLabel(lastPromptTokens, stubWindow)
       withRenderLock:
         enterTurnScrollRegion()
-        stdout.write "\n"
-        stdout.flushFile()
+        terminal_owner.writeRaw("\n")
       setSpinLabel(liveLabel(stubBaseLabel, 0))
       startSpinner("")
       startQuietWatch(liveLabel(stubBaseLabel, 0))
@@ -2623,8 +2623,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   # row.
   withRenderLock:
     enterTurnScrollRegion()
-    stdout.write "\n"
-    stdout.flushFile()
+    terminal_owner.writeRaw("\n")
   setSpinLabel(liveLabel(baseLabel, 0))
   # Cursor is hidden for the duration of the entire turn by `runTurns`
   # so the dim ❯ placeholder is the only visible caret. callModel
@@ -2736,7 +2735,6 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   else:
     screenWriteTranscript:
       hint &"  · {elapsed.int}s", resetStyle, "\n"
-  stdout.flushFile
   if outcome.assistantMsg != nil and usage.totalTokens > 0:
     # Attach this turn's usage inline so replay can render the same
     # token line without a parallel array that drifts under summarization.
