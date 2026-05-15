@@ -787,18 +787,13 @@ proc addUserEcho(result: var string, line: string; trailingNewline = true) =
 proc bufferedSubmitTransitionBytes*(line: string, hadPending, hadGap: bool,
                                     receiptLabel: string,
                                     hasBar = true): string =
-  ## User submitted while a turn was running. By the time the outer REPL
-  ## drains the queued text, ``endTurn`` has already repainted the
-  ## typing-ready footer and parked the cursor on the bar row, not below
-  ## the user's readline echo. This transition starts from that footer
-  ## anchor instead of using ``submitTransitionBytes``'s readline-relative
-  ## walkback.
+  ## User submitted while a turn was running. The live editor is still on
+  ## screen; `submitBufferedUser` walks from the deferred-submit cursor back
+  ## to the token bar row, and this transition lands on the gap/receipt row.
   if not hasBar:
     result = "\r\x1b[J"
     result.addUserEcho(line)
     return
-  if hadGap:
-    result = "\x1b[1A"
   result.add "\r\x1b[J"
   if hadPending:
     result.add receiptBarBytes(receiptLabel)

@@ -254,6 +254,17 @@ proc assertNoBlankBetween(tty: TtySession; upperMarker, lowerMarker: string) =
     "visual test never captured adjacent pair `" & upperMarker & "` and `" &
       lowerMarker & "`"
 
+proc assertOrderedRows(tty: TtySession; markers: openArray[string]) =
+  for frame in tty.frames:
+    var next = 0
+    for row in frame.rows:
+      if next < markers.len and markers[next] in row:
+        inc next
+    if next == markers.len:
+      return
+  doAssert false,
+    "visual test never captured ordered markers: " & markers.join(" -> ")
+
 suite "terminal visual contract":
   test "fat prompt remains stable through streaming, tools, and buffered input":
     let root = newFixture("visual")
@@ -279,6 +290,27 @@ suite "terminal visual contract":
           "totalTokens": 128,
           "cachedTokens": 32
         }
+      },
+      {
+        "role": "assistant",
+        "preStreamDelayMs": 900,
+        "content": "yes it is",
+        "usage": {
+          "promptTokens": 16,
+          "completionTokens": 36,
+          "totalTokens": 52,
+          "cachedTokens": 3200
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Sure is. Let me know when you have a real task.",
+        "usage": {
+          "promptTokens": 31,
+          "completionTokens": 31,
+          "totalTokens": 62,
+          "cachedTokens": 3200
+        }
       }
     ])
 
@@ -299,7 +331,22 @@ suite "terminal visual contract":
     tty.expectInHistory "second-tool"
     tty.expectInHistory "Buffered prompt answered."
     tty.expectTokenBar(["○", "↑88", "↻32", "↓8"])
+    tty.send "this is a test\n"
+    tty.expectTokenBar(["○"])
+    tty.send "and this is another\n"
+    tty.expectInHistory "yes it is"
+    tty.expectInHistory "Sure is. Let me know when you have a real task."
     tty.assertFatPromptFrames()
+    tty.assertOrderedRows([
+      "❯ this is a test",
+      "● yes it is",
+      "↻3.2k  ↓36",
+      "❯ and this is another",
+      "● Sure is. Let me know when you have a real task.",
+      "↻3.2k  ↓31"
+    ])
+    tty.assertOneBlankBetween("❯ this is a test", "● yes it is")
+    tty.assertOneBlankBetween("❯ and this is another", "● Sure is.")
     tty.send ":q\n"
     tty.expectExit 0
 
