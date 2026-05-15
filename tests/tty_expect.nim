@@ -14,6 +14,7 @@ type
     ms*: int
     rows*: seq[string]
     changedRows*: seq[int]
+    cursorRow*, cursorCol*: int
 
   TtySession* = ref object
     masterFd*: cint
@@ -27,6 +28,10 @@ type
     keepHistory*: bool
     closed*: bool
     syncDepth*: int
+
+const
+  DefaultTtyCols* = 120
+  DefaultTtyRows* = 40
 
 proc openpty(masterFd, slaveFd: ptr cint; name: pointer; termp: pointer;
              winp: pointer): cint {.cdecl, importc: "openpty",
@@ -82,7 +87,9 @@ proc rememberFrame(s: TtySession) =
   s.frames.add TtyFrame(
     ms: int((epochTime() - s.started) * 1000.0),
     rows: rows,
-    changedRows: changed)
+    changedRows: changed,
+    cursorRow: s.grid.row,
+    cursorCol: s.grid.col)
 
 proc noteSyncState(s: TtySession; chunk: string) =
   var i = 0
@@ -138,6 +145,8 @@ proc drain*(s: TtySession; settleMs = 20) =
 
 proc resize*(s: TtySession; cols, rows: int): bool {.discardable.} =
   ## Resize the PTY and send SIGWINCH to the child. POSIX only.
+  s.grid.width = max(1, cols)
+  s.grid.height = max(1, rows)
   var ws = IOctl_WinSize(ws_row: rows.cushort, ws_col: cols.cushort,
                          ws_xpixel: 0, ws_ypixel: 0)
   result = ioctl(s.masterFd, TIOCSWINSZ, addr ws) == 0
@@ -146,7 +155,7 @@ proc resize*(s: TtySession; cols, rows: int): bool {.discardable.} =
 
 proc newTtySession*(bin: string; args: openArray[string] = [];
                     cwd = ""; env: openArray[EnvVar] = [];
-                    cols = 80; rows = 24;
+                    cols = DefaultTtyCols; rows = DefaultTtyRows;
                     keepHistory = true): TtySession =
   ## Start `bin` under a real PTY with an isolated environment.
   ##
@@ -285,7 +294,7 @@ proc dumpFramesAround*(s: TtySession; text: string; radius = 2): string =
 
 proc framesText*(s: TtySession): string =
   for i, frame in s.frames:
-    result.add &"===== frame {i:04d} @{frame.ms}ms changed={frame.changedRows} =====\n"
+    result.add &"===== frame {i:04d} @{frame.ms}ms changed={frame.changedRows} cursor=({frame.cursorRow},{frame.cursorCol}) =====\n"
     for row in frame.rows:
       result.add row
       result.add "\n"

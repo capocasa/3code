@@ -440,6 +440,8 @@ proc liveEditorFooterAnchored*(): bool =
   inputThreadRunning and inputEditor != nil and terminalHeight() > 0 and
     stdout.isatty
 
+proc paintBarBytes*(label: string): string
+
 proc liveFooterRows(): int =
   1 + liveEditorRows()
 
@@ -453,23 +455,16 @@ proc enterTurnScrollRegion*() =
   ## During an active turn the editor is always live. Reserve the bottom
   ## footer rows (token bar + editor rows) as non-scrolling territory so
   ## model/tool transcript output cannot push the prompt into scrollback.
-  if not liveEditorFooterAnchored():
-    return
-  let termH = terminalHeight()
-  stdout.write turnScrollRegionBytes(termH, liveFooterRows())
-  stdout.flushFile()
+  discard
 
 proc parkTranscriptCursor() =
   ## Put subsequent transcript output on the scrolling row above the
   ## reserved editor footer. This is the only legal output row while the
   ## always-live editor owns the terminal floor.
-  enterTurnScrollRegion()
+  discard
 
 proc leaveTurnScrollRegion*() =
-  if terminalHeight() <= 0 or not stdout.isatty:
-    return
-  stdout.write "\x1b[r"
-  stdout.flushFile()
+  discard
 
 proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
   ## Called by the editor before every redraw while a turn is active.
@@ -479,11 +474,17 @@ proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
   ## only code allowed to paint those rows.
   if not liveEditorFooterAnchored():
     return
-  let termH = terminalHeight()
   refreshEditorWidth(ed)
-  let editorRows = max(1, minline.renderedRows(ed))
-  ed.write SyncBegin & anchoredEditorFooterBytes(currentBarLabel, termH,
-                                                 editorRows)
+  var bytes = SyncBegin & "\x1b[?25l\r"
+  if inputEditorReady.load(moAcquire):
+    bytes.add "\x1b[" & $(ed.renderRow + 1) & "A"
+  bytes.add "\x1b[J"
+  if currentBarLabel.len > 0:
+    bytes.add paintBarBytes(currentBarLabel)
+  else:
+    bytes.add "\r\x1b[2K"
+  bytes.add "\r\n"
+  ed.write bytes
   ed.renderRow = 0
 
 proc screenRenderFooterFrame*(s: string) {.gcsafe.} =
@@ -498,25 +499,14 @@ proc screenRenderFooterFrame*(s: string) {.gcsafe.} =
         let edPtr = inputEditor
         stdout.write SyncBegin
         stdout.write "\x1b[?25l"
-        let termH = terminalHeight()
-        if termH > 0 and stdout.isatty:
-          refreshEditorWidth(edPtr[])
-          let editorRows = max(1, minline.renderedRows(edPtr[]))
-          let barRow = max(1, termH - editorRows)
-          let editorTop = min(termH, barRow + 1)
-          let scrollBottom = max(1, barRow - 1)
-          stdout.write &"\x1b[1;{scrollBottom}r"
-          stdout.write "\x1b[" & $barRow & ";1H"
-          stdout.write s
-          stdout.write "\x1b[" & $editorTop & ";1H"
-          edPtr[].renderRow = 0
-        else:
-          let up = edPtr[].renderRow + 1
-          stdout.write "\r"
-          if up > 0:
-            stdout.write "\x1b[" & $up & "A"
-          stdout.write s
-          stdout.write "\x1b[" & $up & "B"
+        refreshEditorWidth(edPtr[])
+        let up = edPtr[].renderRow + 1
+        stdout.write "\r"
+        if up > 0:
+          stdout.write "\x1b[" & $up & "A"
+        stdout.write s
+        stdout.write "\r\n"
+        edPtr[].renderRow = 0
         stdout.write edPtr[].redrawBytes()
         if edPtr[].postRedraw != nil:
           edPtr[].postRedraw(edPtr[])
@@ -1038,14 +1028,22 @@ template screenWriteTranscript*(body: untyped) =
       body
     if liveEditorFooterAnchored():
       let edPtr = inputEditor
-      let termH = terminalHeight()
       refreshEditorWidth(edPtr[])
-      let editorRows = max(1, minline.renderedRows(edPtr[]))
+      var transcript = transcriptBytes
+      while transcript.len > 0 and transcript[^1] in {'\r', '\n'}:
+        transcript.setLen(transcript.len - 1)
       stdout.write SyncBegin
-      stdout.write turnScrollRegionBytes(termH, 1 + editorRows)
-      stdout.write transcriptBytes
-      stdout.write anchoredEditorFooterBytes(currentBarLabel, termH,
-                                             editorRows)
+      stdout.write "\x1b[?25l\r"
+      stdout.write "\x1b[" & $(edPtr[].renderRow + 1) & "A"
+      stdout.write "\x1b[J"
+      if transcript.len > 0:
+        stdout.write transcript
+        stdout.write "\r\n"
+      if currentBarLabel.len > 0:
+        stdout.write paintBarBytes(currentBarLabel)
+      else:
+        stdout.write "\r\x1b[2K"
+      stdout.write "\r\n"
       edPtr[].renderRow = 0
       stdout.write edPtr[].redrawBytes()
       stdout.write "\x1b[?25h"
@@ -2495,11 +2493,17 @@ proc emitUserSubmit*(line: string, echoRows = -1) =
     else: ""
   let hadGap = currentBarHasGap
   let hasBar = currentBarLabel.len > 0
+  let hadPending = pendingHint.active
   stdout.write submitTransitionBytes(line, pendingHint.active, hadGap,
                                      receiptLabel, hasBar, echoRows)
   stdout.flushFile
   emitScreenEvent clearPendingHintEvent()
-  emitScreenEvent clearBarEvent()
+  if hadPending:
+    emitScreenEvent setBarEvent(receiptLabel)
+  elif hasBar:
+    emitScreenEvent setBarEvent(currentBarLabel)
+  else:
+    emitScreenEvent clearBarEvent()
 
 proc emitBufferedUserSubmit*(line: string) =
   ## Echo a prompt that was queued by the background input thread during
@@ -2512,15 +2516,14 @@ proc emitBufferedUserSubmit*(line: string) =
   let hadGap = currentBarHasGap
   let hasBar = currentBarLabel.len > 0
   let label = currentBarLabel
+  let editorRows = max(1, minline.totalRows(line, 2, 2, currentTermW()))
+  stdout.write "\r"
+  if hasBar:
+    stdout.write "\x1b[" & $(editorRows + 1) & "A"
   stdout.write bufferedSubmitTransitionBytes(line, pendingHint.active, hadGap,
                                              receiptLabel, hasBar)
   if label.len > 0:
-    let termH = try: terminalHeight() except CatchableError: 0
-    if termH > 0 and stdout.isatty:
-      stdout.write anchoredEditorFooterBytes(label, termH, 1)
-      stdout.write TurnPromptColor & "❯ " & Reset & "\r\x1b[?25h"
-    else:
-      stdout.write barFooterBytes(label, TurnPromptColor, currentTermW())
+    stdout.write barFooterBytes(label, TurnPromptColor, currentTermW())
   stdout.flushFile
   bufferedSubmitTurn.store(true, moRelaxed)
   emitScreenEvent clearPendingHintEvent()

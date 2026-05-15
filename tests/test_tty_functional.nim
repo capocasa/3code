@@ -1,6 +1,8 @@
 import std/[json, os, osproc, strutils, unittest]
 import tty_expect
 
+const VisualOutputRoot = "tests" / "output" / "tty"
+
 proc ensureStubBinary(): string =
   let pid = $getCurrentProcessId()
   result = getTempDir() / ("3code_tty_stub_" & pid)
@@ -14,7 +16,7 @@ proc ensureStubBinary(): string =
   doAssert code == 0, outp
 
 proc newFixture(name: string): string =
-  result = getTempDir() / ("3code_tty_" & name & "_" & $getCurrentProcessId())
+  result = getCurrentDir() / VisualOutputRoot / (name & "_" & $getCurrentProcessId())
   if dirExists(result):
     removeDir(result)
   createDir(result)
@@ -60,7 +62,7 @@ proc stubEnv(root: string): seq[EnvVar] =
 
 proc startStub(root: string; args: openArray[string] = ["-x", "-i"]): TtySession =
   newTtySession(ensureStubBinary(), args = args, cwd = root / "run",
-                env = stubEnv(root), cols = 80, rows = 24)
+                env = stubEnv(root))
 
 proc countOccurrences(haystack, needle: string): int =
   var pos = 0
@@ -88,15 +90,19 @@ proc isKnownTranscriptBelowFooter(row: string): bool =
 proc assertFatPromptFrames(tty: TtySession) =
   for frame in tty.frames:
     var tokenRows: seq[int]
+    var liveTokenRows: seq[int]
     var promptRows: seq[int]
     for i, row in frame.rows:
       if row.isTokenBar:
         tokenRows.add i
       if row.startsWith("❯"):
         promptRows.add i
+    for rowIdx in tokenRows:
+      if rowIdx + 1 < frame.rows.len and frame.rows[rowIdx + 1].startsWith("❯"):
+        liveTokenRows.add rowIdx
 
-    if tokenRows.len > 0:
-      let liveToken = tokenRows[^1]
+    if liveTokenRows.len > 0:
+      let liveToken = liveTokenRows[^1]
       doAssert liveToken + 1 < frame.rows.len,
         "live token bar has no reserved editor row below it:\n" &
           frame.rows.join("\n")
@@ -112,9 +118,21 @@ proc assertFatPromptFrames(tty: TtySession) =
           "stale bare prompt row escaped into scrollback:\n" &
             frame.rows.join("\n")
 
-    for j in 1 ..< tokenRows.len:
-      doAssert tokenRows[j] != tokenRows[j - 1] + 1,
-        "adjacent token bars in frame:\n" & frame.rows.join("\n")
+    if liveTokenRows.len > 0:
+      let footerTop = liveTokenRows[^1]
+      var prevNonEmpty = -1
+      for rowIdx in countdown(footerTop - 1, 0):
+        if frame.rows[rowIdx].strip.len > 0:
+          prevNonEmpty = rowIdx
+          break
+      if prevNonEmpty >= 0:
+        doAssert footerTop - prevNonEmpty <= 3,
+          "fat prompt drifted away from scrollback content:\n" &
+            frame.rows.join("\n")
+
+    for j in 1 ..< liveTokenRows.len:
+      doAssert liveTokenRows[j] != liveTokenRows[j - 1] + 1,
+        "adjacent live token bars in frame:\n" & frame.rows.join("\n")
     doAssert frame.rows.join("\n").countOccurrences("bash-line-9") <= 1,
       "duplicated bash output in one frame:\n" & frame.rows.join("\n")
     doAssert frame.rows.join("\n").countOccurrences("\n  second-tool") <= 1,

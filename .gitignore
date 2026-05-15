@@ -1,9 +1,11 @@
 /3code
 tests/test_*
 !tests/test_*.nim
+tests/output/
 nimcache/
 config.local.nims
 
 .agents/
 src/threecode.out
+tools/pty_frames
 tests/golden/*.actual
