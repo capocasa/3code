@@ -102,11 +102,8 @@ proc isKnownTranscriptBelowFooter(row: string): bool =
     row.startsWith("w ") or
     row.startsWith("p ")
 
-proc assertFatPromptFrames(tty: TtySession; strictSpacing = true) =
-  ## `strictSpacing` is kept on for flows whose transcript spacing is fully
-  ## migrated to the new owner. Buffered/multiline flows still assert prompt
-  ## ownership, no stale bars, and no duplicate output while their exact
-  ## one-blank spacing is being moved behind `terminal_owner`.
+proc assertFatPromptFrames(tty: TtySession) =
+  ## Assert the full fat-prompt visual contract over every captured frame.
   for frame in tty.frames:
     var tokenRows: seq[int]
     let liveRows = frame.liveTokenRows()
@@ -134,7 +131,7 @@ proc assertFatPromptFrames(tty: TtySession; strictSpacing = true) =
           "stale bare prompt row escaped into scrollback:\n" &
             frame.rows.join("\n")
 
-      if strictSpacing and not frame.cursorHidden:
+      if not frame.cursorHidden:
         doAssert frame.cursorRow > liveToken,
           "visible caret escaped above the editor area:\n" &
             frame.rows.join("\n")
@@ -149,7 +146,7 @@ proc assertFatPromptFrames(tty: TtySession; strictSpacing = true) =
         if frame.rows[rowIdx].strip.len > 0:
           prevNonEmpty = rowIdx
           break
-      if strictSpacing and prevNonEmpty >= 0:
+      if prevNonEmpty >= 0:
         doAssert footerTop - prevNonEmpty == 2,
           "fat prompt must have exactly one blank row below scrollback content:\n" &
             frame.rows.join("\n")
@@ -236,7 +233,7 @@ suite "terminal visual contract":
     tty.expectInHistory "second-tool"
     tty.expectInHistory "Buffered prompt answered."
     tty.expectTokenBar(["○", "↑88", "↻32", "↓8"])
-    tty.assertFatPromptFrames(strictSpacing = false)
+    tty.assertFatPromptFrames()
     tty.send ":q\n"
     tty.expectExit 0
 
@@ -265,7 +262,7 @@ suite "terminal visual contract":
     tty.send "short gap check\n"
     tty.expectInHistory "Short response done."
     tty.expectTokenBar(["○", "↑44", "↓4"])
-    tty.assertFatPromptFrames(strictSpacing = false)
+    tty.assertFatPromptFrames()
     tty.assertNoCacheLiveReceipt("Short response done.")
     tty.send ":q\n"
     tty.expectExit 0
@@ -313,7 +310,7 @@ suite "terminal visual contract":
     tty.expectInHistory "Height change done."
     tty.expectInHistory "❯ short buffered"
     tty.expectInHistory "Shrink prompt answered."
-    tty.assertFatPromptFrames(strictSpacing = false)
+    tty.assertFatPromptFrames()
     tty.assertEditorHeightChangedDuringLiveBar()
     tty.send ":q\n"
     tty.expectExit 0
@@ -346,7 +343,7 @@ suite "terminal visual contract":
     tty.send "ticker off check\n"
     tty.expectInHistory "Ticker disabled response."
     tty.expectTokenBar(["○", "↑70", "↓6"])
-    tty.assertFatPromptFrames(strictSpacing = false)
+    tty.assertFatPromptFrames()
     tty.expectNoReasoningTickerRows()
     tty.assertNoCacheLiveReceipt("Ticker disabled response.")
     tty.send ":q\n"

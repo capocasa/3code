@@ -317,7 +317,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         emitScreenEvent clearPendingHintEvent()
       debugOut "runTurns: loop continue"
       continue
-    finishTurn()
     if content.strip.len > 0:
       if not streamedLive:
         screenWriteTranscript:
@@ -326,6 +325,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       screenWriteTranscript:
         stdout.styledWriteLine styleDim,
           "  (empty reply — no content, no tool calls)", resetStyle
+    finishTurn()
     break
 
 proc runTurnsInteractive*(p: Profile, messages: var JsonNode, session: var Session) =

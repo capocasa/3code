@@ -399,6 +399,11 @@ proc syncWrite*(s: string) =
   ## `screenRenderSync` at new rendering boundaries.
   screenRenderSync(s)
 
+proc hasNonNewlineBytes(s: string): bool =
+  for ch in s:
+    if ch notin {'\r', '\n'}:
+      return true
+
 proc refreshEditorWidth(ed: var minline.LineEditor) =
   let w = try: terminalWidth() except CatchableError: 0
   if w > 0:
@@ -542,8 +547,9 @@ proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int,
   ## Three-row spinner footer. Cursor in: col 0 of the bar row.
   ## Cursor out: same. The row above (ticker overlay target) is
   ## cleared every frame so reasoning→no-reasoning is a faithful
-  ## restore as long as that row was blank to begin with (it always
-  ## is — the leading `\n` callModel writes guarantees it).
+  ## restore as long as that row was blank to begin with. The call-start
+  ## transition parks the cursor on the token bar row, leaving this blank
+  ## separator row above it.
   # Re-assert hide-cursor every frame. Some terminals (older conhost,
   # a few VTE variants) transiently re-show the caret on cursor
   # movement or on sync-update end, so a single `?25l` from beginTurn
@@ -855,6 +861,12 @@ proc paintBarPrompt*(label, promptColor: string) =
       else: "\x1b[?25h"
     screenRenderSync cursor & barFooterBytes(label, promptColor, currentTermW())
 
+proc setBarPromptState*(label: string) =
+  ## Update the logical bar label without painting immediately. Used when a
+  ## completed response still needs to be committed to scrollback first; the
+  ## subsequent transcript append repaints the footer with this final label.
+  emitScreenEvent setBarEvent(label)
+
 proc paintBarBelow*(label, promptColor: string) =
   ## Paint bar + prompt one and two rows below the cursor, restoring
   ## the cursor to its original (likely mid-line) position. Used
@@ -967,14 +979,15 @@ proc leaveToolViewport*(termH: int) =
   emitScreenEvent setModeEvent(smNormal)
 
 proc endTurnBytes*(label, promptColor: string, repaintPrompt: bool,
-                   termW = 0): string =
+                   termW = 0; gapAlready = false): string =
   ## Byte sequence for leaving model/tool mode. Normal completion repaints
   ## the typing-ready footer; exceptional user interrupts only clear the
   ## owned footer area so the caller's feedback lands as plain output.
   if label.len > 0:
     result.add ClearBarPromptBytes
     if repaintPrompt:
-      result.add "\n"
+      if not gapAlready:
+        result.add "\n"
       result.add barFooterBytes(label, promptColor, termW)
       let rows = barWrapRows(2 + labelCells(label), termW)
       result.add "\x1b[" & $rows & "B"
@@ -1008,6 +1021,8 @@ template screenWriteTranscript*(body: untyped) =
     repaint,
     SyncBegin,
     SyncEnd)
+  if transcriptBytes.hasNonNewlineBytes and currentBarLabel.len > 0:
+    emitScreenEvent setBarEvent(currentBarLabel, hasGap = true)
   debugOut "screenWriteTranscript exit"
 
 template withCleared*(body: untyped) =
@@ -2399,7 +2414,8 @@ proc endTurn*(repaintPrompt = true) =
   var label = ""
   if hadBar:
     label = currentBarLabel
-    bytes = endTurnBytes(label, BrightPromptColor, repaintPrompt, currentTermW())
+    bytes = endTurnBytes(label, BrightPromptColor, repaintPrompt, currentTermW(),
+                         currentBarHasGap)
   else:
     bytes = endTurnBytes("", BrightPromptColor, repaintPrompt)
   terminal_owner.endTurn(
@@ -2561,7 +2577,10 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       usage = stubUsage(result, stubContent)
       let stubElapsed = (epochTime() - stubT0).int
       let stubLabel = tokenLineLabel(usage, stubWindow, stubElapsed)
-      paintBarPrompt(stubLabel, DimPromptColor)
+      if contentStreamedLive or stubContent.strip.len == 0:
+        paintBarPrompt(stubLabel, DimPromptColor)
+      else:
+        setBarPromptState(stubLabel)
       emitScreenEvent setPendingHintEvent(usage, stubWindow, stubElapsed)
       if result.kind == JObject:
         result["usage"] = %*{
@@ -2613,14 +2632,9 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   decayLevel(rateRetryLevel, rateLastTs, t0)
   let window = contextWindowFor(p.model)
   let baseLabel = contextLabel(lastPromptTokens, window)
-  # Blank scratch row above the upcoming spinner / bullet. Serves two
-  # purposes: (1) visual separation between the user's echoed prompt
-  # (or prior tool output) and the spinner, and (2) a known-blank
-  # overlay target for the reasoning ticker — the spinner thread
-  # writes the ticker into this row while reasoning streams and clears
-  # it back to blank when reasoning ends, so the original (blank) state
-  # is faithfully restored. Done once per call; retries reuse the same
-  # row.
+  # Park on the upcoming spinner/bar row while leaving one blank scratch row
+  # above it. That row is both the visual separator and the known-blank overlay
+  # target for the reasoning ticker.
   withRenderLock:
     enterTurnScrollRegion()
     terminal_owner.writeRaw("\n")
@@ -2725,7 +2739,13 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
     if contentStreamedLive:
       # Remove the ticker row inserted by the post-streaming spinner restart.
       screenRenderSync "\r\x1b[1A\x1b[M"
-    paintBarPrompt(label, DimPromptColor)
+    let assistantContent =
+      if outcome.assistantMsg == nil: ""
+      else: outcome.assistantMsg{"content"}.getStr("")
+    if contentStreamedLive or assistantContent.strip.len == 0:
+      paintBarPrompt(label, DimPromptColor)
+    else:
+      setBarPromptState(label)
     emitScreenEvent setPendingHintEvent(usage, window, elapsed.int)
     if window > 0 and usage.promptTokens.float > 0.7 * window.float and
        usage.promptTokens.float <= CompactThresholdFrac * window.float:
