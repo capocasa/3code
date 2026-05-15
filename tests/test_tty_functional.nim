@@ -7,7 +7,7 @@ proc ensureStubBinary(): string =
   let pid = $getCurrentProcessId()
   result = getTempDir() / ("3code_tty_stub_" & pid)
   if fileExists(result):
-    return
+    removeFile(result)
   let cacheDir = getTempDir() / ("3code_tty_stub_cache_" & pid)
   createDir(cacheDir)
   let cmd = "nim c -d:ssl -d:providerStub --threads:on --path:src --nimcache:" &
@@ -175,6 +175,25 @@ proc assertEditorHeightChangedDuringLiveBar(tty: TtySession) =
   doAssert sawSingleAfterMulti,
     "visual test never captured the editor shrinking after it grew"
 
+proc assertHistoryNavigationDuringLiveBar(tty: TtySession) =
+  var sawHistoryRecall = false
+  var sawDraftRestore = false
+  for frame in tty.frames:
+    let liveRows = frame.liveTokenRows()
+    if liveRows.len == 0:
+      continue
+    let promptRow = liveRows[^1] + 1
+    if promptRow >= frame.rows.len:
+      continue
+    if frame.rows[promptRow].startsWith("❯ start live history"):
+      sawHistoryRecall = true
+    if sawHistoryRecall and frame.rows[promptRow].startsWith("❯ draft live"):
+      sawDraftRestore = true
+  doAssert sawHistoryRecall,
+    "visual test never captured active-turn Up history recall"
+  doAssert sawDraftRestore,
+    "visual test never captured active-turn Down draft restore"
+
 proc assertNoCacheLiveReceipt(tty: TtySession; marker: string) =
   var sawMarker = false
   for frame in tty.frames:
@@ -187,6 +206,53 @@ proc assertNoCacheLiveReceipt(tty: TtySession; marker: string) =
           doAssert "↻" notin row,
             "cache slot shown for a no-cache usage receipt:\n" &
               frame.rows.join("\n")
+
+proc assertReceiptTouchesAssistantResponse(tty: TtySession;
+                                           responseMarker: string) =
+  for frame in tty.frames:
+    for rowIdx in 0 ..< frame.rows.len - 1:
+      if frame.rows[rowIdx].isTokenBar and
+          frame.rows[rowIdx + 1].startsWith("● ") and
+          responseMarker in frame.rows[rowIdx + 1]:
+        return
+  doAssert false,
+    "no frame showed token receipt directly adjacent to assistant response: " &
+      responseMarker
+
+proc rowWith(frame: TtyFrame; marker: string): int =
+  for rowIdx, row in frame.rows:
+    if marker in row:
+      return rowIdx
+  -1
+
+proc assertOneBlankBetween(tty: TtySession; upperMarker, lowerMarker: string) =
+  var sawPair = false
+  for frame in tty.frames:
+    let upper = frame.rowWith(upperMarker)
+    let lower = frame.rowWith(lowerMarker)
+    if upper < 0 or lower < 0 or lower <= upper:
+      continue
+    sawPair = true
+    doAssert lower - upper == 2 and frame.rows[upper + 1].strip.len == 0,
+      "expected exactly one blank row between `" & upperMarker & "` and `" &
+        lowerMarker & "`:\n" & frame.rows.join("\n")
+  doAssert sawPair,
+    "visual test never captured both `" & upperMarker & "` and `" &
+      lowerMarker & "` in one frame"
+
+proc assertNoBlankBetween(tty: TtySession; upperMarker, lowerMarker: string) =
+  for frame in tty.frames:
+    let upper = frame.rowWith(upperMarker)
+    let lower = frame.rowWith(lowerMarker)
+    if upper < 0 or lower < 0 or lower <= upper:
+      continue
+    doAssert lower - upper == 1,
+      "expected no blank row between `" & upperMarker & "` and `" &
+        lowerMarker & "`:\n" & frame.rows.join("\n")
+    return
+  doAssert false,
+    "visual test never captured adjacent pair `" & upperMarker & "` and `" &
+      lowerMarker & "`"
 
 suite "terminal visual contract":
   test "fat prompt remains stable through streaming, tools, and buffered input":
@@ -346,5 +412,116 @@ suite "terminal visual contract":
     tty.assertFatPromptFrames()
     tty.expectNoReasoningTickerRows()
     tty.assertNoCacheLiveReceipt("Ticker disabled response.")
+    tty.send ":q\n"
+    tty.expectExit 0
+
+  test "history navigation works inside the live reserved editor":
+    let root = newFixture("history_live")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "content": "History seed done.",
+        "usage": {
+          "promptTokens": 30,
+          "completionTokens": 4,
+          "totalTokens": 34,
+          "cachedTokens": 0
+        }
+      },
+      {
+        "role": "assistant",
+        "preStreamDelayMs": 900,
+        "content": "Live history wait done.",
+        "usage": {
+          "promptTokens": 64,
+          "completionTokens": 5,
+          "totalTokens": 69,
+          "cachedTokens": 0
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "History buffered answered.",
+        "usage": {
+          "promptTokens": 72,
+          "completionTokens": 5,
+          "totalTokens": 77,
+          "cachedTokens": 0
+        }
+      }
+    ])
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "history seed\n"
+    tty.expectInHistory "History seed done."
+    tty.send "start live history\n"
+    tty.expectTokenBar(["○"])
+    tty.send "draft live"
+    tty.drain(80)
+    tty.send "\x1b[A"
+    tty.drain(80)
+    tty.send "\x1b[B"
+    tty.drain(80)
+    tty.send " ok\n"
+    tty.expectInHistory "Live history wait done."
+    tty.expectInHistory "❯ draft live ok"
+    tty.expectInHistory "History buffered answered."
+    tty.expectTokenBar(["○", "↑72", "↓5"])
+    tty.assertFatPromptFrames()
+    tty.assertHistoryNavigationDuringLiveBar()
+    tty.send ":q\n"
+    tty.expectExit 0
+
+  test "tool follow-up response touches its token receipt":
+    let root = newFixture("receipt_followup")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "content": "Running directory listing.",
+        "tool_calls": [
+          toolCall("call_ls", "bash", %*{"command": "printf 'listed-file\\n'"})
+        ],
+        "usage": {
+          "promptTokens": 90,
+          "completionTokens": 7,
+          "totalTokens": 97,
+          "cachedTokens": 16
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Follow-up answer after tool.",
+        "usage": {
+          "promptTokens": 110,
+          "completionTokens": 6,
+          "totalTokens": 116,
+          "cachedTokens": 0
+        }
+      }
+    ])
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "run tool followup\n"
+    tty.expectInHistory "listed-file"
+    tty.expectInHistory "Follow-up answer after tool."
+    tty.assertFatPromptFrames()
+    tty.assertOneBlankBetween("❯ run tool followup",
+                              "● Running directory listing.")
+    tty.assertOneBlankBetween("  listed-file", "↑74")
+    tty.assertReceiptTouchesAssistantResponse("Follow-up answer after tool.")
+    tty.assertNoBlankBetween("↑74", "● Follow-up answer after tool.")
+    tty.assertOneBlankBetween("● Follow-up answer after tool.", "↑110")
     tty.send ":q\n"
     tty.expectExit 0

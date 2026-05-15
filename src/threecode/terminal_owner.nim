@@ -193,7 +193,8 @@ proc appendTranscriptWithFooter*(transcriptBytes: string; liveAnchored: bool;
                                  inputRunning: bool;
                                  editor: ptr minline.LineEditor;
                                  barBytes, clearBytes, repaintBytes: string;
-                                 syncBegin, syncEnd: string) =
+                                 syncBegin, syncEnd: string;
+                                 compactRowsAboveFooter = 0) =
   ## Append transcript bytes as real scrollback while preserving the owned
   ## fat-prompt area. The caller supplies already-formatted footer bytes; this
   ## owner decides when and where they are emitted.
@@ -206,7 +207,8 @@ proc appendTranscriptWithFooter*(transcriptBytes: string; liveAnchored: bool;
       refreshEditorWidth(edPtr[])
       stdout.write syncBegin
       stdout.write "\x1b[?25l\r"
-      stdout.write "\x1b[" & $(edPtr[].renderRow + 1) & "A"
+      stdout.write "\x1b[" & $(edPtr[].renderRow + 1 +
+        max(0, compactRowsAboveFooter)) & "A"
       stdout.write "\x1b[J"
       if transcript.len > 0:
         stdout.write transcript
@@ -223,6 +225,8 @@ proc appendTranscriptWithFooter*(transcriptBytes: string; liveAnchored: bool;
         stdout.write "\r"
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
+      if compactRowsAboveFooter > 0:
+        stdout.write "\x1b[" & $compactRowsAboveFooter & "A"
       stdout.write clearBytes
       if transcript.len > 0:
         stdout.write transcript

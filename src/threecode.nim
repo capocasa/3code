@@ -31,7 +31,7 @@ when defined(posix):
   import std/posix
 import threecode/[types, util, prompts, shell, loop, session, compact,
                   config, actions, api, display, ui, update, screen,
-                  streamexec]
+                  streamexec, terminal_owner]
 import threecode/minline
 export types, util, prompts, shell, loop, session, compact,
        config, actions, api, display, ui, screen
@@ -113,7 +113,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       # block in one transcript write is wrong: it clears at start, repaints
       # at end, so bar/prompt are invisible while the command runs.)
       screenWriteTranscript:
-        stdout.write "\n"
         if content.strip.len > 0 and not streamedLive:
           renderAssistantContent(content)
           stdout.write "\n"
@@ -184,11 +183,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
                   try:
                     result = runActionStreaming(act, session.readCache,
                       proc(line: string) =
-                        withRenderLock:
+                        terminal_owner.withTerminalWriteLock:
                           sv.addLine(line))
                   finally:
                     setToolStdinWatcherEnabled(true)
-                  withRenderLock:
+                  terminal_owner.withTerminalWriteLock:
                     sv.erase()
                   result
                 finally:
@@ -314,6 +313,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           screenWriteTranscript:
             stdout.writeLine CyanFg & "  " & rl & Reset
             emitScreenEvent clearBarEvent()
+          followupStartsAfterReceipt = true
+          receiptTouchesNextResponse = true
         emitScreenEvent clearPendingHintEvent()
       debugOut "runTurns: loop continue"
       continue
