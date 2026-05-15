@@ -442,28 +442,19 @@ proc liveEditorFooterAnchored*(): bool =
 
 proc paintBarBytes*(label: string): string
 
-proc liveFooterRows(): int =
-  1 + liveEditorRows()
-
 proc anchoredEditorFooterBytes*(label: string; termH, editorRows: int): string
 
-proc turnScrollRegionBytes(termH, footerRows: int): string =
-  let scrollBottom = max(1, termH - max(1, footerRows))
-  &"\x1b[1;{scrollBottom}r\x1b[{scrollBottom};1H\r"
-
 proc enterTurnScrollRegion*() =
-  ## During an active turn the editor is always live. Reserve the bottom
-  ## footer rows (token bar + editor rows) as non-scrolling territory so
-  ## model/tool transcript output cannot push the prompt into scrollback.
+  ## Compatibility shim for older call sites. The fat prompt is now anchored
+  ## relative to scrollback, not by installing a bottom scroll region.
   discard
 
 proc parkTranscriptCursor() =
-  ## Put subsequent transcript output on the scrolling row above the
-  ## reserved editor footer. This is the only legal output row while the
-  ## always-live editor owns the terminal floor.
+  ## Compatibility shim for older call sites.
   discard
 
 proc leaveTurnScrollRegion*() =
+  ## Compatibility shim for older call sites.
   discard
 
 proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
@@ -1038,7 +1029,7 @@ template screenWriteTranscript*(body: untyped) =
       stdout.write "\x1b[J"
       if transcript.len > 0:
         stdout.write transcript
-        stdout.write "\r\n"
+        stdout.write "\r\n\r\n"
       if currentBarLabel.len > 0:
         stdout.write paintBarBytes(currentBarLabel)
       else:
@@ -1056,7 +1047,12 @@ template screenWriteTranscript*(body: untyped) =
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
       clearBarPrompt()
-      stdout.write transcriptBytes
+      var transcript = transcriptBytes
+      while transcript.len > 0 and transcript[^1] in {'\r', '\n'}:
+        transcript.setLen(transcript.len - 1)
+      if transcript.len > 0:
+        stdout.write transcript
+        stdout.write "\r\n\r\n"
       debugOut "screenWriteTranscript exit"
       repaintBarPrompt()
       if inputThreadRunning and inputEditor != nil:
@@ -2493,17 +2489,11 @@ proc emitUserSubmit*(line: string, echoRows = -1) =
     else: ""
   let hadGap = currentBarHasGap
   let hasBar = currentBarLabel.len > 0
-  let hadPending = pendingHint.active
   stdout.write submitTransitionBytes(line, pendingHint.active, hadGap,
                                      receiptLabel, hasBar, echoRows)
   stdout.flushFile
   emitScreenEvent clearPendingHintEvent()
-  if hadPending:
-    emitScreenEvent setBarEvent(receiptLabel)
-  elif hasBar:
-    emitScreenEvent setBarEvent(currentBarLabel)
-  else:
-    emitScreenEvent clearBarEvent()
+  emitScreenEvent clearBarEvent()
 
 proc emitBufferedUserSubmit*(line: string) =
   ## Echo a prompt that was queued by the background input thread during
@@ -2523,6 +2513,7 @@ proc emitBufferedUserSubmit*(line: string) =
   stdout.write bufferedSubmitTransitionBytes(line, pendingHint.active, hadGap,
                                              receiptLabel, hasBar)
   if label.len > 0:
+    stdout.write "\r\n"
     stdout.write barFooterBytes(label, TurnPromptColor, currentTermW())
   stdout.flushFile
   bufferedSubmitTurn.store(true, moRelaxed)

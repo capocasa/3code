@@ -589,9 +589,7 @@ proc tokenLineBytes*(usage: Usage, window: int, elapsedS = -1): string =
   ## Pure-byte form of the **token receipt** row used by the *replay*
   ## path (saved sessions). The live path uses `submitTransitionBytes`
   ## which paints the receipt in place of the previous turn's bar.
-  ## Returns "" when there's no usage. Trailing double `\x1b[0m` reset
-  ## matches the byte sequence Nim's `styledWrite(... , "\n")` macro
-  ## emits; pinned by `tests/test_golden.nim`.
+  ## Returns "" when there's no usage.
   let label = tokenLineLabel(usage, window, elapsedS)
   if label.len == 0: return ""
   result = CyanFg & "  " & label & Reset & "\n" & Reset

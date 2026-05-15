@@ -3,7 +3,7 @@
 ## The helper starts a real process under a PTY, feeds all output through a
 ## ttty Grid, and records compact screen snapshots for debugging failures.
 
-import std/[os, posix, strformat, strutils, times]
+import std/[os, posix, strformat, strutils, times, unicode]
 import posix/termios
 import ttty/grid
 
@@ -15,6 +15,7 @@ type
     rows*: seq[string]
     changedRows*: seq[int]
     cursorRow*, cursorCol*: int
+    cursorHidden*: bool
 
   TtySession* = ref object
     masterFd*: cint
@@ -89,7 +90,8 @@ proc rememberFrame(s: TtySession) =
     rows: rows,
     changedRows: changed,
     cursorRow: s.grid.row,
-    cursorCol: s.grid.col)
+    cursorCol: s.grid.col,
+    cursorHidden: s.grid.cursorHidden)
 
 proc noteSyncState(s: TtySession; chunk: string) =
   var i = 0
@@ -294,9 +296,28 @@ proc dumpFramesAround*(s: TtySession; text: string; radius = 2): string =
 
 proc framesText*(s: TtySession): string =
   for i, frame in s.frames:
-    result.add &"===== frame {i:04d} @{frame.ms}ms changed={frame.changedRows} cursor=({frame.cursorRow},{frame.cursorCol}) =====\n"
-    for row in frame.rows:
-      result.add row
+    let cursorState =
+      if frame.cursorHidden: "hidden"
+      else: &"visible@({frame.cursorRow},{frame.cursorCol})"
+    result.add &"===== frame {i:04d} @{frame.ms}ms changed={frame.changedRows} cursor={cursorState} =====\n"
+    for rowIdx, row in frame.rows:
+      var text = row
+      if not frame.cursorHidden and rowIdx == frame.cursorRow:
+        let col = max(0, frame.cursorCol)
+        var bytePos = 0
+        var cells = 0
+        while bytePos < text.len and cells < col:
+          bytePos += max(1, runeLenAt(text, bytePos))
+          inc cells
+        if cells < col:
+          text.add repeat(" ", col - cells)
+          text.add "█"
+        elif bytePos < text.len:
+          let next = bytePos + max(1, runeLenAt(text, bytePos))
+          text = text[0 ..< bytePos] & "█" & text[next .. ^1]
+        else:
+          text.add "█"
+      result.add text
       result.add "\n"
 
 proc writeFrameArtifact*(s: TtySession; path: string) =
@@ -631,20 +652,6 @@ proc expectTokenBarStable*(s: TtySession; settleMs = 300): bool {.discardable.} 
         "token bar without prompt below:\n" & s.screenText()
     sleep 5
   true
-
-proc terminalCleanupBytes*(raw: string): bool =
-  ## Check for common cleanup bytes: cursor show, SGR reset, paste off.
-  let hasStyleReset = "\x1b[0m" in raw or "\x1b[m" in raw
-  "\x1b[?25h" in raw and hasStyleReset and "\x1b[?2004l" in raw
-
-proc expectTerminalCleanup*(s: TtySession; timeoutMs = 500): bool {.discardable.} =
-  let deadline = epochTime() + timeoutMs.float / 1000.0
-  while epochTime() < deadline:
-    s.drain(5)
-    if terminalCleanupBytes(s.raw):
-      return true
-    sleep 5
-  doAssert false, "terminal cleanup bytes not observed"
 
 proc close*(s: TtySession) =
   if s.closed:

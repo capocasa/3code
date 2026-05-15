@@ -126,8 +126,8 @@ proc assertFatPromptFrames(tty: TtySession) =
           prevNonEmpty = rowIdx
           break
       if prevNonEmpty >= 0:
-        doAssert footerTop - prevNonEmpty <= 3,
-          "fat prompt drifted away from scrollback content:\n" &
+        doAssert footerTop - prevNonEmpty == 2,
+          "fat prompt must have exactly one blank row below scrollback content:\n" &
             frame.rows.join("\n")
 
     for j in 1 ..< liveTokenRows.len:

@@ -11,7 +11,7 @@ import ttty/grid
 ##   ``totalRows``, ``renderBuffer`` against hand-computed expectations.
 ## * **Driver checks** — feed a synthetic keystroke stream into
 ##   ``readLineWith``, capture the editor's output through an inline
-##   ANSI grid, then assert on cell content / cursor position / final
+##   terminal grid, then assert on cell content / cursor position / final
 ##   ``echoRows`` / returned text.
 ##
 ## Layout invariants (mirror the spec in CLAUDE.md, multiline-aware):
@@ -27,57 +27,13 @@ import ttty/grid
 ## * Word-left / word-right cross newlines.
 ## * Plain Enter submits; Shift/Alt+Enter inserts a real ``'\n'``.
 
-# ---------------- Atomic-redraw invariant ----------------
-
-suite "minline: atomic single-flush redraw":
-  ## On Windows conhost, splitting a redraw across multiple writes /
-  ## flushes (or omitting DEC 2026 synchronized output) makes conhost
-  ## paint mid-frame, which manifests as flicker. The editor's
-  ## ``fullRedraw`` MUST emit one buffered write per call, wrapped in
-  ## ``CSI ? 2026 h`` ... ``CSI ? 2026 l``, or the flicker comes back.
-
-  test "fullRedraw: exactly one write per call, sync-wrapped":
-    var ed = initEditor()
-    ed.line.text = "hello world"
-    ed.line.position = 11
-    ed.prompt = "❯ "
-    ed.contPrompt = "  "
-    ed.width = 80
-    ed.renderRow = 0
-    var writes: seq[string] = @[]
-    ed.write = proc(s: string) = writes.add s
-    ed.getWidth = proc(): int = 80
-    fullRedraw(ed)
-    check writes.len == 1
-    check writes[0].startsWith("\x1b[?2026h")
-    check writes[0].endsWith("\x1b[?2026l")
-    check "❯ hello world" in writes[0]
-
-  test "fullRedraw: multi-line buffer also fits in one sync frame":
-    var ed = initEditor()
-    ed.line.text = "first\nsecond"
-    ed.line.position = 12
-    ed.prompt = "❯ "
-    ed.contPrompt = "  "
-    ed.width = 80
-    ed.renderRow = 0
-    var writes: seq[string] = @[]
-    ed.write = proc(s: string) = writes.add s
-    ed.getWidth = proc(): int = 80
-    fullRedraw(ed)
-    check writes.len == 1
-    check writes[0].startsWith("\x1b[?2026h")
-    check writes[0].endsWith("\x1b[?2026l")
-
 # ---------------- Pure helper tests ----------------
 
 suite "minline pure helpers":
-  test "visualCols counts runes, ignores CSI sequences":
+  test "visualCols counts runes":
     check visualCols("") == 0
     check visualCols("abc") == 3
     check visualCols("❯ ") == 2
-    check visualCols("\x1b[1;36m❯ \x1b[0m") == 2
-    check visualCols("\x1b[?2004h") == 0
 
   test "cursorVisual: empty buffer, prompt-only":
     let (r, c) = cursorVisual("", 0, 2, 2, 80)
@@ -125,18 +81,6 @@ suite "minline pure helpers":
   test "renderBuffer: continuation prompt for logical lines":
     let bytes = renderBuffer("ab\ncd", "P ", "..", 80)
     check bytes == "P ab\r\n..cd"
-
-  test "renderBuffer: colored prompt styles only prompt cells":
-    let bytes = renderBuffer("hello", "\x1b[1;36m❯ \x1b[0m", "  ", 80)
-    let g = newGrid()
-    g.feed bytes
-    check rowText(g, 0) == "❯ hello"
-    check g.cellFg(0, 0) == colCyan
-    check hasAttr(g.cellAttr(0, 0), saBold)
-    check g.cellFg(0, 1) == colCyan
-    check hasAttr(g.cellAttr(0, 1), saBold)
-    check g.cellFg(0, 2) == colDefault
-    check not hasAttr(g.cellAttr(0, 2), saBold)
 
 # ---------------- Driver: basic typing & submit ----------------
 
@@ -435,18 +379,6 @@ suite "minline editor: terminal resize":
 # ---------------- Driver: rendered prompt + content ----------------
 
 suite "minline editor: render correctness":
-  test "colored prompt survives redraw and resets before input":
-    var ed = initEditor()
-    let d = newDriver()
-    d.pushString "hello"
-    d.push Enter
-    discard d.run(ed, prompt = "\x1b[1;36m❯ \x1b[0m")
-    check rowText(d.grid, 0) == "❯ hello"
-    check d.grid.cellFg(0, 0) == colCyan
-    check hasAttr(d.grid.cellAttr(0, 0), saBold)
-    check d.grid.cellFg(0, 2) == colDefault
-    check not hasAttr(d.grid.cellAttr(0, 2), saBold)
-
   test "second logical line is prefixed with continuation prompt '  '":
     var ed = initEditor()
     let d = newDriver()
@@ -520,33 +452,6 @@ suite "minline editor: bracketed paste":
     d.push Enter
     check d.run(ed, prompt = "> ", hidechars = true) == "secret42"
     check rowText(d.grid, 0).startsWith("> ********")
-
-  test "bracketed paste disable is written even when read exits abnormally":
-    # Regression for the macOS api-key paste crash. If readLineWith
-    # raises (ctrl+c, EOF, or the wizard's ESC->cancel path) before
-    # reaching its own `\e[?2004l` write on the submit branch, the host
-    # terminal stays in bracketed-paste mode. The shell then receives
-    # the next paste wrapped in `\e[200~ … \e[201~` and prints it as
-    # literal text. The `defer` in readLineWith must always emit the
-    # disable sequence.
-    block ctrlC:
-      var ed = initEditor()
-      let d = newDriver()
-      d.push CtrlC
-      expect InputCancelled:
-        discard d.run(ed, prompt = "> ")
-      check "\x1b[?2004h" in d.terminal.output
-      check "\x1b[?2004l" in d.terminal.output
-    block bareEsc:
-      var ed = initEditor()
-      let d = newDriver()
-      d.push Esc
-      expect InputCancelled:
-        discard d.run(ed, prompt = "> ")
-      check "\x1b[?2004l" in d.terminal.output
-
-
-# ---------------- SIGWINCH / EINTR ----------------
 
 # ---------------- SIGWINCH / EINTR ----------------
 

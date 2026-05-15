@@ -53,17 +53,25 @@ Removed during the fat-prompt integration pass:
   are reserved, no output appears inside or below the editor area, and editor
   height changes do not leave stale prompt/bar rows.
 
-Remaining byte-oriented tests are legacy/local-helper coverage:
+Removed during the ANSI-test purge:
 
-- `tests/test_golden.nim`: legacy renderer helper byte snapshots for markdown,
-  receipts, and tool banners. These are useful for spotting formatting churn,
-  but they do not validate fat-prompt behavior.
-- `tests/test_render.nim`: markdown live-vs-replay byte parity. This protects
-  the markdown formatter only; terminal layout acceptance must come from visual
-  frame tests.
-- `tests/test_minline.nim`: editor helper byte strings and grid checks. These
-  remain useful for input editing mechanics, but the editor's placement inside
-  the terminal belongs to PTY visual tests.
-- `tests/test_streaming.nim` and `tests/test_streaming_view.nim`: legacy
-  streaming-output timing/viewport helper checks. They do not prove that live
-  bash output is compatible with the fat prompt while the editor is active.
+- `tests/test_golden.nim` and `tests/golden/*.gold`: raw ANSI renderer
+  snapshots for markdown, receipts, and tool banners.
+- `tests/test_render.nim`: live-vs-replay byte parity and inline markdown ANSI
+  assertions.
+- `tests/test_minline.nim` atomic redraw / DEC 2026 byte assertions, colored
+  prompt byte-grid checks, and bracketed-paste cleanup byte checks.
+- `tests/test_util_extra.nim` ANSI-specific `visibleWidth`, `wrapAnsi`, and
+  inline-markdown style-code assertions.
+
+Remaining terminal-byte handling in `tests/tty_expect.nim` is harness plumbing:
+it parses escape sequences to build full visual frames and recognizes DEC 2026
+sync markers to avoid recording half-painted ticks. It is not acceptance
+coverage for renderer behavior.
+
+Remaining non-visual tests are local helper checks only. They may validate pure
+text parsing, editor editing behavior, wrapping counts, token formatting, and
+tool/result data. They must not bless terminal layout, cursor movement,
+prompt/footer stability, ANSI paint sequences, or screen cleanup. Those belong
+to PTY visual-frame tests and reviewable `tests/output/tty/.../frames.txt`
+artifacts.

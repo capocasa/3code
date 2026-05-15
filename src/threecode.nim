@@ -290,6 +290,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         clearInterrupted()
         return
       if queuedUser:
+        endTurn(repaintPrompt = false)
+        turnEnded = true
         return
       if halt:
         screenWriteTranscript:

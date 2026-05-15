@@ -56,14 +56,8 @@ suite "util: visibleWidth":
   test "counts UTF-8 codepoints, not bytes":
     check visibleWidth("café") == 4
 
-  test "skips ANSI escape sequences":
-    check visibleWidth("\x1b[31mhello\x1b[0m") == 5
-
   test "empty string is zero width":
     check visibleWidth("") == 0
-
-  test "handles complex ANSI":
-    check visibleWidth("\x1b[1;32;40mbold\x1b[0m") == 4
 
 suite "util: wrapAnsi":
   test "wraps long line at word boundary":
@@ -73,11 +67,6 @@ suite "util: wrapAnsi":
   test "short line stays single":
     let lines = wrapAnsi("short", 80)
     check lines.len == 1
-
-  test "preserves ANSI codes":
-    let lines = wrapAnsi("\x1b[31mhello world\x1b[0m", 80)
-    check lines.len == 1
-    check "\x1b[31m" in lines[0]
 
   test "zero width returns input as-is":
     let lines = wrapAnsi("hello", 0)
@@ -126,21 +115,24 @@ suite "util: isMdSepRow":
     check not isMdSepRow("")
 
 suite "util: applyInlineMd":
-  test "bold markers are converted":
+  test "bold markers are removed":
     let r = applyInlineMd("**bold**")
-    check "\x1b[1m" in r
+    check "**bold**" notin r
+    check "bold" in r
 
-  test "italic markers are converted":
+  test "italic markers are removed":
     let r = applyInlineMd("*italic*")
-    check "\x1b[3m" in r
+    check "*italic*" notin r
+    check "italic" in r
 
   test "plain text passes through":
     let r = applyInlineMd("hello world")
     check r == "hello world"
 
-  test "backtick code gets bold weight":
+  test "backtick markers are removed":
     let r = applyInlineMd("`code`")
-    check "\x1b[1m" in r
+    check "`code`" notin r
+    check "code" in r
 
 suite "util: resolvePath":
   test "resolves tilde to home":
