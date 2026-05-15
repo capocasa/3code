@@ -449,10 +449,6 @@ proc enterTurnScrollRegion*() =
   ## relative to scrollback, not by installing a bottom scroll region.
   discard
 
-proc parkTranscriptCursor() =
-  ## Compatibility shim for older call sites.
-  discard
-
 proc leaveTurnScrollRegion*() =
   ## Compatibility shim for older call sites.
   discard
@@ -825,7 +821,7 @@ proc submitTransitionBytes*(line: string, hadPending, hadGap: bool,
         i += rl
     result.add "\r\n"
 
-proc addUserEcho(result: var string, line: string) =
+proc addUserEcho(result: var string, line: string; trailingNewline = true) =
   let termW = try: terminalWidth() except CatchableError: 0
   let lines = line.splitLines
   for idx, l in lines:
@@ -844,7 +840,8 @@ proc addUserEcho(result: var string, line: string) =
         result.add l[i ..< i + rl]
         inc col
         i += rl
-    result.add "\r\n"
+    if trailingNewline or idx < lines.high:
+      result.add "\r\n"
 
 proc bufferedSubmitTransitionBytes*(line: string, hadPending, hadGap: bool,
                                     receiptLabel: string,
@@ -895,7 +892,10 @@ proc paintBarPrompt*(label, promptColor: string) =
   if liveEditorFooterAnchored():
     screenRenderFooterFrame paintBarBytes(label)
   else:
-    screenRenderSync barFooterBytes(label, promptColor, currentTermW())
+    let cursor =
+      if promptColor == DimPromptColor: "\x1b[?25l"
+      else: "\x1b[?25h"
+    screenRenderSync cursor & barFooterBytes(label, promptColor, currentTermW())
 
 proc paintBarBelow*(label, promptColor: string) =
   ## Paint bar + prompt one and two rows below the cursor, restoring
@@ -930,8 +930,11 @@ proc repaintBarPrompt*(promptColor = DimPromptColor) =
   if liveEditorFooterAnchored():
     screenRenderFooterFrame paintBarBytes(currentBarLabel)
   else:
-    screenRenderSync barFooterBytes(currentBarLabel, promptColor,
-                                    currentTermW())
+    let cursor =
+      if promptColor == DimPromptColor: "\x1b[?25l"
+      else: "\x1b[?25h"
+    screenRenderSync cursor & barFooterBytes(currentBarLabel, promptColor,
+                                             currentTermW())
 
 proc clearBarPrompt*() =
   ## Erase the bar + prompt rows in place. Cursor parks at col 0 of
@@ -987,7 +990,8 @@ proc leaveToolViewport*(termH: int) =
   ## Leave the bounded live tool-output viewport and return to normal
   ## transcript rendering with the cursor on the bar row.
   if liveEditorFooterAnchored():
-    parkTranscriptCursor()
+    stdout.write "\x1b[r"
+    stdout.flushFile()
   else:
     stdout.write "\x1b[r"
     stdout.write &"\x1b[{liveBarRow(termH)};1H"
@@ -1004,6 +1008,8 @@ proc endTurnBytes*(label, promptColor: string, repaintPrompt: bool,
     if repaintPrompt:
       result.add "\n"
       result.add barFooterBytes(label, promptColor, termW)
+      let rows = barWrapRows(2 + labelCells(label), termW)
+      result.add "\x1b[" & $rows & "B"
   result.add "\x1b[?25h"
 
 template screenWriteTranscript*(body: untyped) =
@@ -2505,23 +2511,16 @@ proc emitBufferedUserSubmit*(line: string) =
     else: ""
   let hadGap = currentBarHasGap
   let hasBar = currentBarLabel.len > 0
-  let label = currentBarLabel
   let editorRows = max(1, minline.totalRows(line, 2, 2, currentTermW()))
   stdout.write "\r"
   if hasBar:
     stdout.write "\x1b[" & $(editorRows + 1) & "A"
   stdout.write bufferedSubmitTransitionBytes(line, pendingHint.active, hadGap,
                                              receiptLabel, hasBar)
-  if label.len > 0:
-    stdout.write "\r\n"
-    stdout.write barFooterBytes(label, TurnPromptColor, currentTermW())
   stdout.flushFile
-  bufferedSubmitTurn.store(true, moRelaxed)
+  bufferedSubmitTurn.store(false, moRelaxed)
   emitScreenEvent clearPendingHintEvent()
-  if label.len > 0:
-    emitScreenEvent setBarEvent(label)
-  else:
-    emitScreenEvent clearBarEvent()
+  emitScreenEvent clearBarEvent()
 
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   when providerStub:
