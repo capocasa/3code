@@ -618,7 +618,7 @@ proc main() =
       emitScreenEvent setBarEvent(label, hasGap = true)
       emitScreenEvent setPendingHintEvent(lastUsage, window, -1)
     else:
-      paintInitialBar(prof)
+      paintInitialPrompt(prof)
     if prompt != "":
       messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
       refreshSystemPrompt(messages, prof)

@@ -164,6 +164,7 @@ type
     postRedraw*: proc(ed: var LineEditor) {.closure.}
     submitIcon*: string ## Icon written at end of text before submit newline (set before readLineWith).
     renderSuffix*: string ## Transient suffix rendered after the buffer, not part of submitted text.
+    renderSuffixCursor*: bool ## Place caret after renderSuffix instead of inside editable text.
     prefillText*: string
     history*: LineHistory
     line*: Line
@@ -440,8 +441,13 @@ proc redrawBytes*(ed: var LineEditor): string =
   let renderedText = ed.line.text & ed.renderSuffix
   let total = totalRows(renderedText, pw, cw, width)
   let endRow = total - 1
-  let (targetRow, targetCol) = cursorVisual(ed.line.text, ed.line.position,
-                                            pw, cw, width)
+  let cursorText =
+    if ed.renderSuffixCursor: renderedText
+    else: ed.line.text
+  let cursorPos =
+    if ed.renderSuffixCursor: renderedText.len
+    else: ed.line.position
+  let (targetRow, targetCol) = cursorVisual(cursorText, cursorPos, pw, cw, width)
   var buf = "\x1b[?2026h"
   if ed.renderRow > 0:
     buf.add "\x1b[" & $ed.renderRow & "A"
@@ -1082,6 +1088,7 @@ proc resetForRead(ed: var LineEditor, prompt: string, hidechars: bool) =
   ed.echoRows = 0
   ed.submitted = false
   ed.renderSuffix = ""
+  ed.renderSuffixCursor = false
   ed.canceled = false
   ed.eof = false
   ed.hidechars = hidechars

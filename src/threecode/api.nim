@@ -209,7 +209,7 @@ var contentStreamedLive*: bool = false
 var followupStartsAfterReceipt*: bool = false
 var receiptTouchesNextResponse*: bool = false
 
-const DeferredSubmitMarker* = "*"
+const DeferredSubmitMarker* = "⧖"
   ## Single-cell, monochrome marker shown after deferred input while it is
   ## queued to auto-send at the next turn boundary.
 
@@ -405,6 +405,17 @@ proc liveEditorRows(): int =
   else:
     1
 
+proc hasElapsedSuffix(label: string): bool =
+  var i = label.len - 1
+  if i < 0 or label[i] != 's':
+    return false
+  dec i
+  if i < 0 or not label[i].isDigit:
+    return false
+  while i >= 0 and label[i].isDigit:
+    dec i
+  i >= 0 and label[i] == ' '
+
 proc liveBarRow(termH: int): int =
   ## 1-based terminal row for the token bar when a variable-height
   ## editor footer is active. The editor owns the rows below it.
@@ -488,8 +499,11 @@ proc spinnerBarBytes*(frame, label: string, elapsed: int): string =
   ## one space at col 1, then the label. 2-char prefix total — the same
   ## width as `liveBarBytes`'s "  " so the spinner can be replaced by
   ## a space without shifting the label.
+  let timedLabel =
+    if label.hasElapsedSuffix: label
+    else: label & " " & $elapsed & "s"
   CyanFg & BoldOn & frame & Reset & CyanFg & BoldOn & " " &
-    label & " " & $elapsed & "s" & Reset
+    timedLabel & Reset
 
 proc liveBarBytes*(label: string): string =
   ## Bar row payload (no spinner): two leading spaces, then the label.
@@ -1123,12 +1137,10 @@ proc paintPromptOnly*(promptColor: string) =
   emitScreenEvent clearBarEvent()
 
 proc paintInitialPrompt*(p: Profile) =
-  ## Welcome-time paint when starting fresh. The design requires the
-  ## token bar to reserve a row even before the first response, carrying
-  ## the context percentage at zero. Avoid the old prompt-only state: it
-  ## leaves a bare prompt row that can be pushed into scrollback when the
-  ## first API call starts.
-  paintInitialBar(p)
+  ## Welcome-time paint when starting fresh. The first prompt is intentionally
+  ## prompt-only; the token bar appears after the first response has real usage
+  ## to display.
+  paintPromptOnly(BrightPromptColor)
 
 
 var spinnerRunning = false  # only mutated by main thread
@@ -1152,7 +1164,9 @@ proc barTickLoop() {.thread.} =
       base = barTickBase
       release barTickLock
     let elapsed = (epochTime() - barTickStart).int
-    let label = base & "  " & $elapsed & "s"
+    let label =
+      if base.hasElapsedSuffix: base
+      else: base & "  " & $elapsed & "s"
     # Re-assert hide-cursor each tick — same rationale as
     # `spinnerFooterBytes`: some terminals transiently re-show the
     # caret on cursor movement, and beginTurn's one-shot `?25l`
@@ -2243,10 +2257,17 @@ proc inputThreadProc() {.thread.} =
       acquire inputStateLock
       try:
         if inputState.autoSend:
+          let queued = inputState.queuedText
+          if queued.len > 0 and ed.line.text.startsWith(queued) and
+              ed.line.position > queued.len:
+            let inserted = ed.line.text[queued.len .. ^1]
+            ed.line.text = queued & "\n" & inserted
+            ed.line.position = queued.len + 1 + inserted.len
           inputState.autoSend = false
           inputState.queuedText = ""
           inputState.queuedEchoRows = 0
           ed.renderSuffix = ""
+          ed.renderSuffixCursor = false
       finally:
         release inputStateLock
     edPtr[].onSubmit = proc(ed: var minline.LineEditor) =
@@ -2261,8 +2282,9 @@ proc inputThreadProc() {.thread.} =
         release inputStateLock
       ed.line.position = ed.line.text.len
       ed.renderSuffix =
-        if ed.line.text.len > 0: DeferredSubmitMarker
+        if ed.line.text.len > 0: " " & DeferredSubmitMarker & "\n"
         else: ""
+      ed.renderSuffixCursor = ed.renderSuffix.len > 0
     edPtr[].preRedraw = proc(ed: var minline.LineEditor) =
       reserveEditorFooterForRedraw(ed)
     edPtr[].postRedraw = proc(ed: var minline.LineEditor) =
@@ -2353,6 +2375,7 @@ proc inputThreadProc() {.thread.} =
     edPtr[].postRedraw = nil
     edPtr[].deferSubmit = false
     edPtr[].renderSuffix = ""
+    edPtr[].renderSuffixCursor = false
     edPtr[].getCh = nil
     edPtr[].write = nil
     edPtr[].getWidth = nil

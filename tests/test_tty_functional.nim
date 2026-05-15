@@ -265,6 +265,24 @@ proc assertOrderedRows(tty: TtySession; markers: openArray[string]) =
   doAssert false,
     "visual test never captured ordered markers: " & markers.join(" -> ")
 
+proc assertInitialPromptOnly(tty: TtySession) =
+  for frame in tty.frames:
+    let promptRow = frame.rowWith("❯")
+    let helpRow = frame.rowWith("type a prompt.")
+    if promptRow < 0 or helpRow < 0:
+      continue
+    if frame.rows[promptRow].startsWith("❯") and
+        "exercise visual contract" notin frame.rows[promptRow]:
+      for row in frame.rows:
+        doAssert not row.isTokenBar,
+          "initial first prompt should not show a token bar:\n" &
+            frame.rows.join("\n")
+      doAssert promptRow - helpRow == 2,
+        "initial prompt should have one blank row after the help line:\n" &
+          frame.rows.join("\n")
+      return
+  doAssert false, "visual test never captured prompt-only initial screen"
+
 proc nearestPromptRow(frame: TtyFrame; rowIdx: int): int =
   for i in countdown(min(rowIdx, frame.rows.high), 0):
     if frame.rows[i].startsWith("❯ "):
@@ -303,6 +321,44 @@ proc assertLiveTypingKeepsTokenBar(tty: TtySession;
   doAssert sawLiveTyping,
     "visual test never captured live typing with a token bar for markers: " &
       @promptMarkers.join(", ")
+
+proc assertAutosendMarkerBehavior(tty: TtySession) =
+  var sawMarker = false
+  var sawMarkerRemoved = false
+  var sawFinalWithoutMarker = false
+  for frame in tty.frames:
+    var hasPromptMarker = false
+    var hasAnotherMarker = false
+    for rowIdx, row in frame.rows:
+      if "prompt" in row and "⧖" in row:
+        hasPromptMarker = true
+        sawMarker = true
+        doAssert row.contains(" ⧖"),
+          "autosend marker should be separated from text by one space:\n" &
+            frame.rows.join("\n")
+        doAssert rowIdx + 1 < frame.rows.len,
+          "autosend marker should reserve a following editor row:\n" &
+            frame.rows.join("\n")
+        if not frame.cursorHidden:
+          doAssert frame.cursorRow == rowIdx + 1,
+            "autosend marker caret should sit on following editor row:\n" &
+              frame.rows.join("\n")
+      if "another" in row and "⧖" in row:
+        hasAnotherMarker = true
+    if "Buffered prompt answered." in frame.rows.join("\n"):
+      doAssert not hasPromptMarker,
+        "autosend marker remained after queued prompt was sent:\n" &
+          frame.rows.join("\n")
+      sawMarkerRemoved = true
+    if "Sure is. Let me know when you have a real task." in frame.rows.join("\n"):
+      doAssert not hasAnotherMarker,
+        "autosend marker remained after final queued prompt was sent:\n" &
+          frame.rows.join("\n")
+      sawFinalWithoutMarker = true
+  doAssert sawMarker, "visual test never captured autosend marker"
+  doAssert sawMarkerRemoved, "visual test never captured autosend marker removal"
+  doAssert sawFinalWithoutMarker,
+    "visual test never captured final queued prompt after marker removal"
 
 proc assertBashViewportBounded(tty: TtySession) =
   var sawCutoff = false
@@ -398,6 +454,7 @@ suite "terminal visual contract":
       tty.close()
 
     tty.expect "❯"
+    tty.assertInitialPromptOnly()
     tty.send "exercise visual contract\n"
     tty.expectInHistory "Streaming markdown before tools."
     tty.send "buffered"
@@ -425,7 +482,8 @@ suite "terminal visual contract":
 
   ○0%  ↑100  ↓9  <elapsed>
 ❯ buffered
-  prompt
+  prompt ⧖
+...
 """,
       """
 ...
@@ -441,7 +499,8 @@ $ for i in 1 2 3 4 5 6 7 8 9; do echo bash-line-$i; sleep 0.05; d…
 
   ○0%  ↑100  ↓9  <elapsed>
 ❯ buffered
-  prompt
+  prompt ⧖
+...
 """,
       """
 ...
@@ -474,6 +533,7 @@ $ for i in 1 2 3 4 5 6 7 8 9; do echo bash-line-$i; sleep 0.05; d…
     ])
     tty.assertFatPromptFrames()
     tty.assertLiveTypingKeepsTokenBar(["❯ buffered", "❯ this is"])
+    tty.assertAutosendMarkerBehavior()
     tty.assertBashViewportBounded()
     tty.assertNoPromptOnlyClearAfter("Streaming markdown before tools.")
     tty.assertOrderedRows([
