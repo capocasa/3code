@@ -20,7 +20,7 @@
 ##     ├── shell        shell command parsing for loop guard
 ##     ├── web          native web search + URL fetch
 ##     ├── update       background auto-update
-##     ├── screen       explicit volatile footer state
+##     ├── fatprompt    volatile prompt/token/ticker state and frame bytes
 ##     ├── util         string utils, ANSI palette, markdown helpers
 ##     ├── types        shared types + globals
 ##     └── minline      readline-style input
@@ -30,12 +30,12 @@ import std/exitprocs
 when defined(posix):
   import std/posix
 import threecode/[types, util, prompts, shell, loop, session, compact,
-                  config, actions, api, display, ui, update, screen,
-                  streamexec]
+                  config, actions, api, display, ui, update, fatprompt,
+                  streamexec, toolstream]
 import threecode/terminal as termui
 import threecode/minline
 export types, util, prompts, shell, loop, session, compact,
-       config, actions, api, display, ui, screen
+       config, actions, api, display, ui, fatprompt, toolstream
 
 proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
   clearInterrupted()
@@ -67,7 +67,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
     messages.add msg
     saveSession(session, messages)
     if isInterrupted():
-      screenWriteTranscript:
+      writeTranscriptWithFatPrompt:
         stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
       clearInterrupted()
       return
@@ -77,7 +77,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
     of caSummarize:
       summarized = summarizeHistory(messages, p)
       if summarized > 0:
-        screenWriteTranscript:
+        writeTranscriptWithFatPrompt:
           hintLn &"  · summarized {summarized} old message" &
             (if summarized == 1: "" else: "s") &
             &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)",
@@ -90,7 +90,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
        usage.promptTokens.float > CompactThresholdFrac * window.float:
       let n = compactHistory(messages)
       if n > 0:
-        screenWriteTranscript:
+        writeTranscriptWithFatPrompt:
           hintLn &"  · compacted {n} old tool result" &
             (if n == 1: "" else: "s") &
             &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)",
@@ -106,14 +106,14 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
     if toolCalls.len > 0:
       debugOut $toolCalls.len & " tool calls"
       # Each emit (blank row, assistant content, pending banner, tool
-      # output, halt notice) is wrapped in `screenWriteTranscript` so
+      # output, halt notice) is wrapped in `writeTranscriptWithFatPrompt` so
       # bar+prompt are repainted directly below after the write. The
       # bar+prompt remain on screen for the entire tool exec — including
       # the seconds while runAction blocks on the bash command between
       # the pending banner and the timed result. (Wrapping the whole
       # block in one transcript write is wrong: it clears at start, repaints
       # at end, so bar/prompt are invisible while the command runs.)
-      screenWriteTranscript:
+      writeTranscriptWithFatPrompt:
         if content.strip.len > 0 and not streamedLive:
           renderAssistantContent(content)
           stdout.write "\n"
@@ -206,11 +206,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
 
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
         if not silent:
-          screenWriteTranscript:
+          writeTranscriptWithFatPrompt:
             renderToolBanner(bannerFor(act), act.kind, code, toolElapsed.int)
             printToolResult(act.kind, r, code, idx, diff)
         else:
-          screenWriteTranscript:
+          writeTranscriptWithFatPrompt:
             printSkillLoaded(act)
         # Loop guard: fingerprint the call and decide whether to annotate the
         # tool result (Strike 1) or halt further tool calls (Strike 2). The
@@ -264,13 +264,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           session.loop = initLoopTracker()
           session.readCache = nil
           session.plan.setLen 0
-          emitScreenEvent clearPendingHintEvent()
-          emitScreenEvent clearBarEvent()
+          emitFatPromptEvent clearPendingHintEvent()
+          emitFatPromptEvent clearBarEvent()
           if session.savePath != "":
             session.savePath = newSessionPath()
             session.created = $now()
             session.cwd = getCurrentDir()
-          screenWriteTranscript:
+          writeTranscriptWithFatPrompt:
             stdout.write OffWhiteFg
             for line in freshMsg.strip.splitLines:
               stdout.write "  "
@@ -281,11 +281,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           cleared = true
           break
       if cleared:
-        emitScreenEvent clearPendingHintEvent()
+        emitFatPromptEvent clearPendingHintEvent()
         continue
       saveSession(session, messages)
       if isInterrupted():
-        screenWriteTranscript:
+        writeTranscriptWithFatPrompt:
           stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
         clearInterrupted()
         return
@@ -294,7 +294,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         turnEnded = true
         return
       if halt:
-        screenWriteTranscript:
+        writeTranscriptWithFatPrompt:
           if session.loop.recoveryCmd != "":
             errLn "⊘  working-tree recovery: `",
               session.loop.recoveryCmd, "` wiped state"
@@ -311,20 +311,20 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         let rl = tokenLineLabel(pendingHint.usage, pendingHint.window,
                                 pendingHint.elapsed)
         if rl.len > 0:
-          screenWriteTranscript:
+          writeTranscriptWithFatPrompt:
             stdout.writeLine CyanFg & "  " & rl & Reset
-            emitScreenEvent clearBarEvent()
+            emitFatPromptEvent clearBarEvent()
           followupStartsAfterReceipt = true
           receiptTouchesNextResponse = true
-        emitScreenEvent clearPendingHintEvent()
+        emitFatPromptEvent clearPendingHintEvent()
       debugOut "runTurns: loop continue"
       continue
     if content.strip.len > 0:
       if not streamedLive:
-        screenWriteTranscript:
+        writeTranscriptWithFatPrompt:
           renderAssistantContent(content)
     else:
-      screenWriteTranscript:
+      writeTranscriptWithFatPrompt:
         stdout.styledWriteLine styleDim,
           "  (empty reply — no content, no tool calls)", resetStyle
     finishTurn()
@@ -616,8 +616,8 @@ proc main() =
       let tw = try: terminalWidth() except CatchableError: 0
       stdout.write barFooterBytes(label, BrightPromptColor, tw)
       stdout.flushFile
-      emitScreenEvent setBarEvent(label, hasGap = true)
-      emitScreenEvent setPendingHintEvent(lastUsage, window, -1)
+      emitFatPromptEvent setBarEvent(label, hasGap = true)
+      emitFatPromptEvent setPendingHintEvent(lastUsage, window, -1)
     else:
       paintInitialPrompt(prof)
     if prompt != "":

@@ -1,5 +1,5 @@
 import std/[json, strutils, unittest]
-import threecode/[compact, types]
+import threecode/compact
 
 suite "compact: compactHistory":
   test "compacts old tool messages":

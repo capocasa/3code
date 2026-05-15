@@ -1,4 +1,4 @@
-import std/[os, strutils, unittest]
+import std/unittest
 import threecode/shell
 
 suite "shell: bashMutationPath edge cases":

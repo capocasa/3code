@@ -1,5 +1,5 @@
 import std/[os, strutils, terminal, unittest]
-import threecode/display
+import threecode/toolstream
 import ttty/grid
 
 proc captureStdout(name: string, body: proc()): string =

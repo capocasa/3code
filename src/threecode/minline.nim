@@ -162,6 +162,7 @@ type
     onSubmit*: SubmitCallback
     preRedraw*: proc(ed: var LineEditor) {.closure.}
     postRedraw*: proc(ed: var LineEditor) {.closure.}
+    redrawWrappedExternally*: bool
     submitIcon*: string ## Icon written at end of text before submit newline (set before readLineWith).
     renderSuffix*: string ## Transient suffix rendered after the buffer, not part of submitted text.
     renderSuffixCursor*: bool ## Place caret after renderSuffix instead of inside editable text.
@@ -411,21 +412,11 @@ proc historyFlush*(ed: var LineEditor) =
 
 # ---------- Render ----------
 
-proc emitMoveUp(ed: var LineEditor, n: int) =
-  if n <= 0: return
-  ed.write "\x1b[" & $n & "A"
-
 proc emitMoveDown(ed: var LineEditor, n: int) =
   if n <= 0: return
   ed.write "\x1b[" & $n & "B"
 
-proc emitColumn(ed: var LineEditor, col: int) =
-  ## Set cursor to absolute column ``col`` (0-based) on the current row.
-  ed.write "\r"
-  if col > 0:
-    ed.write "\x1b[" & $col & "C"
-
-proc redrawBytes*(ed: var LineEditor): string =
+proc redrawBytes*(ed: var LineEditor; synchronized = true): string =
   ## Build a full editor repaint and update ``ed.renderRow`` to the
   ## cursor's new visual row. Callers that share a render lock with
   ## other terminal chrome can embed these bytes in a larger atomic
@@ -448,7 +439,9 @@ proc redrawBytes*(ed: var LineEditor): string =
     if ed.renderSuffixCursor: renderedText.len
     else: ed.line.position
   let (targetRow, targetCol) = cursorVisual(cursorText, cursorPos, pw, cw, width)
-  var buf = "\x1b[?2026h"
+  var buf = ""
+  if synchronized:
+    buf.add "\x1b[?2026h"
   if ed.renderRow > 0:
     buf.add "\x1b[" & $ed.renderRow & "A"
   buf.add "\r\x1b[J"
@@ -458,7 +451,8 @@ proc redrawBytes*(ed: var LineEditor): string =
   buf.add "\r"
   if targetCol > 0:
     buf.add "\x1b[" & $targetCol & "C"
-  buf.add "\x1b[?2026l"
+  if synchronized:
+    buf.add "\x1b[?2026l"
   ed.renderRow = targetRow
   result = buf
 
@@ -484,7 +478,9 @@ proc fullRedraw*(ed: var LineEditor) =
   ## don't recognize the mode ignore it silently.
   if ed.preRedraw != nil:
     ed.preRedraw(ed)
-  ed.write ed.redrawBytes()
+  let synchronized = not ed.redrawWrappedExternally
+  ed.write ed.redrawBytes(synchronized = synchronized)
+  ed.redrawWrappedExternally = false
   if ed.postRedraw != nil:
     ed.postRedraw(ed)
 

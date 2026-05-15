@@ -1,5 +1,5 @@
 import std/[os, strutils, unittest]
-import threecode/[config, web]
+import threecode/config
 
 suite "config: parseConfigFile round-trip":
   var tmp = ""

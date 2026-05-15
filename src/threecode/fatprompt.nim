@@ -1,15 +1,61 @@
-## Pure frame model for the terminal fat prompt.
+## Fat-prompt state, visual model, and byte templates.
 ##
-## This module owns no terminal file descriptors and emits no ANSI. It models
-## the complete visible screen after a render tick: append-only scrollback plus
-## the live prompt chrome reserved below it. Production terminal code should
-## eventually become a byte backend for this state rather than issuing
-## independent cursor movement from feature modules.
+## This module owns the policy for prompt chrome: prompt rows, token bar,
+## thinking ticker state, spacing, receipts, and the visual frame model used by
+## tests. It may construct ANSI byte templates for those prompt frames, but it
+## does not write them. `terminal.nim` is the only module that serializes those
+## bytes to the terminal.
 
-import std/[strformat, strutils, unicode]
+import std/[strformat, strutils, terminal, unicode]
 import types, util
 
 type
+  PromptMode* = enum
+    pmIdle,
+    pmTurnRunning,
+    pmBufferedInput
+
+  PendingHint* = object
+    active*: bool
+    usage*: Usage
+    window*: int
+    elapsed*: int
+
+  FooterState* = object
+    promptMode*: PromptMode
+    barLabel*: string
+    hasGap*: bool
+    ticker*: string
+    pendingHint*: PendingHint
+
+  FatPromptState* = object
+    footer*: FooterState
+
+  FatPromptEventKind* = enum
+    fpeSetPromptMode,
+    fpeSetBar,
+    fpeClearBar,
+    fpeSetTicker,
+    fpeClearTicker,
+    fpeSetPendingHint,
+    fpeClearPendingHint
+
+  FatPromptEvent* = object
+    case kind*: FatPromptEventKind
+    of fpeSetPromptMode:
+      promptMode*: PromptMode
+    of fpeSetBar:
+      barLabel*: string
+      barHasGap*: bool
+    of fpeSetTicker:
+      ticker*: string
+    of fpeSetPendingHint:
+      usage*: Usage
+      window*: int
+      elapsed*: int
+    of fpeClearBar, fpeClearTicker, fpeClearPendingHint:
+      discard
+
   PromptMarker* = enum
     pmUser, pmAssistant, pmBash, pmRead, pmWrite, pmPatch, pmOther
 
@@ -40,6 +86,56 @@ const
   DefaultWidth* = 80
   DefaultHeight* = 24
   DefaultBashMaxLines* = 8
+  DimPromptColor* = GreyFg
+  BrightPromptColor* = CyanFg & BoldOn
+  TurnPromptColor* = OffWhiteFg & BoldOn
+  DeferredSubmitMarker* = "⧖"
+
+proc initFatPromptState*(): FatPromptState =
+  FatPromptState(footer: FooterState(promptMode: pmIdle))
+
+proc setPromptModeEvent*(mode: PromptMode): FatPromptEvent =
+  FatPromptEvent(kind: fpeSetPromptMode, promptMode: mode)
+
+proc setBarEvent*(label: string; hasGap = false): FatPromptEvent =
+  FatPromptEvent(kind: fpeSetBar, barLabel: label, barHasGap: hasGap)
+
+proc clearBarEvent*(): FatPromptEvent =
+  FatPromptEvent(kind: fpeClearBar)
+
+proc setTickerEvent*(ticker: string): FatPromptEvent =
+  FatPromptEvent(kind: fpeSetTicker, ticker: ticker)
+
+proc clearTickerEvent*(): FatPromptEvent =
+  FatPromptEvent(kind: fpeClearTicker)
+
+proc setPendingHintEvent*(usage: Usage; window, elapsed: int): FatPromptEvent =
+  FatPromptEvent(kind: fpeSetPendingHint, usage: usage, window: window,
+                 elapsed: elapsed)
+
+proc clearPendingHintEvent*(): FatPromptEvent =
+  FatPromptEvent(kind: fpeClearPendingHint)
+
+proc apply*(s: var FatPromptState; ev: FatPromptEvent) =
+  case ev.kind
+  of fpeSetPromptMode:
+    s.footer.promptMode = ev.promptMode
+  of fpeSetBar:
+    s.footer.barLabel = ev.barLabel
+    s.footer.hasGap = ev.barHasGap
+  of fpeClearBar:
+    s.footer.barLabel = ""
+    s.footer.hasGap = false
+  of fpeSetTicker:
+    s.footer.ticker = ev.ticker
+  of fpeClearTicker:
+    s.footer.ticker = ""
+  of fpeSetPendingHint:
+    s.footer.pendingHint = PendingHint(active: true, usage: ev.usage,
+                                       window: ev.window,
+                                       elapsed: ev.elapsed)
+  of fpeClearPendingHint:
+    s.footer.pendingHint = PendingHint()
 
 proc initFatPrompt*(width = DefaultWidth, height = DefaultHeight,
                     window = 0): FatPrompt =
@@ -166,6 +262,206 @@ proc tokenBarText*(state: TokenBarState): string =
   if state.apiActive and state.elapsedS >= 0:
     parts.add $state.elapsedS & "s"
   parts.join("  ")
+
+proc hasNonNewlineBytes*(s: string): bool =
+  for ch in s:
+    if ch notin {'\r', '\n'}:
+      return true
+
+proc hasElapsedSuffix*(label: string): bool =
+  var i = label.len - 1
+  if i < 0 or label[i] != 's':
+    return false
+  dec i
+  if i < 0 or not label[i].isDigit:
+    return false
+  while i >= 0 and label[i].isDigit:
+    dec i
+  i >= 0 and label[i] == ' '
+
+proc spinnerBarBytes*(frame, label: string, elapsed: int): string =
+  let timedLabel =
+    if label.hasElapsedSuffix: label
+    else: label & " " & $elapsed & "s"
+  CyanFg & BoldOn & frame & Reset & CyanFg & BoldOn & " " &
+    timedLabel & Reset
+
+proc liveBarBytes*(label: string): string =
+  CyanFg & BoldOn & "  " & label & Reset
+
+proc labelCells*(label: string): int =
+  var i = 0
+  while i < label.len:
+    let rl = max(1, runeLenAt(label, i))
+    inc result
+    i += rl
+
+proc barWrapRows*(visibleCells, termW: int): int =
+  if termW <= 0 or visibleCells <= 0: return 1
+  result = (visibleCells + termW - 1) div termW
+  if result < 1: result = 1
+
+proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int,
+                         termW = 0): string =
+  let barCells = labelCells(label) + 4 + ($elapsed).len
+  let barRows = barWrapRows(barCells, termW)
+  result = "\x1b[?25l\r\x1b[1A\x1b[2K"
+  if ticker.len > 0:
+    result.add GreyFg
+    result.add ticker
+    result.add Reset
+  result.add "\r\n\x1b[2K"
+  result.add spinnerBarBytes(frame, label, elapsed)
+  result.add "\r\n\x1b[2K" & DimPromptColor & "❯ " & Reset
+  result.add "\r\x1b[" & $barRows & "A"
+
+proc liveEditorSpinnerBarBytes*(frame, label: string, elapsed: int): string =
+  "\r\x1b[2K" & spinnerBarBytes(frame, label, elapsed)
+
+proc spinnerCleanupBytes*(tickerRows = 1): string =
+  let rows = max(1, tickerRows)
+  "\r\x1b[" & $rows & "A\x1b[J\n"
+
+proc paintBarBytes*(label: string): string =
+  "\r\x1b[2K" & liveBarBytes(label)
+
+proc barFooterBytes*(label, promptColor: string, termW = 0): string =
+  let barRows = barWrapRows(2 + labelCells(label), termW)
+  paintBarBytes(label) &
+    "\r\n\x1b[2K" & promptColor & "❯ " & Reset &
+    "\r\x1b[" & $barRows & "A"
+
+const ClearBarPromptBytes* = "\r\x1b[J"
+
+proc barFooterBelowAtColBytes*(label, promptColor: string, col: int,
+                               termW = 0): string =
+  let barRows = barWrapRows(2 + labelCells(label), termW)
+  "\r\n\x1b[2K" & liveBarBytes(label) &
+    "\r\n\x1b[2K" & promptColor & "❯ " & Reset &
+    "\x1b[" & $(barRows + 1) & "A\x1b[" & $(max(0, col) + 1) & "G"
+
+proc barFooterBelowBytes*(label, promptColor: string, termW = 0): string =
+  barFooterBelowAtColBytes(label, promptColor, 2, termW)
+
+proc clearBarBelowAtColBytes*(col: int): string =
+  "\n\r\x1b[J\x1b[1A\x1b[" & $(max(0, col) + 1) & "G"
+
+const ClearBarBelowBytes* = "\n\r\x1b[J\x1b[1A\x1b[3G"
+
+proc receiptBarBytes*(label: string): string =
+  if label.len == 0: return ""
+  CyanFg & "  " & label & Reset
+
+proc addUserEcho(result: var string, line: string; trailingNewline = true) =
+  let termW = try: terminalWidth() except CatchableError: 0
+  let lines = line.splitLines
+  for idx, l in lines:
+    let prefix = if idx == 0: "❯ " else: "  "
+    result.add prefix
+    if termW <= 0:
+      result.add l
+    else:
+      var col = 2
+      var i = 0
+      while i < l.len:
+        let rl = max(1, runeLenAt(l, i))
+        if col >= termW:
+          result.add "\r\n  "
+          col = 2
+        result.add l[i ..< i + rl]
+        inc col
+        i += rl
+    if trailingNewline or idx < lines.high:
+      result.add "\r\n"
+
+proc submitTransitionBytes*(line: string, hadPending, hadGap: bool,
+                            receiptLabel: string, hasBar = true,
+                            echoRows = -1): string =
+  let lines = line.splitLines
+  let n = if echoRows > 0: echoRows else: lines.len
+  let walkBack =
+    if not hasBar: n
+    elif hadGap and hadPending: n + 3
+    elif hadGap: n + 2
+    else: n + 1
+  result = "\x1b[" & $walkBack & "A"
+  result.add "\r\x1b[J"
+  if hadPending:
+    result.add receiptBarBytes(receiptLabel)
+    result.add "\n\n"
+  elif hasBar:
+    result.add "\n\n"
+  result.addUserEcho(line)
+
+proc bufferedSubmitTransitionBytes*(line: string, hadPending, hadGap: bool,
+                                    receiptLabel: string,
+                                    hasBar = true): string =
+  if not hasBar:
+    result = "\r\x1b[J"
+    result.addUserEcho(line)
+    return
+  result.add "\r\x1b[J"
+  if hadPending:
+    result.add receiptBarBytes(receiptLabel)
+    result.add "\r\n\r\n"
+  else:
+    result.add "\r\n"
+  result.addUserEcho(line)
+
+proc promptOnlyBytes*(promptColor: string): string =
+  "\r\x1b[2K" & promptColor & "❯ " & Reset & "\r"
+
+proc promptOnlyResetBytes*(promptColor: string): string =
+  "\x1b[2K" & promptColor & "❯ " & Reset & "\r"
+
+proc clearTickerBytes*(): string =
+  "\r\x1b[1A\x1b[2K\x1b[1B"
+
+proc clearPromptAfterPendingReceiptBytes*(): string =
+  "\r\x1b[1A\x1b[J"
+
+proc clearBarRowBytes*(): string =
+  "\r\x1b[2K"
+
+proc currentFooterBarBytes*(s: FatPromptState): string =
+  if s.footer.barLabel.len == 0: ""
+  else: paintBarBytes(s.footer.barLabel)
+
+proc cursorForPromptColor*(promptColor: string): string =
+  if promptColor == DimPromptColor: "\x1b[?25l"
+  else: "\x1b[?25h"
+
+proc endTurnBytes*(label, promptColor: string, repaintPrompt: bool,
+                   termW = 0; gapAlready = false): string =
+  if label.len > 0:
+    result.add ClearBarPromptBytes
+    if repaintPrompt:
+      if not gapAlready:
+        result.add "\n"
+      result.add barFooterBytes(label, promptColor, termW)
+      let rows = barWrapRows(2 + labelCells(label), termW)
+      result.add "\x1b[" & $rows & "B"
+  result.add "\x1b[?25h"
+
+proc liveEditorBarTickFrame*(label: string): string =
+  paintBarBytes(label)
+
+proc absoluteBarTickFrame*(row: int; label: string; activeEditor: bool;
+                           termW = 0): string =
+  let pos = "\x1b[" & $row & ";1H"
+  if activeEditor:
+    "\x1b[?25l" & pos & paintBarBytes(label)
+  else:
+    "\x1b[?25l" & pos & barFooterBytes(label, DimPromptColor, termW)
+
+proc moveToBarBelowBytes*(): string =
+  "\x1b[1B"
+
+proc insertTickerRowBelowBytes*(): string =
+  "\x1b[L\x1b[1B"
+
+proc removeTickerRowAboveBytes*(): string =
+  "\r\x1b[1A\x1b[M"
 
 proc editorRows*(p: FatPrompt): seq[string] =
   wrapMarked("❯", p.editorText, p.width)

@@ -21,7 +21,7 @@ when defined(posix):
   import std/posix except SocketHandle
   import posix/termios
 import streamhttp
-import types, util, prompts, compact, display, minline, screen, streamexec,
+import types, util, prompts, compact, display, minline, fatprompt, streamexec,
   terminal as termui
 
 type
@@ -209,16 +209,12 @@ var contentStreamedLive*: bool = false
 var followupStartsAfterReceipt*: bool = false
 var receiptTouchesNextResponse*: bool = false
 
-const DeferredSubmitMarker* = "⧖"
-  ## Single-cell, monochrome marker shown after deferred input while it is
-  ## queued to auto-send at the next turn boundary.
-
-var screenState* = initScreenState()
+var fatPromptState* = initFatPromptState()
   ## Explicit state for the normal scrollback transcript's volatile footer.
   ## Rendering still happens in this module, but prompt/bar/ticker data now
   ## has one home instead of separate process-level globals.
 
-template pendingHint*(): untyped = screenState.footer.pendingHint
+template pendingHint*(): untyped = fatPromptState.footer.pendingHint
   ## Carries the latest iteration's accurate usage forward. Two roles:
   ##   1. After each `callModel` iteration, used to repaint the **token
   ##      bar** with accurate values (replacing the live rough ones).
@@ -228,13 +224,13 @@ template pendingHint*(): untyped = screenState.footer.pendingHint
   ##      bar (at zeros) takes its place at the new bottom.
   ## See `## Token UI` in `CLAUDE.md` for the full lifecycle.
 
-template currentBarLabel*(): untyped = screenState.footer.barLabel
+template currentBarLabel*(): untyped = fatPromptState.footer.barLabel
   ## What's currently shown in the live bar. Updated by every paint
   ## (live during streaming, accurate after `callModel` parses usage,
-  ## zero on first turn). Used by `screenWriteTranscript` to repaint the bar
+  ## zero on first turn). Used by `writeTranscriptWithFatPrompt` to repaint the bar
   ## with the same label after a content write hides it.
 
-template currentBarHasGap*(): untyped = screenState.footer.hasGap
+template currentBarHasGap*(): untyped = fatPromptState.footer.hasGap
   ## Whether there's a one-row blank "gap" between the bar and the
   ## row above it. Set by `endTurn` (typing-ready state — the gap
   ## sits between the last LLM line and the bar, breathing room
@@ -251,7 +247,6 @@ var showThinking*: bool = true
   ## / `:think off`. Has no effect if the provider doesn't emit reasoning.
 
 var spinnerStop: Atomic[bool]
-var spinnerUseLiveEditorFrame: Atomic[bool]
 var spinnerFramePainted: Atomic[bool]
 var spinnerThread: Thread[string]
 var bufferedSubmitTurn: Atomic[bool]
@@ -259,6 +254,14 @@ var quietStop: Atomic[bool]
 var quietThread: Thread[string]
 var quietRunning = false
 var lastProviderActivity: Atomic[int]
+
+var barTickStop: Atomic[bool]
+var barTickThread: Thread[void]
+var barTickRunning = false
+var barTickStart: float
+var barTickBase: string
+var barTickLock: Lock
+barTickLock.initLock()
 
 var inputState*: InputState
 var inputStateLock*: Lock
@@ -282,22 +285,15 @@ var
   spinLabelLock: Lock
   spinLabelShared: string
   spinTickerShared: string
+  spinFrameShared: string
+  spinElapsedShared: int
 spinLabelLock.initLock()
 
-proc paintBarBytes*(label: string): string
-
-proc emitScreenEvent*(ev: ScreenEvent) =
+proc emitFatPromptEvent*(ev: FatPromptEvent) =
   ## Single state transition entry point for the volatile footer model.
   ## Terminal bytes are still rendered by the helpers below, but all
   ## production state changes flow through this event reducer.
-  screenState.apply ev
-  case ev.kind
-  of seSetBar:
-    termui.setFooterBar(paintBarBytes(ev.barLabel))
-  of seClearBar:
-    termui.clearFooterBar()
-  else:
-    discard
+  fatPromptState.apply ev
 
 type LiveMarkdownStream* = object
   ## Incremental renderer for assistant content during provider streaming.
@@ -333,9 +329,9 @@ proc setSpinTicker(s: string) {.gcsafe.} =
     spinTickerShared = s
     release spinLabelLock
     if s.len == 0:
-      emitScreenEvent clearTickerEvent()
+      emitFatPromptEvent clearTickerEvent()
     else:
-      emitScreenEvent setTickerEvent(s)
+      emitFatPromptEvent setTickerEvent(s)
 
 proc getSpinTicker(): string {.gcsafe.} =
   {.cast(gcsafe).}:
@@ -343,64 +339,22 @@ proc getSpinTicker(): string {.gcsafe.} =
     result = spinTickerShared
     release spinLabelLock
 
-# ---------- Pure byte emitters (testable) ----------
-#
-# CLAUDE.md "Token UI" section is the spec. The bar and prompt are
-# ALWAYS visible — there are no "hidden" states. Tool exec, line emits,
-# and inter-iteration transitions clear them just long enough to write
-# above, then repaint immediately below. Receipts are NOT separate
-# rows — when the user submits, the previous bar's row is repainted
-# dim (the "receipt") and stays in scroll history.
-#
-# Layout (rows at the bottom of the visible content, sliding with the
-# cursor):
-#
-#   row K-1   scratch / thinking-ticker overlay target (always blank
-#             between iterations; ticker overlays it while reasoning
-#             streams, restoring blank when reasoning ends — the row
-#             holds no permanent content).
-#   row K     token bar (cyan + bright). Position 0 carries either the
-#             spinner braille glyph (during streaming) or a space
-#             (idle / between iterations). Position 1 is always a
-#             space. Label starts at column 2.
-#   row K+1   prompt ❯ — dim while typing isn't possible, bright
-#             cyan when readline is reading.
-#
-# Emitters:
-#
-#   spinnerBarBytes      bar payload with spinner glyph at col 0.
-#   liveBarBytes         bar payload with space at col 0 (idle / static).
-#   spinnerFooterBytes   per-frame spinner three-row footer.
-#   barFooterBytes       bar + prompt, cursor parked at bar row col 0.
-#   ClearBarPromptBytes  erase bar + prompt rows, cursor at bar row col 0.
-#   SpinnerCleanupBytes  wipes all three spinner footer rows.
-#   receiptBarBytes      dim payload of the bar (for the in-place
-#                        receipt repaint at user-submit time).
-#   submitTransitionBytes  full byte sequence for the user-submit
-#                        transition (walk back, paint receipt, echo
-#                        user input).
+proc setSpinFrame(frame: string; elapsed: int) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    acquire spinLabelLock
+    spinFrameShared = frame
+    spinElapsedShared = elapsed
+    release spinLabelLock
 
-const
-  DimPromptColor* = GreyFg
-    ## Prompt color while typing isn't possible (model streaming,
-    ## tool exec, etc.). Mid-grey 244 — readable on both bg.
-  BrightPromptColor* = CyanFg & BoldOn
-    ## Prompt color when readline is active (typing-ready).
-  TurnPromptColor* = OffWhiteFg & BoldOn
-    ## Prompt color while a turn is running but buffered typing is active.
-  SyncBegin* = "\x1b[?2026h"
-    ## DEC 2026 begin synchronized update — conhost (Win11 modern) and
-    ## Windows Terminal commit all bytes between BEGIN and END as one
-    ## atomic frame. Terminals that don't recognize the mode ignore it
-    ## silently. Wrapping per-frame paints (bar, spinner ticker)
-    ## eliminates the mid-frame partial-paint flicker conhost shows.
-  SyncEnd* = "\x1b[?2026l"
-    ## End synchronized update.
-
-proc hasNonNewlineBytes(s: string): bool =
-  for ch in s:
-    if ch notin {'\r', '\n'}:
-      return true
+proc getSpinBarBytes(): string {.gcsafe.} =
+  {.cast(gcsafe).}:
+    acquire spinLabelLock
+    let frame = if spinFrameShared.len > 0: spinFrameShared else: "○"
+    let label = spinLabelShared
+    let elapsed = spinElapsedShared
+    release spinLabelLock
+    if label.len > 0:
+      result = liveEditorSpinnerBarBytes(frame, label, elapsed)
 
 proc refreshEditorWidth(ed: var minline.LineEditor) =
   let w = try: terminalWidth() except CatchableError: 0
@@ -413,17 +367,6 @@ proc liveEditorRows(): int =
     max(1, minline.renderedRows(inputEditor[]))
   else:
     1
-
-proc hasElapsedSuffix(label: string): bool =
-  var i = label.len - 1
-  if i < 0 or label[i] != 's':
-    return false
-  dec i
-  if i < 0 or not label[i].isDigit:
-    return false
-  while i >= 0 and label[i].isDigit:
-    dec i
-  i >= 0 and label[i] == ' '
 
 proc liveBarRow(termH: int): int =
   ## 1-based terminal row for the token bar when a variable-height
@@ -438,17 +381,6 @@ proc liveEditorFooterAnchored*(): bool =
   inputThreadRunning and inputEditor != nil and terminalHeight() > 0 and
     stdout.isatty
 
-proc anchoredEditorFooterBytes*(label: string; termH, editorRows: int): string
-
-proc enterTurnScrollRegion*() =
-  ## Compatibility shim for older call sites. The fat prompt is now anchored
-  ## relative to scrollback, not by installing a bottom scroll region.
-  discard
-
-proc leaveTurnScrollRegion*() =
-  ## Compatibility shim for older call sites.
-  discard
-
 proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
   ## Called by the editor before every redraw while a turn is active.
   ## The reserved footer height follows the editor's live rendered height
@@ -457,14 +389,29 @@ proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
   ## only code allowed to paint those rows.
   if not liveEditorFooterAnchored():
     return
+  let footerBarBytes =
+    if spinnerStop.load(moRelaxed) == false and spinnerFramePainted.load(moRelaxed):
+      getSpinBarBytes()
+    elif barTickRunning:
+      var base: string
+      acquire barTickLock
+      base = barTickBase
+      release barTickLock
+      let elapsed = (epochTime() - barTickStart).int
+      let label =
+        if base.hasElapsedSuffix: base
+        else: base & "  " & $elapsed & "s"
+      paintBarBytes(label)
+    else:
+      currentFooterBarBytes(fatPromptState)
   termui.beginEditorRedraw(
     ed,
     inputEditorReady.load(moAcquire),
-    SyncBegin)
+    footerBarBytes)
 
 template captureStdoutWrites(body: untyped): string =
   ## Run a transcript formatter against a temporary stdout target and return
-  ## the produced bytes. `screenWriteTranscript` uses this to make formatter
+  ## the produced bytes. `writeTranscriptWithFatPrompt` uses this to make formatter
   ## flushes invisible until the footer can be restored in the same render
   ## tick.
   block:
@@ -499,328 +446,6 @@ template captureStdoutWrites(body: untyped): string =
       body
     captured
 
-proc spinnerBarBytes*(frame, label: string, elapsed: int): string =
-  ## Bar row payload during the spinner phase: braille glyph at col 0,
-  ## one space at col 1, then the label. 2-char prefix total — the same
-  ## width as `liveBarBytes`'s "  " so the spinner can be replaced by
-  ## a space without shifting the label.
-  let timedLabel =
-    if label.hasElapsedSuffix: label
-    else: label & " " & $elapsed & "s"
-  CyanFg & BoldOn & frame & Reset & CyanFg & BoldOn & " " &
-    timedLabel & Reset
-
-proc liveBarBytes*(label: string): string =
-  ## Bar row payload (no spinner): two leading spaces, then the label.
-  ## Position 0 is the slot that gets overwritten with the spinner
-  ## glyph during streaming.
-  CyanFg & BoldOn & "  " & label & Reset
-
-proc labelCells(label: string): int =
-  ## Visible cells the (plain-text, no-SGR) bar/spinner label occupies.
-  ## Labels come from `liveLabel` / `tokenLineLabel` — both build the
-  ## string from glyphs and digits joined by spaces, no escape codes.
-  ## One cell per rune; wide CJK glyphs are not used in our labels.
-  var i = 0
-  while i < label.len:
-    let rl = max(1, runeLenAt(label, i))
-    inc result
-    i += rl
-
-proc barWrapRows(visibleCells, termW: int): int =
-  ## Visual rows a bar payload of `visibleCells` cells occupies on a
-  ## terminal `termW` wide. `termW = 0` means "unknown" — caller is
-  ## the legacy single-row path and gets `1`. Otherwise round up,
-  ## never less than 1.
-  if termW <= 0 or visibleCells <= 0: return 1
-  result = (visibleCells + termW - 1) div termW
-  if result < 1: result = 1
-
-proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int,
-                         termW = 0): string =
-  ## Three-row spinner footer. Cursor in: col 0 of the bar row.
-  ## Cursor out: same. The row above (ticker overlay target) is
-  ## cleared every frame so reasoning→no-reasoning is a faithful
-  ## restore as long as that row was blank to begin with. The call-start
-  ## transition parks the cursor on the token bar row, leaving this blank
-  ## separator row above it.
-  # Re-assert hide-cursor every frame. Some terminals (older conhost,
-  # a few VTE variants) transiently re-show the caret on cursor
-  # movement or on sync-update end, so a single `?25l` from beginTurn
-  # isn't enough — at 80ms cadence the re-shown caret is visible as a
-  # flicker glued to the braille glyph. Cheap, idempotent.
-  #
-  # Bar payload visible width = "<frame> <label> <elapsed>s" = label
-  # cells + 4 (frame + 2 spaces + "s") + digits of `elapsed`. When
-  # `termW > 0` and the payload exceeds it, the bar wraps to `barRows`
-  # visual rows; the trailing back-walk must compensate so the cursor
-  # parks on the bar's *first* wrap row, not its last. `termW = 0`
-  # falls back to the legacy single-row walk.
-  # Emit explicit CR before every `\n` instead of relying on OPOST/ONLCR
-  # to translate LF to CRLF. The previous SIGWINCH fix preserves OPOST
-  # through the editor's `getchr`, but the dim prompt still drifts right
-  # after a shrink-then-content sequence — some path (terminal reflow
-  # of an in-flight raw-mode capture elsewhere, a tool subprocess
-  # leaving termios with OPOST off, etc.) can still flip it off
-  # mid-session. Belt-and-braces: with explicit `\r`, the spinner /
-  # bar / prompt rows snap to col 0 regardless of OPOST state.
-  let barCells = labelCells(label) + 4 + ($elapsed).len
-  let barRows = barWrapRows(barCells, termW)
-  result = "\x1b[?25l\r\x1b[1A\x1b[2K"
-  if ticker.len > 0:
-    result.add GreyFg
-    result.add ticker
-    result.add Reset
-  result.add "\r\n\x1b[2K"
-  result.add spinnerBarBytes(frame, label, elapsed)
-  result.add "\r\n\x1b[2K" & DimPromptColor & "❯ " & Reset
-  result.add "\r\x1b[" & $barRows & "A"
-
-proc spinnerBarFrameBytes*(frame, label, ticker: string, elapsed: int,
-                           termW = 0): string =
-  ## Spinner/ticker frame for a variable-height live editor footer.
-  ## Cursor in/out: token bar row. The editor rows below are not touched;
-  ## the caller redraws them after this frame.
-  let barCells = labelCells(label) + 4 + ($elapsed).len
-  let barRows = barWrapRows(barCells, termW)
-  result = "\x1b[?25l\r\x1b[1A"
-  if ticker.len > 0:
-    result.add "\x1b[2K"
-    result.add GreyFg
-    result.add ticker
-    result.add Reset
-  result.add "\r\n\x1b[2K"
-  result.add spinnerBarBytes(frame, label, elapsed)
-  result.add "\r"
-  if barRows > 1:
-    result.add "\x1b[" & $(barRows - 1) & "A"
-
-proc liveEditorSpinnerBarBytes*(frame, label: string, elapsed: int): string =
-  ## Spinner frame for the active editor footer. The editor owns the prompt
-  ## row, so this paints only the token bar at the caller-provided bar row.
-  "\r\x1b[2K" & spinnerBarBytes(frame, label, elapsed)
-
-proc spinnerCleanupBytes*(tickerRows = 1): string =
-  ## Erase spinner ticker + bar + prompt, cursor at col 0 of the bar
-  ## row. Clears to end-of-screen from the ticker row so wrapped
-  ## spinner labels/tickers left by terminal reflow are removed too.
-  let rows = max(1, tickerRows)
-  "\r\x1b[" & $rows & "A\x1b[J\n"
-
-const SpinnerCleanupBytes* = "\r\x1b[1A\x1b[J\n"
-
-proc paintBarBytes*(label: string): string =
-  ## Clears the bar row and writes the static-form bar payload. Cursor
-  ## ends at the end of the payload on the bar row.
-  "\r\x1b[2K" & liveBarBytes(label)
-
-proc anchoredEditorFooterBytes*(label: string; termH, editorRows: int): string =
-  ## Absolute-frame setup for the always-live editor footer.
-  ## Cursor out: top row of the editor area. The token bar row and all editor
-  ## rows have been cleared; the token bar has been repainted if a label is
-  ## available. The editor redraw that follows is the only writer for the rows
-  ## below the token bar.
-  let rows = max(1, editorRows)
-  let h = max(2, termH)
-  let barRow = max(1, h - rows)
-  let editorTop = min(h, barRow + 1)
-  let scrollBottom = max(1, barRow - 1)
-  result.add &"\x1b[?25l\x1b[1;{scrollBottom}r"
-  result.add &"\x1b[{barRow};1H\r\x1b[J"
-  if label.len > 0:
-    result.add paintBarBytes(label)
-  else:
-    result.add "\r\x1b[2K"
-  result.add &"\x1b[{editorTop};1H"
-
-proc barFooterBytes*(label, promptColor: string, termW = 0): string =
-  ## Bar at the current row + prompt at the row below, cursor parked
-  ## at col 0 of the bar row. Replaces the old `liveFooterBytes` —
-  ## prompt color is now a parameter (dim while typing impossible,
-  ## bright cyan when readline is active).
-  ##
-  ## `termW` is the current terminal column count (0 = unknown). When
-  ## the bar payload (`"  " & label`) is wider than `termW`, the bar
-  ## wraps to multiple visual rows. The trailing back-walk must climb
-  ## *all* of them so the cursor parks on the bar's first wrap row —
-  ## the only position from which `ClearBarPromptBytes` can erase the
-  ## whole bar+prompt block cleanly. Passing `0` keeps the old
-  ## single-row back-walk for callers that haven't been width-aware.
-  # Explicit `\r` before `\n` so the prompt row reaches col 0 even when
-  # OPOST/ONLCR is off — see `spinnerFooterBytes` for the rationale.
-  let barRows = barWrapRows(2 + labelCells(label), termW)
-  paintBarBytes(label) &
-    "\r\n\x1b[2K" & promptColor & "❯ " & Reset &
-    "\r\x1b[" & $barRows & "A"
-
-const ClearBarPromptBytes* = "\r\x1b[J"
-  ## Erase the bar + prompt area, cursor at col 0 of the bar row.
-  ## This intentionally clears to end-of-screen rather than exactly
-  ## two rows: after terminal width shrink, an already-painted token
-  ## bar may have reflowed into multiple visual rows. The footer owns
-  ## everything below its anchor, so clearing from the anchor is the
-  ## stable recovery operation before content pushes the footer down.
-
-proc barFooterBelowAtColBytes*(label, promptColor: string, col: int,
-                               termW = 0): string =
-  ## Paint bar one row below the cursor + prompt two rows below,
-  ## walking the cursor back up to the content row at `col`. Used
-  ## during mid-line streaming where the cursor sits on an in-progress
-  ## content row and the bar still needs to be visible underneath it.
-  ##
-  ## Avoids CSI s/u (SCO save/restore cursor) — those are silently
-  ## ignored on enough terminals (we shipped a regression where each
-  ## refresh stacked another bar in scroll because the cursor never
-  ## returned). The trailing `\x1b[<n>A\x1b[<col>G` walks back up to the
-  ## content row (`n` = bar wrap rows + 1 for the prompt row) and sets
-  ## the cursor column (1-based).
-  ## With a wrapped bar (post-shrink) `n` is larger than the
-  ## single-row default of 2.
-  # Explicit `\r` before each `\n` so the bar and prompt rows reach
-  # col 0 even when OPOST/ONLCR is off — see `spinnerFooterBytes`.
-  let barRows = barWrapRows(2 + labelCells(label), termW)
-  "\r\n\x1b[2K" & liveBarBytes(label) &
-    "\r\n\x1b[2K" & promptColor & "❯ " & Reset &
-    "\x1b[" & $(barRows + 1) & "A\x1b[" & $(max(0, col) + 1) & "G"
-
-proc barFooterBelowBytes*(label, promptColor: string, termW = 0): string =
-  ## Compatibility wrapper for the canonical pre-text state: cursor
-  ## returns to column 2, right after `● `.
-  barFooterBelowAtColBytes(label, promptColor, 2, termW)
-
-proc clearBarBelowAtColBytes*(col: int): string =
-  ## Erase the bar + prompt rows below the current cursor row and
-  ## restore the cursor to `col` on that original row.
-  "\n\r\x1b[J\x1b[1A\x1b[" & $(max(0, col) + 1) & "G"
-
-const ClearBarBelowBytes* = "\n\r\x1b[J\x1b[1A\x1b[3G"
-  ## Erase the bar + prompt rows below the cursor (without
-  ## disturbing the cursor's row content), then walk back up to the
-  ## bullet row at column 2. Clears to end-of-screen because a resize
-  ## can reflow the already-painted bar/prompt into more than two
-  ## visual rows.
-
-proc receiptBarBytes*(label: string): string =
-  ## In-place dim repaint of the bar row's payload. No leading clear
-  ## — caller has already cleared (or just walked back). No trailing
-  ## newline — caller advances. The byte sequence the user-submit
-  ## transition writes onto the previous turn's bar row to convert it
-  ## into the **token receipt**.
-  if label.len == 0: return ""
-  CyanFg & "  " & label & Reset
-
-proc submitTransitionBytes*(line: string, hadPending, hadGap: bool,
-                            receiptLabel: string, hasBar = true,
-                            echoRows = -1): string =
-  ## Full byte sequence for the moment the user submits a prompt.
-  ##
-  ## Walks back from the cursor (which sits one row below the user's
-  ## input) to the row that should host the receipt:
-  ##
-  ## - `hasBar = false` (prompt-only startup state — no token bar
-  ##   painted yet, no prior turn): walk up `splitLines(line).len` so
-  ##   the cursor lands on the row that held the static prompt. No
-  ##   receipt to paint (`hadPending` is false in this state).
-  ## - `hadGap = true` (typing-ready state from `endTurn`): there's a
-  ##   blank row above the bar between the last LLM line and the bar.
-  ##   If a pending receipt exists, walk one extra row so the cursor lands
-  ##   on the *gap* row. The receipt is painted there, replacing the blank
-  ##   and leaving the old live bar cleared below it. Startup has no pending
-  ##   receipt, so it keeps the shorter walk that only clears the initial
-  ##   bar/prompt.
-  ## - `hadGap = false` + `hasBar = true` (first turn — welcome
-  ##   painted bar without gap, no LLM content to gap from): walk up
-  ##   `splitLines(line).len + 1` to land on the bar row. No receipt
-  ##   to paint anyway (`hadPending` is false on first turn).
-  ##
-  ## Then:
-  ##   1. Clear from cursor to end of screen — wipes (gap), bar,
-  ##      prompt, readline echo, anything below.
-  ##   2. If `hadPending`, paint the dim receipt at this row.
-  ##   3. Two newlines: advance + blank separator between receipt
-  ##      and user echo.
-  ##   4. Echo user input line by line (❯ for first, continuation indent for
-  ##      continuations).
-  ##
-  ## Cursor out: col 0 of the row directly after the last echo line.
-  ## The next `callModel`'s leading `\n` sets up the scratch /
-  ## ticker-overlay row.
-  let lines = line.splitLines
-  let n = if echoRows > 0: echoRows else: lines.len
-  let walkBack =
-    if not hasBar: n
-    elif hadGap and hadPending: n + 3
-    elif hadGap: n + 2
-    else: n + 1
-  result = "\x1b[" & $walkBack & "A"
-  result.add "\r\x1b[J"
-  if hadPending:
-    result.add receiptBarBytes(receiptLabel)
-    result.add "\n\n"
-  elif hasBar:
-    result.add "\n\n"
-  # hasBar=false: cursor is on the cleared prompt row after walkback;
-  # the gap row from paintInitialPrompt already provides the separator.
-  # No extra newline — echo goes directly on the cleared row.
-  let termW = try: terminalWidth() except CatchableError: 0
-  for idx, l in lines:
-    let prefix = if idx == 0: "❯ " else: "  "
-    result.add prefix
-    if termW <= 0:
-      result.add l
-    else:
-      var col = 2  # prefix width — "❯ " and "  " both render as 2 cells
-      var i = 0
-      while i < l.len:
-        let rl = max(1, runeLenAt(l, i))
-        if col >= termW:
-          result.add "\r\n  "
-          col = 2
-        result.add l[i ..< i + rl]
-        inc col
-        i += rl
-    result.add "\r\n"
-
-proc addUserEcho(result: var string, line: string; trailingNewline = true) =
-  let termW = try: terminalWidth() except CatchableError: 0
-  let lines = line.splitLines
-  for idx, l in lines:
-    let prefix = if idx == 0: "❯ " else: "  "
-    result.add prefix
-    if termW <= 0:
-      result.add l
-    else:
-      var col = 2
-      var i = 0
-      while i < l.len:
-        let rl = max(1, runeLenAt(l, i))
-        if col >= termW:
-          result.add "\r\n  "
-          col = 2
-        result.add l[i ..< i + rl]
-        inc col
-        i += rl
-    if trailingNewline or idx < lines.high:
-      result.add "\r\n"
-
-proc bufferedSubmitTransitionBytes*(line: string, hadPending, hadGap: bool,
-                                    receiptLabel: string,
-                                    hasBar = true): string =
-  ## User submitted while a turn was running. The live editor is still on
-  ## screen; `submitBufferedUser` walks from the deferred-submit cursor back
-  ## to the token bar row, and this transition lands on the gap/receipt row.
-  if not hasBar:
-    result = "\r\x1b[J"
-    result.addUserEcho(line)
-    return
-  result.add "\r\x1b[J"
-  if hadPending:
-    result.add receiptBarBytes(receiptLabel)
-    result.add "\r\n\r\n"
-  else:
-    result.add "\r\n"
-  result.addUserEcho(line)
-
 # ---------- Bar+prompt runtime helpers ----------
 #
 # The bar and prompt are *always visible*. These helpers hide them
@@ -843,82 +468,70 @@ proc paintBarPrompt*(label, promptColor: string) =
   ## — during streaming the bar slides flush with content; only
   ## `endTurn` paints a gap.
   debugOut "paintBarPrompt label=" & label[0..min(30, label.len-1)]
-  emitScreenEvent setBarEvent(label)
+  emitFatPromptEvent setBarEvent(label)
   if liveEditorFooterAnchored():
     termui.renderFooterFrame(paintBarBytes(label), inputThreadRunning,
-                                     inputEditor, SyncBegin, SyncEnd)
+                                     inputEditor)
   else:
-    let cursor =
-      if promptColor == DimPromptColor: "\x1b[?25l"
-      else: "\x1b[?25h"
-    termui.syncWrite(cursor & barFooterBytes(label, promptColor,
-                                                     currentTermW()),
-                             SyncBegin, SyncEnd)
+    termui.syncWrite(cursorForPromptColor(promptColor) &
+      barFooterBytes(label, promptColor, currentTermW()))
 
 proc setBarPromptState*(label: string) =
   ## Update the logical bar label without painting immediately. Used when a
   ## completed response still needs to be committed to scrollback first; the
   ## subsequent transcript append repaints the footer with this final label.
-  emitScreenEvent setBarEvent(label)
+  emitFatPromptEvent setBarEvent(label)
 
 proc paintBarBelow*(label, promptColor: string) =
   ## Paint bar + prompt one and two rows below the cursor, restoring
   ## the cursor to its original (likely mid-line) position. Used
   ## during streaming to keep the bar visible while content is being
   ## accumulated in memory and the cursor stays put.
-  emitScreenEvent setBarEvent(label)
+  emitFatPromptEvent setBarEvent(label)
   if liveEditorFooterAnchored():
     termui.renderFooterFrame(paintBarBytes(label), inputThreadRunning,
-                                     inputEditor, SyncBegin, SyncEnd)
+                                     inputEditor)
   else:
     termui.syncWrite(barFooterBelowBytes(label, promptColor,
-                                                 currentTermW()),
-                             SyncBegin, SyncEnd)
+                                         currentTermW()))
 
 proc paintBarBelowAtCol(label, promptColor: string, col: int) =
-  emitScreenEvent setBarEvent(label)
+  emitFatPromptEvent setBarEvent(label)
   if liveEditorFooterAnchored():
     termui.renderFooterFrame(paintBarBytes(label), inputThreadRunning,
-                                     inputEditor, SyncBegin, SyncEnd)
+                                     inputEditor)
   else:
     termui.syncWrite(barFooterBelowAtColBytes(label, promptColor, col,
-                                                      currentTermW()),
-                             SyncBegin, SyncEnd)
+                                              currentTermW()))
 
 proc clearBarBelowAtCol(col: int) =
   if liveEditorFooterAnchored():
-    termui.renderFooterFrame("\r\x1b[2K", inputThreadRunning,
-                                     inputEditor, SyncBegin, SyncEnd)
+    termui.renderFooterFrame(clearBarRowBytes(), inputThreadRunning,
+                             inputEditor)
   else:
-    termui.syncWrite(clearBarBelowAtColBytes(col), SyncBegin, SyncEnd)
+    termui.syncWrite(clearBarBelowAtColBytes(col))
 
 proc repaintBarPrompt*(promptColor = DimPromptColor) =
   ## Re-emit the bar+prompt at the cursor's current row using the
-  ## cached `currentBarLabel`. Used by `screenWriteTranscript` to put the bar
+  ## cached `currentBarLabel`. Used by `writeTranscriptWithFatPrompt` to put the bar
   ## back after a content write.
   if currentBarLabel.len == 0: return
   if liveEditorFooterAnchored():
     termui.renderFooterFrame(paintBarBytes(currentBarLabel),
-                                     inputThreadRunning, inputEditor,
-                                     SyncBegin, SyncEnd)
+                                     inputThreadRunning, inputEditor)
   else:
-    let cursor =
-      if promptColor == DimPromptColor: "\x1b[?25l"
-      else: "\x1b[?25h"
-    termui.syncWrite(cursor & barFooterBytes(currentBarLabel,
-                                                     promptColor,
-                                                     currentTermW()),
-                             SyncBegin, SyncEnd)
+    termui.syncWrite(cursorForPromptColor(promptColor) &
+      barFooterBytes(currentBarLabel, promptColor, currentTermW()))
 
 proc clearBarPrompt*() =
   ## Erase the bar + prompt rows in place. Cursor parks at col 0 of
   ## the bar row so the caller can write content there (which then
   ## pushes the next `repaintBarPrompt` one row down).
   if liveEditorFooterAnchored():
-    termui.renderFooterFrame("\r\x1b[2K", inputThreadRunning,
-                                     inputEditor, SyncBegin, SyncEnd)
+    termui.renderFooterFrame(clearBarRowBytes(), inputThreadRunning,
+                                     inputEditor)
   else:
-    termui.syncWrite(ClearBarPromptBytes, SyncBegin, SyncEnd)
+    termui.syncWrite(ClearBarPromptBytes)
 
 proc paintPromptOnly*(promptColor: string)
 
@@ -931,7 +544,7 @@ proc enterPromptInput*(promptColor: string) =
   ## placeholder.
   if currentBarLabel.len > 0:
     if currentBarHasGap and pendingHint.active:
-      termui.syncWrite("\r\x1b[1A\x1b[J", SyncBegin, SyncEnd)
+      termui.syncWrite(clearPromptAfterPendingReceiptBytes())
     else:
       clearBarPrompt()
     termui.enterPromptInput(
@@ -942,7 +555,7 @@ proc enterPromptInput*(promptColor: string) =
     termui.enterPromptInput(
       false,
       "",
-      "\r\x1b[2K" & promptColor & "❯ " & Reset & "\r")
+      promptOnlyBytes(promptColor))
 
 proc resetPromptInputAfterEmpty*(echoRows: int; promptColor: string) =
   ## Empty submission should leave the prompt/footer at the same visual
@@ -953,25 +566,22 @@ proc resetPromptInputAfterEmpty*(echoRows: int; promptColor: string) =
     termui.resetPromptInputAfterEmpty(
       false,
       n,
-      "\x1b[2K" & promptColor & "❯ " & Reset & "\r",
+      promptOnlyResetBytes(promptColor),
       "")
-    emitScreenEvent clearBarEvent()
+    emitFatPromptEvent clearBarEvent()
   else:
-    let cursor =
-      if promptColor == DimPromptColor: "\x1b[?25l"
-      else: "\x1b[?25h"
     termui.resetPromptInputAfterEmpty(
       true,
       n,
       "",
-      cursor & barFooterBytes(currentBarLabel, promptColor, currentTermW()))
+      cursorForPromptColor(promptColor) &
+        barFooterBytes(currentBarLabel, promptColor, currentTermW()))
 
 proc enterToolViewport*(termH: int) =
   ## Enter the bounded live tool-output viewport while preserving the
   ## footer rows at the bottom of the normal terminal buffer. The footer
   ## is token bar + the live editor's visual rows, so multiline buffered
   ## input reduces the scrolling region instead of being overwritten.
-  emitScreenEvent setModeEvent(smToolStreaming)
   let footerRows = 1 + liveEditorRows()
   let scrollBottom = max(1, termH - footerRows)
   termui.setToolViewport(true, scrollBottom, liveBarRow(termH),
@@ -984,31 +594,15 @@ proc leaveToolViewport*(termH: int) =
     termui.setToolViewport(false, termH, liveBarRow(termH), true)
   else:
     termui.setToolViewport(false, termH, liveBarRow(termH), false)
-  emitScreenEvent setModeEvent(smNormal)
 
-proc endTurnBytes*(label, promptColor: string, repaintPrompt: bool,
-                   termW = 0; gapAlready = false): string =
-  ## Byte sequence for leaving model/tool mode. Normal completion repaints
-  ## the typing-ready footer; exceptional user interrupts only clear the
-  ## owned footer area so the caller's feedback lands as plain output.
-  if label.len > 0:
-    result.add ClearBarPromptBytes
-    if repaintPrompt:
-      if not gapAlready:
-        result.add "\n"
-      result.add barFooterBytes(label, promptColor, termW)
-      let rows = barWrapRows(2 + labelCells(label), termW)
-      result.add "\x1b[" & $rows & "B"
-  result.add "\x1b[?25h"
-
-template screenWriteTranscript*(body: untyped) =
+template writeTranscriptWithFatPrompt*(body: untyped) =
   ## Commit transcript output while preserving the volatile footer.
   ## The footer is cleared, body writes normal scrollback content, then
   ## the footer is repainted below the new cursor position. If the
   ## buffered prompt is active, restore that live editor in the same
   ## render-locked critical section so appended transcript rows do not
   ## erase in-progress multiline input.
-  debugOut &"screenWriteTranscript enter barLabel={currentBarLabel.len}"
+  debugOut &"writeTranscriptWithFatPrompt enter barLabel={currentBarLabel.len}"
   let transcriptBytes = captureStdoutWrites:
     body
   let compactRows =
@@ -1021,26 +615,19 @@ template screenWriteTranscript*(body: untyped) =
     if currentBarLabel.len > 0:
       barFooterBytes(currentBarLabel, DimPromptColor, currentTermW())
     else:
-      "\r\x1b[2K"
+      clearBarRowBytes()
   termui.appendTranscriptWithFooter(
     transcriptBytes,
     liveEditorFooterAnchored(),
     inputThreadRunning,
     inputEditor,
+    currentFooterBarBytes(fatPromptState),
     ClearBarPromptBytes,
     repaint,
-    SyncBegin,
-    SyncEnd,
     compactRows)
   if transcriptBytes.hasNonNewlineBytes and currentBarLabel.len > 0:
-    emitScreenEvent setBarEvent(currentBarLabel, hasGap = true)
-  debugOut "screenWriteTranscript exit"
-
-template withCleared*(body: untyped) =
-  ## Compatibility alias while older tests and callers move to the
-  ## screen-controller vocabulary.
-  screenWriteTranscript:
-    body
+    emitFatPromptEvent setBarEvent(currentBarLabel, hasGap = true)
+  debugOut "writeTranscriptWithFatPrompt exit"
 
 proc spinnerLoop(unused: string) {.thread.} =
   ## Three-line spinner footer rooted at the cursor row:
@@ -1069,19 +656,15 @@ proc spinnerLoop(unused: string) {.thread.} =
         sleep 80
         inc i
         continue
-      let frame = frames[i mod frames.len]
       if inputThreadRunning and inputEditor != nil:
-        termui.renderFooterFrame(
-          liveEditorSpinnerBarBytes(frame, label, elapsed.int),
-          inputThreadRunning, inputEditor, SyncBegin, SyncEnd)
-      elif spinnerUseLiveEditorFrame.load(moRelaxed):
-        termui.renderFooterFrame(
-          spinnerBarFrameBytes(frame, label, ticker, elapsed.int, currentTermW()),
-          inputThreadRunning, inputEditor, SyncBegin, SyncEnd)
-      else:
-        termui.renderFooterFrame(
-          spinnerFooterBytes(frame, label, ticker, elapsed.int, currentTermW()),
-          inputThreadRunning, inputEditor, SyncBegin, SyncEnd)
+        sleep 80
+        inc i
+        continue
+      let frame = frames[i mod frames.len]
+      setSpinFrame(frame, elapsed.int)
+      termui.renderFooterFrame(
+        spinnerFooterBytes(frame, label, ticker, elapsed.int, currentTermW()),
+        inputThreadRunning, inputEditor)
       spinnerFramePainted.store(true, moRelaxed)
     except CatchableError: discard
     sleep 80
@@ -1092,8 +675,7 @@ proc spinnerLoop(unused: string) {.thread.} =
       let tickerRows =
         if lastTicker.len == 0: 1
         else: max(1, (visibleWidth(lastTicker) + max(1, termW) - 1) div max(1, termW))
-      termui.syncWrite(spinnerCleanupBytes(tickerRows), SyncBegin,
-                               SyncEnd)
+      termui.syncWrite(spinnerCleanupBytes(tickerRows))
   except CatchableError: discard
 
 proc liveLabel*(base: string, slurped: int): string =
@@ -1122,7 +704,7 @@ proc paintInitialBar*(p: Profile) =
   let window = contextWindowFor(p.model)
   let baseLabel = contextLabel(0, window)
   paintBarPrompt(liveLabel(baseLabel, 0), BrightPromptColor)
-  emitScreenEvent setBarEvent(currentBarLabel, hasGap = true)
+  emitFatPromptEvent setBarEvent(currentBarLabel, hasGap = true)
 
 proc paintPromptOnly*(promptColor: string) =
   ## Paint just the prompt ❯ at the cursor's current row, no token
@@ -1134,8 +716,8 @@ proc paintPromptOnly*(promptColor: string) =
   ## Leaves `currentBarLabel = ""` and `currentBarHasGap = false` —
   ## the signals `readInput`, `emitUserSubmit`, and the slash-command
   ## repaint use to detect prompt-only mode.
-  termui.writeRaw("\x1b[2K" & promptColor & "❯ " & Reset & "\r")
-  emitScreenEvent clearBarEvent()
+  termui.writeRaw(promptOnlyResetBytes(promptColor))
+  emitFatPromptEvent clearBarEvent()
 
 proc paintInitialPrompt*(p: Profile) =
   ## Welcome-time paint when starting fresh. The first prompt is intentionally
@@ -1149,14 +731,6 @@ var spinnerRunning = false  # only mutated by main thread
 # --- Bar tick: repaints the token bar with an incrementing elapsed counter
 #     during tool execution. No spinner icon, just the bar label + time.
 
-var barTickStop: Atomic[bool]
-var barTickThread: Thread[void]
-var barTickRunning = false
-var barTickStart: float
-var barTickBase: string
-var barTickLock: Lock
-barTickLock.initLock()
-
 proc barTickLoop() {.thread.} =
   while not barTickStop.load(moRelaxed):
     var base: string
@@ -1165,6 +739,9 @@ proc barTickLoop() {.thread.} =
       base = barTickBase
       release barTickLock
     let elapsed = (epochTime() - barTickStart).int
+    if inputThreadRunning and inputEditor != nil:
+      sleep 500
+      continue
     let label =
       if base.hasElapsedSuffix: base
       else: base & "  " & $elapsed & "s"
@@ -1172,20 +749,18 @@ proc barTickLoop() {.thread.} =
     # `spinnerFooterBytes`: some terminals transiently re-show the
     # caret on cursor movement, and beginTurn's one-shot `?25l`
     # isn't enough to keep it hidden over a long-running tool.
-    let tw = currentTermW()
     let th = try: terminalHeight() except CatchableError: 24
     let row = liveBarRow(th)
-    let pos = "\x1b[" & $row & ";1H"
     let frame =
       if inputThreadRunning and inputEditor != nil:
         if liveEditorFooterAnchored():
-          paintBarBytes(label)
+          liveEditorBarTickFrame(label)
         else:
-          "\x1b[?25l" & pos & paintBarBytes(label)
+          absoluteBarTickFrame(row, label, activeEditor = true)
       else:
-        "\x1b[?25l" & pos & barFooterBytes(label, DimPromptColor, tw)
-    termui.renderFooterFrame(frame, inputThreadRunning, inputEditor,
-                                     SyncBegin, SyncEnd)
+        absoluteBarTickFrame(row, label, activeEditor = false,
+                             termW = currentTermW())
+    termui.renderFooterFrame(frame, inputThreadRunning, inputEditor)
     sleep 500
 
 proc startBarTick*(base: string) =
@@ -1214,9 +789,11 @@ proc startSpinner*(label: string) =
   debugOut "startSpinner"
   if spinnerRunning: return
   if label.len > 0: setSpinLabel(label)
-  spinnerUseLiveEditorFrame.store(inputThreadRunning and inputEditor != nil,
-                                  moRelaxed)
-  spinnerFramePainted.store(false, moRelaxed)
+  if inputThreadRunning and inputEditor != nil:
+    setSpinFrame("⠋", 0)
+    spinnerFramePainted.store(true, moRelaxed)
+  else:
+    spinnerFramePainted.store(false, moRelaxed)
   spinnerStop.store(false, moRelaxed)
   createThread(spinnerThread, spinnerLoop, "")
   spinnerRunning = true
@@ -1295,17 +872,13 @@ proc startContent(s: var LiveMarkdownStream, slurpedNow: int) =
   let hadBufferedSubmit = bufferedSubmitTurn.load(moRelaxed)
   bufferedSubmitTurn.store(false, moRelaxed)
   stopSpinner()
+  termui.prepareAssistantContentStart(
+    inputThreadRunning,
+    inputEditor,
+    hadSpinnerFrame,
+    hadBufferedSubmit,
+    ClearBarPromptBytes)
   termui.withTerminalWriteLock:
-    if inputThreadRunning and inputEditor != nil:
-      let up = inputEditor[].renderRow + 3
-      stdout.write "\r"
-      if up > 0:
-        stdout.write "\x1b[" & $up & "A"
-      stdout.write "\x1b[J"
-    elif hadSpinnerFrame:
-      stdout.write "\r\x1b[2A\x1b[J"
-    elif not hadBufferedSubmit:
-      clearBarPrompt()
     stdout.styledWrite(styleBright, "● ", resetStyle)
     s.started = true
     paintBarBelow(s.currentLabel(slurpedNow), DimPromptColor)
@@ -1360,7 +933,7 @@ proc writeRendered(s: var LiveMarkdownStream, bytes: string,
 proc suppressLiveAssistantStream(): bool =
   ## Streaming assistant text and an always-live editor both need the terminal
   ## cursor. Prefer prompt stability: keep the spinner/bar live, then let the
-  ## caller commit the completed assistant text through `screenWriteTranscript`.
+  ## caller commit the completed assistant text through `writeTranscriptWithFatPrompt`.
   liveEditorFooterAnchored()
 
 proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
@@ -2016,20 +1589,19 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
           stdout.write ClearBarBelowBytes
           stdout.flushFile
           live.liveBarBelow = false
-        for _ in 0 ..< trailingNl - 1:
-          stdout.write "\x1b[1A\x1b[2K"
+        termui.eraseRowsAbove(trailingNl - 1)
         paintBarPrompt(live.currentLabel(slurped), DimPromptColor)
     contentStreamedLive = true
     # Normalize cursor to bar row col 0. The streaming loop may have left
     # the cursor in the content area (liveBarBelow case); move it down to
     # the bar row before inserting the ticker row and restarting the spinner.
     if live.liveBarBelow:
-      termui.syncWrite("\x1b[1B", SyncBegin, SyncEnd) # bar is below cursor
+      termui.syncWrite(moveToBarBelowBytes()) # bar is below cursor
     # Now cursor is at bar row col 0.
     # Insert a blank row above the bar (ticker row for the spinner)
     # and restart the spinner so the elapsed time keeps ticking during
     # post-streaming processing (tool-call parsing, usage calculation).
-    termui.syncWrite("\x1b[L\x1b[1B", SyncBegin, SyncEnd)
+    termui.syncWrite(insertTickerRowBelowBytes())
     setSpinLabel(liveLabel(baseLabel, slurped))
     startSpinner("")
 
@@ -2288,7 +1860,7 @@ proc inputThreadProc() {.thread.} =
     edPtr[].preRedraw = proc(ed: var minline.LineEditor) =
       reserveEditorFooterForRedraw(ed)
     edPtr[].postRedraw = proc(ed: var minline.LineEditor) =
-      termui.finishEditorRedraw(SyncEnd)
+      termui.finishEditorRedraw()
       inputEditorReady.store(true, moRelease)
 
     when defined(posix):
@@ -2343,7 +1915,7 @@ proc inputThreadProc() {.thread.} =
               inputState.autoSend = true
             finally:
               release inputStateLock
-            emitScreenEvent setPromptModeEvent(pmBufferedInput)
+            emitFatPromptEvent setPromptModeEvent(pmBufferedInput)
       except minline.InputCancelled:
         requestTurnInterrupt()
         break
@@ -2386,7 +1958,7 @@ proc beginTurn*() =
   ## ❯ glyph (still painted, just not blinking) is the only
   ## visible marker while typing isn't possible.
   termui.hideCaret()
-  emitScreenEvent setPromptModeEvent(pmTurnRunning)
+  emitFatPromptEvent setPromptModeEvent(pmTurnRunning)
   if inputEditor != nil and not inputThreadRunning:
     acquire inputStateLock
     try:
@@ -2397,10 +1969,10 @@ proc beginTurn*() =
     inputEditorReady.store(false, moRelease)
     createThread(inputThread, inputThreadProc)
     inputThreadRunning = true
-    enterTurnScrollRegion()
     let deadline = epochTime() + 0.5
     while not inputEditorReady.load(moAcquire) and epochTime() < deadline:
       sleep 5
+    inputEditorReady.store(true, moRelease)
 
 proc endTurn*(repaintPrompt = true) =
   ## Transition to typing-ready state: clear the bar at its current
@@ -2426,10 +1998,9 @@ proc endTurn*(repaintPrompt = true) =
     inputTurnActive.store(false, moRelease)
     joinThread(inputThread)
     inputThreadRunning = false
-  leaveTurnScrollRegion()
-  let hadTicker = screenState.footer.ticker.len > 0
+  let hadTicker = fatPromptState.footer.ticker.len > 0
   if hadTicker:
-    emitScreenEvent clearTickerEvent()
+    emitFatPromptEvent clearTickerEvent()
   let hadBar = currentBarLabel.len > 0
   var bytes = ""
   var label = ""
@@ -2445,14 +2016,14 @@ proc endTurn*(repaintPrompt = true) =
     hadBar,
     bytes,
     hadTicker,
-    "\r\x1b[1A\x1b[2K\x1b[1B")
+    clearTickerBytes())
   if currentBarLabel.len > 0:
     if repaintPrompt:
-      emitScreenEvent setBarEvent(label, hasGap = true)
+      emitFatPromptEvent setBarEvent(label, hasGap = true)
     else:
-      emitScreenEvent clearBarEvent()
+      emitFatPromptEvent clearBarEvent()
   if repaintPrompt:
-    emitScreenEvent setPromptModeEvent(pmIdle)
+    emitFatPromptEvent setPromptModeEvent(pmIdle)
 
 proc emitUserSubmit*(line: string, echoRows = -1) =
   ## Run the user-submit transition described in `submitTransitionBytes`
@@ -2477,8 +2048,8 @@ proc emitUserSubmit*(line: string, echoRows = -1) =
   termui.submitUser(
     submitTransitionBytes(line, pendingHint.active, hadGap, receiptLabel,
                           hasBar, echoRows))
-  emitScreenEvent clearPendingHintEvent()
-  emitScreenEvent clearBarEvent()
+  emitFatPromptEvent clearPendingHintEvent()
+  emitFatPromptEvent clearBarEvent()
 
 proc emitBufferedUserSubmit*(line: string) =
   ## Echo a prompt that was queued by the background input thread during
@@ -2497,8 +2068,8 @@ proc emitBufferedUserSubmit*(line: string) =
     bufferedSubmitTransitionBytes(line, pendingHint.active, hadGap,
                                   receiptLabel, hasBar))
   bufferedSubmitTurn.store(false, moRelaxed)
-  emitScreenEvent clearPendingHintEvent()
-  emitScreenEvent clearBarEvent()
+  emitFatPromptEvent clearPendingHintEvent()
+  emitFatPromptEvent clearBarEvent()
 
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   when providerStub:
@@ -2509,7 +2080,6 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       let startsAfterReceipt = followupStartsAfterReceipt
       followupStartsAfterReceipt = false
       termui.withTerminalWriteLock:
-        enterTurnScrollRegion()
         if not startsAfterReceipt:
           termui.writeRaw("\n")
       setSpinLabel(liveLabel(stubBaseLabel, 0))
@@ -2605,7 +2175,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
         paintBarPrompt(stubLabel, DimPromptColor)
       else:
         setBarPromptState(stubLabel)
-      emitScreenEvent setPendingHintEvent(usage, stubWindow, stubElapsed)
+      emitFatPromptEvent setPendingHintEvent(usage, stubWindow, stubElapsed)
       if result.kind == JObject:
         result["usage"] = %*{
           "promptTokens": usage.promptTokens,
@@ -2662,7 +2232,6 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   let startsAfterReceipt = followupStartsAfterReceipt
   followupStartsAfterReceipt = false
   termui.withTerminalWriteLock:
-    enterTurnScrollRegion()
     if not startsAfterReceipt:
       termui.writeRaw("\n")
   setSpinLabel(liveLabel(baseLabel, 0))
@@ -2765,7 +2334,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
     let label = tokenLineLabel(usage, window, elapsed.int)
     if contentStreamedLive:
       # Remove the ticker row inserted by the post-streaming spinner restart.
-      termui.syncWrite("\r\x1b[1A\x1b[M", SyncBegin, SyncEnd)
+      termui.syncWrite(removeTickerRowAboveBytes())
     let assistantContent =
       if outcome.assistantMsg == nil: ""
       else: outcome.assistantMsg{"content"}.getStr("")
@@ -2773,14 +2342,14 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       paintBarPrompt(label, DimPromptColor)
     else:
       setBarPromptState(label)
-    emitScreenEvent setPendingHintEvent(usage, window, elapsed.int)
+    emitFatPromptEvent setPendingHintEvent(usage, window, elapsed.int)
     if window > 0 and usage.promptTokens.float > 0.7 * window.float and
        usage.promptTokens.float <= CompactThresholdFrac * window.float:
-      screenWriteTranscript:
+      writeTranscriptWithFatPrompt:
         subtleWriteLn(stdout,
           &"  · context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} — auto-compaction will fire near {humanTokens(int(CompactThresholdFrac * window.float))}; :compact or :summarize to act now")
   else:
-    screenWriteTranscript:
+    writeTranscriptWithFatPrompt:
       hint &"  · {elapsed.int}s", resetStyle, "\n"
   if outcome.assistantMsg != nil and usage.totalTokens > 0:
     # Attach this turn's usage inline so replay can render the same

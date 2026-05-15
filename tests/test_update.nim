@@ -5,7 +5,7 @@
 ## extracts and exec's it in /tmp):
 ##   nim c -d:live -d:ssl -r tests/test_update.nim
 
-import std/[os, strutils, unittest]
+import std/[os, unittest]
 import threecode/update
 when defined(live):
   import std/osproc

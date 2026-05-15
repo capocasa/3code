@@ -1,5 +1,5 @@
 import std/[json, strutils, unittest]
-import threecode/[actions, types, util]
+import threecode/[actions, types]
 
 suite "actions: stripHarmonyChannel":
   test "strips <|channel|> suffix":

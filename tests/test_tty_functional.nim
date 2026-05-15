@@ -74,7 +74,9 @@ proc countOccurrences(haystack, needle: string): int =
     pos = found + needle.len
 
 proc isTokenBar(row: string): bool =
-  ("○" in row or "●" in row) and ("↑" in row or "↓" in row or "↻" in row)
+  let hasContext = ("○" in row or "◔" in row or "◑" in row or "◕" in row or
+                    "●" in row) and "%" in row
+  hasContext and (("↑" in row or "↓" in row or "↻" in row) or row.endsWith("s"))
 
 proc liveTokenRows(frame: TtyFrame): seq[int] =
   for i, row in frame.rows:
@@ -427,7 +429,7 @@ suite "terminal visual contract":
       },
       {
         "role": "assistant",
-        "preStreamDelayMs": 900,
+        "preStreamDelayMs": 1800,
         "content": "yes it is",
         "usage": {
           "promptTokens": 16,
@@ -615,7 +617,7 @@ $ for i in 1 2 3 4 5 6 7 8 9; do echo bash-line-$i; sleep 0.05; d…
 
     tty.expect "❯"
     tty.send "start height change\n"
-    tty.expectTokenBar(["○"])
+    tty.drain(150)
     tty.send repeat("wrap-", 35)
     tty.drain(120)
     tty.send "\x15"

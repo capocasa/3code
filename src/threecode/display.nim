@@ -1,12 +1,15 @@
-## Terminal rendering: markdown, token bar, tool banners, and session replay.
+## Transcript formatting: markdown, receipts, tool banners, and session replay.
 ##
-## All terminal output except user-input lines goes through this module.
+## This module formats append-only scrollback content. It may write ordinary
+## transcript text, usually while `api.writeTranscriptWithFatPrompt` has temporarily
+## captured stdout or while terminal locking is already active, but it does not
+## own volatile cursor movement or prompt repainting.
 ##
 ## - **Markdown rendering**: headers, fences, tables, bold/italic/code pass
 ##   through `printLine` which calls `applyInlineMd` and wraps at terminal
 ##   width. Tables buffer rows and render aligned box-drawing via `renderMdTable`.
-## - **Token bar**: the live bar during streaming (`paintBarBelow`/`paintBarPrompt`)
-##   and the dim receipt in scroll history after each turn (`renderTokenLine`).
+## - **Token receipt**: the dim receipt in scroll history after each turn
+##   (`renderTokenLine`). Live token-bar policy lives in `fatprompt.nim`.
 ## - **Tool banners**: per-kind glyph and path header for each tool call result.
 ## - **Session replay**: `replaySession` reprints a loaded session in the same
 ##   visual style as a live session, reusing the same render helpers.
@@ -16,7 +19,8 @@
 ## below readable contrast on light terminal backgrounds.
 
 import std/[critbits, exitprocs, json, os, strformat, strutils, terminal, times]
-import types, util, config, prompts, session, actions, minline
+import types, util, config, prompts, session, actions, minline, toolstream
+import terminal as termui
 
 # Three visible tiers, designed to read on both light + dark terminal
 # backgrounds:
@@ -121,7 +125,7 @@ proc subtleWriteLn*(outFile: File, body: string) =
   outFile.write Reset
   outFile.write "\r\n"
 
-# `screenWriteTranscript` lives in `api.nim` now — it owns
+# `writeTranscriptWithFatPrompt` lives in `api.nim` now — it owns
 # `currentBarLabel`, the cached bar payload that drives repaint after a
 # content write.
 # `display.nim`'s job here is purely formatting: receipts, banners,
@@ -179,114 +183,9 @@ proc printSkillLoaded*(act: Action) =
   if name.len == 0: return
   subtleWriteLn(stdout, "· loaded skill: " & name)
 
-const StreamMaxLines* = 8
-  ## Maximum lines shown in the bash scroll area, both during live
-  ## streaming (`StreamingView`) and in the static post-stream
-  ## rendering (`printBashScroll`). Configurable so tests can shrink
-  ## the viewport.
-
-proc eraseRows(n: int) =
-  ## Erase n rows above the cursor: move up, clear line, repeat.
-  for _ in 0..<n:
-    stdout.write "\x1b[1A\x1b[2K"
-
-proc printStreamingLine*(line: string) =
-  ## Print a single line of streaming bash output. Legacy path used
-  ## by non-viewport callers.
-  subtleWriteLn(stdout, "  " & line)
-
-proc indentedRowCount(l: string): int =
-  ## Number of visual terminal rows a single `printLine(l)` call
-  ## occupies, accounting for soft-wrap at the terminal width. The
-  ## streaming viewport needs this to erase the correct number of
-  ## rows when long lines wrap (the prior implementation counted
-  ## logical lines and undercounted when output wrapped).
-  let termW = try: terminalWidth() except CatchableError: 80
-  let bodyW = max(20, termW - 3)
-  result = max(1, charWrapAnsi(l, bodyW).len)
-
-type
-  StreamingView* = object
-    ## Fixed-height viewport for streaming bash output. Lines append
-    ## normally until `maxLines` is reached, then the oldest line is
-    ## pushed off the top to make room at the bottom.
-    maxLines*: int
-    idx*: int         ## tool call index for the :show hint
-    total*: int       ## total lines received (not just visible)
-    onScreen*: int    ## visual rows currently on screen (post-wrap)
-    buf*: seq[string] ## ring buffer of last maxLines lines
-
-proc initStreamingView*(maxLines = StreamMaxLines, idx = 0): StreamingView =
-  result = StreamingView(maxLines: maxLines, idx: idx, buf: @[])
-
 proc trimTrailingBlank(lines: var seq[string]) =
   while lines.len > 0 and lines[^1].strip == "":
     lines.setLen lines.len - 1
-
-proc printLine*(l: string) =
-  let termW = try: terminalWidth() except CatchableError: 80
-  let bodyW = max(20, termW - 3)
-  let chunks = charWrapAnsi(l, bodyW)
-  for i, chunk in chunks:
-    subtleWriteLn(stdout, "  " & chunk)
-
-proc omittedLine(v: StreamingView): string =
-  let hidden = max(0, v.total - (v.maxLines - 1))
-  let show =
-    if v.idx > 0: " :show " & $v.idx & " for full"
-    else: ""
-  &"... {hidden} line" & (if hidden == 1: "" else: "s") &
-    " omitted" & show
-
-proc addLine*(v: var StreamingView, line: string) =
-  ## Add one line to the viewport. For the first `maxLines` lines, appends
-  ## normally. After that, erases the entire viewport and reprints an
-  ## omission marker plus the latest tail, giving the illusion of a
-  ## bounded scroll area. Visual rows are tracked separately so that
-  ## wrapped long lines erase cleanly.
-  inc v.total
-  v.buf.add line
-  if v.total <= v.maxLines:
-    printLine(line)
-    v.onScreen += indentedRowCount(line)
-  else:
-    eraseRows(v.onScreen)
-    v.onScreen = 0
-    let mark = omittedLine(v)
-    printLine(mark)
-    v.onScreen += indentedRowCount(mark)
-    let tailLines = max(0, v.maxLines - 1)
-    let start = max(0, v.buf.len - tailLines)
-    for i in start..<v.buf.len:
-      printLine(v.buf[i])
-      v.onScreen += indentedRowCount(v.buf[i])
-    stdout.flushFile()
-
-proc erase*(v: var StreamingView) =
-  ## Remove all on-screen rows, leaving cursor where the viewport started.
-  eraseRows(v.onScreen)
-  v.onScreen = 0
-
-proc printBashScroll*(res: string, idx: int, maxLines = StreamMaxLines) =
-  ## Static scroll-area render for completed bash output. Mirrors the
-  ## shape of the live `StreamingView`: up to `maxLines` lines verbatim,
-  ## or an "... N lines omitted" marker plus the latest (maxLines - 1)
-  ## lines when the body overflows. Terminal output is uniquely
-  ## understood as streaming, so this matches the live view rather than
-  ## the head/tail compact used by other tool kinds.
-  var lines = res.splitLines
-  trimTrailingBlank(lines)
-  if lines.len <= maxLines:
-    for l in lines: printLine(l)
-    return
-  let tailLen = max(0, maxLines - 1)
-  let hidden = lines.len - tailLen
-  let show = if idx > 0: " :show " & $idx & " for full" else: ""
-  subtleWriteLn(stdout,
-    &"  ... {hidden} line" & (if hidden == 1: "" else: "s") &
-    " omitted" & show)
-  for i in lines.len - tailLen ..< lines.len:
-    printLine(lines[i])
 
 proc printCompactHeadTail*(res: string, idx: int,
                            head = CompactHead, tail = CompactTail) =
@@ -631,25 +530,9 @@ proc installEditorTweaks*() =
     origClear(ed)
     navigatedUp = false
 
-proc setSteadyCursor() =
-  ## DECSCUSR `\x1b[2 q`: steady block. The blink in 3code adds no
-  ## information (the `❯ ` prompt already marks the input position)
-  ## and competes with the spinner, which is the only animation that
-  ## carries meaning here. Restored to terminal default on exit by the
-  ## `\x1b[0 q` hook below; if 3code is killed abruptly the next CLI
-  ## that sets a cursor style (or a `tput reset`) restores it.
-  stdout.write "\x1b[2 q"
-  stdout.flushFile
-
-proc restoreCursorStyle() {.noconv.} =
-  try:
-    stdout.write "\x1b[0 q"
-    stdout.flushFile
-  except IOError: discard
-
 proc welcome*(p: Profile): minline.LineEditor =
-  setSteadyCursor()
-  addExitProc(restoreCursorStyle)
+  termui.setSteadyCursor()
+  addExitProc(termui.restoreCursorStyle)
   stdout.write "\n"
   stdout.styledWriteLine fgCyan, styleBright, "  ╭─╮"
   stdout.styledWrite fgCyan, styleBright, "   ─┤  ", resetStyle, styleBright, "3code ", resetStyle, fgCyan, styleBright, "v" & Version, resetStyle
