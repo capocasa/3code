@@ -799,7 +799,7 @@ proc bufferedSubmitTransitionBytes*(line: string, hadPending, hadGap: bool,
     result.add receiptBarBytes(receiptLabel)
     result.add "\r\n\r\n"
   else:
-    result.add "\r\n\r\n"
+    result.add "\r\n"
   result.addUserEcho(line)
 
 # ---------- Bar+prompt runtime helpers ----------

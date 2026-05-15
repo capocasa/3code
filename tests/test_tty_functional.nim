@@ -331,22 +331,28 @@ suite "terminal visual contract":
     tty.expectInHistory "second-tool"
     tty.expectInHistory "Buffered prompt answered."
     tty.expectTokenBar(["○", "↑88", "↻32", "↓8"])
-    tty.send "this is a test\n"
+    tty.send "this is..."
+    tty.send "\x1b[13;2u"
+    tty.send "a test!!!\n"
     tty.expectTokenBar(["○"])
-    tty.send "and this is another\n"
+    tty.send "and"
+    tty.send "\x1b[13;2u"
+    tty.send "another\n"
     tty.expectInHistory "yes it is"
     tty.expectInHistory "Sure is. Let me know when you have a real task."
     tty.assertFatPromptFrames()
     tty.assertOrderedRows([
-      "❯ this is a test",
+      "❯ this is...",
+      "  a test!!!",
       "● yes it is",
       "↻3.2k  ↓36",
-      "❯ and this is another",
+      "❯ and",
+      "  another",
       "● Sure is. Let me know when you have a real task.",
       "↻3.2k  ↓31"
     ])
-    tty.assertOneBlankBetween("❯ this is a test", "● yes it is")
-    tty.assertOneBlankBetween("❯ and this is another", "● Sure is.")
+    tty.assertOneBlankBetween("  a test!!!", "● yes it is")
+    tty.assertOneBlankBetween("  another", "● Sure is.")
     tty.send ":q\n"
     tty.expectExit 0
 

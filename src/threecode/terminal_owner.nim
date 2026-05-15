@@ -154,7 +154,9 @@ proc submitBufferedUser*(editorRows: int; hasBar: bool; bytes: string) =
   withTerminalWriteLock:
     stdout.write "\r"
     if hasBar:
-      stdout.write "\x1b[" & $(max(1, editorRows) + 1) & "A"
+      let up = max(0, editorRows - 1)
+      if up > 0:
+        stdout.write "\x1b[" & $up & "A"
     stdout.write bytes
     stdout.flushFile
 
