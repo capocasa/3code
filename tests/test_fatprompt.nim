@@ -74,7 +74,13 @@ suite "fat prompt frame model":
                         completionTokens: 25, totalTokens: 2025),
                   window = 128000, apiActive = true, spinner = "●",
                   elapsedS = 3)
-    check tokenBarText(p.tokenBar) == "●  ○1%  ↑1.5k  ↻500  ↓25  3s"
+    check tokenBarText(p.tokenBar) == "●  ○1%  ↑2.0k  ↻500  ↓25  3s"
+
+    p.setTokenBar(Usage(promptTokens: 16, cachedTokens: 3200,
+                        completionTokens: 36, totalTokens: 52),
+                  window = 128000, apiActive = true, spinner = "○",
+                  elapsedS = 3)
+    check tokenBarText(p.tokenBar) == "○  ○0%  ↑16  ↻3.2k  ↓36  3s"
 
   test "bash viewport shows cutoff plus bottom seven while active":
     var p = initFatPrompt(width = 50, height = 13, window = 1000)

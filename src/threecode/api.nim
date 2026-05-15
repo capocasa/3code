@@ -1249,8 +1249,7 @@ proc initLiveMarkdownStream*(baseLabel: string): LiveMarkdownStream =
     streamT0: epochTime(), liveCol: 2)
 
 proc currentLabel(s: LiveMarkdownStream, slurpedNow: int): string =
-  let elapsed = (epochTime() - s.streamT0).int
-  liveLabel(s.baseLabel, slurpedNow) & "  " & $elapsed & "s"
+  liveLabel(s.baseLabel, slurpedNow)
 
 proc utf8LenAt(s: string, i: int): int =
   let b = s[i].uint8

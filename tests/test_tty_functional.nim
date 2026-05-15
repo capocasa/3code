@@ -265,6 +265,84 @@ proc assertOrderedRows(tty: TtySession; markers: openArray[string]) =
   doAssert false,
     "visual test never captured ordered markers: " & markers.join(" -> ")
 
+proc nearestPromptRow(frame: TtyFrame; rowIdx: int): int =
+  for i in countdown(min(rowIdx, frame.rows.high), 0):
+    if frame.rows[i].startsWith("❯ "):
+      return i
+    if frame.rows[i].strip.len > 0 and not frame.rows[i].startsWith("  "):
+      return -1
+  -1
+
+proc assertLiveTypingKeepsTokenBar(tty: TtySession;
+                                   promptMarkers: openArray[string]) =
+  ## Reproduce the "typing while the token bar updates makes it blink" report:
+  ## whenever the visible caret is inside one of the live editor prompts, the
+  ## token bar must be present directly above the editor top in that same frame.
+  var sawLiveTyping = false
+  for frame in tty.frames:
+    if frame.cursorHidden or frame.cursorRow < 0 or
+        frame.cursorRow >= frame.rows.len:
+      continue
+    let cursorRow = frame.rows[frame.cursorRow]
+    if not cursorRow.startsWith("❯ ") and not cursorRow.startsWith("  "):
+      continue
+    let promptRow = frame.nearestPromptRow(frame.cursorRow)
+    if promptRow <= 0:
+      continue
+    var tracked = false
+    for marker in promptMarkers:
+      if marker in frame.rows[promptRow]:
+        tracked = true
+        break
+    if not tracked:
+      continue
+    sawLiveTyping = true
+    doAssert frame.rows[promptRow - 1].isTokenBar,
+      "token bar blinked or separated while typing in live editor:\n" &
+        frame.rows.join("\n")
+  doAssert sawLiveTyping,
+    "visual test never captured live typing with a token bar for markers: " &
+      @promptMarkers.join(", ")
+
+proc assertBashViewportBounded(tty: TtySession) =
+  var sawCutoff = false
+  for frame in tty.frames:
+    var bashRows = 0
+    for row in frame.rows:
+      if "lines omitted" in row:
+        sawCutoff = true
+      if row.startsWith("  bash-line-"):
+        inc bashRows
+    doAssert bashRows <= 7,
+      "live bash viewport showed more than the bottom seven output lines:\n" &
+        frame.rows.join("\n")
+  doAssert sawCutoff, "visual test never captured bash viewport cutoff hint"
+
+proc assertNoPromptOnlyClearAfter(tty: TtySession; marker: string) =
+  ## Once transcript content exists, no later visual frame should collapse to a
+  ## nearly blank prompt/token-only screen. This catches the old random-clear /
+  ## jump-to-bottom failure mode without pinning raw terminal bytes.
+  var armed = false
+  for frame in tty.frames:
+    for row in frame.rows:
+      if marker in row:
+        armed = true
+        break
+    if not armed:
+      continue
+    var transcriptRows = 0
+    var liveRows = 0
+    for row in frame.rows:
+      if row.startsWith("❯ ") or row.startsWith("● ") or
+          row.startsWith("$ ") or row.startsWith("r ") or
+          row.startsWith("w ") or row.startsWith("p "):
+        inc transcriptRows
+      elif row.isTokenBar:
+        inc liveRows
+    doAssert transcriptRows > 0 or liveRows == 0,
+      "screen collapsed to prompt/token chrome after transcript appeared:\n" &
+        frame.rows.join("\n")
+
 suite "terminal visual contract":
   test "fat prompt remains stable through streaming, tools, and buffered input":
     let root = newFixture("visual")
@@ -330,7 +408,7 @@ suite "terminal visual contract":
     tty.expectInHistory "bash-line-9"
     tty.expectInHistory "second-tool"
     tty.expectInHistory "Buffered prompt answered."
-    tty.expectTokenBar(["○", "↑88", "↻32", "↓8"])
+    tty.expectTokenBar(["○", "↑120", "↻32", "↓8"])
     tty.send "this is..."
     tty.send "\x1b[13;2u"
     tty.send "a test!!!\n"
@@ -340,7 +418,64 @@ suite "terminal visual contract":
     tty.send "another\n"
     tty.expectInHistory "yes it is"
     tty.expectInHistory "Sure is. Let me know when you have a real task."
+    tty.expectFrameSeries([
+      """
+...
+● Streaming markdown before tools.
+
+  ○0%  ↑100  ↓9  <elapsed>
+❯ buffered
+  prompt
+""",
+      """
+...
+$ for i in 1 2 3 4 5 6 7 8 9; do echo bash-line-$i; sleep 0.05; d…
+  ... 2 lines omitted :show 1 for full
+  bash-line-3
+  bash-line-4
+  bash-line-5
+  bash-line-6
+  bash-line-7
+  bash-line-8
+  bash-line-9
+
+  ○0%  ↑100  ↓9  <elapsed>
+❯ buffered
+  prompt
+""",
+      """
+...
+❯ buffered
+  prompt
+
+● Buffered prompt answered.
+
+  ○0%  ↑120  ↻32  ↓8  <elapsed>
+❯ this is...
+  a test!!!
+""",
+      """
+...
+❯ this is...
+  a test!!!
+
+● yes it is
+
+  ○0%  ↑16  ↻3.2k  ↓36  <elapsed>
+
+❯ and
+  another
+
+● Sure is. Let me know when you have a real task.
+
+  ○0%  ↑31  ↻3.2k  ↓31  <elapsed>
+...
+"""
+    ])
     tty.assertFatPromptFrames()
+    tty.assertLiveTypingKeepsTokenBar(["❯ buffered", "❯ this is"])
+    tty.assertBashViewportBounded()
+    tty.assertNoPromptOnlyClearAfter("Streaming markdown before tools.")
     tty.assertOrderedRows([
       "❯ this is...",
       "  a test!!!",
@@ -572,9 +707,9 @@ suite "terminal visual contract":
     tty.assertFatPromptFrames()
     tty.assertOneBlankBetween("❯ run tool followup",
                               "● Running directory listing.")
-    tty.assertOneBlankBetween("  listed-file", "↑74")
+    tty.assertOneBlankBetween("  listed-file", "↑90")
     tty.assertReceiptTouchesAssistantResponse("Follow-up answer after tool.")
-    tty.assertNoBlankBetween("↑74", "● Follow-up answer after tool.")
+    tty.assertNoBlankBetween("↑90", "● Follow-up answer after tool.")
     tty.assertOneBlankBetween("● Follow-up answer after tool.", "↑110")
     tty.send ":q\n"
     tty.expectExit 0

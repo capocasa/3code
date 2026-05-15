@@ -154,8 +154,7 @@ proc tokenBarText*(state: TokenBarState): string =
   let ctx = contextPart(state.usage, state.window)
   if ctx.len > 0:
     parts.add ctx
-  let fresh = max(0, state.usage.promptTokens - state.usage.cachedTokens)
-  let input = tokenSlot("↑", fresh)
+  let input = tokenSlot("↑", state.usage.promptTokens)
   if input.len > 0:
     parts.add input
   let cache = tokenSlot("↻", state.usage.cachedTokens)

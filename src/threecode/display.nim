@@ -567,16 +567,15 @@ proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -
   stdout.flushFile
 
 proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
-  ## Pure label string for the bar / receipt: "○N%  ↑fresh  ↻cached
+  ## Pure label string for the bar / receipt: "○N%  ↑input  ↻cached
   ## ↓completion  Ts" (no styling, no leading spaces — caller wraps
   ## it in cyan-bright for the bar or dim for the receipt). Empty
   ## when there's no usage to report.
   if usage.totalTokens <= 0: return ""
-  let fresh = max(0, usage.promptTokens - usage.cachedTokens)
   let ctx = contextLabel(usage.promptTokens, window)
   var parts: seq[string]
   if ctx.len > 0: parts.add ctx
-  let ts1 = tokenSlot("↑", fresh)
+  let ts1 = tokenSlot("↑", usage.promptTokens)
   if ts1.len > 0: parts.add ts1
   let ts2 = tokenSlot("↻", usage.cachedTokens)
   if ts2.len > 0: parts.add ts2

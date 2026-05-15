@@ -4,8 +4,14 @@
 
 The fat prompt contract is tested with PTY-backed visual tests in
 `tests/test_tty_functional.nim`. These tests run a provider stub, capture every
-terminal frame, and assert against the whole screen state instead of matching
-raw ANSI byte streams.
+terminal frame, and assert visual invariants over those frames instead of
+matching raw ANSI byte streams.
+
+The current visual suite records whole frames and checks the important rows,
+spacing, caret placement, prompt anchoring, and selected frame-series snapshots.
+The next step is a stricter semantic full-frame verifier where every nonempty
+row in every frame must be explained as transcript, receipt, live token bar,
+ticker, editor, or allowed chrome.
 
 Run the visual suite:
 

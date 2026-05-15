@@ -1,4 +1,15 @@
-# Debug: UI freeze during tool calls
+# Historical Debug Note: UI freeze during tool calls
+
+This file records an older investigation from before the fat-prompt rendering
+architecture. It is useful as history, but it is not the current rendering
+contract. For current terminal behavior, use:
+
+- `docs/design.md`
+- `docs/development-guide.md`
+- `docs/testing.md`
+
+Do not use this note to justify new footer-byte tests or old relative-cursor
+repair behavior.
 
 ## Resolution
 
