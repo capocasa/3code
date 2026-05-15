@@ -98,19 +98,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       if tcNode != nil and tcNode.kind == JArray: tcNode
       else: newJArray()
     if toolCalls.len > 0:
-      var queuedBeforeTools = false
-      acquire inputStateLock
-      try:
-        queuedBeforeTools = inputState.autoSend
-      finally:
-        release inputStateLock
-      if queuedBeforeTools:
-        for tc in toolCalls:
-          let id = tc{"id"}.getStr
-          messages.add %*{"role": "tool", "tool_call_id": id,
-                          "content": "skipped — user entered a new prompt"}
-        saveSession(session, messages)
-        return
       debugOut $toolCalls.len & " tool calls"
       # Each emit (blank row, assistant content, pending banner, tool
       # output, halt notice) is wrapped in `screenWriteTranscript` so
@@ -134,8 +121,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           # still emit a tool response so the assistant message's tool_calls
           # are all paired; the model sees the cancellation on the next turn.
           let stopMsg =
-            if queuedUser: "skipped — user entered a new prompt"
-            elif halt: "skipped — loop guard paused the turn"
+            if halt: "skipped — loop guard paused the turn"
             else: "interrupted by user"
           messages.add %*{"role": "tool", "tool_call_id": id,
                           "content": stopMsg}
@@ -250,12 +236,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         acquire inputStateLock
         try:
           if inputState.autoSend:
-            # Pair any remaining tool calls with skipped results, then return
-            # to the interactive loop. That loop drains the queued user text
-            # and starts the next model call, so user intent wins at the first
-            # safe boundary after the active tool process finishes.
+            # Let the current assistant tool batch finish so the tool-call
+            # pairing stays faithful to what the model requested, then return
+            # before the model-initiated follow-up call. The interactive loop
+            # drains the queued user text and starts the next user turn.
             queuedUser = true
-            halt = true
         finally:
           release inputStateLock
         if act.kind == akClear:
@@ -318,8 +303,16 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         let rl = tokenLineLabel(pendingHint.usage, pendingHint.window,
                                 pendingHint.elapsed)
         if rl.len > 0:
-          screenWriteTranscript:
+          withRenderLock:
+            if inputThreadRunning and inputEditor != nil:
+              let up = inputEditor[].renderRow + 1
+              stdout.write "\r"
+              if up > 0:
+                stdout.write "\x1b[" & $up & "A"
+            clearBarPrompt()
             stdout.writeLine CyanFg & "  " & rl & Reset
+            stdout.flushFile()
+            emitScreenEvent clearBarEvent()
         emitScreenEvent clearPendingHintEvent()
       debugOut "runTurns: loop continue"
       continue
@@ -558,14 +551,12 @@ proc main() =
   proc handleBufferedAfterTurn(): bool =
     var cmdWasQuit = false
     var queued = ""
-    var echoRows = 0
     var residual = ""
     acquire inputStateLock
     try:
       cmdWasQuit = inputState.cmdWasQuit
       if inputState.queuedText.len > 0 and inputState.autoSend:
         queued = inputState.queuedText
-        echoRows = inputState.queuedEchoRows
         inputState.queuedText = ""
         inputState.queuedEchoRows = 0
         inputState.autoSend = false
@@ -585,7 +576,12 @@ proc main() =
       messages.add %*{"role": "user",
                       "content": buildUserMessage(messages, queued)}
       refreshSystemPrompt(messages, prof)
-      emitUserSubmit(queued, echoRows)
+      emitBufferedUserSubmit(queued)
+      editor.line = minline.Line(text: "", position: 0)
+      editor.renderSuffix = ""
+      editor.prefillText = ""
+      editor.renderRow = 0
+      editor.echoRows = 0
       runTurnsInteractive(prof, messages, session)
       return handleBufferedAfterTurn()
     if residual.len > 0:

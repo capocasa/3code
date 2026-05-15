@@ -107,6 +107,39 @@ suite "token receipt placement":
     check g.cellFg(1, 0) == colCyan
     check not hasAttr(g.cellAttr(1, 0), saBold)
 
+  test "bufferedSubmitTransitionBytes starts from the repainted bar row":
+    let g = newGrid()
+    let label = tokenLineLabel(usage, 200_000, 1)
+    g.feed "yes it is\n"
+    g.feed "\n"
+    g.feed barFooterBytes(label, BrightPromptColor)
+
+    g.feed bufferedSubmitTransitionBytes("and another", hadPending = true,
+      hadGap = true, receiptLabel = label)
+
+    check "yes it is" in rowText(g, 0)
+    check "3.8k" in rowText(g, 1)
+    check rowText(g, 2).strip == ""
+    check rowText(g, 3).startsWith("❯ and another")
+
+  test "bufferedSubmitTransitionBytes multiline parks below continuation":
+    let g = newGrid()
+    let label = tokenLineLabel(usage, 200_000, 1)
+    g.feed "and this too\n"
+    g.feed "\n"
+    g.feed barFooterBytes(label, BrightPromptColor)
+
+    g.feed bufferedSubmitTransitionBytes("another\ntest", hadPending = true,
+      hadGap = true, receiptLabel = label)
+
+    check "and this too" in rowText(g, 0)
+    check "3.8k" in rowText(g, 1)
+    check rowText(g, 2).strip == ""
+    check rowText(g, 3).startsWith("❯ another")
+    check rowText(g, 4).startsWith("  test")
+    check g.row == 5
+    check g.col == 0
+
   test "submitTransitionBytes: multi-line input + hadGap walks back N+2":
     let g = newGrid()
     g.feed "● Hello\n"                # row 0

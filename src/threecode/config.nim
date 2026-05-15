@@ -418,6 +418,9 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ## Routers belong in user config when wanted, not in the catalog.
 
 proc catalogUrl*(name: string): string =
+  when defined(providerStub):
+    if name == "stub":
+      return "stub://provider"
   for (n, u) in ProviderCatalog:
     if n == name: return u
   ""
@@ -438,6 +441,9 @@ const KeyPrefixCatalog*: seq[(string, string)] = @[
 
 proc inferProvider*(key: string): string =
   ## Returns catalog provider name, or "" if key prefix is not uniquely identifying.
+  when defined(providerStub):
+    if key == "stub":
+      return "stub"
   for (p, n) in KeyPrefixCatalog:
     if key.startsWith(p): return n
   ""

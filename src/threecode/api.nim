@@ -247,7 +247,10 @@ var showThinking*: bool = true
   ## / `:think off`. Has no effect if the provider doesn't emit reasoning.
 
 var spinnerStop: Atomic[bool]
+var spinnerUseLiveEditorFrame: Atomic[bool]
+var spinnerFramePainted: Atomic[bool]
 var spinnerThread: Thread[string]
+var bufferedSubmitTurn: Atomic[bool]
 var quietStop: Atomic[bool]
 var quietThread: Thread[string]
 var quietRunning = false
@@ -698,12 +701,56 @@ proc submitTransitionBytes*(line: string, hadPending, hadGap: bool,
       while i < l.len:
         let rl = max(1, runeLenAt(l, i))
         if col >= termW:
-          result.add "\n  "
+          result.add "\r\n  "
           col = 2
         result.add l[i ..< i + rl]
         inc col
         i += rl
-    result.add "\n"
+    result.add "\r\n"
+
+proc addUserEcho(result: var string, line: string) =
+  let termW = try: terminalWidth() except CatchableError: 0
+  let lines = line.splitLines
+  for idx, l in lines:
+    let prefix = if idx == 0: "❯ " else: "  "
+    result.add prefix
+    if termW <= 0:
+      result.add l
+    else:
+      var col = 2
+      var i = 0
+      while i < l.len:
+        let rl = max(1, runeLenAt(l, i))
+        if col >= termW:
+          result.add "\r\n  "
+          col = 2
+        result.add l[i ..< i + rl]
+        inc col
+        i += rl
+    result.add "\r\n"
+
+proc bufferedSubmitTransitionBytes*(line: string, hadPending, hadGap: bool,
+                                    receiptLabel: string,
+                                    hasBar = true): string =
+  ## User submitted while a turn was running. By the time the outer REPL
+  ## drains the queued text, ``endTurn`` has already repainted the
+  ## typing-ready footer and parked the cursor on the bar row, not below
+  ## the user's readline echo. This transition starts from that footer
+  ## anchor instead of using ``submitTransitionBytes``'s readline-relative
+  ## walkback.
+  if not hasBar:
+    result = "\r\x1b[J"
+    result.addUserEcho(line)
+    return
+  if hadGap:
+    result = "\x1b[1A"
+  result.add "\r\x1b[J"
+  if hadPending:
+    result.add receiptBarBytes(receiptLabel)
+    result.add "\r\n\r\n"
+  else:
+    result.add "\r\n\r\n"
+  result.addUserEcho(line)
 
 # ---------- Bar+prompt runtime helpers ----------
 #
@@ -866,16 +913,23 @@ proc spinnerLoop(unused: string) {.thread.} =
   while not spinnerStop.load(moRelaxed):
     let elapsed = epochTime() - start
     let label = getSpinLabel()
-    let ticker = getSpinTicker()
+    let ticker =
+      if inputThreadRunning and inputEditor != nil: ""
+      else: getSpinTicker()
     lastTicker = ticker
     try:
+      if bufferedSubmitTurn.load(moRelaxed):
+        sleep 80
+        inc i
+        continue
       let frame = frames[i mod frames.len]
-      if inputThreadRunning and inputEditor != nil:
+      if spinnerUseLiveEditorFrame.load(moRelaxed):
         screenRenderFooterFrame spinnerBarFrameBytes(frame, label, ticker,
                                                      elapsed.int, currentTermW())
       else:
         screenRenderFooterFrame spinnerFooterBytes(frame, label, ticker,
                                                    elapsed.int, currentTermW())
+      spinnerFramePainted.store(true, moRelaxed)
     except CatchableError: discard
     sleep 80
     inc i
@@ -1004,6 +1058,9 @@ proc startSpinner*(label: string) =
   debugOut "startSpinner"
   if spinnerRunning: return
   if label.len > 0: setSpinLabel(label)
+  spinnerUseLiveEditorFrame.store(inputThreadRunning and inputEditor != nil and
+    currentBarLabel.len > 0, moRelaxed)
+  spinnerFramePainted.store(false, moRelaxed)
   spinnerStop.store(false, moRelaxed)
   createThread(spinnerThread, spinnerLoop, "")
   spinnerRunning = true
@@ -1079,7 +1136,18 @@ proc captureMd(s: var LiveMarkdownStream, line: string,
 proc startContent(s: var LiveMarkdownStream, slurpedNow: int) =
   if s.started: return
   setSpinTicker("")
+  let hadSpinnerFrame = spinnerFramePainted.load(moRelaxed)
+  let hadBufferedSubmit = bufferedSubmitTurn.load(moRelaxed)
+  bufferedSubmitTurn.store(false, moRelaxed)
   stopSpinner()
+  if inputThreadRunning and inputEditor != nil:
+    stdout.write "\r"
+    if hadBufferedSubmit:
+      discard
+    elif hadSpinnerFrame:
+      stdout.write "\x1b[1A\x1b[2K"
+    else:
+      clearBarPrompt()
   stdout.styledWrite(styleBright, "● ", resetStyle)
   s.started = true
   paintBarBelow(s.currentLabel(slurpedNow), DimPromptColor)
@@ -1167,7 +1235,22 @@ proc finishContent*(s: var LiveMarkdownStream, slurpedNow: int) =
     s.liveBarBelow = false
 
 when providerStub:
-  proc stubUsage(content: string): Usage =
+  proc stubUsage(node: JsonNode, content: string): Usage =
+    let u = if node != nil and node.kind == JObject: node{"usage"} else: nil
+    if u != nil and u.kind == JObject:
+      result.promptTokens =
+        u{"promptTokens"}.getInt(u{"prompt_tokens"}.getInt(0))
+      result.completionTokens =
+        u{"completionTokens"}.getInt(u{"completion_tokens"}.getInt(0))
+      result.totalTokens =
+        u{"totalTokens"}.getInt(u{"total_tokens"}.getInt(0))
+      result.cachedTokens =
+        u{"cachedTokens"}.getInt(
+          u{"cached_tokens"}.getInt(
+            u{"prompt_cache_hit_tokens"}.getInt(0)))
+      if result.totalTokens == 0:
+        result.totalTokens = result.promptTokens + result.completionTokens
+      return
     result.promptTokens = 100
     result.completionTokens = max(1, content.len div 4)
     result.totalTokens = result.promptTokens + result.completionTokens
@@ -1188,6 +1271,28 @@ when providerStub:
       i += charLen
     live.finishContent(slurped)
     contentStreamedLive = true
+
+  proc streamStubReasoning(reasoning, baseLabel: string, slurped: var int) =
+    if reasoning.strip.len == 0:
+      return
+    var acc = ""
+    var i = 0
+    while i < reasoning.len:
+      let charLen = utf8LenAt(reasoning, i)
+      acc.add reasoning[i ..< min(i + charLen, reasoning.len)]
+      slurped += charLen
+      setSpinLabel(liveLabel(baseLabel, slurped))
+      let termW = try: terminalWidth() except CatchableError: 80
+      let budget = max(20, termW - 6)
+      let tail =
+        if acc.len > budget: acc[acc.len - budget .. ^1]
+        else: acc
+      var flat = newStringOfCap(tail.len)
+      for ch in tail:
+        flat.add(if ch == '\n' or ch == '\r': ' ' else: ch)
+      setSpinTicker("  … " & flat)
+      sleep 15
+      i += charLen
 
 proc parseUsage*(u: JsonNode): Usage =
   ## Parses an OpenAI-compatible `usage` object. Cached-token accounting
@@ -2008,7 +2113,8 @@ proc inputThreadProc() {.thread.} =
         if ed.line.text.len > 0: DeferredSubmitMarker
         else: ""
     edPtr[].postRedraw = proc(ed: var minline.LineEditor) =
-      discard
+      stdout.write "\x1b[?25h"
+      stdout.flushFile()
 
     withRender:
       enterPromptInput(TurnPromptColor)
@@ -2032,7 +2138,9 @@ proc inputThreadProc() {.thread.} =
     edPtr[].submitIcon = DeferredSubmitMarker
     while turnActive():
       try:
-        let text = minline.readLineWith(edPtr[], "❯ ", getCh, writeProc,
+        let text = minline.readLineWith(edPtr[],
+                                        TurnPromptColor & "❯ " & Reset,
+                                        getCh, writeProc,
                                         hasPendingInput = hasPendingInput)
         if text.len == 0:
           continue
@@ -2069,7 +2177,7 @@ proc inputThreadProc() {.thread.} =
         requestTurnInterrupt()
         break
       except EOFError:
-        if edPtr[].line.text.len == 0:
+        if turnActive() and edPtr[].line.text.len == 0:
           acquire inputStateLock
           try:
             inputState.cmdWasQuit = true
@@ -2191,6 +2299,23 @@ proc emitUserSubmit*(line: string, echoRows = -1) =
   emitScreenEvent clearPendingHintEvent()
   emitScreenEvent clearBarEvent()
 
+proc emitBufferedUserSubmit*(line: string) =
+  ## Echo a prompt that was queued by the background input thread during
+  ## a model/tool turn. See ``bufferedSubmitTransitionBytes`` for the
+  ## cursor contract.
+  let receiptLabel =
+    if pendingHint.active:
+      tokenLineLabel(pendingHint.usage, pendingHint.window, pendingHint.elapsed)
+    else: ""
+  let hadGap = currentBarHasGap
+  let hasBar = currentBarLabel.len > 0
+  stdout.write bufferedSubmitTransitionBytes(line, pendingHint.active, hadGap,
+                                             receiptLabel, hasBar)
+  stdout.flushFile
+  bufferedSubmitTurn.store(true, moRelaxed)
+  emitScreenEvent clearPendingHintEvent()
+  emitScreenEvent clearBarEvent()
+
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   when providerStub:
     block:
@@ -2276,9 +2401,15 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
           let step = min(100, remaining)
           sleep(step)
           remaining -= step
-      streamStubContent(result{"content"}.getStr(""), stubBaseLabel, slurped)
+      let stubContent = result{"content"}.getStr("")
+      if result{"stream"}.getBool(true):
+        var stubReasoning = result{"reasoning_content"}.getStr("")
+        if stubReasoning.len == 0:
+          stubReasoning = result{"reasoning"}.getStr("")
+        streamStubReasoning(stubReasoning, stubBaseLabel, slurped)
+        streamStubContent(stubContent, stubBaseLabel, slurped)
       stopSpinner()
-      usage = stubUsage(result{"content"}.getStr(""))
+      usage = stubUsage(result, stubContent)
       let stubElapsed = (epochTime() - stubT0).int
       let stubLabel = tokenLineLabel(usage, stubWindow, stubElapsed)
       paintBarPrompt(stubLabel, DimPromptColor)
@@ -2484,6 +2615,9 @@ proc verifyBody*(p: Profile): string =
 proc verifyProfile*(p: Profile): (bool, string) =
   if verifyProfileHook != nil:
     return verifyProfileHook(p)
+  when providerStub:
+    if p.url.startsWith("stub://"):
+      return (true, "")
   let body = verifyBody(p)
   try:
     let client = newHttpClient(timeout = 20_000, userAgent = "3code",
@@ -2515,6 +2649,9 @@ proc fetchModels*(url, key: string): (seq[string], string) =
   ## success. Callers are responsible for displaying the error.
   if fetchModelsHook != nil:
     return fetchModelsHook(url, key)
+  when providerStub:
+    if url.startsWith("stub://"):
+      return (@["stub-model"], "")
   try:
     let client = newHttpClient(timeout = 20_000, userAgent = "3code",
                                sslContext = bundledSslContext())
