@@ -22,7 +22,7 @@ when defined(posix):
   import posix/termios
 import streamhttp
 import types, util, prompts, compact, display, minline, screen, streamexec,
-  terminal_owner
+  terminal as termui
 
 type
   VerifyProfileHook* = proc(p: Profile): (bool, string) {.closure.}
@@ -284,11 +284,20 @@ var
   spinTickerShared: string
 spinLabelLock.initLock()
 
+proc paintBarBytes*(label: string): string
+
 proc emitScreenEvent*(ev: ScreenEvent) =
   ## Single state transition entry point for the volatile footer model.
   ## Terminal bytes are still rendered by the helpers below, but all
   ## production state changes flow through this event reducer.
   screenState.apply ev
+  case ev.kind
+  of seSetBar:
+    termui.setFooterBar(paintBarBytes(ev.barLabel))
+  of seClearBar:
+    termui.clearFooterBar()
+  else:
+    discard
 
 type LiveMarkdownStream* = object
   ## Incremental renderer for assistant content during provider streaming.
@@ -429,8 +438,6 @@ proc liveEditorFooterAnchored*(): bool =
   inputThreadRunning and inputEditor != nil and terminalHeight() > 0 and
     stdout.isatty
 
-proc paintBarBytes*(label: string): string
-
 proc anchoredEditorFooterBytes*(label: string; termH, editorRows: int): string
 
 proc enterTurnScrollRegion*() =
@@ -450,11 +457,9 @@ proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
   ## only code allowed to paint those rows.
   if not liveEditorFooterAnchored():
     return
-  terminal_owner.beginEditorRedraw(
+  termui.beginEditorRedraw(
     ed,
     inputEditorReady.load(moAcquire),
-    currentBarLabel,
-    paintBarBytes(currentBarLabel),
     SyncBegin)
 
 template captureStdoutWrites(body: untyped): string =
@@ -613,7 +618,7 @@ proc anchoredEditorFooterBytes*(label: string; termH, editorRows: int): string =
   ## Absolute-frame setup for the always-live editor footer.
   ## Cursor out: top row of the editor area. The token bar row and all editor
   ## rows have been cleared; the token bar has been repainted if a label is
-  ## available. The editor redraw that follows is the only owner of the rows
+  ## available. The editor redraw that follows is the only writer for the rows
   ## below the token bar.
   let rows = max(1, editorRows)
   let h = max(2, termH)
@@ -840,13 +845,13 @@ proc paintBarPrompt*(label, promptColor: string) =
   debugOut "paintBarPrompt label=" & label[0..min(30, label.len-1)]
   emitScreenEvent setBarEvent(label)
   if liveEditorFooterAnchored():
-    terminal_owner.renderFooterFrame(paintBarBytes(label), inputThreadRunning,
+    termui.renderFooterFrame(paintBarBytes(label), inputThreadRunning,
                                      inputEditor, SyncBegin, SyncEnd)
   else:
     let cursor =
       if promptColor == DimPromptColor: "\x1b[?25l"
       else: "\x1b[?25h"
-    terminal_owner.syncWrite(cursor & barFooterBytes(label, promptColor,
+    termui.syncWrite(cursor & barFooterBytes(label, promptColor,
                                                      currentTermW()),
                              SyncBegin, SyncEnd)
 
@@ -863,29 +868,29 @@ proc paintBarBelow*(label, promptColor: string) =
   ## accumulated in memory and the cursor stays put.
   emitScreenEvent setBarEvent(label)
   if liveEditorFooterAnchored():
-    terminal_owner.renderFooterFrame(paintBarBytes(label), inputThreadRunning,
+    termui.renderFooterFrame(paintBarBytes(label), inputThreadRunning,
                                      inputEditor, SyncBegin, SyncEnd)
   else:
-    terminal_owner.syncWrite(barFooterBelowBytes(label, promptColor,
+    termui.syncWrite(barFooterBelowBytes(label, promptColor,
                                                  currentTermW()),
                              SyncBegin, SyncEnd)
 
 proc paintBarBelowAtCol(label, promptColor: string, col: int) =
   emitScreenEvent setBarEvent(label)
   if liveEditorFooterAnchored():
-    terminal_owner.renderFooterFrame(paintBarBytes(label), inputThreadRunning,
+    termui.renderFooterFrame(paintBarBytes(label), inputThreadRunning,
                                      inputEditor, SyncBegin, SyncEnd)
   else:
-    terminal_owner.syncWrite(barFooterBelowAtColBytes(label, promptColor, col,
+    termui.syncWrite(barFooterBelowAtColBytes(label, promptColor, col,
                                                       currentTermW()),
                              SyncBegin, SyncEnd)
 
 proc clearBarBelowAtCol(col: int) =
   if liveEditorFooterAnchored():
-    terminal_owner.renderFooterFrame("\r\x1b[2K", inputThreadRunning,
+    termui.renderFooterFrame("\r\x1b[2K", inputThreadRunning,
                                      inputEditor, SyncBegin, SyncEnd)
   else:
-    terminal_owner.syncWrite(clearBarBelowAtColBytes(col), SyncBegin, SyncEnd)
+    termui.syncWrite(clearBarBelowAtColBytes(col), SyncBegin, SyncEnd)
 
 proc repaintBarPrompt*(promptColor = DimPromptColor) =
   ## Re-emit the bar+prompt at the cursor's current row using the
@@ -893,14 +898,14 @@ proc repaintBarPrompt*(promptColor = DimPromptColor) =
   ## back after a content write.
   if currentBarLabel.len == 0: return
   if liveEditorFooterAnchored():
-    terminal_owner.renderFooterFrame(paintBarBytes(currentBarLabel),
+    termui.renderFooterFrame(paintBarBytes(currentBarLabel),
                                      inputThreadRunning, inputEditor,
                                      SyncBegin, SyncEnd)
   else:
     let cursor =
       if promptColor == DimPromptColor: "\x1b[?25l"
       else: "\x1b[?25h"
-    terminal_owner.syncWrite(cursor & barFooterBytes(currentBarLabel,
+    termui.syncWrite(cursor & barFooterBytes(currentBarLabel,
                                                      promptColor,
                                                      currentTermW()),
                              SyncBegin, SyncEnd)
@@ -910,10 +915,10 @@ proc clearBarPrompt*() =
   ## the bar row so the caller can write content there (which then
   ## pushes the next `repaintBarPrompt` one row down).
   if liveEditorFooterAnchored():
-    terminal_owner.renderFooterFrame("\r\x1b[2K", inputThreadRunning,
+    termui.renderFooterFrame("\r\x1b[2K", inputThreadRunning,
                                      inputEditor, SyncBegin, SyncEnd)
   else:
-    terminal_owner.syncWrite(ClearBarPromptBytes, SyncBegin, SyncEnd)
+    termui.syncWrite(ClearBarPromptBytes, SyncBegin, SyncEnd)
 
 proc paintPromptOnly*(promptColor: string)
 
@@ -926,15 +931,15 @@ proc enterPromptInput*(promptColor: string) =
   ## placeholder.
   if currentBarLabel.len > 0:
     if currentBarHasGap and pendingHint.active:
-      terminal_owner.syncWrite("\r\x1b[1A\x1b[J", SyncBegin, SyncEnd)
+      termui.syncWrite("\r\x1b[1A\x1b[J", SyncBegin, SyncEnd)
     else:
       clearBarPrompt()
-    terminal_owner.enterPromptInput(
+    termui.enterPromptInput(
       true,
       barFooterBytes(currentBarLabel, promptColor, currentTermW()),
       "")
   else:
-    terminal_owner.enterPromptInput(
+    termui.enterPromptInput(
       false,
       "",
       "\r\x1b[2K" & promptColor & "❯ " & Reset & "\r")
@@ -945,7 +950,7 @@ proc resetPromptInputAfterEmpty*(echoRows: int; promptColor: string) =
   ## input height, including wraps.
   let n = max(1, echoRows)
   if currentBarLabel.len == 0:
-    terminal_owner.resetPromptInputAfterEmpty(
+    termui.resetPromptInputAfterEmpty(
       false,
       n,
       "\x1b[2K" & promptColor & "❯ " & Reset & "\r",
@@ -955,7 +960,7 @@ proc resetPromptInputAfterEmpty*(echoRows: int; promptColor: string) =
     let cursor =
       if promptColor == DimPromptColor: "\x1b[?25l"
       else: "\x1b[?25h"
-    terminal_owner.resetPromptInputAfterEmpty(
+    termui.resetPromptInputAfterEmpty(
       true,
       n,
       "",
@@ -969,16 +974,16 @@ proc enterToolViewport*(termH: int) =
   emitScreenEvent setModeEvent(smToolStreaming)
   let footerRows = 1 + liveEditorRows()
   let scrollBottom = max(1, termH - footerRows)
-  terminal_owner.setToolViewport(true, scrollBottom, liveBarRow(termH),
+  termui.setToolViewport(true, scrollBottom, liveBarRow(termH),
                                  liveEditorFooterAnchored())
 
 proc leaveToolViewport*(termH: int) =
   ## Leave the bounded live tool-output viewport and return to normal
   ## transcript rendering with the cursor on the bar row.
   if liveEditorFooterAnchored():
-    terminal_owner.setToolViewport(false, termH, liveBarRow(termH), true)
+    termui.setToolViewport(false, termH, liveBarRow(termH), true)
   else:
-    terminal_owner.setToolViewport(false, termH, liveBarRow(termH), false)
+    termui.setToolViewport(false, termH, liveBarRow(termH), false)
   emitScreenEvent setModeEvent(smNormal)
 
 proc endTurnBytes*(label, promptColor: string, repaintPrompt: bool,
@@ -1012,20 +1017,16 @@ template screenWriteTranscript*(body: untyped) =
       1
     else:
       0
-  let liveBar =
-    if currentBarLabel.len > 0: paintBarBytes(currentBarLabel)
-    else: "\r\x1b[2K"
   let repaint =
     if currentBarLabel.len > 0:
       barFooterBytes(currentBarLabel, DimPromptColor, currentTermW())
     else:
       "\r\x1b[2K"
-  terminal_owner.appendTranscriptWithFooter(
+  termui.appendTranscriptWithFooter(
     transcriptBytes,
     liveEditorFooterAnchored(),
     inputThreadRunning,
     inputEditor,
-    liveBar,
     ClearBarPromptBytes,
     repaint,
     SyncBegin,
@@ -1070,15 +1071,15 @@ proc spinnerLoop(unused: string) {.thread.} =
         continue
       let frame = frames[i mod frames.len]
       if inputThreadRunning and inputEditor != nil:
-        terminal_owner.renderFooterFrame(
+        termui.renderFooterFrame(
           liveEditorSpinnerBarBytes(frame, label, elapsed.int),
           inputThreadRunning, inputEditor, SyncBegin, SyncEnd)
       elif spinnerUseLiveEditorFrame.load(moRelaxed):
-        terminal_owner.renderFooterFrame(
+        termui.renderFooterFrame(
           spinnerBarFrameBytes(frame, label, ticker, elapsed.int, currentTermW()),
           inputThreadRunning, inputEditor, SyncBegin, SyncEnd)
       else:
-        terminal_owner.renderFooterFrame(
+        termui.renderFooterFrame(
           spinnerFooterBytes(frame, label, ticker, elapsed.int, currentTermW()),
           inputThreadRunning, inputEditor, SyncBegin, SyncEnd)
       spinnerFramePainted.store(true, moRelaxed)
@@ -1091,7 +1092,7 @@ proc spinnerLoop(unused: string) {.thread.} =
       let tickerRows =
         if lastTicker.len == 0: 1
         else: max(1, (visibleWidth(lastTicker) + max(1, termW) - 1) div max(1, termW))
-      terminal_owner.syncWrite(spinnerCleanupBytes(tickerRows), SyncBegin,
+      termui.syncWrite(spinnerCleanupBytes(tickerRows), SyncBegin,
                                SyncEnd)
   except CatchableError: discard
 
@@ -1117,7 +1118,7 @@ proc paintInitialBar*(p: Profile) =
   ## haven't sent a request yet, so promptTokens is 0). Bright cyan
   ## prompt — typing-ready. Sets `currentBarHasGap = true` to match
   ## `endTurn`'s shape between turns.
-  terminal_owner.writeRaw("\n")
+  termui.writeRaw("\n")
   let window = contextWindowFor(p.model)
   let baseLabel = contextLabel(0, window)
   paintBarPrompt(liveLabel(baseLabel, 0), BrightPromptColor)
@@ -1133,7 +1134,7 @@ proc paintPromptOnly*(promptColor: string) =
   ## Leaves `currentBarLabel = ""` and `currentBarHasGap = false` —
   ## the signals `readInput`, `emitUserSubmit`, and the slash-command
   ## repaint use to detect prompt-only mode.
-  terminal_owner.writeRaw("\x1b[2K" & promptColor & "❯ " & Reset & "\r")
+  termui.writeRaw("\x1b[2K" & promptColor & "❯ " & Reset & "\r")
   emitScreenEvent clearBarEvent()
 
 proc paintInitialPrompt*(p: Profile) =
@@ -1183,7 +1184,7 @@ proc barTickLoop() {.thread.} =
           "\x1b[?25l" & pos & paintBarBytes(label)
       else:
         "\x1b[?25l" & pos & barFooterBytes(label, DimPromptColor, tw)
-    terminal_owner.renderFooterFrame(frame, inputThreadRunning, inputEditor,
+    termui.renderFooterFrame(frame, inputThreadRunning, inputEditor,
                                      SyncBegin, SyncEnd)
     sleep 500
 
@@ -1294,7 +1295,7 @@ proc startContent(s: var LiveMarkdownStream, slurpedNow: int) =
   let hadBufferedSubmit = bufferedSubmitTurn.load(moRelaxed)
   bufferedSubmitTurn.store(false, moRelaxed)
   stopSpinner()
-  terminal_owner.withTerminalWriteLock:
+  termui.withTerminalWriteLock:
     if inputThreadRunning and inputEditor != nil:
       let up = inputEditor[].renderRow + 3
       stdout.write "\r"
@@ -1357,16 +1358,15 @@ proc writeRendered(s: var LiveMarkdownStream, bytes: string,
       s.liveBarBelow = true
 
 proc suppressLiveAssistantStream(): bool =
-  ## Streaming assistant text and an always-live editor both need ownership of
-  ## the terminal cursor. Prefer prompt stability: keep the spinner/bar live,
-  ## then let the caller commit the completed assistant text through
-  ## `screenWriteTranscript`.
+  ## Streaming assistant text and an always-live editor both need the terminal
+  ## cursor. Prefer prompt stability: keep the spinner/bar live, then let the
+  ## caller commit the completed assistant text through `screenWriteTranscript`.
   liveEditorFooterAnchored()
 
 proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
   if chunk.len == 0: return
   if suppressLiveAssistantStream(): return
-  terminal_owner.withTerminalWriteLock:
+  termui.withTerminalWriteLock:
     var data = s.utf8Pending & chunk
     s.utf8Pending = ""
     var i = 0
@@ -2008,7 +2008,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       if accContent[i] == '\n': inc trailingNl
       else: break
     if trailingNl > 1:
-      terminal_owner.withTerminalWriteLock:
+      termui.withTerminalWriteLock:
         if live.liveBarAtCursor:
           clearBarPrompt()
           live.liveBarAtCursor = false
@@ -2024,12 +2024,12 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     # the cursor in the content area (liveBarBelow case); move it down to
     # the bar row before inserting the ticker row and restarting the spinner.
     if live.liveBarBelow:
-      terminal_owner.syncWrite("\x1b[1B", SyncBegin, SyncEnd) # bar is below cursor
+      termui.syncWrite("\x1b[1B", SyncBegin, SyncEnd) # bar is below cursor
     # Now cursor is at bar row col 0.
     # Insert a blank row above the bar (ticker row for the spinner)
     # and restart the spinner so the elapsed time keeps ticking during
     # post-streaming processing (tool-call parsing, usage calculation).
-    terminal_owner.syncWrite("\x1b[L\x1b[1B", SyncBegin, SyncEnd)
+    termui.syncWrite("\x1b[L\x1b[1B", SyncBegin, SyncEnd)
     setSpinLabel(liveLabel(baseLabel, slurped))
     startSpinner("")
 
@@ -2251,7 +2251,7 @@ proc inputThreadProc() {.thread.} =
       let hasPendingInput: minline.HasPendingInputProc = nil
 
     let writeProc: minline.WriteProc = proc(s: string) =
-      terminal_owner.writeRaw(s)
+      termui.writeRaw(s)
 
     edPtr[].onMutate = proc(ed: var minline.LineEditor) =
       acquire inputStateLock
@@ -2288,7 +2288,7 @@ proc inputThreadProc() {.thread.} =
     edPtr[].preRedraw = proc(ed: var minline.LineEditor) =
       reserveEditorFooterForRedraw(ed)
     edPtr[].postRedraw = proc(ed: var minline.LineEditor) =
-      terminal_owner.finishEditorRedraw(SyncEnd)
+      termui.finishEditorRedraw(SyncEnd)
       inputEditorReady.store(true, moRelease)
 
     when defined(posix):
@@ -2317,13 +2317,13 @@ proc inputThreadProc() {.thread.} =
         if text.len == 0:
           continue
         if text[0] == ':':
-          terminal_owner.withTerminalWriteLock:
+          termui.withTerminalWriteLock:
             clearBarPrompt()
           if turnHandleCommand != nil:
             discard turnHandleCommand(text)
-          terminal_owner.withTerminalWriteLock:
+          termui.withTerminalWriteLock:
             enterPromptInput(TurnPromptColor)
-            terminal_owner.writeRaw(edPtr[].redrawBytes())
+            termui.writeRaw(edPtr[].redrawBytes())
             if edPtr[].postRedraw != nil:
               edPtr[].postRedraw(edPtr[])
           if text.strip in [":q", ":quit", ":exit"]:
@@ -2335,7 +2335,7 @@ proc inputThreadProc() {.thread.} =
             setInterrupted(true)
             break
         else:
-          terminal_owner.withTerminalWriteLock:
+          termui.withTerminalWriteLock:
             acquire inputStateLock
             try:
               inputState.queuedText = text
@@ -2385,7 +2385,7 @@ proc beginTurn*() =
   ## Hide the terminal caret for the duration of the turn — the dim
   ## ❯ glyph (still painted, just not blinking) is the only
   ## visible marker while typing isn't possible.
-  terminal_owner.hideCaret()
+  termui.hideCaret()
   emitScreenEvent setPromptModeEvent(pmTurnRunning)
   if inputEditor != nil and not inputThreadRunning:
     acquire inputStateLock
@@ -2439,7 +2439,7 @@ proc endTurn*(repaintPrompt = true) =
                          currentBarHasGap)
   else:
     bytes = endTurnBytes("", BrightPromptColor, repaintPrompt)
-  terminal_owner.endTurn(
+  termui.endTurn(
     hadInputThread,
     inputEditor,
     hadBar,
@@ -2474,7 +2474,7 @@ proc emitUserSubmit*(line: string, echoRows = -1) =
     else: ""
   let hadGap = currentBarHasGap
   let hasBar = currentBarLabel.len > 0
-  terminal_owner.submitUser(
+  termui.submitUser(
     submitTransitionBytes(line, pendingHint.active, hadGap, receiptLabel,
                           hasBar, echoRows))
   emitScreenEvent clearPendingHintEvent()
@@ -2491,7 +2491,7 @@ proc emitBufferedUserSubmit*(line: string) =
   let hadGap = currentBarHasGap
   let hasBar = currentBarLabel.len > 0
   let editorRows = max(1, minline.totalRows(line, 2, 2, currentTermW()))
-  terminal_owner.submitBufferedUser(
+  termui.submitBufferedUser(
     editorRows,
     hasBar,
     bufferedSubmitTransitionBytes(line, pendingHint.active, hadGap,
@@ -2508,10 +2508,10 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       let stubBaseLabel = contextLabel(lastPromptTokens, stubWindow)
       let startsAfterReceipt = followupStartsAfterReceipt
       followupStartsAfterReceipt = false
-      terminal_owner.withTerminalWriteLock:
+      termui.withTerminalWriteLock:
         enterTurnScrollRegion()
         if not startsAfterReceipt:
-          terminal_owner.writeRaw("\n")
+          termui.writeRaw("\n")
       setSpinLabel(liveLabel(stubBaseLabel, 0))
       startSpinner("")
       startQuietWatch(liveLabel(stubBaseLabel, 0))
@@ -2661,10 +2661,10 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   # target for the reasoning ticker.
   let startsAfterReceipt = followupStartsAfterReceipt
   followupStartsAfterReceipt = false
-  terminal_owner.withTerminalWriteLock:
+  termui.withTerminalWriteLock:
     enterTurnScrollRegion()
     if not startsAfterReceipt:
-      terminal_owner.writeRaw("\n")
+      termui.writeRaw("\n")
   setSpinLabel(liveLabel(baseLabel, 0))
   # Cursor is hidden for the duration of the entire turn by `runTurns`
   # so the dim ❯ placeholder is the only visible caret. callModel
@@ -2765,7 +2765,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
     let label = tokenLineLabel(usage, window, elapsed.int)
     if contentStreamedLive:
       # Remove the ticker row inserted by the post-streaming spinner restart.
-      terminal_owner.syncWrite("\r\x1b[1A\x1b[M", SyncBegin, SyncEnd)
+      termui.syncWrite("\r\x1b[1A\x1b[M", SyncBegin, SyncEnd)
     let assistantContent =
       if outcome.assistantMsg == nil: ""
       else: outcome.assistantMsg{"content"}.getStr("")

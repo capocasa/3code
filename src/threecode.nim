@@ -31,7 +31,8 @@ when defined(posix):
   import std/posix
 import threecode/[types, util, prompts, shell, loop, session, compact,
                   config, actions, api, display, ui, update, screen,
-                  streamexec, terminal_owner]
+                  streamexec]
+import threecode/terminal as termui
 import threecode/minline
 export types, util, prompts, shell, loop, session, compact,
        config, actions, api, display, ui, screen
@@ -183,11 +184,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
                   try:
                     result = runActionStreaming(act, session.readCache,
                       proc(line: string) =
-                        terminal_owner.withTerminalWriteLock:
+                        termui.withTerminalWriteLock:
                           sv.addLine(line))
                   finally:
                     setToolStdinWatcherEnabled(true)
-                  terminal_owner.withTerminalWriteLock:
+                  termui.withTerminalWriteLock:
                     sv.erase()
                   result
                 finally:

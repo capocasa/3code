@@ -26,7 +26,7 @@
 
 import
   critbits,
-  terminal,
+  std/terminal,
   unicode,
   deques,
   sequtils,

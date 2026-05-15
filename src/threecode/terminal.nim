@@ -1,4 +1,4 @@
-## Single owner for normal-terminal writes.
+## Terminal rendering for normal-terminal writes.
 ##
 ## This deliberately uses direct terminal operations, not a fullscreen diff.
 ## Scrollback content is appended once as ordinary terminal output; only the
@@ -10,6 +10,12 @@ import minline
 var terminalLock*: Lock
 initLock(terminalLock)
 var terminalLockDepth {.threadvar.}: int
+
+type
+  TerminalState = object
+    barPayload: string
+
+var terminalState: TerminalState
 
 proc acquireTerminalWrite*() =
   ## Enter the single terminal-writer critical section. Reentrant so editor
@@ -29,7 +35,7 @@ proc releaseTerminalWrite*() =
 
 template withTerminalWriteLock*(body: untyped) =
   ## Serialize all terminal writes. Reentrant for helpers that compose other
-  ## owner operations within one render tick.
+  ## terminal operations within one render tick.
   acquireTerminalWrite()
   try:
     body
@@ -60,12 +66,26 @@ proc writeRaw*(bytes: string) =
     stdout.write bytes
     stdout.flushFile
 
+proc setFooterBar*(barPayload: string) =
+  ## Remember the latest complete token-bar payload. Editor redraws use this
+  ## terminal state instead of trusting a caller-local view of the footer.
+  withTerminalWriteLock:
+    terminalState.barPayload = barPayload
+
+proc clearFooterBar*() =
+  ## Clear the terminal token-bar payload. Used only for true prompt-only states.
+  withTerminalWriteLock:
+    terminalState.barPayload = ""
+
+proc currentFooterBar(): string =
+  terminalState.barPayload
+
 proc hideCaret*() =
   ## Hide the physical terminal caret while the prompt is in turn-running mode.
   writeRaw("\x1b[?25l")
 
 proc beginEditorRedraw*(ed: var minline.LineEditor; ready: bool;
-                        label, barBytes, syncBegin: string) =
+                        syncBegin: string) =
   ## Start an atomic live-editor redraw frame. The caller must finish with
   ## `finishEditorRedraw` after minline has emitted the editor bytes.
   acquireTerminalWrite()
@@ -75,8 +95,9 @@ proc beginEditorRedraw*(ed: var minline.LineEditor; ready: bool;
   if ready:
     stdout.write "\x1b[" & $(ed.renderRow + 1) & "A"
   stdout.write "\x1b[J"
-  if label.len > 0:
-    stdout.write barBytes
+  let bar = currentFooterBar()
+  if bar.len > 0:
+    stdout.write bar
   else:
     stdout.write "\r\x1b[2K"
   stdout.write "\r\n"
@@ -93,7 +114,7 @@ proc finishEditorRedraw*(syncEnd: string) =
 
 proc enterPromptInput*(hasBar: bool; barFooterBytes, promptOnlyBytes: string) =
   ## Prepare the cursor for the line editor. In bar mode, the caller has
-  ## already cleared the owned prompt region and supplies the repaint bytes.
+  ## already cleared the reserved prompt region and supplies the repaint bytes.
   withTerminalWriteLock:
     if hasBar:
       stdout.write barFooterBytes
@@ -168,6 +189,9 @@ proc renderFooterFrame*(bytes: string; inputRunning: bool;
   ## cursor returns to the editor instead of the bar.
   {.cast(gcsafe).}:
     withTerminalWriteLock:
+      if bytes.len > 0 and bytes != "\r\x1b[2K" and
+          '\n' notin bytes and '\r' in bytes:
+        terminalState.barPayload = bytes
       if inputRunning and editor != nil:
         let edPtr = editor
         stdout.write syncBegin
@@ -194,12 +218,12 @@ proc renderFooterFrame*(bytes: string; inputRunning: bool;
 proc appendTranscriptWithFooter*(transcriptBytes: string; liveAnchored: bool;
                                  inputRunning: bool;
                                  editor: ptr minline.LineEditor;
-                                 barBytes, clearBytes, repaintBytes: string;
+                                 clearBytes, repaintBytes: string;
                                  syncBegin, syncEnd: string;
                                  compactRowsAboveFooter = 0) =
-  ## Append transcript bytes as real scrollback while preserving the owned
-  ## fat-prompt area. The caller supplies already-formatted footer bytes; this
-  ## owner decides when and where they are emitted.
+  ## Append transcript bytes as real scrollback while preserving the terminal's
+  ## fat-prompt area. The terminal decides when and where footer bytes are
+  ## emitted.
   withTerminalWriteLock:
     let transcript = trimTrailingNewlines(transcriptBytes)
     if liveAnchored:
@@ -215,7 +239,7 @@ proc appendTranscriptWithFooter*(transcriptBytes: string; liveAnchored: bool;
       if transcript.len > 0:
         stdout.write transcript
         stdout.write "\r\n\r\n"
-      stdout.write barBytes
+      stdout.write currentFooterBar()
       stdout.write "\r\n"
       edPtr[].renderRow = 0
       stdout.write edPtr[].redrawBytes()
