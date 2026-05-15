@@ -265,6 +265,19 @@ proc dumpFramesAround*(s: TtySession; text: string; radius = 2): string =
           let mark = if rowIdx in frame.changedRows: "*" else: " "
           result.add &"{mark}{rowIdx:02d}: {row}\n"
 
+proc framesText*(s: TtySession): string =
+  for i, frame in s.frames:
+    result.add &"===== frame {i:04d} @{frame.ms}ms changed={frame.changedRows} =====\n"
+    for row in frame.rows:
+      result.add row
+      result.add "\n"
+
+proc writeFrameArtifact*(s: TtySession; path: string) =
+  let dir = path.splitPath.head
+  if dir.len > 0:
+    createDir(dir)
+  writeFile(path, s.framesText())
+
 type
   NormalizedFrame = object
     originalIndex: int

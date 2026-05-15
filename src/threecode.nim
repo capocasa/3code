@@ -166,8 +166,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
               # pinned at the bottom two rows.
               enterToolViewport(termH)
               try:
-                renderToolBanner(bannerFor(act), akBash, -1)
-                stdout.flushFile()
                 var sv = initStreamingView(StreamMaxLines, idx)
                 let promptOwnsStdin = inputEditor != nil
                 setToolStdinWatcherEnabled(not promptOwnsStdin)
@@ -181,12 +179,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
                   setToolStdinWatcherEnabled(true)
                 withRenderLock:
                   sv.erase()
-                  # Erase the initial banner row
-                  stdout.write "\x1b[1A\x1b[2K"
-                  let elapsed = (epochTime() - toolT0).int
-                  renderToolBanner(bannerFor(act), akBash, result.code, elapsed)
-                  printToolResult(akBash, result.output, result.code, idx,
-                    result.diff)
                 result
               finally:
                 # Reset scrolling region, position cursor at bar row.
@@ -202,12 +194,10 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         debugOut &"tool done: {act.kind} code={code} elapsed={toolElapsed:.2f}"
 
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
-        if not silent and act.kind != akBash:
+        if not silent:
           screenWriteTranscript:
             renderToolBanner(bannerFor(act), act.kind, code, toolElapsed.int)
             printToolResult(act.kind, r, code, idx, diff)
-        elif not silent:
-          discard  # bash already rendered above
         else:
           screenWriteTranscript:
             printSkillLoaded(act)
