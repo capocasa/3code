@@ -21,7 +21,8 @@ when defined(posix):
   import std/posix except SocketHandle
   import posix/termios
 import streamhttp
-import types, util, prompts, compact, display, minline, screen, streamexec
+import types, util, prompts, compact, display, minline, screen, streamexec,
+  terminal_owner
 
 type
   VerifyProfileHook* = proc(p: Profile): (bool, string) {.closure.}
@@ -255,25 +256,10 @@ var quietStop: Atomic[bool]
 var quietThread: Thread[string]
 var quietRunning = false
 var lastProviderActivity: Atomic[int]
-var renderLock*: Lock
-initLock(renderLock)
-var renderLockDepth {.threadvar.}: int
-
 template withRenderLock*(body: untyped) =
-  ## Serialize terminal writes across the main thread, spinner/ticker threads,
-  ## and the always-live prompt input thread. The depth counter makes the lock
-  ## reentrant within one thread, which keeps existing helpers that call other
-  ## render helpers from deadlocking.
-  if renderLockDepth > 0:
+  ## Transitional alias while call sites move to `terminal_owner`.
+  terminal_owner.withTerminalWriteLock:
     body
-  else:
-    acquire renderLock
-    inc renderLockDepth
-    try:
-      body
-    finally:
-      dec renderLockDepth
-      release renderLock
 
 var inputState*: InputState
 var inputStateLock*: Lock
@@ -406,9 +392,7 @@ const
 proc screenRenderSync*(s: string) =
   ## Single-flush write of ``s`` wrapped in DEC 2026 synchronized
   ## output, so conhost paints it as one atomic frame.
-  withRenderLock:
-    stdout.write SyncBegin & s & SyncEnd
-    stdout.flushFile
+  terminal_owner.syncWrite(s, SyncBegin, SyncEnd)
 
 proc syncWrite*(s: string) =
   ## Compatibility wrapper for older tests/callers; prefer
@@ -480,28 +464,8 @@ proc screenRenderFooterFrame*(s: string) {.gcsafe.} =
   ## anchor and then restore the editor's prompt/input row in the same
   ## synchronized frame. Otherwise spinner/bar ticks park the physical
   ## cursor on the token bar and the next typed character echoes there.
-  {.cast(gcsafe).}:
-    withRenderLock:
-      if inputThreadRunning and inputEditor != nil:
-        let edPtr = inputEditor
-        stdout.write SyncBegin
-        stdout.write "\x1b[?25l"
-        refreshEditorWidth(edPtr[])
-        let up = edPtr[].renderRow + 1
-        stdout.write "\r"
-        if up > 0:
-          stdout.write "\x1b[" & $up & "A"
-        stdout.write s
-        stdout.write "\r\n"
-        edPtr[].renderRow = 0
-        stdout.write edPtr[].redrawBytes()
-        if edPtr[].postRedraw != nil:
-          edPtr[].postRedraw(edPtr[])
-        stdout.write SyncEnd
-        stdout.flushFile
-      else:
-        stdout.write SyncBegin & s & SyncEnd
-        stdout.flushFile
+  terminal_owner.renderFooterFrame(s, inputThreadRunning, inputEditor,
+                                   SyncBegin, SyncEnd)
 
 proc syncTurnFooterWrite*(s: string) {.gcsafe.} =
   ## Compatibility wrapper for older tests/callers; prefer
@@ -1020,51 +984,27 @@ template screenWriteTranscript*(body: untyped) =
   ## render-locked critical section so appended transcript rows do not
   ## erase in-progress multiline input.
   debugOut &"screenWriteTranscript enter barLabel={currentBarLabel.len}"
-  withRenderLock:
-    let transcriptBytes = captureStdoutWrites:
-      body
-    if liveEditorFooterAnchored():
-      let edPtr = inputEditor
-      refreshEditorWidth(edPtr[])
-      var transcript = transcriptBytes
-      while transcript.len > 0 and transcript[^1] in {'\r', '\n'}:
-        transcript.setLen(transcript.len - 1)
-      stdout.write SyncBegin
-      stdout.write "\x1b[?25l\r"
-      stdout.write "\x1b[" & $(edPtr[].renderRow + 1) & "A"
-      stdout.write "\x1b[J"
-      if transcript.len > 0:
-        stdout.write transcript
-        stdout.write "\r\n\r\n"
-      if currentBarLabel.len > 0:
-        stdout.write paintBarBytes(currentBarLabel)
-      else:
-        stdout.write "\r\x1b[2K"
-      stdout.write "\r\n"
-      edPtr[].renderRow = 0
-      stdout.write edPtr[].redrawBytes()
-      stdout.write "\x1b[?25h"
-      stdout.write SyncEnd
-      stdout.flushFile
+  let transcriptBytes = captureStdoutWrites:
+    body
+  let liveBar =
+    if currentBarLabel.len > 0: paintBarBytes(currentBarLabel)
+    else: "\r\x1b[2K"
+  let repaint =
+    if currentBarLabel.len > 0:
+      barFooterBytes(currentBarLabel, DimPromptColor, currentTermW())
     else:
-      if inputThreadRunning and inputEditor != nil:
-        let up = inputEditor[].renderRow + 1
-        stdout.write "\r"
-        if up > 0:
-          stdout.write "\x1b[" & $up & "A"
-      clearBarPrompt()
-      var transcript = transcriptBytes
-      while transcript.len > 0 and transcript[^1] in {'\r', '\n'}:
-        transcript.setLen(transcript.len - 1)
-      if transcript.len > 0:
-        stdout.write transcript
-        stdout.write "\r\n\r\n"
-      debugOut "screenWriteTranscript exit"
-      repaintBarPrompt()
-      if inputThreadRunning and inputEditor != nil:
-        stdout.write "\x1b[1B"
-        stdout.write inputEditor[].redrawBytes()
-        stdout.flushFile
+      "\r\x1b[2K"
+  terminal_owner.appendTranscriptWithFooter(
+    transcriptBytes,
+    liveEditorFooterAnchored(),
+    inputThreadRunning,
+    inputEditor,
+    liveBar,
+    ClearBarPromptBytes,
+    repaint,
+    SyncBegin,
+    SyncEnd)
+  debugOut "screenWriteTranscript exit"
 
 template withCleared*(body: untyped) =
   ## Compatibility alias while older tests and callers move to the
