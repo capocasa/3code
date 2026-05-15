@@ -48,7 +48,12 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
   # `pendingHint` and is painted in place of the previous bar at
   # user-submit time by `emitUserSubmit`.
   beginTurn()
-  defer: endTurn(repaintPrompt = not isInterrupted())
+  var turnEnded = false
+  template finishTurn() =
+    if not turnEnded:
+      endTurn(repaintPrompt = not isInterrupted())
+      turnEnded = true
+  defer: finishTurn()
   while true:
     discard supersedeCompact(messages)
     var usage: Usage
@@ -303,19 +308,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         let rl = tokenLineLabel(pendingHint.usage, pendingHint.window,
                                 pendingHint.elapsed)
         if rl.len > 0:
-          withRenderLock:
-            if inputThreadRunning and inputEditor != nil:
-              let up = inputEditor[].renderRow + 1
-              stdout.write "\r"
-              if up > 0:
-                stdout.write "\x1b[" & $up & "A"
-            clearBarPrompt()
+          screenWriteTranscript:
             stdout.writeLine CyanFg & "  " & rl & Reset
-            stdout.flushFile()
             emitScreenEvent clearBarEvent()
         emitScreenEvent clearPendingHintEvent()
       debugOut "runTurns: loop continue"
       continue
+    finishTurn()
     if content.strip.len > 0:
       if not streamedLive:
         screenWriteTranscript:

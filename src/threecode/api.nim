@@ -414,8 +414,14 @@ proc syncWrite*(s: string) =
   ## `screenRenderSync` at new rendering boundaries.
   screenRenderSync(s)
 
+proc refreshEditorWidth(ed: var minline.LineEditor) =
+  let w = try: terminalWidth() except CatchableError: 0
+  if w > 0:
+    ed.width = w
+
 proc liveEditorRows(): int =
   if inputThreadRunning and inputEditor != nil:
+    refreshEditorWidth(inputEditor[])
     max(1, minline.renderedRows(inputEditor[]))
   else:
     1
@@ -424,6 +430,58 @@ proc liveBarRow(termH: int): int =
   ## 1-based terminal row for the token bar when a variable-height
   ## editor footer is active. The editor owns the rows below it.
   max(1, termH - liveEditorRows())
+
+proc liveEditorFooterAnchored*(): bool =
+  ## True when we can pin the live turn editor to absolute terminal rows.
+  ## This is the production/PTY path. Pipe-backed unit tests and redirected
+  ## output keep the older relative cursor contract because there is no real
+  ## terminal floor to anchor to.
+  inputThreadRunning and inputEditor != nil and terminalHeight() > 0 and
+    stdout.isatty
+
+proc liveFooterRows(): int =
+  1 + liveEditorRows()
+
+proc enterTurnScrollRegion*() =
+  ## During an active turn the editor is always live. Reserve the bottom
+  ## footer rows (token bar + editor rows) as non-scrolling territory so
+  ## model/tool transcript output cannot push the prompt into scrollback.
+  if not liveEditorFooterAnchored():
+    return
+  let termH = terminalHeight()
+  let scrollBottom = max(1, termH - liveFooterRows())
+  stdout.write &"\x1b[1;{scrollBottom}r"
+  stdout.write &"\x1b[{scrollBottom};1H\r"
+  stdout.flushFile()
+
+proc parkTranscriptCursor() =
+  ## Put subsequent transcript output on the scrolling row above the
+  ## reserved editor footer. This is the only legal output row while the
+  ## always-live editor owns the terminal floor.
+  enterTurnScrollRegion()
+
+proc leaveTurnScrollRegion*() =
+  if terminalHeight() <= 0 or not stdout.isatty:
+    return
+  stdout.write "\x1b[r"
+  stdout.flushFile()
+
+proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
+  ## Called by the editor before every redraw while a turn is active.
+  ## The reserved footer height follows the editor's live rendered height
+  ## (wraps, multiline input, history navigation, submit suffix). Cursor
+  ## out: top row of the editor area. The subsequent editor redraw is the
+  ## only code allowed to paint those rows.
+  if not liveEditorFooterAnchored():
+    return
+  let termH = terminalHeight()
+  refreshEditorWidth(ed)
+  let editorRows = max(1, minline.renderedRows(ed))
+  let barRow = max(1, termH - editorRows)
+  let editorTop = min(termH, barRow + 1)
+  let scrollBottom = max(1, barRow - 1)
+  ed.write &"\x1b[?25l\x1b[1;{scrollBottom}r\x1b[{editorTop};1H"
+  ed.renderRow = 0
 
 proc screenRenderFooterFrame*(s: string) {.gcsafe.} =
   ## Like ``screenRenderSync`` for turn-time footer animations, but if the
@@ -436,12 +494,26 @@ proc screenRenderFooterFrame*(s: string) {.gcsafe.} =
       if inputThreadRunning and inputEditor != nil:
         let edPtr = inputEditor
         stdout.write SyncBegin
-        let up = edPtr[].renderRow + 1
-        stdout.write "\r"
-        if up > 0:
-          stdout.write "\x1b[" & $up & "A"
-        stdout.write s
-        stdout.write "\x1b[" & $up & "B"
+        stdout.write "\x1b[?25l"
+        let termH = terminalHeight()
+        if termH > 0 and stdout.isatty:
+          refreshEditorWidth(edPtr[])
+          let editorRows = max(1, minline.renderedRows(edPtr[]))
+          let barRow = max(1, termH - editorRows)
+          let editorTop = min(termH, barRow + 1)
+          let scrollBottom = max(1, barRow - 1)
+          stdout.write &"\x1b[1;{scrollBottom}r"
+          stdout.write "\x1b[" & $barRow & ";1H"
+          stdout.write s
+          stdout.write "\x1b[" & $editorTop & ";1H"
+          edPtr[].renderRow = 0
+        else:
+          let up = edPtr[].renderRow + 1
+          stdout.write "\r"
+          if up > 0:
+            stdout.write "\x1b[" & $up & "A"
+          stdout.write s
+          stdout.write "\x1b[" & $up & "B"
         stdout.write edPtr[].redrawBytes()
         if edPtr[].postRedraw != nil:
           edPtr[].postRedraw(edPtr[])
@@ -547,6 +619,11 @@ proc spinnerBarFrameBytes*(frame, label, ticker: string, elapsed: int,
   result.add "\r"
   if barRows > 1:
     result.add "\x1b[" & $(barRows - 1) & "A"
+
+proc liveEditorSpinnerBarBytes*(frame, label: string, elapsed: int): string =
+  ## Spinner frame for the active editor footer. The editor owns the prompt
+  ## row, so this paints only the token bar at the caller-provided bar row.
+  "\r\x1b[2K" & spinnerBarBytes(frame, label, elapsed)
 
 proc spinnerCleanupBytes*(tickerRows = 1): string =
   ## Erase spinner ticker + bar + prompt, cursor at col 0 of the bar
@@ -775,7 +852,10 @@ proc paintBarPrompt*(label, promptColor: string) =
   ## `endTurn` paints a gap.
   debugOut "paintBarPrompt label=" & label[0..min(30, label.len-1)]
   emitScreenEvent setBarEvent(label)
-  screenRenderSync barFooterBytes(label, promptColor, currentTermW())
+  if liveEditorFooterAnchored():
+    screenRenderFooterFrame paintBarBytes(label)
+  else:
+    screenRenderSync barFooterBytes(label, promptColor, currentTermW())
 
 proc paintBarBelow*(label, promptColor: string) =
   ## Paint bar + prompt one and two rows below the cursor, restoring
@@ -783,27 +863,44 @@ proc paintBarBelow*(label, promptColor: string) =
   ## during streaming to keep the bar visible while content is being
   ## accumulated in memory and the cursor stays put.
   emitScreenEvent setBarEvent(label)
-  screenRenderSync barFooterBelowBytes(label, promptColor, currentTermW())
+  if liveEditorFooterAnchored():
+    screenRenderFooterFrame paintBarBytes(label)
+  else:
+    screenRenderSync barFooterBelowBytes(label, promptColor, currentTermW())
 
 proc paintBarBelowAtCol(label, promptColor: string, col: int) =
   emitScreenEvent setBarEvent(label)
-  screenRenderSync barFooterBelowAtColBytes(label, promptColor, col, currentTermW())
+  if liveEditorFooterAnchored():
+    screenRenderFooterFrame paintBarBytes(label)
+  else:
+    screenRenderSync barFooterBelowAtColBytes(label, promptColor, col,
+                                             currentTermW())
 
 proc clearBarBelowAtCol(col: int) =
-  screenRenderSync clearBarBelowAtColBytes(col)
+  if liveEditorFooterAnchored():
+    screenRenderFooterFrame "\r\x1b[2K"
+  else:
+    screenRenderSync clearBarBelowAtColBytes(col)
 
 proc repaintBarPrompt*(promptColor = DimPromptColor) =
   ## Re-emit the bar+prompt at the cursor's current row using the
   ## cached `currentBarLabel`. Used by `screenWriteTranscript` to put the bar
   ## back after a content write.
   if currentBarLabel.len == 0: return
-  screenRenderSync barFooterBytes(currentBarLabel, promptColor, currentTermW())
+  if liveEditorFooterAnchored():
+    screenRenderFooterFrame paintBarBytes(currentBarLabel)
+  else:
+    screenRenderSync barFooterBytes(currentBarLabel, promptColor,
+                                    currentTermW())
 
 proc clearBarPrompt*() =
   ## Erase the bar + prompt rows in place. Cursor parks at col 0 of
   ## the bar row so the caller can write content there (which then
   ## pushes the next `repaintBarPrompt` one row down).
-  screenRenderSync ClearBarPromptBytes
+  if liveEditorFooterAnchored():
+    screenRenderFooterFrame "\r\x1b[2K"
+  else:
+    screenRenderSync ClearBarPromptBytes
 
 proc paintPromptOnly*(promptColor: string)
 
@@ -849,9 +946,12 @@ proc enterToolViewport*(termH: int) =
 proc leaveToolViewport*(termH: int) =
   ## Leave the bounded live tool-output viewport and return to normal
   ## transcript rendering with the cursor on the bar row.
-  stdout.write "\x1b[r"
-  stdout.write &"\x1b[{liveBarRow(termH)};1H"
-  stdout.flushFile()
+  if liveEditorFooterAnchored():
+    parkTranscriptCursor()
+  else:
+    stdout.write "\x1b[r"
+    stdout.write &"\x1b[{liveBarRow(termH)};1H"
+    stdout.flushFile()
   emitScreenEvent setModeEvent(smNormal)
 
 proc endTurnBytes*(label, promptColor: string, repaintPrompt: bool,
@@ -875,19 +975,25 @@ template screenWriteTranscript*(body: untyped) =
   ## erase in-progress multiline input.
   debugOut &"screenWriteTranscript enter barLabel={currentBarLabel.len}"
   withRenderLock:
-    if inputThreadRunning and inputEditor != nil:
+    if liveEditorFooterAnchored():
+      parkTranscriptCursor()
+    elif inputThreadRunning and inputEditor != nil:
       let up = inputEditor[].renderRow + 1
       stdout.write "\r"
       if up > 0:
         stdout.write "\x1b[" & $up & "A"
-    clearBarPrompt()
+    if not liveEditorFooterAnchored():
+      clearBarPrompt()
     body
     debugOut "screenWriteTranscript exit"
     repaintBarPrompt()
     if inputThreadRunning and inputEditor != nil:
-      stdout.write "\x1b[1B"
-      stdout.write inputEditor[].redrawBytes()
-      stdout.flushFile
+      if liveEditorFooterAnchored():
+        discard
+      else:
+        stdout.write "\x1b[1B"
+        stdout.write inputEditor[].redrawBytes()
+        stdout.flushFile
 
 template withCleared*(body: untyped) =
   ## Compatibility alias while older tests and callers move to the
@@ -923,7 +1029,10 @@ proc spinnerLoop(unused: string) {.thread.} =
         inc i
         continue
       let frame = frames[i mod frames.len]
-      if spinnerUseLiveEditorFrame.load(moRelaxed):
+      if inputThreadRunning and inputEditor != nil:
+        screenRenderFooterFrame liveEditorSpinnerBarBytes(frame, label,
+                                                          elapsed.int)
+      elif spinnerUseLiveEditorFrame.load(moRelaxed):
         screenRenderFooterFrame spinnerBarFrameBytes(frame, label, ticker,
                                                      elapsed.int, currentTermW())
       else:
@@ -1026,7 +1135,10 @@ proc barTickLoop() {.thread.} =
     let pos = "\x1b[" & $row & ";1H"
     let frame =
       if inputThreadRunning and inputEditor != nil:
-        "\x1b[?25l" & pos & paintBarBytes(label)
+        if liveEditorFooterAnchored():
+          paintBarBytes(label)
+        else:
+          "\x1b[?25l" & pos & paintBarBytes(label)
       else:
         "\x1b[?25l" & pos & barFooterBytes(label, DimPromptColor, tw)
     screenRenderFooterFrame frame
@@ -1058,8 +1170,8 @@ proc startSpinner*(label: string) =
   debugOut "startSpinner"
   if spinnerRunning: return
   if label.len > 0: setSpinLabel(label)
-  spinnerUseLiveEditorFrame.store(inputThreadRunning and inputEditor != nil and
-    currentBarLabel.len > 0, moRelaxed)
+  spinnerUseLiveEditorFrame.store(inputThreadRunning and inputEditor != nil,
+                                  moRelaxed)
   spinnerFramePainted.store(false, moRelaxed)
   spinnerStop.store(false, moRelaxed)
   createThread(spinnerThread, spinnerLoop, "")
@@ -1199,8 +1311,16 @@ proc writeRendered(s: var LiveMarkdownStream, bytes: string,
       paintBarBelowAtCol(s.currentLabel(slurpedNow), DimPromptColor, s.liveCol)
       s.liveBarBelow = true
 
+proc suppressLiveAssistantStream(): bool =
+  ## Streaming assistant text and an always-live editor both need ownership of
+  ## the terminal cursor. Prefer prompt stability: keep the spinner/bar live,
+  ## then let the caller commit the completed assistant text through
+  ## `screenWriteTranscript`.
+  liveEditorFooterAnchored()
+
 proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
   if chunk.len == 0: return
+  if suppressLiveAssistantStream(): return
   var data = s.utf8Pending & chunk
   s.utf8Pending = ""
   var i = 0
@@ -1220,6 +1340,7 @@ proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
   stdout.flushFile()
 
 proc finishContent*(s: var LiveMarkdownStream, slurpedNow: int) =
+  if suppressLiveAssistantStream(): return
   if s.utf8Pending.len > 0:
     s.pendingLine.add s.utf8Pending
     s.utf8Pending = ""
@@ -1266,11 +1387,13 @@ when providerStub:
       let charLen = utf8LenAt(content, i)
       let chunk = content[i ..< min(i + charLen, content.len)]
       slurped += chunk.len
+      setSpinLabel(liveLabel(baseLabel, slurped))
       live.feedContent(chunk, slurped)
       sleep 15
       i += charLen
     live.finishContent(slurped)
-    contentStreamedLive = true
+    if live.started:
+      contentStreamedLive = true
 
   proc streamStubReasoning(reasoning, baseLabel: string, slurped: var int) =
     if reasoning.strip.len == 0:
@@ -1791,6 +1914,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
           if c.len > 0:
             accContent &= c
             slurped += c.len
+            setSpinLabel(liveLabel(baseLabel, slurped))
             let visible =
               if suppressXml: feed(xmlFilter, c)
               else: c
@@ -2112,6 +2236,8 @@ proc inputThreadProc() {.thread.} =
       ed.renderSuffix =
         if ed.line.text.len > 0: DeferredSubmitMarker
         else: ""
+    edPtr[].preRedraw = proc(ed: var minline.LineEditor) =
+      reserveEditorFooterForRedraw(ed)
     edPtr[].postRedraw = proc(ed: var minline.LineEditor) =
       stdout.write "\x1b[?25h"
       stdout.flushFile()
@@ -2200,6 +2326,7 @@ proc inputThreadProc() {.thread.} =
       release inputStateLock
     edPtr[].onMutate = nil
     edPtr[].onSubmit = nil
+    edPtr[].preRedraw = nil
     edPtr[].postRedraw = nil
     edPtr[].deferSubmit = false
     edPtr[].renderSuffix = ""
@@ -2224,6 +2351,7 @@ proc beginTurn*() =
     inputTurnActive.store(true, moRelease)
     createThread(inputThread, inputThreadProc)
     inputThreadRunning = true
+    enterTurnScrollRegion()
 
 proc endTurn*(repaintPrompt = true) =
   ## Transition to typing-ready state: clear the bar at its current
@@ -2249,6 +2377,7 @@ proc endTurn*(repaintPrompt = true) =
     inputTurnActive.store(false, moRelease)
     joinThread(inputThread)
     inputThreadRunning = false
+  leaveTurnScrollRegion()
   if hadInputThread and inputEditor != nil:
     let up =
       if currentBarLabel.len > 0: inputEditor[].renderRow + 1
@@ -2322,6 +2451,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       let stubT0 = epochTime()
       let stubWindow = contextWindowFor(p.model)
       let stubBaseLabel = contextLabel(lastPromptTokens, stubWindow)
+      enterTurnScrollRegion()
       stdout.write "\n"
       setSpinLabel(liveLabel(stubBaseLabel, 0))
       startSpinner("")
@@ -2472,6 +2602,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   # it back to blank when reasoning ends, so the original (blank) state
   # is faithfully restored. Done once per call; retries reuse the same
   # row.
+  enterTurnScrollRegion()
   stdout.write "\n"
   setSpinLabel(liveLabel(baseLabel, 0))
   # Cursor is hidden for the duration of the entire turn by `runTurns`

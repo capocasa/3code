@@ -160,6 +160,7 @@ type
     completionCallback*: proc(ed: LineEditor): seq[string] {.closure.}
     onMutate*: proc(ed: var LineEditor) {.closure.}
     onSubmit*: SubmitCallback
+    preRedraw*: proc(ed: var LineEditor) {.closure.}
     postRedraw*: proc(ed: var LineEditor) {.closure.}
     submitIcon*: string ## Icon written at end of text before submit newline (set before readLineWith).
     renderSuffix*: string ## Transient suffix rendered after the buffer, not part of submitted text.
@@ -475,6 +476,8 @@ proc fullRedraw*(ed: var LineEditor) =
   ## wrapped in DEC 2026 synchronized-output (``CSI ? 2026 h/l``) so
   ## conhost treats the repaint as one atomic frame; terminals that
   ## don't recognize the mode ignore it silently.
+  if ed.preRedraw != nil:
+    ed.preRedraw(ed)
   ed.write ed.redrawBytes()
   if ed.postRedraw != nil:
     ed.postRedraw(ed)
