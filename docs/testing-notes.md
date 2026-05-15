@@ -37,5 +37,33 @@ frame-model tests:
 - no random clears or transient invalid frames,
 - terminal cleanup on normal and signal exit.
 
-Functional tests should use PTY full-frame recording. Byte-level assertions
-should remain only for isolated pure emitters and ANSI-free render helpers.
+Functional tests should use PTY full-frame recording. Byte-level assertions are
+legacy unless the bytes are the actual public API of an isolated pure helper.
+They must not be used to accept or reject fat-prompt behavior. A passing byte
+test is only a local helper check; the visual-frame tests are the acceptance
+tests for terminal behavior.
+
+Removed during the fat-prompt integration pass:
+
+- `tests/test_api_pure.nim` byte assertions for
+  `anchoredEditorFooterBytes`: these checked scroll-region and cursor escape
+  substrings. They were intentionally removed because they blessed another
+  byte-level footer strategy instead of proving the user-visible invariant.
+  The behavior belongs in PTY full-frame tests: the token bar and editor rows
+  are reserved, no output appears inside or below the editor area, and editor
+  height changes do not leave stale prompt/bar rows.
+
+Remaining byte-oriented tests are legacy/local-helper coverage:
+
+- `tests/test_golden.nim`: legacy renderer helper byte snapshots for markdown,
+  receipts, and tool banners. These are useful for spotting formatting churn,
+  but they do not validate fat-prompt behavior.
+- `tests/test_render.nim`: markdown live-vs-replay byte parity. This protects
+  the markdown formatter only; terminal layout acceptance must come from visual
+  frame tests.
+- `tests/test_minline.nim`: editor helper byte strings and grid checks. These
+  remain useful for input editing mechanics, but the editor's placement inside
+  the terminal belongs to PTY visual tests.
+- `tests/test_streaming.nim` and `tests/test_streaming_view.nim`: legacy
+  streaming-output timing/viewport helper checks. They do not prove that live
+  bash output is compatible with the fat prompt while the editor is active.

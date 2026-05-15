@@ -160,30 +160,41 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         try:
           (r, code, diff) =
             if act.kind == akBash:
-              discard stopBarTick()
-              let termH = try: terminalHeight() except CatchableError: 24
-              # Scrolling region: rows 1..termH-2, leaving bar+prompt
-              # pinned at the bottom two rows.
-              enterToolViewport(termH)
-              try:
-                var sv = initStreamingView(StreamMaxLines, idx)
+              if liveEditorFooterAnchored():
                 let promptOwnsStdin = inputEditor != nil
                 setToolStdinWatcherEnabled(not promptOwnsStdin)
                 var result: typeof(runActionStreaming(act, session.readCache))
                 try:
                   result = runActionStreaming(act, session.readCache,
-                    proc(line: string) =
-                      withRenderLock:
-                        sv.addLine(line))
+                    proc(line: string) = discard)
                 finally:
                   setToolStdinWatcherEnabled(true)
-                withRenderLock:
-                  sv.erase()
                 result
-              finally:
-                # Reset scrolling region, position cursor at bar row.
-                leaveToolViewport(termH)
-                repaintBarPrompt()
+              else:
+                discard stopBarTick()
+                let termH = try: terminalHeight() except CatchableError: 24
+                # Scrolling region: rows 1..termH-2, leaving bar+prompt
+                # pinned at the bottom two rows.
+                enterToolViewport(termH)
+                try:
+                  var sv = initStreamingView(StreamMaxLines, idx)
+                  let promptOwnsStdin = inputEditor != nil
+                  setToolStdinWatcherEnabled(not promptOwnsStdin)
+                  var result: typeof(runActionStreaming(act, session.readCache))
+                  try:
+                    result = runActionStreaming(act, session.readCache,
+                      proc(line: string) =
+                        withRenderLock:
+                          sv.addLine(line))
+                  finally:
+                    setToolStdinWatcherEnabled(true)
+                  withRenderLock:
+                    sv.erase()
+                  result
+                finally:
+                  # Reset scrolling region, position cursor at bar row.
+                  leaveToolViewport(termH)
+                  repaintBarPrompt()
             else:
               runAction(act, session.readCache)
         finally:

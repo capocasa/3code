@@ -279,6 +279,7 @@ var inputState*: InputState
 var inputStateLock*: Lock
 initLock(inputStateLock)
 var inputTurnActive: Atomic[bool]
+var inputEditorReady: Atomic[bool]
 var inputThread: Thread[void]
 var inputThreadRunning* = false
 var inputEditor*: ptr minline.LineEditor
@@ -442,6 +443,12 @@ proc liveEditorFooterAnchored*(): bool =
 proc liveFooterRows(): int =
   1 + liveEditorRows()
 
+proc anchoredEditorFooterBytes*(label: string; termH, editorRows: int): string
+
+proc turnScrollRegionBytes(termH, footerRows: int): string =
+  let scrollBottom = max(1, termH - max(1, footerRows))
+  &"\x1b[1;{scrollBottom}r\x1b[{scrollBottom};1H\r"
+
 proc enterTurnScrollRegion*() =
   ## During an active turn the editor is always live. Reserve the bottom
   ## footer rows (token bar + editor rows) as non-scrolling territory so
@@ -449,9 +456,7 @@ proc enterTurnScrollRegion*() =
   if not liveEditorFooterAnchored():
     return
   let termH = terminalHeight()
-  let scrollBottom = max(1, termH - liveFooterRows())
-  stdout.write &"\x1b[1;{scrollBottom}r"
-  stdout.write &"\x1b[{scrollBottom};1H\r"
+  stdout.write turnScrollRegionBytes(termH, liveFooterRows())
   stdout.flushFile()
 
 proc parkTranscriptCursor() =
@@ -477,10 +482,8 @@ proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
   let termH = terminalHeight()
   refreshEditorWidth(ed)
   let editorRows = max(1, minline.renderedRows(ed))
-  let barRow = max(1, termH - editorRows)
-  let editorTop = min(termH, barRow + 1)
-  let scrollBottom = max(1, barRow - 1)
-  ed.write &"\x1b[?25l\x1b[1;{scrollBottom}r\x1b[{editorTop};1H"
+  ed.write SyncBegin & anchoredEditorFooterBytes(currentBarLabel, termH,
+                                                 editorRows)
   ed.renderRow = 0
 
 proc screenRenderFooterFrame*(s: string) {.gcsafe.} =
@@ -527,6 +530,43 @@ proc syncTurnFooterWrite*(s: string) {.gcsafe.} =
   ## Compatibility wrapper for older tests/callers; prefer
   ## `screenRenderFooterFrame` at new rendering boundaries.
   screenRenderFooterFrame(s)
+
+template captureStdoutWrites(body: untyped): string =
+  ## Run a transcript formatter against a temporary stdout target and return
+  ## the produced bytes. `screenWriteTranscript` uses this to make formatter
+  ## flushes invisible until the footer can be restored in the same render
+  ## tick.
+  block:
+    var captured = ""
+    when defined(posix):
+      let path = getTempDir() / "3code_transcript_" & $getCurrentProcessId() &
+                 "_" & $(epochTime() * 1000.0).int
+      flushFile(stdout)
+      let saved = dup(1)
+      if saved < 0:
+        body
+      else:
+        let fd = posix.open(path.cstring, O_WRONLY or O_CREAT or O_TRUNC, 0o600)
+        if fd < 0:
+          discard close(saved)
+          body
+        else:
+          doAssert dup2(fd, 1) >= 0
+          discard close(fd)
+          try:
+            body
+            flushFile(stdout)
+          finally:
+            discard dup2(saved, 1)
+            discard close(saved)
+          try:
+            captured = readFile(path)
+            removeFile(path)
+          except OSError:
+            discard
+    else:
+      body
+    captured
 
 proc spinnerBarBytes*(frame, label: string, elapsed: int): string =
   ## Bar row payload during the spinner phase: braille glyph at col 0,
@@ -638,6 +678,25 @@ proc paintBarBytes*(label: string): string =
   ## Clears the bar row and writes the static-form bar payload. Cursor
   ## ends at the end of the payload on the bar row.
   "\r\x1b[2K" & liveBarBytes(label)
+
+proc anchoredEditorFooterBytes*(label: string; termH, editorRows: int): string =
+  ## Absolute-frame setup for the always-live editor footer.
+  ## Cursor out: top row of the editor area. The token bar row and all editor
+  ## rows have been cleared; the token bar has been repainted if a label is
+  ## available. The editor redraw that follows is the only owner of the rows
+  ## below the token bar.
+  let rows = max(1, editorRows)
+  let h = max(2, termH)
+  let barRow = max(1, h - rows)
+  let editorTop = min(h, barRow + 1)
+  let scrollBottom = max(1, barRow - 1)
+  result.add &"\x1b[?25l\x1b[1;{scrollBottom}r"
+  result.add &"\x1b[{barRow};1H\r\x1b[J"
+  if label.len > 0:
+    result.add paintBarBytes(label)
+  else:
+    result.add "\r\x1b[2K"
+  result.add &"\x1b[{editorTop};1H"
 
 proc barFooterBytes*(label, promptColor: string, termW = 0): string =
   ## Bar at the current row + prompt at the row below, cursor parked
@@ -975,22 +1034,34 @@ template screenWriteTranscript*(body: untyped) =
   ## erase in-progress multiline input.
   debugOut &"screenWriteTranscript enter barLabel={currentBarLabel.len}"
   withRenderLock:
+    let transcriptBytes = captureStdoutWrites:
+      body
     if liveEditorFooterAnchored():
-      parkTranscriptCursor()
-    elif inputThreadRunning and inputEditor != nil:
-      let up = inputEditor[].renderRow + 1
-      stdout.write "\r"
-      if up > 0:
-        stdout.write "\x1b[" & $up & "A"
-    if not liveEditorFooterAnchored():
+      let edPtr = inputEditor
+      let termH = terminalHeight()
+      refreshEditorWidth(edPtr[])
+      let editorRows = max(1, minline.renderedRows(edPtr[]))
+      stdout.write SyncBegin
+      stdout.write turnScrollRegionBytes(termH, 1 + editorRows)
+      stdout.write transcriptBytes
+      stdout.write anchoredEditorFooterBytes(currentBarLabel, termH,
+                                             editorRows)
+      edPtr[].renderRow = 0
+      stdout.write edPtr[].redrawBytes()
+      stdout.write "\x1b[?25h"
+      stdout.write SyncEnd
+      stdout.flushFile
+    else:
+      if inputThreadRunning and inputEditor != nil:
+        let up = inputEditor[].renderRow + 1
+        stdout.write "\r"
+        if up > 0:
+          stdout.write "\x1b[" & $up & "A"
       clearBarPrompt()
-    body
-    debugOut "screenWriteTranscript exit"
-    repaintBarPrompt()
-    if inputThreadRunning and inputEditor != nil:
-      if liveEditorFooterAnchored():
-        discard
-      else:
+      stdout.write transcriptBytes
+      debugOut "screenWriteTranscript exit"
+      repaintBarPrompt()
+      if inputThreadRunning and inputEditor != nil:
         stdout.write "\x1b[1B"
         stdout.write inputEditor[].redrawBytes()
         stdout.flushFile
@@ -1094,13 +1165,12 @@ proc paintPromptOnly*(promptColor: string) =
   emitScreenEvent clearBarEvent()
 
 proc paintInitialPrompt*(p: Profile) =
-  ## Welcome-time paint when starting fresh (no prior session, no
-  ## prior usage to show): one blank gap row, then just the bright
-  ## cyan prompt — the token bar stays hidden until the first model
-  ## response. Mirrors the shape `endTurn` would leave between turns,
-  ## minus the bar.
-  stdout.write "\n"
-  paintPromptOnly(BrightPromptColor)
+  ## Welcome-time paint when starting fresh. The design requires the
+  ## token bar to reserve a row even before the first response, carrying
+  ## the context percentage at zero. Avoid the old prompt-only state: it
+  ## leaves a bare prompt row that can be pushed into scrollback when the
+  ## first API call starts.
+  paintInitialBar(p)
 
 
 var spinnerRunning = false  # only mutated by main thread
@@ -2240,10 +2310,9 @@ proc inputThreadProc() {.thread.} =
       reserveEditorFooterForRedraw(ed)
     edPtr[].postRedraw = proc(ed: var minline.LineEditor) =
       stdout.write "\x1b[?25h"
+      stdout.write SyncEnd
       stdout.flushFile()
-
-    withRender:
-      enterPromptInput(TurnPromptColor)
+      inputEditorReady.store(true, moRelease)
 
     when defined(posix):
       var oldMode: Termios
@@ -2349,9 +2418,13 @@ proc beginTurn*() =
     finally:
       release inputStateLock
     inputTurnActive.store(true, moRelease)
+    inputEditorReady.store(false, moRelease)
     createThread(inputThread, inputThreadProc)
     inputThreadRunning = true
     enterTurnScrollRegion()
+    let deadline = epochTime() + 0.5
+    while not inputEditorReady.load(moAcquire) and epochTime() < deadline:
+      sleep 5
 
 proc endTurn*(repaintPrompt = true) =
   ## Transition to typing-ready state: clear the bar at its current
@@ -2438,12 +2511,23 @@ proc emitBufferedUserSubmit*(line: string) =
     else: ""
   let hadGap = currentBarHasGap
   let hasBar = currentBarLabel.len > 0
+  let label = currentBarLabel
   stdout.write bufferedSubmitTransitionBytes(line, pendingHint.active, hadGap,
                                              receiptLabel, hasBar)
+  if label.len > 0:
+    let termH = try: terminalHeight() except CatchableError: 0
+    if termH > 0 and stdout.isatty:
+      stdout.write anchoredEditorFooterBytes(label, termH, 1)
+      stdout.write TurnPromptColor & "❯ " & Reset & "\r\x1b[?25h"
+    else:
+      stdout.write barFooterBytes(label, TurnPromptColor, currentTermW())
   stdout.flushFile
   bufferedSubmitTurn.store(true, moRelaxed)
   emitScreenEvent clearPendingHintEvent()
-  emitScreenEvent clearBarEvent()
+  if label.len > 0:
+    emitScreenEvent setBarEvent(label)
+  else:
+    emitScreenEvent clearBarEvent()
 
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   when providerStub:
@@ -2451,8 +2535,10 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       let stubT0 = epochTime()
       let stubWindow = contextWindowFor(p.model)
       let stubBaseLabel = contextLabel(lastPromptTokens, stubWindow)
-      enterTurnScrollRegion()
-      stdout.write "\n"
+      withRenderLock:
+        enterTurnScrollRegion()
+        stdout.write "\n"
+        stdout.flushFile()
       setSpinLabel(liveLabel(stubBaseLabel, 0))
       startSpinner("")
       startQuietWatch(liveLabel(stubBaseLabel, 0))
@@ -2602,8 +2688,10 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   # it back to blank when reasoning ends, so the original (blank) state
   # is faithfully restored. Done once per call; retries reuse the same
   # row.
-  enterTurnScrollRegion()
-  stdout.write "\n"
+  withRenderLock:
+    enterTurnScrollRegion()
+    stdout.write "\n"
+    stdout.flushFile()
   setSpinLabel(liveLabel(baseLabel, 0))
   # Cursor is hidden for the duration of the entire turn by `runTurns`
   # so the dim ❯ placeholder is the only visible caret. callModel

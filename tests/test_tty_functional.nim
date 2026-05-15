@@ -74,6 +74,17 @@ proc countOccurrences(haystack, needle: string): int =
 proc isTokenBar(row: string): bool =
   ("○" in row or "●" in row) and ("↑" in row or "↓" in row or "↻" in row)
 
+proc isKnownTranscriptBelowFooter(row: string): bool =
+  row.contains("Streaming markdown") or
+    row.contains("bash-line-") or
+    row.contains("second-tool") or
+    row.contains("Buffered prompt answered") or
+    row.startsWith("● ") or
+    row.startsWith("$ ") or
+    row.startsWith("r ") or
+    row.startsWith("w ") or
+    row.startsWith("p ")
+
 proc assertFatPromptFrames(tty: TtySession) =
   for frame in tty.frames:
     var tokenRows: seq[int]
@@ -83,20 +94,27 @@ proc assertFatPromptFrames(tty: TtySession) =
         tokenRows.add i
       if row.startsWith("❯"):
         promptRows.add i
-    if tokenRows.len == 1 and promptRows.len > 0:
-      doAssert promptRows[^1] > tokenRows[0],
-        "prompt is not below token bar:\n" & frame.rows.join("\n")
-    if tokenRows.len > 0 and promptRows.len > 0:
-      doAssert promptRows[^1] > tokenRows[^1],
-        "bottom prompt is not below live token bar:\n" & frame.rows.join("\n")
+
+    if tokenRows.len > 0:
+      let liveToken = tokenRows[^1]
+      doAssert liveToken + 1 < frame.rows.len,
+        "live token bar has no reserved editor row below it:\n" &
+          frame.rows.join("\n")
+      doAssert frame.rows[liveToken + 1].startsWith("❯"),
+        "editor prompt is not directly below live token bar:\n" &
+          frame.rows.join("\n")
+      for rowIdx in liveToken + 1 ..< frame.rows.len:
+        doAssert not frame.rows[rowIdx].isKnownTranscriptBelowFooter,
+          "transcript/tool output appeared inside reserved editor area:\n" &
+            frame.rows.join("\n")
+      for rowIdx in 0 ..< liveToken:
+        doAssert frame.rows[rowIdx].strip != "❯",
+          "stale bare prompt row escaped into scrollback:\n" &
+            frame.rows.join("\n")
+
     for j in 1 ..< tokenRows.len:
       doAssert tokenRows[j] != tokenRows[j - 1] + 1,
         "adjacent token bars in frame:\n" & frame.rows.join("\n")
-    if tokenRows.len > 0 and tokenRows[^1] + 1 < frame.rows.len:
-      let below = frame.rows[tokenRows[^1] + 1]
-      doAssert below.startsWith("❯") or below.startsWith("  ") or below.len == 0,
-        "token bar overwrote scrollback instead of owning footer:\n" &
-          frame.rows.join("\n")
     doAssert frame.rows.join("\n").countOccurrences("bash-line-9") <= 1,
       "duplicated bash output in one frame:\n" & frame.rows.join("\n")
     doAssert frame.rows.join("\n").countOccurrences("\n  second-tool") <= 1,

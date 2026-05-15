@@ -26,6 +26,7 @@ type
     exitCode*: int
     keepHistory*: bool
     closed*: bool
+    syncDepth*: int
 
 proc openpty(masterFd, slaveFd: ptr cint; name: pointer; termp: pointer;
              winp: pointer): cint {.cdecl, importc: "openpty",
@@ -83,6 +84,21 @@ proc rememberFrame(s: TtySession) =
     rows: rows,
     changedRows: changed)
 
+proc noteSyncState(s: TtySession; chunk: string) =
+  var i = 0
+  while i < chunk.len:
+    let start = chunk.find("\x1b[?2026h", i)
+    let stop = chunk.find("\x1b[?2026l", i)
+    if start < 0 and stop < 0:
+      break
+    if start >= 0 and (stop < 0 or start < stop):
+      inc s.syncDepth
+      i = start + "\x1b[?2026h".len
+    else:
+      if s.syncDepth > 0:
+        dec s.syncDepth
+      i = stop + "\x1b[?2026l".len
+
 proc pollOnce(s: TtySession, waitMs: int): bool =
   if s.closed:
     return false
@@ -99,7 +115,9 @@ proc pollOnce(s: TtySession, waitMs: int): bool =
       copyMem(chunk[0].addr, buf[0].addr, n)
       s.raw.add chunk
       s.grid.feed chunk
-      s.rememberFrame()
+      s.noteSyncState(chunk)
+      if s.syncDepth == 0:
+        s.rememberFrame()
       result = true
 
   if not s.exited:
