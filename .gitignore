@@ -5,6 +5,7 @@ tests/output/
 nimcache/
 config.local.nims
 
+.archive/
 .agents/
 src/threecode.out
 tools/pty_frames
