@@ -1,14 +1,9 @@
-## HTTP client, SSE streaming, spinner, and thinking ticker.
+## HTTP client and SSE parsing.
 ##
 ## `callModel` is the single outbound call: it sends the messages array as an
 ## OpenAI-compatible chat completions request, reads the Server-Sent Events
 ## stream chunk by chunk, and returns a completed assistant `JsonNode` plus
 ## a `Usage` record.
-##
-## The spinner runs on a background thread so the braille animation stays
-## smooth while the main thread blocks on I/O. The thinking ticker - a dim
-## one-liner above the spinner showing the model's `reasoning_content` deltas
-## - is cleared when the model transitions from reasoning to output.
 ##
 ## XML tool call recovery handles a gpt-oss quirk: some nvidia-hosted variants
 ## leak the model's native `<tool_call>` chat template into `delta.content`
@@ -16,13 +11,11 @@
 ## combo, `callModel` promotes those tags to synthetic tool_calls so the rest
 ## of the pipeline sees a uniform shape.
 
-import std/[algorithm, atomics, hashes, httpclient, json, locks, nativesockets, net, os, sequtils, strformat, strutils, tables, terminal, times, unicode, uri]
+import std/[algorithm, atomics, hashes, httpclient, json, nativesockets, net, os, sequtils, strformat, strutils, tables, times, uri]
 when defined(posix):
   import std/posix except SocketHandle
-  import posix/termios
 import streamhttp
-import types, util, prompts, compact, display, minline, fatprompt, streamexec,
-  terminal as termui
+import types, util, prompts, compact, streamexec
 
 type
   VerifyProfileHook* = proc(p: Profile): (bool, string) {.closure.}
@@ -184,797 +177,6 @@ when providerStub:
     result = responses[stubResponseIdx]
     inc stubResponseIdx
 
-# ---------- Spinner ----------
-
-var interruptedFlag: Atomic[bool]
-  ## Set by the SIGINT hook and buffered prompt key path. Checked between
-  ## model/tool steps and during HTTP polling / retry backoff so ctrl-c drops
-  ## back to the prompt without killing the process.
-
-proc isInterrupted*(): bool {.gcsafe.} =
-  interruptedFlag.load(moAcquire)
-
-proc setInterrupted*(value: bool) {.gcsafe.} =
-  interruptedFlag.store(value, moRelease)
-
-proc clearInterrupted*() {.gcsafe.} =
-  setInterrupted(false)
-
-var contentStreamedLive*: bool = false
-  ## Set by `callModel` when the assistant's text content has been streamed
-  ## to stdout chunk-by-chunk during the SSE read; read (and reset) by
-  ## `runTurns` so the same content isn't redrawn a second time at the end
-  ## of the turn.
-
-var followupStartsAfterReceipt*: bool = false
-var receiptTouchesNextResponse*: bool = false
-
-var fatPromptState* = initFatPromptState()
-  ## Explicit state for the normal scrollback transcript's volatile footer.
-  ## Rendering still happens in this module, but prompt/bar/ticker data now
-  ## has one home instead of separate process-level globals.
-
-template pendingHint*(): untyped = fatPromptState.footer.pendingHint
-  ## Carries the latest iteration's accurate usage forward. Two roles:
-  ##   1. After each `callModel` iteration, used to repaint the **token
-  ##      bar** with accurate values (replacing the live rough ones).
-  ##   2. On user submit (next turn), the saved values become the
-  ##      **token receipt** — the dim repaint of the previous bar's
-  ##      row, leaving the receipt in scroll history while a fresh
-  ##      bar (at zeros) takes its place at the new bottom.
-  ## See `## Token UI` in `CLAUDE.md` for the full lifecycle.
-
-template currentBarLabel*(): untyped = fatPromptState.footer.barLabel
-  ## What's currently shown in the live bar. Updated by every paint
-  ## (live during streaming, accurate after `callModel` parses usage,
-  ## zero on first turn). Used by `writeTranscriptWithFatPrompt` to repaint the bar
-  ## with the same label after a content write hides it.
-
-template currentBarHasGap*(): untyped = fatPromptState.footer.hasGap
-  ## Whether there's a one-row blank "gap" between the bar and the
-  ## row above it. Set by `endTurn` (typing-ready state — the gap
-  ## sits between the last LLM line and the bar, breathing room
-  ## while the user reads). Cleared by every `paintBarPrompt` /
-  ## `paintBarBelow` (during streaming, the bar slides flush with
-  ## content — no gap mid-turn). Read by `emitUserSubmit` so the
-  ## receipt repaints the gap row in place — overwriting the blank,
-  ## leaving the receipt flush below the LLM content with no
-  ## permanent gap in scroll history.
-
-var showThinking*: bool = true
-  ## When true, reasoning_content deltas from the provider are rendered as
-  ## a one-line ticker embedded in the spinner label. Flipped by `:think on`
-  ## / `:think off`. Has no effect if the provider doesn't emit reasoning.
-
-var spinnerStop: Atomic[bool]
-var spinnerFramePainted: Atomic[bool]
-var spinnerThread: Thread[string]
-var bufferedSubmitTurn: Atomic[bool]
-var quietStop: Atomic[bool]
-var quietThread: Thread[string]
-var quietRunning = false
-var lastProviderActivity: Atomic[int]
-
-var barTickStop: Atomic[bool]
-var barTickThread: Thread[void]
-var barTickRunning = false
-var barTickStart: float
-var barTickBase: string
-var barTickLock: Lock
-barTickLock.initLock()
-
-var inputState*: InputState
-var inputStateLock*: Lock
-initLock(inputStateLock)
-var inputTurnActive: Atomic[bool]
-var inputEditorReady: Atomic[bool]
-var inputThread: Thread[void]
-var inputThreadRunning* = false
-var inputEditor*: ptr minline.LineEditor
-var inputProfile*: ptr Profile
-var inputSession*: ptr Session
-var inputMessages*: ptr JsonNode
-var turnHandleCommand*: proc(cmd: string): bool
-
-# Shared mutable spinner state. The spinner thread reads these every frame;
-# the main thread updates them as chunks arrive. Two separate lines:
-#   line 1 = the classic spinner (frame + label + elapsed seconds)
-#   line 2 = the reasoning ticker, dim, empty when no thinking is streaming
-# Both fields live under one lock for simplicity — writes are infrequent.
-var
-  spinLabelLock: Lock
-  spinLabelShared: string
-  spinTickerShared: string
-  spinFrameShared: string
-  spinElapsedShared: int
-spinLabelLock.initLock()
-
-proc emitFatPromptEvent*(ev: FatPromptEvent) =
-  ## Single state transition entry point for the volatile footer model.
-  ## Terminal bytes are still rendered by the helpers below, but all
-  ## production state changes flow through this event reducer.
-  fatPromptState.apply ev
-
-type LiveMarkdownStream* = object
-  ## Incremental renderer for assistant content during provider streaming.
-  ## It buffers input until markdown line/block boundaries, renders through
-  ## the same MarkdownState used by replay, and keeps the token footer sliding
-  ## below whatever rendered bytes are emitted.
-  baseLabel: string
-  started: bool
-  md: MarkdownState
-  pendingLine: string
-  utf8Pending: string
-  streamT0: float
-  liveBarAtCursor: bool
-  liveBarBelow: bool
-  liveLineEmitted: bool
-  liveCol: int
-
-proc setSpinLabel(s: string) {.gcsafe.} =
-  {.cast(gcsafe).}:
-    acquire spinLabelLock
-    spinLabelShared = s
-    release spinLabelLock
-
-proc getSpinLabel(): string {.gcsafe.} =
-  {.cast(gcsafe).}:
-    acquire spinLabelLock
-    result = spinLabelShared
-    release spinLabelLock
-
-proc setSpinTicker(s: string) {.gcsafe.} =
-  {.cast(gcsafe).}:
-    acquire spinLabelLock
-    spinTickerShared = s
-    release spinLabelLock
-    if s.len == 0:
-      emitFatPromptEvent clearTickerEvent()
-    else:
-      emitFatPromptEvent setTickerEvent(s)
-
-proc getSpinTicker(): string {.gcsafe.} =
-  {.cast(gcsafe).}:
-    acquire spinLabelLock
-    result = spinTickerShared
-    release spinLabelLock
-
-proc setSpinFrame(frame: string; elapsed: int) {.gcsafe.} =
-  {.cast(gcsafe).}:
-    acquire spinLabelLock
-    spinFrameShared = frame
-    spinElapsedShared = elapsed
-    release spinLabelLock
-
-proc getSpinBarBytes(): string {.gcsafe.} =
-  {.cast(gcsafe).}:
-    acquire spinLabelLock
-    let frame = if spinFrameShared.len > 0: spinFrameShared else: "○"
-    let label = spinLabelShared
-    let elapsed = spinElapsedShared
-    release spinLabelLock
-    if label.len > 0:
-      result = liveEditorSpinnerBarBytes(frame, label, elapsed)
-
-proc refreshEditorWidth(ed: var minline.LineEditor) =
-  let w = try: terminalWidth() except CatchableError: 0
-  if w > 0:
-    ed.width = w
-
-proc liveEditorRows(): int =
-  if inputThreadRunning and inputEditor != nil:
-    refreshEditorWidth(inputEditor[])
-    max(1, minline.renderedRows(inputEditor[]))
-  else:
-    1
-
-proc liveBarRow(termH: int): int =
-  ## 1-based terminal row for the token bar when a variable-height
-  ## editor footer is active. The editor owns the rows below it.
-  max(1, termH - liveEditorRows())
-
-proc liveEditorFooterAnchored*(): bool =
-  ## True when we can pin the live turn editor to absolute terminal rows.
-  ## This is the production/PTY path. Pipe-backed unit tests and redirected
-  ## output keep the older relative cursor contract because there is no real
-  ## terminal floor to anchor to.
-  inputThreadRunning and inputEditor != nil and terminalHeight() > 0 and
-    stdout.isatty
-
-proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
-  ## Called by the editor before every redraw while a turn is active.
-  ## The reserved footer height follows the editor's live rendered height
-  ## (wraps, multiline input, history navigation, submit suffix). Cursor
-  ## out: top row of the editor area. The subsequent editor redraw is the
-  ## only code allowed to paint those rows.
-  if not liveEditorFooterAnchored():
-    return
-  let footerBarBytes =
-    if spinnerStop.load(moRelaxed) == false and spinnerFramePainted.load(moRelaxed):
-      getSpinBarBytes()
-    elif barTickRunning:
-      var base: string
-      acquire barTickLock
-      base = barTickBase
-      release barTickLock
-      let elapsed = (epochTime() - barTickStart).int
-      let label =
-        if base.hasElapsedSuffix: base
-        else: base & "  " & $elapsed & "s"
-      paintBarBytes(label)
-    else:
-      currentFooterBarBytes(fatPromptState)
-  termui.beginEditorRedraw(
-    ed,
-    inputEditorReady.load(moAcquire),
-    footerBarBytes)
-
-template captureStdoutWrites(body: untyped): string =
-  ## Run a transcript formatter against a temporary stdout target and return
-  ## the produced bytes. `writeTranscriptWithFatPrompt` uses this to make formatter
-  ## flushes invisible until the footer can be restored in the same render
-  ## tick.
-  block:
-    var captured = ""
-    when defined(posix):
-      let path = getTempDir() / "3code_transcript_" & $getCurrentProcessId() &
-                 "_" & $(epochTime() * 1000.0).int
-      flushFile(stdout)
-      let saved = dup(1)
-      if saved < 0:
-        body
-      else:
-        let fd = posix.open(path.cstring, O_WRONLY or O_CREAT or O_TRUNC, 0o600)
-        if fd < 0:
-          discard close(saved)
-          body
-        else:
-          doAssert dup2(fd, 1) >= 0
-          discard close(fd)
-          try:
-            body
-            flushFile(stdout)
-          finally:
-            discard dup2(saved, 1)
-            discard close(saved)
-          try:
-            captured = readFile(path)
-            removeFile(path)
-          except OSError:
-            discard
-    else:
-      body
-    captured
-
-# ---------- Bar+prompt runtime helpers ----------
-#
-# The bar and prompt are *always visible*. These helpers hide them
-# just long enough for a content write that would otherwise advance
-# into them, and repaint them immediately below. Each helper also
-# updates `currentBarLabel` so subsequent repaints (after a tool
-# write, after an iteration end, etc.) use the same content.
-
-proc currentTermW(): int =
-  ## Best-effort terminal column count for the width-aware bar emitters.
-  ## Returns 0 when stdout is not a tty (test harnesses, redirected
-  ## runs) so the emitters fall back to the single-row default rather
-  ## than guessing a width that doesn't match what the consumer sees.
-  try: terminalWidth() except CatchableError: 0
-
-proc paintBarPrompt*(label, promptColor: string) =
-  ## Write bar + prompt at the cursor's current row, parking cursor
-  ## at col 0 of the bar row. Caches `label` so a later
-  ## `repaintBarPrompt` knows what to draw. Clears `currentBarHasGap`
-  ## — during streaming the bar slides flush with content; only
-  ## `endTurn` paints a gap.
-  debugOut "paintBarPrompt label=" & label[0..min(30, label.len-1)]
-  emitFatPromptEvent setBarEvent(label)
-  if liveEditorFooterAnchored():
-    termui.renderFooterFrame(paintBarBytes(label), inputThreadRunning,
-                                     inputEditor)
-  else:
-    termui.syncWrite(cursorForPromptColor(promptColor) &
-      barFooterBytes(label, promptColor, currentTermW()))
-
-proc setBarPromptState*(label: string) =
-  ## Update the logical bar label without painting immediately. Used when a
-  ## completed response still needs to be committed to scrollback first; the
-  ## subsequent transcript append repaints the footer with this final label.
-  emitFatPromptEvent setBarEvent(label)
-
-proc paintBarBelow*(label, promptColor: string) =
-  ## Paint bar + prompt one and two rows below the cursor, restoring
-  ## the cursor to its original (likely mid-line) position. Used
-  ## during streaming to keep the bar visible while content is being
-  ## accumulated in memory and the cursor stays put.
-  emitFatPromptEvent setBarEvent(label)
-  if liveEditorFooterAnchored():
-    termui.renderFooterFrame(paintBarBytes(label), inputThreadRunning,
-                                     inputEditor)
-  else:
-    termui.syncWrite(barFooterBelowBytes(label, promptColor,
-                                         currentTermW()))
-
-proc paintBarBelowAtCol(label, promptColor: string, col: int) =
-  emitFatPromptEvent setBarEvent(label)
-  if liveEditorFooterAnchored():
-    termui.renderFooterFrame(paintBarBytes(label), inputThreadRunning,
-                                     inputEditor)
-  else:
-    termui.syncWrite(barFooterBelowAtColBytes(label, promptColor, col,
-                                              currentTermW()))
-
-proc clearBarBelowAtCol(col: int) =
-  if liveEditorFooterAnchored():
-    termui.renderFooterFrame(clearBarRowBytes(), inputThreadRunning,
-                             inputEditor)
-  else:
-    termui.syncWrite(clearBarBelowAtColBytes(col))
-
-proc repaintBarPrompt*(promptColor = DimPromptColor) =
-  ## Re-emit the bar+prompt at the cursor's current row using the
-  ## cached `currentBarLabel`. Used by `writeTranscriptWithFatPrompt` to put the bar
-  ## back after a content write.
-  if currentBarLabel.len == 0: return
-  if liveEditorFooterAnchored():
-    termui.renderFooterFrame(paintBarBytes(currentBarLabel),
-                                     inputThreadRunning, inputEditor)
-  else:
-    termui.syncWrite(cursorForPromptColor(promptColor) &
-      barFooterBytes(currentBarLabel, promptColor, currentTermW()))
-
-proc clearBarPrompt*() =
-  ## Erase the bar + prompt rows in place. Cursor parks at col 0 of
-  ## the bar row so the caller can write content there (which then
-  ## pushes the next `repaintBarPrompt` one row down).
-  if liveEditorFooterAnchored():
-    termui.renderFooterFrame(clearBarRowBytes(), inputThreadRunning,
-                                     inputEditor)
-  else:
-    termui.syncWrite(ClearBarPromptBytes)
-
-proc paintPromptOnly*(promptColor: string)
-
-proc enterPromptInput*(promptColor: string) =
-  ## Prepare the physical cursor for either immediate input or buffered
-  ## input during a running turn. In bar mode, repaint the shared
-  ## bar+prompt footer and park on the prompt row. In prompt-only mode,
-  ## clear the prompt row in place. The line editor writes its own prompt
-  ## glyph after this, so the prepainted glyph is only a stable visual
-  ## placeholder.
-  if currentBarLabel.len > 0:
-    if currentBarHasGap and pendingHint.active:
-      termui.syncWrite(clearPromptAfterPendingReceiptBytes())
-    else:
-      clearBarPrompt()
-    termui.enterPromptInput(
-      true,
-      barFooterBytes(currentBarLabel, promptColor, currentTermW()),
-      "")
-  else:
-    termui.enterPromptInput(
-      false,
-      "",
-      promptOnlyBytes(promptColor))
-
-proc resetPromptInputAfterEmpty*(echoRows: int; promptColor: string) =
-  ## Empty submission should leave the prompt/footer at the same visual
-  ## floor instead of drifting downward. `echoRows` is the editor's visual
-  ## input height, including wraps.
-  let n = max(1, echoRows)
-  if currentBarLabel.len == 0:
-    termui.resetPromptInputAfterEmpty(
-      false,
-      n,
-      promptOnlyResetBytes(promptColor),
-      "")
-    emitFatPromptEvent clearBarEvent()
-  else:
-    termui.resetPromptInputAfterEmpty(
-      true,
-      n,
-      "",
-      cursorForPromptColor(promptColor) &
-        barFooterBytes(currentBarLabel, promptColor, currentTermW()))
-
-proc enterToolViewport*(termH: int) =
-  ## Enter the bounded live tool-output viewport while preserving the
-  ## footer rows at the bottom of the normal terminal buffer. The footer
-  ## is token bar + the live editor's visual rows, so multiline buffered
-  ## input reduces the scrolling region instead of being overwritten.
-  let footerRows = 1 + liveEditorRows()
-  let scrollBottom = max(1, termH - footerRows)
-  termui.setToolViewport(true, scrollBottom, liveBarRow(termH),
-                                 liveEditorFooterAnchored())
-
-proc leaveToolViewport*(termH: int) =
-  ## Leave the bounded live tool-output viewport and return to normal
-  ## transcript rendering with the cursor on the bar row.
-  if liveEditorFooterAnchored():
-    termui.setToolViewport(false, termH, liveBarRow(termH), true)
-  else:
-    termui.setToolViewport(false, termH, liveBarRow(termH), false)
-
-template writeTranscriptWithFatPrompt*(body: untyped) =
-  ## Commit transcript output while preserving the volatile footer.
-  ## The footer is cleared, body writes normal scrollback content, then
-  ## the footer is repainted below the new cursor position. If the
-  ## buffered prompt is active, restore that live editor in the same
-  ## render-locked critical section so appended transcript rows do not
-  ## erase in-progress multiline input.
-  debugOut &"writeTranscriptWithFatPrompt enter barLabel={currentBarLabel.len}"
-  let transcriptBytes = captureStdoutWrites:
-    body
-  let compactRows =
-    if receiptTouchesNextResponse and transcriptBytes.hasNonNewlineBytes:
-      receiptTouchesNextResponse = false
-      1
-    else:
-      0
-  let repaint =
-    if currentBarLabel.len > 0:
-      barFooterBytes(currentBarLabel, DimPromptColor, currentTermW())
-    else:
-      clearBarRowBytes()
-  termui.appendTranscriptWithFooter(
-    transcriptBytes,
-    liveEditorFooterAnchored(),
-    inputThreadRunning,
-    inputEditor,
-    currentFooterBarBytes(fatPromptState),
-    ClearBarPromptBytes,
-    repaint,
-    compactRows)
-  if transcriptBytes.hasNonNewlineBytes and currentBarLabel.len > 0:
-    emitFatPromptEvent setBarEvent(currentBarLabel, hasGap = true)
-  debugOut "writeTranscriptWithFatPrompt exit"
-
-proc spinnerLoop(unused: string) {.thread.} =
-  ## Three-line spinner footer rooted at the cursor row:
-  ##   row N-1   reasoning ticker (overlay, dim) — shown only while
-  ##             reasoning streams; the row above the bar is the
-  ##             leading-`\n` scratch row callModel writes, so the
-  ##             overlay always lands on a blank, and clearing the
-  ##             row is a faithful restore.
-  ##   row N     spinner frame + token-slot bar (cyan + bright)
-  ##   row N+1   dim ❯ placeholder, the visible caret while typing
-  ##             isn't possible.
-  ## See `spinnerFooterBytes` for the byte sequence each frame writes.
-  const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-  let start = epochTime()
-  var i = 0
-  var lastTicker = ""
-  while not spinnerStop.load(moRelaxed):
-    let elapsed = epochTime() - start
-    let label = getSpinLabel()
-    let ticker =
-      if inputThreadRunning and inputEditor != nil: ""
-      else: getSpinTicker()
-    lastTicker = ticker
-    try:
-      if bufferedSubmitTurn.load(moRelaxed):
-        sleep 80
-        inc i
-        continue
-      if inputThreadRunning and inputEditor != nil:
-        sleep 80
-        inc i
-        continue
-      let frame = frames[i mod frames.len]
-      setSpinFrame(frame, elapsed.int)
-      termui.renderFooterFrame(
-        spinnerFooterBytes(frame, label, ticker, elapsed.int, currentTermW()),
-        inputThreadRunning, inputEditor)
-      spinnerFramePainted.store(true, moRelaxed)
-    except CatchableError: discard
-    sleep 80
-    inc i
-  try:
-    let termW = try: terminalWidth() except CatchableError: 80
-    if not inputThreadRunning:
-      let tickerRows =
-        if lastTicker.len == 0: 1
-        else: max(1, (visibleWidth(lastTicker) + max(1, termW) - 1) div max(1, termW))
-      termui.syncWrite(spinnerCleanupBytes(tickerRows))
-  except CatchableError: discard
-
-proc liveLabel*(base: string, slurped: int): string =
-  ## Spinner label whose token slots match the per-call summary's shape:
-  ## icon hugs value, slots joined by two spaces. ↑/↻ read as `0` until
-  ## the final usage event closes the response; the spinner thread
-  ## renders this in fgCyan + styleBright.
-  var parts: seq[string]
-  if base.len > 0: parts.add base
-  let up = tokenSlot("↑", 0)
-  if up.len > 0: parts.add up
-  let cached = tokenSlot("↻", 0)
-  if cached.len > 0: parts.add cached
-  let down = tokenSlot("↓", slurped div 4)
-  if down.len > 0: parts.add down
-  parts.join("  ")
-
-proc paintInitialBar*(p: Profile) =
-  ## Welcome-time paint: one blank gap row, then bar+prompt at zero
-  ## values *with* a `○ 0%` context indicator (the empty-circle glyph
-  ## is the same one a populated bar carries — at startup we just
-  ## haven't sent a request yet, so promptTokens is 0). Bright cyan
-  ## prompt — typing-ready. Sets `currentBarHasGap = true` to match
-  ## `endTurn`'s shape between turns.
-  termui.writeRaw("\n")
-  let window = contextWindowFor(p.model)
-  let baseLabel = contextLabel(0, window)
-  paintBarPrompt(liveLabel(baseLabel, 0), BrightPromptColor)
-  emitFatPromptEvent setBarEvent(currentBarLabel, hasGap = true)
-
-proc paintPromptOnly*(promptColor: string) =
-  ## Paint just the prompt ❯ at the cursor's current row, no token
-  ## bar above. Used in the pre-first-turn startup state where we have
-  ## no real token values yet — the bar stays hidden until the first
-  ## model response brings them. Cursor parks at col 0 of the prompt
-  ## row.
-  ##
-  ## Leaves `currentBarLabel = ""` and `currentBarHasGap = false` —
-  ## the signals `readInput`, `emitUserSubmit`, and the slash-command
-  ## repaint use to detect prompt-only mode.
-  termui.writeRaw(promptOnlyResetBytes(promptColor))
-  emitFatPromptEvent clearBarEvent()
-
-proc paintInitialPrompt*(p: Profile) =
-  ## Welcome-time paint when starting fresh. The first prompt is intentionally
-  ## prompt-only; the token bar appears after the first response has real usage
-  ## to display.
-  paintPromptOnly(BrightPromptColor)
-
-
-var spinnerRunning = false  # only mutated by main thread
-
-# --- Bar tick: repaints the token bar with an incrementing elapsed counter
-#     during tool execution. No spinner icon, just the bar label + time.
-
-proc barTickLoop() {.thread.} =
-  while not barTickStop.load(moRelaxed):
-    var base: string
-    {.cast(gcsafe).}:
-      acquire barTickLock
-      base = barTickBase
-      release barTickLock
-    let elapsed = (epochTime() - barTickStart).int
-    if inputThreadRunning and inputEditor != nil:
-      sleep 500
-      continue
-    let label =
-      if base.hasElapsedSuffix: base
-      else: base & "  " & $elapsed & "s"
-    # Re-assert hide-cursor each tick — same rationale as
-    # `spinnerFooterBytes`: some terminals transiently re-show the
-    # caret on cursor movement, and beginTurn's one-shot `?25l`
-    # isn't enough to keep it hidden over a long-running tool.
-    let th = try: terminalHeight() except CatchableError: 24
-    let row = liveBarRow(th)
-    let frame =
-      if inputThreadRunning and inputEditor != nil:
-        if liveEditorFooterAnchored():
-          liveEditorBarTickFrame(label)
-        else:
-          absoluteBarTickFrame(row, label, activeEditor = true)
-      else:
-        absoluteBarTickFrame(row, label, activeEditor = false,
-                             termW = currentTermW())
-    termui.renderFooterFrame(frame, inputThreadRunning, inputEditor)
-    sleep 500
-
-proc startBarTick*(base: string) =
-  debugOut "startBarTick"
-  if barTickRunning: return
-  {.cast(gcsafe).}:
-    acquire barTickLock
-    barTickBase = base
-    release barTickLock
-  barTickStart = epochTime()
-  barTickStop.store(false, moRelaxed)
-  createThread(barTickThread, barTickLoop)
-  barTickRunning = true
-
-proc stopBarTick*(): int =
-  ## Stops the bar tick and returns elapsed seconds.
-  debugOut "stopBarTick"
-  if not barTickRunning: return 0
-  let elapsed = (epochTime() - barTickStart).int
-  barTickStop.store(true, moRelaxed)
-  joinThread(barTickThread)
-  barTickRunning = false
-  return elapsed
-
-proc startSpinner*(label: string) =
-  debugOut "startSpinner"
-  if spinnerRunning: return
-  if label.len > 0: setSpinLabel(label)
-  if inputThreadRunning and inputEditor != nil:
-    setSpinFrame("⠋", 0)
-    spinnerFramePainted.store(true, moRelaxed)
-  else:
-    spinnerFramePainted.store(false, moRelaxed)
-  spinnerStop.store(false, moRelaxed)
-  createThread(spinnerThread, spinnerLoop, "")
-  spinnerRunning = true
-
-proc stopSpinner*() =
-  debugOut "stopSpinner"
-  if not spinnerRunning: return
-  spinnerStop.store(true, moRelaxed)
-  joinThread(spinnerThread)
-  spinnerRunning = false
-
-proc nowMs(): int =
-  int(epochTime() * 1000.0)
-
-proc markProviderActivity*() =
-  lastProviderActivity.store(nowMs(), moRelaxed)
-
-proc quietWatchLoop(baseLabel: string) {.thread.} =
-  var shown = false
-  while not quietStop.load(moRelaxed):
-    let idleMs = nowMs() - lastProviderActivity.load(moRelaxed)
-    if idleMs >= 15_000:
-      setSpinLabel("network quiet; still waiting")
-      shown = true
-    elif shown:
-      setSpinLabel(baseLabel)
-      shown = false
-    sleep 500
-
-proc startQuietWatch(baseLabel: string) =
-  if quietRunning: return
-  markProviderActivity()
-  quietStop.store(false, moRelaxed)
-  createThread(quietThread, quietWatchLoop, baseLabel)
-  quietRunning = true
-
-proc stopQuietWatch() =
-  if not quietRunning: return
-  quietStop.store(true, moRelaxed)
-  joinThread(quietThread)
-  quietRunning = false
-
-proc initLiveMarkdownStream*(baseLabel: string): LiveMarkdownStream =
-  LiveMarkdownStream(baseLabel: baseLabel, md: initMarkdownState(),
-    streamT0: epochTime(), liveCol: 2)
-
-proc currentLabel(s: LiveMarkdownStream, slurpedNow: int): string =
-  liveLabel(s.baseLabel, slurpedNow)
-
-proc utf8LenAt(s: string, i: int): int =
-  let b = s[i].uint8
-  if (b and 0x80'u8) == 0'u8: 1
-  elif (b and 0xE0'u8) == 0xC0'u8: 2
-  elif (b and 0xF0'u8) == 0xE0'u8: 3
-  elif (b and 0xF8'u8) == 0xF0'u8: 4
-  else: 1
-
-proc captureMd(s: var LiveMarkdownStream, line: string,
-               finish = false): string =
-  let path = getTempDir() / "3code_live_md_" & $getCurrentProcessId()
-  let f = open(path, fmWrite)
-  defer:
-    try: removeFile(path) except OSError: discard
-  if finish:
-    discard finishMd(s.md, f)
-  else:
-    discard handleMdLine(s.md, line, f)
-  f.flushFile
-  close(f)
-  result = readFile(path)
-
-proc startContent(s: var LiveMarkdownStream, slurpedNow: int) =
-  if s.started: return
-  setSpinTicker("")
-  let hadSpinnerFrame = spinnerFramePainted.load(moRelaxed)
-  let hadBufferedSubmit = bufferedSubmitTurn.load(moRelaxed)
-  bufferedSubmitTurn.store(false, moRelaxed)
-  stopSpinner()
-  termui.prepareAssistantContentStart(
-    inputThreadRunning,
-    inputEditor,
-    hadSpinnerFrame,
-    hadBufferedSubmit,
-    ClearBarPromptBytes)
-  termui.withTerminalWriteLock:
-    stdout.styledWrite(styleBright, "● ", resetStyle)
-    s.started = true
-    paintBarBelow(s.currentLabel(slurpedNow), DimPromptColor)
-    s.liveBarBelow = true
-
-proc advanceLiveCol(s: var LiveMarkdownStream, text: string) =
-  let termW = max(1, try: terminalWidth() except CatchableError: 80)
-  s.liveCol += visibleWidth(text)
-  while s.liveCol >= termW:
-    s.liveCol -= termW
-
-proc writeLiveSegment(s: var LiveMarkdownStream, text: string) =
-  if text.len == 0: return
-  if s.liveBarAtCursor:
-    clearBarPrompt()
-    s.liveBarAtCursor = false
-  elif s.liveBarBelow:
-    clearBarBelowAtCol(s.liveCol)
-    s.liveBarBelow = false
-  stdout.write text
-  s.advanceLiveCol(text)
-  s.liveLineEmitted = true
-
-proc writeRendered(s: var LiveMarkdownStream, bytes: string,
-                   slurpedNow: int) =
-  if bytes.len == 0: return
-  s.startContent(slurpedNow)
-  var i = 0
-  while i < bytes.len:
-    if bytes[i] == '\n':
-      if s.liveBarBelow:
-        clearBarBelowAtCol(s.liveCol)
-        s.liveBarBelow = false
-      stdout.write "\n"
-      s.liveCol = 0
-      if s.liveLineEmitted:
-        paintBarPrompt(s.currentLabel(slurpedNow), DimPromptColor)
-        s.liveBarAtCursor = true
-      inc i
-    else:
-      let start = i
-      while i < bytes.len and bytes[i] != '\n':
-        inc i
-      s.writeLiveSegment(bytes[start ..< i])
-  if s.started:
-    if s.liveBarAtCursor:
-      paintBarPrompt(s.currentLabel(slurpedNow), DimPromptColor)
-    else:
-      paintBarBelowAtCol(s.currentLabel(slurpedNow), DimPromptColor, s.liveCol)
-      s.liveBarBelow = true
-
-proc suppressLiveAssistantStream(): bool =
-  ## Streaming assistant text and an always-live editor both need the terminal
-  ## cursor. Prefer prompt stability: keep the spinner/bar live, then let the
-  ## caller commit the completed assistant text through `writeTranscriptWithFatPrompt`.
-  liveEditorFooterAnchored()
-
-proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
-  if chunk.len == 0: return
-  if suppressLiveAssistantStream(): return
-  termui.withTerminalWriteLock:
-    var data = s.utf8Pending & chunk
-    s.utf8Pending = ""
-    var i = 0
-    while i < data.len:
-      if data[i] == '\n':
-        let rendered = s.captureMd(s.pendingLine)
-        s.pendingLine = ""
-        s.writeRendered(rendered, slurpedNow)
-        inc i
-      else:
-        let charLen = utf8LenAt(data, i)
-        if i + charLen > data.len:
-          s.utf8Pending = data[i .. ^1]
-          break
-        s.pendingLine.add data[i ..< i + charLen]
-        i += charLen
-    stdout.flushFile()
-
-proc finishContent*(s: var LiveMarkdownStream, slurpedNow: int) =
-  if suppressLiveAssistantStream(): return
-  if s.utf8Pending.len > 0:
-    s.pendingLine.add s.utf8Pending
-    s.utf8Pending = ""
-  if s.pendingLine.len > 0:
-    let rendered = s.captureMd(s.pendingLine)
-    s.pendingLine = ""
-    s.writeRendered(rendered, slurpedNow)
-  let tail = s.captureMd("", finish = true)
-  s.writeRendered(tail, slurpedNow)
-  if s.started and s.liveBarBelow:
-    paintBarPrompt(s.currentLabel(slurpedNow), DimPromptColor)
-    s.liveBarAtCursor = true
-    s.liveBarBelow = false
-
-when providerStub:
   proc stubUsage(node: JsonNode, content: string): Usage =
     let u = if node != nil and node.kind == JObject: node{"usage"} else: nil
     if u != nil and u.kind == JObject:
@@ -995,46 +197,108 @@ when providerStub:
     result.completionTokens = max(1, content.len div 4)
     result.totalTokens = result.promptTokens + result.completionTokens
 
-  proc streamStubContent(content, baseLabel: string, slurped: var int) =
-    ## Provider-stub streaming path. It intentionally exercises the
-    ## same footer geometry as live SSE, including chunked newlines, so
-    ## terminal regressions show up in local/manual stub runs.
-    if content.strip.len == 0: return
-    var live = initLiveMarkdownStream(baseLabel)
-    var i = 0
-    while i < content.len:
-      let charLen = utf8LenAt(content, i)
-      let chunk = content[i ..< min(i + charLen, content.len)]
-      slurped += chunk.len
-      setSpinLabel(liveLabel(baseLabel, slurped))
-      live.feedContent(chunk, slurped)
-      sleep 15
-      i += charLen
-    live.finishContent(slurped)
-    if live.started:
-      contentStreamedLive = true
+# ---------- Cancellation and stream hooks ----------
 
-  proc streamStubReasoning(reasoning, baseLabel: string, slurped: var int) =
-    if reasoning.strip.len == 0:
-      return
-    var acc = ""
-    var i = 0
-    while i < reasoning.len:
-      let charLen = utf8LenAt(reasoning, i)
-      acc.add reasoning[i ..< min(i + charLen, reasoning.len)]
-      slurped += charLen
-      setSpinLabel(liveLabel(baseLabel, slurped))
-      let termW = try: terminalWidth() except CatchableError: 80
-      let budget = max(20, termW - 6)
-      let tail =
-        if acc.len > budget: acc[acc.len - budget .. ^1]
-        else: acc
-      var flat = newStringOfCap(tail.len)
-      for ch in tail:
-        flat.add(if ch == '\n' or ch == '\r': ' ' else: ch)
-      setSpinTicker("  … " & flat)
-      sleep 15
-      i += charLen
+var interruptedFlag: Atomic[bool]
+  ## Set by the SIGINT hook and buffered prompt key path. Checked between
+  ## model/tool steps and during HTTP polling / retry backoff so ctrl-c drops
+  ## back to the prompt without killing the process.
+
+proc isInterrupted*(): bool {.gcsafe.} =
+  interruptedFlag.load(moAcquire)
+
+proc setInterrupted*(value: bool) {.gcsafe.} =
+  interruptedFlag.store(value, moRelease)
+
+proc clearInterrupted*() {.gcsafe.} =
+  setInterrupted(false)
+
+type
+  ApiStreamHooks* = object
+    beforeCall*: proc(lastPromptTokens, window: int): string {.closure.}
+    afterCall*: proc() {.closure.}
+    progress*: proc(baseLabel: string; slurped: int) {.closure.}
+    setStatusLabel*: proc(label: string) {.closure.}
+    startSpinner*: proc(label: string) {.closure.}
+    stopSpinner*: proc() {.closure.}
+    providerActivity*: proc() {.closure.}
+    showThinking*: proc(): bool {.closure.}
+    reasoningDelta*: proc(reasoning, baseLabel: string; slurped: int;
+                          contentStarted: bool) {.closure.}
+    contentDelta*: proc(chunk, baseLabel: string; slurped: int): bool {.closure.}
+    contentFinished*: proc(fullContent, baseLabel: string;
+                           slurped: int): bool {.closure.}
+    trimTrailingContent*: proc(fullContent, baseLabel: string;
+                               slurped: int) {.closure.}
+    afterLiveContent*: proc(baseLabel: string; slurped: int) {.closure.}
+    finalUsage*: proc(usage: Usage; window, elapsed: int;
+                      assistantContent: string; streamedLive: bool) {.closure.}
+    noUsage*: proc(elapsed: int) {.closure.}
+
+var apiStreamHooks*: ApiStreamHooks
+
+proc setApiStreamHooks*(hooks: ApiStreamHooks) =
+  apiStreamHooks = hooks
+
+proc hookBeforeCall(lastPromptTokens, window: int): string =
+  if apiStreamHooks.beforeCall != nil:
+    result = apiStreamHooks.beforeCall(lastPromptTokens, window)
+
+proc hookAfterCall() =
+  if apiStreamHooks.afterCall != nil: apiStreamHooks.afterCall()
+
+proc hookProgress(baseLabel: string; slurped: int) =
+  if apiStreamHooks.progress != nil:
+    apiStreamHooks.progress(baseLabel, slurped)
+
+proc hookSetStatusLabel(label: string) =
+  if apiStreamHooks.setStatusLabel != nil:
+    apiStreamHooks.setStatusLabel(label)
+
+proc hookStartSpinner(label: string) =
+  if apiStreamHooks.startSpinner != nil: apiStreamHooks.startSpinner(label)
+
+proc hookStopSpinner() =
+  if apiStreamHooks.stopSpinner != nil: apiStreamHooks.stopSpinner()
+
+proc hookProviderActivity() =
+  if apiStreamHooks.providerActivity != nil:
+    apiStreamHooks.providerActivity()
+
+proc hookShowThinking(): bool =
+  apiStreamHooks.showThinking != nil and apiStreamHooks.showThinking()
+
+proc hookReasoningDelta(reasoning, baseLabel: string; slurped: int;
+                        contentStarted: bool) =
+  if apiStreamHooks.reasoningDelta != nil:
+    apiStreamHooks.reasoningDelta(reasoning, baseLabel, slurped,
+                                  contentStarted)
+
+proc hookContentDelta(chunk, baseLabel: string; slurped: int): bool =
+  if apiStreamHooks.contentDelta != nil:
+    result = apiStreamHooks.contentDelta(chunk, baseLabel, slurped)
+
+proc hookContentFinished(fullContent, baseLabel: string; slurped: int): bool =
+  if apiStreamHooks.contentFinished != nil:
+    result = apiStreamHooks.contentFinished(fullContent, baseLabel, slurped)
+
+proc hookTrimTrailingContent(fullContent, baseLabel: string; slurped: int) =
+  if apiStreamHooks.trimTrailingContent != nil:
+    apiStreamHooks.trimTrailingContent(fullContent, baseLabel, slurped)
+
+proc hookAfterLiveContent(baseLabel: string; slurped: int) =
+  if apiStreamHooks.afterLiveContent != nil:
+    apiStreamHooks.afterLiveContent(baseLabel, slurped)
+
+proc hookFinalUsage(usage: Usage; window, elapsed: int;
+                    assistantContent: string; streamedLive: bool) =
+  if apiStreamHooks.finalUsage != nil:
+    apiStreamHooks.finalUsage(usage, window, elapsed, assistantContent,
+                              streamedLive)
+
+proc hookNoUsage(elapsed: int) =
+  if apiStreamHooks.noUsage != nil: apiStreamHooks.noUsage(elapsed)
+
 
 proc parseUsage*(u: JsonNode): Usage =
   ## Parses an OpenAI-compatible `usage` object. Cached-token accounting
@@ -1137,101 +401,6 @@ proc requestTurnInterrupt*() {.gcsafe.} =
   shutdownCachedStreamFd()
   cancelActiveTool()
 
-# ---- Stream-time stdin cancel watcher ----
-#
-# During streamHttp's read loop, a tiny POSIX-only watcher thread polls
-# stdin in non-canonical/no-isig/no-echo mode and shuts down the cached
-# socket on the first ctrl-c (`\x03`) or ESC (`\x1b`) byte. The SIGINT
-# hook covers ctrl-c too, but only when the terminal is in cooked mode
-# at the moment the keystroke arrives — keeping a dedicated watcher
-# means cancel works the same way whether the kernel turns ctrl-c into
-# SIGINT or we read the raw byte ourselves, and ESC works at all (no
-# signal path exists for it).
-when defined(posix):
-  var
-    cancelWatcherStop: Atomic[bool]
-    cancelWatcherThread: Thread[void]
-    cancelWatcherActive: bool
-    cancelOrigTermios: Termios
-    cancelOrigTermiosValid: bool
-
-  proc restoreCancelTermios*() {.noconv, gcsafe.} =
-    if cancelOrigTermiosValid:
-      discard tcSetAttr(0.cint, TCSANOW, addr cancelOrigTermios)
-      cancelOrigTermiosValid = false
-
-  proc cancelWatcherLoop() {.thread, nimcall.} =
-    while not cancelWatcherStop.load(moRelaxed):
-      var pfd: TPollfd
-      pfd.fd = 0.cint  # STDIN_FILENO
-      pfd.events = POLLIN
-      let r = poll(addr pfd, 1.Tnfds, 100.cint)
-      if r > 0 and (pfd.revents and POLLIN) != 0:
-        var buf: array[64, char]
-        let n = posix.read(0.cint, addr buf[0], buf.len)
-        if n > 0:
-          for i in 0 ..< n.int:
-            let b = buf[i].uint8
-            if b == 0x03 or b == 0x1b:
-              {.cast(gcsafe).}:
-                requestTurnInterrupt()
-                restoreCancelTermios()
-              return
-            else: discard
-        # else: spurious wakeup or EOF on stdin; loop and re-check stop.
-
-  proc drainCancelInput() =
-    ## Drop keystrokes pressed while the dim prompt is visible. Input is
-    ## locked during provider work; carrying buffered Enter bytes into the
-    ## next prompt turns an accidental keypress into a blank submission.
-    if isatty(0.cint) == 0: return
-    while true:
-      var pfd: TPollfd
-      pfd.fd = 0.cint
-      pfd.events = POLLIN
-      let r = poll(addr pfd, 1.Tnfds, 0.cint)
-      if r <= 0 or (pfd.revents and POLLIN) == 0:
-        break
-      var buf: array[64, char]
-      let n = posix.read(0.cint, addr buf[0], buf.len)
-      if n <= 0:
-        break
-
-  proc startCancelWatcher() =
-    if cancelWatcherActive: return
-    if isatty(0.cint) == 0: return
-    var t: Termios
-    if tcGetAttr(0.cint, addr t) != 0: return
-    cancelOrigTermios = t
-    cancelOrigTermiosValid = true
-    # Disable canonical line buffering, signal generation (so ctrl-c
-    # arrives as `\x03` instead of SIGINT), and local echo. VMIN/VTIME
-    # don't really matter — we only ever read after `poll` says there's
-    # data — but pin them so a non-poll caller doesn't accidentally
-    # block.
-    t.c_lflag = t.c_lflag and not Cflag(ICANON or ECHO or ISIG)
-    t.c_cc[VMIN] = 0.char
-    t.c_cc[VTIME] = 0.char
-    if tcSetAttr(0.cint, TCSANOW, addr t) != 0:
-      cancelOrigTermiosValid = false
-      return
-    cancelWatcherStop.store(false, moRelaxed)
-    createThread(cancelWatcherThread, cancelWatcherLoop)
-    cancelWatcherActive = true
-
-  proc stopCancelWatcher() =
-    if not cancelWatcherActive: return
-    cancelWatcherStop.store(true, moRelaxed)
-    joinThread(cancelWatcherThread)
-    cancelWatcherActive = false
-    drainCancelInput()
-    if cancelOrigTermiosValid:
-      restoreCancelTermios()
-else:
-  proc startCancelWatcher() = discard
-  proc stopCancelWatcher() = discard
-  proc restoreCancelTermios*() {.noconv.} = discard
-
 type StreamOutcome = object
   statusCode: int
   retryAfter: string
@@ -1239,6 +408,7 @@ type StreamOutcome = object
   errBody: string         # non-SSE response body (error responses)
   assistantMsg: JsonNode  # reconstructed from SSE when status=200
   usage: Usage
+  streamedLive: bool
 
 proc buildStreamAssistantMsg*(content, reasoning: string,
                               tools: OrderedTable[int, JsonNode],
@@ -1440,9 +610,9 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
                                   ("Content-Type", "application/json"),
                                   ("Accept", "text/event-stream")],
                        body = bodyStr)
-      markProviderActivity()
+      hookProviderActivity()
       resp = conn.readResponseHead()
-      markProviderActivity()
+      hookProviderActivity()
       break
     except CatchableError as e:
       # Cached conn was stale (server-side keep-alive timeout, etc.) or
@@ -1461,7 +631,6 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   var accTools = initOrderedTable[int, JsonNode]()
   var nonSSE: seq[string]
   var contentStarted = false
-  var live = initLiveMarkdownStream(baseLabel)
   var xmlFilter = XmlToolFilter()
   # Completion signals. A clean upstream EOF without either `[DONE]` or a
   # non-empty `finish_reason` means the SSE stream was cut mid-response
@@ -1472,25 +641,6 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   # marker on screen and stranding the user with an unfinished job.
   var sawDone = false
   var sawFinish = false
-  # Ticker state: the full reasoning text is retained in `accReasoning` (so
-  # it can be echoed back to the provider — DeepSeek rejects follow-up
-  # requests that drop reasoning_content); the ticker display only shows
-  # the tail that fits on one line. Updates are throttled to ~10Hz.
-  var lastTickerUpdate = 0.0
-  proc refreshTicker() =
-    let now = epochTime()
-    if now - lastTickerUpdate < 0.1: return
-    lastTickerUpdate = now
-    let termW = try: terminalWidth() except CatchableError: 80
-    let budget = max(20, termW - 6)  # leave margin for indent + glyph
-    # flatten newlines for single-line display without mutating accReasoning
-    let tail =
-      if accReasoning.len > budget: accReasoning[accReasoning.len - budget .. ^1]
-      else: accReasoning
-    var flat = newStringOfCap(tail.len)
-    for ch in tail:
-      flat.add(if ch == '\n' or ch == '\r': ' ' else: ch)
-    setSpinTicker("  … " & flat)
   var line = ""
   var streamErr = ""
   while true:
@@ -1501,7 +651,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       closeCachedStreamConn()
       break
     if not hasLine: break
-    markProviderActivity()
+    hookProviderActivity()
     if isInterrupted():
       closeCachedStreamConn()
       break
@@ -1526,20 +676,19 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
           if r.len > 0:
             accReasoning &= r
             slurped += r.len
-            setSpinLabel(liveLabel(baseLabel, slurped))
-            if showThinking and not contentStarted:
-              refreshTicker()
+            hookProgress(baseLabel, slurped)
+            if hookShowThinking() and not contentStarted:
+              hookReasoningDelta(accReasoning, baseLabel, slurped, contentStarted)
           let c = delta{"content"}.getStr("")
           if c.len > 0:
             accContent &= c
             slurped += c.len
-            setSpinLabel(liveLabel(baseLabel, slurped))
+            hookProgress(baseLabel, slurped)
             let visible =
               if suppressXml: feed(xmlFilter, c)
               else: c
             if visible.len > 0:
-              live.feedContent(visible, slurped)
-              contentStarted = live.started
+              contentStarted = hookContentDelta(visible, baseLabel, slurped)
           let tcDelta = delta{"tool_calls"}
           if tcDelta != nil and tcDelta.kind == JArray:
             for tc in tcDelta:
@@ -1554,7 +703,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
               let fn = tc{"function"}
               if fn != nil:
                 slurped += fn{"arguments"}.getStr("").len
-                setSpinLabel(liveLabel(baseLabel, slurped))
+                hookProgress(baseLabel, slurped)
       let u = j{"usage"}
       if u != nil and u.kind == JObject:
         result.usage = parseUsage(u)
@@ -1567,43 +716,13 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   if suppressXml:
     let tail = flushTail(xmlFilter)
     if tail.len > 0:
-      live.feedContent(tail, slurped)
-      contentStarted = live.started
+      contentStarted = hookContentDelta(tail, baseLabel, slurped)
 
   if contentStarted:
-    live.finishContent(slurped)
-    # Collapse trailing blank rows the model emitted so the bar lands
-    # flush below the last content line. The bar may currently sit
-    # `trailingNl - 1` rows below where it should; clear it, walk up
-    # the extras, repaint.
-    var trailingNl = 0
-    for i in countdown(accContent.len - 1, 0):
-      if accContent[i] == '\n': inc trailingNl
-      else: break
-    if trailingNl > 1:
-      termui.withTerminalWriteLock:
-        if live.liveBarAtCursor:
-          clearBarPrompt()
-          live.liveBarAtCursor = false
-        elif live.liveBarBelow:
-          stdout.write ClearBarBelowBytes
-          stdout.flushFile
-          live.liveBarBelow = false
-        termui.eraseRowsAbove(trailingNl - 1)
-        paintBarPrompt(live.currentLabel(slurped), DimPromptColor)
-    contentStreamedLive = true
-    # Normalize cursor to bar row col 0. The streaming loop may have left
-    # the cursor in the content area (liveBarBelow case); move it down to
-    # the bar row before inserting the ticker row and restarting the spinner.
-    if live.liveBarBelow:
-      termui.syncWrite(moveToBarBelowBytes()) # bar is below cursor
-    # Now cursor is at bar row col 0.
-    # Insert a blank row above the bar (ticker row for the spinner)
-    # and restart the spinner so the elapsed time keeps ticking during
-    # post-streaming processing (tool-call parsing, usage calculation).
-    termui.syncWrite(insertTickerRowBelowBytes())
-    setSpinLabel(liveLabel(baseLabel, slurped))
-    startSpinner("")
+    result.streamedLive = hookContentFinished(accContent, baseLabel, slurped)
+    hookTrimTrailingContent(accContent, baseLabel, slurped)
+    if result.streamedLive:
+      hookAfterLiveContent(baseLabel, slurped)
 
   if isInterrupted():
     if result.assistantMsg == nil:
@@ -1670,9 +789,6 @@ proc ensureReasoningField(messages: JsonNode) =
     if m{"role"}.getStr != "assistant": continue
     if "reasoning_content" notin m:
       m["reasoning_content"] = %""
-
-template hint(args: varargs[untyped]) =
-  stdout.styledWrite(fgCyan, styleBright, args, resetStyle)
 
 proc providerOf(p: Profile): string =
   ## Lower-case provider name from `Profile.name` ("nvidia.openai/gpt-oss-120b"
@@ -1778,320 +894,14 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "minimax": applyMinimaxReasoning(p, body)
   else: discard
 
-proc inputThreadProc() {.thread.} =
-  ## Runs readline while the model or a tool owns the turn. Completed text is
-  ## queued for the outer REPL to send as soon as the current turn settles;
-  ## partial text is handed back as the next prompt's prefill.
-  {.cast(gcsafe).}:
-    if inputEditor == nil:
-      return
-    let edPtr = inputEditor
-    template turnActive(): bool =
-      inputTurnActive.load(moAcquire)
-    when defined(posix):
-      let fd = STDIN_FILENO.cint
-      var pendingInput: seq[int]
-      proc fillPending(waitMs: cint): bool =
-        if pendingInput.len > 0:
-          return true
-        var pfd: Tpollfd
-        pfd.fd = STDIN_FILENO
-        pfd.events = POLLIN
-        let r = poll(addr pfd, 1.Tnfds, waitMs)
-        if r <= 0 or (pfd.revents and POLLIN) == 0:
-          return false
-        var ch: char
-        let n = posix.read(fd, addr ch, 1)
-        if n == 1:
-          pendingInput.add ch.ord.int
-        pendingInput.len > 0
-
-      let getCh: minline.GetChProc = proc(): int =
-        while turnActive():
-          if pendingInput.len > 0 or fillPending(200.cint):
-            result = pendingInput[0]
-            pendingInput.delete(0)
-            return
-          if errno == EINTR:
-            continue
-        -1
-      let hasPendingInput: minline.HasPendingInputProc = proc(): bool =
-        pendingInput.len > 0 or fillPending(minline.EscapeTailPollMs.cint)
-    else:
-      let getCh: minline.GetChProc = proc(): int =
-        if turnActive(): getchr().int else: -1
-      let hasPendingInput: minline.HasPendingInputProc = nil
-
-    let writeProc: minline.WriteProc = proc(s: string) =
-      termui.writeRaw(s)
-
-    edPtr[].onMutate = proc(ed: var minline.LineEditor) =
-      acquire inputStateLock
-      try:
-        if inputState.autoSend:
-          let queued = inputState.queuedText
-          if queued.len > 0 and ed.line.text.startsWith(queued) and
-              ed.line.position > queued.len:
-            let inserted = ed.line.text[queued.len .. ^1]
-            ed.line.text = queued & "\n" & inserted
-            ed.line.position = queued.len + 1 + inserted.len
-          inputState.autoSend = false
-          inputState.queuedText = ""
-          inputState.queuedEchoRows = 0
-          ed.renderSuffix = ""
-          ed.renderSuffixCursor = false
-      finally:
-        release inputStateLock
-    edPtr[].onSubmit = proc(ed: var minline.LineEditor) =
-      acquire inputStateLock
-      try:
-        inputState.queuedText = ed.line.text
-        inputState.queuedEchoRows = minline.totalRows(ed.line.text, ed.promptW,
-                                                      ed.contPromptW,
-                                                      max(2, ed.width))
-        inputState.autoSend = ed.line.text.len > 0
-      finally:
-        release inputStateLock
-      ed.line.position = ed.line.text.len
-      ed.renderSuffix =
-        if ed.line.text.len > 0: " " & DeferredSubmitMarker & "\n"
-        else: ""
-      ed.renderSuffixCursor = ed.renderSuffix.len > 0
-    edPtr[].preRedraw = proc(ed: var minline.LineEditor) =
-      reserveEditorFooterForRedraw(ed)
-    edPtr[].postRedraw = proc(ed: var minline.LineEditor) =
-      termui.finishEditorRedraw()
-      inputEditorReady.store(true, moRelease)
-
-    when defined(posix):
-      var oldMode: Termios
-      var haveOldMode = false
-      if isatty(fd) != 0 and fd.tcGetAttr(addr oldMode) == 0:
-        haveOldMode = true
-        var rawMode = oldMode
-        rawMode.c_iflag = rawMode.c_iflag and not Cflag(BRKINT or ICRNL or
-          INPCK or ISTRIP or IXON)
-        rawMode.c_cflag = (rawMode.c_cflag and not Cflag(CSIZE or PARENB)) or CS8
-        rawMode.c_lflag = rawMode.c_lflag and not Cflag(ECHO or ICANON or
-          IEXTEN or ISIG)
-        rawMode.c_cc[VMIN] = 1.char
-        rawMode.c_cc[VTIME] = 0.char
-        discard fd.tcSetAttr(TCSANOW, addr rawMode)
-
-    edPtr[].deferSubmit = true
-    edPtr[].submitIcon = DeferredSubmitMarker
-    while turnActive():
-      try:
-        let text = minline.readLineWith(edPtr[],
-                                        TurnPromptColor & "❯ " & Reset,
-                                        getCh, writeProc,
-                                        hasPendingInput = hasPendingInput)
-        if text.len == 0:
-          continue
-        if text[0] == ':':
-          termui.withTerminalWriteLock:
-            clearBarPrompt()
-          if turnHandleCommand != nil:
-            discard turnHandleCommand(text)
-          termui.withTerminalWriteLock:
-            enterPromptInput(TurnPromptColor)
-            termui.writeRaw(edPtr[].redrawBytes())
-            if edPtr[].postRedraw != nil:
-              edPtr[].postRedraw(edPtr[])
-          if text.strip in [":q", ":quit", ":exit"]:
-            acquire inputStateLock
-            try:
-              inputState.cmdWasQuit = true
-            finally:
-              release inputStateLock
-            setInterrupted(true)
-            break
-        else:
-          termui.withTerminalWriteLock:
-            acquire inputStateLock
-            try:
-              inputState.queuedText = text
-              inputState.queuedEchoRows = edPtr[].echoRows
-              inputState.autoSend = true
-            finally:
-              release inputStateLock
-            emitFatPromptEvent setPromptModeEvent(pmBufferedInput)
-      except minline.InputCancelled:
-        requestTurnInterrupt()
-        break
-      except EOFError:
-        if turnActive() and edPtr[].line.text.len == 0:
-          acquire inputStateLock
-          try:
-            inputState.cmdWasQuit = true
-          finally:
-            release inputStateLock
-          requestTurnInterrupt()
-        break
-      except CatchableError:
-        break
-
-    when defined(posix):
-      if haveOldMode:
-        discard fd.tcSetAttr(TCSADRAIN, addr oldMode)
-    acquire inputStateLock
-    try:
-      inputState.residualText = edPtr[].line.text
-      if inputState.autoSend and inputState.queuedText == inputState.residualText:
-        inputState.residualText = ""
-    finally:
-      release inputStateLock
-    edPtr[].onMutate = nil
-    edPtr[].onSubmit = nil
-    edPtr[].preRedraw = nil
-    edPtr[].postRedraw = nil
-    edPtr[].deferSubmit = false
-    edPtr[].renderSuffix = ""
-    edPtr[].renderSuffixCursor = false
-    edPtr[].getCh = nil
-    edPtr[].write = nil
-    edPtr[].getWidth = nil
-    edPtr[].hasPendingInput = nil
-
-proc beginTurn*() =
-  ## Hide the terminal caret for the duration of the turn — the dim
-  ## ❯ glyph (still painted, just not blinking) is the only
-  ## visible marker while typing isn't possible.
-  termui.hideCaret()
-  emitFatPromptEvent setPromptModeEvent(pmTurnRunning)
-  if inputEditor != nil and not inputThreadRunning:
-    acquire inputStateLock
-    try:
-      inputState = InputState(turnActive: true)
-    finally:
-      release inputStateLock
-    inputTurnActive.store(true, moRelease)
-    inputEditorReady.store(false, moRelease)
-    createThread(inputThread, inputThreadProc)
-    inputThreadRunning = true
-    let deadline = epochTime() + 0.5
-    while not inputEditorReady.load(moAcquire) and epochTime() < deadline:
-      sleep 5
-    inputEditorReady.store(true, moRelease)
-
-proc endTurn*(repaintPrompt = true) =
-  ## Transition to typing-ready state: clear the bar at its current
-  ## row, advance one row to leave a blank "gap" between the last
-  ## content row and the bar, repaint bar+prompt with the bright
-  ## cyan prompt color. Show the terminal caret. The gap is
-  ## one-shot — `emitUserSubmit` overwrites it with the receipt at
-  ## next submit, so it never persists in scroll history.
-  # Defensive: nothing should be animating between turns. If a tool
-  # path leaked the bar-tick thread (e.g. an uncaught exception
-  # past the per-tool stopBarTick), the thread would otherwise keep
-  # painting the bottom row with a ticking seconds counter forever.
-  # Idempotent — these are no-ops when the threads aren't running.
-  discard stopBarTick()
-  stopSpinner()
-  let hadInputThread = inputThreadRunning
-  if inputThreadRunning:
-    acquire inputStateLock
-    try:
-      inputState.turnActive = false
-    finally:
-      release inputStateLock
-    inputTurnActive.store(false, moRelease)
-    joinThread(inputThread)
-    inputThreadRunning = false
-  let hadTicker = fatPromptState.footer.ticker.len > 0
-  if hadTicker:
-    emitFatPromptEvent clearTickerEvent()
-  let hadBar = currentBarLabel.len > 0
-  var bytes = ""
-  var label = ""
-  if hadBar:
-    label = currentBarLabel
-    bytes = endTurnBytes(label, BrightPromptColor, repaintPrompt, currentTermW(),
-                         currentBarHasGap)
-  else:
-    bytes = endTurnBytes("", BrightPromptColor, repaintPrompt)
-  termui.endTurn(
-    hadInputThread,
-    inputEditor,
-    hadBar,
-    bytes,
-    hadTicker,
-    clearTickerBytes())
-  if currentBarLabel.len > 0:
-    if repaintPrompt:
-      emitFatPromptEvent setBarEvent(label, hasGap = true)
-    else:
-      emitFatPromptEvent clearBarEvent()
-  if repaintPrompt:
-    emitFatPromptEvent setPromptModeEvent(pmIdle)
-
-proc emitUserSubmit*(line: string, echoRows = -1) =
-  ## Run the user-submit transition described in `submitTransitionBytes`
-  ## using the current `pendingHint`, `currentBarHasGap`, and
-  ## `currentBarLabel` state. The receipt overwrites the gap (or the
-  ## bar's row if no gap), echoes the user's input as scroll-history
-  ## content, and parks the cursor ready for the next `callModel`'s
-  ## leading `\n`. When `currentBarLabel` is empty (prompt-only
-  ## startup state), the walk-back skips the (non-existent) bar row.
-  ##
-  ## ``echoRows`` should be the visual row count occupied by the
-  ## rendered input (the editor exposes this via ``LineEditor.echoRows``)
-  ## so wrap-affected logical lines are walked back over correctly. When
-  ## negative, the legacy ``splitLines(line).len`` is used (still
-  ## correct as long as no logical line wraps).
-  let receiptLabel =
-    if pendingHint.active:
-      tokenLineLabel(pendingHint.usage, pendingHint.window, pendingHint.elapsed)
-    else: ""
-  let hadGap = currentBarHasGap
-  let hasBar = currentBarLabel.len > 0
-  termui.submitUser(
-    submitTransitionBytes(line, pendingHint.active, hadGap, receiptLabel,
-                          hasBar, echoRows))
-  emitFatPromptEvent clearPendingHintEvent()
-  emitFatPromptEvent clearBarEvent()
-
-proc emitBufferedUserSubmit*(line: string) =
-  ## Echo a prompt that was queued by the background input thread during
-  ## a model/tool turn. See ``bufferedSubmitTransitionBytes`` for the
-  ## cursor contract.
-  let receiptLabel =
-    if pendingHint.active:
-      tokenLineLabel(pendingHint.usage, pendingHint.window, pendingHint.elapsed)
-    else: ""
-  let hadGap = currentBarHasGap
-  let hasBar = currentBarLabel.len > 0
-  let editorRows = max(1, minline.totalRows(line, 2, 2, currentTermW()))
-  termui.submitBufferedUser(
-    editorRows,
-    hasBar,
-    bufferedSubmitTransitionBytes(line, pendingHint.active, hadGap,
-                                  receiptLabel, hasBar))
-  bufferedSubmitTurn.store(false, moRelaxed)
-  emitFatPromptEvent clearPendingHintEvent()
-  emitFatPromptEvent clearBarEvent()
-
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   when providerStub:
     block:
       let stubT0 = epochTime()
       let stubWindow = contextWindowFor(p.model)
-      let stubBaseLabel = contextLabel(lastPromptTokens, stubWindow)
-      let startsAfterReceipt = followupStartsAfterReceipt
-      followupStartsAfterReceipt = false
-      termui.withTerminalWriteLock:
-        if not startsAfterReceipt:
-          termui.writeRaw("\n")
-      setSpinLabel(liveLabel(stubBaseLabel, 0))
-      startSpinner("")
-      startQuietWatch(liveLabel(stubBaseLabel, 0))
-      let cancelWatcherStarted = inputEditor == nil
-      if cancelWatcherStarted:
-        startCancelWatcher()
+      let stubBaseLabel = hookBeforeCall(lastPromptTokens, stubWindow)
       defer:
-        stopQuietWatch()
-        if cancelWatcherStarted:
-          stopCancelWatcher()
+        hookAfterCall()
       const StubMaxAttempts = 8
       var attempt = 0
       var lastFailure = sfNone
@@ -2104,7 +914,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
           var remaining = delayMs
           while remaining > 0:
             if isInterrupted():
-              stopSpinner()
+              hookStopSpinner()
               raise newException(ApiError, "interrupted by user")
             let step = min(100, remaining)
             sleep(step)
@@ -2117,7 +927,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
             errMsg = stubFailureName(lastFailure)
           let category = retryCategory(errMsg, nil, code)
           if category.len == 0 or attempt >= StubMaxAttempts:
-            stopSpinner()
+            hookStopSpinner()
             raise newException(ApiError,
               errMsg & (if stubErrBody(lastFailure, node).len > 0:
                 ": " & stubErrBody(lastFailure, node) else: ""))
@@ -2126,7 +936,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
             if retryAfter > 0: retryAfter
             elif category == "rate": min(1 shl rateRetryLevel, 90)
             else: min(1 shl serverRetryLevel, 16)
-          stopSpinner()
+          hookStopSpinner()
           stderr.writeLine &"3code: {errMsg}; retry {attempt + 1}/{StubMaxAttempts} in {backoff}s"
           var waitMs = backoff * 1000
           while waitMs > 0:
@@ -2141,8 +951,8 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
           else:
             inc serverRetryLevel
             serverLastTs = epochTime()
-          setSpinLabel(&"retry {attempt + 1}/{StubMaxAttempts}")
-          startSpinner("")
+          hookSetStatusLabel(&"retry {attempt + 1}/{StubMaxAttempts}")
+          hookStartSpinner("")
         else:
           result = node
           break
@@ -2155,27 +965,44 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
         var remaining = preStreamDelay
         while remaining > 0:
           if isInterrupted():
-            stopSpinner()
+            hookStopSpinner()
             raise newException(ApiError, "interrupted by user")
           let step = min(100, remaining)
           sleep(step)
           remaining -= step
       let stubContent = result{"content"}.getStr("")
+      var stubStreamedLive = false
       if result{"stream"}.getBool(true):
         var stubReasoning = result{"reasoning_content"}.getStr("")
         if stubReasoning.len == 0:
           stubReasoning = result{"reasoning"}.getStr("")
-        streamStubReasoning(stubReasoning, stubBaseLabel, slurped)
-        streamStubContent(stubContent, stubBaseLabel, slurped)
-      stopSpinner()
+        var accReasoning = ""
+        var contentStarted = false
+        for ch in stubReasoning:
+          accReasoning.add ch
+          inc slurped
+          hookProgress(stubBaseLabel, slurped)
+          if hookShowThinking() and not contentStarted:
+            hookReasoningDelta(accReasoning, stubBaseLabel, slurped,
+                               contentStarted)
+          sleep 15
+        for ch in stubContent:
+          let chunk = $ch
+          inc slurped
+          hookProgress(stubBaseLabel, slurped)
+          contentStarted = hookContentDelta(chunk, stubBaseLabel, slurped)
+          sleep 15
+        if contentStarted:
+          stubStreamedLive = hookContentFinished(stubContent, stubBaseLabel,
+                                                 slurped)
+          hookTrimTrailingContent(stubContent, stubBaseLabel, slurped)
+          if stubStreamedLive:
+            hookAfterLiveContent(stubBaseLabel, slurped)
+      hookStopSpinner()
       usage = stubUsage(result, stubContent)
       let stubElapsed = (epochTime() - stubT0).int
-      let stubLabel = tokenLineLabel(usage, stubWindow, stubElapsed)
-      if contentStreamedLive or stubContent.strip.len == 0:
-        paintBarPrompt(stubLabel, DimPromptColor)
-      else:
-        setBarPromptState(stubLabel)
-      emitFatPromptEvent setPendingHintEvent(usage, stubWindow, stubElapsed)
+      hookFinalUsage(usage, stubWindow, stubElapsed, stubContent,
+                     stubStreamedLive)
       if result.kind == JObject:
         result["usage"] = %*{
           "promptTokens": usage.promptTokens,
@@ -2225,29 +1052,13 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   decayLevel(serverRetryLevel, serverLastTs, t0)
   decayLevel(rateRetryLevel, rateLastTs, t0)
   let window = contextWindowFor(p.model)
-  let baseLabel = contextLabel(lastPromptTokens, window)
-  # Park on the upcoming spinner/bar row while leaving one blank scratch row
-  # above it. That row is both the visual separator and the known-blank overlay
-  # target for the reasoning ticker.
-  let startsAfterReceipt = followupStartsAfterReceipt
-  followupStartsAfterReceipt = false
-  termui.withTerminalWriteLock:
-    if not startsAfterReceipt:
-      termui.writeRaw("\n")
-  setSpinLabel(liveLabel(baseLabel, 0))
+  let baseLabel = hookBeforeCall(lastPromptTokens, window)
   # Cursor is hidden for the duration of the entire turn by `runTurns`
   # so the dim ❯ placeholder is the only visible caret. callModel
   # itself doesn't toggle visibility — touching DECTCEM here would
   # cause a flicker between callModel iterations within a turn.
-  startSpinner("")
-  startQuietWatch(liveLabel(baseLabel, 0))
-  let cancelWatcherStarted = inputEditor == nil
-  if cancelWatcherStarted:
-    startCancelWatcher()
   defer:
-    stopQuietWatch()
-    if cancelWatcherStarted:
-      stopCancelWatcher()
+    hookAfterCall()
   const MaxAttempts = 8
   var outcome: StreamOutcome
   var attempt = 0
@@ -2257,7 +1068,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
     outcome = streamHttp(p.url & "/chat/completions", p.key, bodyStr,
                         baseLabel, slurped, xmlToolCallsFallback(p))
     if outcome.errMsg == "interrupted by user":
-      stopSpinner()
+      hookStopSpinner()
       if outcome.assistantMsg == nil:
         raise newException(ApiError, "interrupted by user")
       break
@@ -2267,7 +1078,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
     var errMsg = outcome.errMsg
     if errMsg == "" and retryable: errMsg = "api " & $code
     if not retryable:
-      stopSpinner()
+      hookStopSpinner()
       if outcome.assistantMsg == nil:
         raise newException(ApiError,
           errMsg & (if outcome.errBody.len > 0: ": " & outcome.errBody else: ""))
@@ -2289,7 +1100,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
             msg["tool_calls"] = tcArr
       break
     if attempt >= MaxAttempts:
-      stopSpinner()
+      hookStopSpinner()
       raise newException(ApiError,
         errMsg & (if outcome.errBody.len > 0: ": " & outcome.errBody else: ""))
     let retryAfter = try: parseInt(outcome.retryAfter) except CatchableError: 0
@@ -2304,7 +1115,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
         min(1 shl base, 90)
       else:
         min(1 shl serverRetryLevel, 16)
-    stopSpinner()
+    hookStopSpinner()
     stderr.writeLine &"3code: {errMsg}; retry {attempt + 1}/{MaxAttempts} in {backoff}s"
     block wait:
       var remaining = backoff * 1000
@@ -2315,8 +1126,8 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
         remaining -= step
     if isInterrupted():
       raise newException(ApiError, "interrupted by user during retry backoff")
-    setSpinLabel(&"retry {attempt + 1}/{MaxAttempts}")
-    startSpinner("")
+    hookSetStatusLabel(&"retry {attempt + 1}/{MaxAttempts}")
+    hookStartSpinner("")
     if category == "rate":
       inc rateRetryLevel
       rateLastTs = epochTime()
@@ -2331,26 +1142,13 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
     # (`slurped/4`). `pendingHint` carries the same numbers forward
     # so the next user-submit's receipt repaints this row dim with
     # matching content.
-    let label = tokenLineLabel(usage, window, elapsed.int)
-    if contentStreamedLive:
-      # Remove the ticker row inserted by the post-streaming spinner restart.
-      termui.syncWrite(removeTickerRowAboveBytes())
     let assistantContent =
       if outcome.assistantMsg == nil: ""
       else: outcome.assistantMsg{"content"}.getStr("")
-    if contentStreamedLive or assistantContent.strip.len == 0:
-      paintBarPrompt(label, DimPromptColor)
-    else:
-      setBarPromptState(label)
-    emitFatPromptEvent setPendingHintEvent(usage, window, elapsed.int)
-    if window > 0 and usage.promptTokens.float > 0.7 * window.float and
-       usage.promptTokens.float <= CompactThresholdFrac * window.float:
-      writeTranscriptWithFatPrompt:
-        subtleWriteLn(stdout,
-          &"  · context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} — auto-compaction will fire near {humanTokens(int(CompactThresholdFrac * window.float))}; :compact or :summarize to act now")
+    hookFinalUsage(usage, window, elapsed.int, assistantContent,
+                   outcome.streamedLive)
   else:
-    writeTranscriptWithFatPrompt:
-      hint &"  · {elapsed.int}s", resetStyle, "\n"
+    hookNoUsage(elapsed.int)
   if outcome.assistantMsg != nil and usage.totalTokens > 0:
     # Attach this turn's usage inline so replay can render the same
     # token line without a parallel array that drifts under summarization.
@@ -2364,7 +1162,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       "elapsed": elapsed.int,
       "ts": now().format("yyyy-MM-dd'T'HH:mm:sszzz"),
     }
-  debugOut &"callModel end streamedLive={contentStreamedLive} usage={usage.totalTokens}"
+  debugOut &"callModel end streamedLive={outcome.streamedLive} usage={usage.totalTokens}"
   return outcome.assistantMsg
 
 proc verifyBody*(p: Profile): string =

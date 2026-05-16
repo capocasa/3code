@@ -209,18 +209,6 @@ proc assertNoCacheLiveReceipt(tty: TtySession; marker: string) =
             "cache slot shown for a no-cache usage receipt:\n" &
               frame.rows.join("\n")
 
-proc assertReceiptTouchesAssistantResponse(tty: TtySession;
-                                           responseMarker: string) =
-  for frame in tty.frames:
-    for rowIdx in 0 ..< frame.rows.len - 1:
-      if frame.rows[rowIdx].isTokenBar and
-          frame.rows[rowIdx + 1].startsWith("● ") and
-          responseMarker in frame.rows[rowIdx + 1]:
-        return
-  doAssert false,
-    "no frame showed token receipt directly adjacent to assistant response: " &
-      responseMarker
-
 proc rowWith(frame: TtyFrame; marker: string): int =
   for rowIdx, row in frame.rows:
     if marker in row:
@@ -618,7 +606,9 @@ $ for i in 1 2 3 4 5 6 7 8 9; do echo bash-line-$i; sleep 0.05; d…
     tty.expect "❯"
     tty.send "start height change\n"
     tty.drain(150)
-    tty.send repeat("wrap-", 35)
+    tty.send "tall buffered"
+    tty.send "\x1b[13;2u"
+    tty.send "still buffered"
     tty.drain(120)
     tty.send "\x15"
     tty.drain(80)
@@ -728,7 +718,7 @@ $ for i in 1 2 3 4 5 6 7 8 9; do echo bash-line-$i; sleep 0.05; d…
     tty.send ":q\n"
     tty.expectExit 0
 
-  test "tool follow-up response touches its token receipt":
+  test "tool follow-up response keeps receipt attached to prior item":
     let root = newFixture("receipt_followup")
     writeConfiguredProvider(root)
     writeStubResponses(root, %*[
@@ -769,9 +759,9 @@ $ for i in 1 2 3 4 5 6 7 8 9; do echo bash-line-$i; sleep 0.05; d…
     tty.assertFatPromptFrames()
     tty.assertOneBlankBetween("❯ run tool followup",
                               "● Running directory listing.")
-    tty.assertOneBlankBetween("  listed-file", "↑90")
-    tty.assertReceiptTouchesAssistantResponse("Follow-up answer after tool.")
-    tty.assertNoBlankBetween("↑90", "● Follow-up answer after tool.")
-    tty.assertOneBlankBetween("● Follow-up answer after tool.", "↑110")
+    tty.assertNoBlankBetween("● Running directory listing.", "↑90")
+    tty.assertOneBlankBetween("↑90", "$ printf")
+    tty.assertOneBlankBetween("  listed-file", "● Follow-up answer after tool.")
+    tty.assertNoBlankBetween("● Follow-up answer after tool.", "↑110")
     tty.send ":q\n"
     tty.expectExit 0

@@ -93,6 +93,7 @@ type
     queuedText*: string
     queuedEchoRows*: int
     residualText*: string
+    editorText*: string
     cmdWasQuit*: bool
 
 proc die*(msg: string, code = 1) {.noreturn.} =

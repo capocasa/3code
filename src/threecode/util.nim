@@ -1,4 +1,5 @@
-import std/[net, os, sequtils, strformat, strutils]
+import std/[net, os, sequtils, strformat, strutils, times]
+import types
 
 # ---------- Color palette ----------
 #
@@ -12,9 +13,21 @@ import std/[net, os, sequtils, strformat, strutils]
 const
   CyanFg* = "\x1b[36m"
   BoldOn* = "\x1b[1m"
+  BlueFg* = "\x1b[34m"
   GreyFg* = "\x1b[38;5;244m"
   OffWhiteFg* = "\x1b[38;5;252m"
   Reset* = "\x1b[0m"
+
+proc debugOut*(msg: string) =
+  if not debugEnabled: return
+  let t = epochTime().formatFloat(ffDecimal, 3)
+  stderr.writeLine BlueFg & "[dbg " & t & "] " & msg & Reset
+
+proc debugOut*(msg, tag: string) =
+  if not debugEnabled: return
+  let t = epochTime().formatFloat(ffDecimal, 3)
+  stderr.writeLine BlueFg & "[dbg " & t & "] " & BoldOn & tag &
+    Reset & BlueFg & " " & msg & Reset
 
 proc bundledCaFile*(): string =
   ## Path to the `cacert.pem` we ship alongside the binary on macOS /

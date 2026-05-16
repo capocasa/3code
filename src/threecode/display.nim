@@ -18,7 +18,7 @@
 ## grey-244 for subtle FYI output) avoids SGR `dim` and `fgWhite` which render
 ## below readable contrast on light terminal backgrounds.
 
-import std/[critbits, exitprocs, json, os, strformat, strutils, terminal, times]
+import std/[critbits, exitprocs, json, os, strformat, strutils, terminal]
 import types, util, config, prompts, session, actions, minline, toolstream
 import terminal as termui
 
@@ -57,16 +57,6 @@ template err*(args: varargs[untyped]) =
 template errLn*(args: varargs[untyped]) =
   stdout.styledWrite(fgMagenta, args, resetStyle)
   stdout.write "\r\n"
-
-proc debugOut*(msg: string) =
-  if not debugEnabled: return
-  let t = epochTime().formatFloat(ffDecimal, 3)
-  stderr.styledWriteLine(fgBlue, "[dbg ", t, "] ", msg, resetStyle)
-
-proc debugOut*(msg, tag: string) =
-  if not debugEnabled: return
-  let t = epochTime().formatFloat(ffDecimal, 3)
-  stderr.styledWriteLine(fgBlue, "[dbg ", t, "] ", styleBright, tag, resetStyle, fgBlue, " ", msg, resetStyle)
 
 proc cmdResponse*(body: string) =
   ## System-command response. One blank line above and below, no
@@ -417,6 +407,9 @@ proc finishMd*(s: MarkdownState, outFile: File): bool {.discardable.} =
     s.tableBuf.setLen 0
     result = true
 
+proc writeAssistantBullet*(outFile: File = stdout) =
+  outFile.styledWrite styleBright, "● ", resetStyle
+
 proc renderAssistantContent*(content: string, outFile: File = stdout) =
   ## Bullet `● ` (bright white) + dim content with full markdown
   ## structure (headers, fences, tables, inline bold and backtick-code).
@@ -425,7 +418,7 @@ proc renderAssistantContent*(content: string, outFile: File = stdout) =
   ## `outFile` lets tests capture output to a temp file; default is
   ## stdout.
   if content.strip.len == 0: return
-  outFile.styledWrite styleBright, "● ", resetStyle
+  writeAssistantBullet(outFile)
   var st = initMarkdownState()
   for line in content.splitLines:
     handleMdLine(st, line, outFile)

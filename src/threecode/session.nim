@@ -698,7 +698,7 @@ proc resolveSessionPath*(id: string, cwd = ""): string =
   if fileExists(candidate2): return candidate2
   ""
 
-# ---------- back-compat shims kept for callers ----------
+# ---------- Session-derived display helpers ----------
 
 proc usageFromJson*(j: JsonNode): Usage =
   if j == nil or j.kind != JObject: return

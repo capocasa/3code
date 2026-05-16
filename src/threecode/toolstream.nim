@@ -48,10 +48,16 @@ type
     idx*: int
     total*: int
     onScreen*: int
+    overlayTop*: int
+    overlayHeight*: int
+    restoreRow*: int
     buf*: seq[string]
 
-proc initStreamingView*(maxLines = StreamMaxLines, idx = 0): StreamingView =
-  StreamingView(maxLines: maxLines, idx: idx, buf: @[])
+proc initStreamingView*(maxLines = StreamMaxLines, idx = 0;
+                        overlayTop = 0, overlayHeight = 0,
+                        restoreRow = 0): StreamingView =
+  StreamingView(maxLines: maxLines, idx: idx, overlayTop: overlayTop,
+                overlayHeight: overlayHeight, restoreRow: restoreRow, buf: @[])
 
 proc omittedLine(v: StreamingView): string =
   let hidden = max(0, v.total - (v.maxLines - 1))
@@ -61,10 +67,47 @@ proc omittedLine(v: StreamingView): string =
   &"... {hidden} line" & (if hidden == 1: "" else: "s") &
     " omitted" & show
 
+proc overlayActive(v: StreamingView): bool =
+  v.overlayTop > 0 and v.overlayHeight > 0 and v.restoreRow > 0
+
+proc wrappedRows(line: string): seq[string] =
+  let termW = try: terminalWidth() except CatchableError: 80
+  let bodyW = max(20, termW - 3)
+  for chunk in charWrapAnsi(line, bodyW):
+    result.add GreyFg & "  " & chunk & Reset
+
+proc overlayRows(v: StreamingView): seq[string] =
+  let contentHeight = max(1, v.overlayHeight - 1)
+  var logical: seq[string]
+  if v.buf.len <= v.maxLines:
+    logical = v.buf
+  else:
+    logical.add v.omittedLine()
+    let tailLines = max(0, v.maxLines - 1)
+    let start = max(0, v.buf.len - tailLines)
+    for i in start..<v.buf.len:
+      logical.add v.buf[i]
+  for line in logical:
+    for row in wrappedRows(line):
+      result.add row
+  if result.len > contentHeight:
+    let hidden = result.len - (contentHeight - 1)
+    let show =
+      if v.idx > 0: " :show " & $v.idx & " for full"
+      else: ""
+    result = @[GreyFg & "  ... " & $hidden & " visual row" &
+      (if hidden == 1: "" else: "s") & " omitted" & show & Reset] &
+      result[^max(0, contentHeight - 1) .. ^1]
+  result.insert("", 0)
+
 proc addLine*(v: var StreamingView, line: string) =
   termui.withTerminalWriteLock:
     inc v.total
     v.buf.add line
+    if v.overlayActive:
+      termui.renderToolOverlay(v.overlayTop, v.overlayHeight, v.restoreRow,
+                               v.overlayRows())
+      return
     if v.total <= v.maxLines:
       writeWrappedLine(line)
       v.onScreen += indentedRowCount(line)
@@ -83,6 +126,9 @@ proc addLine*(v: var StreamingView, line: string) =
 
 proc erase*(v: var StreamingView) =
   termui.withTerminalWriteLock:
+    if v.overlayActive:
+      termui.clearToolOverlay(v.overlayTop, v.overlayHeight, v.restoreRow)
+      return
     eraseRows(v.onScreen)
     v.onScreen = 0
 

@@ -3,6 +3,8 @@
 Before changing terminal rendering, read:
 
 - `.agents/design.md` for the fat prompt architecture and visual contract.
+- `.agents/controller-design.md` for controller-owned transcript/history item
+  architecture and module MVC responsibilities.
 - `.agents/testing.md` for visual test and frame viewer workflow.
 - `.agents/development-guide.md` for agent bugfixing rules.
 
