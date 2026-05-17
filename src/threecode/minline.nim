@@ -35,25 +35,15 @@ import
   std/exitprocs,
   os
 
+import signals
+
 when defined(posix):
   import posix
   import std/termios
 
-# SIGWINCH: set on resize. Read by the readLine driver between keystrokes
-# so the editor can pick up the new terminal width and redraw cleanly.
-# The handler stays lightweight (just a flag) — no allocation, no
-# stdio writes — to play nicely with whatever signal mask is in effect.
-var resizePending* {.threadvar.}: bool
-
 when defined(posix):
-  var SIGWINCH {.importc, header: "<signal.h>".}: cint
-  proc winchHandler(sig: cint) {.noconv.} =
-    resizePending = true
   if isatty(stdin):
-    var sa: Sigaction
-    discard sigemptyset(sa.sa_mask)
-    sa.sa_handler = winchHandler
-    discard sigaction(SIGWINCH, sa, nil)
+    installResizeHandler()
 
 proc restoreTerminal*() {.noconv.} =
   ## Single point of terminal restore. Registered once as an exit proc
@@ -1098,7 +1088,7 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
   ## extended keys). Returns ``true`` if the sequence requested a submit
   ## (Shift+Enter / Alt+Enter — these now insert a real newline rather
   ## than backslash-continuation).
-  if c1 == 27 and not ed.deferSubmit and not ed.hasPendingEscapeTail():
+  if c1 == 27 and not ed.hasPendingEscapeTail():
     KEYMAP["ctrl+c"](ed)
     return false
 
@@ -1278,8 +1268,7 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
         c1 = ed.getCh()
         break
       except IOError:
-        if resizePending:
-          resizePending = false
+        if consumeResizePending():
           fullRedraw(ed)
           continue
         raise
@@ -1387,7 +1376,8 @@ proc readLine*(ed: var LineEditor, prompt = "", hidechars = false,
         # uses `resizePending` to redraw on the next iteration; we
         # surface EINTR as IOError so it can do that.
         if n < 0 and errno == EINTR:
-          if resizePending:
+          if consumeResizePending():
+            markResizePending()
             raise newException(IOError, "interrupted")
           continue
         return -1

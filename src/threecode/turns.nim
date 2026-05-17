@@ -7,6 +7,8 @@
 ## model/tool progress should flow through this layer.
 
 import std/[json, locks, os, strformat, strutils, terminal, times]
+when defined(posix):
+  import std/posix except Time
 import types, util, prompts, loop, session, compact, config, actions, api,
   display, fatprompt, streamexec, toolstream
 import terminal as termui
@@ -15,6 +17,39 @@ proc trimTranscriptTail(bytes: var string) =
   while bytes.len > 0 and bytes[^1] in {'\r', '\n'}:
     bytes.setLen(bytes.len - 1)
 
+proc emitTestFrameEvent() =
+  when defined(posix):
+    let fdText = getEnv("THREECODE_TEST_FRAME_FD")
+    if fdText.len > 0:
+      try:
+        let fd = cint(parseInt(fdText))
+        var ch = 'f'
+        discard posix.write(fd, addr ch, 1)
+        let ackText = getEnv("THREECODE_TEST_FRAME_ACK_FD")
+        if ackText.len > 0:
+          let ackFd = cint(parseInt(ackText))
+          var ack: array[1, char]
+          discard posix.read(ackFd, addr ack[0], 1)
+      except CatchableError:
+        discard
+
+proc stubToolCallResult(stub: JsonNode; onLine: proc(line: string) = nil):
+    tuple[output: string, code: int, diff: string] =
+  let stream = stub{"stream"}
+  var streamedLines: seq[string]
+  if stream != nil and stream.kind == JArray:
+    for item in stream:
+      let line = item.getStr("")
+      streamedLines.add line
+      if onLine != nil:
+        onLine(line)
+      emitTestFrameEvent()
+  result.output = stub{"output"}.getStr("")
+  if result.output.len == 0 and streamedLines.len > 0:
+    result.output = streamedLines.join("\n") & "\n"
+  result.code = stub{"code"}.getInt(stub{"exitCode"}.getInt(0))
+  result.diff = stub{"diff"}.getStr("")
+
 proc pendingReceiptBytes(): string =
   if not pendingHint.active:
     return ""
@@ -22,7 +57,7 @@ proc pendingReceiptBytes(): string =
                              pendingHint.elapsed)
   if label.len == 0:
     return ""
-  CyanFg & "  " & label & Reset
+  GreyFg & "  " & label & Reset
 
 proc finishTranscriptItem(bytes: var string) =
   ## A transcript item owns its attached receipt and its following separator.
@@ -31,36 +66,45 @@ proc finishTranscriptItem(bytes: var string) =
   bytes.trimTranscriptTail()
   bytes.add "\r\n\r\n"
 
-proc clearSubmittedFooterState() =
+proc clearSubmittedReceiptState() =
   emitFatPromptEvent clearPendingHintEvent()
-  emitFatPromptEvent clearBarEvent()
+  emitFatPromptEvent clearTickerEvent()
 
-proc commitAssistantItem(content: string; restoreEditor = true) =
+proc clearSubmittedTickerState() =
+  emitFatPromptEvent clearTickerEvent()
+
+proc commitAssistantItem(content: string; restoreEditor = true;
+                         attachReceipt = true) =
+  let afterCommit =
+    if attachReceipt: clearSubmittedReceiptState
+    else: clearSubmittedTickerState
   if content.strip.len == 0:
     var bytes = GreyFg & "  (empty reply — no content, no tool calls)" & Reset
-    let receipt = pendingReceiptBytes()
-    if receipt.len > 0:
+    let receipt = if attachReceipt: pendingReceiptBytes() else: ""
+    if attachReceipt and receipt.len > 0:
       bytes.add "\r\n"
       bytes.add receipt
     bytes.finishTranscriptItem()
     commitTranscriptBytes(
       bytes,
       restoreEditor,
-      clearSubmittedFooterState,
+      afterCommit,
+      reserveFooter = restoreEditor,
       transcriptOwnsSpacing = true)
     return
   var bytes = captureStdoutWrites:
     renderAssistantContent(content)
   bytes.trimTranscriptTail()
-  let receipt = pendingReceiptBytes()
-  if receipt.len > 0:
+  let receipt = if attachReceipt: pendingReceiptBytes() else: ""
+  if attachReceipt and receipt.len > 0:
     bytes.add "\r\n"
     bytes.add receipt
   bytes.finishTranscriptItem()
   commitTranscriptBytes(
     bytes,
     restoreEditor,
-    clearSubmittedFooterState,
+    afterCommit,
+    reserveFooter = restoreEditor,
     transcriptOwnsSpacing = true)
 
 proc commitPendingReceiptAfterStream(restoreEditor = true) =
@@ -74,7 +118,8 @@ proc commitPendingReceiptAfterStream(restoreEditor = true) =
   commitTranscriptBytes(
     bytes,
     restoreEditor,
-    clearSubmittedFooterState,
+    clearSubmittedReceiptState,
+    reserveFooter = restoreEditor,
     transcriptOwnsSpacing = true)
 
 proc commitTranscriptItem(formatBody: proc(); restoreEditor = true;
@@ -98,9 +143,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
   clearInterrupted()
   resetLoopTracker(session.loop)
   # `beginTurn` hides the terminal cursor for the duration of the
-  # turn (streaming + tool exec); the dim `❯ ` glyph remains on
-  # screen as the visible-but-not-blinking caret. `endTurn` flips
-  # the prompt back to bright cyan and shows the cursor again so
+  # turn (streaming + tool exec); the bright `❯ ` glyph remains on
+  # screen as the visible-but-not-blinking caret. `endTurn` shows the
+  # cursor again so
   # readline lands on a typing-ready row. The token receipt for the
   # turn that just completed is *not* rendered here — it lives in
   # `pendingHint` and is painted in place of the previous bar at
@@ -200,6 +245,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
               " has malformed arguments JSON (" & e.msg & "): " & argsStr
             newJObject()
         let act = toolCallToAction(p.family, name, args)
+        let toolStub = tc{"stub"}
         let idx = session.toolLog.len + 1
         let silent = isSkillRead(act)
         let hadToolBar = currentBarLabel.len > 0
@@ -207,6 +253,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           startBarTick(currentBarLabel)
         let toolT0 = epochTime()
         if session.readCache == nil: session.readCache = newReadCache()
+        var streamedOutputShown = false
         # try/finally guarantees `stopBarTick` runs even if `runAction`
         # raises. Without this, an unhandled exception in a non-bash
         # action leaves the bar-tick thread painting the bottom row
@@ -221,35 +268,58 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           (r, code, diff) =
             if act.kind == akBash:
               if liveEditorFooterAnchored():
-                let promptOwnsStdin = inputEditor != nil
-                setToolStdinWatcherEnabled(not promptOwnsStdin)
-                var result: typeof(runActionStreaming(act, session.readCache))
-                try:
-                  result = runActionStreaming(act, session.readCache,
-                    proc(line: string) = discard)
-                finally:
-                  setToolStdinWatcherEnabled(true)
-                result
-              else:
-                discard stopBarTick()
-                let termH = try: terminalHeight() except CatchableError: 24
-                let overlay = toolOverlayGeometry(termH, StreamMaxLines)
+                let th = try: terminalHeight() except CatchableError: 24
+                let overlay = toolOverlayGeometry(th, StreamMaxLines)
                 var sv = initStreamingView(StreamMaxLines, idx,
                   overlay.top, overlay.height, overlay.footerTop)
                 let promptOwnsStdin = inputEditor != nil
                 setToolStdinWatcherEnabled(not promptOwnsStdin)
                 var result: typeof(runActionStreaming(act, session.readCache))
+                var streamHeaderShown = false
                 try:
-                  result = runActionStreaming(act, session.readCache,
-                    proc(line: string) =
-                      sv.addLine(line))
+                  let onLine = proc(line: string) =
+                    if not streamHeaderShown:
+                      sv.addLine("$ " & bannerFor(act))
+                      streamHeaderShown = true
+                    streamedOutputShown = true
+                    sv.addLine(line)
+                  if toolStub != nil and toolStub.kind == JObject:
+                    result = stubToolCallResult(toolStub, onLine)
+                  else:
+                    result = runActionStreaming(act, session.readCache, onLine)
+                finally:
+                  setToolStdinWatcherEnabled(true)
+                  sv.erase()
+                  repaintBarPrompt()
+                result
+              else:
+                discard stopBarTick()
+                var sv = initStreamingView(StreamMaxLines, idx)
+                let promptOwnsStdin = inputEditor != nil
+                setToolStdinWatcherEnabled(not promptOwnsStdin)
+                var result: typeof(runActionStreaming(act, session.readCache))
+                var streamHeaderShown = false
+                try:
+                  let onLine = proc(line: string) =
+                    if not streamHeaderShown:
+                      sv.addLine("$ " & bannerFor(act))
+                      streamHeaderShown = true
+                    streamedOutputShown = true
+                    sv.addLine(line)
+                  if toolStub != nil and toolStub.kind == JObject:
+                    result = stubToolCallResult(toolStub, onLine)
+                  else:
+                    result = runActionStreaming(act, session.readCache, onLine)
                 finally:
                   setToolStdinWatcherEnabled(true)
                   sv.erase()
                   repaintBarPrompt()
                 result
             else:
-              runAction(act, session.readCache)
+              if toolStub != nil and toolStub.kind == JObject:
+                stubToolCallResult(toolStub)
+              else:
+                runAction(act, session.readCache)
         finally:
           if hadToolBar:
             discard stopBarTick()
@@ -262,7 +332,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         if not silent:
           commitTranscriptItem(proc() =
             renderToolBanner(bannerFor(act), act.kind, code, toolElapsed.int)
-            printToolResult(act.kind, r, code, idx, diff)
+            if not (act.kind == akBash and streamedOutputShown):
+              printToolResult(act.kind, r, code, idx, diff)
           , prefixBoundary = not hadToolBar)
         else:
           commitTranscriptItem(proc() =
@@ -362,16 +433,22 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       debugOut "runTurns: loop continue"
       continue
     let queuedBeforeFinalRender = hasQueuedAutosend()
+    discard stopBarTick()
+    stopSpinner()
     if streamedLive:
-      commitPendingReceiptAfterStream(restoreEditor = not queuedBeforeFinalRender)
+      if queuedBeforeFinalRender:
+        commitPendingReceiptAfterStream(restoreEditor = false)
     else:
-      commitAssistantItem(content, restoreEditor = not queuedBeforeFinalRender)
+      commitAssistantItem(content, restoreEditor = not queuedBeforeFinalRender,
+                          attachReceipt = queuedBeforeFinalRender)
     if queuedBeforeFinalRender or hasQueuedAutosend():
-      promoteQueuedAutosendFromEditor()
       stopTurnInputForFinalRender()
+      promoteQueuedAutosendFromEditor()
       turnEnded = true
       return
-    finishTurn()
+    stopTurnInputForFinalRender()
+    endTurnAfterTranscriptAppend()
+    turnEnded = true
     break
 
 proc runTurnsInteractive*(p: Profile, messages: var JsonNode, session: var Session) =

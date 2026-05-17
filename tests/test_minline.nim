@@ -1,5 +1,6 @@
 import std/[unittest, strutils, sequtils]
 import threecode/minline
+import threecode/signals
 import minline_testutils
 import ttty/grid
 
@@ -458,15 +459,6 @@ suite "minline editor: bracketed paste":
 
 # ---------------- SIGWINCH / EINTR ----------------
 
-template sigGetCh(keys: seq[int]; ki: var int; body: untyped): untyped =
-  ## Read from `keys` where -1 = raise IOError (SIGWINCH EINTR).
-  let idx = ki
-  inc ki
-  if keys[idx] == -1:
-    resizePending = true
-    raise newException(IOError, "Interrupted system call")
-  body = keys[idx]
-
 suite "minline editor: SIGWINCH EINTR":
   test "SIGWINCH before first keypress recovers":
     var ed = initEditor()
@@ -478,7 +470,7 @@ suite "minline editor: SIGWINCH EINTR":
     let getCh: GetChProc = proc(): int =
       let idx = ki; inc ki
       if keys[idx] == -1:
-        resizePending = true
+        markResizePending()
         raise newException(IOError, "Interrupted system call")
       result = keys[idx]
     let write = proc(s: string) = discard
@@ -496,7 +488,7 @@ suite "minline editor: SIGWINCH EINTR":
     let getCh: GetChProc = proc(): int =
       let idx = ki; inc ki
       if keys[idx] == -1:
-        resizePending = true
+        markResizePending()
         ed.width = 10
         raise newException(IOError, "Interrupted system call")
       result = keys[idx]
@@ -518,7 +510,7 @@ suite "minline editor: SIGWINCH EINTR":
     let getCh: GetChProc = proc(): int =
       let idx = ki; inc ki
       if keys[idx] == -1:
-        resizePending = true
+        markResizePending()
         raise newException(IOError, "Interrupted system call")
       result = keys[idx]
     let write = proc(s: string) = discard

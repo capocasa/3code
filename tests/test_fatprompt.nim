@@ -16,7 +16,7 @@ suite "fat prompt frame model":
 
     p.checkFrame ["one", "two", "three", "", "○2%  ↑20", "❯ hello"]
 
-  test "ticker overlays lowest scrollback row without reserving space":
+  test "ticker reserves its own row above token bar":
     var p = initFatPrompt(width = 30, height = 6, window = 1000)
     for line in ["one", "two", "three", "four"]:
       p.addScrollLine line
@@ -25,7 +25,7 @@ suite "fat prompt frame model":
                   apiActive = true, spinner = "◐", elapsedS = 7)
     p.setEditor "hello"
 
-    p.checkFrame ["two", "three", "four", "thinking...",
+    p.checkFrame ["three", "four", "", "thinking...",
                   "◐  ○2%  ↑20  7s", "❯ hello"]
 
     p.setTicker ""

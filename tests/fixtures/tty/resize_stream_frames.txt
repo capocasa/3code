@@ -1,0 +1,302 @@
+===== frame 0000 =====
+
+===== frame 0001 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+===== frame 0002 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+<spinner> ○0% <elapsed>
+❯
+===== frame 0003 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+<spinner> ○0%  ↓1 <elapsed>
+❯
+===== frame 0004 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+<spinner> ○0%  ↓2 <elapsed>
+❯
+===== frame 0005 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+<spinner> ○0%  ↓3 <elapsed>
+❯
+===== frame 0006 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+<spinner> ○0%  ↓4 <elapsed>
+❯
+===== frame 0007 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+<spinner> ○0%  ↓5 <elapsed>
+❯
+===== frame 0008 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+<spinner> ○0%  ↓6 <elapsed>
+❯
+===== frame 0009 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+<spinner> ○0%  ↓7 <elapsed>
+❯
+===== frame 0010 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+<spinner> ○0%  ↓8 <elapsed>
+❯
+===== frame 0011 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+<spinner> ○0%  ↓9 <elapsed>
+❯
+===== frame 0012 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+<spinner> ○0%  ↓10 <elapsed>
+❯
+===== frame 0013 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+<spinner> ○0%  ↓11 <elapsed>
+❯
+===== frame 0014 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+<spinner> ○0%  ↓12 <elapsed>
+❯
+===== frame 0015 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+<spinner> ○0%  ↓13 <elapsed>
+❯
+===== frame 0016 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+<spinner> ○0%  ↓14 <elapsed>
+❯
+===== frame 0017 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+<spinner> ○0%  ↓15 <elapsed>
+❯
+===== frame 0018 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+<spinner> ○0%  ↓16 <elapsed>
+❯
+===== frame 0019 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+<spinner> ○0%  ↓17 <elapsed>
+❯
+===== frame 0020 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ resize while streaming
+
+● Resize stream part one. Resize stream part two. Resize stream complete.
+
+  ○0%  ↑42  ↓9  <elapsed>
+❯

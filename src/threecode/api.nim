@@ -28,6 +28,26 @@ var
 const providerStub {.booldefine.} = false
 when providerStub:
   var stubResponseIdx = 0
+
+  proc emitTestFrameEvent() =
+    when defined(posix):
+      let fdText = getEnv("THREECODE_TEST_FRAME_FD")
+      if fdText.len > 0:
+        try:
+          let fd = cint(parseInt(fdText))
+          var ch = 'f'
+          discard posix.write(fd, addr ch, 1)
+          let ackText = getEnv("THREECODE_TEST_FRAME_ACK_FD")
+          if ackText.len > 0:
+            let ackFd = cint(parseInt(ackText))
+            var ack: array[1, char]
+            discard posix.read(ackFd, addr ack[0], 1)
+        except CatchableError:
+          discard
+
+  proc testFrameMode(): bool =
+    getEnv("THREECODE_TEST_FRAME_FD").len > 0
+
   type StubFailure* = enum
     sfNone, sfDns, sfNetworkUnreachable, sfConnectionRefused,
     sfConnectTimeout, sfTls, sfCertificate, sfBrokenPipe,
@@ -196,6 +216,15 @@ when providerStub:
     result.promptTokens = 100
     result.completionTokens = max(1, content.len div 4)
     result.totalTokens = result.promptTokens + result.completionTokens
+
+  proc stubStringChunks(node: JsonNode; key, fallback: string): seq[string] =
+    let chunks = node{key}
+    if chunks != nil and chunks.kind == JArray:
+      for chunk in chunks:
+        result.add chunk.getStr("")
+    if result.len == 0:
+      for ch in fallback:
+        result.add $ch
 
 # ---------- Cancellation and stream hooks ----------
 
@@ -568,12 +597,18 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   let u = try: parseUri(url) except CatchableError as e:
     result.errMsg = "bad url: " & e.msg
     return
-  if u.scheme != "https":
+  let host = u.hostname
+  let plainHttp =
+    when defined(testPlainHttp):
+      u.scheme == "http" and (host == "127.0.0.1" or host == "localhost")
+    else:
+      false
+  if u.scheme != "https" and not plainHttp:
     result.errMsg = "only https supported, got: " & u.scheme
     return
-  let host = u.hostname
   let port =
     if u.port.len > 0: Port(parseInt(u.port))
+    elif plainHttp: Port(80)
     else: Port(443)
   let pathQuery =
     block:
@@ -596,10 +631,14 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     else:
       closeCachedStreamConn()
       try:
-        conn = connectTls(host, port, timeoutMs = 1_200_000,
-                          caFile = bundledCaFile())
+        if plainHttp:
+          conn = connectPlain(host, port, timeoutMs = 1_200_000)
+        else:
+          conn = connectTls(host, port, timeoutMs = 1_200_000,
+                            caFile = bundledCaFile())
       except CatchableError as e:
-        result.errMsg = "TLS connect failed: " & e.msg
+        result.errMsg =
+          (if plainHttp: "connect failed: " else: "TLS connect failed: ") & e.msg
         return
       cachedStreamConn = conn
       cachedStreamHostKey = hostKey
@@ -961,7 +1000,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       debugOut &"callModel stub idx={stubResponseIdx-1} failure={stubFailureName(lastFailure)}"
       var slurped = 0
       let preStreamDelay = stubDelayMs(result, "preStreamDelayMs", 0)
-      if preStreamDelay > 0:
+      if preStreamDelay > 0 and not testFrameMode():
         var remaining = preStreamDelay
         while remaining > 0:
           if isInterrupted():
@@ -978,31 +1017,32 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
           stubReasoning = result{"reasoning"}.getStr("")
         var accReasoning = ""
         var contentStarted = false
-        for ch in stubReasoning:
-          accReasoning.add ch
-          inc slurped
+        for chunk in stubStringChunks(result, "reasoningChunks", stubReasoning):
+          accReasoning.add chunk
+          slurped += chunk.len
           hookProgress(stubBaseLabel, slurped)
           if hookShowThinking() and not contentStarted:
             hookReasoningDelta(accReasoning, stubBaseLabel, slurped,
                                contentStarted)
-          sleep 15
-        for ch in stubContent:
-          let chunk = $ch
-          inc slurped
+          emitTestFrameEvent()
+        for chunk in stubStringChunks(result, "contentChunks", stubContent):
+          slurped += chunk.len
           hookProgress(stubBaseLabel, slurped)
           contentStarted = hookContentDelta(chunk, stubBaseLabel, slurped)
-          sleep 15
+          emitTestFrameEvent()
         if contentStarted:
           stubStreamedLive = hookContentFinished(stubContent, stubBaseLabel,
                                                  slurped)
           hookTrimTrailingContent(stubContent, stubBaseLabel, slurped)
           if stubStreamedLive:
             hookAfterLiveContent(stubBaseLabel, slurped)
+          emitTestFrameEvent()
       hookStopSpinner()
       usage = stubUsage(result, stubContent)
       let stubElapsed = (epochTime() - stubT0).int
       hookFinalUsage(usage, stubWindow, stubElapsed, stubContent,
                      stubStreamedLive)
+      emitTestFrameEvent()
       if result.kind == JObject:
         result["usage"] = %*{
           "promptTokens": usage.promptTokens,
@@ -1054,7 +1094,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   let window = contextWindowFor(p.model)
   let baseLabel = hookBeforeCall(lastPromptTokens, window)
   # Cursor is hidden for the duration of the entire turn by `runTurns`
-  # so the dim ❯ placeholder is the only visible caret. callModel
+  # so the prompt placeholder is the only visible caret. callModel
   # itself doesn't toggle visibility — touching DECTCEM here would
   # cause a flicker between callModel iterations within a turn.
   defer:

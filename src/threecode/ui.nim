@@ -707,12 +707,22 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
   ## cursor at K col 0 — the pre-first-turn startup state, signalled
   ## by `currentBarLabel == ""`). In bar mode we walk down one row to
   ## the prompt and clear; in prompt-only mode we clear in place so
-  ## minline's bright cyan `❯ ` overwrites the static dim glyph. After
+  ## minline's bright cyan `❯ ` owns the visible prompt glyph. After
   ## Enter the cursor is wherever minline left it; we don't try to
   ## clean up — `emitUserSubmit` walks back using
   ## `splitLines(line).len + (1 if bar / 2 if gap / 0 if prompt-only)`
   ## and clear-to-end-of-screen from there.
-  enterPromptInput(BrightPromptColor)
+  enterPromptInput()
+  let oldPreRedraw = editor.preRedraw
+  let oldPostRedraw = editor.postRedraw
+  if currentBarLabel.len > 0:
+    editor.preRedraw = proc(ed: var minline.LineEditor) =
+      beginForegroundEditorRedraw(ed)
+    editor.postRedraw = proc(ed: var minline.LineEditor) =
+      finishForegroundEditorRedraw()
+  defer:
+    editor.preRedraw = oldPreRedraw
+    editor.postRedraw = oldPostRedraw
   let line = try: editor.readLine("❯ ")
              except EOFError:
                done = true; return ""
@@ -725,7 +735,7 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
     # would push the prompt one row lower than the bar).
     # The editor reports the visual rows the rendered input occupied;
     # use that so wrap-affected lines walk back the right amount.
-    resetPromptInputAfterEmpty(editor.echoRows, BrightPromptColor)
+    resetPromptInputAfterEmpty(editor.echoRows)
     return ""
   return line
 

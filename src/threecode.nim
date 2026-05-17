@@ -33,7 +33,6 @@ when defined(posix):
 import threecode/[types, util, prompts, shell, loop, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
                   toolstream, turns]
-import threecode/terminal as termui
 import threecode/minline
 export types, util, prompts, shell, loop, session, compact,
        config, actions, api, display, ui, fatprompt, toolstream, turns
@@ -104,7 +103,7 @@ proc commitUserPromptTranscript(line: string; restoreEditor = true) =
       ""
   var bytes = ""
   if receiptLabel.len > 0:
-    bytes.add CyanFg
+    bytes.add GreyFg
     bytes.add "  "
     bytes.add receiptLabel
     bytes.add Reset
@@ -115,11 +114,23 @@ proc commitUserPromptTranscript(line: string; restoreEditor = true) =
   proc clearSubmittedFooterState() =
     emitFatPromptEvent clearPendingHintEvent()
     emitFatPromptEvent clearBarEvent()
+    emitFatPromptEvent clearTickerEvent()
   if not restoreEditor:
+    let oldFooterRows =
+      if currentBarLabel.len > 0: max(1, footerRowsAboveEditor(fatPromptState))
+      else: 0
     clearSubmittedFooterState()
-    if bytes.len > 0 and bytes[^1] != '\n':
-      bytes.add "\n"
-    termui.writeRaw(bytes)
+    while bytes.len > 0 and bytes[^1] in {'\r', '\n'}:
+      bytes.setLen(bytes.len - 1)
+    bytes.add "\r\n\r\n"
+    commitTranscriptBytes(
+      bytes,
+      restoreEditor = false,
+      clearFooterAboveCursor = false,
+      reserveFooter = false,
+      footerRowsAboveCursor = oldFooterRows,
+      transcriptOwnsSpacing = true)
+    receiptTouchesNextResponse = true
     return
   commitTranscriptBytes(
     bytes,
@@ -355,7 +366,7 @@ proc main() =
       stdout.write "\n"
       let label = tokenLineLabel(lastUsage, window)
       let tw = try: terminalWidth() except CatchableError: 0
-      stdout.write barFooterBytes(label, BrightPromptColor, tw)
+      stdout.write barFooterBytes(label, tw)
       stdout.flushFile
       emitFatPromptEvent setBarEvent(label, hasGap = true)
       emitFatPromptEvent setPendingHintEvent(lastUsage, window, -1)
@@ -389,9 +400,9 @@ proc main() =
       # flow. In prompt-only mode (pre-first-turn) the chrome is just
       # the prompt; otherwise it's bar+prompt.
       if currentBarLabel.len == 0:
-        paintPromptOnly(BrightPromptColor)
+        paintPromptOnly()
       else:
-        paintBarPrompt(currentBarLabel, BrightPromptColor)
+        paintBarPrompt(currentBarLabel)
       continue
     if prof.name == "":
       stdout.styledWriteLine fgMagenta,

@@ -1,4 +1,4 @@
-import std/[os, strutils, unittest]
+import std/[os, strutils, times, unittest]
 import threecode/[actions, types, streamexec]
 
 suite "streamexec: basic streaming":
@@ -29,6 +29,28 @@ suite "streamexec: basic streaming":
     check lines == @["no newline"]
     check rawOut == "no newline\n"
 
+  test "streams partial prompt before newline":
+    var lines: seq[string]
+    let act = Action(kind: akBash,
+      body: "printf 'Prompt: waiting'; sleep 1; printf '\\nDone\\n'")
+    let (rawOut, code) = runStreamingBash(act, nil,
+      proc(line: string) = lines.add(line))
+    check code == 0
+    check lines == @["Prompt: waiting", "Done"]
+    check rawOut == "Prompt: waiting\nDone\n"
+
+  test "preserves very long single-line output":
+    var lines: seq[string]
+    let act = Action(kind: akBash,
+      body: "python3 -c \"print('x' * 200000, end='')\"")
+    let (rawOut, code) = runStreamingBash(act, nil,
+      proc(line: string) = lines.add(line))
+    check code == 0
+    check rawOut.len == 200001
+    check rawOut == repeat('x', 200000) & "\n"
+    check lines.len == 1
+    check lines[0] == repeat('x', 200000)
+
   test "preserves exit code":
     let act = Action(kind: akBash, body: "exit 42")
     let (_, code) = runStreamingBash(act, nil, nil)
@@ -38,6 +60,21 @@ suite "streamexec: basic streaming":
     let act = Action(kind: akBash, body: "false")
     let (_, code) = runStreamingBash(act, nil, nil)
     check code == 1
+
+  test "cancelActiveTool stops streamed bash process tree promptly":
+    let started = epochTime()
+    var lines: seq[string]
+    let act = Action(kind: akBash,
+      body: "echo ready; sh -c 'sleep 30 & wait'")
+    let (rawOut, code) = runStreamingBash(act, nil,
+      proc(line: string) =
+        lines.add(line)
+        if line == "ready":
+          cancelActiveTool())
+    check "ready" in lines
+    check rawOut.contains("ready")
+    check code != 0
+    check epochTime() - started < 5.0
 
 suite "streamexec: stderr handling":
   test "stderr appears inline in stdout":

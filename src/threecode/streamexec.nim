@@ -6,11 +6,103 @@
 ## callback for live display. Returns the raw merged output and the
 ## exit code — clipping and post-processing live in `actions.nim`.
 
-import std/[atomics, os, osproc, streams, strformat, strutils, tables, times]
+import std/[atomics, os, osproc, strformat, strutils, tables, times]
 when defined(posix):
   import std/posix except Time
   import std/termios
+else:
+  import std/streams
 import types, util, shell
+
+const PartialLineFlushMs = 700
+
+proc emitCompleteLine(rawOut: var string; lineBuf: var string;
+                      onLine: proc(line: string);
+                      partialShown: var bool; partialText: var string) =
+  rawOut.add lineBuf & "\n"
+  if onLine != nil and not (partialShown and partialText == lineBuf):
+    onLine(lineBuf)
+  lineBuf.setLen(0)
+  partialShown = false
+  partialText.setLen(0)
+
+proc feedOutputChunk(rawOut: var string; lineBuf: var string; chunk: string;
+                     onLine: proc(line: string);
+                     partialShown: var bool; partialText: var string) =
+  for ch in chunk:
+    if ch == '\n':
+      emitCompleteLine(rawOut, lineBuf, onLine, partialShown, partialText)
+    elif ch != '\r':
+      lineBuf.add ch
+
+proc emitPartialLine(lineBuf: string; onLine: proc(line: string);
+                     partialShown: var bool; partialText: var string) =
+  if onLine != nil and lineBuf.len > 0 and
+      (not partialShown or partialText != lineBuf):
+    onLine(lineBuf)
+    partialShown = true
+    partialText = lineBuf
+
+proc emitFinalPartial(rawOut: var string; lineBuf: var string;
+                      onLine: proc(line: string);
+                      partialShown: var bool; partialText: var string) =
+  if lineBuf.len == 0:
+    return
+  emitCompleteLine(rawOut, lineBuf, onLine, partialShown, partialText)
+
+when defined(posix):
+  proc readChunk(buf: var array[4096, char]; n: int): string =
+    result = newString(n)
+    if n > 0:
+      copyMem(addr result[0], addr buf[0], n)
+
+  proc readAvailableOutput(p: Process, rawOut: var string;
+                           lineBuf: var string;
+                           onLine: proc(line: string)) =
+    var partialShown = false
+    var partialText = ""
+    var lastActivity = epochTime()
+    var processExited = false
+    let fd = cint(p.outputHandle)
+
+    while true:
+      var pfd: TPollfd
+      pfd.fd = fd
+      pfd.events = POLLIN or POLLHUP or POLLERR
+      let r = poll(addr pfd, 1.Tnfds, 100.cint)
+      if r > 0 and (pfd.revents and POLLIN) != 0:
+        var buf: array[4096, char]
+        let n = posix.read(fd, addr buf[0], buf.len)
+        if n > 0:
+          feedOutputChunk(rawOut, lineBuf, readChunk(buf, n.int),
+                          onLine, partialShown, partialText)
+          lastActivity = epochTime()
+        else:
+          processExited = true
+      elif p.peekExitCode != -1:
+        processExited = true
+
+      if lineBuf.len > 0 and
+          (epochTime() - lastActivity) * 1000 >= PartialLineFlushMs.float:
+        emitPartialLine(lineBuf, onLine, partialShown, partialText)
+
+      if processExited:
+        while true:
+          var pfdDrain: TPollfd
+          pfdDrain.fd = fd
+          pfdDrain.events = POLLIN
+          let rd = poll(addr pfdDrain, 1.Tnfds, 0.cint)
+          if rd <= 0 or (pfdDrain.revents and POLLIN) == 0:
+            break
+          var buf: array[4096, char]
+          let n = posix.read(fd, addr buf[0], buf.len)
+          if n <= 0:
+            break
+          feedOutputChunk(rawOut, lineBuf, readChunk(buf, n.int),
+                          onLine, partialShown, partialText)
+        break
+
+    emitFinalPartial(rawOut, lineBuf, onLine, partialShown, partialText)
 
 when defined(posix):
   var
@@ -25,10 +117,17 @@ when defined(posix):
 
   toolStdinWatcherEnabled.store(true, moRelaxed)
 
+  proc signalToolProcessTree(pid: int; signal: cint) {.gcsafe.} =
+    ## Streamed tools run in their own process group when `setsid` is
+    ## available. Signal the group first so wrappers such as `timeout` and
+    ## their child shell do not leave the visible tool stuck after Ctrl-C.
+    if pid <= 0: return
+    discard posix.kill(Pid(-pid), signal)
+    discard posix.kill(Pid(pid), signal)
+
   proc cancelActiveTool*() {.gcsafe.} =
     let pid = toolCancelPid.load(moRelaxed)
-    if pid > 0:
-      discard posix.kill(Pid(pid), SIGTERM)
+    signalToolProcessTree(pid, SIGTERM)
 
   proc setToolStdinWatcherEnabled*(enabled: bool) {.gcsafe.} =
     toolStdinWatcherEnabled.store(enabled, moRelease)
@@ -77,10 +176,12 @@ when defined(posix):
                   if not isAlive(Pid(pid)): break
                   sleep(100)
                 if isAlive(Pid(pid)):
-                  discard posix.kill(Pid(pid), SIGKILL)
+                  signalToolProcessTree(pid, SIGKILL)
               return
 
   proc startToolCancelWatcher(pid: int) =
+    toolCancelPid.store(pid, moRelaxed)
+    toolCancelHit.store(false, moRelaxed)
     if not toolStdinWatcherEnabled.load(moAcquire): return
     if toolCancelActive: return
     if isatty(0.cint) == 0: return
@@ -94,22 +195,20 @@ when defined(posix):
     if tcSetAttr(0.cint, TCSANOW, addr t) != 0:
       toolCancelOrigValid = false
       return
-    toolCancelPid.store(pid, moRelaxed)
-    toolCancelHit.store(false, moRelaxed)
     toolCancelStop.store(false, moRelaxed)
     createThread(toolCancelThread, toolCancelLoop)
     toolCancelActive = true
 
   proc stopToolCancelWatcher(): bool =
-    if not toolCancelActive:
-      return toolCancelHit.load(moRelaxed)
-    toolCancelStop.store(true, moRelaxed)
-    joinThread(toolCancelThread)
-    toolCancelActive = false
-    drainToolCancelInput()
-    restoreToolCancelTermios()
+    result = toolCancelHit.load(moRelaxed)
+    if toolCancelActive:
+      toolCancelStop.store(true, moRelaxed)
+      joinThread(toolCancelThread)
+      toolCancelActive = false
+      drainToolCancelInput()
+      restoreToolCancelTermios()
+      result = result or toolCancelHit.load(moRelaxed)
     toolCancelPid.store(0, moRelaxed)
-    toolCancelHit.load(moRelaxed)
 else:
   proc cancelActiveTool*() = discard
   proc setToolStdinWatcherEnabled*(enabled: bool) = discard
@@ -152,29 +251,37 @@ export DEBIAN_FRONTEND=noninteractive
 
   let wrapped = &"exec timeout --foreground 120s sh \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
 
-  var p = startProcess("/bin/sh", args = ["-c", wrapped],
-                       options = {poStdErrToStdOut, poUsePath})
+  var p =
+    when defined(posix):
+      let setsidExe = findExe("setsid")
+      if setsidExe.len > 0:
+        startProcess(setsidExe, args = ["/bin/sh", "-c", wrapped],
+                     options = {poStdErrToStdOut, poUsePath})
+      else:
+        startProcess("/bin/sh", args = ["-c", wrapped],
+                     options = {poStdErrToStdOut, poUsePath})
+    else:
+      startProcess("/bin/sh", args = ["-c", wrapped],
+                   options = {poStdErrToStdOut, poUsePath})
   startToolCancelWatcher(p.processID)
   var cancelled = false
 
   var rawOut = ""
   try:
-    let outStream = p.outputStream
     var lineBuf = ""
-    while not outStream.atEnd:
-      let ch = outStream.readChar()
-      if ch == '\n':
-        rawOut.add lineBuf & "\n"
-        if onLine != nil:
-          onLine(lineBuf)
-        lineBuf.setLen(0)
-      else:
-        lineBuf.add ch
-
-    if lineBuf.len > 0:
-      rawOut.add lineBuf & "\n"
-      if onLine != nil:
-        onLine(lineBuf)
+    when defined(posix):
+      readAvailableOutput(p, rawOut, lineBuf, onLine)
+    else:
+      let outStream = p.outputStream
+      var partialShown = false
+      var partialText = ""
+      while not outStream.atEnd:
+        let ch = outStream.readChar()
+        if ch == '\n':
+          emitCompleteLine(rawOut, lineBuf, onLine, partialShown, partialText)
+        elif ch != '\r':
+          lineBuf.add ch
+      emitFinalPartial(rawOut, lineBuf, onLine, partialShown, partialText)
   finally:
     cancelled = stopToolCancelWatcher()
 

@@ -84,9 +84,7 @@ type
 
   FatPromptGeometry* = object
     ## Width-aware size of the volatile fat-prompt area.
-    ##
-    ## The thinking ticker is intentionally excluded: by design it overlays the
-    ## lowest scrollback row while visible and does not reserve its own row.
+    tickerRows*: int
     hasBar*: bool
     barRows*: int
     editorRows*: int
@@ -96,9 +94,8 @@ const
   DefaultWidth* = 80
   DefaultHeight* = 24
   DefaultBashMaxLines* = 8
-  DimPromptColor* = GreyFg
   BrightPromptColor* = CyanFg & BoldOn
-  TurnPromptColor* = OffWhiteFg & BoldOn
+  EditorPromptBytes* = BrightPromptColor & "❯ " & Reset
   DeferredSubmitMarker* = "⧖"
 
 proc initFatPromptState*(): FatPromptState =
@@ -315,14 +312,14 @@ proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int,
                          termW = 0): string =
   let barCells = labelCells(label) + 4 + ($elapsed).len
   let barRows = barWrapRows(barCells, termW)
-  result = "\x1b[?25l\r\x1b[1A\x1b[2K"
+  result = "\x1b[?25l\r\x1b[2K"
   if ticker.len > 0:
     result.add GreyFg
     result.add ticker
     result.add Reset
   result.add "\r\n\x1b[2K"
   result.add spinnerBarBytes(frame, label, elapsed)
-  result.add "\r\n\x1b[2K" & DimPromptColor & "❯ " & Reset
+  result.add "\r\n\x1b[2K" & EditorPromptBytes
   result.add "\r\x1b[" & $barRows & "A"
 
 proc liveEditorSpinnerBarBytes*(frame, label: string, elapsed: int): string =
@@ -335,23 +332,22 @@ proc spinnerCleanupBytes*(tickerRows = 1): string =
 proc paintBarBytes*(label: string): string =
   "\r\x1b[2K" & liveBarBytes(label)
 
-proc barFooterBytes*(label, promptColor: string, termW = 0): string =
+proc barFooterBytes*(label: string, termW = 0): string =
   let barRows = barWrapRows(2 + labelCells(label), termW)
   paintBarBytes(label) &
-    "\r\n\x1b[2K" & promptColor & "❯ " & Reset &
+    "\r\n\x1b[2K" & EditorPromptBytes &
     "\r\x1b[" & $barRows & "A"
 
 const ClearBarPromptBytes* = "\r\x1b[J"
 
-proc barFooterBelowAtColBytes*(label, promptColor: string, col: int,
-                               termW = 0): string =
+proc barFooterBelowAtColBytes*(label: string; col: int; termW = 0): string =
   let barRows = barWrapRows(2 + labelCells(label), termW)
   "\r\n\x1b[2K" & liveBarBytes(label) &
-    "\r\n\x1b[2K" & promptColor & "❯ " & Reset &
+    "\r\n\x1b[2K" & EditorPromptBytes &
     "\x1b[" & $(barRows + 1) & "A\x1b[" & $(max(0, col) + 1) & "G"
 
-proc barFooterBelowBytes*(label, promptColor: string, termW = 0): string =
-  barFooterBelowAtColBytes(label, promptColor, 2, termW)
+proc barFooterBelowBytes*(label: string; termW = 0): string =
+  barFooterBelowAtColBytes(label, 2, termW)
 
 proc clearBarBelowAtColBytes*(col: int): string =
   "\n\r\x1b[J\x1b[1A\x1b[" & $(max(0, col) + 1) & "G"
@@ -360,7 +356,20 @@ const ClearBarBelowBytes* = "\n\r\x1b[J\x1b[1A\x1b[3G"
 
 proc receiptBarBytes*(label: string): string =
   if label.len == 0: return ""
-  CyanFg & "  " & label & Reset
+  GreyFg & "  " & label & Reset
+
+proc liveEditorSpinnerFooterBytes*(frame, label, ticker: string;
+                                   elapsed: int): string =
+  result.add "\r\x1b[2K"
+  if ticker.len > 0:
+    result.add GreyFg
+    result.add ticker
+    result.add Reset
+  result.add "\r\n"
+  result.add liveEditorSpinnerBarBytes(frame, label, elapsed)
+
+proc clearTickerBarFooterBytes*(): string =
+  "\r\x1b[2K\r\n\x1b[2K"
 
 proc addUserEcho(result: var string, line: string; trailingNewline = true) =
   let termW = try: terminalWidth() except CatchableError: 0
@@ -396,17 +405,17 @@ proc submitTransitionBytes*(line: string, hadPending, hadGap: bool,
   let n = if echoRows > 0: echoRows else: lines.len
   let walkBack =
     if not hasBar: n
-    elif hadGap and hadPending: n + 3
-    elif hadGap: n + 2
+    elif hadGap: n + 1
     else: n + 1
   result = "\x1b[" & $walkBack & "A"
   result.add "\r\x1b[J"
   if hadPending:
     result.add receiptBarBytes(receiptLabel)
-    result.add "\n\n"
+    result.add "\r\n\r\n"
   elif hasBar:
-    result.add "\n\n"
+    result.add "\r\n\r\n"
   result.addUserEcho(line)
+  result.add "\r\n"
 
 proc bufferedSubmitTransitionBytes*(line: string, hadPending, hadGap: bool,
                                     receiptLabel: string,
@@ -422,15 +431,13 @@ proc bufferedSubmitTransitionBytes*(line: string, hadPending, hadGap: bool,
   else:
     result.add "\r\n"
   result.addUserEcho(line, trailingNewline = false)
+  result.add "\r\n\r\n"
 
-proc promptOnlyBytes*(promptColor: string): string =
-  "\r\x1b[2K" & promptColor & "❯ " & Reset & "\r"
+proc promptOnlyBytes*(): string =
+  "\r\x1b[2K" & EditorPromptBytes & "\r"
 
-proc promptOnlyResetBytes*(promptColor: string): string =
-  "\x1b[2K" & promptColor & "❯ " & Reset & "\r"
-
-proc clearTickerBytes*(): string =
-  "\r\x1b[1A\x1b[2K\x1b[1B"
+proc promptOnlyResetBytes*(): string =
+  "\x1b[2K" & EditorPromptBytes & "\r"
 
 proc clearPromptAfterPendingReceiptBytes*(): string =
   "\r\x1b[1A\x1b[J"
@@ -442,37 +449,57 @@ proc currentFooterBarBytes*(s: FatPromptState): string =
   if s.footer.barLabel.len == 0: ""
   else: paintBarBytes(s.footer.barLabel)
 
+proc currentFooterBytes*(s: FatPromptState): string =
+  if s.footer.barLabel.len == 0:
+    return ""
+  if s.footer.ticker.len == 0:
+    return paintBarBytes(s.footer.barLabel)
+  result.add "\r\x1b[2K"
+  result.add GreyFg
+  result.add s.footer.ticker
+  result.add Reset
+  result.add "\r\n"
+  result.add paintBarBytes(s.footer.barLabel)
+
+proc footerRowsAboveEditor*(s: FatPromptState): int =
+  if s.footer.barLabel.len == 0:
+    return 0
+  result = 1
+  if s.footer.ticker.len > 0:
+    inc result
+
 proc tokenBarRows*(s: FatPromptState; termW = 0): int =
   ## Number of terminal rows occupied by the current token bar.
   if s.footer.barLabel.len == 0: 0
   else: barWrapRows(2 + labelCells(s.footer.barLabel), termW)
 
 proc footerGeometry*(s: FatPromptState; editorRows: int; termW = 0): FatPromptGeometry =
-  ## Size of the reserved fat-prompt area: token bar plus editor rows.
+  ## Size of the reserved fat-prompt area: ticker, token bar, and editor rows.
   let barRows = tokenBarRows(s, termW)
+  let tickerRows = if s.footer.ticker.len > 0: 1 else: 0
   result = FatPromptGeometry(
+    tickerRows: tickerRows,
     hasBar: barRows > 0,
     barRows: barRows,
     editorRows: max(1, editorRows))
-  result.reservedRows = result.barRows + result.editorRows
+  result.reservedRows = result.tickerRows + result.barRows + result.editorRows
 
-proc footerFrameBytes*(s: FatPromptState; promptColor: string; termW = 0): string =
+proc footerFrameBytes*(s: FatPromptState; termW = 0): string =
   ## Complete token-bar + prompt placeholder frame for the current state.
   if s.footer.barLabel.len == 0: ""
-  else: barFooterBytes(s.footer.barLabel, promptColor, termW)
+  else: barFooterBytes(s.footer.barLabel, termW)
 
-proc cursorForPromptColor*(promptColor: string): string =
-  if promptColor == DimPromptColor: "\x1b[?25l"
-  else: "\x1b[?25h"
+proc hideRealCaretBytes*(): string =
+  "\x1b[?25l"
 
-proc endTurnBytes*(label, promptColor: string, repaintPrompt: bool,
+proc endTurnBytes*(label: string; repaintPrompt: bool,
                    termW = 0; gapAlready = false): string =
   if label.len > 0:
     result.add ClearBarPromptBytes
     if repaintPrompt:
       if not gapAlready:
         result.add "\n"
-      result.add barFooterBytes(label, promptColor, termW)
+      result.add barFooterBytes(label, termW)
       let rows = barWrapRows(2 + labelCells(label), termW)
       result.add "\x1b[" & $rows & "B"
   result.add "\x1b[?25h"
@@ -486,16 +513,10 @@ proc absoluteBarTickFrame*(row: int; label: string; activeEditor: bool;
   if activeEditor:
     "\x1b[?25l" & pos & paintBarBytes(label)
   else:
-    "\x1b[?25l" & pos & barFooterBytes(label, DimPromptColor, termW)
+    "\x1b[?25l" & pos & barFooterBytes(label, termW)
 
 proc moveToBarBelowBytes*(): string =
   "\x1b[1B"
-
-proc insertTickerRowBelowBytes*(): string =
-  "\x1b[L\x1b[1B"
-
-proc removeTickerRowAboveBytes*(): string =
-  "\r\x1b[1A\x1b[M"
 
 proc editorRows*(p: FatPrompt): seq[string] =
   wrapMarked("❯", p.editorText, p.width)
@@ -544,7 +565,8 @@ proc frameRows*(p: FatPrompt): seq[string] =
   ## Return the complete visible screen for one render tick.
   let editor = p.editorRows()
   let bar = tokenBarText(p.tokenBar)
-  let reserved = 1 + editor.len
+  let tickerRows = if p.ticker.len > 0: 1 else: 0
+  let reserved = tickerRows + 1 + editor.len
   let scrollRows = max(0, p.height - reserved)
   var content = p.scrollback
   let bashRows = p.bashVisibleRows()
@@ -558,8 +580,8 @@ proc frameRows*(p: FatPrompt): seq[string] =
   result = content[start ..< content.len]
   while result.len < scrollRows:
     result.insert("", 0)
-  if p.ticker.len > 0 and scrollRows > 0:
-    result[scrollRows - 1] = p.ticker
+  if p.ticker.len > 0:
+    result.add p.ticker
   result.add bar
   for row in editor:
     result.add row
