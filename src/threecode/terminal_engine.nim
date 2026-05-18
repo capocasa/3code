@@ -17,6 +17,7 @@ type
     footerRowsAboveEditor: int
     footerHasLeadingGap: bool
     footerNeedsLeadingGap: bool
+    toolViewportRows: seq[string]
     editorRedrawPending: bool
     editorRedrawFooterRows: int
 
@@ -56,20 +57,27 @@ proc noteNoFooter(e: var TerminalEngine) =
   e.footerRowsAboveEditor = 0
   e.footerHasLeadingGap = false
 
+proc writeViewportRows(rows: openArray[string]) =
+  for row in rows:
+    stdout.write row
+    stdout.write "\r\n"
+
 proc syncWrite*(e: var TerminalEngine; bytes: string) =
   ## Synchronized screen write for legacy frame helpers that have not yet been
   ## decomposed into footer model mutations.
   termio.syncWrite(bytes)
 
-proc syncWrite*(bytes: string) =
-  defaultEngine.syncWrite(bytes)
+proc syncWrite*(bytes: string) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    defaultEngine.syncWrite(bytes)
 
 proc writeRaw*(e: var TerminalEngine; bytes: string) =
   ## Raw screen write owned by the engine boundary.
   termio.writeRaw(bytes)
 
-proc writeRaw*(bytes: string) =
-  defaultEngine.writeRaw(bytes)
+proc writeRaw*(bytes: string) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    defaultEngine.writeRaw(bytes)
 
 proc beginEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor;
                         ready: bool; frame: FooterFrame) =
@@ -121,7 +129,7 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
             max(0, footerRowsAboveEditor - e.footerRowsAboveEditor)
           else:
             0
-        let up = e.rowsAboveCursorToFooterTop + growth
+        let up = e.rowsAboveCursorToFooterTop + e.toolViewportRows.len + growth
         let rewriteLeadingGap =
           hasLeadingGap and (up == 0 or (growth > 0 and e.footerHasLeadingGap))
         stdout.write "\r"
@@ -131,6 +139,7 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
         if rewriteLeadingGap:
           stdout.write "\r\n"
         e.footerNeedsLeadingGap = false
+        writeViewportRows(e.toolViewportRows)
         stdout.write bytes
         stdout.write "\r\n"
         edPtr[].renderRow = 0
@@ -155,7 +164,80 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
 proc renderFooter*(frame: FooterFrame; inputRunning: bool;
                    editor: ptr minline.LineEditor;
                    termW = 0) {.gcsafe.} =
-  defaultEngine.renderFooter(frame, inputRunning, editor, termW)
+  {.cast(gcsafe).}:
+    defaultEngine.renderFooter(frame, inputRunning, editor, termW)
+
+proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
+                         frame: FooterFrame; inputRunning: bool;
+                         editor: ptr minline.LineEditor;
+                         termW = 0) {.gcsafe.} =
+  ## Replace the volatile bash viewport and repaint footer/editor in one
+  ## synchronized frame. The viewport is live chrome: it is not transcript
+  ## scrollback, and the controller commits final output separately.
+  {.cast(gcsafe).}:
+    termio.withTerminalWriteLock:
+      let width = if termW > 0: termW else:
+        try: terminalWidth() except CatchableError: 0
+      let bytes = frame.footerFrameBytes(width)
+      let footerRowsAboveEditor = frame.rowsAboveEditor(width)
+      stdout.write termio.SyncBegin
+      stdout.write "\x1b[?25l"
+      if inputRunning and editor != nil:
+        refreshEditorWidth(editor[])
+        let growth =
+          if e.footerRowsAboveEditor > 0:
+            max(0, footerRowsAboveEditor - e.footerRowsAboveEditor)
+          else:
+            0
+        let rowsToFooter =
+          if e.rowsAboveCursorToFooterTop > 0:
+            e.rowsAboveCursorToFooterTop
+          else:
+            rowsToFooterTop(editor[], footerRowsAboveEditor)
+        let up = rowsToFooter + e.toolViewportRows.len + growth
+        stdout.write "\r"
+        if up > 0:
+          stdout.write "\x1b[" & $up & "A"
+        stdout.write "\x1b[J"
+        e.toolViewportRows = @rows
+        writeViewportRows(e.toolViewportRows)
+        if bytes.len > 0:
+          stdout.write bytes
+          stdout.write "\r\n"
+        editor[].renderRow = 0
+        stdout.write editor[].redrawBytes(synchronized = false)
+        if frame.kind == ffClear:
+          e.noteNoFooter()
+        else:
+          e.noteFooterPainted(editor[], footerRowsAboveEditor)
+      else:
+        e.toolViewportRows = @rows
+        writeViewportRows(e.toolViewportRows)
+        if bytes.len > 0:
+          stdout.write bytes
+        e.noteNoFooter()
+      stdout.write termio.SyncEnd
+      stdout.flushFile
+
+proc renderToolViewport*(rows: openArray[string]; frame: FooterFrame;
+                         inputRunning: bool; editor: ptr minline.LineEditor;
+                         termW = 0) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    defaultEngine.renderToolViewport(rows, frame, inputRunning, editor, termW)
+
+proc clearToolViewport*(e: var TerminalEngine; frame: FooterFrame;
+                        inputRunning: bool; editor: ptr minline.LineEditor;
+                        termW = 0) {.gcsafe.} =
+  if e.toolViewportRows.len == 0:
+    e.renderFooter(frame, inputRunning, editor, termW)
+  else:
+    e.renderToolViewport([], frame, inputRunning, editor, termW)
+
+proc clearToolViewport*(frame: FooterFrame; inputRunning: bool;
+                        editor: ptr minline.LineEditor; termW = 0)
+    {.gcsafe.} =
+  {.cast(gcsafe).}:
+    defaultEngine.clearToolViewport(frame, inputRunning, editor, termW)
 
 proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
                        liveAnchored: bool;

@@ -130,33 +130,6 @@ proc resetPromptInputAfterEmpty*(hasBar: bool; rows: int;
       stdout.write promptOnlyBytes
     stdout.flushFile
 
-proc renderToolOverlay*(top, height, restoreRow: int; rows: openArray[string]) =
-  ## Paint the bounded live tool-output overlay with absolute cursor moves.
-  ## This does not install a terminal scroll region; only the declared overlay
-  ## rows are touched, and the cursor is parked back at the footer afterwards.
-  withTerminalWriteLock:
-    stdout.write SyncBegin
-    stdout.write "\x1b[?25l"
-    let h = max(0, height)
-    for i in 0 ..< h:
-      stdout.write "\x1b[" & $(max(1, top + i)) & ";1H\x1b[2K"
-      if i < rows.len:
-        stdout.write rows[i]
-    stdout.write "\x1b[" & $max(1, restoreRow) & ";1H"
-    stdout.write SyncEnd
-    stdout.flushFile
-
-proc clearToolOverlay*(top, height, restoreRow: int) =
-  ## Clear the bounded live tool-output overlay and park at the footer.
-  withTerminalWriteLock:
-    stdout.write SyncBegin
-    stdout.write "\x1b[?25l"
-    for i in 0 ..< max(0, height):
-      stdout.write "\x1b[" & $(max(1, top + i)) & ";1H\x1b[2K"
-    stdout.write "\x1b[" & $max(1, restoreRow) & ";1H"
-    stdout.write SyncEnd
-    stdout.flushFile
-
 proc eraseRowsAbove*(rows: int) =
   ## Erase rows immediately above the current cursor.
   withTerminalWriteLock:

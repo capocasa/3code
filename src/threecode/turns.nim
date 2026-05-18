@@ -11,7 +11,7 @@ when defined(posix):
   import std/posix except Time
 import types, util, prompts, loop, session, compact, config, actions, api,
   display, fatprompt, streamexec, toolstream
-import terminal as termui
+import terminal_engine as termengine
 
 proc trimTranscriptTail(bytes: var string) =
   while bytes.len > 0 and bytes[^1] in {'\r', '\n'}:
@@ -49,6 +49,62 @@ proc stubToolCallResult(stub: JsonNode; onLine: proc(line: string) = nil):
     result.output = streamedLines.join("\n") & "\n"
   result.code = stub{"code"}.getInt(stub{"exitCode"}.getInt(0))
   result.diff = stub{"diff"}.getStr("")
+
+proc runBashWithViewport(act: Action; cache: ReadCache; stub: JsonNode;
+                         idx: int; streamedOutputShown: ptr bool):
+    tuple[output: string, code: int, diff: string] =
+  var view = initStreamingView(StreamMaxLines, idx, bannerFor(act))
+  let promptOwnsStdin = inputEditor != nil
+
+  proc renderView() =
+    termengine.renderToolViewport(
+      view.viewportRows(),
+      footerFrame(fatPromptState),
+      inputThreadRunning,
+      inputEditor)
+
+  setToolStdinWatcherEnabled(not promptOwnsStdin)
+  try:
+    renderView()
+    emitTestFrameEvent()
+    if stub != nil and stub.kind == JObject:
+      let stream = stub{"stream"}
+      let finalCode = stub{"code"}.getInt(stub{"exitCode"}.getInt(0))
+      var streamedLines: seq[string]
+      if stream != nil and stream.kind == JArray:
+        var lineIdx = 0
+        for item in stream:
+          let line = item.getStr("")
+          streamedLines.add line
+          if lineIdx == stream.len - 1 and finalCode > 0:
+            view.setExitCode(finalCode)
+          streamedOutputShown[] = true
+          view.addLine(line)
+          renderView()
+          emitTestFrameEvent()
+          inc lineIdx
+      result.output = stub{"output"}.getStr("")
+      if result.output.len == 0 and streamedLines.len > 0:
+        result.output = streamedLines.join("\n") & "\n"
+      result.code = finalCode
+      result.diff = stub{"diff"}.getStr("")
+      if streamedLines.len == 0 or finalCode <= 0:
+        view.setExitCode(finalCode)
+        renderView()
+    else:
+      let onLine = proc(line: string) =
+        streamedOutputShown[] = true
+        view.addLine(line)
+        renderView()
+      result = runActionStreaming(act, cache, onLine)
+      view.setExitCode(result.code)
+      renderView()
+  finally:
+    setToolStdinWatcherEnabled(true)
+    termengine.clearToolViewport(
+      footerFrame(fatPromptState),
+      inputThreadRunning,
+      inputEditor)
 
 proc pendingReceiptBytes(): string =
   if not pendingHint.active:
@@ -274,54 +330,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         try:
           (r, code, diff) =
             if act.kind == akBash:
-              if liveEditorFooterAnchored():
-                let th = try: terminalHeight() except CatchableError: 24
-                let overlay = toolOverlayGeometry(th, StreamMaxLines)
-                var sv = initStreamingView(StreamMaxLines, idx,
-                  overlay.top, overlay.height, overlay.footerTop)
-                let promptOwnsStdin = inputEditor != nil
-                setToolStdinWatcherEnabled(not promptOwnsStdin)
-                var result: typeof(runActionStreaming(act, session.readCache))
-                var streamHeaderShown = false
-                try:
-                  let onLine = proc(line: string) =
-                    if not streamHeaderShown:
-                      sv.addLine("$ " & bannerFor(act))
-                      streamHeaderShown = true
-                    streamedOutputShown = true
-                    sv.addLine(line)
-                  if toolStub != nil and toolStub.kind == JObject:
-                    result = stubToolCallResult(toolStub, onLine)
-                  else:
-                    result = runActionStreaming(act, session.readCache, onLine)
-                finally:
-                  setToolStdinWatcherEnabled(true)
-                  sv.erase()
-                  repaintBarPrompt()
-                result
-              else:
-                discard stopBarTick()
-                var sv = initStreamingView(StreamMaxLines, idx)
-                let promptOwnsStdin = inputEditor != nil
-                setToolStdinWatcherEnabled(not promptOwnsStdin)
-                var result: typeof(runActionStreaming(act, session.readCache))
-                var streamHeaderShown = false
-                try:
-                  let onLine = proc(line: string) =
-                    if not streamHeaderShown:
-                      sv.addLine("$ " & bannerFor(act))
-                      streamHeaderShown = true
-                    streamedOutputShown = true
-                    sv.addLine(line)
-                  if toolStub != nil and toolStub.kind == JObject:
-                    result = stubToolCallResult(toolStub, onLine)
-                  else:
-                    result = runActionStreaming(act, session.readCache, onLine)
-                finally:
-                  setToolStdinWatcherEnabled(true)
-                  sv.erase()
-                  repaintBarPrompt()
-                result
+              runBashWithViewport(
+                act, session.readCache, toolStub, idx, addr streamedOutputShown)
             else:
               if toolStub != nil and toolStub.kind == JObject:
                 stubToolCallResult(toolStub)
@@ -339,8 +349,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         if not silent:
           commitTranscriptItem(proc() =
             renderToolBanner(bannerFor(act), act.kind, code, toolElapsed.int)
-            if not (act.kind == akBash and streamedOutputShown):
-              printToolResult(act.kind, r, code, idx, diff)
+            printToolResult(act.kind, r, code, idx, diff)
           , prefixBoundary = not hadToolBar)
         else:
           commitTranscriptItem(proc() =

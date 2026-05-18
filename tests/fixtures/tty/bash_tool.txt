@@ -1,0 +1,622 @@
+===== 853 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+===== 538 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+⣿ ○0% ↓5 0s
+❯
+===== 333 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ○1%  0s
+❯
+===== 719 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ○1%
+❯
+===== 112 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+  ○1%
+❯
+===== 625 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+$ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  ○1%  0s
+❯
+===== 509 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+$ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  ○1%
+❯
+===== 769 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+$ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  ○1%
+❯
+===== 428 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+  ○1%
+❯
+===== 153 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+  ○1%  0s
+❯
+===== 193 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+  scroll-1
+  ○1%
+❯
+===== 390 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+  scroll-1
+  scroll-2
+  ○1%
+❯
+===== 839 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+  scroll-1
+  scroll-2
+  scroll-3
+  ○1%
+❯
+===== 901 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+  scroll-1
+  scroll-2
+  scroll-3
+  scroll-4
+  ○1%
+❯
+===== 619 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+  scroll-1
+  scroll-2
+  scroll-3
+  scroll-4
+  scroll-5
+  ○1%
+❯
+===== 431 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+  scroll-1
+  scroll-2
+  scroll-3
+  scroll-4
+  scroll-5
+  scroll-6
+  ○1%
+❯
+===== 520 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+  scroll-1
+  scroll-2
+  scroll-3
+  scroll-4
+  scroll-5
+  scroll-6
+  scroll-7
+  ○1%
+❯
+===== 179 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+  scroll-1
+  scroll-2
+  scroll-3
+  scroll-4
+  scroll-5
+  scroll-6
+  scroll-7
+  scroll-8
+  ○1%
+❯
+===== 368 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+  ... 2 lines omitted :show 3 for full
+  scroll-3
+  scroll-4
+  scroll-5
+  scroll-6
+  scroll-7
+  scroll-8
+  scroll-9
+  ○1%
+❯
+===== 668 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+  ... 3 lines omitted :show 3 for full
+  scroll-4
+  scroll-5
+  scroll-6
+  scroll-7
+  scroll-8
+  scroll-9
+  scroll-10
+  ○1%
+❯
+===== 279 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+  ... 3 lines omitted :show 3 for full
+  scroll-4
+  scroll-5
+  scroll-6
+  scroll-7
+  scroll-8
+  scroll-9
+  scroll-10
+
+⣿ ○1% ↓5 0s
+❯
+===== 656 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+
+● Running bash checks.
+  ○1%  ↑130  ↓18  0s
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+  ... 3 lines omitted :show 3 for full
+  scroll-4
+  scroll-5
+  scroll-6
+  scroll-7
+  scroll-8
+  scroll-9
+  scroll-10
+
+● Bash checks complete.
+  ○1%  ↑210  ↓20  0s
+
+  ○1%
+❯

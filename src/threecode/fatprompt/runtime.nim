@@ -241,16 +241,6 @@ proc currentTermW(): int =
   ## emitters fall back to their single-row default instead of guessing.
   try: terminalWidth() except CatchableError: 0
 
-proc liveFatPromptGeometry(): FatPromptGeometry {.gcsafe.} =
-  {.cast(gcsafe).}:
-    result = fatPromptState.footerGeometry(liveEditorRows(), currentTermW())
-
-proc liveFooterTopRow(termH: int): int {.gcsafe.} =
-  ## 1-based top row for the volatile footer. When a token bar is visible this
-  ## is the bar row; in prompt-only mode it is the editor row.
-  let g = liveFatPromptGeometry()
-  max(1, termH - g.reservedRows + 1)
-
 proc liveEditorFooterAnchored*(): bool =
   ## True when we can pin the live turn editor to absolute terminal rows.
   ## This is the production/PTY path. Pipe-backed unit tests and redirected
@@ -508,15 +498,6 @@ proc resetPromptInputAfterEmpty*(echoRows: int) =
       "",
       hideRealCaretBytes() &
         barFooterBytes(currentBarLabel, currentTermW()))
-
-proc toolOverlayGeometry*(termH: int; maxRows = 8):
-    tuple[top, height, footerTop: int] =
-  ## Absolute rows available to the bounded live tool-output overlay. The
-  ## overlay sits immediately above the volatile fat prompt and is the only
-  ## non-append transcript area.
-  let footerTop = liveFooterTopRow(termH)
-  let h = min(max(1, maxRows + 1), max(1, footerTop - 1))
-  (top: max(1, footerTop - h), height: h, footerTop: footerTop)
 
 proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
                             beforeRepaint: proc() = nil;

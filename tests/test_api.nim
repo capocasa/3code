@@ -88,7 +88,6 @@ proc queueAutosend() {.thread, gcsafe.} =
   {.cast(gcsafe).}:
     acquire inputStateLock
     try:
-      inputState.queuedText = "next prompt"
       inputState.queuedEchoRows = 1
       inputState.autoSend = true
     finally:
@@ -165,7 +164,6 @@ proc queueAutosend() {.thread, gcsafe.} =
   {.cast(gcsafe).}:
     acquire inputStateLock
     try:
-      inputState.queuedText = "cut me a release"
       inputState.queuedEchoRows = 1
       inputState.autoSend = true
     finally:
@@ -250,7 +248,6 @@ proc queueAutosend() {.thread, gcsafe.} =
   {.cast(gcsafe).}:
     acquire inputStateLock
     try:
-      inputState.queuedText = "buffered prompt"
       inputState.queuedEchoRows = 1
       inputState.autoSend = true
     finally:

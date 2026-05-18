@@ -4,6 +4,7 @@ import tty_expect
 const VisualOutputRoot = "tests" / "output" / "tty"
 const SimpleVisualTestFrames = "tests" / "fixtures" / "tty" / "simple.txt"
 const MultilineVisualTestFrames = "tests" / "fixtures" / "tty" / "multiline.txt"
+const BashToolVisualTestFrames = "tests" / "fixtures" / "tty" / "bash_tool.txt"
 const ResizeStreamFrames = "tests" / "fixtures" / "tty" / "resize_stream_frames.txt"
 
 proc ensureStubBinary(): string =
@@ -170,6 +171,7 @@ suite "terminal visual contract":
     tty.advanceTicker()
     tty.advanceTicker()
     tty.send "\n"
+    tty.advanceTicker()
     tty.continueStubApi()
 
     tty.expectInHistory "❯ first line"
@@ -183,6 +185,90 @@ suite "terminal visual contract":
     tty.expectMeaningfulFrameArtifact(
       MultilineVisualTestFrames,
       root / "multiline_visual_test_actual.txt")
+
+  test "bash tool success and nonzero exit":
+    let root = newFixture("bash_tool_visual_test")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "content": "Running bash checks.",
+        "contentChunks": ["Running bash checks."],
+        "tool_calls": [
+          toolCall("call_success", "bash", %*{
+            "command": "printf 'ok-one\\nok-two\\n'"
+          }, %*{
+            "stream": ["ok-one", "ok-two"],
+            "output": "ok-one\nok-two\n",
+            "code": 0
+          }),
+          toolCall("call_failure", "bash", %*{
+            "command": "printf 'bad-one\\nbad-two\\nbad-three\\n'; exit 7"
+          }, %*{
+            "stream": ["bad-one", "bad-two", "bad-three"],
+            "output": "bad-one\nbad-two\nbad-three\n",
+            "code": 7
+          }),
+          toolCall("call_scroll", "bash", %*{
+            "command": "printf 'scroll-1\\nscroll-2\\nscroll-3\\nscroll-4\\nscroll-5\\nscroll-6\\nscroll-7\\nscroll-8\\nscroll-9\\nscroll-10\\n'"
+          }, %*{
+            "stream": [
+              "scroll-1",
+              "scroll-2",
+              "scroll-3",
+              "scroll-4",
+              "scroll-5",
+              "scroll-6",
+              "scroll-7",
+              "scroll-8",
+              "scroll-9",
+              "scroll-10"
+            ],
+            "output": "scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n",
+            "code": 0
+          })
+        ],
+        "usage": {
+          "promptTokens": 130,
+          "completionTokens": 18,
+          "totalTokens": 148,
+          "cachedTokens": 0
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Bash checks complete.",
+        "contentChunks": ["Bash checks complete."],
+        "usage": {
+          "promptTokens": 210,
+          "completionTokens": 20,
+          "totalTokens": 230,
+          "cachedTokens": 0
+        }
+      }
+    ])
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "run bash checks\n"
+    tty.expectInHistory "Running bash checks."
+    tty.expectInHistory "$ printf 'ok-one"
+    tty.expectInHistory "ok-two"
+    tty.expectInHistory "¤ printf 'bad-one"
+    tty.expectInHistory "bad-three"
+    tty.expectInHistory "$ printf 'scroll-1"
+    tty.expectInHistory "scroll-10"
+    tty.expectInHistory "Bash checks complete."
+    tty.expectTokenBar(["○", "↑210", "↓20"])
+    tty.drain(200)
+    tty.expectMeaningfulFrameArtifact(
+      BashToolVisualTestFrames,
+      root / "bash_tool_visual_test_actual.txt")
 
 when false:
   suite "disabled terminal visual contract tests":
