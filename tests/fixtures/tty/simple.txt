@@ -1,0 +1,47 @@
+===== 482 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+  ○0%
+❯ This is a test prompt
+===== 193 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ This is a test prompt
+
+  … Thinking about the test prompt
+⣿ ○0%  ↓8 0s
+❯
+===== 760 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ This is a test prompt
+
+● This is a test response.
+  ○1%  ↑120  ↓24  0s
+
+  ○1%
+❯
