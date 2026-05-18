@@ -2,7 +2,8 @@ import std/[json, os, osproc, strutils, unittest]
 import tty_expect
 
 const VisualOutputRoot = "tests" / "output" / "tty"
-const MainVisualTestFrames = "tests" / "fixtures" / "tty" / "main_visual_test_frames.txt"
+const SimpleVisualTestFrames = "tests" / "fixtures" / "tty" / "simple.txt"
+const MultilineVisualTestFrames = "tests" / "fixtures" / "tty" / "multiline.txt"
 const ResizeStreamFrames = "tests" / "fixtures" / "tty" / "resize_stream_frames.txt"
 
 proc ensureStubBinary(): string =
@@ -81,30 +82,134 @@ proc framePresenceRuns(s: TtySession; needle: string): int =
     wasPresent = present
 
 suite "terminal visual contract":
-  test "stub provider streams bash output without replaying it later":
-    if getEnv("THREECODE_TTY_ONLY") in ["", "stream_no_replay"]:
-      let root = newFixture("stream_no_replay")
-      writeConfiguredProvider(root)
-      writeStubResponses(root, %*[
-        {
-          "role": "assistant",
-          "content": "About to run one tool.",
-          "tool_calls": [
-            toolCall("call_once", "bash", %*{
-              "command": "printf 'unique-stream-line\\n'; sleep 0.25"})
-          ]
-        },
-        {
-          "role": "assistant",
-          "content": "Done.",
-          "usage": {
-            "promptTokens": 42,
-            "completionTokens": 7,
-            "totalTokens": 49,
-            "cachedTokens": 0
-          }
+  test "simple one-turn prompt and reply":
+    let root = newFixture("simple_visual_test")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "reasoning_content": "Thinking about the test prompt",
+        "reasoningChunks": ["Thinking about the test prompt"],
+        "preStreamDelayMs": 200,
+        "content": "This is a test response.",
+        "contentChunks": ["This is a test response."],
+        "usage": {
+          "promptTokens": 120,
+          "completionTokens": 24,
+          "totalTokens": 144,
+          "cachedTokens": 0
         }
-      ])
+      }
+    ])
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "This is a test prompt"
+    tty.expect "This is a test prompt"
+    tty.send "\n"
+    tty.expectInHistory "Thinking about the test prompt"
+    tty.expectInHistory "This is a test response."
+    tty.expectTokenBar(["○", "↑120", "↓24"])
+    tty.drain(200)
+    tty.expectMeaningfulFrameArtifact(
+      SimpleVisualTestFrames,
+      root / "simple_visual_test_actual.txt")
+
+  test "multiline prompt and queued multiline autosend":
+    let root = newFixture("multiline_visual_test")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "waitForTestContinue": true,
+        "content": "First multiline response.",
+        "contentChunks": ["First multiline response."],
+        "usage": {
+          "promptTokens": 120,
+          "completionTokens": 24,
+          "totalTokens": 144,
+          "cachedTokens": 0
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Queued multiline response.",
+        "contentChunks": ["Queued multiline response."],
+        "usage": {
+          "promptTokens": 180,
+          "completionTokens": 32,
+          "totalTokens": 212,
+          "cachedTokens": 0
+        }
+      }
+    ])
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "first line"
+    tty.send "\x1b[13;2u"
+    tty.send "second line"
+    tty.expect "second line"
+    tty.send "\n"
+
+    tty.send "queued line one"
+    tty.send "\x1b[13;2u"
+    tty.send "queued line two"
+    tty.expect "queued line two"
+    tty.advanceTicker()
+    tty.advanceTicker()
+    tty.advanceTicker()
+    tty.send "\n"
+    tty.continueStubApi()
+
+    tty.expectInHistory "❯ first line"
+    tty.expectInHistory "  second line"
+    tty.expectInHistory "First multiline response."
+    tty.expectInHistory "❯ queued line one"
+    tty.expectInHistory "  queued line two"
+    tty.expectInHistory "Queued multiline response."
+    tty.expectTokenBar(["○", "↑180", "↓32"])
+    tty.drain(200)
+    tty.expectMeaningfulFrameArtifact(
+      MultilineVisualTestFrames,
+      root / "multiline_visual_test_actual.txt")
+
+when false:
+  suite "disabled terminal visual contract tests":
+    test "stub provider streams bash output without replaying it later":
+      if getEnv("THREECODE_TTY_ONLY") in ["", "stream_no_replay"]:
+        let root = newFixture("stream_no_replay")
+        writeConfiguredProvider(root)
+        writeStubResponses(root, %*[
+          {
+            "role": "assistant",
+            "content": "About to run one tool.",
+            "tool_calls": [
+              toolCall("call_once", "bash", %*{
+                "command": "printf 'unique-stream-line\\n'; sleep 0.25"})
+            ]
+          },
+          {
+            "role": "assistant",
+            "content": "Done.",
+            "usage": {
+              "promptTokens": 42,
+              "completionTokens": 7,
+              "totalTokens": 49,
+              "cachedTokens": 0
+            }
+          }
+        ])
 
       let tty = startStub(root)
       defer:

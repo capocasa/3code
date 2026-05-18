@@ -89,11 +89,9 @@ type
     ## Shared between the main thread and the buffered prompt thread during
     ## model/tool turns.
     turnActive*: bool
+    shutdown*: bool
     autoSend*: bool
-    queuedText*: string
     queuedEchoRows*: int
-    residualText*: string
-    editorText*: string
     cmdWasQuit*: bool
 
 proc die*(msg: string, code = 1) {.noreturn.} =

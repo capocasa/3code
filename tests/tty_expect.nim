@@ -3,7 +3,7 @@
 ## The helper starts a real process under a PTY, feeds all output through a
 ## ttty Grid, and records compact screen snapshots for debugging failures.
 
-import std/[os, posix, strformat, strutils, times, unicode]
+import std/[os, posix, random, strformat, strutils, times, unicode]
 import posix/termios
 import ttty/grid
 
@@ -33,6 +33,9 @@ type
     lastOutputAt*: float
     frameEventFd*: cint
     frameAckFd*: cint
+    tickerCommandFd*: cint
+    tickerAckFd*: cint
+    apiContinueFd*: cint
 
 const
   DefaultTtyCols* = 120
@@ -258,11 +261,23 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
   var ackPipe: array[2, cint]
   doAssert pipe(ackPipe) == 0
   discard fcntl(ackPipe[0], F_SETFD, 0)
+  var tickerPipe: array[2, cint]
+  doAssert pipe(tickerPipe) == 0
+  discard fcntl(tickerPipe[0], F_SETFD, 0)
+  var tickerAckPipe: array[2, cint]
+  doAssert pipe(tickerAckPipe) == 0
+  discard fcntl(tickerAckPipe[1], F_SETFD, 0)
+  var apiContinuePipe: array[2, cint]
+  doAssert pipe(apiContinuePipe) == 0
+  discard fcntl(apiContinuePipe[0], F_SETFD, 0)
 
   result = TtySession(
     masterFd: masterFd,
     frameEventFd: framePipe[0],
     frameAckFd: ackPipe[1],
+    tickerCommandFd: tickerPipe[1],
+    tickerAckFd: tickerAckPipe[0],
+    apiContinueFd: apiContinuePipe[1],
     grid: newGrid(),
     started: epochTime(),
     keepHistory: keepHistory,
@@ -275,6 +290,9 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     discard close(masterFd)
     discard close(framePipe[0])
     discard close(ackPipe[1])
+    discard close(tickerPipe[1])
+    discard close(tickerAckPipe[0])
+    discard close(apiContinuePipe[1])
     discard login_tty(slaveFd)
     discard clearenv()
 
@@ -287,6 +305,9 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       putEnv("TERM", "xterm-256color")
     putEnv("THREECODE_TEST_FRAME_FD", $framePipe[1])
     putEnv("THREECODE_TEST_FRAME_ACK_FD", $ackPipe[0])
+    putEnv("THREECODE_TEST_TICKER_FD", $tickerPipe[0])
+    putEnv("THREECODE_TEST_TICKER_ACK_FD", $tickerAckPipe[1])
+    putEnv("THREECODE_TEST_API_CONTINUE_FD", $apiContinuePipe[0])
     if cwd.len > 0:
       setCurrentDir(cwd)
 
@@ -298,6 +319,9 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
   discard close(slaveFd)
   discard close(framePipe[1])
   discard close(ackPipe[0])
+  discard close(tickerPipe[0])
+  discard close(tickerAckPipe[1])
+  discard close(apiContinuePipe[0])
   result.rememberFrame()
 
 proc send*(s: TtySession; text: string) =
@@ -324,6 +348,23 @@ proc send*(s: TtySession; text: string) =
   while s.pollOnce(0):
     discard
   s.flushFrame(force = true)
+
+proc advanceTicker*(s: TtySession) =
+  ## Deterministically advance one live spinner/ticker frame in the child.
+  if s.tickerCommandFd <= 0 or s.tickerAckFd <= 0:
+    return
+  var ch = 't'
+  discard posix.write(s.tickerCommandFd, addr ch, 1)
+  var ack: array[1, char]
+  discard posix.read(s.tickerAckFd, addr ack[0], 1)
+  s.drain(20, recordFrame = true)
+
+proc continueStubApi*(s: TtySession) =
+  ## Release a stub response blocked on waitForTestContinue.
+  if s.apiContinueFd <= 0:
+    return
+  var ch = 'c'
+  discard posix.write(s.apiContinueFd, addr ch, 1)
 
 proc ctrlC*(s: TtySession) =
   s.send "\x03"
@@ -457,7 +498,7 @@ proc normalizeElapsed(row: string): string =
         let beforeOk = start == 0 or row[start - 1] in {' ', '\t', '(', '['}
         let afterOk = i + 1 >= row.len or row[i + 1] in {' ', '\t', ')', ']'}
         if beforeOk and afterOk:
-          result.add "<elapsed>"
+          result.add "0s"
           inc i
         else:
           result.add row[start ..< i]
@@ -469,14 +510,14 @@ proc normalizeElapsed(row: string): string =
 
 proc normalizeSpinnerGlyphs(row: string): string =
   result = row
-  if "<elapsed>" notin result:
+  if " 0s" notin result and not result.endsWith("0s"):
     return
 
   for glyph in ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]:
     if result.strip(leading = true, trailing = false).startsWith(glyph):
       let pos = result.find(glyph)
       if pos >= 0:
-        result = result[0 ..< pos] & "<spinner>" & result[pos + glyph.len .. ^1]
+        result = result[0 ..< pos] & "⣿" & result[pos + glyph.len .. ^1]
       return
 
 proc normalizeFrameRows*(rows: openArray[string]): seq[string] =
@@ -509,21 +550,37 @@ proc frameRowsWithCursor(frame: TtyFrame): seq[string] =
     text.add "█"
   result[frame.cursorRow] = text
 
+proc allRowsEmpty(rows: openArray[string]): bool =
+  result = true
+  for row in rows:
+    if row.len > 0:
+      return false
+
 proc meaningfulFrameText*(s: TtySession): string =
   ## Full-frame visual recording suitable for expected-frame review. Every changed
   ## screen state is preserved; adjacent duplicate normalized states are compressed.
-  var count = 0
   var lastRows: seq[string]
+  randomize()
   for frame in s.frames:
     let rows = normalizeFrameRows(frame.frameRowsWithCursor())
+    if rows.allRowsEmpty:
+      continue
     if rows == lastRows:
       continue
-    result.add &"===== frame {count:04d} =====\n"
+    result.add &"===== {rand(100..999)} =====\n"
     for row in rows:
       result.add row
       result.add "\n"
     lastRows = rows
-    inc count
+
+proc normalizeFrameSeparators(text: string): string =
+  ## Expected fixtures may use hand-friendly arbitrary frame labels. Only the
+  ## separator boundary matters for comparison.
+  for line in text.splitLines(keepEol = true):
+    if line.startsWith("=====") and line.strip.endsWith("====="):
+      result.add "===== frame =====\n"
+    else:
+      result.add line
 
 proc writeMeaningfulFrameArtifact*(s: TtySession; path: string) =
   let dir = path.splitPath.head
@@ -542,7 +599,7 @@ proc expectMeaningfulFrameArtifact*(s: TtySession; expectedPath,
     "missing expected full-frame artifact: " & expectedPath & "\nactual written to: " &
       actualPath
   let expected = readFile(expectedPath)
-  doAssert actual == expected,
+  doAssert actual.normalizeFrameSeparators == expected.normalizeFrameSeparators,
     "full-frame recording differed from expected frames\nexpected: " & expectedPath &
       "\nactual: " & actualPath
 
@@ -642,4 +699,13 @@ proc close*(s: TtySession) =
   if s.frameAckFd > 0:
     discard close(s.frameAckFd)
     s.frameAckFd = 0
+  if s.tickerCommandFd > 0:
+    discard close(s.tickerCommandFd)
+    s.tickerCommandFd = 0
+  if s.tickerAckFd > 0:
+    discard close(s.tickerAckFd)
+    s.tickerAckFd = 0
+  if s.apiContinueFd > 0:
+    discard close(s.apiContinueFd)
+    s.apiContinueFd = 0
   s.closed = true

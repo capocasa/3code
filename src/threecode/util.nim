@@ -12,6 +12,7 @@ import types
 
 const
   CyanFg* = "\x1b[36m"
+  BrightWhiteFg* = "\x1b[97m"
   BoldOn* = "\x1b[1m"
   BlueFg* = "\x1b[34m"
   GreyFg* = "\x1b[38;5;244m"

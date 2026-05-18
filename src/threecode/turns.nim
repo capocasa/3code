@@ -67,8 +67,15 @@ proc finishTranscriptItem(bytes: var string) =
   bytes.add "\r\n\r\n"
 
 proc clearSubmittedReceiptState() =
+  let restingLabel =
+    if pendingHint.active:
+      contextLabel(pendingHint.usage.promptTokens, pendingHint.window)
+    else:
+      ""
   emitFatPromptEvent clearPendingHintEvent()
   emitFatPromptEvent clearTickerEvent()
+  if restingLabel.len > 0:
+    emitFatPromptEvent setBarEvent(restingLabel)
 
 proc clearSubmittedTickerState() =
   emitFatPromptEvent clearTickerEvent()
@@ -434,19 +441,22 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       continue
     let queuedBeforeFinalRender = hasQueuedAutosend()
     discard stopBarTick()
-    stopSpinner()
+    stopSpinner(clearLiveFooter = false)
     if streamedLive:
       if queuedBeforeFinalRender:
         commitPendingReceiptAfterStream(restoreEditor = false)
     else:
-      commitAssistantItem(content, restoreEditor = not queuedBeforeFinalRender,
-                          attachReceipt = queuedBeforeFinalRender)
+      if not queuedBeforeFinalRender:
+        stopTurnInputForFinalRender()
+      commitAssistantItem(
+        content,
+        restoreEditor = not queuedBeforeFinalRender)
     if queuedBeforeFinalRender or hasQueuedAutosend():
       stopTurnInputForFinalRender()
-      promoteQueuedAutosendFromEditor()
       turnEnded = true
       return
-    stopTurnInputForFinalRender()
+    if streamedLive:
+      stopTurnInputForFinalRender()
     endTurnAfterTranscriptAppend()
     turnEnded = true
     break

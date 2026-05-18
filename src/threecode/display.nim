@@ -537,7 +537,6 @@ proc welcome*(p: Profile): minline.LineEditor =
     stdout.write "\n"
     stdout.styledWrite fgCyan, styleBright, "  type a prompt. ", resetStyle
     subtleWriteLn(stdout, ":help for commands. :q or Ctrl-D to exit.")
-    stdout.write "\n"
   stdout.flushFile
   installEditorTweaks()
   result = minline.initEditor(historyFile = historyFile())

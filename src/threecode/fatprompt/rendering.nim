@@ -90,11 +90,28 @@ type
     editorRows*: int
     reservedRows*: int
 
+  FooterFrameKind* = enum
+    ffNone,
+    ffClear,
+    ffTokenBar,
+    ffSpinner
+
+  FooterFrame* = object
+    ## Semantic footer view. Runtime code constructs this value; the terminal
+    ## engine is responsible for lowering it to terminal bytes and using the
+    ## same value for geometry.
+    kind*: FooterFrameKind
+    ticker*: string
+    label*: string
+    spinner*: string
+    elapsed*: int
+    clearRows*: int
+
 const
   DefaultWidth* = 80
   DefaultHeight* = 24
   DefaultBashMaxLines* = 8
-  BrightPromptColor* = CyanFg & BoldOn
+  BrightPromptColor* = BrightWhiteFg & BoldOn
   EditorPromptBytes* = BrightPromptColor & "❯ " & Reset
   DeferredSubmitMarker* = "⧖"
 
@@ -308,6 +325,41 @@ proc barWrapRows*(visibleCells, termW: int): int =
   result = (visibleCells + termW - 1) div termW
   if result < 1: result = 1
 
+proc noFooterFrame*(): FooterFrame =
+  FooterFrame(kind: ffNone)
+
+proc clearFooterFrame*(rows = 1): FooterFrame =
+  FooterFrame(kind: ffClear, clearRows: max(1, rows))
+
+proc tokenBarFrame*(label: string; ticker = ""): FooterFrame =
+  if label.len == 0:
+    noFooterFrame()
+  else:
+    FooterFrame(kind: ffTokenBar, label: label, ticker: ticker)
+
+proc spinnerFooterFrame*(spinner, label, ticker: string; elapsed: int): FooterFrame =
+  FooterFrame(kind: ffSpinner, spinner: spinner, label: label,
+              ticker: ticker, elapsed: elapsed)
+
+proc footerFrame*(s: FatPromptState): FooterFrame =
+  tokenBarFrame(s.footer.barLabel, s.footer.ticker)
+
+proc rowsAboveEditor*(frame: FooterFrame; termW = 0): int =
+  case frame.kind
+  of ffNone:
+    result = 0
+  of ffClear:
+    result = max(1, frame.clearRows)
+  of ffTokenBar:
+    result = barWrapRows(2 + labelCells(frame.label), termW)
+    if frame.ticker.len > 0:
+      inc result
+  of ffSpinner:
+    let elapsedTextLen = if frame.elapsed >= 0: ($frame.elapsed).len else: 1
+    result = barWrapRows(labelCells(frame.label) + 4 + elapsedTextLen, termW)
+    if frame.ticker.len > 0:
+      inc result
+
 proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int,
                          termW = 0): string =
   let barCells = labelCells(label) + 4 + ($elapsed).len
@@ -360,16 +412,37 @@ proc receiptBarBytes*(label: string): string =
 
 proc liveEditorSpinnerFooterBytes*(frame, label, ticker: string;
                                    elapsed: int): string =
-  result.add "\r\x1b[2K"
   if ticker.len > 0:
+    result.add "\r\x1b[2K"
     result.add GreyFg
     result.add ticker
     result.add Reset
-  result.add "\r\n"
+    result.add "\r\n"
   result.add liveEditorSpinnerBarBytes(frame, label, elapsed)
 
-proc clearTickerBarFooterBytes*(): string =
-  "\r\x1b[2K\r\n\x1b[2K"
+proc clearSpinnerFooterBytes*(hadTicker: bool): string =
+  if hadTicker:
+    "\r\x1b[2K\r\n\x1b[2K"
+  else:
+    "\r\x1b[2K"
+
+proc footerFrameBytes*(frame: FooterFrame; termW = 0): string =
+  case frame.kind
+  of ffNone:
+    result = ""
+  of ffClear:
+    result = "\r\x1b[2K"
+    for _ in 1 ..< max(1, frame.clearRows):
+      result.add "\r\n\x1b[2K"
+  of ffTokenBar:
+    if frame.ticker.len == 0:
+      result = paintBarBytes(frame.label)
+    else:
+      result = "\r\x1b[2K" & GreyFg & frame.ticker & Reset & "\r\n" &
+        paintBarBytes(frame.label)
+  of ffSpinner:
+    result = liveEditorSpinnerFooterBytes(frame.spinner, frame.label,
+                                          frame.ticker, frame.elapsed)
 
 proc addUserEcho(result: var string, line: string; trailingNewline = true) =
   let termW = try: terminalWidth() except CatchableError: 0
@@ -444,22 +517,6 @@ proc clearPromptAfterPendingReceiptBytes*(): string =
 
 proc clearBarRowBytes*(): string =
   "\r\x1b[2K"
-
-proc currentFooterBarBytes*(s: FatPromptState): string =
-  if s.footer.barLabel.len == 0: ""
-  else: paintBarBytes(s.footer.barLabel)
-
-proc currentFooterBytes*(s: FatPromptState): string =
-  if s.footer.barLabel.len == 0:
-    return ""
-  if s.footer.ticker.len == 0:
-    return paintBarBytes(s.footer.barLabel)
-  result.add "\r\x1b[2K"
-  result.add GreyFg
-  result.add s.footer.ticker
-  result.add Reset
-  result.add "\r\n"
-  result.add paintBarBytes(s.footer.barLabel)
 
 proc footerRowsAboveEditor*(s: FatPromptState): int =
   if s.footer.barLabel.len == 0:

@@ -30,7 +30,8 @@ proc contextWindowFor*(model: string): int =
   ## known collisions exist in practice. Update if a provider ships a
   ## colliding model name.
   let m = model.toLowerAscii
-  if "kimi-k2" in m: 128_000
+  if m == "stub-model": 12_000
+  elif "kimi-k2" in m: 128_000
   elif "qwen3-coder" in m or "qwen3_coder" in m: 262_144
   elif "qwen" in m: 128_000
   elif "claude" in m: 200_000

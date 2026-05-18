@@ -116,19 +116,14 @@ proc commitUserPromptTranscript(line: string; restoreEditor = true) =
     emitFatPromptEvent clearBarEvent()
     emitFatPromptEvent clearTickerEvent()
   if not restoreEditor:
-    let oldFooterRows =
-      if currentBarLabel.len > 0: max(1, footerRowsAboveEditor(fatPromptState))
-      else: 0
-    clearSubmittedFooterState()
     while bytes.len > 0 and bytes[^1] in {'\r', '\n'}:
       bytes.setLen(bytes.len - 1)
-    bytes.add "\r\n\r\n"
+    bytes.add "\r\n"
     commitTranscriptBytes(
       bytes,
       restoreEditor = false,
-      clearFooterAboveCursor = false,
+      beforeRepaint = clearSubmittedFooterState,
       reserveFooter = false,
-      footerRowsAboveCursor = oldFooterRows,
       transcriptOwnsSpacing = true)
     receiptTouchesNextResponse = true
     return
@@ -136,7 +131,6 @@ proc commitUserPromptTranscript(line: string; restoreEditor = true) =
     bytes,
     restoreEditor,
     clearSubmittedFooterState,
-    clearFooterAboveCursor = false,
     reserveFooter = restoreEditor)
   if not restoreEditor:
     receiptTouchesNextResponse = true
@@ -297,30 +291,15 @@ proc main() =
   proc handleBufferedAfterTurn(): bool =
     var cmdWasQuit = false
     var queued = ""
-    var residual = ""
-    promoteQueuedAutosendFromEditor()
+    var queuedRows = 0
     acquire inputStateLock
     try:
       cmdWasQuit = inputState.cmdWasQuit
-      if inputState.queuedText.len > 0 and inputState.autoSend:
-        queued = inputState.queuedText
-        if inputState.editorText.len > queued.len and
-            inputState.editorText.startsWith(queued):
-          queued = inputState.editorText
-        if editor.line.text.len > queued.len and
-            editor.line.text.startsWith(queued):
-          queued = editor.line.text
-        if inputState.residualText.len > queued.len and
-            inputState.residualText.startsWith(queued):
-          queued = inputState.residualText
-        inputState.queuedText = ""
-        inputState.queuedEchoRows = 0
+      if inputState.autoSend:
+        queued = editor.line.text
+        queuedRows = inputState.queuedEchoRows
         inputState.autoSend = false
-        if inputState.residualText.startsWith(queued):
-          inputState.residualText = ""
-      if queued.len == 0 and inputState.residualText.len > 0:
-        residual = inputState.residualText
-        inputState.residualText = ""
+        inputState.queuedEchoRows = 0
     finally:
       release inputStateLock
     if cmdWasQuit:
@@ -332,6 +311,7 @@ proc main() =
       messages.add %*{"role": "user",
                       "content": buildUserMessage(messages, queued)}
       refreshSystemPrompt(messages, prof)
+      editor.echoRows = queuedRows
       commitUserPromptTranscript(queued, restoreEditor = false)
       editor.line = minline.Line(text: "", position: 0)
       editor.renderSuffix = ""
@@ -340,8 +320,6 @@ proc main() =
       editor.echoRows = 0
       runTurnsInteractive(prof, messages, session)
       return handleBufferedAfterTurn()
-    if residual.len > 0:
-      editor.prefillText = residual
     false
 
   # Draw the initial chrome at the bottom of the welcome screen. On
@@ -416,6 +394,11 @@ proc main() =
     # on the row directly after the last echo line, where callModel's
     # leading `\n` will set up the new spinner-footer scratch row.
     emitUserSubmit(line, editor.echoRows)
+    editor.line = minline.Line(text: "", position: 0)
+    editor.renderSuffix = ""
+    editor.renderSuffixCursor = false
+    editor.renderRow = 0
+    editor.echoRows = 0
     runTurnsInteractive(prof, messages, session)
     if handleBufferedAfterTurn(): break
 

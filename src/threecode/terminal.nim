@@ -45,11 +45,6 @@ proc refreshEditorWidth(ed: var minline.LineEditor) =
   if w > 0:
     ed.width = w
 
-proc trimTrailingNewlines(s: string): string =
-  result = s
-  while result.len > 0 and result[^1] in {'\r', '\n'}:
-    result.setLen(result.len - 1)
-
 proc syncWrite*(bytes: string) =
   ## Write one synchronized terminal update.
   withTerminalWriteLock:
@@ -101,10 +96,11 @@ proc beginEditorRedraw*(ed: var minline.LineEditor; ready: bool;
   stdout.write "\r\n"
   ed.renderRow = 0
 
-proc finishEditorRedraw*() =
+proc finishEditorRedraw*(showCaret = true) =
   ## Finish the live-editor redraw frame opened by `beginEditorRedraw`.
   try:
-    stdout.write "\x1b[?25h"
+    if showCaret:
+      stdout.write "\x1b[?25h"
     stdout.write SyncEnd
     stdout.flushFile()
   finally:
@@ -161,163 +157,9 @@ proc clearToolOverlay*(top, height, restoreRow: int) =
     stdout.write SyncEnd
     stdout.flushFile
 
-proc prepareAssistantContentStart*(inputRunning: bool;
-                                   editor: ptr minline.LineEditor;
-                                   hadSpinnerFrame, hadBufferedSubmit: bool;
-                                   clearFooterBytes: string;
-                                   flush = true) =
-  ## Clear volatile footer chrome so an assistant response can begin as normal
-  ## transcript output. Caller writes the assistant bullet/content next.
-  withTerminalWriteLock:
-    if inputRunning and editor != nil:
-      let up = editor[].renderRow + 3
-      stdout.write "\r"
-      if up > 0:
-        stdout.write "\x1b[" & $up & "A"
-      stdout.write "\x1b[J"
-    elif hadSpinnerFrame:
-      stdout.write "\r\x1b[2A\x1b[J"
-    elif not hadBufferedSubmit:
-      stdout.write clearFooterBytes
-    if flush:
-      stdout.flushFile
-
 proc eraseRowsAbove*(rows: int) =
   ## Erase rows immediately above the current cursor.
   withTerminalWriteLock:
     for _ in 0 ..< max(0, rows):
       stdout.write "\x1b[1A\x1b[2K"
     stdout.flushFile
-
-proc endTurn*(hadInputThread: bool; editor: ptr minline.LineEditor;
-              hasBar: bool; bytes: string; footerRowsAboveEditor = 1) =
-  ## Render the transition from running turn to idle prompt.
-  withTerminalWriteLock:
-    if hadInputThread and editor != nil:
-      let up =
-        if hasBar: editor[].renderRow + max(1, footerRowsAboveEditor)
-        else: editor[].renderRow
-      stdout.write "\r"
-      if up > 0:
-        stdout.write "\x1b[" & $up & "A"
-    stdout.write bytes
-    stdout.flushFile
-
-proc submitUser*(bytes: string) =
-  ## Echo a normal foreground user submit and clear live footer state.
-  writeRaw(bytes)
-
-proc submitBufferedUser*(editorRows: int; hasBar: bool; bytes: string) =
-  ## Echo a prompt queued by the background editor during a running turn.
-  withTerminalWriteLock:
-    stdout.write "\r"
-    if hasBar:
-      let up = max(0, editorRows - 1)
-      if up > 0:
-        stdout.write "\x1b[" & $up & "A"
-    stdout.write bytes
-    stdout.flushFile
-
-proc renderFooterFrame*(bytes: string; inputRunning: bool;
-                        editor: ptr minline.LineEditor;
-                        footerRowsAboveEditor = 1) {.gcsafe.} =
-  ## Render a fat-prompt chrome update. If the background editor is active,
-  ## repaint the token bar and editor in the same synchronized tick so the
-  ## cursor returns to the editor instead of the bar.
-  {.cast(gcsafe).}:
-    withTerminalWriteLock:
-      if inputRunning and editor != nil:
-        let edPtr = editor
-        stdout.write SyncBegin
-        stdout.write "\x1b[?25l"
-        refreshEditorWidth(edPtr[])
-        let up = edPtr[].renderRow + max(1, footerRowsAboveEditor)
-        stdout.write "\r"
-        if up > 0:
-          stdout.write "\x1b[" & $up & "A"
-        stdout.write "\x1b[J"
-        stdout.write bytes
-        stdout.write "\r\n"
-        edPtr[].renderRow = 0
-        stdout.write edPtr[].redrawBytes(synchronized = false)
-        stdout.write SyncEnd
-        stdout.flushFile
-      else:
-        stdout.write SyncBegin
-        stdout.write bytes
-        stdout.write SyncEnd
-        stdout.flushFile
-
-proc appendTranscriptWithFooter*(transcriptBytes: string; liveAnchored: bool;
-                                 inputRunning: bool;
-                                 editor: ptr minline.LineEditor;
-                                 footerBarBytes, clearBytes, repaintBytes: string;
-                                 compactRowsAboveFooter = 0;
-                                 clearRowsAboveFooter = 0;
-                                 restoreEditor = true;
-                                 footerRowsAboveCursor = -1;
-                                 reserveFooter = true;
-                                 transcriptOwnsSpacing = false) =
-  ## Append transcript bytes as real scrollback while preserving the terminal's
-  ## fat-prompt area. The terminal decides when and where footer bytes are
-  ## emitted.
-  withTerminalWriteLock:
-    let transcript =
-      if transcriptOwnsSpacing: transcriptBytes
-      else: trimTrailingNewlines(transcriptBytes)
-    if liveAnchored:
-      let edPtr = editor
-      if edPtr == nil:
-        return
-      refreshEditorWidth(edPtr[])
-      stdout.write SyncBegin
-      stdout.write "\x1b[?25l\r"
-      let rowsToFooter =
-        if footerRowsAboveCursor > 0: footerRowsAboveCursor
-        else: edPtr[].renderRow + 1
-      let rowsUp = rowsToFooter + max(0, compactRowsAboveFooter)
-      if rowsUp > 0:
-        stdout.write "\x1b[" & $rowsUp & "A"
-      for _ in 0 ..< max(0, clearRowsAboveFooter):
-        stdout.write "\r\x1b[1A\x1b[2K\x1b[1B\r"
-      stdout.write "\x1b[J"
-      if transcript.len > 0:
-        stdout.write transcript
-        if reserveFooter and not transcriptOwnsSpacing:
-          stdout.write "\r\n\r\n"
-      if reserveFooter:
-        if footerBarBytes.len > 0:
-          stdout.write footerBarBytes
-          stdout.write "\r\n"
-        if restoreEditor:
-          edPtr[].renderRow = 0
-          stdout.write edPtr[].redrawBytes()
-      stdout.write SyncEnd
-      stdout.flushFile
-    else:
-      if footerRowsAboveCursor >= 0:
-        stdout.write "\r"
-        if footerRowsAboveCursor > 0:
-          stdout.write "\x1b[" & $footerRowsAboveCursor & "A"
-      elif inputRunning and editor != nil:
-        let up = editor[].renderRow + 1
-        stdout.write "\r"
-        if up > 0:
-          stdout.write "\x1b[" & $up & "A"
-      if compactRowsAboveFooter > 0:
-        stdout.write "\x1b[" & $compactRowsAboveFooter & "A"
-      for _ in 0 ..< max(0, clearRowsAboveFooter):
-        stdout.write "\r\x1b[1A\x1b[2K\x1b[1B\r"
-      stdout.write clearBytes
-      if transcript.len > 0:
-        stdout.write transcript
-        if reserveFooter and not transcriptOwnsSpacing:
-          stdout.write "\r\n\r\n"
-      if reserveFooter:
-        if footerBarBytes.len > 0:
-          stdout.write repaintBytes
-          if inputRunning and editor != nil and restoreEditor:
-            stdout.write "\x1b[1B"
-        if inputRunning and editor != nil and restoreEditor:
-          stdout.write editor[].redrawBytes()
-      stdout.flushFile

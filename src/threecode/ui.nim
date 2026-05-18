@@ -701,43 +701,25 @@ proc buildUserMessage*(messages: JsonNode, raw: string): string =
     body
 
 proc readInput*(editor: var minline.LineEditor, done: var bool): string =
-  ## Read a line of user input. Entry contract: the chrome at the
-  ## bottom of the cursor's content is either bar+prompt (bar at K,
-  ## prompt at K+1, cursor at K col 0) or prompt-only (prompt at K,
-  ## cursor at K col 0 — the pre-first-turn startup state, signalled
-  ## by `currentBarLabel == ""`). In bar mode we walk down one row to
-  ## the prompt and clear; in prompt-only mode we clear in place so
-  ## minline's bright cyan `❯ ` owns the visible prompt glyph. After
-  ## Enter the cursor is wherever minline left it; we don't try to
-  ## clean up — `emitUserSubmit` walks back using
-  ## `splitLines(line).len + (1 if bar / 2 if gap / 0 if prompt-only)`
-  ## and clear-to-end-of-screen from there.
-  enterPromptInput()
-  let oldPreRedraw = editor.preRedraw
-  let oldPostRedraw = editor.postRedraw
-  if currentBarLabel.len > 0:
-    editor.preRedraw = proc(ed: var minline.LineEditor) =
-      beginForegroundEditorRedraw(ed)
-    editor.postRedraw = proc(ed: var minline.LineEditor) =
-      finishForegroundEditorRedraw()
-  defer:
-    editor.preRedraw = oldPreRedraw
-    editor.postRedraw = oldPostRedraw
-  let line = try: editor.readLine("❯ ")
-             except EOFError:
-               done = true; return ""
-             except minline.InputCancelled:
-               return ""
-  navigatedUp = false
-  if line.strip == "":
-    # Empty input: walk back to the prompt-row floor so the chrome
-    # stays glued to the cursor's bottom (otherwise each empty Enter
-    # would push the prompt one row lower than the bar).
-    # The editor reports the visual rows the rendered input occupied;
-    # use that so wrap-affected lines walk back the right amount.
-    resetPromptInputAfterEmpty(editor.echoRows)
-    return ""
-  return line
+  ## Read a line submitted by the persistent input thread. The same
+  ## ``minline.readLineWith`` path owns idle prompt input and active-turn
+  ## buffered input; the controller only consumes completed lines here.
+  ensureInputThreadStarted()
+  while true:
+    var line = ""
+    var echoRows = 0
+    var cmdWasQuit = false
+    if consumeQueuedInput(line, echoRows, cmdWasQuit):
+      navigatedUp = false
+      editor.echoRows = echoRows
+      if line.strip == "":
+        resetPromptInputAfterEmpty(editor.echoRows)
+        return ""
+      return line
+    if cmdWasQuit:
+      done = true
+      return ""
+    sleep 5
 
 # ---------- Command dispatcher ----------
 

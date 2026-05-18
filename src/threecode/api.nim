@@ -48,6 +48,18 @@ when providerStub:
   proc testFrameMode(): bool =
     getEnv("THREECODE_TEST_FRAME_FD").len > 0
 
+  proc waitForTestContinue() =
+    when defined(posix):
+      let fdText = getEnv("THREECODE_TEST_API_CONTINUE_FD")
+      if fdText.len == 0:
+        return
+      try:
+        let fd = cint(parseInt(fdText))
+        var ch: array[1, char]
+        discard posix.read(fd, addr ch[0], 1)
+      except CatchableError:
+        discard
+
   type StubFailure* = enum
     sfNone, sfDns, sfNetworkUnreachable, sfConnectionRefused,
     sfConnectTimeout, sfTls, sfCertificate, sfBrokenPipe,
@@ -1009,6 +1021,8 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
           let step = min(100, remaining)
           sleep(step)
           remaining -= step
+      if testFrameMode() and result{"waitForTestContinue"}.getBool(false):
+        waitForTestContinue()
       let stubContent = result{"content"}.getStr("")
       var stubStreamedLive = false
       if result{"stream"}.getBool(true):
@@ -1039,7 +1053,9 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
           emitTestFrameEvent()
       hookStopSpinner()
       usage = stubUsage(result, stubContent)
-      let stubElapsed = (epochTime() - stubT0).int
+      let stubElapsed =
+        if testFrameMode(): 0
+        else: (epochTime() - stubT0).int
       hookFinalUsage(usage, stubWindow, stubElapsed, stubContent,
                      stubStreamedLive)
       emitTestFrameEvent()

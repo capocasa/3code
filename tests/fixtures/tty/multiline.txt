@@ -1,0 +1,171 @@
+===== 595 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+===== 706 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  
+===== 117 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  second line
+===== 522 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  second line
+
+⣿ ○0% 0s
+❯ queued line one
+===== 952 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  second line
+
+⣿ ○0% 0s
+❯ queued line one
+  
+===== 166 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  second line
+
+⣿ ○0% 0s
+❯ queued line one
+  queued line two
+===== 415 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  second line
+
+⣿ ○0% 0s
+❯ queued line one
+  queued line two ⧖
+  
+===== 619 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  second line
+
+⣿ ○0% ↓6 0s
+❯ queued line one
+  queued line two ⧖
+  
+===== 505 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  second line
+
+● First multiline response.
+  ○1%  ↑120  ↓24  0s
+
+❯ queued line one
+  queued line two
+
+⣿ ○1% ↓6 0s
+❯
+===== 522 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  second line
+
+● First multiline response.
+  ○1%  ↑120  ↓24  0s
+
+❯ queued line one
+  queued line two
+
+● Queued multiline response.
+  ○1%  ↑180  ↓32  0s
+
+  ○1%
+❯
