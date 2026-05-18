@@ -206,6 +206,115 @@ proc printCompactHeadTail*(res: string, idx: int,
     for i in footer - tail ..< footer: printLine(lines[i])
   if footer < lines.len: printLine(lines[footer])
 
+proc wrappedSubtleBytes(body: string; widthPad = 3): string =
+  let termW = try: terminalWidth() except CatchableError: 80
+  let bodyW = max(20, termW - widthPad)
+  for line in body.splitLines:
+    for chunk in wrapAnsi(line, bodyW):
+      result.add GreyFg & "  " & chunk & Reset & "\r\n"
+
+proc compactHeadTailBytes(res: string; idx: int;
+                          head = CompactHead; tail = CompactTail): string =
+  var lines = res.splitLines
+  trimTrailingBlank(lines)
+  var header = 0
+  if header < lines.len and lines[header].startsWith("$ "):
+    result.add wrappedSubtleBytes(lines[header])
+    inc header
+  var footer = lines.len
+  if footer > 0 and lines[footer-1].startsWith("[exit "):
+    dec footer
+  let bodyLen = footer - header
+  let hidden = bodyLen - head - tail
+  if hidden <= head + tail + 1:
+    for i in header ..< footer:
+      result.add wrappedSubtleBytes(lines[i])
+  else:
+    for i in header ..< header + head:
+      result.add wrappedSubtleBytes(lines[i])
+    result.add GreyFg & "  … " & $hidden & " line" &
+      (if hidden == 1: "" else: "s") &
+      " hidden · :show " & $idx & " for full …" & Reset & "\r\n"
+    for i in footer - tail ..< footer:
+      result.add wrappedSubtleBytes(lines[i])
+  if footer < lines.len:
+    result.add wrappedSubtleBytes(lines[footer])
+
+proc addDiffPainted(outBytes: var string; l: string) =
+  let termW = try: terminalWidth() except CatchableError: 80
+  let bodyW = max(20, termW - 2)
+  for chunk in wrapAnsi(l, bodyW):
+    if l.len > 0 and l[0] == '+':
+      outBytes.add ansiForegroundColorCode(fgGreen) & "  " & chunk &
+        ansiResetCode & "\r\n"
+    elif l.len > 0 and l[0] == '-':
+      outBytes.add ansiForegroundColorCode(fgRed) & "  " & chunk &
+        ansiResetCode & "\r\n"
+    else:
+      outBytes.add GreyFg & "  " & chunk & Reset & "\r\n"
+
+proc diffBytes(diff: string): string =
+  const DiffHead = 15
+  const DiffTail = 20
+  var lines = diff.splitLines
+  while lines.len > 0 and lines[^1].strip == "":
+    lines.setLen lines.len - 1
+  if lines.len == 0:
+    return ""
+  if lines.len <= DiffHead + DiffTail + 2:
+    for l in lines:
+      result.addDiffPainted(l)
+    return
+  for i in 0 ..< DiffHead:
+    result.addDiffPainted(lines[i])
+  result.add GreyFg & "  … " & $(lines.len - DiffHead - DiffTail) &
+    " line" & (if lines.len - DiffHead - DiffTail == 1: "" else: "s") &
+    " hidden · `git diff` for full …" & Reset & "\r\n"
+  for i in lines.len - DiffTail ..< lines.len:
+    result.addDiffPainted(lines[i])
+
+proc firstDiffLine(diff: string): string =
+  for line in diff.splitLines:
+    if line.strip.len > 0:
+      return line
+  ""
+
+proc diffBytesSkippingFirst(diff: string): string =
+  var skipped = false
+  var rest: seq[string]
+  for line in diff.splitLines:
+    if not skipped and line.strip.len > 0:
+      skipped = true
+      continue
+    if skipped:
+      rest.add line
+  diffBytes(rest.join("\n"))
+
+proc writeBannerPath(act: Action; diff: string): string =
+  let first = firstDiffLine(diff)
+  if first.startsWith("--- "):
+    first[4 .. ^1].strip
+  elif act.path.len > 0:
+    resolvePath(act.path)
+  else:
+    ""
+
+proc planStatusGlyph(status: string): string =
+  case status
+  of "completed": "✓"
+  of "in_progress": "~"
+  else: "○"
+
+proc planTranscriptBytes(act: Action): string =
+  result.add "≡ ──────────\r\n"
+  for item in act.plan:
+    result.add GreyFg & "  " & planStatusGlyph(item.status) & " " &
+      item.text & Reset & "\r\n"
+
+proc clearTranscriptBytes(act: Action): string =
+  result.add "═════════════════════════════════════════\r\n"
+  result.add "↻ " & act.body.strip & "\r\n"
+
 proc printDiff*(diff: string) =
   const DiffHead = 15
   const DiffTail = 20
@@ -457,6 +566,88 @@ proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -
     subtleWrite(stdout, &"  ({elapsedS}s)")
   stdout.write "\n"
   stdout.flushFile
+
+proc toolBannerBytes*(banner: string; kind: ActionKind; code: int;
+                      elapsedS = -1): string =
+  let icon = if kind == akBash and code > 0: "¤" else: toolIcon(kind)
+  result.add icon & " " & banner
+  if elapsedS >= 1:
+    result.add GreyFg & &"  ({elapsedS}s)" & Reset
+  result.add "\r\n"
+
+proc toolResultBytes*(kind: ActionKind; res: string; code: int; idx: int;
+                      diff = ""): string =
+  if kind == akBash:
+    var lines = res.splitLines
+    trimTrailingBlank(lines)
+    if lines.len <= StreamMaxLines:
+      for l in lines:
+        result.add wrappedSubtleBytes(l)
+    else:
+      let tailLen = max(0, StreamMaxLines - 1)
+      let hidden = lines.len - tailLen
+      result.add GreyFg & "  ... " & $hidden & " line" &
+        (if hidden == 1: "" else: "s") & " omitted" &
+        (if idx > 0: " :show " & $idx & " for full" else: "") &
+        Reset & "\r\n"
+      for i in lines.len - tailLen ..< lines.len:
+        result.add wrappedSubtleBytes(lines[i])
+  elif kind == akRead:
+    var lines = res.splitLines
+    while lines.len > 0 and lines[^1].startsWith("... [") and
+          lines[^1].endsWith("] ..."):
+      lines.setLen(lines.len - 1)
+    result.add compactHeadTailBytes(lines.join("\n"), idx, ReadHead, ReadTail)
+  elif kind in {akWebSearch, akWebFetch}:
+    result.add compactHeadTailBytes(res, idx)
+  elif kind == akPlan:
+    result.add wrappedSubtleBytes(res)
+  else:
+    if code == 0:
+      result.add wrappedSubtleBytes(res)
+    else:
+      let nl = res.find('\n')
+      let head = if nl < 0: res else: res[0 ..< nl]
+      result.add wrappedSubtleBytes(head)
+  if diff.len > 0:
+    result.add diffBytes(diff)
+
+proc toolTranscriptBytes*(banner: string; kind: ActionKind; res: string;
+                          code: int; idx: int; diff = "";
+                          elapsedS = -1): string =
+  result.add toolBannerBytes(banner, kind, code, elapsedS)
+  result.add toolResultBytes(kind, res, code, idx, diff)
+
+proc toolTranscriptBytes*(act: Action; res: string; code: int; idx: int;
+                          diff = ""; elapsedS = -1): string =
+  case act.kind
+  of akWrite:
+    result.add toolBannerBytes(writeBannerPath(act, diff), act.kind, code, elapsedS)
+    if code != 0:
+      result.add toolResultBytes(act.kind, res, code, idx, diff = "")
+    elif diff.len > 0:
+      result.add diffBytes(diff)
+    else:
+      result.add toolResultBytes(act.kind, res, code, idx, diff = "")
+  of akPatch, akApplyPatch:
+    let first = firstDiffLine(diff)
+    let banner = if first.len > 0: first else: bannerFor(act)
+    result.add toolBannerBytes(banner, act.kind, code, elapsedS)
+    if code != 0:
+      result.add toolResultBytes(act.kind, res, code, idx, diff = "")
+    elif diff.len > 0:
+      result.add diffBytesSkippingFirst(diff)
+    else:
+      result.add toolResultBytes(act.kind, res, code, idx, diff = "")
+  of akPlan:
+    result.add planTranscriptBytes(act)
+  of akClear:
+    result.add clearTranscriptBytes(act)
+  of akError:
+    result.add "✕ unknown tool: " & act.path & "\r\n"
+  else:
+    result.add toolTranscriptBytes(
+      bannerFor(act), act.kind, res, code, idx, diff, elapsedS)
 
 proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
   ## Pure label string for the bar / receipt: "○N%  ↑input  ↻cached

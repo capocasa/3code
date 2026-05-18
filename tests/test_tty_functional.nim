@@ -5,6 +5,7 @@ const VisualOutputRoot = "tests" / "output" / "tty"
 const SimpleVisualTestFrames = "tests" / "fixtures" / "tty" / "simple.txt"
 const MultilineVisualTestFrames = "tests" / "fixtures" / "tty" / "multiline.txt"
 const BashToolVisualTestFrames = "tests" / "fixtures" / "tty" / "bash_tool.txt"
+const OtherToolsVisualTestFrames = "tests" / "fixtures" / "tty" / "other_tools.txt"
 const ResizeStreamFrames = "tests" / "fixtures" / "tty" / "resize_stream_frames.txt"
 
 proc ensureStubBinary(): string =
@@ -66,9 +67,10 @@ proc stubEnv(root: string): seq[EnvVar] =
     (key: "XDG_DATA_HOME", val: root / "data"),
   ]
 
-proc startStub(root: string; args: openArray[string] = ["-x", "-i"]): TtySession =
+proc startStub(root: string; args: openArray[string] = ["-x", "-i"];
+               cols = DefaultTtyCols; rows = DefaultTtyRows): TtySession =
   newTtySession(ensureStubBinary(), args = args, cwd = root / "run",
-                env = stubEnv(root))
+                env = stubEnv(root), cols = cols, rows = rows)
 
 proc framePresenceRuns(s: TtySession; needle: string): int =
   var wasPresent = false
@@ -269,6 +271,128 @@ suite "terminal visual contract":
     tty.expectMeaningfulFrameArtifact(
       BashToolVisualTestFrames,
       root / "bash_tool_visual_test_actual.txt")
+
+  test "non-bash tool transcript shapes":
+    let root = newFixture("other_tools_visual_test")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "content": "Exercising non-bash tools.",
+        "contentChunks": ["Exercising non-bash tools."],
+        "tool_calls": [
+          toolCall("call_read", "read", %*{
+            "path": "notes.txt"
+          }, %*{
+            "output": "read-one\nread-two\nread-three\n",
+            "code": 0
+          }),
+          toolCall("call_write", "write", %*{
+            "path": "notes.txt",
+            "body": "new notes\n"
+          }, %*{
+            "output": "wrote /tmp/notes.txt (10 bytes)",
+            "code": 0,
+            "diff": "--- /tmp/notes.txt\n+++ /tmp/notes.txt\n+new notes\n"
+          }),
+          toolCall("call_patch", "patch", %*{
+            "path": "notes.txt",
+            "edits": [
+              {"search": "new notes", "replace": "patched notes"}
+            ]
+          }, %*{
+            "output": "",
+            "code": 0,
+            "diff": "--- /tmp/notes.txt\n+++ /tmp/notes.txt\n-new notes\n+patched notes\n"
+          }),
+          toolCall("call_apply_patch", "apply_patch", %*{
+            "input": "*** Begin Patch\n*** Add File: applied.txt\n+hello\n*** End Patch\n"
+          }, %*{
+            "output": "added /tmp/applied.txt (6 bytes)",
+            "code": 0,
+            "diff": "--- /tmp/applied.txt\n+++ /tmp/applied.txt\n+hello\n"
+          }),
+          toolCall("call_search", "web_search", %*{
+            "query": "terminal rendering"
+          }, %*{
+            "output": "1. Terminal Rendering Guide\nhttps://example.test/rendering\nUseful result snippet.\n",
+            "code": 0
+          }),
+          toolCall("call_fetch", "web_fetch", %*{
+            "url": "https://example.test/rendering"
+          }, %*{
+            "output": "Fetched page title\nFetched page body line\n",
+            "code": 0
+          }),
+          toolCall("call_plan", "update_plan", %*{
+            "items": [
+              {"text": "inspect", "status": "completed"},
+              {"text": "adjust", "status": "in_progress"},
+              {"text": "verify", "status": "pending"}
+            ]
+          }, %*{
+            "output": "completed: inspect\nin_progress: adjust\npending: verify\n",
+            "code": 0
+          }),
+          toolCall("call_unknown", "not_a_tool", %*{}, %*{
+            "output": "Error: tool 'not_a_tool' is not available.",
+            "code": 1
+          }),
+          toolCall("call_clear", "clear", %*{
+            "prompt": "fresh context prompt"
+          }, %*{
+            "output": "",
+            "code": 0
+          })
+        ],
+        "usage": {
+          "promptTokens": 300,
+          "completionTokens": 44,
+          "totalTokens": 344,
+          "cachedTokens": 0
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Clear completed.",
+        "contentChunks": ["Clear completed."],
+        "usage": {
+          "promptTokens": 90,
+          "completionTokens": 12,
+          "totalTokens": 102,
+          "cachedTokens": 0
+        }
+      }
+    ])
+
+    let tty = startStub(root, rows = 70)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "run other tool checks\n"
+    tty.expectInHistory "Exercising non-bash tools."
+    tty.expectInHistory "r notes.txt"
+    tty.expectInHistory "read-three"
+    tty.expectInHistory "w /tmp/notes.txt"
+    tty.expectInHistory "+new notes"
+    tty.expectInHistory "p --- /tmp/notes.txt"
+    tty.expectInHistory "+patched notes"
+    tty.expectInHistory "p --- /tmp/applied.txt"
+    tty.expectInHistory "⌕ terminal rendering"
+    tty.expectInHistory "⇊ https://example.test/rendering"
+    tty.expectInHistory "≡ ──────────"
+    tty.expectInHistory "✕ unknown tool: not_a_tool"
+    tty.expectInHistory "↻ fresh context prompt"
+    tty.expectInHistory "fresh context prompt"
+    tty.expectInHistory "Clear completed."
+    tty.expectTokenBar(["○", "↑90", "↓12"])
+    tty.drain(200)
+    tty.expectMeaningfulFrameArtifact(
+      OtherToolsVisualTestFrames,
+      root / "other_tools_visual_test_actual.txt")
 
 when false:
   suite "disabled terminal visual contract tests":

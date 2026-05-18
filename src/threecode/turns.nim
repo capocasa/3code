@@ -347,10 +347,14 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
 
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
         if not silent:
-          commitTranscriptItem(proc() =
-            renderToolBanner(bannerFor(act), act.kind, code, toolElapsed.int)
-            printToolResult(act.kind, r, code, idx, diff)
-          , prefixBoundary = not hadToolBar)
+          var bytes = toolTranscriptBytes(
+            act, r, code, idx, diff, toolElapsed.int)
+          bytes.finishTranscriptItem()
+          if not hadToolBar:
+            bytes = "\r\n" & bytes
+          commitTranscriptBytes(
+            bytes,
+            transcriptOwnsSpacing = true)
         else:
           commitTranscriptItem(proc() =
             printSkillLoaded(act)
@@ -413,13 +417,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
             session.savePath = newSessionPath()
             session.created = $now()
             session.cwd = getCurrentDir()
-          writeTranscriptWithFatPrompt:
-            stdout.write OffWhiteFg
-            for line in freshMsg.strip.splitLines:
-              stdout.write "  "
-              stdout.write line
-              stdout.write "\n"
-            stdout.write Reset
           saveSession(session, messages)
           cleared = true
           break
