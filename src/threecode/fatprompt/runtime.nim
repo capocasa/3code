@@ -10,7 +10,7 @@ when defined(posix):
   import posix/termios
 import ../types, ../util, ../compact, ../display, ../minline,
   ../terminal as termui
-import ../terminal_engine as termengine
+import ../engine as termengine
 import rendering
 from ../api import ApiStreamHooks, requestTurnInterrupt, setApiStreamHooks,
   setInterrupted

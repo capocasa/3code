@@ -1,0 +1,286 @@
+===== 386 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+  reasoning medium
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ :help
+===== 917 =====
+
+  ╭─╮
+   ─┤  3code v0.4.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+  reasoning medium
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ :help
+
+: help
+  3code the economical coding agent
+
+  commands:
+    :help             show this message
+    :tokens           show token usage for this session
+    :clear            reset conversation (keeps system prompt)
+    :model            list models for current provider (current marked with *)
+    :model X          switch to model X (within current provider)
+    :provider         list configured providers (current marked with *)
+    :provider X       switch to provider X (model defaults to first in its list)
+    :provider add     add a new provider (interactive, verified)
+    :provider edit X  edit provider X (url, key, models)
+    :provider rm X    remove provider X
+    :reasoning        list reasoning levels for current model (* marks active)
+    :reasoning X      switch reasoning level (low / medium / high)
+    :prompt           show the active system prompt
+    :show [N]         show full output of tool call N (default: last)
+    :log              list all tool calls this session
+    :sessions         list sessions saved in the current directory
+    :sessions all     list every saved session (any directory)
+    :compact          compact older tool output in context
+    :summarize        collapse old turns into a synthetic recap (meta model call)
+    :think [on|off]   toggle the reasoning-content ticker (on by default)
+    :q :quit          exit (also Ctrl-D)
+
+  input:
+    single-line   just type and press Enter
+    multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+    arrows        full cursor navigation across lines and visual wraps
+    ctrl+arrow    word-by-word jumps (also crosses logical lines)
+    home / end    jump to start / end of the current logical line
+    ctrl+u        clear the buffer
+    ctrl+w        delete the word before the cursor
+    up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+    tab           complete :commands, provider names, model names
+    ctrl+l        clear the screen
+    @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+===== 274 =====
+
+❯ :provider
+
+: providers
+  * stub  [stub-model]
+    alt
+
+❯ :model
+===== 625 =====
+
+❯ :model
+
+: models
+  * stub-model
+    stub-large
+
+❯ :reasoning
+===== 108 =====
+
+❯ :reasoning
+
+: reasoning
+    low
+  * medium
+    high
+
+❯ :model stub-large
+===== 743 =====
+
+❯ :model stub-large
+
+: profile
+  provider  stub
+  model     stub-large
+  reasoning medium
+
+❯ :reasoning high
+===== 492 =====
+
+❯ :reasoning high
+
+: profile
+  provider  stub
+  model     stub-large
+  reasoning high
+
+❯ :provider alt
+===== 830 =====
+
+❯ :provider alt
+
+: profile
+  provider  alt
+  model     alt-model
+  reasoning medium
+
+❯ :tokens
+===== 561 =====
+
+❯ :tokens
+
+: tokens
+  no tokens used yet
+
+❯ :clear
+===== 319 =====
+
+❯ :clear
+
+: clear
+  ═════════════════════════════════════════
+
+❯ :think off
+===== 704 =====
+
+❯ :think off
+
+: think
+  thinking ticker off
+
+❯ :think on
+===== 266 =====
+
+❯ :think on
+
+: think
+  thinking ticker on
+
+❯ :sessions
+===== 955 =====
+
+❯ :sessions
+
+: sessions
+  no saved sessions for this directory  (try `:sessions all`)
+
+❯ :sessions all
+===== 147 =====
+
+❯ :sessions all
+
+: sessions
+  no saved sessions
+
+❯ :log
+===== 592 =====
+
+❯ :log
+
+: log
+  no tool calls yet
+
+❯ :show
+===== 407 =====
+
+❯ :show
+
+: show
+  no tool calls yet
+
+❯ :compact
+===== 681 =====
+
+❯ :compact
+
+: compact
+  nothing to compact
+
+❯ :summarize
+===== 229 =====
+
+❯ :summarize
+
+! summarize
+  failed or not worth it
+
+❯ :prompt
+===== 814 =====
+
+❯ :prompt
+
+: prompt
+  <active system prompt>
+
+❯ :toknes
+===== 370 =====
+
+❯ :toknes
+
+! command
+  unknown command: :toknes  did you mean :tokens?
+
+❯ :provider add
+===== 641 =====
+
+❯ :provider add
+
+: provider add
+  supported: stub, alt
+
+  api key              : •••••••••
+===== 719 =====
+
+  api key              : •••••••••
+  detected: alt -> stub://alt
+    alt-model
+    alt-large
+  models [alt-model alt-large]  :
+===== 485 =====
+
+  models [alt-model alt-large]  :
+  verifying... ok
+  added alt
+
+: profile
+  provider  alt
+  model     alt-model
+  reasoning medium
+
+❯ :provider edit alt
+===== 132 =====
+
+❯ :provider edit alt
+
+: provider edit
+  editing 'alt' (enter to keep, ctrl+c to abort)
+  # tip: change name + url to point at a fine-tune deployment
+  name [alt]  :
+===== 304 =====
+
+  name [alt]  :
+  url [stub://alt]     :
+===== 573 =====
+
+  url [stub://alt]     :
+  api key [keep existing] :
+===== 882 =====
+
+  api key [keep existing] :
+  fetching models...   2 available
+    alt-model
+    alt-large
+  models [alt-model alt-large]  :
+===== 216 =====
+
+  models [alt-model alt-large]  :
+  verifying... ok
+  updated alt
+
+❯ :provider rm alt
+===== 738 =====
+
+❯ :provider rm alt
+
+: provider rm
+  removed alt
+
+❯ :q

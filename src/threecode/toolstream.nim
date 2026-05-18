@@ -1,7 +1,7 @@
 ## Bash tool-output viewport model and transcript formatting.
 ##
 ## The live viewport is semantic state: command banner, streamed lines, cutoff
-## policy, and final exit code. Terminal placement belongs to terminal_engine.
+## policy, and final exit code. Terminal placement belongs to engine.
 
 import std/[strformat, strutils, terminal]
 import util

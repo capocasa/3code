@@ -11,7 +11,7 @@ when defined(posix):
   import std/posix except Time
 import types, util, prompts, loop, session, compact, config, actions, api,
   display, fatprompt, streamexec, toolstream
-import terminal_engine as termengine
+import engine as termengine
 
 proc trimTranscriptTail(bytes: var string) =
   while bytes.len > 0 and bytes[^1] in {'\r', '\n'}:
