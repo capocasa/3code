@@ -1,4 +1,4 @@
-===== 879 =====
+===== 561 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -10,7 +10,7 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ This is a test prompt
-===== 598 =====
+===== 132 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -26,7 +26,7 @@
   … Thinking about the test prompt
 ⣿ ○0% ↓7 0s
 ❯
-===== 511 =====
+===== 757 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -42,7 +42,7 @@
   … Thinking about the test prompt
 ⣿ ○0% ↓13 0s
 ❯
-===== 193 =====
+===== 474 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent

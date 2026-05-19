@@ -32,10 +32,11 @@ when defined(posix):
   import std/posix
 import threecode/[types, util, prompts, shell, loop, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
-                  toolstream, turns]
+                  toolstream, turns, transcript]
 import threecode/minline
 export types, util, prompts, shell, loop, session, compact,
-       config, actions, api, display, ui, fatprompt, toolstream, turns
+       config, actions, api, display, ui, fatprompt, toolstream, turns,
+       transcript
 
 
 
@@ -285,8 +286,6 @@ proc main() =
   inputMessages = addr(messages)
   inputSession = addr(session)
   inputProfile = addr(prof)
-  turnHandleCommand = proc(cmd: string): bool =
-    handleCommand(cmd, messages, session, prof, editor)
 
   proc handleBufferedAfterTurn(): bool =
     var cmdWasQuit = false
@@ -296,8 +295,11 @@ proc main() =
     try:
       cmdWasQuit = inputState.cmdWasQuit
       if inputState.autoSend:
-        queued = editor.line.text
+        queued =
+          if inputState.queuedText.len > 0: inputState.queuedText
+          else: editor.line.text
         queuedRows = inputState.queuedEchoRows
+        inputState.queuedText = ""
         inputState.autoSend = false
         inputState.queuedEchoRows = 0
     finally:
@@ -371,16 +373,33 @@ proc main() =
     if line == "": continue
     let t = line.strip
     if t in ["exit", "quit", ":q", ":quit", ":exit"]: break
-    if handleCommand(line, messages, session, prof, editor):
-      # Slash command output advanced the cursor; the chrome at the
-      # row where it stood before the user typed is now stale. Drop a
-      # fresh copy at the new bottom so it stays glued to the cursor
-      # flow. In prompt-only mode (pre-first-turn) the chrome is just
-      # the prompt; otherwise it's bar+prompt.
-      if currentBarLabel.len == 0:
-        paintPromptOnly()
-      else:
-        paintBarPrompt(currentBarLabel)
+    let commandResult = handleCommandResult(line, messages, session, prof, editor)
+    if commandResult.recognized:
+      var echo = userPromptItem(line)
+      echo.attachSeparator = true
+      let commandBytes =
+        if commandResult.plainBody:
+          plainCommandBodyBytes(commandResult.body)
+        else:
+          formatItem(commandItem(commandResult.name, commandResult.body,
+                                commandResult.ok))
+      let bytes = formatItem(echo) & commandBytes
+      proc clearSubmittedCommandEditor() =
+        editor.line = minline.Line(text: "", position: 0)
+        editor.renderSuffix = ""
+        editor.renderSuffixCursor = false
+        editor.renderRow = 0
+        editor.echoRows = 0
+        if commandResult.clearFooter:
+          emitFatPromptEvent clearPendingHintEvent()
+          emitFatPromptEvent clearBarEvent()
+      commitTranscriptBytes(
+        bytes,
+        restoreEditor = true,
+        beforeRepaint = clearSubmittedCommandEditor,
+        reserveFooter = true,
+        transcriptOwnsSpacing = true)
+      releaseIdleSubmittedInput()
       continue
     if prof.name == "":
       stdout.styledWriteLine fgMagenta,

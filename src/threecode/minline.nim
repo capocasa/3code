@@ -1281,6 +1281,9 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
         if ed.onSubmit != nil:
           ed.onSubmit(ed)
         fullRedraw(ed)
+        if not noHistory and not hidechars:
+          ed.historyAdd()
+        ed.historyFlush()
         continue
       parkAtEnd(ed)
       if not noHistory and not hidechars:
@@ -1313,6 +1316,9 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
             if ed.onSubmit != nil:
               ed.onSubmit(ed)
             fullRedraw(ed)
+            if not noHistory and not hidechars:
+              ed.historyAdd()
+            ed.historyFlush()
             continue
           parkAtEnd(ed)
           if not noHistory and not hidechars:

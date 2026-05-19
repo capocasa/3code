@@ -10,7 +10,7 @@ import std/[json, locks, os, strformat, strutils, terminal, times]
 when defined(posix):
   import std/posix except Time
 import types, util, prompts, loop, session, compact, config, actions, api,
-  display, fatprompt, streamexec, toolstream
+  display, fatprompt, streamexec, toolstream, transcript
 import engine as termengine
 
 proc trimTranscriptTail(bytes: var string) =
@@ -347,14 +347,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
 
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
         if not silent:
-          var bytes = toolTranscriptBytes(
-            act, r, code, idx, diff, toolElapsed.int)
-          bytes.finishTranscriptItem()
-          if not hadToolBar:
-            bytes = "\r\n" & bytes
-          commitTranscriptBytes(
-            bytes,
-            transcriptOwnsSpacing = true)
+          appendItem(
+            toolItem(act, r, code, idx, diff, toolElapsed.int),
+            prefixBoundary = not hadToolBar)
         else:
           commitTranscriptItem(proc() =
             printSkillLoaded(act)

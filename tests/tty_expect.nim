@@ -520,10 +520,22 @@ proc normalizeSpinnerGlyphs(row: string): string =
         result = result[0 ..< pos] & "⣿" & result[pos + glyph.len .. ^1]
       return
 
+proc normalizeTtyRunRoots(row: string): string =
+  const marker = "tests/output/tty/"
+  result = row
+  var start = result.find(marker)
+  while start >= 0:
+    let runStart = start + marker.len
+    let dataPos = result.find("/data/", runStart)
+    if dataPos < 0:
+      break
+    result = result[0 ..< runStart] & "<tty-run>" & result[dataPos .. ^1]
+    start = result.find(marker, runStart + "<tty-run>".len)
+
 proc normalizeFrameRows*(rows: openArray[string]): seq[string] =
   for row in rows:
     var normalized = row.normalizeElapsed().normalizeSpinnerGlyphs().
-      strip(leading = false, trailing = true)
+      normalizeTtyRunRoots().strip(leading = false, trailing = true)
     if normalized.endsWith("█"):
       normalized = normalized[0 ..< normalized.len - "█".len].
         strip(leading = false, trailing = true)

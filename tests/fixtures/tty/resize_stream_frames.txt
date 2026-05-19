@@ -26,7 +26,7 @@
 
 ❯ resize while streaming
 
-<spinner> ○0% <elapsed>
+⣿ ○0% 0s
 ❯
 ===== frame 0003 =====
 
@@ -41,7 +41,7 @@
 
 ❯ resize while streaming
 
-<spinner> ○0%  ↓1 <elapsed>
+⣿ ○0%  ↓1 0s
 ❯
 ===== frame 0004 =====
 
@@ -56,7 +56,7 @@
 
 ❯ resize while streaming
 
-<spinner> ○0%  ↓2 <elapsed>
+⣿ ○0%  ↓2 0s
 ❯
 ===== frame 0005 =====
 
@@ -71,7 +71,7 @@
 
 ❯ resize while streaming
 
-<spinner> ○0%  ↓3 <elapsed>
+⣿ ○0%  ↓3 0s
 ❯
 ===== frame 0006 =====
 
@@ -86,7 +86,7 @@
 
 ❯ resize while streaming
 
-<spinner> ○0%  ↓4 <elapsed>
+⣿ ○0%  ↓4 0s
 ❯
 ===== frame 0007 =====
 
@@ -101,7 +101,7 @@
 
 ❯ resize while streaming
 
-<spinner> ○0%  ↓5 <elapsed>
+⣿ ○0%  ↓5 0s
 ❯
 ===== frame 0008 =====
 
@@ -116,7 +116,7 @@
 
 ❯ resize while streaming
 
-<spinner> ○0%  ↓6 <elapsed>
+⣿ ○0%  ↓6 0s
 ❯
 ===== frame 0009 =====
 
@@ -131,7 +131,7 @@
 
 ❯ resize while streaming
 
-<spinner> ○0%  ↓7 <elapsed>
+⣿ ○0%  ↓7 0s
 ❯
 ===== frame 0010 =====
 
@@ -146,7 +146,7 @@
 
 ❯ resize while streaming
 
-<spinner> ○0%  ↓8 <elapsed>
+⣿ ○0%  ↓8 0s
 ❯
 ===== frame 0011 =====
 
@@ -161,7 +161,7 @@
 
 ❯ resize while streaming
 
-<spinner> ○0%  ↓9 <elapsed>
+⣿ ○0%  ↓9 0s
 ❯
 ===== frame 0012 =====
 
@@ -176,7 +176,7 @@
 
 ❯ resize while streaming
 
-<spinner> ○0%  ↓10 <elapsed>
+⣿ ○0%  ↓10 0s
 ❯
 ===== frame 0013 =====
 
@@ -191,7 +191,7 @@
 
 ❯ resize while streaming
 
-<spinner> ○0%  ↓11 <elapsed>
+⣿ ○0%  ↓11 0s
 ❯
 ===== frame 0014 =====
 
@@ -206,7 +206,7 @@
 
 ❯ resize while streaming
 
-<spinner> ○0%  ↓12 <elapsed>
+⣿ ○0%  ↓12 0s
 ❯
 ===== frame 0015 =====
 
@@ -221,7 +221,7 @@
 
 ❯ resize while streaming
 
-<spinner> ○0%  ↓13 <elapsed>
+⣿ ○0%  ↓13 0s
 ❯
 ===== frame 0016 =====
 
@@ -236,7 +236,7 @@
 
 ❯ resize while streaming
 
-<spinner> ○0%  ↓14 <elapsed>
+⣿ ○0%  ↓14 0s
 ❯
 ===== frame 0017 =====
 
@@ -251,7 +251,7 @@
 
 ❯ resize while streaming
 
-<spinner> ○0%  ↓15 <elapsed>
+⣿ ○0%  ↓15 0s
 ❯
 ===== frame 0018 =====
 
@@ -266,7 +266,7 @@
 
 ❯ resize while streaming
 
-<spinner> ○0%  ↓16 <elapsed>
+⣿ ○0%  ↓16 0s
 ❯
 ===== frame 0019 =====
 
@@ -281,7 +281,7 @@
 
 ❯ resize while streaming
 
-<spinner> ○0%  ↓17 <elapsed>
+⣿ ○0%  ↓17 0s
 ❯
 ===== frame 0020 =====
 
@@ -298,5 +298,5 @@
 
 ● Resize stream part one. Resize stream part two. Resize stream complete.
 
-  ○0%  ↑42  ↓9  <elapsed>
+  ○0%  ↑42  ↓9  0s
 ❯

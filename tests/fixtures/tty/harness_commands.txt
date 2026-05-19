@@ -1,4 +1,4 @@
-===== 386 =====
+===== 606 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -6,124 +6,659 @@
 
   provider  stub
   model     stub-model
-  reasoning medium
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ :help
-===== 917 =====
-
-  ╭─╮
-   ─┤  3code v0.4.0   the economical coding agent
-  ╰─╯
-
-  provider  stub
-  model     stub-model
-  reasoning medium
-
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
-
-❯ :help
-
+===== 615 =====
 : help
   3code the economical coding agent
 
   commands:
-    :help             show this message
-    :tokens           show token usage for this session
-    :clear            reset conversation (keeps system prompt)
-    :model            list models for current provider (current marked with *)
-    :model X          switch to model X (within current provider)
-    :provider         list configured providers (current marked with *)
-    :provider X       switch to provider X (model defaults to first in its list)
-    :provider add     add a new provider (interactive, verified)
-    :provider edit X  edit provider X (url, key, models)
-    :provider rm X    remove provider X
-    :reasoning        list reasoning levels for current model (* marks active)
-    :reasoning X      switch reasoning level (low / medium / high)
-    :prompt           show the active system prompt
-    :show [N]         show full output of tool call N (default: last)
-    :log              list all tool calls this session
-    :sessions         list sessions saved in the current directory
-    :sessions all     list every saved session (any directory)
-    :compact          compact older tool output in context
-    :summarize        collapse old turns into a synthetic recap (meta model call)
-    :think [on|off]   toggle the reasoning-content ticker (on by default)
-    :q :quit          exit (also Ctrl-D)
+  :help             show this message
+  :tokens           show token usage for this session
+  :clear            reset conversation (keeps system prompt)
+  :model            list models for current provider (current marked with *)
+  :model X          switch to model X (within current provider)
+  :provider         list configured providers (current marked with *)
+  :provider X       switch to provider X (model defaults to first in its list)
+  :provider add     add a new provider (interactive, verified)
+  :provider edit X  edit provider X (url, key, models)
+  :provider rm X    remove provider X
+  :reasoning        list reasoning levels for current model (* marks active)
+  :reasoning X      switch reasoning level (low / medium / high)
+  :prompt           show the active system prompt
+  :show [N]         show full output of tool call N (default: last)
+  :log              list all tool calls this session
+  :sessions         list sessions saved in the current directory
+  :sessions all     list every saved session (any directory)
+  :compact          compact older tool output in context
+  :summarize        collapse old turns into a synthetic recap (meta model call)
+  :think [on|off]   toggle the reasoning-content ticker (on by default)
+  :q :quit          exit (also Ctrl-D)
 
   input:
-    single-line   just type and press Enter
-    multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
-    arrows        full cursor navigation across lines and visual wraps
-    ctrl+arrow    word-by-word jumps (also crosses logical lines)
-    home / end    jump to start / end of the current logical line
-    ctrl+u        clear the buffer
-    ctrl+w        delete the word before the cursor
-    up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
-    tab           complete :commands, provider names, model names
-    ctrl+l        clear the screen
-    @path         inline file contents (e.g. @src/foo.nim)
+  single-line   just type and press Enter
+  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  arrows        full cursor navigation across lines and visual wraps
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯
+===== 332 =====
+: help
+  3code the economical coding agent
+
+  commands:
+  :help             show this message
+  :tokens           show token usage for this session
+  :clear            reset conversation (keeps system prompt)
+  :model            list models for current provider (current marked with *)
+  :model X          switch to model X (within current provider)
+  :provider         list configured providers (current marked with *)
+  :provider X       switch to provider X (model defaults to first in its list)
+  :provider add     add a new provider (interactive, verified)
+  :provider edit X  edit provider X (url, key, models)
+  :provider rm X    remove provider X
+  :reasoning        list reasoning levels for current model (* marks active)
+  :reasoning X      switch reasoning level (low / medium / high)
+  :prompt           show the active system prompt
+  :show [N]         show full output of tool call N (default: last)
+  :log              list all tool calls this session
+  :sessions         list sessions saved in the current directory
+  :sessions all     list every saved session (any directory)
+  :compact          compact older tool output in context
+  :summarize        collapse old turns into a synthetic recap (meta model call)
+  :think [on|off]   toggle the reasoning-content ticker (on by default)
+  :q :quit          exit (also Ctrl-D)
+
+  input:
+  single-line   just type and press Enter
+  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  arrows        full cursor navigation across lines and visual wraps
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
-===== 274 =====
+===== 302 =====
+  :clear            reset conversation (keeps system prompt)
+  :model            list models for current provider (current marked with *)
+  :model X          switch to model X (within current provider)
+  :provider         list configured providers (current marked with *)
+  :provider X       switch to provider X (model defaults to first in its list)
+  :provider add     add a new provider (interactive, verified)
+  :provider edit X  edit provider X (url, key, models)
+  :provider rm X    remove provider X
+  :reasoning        list reasoning levels for current model (* marks active)
+  :reasoning X      switch reasoning level (low / medium / high)
+  :prompt           show the active system prompt
+  :show [N]         show full output of tool call N (default: last)
+  :log              list all tool calls this session
+  :sessions         list sessions saved in the current directory
+  :sessions all     list every saved session (any directory)
+  :compact          compact older tool output in context
+  :summarize        collapse old turns into a synthetic recap (meta model call)
+  :think [on|off]   toggle the reasoning-content ticker (on by default)
+  :q :quit          exit (also Ctrl-D)
+
+  input:
+  single-line   just type and press Enter
+  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  arrows        full cursor navigation across lines and visual wraps
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
 
 : providers
-  * stub  [stub-model]
-    alt
+    * stub  [stub-model]
+      alt
+
+❯
+===== 377 =====
+  :clear            reset conversation (keeps system prompt)
+  :model            list models for current provider (current marked with *)
+  :model X          switch to model X (within current provider)
+  :provider         list configured providers (current marked with *)
+  :provider X       switch to provider X (model defaults to first in its list)
+  :provider add     add a new provider (interactive, verified)
+  :provider edit X  edit provider X (url, key, models)
+  :provider rm X    remove provider X
+  :reasoning        list reasoning levels for current model (* marks active)
+  :reasoning X      switch reasoning level (low / medium / high)
+  :prompt           show the active system prompt
+  :show [N]         show full output of tool call N (default: last)
+  :log              list all tool calls this session
+  :sessions         list sessions saved in the current directory
+  :sessions all     list every saved session (any directory)
+  :compact          compact older tool output in context
+  :summarize        collapse old turns into a synthetic recap (meta model call)
+  :think [on|off]   toggle the reasoning-content ticker (on by default)
+  :q :quit          exit (also Ctrl-D)
+
+  input:
+  single-line   just type and press Enter
+  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  arrows        full cursor navigation across lines and visual wraps
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+: providers
+    * stub  [stub-model]
+      alt
 
 ❯ :model
-===== 625 =====
+===== 312 =====
+  :provider edit X  edit provider X (url, key, models)
+  :provider rm X    remove provider X
+  :reasoning        list reasoning levels for current model (* marks active)
+  :reasoning X      switch reasoning level (low / medium / high)
+  :prompt           show the active system prompt
+  :show [N]         show full output of tool call N (default: last)
+  :log              list all tool calls this session
+  :sessions         list sessions saved in the current directory
+  :sessions all     list every saved session (any directory)
+  :compact          compact older tool output in context
+  :summarize        collapse old turns into a synthetic recap (meta model call)
+  :think [on|off]   toggle the reasoning-content ticker (on by default)
+  :q :quit          exit (also Ctrl-D)
+
+  input:
+  single-line   just type and press Enter
+  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  arrows        full cursor navigation across lines and visual wraps
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+: providers
+    * stub  [stub-model]
+      alt
 
 ❯ :model
 
 : models
-  * stub-model
-    stub-large
+    * stub-model
+      stub-large
+
+❯
+===== 326 =====
+  :provider edit X  edit provider X (url, key, models)
+  :provider rm X    remove provider X
+  :reasoning        list reasoning levels for current model (* marks active)
+  :reasoning X      switch reasoning level (low / medium / high)
+  :prompt           show the active system prompt
+  :show [N]         show full output of tool call N (default: last)
+  :log              list all tool calls this session
+  :sessions         list sessions saved in the current directory
+  :sessions all     list every saved session (any directory)
+  :compact          compact older tool output in context
+  :summarize        collapse old turns into a synthetic recap (meta model call)
+  :think [on|off]   toggle the reasoning-content ticker (on by default)
+  :q :quit          exit (also Ctrl-D)
+
+  input:
+  single-line   just type and press Enter
+  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  arrows        full cursor navigation across lines and visual wraps
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+: providers
+    * stub  [stub-model]
+      alt
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
 
 ❯ :reasoning
-===== 108 =====
+===== 835 =====
+  :sessions         list sessions saved in the current directory
+  :sessions all     list every saved session (any directory)
+  :compact          compact older tool output in context
+  :summarize        collapse old turns into a synthetic recap (meta model call)
+  :think [on|off]   toggle the reasoning-content ticker (on by default)
+  :q :quit          exit (also Ctrl-D)
+
+  input:
+  single-line   just type and press Enter
+  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  arrows        full cursor navigation across lines and visual wraps
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+: providers
+    * stub  [stub-model]
+      alt
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
 
 ❯ :reasoning
 
 : reasoning
-    low
-  * medium
-    high
+      low
+      medium
+      high
+
+❯
+===== 682 =====
+  :sessions         list sessions saved in the current directory
+  :sessions all     list every saved session (any directory)
+  :compact          compact older tool output in context
+  :summarize        collapse old turns into a synthetic recap (meta model call)
+  :think [on|off]   toggle the reasoning-content ticker (on by default)
+  :q :quit          exit (also Ctrl-D)
+
+  input:
+  single-line   just type and press Enter
+  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  arrows        full cursor navigation across lines and visual wraps
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+: providers
+    * stub  [stub-model]
+      alt
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
 
 ❯ :model stub-large
-===== 743 =====
+===== 436 =====
+  :q :quit          exit (also Ctrl-D)
+
+  input:
+  single-line   just type and press Enter
+  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  arrows        full cursor navigation across lines and visual wraps
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+: providers
+    * stub  [stub-model]
+      alt
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
 
 ❯ :model stub-large
 
-: profile
-  provider  stub
-  model     stub-large
-  reasoning medium
+provider  stub
+model     stub-large
+
+❯
+===== 217 =====
+  :q :quit          exit (also Ctrl-D)
+
+  input:
+  single-line   just type and press Enter
+  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  arrows        full cursor navigation across lines and visual wraps
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+: providers
+    * stub  [stub-model]
+      alt
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
 
 ❯ :reasoning high
-===== 492 =====
+===== 111 =====
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+: providers
+    * stub  [stub-model]
+      alt
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
 
 ❯ :reasoning high
 
-: profile
-  provider  stub
-  model     stub-large
-  reasoning high
+provider  stub
+model     stub-large
+reasoning high
+
+❯
+===== 242 =====
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+: providers
+    * stub  [stub-model]
+      alt
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
 
 ❯ :provider alt
-===== 830 =====
+===== 948 =====
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+: providers
+    * stub  [stub-model]
+      alt
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
 
 ❯ :provider alt
 
-: profile
-  provider  alt
-  model     alt-model
-  reasoning medium
+provider  alt
+model     alt-model
+
+❯
+===== 456 =====
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+: providers
+    * stub  [stub-model]
+      alt
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+
+provider  alt
+model     alt-model
 
 ❯ :tokens
-===== 561 =====
+===== 664 =====
+
+: providers
+    * stub  [stub-model]
+      alt
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+
+provider  alt
+model     alt-model
+
+❯ :tokens
+
+: tokens
+  no tokens used yet
+
+❯
+===== 464 =====
+
+: providers
+    * stub  [stub-model]
+      alt
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+
+provider  alt
+model     alt-model
 
 ❯ :tokens
 
@@ -131,15 +666,163 @@
   no tokens used yet
 
 ❯ :clear
-===== 319 =====
+===== 128 =====
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+
+provider  alt
+model     alt-model
+
+❯ :tokens
+
+: tokens
+  no tokens used yet
 
 ❯ :clear
 
 : clear
-  ═════════════════════════════════════════
+  ════════════════════════════════════════
+
+❯
+===== 127 =====
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+
+provider  alt
+model     alt-model
+
+❯ :tokens
+
+: tokens
+  no tokens used yet
+
+❯ :clear
+
+: clear
+  ════════════════════════════════════════
 
 ❯ :think off
-===== 704 =====
+===== 125 =====
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+
+provider  alt
+model     alt-model
+
+❯ :tokens
+
+: tokens
+  no tokens used yet
+
+❯ :clear
+
+: clear
+  ════════════════════════════════════════
+
+❯ :think off
+
+: think
+  thinking ticker off
+
+❯
+===== 548 =====
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+
+provider  alt
+model     alt-model
+
+❯ :tokens
+
+: tokens
+  no tokens used yet
+
+❯ :clear
+
+: clear
+  ════════════════════════════════════════
 
 ❯ :think off
 
@@ -147,7 +830,81 @@
   thinking ticker off
 
 ❯ :think on
-===== 266 =====
+===== 109 =====
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+
+provider  alt
+model     alt-model
+
+❯ :tokens
+
+: tokens
+  no tokens used yet
+
+❯ :clear
+
+: clear
+  ════════════════════════════════════════
+
+❯ :think off
+
+: think
+  thinking ticker off
+
+❯ :think on
+
+: think
+  thinking ticker on
+
+❯
+===== 530 =====
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+
+provider  alt
+model     alt-model
+
+❯ :tokens
+
+: tokens
+  no tokens used yet
+
+❯ :clear
+
+: clear
+  ════════════════════════════════════════
+
+❯ :think off
+
+: think
+  thinking ticker off
 
 ❯ :think on
 
@@ -155,7 +912,81 @@
   thinking ticker on
 
 ❯ :sessions
-===== 955 =====
+===== 662 =====
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+
+provider  alt
+model     alt-model
+
+❯ :tokens
+
+: tokens
+  no tokens used yet
+
+❯ :clear
+
+: clear
+  ════════════════════════════════════════
+
+❯ :think off
+
+: think
+  thinking ticker off
+
+❯ :think on
+
+: think
+  thinking ticker on
+
+❯ :sessions
+
+: sessions
+  no saved sessions for this directory  (try `:sessions all`)
+
+❯
+===== 294 =====
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+
+provider  alt
+model     alt-model
+
+❯ :tokens
+
+: tokens
+  no tokens used yet
+
+❯ :clear
+
+: clear
+  ════════════════════════════════════════
+
+❯ :think off
+
+: think
+  thinking ticker off
+
+❯ :think on
+
+: think
+  thinking ticker on
 
 ❯ :sessions
 
@@ -163,7 +994,81 @@
   no saved sessions for this directory  (try `:sessions all`)
 
 ❯ :sessions all
-===== 147 =====
+===== 625 =====
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+
+provider  alt
+model     alt-model
+
+❯ :tokens
+
+: tokens
+  no tokens used yet
+
+❯ :clear
+
+: clear
+  ════════════════════════════════════════
+
+❯ :think off
+
+: think
+  thinking ticker off
+
+❯ :think on
+
+: think
+  thinking ticker on
+
+❯ :sessions
+
+: sessions
+  no saved sessions for this directory  (try `:sessions all`)
+
+❯ :sessions all
+
+: sessions
+  no saved sessions
+
+❯
+===== 314 =====
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+
+provider  alt
+model     alt-model
+
+❯ :tokens
+
+: tokens
+  no tokens used yet
+
+❯ :clear
+
+: clear
+  ════════════════════════════════════════
+
+❯ :think off
+
+: think
+  thinking ticker off
+
+❯ :think on
+
+: think
+  thinking ticker on
+
+❯ :sessions
+
+: sessions
+  no saved sessions for this directory  (try `:sessions all`)
 
 ❯ :sessions all
 
@@ -171,23 +1076,245 @@
   no saved sessions
 
 ❯ :log
-===== 592 =====
+===== 655 =====
+
+provider  alt
+model     alt-model
+
+❯ :tokens
+
+: tokens
+  no tokens used yet
+
+❯ :clear
+
+: clear
+  ════════════════════════════════════════
+
+❯ :think off
+
+: think
+  thinking ticker off
+
+❯ :think on
+
+: think
+  thinking ticker on
+
+❯ :sessions
+
+: sessions
+  no saved sessions for this directory  (try `:sessions all`)
+
+❯ :sessions all
+
+: sessions
+  no saved sessions
 
 ❯ :log
 
 : log
-  no tool calls yet
+    no tool calls yet
+
+❯
+===== 130 =====
+
+provider  alt
+model     alt-model
+
+❯ :tokens
+
+: tokens
+  no tokens used yet
+
+❯ :clear
+
+: clear
+  ════════════════════════════════════════
+
+❯ :think off
+
+: think
+  thinking ticker off
+
+❯ :think on
+
+: think
+  thinking ticker on
+
+❯ :sessions
+
+: sessions
+  no saved sessions for this directory  (try `:sessions all`)
+
+❯ :sessions all
+
+: sessions
+  no saved sessions
+
+❯ :log
+
+: log
+    no tool calls yet
 
 ❯ :show
-===== 407 =====
+===== 347 =====
+
+: tokens
+  no tokens used yet
+
+❯ :clear
+
+: clear
+  ════════════════════════════════════════
+
+❯ :think off
+
+: think
+  thinking ticker off
+
+❯ :think on
+
+: think
+  thinking ticker on
+
+❯ :sessions
+
+: sessions
+  no saved sessions for this directory  (try `:sessions all`)
+
+❯ :sessions all
+
+: sessions
+  no saved sessions
+
+❯ :log
+
+: log
+    no tool calls yet
 
 ❯ :show
 
 : show
-  no tool calls yet
+    no tool calls yet
+
+❯
+===== 520 =====
+
+: tokens
+  no tokens used yet
+
+❯ :clear
+
+: clear
+  ════════════════════════════════════════
+
+❯ :think off
+
+: think
+  thinking ticker off
+
+❯ :think on
+
+: think
+  thinking ticker on
+
+❯ :sessions
+
+: sessions
+  no saved sessions for this directory  (try `:sessions all`)
+
+❯ :sessions all
+
+: sessions
+  no saved sessions
+
+❯ :log
+
+: log
+    no tool calls yet
+
+❯ :show
+
+: show
+    no tool calls yet
 
 ❯ :compact
-===== 681 =====
+===== 224 =====
+
+: clear
+  ════════════════════════════════════════
+
+❯ :think off
+
+: think
+  thinking ticker off
+
+❯ :think on
+
+: think
+  thinking ticker on
+
+❯ :sessions
+
+: sessions
+  no saved sessions for this directory  (try `:sessions all`)
+
+❯ :sessions all
+
+: sessions
+  no saved sessions
+
+❯ :log
+
+: log
+    no tool calls yet
+
+❯ :show
+
+: show
+    no tool calls yet
+
+❯ :compact
+
+: compact
+  nothing to compact
+
+❯
+===== 839 =====
+
+: clear
+  ════════════════════════════════════════
+
+❯ :think off
+
+: think
+  thinking ticker off
+
+❯ :think on
+
+: think
+  thinking ticker on
+
+❯ :sessions
+
+: sessions
+  no saved sessions for this directory  (try `:sessions all`)
+
+❯ :sessions all
+
+: sessions
+  no saved sessions
+
+❯ :log
+
+: log
+    no tool calls yet
+
+❯ :show
+
+: show
+    no tool calls yet
 
 ❯ :compact
 
@@ -195,7 +1322,81 @@
   nothing to compact
 
 ❯ :summarize
-===== 229 =====
+===== 606 =====
+
+: think
+  thinking ticker off
+
+❯ :think on
+
+: think
+  thinking ticker on
+
+❯ :sessions
+
+: sessions
+  no saved sessions for this directory  (try `:sessions all`)
+
+❯ :sessions all
+
+: sessions
+  no saved sessions
+
+❯ :log
+
+: log
+    no tool calls yet
+
+❯ :show
+
+: show
+    no tool calls yet
+
+❯ :compact
+
+: compact
+  nothing to compact
+
+❯ :summarize
+
+! summarize
+  failed or not worth it
+
+❯
+===== 852 =====
+
+: think
+  thinking ticker off
+
+❯ :think on
+
+: think
+  thinking ticker on
+
+❯ :sessions
+
+: sessions
+  no saved sessions for this directory  (try `:sessions all`)
+
+❯ :sessions all
+
+: sessions
+  no saved sessions
+
+❯ :log
+
+: log
+    no tool calls yet
+
+❯ :show
+
+: show
+    no tool calls yet
+
+❯ :compact
+
+: compact
+  nothing to compact
 
 ❯ :summarize
 
@@ -203,84 +1404,167 @@
   failed or not worth it
 
 ❯ :prompt
-===== 814 =====
+===== 240 =====
 
-❯ :prompt
+  Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping ta
+bles), hard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (
+pushing code, opening PRs, sending email). When in doubt, ask.
 
-: prompt
-  <active system prompt>
+  # Git
+
+  Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`.
+Don't push or commit unless asked.
+
+  # Security
+
+  Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Do
+n't disable TLS verification. If you spot something insecure, fix it immediately.
+
+  # Web research
+
+  Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you'd read the pag
+e — fetch it. Prefer primary sources (official docs, spec, repo) over aggregators. Two independent sources before claimi
+ng a fact; mark single-source claims. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question.
+If searches don't turn up a clear answer, say so — don't guess.
+
+  # Skills
+
+  Before using unfamiliar tools, `cat` a matching skill file from the list below.
+
+  Available:
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
+
+  # Tone
+
+  Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one o
+n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
+
+❯
+===== 186 =====
+
+  Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping ta
+bles), hard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (
+pushing code, opening PRs, sending email). When in doubt, ask.
+
+  # Git
+
+  Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`.
+Don't push or commit unless asked.
+
+  # Security
+
+  Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Do
+n't disable TLS verification. If you spot something insecure, fix it immediately.
+
+  # Web research
+
+  Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you'd read the pag
+e — fetch it. Prefer primary sources (official docs, spec, repo) over aggregators. Two independent sources before claimi
+ng a fact; mark single-source claims. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question.
+If searches don't turn up a clear answer, say so — don't guess.
+
+  # Skills
+
+  Before using unfamiliar tools, `cat` a matching skill file from the list below.
+
+  Available:
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
+
+  # Tone
+
+  Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one o
+n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯ :toknes
-===== 370 =====
+===== 939 =====
+  # Git
+
+  Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`.
+Don't push or commit unless asked.
+
+  # Security
+
+  Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Do
+n't disable TLS verification. If you spot something insecure, fix it immediately.
+
+  # Web research
+
+  Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you'd read the pag
+e — fetch it. Prefer primary sources (official docs, spec, repo) over aggregators. Two independent sources before claimi
+ng a fact; mark single-source claims. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question.
+If searches don't turn up a clear answer, say so — don't guess.
+
+  # Skills
+
+  Before using unfamiliar tools, `cat` a matching skill file from the list below.
+
+  Available:
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
+
+  # Tone
+
+  Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one o
+n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯ :toknes
 
 ! command
   unknown command: :toknes  did you mean :tokens?
 
-❯ :provider add
-===== 641 =====
+❯
+===== 943 =====
+  # Git
 
-❯ :provider add
+  Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`.
+Don't push or commit unless asked.
 
-: provider add
-  supported: stub, alt
+  # Security
 
-  api key              : •••••••••
-===== 719 =====
+  Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Do
+n't disable TLS verification. If you spot something insecure, fix it immediately.
 
-  api key              : •••••••••
-  detected: alt -> stub://alt
-    alt-model
-    alt-large
-  models [alt-model alt-large]  :
-===== 485 =====
+  # Web research
 
-  models [alt-model alt-large]  :
-  verifying... ok
-  added alt
+  Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you'd read the pag
+e — fetch it. Prefer primary sources (official docs, spec, repo) over aggregators. Two independent sources before claimi
+ng a fact; mark single-source claims. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question.
+If searches don't turn up a clear answer, say so — don't guess.
 
-: profile
-  provider  alt
-  model     alt-model
-  reasoning medium
+  # Skills
 
-❯ :provider edit alt
-===== 132 =====
+  Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
-❯ :provider edit alt
+  Available:
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
 
-: provider edit
-  editing 'alt' (enter to keep, ctrl+c to abort)
-  # tip: change name + url to point at a fine-tune deployment
-  name [alt]  :
-===== 304 =====
+  # Tone
 
-  name [alt]  :
-  url [stub://alt]     :
-===== 573 =====
+  Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one o
+n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
-  url [stub://alt]     :
-  api key [keep existing] :
-===== 882 =====
+❯ :toknes
 
-  api key [keep existing] :
-  fetching models...   2 available
-    alt-model
-    alt-large
-  models [alt-model alt-large]  :
-===== 216 =====
+! command
+  unknown command: :toknes  did you mean :tokens?
 
-  models [alt-model alt-large]  :
-  verifying... ok
-  updated alt
-
-❯ :provider rm alt
-===== 738 =====
-
-❯ :provider rm alt
-
-: provider rm
-  removed alt
-
-❯ :q
+❯ :toknes

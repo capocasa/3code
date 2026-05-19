@@ -7,6 +7,7 @@ const MultilineVisualTestFrames = "tests" / "fixtures" / "tty" / "multiline.txt"
 const BashToolVisualTestFrames = "tests" / "fixtures" / "tty" / "bash_tool.txt"
 const OtherToolsVisualTestFrames = "tests" / "fixtures" / "tty" / "other_tools.txt"
 const ResizeStreamFrames = "tests" / "fixtures" / "tty" / "resize_stream_frames.txt"
+const HarnessCommandFrames = "tests" / "fixtures" / "tty" / "harness_commands.txt"
 
 proc ensureStubBinary(): string =
   let pid = $getCurrentProcessId()
@@ -41,6 +42,28 @@ url = "stub://provider"
 key = "stub"
 family = "glm"
 models = "stub-model"
+""")
+
+proc writeHarnessProviders(root: string) =
+  createDir(root / "xdg" / "3code")
+  writeFile(root / "xdg" / "3code" / "config", """
+[settings]
+current = "stub.stub-model"
+search-url = "http://127.0.0.1:1/?q="
+
+[provider]
+name = "stub"
+url = "stub://provider"
+key = "stub"
+family = "glm"
+models = "stub-model stub-large"
+
+[provider]
+name = "alt"
+url = "stub://alt"
+key = "alt"
+family = "glm"
+models = "alt-model alt-large"
 """)
 
 proc toolCall(id, name: string, args: JsonNode; stub: JsonNode = nil): JsonNode =
@@ -85,6 +108,62 @@ proc framePresenceRuns(s: TtySession; needle: string): int =
     wasPresent = present
 
 suite "terminal visual contract":
+  test "harness commands are transcript items":
+    let root = newFixture("harness_commands")
+    writeHarnessProviders(root)
+    writeStubResponses(root, %*[])
+    check fileExists(HarnessCommandFrames)
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.frames.setLen(0)
+    var firstCommand = true
+    for commandCase in [
+      (":help", ": help"),
+      (":provider", ": providers"),
+      (":model", ": models"),
+      (":reasoning", ": reasoning"),
+      (":model stub-large", "provider  stub"),
+      (":reasoning high", "reasoning high"),
+      (":provider alt", "provider  alt"),
+      (":tokens", ": tokens"),
+      (":clear", ": clear"),
+      (":think off", ": think"),
+      (":think on", ": think"),
+      (":sessions", ": sessions"),
+      (":sessions all", ": sessions"),
+      (":log", ": log"),
+      (":show", ": show"),
+      (":compact", ": compact"),
+      (":summarize", "! summarize"),
+      (":prompt", ": prompt"),
+      (":toknes", "! command")
+    ]:
+      let (command, marker) = commandCase
+      tty.send command
+      if firstCommand:
+        tty.expect "❯ " & command
+        tty.frames.setLen(0)
+        firstCommand = false
+      else:
+        tty.drain(80)
+      tty.send "\n"
+      tty.expectInHistory "❯ " & command
+      tty.expectInHistory marker
+      tty.drain(120)
+    tty.expectInHistory "unknown command: :toknes  did you mean :tokens?"
+    tty.send "\x1b[A"
+    tty.expect "❯ :toknes"
+    tty.drain(200)
+    tty.expectMeaningfulFrameArtifact(
+      HarnessCommandFrames,
+      root / "harness_commands_actual.txt")
+
   test "simple one-turn prompt and reply":
     let root = newFixture("simple_visual_test")
     writeConfiguredProvider(root)

@@ -21,7 +21,19 @@ const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
 type WizardReadLineHook* = proc(prompt: string, hidden,
                                 noHistory: bool): string {.closure.}
 
+type CommandResult* = object
+  recognized*: bool
+  ok*: bool
+  name*: string
+  body*: string
+  plainBody*: bool
+  clearFooter*: bool
+
 var wizardReadLineHook*: WizardReadLineHook
+
+proc handleCommandResult*(cmd: string, messages: var JsonNode,
+                          session: var Session, prof: var Profile,
+                          editor: var minline.LineEditor): CommandResult
 
 proc completionFor*(line: string): seq[string] =
   let words = line.split(' ')
@@ -577,6 +589,27 @@ proc nearestCommand(name: string): string =
       result = c
   if bestDist > 2: result = ""
 
+proc commandTitle(name, arg: string; ok: bool): string =
+  if not ok and name notin CommandNames:
+    return "command"
+  case name
+  of ":?":
+    "help"
+  of ":provider":
+    let parts = arg.splitWhitespace()
+    if parts.len == 0:
+      "providers"
+    elif parts[0] in ["add", "edit", "rm", "remove"]:
+      "provider " & (if parts[0] == "remove": "rm" else: parts[0])
+    else:
+      "profile"
+  of ":model":
+    if arg.len == 0: "models" else: "profile"
+  of ":reasoning":
+    if arg.len == 0: "reasoning" else: "profile"
+  else:
+    name.strip(chars = {':'})
+
 # ---------- Session preamble + user-input prep ----------
 
 proc loadAgentsMd(start: string): string =
@@ -726,96 +759,121 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
 proc handleCommand*(cmd: string, messages: var JsonNode, session: var Session,
                    prof: var Profile, editor: var minline.LineEditor): bool =
   ## returns true if the input was a recognised command
+  let res = handleCommandResult(cmd, messages, session, prof, editor)
+  if not res.recognized:
+    return false
+  if res.body.len > 0:
+    stdout.write res.body
+    stdout.flushFile
+  true
+
+proc handleCommandResult*(cmd: string, messages: var JsonNode,
+                          session: var Session, prof: var Profile,
+                          editor: var minline.LineEditor): CommandResult =
+  ## Execute a REPL command and return its terminal body instead of writing
+  ## directly to scrollback. Command internals still use the legacy display
+  ## helpers; their stdout is captured here so the outer controller can commit
+  ## one high-level transcript item.
   let c = cmd.strip
-  if c.len == 0 or c[0] != ':': return false
+  if c.len == 0 or c[0] != ':':
+    return CommandResult(recognized: false)
   let sp = c.find({' ', '\t'})
   let name = if sp < 0: c else: c[0 ..< sp]
   let arg = if sp < 0: "" else: c[sp+1 .. ^1].strip
-  case name
-  of ":help", ":?":
-    renderHelp()
-  of ":tokens":
-    if session.usage.totalTokens == 0:
-      cmdResponse "no tokens used yet"
-    else:
-      let fresh = max(0, session.usage.promptTokens - session.usage.cachedTokens)
-      let line = tokenSlot("↑", fresh) &
-        "  " & tokenSlot("↻", session.usage.cachedTokens) &
-        "  " & tokenSlot("↓", session.usage.completionTokens) &
-        "  total " & humanTokens(session.usage.totalTokens)
-      cmdResponse line
-  of ":clear":
-    messages = %* [{"role": "system", "content": buildSystemPrompt(prof)}]
-    session.toolLog.setLen 0
-    session.usage = Usage()
-    session.lastPromptTokens = 0
-    session.loop = initLoopTracker()
-    session.readCache = nil
-    session.plan.setLen 0
-    emitFatPromptEvent clearPendingHintEvent()
-    emitFatPromptEvent clearBarEvent()
-    if session.savePath != "":
-      session.savePath = newSessionPath()
-      session.created = $now()
-      session.cwd = getCurrentDir()
-    cmdResponse "context cleared"
-  of ":model":
-    cmdModel(arg, prof)
-    session.profileName = prof.name
-  of ":provider":
-    cmdProvider(arg, editor, prof)
-    session.profileName = prof.name
-  of ":reasoning":
-    cmdReasoning(arg, prof)
-  of ":prompt":
-    cmdResponse buildSystemPrompt(prof)
-  of ":show":
-    showTool(arg, session.toolLog)
-  of ":log":
-    listTools(session.toolLog)
-  of ":sessions":
-    let showAll = arg.strip.toLowerAscii in ["all", "-a", "--all"]
-    let paths =
-      if showAll: listSessionPaths()
-      else: listSessionPathsForCwd(getCurrentDir())
-    if paths.len == 0:
-      cmdResponse (if showAll: "no saved sessions"
-                   else: "no saved sessions for this directory  (try `:sessions all`)")
-    else:
-      printSessionList(paths, session.savePath, showAll)
-  of ":compact":
-    let n = compactHistory(messages)
-    if n == 0:
-      cmdResponse "nothing to compact"
-    else:
-      cmdResponse &"compacted {n} tool result" & (if n == 1: "" else: "s")
-      saveSession(session, messages)
-  of ":think":
-    case arg.strip.toLowerAscii
-    of "", "toggle":
-      showThinking = not showThinking
-    of "on", "show", "yes": showThinking = true
-    of "off", "hide", "no": showThinking = false
-    else:
-      cmdError "usage: :think [on|off]"
-      return true
-    cmdResponse "thinking ticker " & (if showThinking: "on" else: "off")
-  of ":summarize":
-    if prof.name == "":
-      cmdError "no provider configured. use :provider add"
-    else:
-      let n = summarizeHistory(messages, prof)
-      if n == 0:
-        cmdResponse "summarize: failed or not worth it"
+  var ok = true
+  let body = captureStdoutWrites:
+    case name
+    of ":help", ":?":
+      renderHelp()
+    of ":tokens":
+      if session.usage.totalTokens == 0:
+        cmdResponse "no tokens used yet"
       else:
-        cmdResponse &"collapsed {n} message" &
-          (if n == 1: "" else: "s") &
-          " into a synthetic recap"
+        let fresh = max(0, session.usage.promptTokens - session.usage.cachedTokens)
+        let line = tokenSlot("↑", fresh) &
+          "  " & tokenSlot("↻", session.usage.cachedTokens) &
+          "  " & tokenSlot("↓", session.usage.completionTokens) &
+          "  total " & humanTokens(session.usage.totalTokens)
+        cmdResponse line
+    of ":clear":
+      messages = %* [{"role": "system", "content": buildSystemPrompt(prof)}]
+      session.toolLog.setLen 0
+      session.usage = Usage()
+      session.lastPromptTokens = 0
+      session.loop = initLoopTracker()
+      session.readCache = nil
+      session.plan.setLen 0
+      emitFatPromptEvent clearPendingHintEvent()
+      emitFatPromptEvent clearBarEvent()
+      if session.savePath != "":
+        session.savePath = newSessionPath()
+        session.created = $now()
+        session.cwd = getCurrentDir()
+      cmdResponse "════════════════════════════════════════"
+    of ":model":
+      cmdModel(arg, prof)
+      session.profileName = prof.name
+    of ":provider":
+      cmdProvider(arg, editor, prof)
+      session.profileName = prof.name
+    of ":reasoning":
+      cmdReasoning(arg, prof)
+    of ":prompt":
+      cmdResponse buildSystemPrompt(prof)
+    of ":show":
+      showTool(arg, session.toolLog)
+    of ":log":
+      listTools(session.toolLog)
+    of ":sessions":
+      let showAll = arg.strip.toLowerAscii in ["all", "-a", "--all"]
+      let paths =
+        if showAll: listSessionPaths()
+        else: listSessionPathsForCwd(getCurrentDir())
+      if paths.len == 0:
+        cmdResponse (if showAll: "no saved sessions"
+                     else: "no saved sessions for this directory  (try `:sessions all`)")
+      else:
+        printSessionList(paths, session.savePath, showAll)
+    of ":compact":
+      let n = compactHistory(messages)
+      if n == 0:
+        cmdResponse "nothing to compact"
+      else:
+        cmdResponse &"compacted {n} tool result" & (if n == 1: "" else: "s")
         saveSession(session, messages)
-  else:
-    let suggestion = nearestCommand(name)
-    if suggestion != "":
-      cmdError "unknown command: " & c & "  did you mean " & suggestion & "?"
+    of ":think":
+      case arg.strip.toLowerAscii
+      of "", "toggle":
+        showThinking = not showThinking
+      of "on", "show", "yes": showThinking = true
+      of "off", "hide", "no": showThinking = false
+      else:
+        ok = false
+        cmdError "usage: :think [on|off]"
+      if ok:
+        cmdResponse "thinking ticker " & (if showThinking: "on" else: "off")
+    of ":summarize":
+      if prof.name == "":
+        ok = false
+        cmdError "no provider configured. use :provider add"
+      else:
+        let n = summarizeHistory(messages, prof)
+        if n == 0:
+          ok = false
+          cmdResponse "failed or not worth it"
+        else:
+          cmdResponse &"collapsed {n} message" &
+            (if n == 1: "" else: "s") &
+            " into a synthetic recap"
+          saveSession(session, messages)
     else:
-      cmdError "unknown command: " & c & "  (try :help)"
-  return true
+      ok = false
+      let suggestion = nearestCommand(name)
+      if suggestion != "":
+        cmdError "unknown command: " & c & "  did you mean " & suggestion & "?"
+      else:
+        cmdError "unknown command: " & c & "  (try :help)"
+  let title = commandTitle(name, arg, ok)
+  CommandResult(recognized: true, ok: ok, name: title,
+                body: body, plainBody: ok and title == "profile",
+                clearFooter: ok and title == "profile")

@@ -1,4 +1,4 @@
-import std/[unittest, strutils, sequtils]
+import std/[deques, unittest, strutils, sequtils]
 import threecode/minline
 import threecode/signals
 import minline_testutils
@@ -270,6 +270,9 @@ suite "minline editor: newline insertion (multiline)":
     check ed.line.text == "line1\nline2 edited"
     check rowText(d.grid, 1).contains("line2 edited ⧖")
     check rowText(d.grid, 2).strip.len == 0
+    check len(ed.history.entries) == 2
+    check ed.history.entries[0] == "line1\nline2"
+    check ed.history.entries[1] == "line1\nline2 edited"
 
   test "backspace at start of second logical line joins lines":
     var ed = initEditor()

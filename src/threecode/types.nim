@@ -91,6 +91,7 @@ type
     turnActive*: bool
     shutdown*: bool
     autoSend*: bool
+    queuedText*: string
     queuedEchoRows*: int
     cmdWasQuit*: bool
 

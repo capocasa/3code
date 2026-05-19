@@ -95,7 +95,6 @@ var inputEditor*: ptr minline.LineEditor
 var inputProfile*: ptr Profile
 var inputSession*: ptr Session
 var inputMessages*: ptr JsonNode
-var turnHandleCommand*: proc(cmd: string): bool
 
 # Shared mutable spinner state. The spinner thread reads these every frame;
 # the main thread updates them as chunks arrive. Two separate lines:
@@ -266,15 +265,25 @@ proc consumeQueuedInput*(line: var string; echoRows: var int;
   acquire inputStateLock
   try:
     cmdWasQuit = inputState.cmdWasQuit
-    if inputState.autoSend and inputEditor != nil and
-        inputEditor[].line.text.len > 0:
-      line = inputEditor[].line.text
+    if inputState.autoSend and
+        (inputState.queuedText.len > 0 or
+         (inputEditor != nil and inputEditor[].line.text.len > 0)):
+      line =
+        if inputState.queuedText.len > 0: inputState.queuedText
+        else: inputEditor[].line.text
       echoRows = inputState.queuedEchoRows
+      inputState.queuedText = ""
       inputState.queuedEchoRows = 0
       inputState.autoSend = false
       return true
   finally:
     release inputStateLock
+
+proc releaseIdleSubmittedInput*() =
+  ## Let the persistent editor leave the submitted-line state after an idle
+  ## controller path has consumed and committed the line. Model turns use
+  ## ``beginTurn`` for the same acknowledgement.
+  inputIdleSubmitted.store(false, moRelease)
 
 proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
   ## Called by the editor before every redraw while a turn is active.
@@ -1228,27 +1237,25 @@ proc inputThreadProc() {.thread.} =
         if text.len == 0:
           continue
         if text[0] == ':':
-          termui.withTerminalWriteLock:
-            clearBarPrompt()
-          if turnHandleCommand != nil:
-            discard turnHandleCommand(text)
-          termui.withTerminalWriteLock:
-            enterPromptInput()
-            termengine.writeRaw(edPtr[].redrawBytes())
-            if edPtr[].postRedraw != nil:
-              edPtr[].postRedraw(edPtr[])
-          if text.strip in [":q", ":quit", ":exit"]:
-            acquire inputStateLock
-            try:
-              inputState.cmdWasQuit = true
-            finally:
-              release inputStateLock
-            setInterrupted(true)
-            break
+          acquire inputStateLock
+          try:
+            inputState.queuedText = text
+            inputState.queuedEchoRows = edPtr[].echoRows
+            inputState.autoSend = true
+          finally:
+            release inputStateLock
+          if inputTurnActive.load(moAcquire):
+            emitFatPromptEvent setPromptModeEvent(pmBufferedInput)
+          edPtr[].line = minline.Line(text: "", position: 0)
+          edPtr[].renderSuffix = ""
+          edPtr[].renderSuffixCursor = false
+          edPtr[].renderRow = 0
+          edPtr[].echoRows = 0
         else:
           termui.withTerminalWriteLock:
             acquire inputStateLock
             try:
+              inputState.queuedText = edPtr[].line.text
               inputState.queuedEchoRows = edPtr[].echoRows
               inputState.autoSend = true
             finally:
