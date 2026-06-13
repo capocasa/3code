@@ -46,11 +46,12 @@ type
 
 const KnownGoodCombos* = [
     # glm
-    ("baseten",   "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "low",    0.2, 8192, false),
     ("baseten",   "zai-org/GLM-5",                                   "glm",      "5",   "",          "low",    0.2, 8192, false),
+    ("baseten",   "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "low",    0.2, 8192, false),
     ("cerebras",  "zai-glm-4.7",                                     "glm",      "4",   "7",         "low",    0.2, 8192, false),
     ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm",      "5",   "1",         "low",    0.2, 8192, false),
     ("fireworks", "accounts/fireworks/models/glm-5",                 "glm",      "5",   "",          "low",    0.2, 8192, false),
+    ("nebius",    "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "low",    0.2, 8192, false),
     ("nebius",    "zai-org/GLM-5",                                   "glm",      "5",   "",          "low",    0.2, 8192, false),
     ("nvidia",    "z-ai/glm4.7",                                     "glm",      "4",   "7",         "low",    0.2, 8192, true),
     ("together",  "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "low",    0.2, 8192, false),

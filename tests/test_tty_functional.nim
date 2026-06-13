@@ -107,6 +107,14 @@ proc framePresenceRuns(s: TtySession; needle: string): int =
       inc result
     wasPresent = present
 
+proc requireVisibleEditorCaret(s: TtySession; needle: string) =
+  s.drain(20)
+  require s.frames.len > 0
+  let frame = s.frames[^1]
+  check not frame.cursorHidden
+  require frame.cursorRow >= 0 and frame.cursorRow < frame.rows.len
+  check needle in frame.rows[frame.cursorRow]
+
 suite "terminal visual contract":
   test "harness commands are transcript items":
     let root = newFixture("harness_commands")
@@ -249,8 +257,11 @@ suite "terminal visual contract":
     tty.send "queued line two"
     tty.expect "queued line two"
     tty.advanceTicker()
+    tty.requireVisibleEditorCaret("queued line two")
     tty.advanceTicker()
+    tty.requireVisibleEditorCaret("queued line two")
     tty.advanceTicker()
+    tty.requireVisibleEditorCaret("queued line two")
     tty.send "\n"
     tty.advanceTicker()
     tty.continueStubApi()

@@ -144,6 +144,7 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
         stdout.write "\r\n"
         edPtr[].renderRow = 0
         stdout.write edPtr[].redrawBytes(synchronized = false)
+        stdout.write "\x1b[?25h"
         if frame.kind == ffClear:
           e.noteNoFooter()
         else:
@@ -206,6 +207,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
           stdout.write "\r\n"
         editor[].renderRow = 0
         stdout.write editor[].redrawBytes(synchronized = false)
+        stdout.write "\x1b[?25h"
         if frame.kind == ffClear:
           e.noteNoFooter()
         else:
@@ -289,6 +291,7 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
         if restoreEditor:
           edPtr[].renderRow = 0
           stdout.write edPtr[].redrawBytes()
+          stdout.write "\x1b[?25h"
           e.noteFooterPainted(edPtr[], footerRowsAboveEditor)
         else:
           e.rowsAboveCursorToFooterTop =
@@ -326,6 +329,7 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
         if inputRunning and editor != nil and restoreEditor:
           editor[].renderRow = 0
           stdout.write editor[].redrawBytes()
+          stdout.write "\x1b[?25h"
           e.noteFooterPainted(editor[], footerRowsAboveEditor)
         else:
           e.rowsAboveCursorToFooterTop =
