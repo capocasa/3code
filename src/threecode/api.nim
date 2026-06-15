@@ -908,31 +908,40 @@ proc applyGenerationDefaults*(p: Profile, body: JsonNode) =
     body["max_tokens"] = %d.maxTokens
 
 proc applyDeepseekReasoning(p: Profile, body: JsonNode) =
-  ## DeepSeek V4 maps thinking on/off + reasoning_effort (high/max only;
-  ## low/medium silently become high). For economical coding we follow
-  ## DeepSeek’s recommendation for coding tasks: temperature 0.0, which
-  ## yields deterministic output and reduces token waste.
-  ##   low    → thinking disabled, temperature 0.0
-  ##   medium → thinking enabled, effort low,   temperature 0.0
-  ##   high   → thinking enabled, effort medium,temperature 0.0
-  ## Temperature is overridden here (after applyGenerationDefaults) because
-  ## thinking mode ignores it — but we still set it explicitly for all
-  ## levels to keep behavior deterministic.
-  case p.reasoning
-  of "low":
-    body["thinking"] = %*{"type": "disabled"}
-    body["temperature"] = %0.0
-  of "medium":
-    body["thinking"] = %*{"type": "enabled"}
-    # Map to low reasoning effort for DeepSeek
-    body["reasoning_effort"] = %"low"
-    body["temperature"] = %0.0
-  of "high":
-    body["thinking"] = %*{"type": "enabled"}
-    # Map to medium reasoning effort for DeepSeek
-    body["reasoning_effort"] = %"medium"
-    body["temperature"] = %0.0
-  else: discard
+  ## DeepSeek's reasoning surface differs by serving stack. The
+  ## first-party API (provider `deepseek`) exposes `thinking.type`
+  ## (disabled/enabled/adaptive) plus `reasoning_effort`
+  ## (low/medium/high/max/xhigh); only `disabled` is a true off (0
+  ## reasoning tokens). Hosted stacks (nebius, baseten, together, ...)
+  ## ignore `thinking.type` and expose only `reasoning_effort`
+  ## (low/medium/high), vLLM-style, behaving like gpt-oss. Temperature
+  ## is pinned to 0.0 on the first-party API for deterministic coding
+  ## output.
+  case providerOf(p)
+  of "deepseek":
+    ## First-party API: thinking.type (disabled/enabled/adaptive) plus
+    ## reasoning_effort (low/medium/high/max/xhigh). disabled is the
+    ## only true off (0 reasoning tokens); enabled engages heavy
+    ## reasoning regardless of effort level. Temperature 0.0 for
+    ## deterministic coding output.
+    case p.reasoning
+    of "low":
+      body["thinking"] = %*{"type": "disabled"}
+      body["temperature"] = %0.0
+    of "medium":
+      body["thinking"] = %*{"type": "enabled"}
+      body["reasoning_effort"] = %"medium"
+      body["temperature"] = %0.0
+    of "high":
+      body["thinking"] = %*{"type": "enabled"}
+      body["reasoning_effort"] = %"high"
+      body["temperature"] = %0.0
+    else: discard
+  else:
+    ## Hosted stacks (nebius, baseten, together, deepinfra, fireworks,
+    ## sambanova) ignore thinking.type and expose only reasoning_effort
+    ## (low/medium/high), vLLM-style. Behaves like gpt-oss.
+    body["reasoning_effort"] = %p.reasoning
 
 proc applyMinimaxReasoning(p: Profile, body: JsonNode) =
   ## MiniMax M2.x uses vLLM's `chat_template_kwargs.enable_thinking`

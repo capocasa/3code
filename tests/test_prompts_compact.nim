@@ -80,6 +80,10 @@ suite "prompts: defaultReasoningsFor":
   test "level-based families still use ReasoningLevels":
     check defaultReasoningsFor("openai", "gpt-oss-1", "gpt-oss") ==
       @["low", "medium", "high"]
+    check defaultReasoningsFor("deepseek", "deepseek-v4-pro", "deepseek") ==
+      @["low", "medium", "high"]
+    check defaultReasoningsFor("nebius", "deepseek-ai/DeepSeek-V3.2", "deepseek") ==
+      @["low", "medium", "high"]
 
   test "returns empty for unsupported family":
     check defaultReasoningsFor("x", "y", "llama").len == 0
