@@ -46,25 +46,25 @@ type
 
 const KnownGoodCombos* = [
     # glm
-    ("baseten",   "zai-org/GLM-5",                                   "glm",      "5",   "",          "low",    0.2, 8192, false),
-    ("baseten",   "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "low",    0.2, 8192, false),
-    ("cerebras",  "zai-glm-4.7",                                     "glm",      "4",   "7",         "low",    0.2, 8192, false),
-    ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm",      "5",   "1",         "low",    0.2, 8192, false),
-    ("fireworks", "accounts/fireworks/models/glm-5",                 "glm",      "5",   "",          "low",    0.2, 8192, false),
-    ("nebius",    "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "low",    0.2, 8192, false),
-    ("nebius",    "zai-org/GLM-5",                                   "glm",      "5",   "",          "low",    0.2, 8192, false),
-    ("nvidia",    "z-ai/glm4.7",                                     "glm",      "4",   "7",         "low",    0.2, 8192, true),
-    ("together",  "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "low",    0.2, 8192, false),
-    ("together",  "zai-org/GLM-5",                                   "glm",      "5",   "",          "low",    0.2, 8192, false),
-    ("zai",       "glm-4.7",                                         "glm",      "4",   "7",         "low",    0.2, 8192, false),
-    ("zai",       "glm-5",                                           "glm",      "5",   "",          "low",    0.2, 8192, false),
-    ("zai",       "glm-5-turbo",                                     "glm",      "5",   "turbo",     "low",    0.2, 8192, false),
-    ("zai",       "glm-5.1",                                         "glm",      "5",   "1",         "low",    0.2, 8192, false),
-    ("zaicode",   "glm-5.1",                                         "glm",      "5",   "1",         "low",    0.2, 8192, false),
+    ("baseten",   "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false),
+    ("baseten",   "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "on",     0.2, 8192, false),
+    ("cerebras",  "zai-glm-4.7",                                     "glm",      "4",   "7",         "on",     0.2, 8192, false),
+    ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm",      "5",   "1",         "on",     0.2, 8192, false),
+    ("fireworks", "accounts/fireworks/models/glm-5",                 "glm",      "5",   "",          "on",     0.2, 8192, false),
+    ("nebius",    "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "on",     0.2, 8192, false),
+    ("nebius",    "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false),
+    ("nvidia",    "z-ai/glm4.7",                                     "glm",      "4",   "7",         "on",     0.2, 8192, true),
+    ("together",  "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "on",     0.2, 8192, false),
+    ("together",  "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false),
+    ("zai",       "glm-4.7",                                         "glm",      "4",   "7",         "on",     0.2, 8192, false),
+    ("zai",       "glm-5",                                           "glm",      "5",   "",          "on",     0.2, 8192, false),
+    ("zai",       "glm-5-turbo",                                     "glm",      "5",   "turbo",     "on",     0.2, 8192, false),
+    ("zai",       "glm-5.1",                                         "glm",      "5",   "1",         "on",     0.2, 8192, false),
+    ("zai",       "glm-5.2",                                         "glm",      "5",   "1",         "high",   0.2, 8192, false),
     # qwen is out
-    ("deepinfra", "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "low",    0.2, 8192, false),
-    ("deepinfra", "zai-org/GLM-5",                                   "glm",      "5",   "",          "low",    0.2, 8192, false),
-    ("deepinfra", "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "low",    0.2, 8192, false),
+    ("deepinfra", "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "on",     0.2, 8192, false),
+    ("deepinfra", "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false),
+    ("deepinfra", "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "on",     0.2, 8192, false),
 
     # gpt-oss
     ("baseten",   "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
@@ -1061,10 +1061,12 @@ proc xmlToolCallsFallback*(p: Profile): bool =
   false
 
 const ReasoningLevels* = ["low", "medium", "high"]
-  ## Universal abstract reasoning levels. Wire-level translation is
-  ## family-specific (see `callModel`): gpt-oss passes them through to
-  ## `reasoning_effort`; glm maps "low" to thinking-disabled and the rest
-  ## to thinking-enabled. Empty string means "no knob, omit the field."
+  ## Abstract reasoning levels for the level-based families (gpt-oss,
+  ## deepseek, minimax). Wire-level translation is family-specific (see
+  ## `callModel`): gpt-oss passes them through to `reasoning_effort`;
+  ## deepseek/minimax map them to thinking on/off + effort. GLM uses its
+  ## own value sets (`off`/`on`, or `off`/`high`/`max` on 5.2); see
+  ## `knownGoodReasonings`. Empty string means "no knob, omit the field."
 
 proc reasoningSupported*(family: string): bool =
   ## True when `family` has a wire field for reasoning effort. Drives
@@ -1072,11 +1074,34 @@ proc reasoningSupported*(family: string): bool =
   family == "gpt-oss" or family == "glm" or family == "deepseek" or
     family == "minimax"
 
-proc defaultReasoningsFor*(family: string): seq[string] =
-  ## Available levels per family for the `:reasoning` listing. Empty when
-  ## the family has no reasoning knob at all.
-  if reasoningSupported(family): @ReasoningLevels
-  else: @[]
+proc knownGoodReasonings*(provider, model: string): seq[string] =
+  ## Value set offered by `:reasoning` for a known-good (provider, model)
+  ## pair. Reflects each model's real wire surface: glm 4.7/5/5.1 expose
+  ## on/off only (`thinking.type` or the vLLM `enable_thinking` bool);
+  ## glm-5.2 on z.ai additionally exposes `thinking.effort` with `high`
+  ## (default) and `max`. Falls back to `@ReasoningLevels` for the
+  ## level-based families (gpt-oss, deepseek, minimax), and `@[]` when the
+  ## pair is off the table.
+  let p = provider.toLowerAscii
+  let m = model.toLowerAscii
+  for combo in KnownGoodCombos:
+    if combo[0].toLowerAscii == p and combo[1].toLowerAscii == m:
+      let fam = combo[2]
+      if fam == "glm":
+        if m == "glm-5.2": return @["off", "high", "max"]
+        return @["off", "on"]
+      return @ReasoningLevels
+  @[]
+
+proc defaultReasoningsFor*(provider, model, family: string): seq[string] =
+  ## Value set for the `:reasoning` listing, model-aware for glm. Empty
+  ## when the family has no reasoning knob or the (provider, model) pair
+  ## is off the known-good table.
+  if not reasoningSupported(family): return @[]
+  if family == "glm":
+    let r = knownGoodReasonings(provider, model)
+    if r.len > 0: return r
+  @ReasoningLevels
 
 proc buildCredit*(p: Profile): string =
   ## Dynamic attribution line: model + serving provider, derived from

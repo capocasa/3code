@@ -21,19 +21,61 @@ const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
 type WizardReadLineHook* = proc(prompt: string, hidden,
                                 noHistory: bool): string {.closure.}
 
-type CommandResult* = object
-  recognized*: bool
-  ok*: bool
-  name*: string
-  body*: string
-  plainBody*: bool
-  clearFooter*: bool
+type
+  CommandKind* = enum
+    ckUnknown, ckSafeImmediate, ckMutating, ckModal
+  CommandDisposition* = enum
+    cdTranscriptResult, cdHarnessOnly, cdModal
+  CommandResult* = object
+    recognized*: bool
+    ok*: bool
+    name*: string
+    body*: string
+    plainBody*: bool
+    clearFooter*: bool
+    disposition*: CommandDisposition
 
 var wizardReadLineHook*: WizardReadLineHook
 
 proc handleCommandResult*(cmd: string, messages: var JsonNode,
                           session: var Session, prof: var Profile,
                           editor: var minline.LineEditor): CommandResult
+
+proc classifyCommand*(cmd: string): CommandKind =
+  let c = cmd.strip
+  if c.len == 0 or c[0] != ':':
+    return ckUnknown
+  let sp = c.find({' ', '\t'})
+  let name = if sp < 0: c else: c[0 ..< sp]
+  let arg = if sp < 0: "" else: c[sp+1 .. ^1].strip
+  let parts = arg.splitWhitespace()
+  case name
+  of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":prompt":
+    ckSafeImmediate
+  of ":think":
+    if parts.len == 0 or (parts.len == 1 and parts[0] in ["on", "off", "show", "hide", "yes", "no", "toggle"]):
+      ckSafeImmediate
+    else:
+      ckUnknown
+  of ":provider":
+    if parts.len == 0:
+      ckSafeImmediate
+    elif parts.len == 1 and parts[0] == "list":
+      ckSafeImmediate
+    elif parts.len >= 1 and parts[0] in ["add", "edit"]:
+      ckModal
+    else:
+      ckMutating
+  of ":model":
+    if parts.len == 0 or (parts.len == 1 and parts[0] == "list"): ckSafeImmediate
+    else: ckMutating
+  of ":reasoning":
+    if parts.len == 0 or (parts.len == 1 and parts[0] == "list"): ckSafeImmediate
+    else: ckMutating
+  of ":clear", ":compact", ":summarize":
+    ckMutating
+  else:
+    ckUnknown
 
 proc completionFor*(line: string): seq[string] =
   let words = line.split(' ')
@@ -466,7 +508,7 @@ proc cmdProviderRm(target: string, prof: var Profile) =
 proc cmdProvider(arg: string, editor: var minline.LineEditor,
                  prof: var Profile) =
   let parts = arg.splitWhitespace()
-  if parts.len == 0:
+  if parts.len == 0 or (parts.len == 1 and parts[0] == "list"):
     cmdProviderList(prof)
     return
   case parts[0]
@@ -535,16 +577,19 @@ proc cmdModel(arg: string, prof: var Profile) =
   of 0:
     cmdModelList(prof)
   of 1:
-    cmdModelSelect(parts[0], prof)
+    if parts[0] == "list":
+      cmdModelList(prof)
+    else:
+      cmdModelSelect(parts[0], prof)
   else:
     errLn "  usage: :model [<name>]"
 
 proc cmdReasoningList(prof: Profile) =
-  let prov = currentProvider()
+  let prov = providerForProfile(prof)
   if prov.name == "":
     hintLn "  no provider selected", resetStyle
     return
-  let levels = availableReasonings(prov, prof.family)
+  let levels = availableReasonings(prov, prof.family, prof.model)
   if levels.len == 0:
     hintLn &"  {prof.family}: no reasoning knob", resetStyle
     return
@@ -553,12 +598,12 @@ proc cmdReasoningList(prof: Profile) =
     hintLn "  ", mark, " ", resetStyle, r
 
 proc cmdReasoningSelect(target: string, prof: var Profile) =
-  let prov = currentProvider()
+  let prov = providerForProfile(prof)
   if prov.name == "":
     errLn "  no provider selected"
     return
   let value = target.toLowerAscii
-  let levels = availableReasonings(prov, prof.family)
+  let levels = availableReasonings(prov, prof.family, prof.model)
   if value notin levels:
     errLn &"  unknown reasoning level: {target} (choose from {levels.join(\" \")})"
     return
@@ -576,7 +621,10 @@ proc cmdReasoning(arg: string, prof: var Profile) =
   of 0:
     cmdReasoningList(prof)
   of 1:
-    cmdReasoningSelect(parts[0], prof)
+    if parts[0] == "list":
+      cmdReasoningList(prof)
+    else:
+      cmdReasoningSelect(parts[0], prof)
   else:
     errLn "  usage: :reasoning [<level>]"
 
@@ -780,6 +828,41 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
   let sp = c.find({' ', '\t'})
   let name = if sp < 0: c else: c[0 ..< sp]
   let arg = if sp < 0: "" else: c[sp+1 .. ^1].strip
+  let kind = classifyCommand(c)
+  if kind == ckModal:
+    stdout.write "\r\n"
+    stdout.flushFile
+    let savedOnSubmit = editor.onSubmit
+    let savedPreRedraw = editor.preRedraw
+    let savedPostRedraw = editor.postRedraw
+    let savedDeferSubmit = editor.deferSubmit
+    let savedSubmitIcon = editor.submitIcon
+    let savedRenderSuffix = editor.renderSuffix
+    let savedRenderSuffixCursor = editor.renderSuffixCursor
+    editor.onSubmit = nil
+    editor.preRedraw = nil
+    editor.postRedraw = nil
+    editor.deferSubmit = false
+    editor.submitIcon = ""
+    editor.renderSuffix = ""
+    editor.renderSuffixCursor = false
+    defer:
+      editor.onSubmit = savedOnSubmit
+      editor.preRedraw = savedPreRedraw
+      editor.postRedraw = savedPostRedraw
+      editor.deferSubmit = savedDeferSubmit
+      editor.submitIcon = savedSubmitIcon
+      editor.renderSuffix = savedRenderSuffix
+      editor.renderSuffixCursor = savedRenderSuffixCursor
+    case name
+    of ":provider":
+      cmdProvider(arg, editor, prof)
+      session.profileName = prof.name
+    else:
+      discard
+    return CommandResult(recognized: true, ok: true,
+                         name: commandTitle(name, arg, true),
+                         disposition: cdModal)
   var ok = true
   let body = captureStdoutWrites:
     case name
@@ -874,6 +957,13 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       else:
         cmdError "unknown command: " & c & "  (try :help)"
   let title = commandTitle(name, arg, ok)
+  let disposition =
+    case kind
+    of ckSafeImmediate: cdHarnessOnly
+    of ckModal: cdModal
+    else: cdTranscriptResult
   CommandResult(recognized: true, ok: ok, name: title,
-                body: body, plainBody: ok and title == "profile",
-                clearFooter: ok and title == "profile")
+                body: body,
+                plainBody: ok and (title == "profile" or title == "clear"),
+                clearFooter: ok and title == "profile",
+                disposition: disposition)

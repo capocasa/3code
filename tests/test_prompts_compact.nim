@@ -45,7 +45,8 @@ suite "prompts: knownGoodTags":
 suite "prompts: knownGoodReasoning":
   test "returns reasoning level for known-good combo":
     let r = knownGoodReasoning("zai", "glm-5.1")
-    check r in ["", "low", "medium", "high"]
+    check r in ["", "low", "medium", "high", "on", "off", "max"]
+    check r == "on"  # glm 5.1 defaults to on
 
   test "returns empty for unknown":
     check knownGoodReasoning("unknown", "model") == ""
@@ -67,12 +68,21 @@ suite "prompts: reasoningSupported":
     check not reasoningSupported("llama")
 
 suite "prompts: defaultReasoningsFor":
-  test "returns levels for supported family":
-    let levels = defaultReasoningsFor("glm")
-    check levels == @["low", "medium", "high"]
+  test "glm 4.7/5/5.1 expose off/on":
+    check defaultReasoningsFor("zai", "glm-5.1", "glm") == @["off", "on"]
+    check defaultReasoningsFor("zai", "glm-5", "glm") == @["off", "on"]
+    check defaultReasoningsFor("zai", "glm-4.7", "glm") == @["off", "on"]
+    check defaultReasoningsFor("nebius", "zai-org/GLM-5.1", "glm") == @["off", "on"]
+
+  test "glm-5.2 on z.ai exposes off/high/max":
+    check defaultReasoningsFor("zai", "glm-5.2", "glm") == @["off", "high", "max"]
+
+  test "level-based families still use ReasoningLevels":
+    check defaultReasoningsFor("openai", "gpt-oss-1", "gpt-oss") ==
+      @["low", "medium", "high"]
 
   test "returns empty for unsupported family":
-    check defaultReasoningsFor("llama").len == 0
+    check defaultReasoningsFor("x", "y", "llama").len == 0
 
 suite "prompts: buildCredit":
   test "builds attribution for valid profile":

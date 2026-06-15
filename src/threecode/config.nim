@@ -139,6 +139,17 @@ proc currentProvider*(): ProviderRec =
     if pr.name == name: return pr
   ProviderRec()
 
+proc providerForProfile*(prof: Profile): ProviderRec =
+  ## The provider rec backing a profile, looked up by the provider prefix
+  ## of `prof.name` ("nebius.zai-org/GLM-5.1" -> nebius). Falls back to
+  ## `currentProvider()` when the name has no dot (e.g. a bare default).
+  let dot = prof.name.find('.')
+  if dot >= 0:
+    let name = prof.name[0 ..< dot]
+    for pr in activeProviders:
+      if pr.name == name: return pr
+  return currentProvider()
+
 proc splitModels*(s: string): seq[string] =
   ## Whitespace- (and comma-) separated list of bare model names. Family
   ## lives elsewhere — KnownGoodCombos hardcodes it; the [provider]
@@ -283,12 +294,12 @@ proc resolveReasoning*(prov: ProviderRec, prof: Profile): string =
     if kg != "": return kg
   ""
 
-proc availableReasonings*(prov: ProviderRec, family: string): seq[string] =
-  ## Levels offered by `:reasoning` for the active provider+model. The
-  ## per-provider config override wins; otherwise fall back to the
-  ## family's default list.
+proc availableReasonings*(prov: ProviderRec, family, model: string): seq[string] =
+  ## Value set offered by `:reasoning` for the active provider+model. The
+  ## per-provider config override wins; otherwise the model-aware default
+  ## from the known-good table (glm has per-model value sets).
   if prov.reasonings.len > 0: prov.reasonings
-  else: defaultReasoningsFor(family)
+  else: defaultReasoningsFor(prov.name, model, family)
 
 proc buildProfile*(current: string, providers: seq[ProviderRec],
                   wanted: string): Profile =
@@ -409,8 +420,7 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("together-eu", "https://eu.api.together.xyz/v1"),
   ("xai",         "https://api.x.ai/v1"),
   ("zai",         "https://api.z.ai/api/paas/v4"),
-  ("zai-coding",  "https://api.z.ai/api/coding/paas/v4"),
-  ("zaicode",      "https://api.z.ai/api/coding/paas/v4"),
+  ("zaicode",     "https://api.z.ai/api/coding/paas/v4"),
 ]
   ## Skipped on purpose: `cortects.ai` is a router (an OpenAI-compatible
   ## front-end that fans out to other providers' models), so adding it

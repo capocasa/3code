@@ -863,24 +863,28 @@ proc applyGptOssReasoning(p: Profile, body: JsonNode) =
 
 
 proc applyGlmReasoning(p: Profile, body: JsonNode) =
-  ## `thinking: {type}` is z.ai's first-party knob — accepted on
-  ## api.z.ai (provider names `zai` / `zai-coding`) and rejected
-  ## elsewhere (nvidia replies "Validation: Unsupported parameter(s):
-  ## `thinking`"). NVIDIA NIM exposes the same knob via vLLM's
-  ## `chat_template_kwargs.enable_thinking`, and turning thinking off
-  ## there has the side benefit of stabilising tool-call template
-  ## emission (the streamed reasoning→tool_call transition is what
-  ## sometimes leaks `<tool_call>` tags into delta.content). Other
-  ## glm-serving providers (baseten, nebius, together, fireworks,
-  ## cerebras) get nothing on the wire — they just always think;
-  ## `:reasoning low` is silently inert there.
+  ## Wire mapping for GLM reasoning. Values are `off`/`on` (4.7/5/5.1) or
+  ## `off`/`high`/`max` (5.2 on z.ai). Two control surfaces:
+  ## - `thinking.type` ("enabled"/"disabled") on z.ai's first-party API
+  ##   (provider names `zai` / `zai-coding`), plus `thinking.effort`
+  ##   (`high` default, `max` deeper) on GLM-5.2 only.
+  ## - `chat_template_kwargs.enable_thinking` (bool) on vLLM stacks
+  ##   (nvidia); other vLLM GLM providers (nebius, deepinfra, fireworks)
+  ##   accept the same knob but always think when it's omitted.
+  ## Inert stacks (baseten, together, cerebras) accept nothing and always
+  ## think, so `off` is silently a no-op there.
   case providerOf(p)
   of "zai", "zai-coding", "zaicode":
-    let on = p.reasoning != "low"
-    body["thinking"] = %*{"type": (if on: "enabled" else: "disabled")}
+    case p.reasoning
+    of "off": body["thinking"] = %*{"type": "disabled"}
+    of "on": discard
+    of "high": body["thinking"] = %*{"type": "enabled"}
+    of "max": body["thinking"] = %*{"type": "enabled", "effort": "max"}
+    else: discard
   of "nvidia":
-    let on = p.reasoning != "low"
-    body["chat_template_kwargs"] = %*{"enable_thinking": on}
+    case p.reasoning
+    of "off": body["chat_template_kwargs"] = %*{"enable_thinking": false}
+    else: discard
   else: discard
 
 proc applyStreamingOptions*(p: Profile, body: JsonNode) =
