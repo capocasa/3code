@@ -1,4 +1,4 @@
-import std/[json, os, osproc, strutils, unittest]
+import std/[json, os, osproc, strutils, times, unittest]
 import tty_expect
 
 const VisualOutputRoot = "tests" / "output" / "tty"
@@ -16,7 +16,7 @@ proc ensureStubBinary(): string =
     removeFile(result)
   let cacheDir = getTempDir() / ("3code_tty_stub_cache_" & pid)
   createDir(cacheDir)
-  let cmd = "nim c -d:ssl -d:providerStub --threads:on --path:src --nimcache:" &
+  let cmd = "nim c -d:ssl -d:providerStub -d:QuietThresholdMs=1000 --threads:on --path:src --nimcache:" &
     cacheDir.quoteShell & " -o:" & result.quoteShell & " src/threecode.nim"
   let (outp, code) = execCmdEx(cmd)
   doAssert code == 0, outp
@@ -209,6 +209,93 @@ suite "terminal visual contract":
     tty.expectMeaningfulFrameArtifact(
       SimpleVisualTestFrames,
       root / "simple_visual_test_actual.txt")
+
+  # In tty frame mode preStreamDelay is skipped (see testFrameMode in
+  # api.nim); a response with waitForTestContinue holds the turn open on a
+  # blocking read until continueStubApi releases it. The quiet-watch thread is
+  # real-time, so we wait past QuietThresholdMs then drive a spinner repaint via
+  # advanceTicker so the quiet label becomes visible in the recorded frames.
+  proc expectQuietLabel(tty: TtySession) =
+    let deadline = epochTime() + 5.0
+    while epochTime() < deadline:
+      tty.advanceTicker()
+      if "⏳" in tty.screenText():
+        return
+      sleep(100)
+    doAssert false, "quiet hourglass label never appeared\n" &
+      tty.dumpFramesAround("⏳")
+
+  test "escape cancels during network-quiet":
+    let root = newFixture("quiet_cancel_esc")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "waitForTestContinue": true,
+        "content": "should not appear",
+        "contentChunks": ["should not appear"],
+        "usage": {"promptTokens": 10, "completionTokens": 5,
+                  "totalTokens": 15, "cachedTokens": 0}
+      },
+      {
+        "role": "assistant",
+        "content": "second turn ok",
+        "contentChunks": ["second turn ok"],
+        "usage": {"promptTokens": 10, "completionTokens": 5,
+                  "totalTokens": 15, "cachedTokens": 0}
+      }
+    ])
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+      tty.close()
+    tty.expect "❯"
+    tty.send "first turn"
+    tty.send "\n"
+    tty.expectQuietLabel()
+    tty.send "\x1b"
+    tty.expectInHistory "· interrupted"
+    tty.expect "❯"
+    tty.send "second"
+    tty.send "\n"
+    tty.expectInHistory "second turn ok"
+
+  test "ctrl-c cancels during network-quiet":
+    let root = newFixture("quiet_cancel_ctrlc")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "waitForTestContinue": true,
+        "content": "should not appear",
+        "contentChunks": ["should not appear"],
+        "usage": {"promptTokens": 10, "completionTokens": 5,
+                  "totalTokens": 15, "cachedTokens": 0}
+      },
+      {
+        "role": "assistant",
+        "content": "second turn ok",
+        "contentChunks": ["second turn ok"],
+        "usage": {"promptTokens": 10, "completionTokens": 5,
+                  "totalTokens": 15, "cachedTokens": 0}
+      }
+    ])
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+      tty.close()
+    tty.expect "❯"
+    tty.send "first turn"
+    tty.send "\n"
+    tty.expectQuietLabel()
+    tty.send "\x03"
+    tty.expectInHistory "· interrupted"
+    tty.expect "❯"
+    tty.send "second"
+    tty.send "\n"
+    tty.expectInHistory "second turn ok"
 
   test "multiline prompt and queued multiline autosend":
     let root = newFixture("multiline_visual_test")

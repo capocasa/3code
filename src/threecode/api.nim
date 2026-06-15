@@ -26,6 +26,8 @@ var
   fetchModelsHook*: FetchModelsHook
 
 const providerStub {.booldefine.} = false
+const ConnectTimeoutMs = 30_000
+proc isInterrupted*(): bool {.gcsafe.}
 when providerStub:
   var stubResponseIdx = 0
 
@@ -55,8 +57,17 @@ when providerStub:
         return
       try:
         let fd = cint(parseInt(fdText))
-        var ch: array[1, char]
-        discard posix.read(fd, addr ch[0], 1)
+        var pfd: TPollfd
+        pfd.fd = fd
+        pfd.events = POLLIN
+        while true:
+          if isInterrupted():
+            raise newException(ApiError, "interrupted by user")
+          let r = poll(addr pfd, 1.Tnfds, 100.cint)
+          if r > 0 and (pfd.revents and POLLIN) != 0:
+            var ch: array[1, char]
+            if posix.read(fd, addr ch[0], 1) > 0:
+              break
       except CatchableError:
         discard
 
@@ -644,9 +655,9 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       closeCachedStreamConn()
       try:
         if plainHttp:
-          conn = connectPlain(host, port, timeoutMs = 1_200_000)
+          conn = connectPlain(host, port, timeoutMs = ConnectTimeoutMs)
         else:
-          conn = connectTls(host, port, timeoutMs = 1_200_000,
+          conn = connectTls(host, port, timeoutMs = ConnectTimeoutMs,
                             caFile = bundledCaFile())
       except CatchableError as e:
         result.errMsg =

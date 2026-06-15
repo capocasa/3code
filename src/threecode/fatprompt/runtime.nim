@@ -66,6 +66,7 @@ var spinnerStop: Atomic[bool]
 var spinnerFramePainted: Atomic[bool]
 var spinnerThread: Thread[string]
 var bufferedSubmitTurn: Atomic[bool]
+const QuietThresholdMs {.intdefine.} = 15_000
 var quietStop: Atomic[bool]
 var quietThread: Thread[string]
 var quietRunning = false
@@ -749,8 +750,8 @@ proc quietWatchLoop(baseLabel: string) {.thread.} =
   var shown = false
   while not quietStop.load(moRelaxed):
     let idleMs = nowMs() - lastProviderActivity.load(moRelaxed)
-    if idleMs >= 15_000:
-      setSpinLabel("network quiet; still waiting")
+    if idleMs >= QuietThresholdMs:
+      setSpinLabel("⏳")
       shown = true
     elif shown:
       setSpinLabel(baseLabel)
