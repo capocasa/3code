@@ -88,8 +88,8 @@ const KnownGoodCombos* = [
     ("nebius",    "deepseek-ai/DeepSeek-V3.2",                       "deepseek", "3.2", "",          "medium", 0.2, 8192, false),
     ("nebius",    "deepseek-ai/DeepSeek-V3.2-fast",                  "deepseek", "3.2", "fast",      "medium", 0.2, 4096, false),
     ("nebius",    "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false),
-    ("nebius",    "deepseek-ai/Kimi-K2.5",                           "kimi",     "2",   "5",         "low",    0.2, 8192, false),
-    ("nebius",    "deepseek-ai/Kimi-K2.5-fast",                      "kimi",     "2",   "5-fast",    "low",    0.2, 4096, false),
+    ("nebius",    "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.2, 8192, false),
+    ("nebius",    "moonshotai/Kimi-K2.5-fast",                     "kimi",     "2",   "5-fast",    "on",     0.2, 4096, false),
     ("nebius",    "deepseek-ai/MiniMax-M2.5",                        "minimax",  "2",   "5",         "low",    0.2, 8192, false),
     ("nebius",    "deepseek-ai/MiniMax-M2.5-fast",                   "minimax",  "2",   "5-fast",    "low",    0.2, 4096, false),
     ("together",  "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false),
@@ -107,11 +107,11 @@ const KnownGoodCombos* = [
     ("sambanova", "minimaxai/MiniMax-M2.5",                          "minimax",  "2",   "5",         "low",    0.2, 8192, false),
 
     # kimi
-    ("together",  "deepseek-ai/Kimi-K2.5",                           "kimi",     "2",   "5",         "low",    0.2, 8192, false),
-    ("fireworks", "accounts/fireworks/models/kimi-k2p6",             "kimi",     "2",   "6",         "low",    0.2, 8192, false),
-    ("together",  "deepseek-ai/Kimi-K2.6",                           "kimi",     "2",   "6",         "low",    0.2, 8192, false),
-    ("deepinfra", "deepseek-ai/Kimi-K2.6",                           "kimi",     "2",   "6",         "low",    0.2, 8192, false),
-    ("deepinfra", "deepseek-ai/Kimi-K2.5",                           "kimi",     "2",   "5",         "low",    0.2, 8192, false),
+    ("together",  "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.2, 8192, false),
+    ("fireworks", "accounts/fireworks/models/kimi-k2p6",             "kimi",     "2",   "6",         "on",     0.2, 8192, false),
+    ("together",  "moonshotai/Kimi-K2.6",                          "kimi",     "2",   "6",         "on",     0.2, 8192, false),
+    ("deepinfra", "moonshotai/Kimi-K2.6",                          "kimi",     "2",   "6",         "on",     0.2, 8192, false),
+    ("deepinfra", "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.2, 8192, false),
   ]
     ## (provider, model, family, version, variant, reasoning, temperature,
     ## maxTokens) tuples.
@@ -1072,7 +1072,7 @@ proc reasoningSupported*(family: string): bool =
   ## True when `family` has a wire field for reasoning effort. Drives
   ## whether `:reasoning` switching has any effect for the active model.
   family == "gpt-oss" or family == "glm" or family == "deepseek" or
-    family == "minimax"
+    family == "minimax" or family == "kimi"
 
 proc knownGoodReasonings*(provider, model: string): seq[string] =
   ## Value set offered by `:reasoning` for a known-good (provider, model)
@@ -1090,17 +1090,18 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
       if fam == "glm":
         if m == "glm-5.2": return @["off", "high", "max"]
         return @["off", "on"]
+      if fam == "kimi":
+        return @["off", "on"]
       return @ReasoningLevels
   @[]
 
 proc defaultReasoningsFor*(provider, model, family: string): seq[string] =
-  ## Value set for the `:reasoning` listing, model-aware for glm. Empty
-  ## when the family has no reasoning knob or the (provider, model) pair
-  ## is off the known-good table.
+  ## Value set for the `:reasoning` listing. Empty when the family has
+  ## no reasoning knob or the (provider, model) pair is off the
+  ## known-good table.
   if not reasoningSupported(family): return @[]
-  if family == "glm":
-    let r = knownGoodReasonings(provider, model)
-    if r.len > 0: return r
+  let r = knownGoodReasonings(provider, model)
+  if r.len > 0: return r
   @ReasoningLevels
 
 proc buildCredit*(p: Profile): string =

@@ -64,6 +64,9 @@ suite "prompts: reasoningSupported":
   test "true for minimax":
     check reasoningSupported("minimax")
 
+  test "true for kimi":
+    check reasoningSupported("kimi")
+
   test "false for unknown family":
     check not reasoningSupported("llama")
 
@@ -76,6 +79,14 @@ suite "prompts: defaultReasoningsFor":
 
   test "glm-5.2 on z.ai exposes off/high/max":
     check defaultReasoningsFor("zai", "glm-5.2", "glm") == @["off", "high", "max"]
+
+  test "kimi exposes off/on":
+    check defaultReasoningsFor("nebius", "moonshotai/Kimi-K2.5", "kimi") ==
+      @["off", "on"]
+    check defaultReasoningsFor("together", "moonshotai/Kimi-K2.6", "kimi") ==
+      @["off", "on"]
+    check defaultReasoningsFor("deepinfra", "moonshotai/Kimi-K2.6", "kimi") ==
+      @["off", "on"]
 
   test "level-based families still use ReasoningLevels":
     check defaultReasoningsFor("openai", "gpt-oss-1", "gpt-oss") ==
