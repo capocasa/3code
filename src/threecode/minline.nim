@@ -236,6 +236,14 @@ proc runeLenSafe(text: string, i: int): int =
   let n = runeLenAt(text, i)
   if n <= 0: 1 else: n
 
+proc expectedSeqLen(lead: int): int =
+  if lead < 0x80: 0
+  elif lead < 0xC2: 0
+  elif lead < 0xE0: 2
+  elif lead < 0xF0: 3
+  elif lead < 0xF8: 4
+  else: 0
+
 proc cursorVisual*(text: string, position, promptW, contW, width: int): (int, int) =
   ## (visualRow, visualCol) of the cursor when ``text[0 ..< position]``
   ## has been rendered into a ``width``-wide grid with ``promptW`` cells
@@ -1261,17 +1269,22 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
     # returning. A second copy on top of that is harmless.
     try: ed.write "\x1b[?2004l" except CatchableError: discard
   fullRedraw(ed)
+  var c1: int
+  var putback = -1
   while true:
-    var c1: int
-    while true:
-      try:
-        c1 = ed.getCh()
-        break
-      except IOError:
-        if consumeResizePending():
-          fullRedraw(ed)
-          continue
-        raise
+    if putback >= 0:
+      c1 = putback
+      putback = -1
+    else:
+      while true:
+        try:
+          c1 = ed.getCh()
+          break
+        except IOError:
+          if consumeResizePending():
+            fullRedraw(ed)
+            continue
+          raise
     if c1 < 0:
       ed.eof = true
       raise newException(EOFError, "")
@@ -1335,6 +1348,24 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
       continue
     if c1 in CTRL and KEYMAP.hasKey(KEYNAMES[c1]):
       KEYMAP[KEYNAMES[c1]](ed)
+      continue
+    # Multi-byte UTF-8: decode the full sequence and insert it.
+    if c1 >= 0x80:
+      var buf = ""
+      buf.add c1.char
+      let n = expectedSeqLen(c1)
+      var bad = false
+      for _ in 1 ..< n:
+        let b = ed.getCh()
+        if b >= 0 and (b and 0xC0) == 0x80:
+          buf.add b.char
+        else:
+          putback = b
+          bad = true
+          break
+      # Only commit a complete sequence; a truncated one would leave a
+      # malformed (invalid-UTF-8) buffer that breaks rune walking.
+      if not bad: ed.insertText(buf)
       continue
     # Unknown byte: ignore.
 

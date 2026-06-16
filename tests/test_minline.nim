@@ -540,100 +540,39 @@ suite "minline editor: SIGWINCH EINTR":
     let write = proc(s: string) = discard
     expect IOError:
       discard ed.readLineWith("> ", getCh, write)
-  # PATCHTEST
-
-  test "typed multibyte UTF-8 is accepted":
-    # 'é' is U+00E9 -> C3 A9; '€' is U+20AC -> E2 82 AC.
-    # Fed one byte at a time as a terminal would. Before the unicode fix
-    # the lead byte (0xC3) fell into the "Unknown byte: ignore" branch.
+suite "minline editor: unicode input":
+  proc feedBytes(bytes: openArray[int]; width = 80): string =
     var ed = initEditor()
-    ed.width = 80
-    var keys: seq[int] = @[]
-    keys.add toSeq("héllo €".mapIt(it.ord))
+    ed.width = width
+    var keys: seq[int] = @bytes
     keys.add Enter
     var ki = 0
     let getCh: GetChProc = proc(): int =
       let idx = ki; inc ki
       result = keys[idx]
     let write = proc(s: string) = discard
-    let result = ed.readLineWith("> ", getCh, write)
-    check result == "héllo €"
+    ed.readLineWith("> ", getCh, write)
 
-  test "emoji (4-byte UTF-8) is accepted":
-    # '🚀' is U+1F680 -> F0 9F 9A 80.
-    var ed = initEditor()
-    ed.width = 80
-    var keys: seq[int] = @[]
-    keys.add toSeq("go 🚀".mapIt(it.ord))
-    keys.add Enter
-    var ki = 0
-    let getCh: GetChProc = proc(): int =
-      let idx = ki; inc ki
-      result = keys[idx]
-    let write = proc(s: string) = discard
-    let result = ed.readLineWith("> ", getCh, write)
-    check result == "go 🚀"
+  test "typed multibyte (2-byte) survives":
+    # "\xC3\xA9" = 'é'
+    check feedBytes([0xC3, 0xA9]) == "\xc3\xa9"
 
-  test "malformed UTF-8 lead with no continuation is dropped":
-    # A lone 0xC3 lead followed by a non-continuation byte ('A' = 0x41)
-    # must not corrupt the buffer: the lead is abandoned and 'A' is
-    # processed as a normal char.
-    var ed = initEditor()
-    ed.width = 80
-    var keys: seq[int] = @[0xC3, 'A'.ord]
-    keys.add Enter
-    var ki = 0
-    let getCh: GetChProc = proc(): int =
-      let idx = ki; inc ki
-      result = keys[idx]
-    let write = proc(s: string) = discard
-    let result = ed.readLineWith("> ", getCh, write)
-    check result == "A"
+  test "typed CJK (3-byte) survives":
+    # "\xE4\xB8\xAD" = '中'
+    check feedBytes([0xE4, 0xB8, 0xAD]) == "\xe4\xb8\xad"
 
-  test "typed multibyte UTF-8 is accepted":
-    # 'é' is U+00E9 -> C3 A9; '€' is U+20AC -> E2 82 AC.
-    # Fed one byte at a time as a terminal would. Before the unicode fix
-    # the lead byte (0xC3) fell into the "Unknown byte: ignore" branch.
-    var ed = initEditor()
-    ed.width = 80
-    var keys: seq[int] = @[]
-    keys.add toSeq("héllo €".mapIt(it.ord))
-    keys.add Enter
-    var ki = 0
-    let getCh: GetChProc = proc(): int =
-      let idx = ki; inc ki
-      result = keys[idx]
-    let write = proc(s: string) = discard
-    let result = ed.readLineWith("> ", getCh, write)
-    check result == "héllo €"
+  test "typed emoji (4-byte) survives":
+    # "\xF0\x9F\x98\x80" = '😀'
+    check feedBytes([0xF0, 0x9F, 0x98, 0x80]) == "\xf0\x9f\x98\x80"
 
-  test "emoji (4-byte UTF-8) is accepted":
-    # '🚀' is U+1F680 -> F0 9F 9A 80.
-    var ed = initEditor()
-    ed.width = 80
-    var keys: seq[int] = @[]
-    keys.add toSeq("go 🚀".mapIt(it.ord))
-    keys.add Enter
-    var ki = 0
-    let getCh: GetChProc = proc(): int =
-      let idx = ki; inc ki
-      result = keys[idx]
-    let write = proc(s: string) = discard
-    let result = ed.readLineWith("> ", getCh, write)
-    check result == "go 🚀"
+  test "mixed ASCII and multibyte":
+    # "a\xC3\xA9z"
+    let bytes = toSeq("a".items).mapIt(it.ord) & @[0xC3, 0xA9] &
+      toSeq("z".items).mapIt(it.ord)
+    check feedBytes(bytes) == "a\xc3\xa9z"
 
-  test "malformed UTF-8 lead with no continuation is dropped":
-    # A lone 0xC3 lead followed by a non-continuation byte ('A' = 0x41)
-    # must not corrupt the buffer: the lead is abandoned and 'A' is
-    # processed as a normal char.
-    var ed = initEditor()
-    ed.width = 80
-    var keys: seq[int] = @[0xC3, 'A'.ord]
-    keys.add Enter
-    var ki = 0
-    let getCh: GetChProc = proc(): int =
-      let idx = ki; inc ki
-      result = keys[idx]
-    let write = proc(s: string) = discard
-    let result = ed.readLineWith("> ", getCh, write)
-    check result == "A"
+  test "malformed lead byte with no continuation is dropped":
+    # 0xC3 is a 2-byte lead; a following ASCII byte (not a continuation)
+    # makes the sequence invalid. The lead is discarded and the ASCII byte
+    # is typed normally.
+    check feedBytes([0xC3, 0x41]) == "A"
