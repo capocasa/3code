@@ -10,3 +10,6 @@ config.local.nims
 src/threecode.out
 tools/pty_frames
 tests/golden/*.actual
+nimble.develop
+nimble.paths
+nimbledeps
