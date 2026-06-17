@@ -163,6 +163,34 @@ suite "terminal visual contract":
     check "start active command turn" in log
     check ":tokens" notin log
     check ":provider add" notin log
+
+  test "idle provider add wizard is visible and masks input":
+    let root = newFixture("provider_add_wizard")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[])
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send ":provider add\n"
+    tty.drain(200)
+    check "api key" in tty.screenText()
+    check "********************" notin tty.screenText()
+    tty.send "nvapi-visible-secret"
+    tty.expect "********************"
+    tty.expectNo "nvapi-visible-secret"
+    tty.send "\n"
+    tty.expect "detected:"
+    tty.expect "models"
+    tty.expectNo "nvapi-visible-secret"
+    tty.send "\x1b"
+    tty.expect "cancelled"
+    tty.expectNo "nvapi-visible-secret"
+
   test "harness commands are transcript items":
     let root = newFixture("harness_commands")
     writeHarnessProviders(root)
