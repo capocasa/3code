@@ -111,8 +111,7 @@ const
   DefaultWidth* = 80
   DefaultHeight* = 24
   DefaultBashMaxLines* = 8
-  BrightPromptColor* = BrightWhiteFg & BoldOn
-  EditorPromptBytes* = BrightPromptColor & "❯ " & Reset
+  EditorPromptBytes* = "❯ "
   DeferredSubmitMarker* = "⧖"
 
 proc initFatPromptState*(): FatPromptState =

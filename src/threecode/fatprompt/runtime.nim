@@ -791,7 +791,7 @@ proc quietWatchLoop(baseLabel: string) {.thread.} =
   while not quietStop.load(moRelaxed):
     let idleMs = nowMs() - lastProviderActivity.load(moRelaxed)
     if idleMs >= QuietThresholdMs:
-      setSpinLabel("⏳")
+      setSpinLabel("⧖")
       shown = true
     elif shown:
       setSpinLabel(baseLabel)
@@ -1418,7 +1418,7 @@ proc ensureInputThreadStarted*() =
 
 proc beginTurn*() =
   ## Hide the physical terminal caret for the duration of the turn. The
-  ## bright prompt glyph stays visible as the stable visual anchor.
+  ## prompt glyph stays visible as the stable visual anchor.
   ensureInputThreadStarted()
   termui.hideCaret()
   emitFatPromptEvent setPromptModeEvent(pmTurnRunning)
@@ -1445,8 +1445,8 @@ proc stopTurnInputForFinalRender*() =
 proc endTurn*(repaintPrompt = true) =
   ## Transition to typing-ready state: clear the bar at its current
   ## row, advance one row to leave a blank "gap" between the last
-  ## content row and the bar, repaint bar+prompt with the bright
-  ## cyan prompt color. Show the terminal caret. The gap is
+  ## content row and the bar, repaint bar+prompt, and show the terminal
+  ## caret. The gap is
   ## one-shot — `emitUserSubmit` overwrites it with the receipt at
   ## next submit, so it never persists in scroll history.
   # Defensive: nothing should be animating between turns. If a tool

@@ -215,7 +215,7 @@ suite "terminal visual contract":
       (":reasoning high", "reasoning high"),
       (":provider alt", "provider  alt"),
       (":tokens", ": tokens"),
-      (":clear", ": clear"),
+      (":clear", "═══"),
       (":think off", ": think"),
       (":think on", ": think"),
       (":sessions", ": sessions"),
@@ -294,11 +294,11 @@ suite "terminal visual contract":
     let deadline = epochTime() + 5.0
     while epochTime() < deadline:
       tty.advanceTicker()
-      if "⏳" in tty.screenText():
+      if "⧖" in tty.screenText():
         return
       sleep(100)
     doAssert false, "quiet hourglass label never appeared\n" &
-      tty.dumpFramesAround("⏳")
+      tty.dumpFramesAround("⧖")
 
   test "escape cancels during network-quiet":
     let root = newFixture("quiet_cancel_esc")

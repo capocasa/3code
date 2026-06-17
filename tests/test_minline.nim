@@ -1,7 +1,9 @@
 import std/[deques, unittest, strutils, sequtils]
+import threecode/fatprompt
 import threecode/minline
 import threecode/signals
 import minline_testutils
+import ttty
 import ttty/grid
 
 ## Multiline editor tests.
@@ -82,6 +84,16 @@ suite "minline pure helpers":
   test "renderBuffer: continuation prompt for logical lines":
     let bytes = renderBuffer("ab\ncd", "P ", "..", 80)
     check bytes == "P ab\r\n..cd"
+
+  test "editor prompt marker uses same default style as typed text":
+    let d = newDriver()
+    d.terminal.write renderBuffer("x", EditorPromptBytes, "  ", 80)
+    let prompt = d.grid.cellAt(0, 0)
+    let typed = d.grid.cellAt(0, 2)
+    check prompt.text == "❯"
+    check typed.text == "x"
+    check prompt.fgColor == typed.fgColor
+    check uint16(prompt.attrs) == uint16(typed.attrs)
 
 # ---------------- Driver: basic typing & submit ----------------
 
@@ -528,3 +540,100 @@ suite "minline editor: SIGWINCH EINTR":
     let write = proc(s: string) = discard
     expect IOError:
       discard ed.readLineWith("> ", getCh, write)
+  # PATCHTEST
+
+  test "typed multibyte UTF-8 is accepted":
+    # 'é' is U+00E9 -> C3 A9; '€' is U+20AC -> E2 82 AC.
+    # Fed one byte at a time as a terminal would. Before the unicode fix
+    # the lead byte (0xC3) fell into the "Unknown byte: ignore" branch.
+    var ed = initEditor()
+    ed.width = 80
+    var keys: seq[int] = @[]
+    keys.add toSeq("héllo €".mapIt(it.ord))
+    keys.add Enter
+    var ki = 0
+    let getCh: GetChProc = proc(): int =
+      let idx = ki; inc ki
+      result = keys[idx]
+    let write = proc(s: string) = discard
+    let result = ed.readLineWith("> ", getCh, write)
+    check result == "héllo €"
+
+  test "emoji (4-byte UTF-8) is accepted":
+    # '🚀' is U+1F680 -> F0 9F 9A 80.
+    var ed = initEditor()
+    ed.width = 80
+    var keys: seq[int] = @[]
+    keys.add toSeq("go 🚀".mapIt(it.ord))
+    keys.add Enter
+    var ki = 0
+    let getCh: GetChProc = proc(): int =
+      let idx = ki; inc ki
+      result = keys[idx]
+    let write = proc(s: string) = discard
+    let result = ed.readLineWith("> ", getCh, write)
+    check result == "go 🚀"
+
+  test "malformed UTF-8 lead with no continuation is dropped":
+    # A lone 0xC3 lead followed by a non-continuation byte ('A' = 0x41)
+    # must not corrupt the buffer: the lead is abandoned and 'A' is
+    # processed as a normal char.
+    var ed = initEditor()
+    ed.width = 80
+    var keys: seq[int] = @[0xC3, 'A'.ord]
+    keys.add Enter
+    var ki = 0
+    let getCh: GetChProc = proc(): int =
+      let idx = ki; inc ki
+      result = keys[idx]
+    let write = proc(s: string) = discard
+    let result = ed.readLineWith("> ", getCh, write)
+    check result == "A"
+
+  test "typed multibyte UTF-8 is accepted":
+    # 'é' is U+00E9 -> C3 A9; '€' is U+20AC -> E2 82 AC.
+    # Fed one byte at a time as a terminal would. Before the unicode fix
+    # the lead byte (0xC3) fell into the "Unknown byte: ignore" branch.
+    var ed = initEditor()
+    ed.width = 80
+    var keys: seq[int] = @[]
+    keys.add toSeq("héllo €".mapIt(it.ord))
+    keys.add Enter
+    var ki = 0
+    let getCh: GetChProc = proc(): int =
+      let idx = ki; inc ki
+      result = keys[idx]
+    let write = proc(s: string) = discard
+    let result = ed.readLineWith("> ", getCh, write)
+    check result == "héllo €"
+
+  test "emoji (4-byte UTF-8) is accepted":
+    # '🚀' is U+1F680 -> F0 9F 9A 80.
+    var ed = initEditor()
+    ed.width = 80
+    var keys: seq[int] = @[]
+    keys.add toSeq("go 🚀".mapIt(it.ord))
+    keys.add Enter
+    var ki = 0
+    let getCh: GetChProc = proc(): int =
+      let idx = ki; inc ki
+      result = keys[idx]
+    let write = proc(s: string) = discard
+    let result = ed.readLineWith("> ", getCh, write)
+    check result == "go 🚀"
+
+  test "malformed UTF-8 lead with no continuation is dropped":
+    # A lone 0xC3 lead followed by a non-continuation byte ('A' = 0x41)
+    # must not corrupt the buffer: the lead is abandoned and 'A' is
+    # processed as a normal char.
+    var ed = initEditor()
+    ed.width = 80
+    var keys: seq[int] = @[0xC3, 'A'.ord]
+    keys.add Enter
+    var ki = 0
+    let getCh: GetChProc = proc(): int =
+      let idx = ki; inc ki
+      result = keys[idx]
+    let write = proc(s: string) = discard
+    let result = ed.readLineWith("> ", getCh, write)
+    check result == "A"

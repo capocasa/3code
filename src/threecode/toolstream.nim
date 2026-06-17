@@ -6,7 +6,8 @@
 import std/[strformat, strutils, terminal]
 import util
 
-const StreamMaxLines* = 8
+const
+  StreamMaxLines* = 8
 
 proc subtleWriteLn*(outFile: File, body: string) =
   outFile.write GreyFg
