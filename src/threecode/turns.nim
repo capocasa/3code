@@ -236,7 +236,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
       clearInterrupted()
       return
-    let window = contextWindowFor(p.model)
+    let window = contextWindowFor(p)
     var summarized = 0
     case decideContextAction(usage.promptTokens, window, messages.len)
     of caSummarize:

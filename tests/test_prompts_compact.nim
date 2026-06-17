@@ -112,8 +112,8 @@ suite "prompts: buildCredit":
     check credit.contains("whoever trained")
 
 suite "compact: contextWindowFor":
-  test "glm returns 128000":
-    check contextWindowFor("glm-5.1") == 128_000
+  test "glm returns 200000":
+    check contextWindowFor("glm-5.1") == 200_000
 
   test "claude returns 200000":
     check contextWindowFor("claude-3.5-sonnet") == 200_000
@@ -143,14 +143,38 @@ suite "compact: contextWindowFor":
     check contextWindowFor("qwen3-coder-480b") == 262_144
 
   test "case insensitive":
-    check contextWindowFor("GLM-5.1") == 128_000
+    check contextWindowFor("GLM-5.1") == 200_000
 
   test "o1/o3/o4 models return 200000":
     check contextWindowFor("o1-preview") == 200_000
     check contextWindowFor("o3-mini") == 200_000
 
-  test "kimi-k2 returns 128000":
-    check contextWindowFor("kimi-k2") == 128_000
+  test "kimi-k2 returns 262144":
+    check contextWindowFor("kimi-k2") == 262_144
+
+suite "compact: contextWindowFor (known-good)":
+  test "glm-5.2 profile returns 1000000":
+    let p = Profile(name: "zai.test", model: "glm-5.2", family: "glm")
+    check contextWindowFor(p) == 1_000_000
+
+  test "glm-5.1 profile returns 200000":
+    let p = Profile(name: "zai.test", model: "glm-5.1", family: "glm")
+    check contextWindowFor(p) == 200_000
+
+  test "kimi profile returns 262144":
+    let p = Profile(name: "nebius.test", model: "moonshotai/Kimi-K2.6",
+                    family: "kimi")
+    check contextWindowFor(p) == 262_144
+
+  test "deepseek-v4 profile returns 1000000":
+    let p = Profile(name: "deepseek.test", model: "deepseek-v4-pro",
+                    family: "deepseek")
+    check contextWindowFor(p) == 1_000_000
+
+  test "off-table profile falls back to heuristic":
+    # Not a known-good (provider, model) pair, so heuristic kicks in.
+    let p = Profile(name: "acme.test", model: "gpt-5", family: "")
+    check contextWindowFor(p) == 400_000
 
 suite "compact: decideContextAction":
   test "returns caNone when under threshold":

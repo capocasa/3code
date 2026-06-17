@@ -958,6 +958,20 @@ proc applyMinimaxReasoning(p: Profile, body: JsonNode) =
     body["chat_template_kwargs"] = %*{"enable_thinking": true}
   else: discard
 
+proc applyKimiReasoning(p: Profile, body: JsonNode) =
+  ## Kimi K2.x is served on vLLM stacks (nebius, together, deepinfra,
+  ## baseten, fireworks) and toggles reasoning via
+  ## `chat_template_kwargs.enable_thinking`. Most stacks default to
+  ## thinking-on (and nebius always reasons regardless of the flag);
+  ## baseten defaults off. `on` sends enable_thinking=true, `off` sends
+  ## false (inert on nebius, which can't be turned off).
+  case p.reasoning
+  of "off":
+    body["chat_template_kwargs"] = %*{"enable_thinking": false}
+  of "on":
+    body["chat_template_kwargs"] = %*{"enable_thinking": true}
+  else: discard
+
 proc applyReasoning*(p: Profile, body: JsonNode) =
   ## Per-family wire mapping for `Profile.reasoning`. Adding a new
   ## family means: (1) set `reasoning` in the known-good combo table,
@@ -967,13 +981,14 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "glm": applyGlmReasoning(p, body)
   of "deepseek": applyDeepseekReasoning(p, body)
   of "minimax": applyMinimaxReasoning(p, body)
+  of "kimi": applyKimiReasoning(p, body)
   else: discard
 
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   when providerStub:
     block:
       let stubT0 = epochTime()
-      let stubWindow = contextWindowFor(p.model)
+      let stubWindow = contextWindowFor(p)
       let stubBaseLabel = hookBeforeCall(lastPromptTokens, stubWindow)
       defer:
         hookAfterCall()
@@ -1131,7 +1146,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   let t0 = epochTime()
   decayLevel(serverRetryLevel, serverLastTs, t0)
   decayLevel(rateRetryLevel, rateLastTs, t0)
-  let window = contextWindowFor(p.model)
+  let window = contextWindowFor(p)
   let baseLabel = hookBeforeCall(lastPromptTokens, window)
   # Cursor is hidden for the duration of the entire turn by `runTurns`
   # so the prompt placeholder is the only visible caret. callModel

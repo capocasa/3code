@@ -18,6 +18,7 @@
 import std/[httpclient, json, strutils, tables]
 import util
 import types
+import prompts
 
 const
   CompactThresholdFrac* = 0.8
@@ -26,12 +27,14 @@ const
   SupersededMarker* = "[superseded — later action on same path elided this]"
 
 proc contextWindowFor*(model: string): int =
-  ## Heuristic: substring match on well-known model slugs. Cheap, and no
-  ## known collisions exist in practice. Update if a provider ships a
-  ## colliding model name.
+  ## Heuristic fallback for models off the known-good table
+  ## (experimental, or a provider/model pair we haven't curated).
+  ## Substring match on well-known slugs; no known collisions in
+  ## practice. Known-good pairs should go through `contextWindowFor(p)`
+  ## instead, which consults `KnownGoodCombos` for the exact window.
   let m = model.toLowerAscii
   if m == "stub-model": 12_000
-  elif "kimi-k2" in m: 128_000
+  elif "kimi-k2" in m: 262_144
   elif "qwen3-coder" in m or "qwen3_coder" in m: 262_144
   elif "qwen" in m: 128_000
   elif "claude" in m: 200_000
@@ -41,9 +44,21 @@ proc contextWindowFor*(model: string): int =
   elif "deepseek" in m: 128_000
   elif "gemini" in m: 1_000_000
   elif "llama" in m: 128_000
-  elif "glm" in m: 128_000
+  elif "glm-5.2" in m: 1_000_000
+  elif "glm" in m: 200_000
   elif "mistral" in m or "mixtral" in m: 128_000
+  elif "minimax" in m: 204_800
   else: 128_000
+
+proc contextWindowFor*(p: Profile): int =
+  ## Known-good-aware context window. A curated (provider, model) pair
+  ## returns its exact advertised window; everything else falls back to
+  ## the substring heuristic in the `model: string` overload. The table
+  ## is the source of truth because provider curation (which GLM build a
+  ## provider actually serves) matters as much as the family.
+  let kg = knownGoodContextWindow(p)
+  if kg > 0: return kg
+  contextWindowFor(p.model)
 
 proc compactHistory*(messages: JsonNode, keepRecent = CompactKeepRecent): int =
   ## Replace `content` of old `tool` messages with a short marker. Returns

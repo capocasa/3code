@@ -1074,6 +1074,35 @@ proc reasoningSupported*(family: string): bool =
   family == "gpt-oss" or family == "glm" or family == "deepseek" or
     family == "minimax" or family == "kimi"
 
+proc knownGoodContextWindow*(provider, model: string): int =
+  ## Context window for a known-good (provider, model) pair, in tokens.
+  ## Returns 0 when the pair is off the table (caller falls back to the
+  ## substring heuristic). Values are model-specific, not family-wide:
+  ## GLM 4.7/5/5.1 expose 200K, GLM-5.2 ships a usable 1M window; Kimi
+  ## K2.x advertises 256K; DeepSeek V4 is 1M while V3/R1 cap at 128K.
+  let p = provider.toLowerAscii
+  let m = model.toLowerAscii
+  for combo in KnownGoodCombos:
+    if combo[0].toLowerAscii == p and combo[1].toLowerAscii == m:
+      let fam = combo[2]
+      if fam == "glm":
+        if m == "glm-5.2": return 1_000_000
+        return 200_000
+      if fam == "kimi": return 262_144
+      if fam == "deepseek":
+        if "v4" in m: return 1_000_000
+        return 128_000
+      if fam == "minimax": return 204_800
+      if fam == "gpt-oss": return 131_072
+      return 128_000
+  0
+
+proc knownGoodContextWindow*(p: Profile): int =
+  if p.name == "": return 0
+  let dot = p.name.find('.')
+  if dot < 0: return 0
+  knownGoodContextWindow(p.name[0 ..< dot], p.model)
+
 proc knownGoodReasonings*(provider, model: string): seq[string] =
   ## Value set offered by `:reasoning` for a known-good (provider, model)
   ## pair. Reflects each model's real wire surface: glm 4.7/5/5.1 expose
