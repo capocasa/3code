@@ -480,6 +480,9 @@ suite "terminal visual contract":
             ],
             "output": "scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n",
             "code": 0
+          }),
+          toolCall("call_slow", "bash", %*{
+            "command": "sleep 3; printf 'slow-done\\n'"
           })
         ],
         "usage": {
@@ -517,6 +520,8 @@ suite "terminal visual contract":
     tty.expectInHistory "bad-three"
     tty.expectInHistory "$ printf 'scroll-1"
     tty.expectInHistory "scroll-10"
+    tty.expectInHistory "$ sleep 3; printf 'slow-done"
+    tty.expectInHistory "slow-done"
     tty.expectInHistory "Bash checks complete."
     tty.expectTokenBar(["○", "↑210", "↓20"])
     tty.drain(200)
