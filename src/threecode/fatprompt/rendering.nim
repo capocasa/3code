@@ -8,6 +8,7 @@
 
 import std/[strformat, strutils, terminal, unicode]
 import ../types, ../util
+import ../unicodewidth
 
 type
   PromptMode* = enum
@@ -194,16 +195,18 @@ proc wrapPlain(line: string, width: int): seq[string] =
   while i < line.len:
     let start = i
     var cells = 0
-    while i < line.len and cells < w:
+    while i < line.len and cells + runeCellWidth(line.runeAt(i)) <= w:
+      cells += runeCellWidth(line.runeAt(i))
       i += max(1, runeLenAt(line, i))
-      inc cells
+    if i == start:  # single rune wider than w: emit it anyway
+      i += max(1, runeLenAt(line, i))
     result.add line[start ..< i]
 
 proc cellWidth(s: string): int =
   var i = 0
   while i < s.len:
+    inc result, runeCellWidth(s.runeAt(i))
     i += max(1, runeLenAt(s, i))
-    inc result
 
 proc wrapMarked(marker, body: string, width: int): seq[string] =
   let firstPrefix = marker & " "
@@ -456,11 +459,12 @@ proc addUserEcho(result: var string, line: string; trailingNewline = true) =
       var i = 0
       while i < l.len:
         let rl = max(1, runeLenAt(l, i))
-        if col >= termW:
+        let w = runeCellWidth(l.runeAt(i))
+        if col + w > termW:
           result.add "\r\n  "
           col = 2
         result.add l[i ..< i + rl]
-        inc col
+        inc col, w
         i += rl
     if trailingNewline or idx < lines.high:
       result.add "\r\n"

@@ -1,5 +1,6 @@
-import std/[net, os, sequtils, strformat, strutils, times]
+import std/[net, os, sequtils, strformat, strutils, unicode, times]
 import types
+import threecode/unicodewidth
 
 # ---------- Color palette ----------
 #
@@ -242,9 +243,8 @@ proc applyInlineMd*(line: string): string =
 
 proc visibleWidth*(s: string): int =
   ## Count visible columns in a string that may contain ANSI CSI escape
-  ## sequences (`\e[...<letter>`). UTF-8 multi-byte codepoints count as
-  ## one column (a coarse approximation — wide CJK / emoji aren't given
-  ## width 2; good enough for soft-wrap).
+  ## sequences (`\e[...<letter>`). Each rune is weighted by its East
+  ## Asian Width: CJK / emoji count as 2, combining marks as 0.
   var i = 0
   while i < s.len:
     if s[i] == '\x1b' and i + 1 < s.len and s[i + 1] == '[':
@@ -253,9 +253,10 @@ proc visibleWidth*(s: string): int =
         inc i
       if i < s.len: inc i
       continue
+    let rl = if (s[i].uint8 and 0xC0'u8) != 0x80'u8: max(1, runeLenAt(s, i)) else: 1
     if (s[i].uint8 and 0xC0'u8) != 0x80'u8:
-      inc result
-    inc i
+      inc result, runeCellWidth(s.runeAt(i))
+    inc i, rl
 
 proc wrapAnsi*(s: string, width: int): seq[string] =
   ## Greedy word-wrap on whitespace; each chunk's visible width is at

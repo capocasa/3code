@@ -1,4 +1,4 @@
-import std/[strutils, unittest]
+import std/[strutils, unicode, unittest]
 import threecode/[fatprompt, types]
 
 proc checkFrame(p: FatPrompt; rows: openArray[string]) =
@@ -119,3 +119,28 @@ suite "fat prompt frame model":
 
     p.checkFrame ["", "", "● answer", "○10%  ↑100  ↓7", "",
                   "r src/file.nim", "", "○10%  ↑100", "❯ "]
+
+suite "fat prompt: unicode wrapping":
+  proc wrappedRows(body: string): seq[string] =
+    var p = initFatPrompt(width = 6, height = 8, window = 1000)
+    p.addTranscriptItem(pmUser, body)
+    p.setEditor ""
+    var seenBody = false
+    for row in p.frameText().split("\n"):
+      if row.startsWith("❯ ") or row.startsWith("  "):
+        seenBody = true
+        result.add row
+      elif seenBody and row.len == 0:
+        break    # blank row ends the transcript body
+
+  test "CJK body wraps two runes per line of width 4":
+    # marker prefix '❯ ' is 2 cells; width 6 leaves 4 data cells, so
+    # two CJK runes (2 cells each) fit per visual row.
+    let rows = wrappedRows("中中中中")
+    check rows == @["❯ 中中", "  中中"]
+
+  test "emoji body takes 2 cells per rune":
+    let e = Rune(0x1F600).toUTF8
+    let rows = wrappedRows(e & e & e)
+    # 4 data cells per row, each emoji is 2 cells -> 2 per row
+    check rows == @["❯ 😀😀", "  😀"]

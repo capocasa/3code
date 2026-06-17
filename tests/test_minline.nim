@@ -1,4 +1,4 @@
-import std/[deques, unittest, strutils, sequtils]
+import std/[deques, unittest, strutils, sequtils, unicode]
 import threecode/fatprompt
 import threecode/minline
 import threecode/signals
@@ -75,6 +75,26 @@ suite "minline pure helpers":
     check totalRows("abcd", 2, 2, 5) == 2  # 'd' wraps to row 1
     check totalRows("abcdefgh", 2, 2, 5) == 3  # 'abc','def','gh'
     check totalRows("abcdefghi", 2, 2, 5) == 3 # 'abc','def','ghi'
+
+  test "visualCols: CJK counts as 2 cells":
+    check visualCols("\u4E2D") == 2   # '中' East Asian Wide
+
+  test "visualCols: emoji counts as 2 cells":
+    check visualCols(Rune(0x1F600).toUTF8) == 2   # '😀'
+
+  test "visualCols: combining mark is zero-width":
+    check visualCols("a\u0301") == 1   # 'a' + combining acute
+
+  test "totalRows: wide rune wraps at right margin":
+    # width 4, prompt 1, contW 1 -> 3 data cells per row. A 2-cell CJK
+    # rune fills cells 1-2; a second one (cells 3-4) doesn't fit, wraps.
+    check totalRows("\u4E2D\u4E2D", 1, 1, 4) == 2
+
+  test "cursorVisual: wide rune occupies two cells":
+    # prompt 0, one CJK rune: cursor advances 2 cells.
+    let (r, c) = cursorVisual("\u4E2D", 3, 0, 0, 80)
+    check r == 0
+    check c == 2
 
   test "renderBuffer: prompt + text, joined by \\r\\n on wrap":
     let bytes = renderBuffer("abcd", "P ", "  ", 5)

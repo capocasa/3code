@@ -1,4 +1,4 @@
-import std/[strutils, unittest]
+import std/[strutils, unicode, unittest]
 import threecode/util
 
 suite "util: utf8ByteCut":
@@ -178,3 +178,25 @@ suite "util: charWrapAnsi":
 
   test "single character width":
     check charWrapAnsi("abc", 1) == @["a", "b", "c"]
+
+suite "util: visibleWidth unicode":
+  test "ASCII counts as 1":
+    check visibleWidth("hello") == 5
+
+  test "CJK rune counts as 2":
+    check visibleWidth("中") == 2
+    check visibleWidth("a中b") == 4
+
+  test "emoji counts as 2":
+    check visibleWidth(Rune(0x1F600).toUTF8) == 2
+
+  test "combining mark is zero-width":
+    # 'e' followed by U+0301 combining acute
+    check visibleWidth("e\u0301") == 1
+
+  test "ANSI escape does not count":
+    check visibleWidth("\x1b[31mhi\x1b[0m") == 2
+
+  test "mixed ANSI, CJK, combining":
+    # red '中' + combining acute: 2 cells
+    check visibleWidth("\x1b[31m中\u0301\x1b[0m") == 2

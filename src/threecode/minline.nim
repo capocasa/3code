@@ -36,6 +36,7 @@ import
   os
 
 import signals
+import threecode/unicodewidth as ucwidth
 
 when defined(posix):
   import posix
@@ -204,10 +205,10 @@ const EscapeTailPollMs* = 250
 # ---------- Pure helpers (testable without IO) ----------
 
 proc visualCols*(s: string): int =
-  ## Number of cells `s` would occupy when printed. Counts each rune as
-  ## one cell. Skips ANSI CSI sequences `ESC [ ... <final>` so escape
-  ## codes embedded in a colored prompt don't inflate the count. Wide
-  ## CJK and combining marks are not handled — fine for our prompts.
+  ## Number of cells `s` would occupy when printed. Skips ANSI CSI
+  ## sequences `ESC [ ... <final>` so escape codes embedded in a
+  ## colored prompt don't inflate the count. Wide CJK / emoji count as
+  ## two cells; combining marks as zero.
   var i = 0
   while i < s.len:
     let b = s[i]
@@ -219,7 +220,7 @@ proc visualCols*(s: string): int =
       i = j
     else:
       let rl = max(1, runeLenAt(s, i))
-      inc result
+      inc result, runeCellWidth(s.runeAt(i))
       i += rl
 
 proc runeStartBefore(text: string, p: int): int =
@@ -260,10 +261,11 @@ proc cursorVisual*(text: string, position, promptW, contW, width: int): (int, in
       col = contW
       inc i
     else:
-      if col >= width:
+      let w = runeCellWidth(text.runeAt(i))
+      if col + w > width:
         inc row
         col = contW
-      inc col
+      inc col, w
       i += runeLenSafe(text, i)
   (row, col)
 
@@ -280,10 +282,11 @@ proc totalRows*(text: string, promptW, contW, width: int): int =
       col = contW
       inc i
     else:
-      if col >= width:
+      let w = runeCellWidth(text.runeAt(i))
+      if col + w > width:
         inc row
         col = contW
-      inc col
+      inc col, w
       i += runeLenSafe(text, i)
   row + 1
 
@@ -307,12 +310,13 @@ proc renderBuffer*(text, prompt, cont: string, width: int): string =
       inc i
     else:
       let rl = runeLenSafe(text, i)
-      if col >= width:
+      let w = runeCellWidth(text.runeAt(i))
+      if col + w > width:
         result.add "\r\n"
         result.add cont
         col = contW
       result.add text[i ..< i + rl]
-      inc col
+      inc col, w
       i += rl
 
 # History
