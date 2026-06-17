@@ -73,6 +73,7 @@ var quietRunning = false
 var lastProviderActivity: Atomic[int]
 
 var barTickStop: Atomic[bool]
+var commandStatusActive: Atomic[bool]
 var barTickThread: Thread[void]
 var barTickRunning = false
 var barTickStart: float
@@ -96,6 +97,7 @@ var inputEditor*: ptr minline.LineEditor
 var inputProfile*: ptr Profile
 var inputSession*: ptr Session
 var inputMessages*: ptr JsonNode
+var activeCommandHook*: proc(cmd: string) {.gcsafe.}
 
 # Shared mutable spinner state. The spinner thread reads these every frame;
 # the main thread updates them as chunks arrive. Two separate lines:
@@ -279,6 +281,24 @@ proc consumeQueuedInput*(line: var string; echoRows: var int;
       return true
   finally:
     release inputStateLock
+
+proc consumeQueuedCommand*(line: var string; echoRows: var int): bool =
+  ## Consume a colon command submitted while a turn was active. Commands are
+  ## intentionally separate from autosend prompts so they never enter the model
+  ## conversation by mistake.
+  acquire inputStateLock
+  try:
+    if inputState.queuedCommand.len > 0:
+      line = inputState.queuedCommand
+      echoRows = inputState.queuedCommandRows
+      inputState.queuedCommand = ""
+      inputState.queuedCommandRows = 0
+      return true
+  finally:
+    release inputStateLock
+
+proc setActiveCommandHook*(hook: proc(cmd: string) {.gcsafe.}) =
+  activeCommandHook = hook
 
 proc releaseIdleSubmittedInput*() =
   ## Let the persistent editor leave the submitted-line state after an idle
@@ -631,7 +651,7 @@ proc paintInitialBar*(p: Profile) =
   ## prompt — typing-ready. Sets `currentBarHasGap = true` to match
   ## `endTurn`'s shape between turns.
   termengine.writeRaw("\n")
-  let window = contextWindowFor(p.model)
+  let window = contextWindowFor(p)
   let baseLabel = contextLabel(0, window)
   paintBarPrompt(liveLabel(baseLabel, 0))
   emitFatPromptEvent setBarEvent(currentBarLabel, hasGap = true)
@@ -657,7 +677,17 @@ proc paintInitialPrompt*(p: Profile) =
 
 
 # --- Bar tick: repaints the token bar with an incrementing elapsed counter
-#     during tool execution. No spinner icon, just the bar label + time.
+#     during tool execution. Bash tool viewports can also attach a compact
+#     command-status row below the live output.
+
+const CommandStatusDelayMs = 2000
+
+proc commandStatusText(elapsedMs: int): string =
+  if elapsedMs < CommandStatusDelayMs:
+    return ""
+  const frames = ["|", "/", "-", "\\"]
+  let frameIdx = ((elapsedMs - CommandStatusDelayMs) div 250) mod frames.len
+  frames[frameIdx] & " " & $max(1, elapsedMs div 1000) & "s"
 
 proc barTickLoop() {.thread.} =
   while not barTickStop.load(moRelaxed):
@@ -666,17 +696,20 @@ proc barTickLoop() {.thread.} =
       acquire barTickLock
       base = barTickBase
       release barTickLock
-    let elapsed = (epochTime() - barTickStart).int
+    let elapsedMs = int((epochTime() - barTickStart) * 1000.0)
+    let elapsed = elapsedMs div 1000
     let label =
       if base.hasElapsedSuffix: base
       else: base & "  " & $elapsed & "s"
+    if commandStatusActive.load(moRelaxed):
+      termengine.setToolViewportStatus(commandStatusText(elapsedMs))
     # Re-assert hide-cursor each tick — same rationale as
     # `spinnerFooterBytes`: some terminals transiently re-show the
     # caret on cursor movement, and beginTurn's one-shot `?25l`
     # isn't enough to keep it hidden over a long-running tool.
     termengine.renderFooter(tokenBarFrame(label), inputThreadRunning,
                             inputEditor, currentTermW())
-    sleep 500
+    sleep 250
 
 proc startBarTick*(base: string) =
   debugOut "startBarTick"
@@ -698,7 +731,14 @@ proc stopBarTick*(): int =
   barTickStop.store(true, moRelaxed)
   joinThread(barTickThread)
   barTickRunning = false
+  commandStatusActive.store(false, moRelaxed)
+  termengine.setToolViewportStatus("")
   return elapsed
+
+proc setCommandStatusActive*(active: bool) =
+  commandStatusActive.store(active, moRelaxed)
+  if not active:
+    termengine.setToolViewportStatus("")
 
 proc startSpinner*(label: string) =
   debugOut "startSpinner"
@@ -885,7 +925,7 @@ proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
     var i = 0
     while i < data.len:
       if data[i] == '\n':
-        let rendered = s.captureMd(s.pendingLine)
+        let rendered = assistantTextBytes(s.captureMd(s.pendingLine))
         s.pendingLine = ""
         s.writeRendered(rendered, slurpedNow)
         inc i
@@ -904,10 +944,10 @@ proc finishContent*(s: var LiveMarkdownStream, slurpedNow: int) =
     s.pendingLine.add s.utf8Pending
     s.utf8Pending = ""
   if s.pendingLine.len > 0:
-    let rendered = s.captureMd(s.pendingLine)
+    let rendered = assistantTextBytes(s.captureMd(s.pendingLine))
     s.pendingLine = ""
     s.writeRendered(rendered, slurpedNow)
-  let tail = s.captureMd("", finish = true)
+  let tail = assistantTextBytes(s.captureMd("", finish = true))
   s.writeRendered(tail, slurpedNow)
   if s.started and s.liveBarBelow:
     paintBarPrompt(s.currentLabel(slurpedNow))
@@ -1190,6 +1230,31 @@ proc inputThreadProc() {.thread.} =
       finally:
         release inputStateLock
     edPtr[].onSubmit = proc(ed: var minline.LineEditor) =
+      if inputTurnActive.load(moAcquire) and ed.line.text.startsWith(":"):
+        let cmd = ed.line.text
+        acquire inputStateLock
+        try:
+          inputState.queuedCommand = cmd
+          inputState.queuedCommandRows = minline.totalRows(ed.line.text,
+            ed.promptW, ed.contPromptW, max(2, ed.width))
+          inputState.autoSend = false
+        finally:
+          release inputStateLock
+        ed.line = minline.Line(text: "", position: 0)
+        ed.renderSuffix = ""
+        ed.renderSuffixCursor = false
+        ed.renderRow = 0
+        ed.echoRows = 0
+        if activeCommandHook != nil:
+          activeCommandHook(cmd)
+          acquire inputStateLock
+          try:
+            if inputState.queuedCommand == cmd:
+              inputState.queuedCommand = ""
+              inputState.queuedCommandRows = 0
+          finally:
+            release inputStateLock
+        return
       acquire inputStateLock
       try:
         inputState.queuedEchoRows = minline.totalRows(ed.line.text, ed.promptW,
@@ -1238,20 +1303,32 @@ proc inputThreadProc() {.thread.} =
         if text.len == 0:
           continue
         if text[0] == ':':
+          let isActiveCommand = inputTurnActive.load(moAcquire)
           acquire inputStateLock
           try:
-            inputState.queuedText = text
-            inputState.queuedEchoRows = edPtr[].echoRows
-            inputState.autoSend = true
+            if isActiveCommand:
+              inputState.queuedCommand = text
+              inputState.queuedCommandRows = edPtr[].echoRows
+            else:
+              inputState.queuedText = text
+              inputState.queuedEchoRows = edPtr[].echoRows
+              inputState.autoSend = true
           finally:
             release inputStateLock
-          if inputTurnActive.load(moAcquire):
-            emitFatPromptEvent setPromptModeEvent(pmBufferedInput)
           edPtr[].line = minline.Line(text: "", position: 0)
           edPtr[].renderSuffix = ""
           edPtr[].renderSuffixCursor = false
           edPtr[].renderRow = 0
           edPtr[].echoRows = 0
+          if isActiveCommand and activeCommandHook != nil:
+            activeCommandHook(text)
+            acquire inputStateLock
+            try:
+              if inputState.queuedCommand == text:
+                inputState.queuedCommand = ""
+                inputState.queuedCommandRows = 0
+            finally:
+              release inputStateLock
         else:
           termui.withTerminalWriteLock:
             acquire inputStateLock

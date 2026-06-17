@@ -7,6 +7,7 @@
 import std/[terminal]
 import minline
 import ./terminal as termio
+import ./util
 import ./fatprompt/rendering
 
 type
@@ -18,6 +19,7 @@ type
     footerHasLeadingGap: bool
     footerNeedsLeadingGap: bool
     toolViewportRows: seq[string]
+    toolViewportStatus: string
     editorRedrawPending: bool
     editorRedrawFooterRows: int
 
@@ -61,6 +63,14 @@ proc writeViewportRows(rows: openArray[string]) =
   for row in rows:
     stdout.write row
     stdout.write "\r\n"
+
+proc toolViewportHeight(e: TerminalEngine): int =
+  e.toolViewportRows.len + (if e.toolViewportStatus.len > 0: 1 else: 0)
+
+proc writeToolViewportRows(e: TerminalEngine) =
+  writeViewportRows(e.toolViewportRows)
+  if e.toolViewportStatus.len > 0:
+    writeViewportRows([GreyFg & "  " & e.toolViewportStatus & Reset])
 
 proc syncWrite*(e: var TerminalEngine; bytes: string) =
   ## Synchronized screen write for legacy frame helpers that have not yet been
@@ -129,7 +139,7 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
             max(0, footerRowsAboveEditor - e.footerRowsAboveEditor)
           else:
             0
-        let up = e.rowsAboveCursorToFooterTop + e.toolViewportRows.len + growth
+        let up = e.rowsAboveCursorToFooterTop + e.toolViewportHeight + growth
         let rewriteLeadingGap =
           hasLeadingGap and (up == 0 or (growth > 0 and e.footerHasLeadingGap))
         stdout.write "\r"
@@ -139,7 +149,7 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
         if rewriteLeadingGap:
           stdout.write "\r\n"
         e.footerNeedsLeadingGap = false
-        writeViewportRows(e.toolViewportRows)
+        e.writeToolViewportRows()
         stdout.write bytes
         stdout.write "\r\n"
         edPtr[].renderRow = 0
@@ -195,13 +205,13 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
             e.rowsAboveCursorToFooterTop
           else:
             rowsToFooterTop(editor[], footerRowsAboveEditor)
-        let up = rowsToFooter + e.toolViewportRows.len + growth
+        let up = rowsToFooter + e.toolViewportHeight + growth
         stdout.write "\r"
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
         stdout.write "\x1b[J"
         e.toolViewportRows = @rows
-        writeViewportRows(e.toolViewportRows)
+        e.writeToolViewportRows()
         if bytes.len > 0:
           stdout.write bytes
           stdout.write "\r\n"
@@ -214,7 +224,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
           e.noteFooterPainted(editor[], footerRowsAboveEditor)
       else:
         e.toolViewportRows = @rows
-        writeViewportRows(e.toolViewportRows)
+        e.writeToolViewportRows()
         if bytes.len > 0:
           stdout.write bytes
         e.noteNoFooter()
@@ -230,6 +240,7 @@ proc renderToolViewport*(rows: openArray[string]; frame: FooterFrame;
 proc clearToolViewport*(e: var TerminalEngine; frame: FooterFrame;
                         inputRunning: bool; editor: ptr minline.LineEditor;
                         termW = 0) {.gcsafe.} =
+  e.toolViewportStatus = ""
   if e.toolViewportRows.len == 0:
     e.renderFooter(frame, inputRunning, editor, termW)
   else:
@@ -240,6 +251,14 @@ proc clearToolViewport*(frame: FooterFrame; inputRunning: bool;
     {.gcsafe.} =
   {.cast(gcsafe).}:
     defaultEngine.clearToolViewport(frame, inputRunning, editor, termW)
+
+proc setToolViewportStatus*(e: var TerminalEngine; status: string) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    e.toolViewportStatus = status
+
+proc setToolViewportStatus*(status: string) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    defaultEngine.setToolViewportStatus(status)
 
 proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
                        liveAnchored: bool;

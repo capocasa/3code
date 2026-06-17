@@ -65,6 +65,7 @@ proc runBashWithViewport(act: Action; cache: ReadCache; stub: JsonNode;
 
   setToolStdinWatcherEnabled(not promptOwnsStdin)
   try:
+    setCommandStatusActive(true)
     renderView()
     emitTestFrameEvent()
     if stub != nil and stub.kind == JObject:
@@ -97,9 +98,11 @@ proc runBashWithViewport(act: Action; cache: ReadCache; stub: JsonNode;
         view.addLine(line)
         renderView()
       result = runActionStreaming(act, cache, onLine)
+      setCommandStatusActive(false)
       view.setExitCode(result.code)
       renderView()
   finally:
+    setCommandStatusActive(false)
     setToolStdinWatcherEnabled(true)
     termengine.clearToolViewport(
       footerFrame(fatPromptState),
@@ -206,9 +209,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
   clearInterrupted()
   resetLoopTracker(session.loop)
   # `beginTurn` hides the terminal cursor for the duration of the
-  # turn (streaming + tool exec); the bright `❯ ` glyph remains on
-  # screen as the visible-but-not-blinking caret. `endTurn` shows the
-  # cursor again so
+  # turn (streaming + tool exec); the `❯ ` glyph remains on screen as
+  # the visible-but-not-blinking caret. `endTurn` shows the cursor again so
   # readline lands on a typing-ready row. The token receipt for the
   # turn that just completed is *not* rendered here — it lives in
   # `pendingHint` and is painted in place of the previous bar at
@@ -243,7 +245,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       summarized = summarizeHistory(messages, p)
       if summarized > 0:
         writeTranscriptWithFatPrompt:
-          hintLn &"  · summarized {summarized} old message" &
+          hintLn &"· summarized {summarized} message" &
             (if summarized == 1: "" else: "s") &
             &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)",
             resetStyle
@@ -256,7 +258,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       let n = compactHistory(messages)
       if n > 0:
         writeTranscriptWithFatPrompt:
-          hintLn &"  · compacted {n} old tool result" &
+          hintLn &"· compacted {n} old tool result" &
             (if n == 1: "" else: "s") &
             &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)",
             resetStyle

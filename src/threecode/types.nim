@@ -93,6 +93,8 @@ type
     autoSend*: bool
     queuedText*: string
     queuedEchoRows*: int
+    queuedCommand*: string
+    queuedCommandRows*: int
     cmdWasQuit*: bool
 
 proc die*(msg: string, code = 1) {.noreturn.} =

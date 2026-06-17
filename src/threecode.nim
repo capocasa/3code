@@ -286,6 +286,38 @@ proc main() =
   inputMessages = addr(messages)
   inputSession = addr(session)
   inputProfile = addr(prof)
+  setActiveCommandHook(proc(cmd: string) {.gcsafe.} =
+    {.cast(gcsafe).}:
+      let kind = classifyCommand(cmd)
+      case kind
+      of ckSafeImmediate:
+        if inputMessages == nil or inputSession == nil or inputProfile == nil or
+            inputEditor == nil:
+          return
+        var res = handleCommandResult(cmd, inputMessages[], inputSession[],
+                                      inputProfile[], inputEditor[])
+        if not res.recognized:
+          res = CommandResult(recognized: true, ok: false, name: "command",
+                              body: "unknown command: " & cmd.strip &
+                                    "  (try :help)\n")
+        let bytes =
+          if res.plainBody:
+            plainCommandBodyBytes(res.body)
+          else:
+            formatItem(commandItem(res.name, res.body, res.ok))
+        commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true,
+                              transcriptOwnsSpacing = true)
+      of ckMutating, ckModal:
+        let msg = "cannot run " & cmd.strip & " while a turn is active"
+        let bytes = formatItem(commandItem("command", msg & "\n", false))
+        commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true,
+                              transcriptOwnsSpacing = true)
+      else:
+        let bytes = formatItem(commandItem("command",
+          "unknown command: " & cmd.strip & "  (try :help)\n", false))
+        commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true,
+                              transcriptOwnsSpacing = true)
+  )
 
   proc handleBufferedAfterTurn(): bool =
     var cmdWasQuit = false
@@ -334,12 +366,12 @@ proc main() =
   if resume:
     stdout.write "\n"
     stdout.styledWriteLine styleDim, &"● resumed {sessionIdFromPath(session.savePath)}", resetStyle
-    let window = contextWindowFor(prof.model)
+    let window = contextWindowFor(prof)
     let lastUsage = replaySessionTail(messages, session.toolLog,
                                       window, prof.family)
     if lastUsage.totalTokens > 0:
-      # Same shape as `endTurn`: gap row + bar+prompt with bright cyan
-      # (typing-ready) prompt, carrying the last response's usage so
+      # Same shape as `endTurn`: gap row + bar+prompt in typing-ready
+      # state, carrying the last response's usage so
       # the bar replaces what would otherwise be the last receipt.
       # `pendingHint` is primed so the next user submit converts this
       # bar into the dim receipt for that response.
@@ -375,6 +407,14 @@ proc main() =
     if t in ["exit", "quit", ":q", ":quit", ":exit"]: break
     let commandResult = handleCommandResult(line, messages, session, prof, editor)
     if commandResult.recognized:
+      if commandResult.disposition == cdModal:
+        editor.line = minline.Line(text: "", position: 0)
+        editor.renderSuffix = ""
+        editor.renderSuffixCursor = false
+        editor.renderRow = 0
+        editor.echoRows = 0
+        releaseIdleSubmittedInput()
+        continue
       var echo = userPromptItem(line)
       echo.attachSeparator = true
       let commandBytes =

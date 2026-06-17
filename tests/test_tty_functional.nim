@@ -81,6 +81,15 @@ proc toolCall(id, name: string, args: JsonNode; stub: JsonNode = nil): JsonNode 
 proc writeStubResponses(root: string, responses: JsonNode) =
   writeFile(root / "run" / "stub_responses.json", $responses)
 
+proc sessionLogText(root: string): string =
+  let dir = root / "data" / "3code" / "sessions"
+  if not dirExists(dir):
+    return ""
+  for kind, path in walkDir(dir):
+    if kind == pcFile and path.endsWith(".3log"):
+      result.add readFile(path)
+      result.add "\n"
+
 proc stubEnv(root: string): seq[EnvVar] =
   @[
     (key: "TERM", val: "xterm-256color"),
@@ -116,6 +125,44 @@ proc requireVisibleEditorCaret(s: TtySession; needle: string) =
   check needle in frame.rows[frame.cursorRow]
 
 suite "terminal visual contract":
+  test "active turn colon commands are controller handled":
+    let root = newFixture("active_colon_commands")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "waitForTestContinue": true,
+        "content": "Active command turn complete.",
+        "contentChunks": ["Active command turn complete."],
+        "usage": {
+          "promptTokens": 88,
+          "completionTokens": 12,
+          "totalTokens": 100,
+          "cachedTokens": 0
+        }
+      }
+    ])
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "start active command turn\n"
+    tty.send ":tokens\n"
+    tty.expect "no tokens used yet"
+    tty.send ":provider add\n"
+    tty.expect "cannot run :provider add while a turn is active"
+    tty.continueStubApi()
+    tty.expectInHistory "Active command turn complete."
+    tty.drain(200)
+
+    let log = sessionLogText(root)
+    check "start active command turn" in log
+    check ":tokens" notin log
+    check ":provider add" notin log
   test "harness commands are transcript items":
     let root = newFixture("harness_commands")
     writeHarnessProviders(root)
