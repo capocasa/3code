@@ -516,11 +516,41 @@ proc finishMd*(s: MarkdownState, outFile: File): bool {.discardable.} =
     s.tableBuf.setLen 0
     result = true
 
+const AssistantTextStyle* = BrightWhiteFg & BoldOn
+
+proc assistantTextBytes*(bytes: string): string =
+  if bytes.len == 0:
+    return ""
+  var body = bytes
+  var tail = ""
+  while body.len > 0 and body[^1] in {'\r', '\n'}:
+    tail.insert($body[^1], 0)
+    body.setLen(body.len - 1)
+  let styled = body
+    .replace(Reset, Reset & AssistantTextStyle)
+    .replace("\x1b[22m", "\x1b[22m" & AssistantTextStyle)
+  AssistantTextStyle & styled & Reset & tail
+
+proc captureMarkdownBytes(s: MarkdownState; line = ""; finish = false): string =
+  let path = getTempDir() / "3code_assistant_md_" & $getCurrentProcessId()
+  let f = open(path, fmWrite)
+  if finish:
+    discard finishMd(s, f)
+  else:
+    discard handleMdLine(s, line, f)
+  f.flushFile
+  close(f)
+  result = readFile(path)
+  try:
+    removeFile(path)
+  except OSError:
+    discard
+
 proc writeAssistantBullet*(outFile: File = stdout) =
-  outFile.styledWrite styleBright, "● ", resetStyle
+  outFile.write AssistantTextStyle & "● " & Reset
 
 proc renderAssistantContent*(content: string, outFile: File = stdout) =
-  ## Bullet `● ` (bright white) + dim content with full markdown
+  ## Bullet `● ` + bright-white content with full markdown
   ## structure (headers, fences, tables, inline bold and backtick-code).
   ## Used by replay and by the live path when content was buffered (rare:
   ## streaming bypasses this and feeds the same handlers chunk by chunk).
@@ -530,8 +560,8 @@ proc renderAssistantContent*(content: string, outFile: File = stdout) =
   writeAssistantBullet(outFile)
   var st = initMarkdownState()
   for line in content.splitLines:
-    handleMdLine(st, line, outFile)
-  finishMd(st, outFile)
+    outFile.write assistantTextBytes(captureMarkdownBytes(st, line))
+  outFile.write assistantTextBytes(captureMarkdownBytes(st, finish = true))
   outFile.flushFile
 
 proc toolIcon*(kind: ActionKind): string =
