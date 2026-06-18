@@ -516,7 +516,7 @@ proc finishMd*(s: MarkdownState, outFile: File): bool {.discardable.} =
     s.tableBuf.setLen 0
     result = true
 
-const AssistantTextStyle* = BrightWhiteFg & BoldOn
+const AssistantTextStyle* = BrightWhiteFg
 
 proc assistantTextBytes*(bytes: string): string =
   if bytes.len == 0:
