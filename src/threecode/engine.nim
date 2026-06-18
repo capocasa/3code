@@ -4,7 +4,7 @@
 ## owns the cursor geometry needed to clear/repaint the volatile footer around
 ## those appends. Scrollback bytes are append-only once emitted.
 
-import std/[terminal]
+import std/[terminal, unicode]
 import minline
 import ./terminal as termio
 import ./util
@@ -19,7 +19,6 @@ type
     footerHasLeadingGap: bool
     footerNeedsLeadingGap: bool
     toolViewportRows: seq[string]
-    toolViewportStatus: string
     editorRedrawPending: bool
     editorRedrawFooterRows: int
 
@@ -65,12 +64,22 @@ proc writeViewportRows(rows: openArray[string]) =
     stdout.write "\r\n"
 
 proc toolViewportHeight(e: TerminalEngine): int =
-  e.toolViewportRows.len + (if e.toolViewportStatus.len > 0: 1 else: 0)
+  e.toolViewportRows.len
 
 proc writeToolViewportRows(e: TerminalEngine) =
   writeViewportRows(e.toolViewportRows)
-  if e.toolViewportStatus.len > 0:
-    writeViewportRows([GreyFg & "  " & e.toolViewportStatus & Reset])
+
+proc updateToolViewportSymbol*(symbol: string) {.gcsafe.} =
+  ## Rewrite the leading glyph of the cached command banner row. The bar-tick
+  ## thread calls this each tick to rotate the currency marker ($/€/£/¥); the
+  ## next `renderFooter` repaint writes the updated row in one locked pass.
+  {.cast(gcsafe).}:
+    if defaultEngine.toolViewportRows.len > 0:
+      let row = defaultEngine.toolViewportRows[0]
+      if row.len > 0:
+        let firstLen = runeLenAt(row, 0)
+        if firstLen > 0:
+          defaultEngine.toolViewportRows[0] = symbol & row.substr(firstLen)
 
 proc syncWrite*(e: var TerminalEngine; bytes: string) =
   ## Synchronized screen write for legacy frame helpers that have not yet been
@@ -240,7 +249,6 @@ proc renderToolViewport*(rows: openArray[string]; frame: FooterFrame;
 proc clearToolViewport*(e: var TerminalEngine; frame: FooterFrame;
                         inputRunning: bool; editor: ptr minline.LineEditor;
                         termW = 0) {.gcsafe.} =
-  e.toolViewportStatus = ""
   if e.toolViewportRows.len == 0:
     e.renderFooter(frame, inputRunning, editor, termW)
   else:
@@ -251,14 +259,6 @@ proc clearToolViewport*(frame: FooterFrame; inputRunning: bool;
     {.gcsafe.} =
   {.cast(gcsafe).}:
     defaultEngine.clearToolViewport(frame, inputRunning, editor, termW)
-
-proc setToolViewportStatus*(e: var TerminalEngine; status: string) {.gcsafe.} =
-  {.cast(gcsafe).}:
-    e.toolViewportStatus = status
-
-proc setToolViewportStatus*(status: string) {.gcsafe.} =
-  {.cast(gcsafe).}:
-    defaultEngine.setToolViewportStatus(status)
 
 proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
                        liveAnchored: bool;

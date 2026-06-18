@@ -57,6 +57,7 @@ proc runBashWithViewport(act: Action; cache: ReadCache; stub: JsonNode;
   let promptOwnsStdin = inputEditor != nil
 
   proc renderView() =
+    view.setSymbol(nextCommandSymbol())
     termengine.renderToolViewport(
       view.viewportRows(),
       footerFrame(fatPromptState),

@@ -38,12 +38,13 @@ type
     total*: int
     banner*: string
     exitCode*: int
+    symbol*: string
     buf*: seq[string]
 
 proc initStreamingView*(maxLines = StreamMaxLines, idx = 0;
                         banner = ""): StreamingView =
   StreamingView(maxLines: maxLines, idx: idx, banner: banner,
-                exitCode: -1, buf: @[])
+                exitCode: -1, symbol: "$", buf: @[])
 
 proc omittedLine(v: StreamingView): string =
   let hidden = max(0, v.total - (v.maxLines - 1))
@@ -54,7 +55,10 @@ proc omittedLine(v: StreamingView): string =
     " omitted" & show
 
 proc commandIcon(v: StreamingView): string =
-  if v.exitCode > 0: "¤" else: "$"
+  if v.exitCode > 0: "¤" else: v.symbol
+
+proc setSymbol*(v: var StreamingView; symbol: string) =
+  v.symbol = symbol
 
 proc setExitCode*(v: var StreamingView; code: int) =
   v.exitCode = code
