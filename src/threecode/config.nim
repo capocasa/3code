@@ -71,6 +71,10 @@ var activeSearchUrl*: string = DefaultSearchUrl
   ## Persisted back to disk only when it differs from `DefaultSearchUrl`,
   ## so users who never customize keep a clean config.
 
+var notifyEnabled*: bool = false
+  ## Resolved at config load. Set true by `[settings]` `notify = on`.
+  ## When true, a native desktop notification fires when a turn ends.
+
 proc gateExperimental*(p: Profile): bool =
   ## True if the profile is allowed to run a turn under current policy:
   ## empty profile (caller handles that), known-good model, or the
@@ -212,6 +216,11 @@ proc parseConfigFile*(path: string): (string, string, seq[ProviderRec]) =
         case e.key
         of "current": current = v
         of "search-url", "search_url": searchUrl = v
+        of "notify":
+          case v.toLowerAscii
+          of "on", "true", "yes", "1": notifyEnabled = true
+          of "off", "false", "no", "0": notifyEnabled = false
+          else: discard
         else: discard
       of "provider":
         case e.key

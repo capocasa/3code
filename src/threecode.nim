@@ -33,6 +33,7 @@ when defined(posix):
 import threecode/[types, util, prompts, shell, loop, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
                   toolstream, turns, transcript]
+import tinotify
 import threecode/minline
 export types, util, prompts, shell, loop, session, compact,
        config, actions, api, display, ui, fatprompt, toolstream, turns,
@@ -92,6 +93,14 @@ proc setupTlsEnv() =
     let cur = getEnv("DYLD_LIBRARY_PATH")
     let newVal = if cur.len > 0: dir & ":" & cur else: dir
     putEnv("DYLD_LIBRARY_PATH", newVal)
+
+const NotifyMinSeconds = 5.0
+
+proc notifyTurnFinished(messages: JsonNode) =
+  let last = messages[^1]
+  if last.kind != JObject or last{"role"}.getStr != "assistant": return
+  let body = last{"content"}.getStr
+  notify("3code", "Turn finished", body)
 
 proc commitUserPromptTranscript(line: string; restoreEditor = true) =
   ## Controller-owned transcript append for user prompt items. Formatters
@@ -485,7 +494,10 @@ proc main() =
     editor.renderSuffixCursor = false
     editor.renderRow = 0
     editor.echoRows = 0
+    let turnStart = epochTime()
     runTurnsInteractive(prof, messages, session)
+    if notifyEnabled and epochTime() - turnStart >= NotifyMinSeconds:
+      notifyTurnFinished(messages)
     if handleBufferedAfterTurn(): break
 
 when isMainModule:
