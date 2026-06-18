@@ -18,9 +18,11 @@ const PartialLineFlushMs = 700
 
 proc emitCompleteLine(rawOut: var string; lineBuf: var string;
                       onLine: proc(line: string);
-                      partialShown: var bool; partialText: var string) =
+                      partialShown: var bool; partialText: var string;
+                      suppress: var bool) =
   rawOut.add lineBuf & "\n"
-  if onLine != nil and not (partialShown and partialText == lineBuf):
+  if onLine != nil and not suppress and
+      not (partialShown and partialText == lineBuf):
     onLine(lineBuf)
   lineBuf.setLen(0)
   partialShown = false
@@ -28,16 +30,20 @@ proc emitCompleteLine(rawOut: var string; lineBuf: var string;
 
 proc feedOutputChunk(rawOut: var string; lineBuf: var string; chunk: string;
                      onLine: proc(line: string);
-                     partialShown: var bool; partialText: var string) =
+                     partialShown: var bool; partialText: var string;
+                     suppress: var bool) =
   for ch in chunk:
+    if ch == '\x00':
+      suppress = true
     if ch == '\n':
-      emitCompleteLine(rawOut, lineBuf, onLine, partialShown, partialText)
+      emitCompleteLine(rawOut, lineBuf, onLine, partialShown, partialText, suppress)
     elif ch != '\r':
       lineBuf.add ch
 
 proc emitPartialLine(lineBuf: string; onLine: proc(line: string);
-                     partialShown: var bool; partialText: var string) =
-  if onLine != nil and lineBuf.len > 0 and
+                     partialShown: var bool; partialText: var string;
+                     suppress: var bool) =
+  if onLine != nil and not suppress and lineBuf.len > 0 and
       (not partialShown or partialText != lineBuf):
     onLine(lineBuf)
     partialShown = true
@@ -45,10 +51,11 @@ proc emitPartialLine(lineBuf: string; onLine: proc(line: string);
 
 proc emitFinalPartial(rawOut: var string; lineBuf: var string;
                       onLine: proc(line: string);
-                      partialShown: var bool; partialText: var string) =
+                      partialShown: var bool; partialText: var string;
+                      suppress: var bool) =
   if lineBuf.len == 0:
     return
-  emitCompleteLine(rawOut, lineBuf, onLine, partialShown, partialText)
+  emitCompleteLine(rawOut, lineBuf, onLine, partialShown, partialText, suppress)
 
 when defined(posix):
   proc readChunk(buf: var array[4096, char]; n: int): string =
@@ -61,6 +68,7 @@ when defined(posix):
                            onLine: proc(line: string)) =
     var partialShown = false
     var partialText = ""
+    var suppress = false
     var lastActivity = epochTime()
     var processExited = false
     let fd = cint(p.outputHandle)
@@ -75,7 +83,7 @@ when defined(posix):
         let n = posix.read(fd, addr buf[0], buf.len)
         if n > 0:
           feedOutputChunk(rawOut, lineBuf, readChunk(buf, n.int),
-                          onLine, partialShown, partialText)
+                          onLine, partialShown, partialText, suppress)
           lastActivity = epochTime()
         else:
           processExited = true
@@ -84,7 +92,7 @@ when defined(posix):
 
       if lineBuf.len > 0 and
           (epochTime() - lastActivity) * 1000 >= PartialLineFlushMs.float:
-        emitPartialLine(lineBuf, onLine, partialShown, partialText)
+        emitPartialLine(lineBuf, onLine, partialShown, partialText, suppress)
 
       if processExited:
         while true:
@@ -99,10 +107,10 @@ when defined(posix):
           if n <= 0:
             break
           feedOutputChunk(rawOut, lineBuf, readChunk(buf, n.int),
-                          onLine, partialShown, partialText)
+                          onLine, partialShown, partialText, suppress)
         break
 
-    emitFinalPartial(rawOut, lineBuf, onLine, partialShown, partialText)
+    emitFinalPartial(rawOut, lineBuf, onLine, partialShown, partialText, suppress)
 
 when defined(posix):
   var
@@ -275,13 +283,16 @@ export DEBIAN_FRONTEND=noninteractive
       let outStream = p.outputStream
       var partialShown = false
       var partialText = ""
+      var suppress = false
       while not outStream.atEnd:
         let ch = outStream.readChar()
+        if ch == '\x00':
+          suppress = true
         if ch == '\n':
-          emitCompleteLine(rawOut, lineBuf, onLine, partialShown, partialText)
+          emitCompleteLine(rawOut, lineBuf, onLine, partialShown, partialText, suppress)
         elif ch != '\r':
           lineBuf.add ch
-      emitFinalPartial(rawOut, lineBuf, onLine, partialShown, partialText)
+      emitFinalPartial(rawOut, lineBuf, onLine, partialShown, partialText, suppress)
   finally:
     cancelled = stopToolCancelWatcher()
 
