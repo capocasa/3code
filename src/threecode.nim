@@ -326,6 +326,13 @@ proc main() =
             formatItem(commandItem(res.name, res.body, res.ok))
         commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true,
                               transcriptOwnsSpacing = true)
+      of ckQuit:
+        acquire inputStateLock
+        try:
+          inputState.cmdWasQuit = true
+        finally:
+          release inputStateLock
+        requestTurnInterrupt()
       of ckMutating, ckModal:
         let msg = "cannot run " & cmd.strip & " while a turn is active"
         let bytes = formatItem(commandItem("command", msg & "\n", false))

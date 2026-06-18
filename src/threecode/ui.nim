@@ -69,6 +69,8 @@ proc classifyCommand*(cmd: string): CommandKind =
     else: ckMutating
   of ":clear", ":summarize":
     ckMutating
+  of ":quit", ":q", ":exit":
+    ckQuit
   else:
     ckUnknown
 
