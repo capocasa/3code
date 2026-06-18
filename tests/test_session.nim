@@ -1,4 +1,4 @@
-import std/[json, os, strutils, unittest]
+import std/[json, os, strutils, times, unittest]
 import threecode/[session, types]
 
 suite "session: usageFromJson":
@@ -193,3 +193,68 @@ suite "session: sessionIdFromPath":
 
   test "returns full name when no extension":
     check sessionIdFromPath("/some/dir/my-session") == "my-session"
+
+suite "session: session lock acquire/release":
+  # Unique fake session per test so we never touch real sessions and tests
+  # don't race each other.
+  var tmpPath: string
+  var activeBefore: string
+
+  setup:
+    activeBefore = activeLockPath
+    tmpPath = getTempDir() / ("3code-test-lock-" & $epochTime().int64 & ".3log")
+
+  teardown:
+    if activeLockPath != "": releaseActiveSessionLock()
+    # Restore prior global so one test's acquire can't leak into another.
+    activeLockPath = activeBefore
+    if fileExists(tmpPath): removeFile(tmpPath)
+    let lp = sessionLockPathFor(tmpPath)
+    if fileExists(lp): removeFile(lp)
+
+  test "acquire creates the lock file holding our pid":
+    acquireSessionLock(tmpPath)
+    let lp = sessionLockPathFor(tmpPath)
+    check fileExists(lp)
+    check readFile(lp).strip == $getCurrentProcessId()
+    check activeLockPath == lp
+
+  test "acquiring a held lock raises SessionLocked with guidance":
+    acquireSessionLock(tmpPath)
+    let lp = sessionLockPathFor(tmpPath)
+    var msg = ""
+    try:
+      acquireSessionLock(tmpPath)
+      fail()
+    except SessionLocked as e:
+      msg = e.msg
+    # message names the session id, the lock file path, the owner pid,
+    # and tells the user how to clear a stale lock
+    check sessionIdFromPath(tmpPath) in msg
+    check lp in msg
+    check $getCurrentProcessId() in msg
+    check "stale" in msg.toLowerAscii
+
+  test "releaseSessionLock removes the file":
+    acquireSessionLock(tmpPath)
+    let lp = sessionLockPathFor(tmpPath)
+    check fileExists(lp)
+    releaseSessionLock(tmpPath)
+    check not fileExists(lp)
+    check activeLockPath == ""
+
+  test "releaseActiveSessionLock removes the held file":
+    acquireSessionLock(tmpPath)
+    let lp = sessionLockPathFor(tmpPath)
+    check activeLockPath == lp
+    releaseActiveSessionLock()
+    check not fileExists(lp)
+    check activeLockPath == ""
+
+  test "release of a never-held lock is a no-op":
+    releaseSessionLock(tmpPath)
+    check activeLockPath == ""
+
+  test "acquire on empty path is a no-op":
+    acquireSessionLock("")
+    check activeLockPath == ""

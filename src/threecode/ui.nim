@@ -889,9 +889,11 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       emitFatPromptEvent clearPendingHintEvent()
       emitFatPromptEvent clearBarEvent()
       if session.savePath != "":
+        releaseSessionLock(session.savePath)
         session.savePath = newSessionPath()
         session.created = $now()
         session.cwd = getCurrentDir()
+        acquireSessionLock(session.savePath)
       cmdResponse "════════════════════════════════════════"
     of ":model":
       cmdModel(arg, prof)
