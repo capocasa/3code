@@ -2,14 +2,14 @@
 ## Turn lifecycle orchestration.
 ##
 ## This module is the high-level place where model calls, tool calls,
-## transcript commits, fat-prompt transitions, and loop-guard decisions meet.
+## transcript commits and fat-prompt transitions meet.
 ## `api.nim` should stay transport/protocol focused; visual consequences of
 ## model/tool progress should flow through this layer.
 
 import std/[json, locks, os, strformat, strutils, terminal, times]
 when defined(posix):
   import std/posix except Time
-import types, util, prompts, loop, session, compact, config, actions, api,
+import types, util, prompts, session, compact, config, actions, api,
   display, fatprompt, streamexec, toolstream, transcript
 import engine as termengine
 
@@ -208,7 +208,6 @@ proc commitTranscriptItem(formatBody: proc(); restoreEditor = true;
 proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
   installApiStreamHooks()
   clearInterrupted()
-  resetLoopTracker(session.loop)
   # `beginTurn` hides the terminal cursor for the duration of the
   # turn (streaming + tool exec); the `❯ ` glyph remains on screen as
   # the visible-but-not-blinking caret. `endTurn` shows the cursor again so
@@ -274,17 +273,14 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           commitPendingReceiptAfterStream()
         else:
           commitAssistantItem(content)
-      var halt = false  # Strike-2 trip or budget cap: stop further tool calls this turn
       var queuedUser = false # User submitted while tools were running.
       var cleared = false  # akClear: rebuild and continue loop
       for tc in toolCalls:
         let id = tc{"id"}.getStr
-        if isInterrupted() or halt:
+        if isInterrupted():
           # still emit a tool response so the assistant message's tool_calls
           # are all paired; the model sees the cancellation on the next turn.
-          let stopMsg =
-            if halt: "skipped — loop guard paused the turn"
-            else: "interrupted by user"
+          let stopMsg = "interrupted by user"
           messages.add %*{"role": "tool", "tool_call_id": id,
                           "content": stopMsg}
           continue
@@ -345,28 +341,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           commitTranscriptItem(proc() =
             printSkillLoaded(act)
           , prefixBoundary = not hadToolBar)
-        # Loop guard: fingerprint the call and decide whether to annotate the
-        # tool result (Strike 1) or halt further tool calls (Strike 2). The
-        # guard message is appended to the real tool result rather than
-        # injected as a separate message — the assistant's tool_calls array
-        # already pairs 1:1 with tool responses via tool_call_id, so slipping
-        # in an extra message would break the pairing.
-        let priorStrike = session.loop.strike
-        let strike = trackCall(session.loop, name, args)
-        var toolContent = r
-        # Strike 1 is a soft signal (mutation concentration on one path) —
-        # no nudge is injected. Strike 2 halts the turn. The turn-call
-        # budget (TurnCallBudget) is a separate backstop that also halts.
-        if strike >= 2 and priorStrike < 2:
-          halt = true
-          let fp = fingerprint(name, args)
-          toolContent &= "\n\n⊘ [repeat-guard] mutation saturation (" & fp &
-            "); further tool calls paused."
-        elif session.loop.turnCalls >= TurnCallBudget and priorStrike < 2:
-          halt = true
-          toolContent &= "\n\n⊘ [repeat-guard] turn budget exceeded (" &
-            $TurnCallBudget & " tracked calls); further tool calls paused."
-        messages.add %*{"role": "tool", "tool_call_id": id, "content": toolContent}
+        messages.add %*{"role": "tool", "tool_call_id": id, "content": r}
         acquire inputStateLock
         try:
           if inputState.autoSend:
@@ -389,7 +364,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           session.toolLog.setLen 0
           session.usage = Usage()
           session.lastPromptTokens = 0
-          session.loop = initLoopTracker()
           session.readCache = nil
           session.plan.setLen 0
           emitFatPromptEvent clearPendingHintEvent()
@@ -415,13 +389,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       if queuedUser:
         endTurn(repaintPrompt = false)
         turnEnded = true
-        return
-      if halt:
-        writeTranscriptWithFatPrompt:
-          if session.loop.turnCalls >= TurnCallBudget:
-            errLn &"⊘  turn budget exceeded ({TurnCallBudget} tracked calls)"
-          else:
-            errLn "⊘  mutation saturation"
         return
       debugOut "runTurns: loop continue"
       continue

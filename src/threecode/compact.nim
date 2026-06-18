@@ -142,8 +142,7 @@ proc supersedeCompact*(messages: JsonNode, keepRecent = 2): int =
         let c = m{"content"}.getStr("")
         if c.len > SupersededMarker.len + 32 and
            not c.startsWith("[superseded") and
-           not c.startsWith("[compacted") and
-           "[repeat-guard]" notin c:
+           not c.startsWith("[compacted"):
           m["content"] = %SupersededMarker
           inc result
     of "assistant":
