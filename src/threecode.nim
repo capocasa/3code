@@ -3,7 +3,7 @@
 ## `main` parses CLI args, sets up the session, and runs the interactive loop.
 ## `turns.runTurns` is the inner driver: it calls the model, dispatches
 ## tool calls, updates the session, and handles compaction - repeating until
-## the model emits no tool calls or the loop guard trips.
+## the model emits no tool calls.
 ##
 ## Module graph overview::
 ##
@@ -11,14 +11,13 @@
 ##     ├── turns        turn lifecycle + API/tool orchestration
 ##     ├── api          HTTP + SSE streaming + spinner
 ##     ├── actions      tool_call JSON → Action → execute
-##     ├── loop         mutation-saturation loop guard
 ##     ├── compact      supersede elision + LLM summarization
 ##     ├── session      .3log persistence (save + load)
 ##     ├── display      terminal rendering (markdown, token bar, replays)
 ##     ├── ui           REPL :commands + provider wizard
 ##     ├── config       config file parse + profile resolution
 ##     ├── prompts      KnownGoodCombos + per-family (prompt, tools)
-##     ├── shell        shell command parsing for loop guard
+##     ├── shell        shell command parsing for the read cache
 ##     ├── web          native web search + URL fetch
 ##     ├── update       background auto-update
 ##     ├── fatprompt    volatile prompt/token/ticker state and frame bytes
@@ -30,11 +29,11 @@ import std/[json, locks, os, parseopt, strformat, strutils, terminal, times]
 import std/exitprocs
 when defined(posix):
   import std/posix
-import threecode/[types, util, prompts, shell, loop, session, compact,
+import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
                   toolstream, turns, transcript]
 import threecode/minline
-export types, util, prompts, shell, loop, session, compact,
+export types, util, prompts, shell, session, compact,
        config, actions, api, display, ui, fatprompt, toolstream, turns,
        transcript
 
