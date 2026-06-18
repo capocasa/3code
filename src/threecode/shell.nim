@@ -70,9 +70,9 @@ proc splitStatements*(cmd: string): seq[string] =
 
 proc bashMutationPath*(cmd: string): string =
   ## Best-effort: return the first file path that this bash command would
-  ## mutate, or "" if no mutation pattern matches. Closes the loop-guard
-  ## bypass where models reach for `sed -i` instead of `patch`/`write` and
-  ## thrash a file outside the tracker's view.
+  ## mutate, or "" if no mutation pattern matches. Surfaces `sed -i` and
+  ## similar so the read cache knows the file changed even when the model
+  ## never emits a dedicated write action.
   ##
   ## Recognised patterns (per top-level statement):
   ## - explicit redirect: `> path`, `>> path`, `>path`, `>>path`

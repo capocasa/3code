@@ -347,7 +347,7 @@ The harness runs your tool calls and feeds results back. Independent tool calls 
 
 # Reading and searching — batch, don't drip
 
-**Don't re-read a file you've already read this session.** If you have its contents, you have its contents. Going back for "one more lookup" is the saturation pattern that wastes turns and tokens. The harness will trip a repeat-guard and stop accepting tool calls if you keep hammering one path.
+**Don't re-read a file you've already read this session.** If you have its contents, you have its contents. Going back for "one more lookup" wastes turns and tokens.
 
 **Batch your searches.** If you need to look up several signatures, do them in one `rg` with a pipe-separated pattern, not five separate calls:
 
