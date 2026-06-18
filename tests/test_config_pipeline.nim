@@ -79,7 +79,7 @@ suite "config: resolveReasoning":
   test "falls back to known-good default":
     let prov = ProviderRec(name: "zai")
     let prof = Profile(name: "zai.glm-5.1", model: "glm-5.1")
-    check resolveReasoning(prov, prof) == "low"
+    check resolveReasoning(prov, prof) == "on"
 
   test "returns empty when nothing set":
     let prov = ProviderRec()

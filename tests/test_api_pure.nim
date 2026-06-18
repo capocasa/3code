@@ -105,31 +105,39 @@ suite "api: applyReasoning — gpt-oss":
     check body{"reasoning_effort"}.getStr == "high"
 
 suite "api: applyReasoning — deepseek":
-  test "low disables thinking, sets temperature 0":
+  test "first-party low disables thinking, sets temperature 0":
     var body = %*{"stream": true}
-    let p = Profile(name: "test.model", family: "deepseek", model: "model",
+    let p = Profile(name: "deepseek.model", family: "deepseek", model: "model",
                     reasoning: "low")
     applyReasoning(p, body)
     check body{"thinking"}{"type"}.getStr == "disabled"
     check body{"temperature"}.getFloat == 0.0
 
-  test "medium enables thinking, effort low":
+  test "first-party medium enables thinking, effort medium":
     var body = %*{"stream": true}
-    let p = Profile(name: "test.model", family: "deepseek", model: "model",
+    let p = Profile(name: "deepseek.model", family: "deepseek", model: "model",
                     reasoning: "medium")
-    applyReasoning(p, body)
-    check body{"thinking"}{"type"}.getStr == "enabled"
-    check body{"reasoning_effort"}.getStr == "low"
-    check body{"temperature"}.getFloat == 0.0
-
-  test "high enables thinking, effort medium":
-    var body = %*{"stream": true}
-    let p = Profile(name: "test.model", family: "deepseek", model: "model",
-                    reasoning: "high")
     applyReasoning(p, body)
     check body{"thinking"}{"type"}.getStr == "enabled"
     check body{"reasoning_effort"}.getStr == "medium"
     check body{"temperature"}.getFloat == 0.0
+
+  test "first-party high enables thinking, effort high":
+    var body = %*{"stream": true}
+    let p = Profile(name: "deepseek.model", family: "deepseek", model: "model",
+                    reasoning: "high")
+    applyReasoning(p, body)
+    check body{"thinking"}{"type"}.getStr == "enabled"
+    check body{"reasoning_effort"}.getStr == "high"
+    check body{"temperature"}.getFloat == 0.0
+
+  test "hosted stack sets only reasoning_effort":
+    var body = %*{"stream": true}
+    let p = Profile(name: "nebius.model", family: "deepseek", model: "model",
+                    reasoning: "high")
+    applyReasoning(p, body)
+    check body{"reasoning_effort"}.getStr == "high"
+    check not body.hasKey("thinking")
 
 suite "api: applyReasoning — minimax":
   test "low disables thinking":
