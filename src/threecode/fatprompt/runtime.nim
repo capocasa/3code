@@ -680,16 +680,17 @@ proc paintInitialPrompt*(p: Profile) =
 #     during tool execution. Bash tool viewports can also attach a compact
 #     command-status row below the live output.
 
-const CommandStatusDelayMs = 2000
+# Currency symbols rotated by the bar-tick thread while a bash command runs.
+# The classic |/\-+timer command-status line lived here; the live bullet now
+# carries the rotation instead.
+var commandSymbolIndex: Atomic[int]
 
-proc commandStatusText(elapsedMs: int): string =
-  if elapsedMs < CommandStatusDelayMs:
-    return ""
-  const frames = ["|", "/", "-", "\\"]
-  let frameIdx = ((elapsedMs - CommandStatusDelayMs) div 250) mod frames.len
-  frames[frameIdx] & " " & $max(1, elapsedMs div 1000) & "s"
+proc nextCommandSymbol*(): string =
+  const symbols = ["$", "€", "£", "¥"]
+  symbols[commandSymbolIndex.load(moAcquire) mod symbols.len]
 
 proc barTickLoop() {.thread.} =
+  var observedTick = testSpinnerPainted.load(moAcquire)
   while not barTickStop.load(moRelaxed):
     var base: string
     {.cast(gcsafe).}:
@@ -702,7 +703,17 @@ proc barTickLoop() {.thread.} =
       if base.hasElapsedSuffix: base
       else: base & "  " & $elapsed & "s"
     if commandStatusActive.load(moRelaxed):
-      termengine.setToolViewportStatus(commandStatusText(elapsedMs))
+      var advance = false
+      if testFrameMode():
+        let painted = testSpinnerPainted.load(moAcquire)
+        if painted > observedTick:
+          observedTick = painted
+          advance = true
+      else:
+        advance = true
+      if advance:
+        discard commandSymbolIndex.fetchAdd(1, moRelease)
+        termengine.updateToolViewportSymbol(nextCommandSymbol())
     # Re-assert hide-cursor each tick — same rationale as
     # `spinnerFooterBytes`: some terminals transiently re-show the
     # caret on cursor movement, and beginTurn's one-shot `?25l`
@@ -732,13 +743,12 @@ proc stopBarTick*(): int =
   joinThread(barTickThread)
   barTickRunning = false
   commandStatusActive.store(false, moRelaxed)
-  termengine.setToolViewportStatus("")
   return elapsed
 
 proc setCommandStatusActive*(active: bool) =
+  if active:
+    commandSymbolIndex.store(0, moRelease)
   commandStatusActive.store(active, moRelaxed)
-  if not active:
-    termengine.setToolViewportStatus("")
 
 proc startSpinner*(label: string) =
   debugOut "startSpinner"
