@@ -2,7 +2,7 @@
 ##
 ## Handles all `:cmd` input that is not a prompt to the model. The command set
 ## is narrow by design: introspection (`:show`, `:log`, `:tokens`), context
-## management (`:clear`, `:compact`, `:summarize`), provider/model switching
+## management (`:clear`, `:summarize`), provider/model switching
 ## (`:provider`, `:model`, `:reasoning`).
 ##
 ## Tab-completion in `tabComplete` walks `KnownGoodCombos` and the live

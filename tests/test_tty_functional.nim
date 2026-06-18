@@ -220,7 +220,7 @@ suite "terminal visual contract":
       (":sessions all", ": sessions"),
       (":log", ": log"),
       (":show", ": show"),
-      (":compact", ": compact"),
+      (":compact", "! command"),
       (":summarize", "! summarize"),
       (":prompt", ": prompt"),
       (":toknes", "! command")

@@ -1,4 +1,4 @@
-===== 595 =====
+===== 865 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -10,7 +10,7 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
-===== 706 =====
+===== 732 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -23,7 +23,7 @@
 
 ❯ first line
   
-===== 117 =====
+===== 987 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -36,7 +36,7 @@
 
 ❯ first line
   second line
-===== 522 =====
+===== 795 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -52,7 +52,7 @@
 
 ⣿ ○0% 0s
 ❯ queued line one
-===== 952 =====
+===== 662 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -69,7 +69,7 @@
 ⣿ ○0% 0s
 ❯ queued line one
   
-===== 166 =====
+===== 704 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -83,10 +83,10 @@
 ❯ first line
   second line
 
-⣿ ○0% 0s
+⣿ ⧖ 0s
 ❯ queued line one
   queued line two
-===== 415 =====
+===== 576 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -100,11 +100,11 @@
 ❯ first line
   second line
 
-⣿ ○0% 0s
-❯ queued line one
-  queued line two ⧖
+⣿ ⧖ 0s
+⣿ ⧖ 0s
+❯  ⧖
   
-===== 619 =====
+===== 664 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -118,11 +118,11 @@
 ❯ first line
   second line
 
+⣿ ⧖ 0s
 ⣿ ○0% ↓6 0s
-❯ queued line one
-  queued line two ⧖
+❯  ⧖
   
-===== 505 =====
+===== 995 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -136,6 +136,7 @@
 ❯ first line
   second line
 
+⣿ ⧖ 0s
 ● First multiline response.
   ○1%  ↑120  ↓24  0s
 
@@ -144,7 +145,7 @@
 
 ⣿ ○1% ↓6 0s
 ❯
-===== 522 =====
+===== 348 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -158,6 +159,7 @@
 ❯ first line
   second line
 
+⣿ ⧖ 0s
 ● First multiline response.
   ○1%  ↑120  ↓24  0s
 
