@@ -638,6 +638,26 @@ proc expectNo*(s: TtySession; text: string; settleMs = 250): bool {.discardable.
     sleep 5
   true
 
+proc expectTypedAtPrompt*(s: TtySession; text: string;
+                           timeoutMs = 5000): bool {.discardable.} =
+  ## Verify typed text is live at the prompt: caret visible and the text
+  ## present on the cursor row. Catches the regression where an interrupt
+  ## leaves the prompt painted but the editor dead — `send` writes bytes to
+  ## the pty but nothing repaints, so the text never appears on the cursor row.
+  let deadline = epochTime() + timeoutMs.float / 1000.0
+  while epochTime() < deadline:
+    s.drain(5, recordFrame = false)
+    if s.frames.len > 0:
+      let f = s.frames[^1]
+      if not f.cursorHidden and f.cursorRow >= 0 and
+          f.cursorRow < f.rows.len and text in f.rows[f.cursorRow]:
+        return true
+    if s.exited:
+      break
+    sleep 5
+  doAssert false, "typed text not live at prompt: " & text & "\n" &
+    s.dumpFramesAround(text)
+
 proc expectInHistory*(s: TtySession; text: string; timeoutMs = 5000): bool {.discardable.} =
   let deadline = epochTime() + timeoutMs.float / 1000.0
   while epochTime() < deadline:
