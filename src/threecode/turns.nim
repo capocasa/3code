@@ -225,6 +225,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
   defer: finishTurn()
   while true:
     discard supersedeCompact(messages)
+    discard compactHistory(messages)
     var usage: Usage
     let msg = callModel(p, messages, usage, session.lastPromptTokens)
     session.usage.promptTokens += usage.promptTokens
@@ -240,10 +241,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       clearInterrupted()
       return
     let window = contextWindowFor(p)
-    var summarized = 0
     case decideContextAction(usage.promptTokens, window, messages.len)
     of caSummarize:
-      summarized = summarizeHistory(messages, p)
+      let summarized = summarizeHistory(messages, p)
       if summarized > 0:
         writeTranscriptWithFatPrompt:
           hintLn &"· summarized {summarized} message" &
@@ -251,19 +251,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
             &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)",
             resetStyle
         saveSession(session, messages)
-    of caCompact, caNone: discard
-    # Fall through: if summarization bailed, still try compaction on the
-    # same turn. Summarization only runs once per turn regardless.
-    if summarized == 0 and usage.promptTokens > 0 and
-       usage.promptTokens.float > CompactThresholdFrac * window.float:
-      let n = compactHistory(messages)
-      if n > 0:
-        writeTranscriptWithFatPrompt:
-          hintLn &"· compacted {n} old tool result" &
-            (if n == 1: "" else: "s") &
-            &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)",
-            resetStyle
-        saveSession(session, messages)
+    of caNone: discard
     let content = msg{"content"}.getStr("")
     let streamedLive = contentStreamedLive
     contentStreamedLive = false

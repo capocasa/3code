@@ -15,7 +15,7 @@ import types, util, prompts, session, config, api, compact, display, minline,
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":prompt", ":show", ":log", ":sessions",
-                      ":compact", ":summarize",
+                      ":summarize",
                       ":q", ":quit", ":exit"]
 
 type WizardReadLineHook* = proc(prompt: string, hidden,
@@ -67,7 +67,7 @@ proc classifyCommand*(cmd: string): CommandKind =
   of ":reasoning":
     if parts.len == 0 or (parts.len == 1 and parts[0] == "list"): ckSafeImmediate
     else: ckMutating
-  of ":clear", ":compact", ":summarize":
+  of ":clear", ":summarize":
     ckMutating
   else:
     ckUnknown
@@ -914,13 +914,6 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
                      else: "no saved sessions for this directory  (try `:sessions all`)")
       else:
         printSessionList(paths, session.savePath, showAll)
-    of ":compact":
-      let n = compactHistory(messages)
-      if n == 0:
-        cmdResponse "nothing to compact"
-      else:
-        cmdResponse &"compacted {n} tool result" & (if n == 1: "" else: "s")
-        saveSession(session, messages)
     of ":summarize":
       if prof.name == "":
         ok = false

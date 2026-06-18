@@ -183,8 +183,8 @@ suite "compact: decideContextAction":
   test "returns caSummarize when over threshold and enough messages":
     check decideContextAction(110_000, 128_000, 20) == caSummarize
 
-  test "returns caCompact when over threshold but too few messages":
-    check decideContextAction(110_000, 128_000, 5) == caCompact
+  test "returns caNone when over threshold but too few messages to summarize":
+    check decideContextAction(110_000, 128_000, 5) == caNone
 
   test "returns caNone for zero tokens":
     check decideContextAction(0, 128_000, 20) == caNone

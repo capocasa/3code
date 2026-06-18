@@ -1171,10 +1171,10 @@ proc apiFinalUsage*(usage: Usage; window, elapsed: int;
     setBarPromptState(label)
   emitFatPromptEvent setPendingHintEvent(usage, window, elapsed)
   if window > 0 and usage.promptTokens.float > 0.7 * window.float and
-     usage.promptTokens.float <= CompactThresholdFrac * window.float:
+     usage.promptTokens.float <= SummarizeThresholdFrac * window.float:
     writeTranscriptWithFatPrompt:
       subtleWriteLn(stdout,
-        &"  · context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} — auto-compaction will fire near {humanTokens(int(CompactThresholdFrac * window.float))}; :compact or :summarize to act now")
+        &"  · context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} — auto-summarization will fire near {humanTokens(int(SummarizeThresholdFrac * window.float))}; :summarize to act now")
 
 proc apiNoUsage*(elapsed: int) =
   writeTranscriptWithFatPrompt:
