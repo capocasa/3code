@@ -589,7 +589,7 @@ proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -
   ## Final tool banner. Icons render in default text color regardless of
   ## exit code. Optional `(Ns)` suffix when `elapsedS >= 1`
   ## (live); replay passes -1 to omit it.
-  let icon = if kind == akBash and code > 0: "¤" else: toolIcon(kind)
+  let icon = if kind == akBash and code > 0: "Ø" else: toolIcon(kind)
   stdout.write icon & " "
   stdout.write banner
   if elapsedS >= 1:
@@ -599,7 +599,7 @@ proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -
 
 proc toolBannerBytes*(banner: string; kind: ActionKind; code: int;
                       elapsedS = -1): string =
-  let icon = if kind == akBash and code > 0: "¤" else: toolIcon(kind)
+  let icon = if kind == akBash and code > 0: "Ø" else: toolIcon(kind)
   result.add icon & " " & banner
   if elapsedS >= 1:
     result.add GreyFg & &"  ({elapsedS}s)" & Reset

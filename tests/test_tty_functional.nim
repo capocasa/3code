@@ -579,7 +579,7 @@ suite "terminal visual contract":
     tty.expectInHistory "Running bash checks."
     tty.expectInHistory "$ printf 'ok-one"
     tty.expectInHistory "ok-two"
-    tty.expectInHistory "¤ printf 'bad-one"
+    tty.expectInHistory "Ø printf 'bad-one"
     tty.expectInHistory "bad-three"
     tty.expectInHistory "$ printf 'scroll-1"
     tty.expectInHistory "scroll-10"

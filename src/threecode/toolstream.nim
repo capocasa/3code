@@ -55,7 +55,7 @@ proc omittedLine(v: StreamingView): string =
     " omitted" & show
 
 proc commandIcon(v: StreamingView): string =
-  if v.exitCode > 0: "¤" else: v.symbol
+  if v.exitCode > 0: "Ø" else: v.symbol
 
 proc setSymbol*(v: var StreamingView; symbol: string) =
   v.symbol = symbol

@@ -177,7 +177,7 @@ $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
 
-¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
   bad-two
   bad-three
@@ -203,7 +203,7 @@ $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
 
-¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
   bad-two
   bad-three
@@ -231,7 +231,7 @@ $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
 
-¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
   bad-two
   bad-three
@@ -260,7 +260,7 @@ $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
 
-¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
   bad-two
   bad-three
@@ -290,7 +290,7 @@ $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
 
-¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
   bad-two
   bad-three
@@ -321,7 +321,7 @@ $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
 
-¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
   bad-two
   bad-three
@@ -353,7 +353,7 @@ $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
 
-¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
   bad-two
   bad-three
@@ -386,7 +386,7 @@ $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
 
-¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
   bad-two
   bad-three
@@ -420,7 +420,7 @@ $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
 
-¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
   bad-two
   bad-three
@@ -455,7 +455,7 @@ $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
 
-¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
   bad-two
   bad-three
@@ -491,7 +491,7 @@ $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
 
-¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
   bad-two
   bad-three
@@ -527,7 +527,7 @@ $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
 
-¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
   bad-two
   bad-three
@@ -563,7 +563,7 @@ $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
 
-¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
   bad-two
   bad-three
@@ -601,7 +601,7 @@ $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
 
-¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
   bad-two
   bad-three
@@ -639,7 +639,7 @@ $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
 
-¤ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
   bad-two
   bad-three
