@@ -11,8 +11,8 @@ suite "shell: bashMutationPath edge cases":
   test "does not flag git log":
     check bashMutationPath("git log --oneline -5") == ""
 
-  test "detects git clean -fd":
-    check bashMutationPath("git clean -fd") != ""
+  test "git clean -fd is not flagged (git left alone)":
+    check bashMutationPath("git clean -fd") == ""
 
   test "detects awk redirect":
     check bashMutationPath("awk '{print $1}' file.txt > out.txt") == "out.txt"
@@ -39,22 +39,6 @@ suite "shell: bashReadPath edge cases":
   test "returns empty for compound with pipe":
     let (path, _) = bashReadPath("wc -l file.txt | grep 100")
     check path == ""
-
-suite "shell: bashIsRecovery edge cases":
-  test "detects git restore":
-    check bashIsRecovery("git restore src/foo.nim") != ""
-
-  test "detects git checkout -- path":
-    check bashIsRecovery("git checkout -- src/foo.nim") != ""
-
-  test "does not flag git checkout new branch":
-    check bashIsRecovery("git checkout -b feature") == ""
-
-  test "does not flag git switch":
-    check bashIsRecovery("git switch main") == ""
-
-  test "does not flag git branch":
-    check bashIsRecovery("git branch feature") == ""
 
 suite "shell: splitStatements edge cases":
   test "handles empty string":

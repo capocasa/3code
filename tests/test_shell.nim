@@ -79,8 +79,8 @@ suite "shell: bashMutationPath":
   test "git stash push is not flagged":
     check bashMutationPath("git stash push") == ""
 
-  test "detects git reset --hard (returns dot)":
-    check bashMutationPath("git reset --hard HEAD") == "."
+  test "git reset --hard is not flagged (git left alone)":
+    check bashMutationPath("git reset --hard HEAD") == ""
 
   test "returns empty for read-only commands":
     check bashMutationPath("ls -la") == ""
@@ -90,8 +90,8 @@ suite "shell: bashMutationPath":
   test "detects perl -i":
     check bashMutationPath("perl -i -pe 's/old/new/g' file.txt") == "file.txt"
 
-  test "detects git checkout path":
-    check bashMutationPath("git checkout src/foo.nim") == "src/foo.nim"
+  test "git checkout path is not flagged (git left alone)":
+    check bashMutationPath("git checkout src/foo.nim") == ""
 
   test "detects touch":
     check bashMutationPath("touch /tmp/newfile") == "/tmp/newfile"
@@ -132,16 +132,3 @@ suite "shell: bashReadPath":
     let (path, _) = bashReadPath("cat file.txt > out.txt")
     check path == ""
 
-suite "shell: bashIsRecovery":
-  test "detects git checkout path as recovery":
-    check bashIsRecovery("git checkout -- src/foo.nim") != ""
-
-  test "does not flag branch checkout":
-    check bashIsRecovery("git checkout main") == ""
-
-  test "git stash is not recovery":
-    check bashIsRecovery("git stash") == ""
-
-  test "returns empty for normal commands":
-    check bashIsRecovery("ls -la") == ""
-    check bashIsRecovery("make test") == ""

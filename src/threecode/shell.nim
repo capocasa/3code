@@ -80,9 +80,6 @@ proc bashMutationPath*(cmd: string): string =
   ## - `tee [-a] path`
   ## - `cp/mv path... DEST` (destination is the last positional)
   ## - `rm path`, `touch path`
-  ## - `git checkout/restore path` (any positional after the subcommand)
-  ## - repo-wide destructives — `git reset --hard`, `git clean -f[d[x]]`
-  ##   — return "." (cwd marker)
   for stmt in splitStatements(cmd):
     let raw = shellTokens(stmt.strip)
     if raw.len == 0: continue
@@ -139,21 +136,6 @@ proc bashMutationPath*(cmd: string): string =
       for t in toks[1..^1]:
         if t.startsWith("-"): continue
         return t
-    of "git":
-      if toks.len < 2: continue
-      case toks[1]
-      of "checkout", "restore":
-        var last = ""
-        for j in 2..<toks.len:
-          if not toks[j].startsWith("-") and toks[j] != "--": last = toks[j]
-        if last.len > 0: return last
-      of "reset":
-        for t in toks[2..^1]:
-          if t == "--hard": return "."
-      of "clean":
-        for t in toks[2..^1]:
-          if t == "-f" or t == "-fd" or t == "-fdx" or t == "-df": return "."
-      else: discard
     else: discard
   ""
 
@@ -215,45 +197,3 @@ proc bashReadPath*(cmd: string): tuple[path: string, fullFile: bool] =
     if paths.len == 1: return (paths[0], false)
   else: discard
   ("", false)
-
-proc bashIsRecovery*(cmd: string): string =
-  ## Returns the offending sub-command (`"git checkout src/foo.nim"`,
-  ## `"git reset --hard"`, etc.) when `cmd` looks like the model trying to undo
-  ## its own work mid-session — otherwise `""`. Hard-trips the loop guard
-  ## to Strike 2 on the first occurrence: these commands wipe the working
-  ## tree state the model's plan was based on, so further autonomous turns
-  ## almost always make things worse. Branch switches (`git checkout main`,
-  ## `git checkout v1.2`) are NOT recovery — only path-shaped restores,
-  ## explicit `--` separators, and the wholesale destructives count.
-  for stmt in splitStatements(cmd):
-    let raw = shellTokens(stmt.strip)
-    var toks: seq[string]
-    var i = 0
-    while i < raw.len:
-      let t = raw[i]
-      if t == ">" or t == ">>" or t == "<" or t == "2>" or t == "&>" or t == "2>>":
-        i += 2; continue
-      if t.startsWith(">") or t.startsWith("<") or t.startsWith("2>") or t.startsWith("&>"):
-        inc i; continue
-      toks.add t; inc i
-    if toks.len < 2 or toks[0] != "git": continue
-    case toks[1]
-    of "restore":
-      return toks.join(" ")
-    of "checkout":
-      # Explicit `--` separator → file restore, no question.
-      if "--" in toks[2..^1]: return toks.join(" ")
-      # No `--` — disambiguate by shape. Path-like args (contain `/`) are
-      # file restores; bare names are branch/tag/ref switches.
-      for j in 2..<toks.len:
-        let a = toks[j]
-        if a.startsWith("-"): continue
-        if '/' in a: return toks.join(" ")
-    of "reset":
-      if "--hard" in toks[2..^1]: return toks.join(" ")
-    of "clean":
-      for t in toks[2..^1]:
-        if t == "-f" or t == "-fd" or t == "-fdx" or t == "-df":
-          return toks.join(" ")
-    else: discard
-  ""

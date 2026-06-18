@@ -359,14 +359,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         # budget (TurnCallBudget) is a separate backstop that also halts.
         if strike >= 2 and priorStrike < 2:
           halt = true
-          if session.loop.recoveryCmd != "":
-            toolContent &= "\n\n⊘ [repeat-guard] working-tree recovery (`" &
-              session.loop.recoveryCmd &
-              "`); further tool calls paused. The model's plan was likely based on the working tree as it was before this command — resume only if you've confirmed the new state is what you want."
-          else:
-            let fp = fingerprint(name, args)
-            toolContent &= "\n\n⊘ [repeat-guard] mutation saturation (" & fp &
-              "); further tool calls paused."
+          let fp = fingerprint(name, args)
+          toolContent &= "\n\n⊘ [repeat-guard] mutation saturation (" & fp &
+            "); further tool calls paused."
         elif session.loop.turnCalls >= TurnCallBudget and priorStrike < 2:
           halt = true
           toolContent &= "\n\n⊘ [repeat-guard] turn budget exceeded (" &
@@ -423,10 +418,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         return
       if halt:
         writeTranscriptWithFatPrompt:
-          if session.loop.recoveryCmd != "":
-            errLn "⊘  working-tree recovery: `",
-              session.loop.recoveryCmd, "` wiped state"
-          elif session.loop.turnCalls >= TurnCallBudget:
+          if session.loop.turnCalls >= TurnCallBudget:
             errLn &"⊘  turn budget exceeded ({TurnCallBudget} tracked calls)"
           else:
             errLn "⊘  mutation saturation"

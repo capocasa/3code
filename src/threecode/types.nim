@@ -63,7 +63,6 @@ type
     mutCounts*: CountTable[string]  # writes+patches+sed+web only per path
     strike*: int             # 0/1/2
     trippedPaths*: seq[string] # paths that have already tripped this strike
-    recoveryCmd*: string     # set when Strike 2 fires from a git-recovery hard-trip; "" otherwise
     turnCalls*: int          # total tool calls this turn (for budget cap)
   ReadCache* = ref object
     state*: Table[string, (Time, int)]
