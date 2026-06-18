@@ -23,7 +23,7 @@ type WizardReadLineHook* = proc(prompt: string, hidden,
 
 type
   CommandKind* = enum
-    ckUnknown, ckSafeImmediate, ckMutating, ckModal
+    ckUnknown, ckSafeImmediate, ckMutating, ckModal, ckQuit
   CommandDisposition* = enum
     cdTranscriptResult, cdHarnessOnly, cdModal
   CommandResult* = object
