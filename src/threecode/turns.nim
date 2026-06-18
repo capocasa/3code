@@ -415,7 +415,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
             releaseSessionLock(session.savePath)
             session.savePath = newSessionPath()
             session.created = $now()
-            session.cwd = getCurrentDir()
+            session.cwd = safeCwd()
             acquireSessionLock(session.savePath)
           saveSession(session, messages)
           cleared = true

@@ -199,11 +199,11 @@ proc main() =
         let showAll = v.toLowerAscii in ["all", "a"]
         let paths =
           if showAll: listSessionPaths()
-          else: listSessionPathsForCwd(getCurrentDir())
+          else: listSessionPathsForCwd(safeCwd())
         if paths.len == 0:
           stderr.writeLine (if showAll: "3code: no saved sessions"
                             else: "3code: no saved sessions for " &
-                                  getCurrentDir() & "  (try --list=all)")
+                                  safeCwd() & "  (try --list=all)")
           quit ExitConfig
         printSessionList(paths, "", showAll)
         return
@@ -234,17 +234,17 @@ proc main() =
   var messages: JsonNode
 
   if resume:
-    let path = resolveSessionPath(resumeId, getCurrentDir())
+    let path = resolveSessionPath(resumeId, safeCwd())
     if path == "":
       if resumeId == "":
-        die("no saved sessions for " & getCurrentDir(), ExitConfig)
+        die("no saved sessions for " & safeCwd(), ExitConfig)
       else:
         die("session not found: " & resumeId, ExitConfig)
     (session, messages) = loadSessionFile(path)
   else:
     messages = %* [{"role": "system", "content": DefaultSystemPrompt}]
     session.created = $now()
-    session.cwd = getCurrentDir()
+    session.cwd = safeCwd()
     session.savePath = if sessionOut != "": sessionOut else: newSessionPath()
 
   try:
