@@ -281,17 +281,25 @@ proc consumeQueuedInput*(line: var string; echoRows: var int;
   acquire inputStateLock
   try:
     cmdWasQuit = inputState.cmdWasQuit
-    if inputState.autoSend and
-        (inputState.queuedText.len > 0 or
-         (inputEditor != nil and inputEditor[].line.text.len > 0)):
-      line =
-        if inputState.queuedText.len > 0: inputState.queuedText
-        else: inputEditor[].line.text
-      echoRows = inputState.queuedEchoRows
-      inputState.queuedText = ""
-      inputState.queuedEchoRows = 0
-      inputState.autoSend = false
-      return true
+    if inputState.autoSend:
+      if inputState.queuedPrompts.len > 0:
+        (line, echoRows) = inputState.queuedPrompts[0]
+        inputState.queuedPrompts.delete(0)
+        if inputState.queuedPrompts.len == 0:
+          inputState.autoSend = false
+          inputState.queuedText = ""
+          inputState.queuedEchoRows = 0
+        return true
+      elif inputState.queuedText.len > 0 or
+          (inputEditor != nil and inputEditor[].line.text.len > 0):
+        line =
+          if inputState.queuedText.len > 0: inputState.queuedText
+          else: inputEditor[].line.text
+        echoRows = inputState.queuedEchoRows
+        inputState.queuedText = ""
+        inputState.queuedEchoRows = 0
+        inputState.autoSend = false
+        return true
   finally:
     release inputStateLock
 
@@ -1290,13 +1298,20 @@ proc inputThreadProc() {.thread.} =
                                                       ed.contPromptW,
                                                       max(2, ed.width))
         inputState.autoSend = ed.line.text.len > 0
+        if inputTurnActive.load(moAcquire) and ed.line.text.len > 0:
+          inputState.queuedPrompts.add((ed.line.text, inputState.queuedEchoRows))
       finally:
         release inputStateLock
-      ed.line.position = ed.line.text.len
-      if not inputTurnActive.load(moAcquire):
-        inputIdleSubmitted.store(true, moRelease)
+      if inputTurnActive.load(moAcquire) and ed.line.text.len > 0:
+        ed.line = minline.Line(text: "", position: 0)
+        ed.renderRow = 0
+        ed.echoRows = 0
+      else:
+        ed.line.position = ed.line.text.len
+        if not inputTurnActive.load(moAcquire):
+          inputIdleSubmitted.store(true, moRelease)
       ed.renderSuffix =
-        if inputTurnActive.load(moAcquire) and ed.line.text.len > 0:
+        if inputTurnActive.load(moAcquire) and inputState.autoSend:
           " " & DeferredSubmitMarker & "\n"
         else: ""
       ed.renderSuffixCursor = ed.renderSuffix.len > 0
