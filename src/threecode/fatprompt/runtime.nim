@@ -92,6 +92,24 @@ var inputEditorReady: Atomic[bool]
 var inputIdleSubmitted: Atomic[bool]
 var inputThread: Thread[void]
 var inputThreadRunning* = false
+
+# The input thread owns the only code path that puts stdin into raw mode
+# for sustained periods (the cancel watcher is transient). Its saved
+# termios snapshot is kept here as module-level state so cleanup can
+# restore stdin from any thread on exit, regardless of whether the input
+# thread has unwound. `inputOrigTermiosValid` gates the restore.
+when defined(posix):
+  var inputOrigTermios: Termios
+  var inputOrigTermiosValid = false
+
+proc restoreInputTermios*() {.noconv.} =
+  ## Restore stdin's termios to the snapshot the input thread captured
+  ## before putting it in raw mode. Safe to call from any thread and
+  ## idempotent; a no-op when no snapshot exists.
+  when defined(posix):
+    if inputOrigTermiosValid:
+      discard tcSetAttr(STDIN_FILENO.cint, TCSADRAIN, addr inputOrigTermios)
+      inputOrigTermiosValid = false
 var spinnerRunning = false  # only mutated by main thread
 var inputEditor*: ptr minline.LineEditor
 var inputProfile*: ptr Profile
@@ -1298,11 +1316,9 @@ proc inputThreadProc() {.thread.} =
       inputEditorReady.store(true, moRelease)
 
     when defined(posix):
-      var oldMode: Termios
-      var haveOldMode = false
-      if isatty(fd) != 0 and fd.tcGetAttr(addr oldMode) == 0:
-        haveOldMode = true
-        var rawMode = oldMode
+      if isatty(fd) != 0 and fd.tcGetAttr(addr inputOrigTermios) == 0:
+        inputOrigTermiosValid = true
+        var rawMode = inputOrigTermios
         rawMode.c_iflag = rawMode.c_iflag and not Cflag(BRKINT or ICRNL or
           INPCK or ISTRIP or IXON)
         rawMode.c_cflag = (rawMode.c_cflag and not Cflag(CSIZE or PARENB)) or CS8
@@ -1401,14 +1417,7 @@ proc inputThreadProc() {.thread.} =
       except CatchableError:
         break
 
-    when defined(posix):
-      if haveOldMode:
-        discard fd.tcSetAttr(TCSADRAIN, addr oldMode)
-    acquire inputStateLock
-    try:
-      discard
-    finally:
-      release inputStateLock
+    restoreInputTermios()
     edPtr[].onMutate = nil
     edPtr[].onSubmit = nil
     edPtr[].preRedraw = nil
