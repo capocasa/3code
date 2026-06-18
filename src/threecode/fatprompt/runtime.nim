@@ -77,7 +77,6 @@ var barTickLock: Lock
 barTickLock.initLock()
 
 var apiCancelWatcherStarted = false
-var apiLastTickerUpdate = 0.0
 
 var inputState*: InputState
 var inputStateLock*: Lock
@@ -1075,7 +1074,6 @@ proc apiBeforeCall*(lastPromptTokens, window: int): string =
   result = baseLabel
   apiLiveStream = initLiveMarkdownStream(baseLabel)
   contentStreamedLive = false
-  apiLastTickerUpdate = 0.0
   setSpinTicker("")
   let startsAfterReceipt = followupStartsAfterReceipt
   followupStartsAfterReceipt = false
@@ -1107,10 +1105,6 @@ proc apiProviderActivity*() =
 
 proc apiReasoningDelta*(reasoning, baseLabel: string; slurped: int;
                         contentStarted: bool) =
-  let now = epochTime()
-  if not testFrameMode() and now - apiLastTickerUpdate < 0.1:
-    return
-  apiLastTickerUpdate = now
   let termW = try: terminalWidth() except CatchableError: 80
   let budget = max(20, termW - 6)
   let tail =
