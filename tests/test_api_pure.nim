@@ -96,6 +96,13 @@ suite "api: retryCategory":
     let msg = %*{"role": "assistant", "content": "ok"}
     check retryCategory("", msg, 0) == ""
 
+  test "empty 200-OK response retries as server":
+    # streamHttp surfaces an empty-but-successful response (200, no
+    # content/tools/usage, nil assistant) as an errMsg; it must classify
+    # as a transient server error so the retry loop fires.
+    check retryCategory("empty response from server (200 OK, no content)",
+                        nil, 200) == "server"
+
 suite "api: applyReasoning — gpt-oss":
   test "sets reasoning_effort for gpt-oss":
     var body = %*{"stream": true}
