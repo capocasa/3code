@@ -958,7 +958,6 @@ commands:
   :log              list all tool calls this session
   :sessions         list sessions saved in the current directory
   :sessions all     list every saved session (any directory)
-  :compact          compact older tool output in context
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 

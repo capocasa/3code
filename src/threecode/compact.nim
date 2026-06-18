@@ -1,19 +1,27 @@
-## Context window management: supersede-aware elision and LLM summarization.
+## Context window management: supersede-aware elision, tool-output compaction,
+## and LLM summarization.
 ##
-## Two complementary strategies keep the context from filling up:
+## Three strategies keep the context from filling up, cheapest first:
 ##
 ## **Supersede compaction** (nearly lossless): when a later write or patch to
 ## path P exists, earlier reads and writes for P are replaced with a one-line
 ## marker. The model's next turn still sees the latest state; it loses the
 ## history of intermediate edits, which it would not use anyway.
 ##
+## **Tool-output compaction**: replaces the content of old `tool` messages
+## older than the `CompactKeepRecent` window with a short marker. The model's
+## next turn still sees the call structure and all text turns; it loses the
+## bodies of old tool results, which `:show` can recover on demand.
+##
 ## **Summarization**: when the context crosses `SummarizeThresholdFrac`, a
 ## meta-call to the same model (with a dedicated terse system prompt) produces
 ## a one-paragraph recap. That recap replaces everything except the system
 ## prompt and the last `SummarizeKeepRecent` messages.
 ##
-## Supersede runs before every `callModel`. Summarization runs at most once per
-## turn and only when there are enough messages to justify the meta-call cost.
+## Supersede and tool-output compaction both run before every `callModel` —
+## they are cheap and local, so they are not gated on token usage.
+## Summarization is the only lossy, expensive operation and runs at most once
+## per turn, only when the context crosses the threshold.
 
 import std/[httpclient, json, strutils, tables]
 import util
@@ -21,7 +29,6 @@ import types
 import prompts
 
 const
-  CompactThresholdFrac* = 0.8
   CompactKeepRecent* = 10
   CompactedMarker* = "[compacted — tool output elided; use :show to view]"
   SupersededMarker* = "[superseded — later action on same path elided this]"
@@ -272,19 +279,19 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
 type
   ContextAction* = enum
     caNone,         ## within budget, nothing to do
-    caSummarize,    ## over threshold and enough history to make it worthwhile
-    caCompact       ## over threshold but too little history to summarize
+    caSummarize     ## over threshold and enough history to make it worthwhile
 
 proc decideContextAction*(promptTokens, windowTokens, msgCount: int,
                          keepRecent = SummarizeKeepRecent,
                          threshold = SummarizeThresholdFrac): ContextAction =
   ## Pure policy helper. Given a fresh usage reading and the current message
-  ## count, decide whether to summarize, compact, or leave things alone.
-  ## Summarization comes first (big lossy win); compaction is the fallback
-  ## when there aren't enough messages to summarize usefully.
+  ## count, decide whether to run the lossy summarizer or do nothing. Tool
+  ## output compaction is no longer gated on tokens — it runs every turn —
+  ## so the only decision left is whether the lossy, expensive meta-call is
+  ## justified.
   if promptTokens <= 0 or windowTokens <= 0: return caNone
   if promptTokens.float <= threshold * windowTokens.float: return caNone
-  if msgCount >= keepRecent + 4: caSummarize else: caCompact
+  if msgCount >= keepRecent + 4: caSummarize else: caNone
 
 proc summarizeHistory*(messages: JsonNode, p: Profile,
                       keepRecent = SummarizeKeepRecent): int =
