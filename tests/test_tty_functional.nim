@@ -216,8 +216,6 @@ suite "terminal visual contract":
       (":provider alt", "provider  alt"),
       (":tokens", ": tokens"),
       (":clear", "═══"),
-      (":think off", ": think"),
-      (":think on", ": think"),
       (":sessions", ": sessions"),
       (":sessions all", ": sessions"),
       (":log", ": log"),

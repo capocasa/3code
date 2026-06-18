@@ -3,7 +3,7 @@
 ## Handles all `:cmd` input that is not a prompt to the model. The command set
 ## is narrow by design: introspection (`:show`, `:log`, `:tokens`), context
 ## management (`:clear`, `:compact`, `:summarize`), provider/model switching
-## (`:provider`, `:model`, `:reasoning`), and thinking control (`:think`).
+## (`:provider`, `:model`, `:reasoning`).
 ##
 ## Tab-completion in `tabComplete` walks `KnownGoodCombos` and the live
 ## provider list to offer only valid model names. The provider-add wizard in
@@ -15,7 +15,7 @@ import types, util, prompts, session, config, api, compact, display, minline,
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":prompt", ":show", ":log", ":sessions",
-                      ":compact", ":summarize", ":think",
+                      ":compact", ":summarize",
                       ":q", ":quit", ":exit"]
 
 type WizardReadLineHook* = proc(prompt: string, hidden,
@@ -52,11 +52,6 @@ proc classifyCommand*(cmd: string): CommandKind =
   case name
   of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":prompt":
     ckSafeImmediate
-  of ":think":
-    if parts.len == 0 or (parts.len == 1 and parts[0] in ["on", "off", "show", "hide", "yes", "no", "toggle"]):
-      ckSafeImmediate
-    else:
-      ckUnknown
   of ":provider":
     if parts.len == 0:
       ckSafeImmediate
@@ -926,17 +921,6 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       else:
         cmdResponse &"compacted {n} tool result" & (if n == 1: "" else: "s")
         saveSession(session, messages)
-    of ":think":
-      case arg.strip.toLowerAscii
-      of "", "toggle":
-        showThinking = not showThinking
-      of "on", "show", "yes": showThinking = true
-      of "off", "hide", "no": showThinking = false
-      else:
-        ok = false
-        cmdError "usage: :think [on|off]"
-      if ok:
-        cmdResponse "thinking ticker " & (if showThinking: "on" else: "off")
     of ":summarize":
       if prof.name == "":
         ok = false

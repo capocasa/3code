@@ -57,11 +57,6 @@ template currentBarHasGap*(): untyped = fatPromptState.footer.hasGap
   ## leaving the receipt flush below the LLM content with no
   ## permanent gap in scroll history.
 
-var showThinking*: bool = true
-  ## When true, reasoning_content deltas from the provider are rendered as
-  ## a one-line ticker embedded in the spinner label. Flipped by `:think on`
-  ## / `:think off`. Has no effect if the provider doesn't emit reasoning.
-
 var spinnerStop: Atomic[bool]
 var spinnerFramePainted: Atomic[bool]
 var spinnerThread: Thread[string]
@@ -1084,9 +1079,6 @@ proc apiProgress*(baseLabel: string; slurped: int) =
 proc apiProviderActivity*() =
   markProviderActivity()
 
-proc apiShowThinking*(): bool =
-  showThinking
-
 proc apiReasoningDelta*(reasoning, baseLabel: string; slurped: int;
                         contentStarted: bool) =
   let now = epochTime()
@@ -1179,7 +1171,6 @@ proc installApiStreamHooks*() =
     startSpinner: startSpinner,
     stopSpinner: proc() = stopSpinner(clearLiveFooter = false),
     providerActivity: apiProviderActivity,
-    showThinking: apiShowThinking,
     reasoningDelta: apiReasoningDelta,
     contentDelta: apiContentDelta,
     contentFinished: apiContentFinished,

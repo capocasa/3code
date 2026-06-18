@@ -960,7 +960,6 @@ commands:
   :sessions all     list every saved session (any directory)
   :compact          compact older tool output in context
   :summarize        collapse old turns into a synthetic recap (meta model call)
-  :think [on|off]   toggle the reasoning-content ticker (on by default)
   :q :quit          exit (also Ctrl-D)
 
 input:

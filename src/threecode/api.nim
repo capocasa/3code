@@ -74,7 +74,6 @@ type
     startSpinner*: proc(label: string) {.closure.}
     stopSpinner*: proc() {.closure.}
     providerActivity*: proc() {.closure.}
-    showThinking*: proc(): bool {.closure.}
     reasoningDelta*: proc(reasoning, baseLabel: string; slurped: int;
                           contentStarted: bool) {.closure.}
     contentDelta*: proc(chunk, baseLabel: string; slurped: int): bool {.closure.}
@@ -116,9 +115,6 @@ proc hookStopSpinner() =
 proc hookProviderActivity() =
   if apiStreamHooks.providerActivity != nil:
     apiStreamHooks.providerActivity()
-
-proc hookShowThinking(): bool =
-  apiStreamHooks.showThinking != nil and apiStreamHooks.showThinking()
 
 proc hookReasoningDelta(reasoning, baseLabel: string; slurped: int;
                         contentStarted: bool) =
@@ -539,7 +535,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
             accReasoning &= r
             slurped += r.len
             hookProgress(baseLabel, slurped)
-            if hookShowThinking() and not contentStarted:
+            if not contentStarted:
               hookReasoningDelta(accReasoning, baseLabel, slurped, contentStarted)
           let c = delta{"content"}.getStr("")
           if c.len > 0:
