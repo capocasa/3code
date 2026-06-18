@@ -173,6 +173,19 @@ suite "streamexec: special characters":
     check code == 0
     check lines[0].contains("●")
 
+suite "streamexec: binary output suppression":
+  test "suppresses streaming callback after NUL byte":
+    var lines: seq[string]
+    let act = Action(kind: akBash, body: "printf 'before\\n\\x00binary\\x00garbage\\nafter\\n'")
+    let (rawOut, code) = runStreamingBash(act, nil,
+      proc(line: string) = lines.add(line))
+    check code == 0
+    check "before" in lines
+    # Once binary content starts, no further lines stream to the callback.
+    check "after" notin lines
+    # rawOut still collects everything for accurate post-hoc byte count.
+    check '\x00' in rawOut
+
 suite "streamexec: callback is optional":
   test "nil callback works":
     let act = Action(kind: akBash, body: "echo hello")
