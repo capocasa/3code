@@ -1,17 +1,16 @@
-## Shell command analysis for the loop guard.
+## Shell command analysis for the read cache.
 ##
 ## Does NOT run any commands - pure parsing only. Tokenizes shell snippets and
-## extracts the mutation target (if any) so the loop guard can track file
-## writes that bypass the `write`/`patch` tools (sed -i, tee, cp, mv, etc.).
-## Recovery detection (`git reset --hard`, `git checkout <path>`) hard-trips
-## the guard immediately without waiting for the saturation threshold.
+## extracts the mutation target (if any) so the read cache can invalidate
+## stale entries when a file is written via shell (sed -i, tee, cp, mv, etc.)
+## rather than the `write`/`patch` tools.
 
 import std/strutils
 
 proc shellTokens*(s: string): seq[string] =
   ## Tokenize a shell snippet by whitespace, honoring single + double quotes.
   ## Backslash-escapes the next character outside quotes. Not a real shell
-  ## parser — used only for path extraction in the loop guard.
+  ## parser — used only for path extraction for the read cache.
   var cur = ""
   var quote: char = '\0'
   var i = 0
@@ -147,7 +146,6 @@ proc bashReadPath*(cmd: string): tuple[path: string, fullFile: bool] =
   ##   - port the read-cache stale-write guard onto cat/sed-n (so `patch`
   ##     after an external edit still errors)
   ##   - dedupe a re-read of an unchanged file
-  ##   - count reads toward Strike-1 saturation
   let stmts = splitStatements(cmd)
   if stmts.len != 1: return ("", false)
   let raw = shellTokens(stmts[0].strip)
