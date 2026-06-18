@@ -136,6 +136,26 @@ proc commitUserPromptTranscript(line: string; restoreEditor = true) =
   if not restoreEditor:
     receiptTouchesNextResponse = true
 
+proc cleanup() {.noconv.} =
+  ## Single point of process teardown. Restores terminal state and
+  ## releases the session lock. Registered as the only exit proc and called
+  ## directly from signal handlers and the REPL's quit paths, so every way
+  ## out (Ctrl-C, Ctrl-D, :q, SIGTERM, SIGHUP, uncaught exception) runs the
+  ## same restore sequence.
+  ##
+  ## Idempotent: each step is guarded against double-invocation so an exit
+  ## proc firing after a signal handler (or vice versa) does no harm.
+  ##
+  ## The persistent input thread is deliberately NOT joined here: it owns
+  ## closures whose ORC cycle-collection crosses threads and segfaults if
+  ## the thread returns while the editor is still live. We restore its
+  ## termios snapshot directly instead; `exit()` kills the thread without
+  ## running its epilogue, avoiding the cross-thread teardown.
+  fatprompt.restoreInputTermios()
+  minline.restoreTerminal()
+  restoreCancelTermios()
+  releaseActiveSessionLock()
+
 proc main() =
   setupTlsEnv()
   cleanupStaleBinaries()
@@ -231,7 +251,6 @@ proc main() =
     acquireSessionLock(session.savePath)
   except SessionLocked as e:
     die(e.msg, ExitConfig)
-  addExitProc(releaseActiveSessionLock)
 
   if prompt != "" and not resume and not forceInteractive:
     let prof = loadProfile(model)
@@ -266,23 +285,17 @@ proc main() =
         activeCurrent = alt.name
         prof = alt
   var editor = welcome(prof)
-  # Ensure the cancel watcher's termios restore is registered as an exit
-  # proc. The minline restoreTerminal exit proc handles cursor + colors;
-  # this one restores stdin's termios if the cancel watcher put it in raw
-  # mode and the process exits mid-stream.
-  addExitProc(restoreCancelTermios)
+  # Terminal, session lock, and thread cleanup all funnel through a single
+  # exit proc so every exit path restores the same state. SIGTERM/SIGHUP get
+  # their own handler because the default disposition skips exit procs.
+  addExitProc(cleanup)
   when defined(posix):
-    # SIGTERM / SIGHUP: the default handler kills the process without
-    # running exit procs, leaving the terminal broken. Install handlers
-    # that restore terminal state first.
-    proc termRestoreAndQuit(sig: cint) {.noconv.} =
-      minline.restoreTerminal()
-      restoreCancelTermios()
-      # Re-raise with default handler so the exit code reflects the signal.
+    proc signalCleanup(sig: cint) {.noconv.} =
+      cleanup()
       signal(sig, SIG_DFL)
       discard posix.raise(sig)
-    signal(SIGTERM, termRestoreAndQuit)
-    signal(SIGHUP, termRestoreAndQuit)
+    signal(SIGTERM, signalCleanup)
+    signal(SIGHUP, signalCleanup)
   editor.completionCallback = proc(ed: minline.LineEditor): seq[string] =
     completionFor(ed.lineText)
   if prof.name == "":
