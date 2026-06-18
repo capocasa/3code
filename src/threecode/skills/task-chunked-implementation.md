@@ -22,13 +22,14 @@ Use this skill when the user asks to implement a substantial feature, refactor, 
    - **Goal**: what this chunk accomplishes.
    - **Files to read first**: list of files the agent should read before starting work.
    - **Detailed instructions**: step-by-step changes to make, including exact function names, type definitions, and expected behavior. Be specific enough that an agent with no prior context can execute correctly.
-   - **Verification**: how to verify this chunk is complete (build command, test command, manual check).
+   - **Verification**: how to verify this chunk is complete (build command, test command, manual check). use the todo tool call for this.
    - **Next step**: the instruction to call `context_clear` with a summary of what was done and a reference to the next chunk file. Example:
      ```
      When this chunk is complete and verified, call context_clear with:
      - summary: "Implemented X, Y, Z. Build passes. Tests green."
      - instructions: "Read impl-2.md and execute the instructions there."
      ```
+     Add this as an additional last todo item of the verification tool.
 
 4. **Execute chunk 1.** Read `impl-1.md` and carry out its instructions. When done, use `context_clear` to summarize state and hand off to chunk 2.
 
