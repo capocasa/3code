@@ -370,6 +370,88 @@ suite "terminal visual contract":
     tty.send "\n"
     tty.expectInHistory "second turn ok"
 
+  test "ctrl-c during bash tool then prompt accepts input":
+    let root = newFixture("ctrlc_during_bash")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "content": "Running a slow tool.",
+        "contentChunks": ["Running a slow tool."],
+        "tool_calls": [
+          toolCall("call_slow", "bash", %*{
+            "command": "sleep 30"
+          })
+        ],
+        "usage": {"promptTokens": 10, "completionTokens": 5,
+                  "totalTokens": 15, "cachedTokens": 0}
+      },
+      {
+        "role": "assistant",
+        "content": "After interrupt ok.",
+        "contentChunks": ["After interrupt ok."],
+        "usage": {"promptTokens": 10, "completionTokens": 5,
+                  "totalTokens": 15, "cachedTokens": 0}
+      }
+    ])
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+      tty.close()
+    tty.expect "❯"
+    tty.send "run slow tool"
+    tty.send "\n"
+    tty.expectInHistory "Running a slow tool."
+    tty.expectInHistory "$ sleep 30"
+    tty.drain(300)
+    tty.send "\x03"
+    tty.expectInHistory "· interrupted"
+    tty.expect "❯"
+    # The regression: after interrupt the prompt must accept typing.
+    tty.send "hello"
+    tty.expectTypedAtPrompt("hello")
+    tty.send "\n"
+    tty.expectInHistory "After interrupt ok."
+
+  test "ctrl-c during active api streaming then prompt accepts input":
+    let root = newFixture("ctrlc_active_stream")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "waitForTestContinue": true,
+        "content": "streaming now",
+        "contentChunks": ["streaming now"],
+        "usage": {"promptTokens": 10, "completionTokens": 5,
+                  "totalTokens": 15, "cachedTokens": 0}
+      },
+      {
+        "role": "assistant",
+        "content": "after interrupt ok",
+        "contentChunks": ["after interrupt ok"],
+        "usage": {"promptTokens": 10, "completionTokens": 5,
+                  "totalTokens": 15, "cachedTokens": 0}
+      }
+    ])
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+      tty.close()
+    tty.expect "❯"
+    tty.send "go"
+    tty.send "\n"
+    # Interrupt before the network-quiet label appears (mid-stream).
+    tty.drain(300)
+    tty.send "\x03"
+    tty.expectInHistory "· interrupted"
+    tty.expect "❯"
+    tty.send "hello"
+    tty.expectTypedAtPrompt("hello")
+    tty.send "\n"
+    tty.expectInHistory "after interrupt ok"
+
   test "multiline prompt and queued multiline autosend":
     let root = newFixture("multiline_visual_test")
     writeConfiguredProvider(root)
