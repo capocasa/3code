@@ -13,6 +13,8 @@
 ## from the records so the session can be resumed mid-conversation with no loss.
 
 import std/[algorithm, json, os, strutils, tables, times]
+when defined(posix):
+  import std/posix
 import types, prompts, util, actions
 
 const SessionExt* = ".3log"
@@ -63,6 +65,91 @@ proc sessionIdFromPath*(path: string): string =
 proc newSessionPath*(): string =
   let stamp = now().format("yyyyMMdd'T'HHmmss")
   sessionDir() / (stamp & SessionExt)
+
+# ---------------------------------------------------------------------------
+# Session locks.
+#
+# A live 3code process owns its session: resuming one that's already open in
+# another process would interleave two writers and corrupt the transcript.
+# Each process holds a lock file in TMPDIR/3code/lock/<id>.lock for the
+# session it's editing. TMPDIR is used deliberately so locks never survive a
+# reboot — a crash leaves a stale lock, but a reboot clears it.
+#
+# `acquireSessionLock` uses O_EXCL create so two racers can't both grab one;
+# on collision it raises SessionLocked carrying the held lock's path, owner
+# pid, and mtime so the caller can tell the user exactly what to delete. The
+# currently-held lock path is tracked in a module global so an exit proc can
+# release whatever the process most recently held (it moves with :clear forks).
+
+var activeLockPath* = ""
+
+proc sessionLockDir*(): string =
+  getTempDir() / "3code" / "lock"
+
+proc sessionLockPathFor*(path: string): string =
+  sessionLockDir() / (sessionIdFromPath(path) & ".lock")
+
+type SessionLocked* = object of CatchableError
+
+proc acquireSessionLock*(path: string) =
+  ## Atomically claim the lock for `path`. Raises SessionLocked if another
+  ## process holds it; the message names the file, its mtime, and the owner
+  ## pid (when recoverable) so the user can judge whether it's stale.
+  if path == "": return
+  let dir = sessionLockDir()
+  try: createDir(dir) except OSError: discard
+  let lockPath = sessionLockPathFor(path)
+  when defined(posix):
+    let p = lockPath.cstring
+    let fd = open(p, O_WRONLY or O_CREAT or O_EXCL, 0o600.cint)
+    if fd < 0:
+      let errno = osLastError()
+      if errno.int32 == EEXIST.int32:
+        var st: Stat
+        let p = lockPath.cstring
+        let mtime = if stat(p, st) == 0'i32:
+          fromUnix(st.st_mtime.int64)
+        else:
+          getTime()
+        let owner = try: readFile(lockPath).strip except CatchableError: ""
+        raise newException(SessionLocked,
+          "session \"" & sessionIdFromPath(path) & "\" is already open" &
+          (if owner.len > 0: " (pid " & owner & ")" else: "") &
+          ". Lock file: " & lockPath &
+          " (last modified " & format(mtime.local, "yyyy-MM-dd HH:mm:ss") & ")" &
+          ". If that process has exited, the lock is stale — delete it and rerun.")
+      raise newException(SessionLocked,
+        "could not create session lock " & lockPath & ": " & osErrorMsg(errno))
+    let pid = $getCurrentProcessId()
+    discard write(fd, pid.cstring, pid.len)
+    discard close(fd)
+  else:
+    if fileExists(lockPath):
+      let mtime = getLastModificationTime(lockPath)
+      let owner = try: readFile(lockPath).strip except CatchableError: ""
+      raise newException(SessionLocked,
+        "session \"" & sessionIdFromPath(path) & "\" is already open" &
+        (if owner.len > 0: " (pid " & owner & ")" else: "") &
+        ". Lock file: " & lockPath &
+        " (last modified " & format(mtime.local, "yyyy-MM-dd HH:mm:ss") & ")" &
+        ". If that process has exited, the lock is stale — delete it and rerun.")
+    try:
+      writeFile(lockPath, $getCurrentProcessId())
+    except IOError, OSError as e:
+      raise newException(SessionLocked,
+        "could not create session lock " & lockPath & ": " & e.msg)
+  activeLockPath = lockPath
+
+proc releaseSessionLock*(path: string) =
+  if path == "": return
+  let lockPath = sessionLockPathFor(path)
+  try: removeFile(lockPath) except OSError: discard
+  if activeLockPath == lockPath: activeLockPath = ""
+
+proc releaseActiveSessionLock*() =
+  if activeLockPath != "":
+    try: removeFile(activeLockPath) except OSError: discard
+    activeLockPath = ""
 
 proc listSessionPaths*(): seq[string] =
   let d = sessionDir()

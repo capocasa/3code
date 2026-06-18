@@ -411,9 +411,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           emitFatPromptEvent clearPendingHintEvent()
           emitFatPromptEvent clearBarEvent()
           if session.savePath != "":
+            releaseSessionLock(session.savePath)
             session.savePath = newSessionPath()
             session.created = $now()
             session.cwd = getCurrentDir()
+            acquireSessionLock(session.savePath)
           saveSession(session, messages)
           cleared = true
           break

@@ -227,6 +227,12 @@ proc main() =
     session.cwd = getCurrentDir()
     session.savePath = if sessionOut != "": sessionOut else: newSessionPath()
 
+  try:
+    acquireSessionLock(session.savePath)
+  except SessionLocked as e:
+    die(e.msg, ExitConfig)
+  addExitProc(releaseActiveSessionLock)
+
   if prompt != "" and not resume and not forceInteractive:
     let prof = loadProfile(model)
     if not gateExperimental(prof):
