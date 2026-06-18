@@ -38,7 +38,8 @@ type
     reasoning: string,
     temperature: float,
     maxTokens: int,
-    xmlToolCalls: bool
+    xmlToolCalls: bool,
+    contextWindow: int
   ]
   GenerationDefaults* = object
     temperature*: float  ## negative means omit the field
@@ -46,75 +47,75 @@ type
 
 const KnownGoodCombos* = [
     # glm
-    ("baseten",   "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false),
-    ("baseten",   "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "on",     0.2, 8192, false),
-    ("cerebras",  "zai-glm-4.7",                                     "glm",      "4",   "7",         "on",     0.2, 8192, false),
-    ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm",      "5",   "1",         "on",     0.2, 8192, false),
-    ("fireworks", "accounts/fireworks/models/glm-5",                 "glm",      "5",   "",          "on",     0.2, 8192, false),
-    ("nebius",    "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "on",     0.2, 8192, false),
-    ("nebius",    "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false),
-    ("nvidia",    "z-ai/glm4.7",                                     "glm",      "4",   "7",         "on",     0.2, 8192, true),
-    ("together",  "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "on",     0.2, 8192, false),
-    ("together",  "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false),
-    ("zai",       "glm-4.7",                                         "glm",      "4",   "7",         "on",     0.2, 8192, false),
-    ("zai",       "glm-5",                                           "glm",      "5",   "",          "on",     0.2, 8192, false),
-    ("zai",       "glm-5-turbo",                                     "glm",      "5",   "turbo",     "on",     0.2, 8192, false),
-    ("zai",       "glm-5.1",                                         "glm",      "5",   "1",         "on",     0.2, 8192, false),
-    ("zai",       "glm-5.2",                                         "glm",      "5",   "1",         "high",   0.2, 8192, false),
+    ("baseten",   "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
+    ("baseten",   "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "on",     0.2, 8192, false, 200_000),
+    ("cerebras",  "zai-glm-4.7",                                     "glm",      "4",   "7",         "on",     0.2, 8192, false, 200_000),
+    ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
+    ("fireworks", "accounts/fireworks/models/glm-5",                 "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
+    ("nebius",    "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
+    ("nebius",    "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
+    ("nvidia",    "z-ai/glm4.7",                                     "glm",      "4",   "7",         "on",     0.2, 8192, true,  200_000),
+    ("together",  "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
+    ("together",  "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
+    ("zai",       "glm-4.7",                                         "glm",      "4",   "7",         "on",     0.2, 8192, false, 200_000),
+    ("zai",       "glm-5",                                           "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
+    ("zai",       "glm-5-turbo",                                     "glm",      "5",   "turbo",     "on",     0.2, 8192, false, 200_000),
+    ("zai",       "glm-5.1",                                         "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
+    ("zai",       "glm-5.2",                                         "glm",      "5",   "1",         "high",   0.2, 8192, false, 1_000_000),
     # qwen is out
-    ("deepinfra", "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "on",     0.2, 8192, false),
-    ("deepinfra", "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false),
-    ("deepinfra", "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "on",     0.2, 8192, false),
+    ("deepinfra", "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
+    ("deepinfra", "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
+    ("deepinfra", "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "on",     0.2, 8192, false, 200_000),
 
     # gpt-oss
-    ("baseten",   "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
-    ("cerebras",  "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
-    ("groq",      "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
-    ("nebius",    "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
-    ("nebius",    "openai/gpt-oss-120b-fast",                        "gpt-oss",  "",    "120b-fast", "medium", 0.2, 4096, false),
-    ("nvidia",    "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
-    ("nvidia",    "openai/gpt-oss-20b",                              "gpt-oss",  "",    "20b",       "medium", 0.2, 4096, false),
-    ("ovh",       "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
-    ("sambanova", "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
-    ("deepinfra", "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
-    ("openrouter", "openai/gpt-oss-120b",                           "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false),
+    ("baseten",   "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
+    ("cerebras",  "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
+    ("groq",      "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
+    ("nebius",    "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
+    ("nebius",    "openai/gpt-oss-120b-fast",                        "gpt-oss",  "",    "120b-fast", "medium", 0.2, 4096, false, 131_072),
+    ("nvidia",    "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
+    ("nvidia",    "openai/gpt-oss-20b",                              "gpt-oss",  "",    "20b",       "medium", 0.2, 4096, false, 131_072),
+    ("ovh",       "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
+    ("sambanova", "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
+    ("deepinfra", "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
+    ("openrouter", "openai/gpt-oss-120b",                           "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
 
     # deepseek
-    ("baseten",   "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false),
-    ("deepseek",  "deepseek-chat",                                   "deepseek", "3",   "",          "medium", 0.2, 8192, false),
-    ("deepseek",  "deepseek-reasoner",                               "deepseek", "r1",  "",          "medium", 0.2, 8192, false),
-    ("deepseek",  "deepseek-v4-flash",                               "deepseek", "4",   "flash",     "low",    0.2, 4096, false),
-    ("deepseek",  "deepseek-v4-pro",                                 "deepseek", "4",   "pro",       "low",    0.2, 8192, false),
-    ("nebius",    "deepseek-ai/DeepSeek-V3.2",                       "deepseek", "3.2", "",          "medium", 0.2, 8192, false),
-    ("nebius",    "deepseek-ai/DeepSeek-V3.2-fast",                  "deepseek", "3.2", "fast",      "medium", 0.2, 4096, false),
-    ("nebius",    "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false),
-    ("nebius",    "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.2, 8192, false),
-    ("nebius",    "moonshotai/Kimi-K2.5-fast",                     "kimi",     "2",   "5-fast",    "on",     0.2, 4096, false),
-    ("nebius",    "deepseek-ai/MiniMax-M2.5",                        "minimax",  "2",   "5",         "low",    0.2, 8192, false),
-    ("nebius",    "deepseek-ai/MiniMax-M2.5-fast",                   "minimax",  "2",   "5-fast",    "low",    0.2, 4096, false),
-    ("together",  "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false),
-    ("fireworks", "accounts/fireworks/models/deepseek-v4-pro",       "deepseek", "4",   "pro",       "low",    0.2, 8192, false),
-    ("deepinfra", "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false),
-    ("sambanova", "deepseek-ai/DeepSeek-V3.2",                       "deepseek", "3.2", "",          "medium", 0.2, 8192, false),
+    ("baseten",   "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
+    ("deepseek",  "deepseek-chat",                                   "deepseek", "3",   "",          "medium", 0.2, 8192, false, 128_000),
+    ("deepseek",  "deepseek-reasoner",                               "deepseek", "r1",  "",          "medium", 0.2, 8192, false, 128_000),
+    ("deepseek",  "deepseek-v4-flash",                               "deepseek", "4",   "flash",     "low",    0.2, 4096, false, 1_000_000),
+    ("deepseek",  "deepseek-v4-pro",                                 "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
+    ("nebius",    "deepseek-ai/DeepSeek-V3.2",                       "deepseek", "3.2", "",          "medium", 0.2, 8192, false, 128_000),
+    ("nebius",    "deepseek-ai/DeepSeek-V3.2-fast",                  "deepseek", "3.2", "fast",      "medium", 0.2, 4096, false, 128_000),
+    ("nebius",    "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
+    ("nebius",    "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.2, 8192, false, 262_144),
+    ("nebius",    "moonshotai/Kimi-K2.5-fast",                     "kimi",     "2",   "5-fast",    "on",     0.2, 4096, false, 262_144),
+    ("nebius",    "deepseek-ai/MiniMax-M2.5",                        "minimax",  "2",   "5",         "low",    0.2, 8192, false, 204_800),
+    ("nebius",    "deepseek-ai/MiniMax-M2.5-fast",                   "minimax",  "2",   "5-fast",    "low",    0.2, 4096, false, 204_800),
+    ("together",  "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
+    ("fireworks", "accounts/fireworks/models/deepseek-v4-pro",       "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
+    ("deepinfra", "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
+    ("sambanova", "deepseek-ai/DeepSeek-V3.2",                       "deepseek", "3.2", "",          "medium", 0.2, 8192, false, 128_000),
 
     # minimax
-    ("nvidia",    "minimaxai/minimax-m2.5",                          "minimax",  "2",   "5",         "low",    0.2, 8192, false),
-    ("nvidia",    "minimaxai/minimax-m2.7",                          "minimax",  "2",   "7",         "low",    0.2, 8192, false),
-    ("fireworks", "accounts/fireworks/models/minimax-m2p7",          "minimax",  "2",   "7",         "low",    0.2, 8192, false),
-    ("deepinfra", "minimaxai/MiniMax-M2.5",                          "minimax",  "2",   "5",         "low",    0.2, 8192, false),
-    ("together",  "minimaxai/MiniMax-M2.7",                          "minimax",  "2",   "7",         "low",    0.2, 8192, false),
-    ("sambanova", "minimaxai/MiniMax-M2.7",                          "minimax",  "2",   "7",         "low",    0.2, 8192, false),
-    ("sambanova", "minimaxai/MiniMax-M2.5",                          "minimax",  "2",   "5",         "low",    0.2, 8192, false),
+    ("nvidia",    "minimaxai/minimax-m2.5",                          "minimax",  "2",   "5",         "low",    0.2, 8192, false, 204_800),
+    ("nvidia",    "minimaxai/minimax-m2.7",                          "minimax",  "2",   "7",         "low",    0.2, 8192, false, 204_800),
+    ("fireworks", "accounts/fireworks/models/minimax-m2p7",          "minimax",  "2",   "7",         "low",    0.2, 8192, false, 204_800),
+    ("deepinfra", "minimaxai/MiniMax-M2.5",                          "minimax",  "2",   "5",         "low",    0.2, 8192, false, 204_800),
+    ("together",  "minimaxai/MiniMax-M2.7",                          "minimax",  "2",   "7",         "low",    0.2, 8192, false, 204_800),
+    ("sambanova", "minimaxai/MiniMax-M2.7",                          "minimax",  "2",   "7",         "low",    0.2, 8192, false, 204_800),
+    ("sambanova", "minimaxai/MiniMax-M2.5",                          "minimax",  "2",   "5",         "low",    0.2, 8192, false, 204_800),
 
     # kimi
-    ("together",  "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.2, 8192, false),
-    ("fireworks", "accounts/fireworks/models/kimi-k2p6",             "kimi",     "2",   "6",         "on",     0.2, 8192, false),
-    ("together",  "moonshotai/Kimi-K2.6",                          "kimi",     "2",   "6",         "on",     0.2, 8192, false),
-    ("deepinfra", "moonshotai/Kimi-K2.6",                          "kimi",     "2",   "6",         "on",     0.2, 8192, false),
-    ("deepinfra", "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.2, 8192, false),
+    ("together",  "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.2, 8192, false, 262_144),
+    ("fireworks", "accounts/fireworks/models/kimi-k2p6",             "kimi",     "2",   "6",         "on",     0.2, 8192, false, 262_144),
+    ("together",  "moonshotai/Kimi-K2.6",                          "kimi",     "2",   "6",         "on",     0.2, 8192, false, 262_144),
+    ("deepinfra", "moonshotai/Kimi-K2.6",                          "kimi",     "2",   "6",         "on",     0.2, 8192, false, 262_144),
+    ("deepinfra", "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.2, 8192, false, 262_144),
   ]
     ## (provider, model, family, version, variant, reasoning, temperature,
-    ## maxTokens) tuples.
+    ## maxTokens, contextWindow) tuples.
     ## `model` is the full API id sent on the wire. `family` drives the
     ## (prompt, tools) branch — it must be set explicitly here, no
     ## guessing from the model string. `version` and `variant` are
@@ -124,6 +125,7 @@ const KnownGoodCombos* = [
     ## (`reasoning_effort` for gpt-oss; `thinking.type` for glm).
     ## `temperature < 0` means "omit the field"; otherwise send it as
     ## the sampling default. `maxTokens` is the explicit generation cap.
+    ## `contextWindow` is the advertised input window in tokens.
     ## Anything outside this list requires --experimental to run.
 
 # ---------------------------------------------------------------------------
@@ -1075,24 +1077,13 @@ proc reasoningSupported*(family: string): bool =
 proc knownGoodContextWindow*(provider, model: string): int =
   ## Context window for a known-good (provider, model) pair, in tokens.
   ## Returns 0 when the pair is off the table (caller falls back to the
-  ## substring heuristic). Values are model-specific, not family-wide:
-  ## GLM 4.7/5/5.1 expose 200K, GLM-5.2 ships a usable 1M window; Kimi
-  ## K2.x advertises 256K; DeepSeek V4 is 1M while V3/R1 cap at 128K.
+  ## substring heuristic). The value comes straight from the
+  ## `contextWindow` field of the matching entry in `KnownGoodCombos`.
   let p = provider.toLowerAscii
   let m = model.toLowerAscii
   for combo in KnownGoodCombos:
     if combo[0].toLowerAscii == p and combo[1].toLowerAscii == m:
-      let fam = combo[2]
-      if fam == "glm":
-        if m == "glm-5.2": return 1_000_000
-        return 200_000
-      if fam == "kimi": return 262_144
-      if fam == "deepseek":
-        if "v4" in m: return 1_000_000
-        return 128_000
-      if fam == "minimax": return 204_800
-      if fam == "gpt-oss": return 131_072
-      return 128_000
+      return combo[9]
   0
 
 proc knownGoodContextWindow*(p: Profile): int =
