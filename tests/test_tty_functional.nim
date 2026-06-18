@@ -843,8 +843,8 @@ when false:
         },
         {
           "role": "assistant",
-          "reasoning_content": "thinking about visible ticker",
-          "reasoningChunks": ["thinking about visible ticker"],
+          "reasoning_content": "thinking about visible ticker animation",
+          "reasoningChunks": ["thinking about ", "visible ", "ticker ", "animation"],
           "content": "Streaming **markdown** before tools.",
           "contentChunks": ["Streaming **markdown** before tools."],
           "tool_calls": [
@@ -929,8 +929,9 @@ when false:
       tty.expectTokenBar(["○", "↑5.5k", "↓188"])
       tty.send "exercise visual contract"
       tty.send "\n"
+      tty.expect("thinking")
       tty.expectTokenBar(["○"])
-      tty.expectInHistory "thinking about visible ticker"
+      tty.expectInHistory "thinking about visible ticker animation"
       tty.send "buffered"
       tty.send "\x1b[27;2;13~"
       tty.send "prompt"

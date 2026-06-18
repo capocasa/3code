@@ -5,6 +5,29 @@ proc checkFrame(p: FatPrompt; rows: openArray[string]) =
   let expected = @rows.join("\n")
   check p.frameText() == expected
 
+suite "ticker clamping":
+  test "clampToWidth truncates to terminal width":
+    check clampToWidth("hello world", 5) == "hello"
+    check clampToWidth("hello world", 20) == "hello world"
+    check clampToWidth("", 5) == ""
+    check clampToWidth("abcdefghij", 0) == ""
+
+  test "narrow terminal clamps ticker in footer bytes":
+    let long = "the quick brown fox jumps over the lazy dog"
+    let f = FooterFrame(kind: ffSpinner, spinner: "⠋", label: "thinking",
+                        ticker: long, elapsed: 3)
+    let wide = f.footerFrameBytes(termW = 120)
+    let narrow = f.footerFrameBytes(termW = 15)
+    # wide terminal still shows the full ticker
+    check long in wide
+    # narrow terminal does not emit the full (wrapping) ticker
+    check long notin narrow
+
+  test "rowsAboveEditor counts ticker as one row":
+    let f = FooterFrame(kind: ffSpinner, spinner: "⠋", label: "thinking",
+                        ticker: "x".repeat(200), elapsed: 3)
+    check f.rowsAboveEditor(termW = 40) == f.rowsAboveEditor(termW = 80)
+
 suite "fat prompt frame model":
   test "token bar and editor reserve rows below scrollback":
     var p = initFatPrompt(width = 30, height = 6, window = 1000)
