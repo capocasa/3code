@@ -482,3 +482,12 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode, session: var Sessi
       stderr.writeLine e.msg
     else:
       stdout.styledWriteLine fgMagenta, "  ", e.msg, resetStyle
+  except OSError as e:
+    # The working directory was removed out from under us (e.g. the
+    # user `rm -rf`'d it in another shell). There is nothing useful
+    # to keep doing, so save what we have and exit cleanly. `quit`
+    # runs the registered exit procs, which restore terminal state.
+    saveSession(session, messages)
+    stdout.styledWriteLine fgMagenta, "  ",
+      "working directory gone: ", e.msg, resetStyle
+    quit()
