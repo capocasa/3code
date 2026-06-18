@@ -1303,22 +1303,22 @@ proc inputThreadProc() {.thread.} =
       finally:
         release inputStateLock
       if inputTurnActive.load(moAcquire) and ed.line.text.len > 0:
-        ed.line = minline.Line(text: "", position: 0)
-        ed.renderRow = 0
-        ed.echoRows = 0
+        # Keep the line intact: the pending caret glyph stands in for the
+        # native caret at the cursor position, so the display must not change.
+        ed.pendingCaret = true
       else:
         ed.line.position = ed.line.text.len
         if not inputTurnActive.load(moAcquire):
           inputIdleSubmitted.store(true, moRelease)
       ed.renderSuffix =
         if inputTurnActive.load(moAcquire) and inputState.autoSend:
-          " " & DeferredSubmitMarker & "\n"
+          " " & DeferredSubmitMarker
         else: ""
-      ed.renderSuffixCursor = ed.renderSuffix.len > 0
+      ed.renderSuffixCursor = false
     edPtr[].preRedraw = proc(ed: var minline.LineEditor) =
       reserveEditorFooterForRedraw(ed)
     edPtr[].postRedraw = proc(ed: var minline.LineEditor) =
-      termengine.finishEditorRedraw(ed)
+      termengine.finishEditorRedraw(ed, showCaret = not ed.pendingCaret)
       inputEditorReady.store(true, moRelease)
 
     when defined(posix):

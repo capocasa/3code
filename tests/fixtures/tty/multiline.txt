@@ -1,4 +1,4 @@
-===== 595 =====
+===== 179 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -10,7 +10,7 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
-===== 706 =====
+===== 753 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -23,7 +23,7 @@
 
 ❯ first line
   
-===== 117 =====
+===== 501 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -36,7 +36,7 @@
 
 ❯ first line
   second line
-===== 522 =====
+===== 374 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -52,7 +52,7 @@
 
 ⣿ ○0% 0s
 ❯ queued line one
-===== 952 =====
+===== 391 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -69,7 +69,7 @@
 ⣿ ○0% 0s
 ❯ queued line one
   
-===== 166 =====
+===== 406 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -83,10 +83,10 @@
 ❯ first line
   second line
 
-⣿ ○0% 0s
+⣿ ⧖ 0s
 ❯ queued line one
   queued line two
-===== 415 =====
+===== 174 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -100,11 +100,10 @@
 ❯ first line
   second line
 
-⣿ ○0% 0s
+⣿ ⧖ 0s
 ❯ queued line one
   queued line two ⧖
-  
-===== 619 =====
+===== 956 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -121,8 +120,7 @@
 ⣿ ○0% ↓6 0s
 ❯ queued line one
   queued line two ⧖
-  
-===== 505 =====
+===== 407 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -144,7 +142,7 @@
 
 ⣿ ○1% ↓6 0s
 ❯
-===== 522 =====
+===== 289 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
