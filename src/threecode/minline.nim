@@ -157,6 +157,7 @@ type
     submitIcon*: string ## Icon written at end of text before submit newline (set before readLineWith).
     renderSuffix*: string ## Transient suffix rendered after the buffer, not part of submitted text.
     renderSuffixCursor*: bool ## Place caret after renderSuffix instead of inside editable text.
+    pendingCaret*: bool ## Hide native caret and show a drawn glyph (renderSuffix) as the caret.
     prefillText*: string
     history*: LineHistory
     line*: Line
@@ -1087,6 +1088,7 @@ proc resetForRead(ed: var LineEditor, prompt: string, hidechars: bool) =
   ed.submitted = false
   ed.renderSuffix = ""
   ed.renderSuffixCursor = false
+  ed.pendingCaret = false
   ed.canceled = false
   ed.eof = false
   ed.hidechars = hidechars
@@ -1309,6 +1311,18 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
       ed.write "\x1b[?2004l"
       ed.submitted = true
       return ed.line.text
+    if ed.pendingCaret:
+      # Any keystroke after a deferred submit ends the pending caret:
+      # clear the submitted line, restore the native caret, and drop the
+      # pending glyph so the new keystroke begins on a fresh prompt.
+      ed.pendingCaret = false
+      ed.renderSuffix = ""
+      ed.renderSuffixCursor = false
+      ed.line = Line(text: "", position: 0)
+      ed.renderRow = 0
+      ed.echoRows = 0
+      fullRedraw(ed)
+      ed.write "\x1b[?25h"
     if c1 == 8 or c1 == 127:
       ed.deletePrevious()
       continue
