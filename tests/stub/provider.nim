@@ -176,7 +176,14 @@ proc loadStubResponses(): seq[JsonNode] =
   ## tool_calls), or `{failure: "...", delayMs: N}` to exercise retry /
   ## flaky-network paths. Re-read on every call so edits take effect
   ## mid-session.
-  const path = "stub_responses.json"
+  ##
+  ## Resolution: an absolute path in ``THREECODE_STUB_RESPONSES`` wins,
+  ## otherwise the cwd-relative ``stub_responses.json``. The override lets
+  ## a test delete the process cwd (to reproduce a deleted-cwd crash) and
+  ## still serve responses from a stable path.
+  let path = block:
+    let override = getEnv("THREECODE_STUB_RESPONSES")
+    if override.len > 0: override else: "stub_responses.json"
   if not fileExists(path):
     stderr.writeLine "3code: stub: " & path & " not found"
     quit 1

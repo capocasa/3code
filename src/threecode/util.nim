@@ -82,6 +82,18 @@ proc resolvePath*(path: string): string =
   if p.startsWith("~"): p = expandTilde(p)
   try: absolutePath(p) except CatchableError: p
 
+proc safeCwd*(): string =
+  ## The current working directory, or ``/`` when the process's cwd has
+  ## been removed or renamed out from under it. Nim's ``getCurrentDir``
+  ## raises ``OSError`` in that case (Linux ``getcwd`` returns ``ENOENT``),
+  ## which would crash the REPL. The filesystem no longer has a name for
+  ## the deleted dir, so callers that only need an absolute path label
+  ## for context, logging, or session identity get ``/`` — every dir-walk,
+  ## ``ls``, ``git`` and ``fileExists`` against it then simply finds
+  ## nothing and degrades gracefully.
+  try: getCurrentDir()
+  except OSError: "/"
+
 proc utf8ByteCut*(s: string, n: int): string =
   ## Slice `s` to at most `n` bytes, backing up to a UTF-8 codepoint
   ## boundary so the result is valid UTF-8. Strings in JSON request bodies

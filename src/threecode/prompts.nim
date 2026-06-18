@@ -1194,7 +1194,7 @@ proc materializeBuiltinSkills*() =
 proc skillsDirs*(): seq[string] =
   ## Directories searched for skill files, in precedence order (first
   ## wins on filename collision). Project → user override → built-in.
-  result.add getCurrentDir() / ".3code" / "skills"
+  result.add safeCwd() / ".3code" / "skills"
   result.add userConfigRoot() / "skills"
   result.add builtinSkillsDir()
 
@@ -1224,7 +1224,7 @@ proc findSystemPromptOverride*(family: string): string =
   ## Look for <family>.txt in project `.3code/` then `userConfigRoot()`.
   ## Returns the file path if found and experimental mode is on, else "".
   if not experimentalEnabled: return ""
-  let local = getCurrentDir() / ".3code" / family & ".txt"
+  let local = safeCwd() / ".3code" / family & ".txt"
   if fileExists(local): return local
   let global = userConfigRoot() / family & ".txt"
   if fileExists(global): return global
