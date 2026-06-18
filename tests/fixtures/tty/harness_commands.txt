@@ -1,4 +1,4 @@
-===== 907 =====
+===== 153 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -10,7 +10,8 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ :help
-===== 357 =====
+===== 970 =====
+❯ :help
 
 : help
   3code the economical coding agent
@@ -33,7 +34,6 @@
   :log              list all tool calls this session
   :sessions         list sessions saved in the current directory
   :sessions all     list every saved session (any directory)
-  :compact          compact older tool output in context
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -51,7 +51,8 @@
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯
-===== 800 =====
+===== 345 =====
+❯ :help
 
 : help
   3code the economical coding agent
@@ -74,7 +75,6 @@
   :log              list all tool calls this session
   :sessions         list sessions saved in the current directory
   :sessions all     list every saved session (any directory)
-  :compact          compact older tool output in context
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -92,7 +92,8 @@
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
-===== 482 =====
+===== 717 =====
+  :help             show this message
   :tokens           show token usage for this session
   :clear            reset conversation (keeps system prompt)
   :model            list models for current provider (current marked with *)
@@ -109,7 +110,6 @@
   :log              list all tool calls this session
   :sessions         list sessions saved in the current directory
   :sessions all     list every saved session (any directory)
-  :compact          compact older tool output in context
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -133,7 +133,8 @@
       alt
 
 ❯
-===== 556 =====
+===== 367 =====
+  :help             show this message
   :tokens           show token usage for this session
   :clear            reset conversation (keeps system prompt)
   :model            list models for current provider (current marked with *)
@@ -150,7 +151,6 @@
   :log              list all tool calls this session
   :sessions         list sessions saved in the current directory
   :sessions all     list every saved session (any directory)
-  :compact          compact older tool output in context
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -174,7 +174,8 @@
       alt
 
 ❯ :model
-===== 238 =====
+===== 380 =====
+  :provider X       switch to provider X (model defaults to first in its list)
   :provider add     add a new provider (interactive, verified)
   :provider edit X  edit provider X (url, key, models)
   :provider rm X    remove provider X
@@ -185,7 +186,6 @@
   :log              list all tool calls this session
   :sessions         list sessions saved in the current directory
   :sessions all     list every saved session (any directory)
-  :compact          compact older tool output in context
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -215,7 +215,8 @@
       stub-large
 
 ❯
-===== 885 =====
+===== 265 =====
+  :provider X       switch to provider X (model defaults to first in its list)
   :provider add     add a new provider (interactive, verified)
   :provider edit X  edit provider X (url, key, models)
   :provider rm X    remove provider X
@@ -226,7 +227,6 @@
   :log              list all tool calls this session
   :sessions         list sessions saved in the current directory
   :sessions all     list every saved session (any directory)
-  :compact          compact older tool output in context
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -256,11 +256,11 @@
       stub-large
 
 ❯ :reasoning
-===== 988 =====
+===== 883 =====
+  :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
   :sessions         list sessions saved in the current directory
   :sessions all     list every saved session (any directory)
-  :compact          compact older tool output in context
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -297,11 +297,11 @@
       high
 
 ❯
-===== 742 =====
+===== 733 =====
+  :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
   :sessions         list sessions saved in the current directory
   :sessions all     list every saved session (any directory)
-  :compact          compact older tool output in context
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -338,7 +338,7 @@
       high
 
 ❯ :model stub-large
-===== 463 =====
+===== 833 =====
   :q :quit          exit (also Ctrl-D)
 
   input:
@@ -377,337 +377,337 @@
 
 provider  stub
 model     stub-large
+
+❯
+===== 230 =====
+  :q :quit          exit (also Ctrl-D)
+
+  input:
+  single-line   just type and press Enter
+  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  arrows        full cursor navigation across lines and visual wraps
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+: providers
+    * stub  [stub-model]
+      alt
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+===== 132 =====
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+: providers
+    * stub  [stub-model]
+      alt
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
+
+❯
+===== 808 =====
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+: providers
+    * stub  [stub-model]
+      alt
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+===== 917 =====
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+: providers
+    * stub  [stub-model]
+      alt
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+
+provider  alt
+model     alt-model
+
+❯
+===== 266 =====
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+: providers
+    * stub  [stub-model]
+      alt
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+
+provider  alt
+model     alt-model
+
+❯ :tokens
+===== 474 =====
+
+: providers
+    * stub  [stub-model]
+      alt
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+
+provider  alt
+model     alt-model
+
+❯ :tokens
+
+: tokens
+  no tokens used yet
+
+❯
+===== 132 =====
+
+: providers
+    * stub  [stub-model]
+      alt
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+
+provider  alt
+model     alt-model
+
+❯ :tokens
+
+: tokens
+  no tokens used yet
+
+❯ :clear
+===== 591 =====
+
+❯ :model
+
+: models
+    * stub-model
+      stub-large
+
+❯ :reasoning
+
+: reasoning
+      low
+      medium
+      high
+
+❯ :model stub-large
+
+provider  stub
+model     stub-large
+
+❯ :reasoning high
+
+provider  stub
+model     stub-large
+reasoning high
+
+❯ :provider alt
+
+provider  alt
+model     alt-model
+
+❯ :tokens
+
+: tokens
+  no tokens used yet
+
+❯ :clear
+
+════════════════════════════════════════
 
 ❯
 ===== 522 =====
-  :q :quit          exit (also Ctrl-D)
-
-  input:
-  single-line   just type and press Enter
-  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
-  arrows        full cursor navigation across lines and visual wraps
-  ctrl+arrow    word-by-word jumps (also crosses logical lines)
-  home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
-  ctrl+w        delete the word before the cursor
-  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
-  tab           complete :commands, provider names, model names
-  ctrl+l        clear the screen
-  @path         inline file contents (e.g. @src/foo.nim)
-
-❯ :provider
-
-: providers
-    * stub  [stub-model]
-      alt
-
-❯ :model
-
-: models
-    * stub-model
-      stub-large
-
-❯ :reasoning
-
-: reasoning
-      low
-      medium
-      high
-
-❯ :model stub-large
-
-provider  stub
-model     stub-large
-
-❯ :reasoning high
-===== 519 =====
-  ctrl+arrow    word-by-word jumps (also crosses logical lines)
-  home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
-  ctrl+w        delete the word before the cursor
-  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
-  tab           complete :commands, provider names, model names
-  ctrl+l        clear the screen
-  @path         inline file contents (e.g. @src/foo.nim)
-
-❯ :provider
-
-: providers
-    * stub  [stub-model]
-      alt
-
-❯ :model
-
-: models
-    * stub-model
-      stub-large
-
-❯ :reasoning
-
-: reasoning
-      low
-      medium
-      high
-
-❯ :model stub-large
-
-provider  stub
-model     stub-large
-
-❯ :reasoning high
-
-provider  stub
-model     stub-large
-reasoning high
-
-❯
-===== 378 =====
-  ctrl+arrow    word-by-word jumps (also crosses logical lines)
-  home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
-  ctrl+w        delete the word before the cursor
-  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
-  tab           complete :commands, provider names, model names
-  ctrl+l        clear the screen
-  @path         inline file contents (e.g. @src/foo.nim)
-
-❯ :provider
-
-: providers
-    * stub  [stub-model]
-      alt
-
-❯ :model
-
-: models
-    * stub-model
-      stub-large
-
-❯ :reasoning
-
-: reasoning
-      low
-      medium
-      high
-
-❯ :model stub-large
-
-provider  stub
-model     stub-large
-
-❯ :reasoning high
-
-provider  stub
-model     stub-large
-reasoning high
-
-❯ :provider alt
-===== 860 =====
-  tab           complete :commands, provider names, model names
-  ctrl+l        clear the screen
-  @path         inline file contents (e.g. @src/foo.nim)
-
-❯ :provider
-
-: providers
-    * stub  [stub-model]
-      alt
-
-❯ :model
-
-: models
-    * stub-model
-      stub-large
-
-❯ :reasoning
-
-: reasoning
-      low
-      medium
-      high
-
-❯ :model stub-large
-
-provider  stub
-model     stub-large
-
-❯ :reasoning high
-
-provider  stub
-model     stub-large
-reasoning high
-
-❯ :provider alt
-
-provider  alt
-model     alt-model
-
-❯
-===== 954 =====
-  tab           complete :commands, provider names, model names
-  ctrl+l        clear the screen
-  @path         inline file contents (e.g. @src/foo.nim)
-
-❯ :provider
-
-: providers
-    * stub  [stub-model]
-      alt
-
-❯ :model
-
-: models
-    * stub-model
-      stub-large
-
-❯ :reasoning
-
-: reasoning
-      low
-      medium
-      high
-
-❯ :model stub-large
-
-provider  stub
-model     stub-large
-
-❯ :reasoning high
-
-provider  stub
-model     stub-large
-reasoning high
-
-❯ :provider alt
-
-provider  alt
-model     alt-model
-
-❯ :tokens
-===== 283 =====
-
-: providers
-    * stub  [stub-model]
-      alt
-
-❯ :model
-
-: models
-    * stub-model
-      stub-large
-
-❯ :reasoning
-
-: reasoning
-      low
-      medium
-      high
-
-❯ :model stub-large
-
-provider  stub
-model     stub-large
-
-❯ :reasoning high
-
-provider  stub
-model     stub-large
-reasoning high
-
-❯ :provider alt
-
-provider  alt
-model     alt-model
-
-❯ :tokens
-
-: tokens
-  no tokens used yet
-
-❯
-===== 597 =====
-
-: providers
-    * stub  [stub-model]
-      alt
-
-❯ :model
-
-: models
-    * stub-model
-      stub-large
-
-❯ :reasoning
-
-: reasoning
-      low
-      medium
-      high
-
-❯ :model stub-large
-
-provider  stub
-model     stub-large
-
-❯ :reasoning high
-
-provider  stub
-model     stub-large
-reasoning high
-
-❯ :provider alt
-
-provider  alt
-model     alt-model
-
-❯ :tokens
-
-: tokens
-  no tokens used yet
-
-❯ :clear
-===== 700 =====
-
-❯ :model
-
-: models
-    * stub-model
-      stub-large
-
-❯ :reasoning
-
-: reasoning
-      low
-      medium
-      high
-
-❯ :model stub-large
-
-provider  stub
-model     stub-large
-
-❯ :reasoning high
-
-provider  stub
-model     stub-large
-reasoning high
-
-❯ :provider alt
-
-provider  alt
-model     alt-model
-
-❯ :tokens
-
-: tokens
-  no tokens used yet
-
-❯ :clear
-
-════════════════════════════════════════
-
-❯
-===== 747 =====
 
 ❯ :model
 
@@ -748,7 +748,7 @@ model     alt-model
 ════════════════════════════════════════
 
 ❯ :sessions
-===== 747 =====
+===== 896 =====
       stub-large
 
 ❯ :reasoning
@@ -789,7 +789,7 @@ model     alt-model
   no saved sessions for this directory  (try `:sessions all`)
 
 ❯
-===== 754 =====
+===== 533 =====
       stub-large
 
 ❯ :reasoning
@@ -830,7 +830,7 @@ model     alt-model
   no saved sessions for this directory  (try `:sessions all`)
 
 ❯ :sessions all
-===== 226 =====
+===== 182 =====
       low
       medium
       high
@@ -871,7 +871,7 @@ model     alt-model
   no saved sessions
 
 ❯
-===== 618 =====
+===== 308 =====
       low
       medium
       high
@@ -912,7 +912,7 @@ model     alt-model
   no saved sessions
 
 ❯ :log
-===== 364 =====
+===== 495 =====
 
 provider  stub
 model     stub-large
@@ -953,7 +953,7 @@ model     alt-model
     no tool calls yet
 
 ❯
-===== 683 =====
+===== 113 =====
 
 provider  stub
 model     stub-large
@@ -994,7 +994,7 @@ model     alt-model
     no tool calls yet
 
 ❯ :show
-===== 489 =====
+===== 505 =====
 
 provider  stub
 model     stub-large
@@ -1035,7 +1035,7 @@ model     alt-model
     no tool calls yet
 
 ❯
-===== 763 =====
+===== 131 =====
 
 provider  stub
 model     stub-large
@@ -1076,7 +1076,7 @@ model     alt-model
     no tool calls yet
 
 ❯ :compact
-===== 122 =====
+===== 883 =====
 ❯ :provider alt
 
 provider  alt
@@ -1113,11 +1113,11 @@ model     alt-model
 
 ❯ :compact
 
-: compact
-  nothing to compact
+! command
+  unknown command: :compact  (try :help)
 
 ❯
-===== 738 =====
+===== 315 =====
 ❯ :provider alt
 
 provider  alt
@@ -1154,11 +1154,11 @@ model     alt-model
 
 ❯ :compact
 
-: compact
-  nothing to compact
+! command
+  unknown command: :compact  (try :help)
 
 ❯ :summarize
-===== 105 =====
+===== 716 =====
 ❯ :tokens
 
 : tokens
@@ -1190,8 +1190,8 @@ model     alt-model
 
 ❯ :compact
 
-: compact
-  nothing to compact
+! command
+  unknown command: :compact  (try :help)
 
 ❯ :summarize
 
@@ -1199,7 +1199,7 @@ model     alt-model
   failed or not worth it
 
 ❯
-===== 251 =====
+===== 139 =====
 ❯ :tokens
 
 : tokens
@@ -1231,8 +1231,8 @@ model     alt-model
 
 ❯ :compact
 
-: compact
-  nothing to compact
+! command
+  unknown command: :compact  (try :help)
 
 ❯ :summarize
 
@@ -1240,7 +1240,8 @@ model     alt-model
   failed or not worth it
 
 ❯ :prompt
-===== 466 =====
+===== 878 =====
+
   Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping ta
 bles), hard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (
 pushing code, opening PRs, sending email). When in doubt, ask.
@@ -1267,13 +1268,12 @@ If searches don't turn up a clear answer, say so — don't guess.
   Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
   Available:
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.m
-d
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
 
@@ -1281,7 +1281,8 @@ d
 n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯
-===== 731 =====
+===== 969 =====
+
   Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping ta
 bles), hard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (
 pushing code, opening PRs, sending email). When in doubt, ask.
@@ -1308,13 +1309,12 @@ If searches don't turn up a clear answer, say so — don't guess.
   Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
   Available:
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.m
-d
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
 
@@ -1322,7 +1322,8 @@ d
 n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯ :toknes
-===== 362 =====
+===== 788 =====
+  # Git
 
   Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`.
 Don't push or commit unless asked.
@@ -1344,13 +1345,12 @@ If searches don't turn up a clear answer, say so — don't guess.
   Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
   Available:
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.m
-d
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
 
@@ -1363,7 +1363,8 @@ n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task 
   unknown command: :toknes  did you mean :tokens?
 
 ❯
-===== 246 =====
+===== 976 =====
+  # Git
 
   Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`.
 Don't push or commit unless asked.
@@ -1385,13 +1386,12 @@ If searches don't turn up a clear answer, say so — don't guess.
   Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
   Available:
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.m
-d
-  - /home/carlo/w/3code/nothink/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
+  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
 

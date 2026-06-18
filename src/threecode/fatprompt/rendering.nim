@@ -536,7 +536,10 @@ proc tokenBarRows*(s: FatPromptState; termW = 0): int =
 proc footerGeometry*(s: FatPromptState; editorRows: int; termW = 0): FatPromptGeometry =
   ## Size of the reserved fat-prompt area: ticker, token bar, and editor rows.
   let barRows = tokenBarRows(s, termW)
-  let tickerRows = if s.footer.ticker.len > 0: 1 else: 0
+  # Always reserve the ticker row to match frameRows: an empty gap between
+  # scrollback and the token bar reads better than flush adjacency, whether or
+  # not a thinking ticker is active.
+  let tickerRows = 1
   result = FatPromptGeometry(
     tickerRows: tickerRows,
     hasBar: barRows > 0,
@@ -625,7 +628,10 @@ proc frameRows*(p: FatPrompt): seq[string] =
   ## Return the complete visible screen for one render tick.
   let editor = p.editorRows()
   let bar = tokenBarText(p.tokenBar)
-  let tickerRows = if p.ticker.len > 0: 1 else: 0
+  # Always reserve the ticker row, even when no thinking ticker is active.
+  # Scrollback sitting flush against the token bar never reads well; the gap
+  # the ticker normally provides is wanted whether or not a ticker is running.
+  let tickerRows = 1
   let reserved = tickerRows + 1 + editor.len
   let scrollRows = max(0, p.height - reserved)
   var content = p.scrollback
@@ -640,8 +646,7 @@ proc frameRows*(p: FatPrompt): seq[string] =
   result = content[start ..< content.len]
   while result.len < scrollRows:
     result.insert("", 0)
-  if p.ticker.len > 0:
-    result.add p.ticker
+  result.add if p.ticker.len > 0: p.ticker else: ""
   result.add bar
   for row in editor:
     result.add row
