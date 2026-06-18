@@ -90,19 +90,22 @@ proc sessionLogText(root: string): string =
       result.add readFile(path)
       result.add "\n"
 
-proc stubEnv(root: string): seq[EnvVar] =
+proc stubEnv(root, responsesPath: string): seq[EnvVar] =
   @[
     (key: "TERM", val: "xterm-256color"),
     (key: "PATH", val: getEnv("PATH")),
     (key: "HOME", val: root),
     (key: "XDG_CONFIG_HOME", val: root / "xdg"),
     (key: "XDG_DATA_HOME", val: root / "data"),
+    (key: "THREECODE_STUB_RESPONSES", val: responsesPath),
   ]
 
 proc startStub(root: string; args: openArray[string] = ["-x", "-i"];
-               cols = DefaultTtyCols; rows = DefaultTtyRows): TtySession =
+               cols = DefaultTtyCols; rows = DefaultTtyRows;
+               responsesPath = ""): TtySession =
+  let resp = if responsesPath.len > 0: responsesPath else: root / "run" / "stub_responses.json"
   newTtySession(ensureStubBinary(), args = args, cwd = root / "run",
-                env = stubEnv(root), cols = cols, rows = rows)
+                env = stubEnv(root, resp), cols = cols, rows = rows)
 
 proc framePresenceRuns(s: TtySession; needle: string): int =
   var wasPresent = false
@@ -282,6 +285,41 @@ suite "terminal visual contract":
     tty.expectMeaningfulFrameArtifact(
       SimpleVisualTestFrames,
       root / "simple_visual_test_actual.txt")
+
+  test "submitting a prompt survives the working directory being removed":
+    # Regression: the process's cwd can be deleted out from under it (tmpfs
+    # reaper, an editor dropping a workspace dir, etc.). Nim's getCurrentDir
+    # raises OSError on the next cwd lookup, which used to crash the REPL
+    # mid-turn. The turn must complete and the reply reach scrollback.
+    let root = newFixture("cwd_removed_test")
+    writeConfiguredProvider(root)
+    # Responses live outside the cwd so deleting the cwd (the point of
+    # this test) does not also delete the stub's responses.
+    let responsesPath = root / "stub_responses.json"
+    writeFile(responsesPath, $(%*[
+      {
+        "role": "assistant",
+        "content": "reply after cwd removed",
+        "contentChunks": ["reply after cwd removed"],
+        "usage": {"promptTokens": 1, "completionTokens": 1,
+                   "totalTokens": 2, "cachedTokens": 0}
+      }
+    ]))
+
+    let tty = startStub(root, responsesPath = responsesPath)
+    defer: tty.close()
+
+    tty.expect "❯"
+    removeDir(root / "run")
+    doAssert not dirExists(root / "run"), "test cwd removal failed"
+    tty.send "hello"
+    tty.expect "hello"
+    tty.send "\n"
+    tty.expectInHistory "reply after cwd removed"
+    # The reply reaching scrollback proves the turn completed with no crash;
+    # :q + a shutdown drain hangs on frame-sync events, so rely on the
+    # committed-history assertion (as simple one-turn does) rather than
+    # asserting a clean exit here.
 
   # In tty frame mode preStreamDelay is skipped (see testFrameMode in
   # api.nim); a response with waitForTestContinue holds the turn open on a

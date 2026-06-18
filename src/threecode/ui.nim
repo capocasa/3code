@@ -661,7 +661,7 @@ proc loadAgentsMd(start: string): string =
   ## Walk from `start` up to the filesystem root. At each level, prefer
   ## 3CODE.md over AGENTS.md. If 3CODE.md is found, load it and stop
   ## (never mix both files). Otherwise collect AGENTS.md as before.
-  var dir = absolutePath(start)
+  var dir = resolvePath(start)
   while true:
     let candidate3 = dir / "3CODE.md"
     if fileExists(candidate3):
@@ -774,7 +774,7 @@ proc buildUserMessage*(messages: JsonNode, raw: string): string =
   ## resumed conversations don't re-inject stale context.
   let body = inlineAtFiles(raw)
   if isFirstUserMessage(messages):
-    sessionPreamble(getCurrentDir()) & "\n\n" & body
+    sessionPreamble(safeCwd()) & "\n\n" & body
   else:
     body
 
@@ -890,7 +890,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         releaseSessionLock(session.savePath)
         session.savePath = newSessionPath()
         session.created = $now()
-        session.cwd = getCurrentDir()
+        session.cwd = safeCwd()
         acquireSessionLock(session.savePath)
       cmdResponse "════════════════════════════════════════"
     of ":model":
@@ -911,7 +911,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       let showAll = arg.strip.toLowerAscii in ["all", "-a", "--all"]
       let paths =
         if showAll: listSessionPaths()
-        else: listSessionPathsForCwd(getCurrentDir())
+        else: listSessionPathsForCwd(safeCwd())
       if paths.len == 0:
         cmdResponse (if showAll: "no saved sessions"
                      else: "no saved sessions for this directory  (try `:sessions all`)")
