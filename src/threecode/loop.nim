@@ -5,9 +5,6 @@
 ## excluded as observation, not action. When a single path is mutated
 ## `LoopTripT` times (Strike 1, nudge) or `LoopHardTripT` times (Strike 2,
 ## halt), the outer loop in `threecode.nim` stops issuing further tool calls.
-## `git reset --hard` and similar recovery commands hard-trip to Strike 2
-## immediately: these wipe working-tree state the model's plan relied on, so
-## further autonomous turns almost always make things worse.
 
 import std/[json, strutils, tables]
 import types, util, shell
@@ -30,7 +27,6 @@ proc resetLoopTracker*(t: var LoopTracker) =
   t.mutCounts.clear()
   t.strike = 0
   t.trippedPaths.setLen 0
-  t.recoveryCmd = ""
   t.turnCalls = 0
 
 proc shellCmd(args: JsonNode): string =
@@ -102,26 +98,14 @@ proc isMutationCall*(name: string, args: JsonNode): bool =
 proc trackCall*(t: var LoopTracker, name: string, args: JsonNode): int =
   ## Feed a tool call through the detector. Returns the strike level AFTER
   ## this call (0 = no trip, 1 = mutation saturation first seen for this
-  ## path, 2 = second distinct mutation trip OR a working-tree-wiping git
-  ## command → outer loop should halt further tool calls).
+  ## path, 2 = a single path mutated past the hard-trip threshold → outer
+  ## loop should halt further tool calls).
   ##
   ## Reads are excluded from tracking entirely — they are observation, not
   ## action, and were the primary source of false positives. Only mutations
   ## (write, patch, sed -i, redirects, etc.) and web calls (web_search,
   ## web_fetch) are tracked. Web calls count as non-mutations: they
   ## contribute to Strike 1 (concentration signal) but not Strike 2.
-  # Hard short-circuit: any `git checkout <path>` / `git restore` /
-  # `git reset --hard` / `git clean -f` is treated as
-  # immediate Strike 2. These wipe the working-tree state the model's
-  # plan was based on; further autonomous turns make things worse.
-  if name == "bash" or name == "shell":
-    let cmd = if name == "bash": bashCmd(args)
-              else: shellCmd(args)
-    let recovery = bashIsRecovery(cmd)
-    if recovery != "" and t.strike < 2:
-      t.strike = 2
-      t.recoveryCmd = recovery
-      return 2
   let fp = fingerprint(name, args)
   if fp == "": return t.strike  # reads/plans don't count toward budget
   inc t.turnCalls  # only tracked calls (mutations + web) count
