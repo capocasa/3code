@@ -313,7 +313,7 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
       accReasoning.add chunk
       slurped += chunk.len
       hookProgress(stubBaseLabel, slurped)
-      if hookShowThinking() and not contentStarted:
+      if not contentStarted:
         hookReasoningDelta(accReasoning, stubBaseLabel, slurped,
                            contentStarted)
       emitTestFrameEvent()
