@@ -327,13 +327,21 @@ proc main() =
     try:
       cmdWasQuit = inputState.cmdWasQuit
       if inputState.autoSend:
-        queued =
-          if inputState.queuedText.len > 0: inputState.queuedText
-          else: editor.line.text
-        queuedRows = inputState.queuedEchoRows
-        inputState.queuedText = ""
-        inputState.autoSend = false
-        inputState.queuedEchoRows = 0
+        if inputState.queuedPrompts.len > 0:
+          (queued, queuedRows) = inputState.queuedPrompts[0]
+          inputState.queuedPrompts.delete(0)
+          if inputState.queuedPrompts.len == 0:
+            inputState.autoSend = false
+            inputState.queuedText = ""
+            inputState.queuedEchoRows = 0
+        else:
+          queued =
+            if inputState.queuedText.len > 0: inputState.queuedText
+            else: editor.line.text
+          queuedRows = inputState.queuedEchoRows
+          inputState.queuedText = ""
+          inputState.autoSend = false
+          inputState.queuedEchoRows = 0
     finally:
       release inputStateLock
     if cmdWasQuit:

@@ -440,6 +440,71 @@ suite "terminal visual contract":
       MultilineVisualTestFrames,
       root / "multiline_visual_test_actual.txt")
 
+  test "two prompts queued during one turn both reach scrollback":
+    let root = newFixture("two_queued")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "waitForTestContinue": true,
+        "content": "First reply.",
+        "contentChunks": ["First reply."],
+        "usage": {
+          "promptTokens": 120,
+          "completionTokens": 24,
+          "totalTokens": 144,
+          "cachedTokens": 0
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Reply alpha.",
+        "contentChunks": ["Reply alpha."],
+        "usage": {
+          "promptTokens": 150,
+          "completionTokens": 20,
+          "totalTokens": 170,
+          "cachedTokens": 0
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Reply beta.",
+        "contentChunks": ["Reply beta."],
+        "usage": {
+          "promptTokens": 180,
+          "completionTokens": 20,
+          "totalTokens": 200,
+          "cachedTokens": 0
+        }
+      }
+    ])
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "initial prompt\n"
+    # Turn is held open by waitForTestContinue. Queue two prompts back to
+    # back before releasing; both must survive as separate scrollback items
+    # (regression: the second used to overwrite or merge into the first).
+    tty.expect "initial prompt"
+    tty.send "queued alpha\n"
+    tty.expect "queued alpha"
+    tty.send "queued beta\n"
+    tty.expect "queued beta"
+    tty.advanceTicker()
+    tty.continueStubApi()
+
+    tty.expectInHistory "❯ initial prompt"
+    tty.expectInHistory "First reply."
+    tty.expectInHistory "❯ queued alpha"
+    tty.expectInHistory "Reply alpha."
+    tty.expectInHistory "❯ queued beta"
+    tty.expectInHistory "Reply beta."
+
   test "bash tool success and nonzero exit":
     let root = newFixture("bash_tool_visual_test")
     writeConfiguredProvider(root)

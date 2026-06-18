@@ -93,6 +93,7 @@ type
     autoSend*: bool
     queuedText*: string
     queuedEchoRows*: int
+    queuedPrompts*: seq[tuple[text: string, echoRows: int]]
     queuedCommand*: string
     queuedCommandRows*: int
     cmdWasQuit*: bool
