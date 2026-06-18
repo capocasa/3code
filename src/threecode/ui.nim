@@ -784,6 +784,8 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
   ## buffered input; the controller only consumes completed lines here.
   ensureInputThreadStarted()
   while true:
+    if not inputThreadRunning and inputEditor != nil:
+      ensureInputThreadStarted()
     var line = ""
     var echoRows = 0
     var cmdWasQuit = false

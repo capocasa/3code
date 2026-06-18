@@ -1421,7 +1421,17 @@ proc inputThreadProc() {.thread.} =
             release inputStateLock
         break
       except CatchableError:
-        break
+        # A transient error (pty write backpressure, etc.) must not kill the
+        # input thread: a dead thread leaves the prompt painted but frozen
+        # — caret never moves, keystrokes silently dropped. Reset the editor
+        # state and retry the loop while we are still running.
+        edPtr[].line = minline.Line(text: "", position: 0)
+        edPtr[].renderSuffix = ""
+        edPtr[].renderSuffixCursor = false
+        edPtr[].renderRow = 0
+        edPtr[].deferSubmit = false
+        sleep 10
+        continue
 
     restoreInputTermios()
     edPtr[].onMutate = nil
