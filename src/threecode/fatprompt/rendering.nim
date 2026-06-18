@@ -412,12 +412,38 @@ proc receiptBarBytes*(label: string): string =
   if label.len == 0: return ""
   GreyFg & "  " & label & Reset
 
+proc clampToWidth*(s: string; width: int): string =
+  ## Truncate `s` (which may contain ANSI CSI escapes) so its visible
+  ## width fits in `width` cells. Escapes are preserved; once the
+  ## accumulated visible width reaches `width` the remainder is dropped.
+  if width <= 0:
+    return ""
+  var vis = 0
+  var i = 0
+  while i < s.len and vis < width:
+    if s[i] == '\x1b' and i + 1 < s.len and s[i + 1] == '[':
+      let escStart = i
+      i += 2
+      while i < s.len and s[i] notin {'A'..'Z', 'a'..'z'}:
+        inc i
+      if i < s.len: inc i
+      result.add s[escStart ..< i]
+      continue
+    let rl = max(1, runeLenAt(s, i))
+    let cw = runeCellWidth(s.runeAt(i))
+    if vis + cw > width:
+      break
+    result.add s[i ..< i + rl]
+    inc vis, cw
+    inc i, rl
+
 proc liveEditorSpinnerFooterBytes*(frame, label, ticker: string;
-                                   elapsed: int): string =
+                                   elapsed: int; termW = 0): string =
   if ticker.len > 0:
+    let shown = if termW > 0: clampToWidth(ticker, termW) else: ticker
     result.add "\r\x1b[2K"
     result.add GreyFg
-    result.add ticker
+    result.add shown
     result.add Reset
     result.add "\r\n"
   result.add liveEditorSpinnerBarBytes(frame, label, elapsed)
@@ -440,11 +466,12 @@ proc footerFrameBytes*(frame: FooterFrame; termW = 0): string =
     if frame.ticker.len == 0:
       result = paintBarBytes(frame.label)
     else:
-      result = "\r\x1b[2K" & GreyFg & frame.ticker & Reset & "\r\n" &
+      let shown = if termW > 0: clampToWidth(frame.ticker, termW) else: frame.ticker
+      result = "\r\x1b[2K" & GreyFg & shown & Reset & "\r\n" &
         paintBarBytes(frame.label)
   of ffSpinner:
     result = liveEditorSpinnerFooterBytes(frame.spinner, frame.label,
-                                          frame.ticker, frame.elapsed)
+                                          frame.ticker, frame.elapsed, termW)
 
 proc addUserEcho(result: var string, line: string; trailingNewline = true) =
   let termW = try: terminalWidth() except CatchableError: 0
