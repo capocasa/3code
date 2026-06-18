@@ -54,16 +54,6 @@ type
     output*: string
     code*: int
     kind*: ActionKind
-  LoopTracker* = object
-    ## Sliding-window per-path saturation detector. Only mutations
-    ## (write, patch, sed -i, redirects, etc.) and web calls are tracked —
-    ## reads are observation and excluded. Reset at the start of each user
-    ## turn via `resetLoopTracker`.
-    ring*: seq[tuple[fp: string, mut: bool]]  # last K (path, isMutation)
-    mutCounts*: CountTable[string]  # writes+patches+sed+web only per path
-    strike*: int             # 0/1/2
-    trippedPaths*: seq[string] # paths that have already tripped this strike
-    turnCalls*: int          # total tool calls this turn (for budget cap)
   ReadCache* = ref object
     state*: Table[string, (Time, int)]
   Session* = object
@@ -75,7 +65,6 @@ type
     created*: string
     cwd*: string
     plan*: seq[PlanItem]
-    loop*: LoopTracker
     readCache*: ReadCache
   ApiError* = object of CatchableError
   ParseIssue* = object

@@ -11,7 +11,7 @@
 
 import std/[json, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline,
-  loop, fatprompt
+  fatprompt
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":prompt", ":show", ":log", ":sessions",
@@ -878,7 +878,6 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       session.toolLog.setLen 0
       session.usage = Usage()
       session.lastPromptTokens = 0
-      session.loop = initLoopTracker()
       session.readCache = nil
       session.plan.setLen 0
       emitFatPromptEvent clearPendingHintEvent()
