@@ -13,7 +13,7 @@ import ../types, ../util, ../compact, ../display, ../minline,
 import ../engine as termengine
 import rendering
 from ../api import ApiStreamHooks, requestTurnInterrupt, setApiStreamHooks,
-  setInterrupted
+  setInterrupted, QuietTooLongMs, markNetworkQuiet, clearNetworkQuiet
 
 
 var contentStreamedLive*: bool = false
@@ -788,9 +788,18 @@ proc markProviderActivity*() =
 
 proc quietWatchLoop(baseLabel: string) {.thread.} =
   var shown = false
+  var timedOut = false
   while not quietStop.load(moRelaxed):
     let idleMs = nowMs() - lastProviderActivity.load(moRelaxed)
-    if idleMs >= QuietThresholdMs:
+    if not timedOut and idleMs >= QuietTooLongMs:
+      # No data for the full window: the provider has gone silent. Raise a
+      # network-quiet error by setting the flag and waking the blocking recv
+      # via the same socket-shutdown path used for Ctrl-C. The stream loop then
+      # surfaces a non-retryable error and the turn mechanism shows it + retries.
+      markNetworkQuiet()
+      requestTurnInterrupt()
+      timedOut = true
+    elif idleMs >= QuietThresholdMs:
       setSpinLabel("⧖")
       shown = true
     elif shown:
@@ -801,6 +810,7 @@ proc quietWatchLoop(baseLabel: string) {.thread.} =
 proc startQuietWatch(baseLabel: string) =
   if quietRunning: return
   markProviderActivity()
+  clearNetworkQuiet()
   quietStop.store(false, moRelaxed)
   createThread(quietThread, quietWatchLoop, baseLabel)
   quietRunning = true

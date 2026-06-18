@@ -27,6 +27,11 @@ var
 
 const providerStub {.booldefine.} = false
 const ConnectTimeoutMs = 30_000
+const QuietTooLongMs* {.intdefine.} = 60_000
+  ## If a streaming response goes this long with no data from the
+  ## provider, the turn is aborted. The blocking `recv` in streamhttp
+  ## has no per-read timeout, so without this a stalled provider hangs
+  ## the agent forever under the ⧖ quiet-network spinner.
 
 proc isInterrupted*(): bool {.gcsafe.}
 # ---------- Cancellation and stream hooks ----------
@@ -44,6 +49,21 @@ proc setInterrupted*(value: bool) {.gcsafe.} =
 
 proc clearInterrupted*() {.gcsafe.} =
   setInterrupted(false)
+
+var networkQuietFlag: Atomic[bool]
+  ## Set by the quiet-watch thread when no provider data has arrived for
+  ## `QuietTooLongMs`. It then shuts down the cached socket fd (same wake
+  ## mechanism as ctrl-c) so the blocking `recv` in streamhttp returns and
+  ## the stream loop can surface the error instead of hanging forever.
+
+proc isNetworkQuiet*(): bool {.gcsafe.} =
+  networkQuietFlag.load(moAcquire)
+
+proc markNetworkQuiet*() {.gcsafe.} =
+  networkQuietFlag.store(true, moRelease)
+
+proc clearNetworkQuiet*() {.gcsafe.} =
+  networkQuietFlag.store(false, moRelease)
 
 type
   ApiStreamHooks* = object
@@ -566,6 +586,14 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     if result.streamedLive:
       hookAfterLiveContent(baseLabel, slurped)
 
+  if isNetworkQuiet():
+    # The quiet-watch thread shut down the fd to wake the blocking recv.
+    # Surface as a non-retryable error so the turn loop shows it and the
+    # user can retry, rather than hanging on a dead connection forever.
+    closeCachedStreamConn()
+    result.errMsg = "network quiet too long (no data for " &
+      $(QuietTooLongMs div 1000) & "s)"
+    return
   if isInterrupted():
     if result.assistantMsg == nil:
       result.assistantMsg = buildStreamAssistantMsg(accContent, accReasoning,
