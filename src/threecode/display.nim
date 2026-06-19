@@ -290,15 +290,6 @@ proc diffBytesSkippingFirst(diff: string): string =
       rest.add line
   diffBytes(rest.join("\n"))
 
-proc writeBannerPath(act: Action; diff: string): string =
-  let first = firstDiffLine(diff)
-  if first.startsWith("--- "):
-    first[4 .. ^1].strip
-  elif act.path.len > 0:
-    resolvePath(act.path)
-  else:
-    ""
-
 proc planStatusGlyph(status: string): string =
   case status
   of "completed": "✓"
@@ -347,10 +338,11 @@ proc printToolResult*(kind: ActionKind, res: string, code: int, idx: int,
                      diff = "") =
   ## Body of a tool turn. bash uses the scroll-area shape via
   ## `printBashScroll` (streaming-style: marker + tail), read/web use
-  ## the head/tail compact via `printCompactHeadTail`; write/patch
-  ## print the headline only on success, or the first error line on
-  ## failure. A non-empty `diff` is colourised after the body. Banner
-  ## is drawn separately by `renderToolBanner`.
+  ## the head/tail compact via `printCompactHeadTail`; write shows the
+  ## new file contents through the same head/tail path as read. patch
+  ## prints the headline only on success, or the first error line on
+  ## failure. A non-empty `diff` is colourised after the body (for patch).
+  ## Banner is drawn separately by `renderToolBanner`.
   if kind == akBash:
     printBashScroll(res, idx)
   elif kind == akRead:
@@ -363,6 +355,17 @@ proc printToolResult*(kind: ActionKind, res: string, code: int, idx: int,
           lines[^1].endsWith("] ..."):
       lines.setLen(lines.len - 1)
     printCompactHeadTail(lines.join("\n"), idx, ReadHead, ReadTail)
+  elif kind == akWrite:
+    if code == 0:
+      printCompactHeadTail(diff, idx, ReadHead, ReadTail)
+    else:
+      let termW = try: terminalWidth() except CatchableError: 80
+      let bodyW = max(20, termW - 3)
+      let nl = res.find('\n')
+      let head = if nl < 0: res else: res[0 ..< nl]
+      for chunk in wrapAnsi(head, bodyW):
+        subtleWriteLn(stdout, "  " & chunk)
+    return
   elif kind in {akWebSearch, akWebFetch}:
     printCompactHeadTail(res, idx)
   elif kind == akPlan:
@@ -383,7 +386,7 @@ proc printToolResult*(kind: ActionKind, res: string, code: int, idx: int,
       let head = if nl < 0: res else: res[0 ..< nl]
       for chunk in wrapAnsi(head, bodyW):
         subtleWriteLn(stdout, "  " & chunk)
-  if diff.len > 0:
+  if diff.len > 0 and kind notin {akWrite, akRead}:
     printDiff(diff)
 
 proc printActionResult*(act: Action, res: string, code: int, idx: int, diff = "") =
@@ -628,6 +631,8 @@ proc toolResultBytes*(kind: ActionKind; res: string; code: int; idx: int;
           lines[^1].endsWith("] ..."):
       lines.setLen(lines.len - 1)
     result.add compactHeadTailBytes(lines.join("\n"), idx, ReadHead, ReadTail)
+  elif kind == akWrite:
+    result.add compactHeadTailBytes(diff, idx, ReadHead, ReadTail)
   elif kind in {akWebSearch, akWebFetch}:
     result.add compactHeadTailBytes(res, idx)
   elif kind == akPlan:
@@ -639,7 +644,7 @@ proc toolResultBytes*(kind: ActionKind; res: string; code: int; idx: int;
       let nl = res.find('\n')
       let head = if nl < 0: res else: res[0 ..< nl]
       result.add wrappedSubtleBytes(head)
-  if diff.len > 0:
+  if diff.len > 0 and kind notin {akWrite, akRead}:
     result.add diffBytes(diff)
 
 proc toolTranscriptBytes*(banner: string; kind: ActionKind; res: string;
@@ -652,11 +657,9 @@ proc toolTranscriptBytes*(act: Action; res: string; code: int; idx: int;
                           diff = ""; elapsedS = -1): string =
   case act.kind
   of akWrite:
-    result.add toolBannerBytes(writeBannerPath(act, diff), act.kind, code, elapsedS)
-    if code != 0:
-      result.add toolResultBytes(act.kind, res, code, idx, diff = "")
-    elif diff.len > 0:
-      result.add diffBytes(diff)
+    result.add toolBannerBytes(bannerFor(act), act.kind, code, elapsedS)
+    if code == 0 and diff.len > 0:
+      result.add compactHeadTailBytes(diff, idx, ReadHead, ReadTail)
     else:
       result.add toolResultBytes(act.kind, res, code, idx, diff = "")
   of akPatch, akApplyPatch:
