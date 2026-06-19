@@ -27,11 +27,17 @@ var
 
 const providerStub {.booldefine.} = false
 const ConnectTimeoutMs = 30_000
-const QuietTooLongMs* {.intdefine.} = 60_000
+const QuietRecvWakeMs* {.intdefine.} = 5_000
+  ## How long each blocking `recv` may stall before waking. With
+  ## streamhttp's `readTimeoutMs` set to this, `readLine` raises
+  ## `StreamTimeoutError` periodically so the stream loop can re-check
+  ## the quiet/interrupt flags. Must be well under `QuietTooLongMs`.
+const QuietTooLongMs* {.intdefine.} = 180_000
   ## If a streaming response goes this long with no data from the
-  ## provider, the turn is aborted. The blocking `recv` in streamhttp
-  ## has no per-read timeout, so without this a stalled provider hangs
-  ## the agent forever under the ⧖ quiet-network spinner.
+  ## provider, the turn is aborted. `posix.shutdown(fd)` from another
+  ## thread does not reliably wake a blocked TLS `recv`, so the stream
+  ## loop instead relies on `QuietRecvWakeMs`-bounded reads to wake up
+  ## and observe this threshold.
 
 proc isInterrupted*(): bool {.gcsafe.}
 # ---------- Cancellation and stream hooks ----------
@@ -462,6 +468,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       cachedStreamConn = conn
       cachedStreamHostKey = hostKey
       cachedStreamFd = conn.getFd
+    conn.readTimeoutMs = QuietRecvWakeMs
     try:
       conn.sendRequest("POST", pathQuery, host,
                        headers = [("Authorization", "Bearer " & key),
@@ -504,6 +511,11 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   while true:
     var hasLine = false
     try: hasLine = conn.readLine(line)
+    except StreamTimeoutError:
+      if isInterrupted() or isNetworkQuiet():
+        closeCachedStreamConn()
+        break
+      continue
     except CatchableError as e:
       streamErr = e.msg
       closeCachedStreamConn()
@@ -583,9 +595,11 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       hookAfterLiveContent(baseLabel, slurped)
 
   if isNetworkQuiet():
-    # The quiet-watch thread shut down the fd to wake the blocking recv.
-    # Surface as a non-retryable error so the turn loop shows it and the
-    # user can retry, rather than hanging on a dead connection forever.
+    # The quiet-watch thread marked the connection dead and shut down the
+    # cached fd. The recv loop's bounded timeout (StreamTimeoutError) let it
+    # wake and check this flag. Surface a non-retryable error so the turn
+    # loop shows it and the user can retry, rather than hanging on a dead
+    # connection forever.
     closeCachedStreamConn()
     result.errMsg = "network quiet too long (no data for " &
       $(QuietTooLongMs div 1000) & "s)"
