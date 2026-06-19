@@ -33,6 +33,20 @@ proc emitTestFrameEvent() =
       except CatchableError:
         discard
 
+proc onTurnInterrupted*() =
+  ## Single response to a user-triggered interrupt (Ctrl-C, ESC, or any
+  ## other trigger wired to `requestTurnInterrupt`). Emits the notice to
+  ## scrollback as a plain harness line and clears the interrupt flag so
+  ## the editor resumes normally on the next input.
+  ##
+  ## This is the only place that renders an interrupt. Whether the
+  ## interrupt was noticed mid-stream, after a tool call, or propagated up
+  ## as an `ApiError` once the stream had already torn itself down, the
+  ## response is identical.
+  writeTranscriptWithFatPrompt:
+    stdout.writeLine "interrupted by user"
+  clearInterrupted()
+
 proc stubToolCallResult(stub: JsonNode; onLine: proc(line: string) = nil):
     tuple[output: string, code: int, diff: string] =
   let stream = stub{"stream"}
@@ -235,9 +249,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
     messages.add msg
     saveSession(session, messages)
     if isInterrupted():
-      writeTranscriptWithFatPrompt:
-        stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
-      clearInterrupted()
+      onTurnInterrupted()
       return
     let window = contextWindowFor(p)
     case decideContextAction(usage.promptTokens, window, messages.len)
@@ -382,9 +394,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         continue
       saveSession(session, messages)
       if isInterrupted():
-        writeTranscriptWithFatPrompt:
-          stdout.styledWriteLine styleDim, "  · interrupted", resetStyle
-        clearInterrupted()
+        onTurnInterrupted()
         return
       if queuedUser:
         endTurn(repaintPrompt = false)
@@ -426,7 +436,7 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode, session: var Sessi
     # button. Render as dim grey hint, reserve magenta for actual
     # errors the user needs to read.
     if e.msg.startsWith("interrupted by user"):
-      stderr.writeLine e.msg
+      onTurnInterrupted()
     else:
       stdout.styledWriteLine fgMagenta, "  ", e.msg, resetStyle
   except OSError as e:

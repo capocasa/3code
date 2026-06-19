@@ -180,6 +180,22 @@ Between transcript items there is always exactly one newline. That means:
 There must not be extra blank rows inserted as a side effect of spinner setup,
 tool viewport setup, receipt rendering, or prompt height changes.
 
+## Harness Messages
+
+Harness messages are output from the controller itself, not from the model
+or a tool. Examples: `interrupted by user`, cancel confirmations, and other
+controller-side status. They are plain text: no bullet, no indent, no dim
+styling. They must not compete with the fat prompt for output lines; the fat
+prompt owns its rows. A harness message occupies exactly one ordinary
+scrollback line and then returns control to the prompt.
+
+Because harness messages are plain text with no marker, they are visually
+distinct from transcript items (which always carry a leading bullet). This is
+the only visual cue separating them from model or tool output. An interrupt
+has exactly one response procedure regardless of how many triggers can fire
+(Ctrl-C, ESC, other). That procedure emits the harness message once, clears
+the interrupt flag, and returns control to the prompt.
+
 ## Exit Contract
 
 On normal exit:
