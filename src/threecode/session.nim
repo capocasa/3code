@@ -135,9 +135,9 @@ proc acquireSessionLock*(path: string) =
         ". If that process has exited, the lock is stale — delete it and rerun.")
     try:
       writeFile(lockPath, $getCurrentProcessId())
-    except IOError, OSError as e:
+    except IOError, OSError:
       raise newException(SessionLocked,
-        "could not create session lock " & lockPath & ": " & e.msg)
+        "could not create session lock " & lockPath & ": " & getCurrentExceptionMsg())
   activeLockPath = lockPath
 
 proc releaseSessionLock*(path: string) =
