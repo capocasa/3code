@@ -1,5 +1,5 @@
-import std/[json, strutils, unittest]
-import threecode/[actions, types]
+import std/[json, os, strutils, unittest]
+import threecode/[actions, display, types]
 
 suite "actions: stripHarmonyChannel":
   test "strips <|channel|> suffix":
@@ -123,3 +123,26 @@ suite "actions: computeDiff edge cases":
     let d = computeDiff(before, after, "multi.txt")
     check "LINE2" in d
     check "LINE4" in d
+
+suite "runAction write returns new contents":
+  test "third tuple value is the file body, not a diff":
+    let path = getTempDir() / "write_display_test.txt"
+    writeFile(path, "old line\n")
+    let act = Action(kind: akWrite, path: path, body: "brand new line\n")
+    let (output, code, body) = runAction(act)
+    defer: removeFile(path)
+    check code == 0
+    check "wrote" in output
+    check body == "brand new line\n"
+    check "old line" notin body
+
+suite "write display uses compact head/tail, not a diff":
+  test "no diff markers in rendered bytes":
+    let body = "line one\nline two\nline three\n"
+    let bytes = toolResultBytes(akWrite, "wrote x.txt (N bytes)", 0, 1, body)
+    let s = $bytes
+    check "line one" in s
+    check "line three" in s
+    check "@@ " notin s          # no unified-diff hunk header
+    check "--- " notin s         # no diff file header
+    check "+++ " notin s         # no diff file header

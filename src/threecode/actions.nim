@@ -467,12 +467,10 @@ export DEBIAN_FRONTEND=noninteractive
     try:
       let dir = parentDir(path)
       if dir != "": createDir(dir)
-      let before = if fileExists(path): readFile(path) else: ""
       writeFile(path, act.body)
       if cache != nil:
         cache.state[path] = fileSig(path)
-      let diff = computeDiff(before, act.body, path)
-      return (&"wrote {path} ({act.body.len} bytes)", 0, diff)
+      return (&"wrote {path} ({act.body.len} bytes)", 0, act.body)
     except CatchableError as e:
       return (&"error: write {path}: {e.msg}", 1, "")
   of akPatch:
