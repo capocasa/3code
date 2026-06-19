@@ -234,6 +234,10 @@ proc main() =
     of "good": printKnownGood(); return
     else: discard
 
+  if (resume or forceInteractive) and args.len > 0:
+    let flag = if resume: "--resume" else: "--interactive"
+    die("unexpected argument with " & flag & ": " & args.join(" "), ExitUsage)
+
   showUpdateNoticeMaybe()
   spawnBackgroundUpdateMaybe()
 
