@@ -625,12 +625,12 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   # the caller a half-formed assistant turn (would otherwise show as a lone
   # `· Xs` line with no token bar and no tool_calls, prompting the user as
   # if the model had simply stopped).
-  let gotAnyDelta = accContent.len > 0 or accTools.len > 0 or accReasoning.len > 0
-  if result.statusCode == 200 and gotAnyDelta and
-     not sawDone and not sawFinish:
-    closeCachedStreamConn()
-    result.errMsg = "stream truncated before completion"
-    return
+  #let gotAnyDelta = accContent.len > 0 or accTools.len > 0 or accReasoning.len > 0
+  #if result.statusCode == 200 and gotAnyDelta and
+  #   not sawDone and not sawFinish:
+  #  closeCachedStreamConn()
+  #  result.errMsg = "stream truncated before completion"
+  #  return
 
   # Build assistant message if we saw any SSE content.
   if result.assistantMsg == nil:
