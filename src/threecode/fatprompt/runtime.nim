@@ -892,6 +892,12 @@ proc startContent(s: var LiveMarkdownStream, slurpedNow: int) =
   let hadBufferedSubmit = bufferedSubmitTurn.load(moRelaxed)
   bufferedSubmitTurn.store(false, moRelaxed)
   stopSpinner(clearLiveFooter = false)
+  ## Pause the bar-tick thread across the footer teardown + content start so it
+  ## can't repaint the footer between prepareAssistantContentStart (which erases
+  ## the footer area) and writeAssistantBullet/paintBarBelow (which anchor the
+  ## new content).  A stray repaint in that window leaves a gap row in
+  ## scrollback.
+  let barTicks = stopBarTick()
   termengine.prepareAssistantContentStart(
     inputThreadRunning,
     inputEditor,
@@ -903,6 +909,8 @@ proc startContent(s: var LiveMarkdownStream, slurpedNow: int) =
     s.started = true
     paintBarBelow(s.currentLabel(slurpedNow))
     s.liveBarBelow = true
+  if barTicks > 0:
+    startBarTick(s.baseLabel)
 
 proc advanceLiveCol(s: var LiveMarkdownStream, text: string) =
   let termW = max(1, try: terminalWidth() except CatchableError: 80)
