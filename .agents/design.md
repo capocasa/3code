@@ -33,9 +33,11 @@ lines, whether the app is idle, waiting for an API call, running tools, or
 accepting buffered input.
 
 The thinking ticker is a first-class fat-prompt row. When visible, it reserves
-one row above the token bar. When hidden, that row is removed from the footer
-layout and the scrollback may move back down. The ticker must never overwrite
-scrollback content, the token bar, or any editor row.
+one row above the token bar. When hidden, that row is kept as an empty line —
+the scrollback never moves back down. Scrollback flush against the token bar
+never reads well, so the gap the ticker provides is wanted whether or not a
+thinking ticker is active. The ticker must never overwrite scrollback content,
+the token bar, or any editor row.
 
 The token bar preserves the existing product behavior, even if the current
 implementation is replaced:
