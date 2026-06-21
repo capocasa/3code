@@ -834,6 +834,49 @@ suite "terminal visual contract":
       OtherToolsVisualTestFrames,
       root / "other_tools_visual_test_actual.txt")
 
+  test "consecutive turns never accumulate extra blank separator lines":
+    # Regression for the intermittent extra-blank-line bug: the gap
+    # between one scrollback entry and the next must be exactly one blank
+    # row.  The bar-tick thread used to repaint the footer between
+    # prepareAssistantContentStart and the content anchor, stranding a
+    # gap row in scrollback.
+    let root = newFixture("separators")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {"role": "assistant", "content": "First reply line.",
+       "contentChunks": ["First reply line."],
+       "preStreamDelayMs": 600,
+       "usage": {"promptTokens": 10, "completionTokens": 5,
+                 "totalTokens": 15, "cachedTokens": 0}},
+      {"role": "assistant", "content": "Second reply line.",
+       "contentChunks": ["Second reply line."],
+       "preStreamDelayMs": 600,
+       "usage": {"promptTokens": 10, "completionTokens": 5,
+                 "totalTokens": 15, "cachedTokens": 0}}
+    ])
+    let tty = startStub(root)
+    defer: tty.close()
+    tty.expect "❯"
+    tty.send "hello one"; tty.expect "hello one"; tty.send "\n"
+    tty.expectInHistory "First reply line."
+    tty.expectTokenBar(["○", "↑10", "↓5"])
+    tty.drain(300)
+    tty.send "hello two"; tty.expect "hello two"; tty.send "\n"
+    tty.expectInHistory "Second reply line."
+    tty.expectTokenBar(["○", "↑10", "↓5"])
+    tty.drain(300)
+    # The final frame must not have >1 consecutive blank rows anywhere in
+    # scrollback: that is the visual symptom of the extra-line bug.
+    let rows = if tty.frames.len > 0: tty.frames[^1].rows else: @[]
+    var maxRun = 0
+    var curRun = 0
+    for r in rows:
+      if r.strip.len == 0:
+        inc curRun; maxRun = max(maxRun, curRun)
+      else:
+        curRun = 0
+    check maxRun <= 1
+
 when false:
   suite "disabled terminal visual contract tests":
     test "stub provider streams bash output without replaying it later":
