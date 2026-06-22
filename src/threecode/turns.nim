@@ -298,15 +298,30 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         let name = if fn != nil and fn.kind == JObject: fn{"name"}.getStr else: ""
         let argsStr =
           if fn != nil and fn.kind == JObject: fn{"arguments"}.getStr("") else: ""
-        let args =
-          try: parseJson(if argsStr == "": "{}" else: argsStr)
-          except CatchableError as e:
-            debugOut "tool_call " & name &
-              " has malformed arguments JSON (" & e.msg & "): " & argsStr
-            newJObject()
-        let act = toolCallToAction(p.family, name, args)
+        let (args, argsMalformed) =
+          block:
+            var a: JsonNode
+            var bad = false
+            try: a = parseJson(if argsStr == "": "{}" else: argsStr)
+            except CatchableError as e:
+              debugOut "tool_call " & name &
+                " has malformed arguments JSON (" & e.msg & "): " & argsStr
+              a = newJObject()
+              bad = true
+            (a, bad)
         let toolStub = tc{"stub"}
         let idx = session.toolLog.len + 1
+        if argsMalformed:
+          debugOut "tool done: " & name &
+            " code=-1 (malformed args, skipping execution)"
+          session.toolLog.add ToolRecord(
+            banner: "! " & name & " (malformed args)",
+            output: "malformed arguments: " & argsStr, code: -1, kind: akBash)
+          messages.add %*{"role": "tool", "tool_call_id": id,
+            "content": "ERROR: tool arguments arrived truncated or malformed (" &
+              "got '" & argsStr & "'). Re-emit this tool call."}
+          continue
+        let act = toolCallToAction(p.family, name, args)
         let silent = isSkillRead(act)
         let hadToolBar = currentBarLabel.len > 0
         if hadToolBar:

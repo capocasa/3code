@@ -400,6 +400,8 @@ export DEBIAN_FRONTEND=noninteractive
       # actual edits.
       if beforeExists and beforeContent != after:
         diff = computeDiff(beforeContent, after, p)
+    if body.len == 0 and code == 0:
+      body = "exit 0 (no output)"
     return (body, code, diff)
   of akRead:
     let path = resolvePath(act.path)
@@ -669,6 +671,8 @@ proc runActionStreaming*(act: Action, cache: ReadCache = nil,
       else: ""
     if beforeExists and beforeContent != after:
       diff = computeDiff(beforeContent, after, p)
+  if body.len == 0 and code == 0:
+    body = "exit 0 (no output)"
   return (body, code, diff)
 
 proc parseActionsChecked*(text: string):

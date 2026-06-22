@@ -228,7 +228,7 @@ var cachedStreamHostKey: string
 # the GC'd `StreamConn` ref. Set/cleared alongside `cachedStreamConn`.
 var cachedStreamFd: SocketHandle = osInvalidSocket
 
-proc closeCachedStreamConn() =
+proc closeCachedStreamConn*() =
   if cachedStreamConn != nil:
     try: cachedStreamConn.close() except CatchableError: discard
     cachedStreamConn = nil
@@ -706,15 +706,28 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
   else: discard
 
 proc applyStreamingOptions*(p: Profile, body: JsonNode) =
-  ## Provider-specific additions for SSE fidelity. Z.ai only streams
-  ## reasoning/tool-call deltas during tool turns when `tool_stream` is set;
-  ## without it, GLM-5.1 can buffer the useful progress and emit usage at
-  ## the end.
-  if p.family == "glm":
-    case providerOf(p)
-    of "zai", "zai-coding", "zaicode":
-      body["tool_stream"] = %true
-    else: discard
+  ## Provider-specific additions for SSE fidelity.
+  ##
+  ## `tool_stream` is intentionally disabled. When enabled, Z.ai/GLM streams
+  ## tool-call arguments as many tiny per-token deltas. Our HTTP stack
+  ## (streamhttp) treats a zero-length TLS recv as clean EOF even when
+  ## OpenSSL has buffered records, so the stream dies after the first delta
+  ## and the arguments arrive truncated (e.g. just `{"`). The tool then runs
+  ## with no input.
+  ##
+  ## Without `tool_stream`, GLM sends the complete arguments in a single
+  ## delta, which is reliable. Reasoning/thinking still streams live (that is
+  ## gated by `stream:true` + `thinking:enabled`, not `tool_stream`).
+  ##
+  ## To re-enable once the streamhttp TLS read race is fixed (see
+  ## ~/p/streamhttp/plan.md), replace the body with:
+  ##
+  ##   if p.family == "glm":
+  ##     case providerOf(p)
+  ##     of "zai", "zai-coding", "zaicode":
+  ##       body["tool_stream"] = %true
+  ##     else: discard
+  discard
 
 proc applyGenerationDefaults*(p: Profile, body: JsonNode) =
   ## Known-good generation policy. Temperature is intentionally hardcoded
