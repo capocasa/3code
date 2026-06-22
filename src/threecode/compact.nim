@@ -1,37 +1,15 @@
-## Context window management: supersede-aware elision, tool-output compaction,
-## and LLM summarization.
-##
-## Three strategies keep the context from filling up, cheapest first:
-##
-## **Supersede compaction** (nearly lossless): when a later write or patch to
-## path P exists, earlier reads and writes for P are replaced with a one-line
-## marker. The model's next turn still sees the latest state; it loses the
-## history of intermediate edits, which it would not use anyway.
-##
-## **Tool-output compaction**: replaces the content of old `tool` messages
-## older than the `CompactKeepRecent` window with a short marker. The model's
-## next turn still sees the call structure and all text turns; it loses the
-## bodies of old tool results, which `:show` can recover on demand.
-##
-## **Summarization**: when the context crosses `SummarizeThresholdFrac`, a
-## meta-call to the same model (with a dedicated terse system prompt) produces
-## a one-paragraph recap. That recap replaces everything except the system
-## prompt and the last `SummarizeKeepRecent` messages.
-##
-## Supersede and tool-output compaction both run before every `callModel` —
-## they are cheap and local, so they are not gated on token usage.
-## Summarization is the only lossy, expensive operation and runs at most once
-## per turn, only when the context crosses the threshold.
+## Context management: when the conversation approaches the model's context
+## window, older turns are collapsed into a single synthetic recap via a
+## meta-call to the same model (with a dedicated terse system prompt). That
+## recap replaces everything except the system prompt and the last
+## `SummarizeKeepRecent` messages. Summarization is lossy and expensive, so
+## it runs at most once per turn, only when the context crosses the
+## threshold.
 
-import std/[httpclient, json, strutils, tables]
+import std/[httpclient, json, strutils]
 import util
 import types
 import prompts
-
-const
-  CompactKeepRecent* = 10
-  CompactedMarker* = "[compacted — tool output elided; use :show to view]"
-  SupersededMarker* = "[superseded — later action on same path elided this]"
 
 proc contextWindowFor*(model: string): int =
   ## Heuristic fallback for models off the known-good table
@@ -66,122 +44,6 @@ proc contextWindowFor*(p: Profile): int =
   let kg = knownGoodContextWindow(p)
   if kg > 0: return kg
   contextWindowFor(p.model)
-
-proc compactHistory*(messages: JsonNode, keepRecent = CompactKeepRecent): int =
-  ## Replace `content` of old `tool` messages with a short marker. Returns
-  ## the number of messages compacted. System prompt (index 0) and the last
-  ## `keepRecent` messages are left untouched.
-  if messages == nil or messages.kind != JArray: return 0
-  if messages.len <= keepRecent + 1: return 0
-  let cutoff = messages.len - keepRecent
-  for i in 1 ..< cutoff:
-    let m = messages[i]
-    if m.kind != JObject: continue
-    if m{"role"}.getStr != "tool": continue
-    let c = m{"content"}.getStr("")
-    if c.len <= CompactedMarker.len + 32: continue
-    if c.startsWith("[compacted"): continue
-    m["content"] = %CompactedMarker
-    inc result
-
-proc supersedeCompact*(messages: JsonNode, keepRecent = 2): int =
-  ## Lossless-ish elision for write-happy models: when a `write` or `patch`
-  ## to path P lands later in the conversation, earlier tool-call bodies
-  ## and read results targeting P are replaced with a short marker. Same
-  ## goes for an earlier `read(P)` superseded by any later read or write.
-  ## The very last `keepRecent` messages are left alone so the model still
-  ## sees the result of its most recent actions.
-  if messages == nil or messages.kind != JArray or messages.len < 3: return 0
-  # Map tool_call_id → (path, tool name, assistant msg index, tool_call index)
-  var idInfo = initTable[string, (string, string, int)]()
-  # path → highest message index of any later write or patch; reads only
-  # invalidate earlier reads of the same path, not writes.
-  var lastMut = initTable[string, int]()   # write or patch
-  var lastRead = initTable[string, int]()
-  for i in 0 ..< messages.len:
-    let m = messages[i]
-    if m.kind != JObject: continue
-    if m{"role"}.getStr != "assistant": continue
-    let tcs = m{"tool_calls"}
-    if tcs == nil or tcs.kind != JArray: continue
-    for tc in tcs:
-      let id = tc{"id"}.getStr
-      let fn = tc{"function"}
-      if fn == nil or fn.kind != JObject: continue
-      let name = fn{"name"}.getStr
-      let argsStr = fn{"arguments"}.getStr("")
-      let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
-                 except CatchableError: continue
-      let path = args{"path"}.getStr
-      if path == "": continue
-      idInfo[id] = (path, name, i)
-      case name
-      of "write", "patch": lastMut[path] = i
-      of "read": lastRead[path] = i
-      else: discard
-  let protectFrom = max(0, messages.len - keepRecent)
-  for i in 0 ..< messages.len:
-    if i >= protectFrom: break
-    let m = messages[i]
-    if m.kind != JObject: continue
-    case m{"role"}.getStr
-    of "tool":
-      let id = m{"tool_call_id"}.getStr
-      if id notin idInfo: continue
-      let (path, name, _) = idInfo[id]
-      let mut = lastMut.getOrDefault(path, -1)
-      let rd = lastRead.getOrDefault(path, -1)
-      var superseded = false
-      case name
-      of "read":
-        if mut > i or rd > i: superseded = true
-      of "write", "patch":
-        if mut > i: superseded = true   # superseded by a later edit
-      else: discard
-      if superseded:
-        let c = m{"content"}.getStr("")
-        if c.len > SupersededMarker.len + 32 and
-           not c.startsWith("[superseded") and
-           not c.startsWith("[compacted"):
-          m["content"] = %SupersededMarker
-          inc result
-    of "assistant":
-      let tcs = m{"tool_calls"}
-      if tcs == nil or tcs.kind != JArray: continue
-      for tc in tcs:
-        let id = tc{"id"}.getStr
-        if id notin idInfo: continue
-        let (path, name, callIdx) = idInfo[id]
-        let mut = lastMut.getOrDefault(path, -1)
-        if name notin ["write", "patch"]: continue
-        if mut <= callIdx: continue  # still the latest edit on this path
-        let fn = tc["function"]
-        let argsStr = fn{"arguments"}.getStr("")
-        var args = try: parseJson(if argsStr == "": "{}" else: argsStr)
-                   except CatchableError: continue
-        var changed = false
-        if name == "write":
-          let b = args{"body"}.getStr("")
-          if b.len > 64 and "elided" notin b:
-            args["body"] = %"[body elided — a later write to this path replaced this one; the current file matches the latest write, not this earlier body]"
-            changed = true
-        elif name == "patch":
-          let edits = args{"edits"}
-          if edits != nil and edits.kind == JArray and edits.len > 0:
-            var bulk = 0
-            var alreadyElided = false
-            for e in edits:
-              bulk += ($e).len
-              if e.kind == JObject and "elided" in e{"search"}.getStr(""):
-                alreadyElided = true
-            if bulk > 128 and not alreadyElided:
-              args["edits"] = %*[{"search": "[edits elided — superseded]",
-                                   "replace": "[edits elided — superseded]"}]
-              changed = true
-        if changed:
-          fn["arguments"] = %( $args )
-          inc result
-    else: discard
 
 const
   SummarizeKeepRecent* = 8
@@ -284,10 +146,7 @@ proc decideContextAction*(promptTokens, windowTokens, msgCount: int,
                          keepRecent = SummarizeKeepRecent,
                          threshold = SummarizeThresholdFrac): ContextAction =
   ## Pure policy helper. Given a fresh usage reading and the current message
-  ## count, decide whether to run the lossy summarizer or do nothing. Tool
-  ## output compaction is no longer gated on tokens — it runs every turn —
-  ## so the only decision left is whether the lossy, expensive meta-call is
-  ## justified.
+  ## count, decide whether to run the lossy summarizer or do nothing.
   if promptTokens <= 0 or windowTokens <= 0: return caNone
   if promptTokens.float <= threshold * windowTokens.float: return caNone
   if msgCount >= keepRecent + 4: caSummarize else: caNone
