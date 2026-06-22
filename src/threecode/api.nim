@@ -639,13 +639,6 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   if result.assistantMsg == nil:
     # No SSE data — provider may have returned a plain JSON error body.
     result.errBody = nonSSE.join("\n")
-    # 200 OK with no choice deltas at all (no content, no tools, no
-    # reasoning, no usage) is an empty-but-successful response. Surface
-    # it as a retryable server error rather than handing the caller a nil
-    # assistant turn, which would otherwise fail with a bare ApiError("").
-    if result.errMsg.len == 0 and result.errBody.strip().len == 0:
-      closeCachedStreamConn()
-      result.errMsg = "empty response from server (200 OK, no content)"
   debugOut &"streamHttp end — contentStarted={contentStarted} accTools={accTools.len}"
 
 proc stripInternalFields*(messages: JsonNode): JsonNode =
