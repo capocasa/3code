@@ -237,8 +237,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       turnEnded = true
   defer: finishTurn()
   while true:
-    discard supersedeCompact(messages)
-    discard compactHistory(messages)
     var usage: Usage
     let msg = callModel(p, messages, usage, session.lastPromptTokens)
     session.usage.promptTokens += usage.promptTokens
