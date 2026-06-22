@@ -146,3 +146,24 @@ suite "write display uses compact head/tail, not a diff":
     check "@@ " notin s          # no unified-diff hunk header
     check "--- " notin s         # no diff file header
     check "+++ " notin s         # no diff file header
+
+suite "actions: tool result not empty":
+  test "patch returns non-empty result on success":
+    let path = getTempDir() / "3code_patch_test.txt"
+    writeFile(path, "alpha\nbeta\ngamma\n")
+    let act = Action(kind: akPatch, path: path, edits: @[("beta", "beta2")])
+    let (output, code, diff) = runAction(act, nil)
+    check code == 0
+    check output.len > 0
+
+  test "applyPatch returns non-empty result on successful update":
+    let path = getTempDir() / "3code_applypatch_test.txt"
+    writeFile(path, "x\ny\nz\n")
+    let act = Action(
+      kind: akApplyPatch,
+      body: "*** Begin Patch\n*** Update File: " & path & "\n@@\n x\n-y\n+y2\n z\n*** End Patch\n"
+    )
+    let (output, code, diff) = runAction(act, nil)
+    check code == 0
+    check output.len > 0
+    check "updated" in output

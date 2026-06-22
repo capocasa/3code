@@ -500,7 +500,8 @@ export DEBIAN_FRONTEND=noninteractive
       if cache != nil:
         cache.state[path] = fileSig(path)
       let diff = computeDiff(before, content, path)
-      return ("", 0, diff)
+      let summary = if diff.len > 0: diff else: &"patched {path} (no textual change)"
+      return (summary, 0, diff)
     except CatchableError as e:
       return (&"error: patch {path}: {e.msg}", 1, "")
   of akApplyPatch:
@@ -564,6 +565,7 @@ export DEBIAN_FRONTEND=noninteractive
             discard applied
             let d = computeDiff(before, content, path)
             if d.len > 0: diffs.add d
+            msgs.add "updated " & path & " (" & $applied & " hunk" & (if applied == 1: "" else: "s") & ")"
         except CatchableError as e:
           msgs.add &"error: update {path}: {e.msg}"
           anyFail = true
