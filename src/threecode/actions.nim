@@ -327,11 +327,6 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
     # see the latest sig.
     let mutPath = bashMutationPath(cmd)
     let (readPath, fullRead) = bashReadPath(cmd)
-    if cache != nil and mutPath != "" and mutPath != ".":
-      let p = resolvePath(mutPath)
-      if p in cache.state and fileExists(p):
-        if fileSig(p) != cache.state[p]:
-          return (&"error: {p} changed on disk since the last read in this session — re-read before mutating", 1, "")
     if cache != nil and readPath != "" and fullRead:
       let p = resolvePath(readPath)
       if fileExists(p) and p in cache.state and fileSig(p) == cache.state[p]:
@@ -460,10 +455,6 @@ export DEBIAN_FRONTEND=noninteractive
     return (body, 0, "")
   of akWrite:
     let path = resolvePath(act.path)
-    if cache != nil and path in cache.state and fileExists(path):
-      let sig = fileSig(path)
-      if sig != cache.state[path]:
-        return (&"error: {path} changed on disk since the last read in this session — re-read before writing", 1, "")
     try:
       let dir = parentDir(path)
       if dir != "": createDir(dir)
@@ -481,10 +472,6 @@ export DEBIAN_FRONTEND=noninteractive
     let path = resolvePath(act.path)
     if not fileExists(path):
       return (&"error: {path} does not exist", 1, "")
-    if cache != nil and path in cache.state:
-      let sig = fileSig(path)
-      if sig != cache.state[path]:
-        return (&"error: {path} changed on disk since the last read in this session — re-read before patching", 1, "")
     try:
       let before = readFile(path)
       var content = before
@@ -537,11 +524,6 @@ export DEBIAN_FRONTEND=noninteractive
       of vkUpdate:
         if not fileExists(path):
           msgs.add &"error: update {path}: does not exist"
-          anyFail = true
-          continue
-        if cache != nil and path in cache.state and
-           fileSig(path) != cache.state[path]:
-          msgs.add &"error: {path} changed on disk since the last read in this session — re-read before patching"
           anyFail = true
           continue
         try:

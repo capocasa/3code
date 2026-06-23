@@ -234,12 +234,6 @@ proc runStreamingBash*(act: Action, cache: ReadCache,
   let mutPath = bashMutationPath(cmd)
   let (readPath, fullRead) = bashReadPath(cmd)
 
-  if cache != nil and mutPath != "" and mutPath != ".":
-    let p = resolvePath(mutPath)
-    if cache.state.hasKey(p) and fileExists(p):
-      if localFileSig(p) != cache.state[p]:
-        return (&"error: {p} changed on disk since the last read in this session — re-read before mutating", 1)
-
   if cache != nil and readPath != "" and fullRead:
     let p = resolvePath(readPath)
     if fileExists(p) and cache.state.hasKey(p) and localFileSig(p) == cache.state[p]:
