@@ -128,6 +128,98 @@ proc requireVisibleEditorCaret(s: TtySession; needle: string) =
   check needle in frame.rows[frame.cursorRow]
 
 suite "terminal visual contract":
+  test "resumed session replays the full conversation into scrollback":
+    # Regression: resume used to show only the last user turn, dropping every
+    # earlier turn from scrollback. A resumed session must drop the user back
+    # into the whole prior conversation, reachable by scrolling up.
+    if getEnv("THREECODE_TTY_ONLY").len > 0 and
+        getEnv("THREECODE_TTY_ONLY") != "resume_full_scrollback":
+      check true
+    else:
+      let root = newFixture("resume_full_scrollback")
+      writeConfiguredProvider(root)
+      # Three turns, each with a distinctive marker so we can tell them apart
+      # in scrollback after resume.
+      writeStubResponses(root, %*[
+        {
+          "role": "assistant",
+          "content": "first-turn-marker is here",
+          "contentChunks": ["first-turn-marker is here"],
+          "usage": {
+            "promptTokens": 40,
+            "completionTokens": 5,
+            "totalTokens": 45,
+            "cachedTokens": 0
+          }
+        },
+        {
+          "role": "assistant",
+          "content": "second-turn-marker appears",
+          "contentChunks": ["second-turn-marker appears"],
+          "usage": {
+            "promptTokens": 60,
+            "completionTokens": 6,
+            "totalTokens": 66,
+            "cachedTokens": 0
+          }
+        },
+        {
+          "role": "assistant",
+          "content": "third-turn-marker last",
+          "contentChunks": ["third-turn-marker last"],
+          "usage": {
+            "promptTokens": 80,
+            "completionTokens": 7,
+            "totalTokens": 87,
+            "cachedTokens": 0
+          }
+        }
+      ])
+
+      # --- phase 1: build a three-turn conversation ---
+      # The session is saved incrementally after each turn, so it is already
+      # on disk once phase 1 completes — no clean shutdown is required for
+      # --resume to find it. We only confirm each reply landed via history
+      # (timing-tolerant); the token-bar shape is asserted in phase 2.
+      block phase1:
+        let tty = startStub(root, rows = 24)
+        defer:
+          tty.close()
+        tty.expect "❯"
+        tty.send "turn one\n"
+        tty.expectInHistory "first-turn-marker is here"
+        tty.send "turn two\n"
+        tty.expectInHistory "second-turn-marker appears"
+        tty.send "turn three\n"
+        tty.expectInHistory "third-turn-marker last"
+        tty.drain(400)
+
+      # The session must be on disk for --resume to find it.
+      check root.sessionLogText().len > 0
+
+      # --- phase 2: resume and inspect scrollback ---
+      block phase2:
+        let tty = startStub(root, args = ["-x", "-r"], rows = 24)
+        defer:
+          tty.writeFrameArtifact(root / "resume_frames.txt")
+          tty.writeMeaningfulFrameArtifact(root / "resume_meaningful_frames.txt")
+          tty.close()
+
+        tty.expect "● resumed"
+        # The most recent turn lands on-screen...
+        tty.expectInHistory "third-turn-marker last"
+        # ...and crucially, the earlier turns must also be present in
+        # scrollback (the bug dropped these).
+        tty.expectInHistory "turn one"
+        tty.expectInHistory "first-turn-marker is here"
+        tty.expectInHistory "turn two"
+        tty.expectInHistory "second-turn-marker appears"
+        # The resumed token bar carries the last turn's usage. The settled
+        # typing-ready bar has no elapsed-seconds suffix, so it is matched via
+        # history rather than tokenBarRows (which keys on the "s" suffix).
+        tty.expectInHistory "↑80"
+        tty.expectInHistory "↓7"
+
   test "active turn colon commands are controller handled":
     let root = newFixture("active_colon_commands")
     writeConfiguredProvider(root)

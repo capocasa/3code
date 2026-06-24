@@ -11,3 +11,8 @@ Before changing terminal rendering, read:
 Bug reports must be reproduced in visual tests before implementation changes.
 Prefer expanding the main shakedown or another broad visual test; add narrow
 one-off tests only as a last resort.
+
+## Commits
+
+Commit when a change reaches a sensible, complete state — don't wait to be
+asked. Use a short, single-line commit message.
