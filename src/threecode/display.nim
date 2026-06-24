@@ -816,20 +816,22 @@ proc printSessionList*(paths: seq[string], currentPath: string, showCwd: bool) =
 
 proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
                        window: int, family: string): Usage =
-  ## Show the last user turn and everything after, so a resumed session
-  ## drops the user back into context without replaying the whole history.
-  ## Renders via the same helpers the live path uses; usage is read from
-  ## each assistant message's inline `usage` field (legacy sessions saved
-  ## before the inline format simply skip the token line). The last
-  ## assistant's inline receipt is suppressed and its usage is returned
-  ## instead — the caller paints the live token bar with it, so the
-  ## resumed shape matches the post-`endTurn` typing-ready state.
+  ## Replay the whole conversation into scrollback so a resumed session drops
+  ## the user back into the full prior context, reachable by scrolling up.
+  ## The session file is already bounded by compaction to roughly one context
+  ## window, so replaying it in full stays manageable. Renders via the same
+  ## helpers the live path uses; usage is read from each assistant message's
+  ## inline `usage` field (legacy sessions saved before the inline format
+  ## simply skip the token line). The last assistant's inline receipt is
+  ## suppressed and its usage is returned instead — the caller paints the
+  ## live token bar with it, so the resumed shape matches the post-`endTurn`
+  ## typing-ready state.
   if messages == nil or messages.kind != JArray or messages.len == 0: return
-  var start = messages.len
-  for i in countdown(messages.len - 1, 0):
-    if messages[i]{"role"}.getStr == "user":
-      start = i
-      break
+  # Start at the first non-system message: the `case` below discards the
+  # system message anyway, but skipping it keeps the leading separator clean.
+  var start = 0
+  while start < messages.len and messages[start]{"role"}.getStr == "system":
+    inc start
   if start >= messages.len: return
   var lastAssistant = -1
   for i in countdown(messages.len - 1, start):
@@ -837,11 +839,6 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
       lastAssistant = i
       break
   var toolIdx = 0
-  for i in 0 ..< start:
-    let m = messages[i]
-    if m{"role"}.getStr == "assistant":
-      let tc = m{"tool_calls"}
-      if tc != nil and tc.kind == JArray: toolIdx += tc.len
   for i in start ..< messages.len:
     let m = messages[i]
     case m{"role"}.getStr
