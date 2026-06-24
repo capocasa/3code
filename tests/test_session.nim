@@ -1,4 +1,4 @@
-import std/[json, os, sequtils, strutils, times, unittest]
+import std/[json, os, osproc, sequtils, strutils, times, unittest]
 import threecode/[session, types]
 
 suite "session: mangleCwd":
@@ -365,3 +365,49 @@ suite "session: session lock acquire/release":
   test "acquire on empty path is a no-op":
     acquireSessionLock("")
     check activeLockPath == ""
+
+  # ---- stale-lock recovery (cross-platform) -------------------------------
+  # A lock left behind by a crashed/killed 3code must be reclaimed and
+  # acquisition must succeed, not refuse.
+
+  test "stale lock whose owner pid is dead is auto-deleted and acquired":
+    # Produce a genuinely-dead pid: spawn a trivial child, wait for it to exit,
+    # then write its (now-reaped) pid into the lock as if a 3code had died.
+    let sleepCmd = when defined(windows): "cmd /c exit 0" else: "true"
+    var p = startProcess(sleepCmd, options = {poEvalCommand})
+    let deadPid = p.processID()
+    discard p.waitForExit()
+    p.close()
+    # Sanity: the pid we recorded really is dead. (Extremely unlikely to have
+    # been reused instantly, but guard the test's own assumption.)
+    check deadPid != getCurrentProcessId()
+
+    let lp = sessionLockPathFor(tmpPath)
+    createDir(parentDir(lp))
+    writeFile(lp, $deadPid)
+    check fileExists(lp)
+
+    # Acquisition should reclaim the stale lock and succeed.
+    acquireSessionLock(tmpPath)
+    check activeLockPath == lp
+    # Our pid now owns it.
+    check readFile(lp).strip == $getCurrentProcessId()
+
+  test "corrupt lock (non-numeric pid) is reclaimed and acquired":
+    let lp = sessionLockPathFor(tmpPath)
+    createDir(parentDir(lp))
+    writeFile(lp, "not-a-pid")
+    check fileExists(lp)
+    # Must not crash; treat unparseable pid as stale and move on.
+    acquireSessionLock(tmpPath)
+    check activeLockPath == lp
+    check readFile(lp).strip == $getCurrentProcessId()
+
+  test "empty lock file is reclaimed and acquired":
+    let lp = sessionLockPathFor(tmpPath)
+    createDir(parentDir(lp))
+    writeFile(lp, "")
+    check fileExists(lp)
+    acquireSessionLock(tmpPath)
+    check activeLockPath == lp
+    check readFile(lp).strip == $getCurrentProcessId()

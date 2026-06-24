@@ -15,6 +15,8 @@
 import std/[algorithm, json, os, strutils, tables, times]
 when defined(posix):
   import std/posix
+when defined(windows):
+  import std/[widestrs, winlean]
 import types, prompts, util, actions
 
 const SessionExt* = ".3log"
@@ -141,14 +143,16 @@ proc appendSessionIndex*(cwd, id: string) =
 # A live 3code process owns its session: resuming one that's already open in
 # another process would interleave two writers and corrupt the transcript.
 # Each process holds a lock file in TMPDIR/3code/lock/<id>.lock for the
-# session it's editing. TMPDIR is used deliberately so locks never survive a
-# reboot — a crash leaves a stale lock, but a reboot clears it.
+# session it's editing.
 #
-# `acquireSessionLock` uses O_EXCL create so two racers can't both grab one;
-# on collision it raises SessionLocked carrying the held lock's path, owner
-# pid, and mtime so the caller can tell the user exactly what to delete. The
-# currently-held lock path is tracked in a module global so an exit proc can
-# release whatever the process most recently held (it moves with :clear forks).
+# Acquiring a lock is atomic on both platforms: POSIX uses open(O_CREAT|O_EXCL)
+# and Windows uses CreateFileW(CREATE_NEW), so two racers can't both grab one.
+# On collision we read the holding lock's pid; if that process is no longer
+# alive (the common case after a crash or killed 3code) the stale lock is
+# removed automatically and acquisition retries once. Only when the holder is
+# still genuinely running does acquire raise SessionLocked. The currently-held
+# lock path is tracked in a module global so an exit proc can release whatever
+# the process most recently held (it moves with :clear forks).
 
 var activeLockPath* = ""
 
@@ -160,54 +164,123 @@ proc sessionLockPathFor*(path: string): string =
 
 type SessionLocked* = object of CatchableError
 
-proc acquireSessionLock*(path: string) =
-  ## Atomically claim the lock for `path`. Raises SessionLocked if another
-  ## process holds it; the message names the file, its mtime, and the owner
-  ## pid (when recoverable) so the user can judge whether it's stale.
-  if path == "": return
-  let dir = sessionLockDir()
-  try: createDir(dir) except OSError: discard
-  let lockPath = sessionLockPathFor(path)
+# Windows access rights/disposition constants used by the atomic lock create.
+# Guarded so they (and winlean) only participate in a Windows build; on POSIX
+# they'd otherwise show as unused and pull in the windows modules for nothing.
+when defined(windows):
+  const
+    WingenGenericWrite = 0x40000000'i32
+    WinCreateNew = 1'i32
+    WinFileAttributeNormal = 0x00000080'i32
+    WinProcessQueryLimitedInfo = 0x1000'i32
+    WinStillActive = 0x00000103'i32
+
+proc pidAlive(pid: int): bool =
+  ## True if a process with `pid` is currently running.
+  ##
+  ## Used to tell a genuinely-held lock (live owner) from a stale one left
+  ## behind by a crashed or killed 3code. Pid reuse can theoretically make a
+  ## recycled pid look alive, but that's an inherent limit of pid-based
+  ## locking; the caller still refuses rather than corrupting a live session.
+  when defined(posix):
+    # kill(pid, 0) delivers no signal; it only probes existence. Same probe
+    # the tool-cancel loop uses (streamexec.nim).
+    if posix.kill(Pid(pid), 0) == 0: return true
+    let e = osLastError()
+    # ESRCH: no such process -> dead. EPERM: exists but not ours -> alive.
+    if e.int32 == EPERM.int32: return true
+    false
+  else:
+    let h = winlean.openProcess(WinProcessQueryLimitedInfo, 0'i32, DWORD pid)
+    if h == INVALID_HANDLE_VALUE: return false
+    var code: int32 = 0
+    let ok = winlean.getExitCodeProcess(h, code)
+    discard winlean.closeHandle(h)
+    ok != 0'i32 and code == WinStillActive
+
+proc writeOwnerPid(fd: int; pid: string) =
+  ## Write the owner pid into a freshly created lock file.
+  when defined(posix):
+    if pid.len > 0:
+      discard write(cint(fd), pid.cstring, pid.len)
+  else:
+    var written: int32 = 0
+    if pid.len > 0:
+      discard writeFile(fd, pid.cstring, int32 pid.len, addr written, nil)
+
+proc tryCreateLockFile(lockPath: string; pid: string): int =
+  ## Atomically create `lockPath` and write `pid` into it.
+  ##
+  ## Returns a handle/fd that the caller closes on success, or -1 if the file
+  ## already exists (collision — caller decides whether the holder is live).
+  ## Any other failure raises SessionLocked.
   when defined(posix):
     let p = lockPath.cstring
     let fd = open(p, O_WRONLY or O_CREAT or O_EXCL, 0o600.cint)
     if fd < 0:
       let errno = osLastError()
-      if errno.int32 == EEXIST.int32:
-        var st: Stat
-        let p = lockPath.cstring
-        let mtime = if stat(p, st) == 0'i32:
-          fromUnix(st.st_mtime.int64)
-        else:
-          getTime()
-        let owner = try: readFile(lockPath).strip except CatchableError: ""
-        raise newException(SessionLocked,
-          "session \"" & sessionIdFromPath(path) & "\" is already open" &
-          (if owner.len > 0: " (pid " & owner & ")" else: "") &
-          ". Lock file: " & lockPath &
-          " (last modified " & format(mtime.local, "yyyy-MM-dd HH:mm:ss") & ")" &
-          ". If that process has exited, the lock is stale — delete it and rerun.")
+      if errno.int32 == EEXIST.int32: return -1
       raise newException(SessionLocked,
         "could not create session lock " & lockPath & ": " & osErrorMsg(errno))
-    let pid = $getCurrentProcessId()
-    discard write(fd, pid.cstring, pid.len)
+    writeOwnerPid(fd, pid)
     discard close(fd)
+    0
   else:
-    if fileExists(lockPath):
-      let mtime = getLastModificationTime(lockPath)
-      let owner = try: readFile(lockPath).strip except CatchableError: ""
+    let h = winlean.createFileW(newWideCString(lockPath),
+                                WingenGenericWrite, 0'i32, nil,
+                                WinCreateNew, WinFileAttributeNormal, 0)
+    if h == INVALID_HANDLE_VALUE:
+      let errno = osLastError()
+      # ERROR_FILE_EXISTS (80) / ERROR_ALREADY_EXISTS (183) -> expected collision.
+      if errno.int32 == 80'i32 or errno.int32 == 183'i32: return -1
       raise newException(SessionLocked,
-        "session \"" & sessionIdFromPath(path) & "\" is already open" &
-        (if owner.len > 0: " (pid " & owner & ")" else: "") &
-        ". Lock file: " & lockPath &
-        " (last modified " & format(mtime.local, "yyyy-MM-dd HH:mm:ss") & ")" &
-        ". If that process has exited, the lock is stale — delete it and rerun.")
-    try:
-      writeFile(lockPath, $getCurrentProcessId())
-    except IOError, OSError:
-      raise newException(SessionLocked,
-        "could not create session lock " & lockPath & ": " & getCurrentExceptionMsg())
-  activeLockPath = lockPath
+        "could not create session lock " & lockPath & ": " & osErrorMsg(errno))
+    writeOwnerPid(h, pid)
+    discard winlean.closeHandle(h)
+    0
+
+proc readOwnerPid(lockPath: string): string =
+  try: readFile(lockPath).strip except CatchableError: ""
+
+proc lockHeldError(path, lockPath, owner: string): ref SessionLocked =
+  var mtime = getTime()
+  try: mtime = getLastModificationTime(lockPath) except OSError: discard
+  newException(SessionLocked,
+    "session \"" & sessionIdFromPath(path) & "\" is already open" &
+    (if owner.len > 0: " (pid " & owner & ")" else: "") &
+    " in another running 3code process. Lock file: " & lockPath &
+    " (last modified " & format(mtime.local, "yyyy-MM-dd HH:mm:ss") & ")." &
+    " If no 3code is running, the lock is stale and the pid check failed —" &
+    " delete it: " & lockPath)
+
+proc acquireSessionLock*(path: string) =
+  ## Atomically claim the lock for `path`.
+  ##
+  ## If a lock exists but its owner process is no longer alive, it's treated
+  ## as stale (left behind by a crash) and removed automatically, then
+  ## acquisition retries once. Raises SessionLocked only when another live
+  ## 3code process genuinely holds the lock (or a second racer grabbed it in
+  ## the retry window).
+  if path == "": return
+  let dir = sessionLockDir()
+  try: createDir(dir) except OSError: discard
+  let lockPath = sessionLockPathFor(path)
+  let pid = $getCurrentProcessId()
+  for attempt in 0 .. 1:
+    if tryCreateLockFile(lockPath, pid) >= 0:
+      activeLockPath = lockPath
+      return
+    # Collision: an existing lock is in the way. Decide stale-vs-live.
+    let owner = readOwnerPid(lockPath)
+    var ownerPid = -1
+    try: ownerPid = parseInt(owner) except ValueError: discard
+    if ownerPid > 0 and pidAlive(ownerPid):
+      # The holder is genuinely running. Refuse rather than corrupt it.
+      raise lockHeldError(path, lockPath, owner)
+    # Stale (dead owner, or corrupt/unparseable pid): reclaim and retry once.
+    try: removeFile(lockPath) except OSError: discard
+  # Second attempt also collided — lost a race to another live 3code.
+  raise lockHeldError(path, lockPath, readOwnerPid(lockPath))
 
 proc releaseSessionLock*(path: string) =
   if path == "": return
