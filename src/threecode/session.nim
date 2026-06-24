@@ -67,6 +67,75 @@ proc newSessionPath*(): string =
   sessionDir() / (stamp & SessionExt)
 
 # ---------------------------------------------------------------------------
+# Cwd path mangling.
+#
+# `--resume` with no id needs the latest session for the *current* working
+# directory, but we refuse to parse every `.3log` to find it (see the cwd
+# index below). The index keeps one append-only file per cwd, named by the
+# mangled path so the filesystem narrows the lookup for us.
+#
+# The mapping must be collision-free: `/a/my_project` and `/a/my/project` are
+# distinct cwds and must not share an index file. A naive `/`→`_` collapses
+# them. We escape existing underscores first (`_`→`__`) and *then* turn
+# separators into single underscores, so every original `_` survives as two
+# and the common case stays readable:
+#
+#   "/home/carlo/p/3code/myworktree" → "home_carlo_p_3code_myworktree"
+#   "/home/carlo_p"                  → "home_carlo__p"   (distinct from above)
+#
+# This direction only (cwd→name); nothing needs to invert it, so there's no
+# `unmangleCwd` to keep in sync.
+# ---------------------------------------------------------------------------
+
+proc mangleCwd*(cwd: string): string =
+  var s = cwd.replace('\\', '/')   # normalize backslashes (posix focus)
+  if s.startsWith("/"): s = s[1 ..< s.len]
+  s = s.replace("_", "__")         # escape existing underscores
+  s = s.replace("/", "_")         # then separators → single underscore
+  if s.len == 0: s = "root"       # cwd "/" (and "") collapse to a stable name
+  s
+
+# ---------------------------------------------------------------------------
+# Cwd index: an append-only file per cwd listing session ids (timestamps).
+#
+# Powers resume-latest and `:sessions`/`--list` for a cwd without ever
+# reading a session body. The file is append-only, so the last line is the
+# latest session; `indexIdsAt` returns ids latest-first.
+# ---------------------------------------------------------------------------
+
+proc sessionPathIndexDir*(): string =
+  userDataRoot() / "session-paths"
+
+proc indexPathAt*(indexDir, cwd: string): string =
+  indexDir / mangleCwd(cwd)
+
+proc appendIndexAt*(indexDir, cwd, id: string) =
+  ## Append `id` to the cwd's index file. Silent on failure: a missing index
+  ## entry only means the session won't show in resume-latest, never a crash.
+  if indexDir == "" or id == "": return
+  let path = indexPathAt(indexDir, cwd)
+  try:
+    createDir(path.parentDir)
+    let f = open(path, fmAppend)
+    f.writeLine(id)
+    f.close()
+  except CatchableError: discard
+
+proc indexIdsAt*(indexDir, cwd: string): seq[string] =
+  ## Session ids for `cwd`, latest-first. Reads the single small index file
+  ## (one line per session) — never touches a `.3log`.
+  if indexDir == "": return
+  let path = indexPathAt(indexDir, cwd)
+  let raw = try: readFile(path) except CatchableError: return
+  for line in splitLines(raw):
+    let id = line.strip
+    if id.len > 0: result.add id
+  result.reverse()   # append order is oldest-first → flip to latest-first
+
+proc appendSessionIndex*(cwd, id: string) =
+  appendIndexAt(sessionPathIndexDir(), cwd, id)
+
+# ---------------------------------------------------------------------------
 # Session locks.
 #
 # A live 3code process owns its session: resuming one that's already open in
@@ -534,13 +603,30 @@ proc renderSession*(session: Session, messages: JsonNode): string =
 
 # ---------- save / load ----------
 
+proc isInSessionDir(path: string): bool =
+  ## True when `path` lives under the managed sessions directory, i.e. when
+  ## it should be (and can be) indexed for cwd lookup. A `-s /custom.3log`
+  ## save target lives elsewhere and is deliberately left unindexed.
+  let dir = sessionDir()
+  if not path.startsWith(dir): return false
+  # dir has no trailing separator; require the next char to be one so that
+  # (say) `sessions-backup/x.3log` doesn't match.
+  path.len > dir.len and (path[dir.len] == '/' or path[dir.len] == '\\')
+
 proc saveSession*(session: Session, messages: JsonNode) =
   if session.savePath == "": return
+  let firstSave = not fileExists(session.savePath)
   try:
     createDir(session.savePath.parentDir)
     writeFile(session.savePath, renderSession(session, messages))
   except CatchableError as e:
     stderr.writeLine "3code: session save failed: " & e.msg
+  # Index a brand-new session under its cwd so resume-latest finds it
+  # without parsing. Skipped on re-saves (existing file → no duplicate line)
+  # and for out-of-tree `-s` targets. cwd is always set in normal use
+  # (`session.cwd = safeCwd()`), and an empty cwd is silently dropped.
+  if firstSave and session.cwd != "" and isInSessionDir(session.savePath):
+    appendSessionIndex(session.cwd, sessionIdFromPath(session.savePath))
 
 proc buildToolLogFromMessages(messages: JsonNode,
                               exitByCallId: Table[string, int]): seq[ToolRecord] =
@@ -759,19 +845,19 @@ proc previewSession*(path: string): SessionPreview =
       inc result.msgCount
     else: discard
 
-proc sessionCwd*(path: string): string =
-  previewSession(path).cwd
-
 proc listSessionPathsForCwd*(cwd: string): seq[string] =
-  for p in listSessionPaths():
-    let c = sessionCwd(p)
-    if c == cwd or c == "":
-      result.add p
+  ## Sessions saved under `cwd`, latest-first — read straight from the cwd
+  ## index, so it never parses a `.3log`. A missing/stale index entry is
+  ## skipped via the `fileExists` check (e.g. a session deleted on disk).
+  for id in indexIdsAt(sessionPathIndexDir(), cwd):
+    let p = sessionDir() / (id & SessionExt)
+    if fileExists(p): result.add p
 
 proc resolveSessionPath*(id: string, cwd = ""): string =
   ## `id` is bare (no extension) or a full path. Returns "" if not found.
-  ## When `id` is empty and `cwd` is set, prefers sessions whose saved cwd
-  ## matches (or is unknown); otherwise returns the latest of any.
+  ## When `id` is empty and `cwd` is set, returns the latest session for that
+  ## cwd via the cwd index (no session parsed); with `cwd` unset, the latest
+  ## of any via a plain directory listing.
   if id == "":
     let candidates =
       if cwd != "": listSessionPathsForCwd(cwd)

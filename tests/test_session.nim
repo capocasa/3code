@@ -1,5 +1,112 @@
-import std/[json, os, strutils, times, unittest]
+import std/[json, os, sequtils, strutils, times, unittest]
 import threecode/[session, types]
+
+suite "session: mangleCwd":
+  test "renders the common path readably":
+    check mangleCwd("/home/carlo/p/3code/myworktree") == "home_carlo_p_3code_myworktree"
+
+  test "keeps underscore cwds distinct from separator cwds":
+    # The whole point of the doubling escape: these must not collide.
+    check mangleCwd("/home/carlo_p") == "home_carlo__p"
+    check mangleCwd("/home/carlo/p") == "home_carlo_p"
+    check mangleCwd("/home/carlo_p") != mangleCwd("/home/carlo/p")
+
+  test "doubled underscore stays doubled":
+    # An original `__` becomes `____` — still invertible, still distinct.
+    check mangleCwd("/a__b") == "a____b"
+
+  test "collapses root and empty to a stable name":
+    check mangleCwd("/") == "root"
+    check mangleCwd("") == "root"
+
+  test "normalizes backslashes to forward slashes":
+    check mangleCwd("\\home\\carlo") == mangleCwd("/home/carlo")
+
+  test "does not prefix a leading separator into the name":
+    check not mangleCwd("/a/b").startsWith("_")
+
+suite "session: cwd index":
+  var indexDir: string
+
+  setup:
+    indexDir = getTempDir() / ("3code-test-index-" & $epochTime().int64)
+    removeDir(indexDir)
+
+  teardown:
+    removeDir(indexDir)
+
+  test "indexIdsAt returns ids latest-first (append order reversed)":
+    appendIndexAt(indexDir, "/home/carlo", "20250101T120000")
+    appendIndexAt(indexDir, "/home/carlo", "20250102T120000")
+    appendIndexAt(indexDir, "/home/carlo", "20250103T120000")
+    check indexIdsAt(indexDir, "/home/carlo") == @[
+      "20250103T120000", "20250102T120000", "20250101T120000"]
+
+  test "one index file per cwd (distinct cwds stay separate)":
+    appendIndexAt(indexDir, "/home/carlo/p", "aaa")
+    appendIndexAt(indexDir, "/home/carlo_p", "bbb")
+    check indexIdsAt(indexDir, "/home/carlo/p") == @["aaa"]
+    check indexIdsAt(indexDir, "/home/carlo_p") == @["bbb"]
+
+  test "blank lines in the index are skipped":
+    let path = indexPathAt(indexDir, "/x")
+    createDir(indexDir)
+    writeFile(path, "one\n\n  \ntwo\n")
+    check indexIdsAt(indexDir, "/x") == @["two", "one"]
+
+  test "indexIdsAt is empty for a cwd with no index":
+    check indexIdsAt(indexDir, "/never-saved").len == 0
+
+suite "session: save → index → resume-latest integration":
+  ## End-to-end check of the real save/index/resolve path. Uses a temp dir
+  ## for the data root via XDG_DATA_HOME so we never touch the user's real
+  ## sessions. The temp dir is created once per test and removed by name in
+  ## teardown (never the real data root).
+  var xdgBefore: string
+  var tmpRoot: string
+  var seed = 0
+
+  setup:
+    xdgBefore = getEnv("XDG_DATA_HOME")
+    inc seed
+    tmpRoot = getTempDir() / ("3code-test-e2e-" & $epochTime().int64 & "-" & $seed)
+    putEnv("XDG_DATA_HOME", tmpRoot)
+
+  teardown:
+    if xdgBefore.len > 0: putEnv("XDG_DATA_HOME", xdgBefore)
+    else: putEnv("XDG_DATA_HOME", "")
+    removeDir(tmpRoot)
+
+  proc makeSession(cwd, ts: string): Session =
+    result = Session(created: ts, profileName: "test", cwd: cwd)
+    result.savePath = sessionDir() / (ts & SessionExt)
+
+  test "saveSession registers the session under its cwd":
+    let msgs = %*[{"role": "system", "content": "sys"},
+                  {"role": "user", "content": "hi"}]
+    saveSession(makeSession("/proj/A", "20250101T100000"), msgs)
+    check listSessionPathsForCwd("/proj/A").len == 1
+    check sessionIdFromPath(listSessionPathsForCwd("/proj/A")[0]) == "20250101T100000"
+
+  test "resume-latest picks the newest for the cwd, ignoring other cwds":
+    let msgs = %*[{"role": "system", "content": "sys"},
+                  {"role": "user", "content": "hi"}]
+    saveSession(makeSession("/proj/A", "20250101T100000"), msgs)
+    saveSession(makeSession("/proj/A", "20250102T100000"), msgs)
+    saveSession(makeSession("/proj/B", "20250103T100000"), msgs)
+    check sessionIdFromPath(resolveSessionPath("", "/proj/A")) == "20250102T100000"
+    check sessionIdFromPath(resolveSessionPath("", "/proj/B")) == "20250103T100000"
+    # The proj/B session must NOT leak into proj/A's list.
+    let aIds = listSessionPathsForCwd("/proj/A").mapIt(sessionIdFromPath(it))
+    check "20250103T100000" notin aIds
+
+  test "re-saving an existing session does not add a duplicate index line":
+    let msgs = %*[{"role": "system", "content": "sys"},
+                  {"role": "user", "content": "hi"}]
+    let s = makeSession("/proj/A", "20250101T100000")
+    saveSession(s, msgs)
+    saveSession(s, msgs)   # re-save: file now exists → not first save
+    check listSessionPathsForCwd("/proj/A").len == 1
 
 suite "session: usageFromJson":
   test "parses all fields":
