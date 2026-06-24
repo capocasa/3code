@@ -58,6 +58,7 @@ const KnownGoodCombos* = [
     ("together",  "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
     ("together",  "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
     ("zai",       "glm-4.7",                                         "glm",      "4",   "7",         "on",     0.2, 8192, false, 200_000),
+    ("zai",       "glm-4.7-flash",                                   "glm",      "4",   "flash",     "on",     0.2, 8192, false, 200_000),
     ("zai",       "glm-5",                                           "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
     ("zai",       "glm-5-turbo",                                     "glm",      "5",   "turbo",     "on",     0.2, 8192, false, 200_000),
     ("zai",       "glm-5.1",                                         "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
