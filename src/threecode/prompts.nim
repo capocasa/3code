@@ -958,8 +958,7 @@ commands:
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
-  :sessions         list sessions saved in the current directory
-  :sessions all     list every saved session (any directory)
+  :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 

@@ -788,8 +788,15 @@ proc printKnownGood*() =
        ".", KnownGoodCombos[0][1]
   echo "other combos require --experimental."
 
+const SessionListCap* = 20
+  ## Newest sessions shown by `printSessionList` / `-l` / `:sessions`.
+  ## Paths arrive newest-first from `listSessionPaths`, so the cap is a
+  ## simple slice. Listing is directory-scoped by design; the full set
+  ## lives under `sessionDir()` for anyone who needs it.
+
 proc printSessionList*(paths: seq[string], currentPath: string, showCwd: bool) =
-  for p in paths:
+  let shown = paths[0 ..< min(paths.len, SessionListCap)]
+  for p in shown:
     let id = sessionIdFromPath(p)
     let preview = previewSession(p)
     let mark = if currentPath == p: "*" else: " "
@@ -803,6 +810,9 @@ proc printSessionList*(paths: seq[string], currentPath: string, showCwd: bool) =
     hint &"  {mark} ", resetStyle, id, fgCyan, styleBright,
       &"   ({preview.msgCount} msg" & (if preview.msgCount == 1: "" else: "s") & ")",
       resetStyle, cwdStr, snip, "\n"
+  if paths.len > shown.len:
+    let dir = collapseHome(sessionDir())
+    noteLn &"  …  {shown.len} of {paths.len}  (more in {dir})"
 
 proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
                        window: int, family: string): Usage =

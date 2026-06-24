@@ -908,15 +908,20 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
     of ":log":
       listTools(session.toolLog)
     of ":sessions":
-      let showAll = arg.strip.toLowerAscii in ["all", "-a", "--all"]
-      let paths =
-        if showAll: listSessionPaths()
-        else: listSessionPathsForCwd(safeCwd())
+      # Listing is directory-scoped by design; the full set lives under
+      # `sessionDir()`. `showCwd` is threaded through as false to keep
+      # the re-enable path a one-line flip here and in the `-l` handler.
+      let showCwd = false
+      let askedAll = arg.strip.toLowerAscii in ["all", "-a", "--all"]
+      let paths = listSessionPathsForCwd(safeCwd())
       if paths.len == 0:
-        cmdResponse (if showAll: "no saved sessions"
-                     else: "no saved sessions for this directory  (try `:sessions all`)")
+        cmdResponse "no saved sessions for this directory"
       else:
-        printSessionList(paths, session.savePath, showAll)
+        printSessionList(paths, session.savePath, showCwd)
+      if askedAll:
+        let dir = collapseHome(sessionDir())
+        cmdResponse "listing is scoped to this directory — run from " & dir &
+                    " for all"
     of ":summarize":
       if prof.name == "":
         ok = false

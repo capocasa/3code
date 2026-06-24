@@ -247,13 +247,17 @@ Resume the most recent session in the current directory:
 3code -r
 ```
 
-List all sessions for the current directory:
+List recent sessions for the current directory (newest first, up to 20):
 
 ```
 3code --list
 # or
 3code -l
 ```
+
+Listing is scoped to the current directory by design. To see every saved
+session, run 3code from the sessions directory itself (e.g.
+`~/.local/share/3code/sessions`).
 
 Resume a specific session by ID:
 

@@ -47,7 +47,8 @@ proc usage() {.noreturn.} =
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
   -r, --resume[=ID]    resume latest session from this directory (or by id)
   -i, --interactive    run prompt then continue interactively
-  -l, --list[=all]     list sessions for this directory (or all) and exit
+  -l, --list           list recent sessions for this directory (max 20) and exit
+  -a, --all            (reserved) with -l, accepted but a no-op for now
   -g, --good           list known-good provider/variant combos and exit
   -x, --experimental   allow combos outside the known-good list
   -D, --debug          colored debug trace to stderr
@@ -183,6 +184,7 @@ proc main() =
   var resumeId = ""
   var sessionOut = ""
   var forceInteractive = false
+  var listSessions = false
   var p = initOptParser(commandLineParams())
   for kind, k, v in p.getopt():
     case kind
@@ -204,17 +206,17 @@ proc main() =
         resume = true
         if v != "": resumeId = v
       of "l", "list":
-        let showAll = v.toLowerAscii in ["all", "a"]
-        let paths =
-          if showAll: listSessionPaths()
-          else: listSessionPathsForCwd(safeCwd())
-        if paths.len == 0:
-          stderr.writeLine (if showAll: "3code: no saved sessions"
-                            else: "3code: no saved sessions for " &
-                                  safeCwd() & "  (try --list=all)")
-          quit ExitConfig
-        printSessionList(paths, "", showAll)
-        return
+        # Short flags accumulate, so `-la` / `-al` both set this true
+        # (parseopt emits one cmdShortOption per clustered letter).
+        # Listing is directory-scoped by design; the full set lives
+        # under `sessionDir()`.
+        listSessions = true
+      of "a", "all":
+        # Reserved for a future all-directories listing; for now it's a
+        # recognized no-op that still implies `-l` so `-la` stacks. To
+        # re-enable: set a `listAllDirs` flag here and thread it into
+        # the listing call below as `showCwd = true`.
+        listSessions = true
       else: die("unknown option: -" & (if k.len == 1: "" else: "-") & k, ExitUsage)
     of cmdArgument:
       if pending == "model":
@@ -228,6 +230,14 @@ proc main() =
     of cmdEnd: discard
   if pending != "":
     die("option --" & pending & " requires a value", ExitUsage)
+
+  if listSessions:
+    let paths = listSessionPathsForCwd(safeCwd())
+    if paths.len == 0:
+      stderr.writeLine "3code: no saved sessions for " & safeCwd()
+      quit ExitConfig
+    printSessionList(paths, "", showCwd = false)
+    return
 
   if args.len > 0:
     case args[0]
