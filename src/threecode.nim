@@ -175,8 +175,6 @@ proc main() =
   if cl.len == 1 and cl[0] == "--self-update-check":
     selfUpdateCheck()
     return
-  installInterruptHook()
-  materializeBuiltinSkills()
   var model = ""
   var args: seq[string]
   var pending = ""  # flag awaiting a space-separated value
@@ -248,6 +246,12 @@ proc main() =
     let flag = if resume: "--resume" else: "--interactive"
     die("unexpected argument with " & flag & ": " & args.join(" "), ExitUsage)
 
+  # All syntax validation and fast-exit dispatches are done. Only now do we
+  # run the side-effecting startup work (global interrupt hook, skill
+  # extraction disk I/O, background auto-update fork) — a usage error must
+  # bail before any of it, and a session load must not pay for it twice.
+  installInterruptHook()
+  materializeBuiltinSkills()
   showUpdateNoticeMaybe()
   spawnBackgroundUpdateMaybe()
 

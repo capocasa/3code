@@ -92,3 +92,52 @@ suite "cli --list cap and short-flag stacking":
     let r = runIn(tmp, "-a")
     check r.code == 0
     check "20260301T120000" in r.o
+
+suite "cli syntax errors do no startup work":
+  # All argument parsing and syntax validation must complete and bail before
+  # any side-effecting startup runs — in particular skill extraction, which
+  # writes to `XDG_DATA_HOME/3code/skills/`. A usage error that creates that
+  # directory is paying load-then-fail overhead. These run against an
+  # isolated XDG_DATA_HOME so the skills dir is a clean signal.
+  var tmp: string
+
+  setup:
+    tmp = getTempDir() / ("3code-cli-noop-" & $getCurrentProcessId() & "-" &
+                          $epochTime().int64)
+    createDir(tmp)
+
+  teardown:
+    if dirExists(tmp): removeDir(tmp)
+
+  proc runIn(envCwd: string; flags: string): tuple[o: string, code: int] =
+    let cmd = "XDG_DATA_HOME=" & tmp.quoteShell & " " &
+              binPath().quoteShell & " " & flags
+    let (outp, code) = execCmdEx(cmd, workingDir = envCwd)
+    return (outp.strip(), code)
+
+  proc skillsDirExists(): bool = dirExists(tmp / "3code" / "skills")
+
+  test "positional arg with --resume bails before skill extraction":
+    let r = runIn(tmp, "--resume=does-not-exist extra")
+    check r.code == 2
+    check "unexpected argument" in r.o
+    check not skillsDirExists()
+
+  test "unknown option bails before skill extraction":
+    let r = runIn(tmp, "--nope")
+    check r.code == 2
+    check "unknown option: --nope" in r.o
+    check not skillsDirExists()
+
+  test "-l with no sessions bails before skill extraction":
+    let r = runIn(tmp, "-l")
+    check r.code == 3  # ExitConfig
+    check "no saved sessions for" in r.o
+    check not skillsDirExists()
+
+  test "option missing its value bails before skill extraction":
+    let r = runIn(tmp, "--model")
+    check r.code == 2
+    check "requires a value" in r.o
+    check not skillsDirExists()
+
