@@ -918,26 +918,19 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
 proc applyStreamingOptions*(p: Profile, body: JsonNode) =
   ## Provider-specific additions for SSE fidelity.
   ##
-  ## `tool_stream` is intentionally disabled. When enabled, Z.ai/GLM streams
-  ## tool-call arguments as many tiny per-token deltas. Our HTTP stack
-  ## (streamhttp) treats a zero-length TLS recv as clean EOF even when
-  ## OpenSSL has buffered records, so the stream dies after the first delta
-  ## and the arguments arrive truncated (e.g. just `{"`). The tool then runs
-  ## with no input.
-  ##
-  ## Without `tool_stream`, GLM sends the complete arguments in a single
-  ## delta, which is reliable. Reasoning/thinking still streams live (that is
-  ## gated by `stream:true` + `thinking:enabled`, not `tool_stream`).
-  ##
-  ## To re-enable once the streamhttp TLS read race is fixed (see
-  ## ~/p/streamhttp/plan.md), replace the body with:
-  ##
-  ##   if p.family == "glm":
-  ##     case providerOf(p)
-  ##     of "zai", "zai-coding", "zaicode":
-  ##       body["tool_stream"] = %true
-  ##     else: discard
-  discard
+  ## Z.ai's first-party API (provider names `zai`, `zai-coding`, `zaicode`)
+  ## gets `tool_stream: true`, which streams tool-call arguments as per-token
+  ## deltas. This was disabled for a long time as a workaround for a
+  ## streamhttp TLS read bug that truncated the per-token deltas mid-stream;
+  ## that bug is fixed in streamhttp >= 0.2.0 (the recv loop drains
+  ## OpenSSL's internal buffer before polling), so streamed tool args now
+  ## arrive complete. Reasoning/thinking streams live regardless (gated by
+  ## `stream:true` + `thinking:enabled`, not `tool_stream`).
+  if p.family == "glm":
+    case providerOf(p)
+    of "zai", "zai-coding", "zaicode":
+      body["tool_stream"] = %true
+    else: discard
 
 proc applyGenerationDefaults*(p: Profile, body: JsonNode) =
   ## Known-good generation policy. Temperature is intentionally hardcoded

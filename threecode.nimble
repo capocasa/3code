@@ -6,7 +6,7 @@ srcDir        = "src"
 namedBin["threecode"] = "3code"
 
 requires "nim >= 2.0.0"
-requires "streamhttp >= 0.1.3"
+requires "streamhttp >= 0.2.0"
 requires "ttty >= 0.2.0"
 requires "unicodedb >= 0.13.0"
 requires "https://github.com/capocasa/tinotify >= 0.1.0"
