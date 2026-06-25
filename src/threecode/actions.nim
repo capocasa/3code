@@ -63,10 +63,13 @@ proc bashAction(args: JsonNode): Action =
   let cmdStr = args{"command"}.getStr
   if cmdStr.len > 0:
     return Action(kind: akBash, body: cmdStr,
-                  stdin: args{"stdin"}.getStr)
+                  stdin: args{"stdin"}.getStr,
+                  timeoutSecs: args{"timeout"}.getInt)
   let argv = args{"cmd"}.getElems
   let line = if argv.len > 0: argv[^1].getStr else: ""
-  Action(kind: akBash, body: line, stdin: args{"stdin"}.getStr)
+  Action(kind: akBash, body: line,
+         stdin: args{"stdin"}.getStr,
+         timeoutSecs: args{"timeout"}.getInt)
 
 proc readAction(args: JsonNode): Action =
   Action(kind: akRead,
@@ -359,7 +362,8 @@ export DEBIAN_FRONTEND=noninteractive
 """ & cmd & "\n"
     writeFile(scriptPath, script)
     writeFile(stdinPath, act.stdin)
-    let wrapped = &"timeout --foreground 120s sh \"{scriptPath}\" <\"{stdinPath}\" >\"{outPath}\" 2>&1"
+    let cap = bashTimeoutSecs(act.timeoutSecs)
+    let wrapped = &"timeout --foreground {cap}s sh \"{scriptPath}\" <\"{stdinPath}\" >\"{outPath}\" 2>&1"
     let code = execShellCmd(wrapped)
     var rawOut = if fileExists(outPath): readFile(outPath) else: ""
     try: removeDir(tmp) except CatchableError: discard
@@ -374,7 +378,7 @@ export DEBIAN_FRONTEND=noninteractive
       body.add outClip
       if not outClip.endsWith("\n"): body.add "\n"
     if code == 124:
-      body.add "[timed out after 120s — wrap long-running commands or run in the background]"
+      body.add &"[timed out after {cap}s — raise `timeout` or run in the background]"
     if cache != nil and code == 0:
       if readPath != "":
         let p = resolvePath(readPath)
@@ -620,7 +624,7 @@ proc runActionStreaming*(act: Action, cache: ReadCache = nil,
     else: ""
   let beforeExists = mutPath != "" and mutPath != "." and
                        fileExists(resolvePath(mutPath))
-  let (rawOut, code) = runStreamingBash(act, cache, onLine)
+  let (rawOut, code, cap) = runStreamingBash(act, cache, onLine)
   # Cache early-return paths: runStreamingBash returns the error body
   # directly with code != 0 (or 0 for unchanged-read). Detect and
   # short-circuit.
@@ -635,7 +639,7 @@ proc runActionStreaming*(act: Action, cache: ReadCache = nil,
     body.add outClip
     if not outClip.endsWith("\n"): body.add "\n"
   if code == 124:
-    body.add "[timed out after 120s — wrap long-running commands or run in the background]"
+    body.add &"[timed out after {cap}s — raise `timeout` or run in the background]"
   if cache != nil and code == 0:
     if readPath != "":
       let p = resolvePath(readPath)

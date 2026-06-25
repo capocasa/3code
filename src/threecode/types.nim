@@ -4,7 +4,7 @@
 ## `experimentalEnabled` is a global because every module that validates a
 ## profile needs it, and threading it through every call site is noise.
 
-import std/[tables, times]
+import std/[os, strutils, tables, times]
 
 var experimentalEnabled*: bool = false
   ## Set by `-x`/`--experimental`.
@@ -21,6 +21,19 @@ const
   ExitUsage* = 2
   ExitConfig* = 3
   ExitApi* = 5
+  DefaultBashTimeout* = 120   ## seconds; used when the model omits `timeout`
+  MaxBashTimeout* = 600       ## seconds; hard ceiling regardless of model request
+
+proc bashTimeoutSecs*(req: int): int =
+  ## Resolve the run cap (seconds) from a model-requested value.
+  ## Missing/zero/negative → default; any value above `MaxBashTimeout`
+  ## is clamped to it. Read at call time so `THREECODE_MAX_TIMEOUT` can
+  ## raise the ceiling at runtime without a rebuild.
+  let cap =
+    try: getEnv("THREECODE_MAX_TIMEOUT").parseInt
+    except CatchableError: MaxBashTimeout
+  let v = if req > 0: req else: DefaultBashTimeout
+  if v > cap: cap else: v
 
 type
   PlanItem* = object
@@ -35,6 +48,7 @@ type
     path*: string
     body*: string
     stdin*: string  ## bash-only: piped to the command's stdin
+    timeoutSecs*: int  ## bash-only: model-requested run cap in seconds; 0 = default
     edits*: seq[(string, string)]
     plan*: seq[PlanItem]
     offset*: int

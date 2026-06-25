@@ -229,7 +229,7 @@ proc localFileSig(path: string): (Time, int) =
 
 proc runStreamingBash*(act: Action, cache: ReadCache,
                        onLine: proc(line: string) = nil):
-    tuple[rawOut: string, code: int] =
+    tuple[rawOut: string, code: int, cap: int] =
   let cmd = act.body.strip
   let mutPath = bashMutationPath(cmd)
   let (readPath, fullRead) = bashReadPath(cmd)
@@ -237,7 +237,7 @@ proc runStreamingBash*(act: Action, cache: ReadCache,
   if cache != nil and readPath != "" and fullRead:
     let p = resolvePath(readPath)
     if fileExists(p) and cache.state.hasKey(p) and localFileSig(p) == cache.state[p]:
-      return (&"[unchanged since prior read of {p}; see earlier read in this session]", 0)
+      return (&"[unchanged since prior read of {p}; see earlier read in this session]", 0, DefaultBashTimeout)
 
   let tmp = getTempDir() / ("3code_bash_" & $getCurrentProcessId() & "_" & $epochTime().int64)
   createDir(tmp)
@@ -251,7 +251,8 @@ export DEBIAN_FRONTEND=noninteractive
   writeFile(scriptPath, script)
   writeFile(stdinPath, act.stdin)
 
-  let wrapped = &"exec timeout --foreground 120s sh \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
+  let cap = bashTimeoutSecs(act.timeoutSecs)
+  let wrapped = &"exec timeout --foreground {cap}s sh \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
 
   var p =
     when defined(posix):
@@ -299,6 +300,6 @@ export DEBIAN_FRONTEND=noninteractive
     if rawOut.len > 0 and not rawOut.endsWith("\n"):
       rawOut.add "\n"
     rawOut.add "[interrupted by user]"
-    return (rawOut, 130)
+    return (rawOut, 130, cap)
 
-  return (rawOut, code)
+  return (rawOut, code, cap)
