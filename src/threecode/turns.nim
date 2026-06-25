@@ -394,6 +394,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           emitFatPromptEvent clearPendingHintEvent()
           emitFatPromptEvent clearBarEvent()
           if session.savePath != "":
+            # Drop the draft belonging to the cleared conversation before the
+            # session path moves to a new id.
+            clearDraft(session)
             releaseSessionLock(session.savePath)
             session.savePath = newSessionPath()
             session.created = $now()

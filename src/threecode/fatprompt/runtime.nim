@@ -9,7 +9,7 @@ when defined(posix):
   import std/posix except SocketHandle
   import posix/termios
 import ../types, ../util, ../compact, ../display, ../minline,
-  ../terminal as termui
+  ../terminal as termui, ../session
 import ../engine as termengine
 import rendering
 from ../api import ApiStreamHooks, requestTurnInterrupt, setApiStreamHooks,
@@ -77,6 +77,16 @@ var barTickLock: Lock
 barTickLock.initLock()
 
 var apiCancelWatcherStarted = false
+
+# --- Prompt draft flusher: snapshots the editor text to a draft sidecar on a
+#     debounce so an unexpected shutdown never loses a half-typed prompt. It
+#     reads the module-level editor/session globals under inputStateLock (the
+#     same model as the bar-tick thread) instead of capturing them in a
+#     closure. It is signaled to stop but never joined on cleanup (see below).
+var draftDirty: Atomic[bool]
+var draftFlusherStop: Atomic[bool]
+var draftFlusherThread: Thread[void]
+var draftFlusherRunning = false
 
 var inputState*: InputState
 var inputStateLock*: Lock
@@ -765,6 +775,69 @@ proc stopBarTick*(): int =
   commandStatusActive.store(false, moRelaxed)
   return elapsed
 
+# --- Prompt draft flusher loop -------------------------------------------
+#
+# The editor's `onMutate` only sets a dirty flag (it runs on the input thread
+# and must stay fast). This thread owns the actual disk write. It sleeps on a
+# short debounce and, when the flag is set, snapshots the live editor/session
+# under inputStateLock — the same access pattern the bar-tick thread uses.
+#
+# Like the other background threads, it is NOT joined from cleanup: a signal
+# may be delivered to this thread, and a thread joining itself deadlocks.
+# cleanup() calls flushDraftNow() for a final synchronous save instead, and
+# exit() tears the thread down. The stop flag lets the loop wind down promptly
+# on a graceful shutdown regardless.
+
+proc snapshotAndSaveDraft() =
+  ## Take a consistent (session path, editor text) snapshot under the input
+  ## lock and persist it as a draft. Called from the flusher thread and the
+  ## synchronous final flush. Uses tryAcquire so a flush triggered from a
+  ## signal handler (cleanup) can never block on a lock the input thread holds.
+  var sessionPtr: ptr Session = nil
+  var text = ""
+  if tryAcquire(inputStateLock):
+    try:
+      sessionPtr = inputSession
+      if inputEditor != nil:
+        text = inputEditor[].line.text
+    finally:
+      release inputStateLock
+  if sessionPtr != nil and sessionPtr[].savePath != "":
+    saveDraft(sessionPtr[], text)
+
+proc draftFlusherLoop() {.thread.} =
+  while not draftFlusherStop.load(moRelaxed):
+    if draftDirty.load(moAcquire):
+      draftDirty.store(false, moRelease)
+      {.cast(gcsafe).}:
+        try: snapshotAndSaveDraft()
+        except CatchableError: discard
+    sleep 250
+
+proc ensureDraftFlusherStarted*() =
+  ## Start the background draft flusher once. Idempotent. Started alongside
+  ## the persistent input thread so it is alive for the whole editing session.
+  if draftFlusherRunning: return
+  draftFlusherStop.store(false, moRelaxed)
+  createThread(draftFlusherThread, draftFlusherLoop)
+  draftFlusherRunning = true
+
+proc stopDraftFlusher*() =
+  ## Signal the flusher thread to stop (non-blocking; does not join). Safe to
+  ## call from any thread, including the flusher thread itself, since it never
+  ## waits on the thread. The loop checks the flag and exits within one sleep.
+  draftFlusherStop.store(true, moRelaxed)
+
+proc flushDraftNow*() =
+  ## Persist the current draft synchronously. Called from cleanup as the last
+  ## reliable save before teardown. No-op when no session path exists yet;
+  ## otherwise writes unconditionally — we are shutting down, so a redundant
+  ## write is cheap insurance against losing the in-flight prompt.
+  draftDirty.store(false, moRelease)
+  {.cast(gcsafe).}:
+    try: snapshotAndSaveDraft()
+    except CatchableError: discard
+
 proc setCommandStatusActive*(active: bool) =
   if active:
     commandSymbolIndex.store(0, moRelease)
@@ -1268,6 +1341,9 @@ proc inputThreadProc() {.thread.} =
         discard
       finally:
         release inputStateLock
+      # Mark the prompt draft dirty so the flusher thread persists the current
+      # editor text on its debounce. No I/O here — the input thread stays fast.
+      draftDirty.store(true, moRelease)
     edPtr[].onSubmit = proc(ed: var minline.LineEditor) =
       if inputTurnActive.load(moAcquire) and ed.line.text.startsWith(":"):
         let cmd = ed.line.text
@@ -1458,6 +1534,7 @@ proc ensureInputThreadStarted*() =
     inputEditorReady.store(false, moRelease)
     createThread(inputThread, inputThreadProc)
     inputThreadRunning = true
+    ensureDraftFlusherStarted()
     let deadline = epochTime() + 0.5
     while not inputEditorReady.load(moAcquire) and epochTime() < deadline:
       sleep 5

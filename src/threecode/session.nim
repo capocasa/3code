@@ -12,7 +12,7 @@
 ## On load, the full OpenAI-shape `messages` JsonNode array is reconstructed
 ## from the records so the session can be resumed mid-conversation with no loss.
 
-import std/[algorithm, json, os, strutils, tables, times]
+import std/[algorithm, json, os, strutils, tables, times, hashes]
 when defined(posix):
   import std/posix
 import types, prompts, util, actions
@@ -65,6 +65,54 @@ proc sessionIdFromPath*(path: string): string =
 proc newSessionPath*(): string =
   let stamp = now().format("yyyyMMdd'T'HHmmss")
   sessionDir() / (stamp & SessionExt)
+
+# ---------------------------------------------------------------------------
+# Prompt drafts.
+#
+# The text a user is currently typing in the prompt editor is not part of the
+# `.3log` transcript (it isn't a committed message yet) but losing it on an
+# unexpected shutdown — kill, power-off, Ctrl-C, SIGTERM — is exactly what a
+# draft is for. Keeping it out of the `.3log` means the audit transcript stays
+# clean and the draft can never be mistaken for a real user turn, and means no
+# phantom session file is created before the first real turn.
+#
+# Two scopes, chosen by whether a `.3log` exists yet (it first appears during
+# the first turn, at the saveSession in turns.nim):
+#
+#   * Pending (pre-first-turn): `drafts/pending/<cwd-hash>.prompt`. No session
+#     `.3log` exists, so there is no session id to key on. The draft is keyed
+#     by the working directory instead and loads into the next fresh session
+#     started in that directory. This is the "typed a prompt, got killed
+#     before sending" case.
+#   * Session (post-first-turn): `drafts/<sessionId>.prompt`. The `.3log`
+#     exists, so the draft is keyed by session id and restored on resume.
+#
+# Both are plain UTF-8 written atomically (temp + rename) on a debounce while
+# editing, and removed when the prompt is committed.
+
+proc draftDir*(): string =
+  userDataRoot() / "drafts"
+
+proc draftPathFor*(sessionPath: string): string =
+  draftDir() / (sessionIdFromPath(sessionPath) & ".prompt")
+
+proc pendingDraftDir*(): string =
+  draftDir() / "pending"
+
+proc pendingDraftPathFor*(cwd: string): string =
+  ## The pre-first-turn draft for a working directory. Keyed by a hash of the
+  ## cwd so arbitrary paths become short, filesystem-safe filenames. One per
+  ## directory: a singleton, overwritten as the user edits.
+  pendingDraftDir() / ($hash(cwd) & ".prompt")
+
+proc currentDraftPath*(session: Session): string =
+  ## The draft path for the live session: id-keyed once a `.3log` exists
+  ## (post-first-turn), otherwise the cwd-keyed pending path. This is the
+  ## single decision point for which scope a draft lives in.
+  if session.savePath != "" and fileExists(session.savePath):
+    draftPathFor(session.savePath)
+  else:
+    pendingDraftPathFor(session.cwd)
 
 # ---------------------------------------------------------------------------
 # Session locks.
@@ -541,6 +589,71 @@ proc saveSession*(session: Session, messages: JsonNode) =
     writeFile(session.savePath, renderSession(session, messages))
   except CatchableError as e:
     stderr.writeLine "3code: session save failed: " & e.msg
+
+proc writeDraftAtomic(path, text: string) =
+  ## Create parent dirs and atomically write `text` to `path` (temp + rename),
+  ## so a crash mid-write can never leave a truncated `.prompt` visible.
+  createDir(path.parentDir)
+  let tmp = path & ".tmp"
+  writeFile(tmp, text)
+  moveFile(tmp, path)
+
+proc removeIfExists(path: string) =
+  if fileExists(path):
+    try: removeFile(path) except OSError: discard
+
+proc saveDraft*(session: Session, text: string) =
+  ## Persist the current prompt-editor text as an atomic draft sidecar so an
+  ## unexpected shutdown never loses a half-typed prompt. Writes to whichever
+  ## scope `currentDraftPath` picks (cwd-keyed pending before the first turn,
+  ## session-id-keyed after). A blank draft removes the sidecar rather than
+  ## leaving an empty file, so an idle editor produces no draft. No-op without
+  ## a cwd to key on (and no savePath).
+  if session.savePath == "" and session.cwd == "": return
+  let path = currentDraftPath(session)
+  if text.len == 0:
+    removeIfExists(path)
+    return
+  try:
+    writeDraftAtomic(path, text)
+  except CatchableError as e:
+    stderr.writeLine "3code: draft save failed: " & e.msg
+
+proc clearDraft*(session: Session) =
+  ## Remove the prompt draft sidecar(s). Called when a prompt is committed so a
+  ## clean exit doesn't leave a stale draft. Removes both scopes — whichever was
+  ## active at submit time — so this is correct regardless of pre/post-first-turn
+  ## state. Cheap and a no-op when neither exists.
+  if session.savePath != "":
+    removeIfExists(draftPathFor(session.savePath))
+  if session.cwd != "":
+    removeIfExists(pendingDraftPathFor(session.cwd))
+
+proc loadDraft*(sessionPath: string): string =
+  ## Read the session-id-keyed prompt draft for `sessionPath`, or "" if there
+  ## is none or it is unreadable. Used by resume (post-first-turn drafts). The
+  ## empty string is indistinguishable from absence, which is fine: an empty
+  ## draft restores to an empty editor.
+  if sessionPath == "": return ""
+  let path = draftPathFor(sessionPath)
+  if not fileExists(path): return ""
+  try: readFile(path) except CatchableError: ""
+
+proc loadPendingDraft*(cwd: string): string =
+  ## Read the cwd-keyed pending prompt draft for `cwd`, or "" if there is none
+  ## or it is unreadable. Used to restore an unsent prompt from a previous,
+  ## killed-before-first-turn run when starting a fresh session in the same
+  ## directory.
+  if cwd == "": return ""
+  let path = pendingDraftPathFor(cwd)
+  if not fileExists(path): return ""
+  try: readFile(path) except CatchableError: ""
+
+proc clearPendingDraft*(cwd: string) =
+  ## Remove the cwd-keyed pending prompt draft for `cwd`. No-op when none
+  ## exists.
+  if cwd == "": return
+  removeIfExists(pendingDraftPathFor(cwd))
 
 proc buildToolLogFromMessages(messages: JsonNode,
                               exitByCallId: Table[string, int]): seq[ToolRecord] =
