@@ -1,4 +1,5 @@
 import std/[json, os, osproc, strutils, times, unittest]
+import posix except SocketHandle
 import tty_expect
 
 const VisualOutputRoot = "tests" / "output" / "tty"
@@ -89,6 +90,56 @@ proc sessionLogText(root: string): string =
     if kind == pcFile and path.endsWith(".3log"):
       result.add readFile(path)
       result.add "\n"
+
+proc draftPathForDir(root: string): string =
+  ## Path of the draft sidecar for the (single) session under a test root.
+  ## Before the first turn a draft lives under the cwd-keyed pending path
+  ## (drafts/pending/<hash>.prompt); after, under drafts/<id>.prompt. This
+  ## resolves against the test's isolated XDG_DATA_HOME so it never touches the
+  ## real draft store. Scans both locations, pending first.
+  let base = root / "data" / "3code" / "drafts"
+  let pendingDir = base / "pending"
+  if dirExists(pendingDir):
+    for kind, path in walkDir(pendingDir):
+      if kind == pcFile and path.endsWith(".prompt"):
+        return path
+  if dirExists(base):
+    for kind, path in walkDir(base):
+      if kind == pcFile and path.endsWith(".prompt"):
+        return path
+  pendingDir / "missing.prompt"
+
+proc hardKillAndWait(tty: TtySession) =
+  ## SIGTERM then SIGKILL the child and block until reaped. The harness's own
+  ## exit polling can miss a signal death when the editor holds unsubmitted
+  ## text, so this reaps directly via waitpid rather than relying on s.exited.
+  if tty.pid <= 0: return
+  discard kill(tty.pid, SIGTERM)
+  var waited = 0
+  var status: cint = 0
+  while waitpid(tty.pid, status, WNOHANG) != tty.pid and waited < 30:
+    sleep 50; inc waited
+  if waitpid(tty.pid, status, WNOHANG) != tty.pid:
+    discard kill(tty.pid, SIGKILL)
+    discard waitpid(tty.pid, status, 0)
+  tty.exited = true
+  tty.exitCode = -1
+
+proc discardClose(tty: TtySession) =
+  ## Close the harness's file descriptors without the wait-for-exit logic in
+  ## `close()`. Use after `hardKillAndWait`, which has already reaped the
+  ## child, so there is nothing left to wait on.
+  if tty.closed: return
+  discard close(tty.masterFd)
+  for fd in [tty.frameEventFd, tty.frameAckFd, tty.tickerCommandFd,
+             tty.tickerAckFd, tty.apiContinueFd]:
+    if fd > 0: discard close(fd)
+  tty.frameEventFd = 0
+  tty.frameAckFd = 0
+  tty.tickerCommandFd = 0
+  tty.tickerAckFd = 0
+  tty.apiContinueFd = 0
+  tty.closed = true
 
 proc stubEnv(root, responsesPath: string): seq[EnvVar] =
   @[
@@ -412,6 +463,48 @@ suite "terminal visual contract":
     # :q + a shutdown drain hangs on frame-sync events, so rely on the
     # committed-history assertion (as simple one-turn does) rather than
     # asserting a clean exit here.
+
+  test "prompt draft is restored after a killed process":
+    # Regression: a half-typed prompt must survive an unexpected shutdown
+    # (kill / power-off / Ctrl-C) so the work isn't lost. The editor's text is
+    # continuously persisted to a draft sidecar and reloaded on resume.
+    let root = newFixture("draft_restore")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[])
+
+    # Phase 1: start an idle REPL and type a prompt WITHOUT submitting it.
+    let draftText = "important unsent prompt"
+    let tty1 = startStub(root)
+    tty1.expect "❯"
+    tty1.send draftText
+    tty1.expect draftText
+    # Wait past the 250ms flusher debounce so the draft reaches disk. No turn
+    # has run, so this is the pre-first-turn case: the draft lands under the
+    # cwd-keyed pending path and no .3log exists yet.
+    sleep 800
+    tty1.drain(100)
+    let draftPath = draftPathForDir(root)
+    check fileExists(draftPath)
+    check readFile(draftPath) == draftText
+    # No session transcript exists for a conversation that never had a turn.
+    let sessDir = root / "data" / "3code" / "sessions"
+    var any3log = false
+    for kind, p in walkDir(sessDir):
+      if kind == pcFile and p.endsWith(".3log"): any3log = true
+    check not any3log
+
+    # Phase 2: simulate an unexpected shutdown (kill / power-off / Ctrl-C).
+    # SIGTERM triggers cleanup()'s final draft flush; SIGKILL is the fallback.
+    tty1.hardKillAndWait()
+    tty1.discardClose()
+
+    # Phase 3: start a FRESH session in the same directory (no --resume — there
+    # is nothing to resume). The pending draft is keyed by cwd, so the next
+    # fresh session in this directory picks it up and restores it.
+    let tty2 = startStub(root)
+    defer: tty2.close()
+    tty2.expect "restored unsent prompt draft"
+    tty2.expect draftText
 
   # In tty frame mode preStreamDelay is skipped (see testFrameMode in
   # api.nim); a response with waitForTestContinue holds the turn open on a

@@ -411,3 +411,113 @@ suite "session: session lock acquire/release":
     acquireSessionLock(tmpPath)
     check activeLockPath == lp
     check readFile(lp).strip == $getCurrentProcessId()
+
+suite "session: prompt draft sidecar":
+  var tmpDir: string
+  var savedXdg: string
+
+  setup:
+    # Redirect userDataRoot() into a temp dir so the test never touches the
+    # real ~/.local/share/3code draft store.
+    tmpDir = getTempDir() / "3code-test-draft-" & $getTime().toUnix()
+    savedXdg = getEnv("XDG_DATA_HOME")
+    putEnv("XDG_DATA_HOME", tmpDir)
+
+  teardown:
+    if savedXdg.len > 0: putEnv("XDG_DATA_HOME", savedXdg)
+    else: delEnv("XDG_DATA_HOME")
+    if dirExists(tmpDir):
+      try: removeDir(tmpDir) except OSError: discard
+
+  test "draftPathFor derives <id>.prompt from a session path":
+    let p = tmpDir / "3code" / "sessions" / "20250101T120000.3log"
+    check draftPathFor(p) == tmpDir / "3code" / "drafts" / "20250101T120000.prompt"
+
+  test "pendingDraftPathFor derives <mangled-cwd>.prompt":
+    let cwd = "/home/user/project"
+    check pendingDraftPathFor(cwd) ==
+      tmpDir / "3code" / "drafts" / "pending" / (mangleCwd(cwd) & ".prompt")
+
+  test "currentDraftPath is pending when no .3log exists yet":
+    # Pre-first-turn: savePath is set but the .3log is not on disk, so the
+    # draft lives under the cwd-keyed pending path.
+    let sess = Session(savePath: tmpDir / "3code" / "sessions" / "20250101T120000.3log",
+                       cwd: "/home/user/project")
+    check currentDraftPath(sess) == pendingDraftPathFor(sess.cwd)
+
+  test "currentDraftPath switches to session-id key once .3log exists":
+    # Post-first-turn: the .3log exists on disk, so the draft becomes
+    # session-id-keyed (restored on resume).
+    let savePath = tmpDir / "3code" / "sessions" / "20250101T120000.3log"
+    createDir(savePath.parentDir)
+    writeFile(savePath, "session exists")
+    let sess = Session(savePath: savePath, cwd: "/home/user/project")
+    check currentDraftPath(sess) == draftPathFor(savePath)
+
+  test "saveDraft writes the pending path before the .3log exists":
+    let sess = Session(savePath: tmpDir / "3code" / "sessions" / "20250101T120000.3log",
+                       cwd: "/home/user/project")
+    saveDraft(sess, "half-typed prompt about to be lost")
+    check fileExists(pendingDraftPathFor(sess.cwd))
+    check loadPendingDraft(sess.cwd) == "half-typed prompt about to be lost"
+    # No session-id draft exists yet.
+    check not fileExists(draftPathFor(sess.savePath))
+
+  test "saveDraft switches to session-id key after the .3log exists":
+    let savePath = tmpDir / "3code" / "sessions" / "20250101T120000.3log"
+    createDir(savePath.parentDir)
+    writeFile(savePath, "session exists")
+    let sess = Session(savePath: savePath, cwd: "/home/user/project")
+    saveDraft(sess, "in-flight during a turn")
+    check fileExists(draftPathFor(sess.savePath))
+    check loadDraft(sess.savePath) == "in-flight during a turn"
+    # Pending path was not (re)written by this save.
+    check not fileExists(pendingDraftPathFor(sess.cwd))
+
+  test "saveDraft with empty text removes the sidecar":
+    let sess = Session(savePath: tmpDir / "3code" / "sessions" / "20250101T120000.3log",
+                       cwd: "/home/user/project")
+    saveDraft(sess, "something")
+    check fileExists(pendingDraftPathFor(sess.cwd))
+    saveDraft(sess, "")
+    check not fileExists(pendingDraftPathFor(sess.cwd))
+
+  test "clearDraft removes both scopes":
+    # A pending draft plus a session draft both exist; clearDraft removes both
+    # so a committed prompt leaves neither behind regardless of which was live.
+    let cwd = "/home/user/project"
+    let savePath = tmpDir / "3code" / "sessions" / "20250101T120000.3log"
+    let sess = Session(savePath: savePath, cwd: cwd)
+    createDir(pendingDraftPathFor(cwd).parentDir)
+    writeFile(pendingDraftPathFor(cwd), "pending")
+    createDir(draftPathFor(savePath).parentDir)
+    writeFile(draftPathFor(savePath), "session")
+    clearDraft(sess)
+    check not fileExists(pendingDraftPathFor(cwd))
+    check not fileExists(draftPathFor(savePath))
+
+  test "clearDraft / clearPendingDraft are no-ops when nothing exists":
+    let sess = Session(savePath: tmpDir / "3code" / "sessions" / "x.3log",
+                       cwd: "/home/user/empty")
+    clearDraft(sess)
+    clearPendingDraft(sess.cwd)
+    check not fileExists(pendingDraftPathFor(sess.cwd))
+    check not fileExists(draftPathFor(sess.savePath))
+
+  test "saveDraft / loadDraft are no-ops on empty savePath and cwd":
+    let sess = Session(savePath: "", cwd: "")
+    saveDraft(sess, "ignored")
+    clearDraft(sess)
+    check loadDraft("") == ""
+    check loadPendingDraft("") == ""
+
+  test "loadPendingDraft returns empty string when no sidecar exists":
+    check loadPendingDraft("/home/user/nothing-here") == ""
+
+  test "saveDraft writes atomically (no stray .tmp left behind)":
+    let sess = Session(savePath: tmpDir / "3code" / "sessions" / "20250101T120000.3log",
+                       cwd: "/home/user/project")
+    saveDraft(sess, "atomic write")
+    let path = pendingDraftPathFor(sess.cwd)
+    check not fileExists(path & ".tmp")
+    check fileExists(path)

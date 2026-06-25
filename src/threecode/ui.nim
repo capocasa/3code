@@ -926,6 +926,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       emitFatPromptEvent clearPendingHintEvent()
       emitFatPromptEvent clearBarEvent()
       if session.savePath != "":
+        clearDraft(session)
         releaseSessionLock(session.savePath)
         session.savePath = newSessionPath()
         session.created = $now()

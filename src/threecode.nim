@@ -163,6 +163,14 @@ proc cleanup() {.noconv.} =
   fatprompt.restoreInputTermios()
   minline.restoreTerminal()
   restoreCancelTermios()
+  # Final best-effort save of the prompt draft so a kill/power-off/SIGTERM
+  # never loses a half-typed prompt. flushDraftNow uses tryAcquire inside so it
+  # is safe to call from a signal handler on any thread. The flusher thread is
+  # only signaled to stop (never joined): a signal can be delivered to the
+  # flusher thread itself, and joining oneself would deadlock. exit() tears it
+  # down like the other background threads.
+  fatprompt.stopDraftFlusher()
+  fatprompt.flushDraftNow()
   releaseActiveSessionLock()
 
 proc main() =
@@ -258,6 +266,7 @@ proc main() =
   let prompt = args.join(" ")
   var session: Session
   var messages: JsonNode
+  var restoredDraft = ""
 
   if resume:
     let path = resolveSessionPath(resumeId, safeCwd())
@@ -267,11 +276,23 @@ proc main() =
       else:
         die("session not found: " & resumeId, ExitConfig)
     (session, messages) = loadSessionFile(path)
+    # Recover any prompt that was in-flight when the previous process ended
+    # (kill, power-off, Ctrl-C). Only restored when no explicit --prompt was
+    # passed: the user's command-line intent wins over the recovered draft.
+    if prompt == "":
+      restoredDraft = loadDraft(session.savePath)
   else:
     messages = %* [{"role": "system", "content": DefaultSystemPrompt}]
     session.created = $now()
     session.cwd = safeCwd()
     session.savePath = if sessionOut != "": sessionOut else: newSessionPath()
+    # Recover a prompt drafted by a previous run in this directory that was
+    # killed before its first turn (so no `.3log` / session draft exists for
+    # it). It was saved under a cwd-keyed pending path; restore it here so the
+    # next fresh session picks it up. Skipped when an explicit --prompt was
+    # passed — the user's command-line intent wins over the recovered draft.
+    if prompt == "":
+      restoredDraft = loadPendingDraft(session.cwd)
 
   try:
     acquireSessionLock(session.savePath)
@@ -412,6 +433,7 @@ proc main() =
       editor.prefillText = ""
       editor.renderRow = 0
       editor.echoRows = 0
+      clearDraft(session)
       runTurnsInteractive(prof, messages, session)
       return handleBufferedAfterTurn()
     false
@@ -426,6 +448,12 @@ proc main() =
   if resume:
     stdout.write "\n"
     stdout.styledWriteLine styleDim, &"● resumed {sessionIdFromPath(session.savePath)}", resetStyle
+    if restoredDraft.len > 0:
+      # Surface that an unsent prompt was recovered, and prefill the editor so
+      # it reappears ready to edit or submit. `prefillText` is consumed on the
+      # next read; it's harmless if a `prompt != ""` branch runs a turn first.
+      editor.prefillText = restoredDraft
+      stdout.styledWriteLine styleDim, "● restored unsent prompt draft", resetStyle
     let window = contextWindowFor(prof)
     let lastUsage = replaySessionTail(messages, session.toolLog,
                                       window, prof.family)
@@ -447,13 +475,21 @@ proc main() =
     if prompt != "":
       messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
       refreshSystemPrompt(messages, prof)
+      clearDraft(session)
       runTurnsInteractive(prof, messages, session)
       if handleBufferedAfterTurn(): return
   else:
+    if restoredDraft.len > 0:
+      # A pending draft from a previous, killed-before-first-turn run in this
+      # directory was recovered: prefill the editor and surface it, mirroring
+      # the resume restore hint.
+      editor.prefillText = restoredDraft
+      stdout.styledWriteLine styleDim, "● restored unsent prompt draft", resetStyle
     paintInitialPrompt(prof)
     if prompt != "":
       messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
       refreshSystemPrompt(messages, prof)
+      clearDraft(session)
       runTurnsInteractive(prof, messages, session)
       if handleBufferedAfterTurn(): return
   while true:
@@ -518,6 +554,9 @@ proc main() =
     editor.renderSuffixCursor = false
     editor.renderRow = 0
     editor.echoRows = 0
+    # The prompt is now a committed user turn: drop the draft sidecar so a
+    # clean exit doesn't restore text the user already sent.
+    clearDraft(session)
     let turnStart = epochTime()
     runTurnsInteractive(prof, messages, session)
     if notifyEnabled and epochTime() - turnStart >= NotifyMinSeconds:
