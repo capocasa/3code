@@ -1,4 +1,4 @@
-===== 153 =====
+===== 768 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -10,8 +10,7 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ :help
-===== 970 =====
-❯ :help
+===== 468 =====
 
 : help
   3code the economical coding agent
@@ -29,11 +28,12 @@
   :provider rm X    remove provider X
   :reasoning        list reasoning levels for current model (* marks active)
   :reasoning X      switch reasoning level (low / medium / high)
+  :streaming        show streaming mode (on = live output, off = request/response)
+  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
-  :sessions         list sessions saved in the current directory
-  :sessions all     list every saved session (any directory)
+  :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -51,8 +51,7 @@
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯
-===== 345 =====
-❯ :help
+===== 744 =====
 
 : help
   3code the economical coding agent
@@ -70,11 +69,12 @@
   :provider rm X    remove provider X
   :reasoning        list reasoning levels for current model (* marks active)
   :reasoning X      switch reasoning level (low / medium / high)
+  :streaming        show streaming mode (on = live output, off = request/response)
+  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
-  :sessions         list sessions saved in the current directory
-  :sessions all     list every saved session (any directory)
+  :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -92,8 +92,7 @@
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
-===== 717 =====
-  :help             show this message
+===== 468 =====
   :tokens           show token usage for this session
   :clear            reset conversation (keeps system prompt)
   :model            list models for current provider (current marked with *)
@@ -105,11 +104,12 @@
   :provider rm X    remove provider X
   :reasoning        list reasoning levels for current model (* marks active)
   :reasoning X      switch reasoning level (low / medium / high)
+  :streaming        show streaming mode (on = live output, off = request/response)
+  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
-  :sessions         list sessions saved in the current directory
-  :sessions all     list every saved session (any directory)
+  :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -133,8 +133,7 @@
       alt
 
 ❯
-===== 367 =====
-  :help             show this message
+===== 954 =====
   :tokens           show token usage for this session
   :clear            reset conversation (keeps system prompt)
   :model            list models for current provider (current marked with *)
@@ -146,11 +145,12 @@
   :provider rm X    remove provider X
   :reasoning        list reasoning levels for current model (* marks active)
   :reasoning X      switch reasoning level (low / medium / high)
+  :streaming        show streaming mode (on = live output, off = request/response)
+  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
-  :sessions         list sessions saved in the current directory
-  :sessions all     list every saved session (any directory)
+  :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -174,18 +174,18 @@
       alt
 
 ❯ :model
-===== 380 =====
-  :provider X       switch to provider X (model defaults to first in its list)
+===== 567 =====
   :provider add     add a new provider (interactive, verified)
   :provider edit X  edit provider X (url, key, models)
   :provider rm X    remove provider X
   :reasoning        list reasoning levels for current model (* marks active)
   :reasoning X      switch reasoning level (low / medium / high)
+  :streaming        show streaming mode (on = live output, off = request/response)
+  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
-  :sessions         list sessions saved in the current directory
-  :sessions all     list every saved session (any directory)
+  :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -215,18 +215,18 @@
       stub-large
 
 ❯
-===== 265 =====
-  :provider X       switch to provider X (model defaults to first in its list)
+===== 726 =====
   :provider add     add a new provider (interactive, verified)
   :provider edit X  edit provider X (url, key, models)
   :provider rm X    remove provider X
   :reasoning        list reasoning levels for current model (* marks active)
   :reasoning X      switch reasoning level (low / medium / high)
+  :streaming        show streaming mode (on = live output, off = request/response)
+  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
-  :sessions         list sessions saved in the current directory
-  :sessions all     list every saved session (any directory)
+  :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -256,11 +256,12 @@
       stub-large
 
 ❯ :reasoning
-===== 883 =====
+===== 821 =====
+  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
+  :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
-  :sessions         list sessions saved in the current directory
-  :sessions all     list every saved session (any directory)
+  :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -292,16 +293,16 @@
 ❯ :reasoning
 
 : reasoning
-      low
-      medium
-      high
+    reasoning: (none)
+    experimental: level is free-form, type any value
 
 ❯
-===== 733 =====
+===== 801 =====
+  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
+  :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
-  :sessions         list sessions saved in the current directory
-  :sessions all     list every saved session (any directory)
+  :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -333,12 +334,12 @@
 ❯ :reasoning
 
 : reasoning
-      low
-      medium
-      high
+    reasoning: (none)
+    experimental: level is free-form, type any value
 
 ❯ :model stub-large
-===== 833 =====
+===== 689 =====
+  :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
   input:
@@ -369,9 +370,8 @@
 ❯ :reasoning
 
 : reasoning
-      low
-      medium
-      high
+    reasoning: (none)
+    experimental: level is free-form, type any value
 
 ❯ :model stub-large
 
@@ -379,7 +379,8 @@ provider  stub
 model     stub-large
 
 ❯
-===== 230 =====
+===== 929 =====
+  :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
   input:
@@ -410,9 +411,8 @@ model     stub-large
 ❯ :reasoning
 
 : reasoning
-      low
-      medium
-      high
+    reasoning: (none)
+    experimental: level is free-form, type any value
 
 ❯ :model stub-large
 
@@ -420,7 +420,8 @@ provider  stub
 model     stub-large
 
 ❯ :reasoning high
-===== 132 =====
+===== 841 =====
+  arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
   ctrl+u        clear the buffer
@@ -445,9 +446,8 @@ model     stub-large
 ❯ :reasoning
 
 : reasoning
-      low
-      medium
-      high
+    reasoning: (none)
+    experimental: level is free-form, type any value
 
 ❯ :model stub-large
 
@@ -461,7 +461,8 @@ model     stub-large
 reasoning high
 
 ❯
-===== 808 =====
+===== 600 =====
+  arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
   ctrl+u        clear the buffer
@@ -486,9 +487,8 @@ reasoning high
 ❯ :reasoning
 
 : reasoning
-      low
-      medium
-      high
+    reasoning: (none)
+    experimental: level is free-form, type any value
 
 ❯ :model stub-large
 
@@ -502,7 +502,8 @@ model     stub-large
 reasoning high
 
 ❯ :provider alt
-===== 917 =====
+===== 523 =====
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
@@ -522,9 +523,8 @@ reasoning high
 ❯ :reasoning
 
 : reasoning
-      low
-      medium
-      high
+    reasoning: (none)
+    experimental: level is free-form, type any value
 
 ❯ :model stub-large
 
@@ -543,7 +543,8 @@ provider  alt
 model     alt-model
 
 ❯
-===== 266 =====
+===== 167 =====
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
@@ -563,9 +564,8 @@ model     alt-model
 ❯ :reasoning
 
 : reasoning
-      low
-      medium
-      high
+    reasoning: (none)
+    experimental: level is free-form, type any value
 
 ❯ :model stub-large
 
@@ -584,7 +584,8 @@ provider  alt
 model     alt-model
 
 ❯ :tokens
-===== 474 =====
+===== 836 =====
+❯ :provider
 
 : providers
     * stub  [stub-model]
@@ -599,9 +600,8 @@ model     alt-model
 ❯ :reasoning
 
 : reasoning
-      low
-      medium
-      high
+    reasoning: (none)
+    experimental: level is free-form, type any value
 
 ❯ :model stub-large
 
@@ -625,7 +625,8 @@ model     alt-model
   no tokens used yet
 
 ❯
-===== 132 =====
+===== 403 =====
+❯ :provider
 
 : providers
     * stub  [stub-model]
@@ -640,9 +641,8 @@ model     alt-model
 ❯ :reasoning
 
 : reasoning
-      low
-      medium
-      high
+    reasoning: (none)
+    experimental: level is free-form, type any value
 
 ❯ :model stub-large
 
@@ -666,7 +666,8 @@ model     alt-model
   no tokens used yet
 
 ❯ :clear
-===== 591 =====
+===== 500 =====
+      alt
 
 ❯ :model
 
@@ -677,9 +678,8 @@ model     alt-model
 ❯ :reasoning
 
 : reasoning
-      low
-      medium
-      high
+    reasoning: (none)
+    experimental: level is free-form, type any value
 
 ❯ :model stub-large
 
@@ -707,7 +707,8 @@ model     alt-model
 ════════════════════════════════════════
 
 ❯
-===== 522 =====
+===== 631 =====
+      alt
 
 ❯ :model
 
@@ -718,9 +719,8 @@ model     alt-model
 ❯ :reasoning
 
 : reasoning
-      low
-      medium
-      high
+    reasoning: (none)
+    experimental: level is free-form, type any value
 
 ❯ :model stub-large
 
@@ -748,15 +748,15 @@ model     alt-model
 ════════════════════════════════════════
 
 ❯ :sessions
-===== 896 =====
+===== 616 =====
+    * stub-model
       stub-large
 
 ❯ :reasoning
 
 : reasoning
-      low
-      medium
-      high
+    reasoning: (none)
+    experimental: level is free-form, type any value
 
 ❯ :model stub-large
 
@@ -786,18 +786,18 @@ model     alt-model
 ❯ :sessions
 
 : sessions
-  no saved sessions for this directory  (try `:sessions all`)
+  no saved sessions for this directory
 
 ❯
-===== 533 =====
+===== 613 =====
+    * stub-model
       stub-large
 
 ❯ :reasoning
 
 : reasoning
-      low
-      medium
-      high
+    reasoning: (none)
+    experimental: level is free-form, type any value
 
 ❯ :model stub-large
 
@@ -827,13 +827,10 @@ model     alt-model
 ❯ :sessions
 
 : sessions
-  no saved sessions for this directory  (try `:sessions all`)
+  no saved sessions for this directory
 
 ❯ :sessions all
-===== 182 =====
-      low
-      medium
-      high
+===== 455 =====
 
 ❯ :model stub-large
 
@@ -863,18 +860,18 @@ model     alt-model
 ❯ :sessions
 
 : sessions
-  no saved sessions for this directory  (try `:sessions all`)
+  no saved sessions for this directory
 
 ❯ :sessions all
 
 : sessions
-  no saved sessions
+  no saved sessions for this directory
+
+
+  listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯
-===== 308 =====
-      low
-      medium
-      high
+===== 478 =====
 
 ❯ :model stub-large
 
@@ -904,18 +901,18 @@ model     alt-model
 ❯ :sessions
 
 : sessions
-  no saved sessions for this directory  (try `:sessions all`)
+  no saved sessions for this directory
 
 ❯ :sessions all
 
 : sessions
-  no saved sessions
+  no saved sessions for this directory
+
+
+  listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯ :log
-===== 495 =====
-
-provider  stub
-model     stub-large
+===== 974 =====
 
 ❯ :reasoning high
 
@@ -940,12 +937,15 @@ model     alt-model
 ❯ :sessions
 
 : sessions
-  no saved sessions for this directory  (try `:sessions all`)
+  no saved sessions for this directory
 
 ❯ :sessions all
 
 : sessions
-  no saved sessions
+  no saved sessions for this directory
+
+
+  listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯ :log
 
@@ -953,10 +953,7 @@ model     alt-model
     no tool calls yet
 
 ❯
-===== 113 =====
-
-provider  stub
-model     stub-large
+===== 187 =====
 
 ❯ :reasoning high
 
@@ -981,12 +978,15 @@ model     alt-model
 ❯ :sessions
 
 : sessions
-  no saved sessions for this directory  (try `:sessions all`)
+  no saved sessions for this directory
 
 ❯ :sessions all
 
 : sessions
-  no saved sessions
+  no saved sessions for this directory
+
+
+  listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯ :log
 
@@ -994,10 +994,7 @@ model     alt-model
     no tool calls yet
 
 ❯ :show
-===== 505 =====
-
-provider  stub
-model     stub-large
+===== 210 =====
 reasoning high
 
 ❯ :provider alt
@@ -1017,12 +1014,15 @@ model     alt-model
 ❯ :sessions
 
 : sessions
-  no saved sessions for this directory  (try `:sessions all`)
+  no saved sessions for this directory
 
 ❯ :sessions all
 
 : sessions
-  no saved sessions
+  no saved sessions for this directory
+
+
+  listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯ :log
 
@@ -1035,10 +1035,7 @@ model     alt-model
     no tool calls yet
 
 ❯
-===== 131 =====
-
-provider  stub
-model     stub-large
+===== 211 =====
 reasoning high
 
 ❯ :provider alt
@@ -1058,12 +1055,15 @@ model     alt-model
 ❯ :sessions
 
 : sessions
-  no saved sessions for this directory  (try `:sessions all`)
+  no saved sessions for this directory
 
 ❯ :sessions all
 
 : sessions
-  no saved sessions
+  no saved sessions for this directory
+
+
+  listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯ :log
 
@@ -1076,10 +1076,7 @@ model     alt-model
     no tool calls yet
 
 ❯ :compact
-===== 883 =====
-❯ :provider alt
-
-provider  alt
+===== 203 =====
 model     alt-model
 
 ❯ :tokens
@@ -1094,12 +1091,15 @@ model     alt-model
 ❯ :sessions
 
 : sessions
-  no saved sessions for this directory  (try `:sessions all`)
+  no saved sessions for this directory
 
 ❯ :sessions all
 
 : sessions
-  no saved sessions
+  no saved sessions for this directory
+
+
+  listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯ :log
 
@@ -1117,10 +1117,7 @@ model     alt-model
   unknown command: :compact  (try :help)
 
 ❯
-===== 315 =====
-❯ :provider alt
-
-provider  alt
+===== 267 =====
 model     alt-model
 
 ❯ :tokens
@@ -1135,12 +1132,15 @@ model     alt-model
 ❯ :sessions
 
 : sessions
-  no saved sessions for this directory  (try `:sessions all`)
+  no saved sessions for this directory
 
 ❯ :sessions all
 
 : sessions
-  no saved sessions
+  no saved sessions for this directory
+
+
+  listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯ :log
 
@@ -1158,10 +1158,7 @@ model     alt-model
   unknown command: :compact  (try :help)
 
 ❯ :summarize
-===== 716 =====
-❯ :tokens
-
-: tokens
+===== 430 =====
   no tokens used yet
 
 ❯ :clear
@@ -1171,12 +1168,15 @@ model     alt-model
 ❯ :sessions
 
 : sessions
-  no saved sessions for this directory  (try `:sessions all`)
+  no saved sessions for this directory
 
 ❯ :sessions all
 
 : sessions
-  no saved sessions
+  no saved sessions for this directory
+
+
+  listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯ :log
 
@@ -1199,10 +1199,7 @@ model     alt-model
   failed or not worth it
 
 ❯
-===== 139 =====
-❯ :tokens
-
-: tokens
+===== 981 =====
   no tokens used yet
 
 ❯ :clear
@@ -1212,12 +1209,15 @@ model     alt-model
 ❯ :sessions
 
 : sessions
-  no saved sessions for this directory  (try `:sessions all`)
+  no saved sessions for this directory
 
 ❯ :sessions all
 
 : sessions
-  no saved sessions
+  no saved sessions for this directory
+
+
+  listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯ :log
 
@@ -1240,7 +1240,7 @@ model     alt-model
   failed or not worth it
 
 ❯ :prompt
-===== 878 =====
+===== 443 =====
 
   Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping ta
 bles), hard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (
@@ -1268,12 +1268,12 @@ If searches don't turn up a clear answer, say so — don't guess.
   Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
   Available:
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
 
@@ -1281,7 +1281,7 @@ If searches don't turn up a clear answer, say so — don't guess.
 n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯
-===== 969 =====
+===== 236 =====
 
   Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping ta
 bles), hard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (
@@ -1309,12 +1309,12 @@ If searches don't turn up a clear answer, say so — don't guess.
   Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
   Available:
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
 
@@ -1322,7 +1322,7 @@ If searches don't turn up a clear answer, say so — don't guess.
 n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯ :toknes
-===== 788 =====
+===== 910 =====
   # Git
 
   Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`.
@@ -1345,12 +1345,12 @@ If searches don't turn up a clear answer, say so — don't guess.
   Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
   Available:
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
 
@@ -1363,7 +1363,7 @@ n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task 
   unknown command: :toknes  did you mean :tokens?
 
 ❯
-===== 976 =====
+===== 590 =====
   # Git
 
   Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`.
@@ -1386,12 +1386,12 @@ If searches don't turn up a clear answer, say so — don't guess.
   Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
   Available:
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
-  - /home/carlo/3w/1line/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
+  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
 

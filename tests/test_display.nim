@@ -59,6 +59,9 @@ suite "display: printSessionList cap":
     let msgs = %*[{"role": "system", "content": "sys"},
                   {"role": "user", "content": body}]
     writeFile(dir / (stamp & SessionExt), renderSession(sess, msgs))
+    # Mirror saveSession: index the new file under its cwd so
+    # listSessionPathsForCwd (which reads the index, not the dir) finds it.
+    appendSessionIndex(cwd, stamp)
 
   proc captureList(paths: seq[string]): string =
     # Mirror the `captureStdout` helper in test_streaming_view.nim: swap

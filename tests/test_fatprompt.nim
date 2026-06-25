@@ -37,7 +37,10 @@ suite "fat prompt frame model":
     p.setTokenBar(Usage(promptTokens: 20, totalTokens: 20), window = 1000)
     p.setEditor "hello"
 
-    p.checkFrame ["one", "two", "three", "", "○2%  ↑20", "❯ hello"]
+    # The ticker row is always reserved now (an empty gap between
+    # scrollback and the bar reads better than flush adjacency), so the
+    # bottom scrollback line drops out of view and the gap is two rows.
+    p.checkFrame ["two", "three", "", "", "○2%  ↑20", "❯ hello"]
 
   test "ticker reserves its own row above token bar":
     var p = initFatPrompt(width = 30, height = 6, window = 1000)
@@ -52,7 +55,7 @@ suite "fat prompt frame model":
                   "◐  ○2%  ↑20  7s", "❯ hello"]
 
     p.setTicker ""
-    p.checkFrame ["two", "three", "four", "", "◐  ○2%  ↑20  7s",
+    p.checkFrame ["three", "four", "", "", "◐  ○2%  ↑20  7s",
                   "❯ hello"]
 
   test "multiline editor grows reserved area and shrinking reveals scrollback":
@@ -62,11 +65,11 @@ suite "fat prompt frame model":
     p.setTokenBar(Usage(promptTokens: 20, totalTokens: 20), window = 1000)
     p.setEditor "alpha\nbeta"
 
-    p.checkFrame ["three", "four", "five", "", "○2%  ↑20", "❯ alpha",
+    p.checkFrame ["four", "five", "", "", "○2%  ↑20", "❯ alpha",
                   "  beta"]
 
     p.setEditor "short"
-    p.checkFrame ["two", "three", "four", "five", "", "○2%  ↑20",
+    p.checkFrame ["three", "four", "five", "", "", "○2%  ↑20",
                   "❯ short"]
 
   test "wrapped editor height reserves every visual row":
@@ -76,7 +79,7 @@ suite "fat prompt frame model":
     p.setTokenBar(Usage(promptTokens: 20, totalTokens: 20), window = 1000)
     p.setEditor "abcdefghijk"
 
-    p.checkFrame ["three", "four", "five", "", "○2%  ↑20", "❯ abcdefgh",
+    p.checkFrame ["four", "five", "", "", "○2%  ↑20", "❯ abcdefgh",
                   "  ijk"]
 
   test "wrapping keeps unicode runes intact":
@@ -85,7 +88,7 @@ suite "fat prompt frame model":
     p.setTokenBar(Usage(promptTokens: 20, totalTokens: 20), window = 1000)
     p.setEditor "abédefg"
 
-    p.checkFrame ["one", "", "○2%  ↑20", "❯ abédef", "  g"]
+    p.checkFrame ["", "", "○2%  ↑20", "❯ abédef", "  g"]
 
   test "token bar always keeps context and only shows nonzero token slots":
     var p = initFatPrompt(width = 40, height = 3, window = 128000)
@@ -114,10 +117,10 @@ suite "fat prompt frame model":
     for i in 1 .. 9:
       p.pushBashOutput "bash-line-" & $i
 
-    p.checkFrame ["❯ run command", "", "$ ... 2 lines omitted :show 4 for full",
+    p.checkFrame ["", "$ ... 2 lines omitted :show 4 for full",
                   "$ bash-line-3", "$ bash-line-4", "$ bash-line-5",
                   "$ bash-line-6", "$ bash-line-7", "$ bash-line-8",
-                  "$ bash-line-9", "", "○1%  ↑10", "❯ next"]
+                  "$ bash-line-9", "", "", "○1%  ↑10", "❯ next"]
 
   test "finished bash commits once and clears live viewport":
     var p = initFatPrompt(width = 50, height = 12, window = 1000)
@@ -140,8 +143,8 @@ suite "fat prompt frame model":
     p.setTokenBar(Usage(promptTokens: 100, totalTokens: 100), window = 1000)
     p.setEditor ""
 
-    p.checkFrame ["", "", "● answer", "○10%  ↑100  ↓7", "",
-                  "r src/file.nim", "", "○10%  ↑100", "❯ "]
+    p.checkFrame ["", "● answer", "○10%  ↑100  ↓7", "",
+                  "r src/file.nim", "", "", "○10%  ↑100", "❯ "]
 
 suite "fat prompt: unicode wrapping":
   proc wrappedRows(body: string): seq[string] =

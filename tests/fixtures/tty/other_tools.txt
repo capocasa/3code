@@ -1,4 +1,4 @@
-===== 594 =====
+===== 797 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -10,7 +10,7 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run other tool checks
-===== 953 =====
+===== 218 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -25,7 +25,7 @@
 
 ⣿ ○0% ↓6 0s
 ❯
-===== 921 =====
+===== 272 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -46,7 +46,7 @@ r notes.txt
   read-two
   read-three
 
-w /tmp/notes.txt
+w notes.txt
   --- /tmp/notes.txt
   +++ /tmp/notes.txt
   +new notes
@@ -81,7 +81,7 @@ p --- /tmp/applied.txt
 
 ⣿ ○0% ↓4 0s
 ❯
-===== 423 =====
+===== 891 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -102,7 +102,7 @@ r notes.txt
   read-two
   read-three
 
-w /tmp/notes.txt
+w notes.txt
   --- /tmp/notes.txt
   +++ /tmp/notes.txt
   +new notes

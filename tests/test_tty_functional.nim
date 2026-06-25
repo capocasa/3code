@@ -1001,7 +1001,7 @@ suite "terminal visual contract":
     tty.expectInHistory "Exercising non-bash tools."
     tty.expectInHistory "r notes.txt"
     tty.expectInHistory "read-three"
-    tty.expectInHistory "w /tmp/notes.txt"
+    tty.expectInHistory "w notes.txt"
     tty.expectInHistory "+new notes"
     tty.expectInHistory "p --- /tmp/notes.txt"
     tty.expectInHistory "+patched notes"

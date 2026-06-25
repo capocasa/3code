@@ -1,6 +1,7 @@
 /3code
 tests/test_*
 !tests/test_*.nim
+!tests/test_http_nonstream.nims
 tests/output/
 nimcache/
 config.local.nims

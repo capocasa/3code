@@ -1,4 +1,5 @@
 import std/[os, osproc, strutils, times, unittest]
+import threecode/session
 
 const binName = when defined(windows): "3code.exe" else: "3code"
 
@@ -51,13 +52,18 @@ suite "cli --list cap and short-flag stacking":
     return (outp.strip(), code)
 
   proc seedSession(stamp: string) =
-    # Minimal valid .3log under the isolated sessions dir.
+    # Minimal valid .3log under the isolated sessions dir, plus a cwd-index
+    # entry so the binary's O(1) `listSessionPathsForCwd` finds it without
+    # scanning. saveSession does both; the test must mirror that. The index
+    # is written directly under the isolated tmp root (not via the test
+    # process's own XDG_DATA_HOME, which is the developer's real one).
     let dir = tmp / "3code" / "sessions"
     createDir(dir)
     let path = dir / (stamp & ".3log")
     writeFile(path, "session " & stamp & " profile=stub cwd=" & tmp & "\n\n" &
                      "system\n  sys\n\n" &
                      "user\n  session " & stamp & "\n\n")
+    appendIndexAt(tmp / "3code" / "session-paths", tmp, stamp)
 
   test "-l reports no sessions for an empty directory":
     let r = runIn(tmp, "-l")
