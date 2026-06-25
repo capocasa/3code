@@ -287,6 +287,16 @@ proc consumeQueuedInput*(line: var string; echoRows: var int;
                          cmdWasQuit: var bool): bool =
   ## Consume the next submitted editor line, regardless of whether it was
   ## entered while the controller was idle or while a turn was active.
+  ##
+  ## Inherent-unpark: the idle input thread parks itself in `getCh` (returns
+  ## -1 -> EOFError) when `inputIdleSubmitted` is set. That park must be
+  ## released by *this* controller thread. Rather than rely on every call
+  ## site remembering `releaseIdleSubmittedInput()`, the release is folded
+  ## into polling: if we found nothing to consume yet the flag is still set,
+  ## the submitted line must already have been consumed on a prior pass (or
+  ## was never real text) — clear the park so the input thread stops
+  ## spinning in its EOFError busy-wait and resumes reading keystrokes.
+  ## Missing this means a frozen prompt: both threads sleep-loop forever.
   acquire inputStateLock
   try:
     cmdWasQuit = inputState.cmdWasQuit
@@ -309,6 +319,8 @@ proc consumeQueuedInput*(line: var string; echoRows: var int;
         inputState.queuedEchoRows = 0
         inputState.autoSend = false
         return true
+    if inputIdleSubmitted.load(moAcquire):
+      inputIdleSubmitted.store(false, moRelease)
   finally:
     release inputStateLock
 
@@ -1386,7 +1398,13 @@ proc inputThreadProc() {.thread.} =
         ed.pendingCaret = true
       else:
         ed.line.position = ed.line.text.len
-        if not inputTurnActive.load(moAcquire):
+        # Only park for a real line with text. An empty idle Enter sets
+        # neither queuedText nor autoSend, so the controller has nothing
+        # to consume and would never release the park. Parking here would
+        # wedge the input thread forever (getCh returns -1 -> EOFError ->
+        # busy-wait) and freeze the prompt. With no park, readLineWith
+        # just continues its loop for the next keystroke.
+        if not inputTurnActive.load(moAcquire) and ed.line.text.len > 0:
           inputIdleSubmitted.store(true, moRelease)
       ed.renderSuffix =
         if inputTurnActive.load(moAcquire) and inputState.autoSend:
