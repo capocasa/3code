@@ -751,7 +751,7 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
       cachedStreamConn = conn
       cachedStreamHostKey = hostKey
       cachedStreamFd = conn.getFd
-    conn.readTimeoutMs = QuietTooLongMs
+    conn.readTimeoutMs = QuietRecvWakeMs
     try:
       conn.sendRequest("POST", pathQuery, host,
                        headers = [("Authorization", "Bearer " & key),

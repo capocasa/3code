@@ -551,7 +551,7 @@ suite "terminal visual contract":
     tty.send "\n"
     tty.expectQuietLabel()
     tty.send "\x1b"
-    tty.expectInHistory "· interrupted"
+    tty.expectInHistory "interrupted by user"
     tty.expect "❯"
     tty.send "second"
     tty.send "\n"
@@ -587,7 +587,7 @@ suite "terminal visual contract":
     tty.send "\n"
     tty.expectQuietLabel()
     tty.send "\x03"
-    tty.expectInHistory "· interrupted"
+    tty.expectInHistory "interrupted by user"
     tty.expect "❯"
     tty.send "second"
     tty.send "\n"
@@ -629,7 +629,7 @@ suite "terminal visual contract":
     tty.expectInHistory "$ sleep 30"
     tty.drain(300)
     tty.send "\x03"
-    tty.expectInHistory "· interrupted"
+    tty.expectInHistory "interrupted by user"
     tty.expect "❯"
     # The regression: after interrupt the prompt must accept typing.
     tty.send "hello"
@@ -668,7 +668,7 @@ suite "terminal visual contract":
     # Interrupt before the network-quiet label appears (mid-stream).
     tty.drain(300)
     tty.send "\x03"
-    tty.expectInHistory "· interrupted"
+    tty.expectInHistory "interrupted by user"
     tty.expect "❯"
     tty.send "hello"
     tty.expectTypedAtPrompt("hello")
