@@ -145,7 +145,7 @@ Act first, explain after. Don't narrate your plan before executing it — just e
 
 # Tools
 
-- `bash(command, stdin?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command.
+- `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `write(path, body)` — create or overwrite a file with `body`.
 - `patch(path, edits)` — apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
 - `update_plan(items)` — update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
@@ -211,7 +211,7 @@ const QwenPreamble = """You are the Qwen edition of 3code, the economical coding
 
 # Tools
 
-- `bash(command, stdin?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command.
+- `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `write(path, body)` — create or overwrite a file with `body`.
 - `patch(path, edits)` — apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
 - `update_plan(items)` — update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
@@ -335,7 +335,7 @@ Reserve step-by-step reasoning for planning non-trivial work and debugging failu
 
 # Tools
 
-- `bash(command, stdin?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command.
+- `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `write(path, body)` — create or overwrite a file with `body`.
 - `patch(path, edits)` — apply targeted edits. `edits` is a list of `{search, replace}` objects; each `search` must match exactly once.
 - `update_plan(items)` — update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
@@ -580,7 +580,7 @@ Be concise and factual. Match structure to complexity. Use short headers only wh
 
 ## Shell commands
 
-You have a `shell` tool. Invoke as `shell({cmd: ["bash", "-lc", "<command>"]})`. Returns stdout, stderr, and exit code.
+You have a `shell` tool. Invoke as `shell({cmd: ["bash", "-lc", "<command>"]})`. Returns stdout, stderr, and exit code. For commands you know run long (builds, test suites, installs), pass `timeout` in seconds (default 120, ceiling 600).
 
 When using the shell, follow these guidelines:
 
@@ -757,7 +757,8 @@ let glmAndQwenTools = %*[
         "type": "object",
         "properties": {
           "command": {"type": "string", "description": "Shell command to run."},
-          "stdin": {"type": "string", "description": "Optional text piped to the command's stdin."}
+          "stdin": {"type": "string", "description": "Optional text piped to the command's stdin."},
+          "timeout": {"type": "integer", "description": "Optional max run time in seconds. Default 120, hard ceiling 600. Set higher only for commands you know run long (builds, test suites, installs)."}
         },
         "required": ["command"]
       }
@@ -848,7 +849,8 @@ let gptOssTools = %*[
             "type": "array",
             "items": {"type": "string"},
             "description": "Argv array — typically [\"bash\", \"-lc\", \"<command line>\"]."
-          }
+          },
+          "timeout": {"type": "integer", "description": "Optional max run time in seconds. Default 120, hard ceiling 600. Set higher only for commands you know run long (builds, test suites, installs)."}
         },
         "required": ["cmd"]
       }
