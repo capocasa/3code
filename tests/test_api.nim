@@ -2,17 +2,19 @@ import std/[json, os, osproc, strutils, unittest]
 import threecode/[api, prompts, types]
 
 suite "api request shaping":
-  test "z.ai glm does not set tool_stream":
+  test "z.ai glm sets tool_stream (streamhttp TLS truncation fixed)":
     # tool_stream makes GLM stream tool-call arguments as per-token deltas.
     # It was disabled as a workaround for a streamhttp TLS truncation bug
-    # that is now fixed (streamhttp >= 0.2.0); it stays off as a deliberate
-    # choice so tool args arrive whole in a single delta.
+    # that truncated the deltas mid-stream. That bug is fixed (streamhttp
+    # >= 0.2.0 drains OpenSSL's internal buffer before polling), so
+    # tool_stream is re-enabled for the first-party z.ai API. Streamed tool
+    # args now arrive complete.
     var body = %*{"stream": true}
     let p = Profile(name: "zai.glm-5.1", family: "glm", model: "glm-5.1")
 
     applyStreamingOptions(p, body)
 
-    check "tool_stream" notin body
+    check body{"tool_stream"}.getBool == true
 
   test "non-z.ai glm does not get z.ai-only tool_stream":
     var body = %*{"stream": true}

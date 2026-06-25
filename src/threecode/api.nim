@@ -708,26 +708,19 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
 proc applyStreamingOptions*(p: Profile, body: JsonNode) =
   ## Provider-specific additions for SSE fidelity.
   ##
-  ## `tool_stream` is currently disabled. When enabled, Z.ai/GLM streams
-  ## tool-call arguments as many tiny per-token deltas. It was disabled as a
-  ## workaround for a streamhttp TLS read bug (zero-length recv was treated
-  ## as clean EOF while OpenSSL still had buffered records), which truncated
-  ## streamed tool args. That bug is fixed in streamhttp >= 0.2.0 (the recv
-  ## loop now drains OpenSSL's internal buffer before polling), so
-  ## `tool_stream` can in principle be re-enabled. It is left off for now as
-  ## a deliberate choice rather than a workaround — tool args arrive whole
-  ## in a single delta, which is reliable and simple. Reasoning/thinking
-  ## still streams live regardless (gated by `stream:true` +
-  ## `thinking:enabled`, not `tool_stream`).
-  ##
-  ## To re-enable, replace the body with:
-  ##
-  ##   if p.family == "glm":
-  ##     case providerOf(p)
-  ##     of "zai", "zai-coding", "zaicode":
-  ##       body["tool_stream"] = %true
-  ##     else: discard
-  discard
+  ## Z.ai's first-party API (provider names `zai`, `zai-coding`, `zaicode`)
+  ## gets `tool_stream: true`, which streams tool-call arguments as per-token
+  ## deltas. This was disabled for a long time as a workaround for a
+  ## streamhttp TLS read bug that truncated the per-token deltas mid-stream;
+  ## that bug is fixed in streamhttp >= 0.2.0 (the recv loop drains
+  ## OpenSSL's internal buffer before polling), so streamed tool args now
+  ## arrive complete. Reasoning/thinking streams live regardless (gated by
+  ## `stream:true` + `thinking:enabled`, not `tool_stream`).
+  if p.family == "glm":
+    case providerOf(p)
+    of "zai", "zai-coding", "zaicode":
+      body["tool_stream"] = %true
+    else: discard
 
 proc applyGenerationDefaults*(p: Profile, body: JsonNode) =
   ## Known-good generation policy. Temperature is intentionally hardcoded

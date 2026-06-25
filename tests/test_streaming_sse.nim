@@ -185,14 +185,16 @@ suite "streaming SSE tool-call accumulation":
     server.socket.close()
     closeCachedStreamConn()
 
-  test "GLM tool_stream disabled: applyStreamingOptions must not set tool_stream":
+  test "GLM tool_stream set for z.ai (streamhttp truncation fixed)":
     # GLM-5.2 with tool_stream=true fragments tool-call arguments into many
-    # tiny per-token deltas, and the server frequently closes the connection
-    # mid-stream after the first delta. Disabling tool_stream makes arguments
-    # arrive in a single delta (reliable). Reasoning still streams live without
-    # it, so there is no downside.
+    # tiny per-token deltas. This was disabled to dodge a streamhttp TLS
+    # truncation bug; that bug is fixed (streamhttp >= 0.2.0), so tool_stream
+    # is back on for the first-party z.ai API. The fragmented tool_call
+    # reassembly tests above are the real regression guard for the per-token
+    # delta path this enables.
     let p = Profile(url: "stub://", family: "glm",
                     model: "glm-5.2", name: "zai.glm-5.2")
     let body = parseJson("{\"model\":\"glm-5.2\"}")
     applyStreamingOptions(p, body)
-    check not body.hasKey("tool_stream")
+    check body.hasKey("tool_stream")
+    check body{"tool_stream"}.getBool == true
