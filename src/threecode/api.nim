@@ -35,7 +35,7 @@ const httpStub {.booldefine.} = false
   ## (non-streaming), the provider stub tests everything else. Sum = full
   ## coverage.
 const ConnectTimeoutMs = 30_000
-const QuietRecvWakeMs* {.intdefine.} = 1_000
+const QuietRecvWakeMs* {.intdefine.} = 500
   ## How long each blocking `recv` may stall before waking. With
   ## streamhttp's `readTimeoutMs` set to this, `readLine` raises
   ## `StreamTimeoutError` periodically so the stream loop can re-check
