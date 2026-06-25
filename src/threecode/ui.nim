@@ -99,7 +99,8 @@ proc completionFor*(line: string): seq[string] =
         result.add shortModel(m)
     return
   if words[0] == ":reasoning" and words.len == 2:
-    for r in ReasoningLevels: result.add r
+    if not experimentalEnabled:
+      for r in ReasoningLevels: result.add r
     return
   if words[0] == ":streaming" and words.len == 2:
     result.add "on"
@@ -593,6 +594,11 @@ proc cmdReasoningList(prof: Profile) =
   if prov.name == "":
     hintLn "  no provider selected", resetStyle
     return
+  if experimentalEnabled:
+    let cur = if prof.reasoning == "": "(none)" else: prof.reasoning
+    hintLn "  reasoning: ", resetStyle, cur
+    hintLn "  experimental: level is free-form, type any value", resetStyle
+    return
   let levels = availableReasonings(prov, prof.family, prof.model)
   if levels.len == 0:
     hintLn &"  {prof.family}: no reasoning knob", resetStyle
@@ -607,10 +613,11 @@ proc cmdReasoningSelect(target: string, prof: var Profile) =
     errLn "  no provider selected"
     return
   let value = target.toLowerAscii
-  let levels = availableReasonings(prov, prof.family, prof.model)
-  if value notin levels:
-    errLn &"  unknown reasoning level: {target} (choose from {levels.join(\" \")})"
-    return
+  if not experimentalEnabled:
+    let levels = availableReasonings(prov, prof.family, prof.model)
+    if value notin levels:
+      errLn &"  unknown reasoning level: {target} (choose from {levels.join(\" \")})"
+      return
   prof.reasoning = value
   for i, pr in activeProviders:
     if pr.name == prov.name:

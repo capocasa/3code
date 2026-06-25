@@ -86,6 +86,27 @@ suite "config: resolveReasoning":
     let prof = Profile(name: "unknown.model", model: "model")
     check resolveReasoning(prov, prof) == ""
 
+  test "experimental skips known-good default":
+    let prov = ProviderRec(name: "zai")
+    let prof = Profile(name: "zai.glm-5.1", model: "glm-5.1")
+    experimentalEnabled = true
+    check resolveReasoning(prov, prof) == ""
+    experimentalEnabled = false
+
+  test "experimental still honors provider config":
+    let prov = ProviderRec(name: "zai", reasoning: "high")
+    let prof = Profile(name: "zai.glm-5.1", model: "glm-5.1")
+    experimentalEnabled = true
+    check resolveReasoning(prov, prof) == "high"
+    experimentalEnabled = false
+
+  test "experimental: availableReasonings is empty (free-form)":
+    let prov = ProviderRec(name: "zai")
+    experimentalEnabled = true
+    var empty: seq[string]
+    check availableReasonings(prov, "glm", "glm-5.1") == empty
+    experimentalEnabled = false
+
 suite "config: buildProfile":
   test "builds profile for valid provider and model":
     let prov = ProviderRec(name: "test", url: "https://api.test.com",

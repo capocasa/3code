@@ -308,17 +308,28 @@ proc resolveReasoning*(prov: ProviderRec, prof: Profile): string =
   ## 1. provider config `reasoning = ...` (user picked / persisted)
   ## 2. KnownGoodCombos default for this (provider, model)
   ## 3. "" — caller treats as "no wire param"
+  ##
+  ## In experimental mode the known-good default is skipped: reasoning
+  ## stays empty (no wire param) unless the user picks one. The effort
+  ## level for an uncured model can't be guessed, and an empty value is
+  ## the safe default: passing nothing beats passing a wrong knob.
   if prov.reasoning != "": return prov.reasoning
-  let dot = prof.name.find('.')
-  if dot >= 0:
-    let kg = knownGoodReasoning(prof.name[0 ..< dot], prof.model)
-    if kg != "": return kg
+  if not experimentalEnabled:
+    let dot = prof.name.find('.')
+    if dot >= 0:
+      let kg = knownGoodReasoning(prof.name[0 ..< dot], prof.model)
+      if kg != "": return kg
   ""
 
 proc availableReasonings*(prov: ProviderRec, family, model: string): seq[string] =
   ## Value set offered by `:reasoning` for the active provider+model. The
   ## per-provider config override wins; otherwise the model-aware default
   ## from the known-good table (glm has per-model value sets).
+  ##
+  ## In experimental mode the set is empty: the effort level is
+  ## free-form (the user types whatever the model's wire surface accepts),
+  ## so there is no fixed list to validate or tab-complete against.
+  if experimentalEnabled: return @[]
   if prov.reasonings.len > 0: prov.reasonings
   else: defaultReasoningsFor(prov.name, model, family)
 
