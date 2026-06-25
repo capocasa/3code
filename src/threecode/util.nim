@@ -1,4 +1,5 @@
-import std/[net, os, sequtils, strformat, strutils, unicode, times]
+import std/[net, os, sequtils, strformat, strutils, times]
+import std/unicode except strip
 import types
 import threecode/unicodewidth
 

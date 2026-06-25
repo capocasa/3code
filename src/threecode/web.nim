@@ -5,7 +5,8 @@
 ## No external binaries, no scripting runtimes, pure Nim httpclient + a
 ## hand-rolled HTML-to-text pass.
 
-import std/[httpclient, strutils, uri, unicode, tables]
+import std/[httpclient, strutils, uri, tables]
+import std/unicode except strip
 import util
 
 const UserAgent = "Mozilla/5.0 (X11; Linux x86_64) 3code/web"

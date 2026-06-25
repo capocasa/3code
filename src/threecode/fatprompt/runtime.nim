@@ -4,7 +4,8 @@
 ## turn is running. The turn controller calls these helpers directly and also
 ## registers them as API stream hooks. `api.nim` must not import this module.
 
-import std/[atomics, json, locks, os, strformat, strutils, terminal, times, unicode]
+import std/[atomics, json, locks, os, strformat, strutils, terminal, times]
+import std/unicode except strip
 when defined(posix):
   import std/posix except SocketHandle
   import posix/termios
