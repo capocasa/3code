@@ -10,6 +10,12 @@ var experimentalEnabled*: bool = false
   ## Set by `-x`/`--experimental`.
 var debugEnabled*: bool = false
   ## Set by `-D`/`--debug`.
+var streamingEnabled*: bool = true
+  ## Whether model calls use SSE streaming (`"stream": true`) or a single
+  ## request/response. Default on for live output. The non-streaming path is
+  ## the reliable fallback when a provider's SSE transport is flaky (empty
+  ## 200 replies, ticker dying mid-response — the streamhttp TLS-read race).
+  ## Toggled at runtime via `:streaming on/off`, persisted in `[settings]`.
 
 const
   ExitUsage* = 2

@@ -26,6 +26,14 @@ var
   fetchModelsHook*: FetchModelsHook
 
 const providerStub {.booldefine.} = false
+const httpStub {.booldefine.} = false
+  ## Test-only define. When true, `tests/stub/http.nim` is included and
+  ## `callHttp` is replaced by `callHttpStub` so the non-streaming path's
+  ## body→assistantMsg reconstruction, usage parsing, retry categorization,
+  ## and xml-tool-call promotion can be unit-tested without a network.
+  ## Pair with `providerStub=false`: the http stub tests the network layer
+  ## (non-streaming), the provider stub tests everything else. Sum = full
+  ## coverage.
 const ConnectTimeoutMs = 30_000
 const QuietRecvWakeMs* {.intdefine.} = 5_000
   ## How long each blocking `recv` may stall before waking. With
@@ -641,6 +649,208 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     result.errBody = nonSSE.join("\n")
   debugOut &"streamHttp end — contentStarted={contentStarted} accTools={accTools.len}"
 
+proc buildBatchAssistantMsg*(message, reasoning: string;
+                             toolCalls: JsonNode): JsonNode =
+  ## Build an assistant message from a non-streaming completion's
+  ## `choices[0].message`. Mirrors `buildStreamAssistantMsg`'s shape so the
+  ## rest of the pipeline (history replay, tool dispatch) sees a uniform
+  ## object regardless of transport. Returns nil only when the message is
+  ## genuinely empty (no content, no tool_calls, no reasoning) — the caller
+  ## treats that as an error to surface.
+  if message.len == 0 and reasoning.len == 0 and
+     (toolCalls == nil or toolCalls.kind != JArray or toolCalls.len == 0):
+    return nil
+  result = %*{"role": "assistant", "content": message}
+  # Same rationale as buildStreamAssistantMsg: DeepSeek-R1-style models
+  # require `reasoning_content` on every assistant message in history.
+  result["reasoning_content"] = %reasoning
+  if toolCalls != nil and toolCalls.kind == JArray and toolCalls.len > 0:
+    result["tool_calls"] = toolCalls
+
+proc readFullBody(conn: StreamConn): string =
+  ## Drain the response body into a single string. streamhttp's `readLine`
+  ## already handles chunked + content-length + until-close decoding, so we
+  ## just concatenate every body line until end-of-body. Used by the
+  ## non-streaming path where the whole JSON document arrives in one shot.
+  var line = ""
+  while conn.readLine(line):
+    if result.len > 0: result.add "\n"
+    result.add line
+
+when httpStub:
+  ## Test-only stub for the non-streaming transport. Included here (before
+  ## `callHttp`) so `callHttpStub` is in scope at the `callHttp` dispatch
+  ## site. Shares this module's scope (`StreamOutcome`,
+  ## `buildBatchAssistantMsg`, `parseUsage`, `hookProgress`, etc.) so the
+  ## stub returns the same shape the real `callHttp` builds.
+  include "../../tests/stub/http.nim"
+
+proc callHttp(url, key, bodyStr: string; baseLabel: string;
+              slurped: var int): StreamOutcome =
+  ## Non-streaming companion to `streamHttp`. Posts `bodyStr` (which carries
+  ## `"stream": false`) and reads the complete JSON completion in one shot —
+  ## no SSE, no recv-loop race. Same `StreamConn` cache and stale-conn retry
+  ## as `streamHttp` so connection reuse and interrupt behavior are uniform.
+  ##
+  ## Why this exists: streamhttp's TLS read path occasionally treats a
+  ## zero-length `recv` as clean EOF while OpenSSL still has buffered
+  ## records, cutting the SSE stream mid-response (empty 200 replies, ticker
+  ## dying after a few tokens). The straight request/response path reads the
+  ## full body before returning, so it is immune to that race. Streaming
+  ## stays the default for live output; this is the reliable fallback when
+  ## `:streaming off` is set.
+  when httpStub:
+    return callHttpStub(url, key, bodyStr, baseLabel, slurped)
+  debugOut "callHttp start"
+  let u = try: parseUri(url) except CatchableError as e:
+    result.errMsg = "bad url: " & e.msg
+    return
+  let host = u.hostname
+  let plainHttp =
+    when defined(testPlainHttp):
+      u.scheme == "http" and (host == "127.0.0.1" or host == "localhost")
+    else:
+      false
+  if u.scheme != "https" and not plainHttp:
+    result.errMsg = "only https supported, got: " & u.scheme
+    return
+  let port =
+    if u.port.len > 0: Port(parseInt(u.port))
+    elif plainHttp: Port(80)
+    else: Port(443)
+  let pathQuery =
+    block:
+      var pq = if u.path.len > 0: u.path else: "/"
+      if u.query.len > 0: pq.add "?" & u.query
+      pq
+
+  let hostKey = host & ":" & $port.uint16
+  var conn: StreamConn
+  var resp: StreamResponse
+  var attempt = 0
+  while true:
+    if isInterrupted():
+      closeCachedStreamConn()
+      result.errMsg = "interrupted by user"
+      return
+    inc attempt
+    if cachedStreamConn != nil and cachedStreamHostKey == hostKey:
+      conn = cachedStreamConn
+    else:
+      closeCachedStreamConn()
+      try:
+        if plainHttp:
+          conn = connectPlain(host, port, timeoutMs = ConnectTimeoutMs)
+        else:
+          conn = connectTls(host, port, timeoutMs = ConnectTimeoutMs,
+                            caFile = bundledCaFile())
+      except CatchableError as e:
+        result.errMsg =
+          (if plainHttp: "connect failed: " else: "TLS connect failed: ") & e.msg
+        return
+      cachedStreamConn = conn
+      cachedStreamHostKey = hostKey
+      cachedStreamFd = conn.getFd
+    conn.readTimeoutMs = QuietTooLongMs
+    try:
+      conn.sendRequest("POST", pathQuery, host,
+                       headers = [("Authorization", "Bearer " & key),
+                                  ("Content-Type", "application/json"),
+                                  ("Accept", "application/json")],
+                       body = bodyStr)
+      hookProviderActivity()
+      resp = conn.readResponseHead()
+      hookProviderActivity()
+      break
+    except CatchableError as e:
+      # Same stale-cache recovery as streamHttp: drop and retry once.
+      closeCachedStreamConn()
+      if attempt >= 2:
+        result.errMsg = "request failed: " & e.msg
+        return
+  result.statusCode = resp.status
+  result.retryAfter = resp.headers.getOrDefault("retry-after")
+
+  var body = ""
+  var readErr = ""
+  block readLoop:
+    while true:
+      try:
+        body = readFullBody(conn)
+        break readLoop
+      except StreamTimeoutError:
+        if isInterrupted() or isNetworkQuiet():
+          closeCachedStreamConn()
+          break readLoop
+        continue
+      except CatchableError as e:
+        readErr = e.msg
+        closeCachedStreamConn()
+        break readLoop
+  hookProviderActivity()
+
+  if isNetworkQuiet():
+    closeCachedStreamConn()
+    result.errMsg = "network quiet too long (no data for " &
+      $(QuietTooLongMs div 1000) & "s)"
+    return
+  if isInterrupted():
+    closeCachedStreamConn()
+    result.errMsg = "interrupted by user"
+    return
+  if readErr.len > 0:
+    result.errMsg = "response read: " & readErr
+    return
+
+  if result.statusCode != 200:
+    result.errBody = body
+    return
+
+  # Parse the single JSON completion object.
+  let j = try: parseJson(body)
+           except CatchableError:
+             result.errBody = body
+             result.errMsg = "response parse: " & getCurrentExceptionMsg()
+             return
+  if j == nil or j.kind != JObject:
+    result.errBody = body
+    result.errMsg = "response not a JSON object"
+    return
+  let choices = j{"choices"}
+  if choices == nil or choices.kind != JArray or choices.len == 0:
+    # Provider returned 200 with no choices — usually an inline error body
+    # (e.g. z.ai's overloaded message can slip through on some paths).
+    result.errBody = body
+    if j{"error"} != nil:
+      result.errMsg = "api error in 200 body"
+    return
+  let message = choices[0]{"message"}
+  if message == nil or message.kind != JObject:
+    result.errBody = body
+    result.errMsg = "response missing choices[0].message"
+    return
+  let content = message{"content"}.getStr("")
+  var reasoning = message{"reasoning_content"}.getStr("")
+  if reasoning.len == 0: reasoning = message{"reasoning"}.getStr("")
+  var toolCalls =
+    if message{"tool_calls"} != nil and message{"tool_calls"}.kind == JArray:
+      message{"tool_calls"}
+    else: newJArray()
+  slurped = content.len + reasoning.len
+  hookProgress(baseLabel, slurped)
+
+  result.assistantMsg = buildBatchAssistantMsg(content, reasoning, toolCalls)
+  if result.assistantMsg == nil:
+    # 200 with a well-formed but empty message — treat as an error so the
+    # turn loop surfaces it instead of silently advancing with nothing.
+    result.errBody = body
+    result.errMsg = "empty completion (no content, no tool calls)"
+    return
+  let u2 = j{"usage"}
+  if u2 != nil and u2.kind == JObject:
+    result.usage = parseUsage(u2)
+  debugOut &"callHttp end — content={content.len} tools={toolCalls.len}"
+
 proc stripInternalFields*(messages: JsonNode): JsonNode =
   ## Return a wire-safe copy of `messages` with internal bookkeeping fields
   ## removed. `usage` is stored on assistant messages for local replay but
@@ -835,13 +1045,12 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   var body = %*{
     "model": p.model,
     "messages": wireMessages,
-    "stream": true,
+    "stream": streamingEnabled,
   }
-  # Include usage in streaming responses only for providers that support it (e.g., OpenAI).
-  # Fireworks and other non‑OpenAI endpoints reject the `include_usage` field.
-  # Include usage in streaming responses for all providers except Fireworks,
-  # which rejects the `include_usage` field.
-  if providerOf(p) != "fireworks":
+  # `stream_options.include_usage` is a streaming-only field; non-streaming
+  # completions always carry `usage` in the response body. Fireworks rejects
+  # the field outright, so it is gated on both streaming and provider.
+  if streamingEnabled and providerOf(p) != "fireworks":
     body["stream_options"] = %*{"include_usage": true}
   body["tools"] = setup(p).tools
   body["tool_choice"] = %"auto"
@@ -876,8 +1085,13 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   while true:
     inc attempt
     var slurped = 0
-    outcome = streamHttp(p.url & "/chat/completions", p.key, bodyStr,
-                        baseLabel, slurped, xmlToolCallsFallback(p))
+    outcome =
+      if streamingEnabled:
+        streamHttp(p.url & "/chat/completions", p.key, bodyStr,
+                   baseLabel, slurped, xmlToolCallsFallback(p))
+      else:
+        callHttp(p.url & "/chat/completions", p.key, bodyStr,
+                 baseLabel, slurped)
     if outcome.errMsg == "interrupted by user":
       hookStopSpinner()
       if outcome.assistantMsg == nil:

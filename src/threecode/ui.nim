@@ -14,8 +14,8 @@ import types, util, prompts, session, config, api, compact, display, minline,
   fatprompt
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
-                      ":reasoning", ":prompt", ":show", ":log", ":sessions",
-                      ":summarize",
+                      ":reasoning", ":streaming", ":prompt", ":show", ":log",
+                      ":sessions", ":summarize",
                       ":q", ":quit", ":exit"]
 
 type WizardReadLineHook* = proc(prompt: string, hidden,
@@ -52,6 +52,9 @@ proc classifyCommand*(cmd: string): CommandKind =
   case name
   of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":prompt":
     ckSafeImmediate
+  of ":streaming":
+    if parts.len == 0 or (parts.len == 1 and parts[0] == "list"): ckSafeImmediate
+    else: ckMutating
   of ":provider":
     if parts.len == 0:
       ckSafeImmediate
@@ -97,6 +100,10 @@ proc completionFor*(line: string): seq[string] =
     return
   if words[0] == ":reasoning" and words.len == 2:
     for r in ReasoningLevels: result.add r
+    return
+  if words[0] == ":streaming" and words.len == 2:
+    result.add "on"
+    result.add "off"
     return
 
 proc readRequired*(editor: var minline.LineEditor, prompt: string,
@@ -625,6 +632,36 @@ proc cmdReasoning(arg: string, prof: var Profile) =
   else:
     errLn "  usage: :reasoning [<level>]"
 
+proc cmdStreamingList() =
+  let mark = if streamingEnabled: "on" else: "off"
+  hintLn "  streaming: ", mark,
+    "  (on = live SSE output, off = single request/response)", resetStyle
+
+proc cmdStreamingSelect(target: string) =
+  case target.toLowerAscii
+  of "on":
+    streamingEnabled = true
+  of "off":
+    streamingEnabled = false
+  else:
+    errLn &"  unknown value: {target} (choose on or off)"
+    return
+  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  cmdStreamingList()
+
+proc cmdStreaming(arg: string) =
+  let parts = arg.splitWhitespace()
+  case parts.len
+  of 0:
+    cmdStreamingList()
+  of 1:
+    if parts[0] == "list":
+      cmdStreamingList()
+    else:
+      cmdStreamingSelect(parts[0])
+  else:
+    errLn "  usage: :streaming [on|off]"
+
 proc nearestCommand(name: string): string =
   var bestDist = high(int)
   for c in CommandNames:
@@ -652,6 +689,8 @@ proc commandTitle(name, arg: string; ok: bool): string =
     if arg.len == 0: "models" else: "profile"
   of ":reasoning":
     if arg.len == 0: "reasoning" else: "profile"
+  of ":streaming":
+    "streaming"
   else:
     name.strip(chars = {':'})
 
@@ -901,6 +940,8 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       session.profileName = prof.name
     of ":reasoning":
       cmdReasoning(arg, prof)
+    of ":streaming":
+      cmdStreaming(arg)
     of ":prompt":
       cmdResponse buildSystemPrompt(prof)
     of ":show":

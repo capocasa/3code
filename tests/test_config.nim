@@ -1,5 +1,5 @@
-import std/[os, unittest]
-import threecode/[config, web]
+import std/[os, strutils, unittest]
+import threecode/[config, types, web]
 
 suite "config: search-url":
   var tmp = ""
@@ -27,3 +27,48 @@ suite "config: search-url":
 
   test "activeSearchUrl defaults to DefaultSearchUrl":
     check activeSearchUrl == DefaultSearchUrl
+
+suite "config: streaming toggle":
+  var tmp = ""
+
+  setup:
+    tmp = getTempDir() / "3code-test-streaming.ini"
+    streamingEnabled = true  # reset to default between tests
+
+  teardown:
+    removeFile(tmp)
+    streamingEnabled = true
+
+  test "streamingEnabled stays on when [settings] omits the key":
+    writeFile(tmp, "[settings]\ncurrent = \"p.m\"\n")
+    discard parseConfigFile(tmp)
+    check streamingEnabled == true
+
+  test "parseConfigFile sets streaming off when [settings] streaming = off":
+    writeFile(tmp, "[settings]\nstreaming = \"off\"\n")
+    discard parseConfigFile(tmp)
+    check streamingEnabled == false
+
+  test "parseConfigFile keeps streaming on when [settings] streaming = on":
+    streamingEnabled = false
+    writeFile(tmp, "[settings]\nstreaming = \"on\"\n")
+    discard parseConfigFile(tmp)
+    check streamingEnabled == true
+
+  test "parseConfigFile accepts boolean dialect (yes/1/false/0)":
+    writeFile(tmp, "[settings]\nstreaming = \"no\"\n")
+    discard parseConfigFile(tmp)
+    check streamingEnabled == false
+    writeFile(tmp, "[settings]\nstreaming = \"1\"\n")
+    discard parseConfigFile(tmp)
+    check streamingEnabled == true
+
+  test "writeConfigFile persists streaming off and not when on":
+    streamingEnabled = false
+    writeConfigFile(tmp, "p.m", @[])
+    let raw = readFile(tmp)
+    check raw.find("streaming = \"off\"") >= 0
+    streamingEnabled = true
+    writeConfigFile(tmp, "p.m", @[])
+    let raw2 = readFile(tmp)
+    check raw2.find("streaming") < 0  # on is the default — clean config

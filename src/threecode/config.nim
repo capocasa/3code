@@ -221,6 +221,13 @@ proc parseConfigFile*(path: string): (string, string, seq[ProviderRec]) =
           of "on", "true", "yes", "1": notifyEnabled = true
           of "off", "false", "no", "0": notifyEnabled = false
           else: discard
+        of "streaming":
+          # Same boolean dialect as `notify`. Default is on (set in types.nim);
+          # an explicit `off` opts into the reliable request/response path.
+          case v.toLowerAscii
+          of "on", "true", "yes", "1": streamingEnabled = true
+          of "off", "false", "no", "0": streamingEnabled = false
+          else: discard
         else: discard
       of "provider":
         case e.key
@@ -255,6 +262,11 @@ proc writeConfigFile*(path: string, current: string,
   buf.add "current = " & quoteVal(current) & "\n"
   if activeSearchUrl != "" and activeSearchUrl != DefaultSearchUrl:
     buf.add "search-url = " & quoteVal(activeSearchUrl) & "\n"
+  # Persist the streaming toggle only when off — on is the default, so a
+  # user who never changes it keeps a clean config (same rationale as
+  # search-url). This also matches `streamingEnabled`'s default in types.nim.
+  if not streamingEnabled:
+    buf.add "streaming = \"off\"\n"
   for pr in providers:
     buf.add "\n[provider]\n"
     buf.add "name = " & quoteVal(pr.name) & "\n"
