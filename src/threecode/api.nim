@@ -35,11 +35,13 @@ const httpStub {.booldefine.} = false
   ## (non-streaming), the provider stub tests everything else. Sum = full
   ## coverage.
 const ConnectTimeoutMs = 30_000
-const QuietRecvWakeMs* {.intdefine.} = 5_000
+const QuietRecvWakeMs* {.intdefine.} = 1_000
   ## How long each blocking `recv` may stall before waking. With
   ## streamhttp's `readTimeoutMs` set to this, `readLine` raises
   ## `StreamTimeoutError` periodically so the stream loop can re-check
   ## the quiet/interrupt flags. Must be well under `QuietTooLongMs`.
+  ## Kept at 1s so user interrupts (Ctrl-C) are honored within ~1s;
+  ## the extra poll overhead is negligible for trickle-rate streams.
 const QuietTooLongMs* {.intdefine.} = 180_000
   ## If a streaming response goes this long with no data from the
   ## provider, the turn is aborted. `posix.shutdown(fd)` from another
