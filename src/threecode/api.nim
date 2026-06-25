@@ -708,19 +708,19 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
 proc applyStreamingOptions*(p: Profile, body: JsonNode) =
   ## Provider-specific additions for SSE fidelity.
   ##
-  ## `tool_stream` is intentionally disabled. When enabled, Z.ai/GLM streams
-  ## tool-call arguments as many tiny per-token deltas. Our HTTP stack
-  ## (streamhttp) treats a zero-length TLS recv as clean EOF even when
-  ## OpenSSL has buffered records, so the stream dies after the first delta
-  ## and the arguments arrive truncated (e.g. just `{"`). The tool then runs
-  ## with no input.
+  ## `tool_stream` is currently disabled. When enabled, Z.ai/GLM streams
+  ## tool-call arguments as many tiny per-token deltas. It was disabled as a
+  ## workaround for a streamhttp TLS read bug (zero-length recv was treated
+  ## as clean EOF while OpenSSL still had buffered records), which truncated
+  ## streamed tool args. That bug is fixed in streamhttp >= 0.2.0 (the recv
+  ## loop now drains OpenSSL's internal buffer before polling), so
+  ## `tool_stream` can in principle be re-enabled. It is left off for now as
+  ## a deliberate choice rather than a workaround — tool args arrive whole
+  ## in a single delta, which is reliable and simple. Reasoning/thinking
+  ## still streams live regardless (gated by `stream:true` +
+  ## `thinking:enabled`, not `tool_stream`).
   ##
-  ## Without `tool_stream`, GLM sends the complete arguments in a single
-  ## delta, which is reliable. Reasoning/thinking still streams live (that is
-  ## gated by `stream:true` + `thinking:enabled`, not `tool_stream`).
-  ##
-  ## To re-enable once the streamhttp TLS read race is fixed (see
-  ## ~/p/streamhttp/plan.md), replace the body with:
+  ## To re-enable, replace the body with:
   ##
   ##   if p.family == "glm":
   ##     case providerOf(p)

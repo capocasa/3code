@@ -2,11 +2,11 @@ import std/[json, os, osproc, strutils, unittest]
 import threecode/[api, prompts, types]
 
 suite "api request shaping":
-  test "z.ai glm does not set tool_stream (streamhttp truncation workaround)":
+  test "z.ai glm does not set tool_stream":
     # tool_stream makes GLM stream tool-call arguments as per-token deltas.
-    # The streamhttp TLS read path drops these mid-stream, leaving the tool
-    # running with truncated arguments. Disabled until streamhttp's SSL
-    # read loop is fixed; see ~/p/streamhttp/plan.md.
+    # It was disabled as a workaround for a streamhttp TLS truncation bug
+    # that is now fixed (streamhttp >= 0.2.0); it stays off as a deliberate
+    # choice so tool args arrive whole in a single delta.
     var body = %*{"stream": true}
     let p = Profile(name: "zai.glm-5.1", family: "glm", model: "glm-5.1")
 
