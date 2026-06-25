@@ -410,7 +410,7 @@ const ClearBarBelowBytes* = "\n\r\x1b[J\x1b[1A\x1b[3G"
 
 proc receiptBarBytes*(label: string): string =
   if label.len == 0: return ""
-  GreyFg & "  " & label & Reset
+  CyanFg & "  " & label & Reset
 
 proc clampToWidth*(s: string; width: int): string =
   ## Truncate `s` (which may contain ANSI CSI escapes) so its visible
