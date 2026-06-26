@@ -115,7 +115,7 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
     client.headers["Authorization"] = "Bearer " & p.key
     client.headers["Content-Type"] = "application/json"
     let resp = client.request(p.url & "/chat/completions",
-                              httpMethod = HttpPost, body = $body)
+                              httpMethod = HttpPost, body = sanitizeUtf8($body))
     status = resp.code.int
     respBody = resp.body
   except CatchableError as e:

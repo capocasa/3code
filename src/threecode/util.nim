@@ -116,6 +116,66 @@ proc utf8ByteCutEnd*(s: string, n: int): string =
     inc start
   s[start .. ^1]
 
+proc sanitizeUtf8*(s: string): string =
+  ## Return a copy of `s` that is valid UTF-8: every invalid byte or
+  ## malformed sequence is replaced with a single U+FFFD, and every valid
+  ## codepoint (including multibyte) passes through untouched.
+  ##
+  ## Strings that cross a system boundary into a JSON request body must be
+  ## valid UTF-8. Tool output and resumed-session text can carry bytes that
+  ## aren't — e.g. a command that printed a truncated multi-byte rune left a
+  ## lone continuation byte in its result, which `std/json` emits verbatim
+  ## into the serialized body. The provider then rejects the whole body with
+  ## a 400, and since the offending message recurs in every subsequent
+  ## request (tool messages can't be dropped) the session is bricked until
+  ## the `.3log` is hand-edited. This is the boundary guard that stops that.
+  result = newStringOfCap(s.len)
+  var i = 0
+  while i < s.len:
+    let b = s[i].uint8
+    if b < 0x80:
+      result.add s[i]; inc i; continue
+    let seqLen =
+      if b shr 5 == 0b110: 2
+      elif b shr 4 == 0b1110: 3
+      elif b shr 3 == 0b11110: 4
+      else: 0 # lone continuation byte, or a lead byte > 0xF4
+    if seqLen == 0:
+      result.add "\uFFFD"; inc i; continue
+    var ok = true
+    if i + seqLen > s.len: ok = false
+    else:
+      case seqLen
+      of 2:
+        if (s[i + 1].uint8 and 0xC0'u8) != 0x80'u8: ok = false
+        elif b <= 0xC1'u8: ok = false # overlong (encodes < 0x80)
+      of 3:
+        if (s[i + 1].uint8 and 0xC0'u8) != 0x80'u8 or
+           (s[i + 2].uint8 and 0xC0'u8) != 0x80'u8: ok = false
+        elif b == 0xE0'u8 and (s[i + 1].uint8 and 0xE0'u8) == 0x80'u8:
+          ok = false # overlong
+        elif b == 0xED'u8 and (s[i + 1].uint8 and 0xE0'u8) == 0xA0'u8:
+          ok = false # surrogate (U+D800..U+DFFF)
+      of 4:
+        if (s[i + 1].uint8 and 0xC0'u8) != 0x80'u8 or
+           (s[i + 2].uint8 and 0xC0'u8) != 0x80'u8 or
+           (s[i + 3].uint8 and 0xC0'u8) != 0x80'u8: ok = false
+        elif b == 0xF0'u8 and (s[i + 1].uint8 and 0xF0'u8) == 0x80'u8:
+          ok = false # overlong
+        elif b == 0xF4'u8 and s[i + 1].uint8 > 0x8F'u8:
+          ok = false # > U+10FFFF
+        elif b > 0xF4'u8: ok = false
+      else: discard
+    if ok:
+      for k in 0 ..< seqLen: result.add s[i + k]
+      inc i, seqLen
+    else:
+      # Drop only the bad lead byte; any orphaned continuation bytes that
+      # follow get re-checked on the next iteration and each become its own
+      # U+FFFD, matching WHATWG/W3C decoder best practice (substituting one
+      # replacement char per maximal subpart of an ill-formed sequence).
+      result.add "\uFFFD"; inc i
+
 proc clipMiddle*(s: string, head, tail: int): string =
   if s.len <= head + tail: s
   else: utf8ByteCut(s, head) & "\n... [truncated] ...\n" & utf8ByteCutEnd(s, tail)

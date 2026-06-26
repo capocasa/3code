@@ -1053,7 +1053,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   applyGenerationDefaults(p, body)
   if p.reasoning.len > 0:
     applyReasoning(p, body)
-  let bodyStr = $body
+  let bodyStr = sanitizeUtf8($body)
   if "\"usage\"" in bodyStr:
     stderr.writeLine "3code: BUG: usage in wireMessages"
     for i, m in wireMessages:

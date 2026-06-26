@@ -1,4 +1,4 @@
-import std/[strutils, unicode, unittest]
+import std/[json, strutils, unicode, unittest]
 import threecode/util
 
 suite "util: utf8ByteCut":
@@ -29,6 +29,53 @@ suite "util: utf8ByteCutEnd":
 
   test "handles empty string":
     check utf8ByteCutEnd("", 5) == ""
+
+suite "util: sanitizeUtf8":
+  test "passes ASCII through unchanged":
+    check sanitizeUtf8("plain ascii") == "plain ascii"
+
+  test "preserves valid multibyte codepoints":
+    check sanitizeUtf8("\u276F caf\u00E9") == "\u276F caf\u00E9"
+
+  test "empty string stays empty":
+    check sanitizeUtf8("") == ""
+
+  test "replaces a lone continuation byte with U+FFFD":
+    # The exact poison: a lone 0xAF (the final byte of ❯ = E2 9D AF) sitting
+    # mid-ASCII after its lead bytes were dropped from captured tool output.
+    var s = "editorText: "
+    s.add chr(0xAF)
+    s.add " this"
+    let r = sanitizeUtf8(s)
+    check r == "editorText: \uFFFD this"
+
+  test "replaces a truncated multi-byte lead with U+FFFD":
+    # E2 9D without the AF tail — the truncated rune that produced this bug.
+    var s = "x"
+    s.add chr(0xE2)
+    s.add chr(0x9D)
+    let r = sanitizeUtf8(s)
+    check r == "x\uFFFD\uFFFD"
+
+  test "result is valid UTF-8":
+    var s = "a"
+    s.add chr(0xAF)
+    s.add "b"
+    let r = sanitizeUtf8(s)
+    # U+FFFD round-trips through rune iteration without error.
+    check r.toRunes.len == 3
+
+  test "a serialized body with invalid UTF-8 parses as JSON after sanitize":
+    # Mirrors how both call sites use it: the body is serialized first, then
+    # sanitized, and the result must still be valid JSON the provider accepts.
+    var poison = "editorText: "
+    poison.add chr(0xAF)
+    poison.add " done"
+    let body = %*{"model": "m",
+                   "messages": [%*{"role": "tool", "content": poison}]}
+    let wire = sanitizeUtf8($body)
+    let back = parseJson(wire)
+    check back{"messages"}[0]{"content"}.getStr == "editorText: \uFFFD done"
 
 suite "util: clipMiddle":
   test "returns full string when within limit":
