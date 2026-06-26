@@ -41,10 +41,13 @@ jobs:
             platform: windows
 
     runs-on: ${{ matrix.os }}
+    # On a manual workflow_dispatch with a target filter, skip matrix legs that
+    # don't match. `inputs` is only populated for workflow_dispatch, so guard it
+    # (the || short-circuits before inputs.target is read on push/PR events).
     if: |
       github.event_name != 'workflow_dispatch' ||
       inputs.target == 'all' ||
-      inputs.target == matrix.platform
+      matrix.platform == inputs.target
 
     # git-bash on every runner. The Windows default (pwsh) does not
     # propagate non-zero exit codes from native exes like nimble, so a
