@@ -306,6 +306,57 @@ suite "minline editor: newline insertion (multiline)":
     check ed.history.entries[0] == "line1\nline2"
     check ed.history.entries[1] == "line1\nline2 edited"
 
+  test "typing after a queued submit edits the text instead of wiping it":
+    # Models the runtime's turn-active submit: Enter queues the text, hides
+    # the native caret (pendingCaret), and shows the hourglass suffix. The
+    # next keystroke must cancel the queue and keep editing the same text
+    # with the cursor where it was, not wipe the line.
+    var ed = initEditor()
+    var cancelled = 0
+    ed.deferSubmit = true
+    ed.onSubmit = proc(e: var LineEditor) =
+      e.line.position = e.line.text.len
+      e.pendingCaret = true
+      e.renderSuffix = " ⏣"
+    ed.onCancelDeferredSubmit = proc(e: var LineEditor) =
+      inc cancelled
+
+    let d = newDriver()
+    d.pushString "hello"
+    d.push Enter      # queue; pendingCaret on, suffix shown, caret hidden
+    d.pushString " world"  # cancels the queue, edits in place
+    d.push CtrlC
+    expect InputCancelled:
+      discard d.run(ed, prompt = "> ")
+    check cancelled == 1
+    check ed.line.text == "hello world"
+    check ed.line.position == 11
+    check rowText(d.grid, 0).contains("hello world")
+    check not rowText(d.grid, 0).contains("⏣")
+
+  test "backspace after a queued submit edits the text, cursor stays":
+    var ed = initEditor()
+    var cancelled = 0
+    ed.deferSubmit = true
+    ed.onSubmit = proc(e: var LineEditor) =
+      e.line.position = e.line.text.len
+      e.pendingCaret = true
+      e.renderSuffix = " ⏣"
+    ed.onCancelDeferredSubmit = proc(e: var LineEditor) =
+      inc cancelled
+
+    let d = newDriver()
+    d.pushString "hello"
+    d.push Enter      # queue; caret parked at end
+    d.push Backspace  # cancels queue, deletes trailing 'o'
+    d.pushString "o!"
+    d.push CtrlC
+    expect InputCancelled:
+      discard d.run(ed, prompt = "> ")
+    check cancelled == 1
+    check ed.line.text == "hello!"
+    check ed.line.position == 6
+
   test "backspace at start of second logical line joins lines":
     var ed = initEditor()
     let d = newDriver()

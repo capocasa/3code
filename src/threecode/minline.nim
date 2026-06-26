@@ -151,6 +151,7 @@ type
     completionCallback*: proc(ed: LineEditor): seq[string] {.closure.}
     onMutate*: proc(ed: var LineEditor) {.closure.}
     onSubmit*: SubmitCallback
+    onCancelDeferredSubmit*: proc(ed: var LineEditor) {.closure.}
     preRedraw*: proc(ed: var LineEditor) {.closure.}
     postRedraw*: proc(ed: var LineEditor) {.closure.}
     redrawWrappedExternally*: bool
@@ -1312,15 +1313,18 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
       ed.submitted = true
       return ed.line.text
     if ed.pendingCaret:
-      # Any keystroke after a deferred submit ends the pending caret:
-      # clear the submitted line, restore the native caret, and drop the
-      # pending glyph so the new keystroke begins on a fresh prompt.
+      # Typing after a queued submit cancels the queue but keeps the
+      # buffered text and cursor position, so the new keystroke edits in
+      # place rather than starting over. Drop the pending glyph, restore
+      # the native caret, recompute the editor height from the text alone
+      # (the suffix is gone), and let the caller clear its queue state.
       ed.pendingCaret = false
       ed.renderSuffix = ""
       ed.renderSuffixCursor = false
-      ed.line = Line(text: "", position: 0)
-      ed.renderRow = 0
-      ed.echoRows = 0
+      if ed.onCancelDeferredSubmit != nil:
+        ed.onCancelDeferredSubmit(ed)
+      ed.echoRows = totalRows(ed.line.text, ed.promptW, ed.contPromptW,
+                              max(2, ed.width))
       fullRedraw(ed)
       ed.write "\x1b[?25h"
     if c1 == 8 or c1 == 127:
