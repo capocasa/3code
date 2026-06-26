@@ -2,8 +2,20 @@
 ## input thread. Before the fix, onSubmit parked the thread on
 ## inputIdleSubmitted even for empty text, and the controller had nothing to
 ## consume, so both threads spun in sleep-loops forever.
-import std/[json, os, strutils, unittest]
+import std/[json, os, osproc, strutils, unittest]
 import tty_expect
+
+proc ensureStubBinary(): string =
+  let pid = $getCurrentProcessId()
+  result = getTempDir() / ("3code_tty_stub_" & pid)
+  if fileExists(result):
+    removeFile(result)
+  let cacheDir = getTempDir() / ("3code_tty_stub_cache_" & pid)
+  createDir(cacheDir)
+  let cmd = "nim c -d:ssl -d:providerStub -d:QuietThresholdMs=1000 --threads:on --path:src --nimcache:" &
+    cacheDir.quoteShell & " -o:" & result.quoteShell & " src/threecode.nim"
+  let (outp, code) = execCmdEx(cmd)
+  doAssert code == 0, outp
 
 const Root = "tests/output/tty/empty_enter_freeze"
 
@@ -48,7 +60,8 @@ suite "idle enter freeze regression":
        "usage": {"promptTokens": 5, "completionTokens": 2,
                   "totalTokens": 7, "cachedTokens": 0}}
     ]))
-    let tty = newTtySession("/tmp/3code_tty_stub",
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
                             args = ["-x", "-i"],
                             cwd = root / "run",
                             env = stubEnv(root, root / "run" / "stub_responses.json"))
