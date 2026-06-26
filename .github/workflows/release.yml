@@ -72,6 +72,7 @@ jobs:
 
       - name: Run tests
         run: nimble test
+        timeout-minutes: 20
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
@@ -134,8 +135,13 @@ jobs:
           path: ${{ matrix.artifact }}.${{ matrix.ext }}
 
   pages:
+    # `needs: build` alone blocks publishing whenever any matrix leg fails
+    # (e.g. Windows DLL packaging) or hangs (a stuck tty test), freezing the
+    # install script's artifact supply for every platform. `always()` lets this
+    # job run regardless; download-artifact then only pulls artifacts from
+    # successful legs, and the assemble step tolerates whichever are missing.
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -155,19 +161,26 @@ jobs:
       - name: Assemble site
         run: |
           mkdir -p site/main
-          cp dl/3code-linux-amd64.tar.gz     site/main/
-          cp dl/3code-linux-arm64.tar.gz     site/main/
-          cp dl/3code-macos-universal.tar.gz site/main/
-          cp dl/3code-windows-amd64.zip      site/main/
+          # download-artifact only pulls artifacts from jobs that succeeded,
+          # so a failed matrix leg (e.g. Windows DLL packaging) simply leaves
+          # its file absent here. Tolerate that with `|| true` and build the
+          # index from whatever actually landed.
+          cp dl/3code-linux-amd64.tar.gz     site/main/ 2>/dev/null || true
+          cp dl/3code-linux-arm64.tar.gz     site/main/ 2>/dev/null || true
+          cp dl/3code-macos-universal.tar.gz site/main/ 2>/dev/null || true
+          cp dl/3code-windows-amd64.zip      site/main/ 2>/dev/null || true
           cat > site/index.html <<EOF
           <!doctype html><meta charset=utf-8><title>3code main builds</title>
           <h1>3code main builds</h1>
           <p>Per-commit builds from <code>main</code> (commit ${GITHUB_SHA}).</p>
           <ul>
-            <li><a href="main/3code-linux-amd64.tar.gz">3code-linux-amd64.tar.gz</a></li>
-            <li><a href="main/3code-linux-arm64.tar.gz">3code-linux-arm64.tar.gz</a></li>
-            <li><a href="main/3code-macos-universal.tar.gz">3code-macos-universal.tar.gz</a></li>
-            <li><a href="main/3code-windows-amd64.zip">3code-windows-amd64.zip</a></li>
+          EOF
+          for f in site/main/*; do
+            [ -f "$f" ] || continue
+            b=$(basename "$f")
+            echo "            <li><a href=\"main/$b\">$b</a></li>" >> site/index.html
+          done
+          cat >> site/index.html <<EOF
           </ul>
           EOF
 
