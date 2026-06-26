@@ -1050,6 +1050,22 @@ suite "terminal visual contract":
     tty.expectInHistory "Second reply line."
     tty.expectTokenBar(["○", "↑10", "↓5"])
     tty.drain(300)
+    # The token bar is only painted while the turn is active. Sample the
+    # *stable idle* state — wait for the caret to reappear on the live `❯`
+    # prompt — so frames[^1] is the idle repaint, not a transient spinner
+    # tick that can sample a mid-turn frame and report a false maxRun>1.
+    # The stranded-gap bug persists into the idle frame (it is committed
+    # scrollback), so maxRun <= 1 still catches it.
+    let idleDeadline = epochTime() + 5.0
+    block waitForIdle:
+      while epochTime() < idleDeadline:
+        tty.drain(20)
+        if tty.frames.len > 0:
+          let f = tty.frames[^1]
+          if not f.cursorHidden and f.cursorRow >= 0 and
+              f.cursorRow < f.rows.len and "❯" in f.rows[f.cursorRow]:
+            break waitForIdle
+        sleep 10
     # The final frame must not have >1 consecutive blank rows anywhere in
     # scrollback: that is the visual symptom of the extra-line bug.
     let rows = if tty.frames.len > 0: tty.frames[^1].rows else: @[]

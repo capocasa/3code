@@ -571,6 +571,18 @@ proc resetPromptInputAfterEmpty*(echoRows: int) =
       hideRealCaretBytes() &
         barFooterBytes(currentBarLabel, currentTermW()))
 
+proc resetEditorRowModel(ed: ptr minline.LineEditor) =
+  ## Clear the live editor's text and row geometry so it presents as a single
+  ## empty row. The submit path calls this inside the terminal-write lock,
+  ## atomically with the transcript append, so background repainters cannot
+  ## observe a stale multi-row editor after a prompt is committed as scrollback.
+  if ed == nil: return
+  ed[].line = minline.Line(text: "", position: 0)
+  ed[].renderSuffix = ""
+  ed[].renderSuffixCursor = false
+  ed[].renderRow = 0
+  ed[].echoRows = 0
+
 proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
                             beforeRepaint: proc() = nil;
                             reserveFooter = true;
@@ -589,17 +601,39 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
   if beforeRepaint != nil:
     beforeRepaint()
   let newFooter = footerFrame(fatPromptState)
-  termengine.appendTranscript(
-    transcriptBytes,
-    liveEditorFooterAnchored(),
-    inputThreadRunning,
-    inputEditor,
-    oldFooter,
-    newFooter,
-    0,
-    restoreEditor,
-    reserveFooter,
-    transcriptOwnsSpacing)
+  # The submit path (restoreEditor=false) commits the prompt as scrollback and
+  # then drops the editor chrome. Reset the editor's row model inside the same
+  # terminal-write critical section as the transcript append: without this,
+  # there is a window between appendTranscript (which reads the editor's
+  # pre-submit row model) and the controller's later reset where a background
+  # repainter (spinner/bar-tick) can observe a stale multi-row editor and
+  # over-walk its clear into the just-committed scrollback rows.
+  if not restoreEditor and inputEditor != nil:
+    withTerminalWriteLock:
+      termengine.appendTranscript(
+        transcriptBytes,
+        liveEditorFooterAnchored(),
+        inputThreadRunning,
+        inputEditor,
+        oldFooter,
+        newFooter,
+        0,
+        restoreEditor,
+        reserveFooter,
+        transcriptOwnsSpacing)
+      resetEditorRowModel(inputEditor)
+  else:
+    termengine.appendTranscript(
+      transcriptBytes,
+      liveEditorFooterAnchored(),
+      inputThreadRunning,
+      inputEditor,
+      oldFooter,
+      newFooter,
+      0,
+      restoreEditor,
+      reserveFooter,
+      transcriptOwnsSpacing)
   if reserveFooter and transcriptBytes.hasNonNewlineBytes and currentBarLabel.len > 0:
     emitFatPromptEvent setBarEvent(currentBarLabel, hasGap = true)
   debugOut "writeTranscriptWithFatPrompt exit"
