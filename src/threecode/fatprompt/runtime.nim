@@ -885,8 +885,7 @@ proc flushDraftNow*() =
     except CatchableError: discard
 
 proc setCommandStatusActive*(active: bool) =
-  if active:
-    commandSymbolIndex.store(0, moRelease)
+  commandSymbolIndex.store(0, moRelease)
   commandStatusActive.store(active, moRelaxed)
 
 proc startSpinner*(label: string) =
