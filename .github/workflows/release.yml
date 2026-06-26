@@ -19,22 +19,13 @@ on:
 
 jobs:
   build:
+    # TEMPORARY: windows-only while the windows leg is being fixed.
+    # Restore the full matrix (linux x86_64/arm64, macos, windows) once
+    # the windows build is green again.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04
-            artifact: 3code-linux-amd64
-            ext: tar.gz
-            platform: linux
-          - os: ubuntu-22.04-arm
-            artifact: 3code-linux-arm64
-            ext: tar.gz
-            platform: linux
-          - os: macos-latest
-            artifact: 3code-macos-universal
-            ext: tar.gz
-            platform: macos
           - os: windows-latest
             artifact: 3code-windows-amd64
             ext: zip

@@ -16,7 +16,7 @@
 ## The read cache tracks the last-seen mtime and size of every `read` so
 ## `patch` can reject stale edits when the file changed since last read.
 
-import std/[json, os, strformat, strutils, tables, times]
+import std/[json, os, sequtils, strformat, strutils, tables, times]
 import types, util, shell, web, config, streamexec
 
 # ---------------------------------------------------------------------------
@@ -217,21 +217,97 @@ proc nearestLineHint(content, search: string): string =
   let trimmed = if snip.len > 80: utf8ByteCut(snip, 77) & "..." else: snip
   &" — nearest match in file: line {bestLine}: \"{trimmed}\""
 
+type DiffOp = enum dopEqual, dopDel, dopIns
+
+proc lcsOps(a, b: seq[string]): seq[DiffOp] =
+  ## Standard dynamic-programming LCS walk: emits one op per source line
+  ## of a (dopEqual / dopDel) plus one dopIns per inserted b line, in
+  ## order. O(n*m) table; fine for the file sizes 3code diffs.
+  let n = a.len
+  let m = b.len
+  var dp = newSeqWith(n + 1, newSeq[int](m + 1))
+  for i in countdown(n - 1, 0):
+    for j in countdown(m - 1, 0):
+      if a[i] == b[j]:
+        dp[i][j] = dp[i + 1][j + 1] + 1
+      else:
+        dp[i][j] = max(dp[i + 1][j], dp[i][j + 1])
+  var i = 0
+  var j = 0
+  while i < n and j < m:
+    if a[i] == b[j]:
+      result.add dopEqual; inc i; inc j
+    elif dp[i + 1][j] >= dp[i][j + 1]:
+      result.add dopDel; inc i
+    else:
+      result.add dopIns; inc j
+  while i < n:
+    result.add dopDel; inc i
+  while j < m:
+    result.add dopIns; inc j
+
 proc computeDiff*(before, after, label: string): string =
+  ## Native unified-diff producer. Shelling out to the external `diff`
+  ## binary breaks on Windows (no `diff` on stock installs) and on systems
+  ## where it isn't on PATH, so we compute the hunks in-process via LCS.
+  ## Output is consumed by the green/red painter in display.nim and by
+  ## tests that assert changed text appears in the result.
   if before == after: return ""
-  let tmp = getTempDir() / ("3code_diff_" & $getCurrentProcessId() & "_" & $epochTime().int64)
-  createDir(tmp)
-  let ap = tmp / "a"
-  let bp = tmp / "b"
-  writeFile(ap, before)
-  writeFile(bp, after)
-  let dp = tmp / "d"
-  let wrapped = &"diff -u --label \"a/{label}\" --label \"b/{label}\" \"{ap}\" \"{bp}\" > \"{dp}\" 2>/dev/null"
-  discard execShellCmd(wrapped)
-  result =
-    if fileExists(dp): readFile(dp)
-    else: ""
-  try: removeDir(tmp) except CatchableError: discard
+  let a = before.splitLines(keepEol = false)
+  let b = after.splitLines(keepEol = false)
+  let ops = lcsOps(a, b)
+
+  # Map each op to its source index in a / b so we can place context.
+  var opA = newSeq[int](ops.len)
+  var opB = newSeq[int](ops.len)
+  block:
+    var ia = 0
+    var ib = 0
+    for k, op in ops:
+      opA[k] = ia
+      opB[k] = ib
+      case op
+      of dopEqual: inc ia; inc ib
+      of dopDel: inc ia
+      of dopIns: inc ib
+
+  const Ctx = 3
+  result = "--- a/" & label & "\n+++ b/" & label & "\n"
+
+  # Group consecutive non-equal ops into hunks, each with its own header
+  # and `Ctx` lines of context on either side.
+  var k = 0
+  while k < ops.len:
+    if ops[k] == dopEqual:
+      inc k; continue
+    let hunkStart = k
+    while k < ops.len and ops[k] != dopEqual: inc k
+    let k1 = k
+    # Expand the window by `Ctx` equal ops backward and forward.
+    var lo = hunkStart
+    var back = 0
+    while lo > 0 and back < Ctx and ops[lo - 1] == dopEqual:
+      dec lo; inc back
+    var hi = k1
+    var fwd = 0
+    while hi < ops.len and fwd < Ctx and ops[hi] == dopEqual:
+      inc hi; inc fwd
+    # Hunk range counts: number of a-side and b-side lines in [lo, hi).
+    var aLines = 0
+    var bLines = 0
+    for x in lo ..< hi:
+      case ops[x]
+      of dopEqual: inc aLines; inc bLines
+      of dopDel: inc aLines
+      of dopIns: inc bLines
+    let aStart = opA[lo] + 1
+    let bStart = opB[lo] + 1
+    result.add "@@ -" & $aStart & "," & $aLines & " +" & $bStart & "," & $bLines & " @@\n"
+    for x in lo ..< hi:
+      case ops[x]
+      of dopEqual: result.add " " & a[opA[x]] & "\n"
+      of dopDel:   result.add "-" & a[opA[x]] & "\n"
+      of dopIns:   result.add "+" & b[opB[x]] & "\n"
 
 proc newReadCache*(): ReadCache =
   ReadCache(state: initTable[string, (Time, int)]())
