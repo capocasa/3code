@@ -9,7 +9,7 @@ when defined(posix):
   import std/posix except SocketHandle
   import posix/termios
 import ../types, ../util, ../compact, ../display, ../minline,
-  ../terminal as termui, ../session
+  ../signals, ../terminal as termui, ../session
 import ../engine as termengine
 import rendering
 from ../api import ApiStreamHooks, requestTurnInterrupt, setApiStreamHooks,
@@ -1319,6 +1319,13 @@ proc inputThreadProc() {.thread.} =
             result = pendingInput[0]
             pendingInput.delete(0)
             return
+          # SIGWINCH is caught with SA_RESTART, so poll() is restarted
+          # rather than returning EINTR. Detect the resize via the shared
+          # flag on each poll cycle and surface it as IOError so readLineWith
+          # redraws the editor and footer at the new geometry.
+          if consumeResizePending():
+            markResizePending()
+            raise newException(IOError, "terminal resized")
           if errno == EINTR:
             continue
         -1
