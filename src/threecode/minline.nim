@@ -491,7 +491,7 @@ proc fullRedraw*(ed: var LineEditor) =
 proc parkAtEnd(ed: var LineEditor) =
   ## After submit, leave the cursor at column 0 of the row directly
   ## below the rendered input — the contract every external transition
-  ## (``submitTransitionBytes`` etc.) was already written against.
+  ## is written against.
   let width = max(2, ed.width)
   let total = totalRows(ed.line.text, ed.promptW, ed.contPromptW, width)
   let endRow = total - 1

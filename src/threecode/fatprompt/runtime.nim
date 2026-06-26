@@ -1707,7 +1707,7 @@ proc endTurnAfterTranscriptAppend*() =
     emitFatPromptEvent setBarEvent(label, hasGap = true)
   emitFatPromptEvent setPromptModeEvent(pmIdle)
 
-proc emitUserSubmit*(line: string, echoRows = -1) =
+proc emitUserSubmit*(line: string) =
   ## Append the submitted prompt as transcript and clear the volatile editor
   ## area. The editor text itself is data; the on-screen prompt is chrome.
   let receiptLabel =

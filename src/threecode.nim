@@ -102,48 +102,28 @@ proc notifyTurnFinished(messages: JsonNode) =
   let body = last{"content"}.getStr
   notify("3code", "Turn finished", body)
 
-proc commitUserPromptTranscript(line: string; restoreEditor = true) =
+proc commitUserPromptTranscript(line: string) =
   ## Controller-owned transcript append for user prompt items. Formatters
   ## return trimmed item bodies; this proc owns the receipt/user separator and
   ## clears volatile footer state before the next turn starts.
-  let receiptLabel =
-    if restoreEditor and pendingHint.active:
-      tokenLineLabel(pendingHint.usage, pendingHint.window, pendingHint.elapsed)
-    else:
-      ""
   var bytes = ""
-  if receiptLabel.len > 0:
-    bytes.add GreyFg
-    bytes.add "  "
-    bytes.add receiptLabel
-    bytes.add Reset
-    bytes.add "\n\n"
-  elif not restoreEditor and pendingHint.active:
+  if pendingHint.active:
     bytes.add "\n"
   bytes.add formatUserPromptItem(line)
   proc clearSubmittedFooterState() =
     emitFatPromptEvent clearPendingHintEvent()
     emitFatPromptEvent clearBarEvent()
     emitFatPromptEvent clearTickerEvent()
-  if not restoreEditor:
-    while bytes.len > 0 and bytes[^1] in {'\r', '\n'}:
-      bytes.setLen(bytes.len - 1)
-    bytes.add "\r\n"
-    commitTranscriptBytes(
-      bytes,
-      restoreEditor = false,
-      beforeRepaint = clearSubmittedFooterState,
-      reserveFooter = false,
-      transcriptOwnsSpacing = true)
-    receiptTouchesNextResponse = true
-    return
+  while bytes.len > 0 and bytes[^1] in {'\r', '\n'}:
+    bytes.setLen(bytes.len - 1)
+  bytes.add "\r\n"
   commitTranscriptBytes(
     bytes,
-    restoreEditor,
-    clearSubmittedFooterState,
-    reserveFooter = restoreEditor)
-  if not restoreEditor:
-    receiptTouchesNextResponse = true
+    restoreEditor = false,
+    beforeRepaint = clearSubmittedFooterState,
+    reserveFooter = false,
+    transcriptOwnsSpacing = true)
+  receiptTouchesNextResponse = true
 
 proc cleanup() {.noconv.} =
   ## Single point of process teardown. Restores terminal state and
@@ -427,7 +407,7 @@ proc main() =
                       "content": buildUserMessage(messages, queued)}
       refreshSystemPrompt(messages, prof)
       editor.echoRows = queuedRows
-      commitUserPromptTranscript(queued, restoreEditor = false)
+      commitUserPromptTranscript(queued)
       editor.line = minline.Line(text: "", position: 0)
       editor.renderSuffix = ""
       editor.prefillText = ""
@@ -548,7 +528,7 @@ proc main() =
     # echo the user's input as scroll-history content. Cursor lands
     # on the row directly after the last echo line, where callModel's
     # leading `\n` will set up the new spinner-footer scratch row.
-    emitUserSubmit(line, editor.echoRows)
+    emitUserSubmit(line)
     editor.line = minline.Line(text: "", position: 0)
     editor.renderSuffix = ""
     editor.renderSuffixCursor = false

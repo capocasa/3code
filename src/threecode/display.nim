@@ -702,8 +702,9 @@ proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
 
 proc tokenLineBytes*(usage: Usage, window: int, elapsedS = -1): string =
   ## Pure-byte form of the **token receipt** row used by the *replay*
-  ## path (saved sessions). The live path uses `submitTransitionBytes`
-  ## which paints the receipt in place of the previous turn's bar.
+  ## path (saved sessions). The live path uses `emitUserSubmit` /
+  ## `commitTranscriptBytes`, which paint the receipt in place of the
+  ## previous turn's bar.
   ## Returns "" when there's no usage.
   let label = tokenLineLabel(usage, window, elapsedS)
   if label.len == 0: return ""
