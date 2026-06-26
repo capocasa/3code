@@ -1,0 +1,142 @@
+name: Windows
+
+# Fast Windows-only build + publish. The full Release workflow waits on every
+# matrix leg (Linux/macOS), and the tty visual test can hang on Linux for the
+# full 20m step timeout before pages can deploy. This workflow builds only the
+# Windows binary and publishes it to the Pages site so a single platform fix
+# can be live-tested in minutes.
+#
+# Trigger manually:
+#   gh workflow run windows.yml --ref main
+# Or it fires on push to main alongside Release.
+#
+# The workflow file must exist on the branch you dispatch from (--ref main),
+# so merge this to main before the first manual run.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows.yml'
+      - 'src/**'
+      - 'tests/**'
+      - '*.nimble'
+      - 'config.nims'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    # git-bash on the Windows runner. The Windows default (pwsh) does not
+    # propagate non-zero exit codes from native exes like nimble, so a failed
+    # build/test is swallowed and the job runs on into packaging, which then
+    # fails for a misleading reason (missing artifact). Same workaround as
+    # release.yml.
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: stable
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dependencies
+        run: |
+          nimble install -y --depsOnly
+          nimble setup -y
+          echo '--path:"src"' >> nimble.paths
+
+      - name: Compute build flags
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "BUILD_FLAGS=-d:autoUpdate" >> "$GITHUB_ENV"
+          else
+            echo "BUILD_FLAGS=-d:versionSuffix=-main-${GITHUB_SHA:0:8}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build
+        run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
+
+      - name: Run tests
+        # The `when defined(windows):` suite in tests/test_streamexec.nim
+        # asserts the no-bundled-bash contract (resolveBash() == "" and
+        # runStreamingBash returns 127 on a clean runner, since no installer
+        # has staged MSYS2 into the bundle path). The POSIX suites guard the
+        # shared launcher logic both platforms use.
+        run: nimble test
+        timeout-minutes: 20
+
+      - name: Package (Windows) - bundle OpenSSL DLLs alongside .exe
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path 3code-windows-amd64 | Out-Null
+          Copy-Item 3code.exe 3code-windows-amd64/
+          Copy-Item README.md, LICENSE 3code-windows-amd64/
+          # Stock Windows ships no OpenSSL. Nim's std/net dlopens libssl /
+          # libcrypto by hardcoded names; without these DLLs alongside
+          # 3code.exe, any TLS code path dies with
+          #   could not load: (libcrypto-1_1-x64|libeay64).dll
+          # Use the canonical Nim Windows DLL bundle from nim-lang.org;
+          # it also ships a cacert.pem that we point SSL_CERT_FILE at.
+          Invoke-WebRequest -Uri https://nim-lang.org/download/dlls.zip -OutFile dlls.zip
+          Expand-Archive -Path dlls.zip -DestinationPath dlls
+          Copy-Item dlls/libssl-1_1-x64.dll, dlls/libcrypto-1_1-x64.dll, dlls/cacert.pem 3code-windows-amd64/
+          Compress-Archive -Path 3code-windows-amd64 -DestinationPath 3code-windows-amd64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 3code-windows-amd64
+          path: 3code-windows-amd64.zip
+
+  pages:
+    # Deploy on a manual workflow_dispatch (fast Windows-only publish for
+    # live testing). On push, the full Release workflow owns the site.
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: 3code-windows-amd64
+          path: dl
+
+      - name: Assemble site
+        run: |
+          mkdir -p site/main
+          cp dl/3code-windows-amd64.zip site/main/ 2>/dev/null || true
+          cat > site/index.html <<EOF
+          <!doctype html><meta charset=utf-8><title>3code main builds</title>
+          <h1>3code main builds</h1>
+          <p>Per-commit builds from <code>main</code> (commit ${GITHUB_SHA}).</p>
+          <ul>
+          EOF
+          for f in site/main/*; do
+            [ -f "$f" ] || continue
+            b=$(basename "$f")
+            echo "            <li><a href=\"main/$b\">$b</a></li>" >> site/index.html
+          done
+          cat >> site/index.html <<EOF
+          </ul>
+          EOF
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

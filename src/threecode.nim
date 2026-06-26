@@ -31,7 +31,7 @@ when defined(posix):
   import std/posix
 import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
-                  toolstream, turns, transcript]
+                  toolstream, turns, transcript, streamexec]
 import tinotify
 import threecode/minline
 export types, util, prompts, shell, session, compact,
@@ -68,6 +68,19 @@ proc refuseRoot() =
     if geteuid() == 0 and getEnv("THREECODE_ALLOW_ROOT").len == 0:
       stderr.writeLine "3code: refusing to run as root. " &
         "Run as your normal user. (override: THREECODE_ALLOW_ROOT=1)"
+      quit ExitUsage
+
+proc ensureBash() =
+  ## Windows startup guard: 3code depends on bash, and the supported source
+  ## is the MSYS2 tree the installer drops into the 3code app dir
+  ## (`%LOCALAPPDATA%\3code\msys64`). Hard-fail if it is missing — the one
+  ## fix is to (re)run the installer, which also bootstraps MSYS2. POSIX
+  ## always has /bin/sh so this is a no-op there.
+  when defined(windows):
+    let b = resolveBash()
+    if b.len == 0:
+      stderr.writeLine "3code: bash not found. Re-run the installer to set it up:"
+      stderr.writeLine "  irm https://3code.capocasa.dev/install.ps1 | iex"
       quit ExitUsage
 
 proc setupTlsEnv() =
@@ -177,6 +190,7 @@ proc main() =
   setupTlsEnv()
   cleanupStaleBinaries()
   refuseRoot()
+  ensureBash()
   # Internal flag for the detached background worker. Run silently and
   # exit before any other startup work (skill extraction, config load).
   let cl = commandLineParams()
