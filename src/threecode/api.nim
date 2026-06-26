@@ -486,7 +486,34 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
                                   ("Accept", "text/event-stream")],
                        body = bodyStr)
       hookProviderActivity()
-      resp = conn.readResponseHead()
+      # The head read uses the same QuietRecvWakeMs-bounded recv as the
+      # body loop, so it raises StreamTimeoutError periodically. Unlike
+      # the body loop, a slow head is the norm here: the provider holds
+      # the connection for several seconds while the model warms up
+      # before emitting even the HTTP status line. We must loop on the
+      # timeout (re-checking interrupt/quiet) rather than treating it as
+      # a stale connection; otherwise every request to a slow provider
+      # (z.ai GLM, ~7s to first byte) burns the two stale-conn retries
+      # and then fails with "recv timed out".
+      while true:
+        try:
+          resp = conn.readResponseHead()
+          break
+        except StreamTimeoutError:
+          if isInterrupted() or isNetworkQuiet():
+            closeCachedStreamConn()
+            break
+          continue
+      if resp.status == 0 and resp.headers.len == 0:
+        # Head loop bailed on interrupt/quiet before any head bytes
+        # arrived. The outer except won't fire (no exception), so exit
+        # the attempt loop here.
+        if isInterrupted():
+          result.errMsg = "interrupted by user"
+        else:
+          result.errMsg = "network quiet too long (no data for " &
+            $(QuietTooLongMs div 1000) & "s)"
+        return
       hookProviderActivity()
       break
     except CatchableError as e:
@@ -761,7 +788,25 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
                                   ("Accept", "application/json")],
                        body = bodyStr)
       hookProviderActivity()
-      resp = conn.readResponseHead()
+      # Same head wake-loop as streamHttp: a slow head is normal (the
+      # model warms up before the status line arrives), so we loop on
+      # StreamTimeoutError rather than burning the stale-conn retry.
+      while true:
+        try:
+          resp = conn.readResponseHead()
+          break
+        except StreamTimeoutError:
+          if isInterrupted() or isNetworkQuiet():
+            closeCachedStreamConn()
+            break
+          continue
+      if resp.status == 0 and resp.headers.len == 0:
+        if isInterrupted():
+          result.errMsg = "interrupted by user"
+        else:
+          result.errMsg = "network quiet too long (no data for " &
+            $(QuietTooLongMs div 1000) & "s)"
+        return
       hookProviderActivity()
       break
     except CatchableError as e:
