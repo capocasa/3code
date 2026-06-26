@@ -122,6 +122,15 @@ when defined(posix):
     toolCancelActive: bool
     toolCancelOrig: Termios
     toolCancelOrigValid: bool
+    # Native bash timeout. We don't depend on an external `timeout`/`gtimeout`
+    # binary (absent on stock macOS, which broke every tool call there). A
+    # watchdog thread sleeps `cap` seconds, then signals the process group and
+    # sets this flag so the read loop bails and the caller maps it to exit 124
+    # (GNU timeout's convention).
+    toolTimedOut: Atomic[bool]
+    toolTimeoutStop: Atomic[bool]
+    toolTimeoutThread: Thread[void]
+    toolTimeoutCap: Atomic[int]
 
   toolStdinWatcherEnabled.store(true, moRelaxed)
 
@@ -187,6 +196,30 @@ when defined(posix):
                   signalToolProcessTree(pid, SIGKILL)
               return
 
+  proc toolTimeoutLoop() {.thread, nimcall.} =
+    let deadline = epochTime() + toolTimeoutCap.load(moRelaxed).float
+    while not toolTimeoutStop.load(moRelaxed):
+      if epochTime() >= deadline:
+        let pid = toolCancelPid.load(moRelaxed)
+        if pid > 0:
+          toolTimedOut.store(true, moRelaxed)
+          signalToolProcessTree(pid, SIGTERM)
+          sleep(200)
+          signalToolProcessTree(pid, SIGKILL)
+        return
+      sleep(200)
+
+  proc startToolTimeoutWatcher(cap: int) =
+    toolTimeoutCap.store(cap, moRelaxed)
+    toolTimedOut.store(false, moRelaxed)
+    toolTimeoutStop.store(false, moRelaxed)
+    createThread(toolTimeoutThread, toolTimeoutLoop)
+
+  proc stopToolTimeoutWatcher(): bool =
+    result = toolTimedOut.load(moRelaxed)
+    toolTimeoutStop.store(true, moRelaxed)
+    try: joinThread(toolTimeoutThread) except CatchableError: discard
+
   proc startToolCancelWatcher(pid: int) =
     toolCancelPid.store(pid, moRelaxed)
     toolCancelHit.store(false, moRelaxed)
@@ -222,6 +255,8 @@ else:
   proc setToolStdinWatcherEnabled*(enabled: bool) = discard
   proc startToolCancelWatcher(pid: int) = discard
   proc stopToolCancelWatcher(): bool = false
+  proc startToolTimeoutWatcher(cap: int) = discard
+  proc stopToolTimeoutWatcher(): bool = false
 
 proc localFileSig(path: string): (Time, int) =
   try: (getLastModificationTime(path), getFileSize(path).int)
@@ -252,7 +287,7 @@ export DEBIAN_FRONTEND=noninteractive
   writeFile(stdinPath, act.stdin)
 
   let cap = bashTimeoutSecs(act.timeoutSecs)
-  let wrapped = &"exec timeout --foreground {cap}s sh \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
+  let wrapped = &"exec sh \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
 
   var p =
     when defined(posix):
@@ -267,7 +302,9 @@ export DEBIAN_FRONTEND=noninteractive
       startProcess("/bin/sh", args = ["-c", wrapped],
                    options = {poStdErrToStdOut, poUsePath})
   startToolCancelWatcher(p.processID)
+  startToolTimeoutWatcher(cap)
   var cancelled = false
+  var timedOut = false
 
   var rawOut = ""
   try:
@@ -290,6 +327,7 @@ export DEBIAN_FRONTEND=noninteractive
       emitFinalPartial(rawOut, lineBuf, onLine, partialShown, partialText, suppress)
   finally:
     cancelled = stopToolCancelWatcher()
+    timedOut = stopToolTimeoutWatcher()
 
   let code = p.waitForExit()
   p.close()
@@ -301,5 +339,9 @@ export DEBIAN_FRONTEND=noninteractive
       rawOut.add "\n"
     rawOut.add "[interrupted by user]"
     return (rawOut, 130, cap)
+  if timedOut:
+    if rawOut.len > 0 and not rawOut.endsWith("\n"):
+      rawOut.add "\n"
+    return (rawOut, 124, cap)
 
   return (rawOut, code, cap)

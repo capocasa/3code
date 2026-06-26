@@ -298,3 +298,35 @@ suite "runActionStreaming: read cache integration":
     check code == 0
     check "unchanged" in output
     removeDir(tmpDir)
+
+suite "streamexec: no external timeout dependency":
+  # Regression: bash execution wrapped the command in `exec timeout
+  # --foreground {cap}s sh ...`, relying on GNU `timeout`. That binary is
+  # absent on stock macOS, so every bash tool call failed with
+  # "exec: timeout: not found". The fix enforces the cap natively (a
+  # watchdog thread signals the process group) and no longer shells out to
+  # `timeout`. These tests guard both the plain-execution path and the native
+  # cap on all platforms.
+  test "runAction runs bash without shelling out to `timeout`":
+    let act = Action(kind: akBash, body: "echo native-exec-ok")
+    let (o, code, _) = runAction(act)
+    check code == 0
+    check "native-exec-ok" in o
+
+  test "native timeout kills a runaway command (exit 124)":
+    let act = Action(kind: akBash, body: "sleep 30", timeoutSecs: 2)
+    let started = epochTime()
+    let (o, code, _) = runAction(act)
+    let elapsed = epochTime() - started
+    check code == 124
+    check elapsed < 6.0
+    check "timed out" in o
+
+  test "native timeout via streaming path (exit 124)":
+    let act = Action(kind: akBash, body: "sleep 30", timeoutSecs: 2)
+    let started = epochTime()
+    let (o, code, _) = runActionStreaming(act, nil, nil)
+    let elapsed = epochTime() - started
+    check code == 124
+    check elapsed < 6.0
+    check "timed out" in o

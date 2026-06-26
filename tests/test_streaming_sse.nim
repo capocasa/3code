@@ -9,7 +9,7 @@
 ##
 ## Must be compiled with -d:testPlainHttp so streamHttp accepts http://127.0.0.1.
 
-import std/[json, jsonutils, net, strutils, threadpool, unittest]
+import std/[json, jsonutils, net, os, strutils, threadpool, unittest]
 
 import threecode/[api, types]
 
@@ -110,6 +110,23 @@ proc serveOnce(server: SseServer) =
   client.send("0\r\n\r\n")
   client.close()
 
+proc serveOnceDelayedHead(server: SseServer; delayMs: int) =
+  ## Like serveOnce but sleeps `delayMs` before sending the HTTP response
+  ## head. Models providers (z.ai GLM) that hold the connection for several
+  ## seconds while the model warms up before emitting even the status line.
+  var client: Socket
+  server.socket.accept(client)
+  while client.recvLine(timeout = 3000).strip() != "":
+    discard
+  sleep(delayMs)
+  let body = server.response
+  let resp = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+  client.send(resp)
+  let chunk = toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n"
+  client.send(chunk)
+  client.send("0\r\n\r\n")
+  client.close()
+
 proc serveThread(server: SseServer) {.thread.} =
   serveOnce(server)
 
@@ -198,3 +215,27 @@ suite "streaming SSE tool-call accumulation":
     applyStreamingOptions(p, body)
     check body.hasKey("tool_stream")
     check body{"tool_stream"}.getBool == true
+
+suite "streaming SSE: slow response head":
+  # Regression: readResponseHead used the same QuietRecvWakeMs-bounded recv
+  # as the streaming body loop, but treated StreamTimeoutError as a stale-conn
+  # failure. A provider that holds the connection for seconds before sending
+  # even the HTTP status line (z.ai GLM, ~7s to first byte) burned both
+  # stale-conn retries and then failed with "recv timed out" — hanging every
+  # request on macOS where the head arrives after the 500ms poll window. The
+  # fix loops on StreamTimeoutError (re-checking interrupt/quiet) so a slow
+  # head is normal, not a dead connection. This test delays the head past the
+  # recv wake window and asserts the request still completes.
+  test "slow head (>recv wake window) still succeeds":
+    let server = newSseServer(makeSseCompleteContent("slow but done", "id-slow"))
+    proc delayedThread(s: SseServer) {.thread.} = serveOnceDelayedHead(s, 1400)
+    var thr: Thread[SseServer]
+    createThread(thr, delayedThread, server)
+    var usage = Usage()
+    let result = callModel(testProfile(server),
+      %*[{"role": "user", "content": "say hi"}], usage, 0)
+    joinThread(thr)
+    check result != nil
+    check result{"content"}.getStr() == "slow but done"
+    server.socket.close()
+    closeCachedStreamConn()

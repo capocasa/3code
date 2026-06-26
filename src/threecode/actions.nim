@@ -318,90 +318,17 @@ proc parseV4APatch(text: string): seq[V4AOp] =
     else:
       inc i
 
+proc runActionStreaming*(act: Action, cache: ReadCache = nil,
+    onLine: proc(line: string) = nil): tuple[output: string, code: int, diff: string]
+
 proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code: int, diff: string] =
   case act.kind
   of akBash:
-    let cmd = act.body.strip
-    # Sniff bash for the read-cache integration that lived on `akRead` before
-    # the dedicated read tool was dropped. Mutation paths (sed -i, redirects,
-    # …) get the stale-write guard so external edits between read and mutate
-    # still error out. Pure full reads (`cat path`) get the dedupe shortcut.
-    # Both update the cache after a successful run so downstream patch/write
-    # see the latest sig.
-    let mutPath = bashMutationPath(cmd)
-    let (readPath, fullRead) = bashReadPath(cmd)
-    if cache != nil and readPath != "" and fullRead:
-      let p = resolvePath(readPath)
-      if fileExists(p) and p in cache.state and fileSig(p) == cache.state[p]:
-        return (&"[unchanged since prior read of {p}; see earlier read in this session]", 0, "")
-    # For bash mutations on a single named path (sed -i, ed -s, redirects),
-    # snapshot before-content so we can synthesize a green/red diff after the
-    # run — keeps the visual feedback `patch` used to give for line-range
-    # edits via ed.
-    let beforeContent =
-      if mutPath != "" and mutPath != "." and fileExists(resolvePath(mutPath)):
-        try: readFile(resolvePath(mutPath))
-        except CatchableError: ""
-      else: ""
-    let beforeExists = mutPath != "" and mutPath != "." and
-                       fileExists(resolvePath(mutPath))
-    let tmp = getTempDir() / ("3code_bash_" & $getCurrentProcessId() & "_" & $epochTime().int64)
-    createDir(tmp)
-    let outPath = tmp / "out"
-    let scriptPath = tmp / "cmd.sh"
-    let stdinPath = tmp / "stdin"
-    # Pager-killing env keeps `git log`, `systemctl`, `man`, etc. from hanging
-    # on a TTY that doesn't exist. `timeout --foreground` caps runaways while
-    # still propagating terminal SIGINT to the child. Writing the command to
-    # a script avoids the shell-escaping minefield. Stdin is always piped
-    # from a file (empty when act.stdin is "") so commands can't block on
-    # the user's terminal.
-    let script = """export PAGER=cat GIT_PAGER=cat PSQL_PAGER=cat MYSQL_PAGER=cat
-export LESS= TERM=dumb CI=1 NO_COLOR=1 GIT_TERMINAL_PROMPT=0
-export DEBIAN_FRONTEND=noninteractive
-""" & cmd & "\n"
-    writeFile(scriptPath, script)
-    writeFile(stdinPath, act.stdin)
-    let cap = bashTimeoutSecs(act.timeoutSecs)
-    let wrapped = &"timeout --foreground {cap}s sh \"{scriptPath}\" <\"{stdinPath}\" >\"{outPath}\" 2>&1"
-    let code = execShellCmd(wrapped)
-    var rawOut = if fileExists(outPath): readFile(outPath) else: ""
-    try: removeDir(tmp) except CatchableError: discard
-    if isBinaryContent(rawOut):
-      rawOut = &"[binary output: {rawOut.len} bytes — not shown]"
-    let outClip = clipMiddle(rawOut, 2000, 2000)
-    # Body omits the "$ {cmd}" echo — the model already has the command in
-    # its own tool_call arguments; no reason to send it back. The display
-    # layer prepends it from `act.body` for the human.
-    var body = ""
-    if outClip.len > 0:
-      body.add outClip
-      if not outClip.endsWith("\n"): body.add "\n"
-    if code == 124:
-      body.add &"[timed out after {cap}s — raise `timeout` or run in the background]"
-    if cache != nil and code == 0:
-      if readPath != "":
-        let p = resolvePath(readPath)
-        if fileExists(p): cache.state[p] = fileSig(p)
-      if mutPath != "" and mutPath != ".":
-        let p = resolvePath(mutPath)
-        if fileExists(p): cache.state[p] = fileSig(p)
-    var diff = ""
-    if mutPath != "" and mutPath != "." and code == 0:
-      let p = resolvePath(mutPath)
-      let after =
-        if fileExists(p):
-          try: readFile(p)
-          except CatchableError: ""
-        else: ""
-      # Don't emit a noisy `--- /dev/null` diff for files the command just
-      # created — that doubles the body in context. Only show diffs for
-      # actual edits.
-      if beforeExists and beforeContent != after:
-        diff = computeDiff(beforeContent, after, p)
-    if body.len == 0 and code == 0:
-      body = "exit 0 (no output)"
-    return (body, code, diff)
+    # Bash execution (native timeout, process-group kill, output clipping,
+    # cache + diff) lives in the streaming executor and is shared by both
+    # paths. `onLine=nil` gives a plain capture; the streaming display path
+    # passes a live callback. There is no duplicated bash branch here.
+    return runActionStreaming(act, cache)
   of akRead:
     let path = resolvePath(act.path)
     if not fileExists(path):
