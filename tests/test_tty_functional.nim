@@ -867,6 +867,51 @@ suite "terminal visual contract":
     # With the bug, the buffer would have been wiped to " edited".
     tty.expectNeverInHistory "❯  edited"
 
+  test "queued prompt typed during a turn keeps the line on a multi-row footer":
+    # Regression: editing a queued mid-turn prompt. On a narrow terminal the
+    # spinner label wraps to several rows, so cancelling the queue and typing
+    # repaints a tall footer region each keystroke. The deferred-submit
+    # suffix must clear and every typed char must stay visible, not flash and
+    # vanish. Guards the cancel-path redraw so it paints exactly once per
+    # keystroke (a double clear-and-repaint flashes on terminals without
+    # DEC 2026 synchronized output).
+    let root = newFixture("queued_narrow_footer")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "waitForTestContinue": true,
+        "content": "Holding turn open.",
+        "contentChunks": ["Holding turn open."],
+        "usage": {
+          "promptTokens": 10,
+          "completionTokens": 5,
+          "totalTokens": 15,
+          "cachedTokens": 0
+        }
+      }
+    ])
+
+    let tty = startStub(root, cols = 18, rows = DefaultTtyRows)
+    defer: tty.close()
+    tty.expect "❯"
+    tty.send "start turn\n"
+    tty.expect "start turn"
+    tty.drain(300)
+    tty.send "hello"
+    tty.requireVisibleEditorCaret("hello")
+    tty.send "\n"
+    tty.expect "⧖"
+    var acc = "hello"
+    for ch in " world":
+      acc.add ch
+      tty.send $ch
+      tty.drain(200)
+      tty.requireVisibleEditorCaret(acc)
+    tty.drain(400)
+    tty.requireVisibleEditorCaret(acc)
+    tty.continueStubApi()
+
   test "bash tool success and nonzero exit":
     let root = newFixture("bash_tool_visual_test")
     writeConfiguredProvider(root)

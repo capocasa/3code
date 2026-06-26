@@ -1278,7 +1278,17 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
   fullRedraw(ed)
   var c1: int
   var putback = -1
+  # Repaint + show caret. Used to clear a just-cancelled deferred-submit
+  # suffix when the keystroke handler itself did not redraw (no-op arrow,
+  # insert toggle, unknown byte). Handlers that DO redraw already show the
+  # caret via the postRedraw hook, so this only runs for the no-redraw paths.
+  proc paintIfCleared(ed: var LineEditor; cleared: var bool) =
+    if cleared:
+      cleared = false
+      fullRedraw(ed)
+      ed.write "\x1b[?25h"
   while true:
+    var suffixJustCleared = false
     if putback >= 0:
       c1 = putback
       putback = -1
@@ -1316,8 +1326,14 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
       # Typing after a queued submit cancels the queue but keeps the
       # buffered text and cursor position, so the new keystroke edits in
       # place rather than starting over. Drop the pending glyph, restore
-      # the native caret, recompute the editor height from the text alone
-      # (the suffix is gone), and let the caller clear its queue state.
+      # the native caret, and recompute the editor height from the text
+      # alone (the suffix is gone). State only: no redraw here. The
+      # keystroke handler below (printChar, deletePrevious, etc.) already
+      # calls fullRedraw, so painting now would clear-and-repaint the
+      # whole footer region twice per keystroke. On terminals without
+      # DEC 2026 synchronized output that double clear is visible as a
+      # per-keystroke flash. Defer the single repaint to the handler; if
+      # the byte is ignored (no handler redraws), paint once below.
       ed.pendingCaret = false
       ed.renderSuffix = ""
       ed.renderSuffixCursor = false
@@ -1325,8 +1341,7 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
         ed.onCancelDeferredSubmit(ed)
       ed.echoRows = totalRows(ed.line.text, ed.promptW, ed.contPromptW,
                               max(2, ed.width))
-      fullRedraw(ed)
-      ed.write "\x1b[?25h"
+      suffixJustCleared = true
     if c1 == 8 or c1 == 127:
       ed.deletePrevious()
       continue
@@ -1364,12 +1379,15 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
           return ed.line.text
         if nxt in PRINTABLE:
           ed.printChar(nxt)
+      paintIfCleared(ed, suffixJustCleared)
       continue
     if c1 in ESCAPES:
       discard handleEscape(ed, c1)
+      paintIfCleared(ed, suffixJustCleared)
       continue
     if c1 in CTRL and KEYMAP.hasKey(KEYNAMES[c1]):
       KEYMAP[KEYNAMES[c1]](ed)
+      paintIfCleared(ed, suffixJustCleared)
       continue
     # Multi-byte UTF-8: decode the full sequence and insert it.
     if c1 >= 0x80:
@@ -1388,8 +1406,11 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
       # Only commit a complete sequence; a truncated one would leave a
       # malformed (invalid-UTF-8) buffer that breaks rune walking.
       if not bad: ed.insertText(buf)
+      paintIfCleared(ed, suffixJustCleared)
       continue
-    # Unknown byte: ignore.
+    # Unknown byte: ignore. If we just cleared a deferred-submit suffix
+    # and no handler above redrew, paint once so the suffix glyph is gone.
+    paintIfCleared(ed, suffixJustCleared)
 
 proc readLine*(ed: var LineEditor, prompt = "", hidechars = false,
                noHistory = false): string =

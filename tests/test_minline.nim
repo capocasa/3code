@@ -357,6 +357,44 @@ suite "minline editor: newline insertion (multiline)":
     check ed.line.text == "hello!"
     check ed.line.position == 6
 
+  test "first keystroke after a queued submit repaints once, not twice":
+    # Regression: the cancel block used to call fullRedraw, then the
+    # keystroke handler (printChar -> insertText) called fullRedraw again.
+    # Two clear-and-repaints per keystroke flash on terminals without
+    # DEC 2026 synchronized output. The fix defers the cancel's repaint to
+    # the handler so only one clear (`\x1b[J`) fires for the keystroke.
+    var ed = initEditor()
+    ed.deferSubmit = true
+    ed.onSubmit = proc(e: var LineEditor) =
+      e.line.position = e.line.text.len
+      e.pendingCaret = true
+      e.renderSuffix = " \u2363"
+    ed.onCancelDeferredSubmit = proc(e: var LineEditor) = discard
+
+    let d = newDriver()
+    d.pushString "hi"
+    d.push Enter       # queue; pendingCaret on
+    d.pushString " "   # first keystroke after queue: cancels + inserts
+    d.push CtrlC
+    var clearsAfterCancel = 0
+    var suffixPainted = false
+    let write: WriteProc = proc(s: string) =
+      if "\u2363" in s: suffixPainted = true
+      # Count clears in frames that no longer show the suffix glyph: those
+      # are repaints after the queue was cancelled, i.e. the typed keystroke.
+      # The Enter that painted the suffix is excluded (it contains the glyph).
+      if suffixPainted and "\u2363" notin s and "\x1b[J" in s:
+        inc clearsAfterCancel
+      d.terminal.write s
+    let getCh: GetChProc = proc(): int = d.terminal.read()
+    let widthProc: WidthProc = proc(): int = d.width
+    let hasPendingInput: HasPendingInputProc = proc(): bool =
+      d.terminal.hasPendingInput()
+    expect InputCancelled:
+      discard ed.readLineWith("> ", getCh, write, getWidth = widthProc,
+                              hasPendingInput = hasPendingInput)
+    check clearsAfterCancel == 1
+
   test "backspace at start of second logical line joins lines":
     var ed = initEditor()
     let d = newDriver()
