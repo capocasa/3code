@@ -31,7 +31,9 @@ when defined(posix):
   import std/posix
 import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
-                  toolstream, turns, transcript, streamexec]
+                  toolstream, turns, transcript]
+when defined(windows):
+  import threecode/streamexec  # for resolveBash, used by ensureBash
 import tinotify
 import threecode/minline
 export types, util, prompts, shell, session, compact,
