@@ -28,6 +28,14 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
+    # git-bash on every runner. The Windows default (pwsh) does not
+    # propagate non-zero exit codes from native exes like nimble, so a
+    # failed build/test is swallowed and the job runs on into packaging,
+    # which then fails for a misleading reason (missing artifact).
+    defaults:
+      run:
+        shell: bash
+
     steps:
       - uses: actions/checkout@v4
 
@@ -43,7 +51,6 @@ jobs:
           echo '--path:"src"' >> nimble.paths
 
       - name: Compute build flags
-        shell: bash
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             echo "BUILD_FLAGS=-d:autoUpdate" >> "$GITHUB_ENV"
