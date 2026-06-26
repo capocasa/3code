@@ -14,6 +14,33 @@ else:
   import std/streams
 import types, util, shell
 
+when defined(windows):
+  var cachedBash* {.threadvar.}: string
+
+  proc bundledMsys2Bash(): string =
+    ## The installer drops an MSYS2 tree into the 3code app dir
+    ## (`%LOCALAPPDATA%\3code\msys64`), so 3code owns its bash + unix
+    ## toolset regardless of what else is on the system. No probing of
+    ## system MSYS2 roots or PATH: a single deterministic location.
+    result = getEnv("LOCALAPPDATA") & r"\3code\msys64\usr\bin\bash.exe"
+
+  proc resolveBash*(): string =
+    ## Windows bash resolution. Order: the 3code-owned bundled MSYS2
+    ## (the supported, always-present source), then an explicit config
+    ## override (`bash_path`) for hyper-users, then nothing (hard-fail
+    ## at the startup guard). We never fall back to a system or PATH
+    ## bash: the bundled toolset is the whole point.
+    if cachedBash.len > 0: return cachedBash
+    let bundled = bundledMsys2Bash()
+    if fileExists(bundled):
+      cachedBash = bundled
+      return bundled
+    when declared(bashPathOverride):
+      if bashPathOverride.len > 0 and fileExists(bashPathOverride):
+        cachedBash = bashPathOverride
+        return bashPathOverride
+    return ""
+
 const PartialLineFlushMs = 700
 
 proc emitCompleteLine(rawOut: var string; lineBuf: var string;
@@ -299,7 +326,10 @@ export DEBIAN_FRONTEND=noninteractive
         startProcess("/bin/sh", args = ["-c", wrapped],
                      options = {poStdErrToStdOut, poUsePath})
     else:
-      startProcess("/bin/sh", args = ["-c", wrapped],
+      let b = resolveBash()
+      if b == "":
+        return ("bash not found", 127, cap)
+      startProcess(b, args = ["-c", wrapped],
                    options = {poStdErrToStdOut, poUsePath})
   startToolCancelWatcher(p.processID)
   startToolTimeoutWatcher(cap)

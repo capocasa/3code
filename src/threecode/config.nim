@@ -75,6 +75,11 @@ var notifyEnabled*: bool = false
   ## Resolved at config load. Set true by `[settings]` `notify = on`.
   ## When true, a native desktop notification fires when a turn ends.
 
+var bashPathOverride*: string
+  ## Windows-only. `[settings]` `bash_path = "..."` overrides MSYS2
+  ## detection in `streamexec.resolveBash` for users with bash at a
+  ## non-standard location. Empty on POSIX (where /bin/sh is always used).
+
 proc gateExperimental*(p: Profile): bool =
   ## True if the profile is allowed to run a turn under current policy:
   ## empty profile (caller handles that), known-good model, or the
@@ -228,6 +233,8 @@ proc parseConfigFile*(path: string): (string, string, seq[ProviderRec]) =
           of "on", "true", "yes", "1": streamingEnabled = true
           of "off", "false", "no", "0": streamingEnabled = false
           else: discard
+        of "bash_path", "bash-path":
+          bashPathOverride = v
         else: discard
       of "provider":
         case e.key

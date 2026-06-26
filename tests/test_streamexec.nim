@@ -330,3 +330,19 @@ suite "streamexec: no external timeout dependency":
     check code == 124
     check elapsed < 6.0
     check "timed out" in o
+
+when defined(windows):
+  suite "streamexec: Windows bash resolution":
+    # On a clean CI runner no installer has run, so the bundled MSYS2 is
+    # absent and resolveBash() returns "". That is the documented contract
+    # (the startup guard hard-fails on it); assert it here rather than
+    # depending on the runner shipping bash at the bundle path.
+    test "resolveBash returns empty when no bundled bash":
+      cachedBash = ""  # defeat the threadvar cache
+      check resolveBash() == ""
+
+    test "runStreamingBash fails cleanly when no bundled bash":
+      cachedBash = ""
+      let act = Action(kind: akBash, body: "echo hello")
+      let (_, code, _) = runStreamingBash(act, nil, nil)
+      check code == 127
