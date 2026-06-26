@@ -1,4 +1,4 @@
-import std/[json, os, osproc, strutils, times, unittest]
+import std/[json, os, osproc, strutils, times, unicode, unittest]
 import posix except SocketHandle
 import tty_expect
 
@@ -1159,6 +1159,48 @@ when false:
       tty.expectMeaningfulFrameArtifact(
         ResizeStreamFrames,
         root / "resize_stream_actual.txt")
+
+  proc dropRunes(s: string; n: int): string =
+    var i = 0
+    var cnt = 0
+    while i < s.len and cnt < n:
+      i += max(1, runeLenAt(s, i))
+      inc cnt
+    if i >= s.len: "" else: s[i..^1]
+
+  test "resize at idle rewraps the editor prompt":
+    if getEnv("THREECODE_TTY_ONLY") notin ["", "resize_idle"]:
+      check true
+    else:
+      let root = newFixture("resize_idle")
+      writeConfiguredProvider(root)
+      let tty = startStub(root)
+      defer:
+        tty.writeFrameArtifact(root / "frames.txt")
+        tty.close()
+      tty.expect "❯"
+      # Type text long enough to wrap at 80 cols, then resize narrower so it
+      # rewraps, and verify the continuation rows appear.
+      tty.send "this is a long enough line of idle text to wrap when narrowed"
+      tty.drain(100)
+      tty.resize(40, 12)
+      tty.drain(300)
+      let narrow = tty.screenText()
+      # At 40 cols the single 80-col line rewraps onto multiple rows.
+      check "this is a long enough line of idle" in narrow
+      # Reassemble the editor rows (strip continuation prefix) and verify the
+      # typed text survived the rewrap with no duplicated or dropped runes.
+      var editorText = ""
+      var inEditor = false
+      for row in narrow.splitLines():
+        if row.startsWith("❯ "):
+          editorText.add row.dropRunes(2)
+          inEditor = true
+        elif inEditor and row.startsWith("  "):
+          editorText.add row.dropRunes(2)
+        elif inEditor and row.strip().len == 0:
+          break
+      check editorText == "this is a long enough line of idle text to wrap when narrowed"
 
   test "main visual test":
     if getEnv("THREECODE_TTY_ONLY").len > 0 and
