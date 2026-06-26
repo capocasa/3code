@@ -1,4 +1,4 @@
-===== 768 =====
+===== 385 =====
 
   ╭─╮
    ─┤  3code v0.4.0   the economical coding agent
@@ -10,7 +10,7 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ :help
-===== 468 =====
+===== 323 =====
 
 : help
   3code the economical coding agent
@@ -51,7 +51,7 @@
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯
-===== 744 =====
+===== 373 =====
 
 : help
   3code the economical coding agent
@@ -92,7 +92,7 @@
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
-===== 468 =====
+===== 438 =====
   :tokens           show token usage for this session
   :clear            reset conversation (keeps system prompt)
   :model            list models for current provider (current marked with *)
@@ -133,7 +133,7 @@
       alt
 
 ❯
-===== 954 =====
+===== 186 =====
   :tokens           show token usage for this session
   :clear            reset conversation (keeps system prompt)
   :model            list models for current provider (current marked with *)
@@ -174,7 +174,7 @@
       alt
 
 ❯ :model
-===== 567 =====
+===== 498 =====
   :provider add     add a new provider (interactive, verified)
   :provider edit X  edit provider X (url, key, models)
   :provider rm X    remove provider X
@@ -215,7 +215,7 @@
       stub-large
 
 ❯
-===== 726 =====
+===== 651 =====
   :provider add     add a new provider (interactive, verified)
   :provider edit X  edit provider X (url, key, models)
   :provider rm X    remove provider X
@@ -256,7 +256,7 @@
       stub-large
 
 ❯ :reasoning
-===== 821 =====
+===== 142 =====
   :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
@@ -297,7 +297,7 @@
     experimental: level is free-form, type any value
 
 ❯
-===== 801 =====
+===== 178 =====
   :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
@@ -338,7 +338,7 @@
     experimental: level is free-form, type any value
 
 ❯ :model stub-large
-===== 689 =====
+===== 951 =====
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -379,7 +379,7 @@ provider  stub
 model     stub-large
 
 ❯
-===== 929 =====
+===== 414 =====
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -420,7 +420,7 @@ provider  stub
 model     stub-large
 
 ❯ :reasoning high
-===== 841 =====
+===== 230 =====
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
@@ -461,7 +461,7 @@ model     stub-large
 reasoning high
 
 ❯
-===== 600 =====
+===== 534 =====
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
@@ -502,7 +502,7 @@ model     stub-large
 reasoning high
 
 ❯ :provider alt
-===== 523 =====
+===== 684 =====
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
@@ -543,7 +543,7 @@ provider  alt
 model     alt-model
 
 ❯
-===== 167 =====
+===== 541 =====
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
@@ -584,7 +584,7 @@ provider  alt
 model     alt-model
 
 ❯ :tokens
-===== 836 =====
+===== 598 =====
 ❯ :provider
 
 : providers
@@ -625,7 +625,7 @@ model     alt-model
   no tokens used yet
 
 ❯
-===== 403 =====
+===== 819 =====
 ❯ :provider
 
 : providers
@@ -666,7 +666,7 @@ model     alt-model
   no tokens used yet
 
 ❯ :clear
-===== 500 =====
+===== 124 =====
       alt
 
 ❯ :model
@@ -707,7 +707,7 @@ model     alt-model
 ════════════════════════════════════════
 
 ❯
-===== 631 =====
+===== 874 =====
       alt
 
 ❯ :model
@@ -748,7 +748,7 @@ model     alt-model
 ════════════════════════════════════════
 
 ❯ :sessions
-===== 616 =====
+===== 356 =====
     * stub-model
       stub-large
 
@@ -789,7 +789,7 @@ model     alt-model
   no saved sessions for this directory
 
 ❯
-===== 613 =====
+===== 244 =====
     * stub-model
       stub-large
 
@@ -830,7 +830,7 @@ model     alt-model
   no saved sessions for this directory
 
 ❯ :sessions all
-===== 455 =====
+===== 861 =====
 
 ❯ :model stub-large
 
@@ -871,7 +871,7 @@ model     alt-model
   listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯
-===== 478 =====
+===== 711 =====
 
 ❯ :model stub-large
 
@@ -912,7 +912,7 @@ model     alt-model
   listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯ :log
-===== 974 =====
+===== 287 =====
 
 ❯ :reasoning high
 
@@ -953,7 +953,7 @@ model     alt-model
     no tool calls yet
 
 ❯
-===== 187 =====
+===== 639 =====
 
 ❯ :reasoning high
 
@@ -994,7 +994,7 @@ model     alt-model
     no tool calls yet
 
 ❯ :show
-===== 210 =====
+===== 949 =====
 reasoning high
 
 ❯ :provider alt
@@ -1035,7 +1035,7 @@ model     alt-model
     no tool calls yet
 
 ❯
-===== 211 =====
+===== 933 =====
 reasoning high
 
 ❯ :provider alt
@@ -1076,7 +1076,7 @@ model     alt-model
     no tool calls yet
 
 ❯ :compact
-===== 203 =====
+===== 240 =====
 model     alt-model
 
 ❯ :tokens
@@ -1117,7 +1117,7 @@ model     alt-model
   unknown command: :compact  (try :help)
 
 ❯
-===== 267 =====
+===== 833 =====
 model     alt-model
 
 ❯ :tokens
@@ -1158,7 +1158,7 @@ model     alt-model
   unknown command: :compact  (try :help)
 
 ❯ :summarize
-===== 430 =====
+===== 456 =====
   no tokens used yet
 
 ❯ :clear
@@ -1199,7 +1199,7 @@ model     alt-model
   failed or not worth it
 
 ❯
-===== 981 =====
+===== 387 =====
   no tokens used yet
 
 ❯ :clear
@@ -1240,7 +1240,7 @@ model     alt-model
   failed or not worth it
 
 ❯ :prompt
-===== 443 =====
+===== 113 =====
 
   Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping ta
 bles), hard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (
@@ -1268,12 +1268,12 @@ If searches don't turn up a clear answer, say so — don't guess.
   Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
   Available:
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
+  - <tty-run>/data/3code/skills/role-conversational.md
+  - <tty-run>/data/3code/skills/role-sysadmin.md
+  - <tty-run>/data/3code/skills/role-thinking-partner.md
+  - <tty-run>/data/3code/skills/role-writing.md
+  - <tty-run>/data/3code/skills/task-chunked-implementation.md
+  - <tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
 
@@ -1281,7 +1281,7 @@ If searches don't turn up a clear answer, say so — don't guess.
 n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯
-===== 236 =====
+===== 595 =====
 
   Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping ta
 bles), hard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (
@@ -1309,12 +1309,12 @@ If searches don't turn up a clear answer, say so — don't guess.
   Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
   Available:
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
+  - <tty-run>/data/3code/skills/role-conversational.md
+  - <tty-run>/data/3code/skills/role-sysadmin.md
+  - <tty-run>/data/3code/skills/role-thinking-partner.md
+  - <tty-run>/data/3code/skills/role-writing.md
+  - <tty-run>/data/3code/skills/task-chunked-implementation.md
+  - <tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
 
@@ -1322,7 +1322,7 @@ If searches don't turn up a clear answer, say so — don't guess.
 n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯ :toknes
-===== 910 =====
+===== 757 =====
   # Git
 
   Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`.
@@ -1345,12 +1345,12 @@ If searches don't turn up a clear answer, say so — don't guess.
   Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
   Available:
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
+  - <tty-run>/data/3code/skills/role-conversational.md
+  - <tty-run>/data/3code/skills/role-sysadmin.md
+  - <tty-run>/data/3code/skills/role-thinking-partner.md
+  - <tty-run>/data/3code/skills/role-writing.md
+  - <tty-run>/data/3code/skills/task-chunked-implementation.md
+  - <tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
 
@@ -1363,7 +1363,7 @@ n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task 
   unknown command: :toknes  did you mean :tokens?
 
 ❯
-===== 590 =====
+===== 498 =====
   # Git
 
   Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`.
@@ -1386,12 +1386,12 @@ If searches don't turn up a clear answer, say so — don't guess.
   Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
   Available:
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-conversational.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-sysadmin.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-thinking-partner.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/role-writing.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-chunked-implementation.md
-  - /home/carlo/p/3code/tests/output/tty/<tty-run>/data/3code/skills/task-debug-systematic.md
+  - <tty-run>/data/3code/skills/role-conversational.md
+  - <tty-run>/data/3code/skills/role-sysadmin.md
+  - <tty-run>/data/3code/skills/role-thinking-partner.md
+  - <tty-run>/data/3code/skills/role-writing.md
+  - <tty-run>/data/3code/skills/task-chunked-implementation.md
+  - <tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
 

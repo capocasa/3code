@@ -30,21 +30,18 @@ proc waitForTestContinue() =
     let fdText = getEnv("THREECODE_TEST_API_CONTINUE_FD")
     if fdText.len == 0:
       return
-    try:
-      let fd = cint(parseInt(fdText))
-      var pfd: TPollfd
-      pfd.fd = fd
-      pfd.events = POLLIN
-      while true:
-        if isInterrupted():
-          raise newException(ApiError, "interrupted by user")
-        let r = poll(addr pfd, 1.Tnfds, 100.cint)
-        if r > 0 and (pfd.revents and POLLIN) != 0:
-          var ch: array[1, char]
-          if posix.read(fd, addr ch[0], 1) > 0:
-            break
-    except CatchableError:
-      discard
+    let fd = try: cint(parseInt(fdText)) except CatchableError: return
+    var pfd: TPollfd
+    pfd.fd = fd
+    pfd.events = POLLIN
+    while true:
+      if isInterrupted():
+        raise newException(ApiError, "interrupted by user")
+      let r = poll(addr pfd, 1.Tnfds, 100.cint)
+      if r > 0 and (pfd.revents and POLLIN) != 0:
+        var ch: array[1, char]
+        if posix.read(fd, addr ch[0], 1) > 0:
+          break
 
 type StubFailure* = enum
   sfNone, sfDns, sfNetworkUnreachable, sfConnectionRefused,

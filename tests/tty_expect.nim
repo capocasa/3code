@@ -521,6 +521,10 @@ proc normalizeSpinnerGlyphs(row: string): string =
       return
 
 proc normalizeTtyRunRoots(row: string): string =
+  ## Collapse the per-run output root to `<tty-run>`, including any repo-root
+  ## prefix, so frames are identical regardless of which worktree or clone
+  ## the suite runs from. Skill and prompt paths materialize under the
+  ## test's isolated XDG_DATA_HOME, which nests under that absolute root.
   const marker = "tests/output/tty/"
   result = row
   var start = result.find(marker)
@@ -529,8 +533,13 @@ proc normalizeTtyRunRoots(row: string): string =
     let dataPos = result.find("/data/", runStart)
     if dataPos < 0:
       break
-    result = result[0 ..< runStart] & "<tty-run>" & result[dataPos .. ^1]
-    start = result.find(marker, runStart + "<tty-run>".len)
+    # The marker sits inside an absolute path. Drop the repo-root prefix
+    # before `tests/` so the normalized frame does not embed the cwd.
+    var prefixEnd = start
+    while prefixEnd > 0 and result[prefixEnd - 1] != ' ':
+      dec prefixEnd
+    result = result[0 ..< prefixEnd] & "<tty-run>" & result[dataPos .. ^1]
+    start = result.find(marker, prefixEnd + "<tty-run>".len)
 
 proc normalizeFrameRows*(rows: openArray[string]): seq[string] =
   for row in rows:
