@@ -501,41 +501,6 @@ proc formatUserPromptItem*(line: string): string =
   ## included; the controller/transcript emitter owns inter-item spacing.
   result.addUserEcho(line, trailingNewline = false)
 
-proc submitTransitionBytes*(line: string, hadPending, hadGap: bool,
-                            receiptLabel: string, hasBar = true,
-                            echoRows = -1): string =
-  let lines = line.splitLines
-  let n = if echoRows > 0: echoRows else: lines.len
-  let walkBack =
-    if not hasBar: n
-    elif hadGap: n + 1
-    else: n + 1
-  result = "\x1b[" & $walkBack & "A"
-  result.add "\r\x1b[J"
-  if hadPending:
-    result.add receiptBarBytes(receiptLabel)
-    result.add "\r\n\r\n"
-  elif hasBar:
-    result.add "\r\n\r\n"
-  result.addUserEcho(line)
-  result.add "\r\n"
-
-proc bufferedSubmitTransitionBytes*(line: string, hadPending, hadGap: bool,
-                                    receiptLabel: string,
-                                    hasBar = true): string =
-  if not hasBar:
-    result = "\r\x1b[J"
-    result.addUserEcho(line)
-    return
-  result.add "\r\x1b[J"
-  if hadPending:
-    result.add receiptBarBytes(receiptLabel)
-    result.add "\r\n\r\n"
-  else:
-    result.add "\r\n"
-  result.addUserEcho(line, trailingNewline = false)
-  result.add "\r\n\r\n"
-
 proc promptOnlyBytes*(): string =
   "\r\x1b[2K" & EditorPromptBytes & "\r"
 
