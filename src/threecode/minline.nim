@@ -1334,6 +1334,18 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
       # DEC 2026 synchronized output that double clear is visible as a
       # per-keystroke flash. Defer the single repaint to the handler; if
       # the byte is ignored (no handler redraws), paint once below.
+      #
+      # Design contract: a prompt queued during a turn shows the
+      # hourglass. Cancelling the current turn with Ctrl-C or a bare ESC
+      # must send that queued prompt as the next user message, not drop
+      # it. So cancel keys raise InputCancelled *before* the teardown
+      # below drops the queue. If the user does not want it sent they
+      # delete the queued text first (any editing keystroke runs the
+      # teardown, cancels the queue, and lets them edit or clear the
+      # line before interrupting).
+      if c1 == 3 or (c1 == 27 and not ed.hasPendingEscapeTail()):
+        ed.canceled = true
+        raise newException(InputCancelled, "")
       ed.pendingCaret = false
       ed.renderSuffix = ""
       ed.renderSuffixCursor = false

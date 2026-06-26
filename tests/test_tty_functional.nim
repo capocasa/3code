@@ -912,6 +912,114 @@ suite "terminal visual contract":
     tty.requireVisibleEditorCaret(acc)
     tty.continueStubApi()
 
+  test "interrupt during a queued mid-turn prompt sends the queue next":
+    # Design contract: a prompt queued during a turn shows the hourglass.
+    # In that state, Ctrl-C (or Esc) cancelling the *current* turn must send
+    # the queued turn immediately as the next user message. The queued prompt
+    # is not discarded by the interrupt. If the user did not want it sent they
+    # would delete the queued text first (typing after the queue cancels it
+    # and lets them edit or clear the line before the interrupt lands).
+    let root = newFixture("queued_interrupt")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "waitForTestContinue": true,
+        "content": "Holding turn open.",
+        "contentChunks": ["Holding turn open."],
+        "usage": {
+          "promptTokens": 100,
+          "completionTokens": 10,
+          "totalTokens": 110,
+          "cachedTokens": 0
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Reply to queued prompt.",
+        "contentChunks": ["Reply to queued prompt."],
+        "usage": {
+          "promptTokens": 120,
+          "completionTokens": 8,
+          "totalTokens": 128,
+          "cachedTokens": 0
+        }
+      }
+    ])
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "start turn\n"
+    tty.expect "start turn"
+    # Turn is held open. Queue a prompt and confirm the hourglass appears.
+    tty.send "queued prompt"
+    tty.expect "queued prompt"
+    tty.send "\n"
+    tty.expect "⧖"
+    # Interrupt the current turn. The queued prompt must survive and be sent
+    # as the next user turn, not dropped.
+    tty.send "\x03"
+    tty.expectInHistory "interrupted by user"
+    tty.expectInHistory "❯ queued prompt"
+    tty.expectInHistory "Reply to queued prompt."
+
+  test "bare escape during a queued mid-turn prompt sends the queue next":
+    # Same contract as the Ctrl-C variant above, exercised with a bare Esc.
+    # Esc is also the prefix of arrow-key sequences; a bare Esc (no tail byte
+    # within the poll window) is a cancel, so the queued prompt survives and
+    # is sent. An arrow key (Esc + tail) is editing intent and would drop the
+    # queue instead (covered by the editing tests above).
+    let root = newFixture("queued_interrupt_esc")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "waitForTestContinue": true,
+        "content": "Holding turn open.",
+        "contentChunks": ["Holding turn open."],
+        "usage": {
+          "promptTokens": 100,
+          "completionTokens": 10,
+          "totalTokens": 110,
+          "cachedTokens": 0
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Reply to queued prompt.",
+        "contentChunks": ["Reply to queued prompt."],
+        "usage": {
+          "promptTokens": 120,
+          "completionTokens": 8,
+          "totalTokens": 128,
+          "cachedTokens": 0
+        }
+      }
+    ])
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "start turn\n"
+    tty.expect "start turn"
+    tty.send "queued prompt"
+    tty.expect "queued prompt"
+    tty.send "\n"
+    tty.expect "⧖"
+    # Bare Esc cancels the current turn. The queued prompt must survive and
+    # be sent as the next user turn, not dropped.
+    tty.send "\x1b"
+    tty.expectInHistory "interrupted by user"
+    tty.expectInHistory "❯ queued prompt"
+    tty.expectInHistory "Reply to queued prompt."
+
   test "bash tool success and nonzero exit":
     let root = newFixture("bash_tool_visual_test")
     writeConfiguredProvider(root)
