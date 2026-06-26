@@ -1,0 +1,134 @@
+name: OSX
+
+# Fast macOS-only build + publish. The full Release workflow waits on every
+# matrix leg (Linux/Windows), and the tty visual test can hang on Linux for
+# the full 20m step timeout before pages can deploy. This workflow builds only
+# the macOS universal binary and publishes it to the Pages site so a single
+# platform fix can be live-tested in minutes.
+#
+# Trigger manually:
+#   gh workflow run osx.yml --ref main
+# Or it fires on push to main alongside Release.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/osx.yml'
+      - 'src/**'
+      - 'tests/**'
+      - '*.nimble'
+      - 'config.nims'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: stable
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dependencies
+        run: |
+          nimble install -y --depsOnly
+          nimble setup -y
+          echo '--path:"src"' >> nimble.paths
+
+      - name: Compute build flags
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "BUILD_FLAGS=-d:autoUpdate" >> "$GITHUB_ENV"
+          else
+            echo "BUILD_FLAGS=-d:versionSuffix=-main-${GITHUB_SHA:0:8}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build
+        run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
+
+      - name: Build x86_64 and create universal binary
+        run: |
+          mv 3code 3code-arm64
+          rm -rf ~/.cache/nim/threecode_r
+          nim c -d:release ${{ env.BUILD_FLAGS }} --passC:"-arch x86_64" --passL:"-arch x86_64" --cpu:amd64 -o:3code-x86_64 src/threecode.nim
+          lipo -create 3code-arm64 3code-x86_64 -output 3code
+          file 3code
+
+      - name: Run tests
+        run: nimble test
+        timeout-minutes: 20
+
+      - name: Package
+        run: |
+          mkdir -p 3code-macos-universal
+          cp 3code 3code-macos-universal/
+          cp README.md LICENSE 3code-macos-universal/
+          OPENSSL_PREFIX="$(brew --prefix openssl@3)"
+          cp "${OPENSSL_PREFIX}/lib/libssl.3.dylib"    3code-macos-universal/
+          cp "${OPENSSL_PREFIX}/lib/libcrypto.3.dylib" 3code-macos-universal/
+          chmod +w 3code-macos-universal/libssl.3.dylib 3code-macos-universal/libcrypto.3.dylib
+          install_name_tool -id @loader_path/libcrypto.3.dylib 3code-macos-universal/libcrypto.3.dylib
+          install_name_tool -id @loader_path/libssl.3.dylib    3code-macos-universal/libssl.3.dylib
+          install_name_tool -change "${OPENSSL_PREFIX}/lib/libcrypto.3.dylib" \
+            @loader_path/libcrypto.3.dylib 3code-macos-universal/libssl.3.dylib
+          ln -sf libssl.3.dylib    3code-macos-universal/libssl.dylib
+          ln -sf libcrypto.3.dylib 3code-macos-universal/libcrypto.dylib
+          curl -fsSL https://curl.se/ca/cacert.pem -o 3code-macos-universal/cacert.pem
+          tar czf 3code-macos-universal.tar.gz 3code-macos-universal
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 3code-macos-universal
+          path: 3code-macos-universal.tar.gz
+
+  pages:
+    # Deploy on a manual workflow_dispatch (fast macOS-only publish for
+    # live testing). On push, the full Release workflow owns the site.
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: 3code-macos-universal
+          path: dl
+
+      - name: Assemble site
+        run: |
+          mkdir -p site/main
+          cp dl/3code-macos-universal.tar.gz site/main/ 2>/dev/null || true
+          cat > site/index.html <<EOF
+          <!doctype html><meta charset=utf-8><title>3code main builds</title>
+          <h1>3code main builds</h1>
+          <p>Per-commit builds from <code>main</code> (commit ${GITHUB_SHA}).</p>
+          <ul>
+          EOF
+          for f in site/main/*; do
+            [ -f "$f" ] || continue
+            b=$(basename "$f")
+            echo "            <li><a href=\"main/$b\">$b</a></li>" >> site/index.html
+          done
+          cat >> site/index.html <<EOF
+          </ul>
+          EOF
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
