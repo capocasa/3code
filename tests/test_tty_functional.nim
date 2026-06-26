@@ -743,7 +743,11 @@ suite "terminal visual contract":
       MultilineVisualTestFrames,
       root / "multiline_visual_test_actual.txt")
 
-  test "two prompts queued during one turn both reach scrollback":
+  test "queued prompt survives a second submit during one turn":
+    # After queuing a prompt mid-turn, the user can revise it: typing appends
+    # to the buffered text (the queue is cancelled and the line kept), so a
+    # second Enter re-queues the revised text. Only the revised prompt reaches
+    # the conversation; the stale first queue is dropped, not merged in.
     let root = newFixture("two_queued")
     writeConfiguredProvider(root)
     writeStubResponses(root, %*[
@@ -761,23 +765,12 @@ suite "terminal visual contract":
       },
       {
         "role": "assistant",
-        "content": "Reply alpha.",
-        "contentChunks": ["Reply alpha."],
+        "content": "Reply to revised prompt.",
+        "contentChunks": ["Reply to revised prompt."],
         "usage": {
           "promptTokens": 150,
           "completionTokens": 20,
           "totalTokens": 170,
-          "cachedTokens": 0
-        }
-      },
-      {
-        "role": "assistant",
-        "content": "Reply beta.",
-        "contentChunks": ["Reply beta."],
-        "usage": {
-          "promptTokens": 180,
-          "completionTokens": 20,
-          "totalTokens": 200,
           "cachedTokens": 0
         }
       }
@@ -790,23 +783,89 @@ suite "terminal visual contract":
 
     tty.expect "❯"
     tty.send "initial prompt\n"
-    # Turn is held open by waitForTestContinue. Queue two prompts back to
-    # back before releasing; both must survive as separate scrollback items
-    # (regression: the second used to overwrite or merge into the first).
     tty.expect "initial prompt"
+    # Turn is held open. Queue a prompt, then keep typing: the text appends to
+    # the buffered line rather than starting fresh, and a second Enter re-queues
+    # the whole revised text.
     tty.send "queued alpha\n"
     tty.expect "queued alpha"
-    tty.send "queued beta\n"
-    tty.expect "queued beta"
+    tty.expect "⧖"
+    tty.send " queued beta"
+    tty.expect "queued alpha queued beta"
+    tty.send "\n"
+    tty.expect "⧖"
     tty.advanceTicker()
     tty.continueStubApi()
 
     tty.expectInHistory "❯ initial prompt"
     tty.expectInHistory "First reply."
-    tty.expectInHistory "❯ queued alpha"
-    tty.expectInHistory "Reply alpha."
-    tty.expectInHistory "❯ queued beta"
-    tty.expectInHistory "Reply beta."
+    tty.expectInHistory "❯ queued alpha queued beta"
+    tty.expectInHistory "Reply to revised prompt."
+
+  test "editing a queued prompt keeps the text instead of wiping it":
+    # Regression: typing after a queued submit used to wipe the buffer and
+    # start over. Now it cancels the queue and edits the existing text in
+    # place, so the user can queue, change their mind, backspace, type, and
+    # queue again. The edited text is what reaches scrollback at turn end.
+    let root = newFixture("queued_prompt_edit")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "waitForTestContinue": true,
+        "content": "Holding turn open.",
+        "contentChunks": ["Holding turn open."],
+        "usage": {
+          "promptTokens": 100,
+          "completionTokens": 10,
+          "totalTokens": 110,
+          "cachedTokens": 0
+        }
+      },
+      {
+        "role": "assistant",
+        "content": "Reply to edited prompt.",
+        "contentChunks": ["Reply to edited prompt."],
+        "usage": {
+          "promptTokens": 120,
+          "completionTokens": 8,
+          "totalTokens": 128,
+          "cachedTokens": 0
+        }
+      }
+    ])
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "start turn\n"
+    tty.expect "start turn"
+    # Turn is held open. Type and queue a prompt, then change your mind:
+    # backspace over the tail and retype an edited version. The hourglass
+    # must clear and the edited text must survive, not be wiped.
+    tty.send "hello world"
+    tty.expect "hello world"
+    tty.send "\n"
+    tty.expect "⧖"
+    tty.send "\x7f"           # backspace: delete the 'd'
+    tty.send " edited"         # buffer now reads "hello worl edited"
+    tty.expect "hello worl edited"
+    tty.requireVisibleEditorCaret("hello worl edited")
+    tty.send "\n"             # re-queue the edited text
+    tty.expect "⧖"
+    tty.advanceTicker()
+    tty.continueStubApi()
+
+    tty.expectInHistory "❯ start turn"
+    tty.expectInHistory "❯ hello worl edited"
+    tty.expectInHistory "Reply to edited prompt."
+    # Regression guard for the old wipe behavior: backspacing and retyping
+    # after the queue must build on the existing text, not start from empty.
+    # With the bug, the buffer would have been wiped to " edited".
+    tty.expectNeverInHistory "❯  edited"
 
   test "bash tool success and nonzero exit":
     let root = newFixture("bash_tool_visual_test")

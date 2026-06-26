@@ -1397,6 +1397,28 @@ proc inputThreadProc() {.thread.} =
       # Mark the prompt draft dirty so the flusher thread persists the current
       # editor text on its debounce. No I/O here — the input thread stays fast.
       draftDirty.store(true, moRelease)
+    edPtr[].onCancelDeferredSubmit = proc(ed: var minline.LineEditor) =
+      # The user resumed typing after a queued submit: drop the queue so the
+      # next Enter re-queues the edited text rather than submitting a stale
+      # copy. The editor keeps its text and cursor; only the queue state goes.
+      #
+      # This makes a mid-turn queue one editable prompt, not a stack of
+      # frozen ones. That is a deliberate design choice: an immutable queue
+      # is more state to track, less flexible (no "change your mind"), and
+      # still concatenates into one user turn anyway, so the extra machinery
+      # buys nothing.
+      acquire inputStateLock
+      try:
+        let t = ed.line.text
+        while inputState.queuedPrompts.len > 0 and
+            inputState.queuedPrompts[^1].text == t:
+          inputState.queuedPrompts.delete(inputState.queuedPrompts.high)
+        if inputState.queuedPrompts.len == 0:
+          inputState.autoSend = false
+          inputState.queuedText = ""
+          inputState.queuedEchoRows = 0
+      finally:
+        release inputStateLock
     edPtr[].onSubmit = proc(ed: var minline.LineEditor) =
       if inputTurnActive.load(moAcquire) and ed.line.text.startsWith(":"):
         let cmd = ed.line.text
@@ -1573,6 +1595,7 @@ proc inputThreadProc() {.thread.} =
     restoreInputTermios()
     edPtr[].onMutate = nil
     edPtr[].onSubmit = nil
+    edPtr[].onCancelDeferredSubmit = nil
     edPtr[].preRedraw = nil
     edPtr[].postRedraw = nil
     edPtr[].deferSubmit = false
