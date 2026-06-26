@@ -94,6 +94,8 @@ proc mangleCwd*(cwd: string): string =
   if s.startsWith("/"): s = s[1 ..< s.len]
   s = s.replace("_", "__")         # escape existing underscores
   s = s.replace("/", "_")         # then separators → single underscore
+  when defined(windows):
+    s = s.replace(":", "_")       # drive letter colon (C:)
   if s.len == 0: s = "root"       # cwd "/" (and "") collapse to a stable name
   s
 
