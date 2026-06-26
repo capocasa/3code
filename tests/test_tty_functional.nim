@@ -1182,6 +1182,44 @@ suite "terminal visual contract":
         curRun = 0
     check maxRun <= 1
 
+  test "every prompt first line survives a reasoning-ticker to content transition":
+    # Regression: when a thinking ticker clears at the start of streamed
+    # content, a concurrent footer repaint could walk its erase one row too
+    # far (the cached footer height still counted the ticker) and wipe the
+    # just-echoed prompt's first line from scrollback, leaving a blank `❯`
+    # row. Run several reasoning turns so the ticker appear/clear transition
+    # is exercised repeatedly; every user prompt must remain intact in the
+    # final scrollback.
+    let root = newFixture("ticker_prompt_drop")
+    writeConfiguredProvider(root)
+    let prompts = ["alpha-marker", "beta-marker", "gamma-marker", "delta-marker"]
+    var responses: seq[JsonNode] = @[]
+    for p in prompts:
+      responses.add %*{
+        "reasoning_content": "thinking about " & p,
+        "reasoningChunks": ["thinking about " & p],
+        "preStreamDelayMs": 400,
+        "content": "reply to " & p,
+        "contentChunks": ["reply to " & p],
+        "usage": {"promptTokens": 40, "completionTokens": 5,
+                  "totalTokens": 45, "cachedTokens": 0}
+      }
+    writeStubResponses(root, %responses)
+    let tty = startStub(root)
+    defer: tty.close()
+    tty.expect "❯"
+    for p in prompts:
+      tty.send p
+      tty.expect p
+      tty.send "\n"
+      tty.expectInHistory "❯ " & p
+      tty.expectInHistory "reply to " & p
+      tty.expect "❯"
+    # Re-assert every prompt survived into the committed scrollback: a
+    # dropped first line would leave no `❯ <prompt>` row at all.
+    for p in prompts:
+      tty.expectInHistory "❯ " & p
+
 when false:
   suite "disabled terminal visual contract tests":
     test "stub provider streams bash output without replaying it later":

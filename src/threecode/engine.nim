@@ -143,12 +143,22 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
         let hasLeadingGap =
           bytes.len > 0 and frame.kind notin {ffNone, ffClear} and
           (e.footerNeedsLeadingGap or e.footerHasLeadingGap)
+        # Footer height can shrink between repaints (a thinking ticker clears,
+        # a wrapping token bar unwraps as its label shortens). ``growth`` only
+        # covers the taller direction; without accounting for the shrink, the
+        # cached ``rowsAboveCursorToFooterTop`` (stale from the taller frame)
+        # drives the walk-up too far and ``\x1b[J`` erases committed
+        # scrollback, dropping the just-echoed prompt's first line.
         let growth =
           if e.footerRowsAboveEditor > 0:
             max(0, footerRowsAboveEditor - e.footerRowsAboveEditor)
           else:
             0
-        let up = e.rowsAboveCursorToFooterTop + e.toolViewportHeight + growth
+        let shrink =
+          max(0, e.footerRowsAboveEditor - footerRowsAboveEditor)
+        let up =
+          max(0, e.rowsAboveCursorToFooterTop + e.toolViewportHeight +
+                 growth - shrink)
         let rewriteLeadingGap =
           hasLeadingGap and (up == 0 or (growth > 0 and e.footerHasLeadingGap))
         stdout.write "\r"
@@ -210,12 +220,15 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
             max(0, footerRowsAboveEditor - e.footerRowsAboveEditor)
           else:
             0
+        let shrink =
+          max(0, e.footerRowsAboveEditor - footerRowsAboveEditor)
         let rowsToFooter =
           if e.rowsAboveCursorToFooterTop > 0:
             e.rowsAboveCursorToFooterTop
           else:
             rowsToFooterTop(editor[], footerRowsAboveEditor)
-        let up = rowsToFooter + e.toolViewportHeight + growth
+        let up =
+          max(0, rowsToFooter + e.toolViewportHeight + growth - shrink)
         stdout.write "\r"
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
