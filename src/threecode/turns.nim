@@ -207,13 +207,17 @@ proc commitPendingReceiptAfterStream(restoreEditor = true) =
     transcriptOwnsSpacing = true)
 
 proc commitTranscriptItem(formatBody: proc(); restoreEditor = true;
-                          prefixBoundary = false) =
+                          prefixBoundary = false; receipt = "") =
   ## Commit one complete transcript item. ``prefixBoundary`` is used when the
   ## previous item already restored the live prompt; the controller still owns
   ## the inter-item blank row, so it emits that boundary before this marker
   ## instead of asking terminal cursor cleanup to preserve it implicitly.
   var bytes = captureStdoutWrites:
     formatBody()
+  if receipt.len > 0:
+    bytes.trimTranscriptTail()
+    bytes.add "\r\n"
+    bytes.add receipt
   bytes.finishTranscriptItem()
   if prefixBoundary:
     bytes = "\r\n" & bytes
@@ -281,14 +285,37 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       # the pending banner and the timed result. (Wrapping the whole
       # block in one transcript write is wrong: it clears at start, repaints
       # at end, so bar/prompt are invisible while the command runs.)
+      # When the model emits both content and tool calls, the token receipt
+      # belongs under the LAST tool of the turn, not under the prose. Attaching
+      # it to the prose item here would render the receipt between the answer
+      # and the tool calls it documents. Defer it instead.
+      var deferredReceipt = ""
       if content.strip.len > 0:
-        if streamedLive:
-          commitPendingReceiptAfterStream()
-        else:
-          commitAssistantItem(content)
+        # Streamed content is already in scrollback; non-streamed content is
+        # committed here as a receipt-less item. Either way, capture the
+        # pending receipt so it can cap the last tool below.
+        if not streamedLive:
+          commitAssistantItem(content, attachReceipt = false)
+        deferredReceipt = pendingReceiptBytes()
+      # The last tool that will actually reach its commit is the one the
+      # deferred receipt caps. Tools that are interrupted or have malformed
+      # arguments skip their transcript commit, so the cap may fall to an
+      # earlier tool or be left over for a trailing commit after the loop.
+      var lastCommitIdx = -1
+      for i in 0 ..< toolCalls.len:
+        let tc = toolCalls[i]
+        let fn = tc{"function"}
+        let argsStr =
+          if fn != nil and fn.kind == JObject: fn{"arguments"}.getStr("") else: ""
+        block malformedCheck:
+          if argsStr.len > 0:
+            try: discard parseJson(argsStr)
+            except CatchableError: break malformedCheck
+          lastCommitIdx = i
       var queuedUser = false # User submitted while tools were running.
       var cleared = false  # akClear: rebuild and continue loop
-      for tc in toolCalls:
+      for i in 0 ..< toolCalls.len:
+        let tc = toolCalls[i]
         let id = tc{"id"}.getStr
         if isInterrupted():
           # still emit a tool response so the assistant message's tool_calls
@@ -361,14 +388,20 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
         debugOut &"tool done: {act.kind} code={code} elapsed={toolElapsed:.2f}"
 
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
+        let isReceiptCap = deferredReceipt.len > 0 and i == lastCommitIdx
         if not silent:
           appendItem(
             toolItem(act, r, code, idx, diff, toolElapsed.int),
-            prefixBoundary = not hadToolBar)
+            prefixBoundary = not hadToolBar,
+            receipt = if isReceiptCap: deferredReceipt else: "")
         else:
           commitTranscriptItem(proc() =
             printSkillLoaded(act)
-          , prefixBoundary = not hadToolBar)
+          , prefixBoundary = not hadToolBar,
+            receipt = if isReceiptCap: deferredReceipt else: "")
+        if isReceiptCap:
+          deferredReceipt = ""
+          emitFatPromptEvent clearPendingHintEvent()
         messages.add %*{"role": "tool", "tool_call_id": id, "content": r}
         acquire inputStateLock
         try:
@@ -408,6 +441,14 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
           saveSession(session, messages)
           cleared = true
           break
+      # The deferred receipt was captured before the loop, but a tool can
+      # skip its commit at runtime (interrupt, akClear wiping the hint). If it
+      # was never spliced onto a tool item, commit it as a trailing item so
+      # the turn's token usage still lands in scrollback rather than silently
+      # evaporating with the bar.
+      if deferredReceipt.len > 0:
+        commitPendingReceiptAfterStream()
+        deferredReceipt = ""
       if cleared:
         emitFatPromptEvent clearPendingHintEvent()
         continue

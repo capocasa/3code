@@ -115,12 +115,28 @@ proc formatItem*(item: TranscriptItem): string =
     result.add commandBodyBytes(item.body)
   result.finishItem(item.attachSeparator)
 
+proc attachReceipt*(bytes: var string; receipt: string; attachSeparator: bool) =
+  ## Splice a token receipt row between an item body and its separator. The
+  ## body must already end in the item separator (`\r\n\r\n`) produced by
+  ## `finishItem`; this strips that separator, appends the receipt flush below
+  ## the body, then restores the separator so the receipt is owned by the item
+  ## it caps rather than becoming a separate blank-separated item.
+  if receipt.len == 0:
+    return
+  bytes.trimTranscriptTail()
+  bytes.add "\r\n"
+  bytes.add receipt
+  if attachSeparator:
+    bytes.add "\r\n\r\n"
+
 proc appendItem*(item: TranscriptItem; restoreEditor = true;
                  beforeRepaint: proc() = nil; reserveFooter = true;
-                 prefixBoundary = false) =
+                 prefixBoundary = false; receipt = "") =
   var bytes = formatItem(item)
   if prefixBoundary:
     bytes = "\r\n" & bytes
+  if receipt.len > 0:
+    bytes.attachReceipt(receipt, item.attachSeparator)
   commitTranscriptBytes(
     bytes,
     restoreEditor,
