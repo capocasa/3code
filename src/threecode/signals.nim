@@ -6,6 +6,7 @@
 
 when defined(posix):
   import posix
+  import util
 
   type SigAtomic {.importc: "sig_atomic_t", header: "<signal.h>", pure.} = cint
 
@@ -20,7 +21,9 @@ when defined(posix):
     discard sigemptyset(sa.sa_mask)
     sa.sa_handler = winchHandler
     sa.sa_flags = SA_RESTART
-    discard sigaction(SIGWINCH, sa, nil)
+    let rc = sigaction(SIGWINCH, sa, nil)
+    if rc != 0:
+      debugOut "sigaction(SIGWINCH) failed: " & $rc
 
   proc markResizePending*() =
     resizePendingFlag = 1

@@ -98,7 +98,8 @@ proc fetchLatestTag(): string =
     if resp.code.int div 100 != 2: return ""
     let j = parseJson(resp.body)
     j{"tag_name"}.getStr("")
-  except CatchableError:
+  except CatchableError as e:
+    debugOut "fetchLatestTag failed: " & e.msg
     ""
 
 proc downloadAsset(tag, asset, dest: string): bool =
@@ -112,7 +113,8 @@ proc downloadAsset(tag, asset, dest: string): bool =
     if resp.code.int div 100 != 2: return false
     writeFile(dest, resp.body)
     fileExists(dest) and getFileSize(dest) > 0
-  except CatchableError:
+  except CatchableError as e:
+    debugOut "downloadAsset failed: " & e.msg
     false
 
 proc extractArchive(archive, workDir: string): string =

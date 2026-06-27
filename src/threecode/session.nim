@@ -592,7 +592,9 @@ proc emitToolUse(s: var string, tc: JsonNode) =
   let rawName = if fn != nil: fn{"name"}.getStr("") else: ""
   let argsStr = if fn != nil: fn{"arguments"}.getStr("") else: ""
   let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
-             except CatchableError: newJObject()
+             except CatchableError as e:
+               debugOut "tool_call " & rawName & " has malformed args: " & e.msg
+               newJObject()
   var name = rawName
   let pipe = name.find("<|")
   if pipe >= 0: name = name[0 ..< pipe]
@@ -835,7 +837,9 @@ proc buildToolLogFromMessages(messages: JsonNode,
       let rawName = if fn != nil: fn{"name"}.getStr else: ""
       let argsStr = if fn != nil: fn{"arguments"}.getStr("") else: ""
       let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
-                 except CatchableError: newJObject()
+                 except CatchableError as e:
+                   debugOut "tool_call " & rawName & " has malformed args: " & e.msg
+                   newJObject()
       var name = rawName
       let pipe = name.find("<|")
       if pipe >= 0: name = name[0 ..< pipe]
@@ -919,7 +923,9 @@ proc buildPlanFromMessages(messages: JsonNode,
       if name != "update_plan" and name != "todo": continue
       let argsStr = if fn != nil: fn{"arguments"}.getStr("") else: ""
       let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
-                 except CatchableError: newJObject()
+                 except CatchableError as e:
+                   debugOut "tool_call " & rawName & " has malformed args: " & e.msg
+                   newJObject()
       let items =
         if args{"items"} != nil and args{"items"}.kind == JArray: args{"items"}
         else: args{"steps"}

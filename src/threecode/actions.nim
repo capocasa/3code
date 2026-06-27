@@ -313,6 +313,11 @@ proc newReadCache*(): ReadCache =
   ReadCache(state: initTable[string, (Time, int)]())
 
 proc fileSig*(path: string): (Time, int) =
+  ## Returns (mtime, size) for the read-cache equality check. On stat failure
+  ## (race, perms, NFS), returns (Time(), 0) as a sentinel. This is safe for
+  ## cache-miss detection (sentinel != real sig) but can cause a false
+  ## cache-hit if the first stat fails and a later stat also fails with the
+  ## same sentinel — a narrow race, but worth knowing about.
   try: (getLastModificationTime(path), getFileSize(path).int)
   except CatchableError: (Time(), 0)
 
@@ -623,7 +628,9 @@ proc runActionStreaming*(act: Action, cache: ReadCache = nil,
   let beforeContent =
     if mutPath != "" and mutPath != "." and fileExists(resolvePath(mutPath)):
       try: readFile(resolvePath(mutPath))
-      except CatchableError: ""
+      except CatchableError as e:
+        debugOut &"diff read failed (before): {e.msg}"
+        ""
     else: ""
   let beforeExists = mutPath != "" and mutPath != "." and
                        fileExists(resolvePath(mutPath))
@@ -656,7 +663,9 @@ proc runActionStreaming*(act: Action, cache: ReadCache = nil,
     let after =
       if fileExists(p):
         try: readFile(p)
-        except CatchableError: ""
+        except CatchableError as e:
+          debugOut &"diff read failed (after): {e.msg}"
+          ""
       else: ""
     if beforeExists and beforeContent != after:
       diff = computeDiff(beforeContent, after, p)
