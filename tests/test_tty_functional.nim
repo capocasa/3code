@@ -1109,6 +1109,88 @@ suite "terminal visual contract":
       BashToolVisualTestFrames,
       root / "bash_tool_visual_test_actual.txt")
 
+  test "bash tool output does not flicker blank on commit":
+    # Regression: when a streaming bash tool completed, the live viewport was
+    # cleared in one synchronized frame and the final transcript committed in
+    # a second. On a real terminal that produced a visible blank flash: the
+    # output vanished then reappeared. The fix folds the viewport clear into
+    # the same sync frame as the transcript append.
+    #
+    # The PTY harness batches reads, so the two old sync frames landed in one
+    # grid snapshot and the flash was invisible there. The assertion is on
+    # the raw byte stream instead: after the streamed output first appears,
+    # no synchronized frame may erase the screen region without also carrying
+    # the committed transcript text. Such an erase-only frame is exactly the
+    # blank flash a human would see.
+    let root = newFixture("bash_flicker")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "content": "Running one tool.",
+        "contentChunks": ["Running one tool."],
+        "tool_calls": [
+          toolCall("call_marker", "bash", %*{
+            "command": "printf 'flicker-marker\n'"
+          }, %*{
+            "stream": ["flicker-marker"],
+            "output": "flicker-marker\n",
+            "code": 0
+          })
+        ],
+        "usage": {"promptTokens": 40, "completionTokens": 8,
+                  "totalTokens": 48, "cachedTokens": 0}
+      },
+      {
+        "role": "assistant",
+        "content": "Done.",
+        "contentChunks": ["Done."],
+        "usage": {"promptTokens": 60, "completionTokens": 6,
+                  "totalTokens": 66, "cachedTokens": 0}
+      }
+    ])
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "run it\n"
+    tty.expectInHistory "flicker-marker"
+    tty.expectInHistory "Done."
+    tty.drain(100)
+    # Split the raw byte stream into synchronized-frame payloads (between
+    # SyncBegin and SyncEnd). The flicker is an erase-then-redraw: a sync
+    # frame that clears the viewport region (cursor-up + erase) without the
+    # streamed text, immediately followed by a frame that rewrites that text
+    # as committed scrollback. Assert no such erased-then-redrawn pair exists
+    # for the streamed marker.
+    const SyncBegin = "\x1b[?2026h"
+    const SyncEnd = "\x1b[?2026l"
+    var syncPayloads: seq[string]
+    var pos = 0
+    while true:
+      let start = tty.raw.find(SyncBegin, pos)
+      if start < 0: break
+      let stop = tty.raw.find(SyncEnd, start + SyncBegin.len)
+      if stop < 0: break
+      syncPayloads.add tty.raw[start + SyncBegin.len ..< stop]
+      pos = stop + SyncEnd.len
+    var firstMarkerFrame = -1
+    for i, p in syncPayloads:
+      if "flicker-marker" in p:
+        firstMarkerFrame = i
+        break
+    require firstMarkerFrame >= 0
+    for i in firstMarkerFrame ..< syncPayloads.len - 1:
+      if "\x1b[J" in syncPayloads[i] and
+          "flicker-marker" notin syncPayloads[i] and
+          "flicker-marker" in syncPayloads[i + 1]:
+        check false
+        break
+
   test "non-bash tool transcript shapes":
     let root = newFixture("other_tools_visual_test")
     writeConfiguredProvider(root)
