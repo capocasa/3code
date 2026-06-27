@@ -572,7 +572,13 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       if payload.strip == "[DONE]":
         sawDone = true
         continue
-      let j = try: parseJson(payload) except CatchableError: continue
+      let j = try: parseJson(payload)
+                 except CatchableError as e:
+                   # Empty payload or [DONE]-like comment is benign; anything
+                   # else that fails to parse is suspicious (truncated JSON).
+                   if payload.strip.len > 0:
+                     debugOut "malformed SSE data line: " & e.msg & " — " & payload
+                   continue
       let choices = j{"choices"}
       if choices != nil and choices.kind == JArray and choices.len > 0:
         let fr = choices[0]{"finish_reason"}
