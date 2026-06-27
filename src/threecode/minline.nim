@@ -60,6 +60,11 @@ proc restoreTerminal*() {.noconv.} =
 if isatty(stdin):
   addExitProc(restoreTerminal)
 
+# Holds one byte read ahead by `terminalHasPendingInput` that turned out
+# NOT to be an escape tail. `getchr` drains it before reading stdin, so the
+# peek never loses user input.
+var termPeeked*: int = -1
+
 when defined(windows):
   proc putchr*(c: cint): cint {.discardable, header: "<conio.h>", importc: "_putch".}
     ## Prints an ASCII character to stdout.
@@ -83,8 +88,16 @@ else:
     ## prompt drifting right by the bar payload's width on every repaint
     ## after a resize. (2) `try/finally` around the read guarantees the
     ## original termios is restored on signal interruption.
+    ##
+    ## Drains `termPeeked` first: `terminalHasPendingInput` reads one byte
+    ## ahead to classify ESC tails, and a non-tail byte is stashed here so
+    ## it is returned to the caller rather than lost.
     stdout.flushFile()
     when defined(posix):
+      if termPeeked >= 0:
+        result = termPeeked.cint
+        termPeeked = -1
+        return result
       let fd = getFileHandle(stdin)
       var oldMode: Termios
       if fd.tcGetAttr(addr oldMode) != 0:
@@ -198,11 +211,26 @@ else:
   const
     ESCAPES* = {27}
 
-const EscapeTailPollMs* = 250
+const EscapeTailPollMs* = 50
   ## Wait long enough for terminal multi-byte escape tails that can be
   ## split from the leading ESC by the terminal/PTY stack. Too short a
   ## window misclassifies modified keys as bare Escape and leaves their
-  ## tail bytes to be printed as normal input.
+  ## tail bytes to be printed as normal input. Combined with
+  ## `isEscapeTailByte` peeking, 50ms covers PTY/SSH burst delivery while
+  ## a bare ESC (user pressed Escape, then started typing) cancels
+  ## instantly: the peek rejects printable tail bytes.
+
+proc isEscapeTailByte*(b: int): bool =
+  ## True when `b` can validly be the second byte of a terminal escape
+  ## sequence (the byte immediately following a leading ESC). Printable
+  ## letters are never valid continuations, so an ESC immediately
+  ## followed by the user's next typed character is correctly classified
+  ## as a bare Escape rather than swallowing that character as a tail.
+  ##
+  ## CSI (ESC [), SS3 (ESC O), Alt+Enter (ESC CR), and the digit/~
+  ## continuations used by xterm/kitty function keys are the real tails.
+  b == 91 or b == 79 or b == 13 or (b >= 48 and b <= 57) or b == 126 or
+    b == 92 or b == 93 or b == 94 or b == 95
 
 # ---------- Pure helpers (testable without IO) ----------
 
@@ -1045,15 +1073,27 @@ proc readBracketedPaste(ed: var LineEditor): string =
         return result
 
 proc terminalHasPendingInput*(): bool =
-  ## Return whether stdin has input waiting after a short poll.
-  ## Used to distinguish bare Escape from ESC-prefixed key sequences.
+  ## Return whether stdin has a pending byte that could be the tail of an
+  ## ESC-prefixed escape sequence. Polls briefly for burst-delivered
+  ## sequences, then peeks at the actual byte: a printable character is
+  ## never a valid escape continuation, so it is stashed for `getchr` to
+  ## return normally and this reports no tail (bare Escape). Only genuine
+  ## continuation bytes (CSI `[`, SS3 `O`, etc.) report a tail.
   when defined(posix):
     if isatty(0.cint) != 0:
       var pfd: TPollfd
       pfd.fd = 0.cint
       pfd.events = POLLIN
       let r = poll(addr pfd, 1.Tnfds, EscapeTailPollMs.cint)
-      return r > 0 and (pfd.revents and POLLIN) != 0
+      if r > 0 and (pfd.revents and POLLIN) != 0:
+        var ch: char
+        if posix.read(0.cint, addr ch, 1) == 1:
+          if isEscapeTailByte(ch.ord.int):
+            termPeeked = ch.ord.int
+            return true
+          termPeeked = ch.ord.int
+          return false
+      return false
   true
 
 proc hasPendingEscapeTail(ed: LineEditor): bool =

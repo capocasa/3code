@@ -148,6 +148,25 @@ suite "minline editor: basic typing":
 # ---------------- Driver: cursor navigation ----------------
 
 suite "minline editor: cursor navigation":
+  test "isEscapeTailByte classifies escape continuations":
+    # CSI and SS3 introducers are valid tails.
+    check minline.isEscapeTailByte(91)   # '['
+    check minline.isEscapeTailByte(79)   # 'O'
+    # Alt+Enter (ESC CR).
+    check minline.isEscapeTailByte(13)
+    # Digit and '~' continuations (xterm/kitty function keys).
+    check minline.isEscapeTailByte(48)   # '0'
+    check minline.isEscapeTailByte(57)   # '9'
+    check minline.isEscapeTailByte(126)  # '~'
+    # Printable letters are NEVER valid tails. This is the key property:
+    # ESC immediately followed by the user's next typed character must be
+    # treated as a bare Escape so the character is not swallowed.
+    check not minline.isEscapeTailByte('a'.ord)
+    check not minline.isEscapeTailByte('z'.ord)
+    check not minline.isEscapeTailByte('A'.ord)
+    check not minline.isEscapeTailByte('w'.ord)
+    check not minline.isEscapeTailByte(' '.ord)
+
   test "bare Escape cancels like Ctrl+C":
     var ed = initEditor()
     let d = newDriver()

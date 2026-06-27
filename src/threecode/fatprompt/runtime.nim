@@ -1377,7 +1377,14 @@ proc inputThreadProc() {.thread.} =
             continue
         -1
       let hasPendingInput: minline.HasPendingInputProc = proc(): bool =
-        pendingInput.len > 0 or fillPending(minline.EscapeTailPollMs.cint)
+        # Peek-aware: only report a pending tail when the next buffered byte
+        # is a valid escape-sequence continuation. A printable byte (the
+        # user's next keystroke right after pressing Escape) stays in the
+        # buffer for normal processing, so ESC + typing cancels instead of
+        # swallowing the first typed character.
+        if pendingInput.len == 0:
+          discard fillPending(minline.EscapeTailPollMs.cint)
+        pendingInput.len > 0 and minline.isEscapeTailByte(pendingInput[0])
     else:
       let getCh: minline.GetChProc = proc(): int =
         if inputRunning() and not inputIdleSubmitted.load(moAcquire):
