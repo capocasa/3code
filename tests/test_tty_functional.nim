@@ -1405,10 +1405,16 @@ suite "terminal visual contract":
       tty.expectInHistory "❯ " & p
       tty.expectInHistory "reply to " & p
       tty.expect "❯"
-    # Re-assert every prompt survived into the committed scrollback: a
+    # Re-assert every prompt survived into the committed scrollback. A
     # dropped first line would leave no `❯ <prompt>` row at all.
+    # `screenText` returns the full grid (scrollback + visible), so this
+    # catches a prompt that appeared while typing but was later erased from
+    # the screen by a footer repaint, which `expectInHistory` (text that ever
+    # appeared) would miss.
+    tty.drain(300)
+    let finalScreen = tty.screenText()
     for p in prompts:
-      tty.expectInHistory "❯ " & p
+      check ("❯ " & p) in finalScreen
 
 when false:
   suite "disabled terminal visual contract tests":

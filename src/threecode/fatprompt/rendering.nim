@@ -347,20 +347,20 @@ proc footerFrame*(s: FatPromptState): FooterFrame =
   tokenBarFrame(s.footer.barLabel, s.footer.ticker)
 
 proc rowsAboveEditor*(frame: FooterFrame; termW = 0): int =
+  ## Rows from the top of the fat prompt to the editor. The first row is
+  ## always a gap (blank unless a thinking ticker fills it): this makes the
+  ## footer height invariant to the ticker appearing or clearing, so the
+  ## engine's walk-up to the footer top never lands on committed scrollback.
   case frame.kind
   of ffNone:
     result = 0
   of ffClear:
     result = max(1, frame.clearRows)
   of ffTokenBar:
-    result = barWrapRows(2 + labelCells(frame.label), termW)
-    if frame.ticker.len > 0:
-      inc result
+    result = 1 + barWrapRows(2 + labelCells(frame.label), termW)
   of ffSpinner:
     let elapsedTextLen = if frame.elapsed >= 0: ($frame.elapsed).len else: 1
-    result = barWrapRows(labelCells(frame.label) + 4 + elapsedTextLen, termW)
-    if frame.ticker.len > 0:
-      inc result
+    result = 1 + barWrapRows(labelCells(frame.label) + 4 + elapsedTextLen, termW)
 
 proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int,
                          termW = 0): string =
@@ -435,13 +435,11 @@ proc clampToWidth*(s: string; width: int): string =
 
 proc liveEditorSpinnerFooterBytes*(frame, label, ticker: string;
                                    elapsed: int; termW = 0): string =
+  result.add "\r\x1b[2K"
   if ticker.len > 0:
     let shown = if termW > 0: clampToWidth(ticker, termW) else: ticker
-    result.add "\r\x1b[2K"
-    result.add GreyFg
-    result.add shown
-    result.add Reset
-    result.add "\r\n"
+    result.add GreyFg & shown & Reset
+  result.add "\r\n"
   result.add liveEditorSpinnerBarBytes(frame, label, elapsed)
 
 proc clearSpinnerFooterBytes*(hadTicker: bool): string =
@@ -449,6 +447,18 @@ proc clearSpinnerFooterBytes*(hadTicker: bool): string =
     "\r\x1b[2K\r\n\x1b[2K"
   else:
     "\r\x1b[2K"
+
+proc footerBarOnlyBytes*(frame: FooterFrame; termW = 0): string =
+  ## The bar row(s) without the leading gap row. Used by transcript append
+  ## paths where the controller's item separator already supplies the gap;
+  ## adding the frame's own gap there would double it.
+  case frame.kind
+  of ffNone, ffClear:
+    result = ""
+  of ffTokenBar:
+    result = paintBarBytes(frame.label)
+  of ffSpinner:
+    result = liveEditorSpinnerBarBytes(frame.spinner, frame.label, frame.elapsed)
 
 proc footerFrameBytes*(frame: FooterFrame; termW = 0): string =
   case frame.kind
@@ -459,12 +469,11 @@ proc footerFrameBytes*(frame: FooterFrame; termW = 0): string =
     for _ in 1 ..< max(1, frame.clearRows):
       result.add "\r\n\x1b[2K"
   of ffTokenBar:
-    if frame.ticker.len == 0:
-      result = paintBarBytes(frame.label)
-    else:
+    result = "\r\x1b[2K"
+    if frame.ticker.len > 0:
       let shown = if termW > 0: clampToWidth(frame.ticker, termW) else: frame.ticker
-      result = "\r\x1b[2K" & GreyFg & shown & Reset & "\r\n" &
-        paintBarBytes(frame.label)
+      result.add GreyFg & shown & Reset
+    result.add "\r\n" & paintBarBytes(frame.label)
   of ffSpinner:
     result = liveEditorSpinnerFooterBytes(frame.spinner, frame.label,
                                           frame.ticker, frame.elapsed, termW)
