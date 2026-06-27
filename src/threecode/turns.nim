@@ -119,10 +119,15 @@ proc runBashWithViewport(act: Action; cache: ReadCache; stub: JsonNode;
   finally:
     setCommandStatusActive(false)
     setToolStdinWatcherEnabled(true)
-    termengine.clearToolViewport(
-      footerFrame(fatPromptState),
-      inputThreadRunning,
-      inputEditor)
+    # The normal path leaves the viewport in place so the controller's
+    # `appendItem` can fold it into one synchronized scrollback commit (no
+    # blank intermediate frame). Only on exception, where the append will not
+    # run, clear the viewport here so a stale live viewport does not linger.
+    if getCurrentException() != nil:
+      termengine.clearToolViewport(
+        footerFrame(fatPromptState),
+        inputThreadRunning,
+        inputEditor)
 
 proc pendingReceiptBytes(): string =
   if not pendingHint.active:

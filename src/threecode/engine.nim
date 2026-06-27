@@ -310,10 +310,18 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
           0
         else:
           rowsToFooterTop(edPtr[], footerRowsAboveEditor)
-      let rowsUp = rowsToFooter + max(0, compactRowsAboveFooter)
+      # When a live tool viewport is still active (bash output streaming),
+      # the viewport sits between the scrollback and the footer. Its final
+      # content is identical to the transcript bytes about to be written, so
+      # clearing it in a separate pass first would flash an empty intermediate
+      # frame. Walk up past it and let the transcript write overwrite those
+      # rows in the same synchronized frame, then drop the viewport tracking.
+      let viewportH = e.toolViewportHeight()
+      let rowsUp = rowsToFooter + viewportH + max(0, compactRowsAboveFooter)
       if rowsUp > 0:
         stdout.write "\x1b[" & $rowsUp & "A"
       stdout.write "\x1b[J"
+      e.toolViewportRows = @[]
       if transcript.len > 0:
         stdout.write transcript
         if reserveFooter and not transcriptOwnsSpacing:
@@ -349,9 +357,12 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
         stdout.write "\r"
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
+      if e.toolViewportRows.len > 0:
+        stdout.write "\x1b[" & $e.toolViewportHeight() & "A"
       if compactRowsAboveFooter > 0:
         stdout.write "\x1b[" & $compactRowsAboveFooter & "A"
       stdout.write "\r\x1b[J"
+      e.toolViewportRows = @[]
       if transcript.len > 0:
         stdout.write transcript
         if reserveFooter and not transcriptOwnsSpacing:
