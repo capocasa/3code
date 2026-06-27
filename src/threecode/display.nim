@@ -868,29 +868,23 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
       if c.len == 0: continue
       let shown = if c.len > 400: c[0 ..< 400] & " …" else: c
       let userLines = shown.splitLines
-      stdout.write "\n"
       for idx, l in userLines:
         let prefix = if idx == 0: "❯ " else: "  "
         stdout.write prefix & l & "\n"
       stdout.write "\n"
     of "assistant":
-      # Mirror callModel's leading \n in the live path: a turn that
-      # follows a tool result needs the same blank-line separator. The
-      # first assistant after the user message already gets one from the
-      # user block's trailing \n, so skip then.
-      if i > start and messages[i-1]{"role"}.getStr == "tool":
-        stdout.write "\n"
       let c = m{"content"}.getStr("").strip
-      renderAssistantContent(c)
+      if c.len > 0:
+        renderAssistantContent(c)
       let u = usageFromJson(m{"usage"})
       if i == lastAssistant:
         result = u
       elif u.totalTokens > 0:
         renderTokenLine(u, window)
+      stdout.write "\n"
       let tcs = m{"tool_calls"}
       let hasTools = tcs != nil and tcs.kind == JArray and tcs.len > 0
       if hasTools:
-        stdout.write "\n"
         for tc in tcs:
           inc toolIdx
           var banner = ""
@@ -915,6 +909,7 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
           renderToolBanner(banner, kind, code)
           if output.len > 0:
             printToolResult(kind, output, code, toolIdx)
+          stdout.write "\n"
     of "tool":
       # Result already rendered alongside the assistant's tool_call via
       # toolLog; nothing to do here. Older sessions without a populated

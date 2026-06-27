@@ -1,7 +1,7 @@
-===== 385 =====
+===== 645 =====
 
   ╭─╮
-   ─┤  3code v0.4.0   the economical coding agent
+   ─┤  3code v0.4.1   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,9 +10,7 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ :help
-===== 323 =====
-
-: help
+===== 604 =====
   3code the economical coding agent
 
   commands:
@@ -53,9 +51,7 @@
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯
-===== 373 =====
-
-: help
+===== 969 =====
   3code the economical coding agent
 
   commands:
@@ -96,9 +92,7 @@
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
-===== 438 =====
-  :tokens           show token usage for this session
-  :clear            reset conversation (keeps system prompt)
+===== 465 =====
   :model            list models for current provider (current marked with *)
   :model X          switch to model X (within current provider)
   :provider         list configured providers (current marked with *)
@@ -139,9 +133,7 @@
       alt
 
 ❯
-===== 186 =====
-  :tokens           show token usage for this session
-  :clear            reset conversation (keeps system prompt)
+===== 307 =====
   :model            list models for current provider (current marked with *)
   :model X          switch to model X (within current provider)
   :provider         list configured providers (current marked with *)
@@ -182,9 +174,7 @@
       alt
 
 ❯ :model
-===== 498 =====
-  :provider add     add a new provider (interactive, verified)
-  :provider edit X  edit provider X (url, key, models)
+===== 989 =====
   :provider rm X    remove provider X
   :reasoning        list reasoning levels for current model (* marks active)
   :reasoning X      switch reasoning level (low / medium / high)
@@ -225,9 +215,7 @@
       stub-large
 
 ❯
-===== 651 =====
-  :provider add     add a new provider (interactive, verified)
-  :provider edit X  edit provider X (url, key, models)
+===== 148 =====
   :provider rm X    remove provider X
   :reasoning        list reasoning levels for current model (* marks active)
   :reasoning X      switch reasoning level (low / medium / high)
@@ -268,9 +256,7 @@
       stub-large
 
 ❯ :reasoning
-===== 142 =====
-  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
-  :notify           show notify mode (on = desktop notification when a turn ends)
+===== 976 =====
   :notify on|off    toggle turn-end desktop notification
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
@@ -311,9 +297,7 @@
     experimental: level is free-form, type any value
 
 ❯
-===== 178 =====
-  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
-  :notify           show notify mode (on = desktop notification when a turn ends)
+===== 939 =====
   :notify on|off    toggle turn-end desktop notification
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
@@ -354,7 +338,7 @@
     experimental: level is free-form, type any value
 
 ❯ :model stub-large
-===== 951 =====
+===== 907 =====
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -395,7 +379,7 @@ provider  stub
 model     stub-large
 
 ❯
-===== 414 =====
+===== 622 =====
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -436,7 +420,7 @@ provider  stub
 model     stub-large
 
 ❯ :reasoning high
-===== 230 =====
+===== 889 =====
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
@@ -477,7 +461,7 @@ model     stub-large
 reasoning high
 
 ❯
-===== 534 =====
+===== 523 =====
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
@@ -518,7 +502,7 @@ model     stub-large
 reasoning high
 
 ❯ :provider alt
-===== 684 =====
+===== 690 =====
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
@@ -559,7 +543,7 @@ provider  alt
 model     alt-model
 
 ❯
-===== 541 =====
+===== 431 =====
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
@@ -600,7 +584,7 @@ provider  alt
 model     alt-model
 
 ❯ :tokens
-===== 598 =====
+===== 201 =====
 ❯ :provider
 
 : providers
@@ -641,7 +625,7 @@ model     alt-model
   no tokens used yet
 
 ❯
-===== 819 =====
+===== 755 =====
 ❯ :provider
 
 : providers
@@ -682,7 +666,7 @@ model     alt-model
   no tokens used yet
 
 ❯ :clear
-===== 124 =====
+===== 832 =====
       alt
 
 ❯ :model
@@ -723,7 +707,7 @@ model     alt-model
 ════════════════════════════════════════
 
 ❯
-===== 874 =====
+===== 171 =====
       alt
 
 ❯ :model
@@ -764,7 +748,7 @@ model     alt-model
 ════════════════════════════════════════
 
 ❯ :sessions
-===== 356 =====
+===== 274 =====
     * stub-model
       stub-large
 
@@ -805,7 +789,7 @@ model     alt-model
   no saved sessions for this directory
 
 ❯
-===== 244 =====
+===== 361 =====
     * stub-model
       stub-large
 
@@ -846,7 +830,7 @@ model     alt-model
   no saved sessions for this directory
 
 ❯ :sessions all
-===== 861 =====
+===== 578 =====
 
 ❯ :model stub-large
 
@@ -887,7 +871,7 @@ model     alt-model
   listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯
-===== 711 =====
+===== 356 =====
 
 ❯ :model stub-large
 
@@ -928,7 +912,7 @@ model     alt-model
   listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯ :log
-===== 287 =====
+===== 180 =====
 
 ❯ :reasoning high
 
@@ -969,7 +953,7 @@ model     alt-model
     no tool calls yet
 
 ❯
-===== 639 =====
+===== 628 =====
 
 ❯ :reasoning high
 
@@ -1010,7 +994,7 @@ model     alt-model
     no tool calls yet
 
 ❯ :show
-===== 949 =====
+===== 174 =====
 reasoning high
 
 ❯ :provider alt
@@ -1051,7 +1035,7 @@ model     alt-model
     no tool calls yet
 
 ❯
-===== 933 =====
+===== 405 =====
 reasoning high
 
 ❯ :provider alt
@@ -1092,7 +1076,7 @@ model     alt-model
     no tool calls yet
 
 ❯ :compact
-===== 240 =====
+===== 167 =====
 model     alt-model
 
 ❯ :tokens
@@ -1133,7 +1117,7 @@ model     alt-model
   unknown command: :compact  (try :help)
 
 ❯
-===== 833 =====
+===== 407 =====
 model     alt-model
 
 ❯ :tokens
@@ -1174,7 +1158,7 @@ model     alt-model
   unknown command: :compact  (try :help)
 
 ❯ :summarize
-===== 456 =====
+===== 844 =====
   no tokens used yet
 
 ❯ :clear
@@ -1215,7 +1199,7 @@ model     alt-model
   failed or not worth it
 
 ❯
-===== 387 =====
+===== 702 =====
   no tokens used yet
 
 ❯ :clear
@@ -1256,8 +1240,7 @@ model     alt-model
   failed or not worth it
 
 ❯ :prompt
-===== 113 =====
-
+===== 869 =====
   Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping ta
 bles), hard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (
 pushing code, opening PRs, sending email). When in doubt, ask.
@@ -1288,7 +1271,8 @@ If searches don't turn up a clear answer, say so — don't guess.
   - <tty-run>/data/3code/skills/role-sysadmin.md
   - <tty-run>/data/3code/skills/role-thinking-partner.md
   - <tty-run>/data/3code/skills/role-writing.md
-  - <tty-run>/data/3code/skills/task-chunked-implementation.md
+  - <tty-run>/data/3code/skills/task-chunked-implementation.m
+d
   - <tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
@@ -1297,8 +1281,7 @@ If searches don't turn up a clear answer, say so — don't guess.
 n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯
-===== 595 =====
-
+===== 328 =====
   Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping ta
 bles), hard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (
 pushing code, opening PRs, sending email). When in doubt, ask.
@@ -1329,7 +1312,8 @@ If searches don't turn up a clear answer, say so — don't guess.
   - <tty-run>/data/3code/skills/role-sysadmin.md
   - <tty-run>/data/3code/skills/role-thinking-partner.md
   - <tty-run>/data/3code/skills/role-writing.md
-  - <tty-run>/data/3code/skills/task-chunked-implementation.md
+  - <tty-run>/data/3code/skills/task-chunked-implementation.m
+d
   - <tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
@@ -1338,8 +1322,7 @@ If searches don't turn up a clear answer, say so — don't guess.
 n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯ :toknes
-===== 757 =====
-  # Git
+===== 207 =====
 
   Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`.
 Don't push or commit unless asked.
@@ -1365,7 +1348,8 @@ If searches don't turn up a clear answer, say so — don't guess.
   - <tty-run>/data/3code/skills/role-sysadmin.md
   - <tty-run>/data/3code/skills/role-thinking-partner.md
   - <tty-run>/data/3code/skills/role-writing.md
-  - <tty-run>/data/3code/skills/task-chunked-implementation.md
+  - <tty-run>/data/3code/skills/task-chunked-implementation.m
+d
   - <tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
@@ -1379,8 +1363,7 @@ n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task 
   unknown command: :toknes  did you mean :tokens?
 
 ❯
-===== 498 =====
-  # Git
+===== 480 =====
 
   Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`.
 Don't push or commit unless asked.
@@ -1406,7 +1389,8 @@ If searches don't turn up a clear answer, say so — don't guess.
   - <tty-run>/data/3code/skills/role-sysadmin.md
   - <tty-run>/data/3code/skills/role-thinking-partner.md
   - <tty-run>/data/3code/skills/role-writing.md
-  - <tty-run>/data/3code/skills/task-chunked-implementation.md
+  - <tty-run>/data/3code/skills/task-chunked-implementation.m
+d
   - <tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone

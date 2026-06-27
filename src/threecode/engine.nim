@@ -17,6 +17,10 @@ type
     rowsAboveCursorToFooterTop: int
     footerRowsAboveEditor: int
     footerNeedsLeadingGap: bool
+    ## When true, the gap row at the top of the footer is a committed
+    ## scrollback separator (from the previous item's trailing \r\n\r\n),
+    ## not volatile chrome. Walk-ups stop one row short to preserve it.
+    gapIsSeparator: bool
     toolViewportRows: seq[string]
     editorRedrawPending: bool
     editorRedrawFooterRows: int
@@ -55,6 +59,7 @@ proc noteFooterPainted(e: var TerminalEngine; ed: var minline.LineEditor;
 proc noteNoFooter(e: var TerminalEngine) =
   e.rowsAboveCursorToFooterTop = 0
   e.footerRowsAboveEditor = 0
+  e.gapIsSeparator = false
 
 proc writeViewportRows(rows: openArray[string]) =
   for row in rows:
@@ -132,25 +137,26 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
   {.cast(gcsafe).}:
     termio.withTerminalWriteLock:
       let bytes = frame.footerFrameBytes(termW)
+      let barBytes = frame.footerBarOnlyBytes(termW)
       let footerRowsAboveEditor = frame.rowsAboveEditor(termW)
       if inputRunning and editor != nil:
         let edPtr = editor
         stdout.write termio.SyncBegin
         stdout.write "\x1b[?25l"
         refreshEditorWidth(edPtr[])
-        # The gap row is part of the frame bytes and counted in
-        # ``footerRowsAboveEditor``, so the footer height never changes when
-        # the ticker appears or clears. The walk-up reaches the footer's own
-        # top and never committed scrollback; the full frame (gap included) is
-        # rewritten below.
-        let up =
+        var up =
           max(0, e.rowsAboveCursorToFooterTop + e.toolViewportHeight)
+        if e.gapIsSeparator:
+          up = max(0, up - 1)
         stdout.write "\r"
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
         stdout.write "\x1b[J"
         e.writeToolViewportRows()
-        stdout.write bytes
+        if e.gapIsSeparator:
+          stdout.write barBytes
+        else:
+          stdout.write bytes
         stdout.write "\r\n"
         edPtr[].renderRow = 0
         stdout.write edPtr[].redrawBytes(synchronized = false)
@@ -197,8 +203,10 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
             e.rowsAboveCursorToFooterTop
           else:
             rowsToFooterTop(editor[], footerRowsAboveEditor)
-        let up =
+        var up =
           max(0, rowsToFooter + e.toolViewportHeight)
+        if e.gapIsSeparator:
+          up = max(0, up - 1)
         stdout.write "\r"
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
@@ -206,7 +214,10 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         e.toolViewportRows = @rows
         e.writeToolViewportRows()
         if bytes.len > 0:
-          stdout.write bytes
+          if e.gapIsSeparator:
+            stdout.write frame.footerBarOnlyBytes(width)
+          else:
+            stdout.write bytes
           stdout.write "\r\n"
         editor[].renderRow = 0
         stdout.write editor[].redrawBytes(synchronized = false)
@@ -287,7 +298,9 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
       # frame. Walk up past it and let the transcript write overwrite those
       # rows in the same synchronized frame, then drop the viewport tracking.
       let viewportH = e.toolViewportHeight()
-      let rowsUp = rowsToFooter + viewportH + max(0, compactRowsAboveFooter)
+      var rowsUp = rowsToFooter + viewportH + max(0, compactRowsAboveFooter)
+      if e.gapIsSeparator:
+        rowsUp = max(0, rowsUp - 1)
       if rowsUp > 0:
         stdout.write "\x1b[" & $rowsUp & "A"
       stdout.write "\x1b[J"
@@ -306,10 +319,12 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
           if not edPtr[].pendingCaret:
             stdout.write "\x1b[?25h"
           e.noteFooterPainted(edPtr[], footerRowsAboveEditor)
+          e.gapIsSeparator = transcriptOwnsSpacing and transcript.hasNonNewlineBytes
         else:
           e.rowsAboveCursorToFooterTop =
             if footerBarBytes.len > 0: max(1, footerRowsAboveEditor)
             else: 0
+          e.gapIsSeparator = false
       else:
         e.footerNeedsLeadingGap = transcript.hasNonNewlineBytes
         e.noteNoFooter()
@@ -317,13 +332,15 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
       stdout.flushFile
     else:
       if inputRunning and editor != nil:
-        let up =
+        var up =
           if e.rowsAboveCursorToFooterTop > 0:
             e.rowsAboveCursorToFooterTop
           elif e.footerNeedsLeadingGap:
             0
           else:
             rowsToFooterTop(editor[], footerRowsAboveEditor)
+        if e.gapIsSeparator:
+          up = max(0, up - 1)
         stdout.write "\r"
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
@@ -371,11 +388,13 @@ proc prepareAssistantContentStart*(e: var TerminalEngine;
     if inputRunning and editor != nil:
       refreshEditorWidth(editor[])
       let footerRows = oldFooter.rowsAboveEditor(termW)
-      let up =
+      var up =
         if e.rowsAboveCursorToFooterTop > 0:
           e.rowsAboveCursorToFooterTop
         else:
           rowsToFooterTop(editor[], footerRows)
+      if e.gapIsSeparator:
+        up = max(0, up - 1)
       stdout.write "\r"
       if up > 0:
         stdout.write "\x1b[" & $up & "A"
@@ -406,11 +425,13 @@ proc endTurn*(e: var TerminalEngine; inputRunning: bool;
     if inputRunning and editor != nil:
       refreshEditorWidth(editor[])
       let footerRows = oldFooter.rowsAboveEditor(termW)
-      let up =
+      var up =
         if e.rowsAboveCursorToFooterTop > 0:
           e.rowsAboveCursorToFooterTop
         else:
           rowsToFooterTop(editor[], footerRows)
+      if e.gapIsSeparator:
+        up = max(0, up - 1)
       stdout.write "\r"
       if up > 0:
         stdout.write "\x1b[" & $up & "A"
