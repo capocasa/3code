@@ -1,0 +1,2 @@
+nimTitle	unicodewidth	threecode/unicodewidth.html	module threecode/unicodewidth		0
+nim	runeCellWidth	threecode/unicodewidth.html#runeCellWidth,Rune	proc runeCellWidth(r: Rune): int		10

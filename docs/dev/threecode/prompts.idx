@@ -1,31 +1,36 @@
 nimTitle	prompts	threecode/prompts.html	module threecode/prompts		0
-nim	Version	threecode/prompts.html#Version	const Version		19
-nim	KnownGoodCombo	threecode/prompts.html#KnownGoodCombo	tuple KnownGoodCombo		23
-nim	GenerationDefaults	threecode/prompts.html#GenerationDefaults	object GenerationDefaults		38
-nim	KnownGoodCombos	threecode/prompts.html#KnownGoodCombos	const KnownGoodCombos		42
-nim	setup	threecode/prompts.html#setup,Profile	proc setup(p: Profile): tuple[prompt: string, tools: JsonNode]		903
-nim	DefaultSystemPrompt	threecode/prompts.html#DefaultSystemPrompt	let DefaultSystemPrompt		915
-nim	ConfigExample	threecode/prompts.html#ConfigExample	const ConfigExample		922
-nim	HelpText	threecode/prompts.html#HelpText	const HelpText		934
-nim	knownGoodFamily	threecode/prompts.html#knownGoodFamily,Profile	proc knownGoodFamily(p: Profile): string		979
-nim	isKnownGood	threecode/prompts.html#isKnownGood,Profile	proc isKnownGood(p: Profile): bool		993
-nim	knownGoodFamily	threecode/prompts.html#knownGoodFamily,string,string	proc knownGoodFamily(provider, model: string): string		999
-nim	knownGoodTags	threecode/prompts.html#knownGoodTags,string,string	proc knownGoodTags(provider, model: string): (string, string, string)		1009
-nim	knownGoodReasoning	threecode/prompts.html#knownGoodReasoning,string,string	proc knownGoodReasoning(provider, model: string): string		1020
-nim	knownGoodGeneration	threecode/prompts.html#knownGoodGeneration,string,string	proc knownGoodGeneration(provider, model: string): GenerationDefaults		1029
-nim	knownGoodGeneration	threecode/prompts.html#knownGoodGeneration,Profile	proc knownGoodGeneration(p: Profile): GenerationDefaults		1039
-nim	xmlToolCallsFallback	threecode/prompts.html#xmlToolCallsFallback,Profile	proc xmlToolCallsFallback(p: Profile): bool		1045
-nim	ReasoningLevels	threecode/prompts.html#ReasoningLevels	const ReasoningLevels		1062
-nim	reasoningSupported	threecode/prompts.html#reasoningSupported,string	proc reasoningSupported(family: string): bool		1068
-nim	defaultReasoningsFor	threecode/prompts.html#defaultReasoningsFor,string	proc defaultReasoningsFor(family: string): seq[string]		1074
-nim	buildCredit	threecode/prompts.html#buildCredit,Profile	proc buildCredit(p: Profile): string		1080
-nim	BuiltinSkills	threecode/prompts.html#BuiltinSkills	const BuiltinSkills		1092
-nim	builtinSkillsDir	threecode/prompts.html#builtinSkillsDir	proc builtinSkillsDir(): string		1113
-nim	materializeBuiltinSkills	threecode/prompts.html#materializeBuiltinSkills	proc materializeBuiltinSkills()		1121
-nim	skillsDirs	threecode/prompts.html#skillsDirs	proc skillsDirs(): seq[string]		1139
-nim	discoverSkills	threecode/prompts.html#discoverSkills	proc discoverSkills(): string		1146
-nim	findSystemPromptOverride	threecode/prompts.html#findSystemPromptOverride,string	proc findSystemPromptOverride(family: string): string		1168
-nim	buildSystemPrompt	threecode/prompts.html#buildSystemPrompt,Profile	proc buildSystemPrompt(p: Profile): string		1178
-nim	refreshSystemPrompt	threecode/prompts.html#refreshSystemPrompt,JsonNode,Profile	proc refreshSystemPrompt(messages: JsonNode; p: Profile)		1195
-nimgrp	knowngoodfamily	threecode/prompts.html#knownGoodFamily-procs-all	proc		979
-nimgrp	knowngoodgeneration	threecode/prompts.html#knownGoodGeneration-procs-all	proc		1029
+nim	versionSuffix	threecode/prompts.html#versionSuffix	const versionSuffix		19
+nim	Version	threecode/prompts.html#Version	const Version		24
+nim	KnownGoodCombo	threecode/prompts.html#KnownGoodCombo	tuple KnownGoodCombo		28
+nim	GenerationDefaults	threecode/prompts.html#GenerationDefaults	object GenerationDefaults		44
+nim	KnownGoodCombos	threecode/prompts.html#KnownGoodCombos	const KnownGoodCombos		48
+nim	setup	threecode/prompts.html#setup,Profile	proc setup(p: Profile): tuple[prompt: string, tools: JsonNode]		914
+nim	DefaultSystemPrompt	threecode/prompts.html#DefaultSystemPrompt	let DefaultSystemPrompt		926
+nim	ConfigExample	threecode/prompts.html#ConfigExample	const ConfigExample		933
+nim	HelpText	threecode/prompts.html#HelpText	const HelpText		945
+nim	knownGoodFamily	threecode/prompts.html#knownGoodFamily,Profile	proc knownGoodFamily(p: Profile): string		984
+nim	isKnownGood	threecode/prompts.html#isKnownGood,Profile	proc isKnownGood(p: Profile): bool		998
+nim	knownGoodFamily	threecode/prompts.html#knownGoodFamily,string,string	proc knownGoodFamily(provider, model: string): string		1004
+nim	knownGoodTags	threecode/prompts.html#knownGoodTags,string,string	proc knownGoodTags(provider, model: string): (string, string, string)		1014
+nim	knownGoodReasoning	threecode/prompts.html#knownGoodReasoning,string,string	proc knownGoodReasoning(provider, model: string): string		1025
+nim	knownGoodGeneration	threecode/prompts.html#knownGoodGeneration,string,string	proc knownGoodGeneration(provider, model: string): GenerationDefaults		1034
+nim	knownGoodGeneration	threecode/prompts.html#knownGoodGeneration,Profile	proc knownGoodGeneration(p: Profile): GenerationDefaults		1044
+nim	xmlToolCallsFallback	threecode/prompts.html#xmlToolCallsFallback,Profile	proc xmlToolCallsFallback(p: Profile): bool		1050
+nim	ReasoningLevels	threecode/prompts.html#ReasoningLevels	const ReasoningLevels		1067
+nim	reasoningSupported	threecode/prompts.html#reasoningSupported,string	proc reasoningSupported(family: string): bool		1075
+nim	knownGoodContextWindow	threecode/prompts.html#knownGoodContextWindow,string,string	proc knownGoodContextWindow(provider, model: string): int		1081
+nim	knownGoodContextWindow	threecode/prompts.html#knownGoodContextWindow,Profile	proc knownGoodContextWindow(p: Profile): int		1093
+nim	knownGoodReasonings	threecode/prompts.html#knownGoodReasonings,string,string	proc knownGoodReasonings(provider, model: string): seq[string]		1099
+nim	defaultReasoningsFor	threecode/prompts.html#defaultReasoningsFor,string,string,string	proc defaultReasoningsFor(provider, model, family: string): seq[string]		1120
+nim	buildCredit	threecode/prompts.html#buildCredit,Profile	proc buildCredit(p: Profile): string		1129
+nim	BuiltinSkills	threecode/prompts.html#BuiltinSkills	const BuiltinSkills		1141
+nim	builtinSkillsDir	threecode/prompts.html#builtinSkillsDir	proc builtinSkillsDir(): string		1162
+nim	materializeBuiltinSkills	threecode/prompts.html#materializeBuiltinSkills	proc materializeBuiltinSkills()		1170
+nim	skillsDirs	threecode/prompts.html#skillsDirs	proc skillsDirs(): seq[string]		1188
+nim	discoverSkills	threecode/prompts.html#discoverSkills	proc discoverSkills(): string		1195
+nim	findSystemPromptOverride	threecode/prompts.html#findSystemPromptOverride,string	proc findSystemPromptOverride(family: string): string		1217
+nim	buildSystemPrompt	threecode/prompts.html#buildSystemPrompt,Profile	proc buildSystemPrompt(p: Profile): string		1227
+nim	refreshSystemPrompt	threecode/prompts.html#refreshSystemPrompt,JsonNode,Profile	proc refreshSystemPrompt(messages: JsonNode; p: Profile)		1244
+nimgrp	knowngoodcontextwindow	threecode/prompts.html#knownGoodContextWindow-procs-all	proc		1081
+nimgrp	knowngoodfamily	threecode/prompts.html#knownGoodFamily-procs-all	proc		984
+nimgrp	knowngoodgeneration	threecode/prompts.html#knownGoodGeneration-procs-all	proc		1034

@@ -6,27 +6,30 @@ nim	findModel	threecode/config.html#findModel,ProviderRec,string	proc findModel(
 nim	activeCurrent	threecode/config.html#activeCurrent	var activeCurrent		67
 nim	activeProviders	threecode/config.html#activeProviders	var activeProviders		68
 nim	activeSearchUrl	threecode/config.html#activeSearchUrl	var activeSearchUrl		69
-nim	gateExperimental	threecode/config.html#gateExperimental,Profile	proc gateExperimental(p: Profile): bool		74
-nim	explainExperimentalGate	threecode/config.html#explainExperimentalGate,Profile	proc explainExperimentalGate(p: Profile)		81
-nim	hasKnownGoodModel	threecode/config.html#hasKnownGoodModel,ProviderRec	proc hasKnownGoodModel(prov: ProviderRec): bool		91
-nim	orderedModels	threecode/config.html#orderedModels,ProviderRec	proc orderedModels(prov: ProviderRec): seq[string]		96
-nim	firstModel	threecode/config.html#firstModel,ProviderRec	proc firstModel(prov: ProviderRec): string		114
-nim	firstKnownGoodCombo	threecode/config.html#firstKnownGoodCombo,seq[ProviderRec]	proc firstKnownGoodCombo(providers: seq[ProviderRec]): string		122
-nim	currentProvider	threecode/config.html#currentProvider	proc currentProvider(): ProviderRec		135
-nim	splitModels	threecode/config.html#splitModels,string	proc splitModels(s: string): seq[string]		142
-nim	formatModels	threecode/config.html#formatModels,seq[string]	proc formatModels(models: seq[string]): string		150
-nim	parseConfigFile	threecode/config.html#parseConfigFile,string	proc parseConfigFile(path: string): (string, string, seq[ProviderRec])		161
-nim	writeConfigFile	threecode/config.html#writeConfigFile,string,string,seq[ProviderRec]	proc writeConfigFile(path: string; current: string; providers: seq[ProviderRec])		231
-nim	configPath	threecode/config.html#configPath	proc configPath(): string		252
-nim	loadStateOrEmpty	threecode/config.html#loadStateOrEmpty,string	proc loadStateOrEmpty(path: string): (string, seq[ProviderRec])		255
-nim	resolveFamily	threecode/config.html#resolveFamily,ProviderRec,Profile	proc resolveFamily(prov: ProviderRec; prof: Profile): string		263
-nim	resolveReasoning	threecode/config.html#resolveReasoning,ProviderRec,Profile	proc resolveReasoning(prov: ProviderRec; prof: Profile): string		274
-nim	availableReasonings	threecode/config.html#availableReasonings,ProviderRec,string	proc availableReasonings(prov: ProviderRec; family: string): seq[string]		286
-nim	buildProfile	threecode/config.html#buildProfile,string,seq[ProviderRec],string	proc buildProfile(current: string; providers: seq[ProviderRec]; wanted: string): Profile		293
-nim	loadProfile	threecode/config.html#loadProfile,string	proc loadProfile(wanted: string): Profile		324
-nim	ProviderCatalog	threecode/config.html#ProviderCatalog	const ProviderCatalog		380
-nim	catalogUrl	threecode/config.html#catalogUrl,string	proc catalogUrl(name: string): string		420
-nim	KeyPrefixCatalog	threecode/config.html#KeyPrefixCatalog	const KeyPrefixCatalog		425
-nim	inferProvider	threecode/config.html#inferProvider,string	proc inferProvider(key: string): string		439
-nim	defaultNameFromUrl	threecode/config.html#defaultNameFromUrl,string	proc defaultNameFromUrl(url: string): string		445
-nim	curatedFor	threecode/config.html#curatedFor,string	proc curatedFor(provider: string): seq[string]		452
+nim	notifyEnabled	threecode/config.html#notifyEnabled	var notifyEnabled		74
+nim	bashPathOverride	threecode/config.html#bashPathOverride	var bashPathOverride		78
+nim	gateExperimental	threecode/config.html#gateExperimental,Profile	proc gateExperimental(p: Profile): bool		83
+nim	explainExperimentalGate	threecode/config.html#explainExperimentalGate,Profile	proc explainExperimentalGate(p: Profile)		90
+nim	hasKnownGoodModel	threecode/config.html#hasKnownGoodModel,ProviderRec	proc hasKnownGoodModel(prov: ProviderRec): bool		100
+nim	orderedModels	threecode/config.html#orderedModels,ProviderRec	proc orderedModels(prov: ProviderRec): seq[string]		105
+nim	firstModel	threecode/config.html#firstModel,ProviderRec	proc firstModel(prov: ProviderRec): string		123
+nim	firstKnownGoodCombo	threecode/config.html#firstKnownGoodCombo,seq[ProviderRec]	proc firstKnownGoodCombo(providers: seq[ProviderRec]): string		131
+nim	currentProvider	threecode/config.html#currentProvider	proc currentProvider(): ProviderRec		144
+nim	providerForProfile	threecode/config.html#providerForProfile,Profile	proc providerForProfile(prof: Profile): ProviderRec		151
+nim	splitModels	threecode/config.html#splitModels,string	proc splitModels(s: string): seq[string]		162
+nim	formatModels	threecode/config.html#formatModels,seq[string]	proc formatModels(models: seq[string]): string		170
+nim	parseConfigFile	threecode/config.html#parseConfigFile,string	proc parseConfigFile(path: string): (string, string, seq[ProviderRec])		181
+nim	writeConfigFile	threecode/config.html#writeConfigFile,string,string,seq[ProviderRec]	proc writeConfigFile(path: string; current: string; providers: seq[ProviderRec])		265
+nim	configPath	threecode/config.html#configPath	proc configPath(): string		291
+nim	loadStateOrEmpty	threecode/config.html#loadStateOrEmpty,string	proc loadStateOrEmpty(path: string): (string, seq[ProviderRec])		294
+nim	resolveFamily	threecode/config.html#resolveFamily,ProviderRec,Profile	proc resolveFamily(prov: ProviderRec; prof: Profile): string		302
+nim	resolveReasoning	threecode/config.html#resolveReasoning,ProviderRec,Profile	proc resolveReasoning(prov: ProviderRec; prof: Profile): string		313
+nim	availableReasonings	threecode/config.html#availableReasonings,ProviderRec,string,string	proc availableReasonings(prov: ProviderRec; family, model: string): seq[string]		331
+nim	buildProfile	threecode/config.html#buildProfile,string,seq[ProviderRec],string	proc buildProfile(current: string; providers: seq[ProviderRec]; wanted: string): Profile		343
+nim	loadProfile	threecode/config.html#loadProfile,string	proc loadProfile(wanted: string): Profile		374
+nim	ProviderCatalog	threecode/config.html#ProviderCatalog	const ProviderCatalog		430
+nim	catalogUrl	threecode/config.html#catalogUrl,string	proc catalogUrl(name: string): string		469
+nim	KeyPrefixCatalog	threecode/config.html#KeyPrefixCatalog	const KeyPrefixCatalog		477
+nim	inferProvider	threecode/config.html#inferProvider,string	proc inferProvider(key: string): string		491
+nim	defaultNameFromUrl	threecode/config.html#defaultNameFromUrl,string	proc defaultNameFromUrl(url: string): string		500
+nim	curatedFor	threecode/config.html#curatedFor,string	proc curatedFor(provider: string): seq[string]		507

@@ -1,40 +1,51 @@
 nimTitle	display	threecode/display.html	module threecode/display		0
-nim	hint	threecode/display.html#hint.t,varargs[untyped]	template hint(args: varargs[untyped])		29
-nim	hintLn	threecode/display.html#hintLn.t,varargs[untyped]	template hintLn(args: varargs[untyped])		32
-nim	note	threecode/display.html#note.t,varargs[untyped]	template note(args: varargs[untyped])		35
-nim	noteLn	threecode/display.html#noteLn.t,varargs[untyped]	template noteLn(args: varargs[untyped])		38
-nim	warn	threecode/display.html#warn.t,varargs[untyped]	template warn(args: varargs[untyped])		41
-nim	warnLn	threecode/display.html#warnLn.t,varargs[untyped]	template warnLn(args: varargs[untyped])		44
-nim	err	threecode/display.html#err.t,varargs[untyped]	template err(args: varargs[untyped])		47
-nim	errLn	threecode/display.html#errLn.t,varargs[untyped]	template errLn(args: varargs[untyped])		50
-nim	subtleWrite	threecode/display.html#subtleWrite,File,string	proc subtleWrite(outFile: File; body: string)		53
-nim	subtleWriteLn	threecode/display.html#subtleWriteLn,File,string	proc subtleWriteLn(outFile: File; body: string)		61
-nim	isSkillRead	threecode/display.html#isSkillRead,Action	proc isSkillRead(act: Action): bool		78
-nim	skillNameFromAct	threecode/display.html#skillNameFromAct,Action	proc skillNameFromAct(act: Action): string		95
-nim	printSkillLoaded	threecode/display.html#printSkillLoaded,Action	proc printSkillLoaded(act: Action)		119
-nim	printLine	threecode/display.html#printLine,string	proc printLine(l: string)		128
-nim	printBashCompact	threecode/display.html#printBashCompact,string,int	proc printBashCompact(res: string; idx: int; head = CompactHead; tail = CompactTail)		135
-nim	printDiff	threecode/display.html#printDiff,string	proc printDiff(diff: string)		159
-nim	printToolResult	threecode/display.html#printToolResult,ActionKind,string,int,int,string	proc printToolResult(kind: ActionKind; res: string; code: int; idx: int; diff = "")		191
-nim	printActionResult	threecode/display.html#printActionResult,Action,string,int,int,string	proc printActionResult(act: Action; res: string; code: int; idx: int; diff = "")		225
-nim	contextLabel	threecode/display.html#contextLabel,int,int	proc contextLabel(promptTokens, window: int): string		228
-nim	MarkdownState	threecode/display.html#MarkdownState	type MarkdownState		243
-nim	initMarkdownState	threecode/display.html#initMarkdownState	proc initMarkdownState(firstEmit = true): MarkdownState		255
-nim	handleMdLine	threecode/display.html#handleMdLine,MarkdownState,string,File	proc handleMdLine(s: MarkdownState; l: string; outFile: File): bool		258
-nim	finishMd	threecode/display.html#finishMd,MarkdownState,File	proc finishMd(s: MarkdownState; outFile: File): bool		327
-nim	renderAssistantContent	threecode/display.html#renderAssistantContent,string,File	proc renderAssistantContent(content: string; outFile: File = stdout)		355
-nim	toolIcon	threecode/display.html#toolIcon,ActionKind	proc toolIcon(kind: ActionKind): string		370
-nim	renderToolPending	threecode/display.html#renderToolPending,string,ActionKind	proc renderToolPending(banner: string; kind: ActionKind)		382
-nim	renderToolBanner	threecode/display.html#renderToolBanner,string,ActionKind,int,int	proc renderToolBanner(banner: string; kind: ActionKind; code: int; elapsedS = -1)		392
-nim	tokenLineLabel	threecode/display.html#tokenLineLabel,Usage,int,int	proc tokenLineLabel(usage: Usage; window: int; elapsedS = -1): string		412
-nim	tokenLineBytes	threecode/display.html#tokenLineBytes,Usage,int,int	proc tokenLineBytes(usage: Usage; window: int; elapsedS = -1): string		431
-nim	renderTokenLine	threecode/display.html#renderTokenLine,Usage,int,int	proc renderTokenLine(usage: Usage; window: int; elapsedS = -1)		442
-nim	showProfile	threecode/display.html#showProfile,Profile	proc showProfile(p: Profile)		451
-nim	navigatedUp	threecode/display.html#navigatedUp	var navigatedUp		461
-nim	installEditorTweaks	threecode/display.html#installEditorTweaks	proc installEditorTweaks()		464
-nim	welcome	threecode/display.html#welcome,Profile	proc welcome(p: Profile): minline.LineEditor		496
-nim	printKnownGood	threecode/display.html#printKnownGood	proc printKnownGood()		514
-nim	printSessionList	threecode/display.html#printSessionList,seq[string],string,bool	proc printSessionList(paths: seq[string]; currentPath: string; showCwd: bool)		537
-nim	replaySessionTail	threecode/display.html#replaySessionTail,JsonNode,seq[ToolRecord],int,string	proc replaySessionTail(messages: JsonNode; toolLog: seq[ToolRecord]; window: int;\n                  family: string): Usage		553
-nim	showTool	threecode/display.html#showTool,string,seq[ToolRecord]	proc showTool(arg: string; toolLog: seq[ToolRecord])		644
-nim	listTools	threecode/display.html#listTools,seq[ToolRecord]	proc listTools(toolLog: seq[ToolRecord])		672
+nim	hint	threecode/display.html#hint.t,varargs[untyped]	template hint(args: varargs[untyped])		33
+nim	hintLn	threecode/display.html#hintLn.t,varargs[untyped]	template hintLn(args: varargs[untyped])		36
+nim	note	threecode/display.html#note.t,varargs[untyped]	template note(args: varargs[untyped])		40
+nim	noteLn	threecode/display.html#noteLn.t,varargs[untyped]	template noteLn(args: varargs[untyped])		43
+nim	warn	threecode/display.html#warn.t,varargs[untyped]	template warn(args: varargs[untyped])		47
+nim	warnLn	threecode/display.html#warnLn.t,varargs[untyped]	template warnLn(args: varargs[untyped])		50
+nim	err	threecode/display.html#err.t,varargs[untyped]	template err(args: varargs[untyped])		54
+nim	errLn	threecode/display.html#errLn.t,varargs[untyped]	template errLn(args: varargs[untyped])		57
+nim	cmdResponse	threecode/display.html#cmdResponse,string	proc cmdResponse(body: string)		61
+nim	cmdError	threecode/display.html#cmdError,string	proc cmdError(body: string)		71
+nim	renderHelp	threecode/display.html#renderHelp	proc renderHelp()		80
+nim	subtleWrite	threecode/display.html#subtleWrite,File,string	proc subtleWrite(outFile: File; body: string)		104
+nim	subtleWriteLn	threecode/display.html#subtleWriteLn,File,string	proc subtleWriteLn(outFile: File; body: string)		112
+nim	isSkillRead	threecode/display.html#isSkillRead,Action	proc isSkillRead(act: Action): bool		130
+nim	skillNameFromAct	threecode/display.html#skillNameFromAct,Action	proc skillNameFromAct(act: Action): string		147
+nim	printSkillLoaded	threecode/display.html#printSkillLoaded,Action	proc printSkillLoaded(act: Action)		171
+nim	printCompactHeadTail	threecode/display.html#printCompactHeadTail,string,int	proc printCompactHeadTail(res: string; idx: int; head = CompactHead;\n                     tail = CompactTail)		180
+nim	printDiff	threecode/display.html#printDiff,string	proc printDiff(diff: string)		309
+nim	printToolResult	threecode/display.html#printToolResult,ActionKind,string,int,int,string	proc printToolResult(kind: ActionKind; res: string; code: int; idx: int; diff = "")		337
+nim	printActionResult	threecode/display.html#printActionResult,Action,string,int,int,string	proc printActionResult(act: Action; res: string; code: int; idx: int; diff = "")		392
+nim	contextLabel	threecode/display.html#contextLabel,int,int	proc contextLabel(promptTokens, window: int): string		395
+nim	MarkdownState	threecode/display.html#MarkdownState	type MarkdownState		410
+nim	initMarkdownState	threecode/display.html#initMarkdownState	proc initMarkdownState(firstEmit = true): MarkdownState		422
+nim	handleMdLine	threecode/display.html#handleMdLine,MarkdownState,string,File	proc handleMdLine(s: MarkdownState; l: string; outFile: File): bool		425
+nim	finishMd	threecode/display.html#finishMd,MarkdownState,File	proc finishMd(s: MarkdownState; outFile: File): bool		494
+nim	AssistantTextStyle	threecode/display.html#AssistantTextStyle	const AssistantTextStyle		522
+nim	assistantTextBytes	threecode/display.html#assistantTextBytes,string	proc assistantTextBytes(bytes: string): string		524
+nim	writeAssistantBullet	threecode/display.html#writeAssistantBullet,File	proc writeAssistantBullet(outFile: File = stdout)		552
+nim	renderAssistantContent	threecode/display.html#renderAssistantContent,string,File	proc renderAssistantContent(content: string; outFile: File = stdout)		555
+nim	toolIcon	threecode/display.html#toolIcon,ActionKind	proc toolIcon(kind: ActionKind): string		570
+nim	renderToolPending	threecode/display.html#renderToolPending,string,ActionKind	proc renderToolPending(banner: string; kind: ActionKind)		582
+nim	renderToolBanner	threecode/display.html#renderToolBanner,string,ActionKind,int,int	proc renderToolBanner(banner: string; kind: ActionKind; code: int; elapsedS = -1)		591
+nim	toolBannerBytes	threecode/display.html#toolBannerBytes,string,ActionKind,int,int	proc toolBannerBytes(banner: string; kind: ActionKind; code: int; elapsedS = -1): string		603
+nim	toolResultBytes	threecode/display.html#toolResultBytes,ActionKind,string,int,int,string	proc toolResultBytes(kind: ActionKind; res: string; code: int; idx: int; diff = ""): string		611
+nim	toolTranscriptBytes	threecode/display.html#toolTranscriptBytes,string,ActionKind,string,int,int,string,int	proc toolTranscriptBytes(banner: string; kind: ActionKind; res: string; code: int;\n                    idx: int; diff = ""; elapsedS = -1): string		650
+nim	toolTranscriptBytes	threecode/display.html#toolTranscriptBytes,Action,string,int,int,string,int	proc toolTranscriptBytes(act: Action; res: string; code: int; idx: int; diff = "";\n                    elapsedS = -1): string		656
+nim	tokenLineLabel	threecode/display.html#tokenLineLabel,Usage,int,int	proc tokenLineLabel(usage: Usage; window: int; elapsedS = -1): string		685
+nim	tokenLineBytes	threecode/display.html#tokenLineBytes,Usage,int,int	proc tokenLineBytes(usage: Usage; window: int; elapsedS = -1): string		703
+nim	renderTokenLine	threecode/display.html#renderTokenLine,Usage,int,int	proc renderTokenLine(usage: Usage; window: int; elapsedS = -1)		713
+nim	showProfile	threecode/display.html#showProfile,Profile	proc showProfile(p: Profile)		722
+nim	navigatedUp	threecode/display.html#navigatedUp	var navigatedUp		732
+nim	installEditorTweaks	threecode/display.html#installEditorTweaks	proc installEditorTweaks()		735
+nim	welcome	threecode/display.html#welcome,Profile	proc welcome(p: Profile): minline.LineEditor		751
+nim	printKnownGood	threecode/display.html#printKnownGood	proc printKnownGood()		769
+nim	SessionListCap	threecode/display.html#SessionListCap	const SessionListCap		792
+nim	printSessionList	threecode/display.html#printSessionList,seq[string],string,bool	proc printSessionList(paths: seq[string]; currentPath: string; showCwd: bool)		798
+nim	replaySessionTail	threecode/display.html#replaySessionTail,JsonNode,seq[ToolRecord],int,string	proc replaySessionTail(messages: JsonNode; toolLog: seq[ToolRecord]; window: int;\n                  family: string): Usage		818
+nim	showTool	threecode/display.html#showTool,string,seq[ToolRecord]	proc showTool(arg: string; toolLog: seq[ToolRecord])		906
+nim	listTools	threecode/display.html#listTools,seq[ToolRecord]	proc listTools(toolLog: seq[ToolRecord])		934
+nimgrp	tooltranscriptbytes	threecode/display.html#toolTranscriptBytes-procs-all	proc		650

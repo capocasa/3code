@@ -61,11 +61,21 @@
   <details open>
     <summary><a class="reference reference-toplevel" href="#7" id="57">Types</a></summary>
     <ul class="simple simple-toc-section">
-      <li><a class="reference" href="#SessionPreview" title="SessionPreview = object
+      <li><a class="reference" href="#SessionLocked" title="SessionLocked = object of CatchableError">SessionLocked</a></li>
+<li><a class="reference" href="#SessionPreview" title="SessionPreview = object
   cwd*: string
   profile*: string
   msgCount*: int
   firstUser*: string">SessionPreview</a></li>
+
+    </ul>
+  </details>
+</li>
+<li>
+  <details open>
+    <summary><a class="reference reference-toplevel" href="#8" id="58">Vars</a></summary>
+    <ul class="simple simple-toc-section">
+      <li><a class="reference" href="#activeLockPath" title="activeLockPath = &quot;&quot;">activeLockPath</a></li>
 
     </ul>
   </details>
@@ -83,12 +93,52 @@
   <details open>
     <summary><a class="reference reference-toplevel" href="#12" id="62">Procs</a></summary>
     <ul class="simple simple-toc-section">
-      <ul class="simple nested-toc-section">firstUserMessage
+      <ul class="simple nested-toc-section">acquireSessionLock
+  <li><a class="reference" href="#acquireSessionLock%2Cstring" title="acquireSessionLock(path: string)">acquireSessionLock(path: string)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">appendIndexAt
+  <li><a class="reference" href="#appendIndexAt%2Cstring%2Cstring%2Cstring" title="appendIndexAt(indexDir, cwd, id: string)">appendIndexAt(indexDir, cwd, id: string)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">appendSessionIndex
+  <li><a class="reference" href="#appendSessionIndex%2Cstring%2Cstring" title="appendSessionIndex(cwd, id: string)">appendSessionIndex(cwd, id: string)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">clearDraft
+  <li><a class="reference" href="#clearDraft%2CSession" title="clearDraft(session: Session)">clearDraft(session: Session)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">clearPendingDraft
+  <li><a class="reference" href="#clearPendingDraft%2Cstring" title="clearPendingDraft(cwd: string)">clearPendingDraft(cwd: string)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">currentDraftPath
+  <li><a class="reference" href="#currentDraftPath%2CSession" title="currentDraftPath(session: Session): string">currentDraftPath(session: Session): string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">draftDir
+  <li><a class="reference" href="#draftDir" title="draftDir(): string">draftDir(): string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">draftPathFor
+  <li><a class="reference" href="#draftPathFor%2Cstring" title="draftPathFor(sessionPath: string): string">draftPathFor(sessionPath: string): string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">firstUserMessage
   <li><a class="reference" href="#firstUserMessage%2CJsonNode" title="firstUserMessage(messages: JsonNode): string">firstUserMessage(messages: JsonNode): string</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">historyFile
   <li><a class="reference" href="#historyFile" title="historyFile(): string">historyFile(): string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">indexIdsAt
+  <li><a class="reference" href="#indexIdsAt%2Cstring%2Cstring" title="indexIdsAt(indexDir, cwd: string): seq[string]">indexIdsAt(indexDir, cwd: string): seq[string]</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">indexPathAt
+  <li><a class="reference" href="#indexPathAt%2Cstring%2Cstring" title="indexPathAt(indexDir, cwd: string): string">indexPathAt(indexDir, cwd: string): string</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">listSessionPaths
@@ -99,16 +149,44 @@
   <li><a class="reference" href="#listSessionPathsForCwd%2Cstring" title="listSessionPathsForCwd(cwd: string): seq[string]">listSessionPathsForCwd(cwd: string): seq[string]</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">loadDraft
+  <li><a class="reference" href="#loadDraft%2Cstring" title="loadDraft(sessionPath: string): string">loadDraft(sessionPath: string): string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">loadPendingDraft
+  <li><a class="reference" href="#loadPendingDraft%2Cstring" title="loadPendingDraft(cwd: string): string">loadPendingDraft(cwd: string): string</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">loadSessionFile
   <li><a class="reference" href="#loadSessionFile%2Cstring" title="loadSessionFile(path: string): (Session, JsonNode)">loadSessionFile(path: string): (Session, JsonNode)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">mangleCwd
+  <li><a class="reference" href="#mangleCwd%2Cstring" title="mangleCwd(cwd: string): string">mangleCwd(cwd: string): string</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">newSessionPath
   <li><a class="reference" href="#newSessionPath" title="newSessionPath(): string">newSessionPath(): string</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">pendingDraftDir
+  <li><a class="reference" href="#pendingDraftDir" title="pendingDraftDir(): string">pendingDraftDir(): string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">pendingDraftPathFor
+  <li><a class="reference" href="#pendingDraftPathFor%2Cstring" title="pendingDraftPathFor(cwd: string): string">pendingDraftPathFor(cwd: string): string</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">previewSession
   <li><a class="reference" href="#previewSession%2Cstring" title="previewSession(path: string): SessionPreview">previewSession(path: string): SessionPreview</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">releaseActiveSessionLock
+  <li><a class="reference" href="#releaseActiveSessionLock" title="releaseActiveSessionLock()">releaseActiveSessionLock()</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">releaseSessionLock
+  <li><a class="reference" href="#releaseSessionLock%2Cstring" title="releaseSessionLock(path: string)">releaseSessionLock(path: string)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">renderSession
@@ -119,12 +197,12 @@
   <li><a class="reference" href="#resolveSessionPath%2Cstring%2Cstring" title="resolveSessionPath(id: string; cwd = &quot;&quot;): string">resolveSessionPath(id: string; cwd = &quot;&quot;): string</a></li>
 
 </ul>
-<ul class="simple nested-toc-section">saveSession
-  <li><a class="reference" href="#saveSession%2CSession%2CJsonNode" title="saveSession(session: Session; messages: JsonNode)">saveSession(session: Session; messages: JsonNode)</a></li>
+<ul class="simple nested-toc-section">saveDraft
+  <li><a class="reference" href="#saveDraft%2CSession%2Cstring" title="saveDraft(session: Session; text: string)">saveDraft(session: Session; text: string)</a></li>
 
 </ul>
-<ul class="simple nested-toc-section">sessionCwd
-  <li><a class="reference" href="#sessionCwd%2Cstring" title="sessionCwd(path: string): string">sessionCwd(path: string): string</a></li>
+<ul class="simple nested-toc-section">saveSession
+  <li><a class="reference" href="#saveSession%2CSession%2CJsonNode" title="saveSession(session: Session; messages: JsonNode)">saveSession(session: Session; messages: JsonNode)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">sessionDir
@@ -133,6 +211,18 @@
 </ul>
 <ul class="simple nested-toc-section">sessionIdFromPath
   <li><a class="reference" href="#sessionIdFromPath%2Cstring" title="sessionIdFromPath(path: string): string">sessionIdFromPath(path: string): string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">sessionLockDir
+  <li><a class="reference" href="#sessionLockDir" title="sessionLockDir(): string">sessionLockDir(): string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">sessionLockPathFor
+  <li><a class="reference" href="#sessionLockPathFor%2Cstring" title="sessionLockPathFor(path: string): string">sessionLockPathFor(path: string): string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">sessionPathIndexDir
+  <li><a class="reference" href="#sessionPathIndexDir" title="sessionPathIndexDir(): string">sessionPathIndexDir(): string</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">usageFromJson
@@ -165,12 +255,34 @@
 <div class="section" id="7">
   <h1><a class="toc-backref" href="#7">Types</a></h1>
   <dl class="item">
-    <div id="SessionPreview">
+    <div id="SessionLocked">
+  <dt><pre><a href="#SessionLocked"><span class="Identifier">SessionLocked</span></a> <span class="Other">=</span> <span class="Keyword">object</span> <span class="Keyword">of</span> <span class="Identifier">CatchableError</span></pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="SessionPreview">
   <dt><pre><a href="#SessionPreview"><span class="Identifier">SessionPreview</span></a> <span class="Other">=</span> <span class="Keyword">object</span>
   <span class="Identifier">cwd</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>
   <span class="Identifier">profile</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>
   <span class="Identifier">msgCount</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>
   <span class="Identifier">firstUser</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span></pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+  </dl>
+</div>
+<div class="section" id="8">
+  <h1><a class="toc-backref" href="#8">Vars</a></h1>
+  <dl class="item">
+    <div id="activeLockPath">
+  <dt><pre><a href="#activeLockPath"><span class="Identifier">activeLockPath</span></a> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span></pre></dt>
   <dd>
     
     
@@ -197,7 +309,106 @@
 <div class="section" id="12">
   <h1><a class="toc-backref" href="#12">Procs</a></h1>
   <dl class="item">
-    <div id="firstUserMessage-procs-all">
+    <div id="acquireSessionLock-procs-all">
+  <div id="acquireSessionLock,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#acquireSessionLock%2Cstring"><span class="Identifier">acquireSessionLock</span></a><span class="Other">(</span><span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">SessionLocked</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span>
+    <span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span>
+                                        <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    <p>Atomically claim the lock for <tt class="docutils literal"><span class="pre"><span class="Identifier">path</span></span></tt>.</p>
+<p>If a lock exists but its owner process is no longer alive, it's treated as stale (left behind by a crash) and removed automatically, then acquisition retries once. Raises SessionLocked only when another live 3code process genuinely holds the lock (or a second racer grabbed it in the retry window).</p>
+
+    
+  </dd>
+</div>
+
+</div>
+<div id="appendIndexAt-procs-all">
+  <div id="appendIndexAt,string,string,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#appendIndexAt%2Cstring%2Cstring%2Cstring"><span class="Identifier">appendIndexAt</span></a><span class="Other">(</span><span class="Identifier">indexDir</span><span class="Other">,</span> <span class="Identifier">cwd</span><span class="Other">,</span> <span class="Identifier">id</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Append <tt class="docutils literal"><span class="pre"><span class="Identifier">id</span></span></tt> to the cwd's index file. Silent on failure: a missing index entry only means the session won't show in resume-latest, never a crash.
+    
+  </dd>
+</div>
+
+</div>
+<div id="appendSessionIndex-procs-all">
+  <div id="appendSessionIndex,string,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#appendSessionIndex%2Cstring%2Cstring"><span class="Identifier">appendSessionIndex</span></a><span class="Other">(</span><span class="Identifier">cwd</span><span class="Other">,</span> <span class="Identifier">id</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteDirEffect</span><span class="Other">,</span>
+    <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
+<div id="clearDraft-procs-all">
+  <div id="clearDraft,Session">
+  <dt><pre><span class="Keyword">proc</span> <a href="#clearDraft%2CSession"><span class="Identifier">clearDraft</span></a><span class="Other">(</span><span class="Identifier">session</span><span class="Other">:</span> <a href="types.html#Session"><span class="Identifier">Session</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadDirEffect</span><span class="Other">,</span>
+    <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Remove the prompt draft sidecar(s). Called when a prompt is committed so a clean exit doesn't leave a stale draft. Removes both scopes — whichever was active at submit time — so this is correct regardless of pre/post-first-turn state. Cheap and a no-op when neither exists.
+    
+  </dd>
+</div>
+
+</div>
+<div id="clearPendingDraft-procs-all">
+  <div id="clearPendingDraft,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#clearPendingDraft%2Cstring"><span class="Identifier">clearPendingDraft</span></a><span class="Other">(</span><span class="Identifier">cwd</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadDirEffect</span><span class="Other">,</span>
+    <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Remove the cwd-keyed pending prompt draft for <tt class="docutils literal"><span class="pre"><span class="Identifier">cwd</span></span></tt>. No-op when none exists.
+    
+  </dd>
+</div>
+
+</div>
+<div id="currentDraftPath-procs-all">
+  <div id="currentDraftPath,Session">
+  <dt><pre><span class="Keyword">proc</span> <a href="#currentDraftPath%2CSession"><span class="Identifier">currentDraftPath</span></a><span class="Other">(</span><span class="Identifier">session</span><span class="Other">:</span> <a href="types.html#Session"><span class="Identifier">Session</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    The draft path for the live session: id-keyed once a <tt class="docutils literal"><span class="pre"><span class="Operator">.</span><span class="DecNumber">3</span><span class="Identifier">log</span></span></tt> exists (post-first-turn), otherwise the cwd-keyed pending path. This is the single decision point for which scope a draft lives in.
+    
+  </dd>
+</div>
+
+</div>
+<div id="draftDir-procs-all">
+  <div id="draftDir">
+  <dt><pre><span class="Keyword">proc</span> <a href="#draftDir"><span class="Identifier">draftDir</span></a><span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span>
+                          <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
+<div id="draftPathFor-procs-all">
+  <div id="draftPathFor,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#draftPathFor%2Cstring"><span class="Identifier">draftPathFor</span></a><span class="Other">(</span><span class="Identifier">sessionPath</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
+<div id="firstUserMessage-procs-all">
   <div id="firstUserMessage,JsonNode">
   <dt><pre><span class="Keyword">proc</span> <a href="#firstUserMessage%2CJsonNode"><span class="Identifier">firstUserMessage</span></a><span class="Other">(</span><span class="Identifier">messages</span><span class="Other">:</span> <span class="Identifier">JsonNode</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
@@ -221,6 +432,30 @@
 </div>
 
 </div>
+<div id="indexIdsAt-procs-all">
+  <div id="indexIdsAt,string,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#indexIdsAt%2Cstring%2Cstring"><span class="Identifier">indexIdsAt</span></a><span class="Other">(</span><span class="Identifier">indexDir</span><span class="Other">,</span> <span class="Identifier">cwd</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Session ids for <tt class="docutils literal"><span class="pre"><span class="Identifier">cwd</span></span></tt>, latest-first. Reads the single small index file (one line per session) — never touches a <tt class="docutils literal"><span class="pre"><span class="Operator">.</span><span class="DecNumber">3</span><span class="Identifier">log</span></span></tt>.
+    
+  </dd>
+</div>
+
+</div>
+<div id="indexPathAt-procs-all">
+  <div id="indexPathAt,string,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#indexPathAt%2Cstring%2Cstring"><span class="Identifier">indexPathAt</span></a><span class="Other">(</span><span class="Identifier">indexDir</span><span class="Other">,</span> <span class="Identifier">cwd</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
 <div id="listSessionPaths-procs-all">
   <div id="listSessionPaths">
   <dt><pre><span class="Keyword">proc</span> <a href="#listSessionPaths"><span class="Identifier">listSessionPaths</span></a><span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadEnvEffect</span><span class="Other">,</span>
@@ -235,12 +470,35 @@
 </div>
 <div id="listSessionPathsForCwd-procs-all">
   <div id="listSessionPathsForCwd,string">
-  <dt><pre><span class="Keyword">proc</span> <a href="#listSessionPathsForCwd%2Cstring"><span class="Identifier">listSessionPathsForCwd</span></a><span class="Other">(</span><span class="Identifier">cwd</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span>
+  <dt><pre><span class="Keyword">proc</span> <a href="#listSessionPathsForCwd%2Cstring"><span class="Identifier">listSessionPathsForCwd</span></a><span class="Other">(</span><span class="Identifier">cwd</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Sessions saved under <tt class="docutils literal"><span class="pre"><span class="Identifier">cwd</span></span></tt>, latest-first — read straight from the cwd index, so it never parses a <tt class="docutils literal"><span class="pre"><span class="Operator">.</span><span class="DecNumber">3</span><span class="Identifier">log</span></span></tt>. A missing/stale index entry is skipped via the <tt class="docutils literal"><span class="pre"><span class="Identifier">fileExists</span></span></tt> check (e.g. a session deleted on disk).
+    
+  </dd>
+</div>
+
+</div>
+<div id="loadDraft-procs-all">
+  <div id="loadDraft,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#loadDraft%2Cstring"><span class="Identifier">loadDraft</span></a><span class="Other">(</span><span class="Identifier">sessionPath</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
+    Read the session-id-keyed prompt draft for <tt class="docutils literal"><span class="pre"><span class="Identifier">sessionPath</span></span></tt>, or &quot;&quot; if there is none or it is unreadable. Used by resume (post-first-turn drafts). The empty string is indistinguishable from absence, which is fine: an empty draft restores to an empty editor.
     
+  </dd>
+</div>
+
+</div>
+<div id="loadPendingDraft-procs-all">
+  <div id="loadPendingDraft,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#loadPendingDraft%2Cstring"><span class="Identifier">loadPendingDraft</span></a><span class="Other">(</span><span class="Identifier">cwd</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Read the cwd-keyed pending prompt draft for <tt class="docutils literal"><span class="pre"><span class="Identifier">cwd</span></span></tt>, or &quot;&quot; if there is none or it is unreadable. Used to restore an unsent prompt from a previous, killed-before-first-turn run when starting a fresh session in the same directory.
     
   </dd>
 </div>
@@ -251,6 +509,17 @@
   <dt><pre><span class="Keyword">proc</span> <a href="#loadSessionFile%2Cstring"><span class="Identifier">loadSessionFile</span></a><span class="Other">(</span><span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Other">(</span><a href="types.html#Session"><span class="Identifier">Session</span></a><span class="Other">,</span> <span class="Identifier">JsonNode</span><span class="Other">)</span> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
+<div id="mangleCwd-procs-all">
+  <div id="mangleCwd,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#mangleCwd%2Cstring"><span class="Identifier">mangleCwd</span></a><span class="Other">(</span><span class="Identifier">cwd</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -271,6 +540,31 @@
 </div>
 
 </div>
+<div id="pendingDraftDir-procs-all">
+  <div id="pendingDraftDir">
+  <dt><pre><span class="Keyword">proc</span> <a href="#pendingDraftDir"><span class="Identifier">pendingDraftDir</span></a><span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+                                 <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span>
+                                 <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
+<div id="pendingDraftPathFor-procs-all">
+  <div id="pendingDraftPathFor,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#pendingDraftPathFor%2Cstring"><span class="Identifier">pendingDraftPathFor</span></a><span class="Other">(</span><span class="Identifier">cwd</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    The pre-first-turn draft for a working directory. Keyed by the collision-free mangled cwd (same scheme as the cwd session index) so distinct directories never share a draft. One per directory: a singleton, overwritten as the user edits.
+    
+  </dd>
+</div>
+
+</div>
 <div id="previewSession-procs-all">
   <div id="previewSession,string">
   <dt><pre><span class="Keyword">proc</span> <a href="#previewSession%2Cstring"><span class="Identifier">previewSession</span></a><span class="Other">(</span><span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <a href="#SessionPreview"><span class="Identifier">SessionPreview</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span>
@@ -278,6 +572,30 @@
   <dd>
     
     Fast peek for <tt class="docutils literal"><span class="pre"><span class="Operator">--</span><span class="Identifier">list</span></span></tt> and <tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">sessions</span></span></tt> — reads the file, parses just enough to show cwd / profile / count / first user line. Doesn't reconstruct the full message tree.
+    
+  </dd>
+</div>
+
+</div>
+<div id="releaseActiveSessionLock-procs-all">
+  <div id="releaseActiveSessionLock">
+  <dt><pre><span class="Keyword">proc</span> <a href="#releaseActiveSessionLock"><span class="Identifier">releaseActiveSessionLock</span></a><span class="Other">(</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteDirEffect</span><span class="Other">]</span><span class="Other">,</span>
+                                  <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
+<div id="releaseSessionLock-procs-all">
+  <div id="releaseSessionLock,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#releaseSessionLock%2Cstring"><span class="Identifier">releaseSessionLock</span></a><span class="Other">(</span><span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadEnvEffect</span><span class="Other">,</span>
+    <span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
     
   </dd>
 </div>
@@ -297,12 +615,24 @@
 </div>
 <div id="resolveSessionPath-procs-all">
   <div id="resolveSessionPath,string,string">
-  <dt><pre><span class="Keyword">proc</span> <a href="#resolveSessionPath%2Cstring%2Cstring"><span class="Identifier">resolveSessionPath</span></a><span class="Other">(</span><span class="Identifier">id</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">cwd</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#resolveSessionPath%2Cstring%2Cstring"><span class="Identifier">resolveSessionPath</span></a><span class="Other">(</span><span class="Identifier">id</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">cwd</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    <tt class="docutils literal"><span class="pre"><span class="Identifier">id</span></span></tt> is bare (no extension) or a full path. Returns &quot;&quot; if not found. When <tt class="docutils literal"><span class="pre"><span class="Identifier">id</span></span></tt> is empty and <tt class="docutils literal"><span class="pre"><span class="Identifier">cwd</span></span></tt> is set, prefers sessions whose saved cwd matches (or is unknown); otherwise returns the latest of any.
+    <tt class="docutils literal"><span class="pre"><span class="Identifier">id</span></span></tt> is bare (no extension) or a full path. Returns &quot;&quot; if not found. When <tt class="docutils literal"><span class="pre"><span class="Identifier">id</span></span></tt> is empty and <tt class="docutils literal"><span class="pre"><span class="Identifier">cwd</span></span></tt> is set, returns the latest session for that cwd via the cwd index (no session parsed); with <tt class="docutils literal"><span class="pre"><span class="Identifier">cwd</span></span></tt> unset, the latest of any via a plain directory listing.
+    
+  </dd>
+</div>
+
+</div>
+<div id="saveDraft-procs-all">
+  <div id="saveDraft,Session,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#saveDraft%2CSession%2Cstring"><span class="Identifier">saveDraft</span></a><span class="Other">(</span><span class="Identifier">session</span><span class="Other">:</span> <a href="types.html#Session"><span class="Identifier">Session</span></a><span class="Other">;</span> <span class="Identifier">text</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span>
+    <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Persist the current prompt-editor text as an atomic draft sidecar so an unexpected shutdown never loses a half-typed prompt. Writes to whichever scope <tt class="docutils literal"><span class="pre"><span class="Identifier">currentDraftPath</span></span></tt> picks (cwd-keyed pending before the first turn, session-id-keyed after). A blank draft removes the sidecar rather than leaving an empty file, so an idle editor produces no draft. No-op without a cwd to key on (and no savePath).
     
   </dd>
 </div>
@@ -311,20 +641,8 @@
 <div id="saveSession-procs-all">
   <div id="saveSession,Session,JsonNode">
   <dt><pre><span class="Keyword">proc</span> <a href="#saveSession%2CSession%2CJsonNode"><span class="Identifier">saveSession</span></a><span class="Other">(</span><span class="Identifier">session</span><span class="Other">:</span> <a href="types.html#Session"><span class="Identifier">Session</span></a><span class="Other">;</span> <span class="Identifier">messages</span><span class="Other">:</span> <span class="Identifier">JsonNode</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span>
-    <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
-  <dd>
-    
-    
-    
-  </dd>
-</div>
-
-</div>
-<div id="sessionCwd-procs-all">
-  <div id="sessionCwd,string">
-  <dt><pre><span class="Keyword">proc</span> <a href="#sessionCwd%2Cstring"><span class="Identifier">sessionCwd</span></a><span class="Other">(</span><span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span>
-                                        <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span>
+    <span class="Identifier">ReadEnvEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -356,6 +674,43 @@
 </div>
 
 </div>
+<div id="sessionLockDir-procs-all">
+  <div id="sessionLockDir">
+  <dt><pre><span class="Keyword">proc</span> <a href="#sessionLockDir"><span class="Identifier">sessionLockDir</span></a><span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span>
+                                <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
+<div id="sessionLockPathFor-procs-all">
+  <div id="sessionLockPathFor,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#sessionLockPathFor%2Cstring"><span class="Identifier">sessionLockPathFor</span></a><span class="Other">(</span><span class="Identifier">path</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
+<div id="sessionPathIndexDir-procs-all">
+  <div id="sessionPathIndexDir">
+  <dt><pre><span class="Keyword">proc</span> <a href="#sessionPathIndexDir"><span class="Identifier">sessionPathIndexDir</span></a><span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+                                     <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span>
+                                     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+</div>
 <div id="usageFromJson-procs-all">
   <div id="usageFromJson,JsonNode">
   <dt><pre><span class="Keyword">proc</span> <a href="#usageFromJson%2CJsonNode"><span class="Identifier">usageFromJson</span></a><span class="Other">(</span><span class="Identifier">j</span><span class="Other">:</span> <span class="Identifier">JsonNode</span><span class="Other">)</span><span class="Other">:</span> <a href="types.html#Usage"><span class="Identifier">Usage</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span>
@@ -378,7 +733,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-05-08 15:10:47 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-27 09:42:01 UTC</small>
       </div>
     </div>
   </div>

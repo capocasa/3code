@@ -1,20 +1,15 @@
 nimTitle	compact	threecode/compact.html	module threecode/compact		0
-nim	CompactThresholdFrac	threecode/compact.html#CompactThresholdFrac	const CompactThresholdFrac		23
-nim	CompactKeepRecent	threecode/compact.html#CompactKeepRecent	const CompactKeepRecent		24
-nim	CompactedMarker	threecode/compact.html#CompactedMarker	const CompactedMarker		25
-nim	SupersededMarker	threecode/compact.html#SupersededMarker	const SupersededMarker		26
-nim	contextWindowFor	threecode/compact.html#contextWindowFor,string	proc contextWindowFor(model: string): int		28
-nim	compactHistory	threecode/compact.html#compactHistory,JsonNode	proc compactHistory(messages: JsonNode; keepRecent = CompactKeepRecent): int		47
-nim	supersedeCompact	threecode/compact.html#supersedeCompact,JsonNode,int	proc supersedeCompact(messages: JsonNode; keepRecent = 2): int		64
-nim	SummarizeKeepRecent	threecode/compact.html#SummarizeKeepRecent	const SummarizeKeepRecent		165
-nim	SummarizeThresholdFrac	threecode/compact.html#SummarizeThresholdFrac	const SummarizeThresholdFrac		166
-nim	SummarizeMaxTokens	threecode/compact.html#SummarizeMaxTokens	const SummarizeMaxTokens		167
-nim	SummaryPrefix	threecode/compact.html#SummaryPrefix	const SummaryPrefix		168
-nim	SummarizerSystemPrompt	threecode/compact.html#SummarizerSystemPrompt	const SummarizerSystemPrompt		169
-nim	applySummary	threecode/compact.html#applySummary,JsonNode,string	proc applySummary(messages: JsonNode; summary: string;\n             keepRecent = SummarizeKeepRecent): int		171
-nim	caNone	threecode/compact.html#caNone	ContextAction.caNone		257
-nim	caSummarize	threecode/compact.html#caSummarize	ContextAction.caSummarize		257
-nim	caCompact	threecode/compact.html#caCompact	ContextAction.caCompact		257
-nim	ContextAction	threecode/compact.html#ContextAction	enum ContextAction		257
-nim	decideContextAction	threecode/compact.html#decideContextAction,int,int,int	proc decideContextAction(promptTokens, windowTokens, msgCount: int;\n                    keepRecent = SummarizeKeepRecent;\n                    threshold = SummarizeThresholdFrac): ContextAction		262
-nim	summarizeHistory	threecode/compact.html#summarizeHistory,JsonNode,Profile	proc summarizeHistory(messages: JsonNode; p: Profile;\n                 keepRecent = SummarizeKeepRecent): int		273
+nim	contextWindowFor	threecode/compact.html#contextWindowFor,string	proc contextWindowFor(model: string): int		14
+nim	contextWindowFor	threecode/compact.html#contextWindowFor,Profile	proc contextWindowFor(p: Profile): int		38
+nim	SummarizeKeepRecent	threecode/compact.html#SummarizeKeepRecent	const SummarizeKeepRecent		49
+nim	SummarizeThresholdFrac	threecode/compact.html#SummarizeThresholdFrac	const SummarizeThresholdFrac		50
+nim	SummarizeMaxTokens	threecode/compact.html#SummarizeMaxTokens	const SummarizeMaxTokens		51
+nim	SummaryPrefix	threecode/compact.html#SummaryPrefix	const SummaryPrefix		52
+nim	SummarizerSystemPrompt	threecode/compact.html#SummarizerSystemPrompt	const SummarizerSystemPrompt		53
+nim	applySummary	threecode/compact.html#applySummary,JsonNode,string	proc applySummary(messages: JsonNode; summary: string;\n             keepRecent = SummarizeKeepRecent): int		55
+nim	caNone	threecode/compact.html#caNone	ContextAction.caNone		141
+nim	caSummarize	threecode/compact.html#caSummarize	ContextAction.caSummarize		141
+nim	ContextAction	threecode/compact.html#ContextAction	enum ContextAction		141
+nim	decideContextAction	threecode/compact.html#decideContextAction,int,int,int	proc decideContextAction(promptTokens, windowTokens, msgCount: int;\n                    keepRecent = SummarizeKeepRecent;\n                    threshold = SummarizeThresholdFrac): ContextAction		145
+nim	summarizeHistory	threecode/compact.html#summarizeHistory,JsonNode,Profile	proc summarizeHistory(messages: JsonNode; p: Profile;\n                 keepRecent = SummarizeKeepRecent): int		154
+nimgrp	contextwindowfor	threecode/compact.html#contextWindowFor-procs-all	proc		14

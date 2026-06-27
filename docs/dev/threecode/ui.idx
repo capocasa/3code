@@ -1,14 +1,29 @@
 nimTitle	ui	threecode/ui.html	module threecode/ui		0
-nim	CommandNames	threecode/ui.html#CommandNames	const CommandNames		15
-nim	completionFor	threecode/ui.html#completionFor,string	proc completionFor(line: string): seq[string]		20
-nim	readRequired	threecode/ui.html#readRequired,,string	proc readRequired(editor: var minline.LineEditor; prompt: string; hidden = false;\n             noHistory = true): string		45
-nim	readOptional	threecode/ui.html#readOptional,,string	proc readOptional(editor: var minline.LineEditor; prompt: string; hidden = false;\n             noHistory = true): string		56
-nim	promptNewProvider	threecode/ui.html#promptNewProvider	proc promptNewProvider(editor: var minline.LineEditor): ProviderRec		114
-nim	promptEditProvider	threecode/ui.html#promptEditProvider,,ProviderRec	proc promptEditProvider(editor: var minline.LineEditor; existing: ProviderRec): ProviderRec		244
-nim	bootstrapProvider	threecode/ui.html#bootstrapProvider	proc bootstrapProvider(editor: var minline.LineEditor): Profile		306
-nim	sessionPreamble	threecode/ui.html#sessionPreamble,string	proc sessionPreamble(cwd: string): string		586
-nim	inlineAtFiles	threecode/ui.html#inlineAtFiles,string	proc inlineAtFiles(msg: string): string		617
-nim	isFirstUserMessage	threecode/ui.html#isFirstUserMessage,JsonNode	proc isFirstUserMessage(messages: JsonNode): bool		649
-nim	buildUserMessage	threecode/ui.html#buildUserMessage,JsonNode,string	proc buildUserMessage(messages: JsonNode; raw: string): string		656
-nim	readInput	threecode/ui.html#readInput,,bool	proc readInput(editor: var minline.LineEditor; done: var bool): string		666
-nim	handleCommand	threecode/ui.html#handleCommand,string,JsonNode,Session,Profile,	proc handleCommand(cmd: string; messages: var JsonNode; session: var Session;\n              prof: var Profile; editor: var minline.LineEditor): bool		707
+nim	CommandNames	threecode/ui.html#CommandNames	const CommandNames		16
+nim	WizardReadLineHook	threecode/ui.html#WizardReadLineHook	type WizardReadLineHook		21
+nim	ckUnknown	threecode/ui.html#ckUnknown	CommandKind.ckUnknown		25
+nim	ckSafeImmediate	threecode/ui.html#ckSafeImmediate	CommandKind.ckSafeImmediate		25
+nim	ckMutating	threecode/ui.html#ckMutating	CommandKind.ckMutating		25
+nim	ckModal	threecode/ui.html#ckModal	CommandKind.ckModal		25
+nim	ckQuit	threecode/ui.html#ckQuit	CommandKind.ckQuit		25
+nim	CommandKind	threecode/ui.html#CommandKind	enum CommandKind		25
+nim	cdTranscriptResult	threecode/ui.html#cdTranscriptResult	CommandDisposition.cdTranscriptResult		27
+nim	cdHarnessOnly	threecode/ui.html#cdHarnessOnly	CommandDisposition.cdHarnessOnly		27
+nim	cdModal	threecode/ui.html#cdModal	CommandDisposition.cdModal		27
+nim	CommandDisposition	threecode/ui.html#CommandDisposition	enum CommandDisposition		27
+nim	CommandResult	threecode/ui.html#CommandResult	object CommandResult		29
+nim	wizardReadLineHook	threecode/ui.html#wizardReadLineHook_2	var wizardReadLineHook		38
+nim	handleCommandResult	threecode/ui.html#handleCommandResult,string,JsonNode,Session,Profile,	proc handleCommandResult(cmd: string; messages: var JsonNode; session: var Session;\n                    prof: var Profile; editor: var minline.LineEditor): CommandResult		40
+nim	classifyCommand	threecode/ui.html#classifyCommand,string	proc classifyCommand(cmd: string): CommandKind		44
+nim	completionFor	threecode/ui.html#completionFor,string	proc completionFor(line: string): seq[string]		80
+nim	readRequired	threecode/ui.html#readRequired,,string	proc readRequired(editor: var minline.LineEditor; prompt: string; hidden = false;\n             noHistory = true): string		110
+nim	readOptional	threecode/ui.html#readOptional,,string	proc readOptional(editor: var minline.LineEditor; prompt: string; hidden = false;\n             noHistory = true): string		126
+nim	promptNewProvider	threecode/ui.html#promptNewProvider	proc promptNewProvider(editor: var minline.LineEditor): ProviderRec		186
+nim	promptEditProvider	threecode/ui.html#promptEditProvider,,ProviderRec	proc promptEditProvider(editor: var minline.LineEditor; existing: ProviderRec): ProviderRec		340
+nim	bootstrapProvider	threecode/ui.html#bootstrapProvider	proc bootstrapProvider(editor: var minline.LineEditor): Profile		402
+nim	sessionPreamble	threecode/ui.html#sessionPreamble,string	proc sessionPreamble(cwd: string): string		747
+nim	inlineAtFiles	threecode/ui.html#inlineAtFiles,string	proc inlineAtFiles(msg: string): string		778
+nim	isFirstUserMessage	threecode/ui.html#isFirstUserMessage,JsonNode	proc isFirstUserMessage(messages: JsonNode): bool		810
+nim	buildUserMessage	threecode/ui.html#buildUserMessage,JsonNode,string	proc buildUserMessage(messages: JsonNode; raw: string): string		817
+nim	readInput	threecode/ui.html#readInput,,bool	proc readInput(editor: var minline.LineEditor; done: var bool): string		827
+nim	handleCommand	threecode/ui.html#handleCommand,string,JsonNode,Session,Profile,	proc handleCommand(cmd: string; messages: var JsonNode; session: var Session;\n              prof: var Profile; editor: var minline.LineEditor): bool		852

@@ -1,0 +1,34 @@
+nimTitle	engine	threecode/engine.html	module threecode/engine		0
+nim	TerminalEngine	threecode/engine.html#TerminalEngine	object TerminalEngine		14
+nim	defaultEngine	threecode/engine.html#defaultEngine	var defaultEngine		25
+nim	updateToolViewportSymbol	threecode/engine.html#updateToolViewportSymbol,string	proc updateToolViewportSymbol(symbol: string)		72
+nim	syncWrite	threecode/engine.html#syncWrite,TerminalEngine,string	proc syncWrite(e: var TerminalEngine; bytes: string)		84
+nim	syncWrite	threecode/engine.html#syncWrite,string	proc syncWrite(bytes: string)		89
+nim	writeRaw	threecode/engine.html#writeRaw,TerminalEngine,string	proc writeRaw(e: var TerminalEngine; bytes: string)		93
+nim	writeRaw	threecode/engine.html#writeRaw,string	proc writeRaw(bytes: string)		97
+nim	beginEditorRedraw	threecode/engine.html#beginEditorRedraw,TerminalEngine,,bool,FooterFrame	proc beginEditorRedraw(e: var TerminalEngine; ed: var minline.LineEditor;\n                  ready: bool; frame: FooterFrame)		101
+nim	beginEditorRedraw	threecode/engine.html#beginEditorRedraw,,bool,FooterFrame	proc beginEditorRedraw(ed: var minline.LineEditor; ready: bool; frame: FooterFrame)		110
+nim	finishEditorRedraw	threecode/engine.html#finishEditorRedraw,TerminalEngine,	proc finishEditorRedraw(e: var TerminalEngine; ed: var minline.LineEditor;\n                   showCaret = true)		114
+nim	finishEditorRedraw	threecode/engine.html#finishEditorRedraw	proc finishEditorRedraw(ed: var minline.LineEditor; showCaret = true)		125
+nim	renderFooter	threecode/engine.html#renderFooter,TerminalEngine,FooterFrame,bool,ptr.,int	proc renderFooter(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool;\n             editor: ptr minline.LineEditor; termW = 0)		128
+nim	renderFooter	threecode/engine.html#renderFooter,FooterFrame,bool,ptr.,int	proc renderFooter(frame: FooterFrame; inputRunning: bool;\n             editor: ptr minline.LineEditor; termW = 0)		195
+nim	renderToolViewport	threecode/engine.html#renderToolViewport,TerminalEngine,openArray[string],FooterFrame,bool,ptr.,int	proc renderToolViewport(e: var TerminalEngine; rows: openArray[string];\n                   frame: FooterFrame; inputRunning: bool;\n                   editor: ptr minline.LineEditor; termW = 0)		201
+nim	renderToolViewport	threecode/engine.html#renderToolViewport,openArray[string],FooterFrame,bool,ptr.,int	proc renderToolViewport(rows: openArray[string]; frame: FooterFrame;\n                   inputRunning: bool; editor: ptr minline.LineEditor; termW = 0)		258
+nim	clearToolViewport	threecode/engine.html#clearToolViewport,TerminalEngine,FooterFrame,bool,ptr.,int	proc clearToolViewport(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool;\n                  editor: ptr minline.LineEditor; termW = 0)		264
+nim	clearToolViewport	threecode/engine.html#clearToolViewport,FooterFrame,bool,ptr.,int	proc clearToolViewport(frame: FooterFrame; inputRunning: bool;\n                  editor: ptr minline.LineEditor; termW = 0)		272
+nim	appendTranscript	threecode/engine.html#appendTranscript,TerminalEngine,string,bool,bool,ptr.,FooterFrame,FooterFrame,int	proc appendTranscript(e: var TerminalEngine; transcriptBytes: string;\n                 liveAnchored: bool; inputRunning: bool;\n                 editor: ptr minline.LineEditor;\n                 oldFooter, newFooter: FooterFrame; compactRowsAboveFooter = 0;\n                 restoreEditor = true; reserveFooter = true;\n                 transcriptOwnsSpacing = false)		278
+nim	prepareAssistantContentStart	threecode/engine.html#prepareAssistantContentStart,TerminalEngine,bool,ptr.,FooterFrame,bool	proc prepareAssistantContentStart(e: var TerminalEngine; inputRunning: bool;\n                             editor: ptr minline.LineEditor;\n                             oldFooter: FooterFrame; hadBufferedSubmit: bool;\n                             flush = true)		379
+nim	prepareAssistantContentStart	threecode/engine.html#prepareAssistantContentStart,bool,ptr.,FooterFrame,bool	proc prepareAssistantContentStart(inputRunning: bool; editor: ptr minline.LineEditor;\n                             oldFooter: FooterFrame; hadBufferedSubmit: bool;\n                             flush = true)		409
+nim	endTurn	threecode/engine.html#endTurn,TerminalEngine,bool,ptr.,FooterFrame,string	proc endTurn(e: var TerminalEngine; inputRunning: bool;\n        editor: ptr minline.LineEditor; oldFooter: FooterFrame; bytes: string)		417
+nim	endTurn	threecode/engine.html#endTurn,bool,ptr.,FooterFrame,string	proc endTurn(inputRunning: bool; editor: ptr minline.LineEditor;\n        oldFooter: FooterFrame; bytes: string)		440
+nim	appendTranscript	threecode/engine.html#appendTranscript,string,bool,bool,ptr.,FooterFrame,FooterFrame,int	proc appendTranscript(transcriptBytes: string; liveAnchored: bool;\n                 inputRunning: bool; editor: ptr minline.LineEditor;\n                 oldFooter, newFooter: FooterFrame; compactRowsAboveFooter = 0;\n                 restoreEditor = true; reserveFooter = true;\n                 transcriptOwnsSpacing = false)		444
+nimgrp	begineditorredraw	threecode/engine.html#beginEditorRedraw-procs-all	proc		101
+nimgrp	appendtranscript	threecode/engine.html#appendTranscript-procs-all	proc		278
+nimgrp	rendertoolviewport	threecode/engine.html#renderToolViewport-procs-all	proc		201
+nimgrp	renderfooter	threecode/engine.html#renderFooter-procs-all	proc		128
+nimgrp	prepareassistantcontentstart	threecode/engine.html#prepareAssistantContentStart-procs-all	proc		379
+nimgrp	syncwrite	threecode/engine.html#syncWrite-procs-all	proc		84
+nimgrp	cleartoolviewport	threecode/engine.html#clearToolViewport-procs-all	proc		264
+nimgrp	finisheditorredraw	threecode/engine.html#finishEditorRedraw-procs-all	proc		114
+nimgrp	writeraw	threecode/engine.html#writeRaw-procs-all	proc		93
+nimgrp	endturn	threecode/engine.html#endTurn-procs-all	proc		417

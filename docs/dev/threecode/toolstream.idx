@@ -1,0 +1,12 @@
+nimTitle	toolstream	threecode/toolstream.html	module threecode/toolstream		0
+nim	StreamMaxLines	threecode/toolstream.html#StreamMaxLines	const StreamMaxLines		10
+nim	subtleWriteLn	threecode/toolstream.html#subtleWriteLn,File,string	proc subtleWriteLn(outFile: File; body: string)		12
+nim	printLine	threecode/toolstream.html#printLine,string	proc printLine(l: string)		28
+nim	StreamingView	threecode/toolstream.html#StreamingView	object StreamingView		35
+nim	initStreamingView	threecode/toolstream.html#initStreamingView,int,string	proc initStreamingView(maxLines = StreamMaxLines; idx = 0; banner = ""): StreamingView		44
+nim	setSymbol	threecode/toolstream.html#setSymbol,StreamingView,string	proc setSymbol(v: var StreamingView; symbol: string)		60
+nim	setExitCode	threecode/toolstream.html#setExitCode,StreamingView,int	proc setExitCode(v: var StreamingView; code: int)		63
+nim	viewportRows	threecode/toolstream.html#viewportRows,StreamingView	proc viewportRows(v: StreamingView): seq[string]		84
+nim	finalTranscriptRows	threecode/toolstream.html#finalTranscriptRows,string,int,openArray[string],int	proc finalTranscriptRows(banner: string; code: int; lines: openArray[string];\n                    idx: int; maxLines = StreamMaxLines): seq[string]		90
+nim	addLine	threecode/toolstream.html#addLine,StreamingView,string	proc addLine(v: var StreamingView; line: string)		99
+nim	printBashScroll	threecode/toolstream.html#printBashScroll,string,int	proc printBashScroll(res: string; idx: int; maxLines = StreamMaxLines)		103

@@ -1,0 +1,106 @@
+nimTitle	rendering	threecode/fatprompt/rendering.html	module threecode/fatprompt/rendering		0
+nim	pmIdle	threecode/fatprompt/rendering.html#pmIdle	PromptMode.pmIdle		14
+nim	pmTurnRunning	threecode/fatprompt/rendering.html#pmTurnRunning	PromptMode.pmTurnRunning		14
+nim	pmBufferedInput	threecode/fatprompt/rendering.html#pmBufferedInput	PromptMode.pmBufferedInput		14
+nim	PromptMode	threecode/fatprompt/rendering.html#PromptMode	enum PromptMode		14
+nim	PendingHint	threecode/fatprompt/rendering.html#PendingHint	object PendingHint		19
+nim	FooterState	threecode/fatprompt/rendering.html#FooterState	object FooterState		25
+nim	FatPromptState	threecode/fatprompt/rendering.html#FatPromptState	object FatPromptState		32
+nim	fpeSetPromptMode	threecode/fatprompt/rendering.html#fpeSetPromptMode	FatPromptEventKind.fpeSetPromptMode		35
+nim	fpeSetBar	threecode/fatprompt/rendering.html#fpeSetBar	FatPromptEventKind.fpeSetBar		35
+nim	fpeClearBar	threecode/fatprompt/rendering.html#fpeClearBar	FatPromptEventKind.fpeClearBar		35
+nim	fpeSetTicker	threecode/fatprompt/rendering.html#fpeSetTicker	FatPromptEventKind.fpeSetTicker		35
+nim	fpeClearTicker	threecode/fatprompt/rendering.html#fpeClearTicker	FatPromptEventKind.fpeClearTicker		35
+nim	fpeSetPendingHint	threecode/fatprompt/rendering.html#fpeSetPendingHint	FatPromptEventKind.fpeSetPendingHint		35
+nim	fpeClearPendingHint	threecode/fatprompt/rendering.html#fpeClearPendingHint	FatPromptEventKind.fpeClearPendingHint		35
+nim	FatPromptEventKind	threecode/fatprompt/rendering.html#FatPromptEventKind	enum FatPromptEventKind		35
+nim	FatPromptEvent	threecode/fatprompt/rendering.html#FatPromptEvent	object FatPromptEvent		44
+nim	pmUser	threecode/fatprompt/rendering.html#pmUser	PromptMarker.pmUser		60
+nim	pmAssistant	threecode/fatprompt/rendering.html#pmAssistant	PromptMarker.pmAssistant		60
+nim	pmBash	threecode/fatprompt/rendering.html#pmBash	PromptMarker.pmBash		60
+nim	pmRead	threecode/fatprompt/rendering.html#pmRead	PromptMarker.pmRead		60
+nim	pmWrite	threecode/fatprompt/rendering.html#pmWrite	PromptMarker.pmWrite		60
+nim	pmPatch	threecode/fatprompt/rendering.html#pmPatch	PromptMarker.pmPatch		60
+nim	pmOther	threecode/fatprompt/rendering.html#pmOther	PromptMarker.pmOther		60
+nim	PromptMarker	threecode/fatprompt/rendering.html#PromptMarker	enum PromptMarker		60
+nim	TokenBarState	threecode/fatprompt/rendering.html#TokenBarState	object TokenBarState		63
+nim	BashViewport	threecode/fatprompt/rendering.html#BashViewport	object BashViewport		70
+nim	FatPrompt	threecode/fatprompt/rendering.html#FatPrompt	object FatPrompt		76
+nim	FatPromptGeometry	threecode/fatprompt/rendering.html#FatPromptGeometry	object FatPromptGeometry		86
+nim	ffNone	threecode/fatprompt/rendering.html#ffNone	FooterFrameKind.ffNone		94
+nim	ffClear	threecode/fatprompt/rendering.html#ffClear	FooterFrameKind.ffClear		94
+nim	ffTokenBar	threecode/fatprompt/rendering.html#ffTokenBar	FooterFrameKind.ffTokenBar		94
+nim	ffSpinner	threecode/fatprompt/rendering.html#ffSpinner	FooterFrameKind.ffSpinner		94
+nim	FooterFrameKind	threecode/fatprompt/rendering.html#FooterFrameKind	enum FooterFrameKind		94
+nim	FooterFrame	threecode/fatprompt/rendering.html#FooterFrame	object FooterFrame		100
+nim	DefaultWidth	threecode/fatprompt/rendering.html#DefaultWidth	const DefaultWidth		112
+nim	DefaultHeight	threecode/fatprompt/rendering.html#DefaultHeight	const DefaultHeight		113
+nim	DefaultBashMaxLines	threecode/fatprompt/rendering.html#DefaultBashMaxLines	const DefaultBashMaxLines		114
+nim	EditorPromptBytes	threecode/fatprompt/rendering.html#EditorPromptBytes	const EditorPromptBytes		115
+nim	DeferredSubmitMarker	threecode/fatprompt/rendering.html#DeferredSubmitMarker	const DeferredSubmitMarker		116
+nim	initFatPromptState	threecode/fatprompt/rendering.html#initFatPromptState	proc initFatPromptState(): FatPromptState		118
+nim	setPromptModeEvent	threecode/fatprompt/rendering.html#setPromptModeEvent,PromptMode	proc setPromptModeEvent(mode: PromptMode): FatPromptEvent		121
+nim	setBarEvent	threecode/fatprompt/rendering.html#setBarEvent,string	proc setBarEvent(label: string; hasGap = false): FatPromptEvent		124
+nim	clearBarEvent	threecode/fatprompt/rendering.html#clearBarEvent	proc clearBarEvent(): FatPromptEvent		127
+nim	setTickerEvent	threecode/fatprompt/rendering.html#setTickerEvent,string	proc setTickerEvent(ticker: string): FatPromptEvent		130
+nim	clearTickerEvent	threecode/fatprompt/rendering.html#clearTickerEvent	proc clearTickerEvent(): FatPromptEvent		133
+nim	setPendingHintEvent	threecode/fatprompt/rendering.html#setPendingHintEvent,Usage,int,int	proc setPendingHintEvent(usage: Usage; window, elapsed: int): FatPromptEvent		136
+nim	clearPendingHintEvent	threecode/fatprompt/rendering.html#clearPendingHintEvent	proc clearPendingHintEvent(): FatPromptEvent		140
+nim	apply	threecode/fatprompt/rendering.html#apply,FatPromptState,FatPromptEvent	proc apply(s: var FatPromptState; ev: FatPromptEvent)		143
+nim	initFatPrompt	threecode/fatprompt/rendering.html#initFatPrompt,int	proc initFatPrompt(width = DefaultWidth; height = DefaultHeight; window = 0): FatPrompt		164
+nim	addTranscriptItem	threecode/fatprompt/rendering.html#addTranscriptItem,FatPrompt,PromptMarker,string,string	proc addTranscriptItem(p: var FatPrompt; marker: PromptMarker; body: string;\n                  receipt = "")		228
+nim	addScrollLine	threecode/fatprompt/rendering.html#addScrollLine,FatPrompt,string	proc addScrollLine(p: var FatPrompt; line: string)		241
+nim	setEditor	threecode/fatprompt/rendering.html#setEditor,FatPrompt,string,int	proc setEditor(p: var FatPrompt; text: string; cursor = -1)		244
+nim	setTicker	threecode/fatprompt/rendering.html#setTicker,FatPrompt,string	proc setTicker(p: var FatPrompt; ticker: string)		251
+nim	setTokenBar	threecode/fatprompt/rendering.html#setTokenBar,FatPrompt,Usage,int,string,int	proc setTokenBar(p: var FatPrompt; usage: Usage; window: int; apiActive = false;\n            spinner = ""; elapsedS = -1)		254
+nim	tokenBarText	threecode/fatprompt/rendering.html#tokenBarText,TokenBarState	proc tokenBarText(state: TokenBarState): string		272
+nim	hasNonNewlineBytes	threecode/fatprompt/rendering.html#hasNonNewlineBytes,string	proc hasNonNewlineBytes(s: string): bool		292
+nim	hasElapsedSuffix	threecode/fatprompt/rendering.html#hasElapsedSuffix,string	proc hasElapsedSuffix(label: string): bool		297
+nim	spinnerBarBytes	threecode/fatprompt/rendering.html#spinnerBarBytes,string,string,int	proc spinnerBarBytes(frame, label: string; elapsed: int): string		308
+nim	liveBarBytes	threecode/fatprompt/rendering.html#liveBarBytes,string	proc liveBarBytes(label: string): string		315
+nim	labelCells	threecode/fatprompt/rendering.html#labelCells,string	proc labelCells(label: string): int		318
+nim	barWrapRows	threecode/fatprompt/rendering.html#barWrapRows,int,int	proc barWrapRows(visibleCells, termW: int): int		325
+nim	noFooterFrame	threecode/fatprompt/rendering.html#noFooterFrame	proc noFooterFrame(): FooterFrame		330
+nim	clearFooterFrame	threecode/fatprompt/rendering.html#clearFooterFrame,int	proc clearFooterFrame(rows = 1): FooterFrame		333
+nim	tokenBarFrame	threecode/fatprompt/rendering.html#tokenBarFrame,string,string	proc tokenBarFrame(label: string; ticker = ""): FooterFrame		336
+nim	spinnerFooterFrame	threecode/fatprompt/rendering.html#spinnerFooterFrame,string,string,string,int	proc spinnerFooterFrame(spinner, label, ticker: string; elapsed: int): FooterFrame		342
+nim	footerFrame	threecode/fatprompt/rendering.html#footerFrame,FatPromptState	proc footerFrame(s: FatPromptState): FooterFrame		346
+nim	rowsAboveEditor	threecode/fatprompt/rendering.html#rowsAboveEditor,FooterFrame,int	proc rowsAboveEditor(frame: FooterFrame; termW = 0): int		349
+nim	spinnerFooterBytes	threecode/fatprompt/rendering.html#spinnerFooterBytes,string,string,string,int,int	proc spinnerFooterBytes(frame, label, ticker: string; elapsed: int; termW = 0): string		365
+nim	liveEditorSpinnerBarBytes	threecode/fatprompt/rendering.html#liveEditorSpinnerBarBytes,string,string,int	proc liveEditorSpinnerBarBytes(frame, label: string; elapsed: int): string		379
+nim	spinnerCleanupBytes	threecode/fatprompt/rendering.html#spinnerCleanupBytes,int	proc spinnerCleanupBytes(tickerRows = 1): string		382
+nim	paintBarBytes	threecode/fatprompt/rendering.html#paintBarBytes,string	proc paintBarBytes(label: string): string		386
+nim	barFooterBytes	threecode/fatprompt/rendering.html#barFooterBytes,string,int	proc barFooterBytes(label: string; termW = 0): string		389
+nim	ClearBarPromptBytes	threecode/fatprompt/rendering.html#ClearBarPromptBytes	const ClearBarPromptBytes		395
+nim	barFooterBelowAtColBytes	threecode/fatprompt/rendering.html#barFooterBelowAtColBytes,string,int,int	proc barFooterBelowAtColBytes(label: string; col: int; termW = 0): string		397
+nim	barFooterBelowBytes	threecode/fatprompt/rendering.html#barFooterBelowBytes,string,int	proc barFooterBelowBytes(label: string; termW = 0): string		403
+nim	clearBarBelowAtColBytes	threecode/fatprompt/rendering.html#clearBarBelowAtColBytes,int	proc clearBarBelowAtColBytes(col: int): string		406
+nim	ClearBarBelowBytes	threecode/fatprompt/rendering.html#ClearBarBelowBytes	const ClearBarBelowBytes		409
+nim	receiptBarBytes	threecode/fatprompt/rendering.html#receiptBarBytes,string	proc receiptBarBytes(label: string): string		411
+nim	clampToWidth	threecode/fatprompt/rendering.html#clampToWidth,string,int	proc clampToWidth(s: string; width: int): string		415
+nim	liveEditorSpinnerFooterBytes	threecode/fatprompt/rendering.html#liveEditorSpinnerFooterBytes,string,string,string,int,int	proc liveEditorSpinnerFooterBytes(frame, label, ticker: string; elapsed: int;\n                             termW = 0): string		440
+nim	clearSpinnerFooterBytes	threecode/fatprompt/rendering.html#clearSpinnerFooterBytes,bool	proc clearSpinnerFooterBytes(hadTicker: bool): string		451
+nim	footerFrameBytes	threecode/fatprompt/rendering.html#footerFrameBytes,FooterFrame,int	proc footerFrameBytes(frame: FooterFrame; termW = 0): string		457
+nim	formatUserPromptItem	threecode/fatprompt/rendering.html#formatUserPromptItem,string	proc formatUserPromptItem(line: string): string		499
+nim	promptOnlyBytes	threecode/fatprompt/rendering.html#promptOnlyBytes	proc promptOnlyBytes(): string		504
+nim	promptOnlyResetBytes	threecode/fatprompt/rendering.html#promptOnlyResetBytes	proc promptOnlyResetBytes(): string		507
+nim	clearPromptAfterPendingReceiptBytes	threecode/fatprompt/rendering.html#clearPromptAfterPendingReceiptBytes	proc clearPromptAfterPendingReceiptBytes(): string		510
+nim	clearBarRowBytes	threecode/fatprompt/rendering.html#clearBarRowBytes	proc clearBarRowBytes(): string		513
+nim	footerRowsAboveEditor	threecode/fatprompt/rendering.html#footerRowsAboveEditor,FatPromptState	proc footerRowsAboveEditor(s: FatPromptState): int		516
+nim	tokenBarRows	threecode/fatprompt/rendering.html#tokenBarRows,FatPromptState,int	proc tokenBarRows(s: FatPromptState; termW = 0): int		523
+nim	footerGeometry	threecode/fatprompt/rendering.html#footerGeometry,FatPromptState,int,int	proc footerGeometry(s: FatPromptState; editorRows: int; termW = 0): FatPromptGeometry		528
+nim	footerFrameBytes	threecode/fatprompt/rendering.html#footerFrameBytes,FatPromptState,int	proc footerFrameBytes(s: FatPromptState; termW = 0): string		542
+nim	hideRealCaretBytes	threecode/fatprompt/rendering.html#hideRealCaretBytes	proc hideRealCaretBytes(): string		547
+nim	endTurnBytes	threecode/fatprompt/rendering.html#endTurnBytes,string,bool,int	proc endTurnBytes(label: string; repaintPrompt: bool; termW = 0; gapAlready = false): string		550
+nim	liveEditorBarTickFrame	threecode/fatprompt/rendering.html#liveEditorBarTickFrame,string	proc liveEditorBarTickFrame(label: string): string		562
+nim	absoluteBarTickFrame	threecode/fatprompt/rendering.html#absoluteBarTickFrame,int,string,bool,int	proc absoluteBarTickFrame(row: int; label: string; activeEditor: bool; termW = 0): string		565
+nim	moveToBarBelowBytes	threecode/fatprompt/rendering.html#moveToBarBelowBytes	proc moveToBarBelowBytes(): string		573
+nim	editorRows	threecode/fatprompt/rendering.html#editorRows,FatPrompt	proc editorRows(p: FatPrompt): seq[string]		576
+nim	editorHeight	threecode/fatprompt/rendering.html#editorHeight,FatPrompt	proc editorHeight(p: FatPrompt): int		579
+nim	beginBash	threecode/fatprompt/rendering.html#beginBash,FatPrompt,int	proc beginBash(p: var FatPrompt; idx = 0; maxLines = DefaultBashMaxLines)		582
+nim	pushBashOutput	threecode/fatprompt/rendering.html#pushBashOutput,FatPrompt,string	proc pushBashOutput(p: var FatPrompt; line: string)		585
+nim	bashVisibleRows	threecode/fatprompt/rendering.html#bashVisibleRows,FatPrompt	proc bashVisibleRows(p: FatPrompt): seq[string]		590
+nim	finishBash	threecode/fatprompt/rendering.html#finishBash,FatPrompt,int,int	proc finishBash(p: var FatPrompt; code = 0; elapsedS = -1)		606
+nim	frameRows	threecode/fatprompt/rendering.html#frameRows,FatPrompt	proc frameRows(p: FatPrompt): seq[string]		619
+nim	frameText	threecode/fatprompt/rendering.html#frameText,FatPrompt	proc frameText(p: FatPrompt): string		650
+nimgrp	footerframebytes	threecode/fatprompt/rendering.html#footerFrameBytes-procs-all	proc		457

@@ -1,0 +1,17 @@
+nimTitle	terminal	threecode/terminal.html	module threecode/terminal		0
+nim	SyncBegin	threecode/terminal.html#SyncBegin	const SyncBegin		11
+nim	SyncEnd	threecode/terminal.html#SyncEnd	const SyncEnd		12
+nim	terminalLock	threecode/terminal.html#terminalLock	var terminalLock		14
+nim	acquireTerminalWrite	threecode/terminal.html#acquireTerminalWrite	proc acquireTerminalWrite()		18
+nim	releaseTerminalWrite	threecode/terminal.html#releaseTerminalWrite	proc releaseTerminalWrite()		25
+nim	withTerminalWriteLock	threecode/terminal.html#withTerminalWriteLock.t,untyped	template withTerminalWriteLock(body: untyped)		34
+nim	syncWrite	threecode/terminal.html#syncWrite,string	proc syncWrite(bytes: string)		48
+nim	writeRaw	threecode/terminal.html#writeRaw,string	proc writeRaw(bytes: string)		56
+nim	hideCaret	threecode/terminal.html#hideCaret	proc hideCaret()		62
+nim	setSteadyCursor	threecode/terminal.html#setSteadyCursor	proc setSteadyCursor()		66
+nim	restoreCursorStyle	threecode/terminal.html#restoreCursorStyle	proc restoreCursorStyle()		70
+nim	beginEditorRedraw	threecode/terminal.html#beginEditorRedraw,,bool,string,int	proc beginEditorRedraw(ed: var minline.LineEditor; ready: bool;\n                  footerBarBytes: string; footerRowsAboveEditor = 1)		76
+nim	finishEditorRedraw	threecode/terminal.html#finishEditorRedraw	proc finishEditorRedraw(showCaret = true)		99
+nim	enterPromptInput	threecode/terminal.html#enterPromptInput,bool,string,string	proc enterPromptInput(hasBar: bool; barFooterBytes, promptOnlyBytes: string)		109
+nim	resetPromptInputAfterEmpty	threecode/terminal.html#resetPromptInputAfterEmpty,bool,int,string,string	proc resetPromptInputAfterEmpty(hasBar: bool; rows: int;\n                           promptOnlyBytes, repaintBytes: string)		120
+nim	eraseRowsAbove	threecode/terminal.html#eraseRowsAbove,int	proc eraseRowsAbove(rows: int)		133

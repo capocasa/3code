@@ -55,13 +55,18 @@
     </div>
     <ul class="simple simple-toc" id="toc-list">
   <li>
+  <a class="reference reference-toplevel" href="#6" id="56">Imports</a>
+</li>
+<li>
   <details open>
     <summary><a class="reference reference-toplevel" href="#10" id="60">Consts</a></summary>
     <ul class="simple simple-toc-section">
-      <li><a class="reference" href="#BoldOn" title="BoldOn = &quot;\e[1m&quot;">BoldOn</a></li>
+      <li><a class="reference" href="#BlueFg" title="BlueFg = &quot;\e[34m&quot;">BlueFg</a></li>
+<li><a class="reference" href="#BoldOn" title="BoldOn = &quot;\e[1m&quot;">BoldOn</a></li>
+<li><a class="reference" href="#BrightWhiteFg" title="BrightWhiteFg = &quot;\e[97m&quot;">BrightWhiteFg</a></li>
 <li><a class="reference" href="#CyanFg" title="CyanFg = &quot;\e[36m&quot;">CyanFg</a></li>
-<li><a class="reference" href="#DimCyanFg" title="DimCyanFg = &quot;\e[96m&quot;">DimCyanFg</a></li>
 <li><a class="reference" href="#GreyFg" title="GreyFg = &quot;\e[38;5;244m&quot;">GreyFg</a></li>
+<li><a class="reference" href="#OffWhiteFg" title="OffWhiteFg = &quot;\e[38;5;252m&quot;">OffWhiteFg</a></li>
 <li><a class="reference" href="#Reset" title="Reset = &quot;\e[0m&quot;">Reset</a></li>
 
     </ul>
@@ -83,12 +88,21 @@
   <li><a class="reference" href="#bundledSslContext" title="bundledSslContext(): SslContext">bundledSslContext(): SslContext</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">charWrapAnsi
+  <li><a class="reference" href="#charWrapAnsi%2Cstring%2Cint" title="charWrapAnsi(s: string; width: int): seq[string]">charWrapAnsi(s: string; width: int): seq[string]</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">clipMiddle
   <li><a class="reference" href="#clipMiddle%2Cstring%2Cint%2Cint" title="clipMiddle(s: string; head, tail: int): string">clipMiddle(s: string; head, tail: int): string</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">collapseHome
   <li><a class="reference" href="#collapseHome%2Cstring" title="collapseHome(path: string): string">collapseHome(path: string): string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">debugOut
+  <li><a class="reference" href="#debugOut%2Cstring%2Cstring" title="debugOut(msg, tag: string)">debugOut(msg, tag: string)</a></li>
+<li><a class="reference" href="#debugOut%2Cstring" title="debugOut(msg: string)">debugOut(msg: string)</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">detectMdHeader
@@ -143,6 +157,14 @@
   <li><a class="reference" href="#resolvePath%2Cstring" title="resolvePath(path: string): string">resolvePath(path: string): string</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">safeCwd
+  <li><a class="reference" href="#safeCwd" title="safeCwd(): string">safeCwd(): string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">sanitizeUtf8
+  <li><a class="reference" href="#sanitizeUtf8%2Cstring" title="sanitizeUtf8(s: string): string">sanitizeUtf8(s: string): string</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">stripPreamble
   <li><a class="reference" href="#stripPreamble%2Cstring" title="stripPreamble(s: string): string">stripPreamble(s: string): string</a></li>
 
@@ -188,11 +210,33 @@
     <div id="tocRoot"></div>
     
     <p class="module-desc"></p>
-    <div class="section" id="10">
+    <div class="section" id="6">
+  <h1><a class="toc-backref" href="#6">Imports</a></h1>
+  <dl class="item">
+    <a class="reference external" href="types.html">types</a>, <a class="reference external" href="unicodewidth.html">unicodewidth</a>
+  </dl>
+</div>
+<div class="section" id="10">
   <h1><a class="toc-backref" href="#10">Consts</a></h1>
   <dl class="item">
-    <div id="BoldOn">
+    <div id="BlueFg">
+  <dt><pre><a href="#BlueFg"><span class="Identifier">BlueFg</span></a> <span class="Other">=</span> <span class="StringLit">&quot;\e[34m&quot;</span></pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="BoldOn">
   <dt><pre><a href="#BoldOn"><span class="Identifier">BoldOn</span></a> <span class="Other">=</span> <span class="StringLit">&quot;\e[1m&quot;</span></pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="BrightWhiteFg">
+  <dt><pre><a href="#BrightWhiteFg"><span class="Identifier">BrightWhiteFg</span></a> <span class="Other">=</span> <span class="StringLit">&quot;\e[97m&quot;</span></pre></dt>
   <dd>
     
     
@@ -207,16 +251,16 @@
     
   </dd>
 </div>
-<div id="DimCyanFg">
-  <dt><pre><a href="#DimCyanFg"><span class="Identifier">DimCyanFg</span></a> <span class="Other">=</span> <span class="StringLit">&quot;\e[96m&quot;</span></pre></dt>
+<div id="GreyFg">
+  <dt><pre><a href="#GreyFg"><span class="Identifier">GreyFg</span></a> <span class="Other">=</span> <span class="StringLit">&quot;\e[38;5;244m&quot;</span></pre></dt>
   <dd>
     
     
     
   </dd>
 </div>
-<div id="GreyFg">
-  <dt><pre><a href="#GreyFg"><span class="Identifier">GreyFg</span></a> <span class="Other">=</span> <span class="StringLit">&quot;\e[38;5;244m&quot;</span></pre></dt>
+<div id="OffWhiteFg">
+  <dt><pre><a href="#OffWhiteFg"><span class="Identifier">OffWhiteFg</span></a> <span class="Other">=</span> <span class="StringLit">&quot;\e[38;5;252m&quot;</span></pre></dt>
   <dd>
     
     
@@ -272,6 +316,18 @@
 </div>
 
 </div>
+<div id="charWrapAnsi-procs-all">
+  <div id="charWrapAnsi,string,int">
+  <dt><pre><span class="Keyword">proc</span> <a href="#charWrapAnsi%2Cstring%2Cint"><span class="Identifier">charWrapAnsi</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">width</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Character-wrap: break at exactly <tt class="docutils literal"><span class="pre"><span class="Identifier">width</span></span></tt> visible columns, even mid-word. ANSI CSI escapes pass through without counting toward width. Lines that fit are returned as-is.
+    
+  </dd>
+</div>
+
+</div>
 <div id="clipMiddle-procs-all">
   <div id="clipMiddle,string,int,int">
   <dt><pre><span class="Keyword">proc</span> <a href="#clipMiddle%2Cstring%2Cint%2Cint"><span class="Identifier">clipMiddle</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">head</span><span class="Other">,</span> <span class="Identifier">tail</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
@@ -291,6 +347,27 @@
   <dd>
     
     Collapse the user's home dir prefix to <tt class="docutils literal"><span class="pre"><span class="Operator">~/</span></span></tt>. Guards against the <tt class="docutils literal"><span class="pre"><span class="Identifier">getHomeDir</span><span class="Punctuation">(</span><span class="Punctuation">)</span></span></tt> trailing-slash footgun that produced things like <tt class="docutils literal"><span class="pre"><span class="Operator">~</span><span class="Identifier">e</span><span class="Operator">/</span><span class="Identifier">hellodeepseek</span></span></tt> for <tt class="docutils literal"><span class="pre"><span class="Operator">/</span><span class="Identifier">home</span><span class="Operator">/</span><span class="Identifier">carlo</span><span class="Operator">/</span><span class="Identifier">e</span><span class="Operator">/</span><span class="Identifier">hellodeepseek</span></span></tt>.
+    
+  </dd>
+</div>
+
+</div>
+<div id="debugOut-procs-all">
+  <div id="debugOut,string,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#debugOut%2Cstring%2Cstring"><span class="Identifier">debugOut</span></a><span class="Other">(</span><span class="Identifier">msg</span><span class="Other">,</span> <span class="Identifier">tag</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">]</span><span class="Other">,</span>
+                                  <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="debugOut,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#debugOut%2Cstring"><span class="Identifier">debugOut</span></a><span class="Other">(</span><span class="Identifier">msg</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">]</span><span class="Other">,</span>
+                             <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
     
   </dd>
 </div>
@@ -447,6 +524,30 @@
 </div>
 
 </div>
+<div id="safeCwd-procs-all">
+  <div id="safeCwd">
+  <dt><pre><span class="Keyword">proc</span> <a href="#safeCwd"><span class="Identifier">safeCwd</span></a><span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    The current working directory, or <tt class="docutils literal"><span class="pre">/</span></tt> when the process's cwd has been removed or renamed out from under it. Nim's <tt class="docutils literal"><span class="pre">getCurrentDir</span></tt> raises <tt class="docutils literal"><span class="pre">OSError</span></tt> in that case (Linux <tt class="docutils literal"><span class="pre">getcwd</span></tt> returns <tt class="docutils literal"><span class="pre">ENOENT</span></tt>), which would crash the REPL. The filesystem no longer has a name for the deleted dir, so callers that only need an absolute path label for context, logging, or session identity get <tt class="docutils literal"><span class="pre">/</span></tt> — every dir-walk, <tt class="docutils literal"><span class="pre">ls</span></tt>, <tt class="docutils literal"><span class="pre">git</span></tt> and <tt class="docutils literal"><span class="pre">fileExists</span></tt> against it then simply finds nothing and degrades gracefully.
+    
+  </dd>
+</div>
+
+</div>
+<div id="sanitizeUtf8-procs-all">
+  <div id="sanitizeUtf8,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#sanitizeUtf8%2Cstring"><span class="Identifier">sanitizeUtf8</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    <p>Return a copy of <tt class="docutils literal"><span class="pre"><span class="Identifier">s</span></span></tt> that is valid UTF-8: every invalid byte or malformed sequence is replaced with a single U+FFFD, and every valid codepoint (including multibyte) passes through untouched.</p>
+<p>Strings that cross a system boundary into a JSON request body must be valid UTF-8. Tool output and resumed-session text can carry bytes that aren't — e.g. a command that printed a truncated multi-byte rune left a lone continuation byte in its result, which <tt class="docutils literal"><span class="pre"><span class="Identifier">std</span><span class="Operator">/</span><span class="Identifier">json</span></span></tt> emits verbatim into the serialized body. The provider then rejects the whole body with a 400, and since the offending message recurs in every subsequent request (tool messages can't be dropped) the session is bricked until the <tt class="docutils literal"><span class="pre"><span class="Operator">.</span><span class="DecNumber">3</span><span class="Identifier">log</span></span></tt> is hand-edited. This is the boundary guard that stops that.</p>
+
+    
+  </dd>
+</div>
+
+</div>
 <div id="stripPreamble-procs-all">
   <div id="stripPreamble,string">
   <dt><pre><span class="Keyword">proc</span> <a href="#stripPreamble%2Cstring"><span class="Identifier">stripPreamble</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
@@ -521,7 +622,7 @@
   <dt><pre><span class="Keyword">proc</span> <a href="#visibleWidth%2Cstring"><span class="Identifier">visibleWidth</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Count visible columns in a string that may contain ANSI CSI escape sequences (<tt class="docutils literal"><span class="pre"><span class="Operator">\</span><span class="Identifier">e</span><span class="Punctuation">[</span><span class="Operator">...&lt;</span><span class="Identifier">letter</span><span class="Operator">&gt;</span></span></tt>). UTF-8 multi-byte codepoints count as one column (a coarse approximation — wide CJK / emoji aren't given width 2; good enough for soft-wrap).
+    Count visible columns in a string that may contain ANSI CSI escape sequences (<tt class="docutils literal"><span class="pre"><span class="Operator">\</span><span class="Identifier">e</span><span class="Punctuation">[</span><span class="Operator">...&lt;</span><span class="Identifier">letter</span><span class="Operator">&gt;</span></span></tt>). Each rune is weighted by its East Asian Width: CJK / emoji count as 2, combining marks as 0.
     
   </dd>
 </div>
@@ -549,7 +650,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-05-08 15:10:46 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-27 09:41:59 UTC</small>
       </div>
     </div>
   </div>

@@ -55,10 +55,14 @@
     </div>
     <ul class="simple simple-toc" id="toc-list">
   <li>
+  <a class="reference reference-toplevel" href="#6" id="56">Imports</a>
+</li>
+<li>
   <details open>
     <summary><a class="reference reference-toplevel" href="#7" id="57">Types</a></summary>
     <ul class="simple simple-toc-section">
       <li><a class="reference" href="#GetChProc" title="GetChProc = proc (): int {.closure.}">GetChProc</a></li>
+<li><a class="reference" href="#HasPendingInputProc" title="HasPendingInputProc = proc (): bool {.closure.}">HasPendingInputProc</a></li>
 <li><a class="reference" href="#InputCancelled" title="InputCancelled = object of CatchableError">InputCancelled</a></li>
 <li><a class="reference" href="#Key" title="Key = int">Key</a></li>
 <li><a class="reference" href="#KeyCallback" title="KeyCallback = proc (ed: var LineEditor) {.closure.}">KeyCallback</a></li>
@@ -68,6 +72,17 @@
   position*: int">Line</a></li>
 <li><a class="reference" href="#LineEditor" title="LineEditor = object
   completionCallback*: proc (ed: LineEditor): seq[string] {.closure.}
+  onMutate*: proc (ed: var LineEditor) {.closure.}
+  onSubmit*: SubmitCallback
+  onCancelDeferredSubmit*: proc (ed: var LineEditor) {.closure.}
+  preRedraw*: proc (ed: var LineEditor) {.closure.}
+  postRedraw*: proc (ed: var LineEditor) {.closure.}
+  redrawWrappedExternally*: bool
+  submitIcon*: string        ## Icon written at end of text before submit newline (set before readLineWith).
+  renderSuffix*: string      ## Transient suffix rendered after the buffer, not part of submitted text.
+  renderSuffixCursor*: bool  ## Place caret after renderSuffix instead of inside editable text.
+  pendingCaret*: bool        ## Hide native caret and show a drawn glyph (renderSuffix) as the caret.
+  prefillText*: string
   history*: LineHistory
   line*: Line
   mode*: LineEditorMode
@@ -79,9 +94,11 @@
   renderRow*: int
   write*: WriteProc
   getCh*: GetChProc
+  hasPendingInput*: HasPendingInputProc
   getWidth*: WidthProc
   echoRows*: int
   submitted*: bool
+  deferSubmit*: bool
   canceled*: bool
   eof*: bool
   hidechars*: bool
@@ -99,6 +116,7 @@
   cursor*: int
   drafts*: Table[int, string]
   cursorPos*: Table[int, int]">LineHistory</a></li>
+<li><a class="reference" href="#SubmitCallback" title="SubmitCallback = proc (ed: var LineEditor) {.closure.}">SubmitCallback</a></li>
 <li><a class="reference" href="#WidthProc" title="WidthProc = proc (): int {.closure.}">WidthProc</a></li>
 <li><a class="reference" href="#WriteProc" title="WriteProc = proc (s: string) {.closure.}">WriteProc</a></li>
 
@@ -112,7 +130,6 @@
       <li><a class="reference" href="#KEYMAP" title="KEYMAP {.threadvar.}: CritBitTree[KeyCallback]">KEYMAP</a></li>
 <li><a class="reference" href="#KEYNAMES" title="KEYNAMES {.threadvar.}: array[0 .. 31, string]">KEYNAMES</a></li>
 <li><a class="reference" href="#KEYSEQS" title="KEYSEQS {.threadvar.}: CritBitTree[KeySeq]">KEYSEQS</a></li>
-<li><a class="reference" href="#resizePending" title="resizePending {.threadvar.}: bool">resizePending</a></li>
 
     </ul>
   </details>
@@ -124,6 +141,7 @@
       <li><a class="reference" href="#CTRL" title="CTRL = {0..31}">CTRL</a></li>
 <li><a class="reference" href="#DIGIT" title="DIGIT = {48..57}">DIGIT</a></li>
 <li><a class="reference" href="#ESCAPES" title="ESCAPES = {27}">ESCAPES</a></li>
+<li><a class="reference" href="#EscapeTailPollMs" title="EscapeTailPollMs = 250">EscapeTailPollMs</a></li>
 <li><a class="reference" href="#LETTER" title="LETTER = {65..122}">LETTER</a></li>
 <li><a class="reference" href="#LOWERLETTER" title="LOWERLETTER = {97..122}">LOWERLETTER</a></li>
 <li><a class="reference" href="#PRINTABLE" title="PRINTABLE = {32..126}">PRINTABLE</a></li>
@@ -224,6 +242,10 @@
   <li><a class="reference" href="#initEditor%2Cint%2Cstring" title="initEditor(mode = mdInsert; historySize = 256; historyFile: string = &quot;&quot;): LineEditor">initEditor(mode = mdInsert; historySize = 256; historyFile: string = &quot;&quot;): LineEditor</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">initKeyTables
+  <li><a class="reference" href="#initKeyTables" title="initKeyTables()">initKeyTables()</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">insertNewline
   <li><a class="reference" href="#insertNewline%2CLineEditor" title="insertNewline(ed: var LineEditor)">insertNewline(ed: var LineEditor)</a></li>
 
@@ -253,19 +275,37 @@
 
 </ul>
 <ul class="simple nested-toc-section">readLineWith
-  <li><a class="reference" href="#readLineWith%2CLineEditor%2Cstring%2CGetChProc%2CWriteProc%2CWidthProc" title="readLineWith(ed: var LineEditor; prompt: string; getCh: GetChProc;
+  <li><a class="reference" href="#readLineWith%2CLineEditor%2Cstring%2CGetChProc%2CWriteProc%2CWidthProc%2CHasPendingInputProc" title="readLineWith(ed: var LineEditor; prompt: string; getCh: GetChProc;
              write: WriteProc; hidechars = false; noHistory = false;
-             getWidth: WidthProc = nil): string">readLineWith(ed: var LineEditor; prompt: string; getCh: GetChProc;
+             getWidth: WidthProc = nil;
+             hasPendingInput: HasPendingInputProc = nil): string">readLineWith(ed: var LineEditor; prompt: string; getCh: GetChProc;
              write: WriteProc; hidechars = false; noHistory = false;
-             getWidth: WidthProc = nil): string</a></li>
+             getWidth: WidthProc = nil;
+             hasPendingInput: HasPendingInputProc = nil): string</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">redrawBytes
+  <li><a class="reference" href="#redrawBytes%2CLineEditor" title="redrawBytes(ed: var LineEditor; synchronized = true): string">redrawBytes(ed: var LineEditor; synchronized = true): string</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">renderBuffer
   <li><a class="reference" href="#renderBuffer%2Cstring%2Cstring%2Cstring%2Cint" title="renderBuffer(text, prompt, cont: string; width: int): string">renderBuffer(text, prompt, cont: string; width: int): string</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">renderedRows
+  <li><a class="reference" href="#renderedRows%2CLineEditor" title="renderedRows(ed: LineEditor): int">renderedRows(ed: LineEditor): int</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">restoreTerminal
+  <li><a class="reference" href="#restoreTerminal" title="restoreTerminal()">restoreTerminal()</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">reverseCompleteLine
   <li><a class="reference" href="#reverseCompleteLine%2CLineEditor" title="reverseCompleteLine(ed: var LineEditor)">reverseCompleteLine(ed: var LineEditor)</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">terminalHasPendingInput
+  <li><a class="reference" href="#terminalHasPendingInput" title="terminalHasPendingInput(): bool">terminalHasPendingInput(): bool</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">totalRows
@@ -312,11 +352,25 @@
 <p>After every keystroke the entire buffer is repainted in place. The render walks the cursor back to the row where the prompt was first drawn (we track the cursor's row offset from that anchor in <tt class="docutils literal"><span class="pre">renderRow</span></tt>), erases to end of screen, prints the prompt, the text (wrapping at terminal width with the continuation prompt prefixed to each logical line), and finally walks the cursor to the visual position computed from the current <tt class="docutils literal"><span class="pre">position</span></tt>.</p>
 <p>All terminal IO goes through the <tt class="docutils literal"><span class="pre">write</span></tt>/<tt class="docutils literal"><span class="pre">getCh</span></tt> procs passed to <tt class="docutils literal"><span class="pre">readLineWith</span></tt> — the public <tt class="docutils literal"><span class="pre">readLine</span></tt> wires them to <tt class="docutils literal"><span class="pre">stdout</span></tt> / <tt class="docutils literal"><span class="pre">getchr</span></tt>. Tests drive the editor through the <tt class="docutils literal"><span class="pre">…With</span></tt> form against an in-memory grid, no PTY required.</p>
 </p>
-    <div class="section" id="7">
+    <div class="section" id="6">
+  <h1><a class="toc-backref" href="#6">Imports</a></h1>
+  <dl class="item">
+    <a class="reference external" href="signals.html">signals</a>, <a class="reference external" href="unicodewidth.html">unicodewidth</a>
+  </dl>
+</div>
+<div class="section" id="7">
   <h1><a class="toc-backref" href="#7">Types</a></h1>
   <dl class="item">
     <div id="GetChProc">
   <dt><pre><a href="#GetChProc"><span class="Identifier">GetChProc</span></a> <span class="Other">=</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.<span class="Identifier">closure</span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="HasPendingInputProc">
+  <dt><pre><a href="#HasPendingInputProc"><span class="Identifier">HasPendingInputProc</span></a> <span class="Other">=</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span class="Identifier">closure</span>.}</pre></dt>
   <dd>
     
     
@@ -368,6 +422,17 @@
 <div id="LineEditor">
   <dt><pre><a href="#LineEditor"><span class="Identifier">LineEditor</span></a> <span class="Other">=</span> <span class="Keyword">object</span>
   <span class="Identifier">completionCallback</span><span class="Operator">*</span><span class="Other">:</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">ed</span><span class="Other">:</span> <a href="#LineEditor"><span class="Identifier">LineEditor</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span> {.<span class="Identifier">closure</span>.}
+  <span class="Identifier">onMutate</span><span class="Operator">*</span><span class="Other">:</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">ed</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#LineEditor"><span class="Identifier">LineEditor</span></a><span class="Other">)</span> {.<span class="Identifier">closure</span>.}
+  <span class="Identifier">onSubmit</span><span class="Operator">*</span><span class="Other">:</span> <a href="#SubmitCallback"><span class="Identifier">SubmitCallback</span></a>
+  <span class="Identifier">onCancelDeferredSubmit</span><span class="Operator">*</span><span class="Other">:</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">ed</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#LineEditor"><span class="Identifier">LineEditor</span></a><span class="Other">)</span> {.<span class="Identifier">closure</span>.}
+  <span class="Identifier">preRedraw</span><span class="Operator">*</span><span class="Other">:</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">ed</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#LineEditor"><span class="Identifier">LineEditor</span></a><span class="Other">)</span> {.<span class="Identifier">closure</span>.}
+  <span class="Identifier">postRedraw</span><span class="Operator">*</span><span class="Other">:</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">ed</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#LineEditor"><span class="Identifier">LineEditor</span></a><span class="Other">)</span> {.<span class="Identifier">closure</span>.}
+  <span class="Identifier">redrawWrappedExternally</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>
+  <span class="Identifier">submitIcon</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>        <span class="Comment">## Icon written at end of text before submit newline (set before readLineWith).</span>
+  <span class="Identifier">renderSuffix</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>      <span class="Comment">## Transient suffix rendered after the buffer, not part of submitted text.</span>
+  <span class="Identifier">renderSuffixCursor</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>  <span class="Comment">## Place caret after renderSuffix instead of inside editable text.</span>
+  <span class="Identifier">pendingCaret</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>        <span class="Comment">## Hide native caret and show a drawn glyph (renderSuffix) as the caret.</span>
+  <span class="Identifier">prefillText</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>
   <span class="Identifier">history</span><span class="Operator">*</span><span class="Other">:</span> <a href="#LineHistory"><span class="Identifier">LineHistory</span></a>
   <span class="Identifier">line</span><span class="Operator">*</span><span class="Other">:</span> <a href="#Line"><span class="Identifier">Line</span></a>
   <span class="Identifier">mode</span><span class="Operator">*</span><span class="Other">:</span> <a href="#LineEditorMode"><span class="Identifier">LineEditorMode</span></a>
@@ -379,9 +444,11 @@
   <span class="Identifier">renderRow</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>
   <span class="Identifier">write</span><span class="Operator">*</span><span class="Other">:</span> <a href="#WriteProc"><span class="Identifier">WriteProc</span></a>
   <span class="Identifier">getCh</span><span class="Operator">*</span><span class="Other">:</span> <a href="#GetChProc"><span class="Identifier">GetChProc</span></a>
+  <span class="Identifier">hasPendingInput</span><span class="Operator">*</span><span class="Other">:</span> <a href="#HasPendingInputProc"><span class="Identifier">HasPendingInputProc</span></a>
   <span class="Identifier">getWidth</span><span class="Operator">*</span><span class="Other">:</span> <a href="#WidthProc"><span class="Identifier">WidthProc</span></a>
   <span class="Identifier">echoRows</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">int</span>
   <span class="Identifier">submitted</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>
+  <span class="Identifier">deferSubmit</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>
   <span class="Identifier">canceled</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>
   <span class="Identifier">eof</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>
   <span class="Identifier">hidechars</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>
@@ -436,6 +503,14 @@
     
   </dd>
 </div>
+<div id="SubmitCallback">
+  <dt><pre><a href="#SubmitCallback"><span class="Identifier">SubmitCallback</span></a> <span class="Other">=</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">ed</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#LineEditor"><span class="Identifier">LineEditor</span></a><span class="Other">)</span> {.<span class="Identifier">closure</span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
 <div id="WidthProc">
   <dt><pre><a href="#WidthProc"><span class="Identifier">WidthProc</span></a> <span class="Other">=</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.<span class="Identifier">closure</span>.}</pre></dt>
   <dd>
@@ -482,14 +557,6 @@
     
   </dd>
 </div>
-<div id="resizePending">
-  <dt><pre><a href="#resizePending"><span class="Identifier">resizePending</span></a> {.<span class="Identifier">threadvar</span>.}<span class="Other">:</span> <span class="Identifier">bool</span></pre></dt>
-  <dd>
-    
-    
-    
-  </dd>
-</div>
 
   </dl>
 </div>
@@ -517,6 +584,14 @@
   <dd>
     
     
+    
+  </dd>
+</div>
+<div id="EscapeTailPollMs">
+  <dt><pre><a href="#EscapeTailPollMs"><span class="Identifier">EscapeTailPollMs</span></a> <span class="Other">=</span> <span class="DecNumber">250</span></pre></dt>
+  <dd>
+    
+    Wait long enough for terminal multi-byte escape tails that can be split from the leading ESC by the terminal/PTY stack. Too short a window misclassifies modified keys as bare Escape and leaves their tail bytes to be printed as normal input.
     
   </dd>
 </div>
@@ -686,7 +761,9 @@
                       <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Retrieves an ASCII character from stdin.
+    <p>Retrieves an ASCII character from stdin.</p>
+<p>Open-coded raw-mode read (rather than <tt class="docutils literal"><span class="pre"><span class="Identifier">terminal</span><span class="Operator">.</span><span class="Identifier">getch</span></span></tt>) for two reasons: (1) we deliberately leave <tt class="docutils literal"><span class="pre"><span class="Identifier">c_oflag</span></span></tt> alone so OPOST/ONLCR stay on — the spinner and bar-tick threads emit bare <tt class="docutils literal"><span class="pre">\n</span></tt> expecting CRLF translation, and a SIGWINCH that interrupted <tt class="docutils literal"><span class="pre"><span class="Identifier">terminal</span><span class="Operator">.</span><span class="Identifier">getch</span></span></tt>'s <tt class="docutils literal"><span class="pre"><span class="Identifier">readChar</span></span></tt> would bypass its <tt class="docutils literal"><span class="pre"><span class="Identifier">tcSetAttr</span></span></tt> restore and leave OPOST permanently disabled, which manifests as the dim prompt drifting right by the bar payload's width on every repaint after a resize. (2) <tt class="docutils literal"><span class="pre"><span class="Keyword">try</span><span class="Operator">/</span><span class="Keyword">finally</span></span></tt> around the read guarantees the original termios is restored on signal interruption.</p>
+
     
   </dd>
 </div>
@@ -743,7 +820,8 @@
 <div id="handleEscape-procs-all">
   <div id="handleEscape,LineEditor,int">
   <dt><pre><span class="Keyword">proc</span> <a href="#handleEscape%2CLineEditor%2Cint"><span class="Identifier">handleEscape</span></a><span class="Other">(</span><span class="Identifier">ed</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#LineEditor"><span class="Identifier">LineEditor</span></a><span class="Other">;</span> <span class="Identifier">c1</span><span class="Other">:</span> <span class="Identifier">int</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">InputCancelled</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     Process a single escape sequence starting just after the leading prefix byte <tt class="docutils literal"><span class="pre">c1</span></tt> (POSIX: ESC = 27; Windows console: 0 or 224 for extended keys). Returns <tt class="docutils literal"><span class="pre">true</span></tt> if the sequence requested a submit (Shift+Enter / Alt+Enter — these now insert a real newline rather than backslash-continuation).
@@ -754,8 +832,8 @@
 </div>
 <div id="historyAdd-procs-all">
   <div id="historyAdd,LineEditor">
-  <dt><pre><span class="Keyword">proc</span> <a href="#historyAdd%2CLineEditor"><span class="Identifier">historyAdd</span></a><span class="Other">(</span><span class="Identifier">ed</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#LineEditor"><span class="Identifier">LineEditor</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span>
-                                      <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#historyAdd%2CLineEditor"><span class="Identifier">historyAdd</span></a><span class="Other">(</span><span class="Identifier">ed</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#LineEditor"><span class="Identifier">LineEditor</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span>
+    <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     Append the just-submitted line to the persistent log. Empty submissions and consecutive duplicates are dropped — they're noise when scrolling back. Writes the file atomically each time.
@@ -825,6 +903,17 @@
 </div>
 
 </div>
+<div id="initKeyTables-procs-all">
+  <div id="initKeyTables">
+  <dt><pre><span class="Keyword">proc</span> <a href="#initKeyTables"><span class="Identifier">initKeyTables</span></a><span class="Other">(</span><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    <tt class="docutils literal"><span class="pre">KEYNAMES</span></tt>, <tt class="docutils literal"><span class="pre">KEYSEQS</span></tt> and <tt class="docutils literal"><span class="pre">KEYMAP</span></tt> are thread-local because display code may temporarily override callbacks. New input threads therefore must populate their own copies before reading keys.
+    
+  </dd>
+</div>
+
+</div>
 <div id="insertNewline-procs-all">
   <div id="insertNewline,LineEditor">
   <dt><pre><span class="Keyword">proc</span> <a href="#insertNewline%2CLineEditor"><span class="Identifier">insertNewline</span></a><span class="Other">(</span><span class="Identifier">ed</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#LineEditor"><span class="Identifier">LineEditor</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
@@ -863,8 +952,9 @@
 <div id="password-procs-all">
   <div id="password,LineEditor,string">
   <dt><pre><span class="Keyword">proc</span> <a href="#password%2CLineEditor%2Cstring"><span class="Identifier">password</span></a><span class="Other">(</span><span class="Identifier">ed</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#LineEditor"><span class="Identifier">LineEditor</span></a><span class="Other">;</span> <span class="Identifier">prompt</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">EOFError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">EOFError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">InputCancelled</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -901,8 +991,9 @@
   <div id="readLine,LineEditor,string">
   <dt><pre><span class="Keyword">proc</span> <a href="#readLine%2CLineEditor%2Cstring"><span class="Identifier">readLine</span></a><span class="Other">(</span><span class="Identifier">ed</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#LineEditor"><span class="Identifier">LineEditor</span></a><span class="Other">;</span> <span class="Identifier">prompt</span> <span class="Other">=</span> <span class="StringLit">&quot;&quot;</span><span class="Other">;</span> <span class="Identifier">hidechars</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">;</span>
               <span class="Identifier">noHistory</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">EOFError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">EOFError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">InputCancelled</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -912,15 +1003,29 @@
 
 </div>
 <div id="readLineWith-procs-all">
-  <div id="readLineWith,LineEditor,string,GetChProc,WriteProc,WidthProc">
-  <dt><pre><span class="Keyword">proc</span> <a href="#readLineWith%2CLineEditor%2Cstring%2CGetChProc%2CWriteProc%2CWidthProc"><span class="Identifier">readLineWith</span></a><span class="Other">(</span><span class="Identifier">ed</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#LineEditor"><span class="Identifier">LineEditor</span></a><span class="Other">;</span> <span class="Identifier">prompt</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">getCh</span><span class="Other">:</span> <a href="#GetChProc"><span class="Identifier">GetChProc</span></a><span class="Other">;</span>
+  <div id="readLineWith,LineEditor,string,GetChProc,WriteProc,WidthProc,HasPendingInputProc">
+  <dt><pre><span class="Keyword">proc</span> <a href="#readLineWith%2CLineEditor%2Cstring%2CGetChProc%2CWriteProc%2CWidthProc%2CHasPendingInputProc"><span class="Identifier">readLineWith</span></a><span class="Other">(</span><span class="Identifier">ed</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#LineEditor"><span class="Identifier">LineEditor</span></a><span class="Other">;</span> <span class="Identifier">prompt</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">getCh</span><span class="Other">:</span> <a href="#GetChProc"><span class="Identifier">GetChProc</span></a><span class="Other">;</span>
                   <span class="Identifier">write</span><span class="Other">:</span> <a href="#WriteProc"><span class="Identifier">WriteProc</span></a><span class="Other">;</span> <span class="Identifier">hidechars</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">;</span> <span class="Identifier">noHistory</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">;</span>
-                  <span class="Identifier">getWidth</span><span class="Other">:</span> <a href="#WidthProc"><span class="Identifier">WidthProc</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">EOFError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+                  <span class="Identifier">getWidth</span><span class="Other">:</span> <a href="#WidthProc"><span class="Identifier">WidthProc</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">;</span>
+                  <span class="Identifier">hasPendingInput</span><span class="Other">:</span> <a href="#HasPendingInputProc"><span class="Identifier">HasPendingInputProc</span></a> <span class="Other">=</span> <span class="Keyword">nil</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span>
+    <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">EOFError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">InputCancelled</span><span class="Other">,</span>
+    <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     Pluggable form of <tt class="docutils literal"><span class="pre">readLine</span></tt>. Provides the same behavior as <tt class="docutils literal"><span class="pre">readLine</span></tt> but with explicit IO procs so tests can drive the editor against a fake terminal.
+    
+  </dd>
+</div>
+
+</div>
+<div id="redrawBytes-procs-all">
+  <div id="redrawBytes,LineEditor">
+  <dt><pre><span class="Keyword">proc</span> <a href="#redrawBytes%2CLineEditor"><span class="Identifier">redrawBytes</span></a><span class="Other">(</span><span class="Identifier">ed</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#LineEditor"><span class="Identifier">LineEditor</span></a><span class="Other">;</span> <span class="Identifier">synchronized</span> <span class="Other">=</span> <span class="Identifier">true</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Build a full editor repaint and update <tt class="docutils literal"><span class="pre">ed.renderRow</span></tt> to the cursor's new visual row. Callers that share a render lock with other terminal chrome can embed these bytes in a larger atomic frame; <tt class="docutils literal"><span class="pre">fullRedraw</span></tt> is the ordinary standalone writer.
     
   </dd>
 </div>
@@ -938,6 +1043,28 @@
 </div>
 
 </div>
+<div id="renderedRows-procs-all">
+  <div id="renderedRows,LineEditor">
+  <dt><pre><span class="Keyword">proc</span> <a href="#renderedRows%2CLineEditor"><span class="Identifier">renderedRows</span></a><span class="Other">(</span><span class="Identifier">ed</span><span class="Other">:</span> <a href="#LineEditor"><span class="Identifier">LineEditor</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Visual rows currently owned by the editor, including any transient suffix such as the buffered-submit hourglass.
+    
+  </dd>
+</div>
+
+</div>
+<div id="restoreTerminal-procs-all">
+  <div id="restoreTerminal">
+  <dt><pre><span class="Keyword">proc</span> <a href="#restoreTerminal"><span class="Identifier">restoreTerminal</span></a><span class="Other">(</span><span class="Other">)</span> {.<span class="Identifier">noconv</span><span class="Other">,</span> <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Single point of terminal restore. Registered once as an exit proc and called from signal handlers. Covers cursor visibility, color/style reset, and bracketed-paste teardown.
+    
+  </dd>
+</div>
+
+</div>
 <div id="reverseCompleteLine-procs-all">
   <div id="reverseCompleteLine,LineEditor">
   <dt><pre><span class="Keyword">proc</span> <a href="#reverseCompleteLine%2CLineEditor"><span class="Identifier">reverseCompleteLine</span></a><span class="Other">(</span><span class="Identifier">ed</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="#LineEditor"><span class="Identifier">LineEditor</span></a><span class="Other">)</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">]</span><span class="Other">,</span>
@@ -945,6 +1072,17 @@
   <dd>
     
     
+    
+  </dd>
+</div>
+
+</div>
+<div id="terminalHasPendingInput-procs-all">
+  <div id="terminalHasPendingInput">
+  <dt><pre><span class="Keyword">proc</span> <a href="#terminalHasPendingInput"><span class="Identifier">terminalHasPendingInput</span></a><span class="Other">(</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    Return whether stdin has input waiting after a short poll. Used to distinguish bare Escape from ESC-prefixed key sequences.
     
   </dd>
 </div>
@@ -967,7 +1105,7 @@
   <dt><pre><span class="Keyword">proc</span> <a href="#visualCols%2Cstring"><span class="Identifier">visualCols</span></a><span class="Other">(</span><span class="Identifier">s</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">int</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Number of cells <tt class="docutils literal"><span class="pre"><span class="Identifier">s</span></span></tt> would occupy when printed. Counts each rune as one cell. Skips ANSI CSI sequences <tt class="docutils literal"><span class="pre"><span class="Identifier">ESC</span> <span class="Punctuation">[</span> <span class="Operator">...</span> <span class="Operator">&lt;</span><span class="Identifier">final</span><span class="Operator">&gt;</span></span></tt> so escape codes embedded in a colored prompt don't inflate the count. Wide CJK and combining marks are not handled — fine for our prompts.
+    Number of cells <tt class="docutils literal"><span class="pre"><span class="Identifier">s</span></span></tt> would occupy when printed. Skips ANSI CSI sequences <tt class="docutils literal"><span class="pre"><span class="Identifier">ESC</span> <span class="Punctuation">[</span> <span class="Operator">...</span> <span class="Operator">&lt;</span><span class="Identifier">final</span><span class="Operator">&gt;</span></span></tt> so escape codes embedded in a colored prompt don't inflate the count. Wide CJK / emoji count as two cells; combining marks as zero.
     
   </dd>
 </div>
@@ -1031,7 +1169,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-05-08 15:10:47 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-27 09:42:02 UTC</small>
       </div>
     </div>
   </div>

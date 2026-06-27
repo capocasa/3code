@@ -1,0 +1,4 @@
+nimTitle	streamexec	threecode/streamexec.html	module threecode/streamexec		0
+nim	cancelActiveTool	threecode/streamexec.html#cancelActiveTool	proc cancelActiveTool()		172
+nim	setToolStdinWatcherEnabled	threecode/streamexec.html#setToolStdinWatcherEnabled,bool	proc setToolStdinWatcherEnabled(enabled: bool)		176
+nim	runStreamingBash	threecode/streamexec.html#runStreamingBash,Action,ReadCache,proc(string)	proc runStreamingBash(act: Action; cache: ReadCache;\n                 onLine: proc (line: string) = nil): tuple[rawOut: string,\n    code: int, cap: int]		292

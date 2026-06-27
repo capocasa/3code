@@ -1,0 +1,75 @@
+nimTitle	runtime	threecode/fatprompt/runtime.html	module threecode/fatprompt/runtime		0
+nim	contentStreamedLive	threecode/fatprompt/runtime.html#contentStreamedLive	var contentStreamedLive		19
+nim	followupStartsAfterReceipt	threecode/fatprompt/runtime.html#followupStartsAfterReceipt	var followupStartsAfterReceipt		25
+nim	receiptTouchesNextResponse	threecode/fatprompt/runtime.html#receiptTouchesNextResponse	var receiptTouchesNextResponse		26
+nim	fatPromptState	threecode/fatprompt/runtime.html#fatPromptState	var fatPromptState		28
+nim	pendingHint	threecode/fatprompt/runtime.html#pendingHint.t	template pendingHint(): untyped		33
+nim	currentBarLabel	threecode/fatprompt/runtime.html#currentBarLabel.t	template currentBarLabel(): untyped		43
+nim	currentBarHasGap	threecode/fatprompt/runtime.html#currentBarHasGap.t	template currentBarHasGap(): untyped		49
+nim	inputState	threecode/fatprompt/runtime.html#inputState	var inputState		91
+nim	inputStateLock	threecode/fatprompt/runtime.html#inputStateLock	var inputStateLock		92
+nim	inputThreadRunning	threecode/fatprompt/runtime.html#inputThreadRunning	var inputThreadRunning		98
+nim	restoreInputTermios	threecode/fatprompt/runtime.html#restoreInputTermios	proc restoreInputTermios()		109
+nim	inputEditor	threecode/fatprompt/runtime.html#inputEditor	var inputEditor		118
+nim	inputProfile	threecode/fatprompt/runtime.html#inputProfile	var inputProfile		119
+nim	inputSession	threecode/fatprompt/runtime.html#inputSession	var inputSession		120
+nim	inputMessages	threecode/fatprompt/runtime.html#inputMessages	var inputMessages		121
+nim	activeCommandHook	threecode/fatprompt/runtime.html#activeCommandHook	var activeCommandHook		122
+nim	emitFatPromptEvent	threecode/fatprompt/runtime.html#emitFatPromptEvent,FatPromptEvent	proc emitFatPromptEvent(ev: FatPromptEvent)		181
+nim	LiveMarkdownStream	threecode/fatprompt/runtime.html#LiveMarkdownStream	object LiveMarkdownStream		187
+nim	liveEditorFooterAnchored	threecode/fatprompt/runtime.html#liveEditorFooterAnchored	proc liveEditorFooterAnchored(): bool		268
+nim	hasQueuedAutosend	threecode/fatprompt/runtime.html#hasQueuedAutosend	proc hasQueuedAutosend(): bool		276
+nim	consumeQueuedInput	threecode/fatprompt/runtime.html#consumeQueuedInput,string,int,bool	proc consumeQueuedInput(line: var string; echoRows: var int; cmdWasQuit: var bool): bool		286
+nim	consumeQueuedCommand	threecode/fatprompt/runtime.html#consumeQueuedCommand,string,int	proc consumeQueuedCommand(line: var string; echoRows: var int): bool		327
+nim	setActiveCommandHook	threecode/fatprompt/runtime.html#setActiveCommandHook,proc(string)	proc setActiveCommandHook(hook: proc (cmd: string) {.gcsafe.})		342
+nim	releaseIdleSubmittedInput	threecode/fatprompt/runtime.html#releaseIdleSubmittedInput	proc releaseIdleSubmittedInput()		345
+nim	beginForegroundEditorRedraw	threecode/fatprompt/runtime.html#beginForegroundEditorRedraw	proc beginForegroundEditorRedraw(ed: var minline.LineEditor)		391
+nim	finishForegroundEditorRedraw	threecode/fatprompt/runtime.html#finishForegroundEditorRedraw	proc finishForegroundEditorRedraw()		402
+nim	captureStdoutWrites	threecode/fatprompt/runtime.html#captureStdoutWrites.t,untyped	template captureStdoutWrites(body: untyped): string		411
+nim	paintBarPrompt	threecode/fatprompt/runtime.html#paintBarPrompt,string	proc paintBarPrompt(label: string)		456
+nim	setBarPromptState	threecode/fatprompt/runtime.html#setBarPromptState,string	proc setBarPromptState(label: string)		471
+nim	paintBarBelow	threecode/fatprompt/runtime.html#paintBarBelow,string	proc paintBarBelow(label: string)		477
+nim	repaintBarPrompt	threecode/fatprompt/runtime.html#repaintBarPrompt	proc repaintBarPrompt()		506
+nim	clearBarPrompt	threecode/fatprompt/runtime.html#clearBarPrompt	proc clearBarPrompt()		519
+nim	paintPromptOnly	threecode/fatprompt/runtime.html#paintPromptOnly	proc paintPromptOnly()		530
+nim	enterPromptInput	threecode/fatprompt/runtime.html#enterPromptInput	proc enterPromptInput()		532
+nim	resetPromptInputAfterEmpty	threecode/fatprompt/runtime.html#resetPromptInputAfterEmpty,int	proc resetPromptInputAfterEmpty(echoRows: int)		554
+nim	commitTranscriptBytes	threecode/fatprompt/runtime.html#commitTranscriptBytes,string,proc)	proc commitTranscriptBytes(transcriptBytes: string; restoreEditor = true;\n                      beforeRepaint: proc () = nil; reserveFooter = true;\n                      transcriptOwnsSpacing = false)		586
+nim	writeTranscriptWithFatPromptRestore	threecode/fatprompt/runtime.html#writeTranscriptWithFatPromptRestore.t,bool,untyped	template writeTranscriptWithFatPromptRestore(restoreEditor: bool; body: untyped)		641
+nim	writeTranscriptWithFatPrompt	threecode/fatprompt/runtime.html#writeTranscriptWithFatPrompt.t,untyped	template writeTranscriptWithFatPrompt(body: untyped)		649
+nim	liveLabel	threecode/fatprompt/runtime.html#liveLabel,string,int	proc liveLabel(base: string; slurped: int): string		704
+nim	paintInitialBar	threecode/fatprompt/runtime.html#paintInitialBar,Profile	proc paintInitialBar(p: Profile)		722
+nim	paintInitialPrompt	threecode/fatprompt/runtime.html#paintInitialPrompt,Profile	proc paintInitialPrompt(p: Profile)		748
+nim	nextCommandSymbol	threecode/fatprompt/runtime.html#nextCommandSymbol	proc nextCommandSymbol(): string		764
+nim	startBarTick	threecode/fatprompt/runtime.html#startBarTick,string	proc startBarTick(base: string)		801
+nim	stopBarTick	threecode/fatprompt/runtime.html#stopBarTick	proc stopBarTick(): int		813
+nim	ensureDraftFlusherStarted	threecode/fatprompt/runtime.html#ensureDraftFlusherStarted	proc ensureDraftFlusherStarted()		863
+nim	stopDraftFlusher	threecode/fatprompt/runtime.html#stopDraftFlusher	proc stopDraftFlusher()		871
+nim	flushDraftNow	threecode/fatprompt/runtime.html#flushDraftNow	proc flushDraftNow()		877
+nim	setCommandStatusActive	threecode/fatprompt/runtime.html#setCommandStatusActive,bool	proc setCommandStatusActive(active: bool)		887
+nim	startSpinner	threecode/fatprompt/runtime.html#startSpinner,string	proc startSpinner(label: string)		891
+nim	stopSpinner	threecode/fatprompt/runtime.html#stopSpinner	proc stopSpinner(clearLiveFooter = true)		917
+nim	markProviderActivity	threecode/fatprompt/runtime.html#markProviderActivity	proc markProviderActivity()		934
+nim	initLiveMarkdownStream	threecode/fatprompt/runtime.html#initLiveMarkdownStream,string	proc initLiveMarkdownStream(baseLabel: string): LiveMarkdownStream		972
+nim	feedContent	threecode/fatprompt/runtime.html#feedContent,LiveMarkdownStream,string,int	proc feedContent(s: var LiveMarkdownStream; chunk: string; slurpedNow: int)		1085
+nim	finishContent	threecode/fatprompt/runtime.html#finishContent,LiveMarkdownStream,int	proc finishContent(s: var LiveMarkdownStream; slurpedNow: int)		1107
+nim	restoreCancelTermios	threecode/fatprompt/runtime.html#restoreCancelTermios	proc restoreCancelTermios()		1131
+nim	apiBeforeCall	threecode/fatprompt/runtime.html#apiBeforeCall,int,int	proc apiBeforeCall(lastPromptTokens, window: int): string		1198
+nim	apiAfterCall	threecode/fatprompt/runtime.html#apiAfterCall	proc apiAfterCall()		1217
+nim	apiSetStatusLabel	threecode/fatprompt/runtime.html#apiSetStatusLabel,string	proc apiSetStatusLabel(label: string)		1223
+nim	apiProgress	threecode/fatprompt/runtime.html#apiProgress,string,int	proc apiProgress(baseLabel: string; slurped: int)		1226
+nim	apiProviderActivity	threecode/fatprompt/runtime.html#apiProviderActivity	proc apiProviderActivity()		1229
+nim	apiReasoningDelta	threecode/fatprompt/runtime.html#apiReasoningDelta,string,string,int,bool	proc apiReasoningDelta(reasoning, baseLabel: string; slurped: int;\n                  contentStarted: bool)		1232
+nim	apiContentDelta	threecode/fatprompt/runtime.html#apiContentDelta,string,string,int	proc apiContentDelta(chunk, baseLabel: string; slurped: int): bool		1245
+nim	apiContentFinished	threecode/fatprompt/runtime.html#apiContentFinished,string,string,int	proc apiContentFinished(fullContent, baseLabel: string; slurped: int): bool		1250
+nim	apiTrimTrailingContent	threecode/fatprompt/runtime.html#apiTrimTrailingContent,string,string,int	proc apiTrimTrailingContent(fullContent, baseLabel: string; slurped: int)		1256
+nim	apiAfterLiveContent	threecode/fatprompt/runtime.html#apiAfterLiveContent,string,int	proc apiAfterLiveContent(baseLabel: string; slurped: int)		1272
+nim	apiFinalUsage	threecode/fatprompt/runtime.html#apiFinalUsage,Usage,int,int,string,bool	proc apiFinalUsage(usage: Usage; window, elapsed: int; assistantContent: string;\n              streamedLive: bool)		1278
+nim	apiNoUsage	threecode/fatprompt/runtime.html#apiNoUsage,int	proc apiNoUsage(elapsed: int)		1307
+nim	installApiStreamHooks	threecode/fatprompt/runtime.html#installApiStreamHooks	proc installApiStreamHooks()		1311
+nim	ensureInputThreadStarted	threecode/fatprompt/runtime.html#ensureInputThreadStarted	proc ensureInputThreadStarted()		1608
+nim	beginTurn	threecode/fatprompt/runtime.html#beginTurn	proc beginTurn()		1624
+nim	stopTurnInputForFinalRender	threecode/fatprompt/runtime.html#stopTurnInputForFinalRender	proc stopTurnInputForFinalRender()		1638
+nim	endTurn	threecode/fatprompt/runtime.html#endTurn	proc endTurn(repaintPrompt = true)		1650
+nim	endTurnAfterTranscriptAppend	threecode/fatprompt/runtime.html#endTurnAfterTranscriptAppend	proc endTurnAfterTranscriptAppend()		1694
+nim	emitUserSubmit	threecode/fatprompt/runtime.html#emitUserSubmit,string	proc emitUserSubmit(line: string)		1710

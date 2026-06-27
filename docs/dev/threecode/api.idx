@@ -1,49 +1,33 @@
 nimTitle	api	threecode/api.html	module threecode/api		0
-nim	interrupted	threecode/api.html#interrupted	var interrupted		28
-nim	contentStreamedLive	threecode/api.html#contentStreamedLive	var contentStreamedLive		33
-nim	pendingHint	threecode/api.html#pendingHint	var pendingHint		39
-nim	currentBarLabel	threecode/api.html#currentBarLabel	var currentBarLabel		49
-nim	currentBarHasGap	threecode/api.html#currentBarHasGap	var currentBarHasGap		55
-nim	showThinking	threecode/api.html#showThinking	var showThinking		66
-nim	DimPromptColor	threecode/api.html#DimPromptColor	const DimPromptColor		147
-nim	BrightPromptColor	threecode/api.html#BrightPromptColor	const BrightPromptColor		150
-nim	SyncBegin	threecode/api.html#SyncBegin	const SyncBegin		152
-nim	SyncEnd	threecode/api.html#SyncEnd	const SyncEnd		158
-nim	syncWrite	threecode/api.html#syncWrite,string	proc syncWrite(s: string)		161
-nim	spinnerBarBytes	threecode/api.html#spinnerBarBytes,string,string,int	proc spinnerBarBytes(frame, label: string; elapsed: int): string		167
-nim	liveBarBytes	threecode/api.html#liveBarBytes,string	proc liveBarBytes(label: string): string		175
-nim	spinnerFooterBytes	threecode/api.html#spinnerFooterBytes,string,string,string,int	proc spinnerFooterBytes(frame, label, ticker: string; elapsed: int): string		181
-nim	SpinnerCleanupBytes	threecode/api.html#SpinnerCleanupBytes	const SpinnerCleanupBytes		197
-nim	paintBarBytes	threecode/api.html#paintBarBytes,string	proc paintBarBytes(label: string): string		200
-nim	barFooterBytes	threecode/api.html#barFooterBytes,string,string	proc barFooterBytes(label, promptColor: string): string		205
-nim	ClearBarPromptBytes	threecode/api.html#ClearBarPromptBytes	const ClearBarPromptBytes		213
-nim	barFooterBelowBytes	threecode/api.html#barFooterBelowBytes,string,string	proc barFooterBelowBytes(label, promptColor: string): string		218
-nim	ClearBarBelowBytes	threecode/api.html#ClearBarBelowBytes	const ClearBarBelowBytes		236
-nim	receiptBarBytes	threecode/api.html#receiptBarBytes,string	proc receiptBarBytes(label: string): string		243
-nim	submitTransitionBytes	threecode/api.html#submitTransitionBytes,string,bool,bool,string,int	proc submitTransitionBytes(line: string; hadPending, hadGap: bool;\n                      receiptLabel: string; hasBar = true; echoRows = -1): string		252
-nim	paintBarPrompt	threecode/api.html#paintBarPrompt,string,string	proc paintBarPrompt(label, promptColor: string)		317
-nim	paintBarBelow	threecode/api.html#paintBarBelow,string,string	proc paintBarBelow(label, promptColor: string)		327
-nim	repaintBarPrompt	threecode/api.html#repaintBarPrompt	proc repaintBarPrompt(promptColor = DimPromptColor)		336
-nim	clearBarPrompt	threecode/api.html#clearBarPrompt	proc clearBarPrompt()		343
-nim	withCleared	threecode/api.html#withCleared.t,untyped	template withCleared(body: untyped)		349
-nim	liveLabel	threecode/api.html#liveLabel,string,int	proc liveLabel(base: string; slurped: int): string		386
-nim	paintInitialBar	threecode/api.html#paintInitialBar,Profile	proc paintInitialBar(p: Profile)		401
-nim	paintPromptOnly	threecode/api.html#paintPromptOnly,string	proc paintPromptOnly(promptColor: string)		414
-nim	paintInitialPrompt	threecode/api.html#paintInitialPrompt,Profile	proc paintInitialPrompt(p: Profile)		429
-nim	startSpinner	threecode/api.html#startSpinner,string	proc startSpinner(label: string)		441
-nim	stopSpinner	threecode/api.html#stopSpinner	proc stopSpinner()		448
-nim	parseUsage	threecode/api.html#parseUsage,JsonNode	proc parseUsage(u: JsonNode): Usage		454
-nim	classifyRetry	threecode/api.html#classifyRetry,ref.CatchableError,int	proc classifyRetry(exc: ref CatchableError; code: int): string		469
-nim	parseXmlToolCalls	threecode/api.html#parseXmlToolCalls,string	proc parseXmlToolCalls(content: string): tuple[cleaned: string, calls: seq[JsonNode]]		613
-nim	stripInternalFields	threecode/api.html#stripInternalFields,JsonNode	proc stripInternalFields(messages: JsonNode): JsonNode		1100
-nim	applyStreamingOptions	threecode/api.html#applyStreamingOptions,Profile,JsonNode	proc applyStreamingOptions(p: Profile; body: JsonNode)		1163
-nim	applyGenerationDefaults	threecode/api.html#applyGenerationDefaults,Profile,JsonNode	proc applyGenerationDefaults(p: Profile; body: JsonNode)		1174
-nim	applyReasoning	threecode/api.html#applyReasoning,Profile,JsonNode	proc applyReasoning(p: Profile; body: JsonNode)		1225
-nim	beginTurn	threecode/api.html#beginTurn	proc beginTurn()		1236
-nim	endTurn	threecode/api.html#endTurn	proc endTurn()		1243
-nim	emitUserSubmit	threecode/api.html#emitUserSubmit,string,int	proc emitUserSubmit(line: string; echoRows = -1)		1260
-nim	callModel	threecode/api.html#callModel,Profile,JsonNode,Usage,int	proc callModel(p: Profile; messages: JsonNode; usage: var Usage;\n          lastPromptTokens: int): JsonNode		1287
-nim	verifyBody	threecode/api.html#verifyBody,Profile	proc verifyBody(p: Profile): string		1462
-nim	verifyProfile	threecode/api.html#verifyProfile,Profile	proc verifyProfile(p: Profile): (bool, string)		1473
-nim	fetchModels	threecode/api.html#fetchModels,string,string	proc fetchModels(url, key: string): (seq[string], string)		1500
-nim	installInterruptHook	threecode/api.html#installInterruptHook	proc installInterruptHook()		1526
+nim	VerifyProfileHook	threecode/api.html#VerifyProfileHook	type VerifyProfileHook		21
+nim	FetchModelsHook	threecode/api.html#FetchModelsHook	type FetchModelsHook		22
+nim	verifyProfileHook	threecode/api.html#verifyProfileHook_2	var verifyProfileHook		25
+nim	fetchModelsHook	threecode/api.html#fetchModelsHook_2	var fetchModelsHook		26
+nim	QuietRecvWakeMs	threecode/api.html#QuietRecvWakeMs	const QuietRecvWakeMs		38
+nim	QuietTooLongMs	threecode/api.html#QuietTooLongMs	const QuietTooLongMs		45
+nim	isInterrupted	threecode/api.html#isInterrupted	proc isInterrupted(): bool		52
+nim	setInterrupted	threecode/api.html#setInterrupted,bool	proc setInterrupted(value: bool)		63
+nim	clearInterrupted	threecode/api.html#clearInterrupted	proc clearInterrupted()		66
+nim	isNetworkQuiet	threecode/api.html#isNetworkQuiet	proc isNetworkQuiet(): bool		75
+nim	markNetworkQuiet	threecode/api.html#markNetworkQuiet	proc markNetworkQuiet()		78
+nim	clearNetworkQuiet	threecode/api.html#clearNetworkQuiet	proc clearNetworkQuiet()		81
+nim	ApiStreamHooks	threecode/api.html#ApiStreamHooks	object ApiStreamHooks		85
+nim	apiStreamHooks	threecode/api.html#apiStreamHooks_2	var apiStreamHooks		105
+nim	setApiStreamHooks	threecode/api.html#setApiStreamHooks,ApiStreamHooks	proc setApiStreamHooks(hooks: ApiStreamHooks)		107
+nim	parseUsage	threecode/api.html#parseUsage,JsonNode	proc parseUsage(u: JsonNode): Usage		167
+nim	classifyRetry	threecode/api.html#classifyRetry,ref.CatchableError,int	proc classifyRetry(exc: ref CatchableError; code: int): string		182
+nim	retryCategory	threecode/api.html#retryCategory,string,JsonNode,int	proc retryCategory(errMsg: string; assistantMsg: JsonNode; statusCode: int): string		192
+nim	closeCachedStreamConn	threecode/api.html#closeCachedStreamConn	proc closeCachedStreamConn()		241
+nim	requestTurnInterrupt	threecode/api.html#requestTurnInterrupt	proc requestTurnInterrupt()		258
+nim	buildStreamAssistantMsg	threecode/api.html#buildStreamAssistantMsg,string,string,OrderedTable[int,JsonNode],Usage	proc buildStreamAssistantMsg(content, reasoning: string;\n                        tools: OrderedTable[int, JsonNode]; usage: Usage;\n                        wasInterrupted = false): JsonNode		277
+nim	parseXmlToolCalls	threecode/api.html#parseXmlToolCalls,string	proc parseXmlToolCalls(content: string): tuple[cleaned: string, calls: seq[JsonNode]]		301
+nim	buildBatchAssistantMsg	threecode/api.html#buildBatchAssistantMsg,string,string,JsonNode	proc buildBatchAssistantMsg(message, reasoning: string; toolCalls: JsonNode): JsonNode		681
+nim	stripInternalFields	threecode/api.html#stripInternalFields,JsonNode	proc stripInternalFields(messages: JsonNode): JsonNode		901
+nim	applyStreamingOptions	threecode/api.html#applyStreamingOptions,Profile,JsonNode	proc applyStreamingOptions(p: Profile; body: JsonNode)		965
+nim	applyGenerationDefaults	threecode/api.html#applyGenerationDefaults,Profile,JsonNode	proc applyGenerationDefaults(p: Profile; body: JsonNode)		982
+nim	applyReasoning	threecode/api.html#applyReasoning,Profile,JsonNode	proc applyReasoning(p: Profile; body: JsonNode)		1056
+nim	callModel	threecode/api.html#callModel,Profile,JsonNode,Usage,int	proc callModel(p: Profile; messages: JsonNode; usage: var Usage;\n          lastPromptTokens: int): JsonNode		1074
+nim	verifyBody	threecode/api.html#verifyBody,Profile	proc verifyBody(p: Profile): string		1233
+nim	verifyProfile	threecode/api.html#verifyProfile,Profile	proc verifyProfile(p: Profile): (bool, string)		1244
+nim	fetchModels	threecode/api.html#fetchModels,string,string	proc fetchModels(url, key: string): (seq[string], string)		1276
+nim	installInterruptHook	threecode/api.html#installInterruptHook	proc installInterruptHook()		1307

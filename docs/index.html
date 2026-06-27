@@ -154,10 +154,11 @@ irm https://3code.capocasa.dev/install.ps1 | iex</pre></p>
 <p><pre class="listing">3code --resume
 # or
 3code -r</pre></p>
-<p>List all sessions for the current directory:</p>
+<p>List recent sessions for the current directory (newest first, up to 20):</p>
 <p><pre class="listing">3code --list
 # or
 3code -l</pre></p>
+<p>Listing is scoped to the current directory by design. To see every saved session, run 3code from the sessions directory itself (e.g. <tt class="docutils literal"><span class="pre">~/.local/share/3code/sessions</span></tt>).</p>
 <p>Resume a specific session by ID:</p>
 <p><pre class="listing">3code --resume=abc123</pre></p>
 <p>Note: different providers expire their prompt cache at different rates. Resuming an old session still works but you will not get cache savings on stale context.</p>
@@ -197,7 +198,7 @@ Task: add comprehensive test coverage to the parser module.</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-05-08 15:10:55 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-27 09:41:50 UTC</small>
       </div>
     </div>
   </div>

@@ -1,3 +1,1 @@
 nimTitle	threecode	threecode.html	module threecode		0
-nim	runTurns	threecode.html#runTurns,Profile,JsonNode,Session	proc runTurns(p: Profile; messages: var JsonNode; session: var Session)		36
-nim	runTurnsInteractive	threecode.html#runTurnsInteractive,Profile,JsonNode,Session	proc runTurnsInteractive(p: Profile; messages: var JsonNode; session: var Session)		250

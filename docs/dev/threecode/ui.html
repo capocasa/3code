@@ -59,11 +59,42 @@
 </li>
 <li>
   <details open>
+    <summary><a class="reference reference-toplevel" href="#7" id="57">Types</a></summary>
+    <ul class="simple simple-toc-section">
+      <li><a class="reference" href="#CommandDisposition" title="CommandDisposition = enum
+  cdTranscriptResult, cdHarnessOnly, cdModal">CommandDisposition</a></li>
+<li><a class="reference" href="#CommandKind" title="CommandKind = enum
+  ckUnknown, ckSafeImmediate, ckMutating, ckModal, ckQuit">CommandKind</a></li>
+<li><a class="reference" href="#CommandResult" title="CommandResult = object
+  recognized*: bool
+  ok*: bool
+  name*: string
+  body*: string
+  plainBody*: bool
+  clearFooter*: bool
+  disposition*: CommandDisposition">CommandResult</a></li>
+<li><a class="reference" href="#WizardReadLineHook" title="WizardReadLineHook = proc (prompt: string; hidden, noHistory: bool): string {.
+    closure.}">WizardReadLineHook</a></li>
+
+    </ul>
+  </details>
+</li>
+<li>
+  <details open>
+    <summary><a class="reference reference-toplevel" href="#8" id="58">Vars</a></summary>
+    <ul class="simple simple-toc-section">
+      <li><a class="reference" href="#wizardReadLineHook_2" title="wizardReadLineHook: WizardReadLineHook">wizardReadLineHook</a></li>
+
+    </ul>
+  </details>
+</li>
+<li>
+  <details open>
     <summary><a class="reference reference-toplevel" href="#10" id="60">Consts</a></summary>
     <ul class="simple simple-toc-section">
       <li><a class="reference" href="#CommandNames" title="CommandNames = [&quot;:help&quot;, &quot;:tokens&quot;, &quot;:clear&quot;, &quot;:model&quot;, &quot;:provider&quot;,
-                &quot;:reasoning&quot;, &quot;:prompt&quot;, &quot;:show&quot;, &quot;:log&quot;, &quot;:sessions&quot;,
-                &quot;:compact&quot;, &quot;:summarize&quot;, &quot;:think&quot;, &quot;:q&quot;, &quot;:quit&quot;, &quot;:exit&quot;]">CommandNames</a></li>
+                &quot;:reasoning&quot;, &quot;:streaming&quot;, &quot;:prompt&quot;, &quot;:show&quot;, &quot;:log&quot;,
+                &quot;:sessions&quot;, &quot;:summarize&quot;, &quot;:q&quot;, &quot;:quit&quot;, &quot;:exit&quot;]">CommandNames</a></li>
 
     </ul>
   </details>
@@ -80,6 +111,10 @@
   <li><a class="reference" href="#buildUserMessage%2CJsonNode%2Cstring" title="buildUserMessage(messages: JsonNode; raw: string): string">buildUserMessage(messages: JsonNode; raw: string): string</a></li>
 
 </ul>
+<ul class="simple nested-toc-section">classifyCommand
+  <li><a class="reference" href="#classifyCommand%2Cstring" title="classifyCommand(cmd: string): CommandKind">classifyCommand(cmd: string): CommandKind</a></li>
+
+</ul>
 <ul class="simple nested-toc-section">completionFor
   <li><a class="reference" href="#completionFor%2Cstring" title="completionFor(line: string): seq[string]">completionFor(line: string): seq[string]</a></li>
 
@@ -88,6 +123,12 @@
   <li><a class="reference" href="#handleCommand%2Cstring%2CJsonNode%2CSession%2CProfile%2C" title="handleCommand(cmd: string; messages: var JsonNode; session: var Session;
               prof: var Profile; editor: var minline.LineEditor): bool">handleCommand(cmd: string; messages: var JsonNode; session: var Session;
               prof: var Profile; editor: var minline.LineEditor): bool</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">handleCommandResult
+  <li><a class="reference" href="#handleCommandResult%2Cstring%2CJsonNode%2CSession%2CProfile%2C" title="handleCommandResult(cmd: string; messages: var JsonNode; session: var Session;
+                    prof: var Profile; editor: var minline.LineEditor): CommandResult">handleCommandResult(cmd: string; messages: var JsonNode; session: var Session;
+                    prof: var Profile; editor: var minline.LineEditor): CommandResult</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">inlineAtFiles
@@ -139,13 +180,75 @@
     <div id="tocRoot"></div>
     
     <p class="module-desc"><p>REPL command dispatch and provider/model wizards.</p>
-<p>Handles all <tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">cmd</span></span></tt> input that is not a prompt to the model. The command set is narrow by design: introspection (<tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">show</span></span></tt>, <tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">log</span></span></tt>, <tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">tokens</span></span></tt>), context management (<tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">clear</span></span></tt>, <tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">compact</span></span></tt>, <tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">summarize</span></span></tt>), provider/model switching (<tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">provider</span></span></tt>, <tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">model</span></span></tt>, <tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">reasoning</span></span></tt>), and thinking control (<tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">think</span></span></tt>).</p>
+<p>Handles all <tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">cmd</span></span></tt> input that is not a prompt to the model. The command set is narrow by design: introspection (<tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">show</span></span></tt>, <tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">log</span></span></tt>, <tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">tokens</span></span></tt>), context management (<tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">clear</span></span></tt>, <tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">summarize</span></span></tt>), provider/model switching (<tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">provider</span></span></tt>, <tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">model</span></span></tt>, <tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">reasoning</span></span></tt>).</p>
 <p>Tab-completion in <tt class="docutils literal"><span class="pre"><span class="Identifier">tabComplete</span></span></tt> walks <tt class="docutils literal"><span class="pre"><span class="Identifier">KnownGoodCombos</span></span></tt> and the live provider list to offer only valid model names. The provider-add wizard in <tt class="docutils literal"><span class="pre"><span class="Identifier">runProviderAdd</span></span></tt> validates the API key with a one-token probe before saving.</p>
 </p>
     <div class="section" id="6">
   <h1><a class="toc-backref" href="#6">Imports</a></h1>
   <dl class="item">
-    <a class="reference external" href="types.html">types</a>, <a class="reference external" href="util.html">util</a>, <a class="reference external" href="prompts.html">prompts</a>, <a class="reference external" href="session.html">session</a>, <a class="reference external" href="config.html">config</a>, <a class="reference external" href="api.html">api</a>, <a class="reference external" href="compact.html">compact</a>, <a class="reference external" href="display.html">display</a>, <a class="reference external" href="minline.html">minline</a>, <a class="reference external" href="loop.html">loop</a>
+    <a class="reference external" href="types.html">types</a>, <a class="reference external" href="util.html">util</a>, <a class="reference external" href="prompts.html">prompts</a>, <a class="reference external" href="session.html">session</a>, <a class="reference external" href="config.html">config</a>, <a class="reference external" href="api.html">api</a>, <a class="reference external" href="compact.html">compact</a>, <a class="reference external" href="display.html">display</a>, <a class="reference external" href="minline.html">minline</a>, <a class="reference external" href="fatprompt.html">fatprompt</a>
+  </dl>
+</div>
+<div class="section" id="7">
+  <h1><a class="toc-backref" href="#7">Types</a></h1>
+  <dl class="item">
+    <div id="CommandDisposition">
+  <dt><pre><a href="#CommandDisposition"><span class="Identifier">CommandDisposition</span></a> <span class="Other">=</span> <span class="Keyword">enum</span>
+  <span class="Identifier">cdTranscriptResult</span><span class="Other">,</span> <span class="Identifier">cdHarnessOnly</span><span class="Other">,</span> <span class="Identifier">cdModal</span></pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="CommandKind">
+  <dt><pre><a href="#CommandKind"><span class="Identifier">CommandKind</span></a> <span class="Other">=</span> <span class="Keyword">enum</span>
+  <span class="Identifier">ckUnknown</span><span class="Other">,</span> <span class="Identifier">ckSafeImmediate</span><span class="Other">,</span> <span class="Identifier">ckMutating</span><span class="Other">,</span> <span class="Identifier">ckModal</span><span class="Other">,</span> <span class="Identifier">ckQuit</span></pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="CommandResult">
+  <dt><pre><a href="#CommandResult"><span class="Identifier">CommandResult</span></a> <span class="Other">=</span> <span class="Keyword">object</span>
+  <span class="Identifier">recognized</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>
+  <span class="Identifier">ok</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>
+  <span class="Identifier">name</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>
+  <span class="Identifier">body</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">string</span>
+  <span class="Identifier">plainBody</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>
+  <span class="Identifier">clearFooter</span><span class="Operator">*</span><span class="Other">:</span> <span class="Identifier">bool</span>
+  <span class="Identifier">disposition</span><span class="Operator">*</span><span class="Other">:</span> <a href="#CommandDisposition"><span class="Identifier">CommandDisposition</span></a></pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+<div id="WizardReadLineHook">
+  <dt><pre><a href="#WizardReadLineHook"><span class="Identifier">WizardReadLineHook</span></a> <span class="Other">=</span> <span class="Keyword">proc</span> <span class="Other">(</span><span class="Identifier">prompt</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">hidden</span><span class="Other">,</span> <span class="Identifier">noHistory</span><span class="Other">:</span> <span class="Identifier">bool</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.
+    <span class="Identifier">closure</span>.}</pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
+  </dl>
+</div>
+<div class="section" id="8">
+  <h1><a class="toc-backref" href="#8">Vars</a></h1>
+  <dl class="item">
+    <div id="wizardReadLineHook_2">
+  <dt><pre><a href="#wizardReadLineHook"><span class="Identifier">wizardReadLineHook</span></a><span class="Other">:</span> <a href="#WizardReadLineHook"><span class="Identifier">WizardReadLineHook</span></a></pre></dt>
+  <dd>
+    
+    
+    
+  </dd>
+</div>
+
   </dl>
 </div>
 <div class="section" id="10">
@@ -153,8 +256,8 @@
   <dl class="item">
     <div id="CommandNames">
   <dt><pre><a href="#CommandNames"><span class="Identifier">CommandNames</span></a> <span class="Other">=</span> <span class="Other">[</span><span class="StringLit">&quot;:help&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:tokens&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:clear&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:model&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:provider&quot;</span><span class="Other">,</span>
-                <span class="StringLit">&quot;:reasoning&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:prompt&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:show&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:log&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:sessions&quot;</span><span class="Other">,</span>
-                <span class="StringLit">&quot;:compact&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:summarize&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:think&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:q&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:quit&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:exit&quot;</span><span class="Other">]</span></pre></dt>
+                <span class="StringLit">&quot;:reasoning&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:streaming&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:prompt&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:show&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:log&quot;</span><span class="Other">,</span>
+                <span class="StringLit">&quot;:sessions&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:summarize&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:q&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:quit&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;:exit&quot;</span><span class="Other">]</span></pre></dt>
   <dd>
     
     
@@ -171,8 +274,8 @@
   <div id="bootstrapProvider">
   <dt><pre><span class="Keyword">proc</span> <a href="#bootstrapProvider"><span class="Identifier">bootstrapProvider</span></a><span class="Other">(</span><span class="Identifier">editor</span><span class="Other">:</span> <span class="Keyword">var</span> <span class="Identifier">minline</span><span class="Other">.</span><span class="Identifier">LineEditor</span><span class="Other">)</span><span class="Other">:</span> <a href="types.html#Profile"><span class="Identifier">Profile</span></a> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span>
-    <span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span>
-    <span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadEnvEffect</span><span class="Other">,</span>
+    <span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -184,12 +287,25 @@
 <div id="buildUserMessage-procs-all">
   <div id="buildUserMessage,JsonNode,string">
   <dt><pre><span class="Keyword">proc</span> <a href="#buildUserMessage%2CJsonNode%2Cstring"><span class="Identifier">buildUserMessage</span></a><span class="Other">(</span><span class="Identifier">messages</span><span class="Other">:</span> <span class="Identifier">JsonNode</span><span class="Other">;</span> <span class="Identifier">raw</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">ValueError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span>
-    <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ExecIOEffect</span><span class="Other">]</span><span class="Other">,</span>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span>
+                                       <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">,</span>
+                                       <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ExecIOEffect</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     Apply @file inlining always; prepend the session preamble (cwd, git state, AGENTS.md, ls) only on the first user message of a session so resumed conversations don't re-inject stale context.
+    
+  </dd>
+</div>
+
+</div>
+<div id="classifyCommand-procs-all">
+  <div id="classifyCommand,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#classifyCommand%2Cstring"><span class="Identifier">classifyCommand</span></a><span class="Other">(</span><span class="Identifier">cmd</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <a href="#CommandKind"><span class="Identifier">CommandKind</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
     
   </dd>
 </div>
@@ -211,12 +327,27 @@
   <div id="handleCommand,string,JsonNode,Session,Profile,">
   <dt><pre><span class="Keyword">proc</span> <a href="#handleCommand%2Cstring%2CJsonNode%2CSession%2CProfile%2C"><span class="Identifier">handleCommand</span></a><span class="Other">(</span><span class="Identifier">cmd</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">messages</span><span class="Other">:</span> <span class="Keyword">var</span> <span class="Identifier">JsonNode</span><span class="Other">;</span> <span class="Identifier">session</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="types.html#Session"><span class="Identifier">Session</span></a><span class="Other">;</span>
                    <span class="Identifier">prof</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="types.html#Profile"><span class="Identifier">Profile</span></a><span class="Other">;</span> <span class="Identifier">editor</span><span class="Other">:</span> <span class="Keyword">var</span> <span class="Identifier">minline</span><span class="Other">.</span><span class="Identifier">LineEditor</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">bool</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">,</span>
-    <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">,</span>
-    <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     returns true if the input was a recognised command
+    
+  </dd>
+</div>
+
+</div>
+<div id="handleCommandResult-procs-all">
+  <div id="handleCommandResult,string,JsonNode,Session,Profile,">
+  <dt><pre><span class="Keyword">proc</span> <a href="#handleCommandResult%2Cstring%2CJsonNode%2CSession%2CProfile%2C"><span class="Identifier">handleCommandResult</span></a><span class="Other">(</span><span class="Identifier">cmd</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span> <span class="Identifier">messages</span><span class="Other">:</span> <span class="Keyword">var</span> <span class="Identifier">JsonNode</span><span class="Other">;</span>
+                         <span class="Identifier">session</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="types.html#Session"><span class="Identifier">Session</span></a><span class="Other">;</span> <span class="Identifier">prof</span><span class="Other">:</span> <span class="Keyword">var</span> <a href="types.html#Profile"><span class="Identifier">Profile</span></a><span class="Other">;</span>
+                         <span class="Identifier">editor</span><span class="Other">:</span> <span class="Keyword">var</span> <span class="Identifier">minline</span><span class="Other">.</span><span class="Identifier">LineEditor</span><span class="Other">)</span><span class="Other">:</span> <a href="#CommandResult"><span class="Identifier">CommandResult</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span>
+    <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">SessionLocked</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span>
+    <span class="Identifier">SessionLocked</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">,</span>
+    <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span>
+    <span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    
     
   </dd>
 </div>
@@ -249,8 +380,9 @@
 <div id="promptEditProvider-procs-all">
   <div id="promptEditProvider,,ProviderRec">
   <dt><pre><span class="Keyword">proc</span> <a href="#promptEditProvider%2C%2CProviderRec"><span class="Identifier">promptEditProvider</span></a><span class="Other">(</span><span class="Identifier">editor</span><span class="Other">:</span> <span class="Keyword">var</span> <span class="Identifier">minline</span><span class="Other">.</span><span class="Identifier">LineEditor</span><span class="Other">;</span> <span class="Identifier">existing</span><span class="Other">:</span> <a href="config.html#ProviderRec"><span class="Identifier">ProviderRec</span></a><span class="Other">)</span><span class="Other">:</span> <a href="config.html#ProviderRec"><span class="Identifier">ProviderRec</span></a> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span>
-    <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">InputCancelled</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span>
+    <span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadEnvEffect</span><span class="Other">,</span>
+    <span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -262,9 +394,9 @@
 <div id="promptNewProvider-procs-all">
   <div id="promptNewProvider">
   <dt><pre><span class="Keyword">proc</span> <a href="#promptNewProvider"><span class="Identifier">promptNewProvider</span></a><span class="Other">(</span><span class="Identifier">editor</span><span class="Other">:</span> <span class="Keyword">var</span> <span class="Identifier">minline</span><span class="Other">.</span><span class="Identifier">LineEditor</span><span class="Other">)</span><span class="Other">:</span> <a href="config.html#ProviderRec"><span class="Identifier">ProviderRec</span></a> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">InputCancelled</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span>
-    <span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span>
-    <span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">InputCancelled</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span>
+    <span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadEnvEffect</span><span class="Other">,</span>
+    <span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     
@@ -276,11 +408,11 @@
 <div id="readInput-procs-all">
   <div id="readInput,,bool">
   <dt><pre><span class="Keyword">proc</span> <a href="#readInput%2C%2Cbool"><span class="Identifier">readInput</span></a><span class="Other">(</span><span class="Identifier">editor</span><span class="Other">:</span> <span class="Keyword">var</span> <span class="Identifier">minline</span><span class="Other">.</span><span class="Identifier">LineEditor</span><span class="Other">;</span> <span class="Identifier">done</span><span class="Other">:</span> <span class="Keyword">var</span> <span class="Identifier">bool</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span>
-    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">RootEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ResourceExhaustedError</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">,</span> <span class="Identifier">ReadEnvEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Read a line of user input. Entry contract: the chrome at the bottom of the cursor's content is either bar+prompt (bar at K, prompt at K+1, cursor at K col 0) or prompt-only (prompt at K, cursor at K col 0 — the pre-first-turn startup state, signalled by <tt class="docutils literal"><span class="pre"><span class="Identifier">currentBarLabel</span> <span class="Operator">==</span> <span class="StringLit">&quot;&quot;</span></span></tt>). In bar mode we walk down one row to the prompt and clear; in prompt-only mode we clear in place so minline's bright cyan <tt class="docutils literal"><span class="pre"><span class="Identifier">❯</span> <span class="Punctuation">`</span> <span class="Identifier">overwrites</span> <span class="Identifier">the</span> <span class="Keyword">static</span> <span class="Identifier">dim</span> <span class="Identifier">glyph</span><span class="Operator">.</span> <span class="Identifier">After</span> <span class="Identifier">Enter</span> <span class="Identifier">the</span> <span class="Identifier">cursor</span> <span class="Keyword">is</span> <span class="Identifier">wherever</span> <span class="Identifier">minline</span> <span class="Identifier">left</span> <span class="Identifier">it</span><span class="Punctuation">;</span> <span class="Identifier">we</span> <span class="Identifier">don</span><span class="CharLit">'t try to clean up — `emitUserSubmit</span></span></tt> walks back using <tt class="docutils literal"><span class="pre"><span class="Identifier">splitLines</span><span class="Punctuation">(</span><span class="Identifier">line</span><span class="Punctuation">)</span><span class="Operator">.</span><span class="Identifier">len</span> <span class="Operator">+</span> <span class="Punctuation">(</span><span class="DecNumber">1</span> <span class="Keyword">if</span> <span class="Identifier">bar</span> <span class="Operator">/</span> <span class="DecNumber">2</span> <span class="Keyword">if</span> <span class="Identifier">gap</span> <span class="Operator">/</span> <span class="DecNumber">0</span> <span class="Keyword">if</span> <span class="Identifier">prompt</span><span class="Operator">-</span><span class="Identifier">only</span><span class="Punctuation">)</span></span></tt> and clear-to-end-of-screen from there.
+    Read a line submitted by the persistent input thread. The same <tt class="docutils literal"><span class="pre">minline.readLineWith</span></tt> path owns idle prompt input and active-turn buffered input; the controller only consumes completed lines here.
     
   </dd>
 </div>
@@ -290,7 +422,8 @@
   <div id="readOptional,,string">
   <dt><pre><span class="Keyword">proc</span> <a href="#readOptional%2C%2Cstring"><span class="Identifier">readOptional</span></a><span class="Other">(</span><span class="Identifier">editor</span><span class="Other">:</span> <span class="Keyword">var</span> <span class="Identifier">minline</span><span class="Other">.</span><span class="Identifier">LineEditor</span><span class="Other">;</span> <span class="Identifier">prompt</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span>
                   <span class="Identifier">hidden</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">;</span> <span class="Identifier">noHistory</span> <span class="Other">=</span> <span class="Identifier">true</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">InputCancelled</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -304,7 +437,8 @@
   <div id="readRequired,,string">
   <dt><pre><span class="Keyword">proc</span> <a href="#readRequired%2C%2Cstring"><span class="Identifier">readRequired</span></a><span class="Other">(</span><span class="Identifier">editor</span><span class="Other">:</span> <span class="Keyword">var</span> <span class="Identifier">minline</span><span class="Other">.</span><span class="Identifier">LineEditor</span><span class="Other">;</span> <span class="Identifier">prompt</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">;</span>
                   <span class="Identifier">hidden</span> <span class="Other">=</span> <span class="Identifier">false</span><span class="Other">;</span> <span class="Identifier">noHistory</span> <span class="Other">=</span> <span class="Identifier">true</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span>
+    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">Exception</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">KeyError</span><span class="Other">,</span> <span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">InputCancelled</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">RootEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">WriteIOEffect</span><span class="Other">]</span><span class="Other">,</span>
     <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
@@ -316,9 +450,9 @@
 </div>
 <div id="sessionPreamble-procs-all">
   <div id="sessionPreamble,string">
-  <dt><pre><span class="Keyword">proc</span> <a href="#sessionPreamble%2Cstring"><span class="Identifier">sessionPreamble</span></a><span class="Other">(</span><span class="Identifier">cwd</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.
-    <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">,</span> <span class="Identifier">ValueError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span>
-    <span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span> <span class="Identifier">ExecIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dt><pre><span class="Keyword">proc</span> <a href="#sessionPreamble%2Cstring"><span class="Identifier">sessionPreamble</span></a><span class="Other">(</span><span class="Identifier">cwd</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Identifier">OSError</span><span class="Other">,</span> <span class="Identifier">IOError</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span>
+    <span class="Identifier">ReadEnvEffect</span><span class="Other">,</span> <span class="Identifier">ReadIOEffect</span><span class="Other">,</span> <span class="Identifier">TimeEffect</span><span class="Other">,</span> <span class="Identifier">WriteDirEffect</span><span class="Other">,</span> <span class="Identifier">ReadDirEffect</span><span class="Other">,</span>
+    <span class="Identifier">ExecIOEffect</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
     Build a one-shot context block to prepend to the first user message of a fresh session: cwd, git state, top-level listing, AGENTS.md content.
@@ -337,7 +471,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-05-08 15:10:47 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-27 09:42:03 UTC</small>
       </div>
     </div>
   </div>

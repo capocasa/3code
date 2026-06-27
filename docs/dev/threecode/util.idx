@@ -1,32 +1,40 @@
 nimTitle	util	threecode/util.html	module threecode/util		0
-nim	CyanFg	threecode/util.html#CyanFg	const CyanFg		13
-nim	DimCyanFg	threecode/util.html#DimCyanFg	const DimCyanFg		14
-nim	BoldOn	threecode/util.html#BoldOn	const BoldOn		15
-nim	GreyFg	threecode/util.html#GreyFg	const GreyFg		16
-nim	Reset	threecode/util.html#Reset	const Reset		17
-nim	bundledCaFile	threecode/util.html#bundledCaFile	proc bundledCaFile(): string		19
-nim	bundledSslContext	threecode/util.html#bundledSslContext	proc bundledSslContext(): SslContext		31
-nim	userConfigRoot	threecode/util.html#userConfigRoot	proc userConfigRoot(): string		43
-nim	userDataRoot	threecode/util.html#userDataRoot	proc userDataRoot(): string		49
-nim	resolvePath	threecode/util.html#resolvePath,string	proc resolvePath(path: string): string		64
-nim	utf8ByteCut	threecode/util.html#utf8ByteCut,string,int	proc utf8ByteCut(s: string; n: int): string		70
-nim	utf8ByteCutEnd	threecode/util.html#utf8ByteCutEnd,string,int	proc utf8ByteCutEnd(s: string; n: int): string		82
-nim	clipMiddle	threecode/util.html#clipMiddle,string,int,int	proc clipMiddle(s: string; head, tail: int): string		92
-nim	humanBytes	threecode/util.html#humanBytes,int	proc humanBytes(n: int): string		96
-nim	humanTokens	threecode/util.html#humanTokens,int	proc humanTokens(n: int): string		101
-nim	detectMdHeader	threecode/util.html#detectMdHeader,string	proc detectMdHeader(line: string): (bool, string)		105
-nim	isMdFenceLine	threecode/util.html#isMdFenceLine,string	proc isMdFenceLine(line: string): bool		116
-nim	applyInlineMd	threecode/util.html#applyInlineMd,string	proc applyInlineMd(line: string): string		130
-nim	visibleWidth	threecode/util.html#visibleWidth,string	proc visibleWidth(s: string): int		229
-nim	wrapAnsi	threecode/util.html#wrapAnsi,string,int	proc wrapAnsi(s: string; width: int): seq[string]		246
-nim	isMdTableRow	threecode/util.html#isMdTableRow,string	proc isMdTableRow(line: string): bool		277
-nim	isMdSepRow	threecode/util.html#isMdSepRow,string	proc isMdSepRow(line: string): bool		290
-nim	renderMdTable	threecode/util.html#renderMdTable,seq[string],string,int	proc renderMdTable(rows: seq[string]; indent = "  "; maxWidth = 0): string		301
-nim	tokenSlot	threecode/util.html#tokenSlot,string,int	proc tokenSlot(icon: string; n: int): string		408
-nim	stripPreamble	threecode/util.html#stripPreamble,string	proc stripPreamble(s: string): string		416
-nim	collapseHome	threecode/util.html#collapseHome,string	proc collapseHome(path: string): string		436
-nim	replaceFirst	threecode/util.html#replaceFirst,string,string,string	proc replaceFirst(s, needle, repl: string): (string, bool)		447
-nim	isBinaryContent	threecode/util.html#isBinaryContent,string	proc isBinaryContent(s: string): bool		452
-nim	looksLikePath	threecode/util.html#looksLikePath,string	proc looksLikePath(s: string): bool		464
-nim	levenshtein	threecode/util.html#levenshtein,string,string	proc levenshtein(a, b: string): int		474
-nim	levenshteinCapped	threecode/util.html#levenshteinCapped,string,string,int	proc levenshteinCapped(a, b: string; cap: int): int		488
+nim	CyanFg	threecode/util.html#CyanFg	const CyanFg		15
+nim	BrightWhiteFg	threecode/util.html#BrightWhiteFg	const BrightWhiteFg		16
+nim	BoldOn	threecode/util.html#BoldOn	const BoldOn		17
+nim	BlueFg	threecode/util.html#BlueFg	const BlueFg		18
+nim	GreyFg	threecode/util.html#GreyFg	const GreyFg		19
+nim	OffWhiteFg	threecode/util.html#OffWhiteFg	const OffWhiteFg		20
+nim	Reset	threecode/util.html#Reset	const Reset		21
+nim	debugOut	threecode/util.html#debugOut,string	proc debugOut(msg: string)		23
+nim	debugOut	threecode/util.html#debugOut,string,string	proc debugOut(msg, tag: string)		28
+nim	bundledCaFile	threecode/util.html#bundledCaFile	proc bundledCaFile(): string		34
+nim	bundledSslContext	threecode/util.html#bundledSslContext	proc bundledSslContext(): SslContext		46
+nim	userConfigRoot	threecode/util.html#userConfigRoot	proc userConfigRoot(): string		58
+nim	userDataRoot	threecode/util.html#userDataRoot	proc userDataRoot(): string		64
+nim	resolvePath	threecode/util.html#resolvePath,string	proc resolvePath(path: string): string		79
+nim	safeCwd	threecode/util.html#safeCwd	proc safeCwd(): string		85
+nim	utf8ByteCut	threecode/util.html#utf8ByteCut,string,int	proc utf8ByteCut(s: string; n: int): string		97
+nim	utf8ByteCutEnd	threecode/util.html#utf8ByteCutEnd,string,int	proc utf8ByteCutEnd(s: string; n: int): string		109
+nim	sanitizeUtf8	threecode/util.html#sanitizeUtf8,string	proc sanitizeUtf8(s: string): string		119
+nim	clipMiddle	threecode/util.html#clipMiddle,string,int,int	proc clipMiddle(s: string; head, tail: int): string		179
+nim	humanBytes	threecode/util.html#humanBytes,int	proc humanBytes(n: int): string		183
+nim	humanTokens	threecode/util.html#humanTokens,int	proc humanTokens(n: int): string		188
+nim	detectMdHeader	threecode/util.html#detectMdHeader,string	proc detectMdHeader(line: string): (bool, string)		192
+nim	isMdFenceLine	threecode/util.html#isMdFenceLine,string	proc isMdFenceLine(line: string): bool		203
+nim	applyInlineMd	threecode/util.html#applyInlineMd,string	proc applyInlineMd(line: string): string		217
+nim	visibleWidth	threecode/util.html#visibleWidth,string	proc visibleWidth(s: string): int		316
+nim	wrapAnsi	threecode/util.html#wrapAnsi,string,int	proc wrapAnsi(s: string; width: int): seq[string]		333
+nim	charWrapAnsi	threecode/util.html#charWrapAnsi,string,int	proc charWrapAnsi(s: string; width: int): seq[string]		364
+nim	isMdTableRow	threecode/util.html#isMdTableRow,string	proc isMdTableRow(line: string): bool		401
+nim	isMdSepRow	threecode/util.html#isMdSepRow,string	proc isMdSepRow(line: string): bool		414
+nim	renderMdTable	threecode/util.html#renderMdTable,seq[string],string,int	proc renderMdTable(rows: seq[string]; indent = "  "; maxWidth = 0): string		425
+nim	tokenSlot	threecode/util.html#tokenSlot,string,int	proc tokenSlot(icon: string; n: int): string		532
+nim	stripPreamble	threecode/util.html#stripPreamble,string	proc stripPreamble(s: string): string		540
+nim	collapseHome	threecode/util.html#collapseHome,string	proc collapseHome(path: string): string		560
+nim	replaceFirst	threecode/util.html#replaceFirst,string,string,string	proc replaceFirst(s, needle, repl: string): (string, bool)		571
+nim	isBinaryContent	threecode/util.html#isBinaryContent,string	proc isBinaryContent(s: string): bool		576
+nim	looksLikePath	threecode/util.html#looksLikePath,string	proc looksLikePath(s: string): bool		588
+nim	levenshtein	threecode/util.html#levenshtein,string,string	proc levenshtein(a, b: string): int		598
+nim	levenshteinCapped	threecode/util.html#levenshteinCapped,string,string,int	proc levenshteinCapped(a, b: string; cap: int): int		612
+nimgrp	debugout	threecode/util.html#debugOut-procs-all	proc		23

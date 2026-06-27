@@ -1,17 +1,39 @@
 nimTitle	session	threecode/session.html	module threecode/session		0
-nim	SessionExt	threecode/session.html#SessionExt	const SessionExt		18
-nim	sessionDir	threecode/session.html#sessionDir	proc sessionDir(): string		56
-nim	sessionIdFromPath	threecode/session.html#sessionIdFromPath,string	proc sessionIdFromPath(path: string): string		59
-nim	newSessionPath	threecode/session.html#newSessionPath	proc newSessionPath(): string		63
-nim	listSessionPaths	threecode/session.html#listSessionPaths	proc listSessionPaths(): seq[string]		67
-nim	renderSession	threecode/session.html#renderSession,Session,JsonNode	proc renderSession(session: Session; messages: JsonNode): string		392
-nim	saveSession	threecode/session.html#saveSession,Session,JsonNode	proc saveSession(session: Session; messages: JsonNode)		450
-nim	loadSessionFile	threecode/session.html#loadSessionFile,string	proc loadSessionFile(path: string): (Session, JsonNode)		550
-nim	SessionPreview	threecode/session.html#SessionPreview	object SessionPreview		629
-nim	previewSession	threecode/session.html#previewSession,string	proc previewSession(path: string): SessionPreview		635
-nim	sessionCwd	threecode/session.html#sessionCwd,string	proc sessionCwd(path: string): string		655
-nim	listSessionPathsForCwd	threecode/session.html#listSessionPathsForCwd,string	proc listSessionPathsForCwd(cwd: string): seq[string]		658
-nim	resolveSessionPath	threecode/session.html#resolveSessionPath,string,string	proc resolveSessionPath(id: string; cwd = ""): string		664
-nim	usageFromJson	threecode/session.html#usageFromJson,JsonNode	proc usageFromJson(j: JsonNode): Usage		683
-nim	firstUserMessage	threecode/session.html#firstUserMessage,JsonNode	proc firstUserMessage(messages: JsonNode): string		692
-nim	historyFile	threecode/session.html#historyFile	proc historyFile(): string		699
+nim	SessionExt	threecode/session.html#SessionExt	const SessionExt		22
+nim	sessionDir	threecode/session.html#sessionDir	proc sessionDir(): string		60
+nim	sessionIdFromPath	threecode/session.html#sessionIdFromPath,string	proc sessionIdFromPath(path: string): string		63
+nim	newSessionPath	threecode/session.html#newSessionPath	proc newSessionPath(): string		67
+nim	mangleCwd	threecode/session.html#mangleCwd,string	proc mangleCwd(cwd: string): string		92
+nim	sessionPathIndexDir	threecode/session.html#sessionPathIndexDir	proc sessionPathIndexDir(): string		110
+nim	indexPathAt	threecode/session.html#indexPathAt,string,string	proc indexPathAt(indexDir, cwd: string): string		113
+nim	appendIndexAt	threecode/session.html#appendIndexAt,string,string,string	proc appendIndexAt(indexDir, cwd, id: string)		116
+nim	indexIdsAt	threecode/session.html#indexIdsAt,string,string	proc indexIdsAt(indexDir, cwd: string): seq[string]		128
+nim	appendSessionIndex	threecode/session.html#appendSessionIndex,string,string	proc appendSessionIndex(cwd, id: string)		139
+nim	draftDir	threecode/session.html#draftDir	proc draftDir(): string		166
+nim	draftPathFor	threecode/session.html#draftPathFor,string	proc draftPathFor(sessionPath: string): string		169
+nim	pendingDraftDir	threecode/session.html#pendingDraftDir	proc pendingDraftDir(): string		172
+nim	pendingDraftPathFor	threecode/session.html#pendingDraftPathFor,string	proc pendingDraftPathFor(cwd: string): string		175
+nim	currentDraftPath	threecode/session.html#currentDraftPath,Session	proc currentDraftPath(session: Session): string		182
+nim	activeLockPath	threecode/session.html#activeLockPath	var activeLockPath		208
+nim	sessionLockDir	threecode/session.html#sessionLockDir	proc sessionLockDir(): string		210
+nim	sessionLockPathFor	threecode/session.html#sessionLockPathFor,string	proc sessionLockPathFor(path: string): string		213
+nim	SessionLocked	threecode/session.html#SessionLocked	object SessionLocked		216
+nim	acquireSessionLock	threecode/session.html#acquireSessionLock,string	proc acquireSessionLock(path: string)		307
+nim	releaseSessionLock	threecode/session.html#releaseSessionLock,string	proc releaseSessionLock(path: string)		336
+nim	releaseActiveSessionLock	threecode/session.html#releaseActiveSessionLock	proc releaseActiveSessionLock()		342
+nim	listSessionPaths	threecode/session.html#listSessionPaths	proc listSessionPaths(): seq[string]		347
+nim	renderSession	threecode/session.html#renderSession,Session,JsonNode	proc renderSession(session: Session; messages: JsonNode): string		672
+nim	saveSession	threecode/session.html#saveSession,Session,JsonNode	proc saveSession(session: Session; messages: JsonNode)		740
+nim	saveDraft	threecode/session.html#saveDraft,Session,string	proc saveDraft(session: Session; text: string)		767
+nim	clearDraft	threecode/session.html#clearDraft,Session	proc clearDraft(session: Session)		784
+nim	loadDraft	threecode/session.html#loadDraft,string	proc loadDraft(sessionPath: string): string		794
+nim	loadPendingDraft	threecode/session.html#loadPendingDraft,string	proc loadPendingDraft(cwd: string): string		804
+nim	clearPendingDraft	threecode/session.html#clearPendingDraft,string	proc clearPendingDraft(cwd: string)		814
+nim	loadSessionFile	threecode/session.html#loadSessionFile,string	proc loadSessionFile(path: string): (Session, JsonNode)		932
+nim	SessionPreview	threecode/session.html#SessionPreview	object SessionPreview		1011
+nim	previewSession	threecode/session.html#previewSession,string	proc previewSession(path: string): SessionPreview		1017
+nim	listSessionPathsForCwd	threecode/session.html#listSessionPathsForCwd,string	proc listSessionPathsForCwd(cwd: string): seq[string]		1037
+nim	resolveSessionPath	threecode/session.html#resolveSessionPath,string,string	proc resolveSessionPath(id: string; cwd = ""): string		1045
+nim	usageFromJson	threecode/session.html#usageFromJson,JsonNode	proc usageFromJson(j: JsonNode): Usage		1065
+nim	firstUserMessage	threecode/session.html#firstUserMessage,JsonNode	proc firstUserMessage(messages: JsonNode): string		1074
+nim	historyFile	threecode/session.html#historyFile	proc historyFile(): string		1081

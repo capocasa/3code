@@ -1,0 +1,14 @@
+nimTitle	transcript	threecode/transcript.html	module threecode/transcript		0
+nim	tiUserPrompt	threecode/transcript.html#tiUserPrompt	TranscriptKind.tiUserPrompt		12
+nim	tiAssistant	threecode/transcript.html#tiAssistant	TranscriptKind.tiAssistant		12
+nim	tiTool	threecode/transcript.html#tiTool	TranscriptKind.tiTool		12
+nim	tiCommand	threecode/transcript.html#tiCommand	TranscriptKind.tiCommand		12
+nim	TranscriptKind	threecode/transcript.html#TranscriptKind	enum TranscriptKind		12
+nim	TranscriptItem	threecode/transcript.html#TranscriptItem	object TranscriptItem		18
+nim	plainCommandBodyBytes	threecode/transcript.html#plainCommandBodyBytes,string	proc plainCommandBodyBytes(body: string): string		62
+nim	userPromptItem	threecode/transcript.html#userPromptItem,string	proc userPromptItem(line: string): TranscriptItem		71
+nim	assistantItem	threecode/transcript.html#assistantItem,string	proc assistantItem(content: string): TranscriptItem		75
+nim	toolItem	threecode/transcript.html#toolItem,Action,string,int,int,string,int	proc toolItem(act: Action; res: string; code, idx: int; diff = ""; elapsedS = -1): TranscriptItem		79
+nim	commandItem	threecode/transcript.html#commandItem,string,string	proc commandItem(name, body: string; ok = true): TranscriptItem		85
+nim	formatItem	threecode/transcript.html#formatItem,TranscriptItem	proc formatItem(item: TranscriptItem): string		98
+nim	appendItem	threecode/transcript.html#appendItem,TranscriptItem,proc)	proc appendItem(item: TranscriptItem; restoreEditor = true;\n           beforeRepaint: proc () = nil; reserveFooter = true;\n           prefixBoundary = false)		118

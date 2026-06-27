@@ -82,6 +82,8 @@
       <li><a class="reference" href="#activeCurrent" title="activeCurrent: string">activeCurrent</a></li>
 <li><a class="reference" href="#activeProviders" title="activeProviders: seq[ProviderRec]">activeProviders</a></li>
 <li><a class="reference" href="#activeSearchUrl" title="activeSearchUrl: string = DefaultSearchUrl">activeSearchUrl</a></li>
+<li><a class="reference" href="#bashPathOverride" title="bashPathOverride: string">bashPathOverride</a></li>
+<li><a class="reference" href="#notifyEnabled" title="notifyEnabled: bool = false">notifyEnabled</a></li>
 
     </ul>
   </details>
@@ -126,7 +128,6 @@
     (&quot;together&quot;, &quot;https://api.together.xyz/v1&quot;),
     (&quot;together-eu&quot;, &quot;https://eu.api.together.xyz/v1&quot;),
     (&quot;xai&quot;, &quot;https://api.x.ai/v1&quot;), (&quot;zai&quot;, &quot;https://api.z.ai/api/paas/v4&quot;),
-    (&quot;zai-coding&quot;, &quot;https://api.z.ai/api/coding/paas/v4&quot;),
     (&quot;zaicode&quot;, &quot;https://api.z.ai/api/coding/paas/v4&quot;)]">ProviderCatalog</a></li>
 
     </ul>
@@ -137,7 +138,7 @@
     <summary><a class="reference reference-toplevel" href="#12" id="62">Procs</a></summary>
     <ul class="simple simple-toc-section">
       <ul class="simple nested-toc-section">availableReasonings
-  <li><a class="reference" href="#availableReasonings%2CProviderRec%2Cstring" title="availableReasonings(prov: ProviderRec; family: string): seq[string]">availableReasonings(prov: ProviderRec; family: string): seq[string]</a></li>
+  <li><a class="reference" href="#availableReasonings%2CProviderRec%2Cstring%2Cstring" title="availableReasonings(prov: ProviderRec; family, model: string): seq[string]">availableReasonings(prov: ProviderRec; family, model: string): seq[string]</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">buildProfile
@@ -210,6 +211,10 @@
 </ul>
 <ul class="simple nested-toc-section">parseConfigFile
   <li><a class="reference" href="#parseConfigFile%2Cstring" title="parseConfigFile(path: string): (string, string, seq[ProviderRec])">parseConfigFile(path: string): (string, string, seq[ProviderRec])</a></li>
+
+</ul>
+<ul class="simple nested-toc-section">providerForProfile
+  <li><a class="reference" href="#providerForProfile%2CProfile" title="providerForProfile(prof: Profile): ProviderRec">providerForProfile(prof: Profile): ProviderRec</a></li>
 
 </ul>
 <ul class="simple nested-toc-section">resolveFamily
@@ -308,6 +313,22 @@
     
   </dd>
 </div>
+<div id="bashPathOverride">
+  <dt><pre><a href="#bashPathOverride"><span class="Identifier">bashPathOverride</span></a><span class="Other">:</span> <span class="Identifier">string</span></pre></dt>
+  <dd>
+    
+    Windows-only. <tt class="docutils literal"><span class="pre"><span class="Punctuation">[</span><span class="Identifier">settings</span><span class="Punctuation">]</span></span></tt> <tt class="docutils literal"><span class="pre"><span class="Identifier">bash_path</span> <span class="Operator">=</span> <span class="StringLit">&quot;...&quot;</span></span></tt> overrides MSYS2 detection in <tt class="docutils literal"><span class="pre"><span class="Identifier">streamexec</span><span class="Operator">.</span><span class="Identifier">resolveBash</span></span></tt> for users with bash at a non-standard location. Empty on POSIX (where /bin/sh is always used).
+    
+  </dd>
+</div>
+<div id="notifyEnabled">
+  <dt><pre><a href="#notifyEnabled"><span class="Identifier">notifyEnabled</span></a><span class="Other">:</span> <span class="Identifier">bool</span> <span class="Other">=</span> <span class="Identifier">false</span></pre></dt>
+  <dd>
+    
+    Resolved at config load. Set true by <tt class="docutils literal"><span class="pre"><span class="Punctuation">[</span><span class="Identifier">settings</span><span class="Punctuation">]</span></span></tt> <tt class="docutils literal"><span class="pre"><span class="Identifier">notify</span> <span class="Operator">=</span> <span class="Identifier">on</span></span></tt>. When true, a native desktop notification fires when a turn ends.
+    
+  </dd>
+</div>
 
   </dl>
 </div>
@@ -358,7 +379,6 @@
     <span class="Other">(</span><span class="StringLit">&quot;together&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;https://api.together.xyz/v1&quot;</span><span class="Other">)</span><span class="Other">,</span>
     <span class="Other">(</span><span class="StringLit">&quot;together-eu&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;https://eu.api.together.xyz/v1&quot;</span><span class="Other">)</span><span class="Other">,</span>
     <span class="Other">(</span><span class="StringLit">&quot;xai&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;https://api.x.ai/v1&quot;</span><span class="Other">)</span><span class="Other">,</span> <span class="Other">(</span><span class="StringLit">&quot;zai&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;https://api.z.ai/api/paas/v4&quot;</span><span class="Other">)</span><span class="Other">,</span>
-    <span class="Other">(</span><span class="StringLit">&quot;zai-coding&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;https://api.z.ai/api/coding/paas/v4&quot;</span><span class="Other">)</span><span class="Other">,</span>
     <span class="Other">(</span><span class="StringLit">&quot;zaicode&quot;</span><span class="Other">,</span> <span class="StringLit">&quot;https://api.z.ai/api/coding/paas/v4&quot;</span><span class="Other">)</span><span class="Other">]</span></pre></dt>
   <dd>
     
@@ -373,12 +393,14 @@
   <h1><a class="toc-backref" href="#12">Procs</a></h1>
   <dl class="item">
     <div id="availableReasonings-procs-all">
-  <div id="availableReasonings,ProviderRec,string">
-  <dt><pre><span class="Keyword">proc</span> <a href="#availableReasonings%2CProviderRec%2Cstring"><span class="Identifier">availableReasonings</span></a><span class="Other">(</span><span class="Identifier">prov</span><span class="Other">:</span> <a href="#ProviderRec"><span class="Identifier">ProviderRec</span></a><span class="Other">;</span> <span class="Identifier">family</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span> {.
+  <div id="availableReasonings,ProviderRec,string,string">
+  <dt><pre><span class="Keyword">proc</span> <a href="#availableReasonings%2CProviderRec%2Cstring%2Cstring"><span class="Identifier">availableReasonings</span></a><span class="Other">(</span><span class="Identifier">prov</span><span class="Other">:</span> <a href="#ProviderRec"><span class="Identifier">ProviderRec</span></a><span class="Other">;</span> <span class="Identifier">family</span><span class="Other">,</span> <span class="Identifier">model</span><span class="Other">:</span> <span class="Identifier">string</span><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">seq</span><span class="Other">[</span><span class="Identifier">string</span><span class="Other">]</span> {.
     <span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
   <dd>
     
-    Levels offered by <tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">reasoning</span></span></tt> for the active provider+model. The per-provider config override wins; otherwise fall back to the family's default list.
+    <p>Value set offered by <tt class="docutils literal"><span class="pre"><span class="Punctuation">:</span><span class="Identifier">reasoning</span></span></tt> for the active provider+model. The per-provider config override wins; otherwise the model-aware default from the known-good table (glm has per-model value sets).</p>
+<p>In experimental mode the set is empty: the effort level is free-form (the user types whatever the model's wire surface accepts), so there is no fixed list to validate or tab-complete against.</p>
+
     
   </dd>
 </div>
@@ -601,6 +623,18 @@
 </div>
 
 </div>
+<div id="providerForProfile-procs-all">
+  <div id="providerForProfile,Profile">
+  <dt><pre><span class="Keyword">proc</span> <a href="#providerForProfile%2CProfile"><span class="Identifier">providerForProfile</span></a><span class="Other">(</span><span class="Identifier">prof</span><span class="Other">:</span> <a href="types.html#Profile"><span class="Identifier">Profile</span></a><span class="Other">)</span><span class="Other">:</span> <a href="#ProviderRec"><span class="Identifier">ProviderRec</span></a> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span> <span class="Identifier">tags</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
+    <span class="Identifier">forbids</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span></span>.}</pre></dt>
+  <dd>
+    
+    The provider rec backing a profile, looked up by the provider prefix of <tt class="docutils literal"><span class="pre"><span class="Identifier">prof</span><span class="Operator">.</span><span class="Identifier">name</span></span></tt> (&quot;nebius.zai-org/GLM-5.1&quot; -&gt; nebius). Falls back to <tt class="docutils literal"><span class="pre"><span class="Identifier">currentProvider</span><span class="Punctuation">(</span><span class="Punctuation">)</span></span></tt> when the name has no dot (e.g. a bare default).
+    
+  </dd>
+</div>
+
+</div>
 <div id="resolveFamily-procs-all">
   <div id="resolveFamily,ProviderRec,Profile">
   <dt><pre><span class="Keyword">proc</span> <a href="#resolveFamily%2CProviderRec%2CProfile"><span class="Identifier">resolveFamily</span></a><span class="Other">(</span><span class="Identifier">prov</span><span class="Other">:</span> <a href="#ProviderRec"><span class="Identifier">ProviderRec</span></a><span class="Other">;</span> <span class="Identifier">prof</span><span class="Other">:</span> <a href="types.html#Profile"><span class="Identifier">Profile</span></a><span class="Other">)</span><span class="Other">:</span> <span class="Identifier">string</span> {.<span><span class="Other pragmadots">...</span></span><span class="pragmawrap"><span class="Identifier">raises</span><span class="Other">:</span> <span class="Other">[</span><span class="Other">]</span><span class="Other">,</span>
@@ -627,6 +661,7 @@
 <li>KnownGoodCombos default for this (provider, model)</li>
 <li>&quot;&quot; — caller treats as &quot;no wire param&quot;</li>
 </ol>
+<p>In experimental mode the known-good default is skipped: reasoning stays empty (no wire param) unless the user picks one. The effort level for an uncured model can't be guessed, and an empty value is the safe default: passing nothing beats passing a wrong knob.</p>
 
     
   </dd>
@@ -690,7 +725,7 @@
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-05-08 15:10:47 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-06-27 09:42:01 UTC</small>
       </div>
     </div>
   </div>
