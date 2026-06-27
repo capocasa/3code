@@ -16,7 +16,6 @@ type
     ## footer. Zero means no footer geometry is currently known.
     rowsAboveCursorToFooterTop: int
     footerRowsAboveEditor: int
-    footerHasLeadingGap: bool
     footerNeedsLeadingGap: bool
     toolViewportRows: seq[string]
     editorRedrawPending: bool
@@ -56,7 +55,6 @@ proc noteFooterPainted(e: var TerminalEngine; ed: var minline.LineEditor;
 proc noteNoFooter(e: var TerminalEngine) =
   e.rowsAboveCursorToFooterTop = 0
   e.footerRowsAboveEditor = 0
-  e.footerHasLeadingGap = false
 
 proc writeViewportRows(rows: openArray[string]) =
   for row in rows:
@@ -140,34 +138,17 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
         stdout.write termio.SyncBegin
         stdout.write "\x1b[?25l"
         refreshEditorWidth(edPtr[])
-        let hasLeadingGap =
-          bytes.len > 0 and frame.kind notin {ffNone, ffClear} and
-          (e.footerNeedsLeadingGap or e.footerHasLeadingGap)
-        # Footer height can shrink between repaints (a thinking ticker clears,
-        # a wrapping token bar unwraps as its label shortens). ``growth`` only
-        # covers the taller direction; without accounting for the shrink, the
-        # cached ``rowsAboveCursorToFooterTop`` (stale from the taller frame)
-        # drives the walk-up too far and ``\x1b[J`` erases committed
-        # scrollback, dropping the just-echoed prompt's first line.
-        let growth =
-          if e.footerRowsAboveEditor > 0:
-            max(0, footerRowsAboveEditor - e.footerRowsAboveEditor)
-          else:
-            0
-        let shrink =
-          max(0, e.footerRowsAboveEditor - footerRowsAboveEditor)
+        # The gap row is part of the frame bytes and counted in
+        # ``footerRowsAboveEditor``, so the footer height never changes when
+        # the ticker appears or clears. The walk-up reaches the footer's own
+        # top and never committed scrollback; the full frame (gap included) is
+        # rewritten below.
         let up =
-          max(0, e.rowsAboveCursorToFooterTop + e.toolViewportHeight +
-                 growth - shrink)
-        let rewriteLeadingGap =
-          hasLeadingGap and (up == 0 or (growth > 0 and e.footerHasLeadingGap))
+          max(0, e.rowsAboveCursorToFooterTop + e.toolViewportHeight)
         stdout.write "\r"
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
         stdout.write "\x1b[J"
-        if rewriteLeadingGap:
-          stdout.write "\r\n"
-        e.footerNeedsLeadingGap = false
         e.writeToolViewportRows()
         stdout.write bytes
         stdout.write "\r\n"
@@ -179,14 +160,10 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
           e.noteNoFooter()
         else:
           e.noteFooterPainted(edPtr[], footerRowsAboveEditor)
-          e.footerHasLeadingGap = hasLeadingGap
         stdout.write termio.SyncEnd
         stdout.flushFile
       else:
         stdout.write termio.SyncBegin
-        if e.footerNeedsLeadingGap and bytes.len > 0:
-          stdout.write "\r\n"
-          e.footerNeedsLeadingGap = false
         stdout.write bytes
         e.noteNoFooter()
         stdout.write termio.SyncEnd
@@ -215,20 +192,13 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
       stdout.write "\x1b[?25l"
       if inputRunning and editor != nil:
         refreshEditorWidth(editor[])
-        let growth =
-          if e.footerRowsAboveEditor > 0:
-            max(0, footerRowsAboveEditor - e.footerRowsAboveEditor)
-          else:
-            0
-        let shrink =
-          max(0, e.footerRowsAboveEditor - footerRowsAboveEditor)
         let rowsToFooter =
           if e.rowsAboveCursorToFooterTop > 0:
             e.rowsAboveCursorToFooterTop
           else:
             rowsToFooterTop(editor[], footerRowsAboveEditor)
         let up =
-          max(0, rowsToFooter + e.toolViewportHeight + growth - shrink)
+          max(0, rowsToFooter + e.toolViewportHeight)
         stdout.write "\r"
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
@@ -291,7 +261,7 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
   termio.withTerminalWriteLock:
     let termW = try: terminalWidth() except CatchableError: 0
     let footerRowsAboveEditor = oldFooter.rowsAboveEditor(termW)
-    let footerBarBytes = newFooter.footerFrameBytes(termW)
+    let footerBarBytes = newFooter.footerBarOnlyBytes(termW)
     let repaintBytes = footerBarBytes
     let transcript =
       if transcriptOwnsSpacing: transcriptBytes

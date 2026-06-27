@@ -695,10 +695,11 @@ proc spinnerLoop(unused: string) {.thread.} =
   try:
     let termW = try: terminalWidth() except CatchableError: 80
     if not inputThreadRunning:
+      # gap+bar is always 2 rows; a wrapping ticker may add more.
       let tickerRows =
         if lastTicker.len == 0: 1
         else: max(1, (visibleWidth(lastTicker) + max(1, termW) - 1) div max(1, termW))
-      termengine.syncWrite(spinnerCleanupBytes(tickerRows))
+      termengine.syncWrite(spinnerCleanupBytes(1 + tickerRows))
   except CatchableError: discard
 
 proc liveLabel*(base: string, slurped: int): string =
@@ -922,8 +923,9 @@ proc stopSpinner*(clearLiveFooter = true) =
   spinnerRunning = false
   if clearLiveFooter and inputThreadRunning and inputEditor != nil and
       spinnerFramePainted.load(moRelaxed):
-    let hadTicker = fatPromptState.footer.ticker.len > 0
-    termengine.renderFooter(clearFooterFrame(if hadTicker: 2 else: 1),
+    # The spinner footer is always gap+bar (2 rows) now that the ticker row
+    # is permanently reserved.
+    termengine.renderFooter(clearFooterFrame(2),
                             inputThreadRunning,
                             inputEditor,
                             currentTermW())
