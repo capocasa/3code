@@ -1,5 +1,5 @@
-import std/[os, strutils, unittest]
-import threecode/[config, types, web]
+import std/[os, strutils, tables, unittest]
+import threecode/[config, types, util, web]
 
 suite "config: search-url":
   var tmp = ""
@@ -12,17 +12,17 @@ suite "config: search-url":
 
   test "parseConfigFile returns the search-url when set":
     writeFile(tmp, "[settings]\nsearch-url = \"https://example.com/search?q=\"\n")
-    let (_, searchUrl, _) = parseConfigFile(tmp)
+    let (_, searchUrl, _, _) = parseConfigFile(tmp)
     check searchUrl == "https://example.com/search?q="
 
   test "parseConfigFile returns empty string when search-url is absent":
     writeFile(tmp, "[settings]\ncurrent = \"some-provider\"\n")
-    let (_, searchUrl, _) = parseConfigFile(tmp)
+    let (_, searchUrl, _, _) = parseConfigFile(tmp)
     check searchUrl == ""
 
   test "parseConfigFile accepts search_url alias":
     writeFile(tmp, "[settings]\nsearch_url = \"https://alias.example.com/?s=\"\n")
-    let (_, searchUrl, _) = parseConfigFile(tmp)
+    let (_, searchUrl, _, _) = parseConfigFile(tmp)
     check searchUrl == "https://alias.example.com/?s="
 
   test "activeSearchUrl defaults to DefaultSearchUrl":
@@ -112,3 +112,30 @@ suite "config: notify toggle":
     writeConfigFile(tmp, "p.m", @[])
     let raw2 = readFile(tmp)
     check raw2.find("notify") < 0  # on is the default — clean config
+
+suite "config: [colors] section":
+  var tmp = ""
+
+  setup:
+    tmp = getTempDir() / "3code-test-colors.ini"
+
+  teardown:
+    removeFile(tmp)
+
+  test "parseConfigFile collects [colors] keys verbatim (suffix kept)":
+    writeFile(tmp, "[colors]\nbright-white = \"\\x1b[37m\"\nbright-white-light = \"\\x1b[90m\"\n")
+    let (_, _, _, colors) = parseConfigFile(tmp)
+    # parsecfg interprets the backslash escape, so the value is the real
+    # ESC byte, not the literal text "\x1b".
+    check colors["bright-white"] == "\x1b[37m"
+    check colors["bright-white-light"] == "\x1b[90m"
+
+  test "parseConfigFile returns empty table when no [colors] section":
+    writeFile(tmp, "[settings]\ncurrent = \"p.m\"\n")
+    let (_, _, _, colors) = parseConfigFile(tmp)
+    check colors.len == 0
+
+  test "loadStateOrEmpty returns the colors map":
+    writeFile(tmp, "[colors]\ndim-white = \"\\x1b[38;5;240m\"\n")
+    let (_, _, colors) = loadStateOrEmpty(tmp)
+    check colors["dim-white"] == "\x1b[38;5;240m"

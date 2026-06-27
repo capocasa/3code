@@ -41,6 +41,8 @@ Full manual at [3code.capocasa.dev](https://3code.capocasa.dev). Developer docs 
 
 ## Changelog
 
+**0.4.1** - light/dark color mode (auto from `$COLORFGBG`, `--light`/`--dark`, `[colors]` config overrides)
+
 **0.4.0** — error icons for failed tool calls, pin bar+prompt to bottom during scrolling, suppress raw JSON on malformed tool args
 
 **0.3.5** — `$`/`r`/`w` tool bullets, bright cyan receipts, bar ticks during tool execution

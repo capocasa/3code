@@ -12,7 +12,7 @@
 ## ranking determines what the user sees first when tabbing through models.
 
 import std/[os, parsecfg, sequtils, streams, strformat, strutils, tables, terminal, uri]
-import types, prompts, web
+import types, prompts, util, web
 
 type
   ProviderRec* = object
@@ -174,13 +174,17 @@ proc expandEnvValue(s: string): string =
     return getEnv(t[1 .. ^1])
   s
 
-proc parseConfigFile*(path: string): (string, string, seq[ProviderRec]) =
+proc parseConfigFile*(path: string): (string, string, seq[ProviderRec], Table[string, string]) =
   ## Streaming parse so that repeated [provider] sections accumulate as a list.
-  ## Returns `(current, searchUrl, providers)`. `searchUrl` is "" when the
-  ## key was absent; the caller decides whether to fall back to the default.
+  ## Returns `(current, searchUrl, providers, colors)`. `searchUrl` is "" when
+  ## the key was absent; the caller decides whether to fall back to the default.
+  ## `colors` is the flat `[colors]` map (raw keys verbatim, including any
+  ## `-light` suffix); the caller routes it through `splitColorOverrides` +
+  ## `applyColorOverrides`.
   var current = ""
   var searchUrl = ""
   var providers: seq[ProviderRec]
+  var colors: Table[string, string]
   var section = ""
   var prov: ProviderRec
   var inProvider = false
@@ -213,6 +217,8 @@ proc parseConfigFile*(path: string): (string, string, seq[ProviderRec]) =
     of cfgKeyValuePair, cfgOption:
       let v = expandEnvValue(e.value)
       case section
+      of "colors":
+        colors[e.key] = v
       of "settings":
         case e.key
         of "current": current = v
@@ -247,7 +253,7 @@ proc parseConfigFile*(path: string): (string, string, seq[ProviderRec]) =
     of cfgError:
       die &"{path}: {e.msg}", ExitConfig
   p.close
-  (current, searchUrl, providers)
+  (current, searchUrl, providers, colors)
 
 proc quoteVal(s: string): string =
   result = "\""
@@ -289,13 +295,15 @@ proc writeConfigFile*(path: string, current: string,
 proc configPath*(): string =
   getConfigDir() / "3code" / "config"
 
-proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec]) =
-  ## Returns `(current, providers)` and updates `activeSearchUrl` as a side
-  ## effect when the config sets `search-url`. Missing file is benign.
-  if not fileExists(path): return ("", @[])
-  let (current, searchUrl, providers) = parseConfigFile(path)
+proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec], Table[string, string]) =
+  ## Returns `(current, providers, colors)` and updates `activeSearchUrl` as a
+  ## side effect when the config sets `search-url`. `colors` is the flat
+  ## `[colors]` map for the caller to route through the cascade. Missing
+  ## file is benign.
+  if not fileExists(path): return ("", @[], initTable[string, string]())
+  let (current, searchUrl, providers, colors) = parseConfigFile(path)
   if searchUrl != "": activeSearchUrl = searchUrl
-  (current, providers)
+  (current, providers, colors)
 
 proc resolveFamily*(prov: ProviderRec, prof: Profile): string =
   ## Family is resolved at profile-build time:
@@ -378,7 +386,7 @@ proc loadProfile*(wanted: string): Profile =
     stderr.writeLine ""
     stderr.writeLine ConfigExample
     quit ExitConfig
-  let (current, searchUrl, providers) = parseConfigFile(path)
+  let (current, searchUrl, providers, _) = parseConfigFile(path)
   if searchUrl != "": activeSearchUrl = searchUrl
   if providers.len == 0:
     die &"no [provider] section in {path}", ExitConfig
