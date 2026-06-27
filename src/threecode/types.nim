@@ -21,6 +21,15 @@ var notifyEnabled*: bool = true
   ## Default on. Toggled at runtime via `:notify on/off`, persisted in
   ## `[settings]`; an explicit `off` opts out.
 
+type
+  ColorMode* = enum
+    cmDark, cmLight
+
+var colorMode*: ColorMode = cmDark
+  ## Active colour mode. Dark by default (prior behaviour). Set at startup
+  ## from `--light`/`--dark`, `$COLORFGBG` detection, or `[colors]` config.
+  ## Drives the white-family palette resolved in `util.applyPalette`.
+
 const
   ExitUsage* = 2
   ExitConfig* = 3

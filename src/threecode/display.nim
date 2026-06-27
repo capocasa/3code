@@ -16,8 +16,11 @@
 ##   visual style as a live session, reusing the same render helpers.
 ##
 ## The three-tier colour palette (bold cyan for hints, plain cyan for notes,
-## grey-244 for subtle FYI output) avoids SGR `dim` and `fgWhite` which render
-## below readable contrast on light terminal backgrounds.
+## a dim-white for subtle FYI output) is mode-aware: the white family is
+## resolved per `ColorMode` at startup (see `util.applyPalette`), so it reads
+## on both light and dark backgrounds. SGR `dim` (`\x1b[2m`) is still avoided,
+## since it drops below readable contrast on light backgrounds and has no
+## clean mode switch.
 
 import std/[critbits, exitprocs, json, os, strformat, strutils, terminal]
 import types, util, config, prompts, session, actions, minline, toolstream
@@ -27,9 +30,11 @@ import terminal as termui
 # backgrounds:
 #   hint = bold cyan        (primary "look here": labels, CTAs)
 #   note = plain cyan       (secondary: help text, validation, errors)
-#   subtle = grey 244       (FYI: skill markers, tool output)
-# We avoid SGR `dim` (\x1b[2m) and `fgWhite`: both render below
-# readable contrast on light backgrounds.
+#   subtle = dim white      (FYI: skill markers, tool output)
+# Cyan is mode-independent (brand tone). The white family (`BrightWhiteFg`,
+# `OffWhiteFg`, `GreyFg`) is resolved per `ColorMode` in `util.applyPalette`.
+# We still avoid SGR `dim` (\x1b[2m): it renders below readable contrast on
+# light backgrounds and has no clean mode switch.
 
 template hint*(args: varargs[untyped]) =
   stdout.styledWrite(fgCyan, styleBright, args, resetStyle)
@@ -93,7 +98,10 @@ proc renderHelp*() =
         var j = i + 1
         while j < line.len and line[j] in {'a'..'z', 'A'..'Z', '?'}:
           inc j
-        stdout.styledWrite(fgWhite, line[i ..< j], resetStyle)
+        # `:command` tokens in the white family: `BrightWhiteFg` so they
+        # participate in light/dark mode switching (plain white is
+        # invisible on a light background).
+        stdout.styledWrite(BrightWhiteFg, line[i ..< j], Reset)
         i = j
       else:
         stdout.write line[i]
@@ -520,7 +528,10 @@ proc finishMd*(s: MarkdownState, outFile: File): bool {.discardable.} =
     s.tableBuf.setLen 0
     result = true
 
-const AssistantTextStyle* = BrightWhiteFg
+template AssistantTextStyle*: string = BrightWhiteFg
+  ## Active assistant-text SGR (the white-family color for LLM output).
+  ## A template so it re-reads the mode-resolved `BrightWhiteFg` var at
+  ## each use instead of snapshotting it at compile time.
 
 proc assistantTextBytes*(bytes: string): string =
   if bytes.len == 0:

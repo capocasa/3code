@@ -1,24 +1,125 @@
-import std/[net, os, sequtils, strformat, strutils, unicode, times]
+import std/[net, os, sequtils, strformat, strutils, tables, unicode, times]
 import types
 import threecode/unicodewidth
 
 # ---------- Color palette ----------
 #
 # Three-tier palette designed to read on both light and dark terminal
-# backgrounds. We don't set a background color (bad form — fights the
+# backgrounds. We don't set a background color (bad form, fights the
 # user's terminal config, leaks seams in scrollback, breaks tmux /
-# transparent terms). We avoid `\x1b[37m` (white fg, invisible on
-# white bg) and `\x1b[2m` (SGR dim, drops below readable contrast on
-# light bg). Cyan is the brand tone; grey 244 is the muted FYI tone.
+# transparent terms). Cyan is the brand tone and is mode-independent;
+# grey 244 (dark) is the muted FYI tone.
+#
+# The white-family colors (`BrightWhiteFg`, `OffWhiteFg`, `GreyFg`) are
+# mode-dependent: `applyPalette(colorMode)` resolves them at startup.
+# Dark defaults reproduce the prior behaviour; light inverts the family
+# (white -> black, off-white -> dark grey, dim white -> lighter dark
+# grey). Colourful colors (cyan/green/red/magenta) stay fixed in both
+# modes. See `applyPalette` / `applyColorOverrides` / `detectColorMode`.
 
 const
   CyanFg* = "\x1b[36m"
-  BrightWhiteFg* = "\x1b[97m"
   BoldOn* = "\x1b[1m"
   BlueFg* = "\x1b[34m"
-  GreyFg* = "\x1b[38;5;244m"
-  OffWhiteFg* = "\x1b[38;5;252m"
   Reset* = "\x1b[0m"
+
+var
+  BrightWhiteFg* = "\x1b[97m"      # assistant text + `:command` help tokens
+  OffWhiteFg* = "\x1b[38;5;252m"   # reserved high-tier near-white
+  GreyFg* = "\x1b[38;5;244m"       # subtle FYI tier (tool output, markers)
+
+type
+  ColorSpec* = tuple
+    brightWhite, offWhite, dimWhite: string
+
+var
+  DarkPalette*: ColorSpec = (
+    brightWhite: "\x1b[97m",        # bright white
+    offWhite:    "\x1b[38;5;252m",  # near-white
+    dimWhite:    "\x1b[38;5;244m",  # grey 244
+  )
+  LightPalette*: ColorSpec = (
+    # Invert the white family: white -> black, off-white -> dark grey,
+    # dim white -> a lighter dark grey. Colourful colors (cyan/green/red/
+    # magenta) are unchanged, handled at their call sites.
+    brightWhite: "\x1b[30m",        # black
+    offWhite:    "\x1b[38;5;238m",  # dark grey
+    dimWhite:    "\x1b[38;5;250m",  # lighter dark grey
+  )
+
+proc paletteFor*(mode: ColorMode): ColorSpec =
+  if mode == cmLight: LightPalette else: DarkPalette
+
+proc applyPalette*(mode: ColorMode) =
+  ## Set the white-family `var`s for `mode`. Call once at startup after
+  ## detection/config, before any colored output.
+  colorMode = mode
+  let p = paletteFor(mode)
+  BrightWhiteFg = p.brightWhite
+  OffWhiteFg = p.offWhite
+  GreyFg = p.dimWhite
+
+proc resetPalettes*() =
+  ## Restore `DarkPalette` / `LightPalette` to their built-in defaults
+  ## and re-resolve the active mode. Used by tests (which mutate the
+  # palettes via `applyColorOverrides`) to leave global state clean.
+  DarkPalette  = (brightWhite: "\x1b[97m", offWhite: "\x1b[38;5;252m",
+                  dimWhite: "\x1b[38;5;244m")
+  LightPalette = (brightWhite: "\x1b[30m", offWhite: "\x1b[38;5;238m",
+                  dimWhite: "\x1b[38;5;250m")
+  applyPalette(colorMode)
+
+proc applyColorOverrides*(dark, light: Table[string, string]) =
+  ## Apply user `[colors]` config overrides on top of the mode palettes.
+  ## `dark` keys override BOTH modes (a plain config key has no suffix);
+  ## `light` keys override light mode only and win for light mode. Keys
+  ## are `bright-white`, `off-white`, `dim-white`; values are ANSI escape
+  ## sequences. Unknown keys are ignored. Re-resolves the active mode last.
+  proc setSpec(t: var ColorSpec; key, val: string) =
+    case key
+    of "bright-white": t.brightWhite = val
+    of "off-white":    t.offWhite = val
+    of "dim-white":    t.dimWhite = val
+    else: discard
+  var dp = DarkPalette
+  var lp = LightPalette
+  for k, v in dark:
+    dp.setSpec(k, v)
+    lp.setSpec(k, v)
+  for k, v in light:
+    lp.setSpec(k, v)
+  DarkPalette = dp
+  LightPalette = lp
+  applyPalette(colorMode)
+
+proc detectColorMode*(force: ColorMode = cmDark): ColorMode =
+  ## Decide dark vs light. `force == cmLight` (i.e. `--light` was passed)
+  ## wins. Otherwise inspect `$COLORFGBG` (the "fg;bg" convention): the
+  ## background field > 7 means a light background, so we select light;
+  ## <= 7 or unknown stays dark (prior behaviour).
+  if force == cmLight: return cmLight
+  let env = getEnv("COLORFGBG")
+  if env.len > 0:
+    let parts = env.split(';')
+    if parts.len >= 2:
+      try:
+        if parts[^1].parseInt > 7: return cmLight
+      except ValueError: discard
+  cmDark
+
+proc splitColorOverrides*(flat: Table[string, string]):
+    tuple[both, light: Table[string, string]] =
+  ## Split a flat `[colors]` map into `(both, light)`. A key ending in
+  ## `-light` contributes to light mode only (suffix stripped); any other
+  ## key is a plain override that applies to both modes. This is the
+  ## cascade: plain keys set both, `-light` keys set light and win there.
+  result[0] = initTable[string, string]()
+  result[1] = initTable[string, string]()
+  for k, v in flat:
+    if k.endsWith("-light"):
+      result[1][k[0 ..< k.len - 6]] = v
+    else:
+      result[0][k] = v
 
 proc debugOut*(msg: string) =
   if not debugEnabled: return
