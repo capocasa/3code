@@ -14,7 +14,7 @@ current = "baseten.glm5"
 ; is Startpage with the web filter; the parser is tuned for Startpage's
 ; SERP, so swap only for a Startpage-compatible mirror.
 ; search-url = "https://www.startpage.com/do/search?cat=web&q="
-; notify = on  ; fire a desktop notification when a turn ends (off by default)
+; notify = off ; turn off the desktop notification that fires when a turn ends (on by default)
 ; bash_path = "C:\\tools\\msys64\\usr\\bin\\bash.exe"  ; Windows only: override bash detection
 
 [provider]

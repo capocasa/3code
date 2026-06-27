@@ -960,6 +960,8 @@ commands:
   :reasoning X      switch reasoning level (low / medium / high)
   :streaming        show streaming mode (on = live output, off = request/response)
   :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
+  :notify           show notify mode (on = desktop notification when a turn ends)
+  :notify on|off    toggle turn-end desktop notification
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
