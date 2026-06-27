@@ -25,7 +25,7 @@
 ##     ├── types        shared types + globals
 ##     └── minline      readline-style input
 
-import std/[json, locks, os, parseopt, strformat, strutils, terminal, times]
+import std/[json, locks, os, parseopt, strformat, strutils, tables, terminal, times]
 import std/exitprocs
 when defined(posix):
   import std/posix
@@ -53,6 +53,8 @@ proc usage() {.noreturn.} =
   -a, --all            (reserved) with -l, accepted but a no-op for now
   -g, --good           list known-good provider/variant combos and exit
   -x, --experimental   allow combos outside the known-good list
+      --light          force light color mode (auto-detected from $COLORFGBG)
+      --dark           force dark color mode (the default)
   -D, --debug          colored debug trace to stderr
   -v, --version        print version
   -h, --help           this message
@@ -182,6 +184,7 @@ proc main() =
   var model = ""
   var args: seq[string]
   var pending = ""  # flag awaiting a space-separated value
+  var colorForce: ColorMode = cmDark
   var resume = false
   var resumeId = ""
   var sessionOut = ""
@@ -196,6 +199,8 @@ proc main() =
       of "h", "help": usage()
       of "g", "good": printKnownGood(); return
       of "x", "experimental": experimentalEnabled = true
+      of "light": colorForce = cmLight
+      of "dark":  colorForce = cmDark  # explicit default; accepted for symmetry
       of "D", "debug": debugEnabled = true
       of "i", "interactive": forceInteractive = true
       of "m", "model":
@@ -232,6 +237,12 @@ proc main() =
     of cmdEnd: discard
   if pending != "":
     die("option --" & pending & " requires a value", ExitUsage)
+
+  # Resolve color mode and apply the palette before any colored output:
+  # update notices, onboarding, and the welcome screen all render below.
+  # Config overrides (the [colors] section) are layered on after the config
+  # file is loaded, but detection must run here so pre-config output is sane.
+  applyPalette(detectColorMode(colorForce))
 
   if listSessions:
     let paths = listSessionPathsForCwd(safeCwd())
@@ -313,7 +324,11 @@ proc main() =
     stderr.writeLine "session: " & sessionIdFromPath(session.savePath)
     return
 
-  (activeCurrent, activeProviders) = loadStateOrEmpty(configPath())
+  var activeColorKeys: Table[string, string]
+  (activeCurrent, activeProviders, activeColorKeys) = loadStateOrEmpty(configPath())
+  if activeColorKeys.len > 0:
+    let (both, lightOnly) = splitColorOverrides(activeColorKeys)
+    applyColorOverrides(both, lightOnly)
   let wantedProfile =
     if model != "": model
     elif resume and session.profileName != "": session.profileName

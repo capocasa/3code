@@ -47,7 +47,12 @@ const QuietTooLongMs* {.intdefine.} = 180_000
   ## provider, the turn is aborted. `posix.shutdown(fd)` from another
   ## thread does not reliably wake a blocked TLS `recv`, so the stream
   ## loop instead relies on `QuietRecvWakeMs`-bounded reads to wake up
-  ## and observe this threshold.
+  ## and observe this threshold. That bound is enforced twice now:
+  ## `poll()` bounds the wait-for-readable step, and `SO_RCVTIMEO` (set
+  ## by `setReadTimeoutMs`) hard-bounds the blocking `SSL_read`/`recv`
+  ## that follows, closing the race where `poll` returns readable for a
+  ## TLS control record (close_notify, ticket, renegotiation) and the
+  ## subsequent `SSL_read` then blocks forever immune to the shutdown wake.
 
 proc isInterrupted*(): bool {.gcsafe.}
 # ---------- Cancellation and stream hooks ----------
@@ -478,7 +483,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       cachedStreamConn = conn
       cachedStreamHostKey = hostKey
       cachedStreamFd = conn.getFd
-    conn.readTimeoutMs = QuietRecvWakeMs
+    conn.setReadTimeoutMs(QuietRecvWakeMs)
     try:
       conn.sendRequest("POST", pathQuery, host,
                        headers = [("Authorization", "Bearer " & key),
@@ -780,7 +785,7 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
       cachedStreamConn = conn
       cachedStreamHostKey = hostKey
       cachedStreamFd = conn.getFd
-    conn.readTimeoutMs = QuietRecvWakeMs
+    conn.setReadTimeoutMs(QuietRecvWakeMs)
     try:
       conn.sendRequest("POST", pathQuery, host,
                        headers = [("Authorization", "Bearer " & key),
