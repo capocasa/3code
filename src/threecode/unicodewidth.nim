@@ -8,6 +8,10 @@ import unicodedb/widths
 import unicodedb/properties
 
 proc runeCellWidth*(r: Rune): int {.inline.} =
+  # Malformed UTF-8 decodes to code points beyond U+10FFFF; unicodedb
+  # asserts on those, so bail out before it ever sees them.
+  if r.int < 0 or r.int > 0x10FFFF:
+    return 1
   let cat = unicodeCategory(r)
   if cat == ctgMn or cat == ctgMe:
     return 0

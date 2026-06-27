@@ -247,3 +247,9 @@ suite "util: visibleWidth unicode":
   test "mixed ANSI, CJK, combining":
     # red '中' + combining acute: 2 cells
     check visibleWidth("\x1b[31m中\u0301\x1b[0m") == 2
+
+  test "malformed UTF-8 does not crash":
+    # Binary file bytes (0xFF 0xFE 0xFD ...) decoded by runeAt yield
+    # code points beyond U+10FFFF, which unicodedb would otherwise
+    # assert on. Each such byte counts as one cell.
+    check visibleWidth("\xff\xfe\xfd") == 3
