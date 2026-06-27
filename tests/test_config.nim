@@ -72,3 +72,43 @@ suite "config: streaming toggle":
     writeConfigFile(tmp, "p.m", @[])
     let raw2 = readFile(tmp)
     check raw2.find("streaming") < 0  # on is the default — clean config
+
+suite "config: notify toggle":
+  var tmp = ""
+
+  setup:
+    tmp = getTempDir() / "3code-test-notify.ini"
+    notifyEnabled = true  # reset to default between tests
+
+  teardown:
+    removeFile(tmp)
+    notifyEnabled = true
+
+  test "notifyEnabled defaults on":
+    check notifyEnabled == true
+
+  test "notifyEnabled stays on when [settings] omits the key":
+    writeFile(tmp, "[settings]\ncurrent = \"p.m\"\n")
+    discard parseConfigFile(tmp)
+    check notifyEnabled == true
+
+  test "parseConfigFile sets notify off when [settings] notify = off":
+    writeFile(tmp, "[settings]\nnotify = \"off\"\n")
+    discard parseConfigFile(tmp)
+    check notifyEnabled == false
+
+  test "parseConfigFile keeps notify on when [settings] notify = on":
+    notifyEnabled = false
+    writeFile(tmp, "[settings]\nnotify = \"on\"\n")
+    discard parseConfigFile(tmp)
+    check notifyEnabled == true
+
+  test "writeConfigFile persists notify off and not when on":
+    notifyEnabled = false
+    writeConfigFile(tmp, "p.m", @[])
+    let raw = readFile(tmp)
+    check raw.find("notify = \"off\"") >= 0
+    notifyEnabled = true
+    writeConfigFile(tmp, "p.m", @[])
+    let raw2 = readFile(tmp)
+    check raw2.find("notify") < 0  # on is the default — clean config

@@ -14,8 +14,8 @@ import types, util, prompts, session, config, api, compact, display, minline,
   fatprompt
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
-                      ":reasoning", ":streaming", ":prompt", ":show", ":log",
-                      ":sessions", ":summarize",
+                      ":reasoning", ":streaming", ":notify", ":prompt", ":show",
+                      ":log", ":sessions", ":summarize",
                       ":q", ":quit", ":exit"]
 
 type WizardReadLineHook* = proc(prompt: string, hidden,
@@ -52,7 +52,7 @@ proc classifyCommand*(cmd: string): CommandKind =
   case name
   of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":prompt":
     ckSafeImmediate
-  of ":streaming":
+  of ":streaming", ":notify":
     if parts.len == 0 or (parts.len == 1 and parts[0] == "list"): ckSafeImmediate
     else: ckMutating
   of ":provider":
@@ -103,6 +103,10 @@ proc completionFor*(line: string): seq[string] =
       for r in ReasoningLevels: result.add r
     return
   if words[0] == ":streaming" and words.len == 2:
+    result.add "on"
+    result.add "off"
+    return
+  if words[0] == ":notify" and words.len == 2:
     result.add "on"
     result.add "off"
     return
@@ -669,6 +673,36 @@ proc cmdStreaming(arg: string) =
   else:
     errLn "  usage: :streaming [on|off]"
 
+proc cmdNotifyList() =
+  let mark = if notifyEnabled: "on" else: "off"
+  hintLn "  notify: ", mark,
+    "  (on = desktop notification when a turn ends, off = silent)", resetStyle
+
+proc cmdNotifySelect(target: string) =
+  case target.toLowerAscii
+  of "on":
+    notifyEnabled = true
+  of "off":
+    notifyEnabled = false
+  else:
+    errLn &"  unknown value: {target} (choose on or off)"
+    return
+  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  cmdNotifyList()
+
+proc cmdNotify(arg: string) =
+  let parts = arg.splitWhitespace()
+  case parts.len
+  of 0:
+    cmdNotifyList()
+  of 1:
+    if parts[0] == "list":
+      cmdNotifyList()
+    else:
+      cmdNotifySelect(parts[0])
+  else:
+    errLn "  usage: :notify [on|off]"
+
 proc nearestCommand(name: string): string =
   var bestDist = high(int)
   for c in CommandNames:
@@ -698,6 +732,8 @@ proc commandTitle(name, arg: string; ok: bool): string =
     if arg.len == 0: "reasoning" else: "profile"
   of ":streaming":
     "streaming"
+  of ":notify":
+    "notify"
   else:
     name.strip(chars = {':'})
 
@@ -950,6 +986,8 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       cmdReasoning(arg, prof)
     of ":streaming":
       cmdStreaming(arg)
+    of ":notify":
+      cmdNotify(arg)
     of ":prompt":
       cmdResponse buildSystemPrompt(prof)
     of ":show":

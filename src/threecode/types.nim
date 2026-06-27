@@ -16,6 +16,10 @@ var streamingEnabled*: bool = true
   ## the reliable fallback when a provider's SSE transport is flaky (empty
   ## 200 replies, ticker dying mid-response — the streamhttp TLS-read race).
   ## Toggled at runtime via `:streaming on/off`, persisted in `[settings]`.
+var notifyEnabled*: bool = true
+  ## When true, a native desktop notification fires when a turn ends.
+  ## Default on. Toggled at runtime via `:notify on/off`, persisted in
+  ## `[settings]`; an explicit `off` opts out.
 
 const
   ExitUsage* = 2

@@ -71,10 +71,6 @@ var activeSearchUrl*: string = DefaultSearchUrl
   ## Persisted back to disk only when it differs from `DefaultSearchUrl`,
   ## so users who never customize keep a clean config.
 
-var notifyEnabled*: bool = false
-  ## Resolved at config load. Set true by `[settings]` `notify = on`.
-  ## When true, a native desktop notification fires when a turn ends.
-
 var bashPathOverride*: string
   ## Windows-only. `[settings]` `bash_path = "..."` overrides MSYS2
   ## detection in `streamexec.resolveBash` for users with bash at a
@@ -269,11 +265,13 @@ proc writeConfigFile*(path: string, current: string,
   buf.add "current = " & quoteVal(current) & "\n"
   if activeSearchUrl != "" and activeSearchUrl != DefaultSearchUrl:
     buf.add "search-url = " & quoteVal(activeSearchUrl) & "\n"
-  # Persist the streaming toggle only when off — on is the default, so a
-  # user who never changes it keeps a clean config (same rationale as
-  # search-url). This also matches `streamingEnabled`'s default in types.nim.
+  # Persist the streaming/notify toggles only when off — on is the default,
+  # so a user who never changes them keeps a clean config (same rationale as
+  # search-url). This also matches the defaults in types.nim.
   if not streamingEnabled:
     buf.add "streaming = \"off\"\n"
+  if not notifyEnabled:
+    buf.add "notify = \"off\"\n"
   for pr in providers:
     buf.add "\n[provider]\n"
     buf.add "name = " & quoteVal(pr.name) & "\n"
