@@ -1205,7 +1205,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
     # Repaint the bar with accurate values now that `usage` is parsed
     # — the live values during streaming were rough estimates
     # (`slurped/4`). `pendingHint` carries the same numbers forward
-    # so the next user-submit's receipt repaints this row dim with
+    # so the next user-submit's receipt repaints this row (cyan) with
     # matching content.
     let assistantContent =
       if outcome.assistantMsg == nil: ""

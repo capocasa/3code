@@ -458,7 +458,7 @@ proc main() =
       # state, carrying the last response's usage so
       # the bar replaces what would otherwise be the last receipt.
       # `pendingHint` is primed so the next user submit converts this
-      # bar into the dim receipt for that response.
+      # bar into the receipt for that response.
       stdout.write "\n"
       let label = tokenLineLabel(lastUsage, window)
       let tw = try: terminalWidth() except CatchableError: 0
@@ -540,7 +540,7 @@ proc main() =
     messages.add %*{"role": "user", "content": buildUserMessage(messages, line)}
     refreshSystemPrompt(messages, prof)
     # User-submit transition: walk back to the previous turn's bar
-    # row, repaint it dim (the receipt — skipped on the first turn),
+    # row, repaint it as the receipt (cyan, skipped on the first turn),
     # echo the user's input as scroll-history content. Cursor lands
     # on the row directly after the last echo line, where callModel's
     # leading `\n` will set up the new spinner-footer scratch row.

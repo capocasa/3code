@@ -8,8 +8,9 @@
 ## - **Markdown rendering**: headers, fences, tables, bold/italic/code pass
 ##   through `printLine` which calls `applyInlineMd` and wraps at terminal
 ##   width. Tables buffer rows and render aligned box-drawing via `renderMdTable`.
-## - **Token receipt**: the dim receipt in scroll history after each turn
-##   (`renderTokenLine`). Live token-bar policy lives in `fatprompt.nim`.
+## - **Token receipt**: the cyan receipt in scroll history after each turn
+##   (`renderTokenLine`). All receipts route through `receiptBytes`. Live
+##   token-bar policy lives in `fatprompt.nim`.
 ## - **Tool banners**: per-kind glyph and path header for each tool call result.
 ## - **Session replay**: `replaySession` reprints a loaded session in the same
 ##   visual style as a live session, reusing the same render helpers.
@@ -26,7 +27,7 @@ import terminal as termui
 # backgrounds:
 #   hint = bold cyan        (primary "look here": labels, CTAs)
 #   note = plain cyan       (secondary: help text, validation, errors)
-#   subtle = grey 244       (FYI: skill markers, tool output, receipts)
+#   subtle = grey 244       (FYI: skill markers, tool output)
 # We avoid SGR `dim` (\x1b[2m) and `fgWhite`: both render below
 # readable contrast on light backgrounds.
 
@@ -685,7 +686,7 @@ proc toolTranscriptBytes*(act: Action; res: string; code: int; idx: int;
 proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
   ## Pure label string for the bar / receipt: "○N%  ↑input  ↻cached
   ## ↓completion  Ts" (no styling, no leading spaces — caller wraps
-  ## it in cyan-bright for the bar or dim for the receipt). Empty
+  ## it in cyan-bright for the bar or cyan for the receipt). Empty
   ## when there's no usage to report.
   if usage.totalTokens <= 0: return ""
   let ctx = contextLabel(usage.promptTokens, window)
@@ -700,6 +701,14 @@ proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
   if elapsedS >= 0: parts.add $elapsedS & "s"
   result = parts.join("  ")
 
+proc receiptBytes*(label: string): string =
+  ## The single canonical styling for a token receipt row (two-space
+  ## indent, cyan fg). Every receipt in the app, live or replay, goes
+  ## through here so there is exactly one color for receipts. Returns
+  ## "" for an empty label.
+  if label.len == 0: return ""
+  CyanFg & "  " & label & Reset
+
 proc tokenLineBytes*(usage: Usage, window: int, elapsedS = -1): string =
   ## Pure-byte form of the **token receipt** row used by the *replay*
   ## path (saved sessions). The live path uses `emitUserSubmit` /
@@ -708,7 +717,7 @@ proc tokenLineBytes*(usage: Usage, window: int, elapsedS = -1): string =
   ## Returns "" when there's no usage.
   let label = tokenLineLabel(usage, window, elapsedS)
   if label.len == 0: return ""
-  result = CyanFg & "  " & label & Reset & "\n" & Reset
+  result = receiptBytes(label) & "\n" & Reset
 
 proc renderTokenLine*(usage: Usage, window: int, elapsedS = -1) =
   ## "○N%  ↑Nk  ↻Nk  ↓Nk  Ts": context glyph, fresh, cached, generated,

@@ -129,9 +129,7 @@ proc pendingReceiptBytes(): string =
     return ""
   let label = tokenLineLabel(pendingHint.usage, pendingHint.window,
                              pendingHint.elapsed)
-  if label.len == 0:
-    return ""
-  GreyFg & "  " & label & Reset
+  receiptBytes(label)
 
 proc finishTranscriptItem(bytes: var string) =
   ## A transcript item owns its attached receipt and its following separator.

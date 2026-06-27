@@ -35,9 +35,9 @@ template pendingHint*(): untyped = fatPromptState.footer.pendingHint
   ##   1. After each `callModel` iteration, used to repaint the **token
   ##      bar** with accurate values (replacing the live rough ones).
   ##   2. On user submit (next turn), the saved values become the
-  ##      **token receipt** — the dim repaint of the previous bar's
-  ##      row, leaving the receipt in scroll history while a fresh
-  ##      bar (at zeros) takes its place at the new bottom.
+  ##      **token receipt** — the repaint of the previous bar's row
+  ##      in the same cyan tone, leaving the receipt in scroll history
+  ##      while a fresh bar (at zeros) takes its place at the new bottom.
   ## See `## Token UI` in `CLAUDE.md` for the full lifecycle.
 
 template currentBarLabel*(): untyped = fatPromptState.footer.barLabel
@@ -1716,7 +1716,7 @@ proc emitUserSubmit*(line: string) =
     else: ""
   var bytes = ""
   if receiptLabel.len > 0:
-    bytes.add receiptBarBytes(receiptLabel)
+    bytes.add receiptBytes(receiptLabel)
     bytes.add "\r\n\r\n"
   bytes.add formatUserPromptItem(line)
   bytes.add "\r\n"
