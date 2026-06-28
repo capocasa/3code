@@ -37,15 +37,19 @@ const
   DefaultBashTimeout* = 120   ## seconds; used when the model omits `timeout`
   MaxBashTimeout* = 600       ## seconds; hard ceiling regardless of model request
 
+proc maxBashTimeoutSecs*(): int =
+  ## The current ceiling a `timeout` request is clamped to. Reads
+  ## `THREECODE_MAX_TIMEOUT` at call time so the ceiling can be raised
+  ## at runtime without a rebuild; defaults to `MaxBashTimeout`.
+  try: getEnv("THREECODE_MAX_TIMEOUT").parseInt
+  except CatchableError: MaxBashTimeout
+
 proc bashTimeoutSecs*(req: int): int =
   ## Resolve the run cap (seconds) from a model-requested value.
-  ## Missing/zero/negative → default; any value above `MaxBashTimeout`
-  ## is clamped to it. Read at call time so `THREECODE_MAX_TIMEOUT` can
-  ## raise the ceiling at runtime without a rebuild.
-  let cap =
-    try: getEnv("THREECODE_MAX_TIMEOUT").parseInt
-    except CatchableError: MaxBashTimeout
+  ## Missing/zero/negative → default; any value above the ceiling
+  ## is clamped to it.
   let v = if req > 0: req else: DefaultBashTimeout
+  let cap = maxBashTimeoutSecs()
   if v > cap: cap else: v
 
 type
