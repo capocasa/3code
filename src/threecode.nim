@@ -460,11 +460,7 @@ proc main() =
     stdout.write "\n"
     stdout.styledWriteLine styleDim, &"● resumed {sessionIdFromPath(session.savePath)}", resetStyle
     if restoredDraft.len > 0:
-      # Surface that an unsent prompt was recovered, and prefill the editor so
-      # it reappears ready to edit or submit. `prefillText` is consumed on the
-      # next read; it's harmless if a `prompt != ""` branch runs a turn first.
       editor.prefillText = restoredDraft
-      stdout.styledWriteLine styleDim, "● restored unsent prompt draft", resetStyle
     let window = contextWindowFor(prof)
     let lastUsage = replaySessionTail(messages, session.toolLog,
                                       window, prof.family)
@@ -491,11 +487,7 @@ proc main() =
       if handleBufferedAfterTurn(): return
   else:
     if restoredDraft.len > 0:
-      # A pending draft from a previous, killed-before-first-turn run in this
-      # directory was recovered: prefill the editor and surface it, mirroring
-      # the resume restore hint.
       editor.prefillText = restoredDraft
-      stdout.styledWriteLine styleDim, "● restored unsent prompt draft", resetStyle
     paintInitialPrompt(prof)
     if prompt != "":
       messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
