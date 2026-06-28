@@ -124,6 +124,20 @@ suite "actions: computeDiff edge cases":
     check "LINE2" in d
     check "LINE4" in d
 
+  test "binary before is not diffed":
+    # Regression: cat-ing or sed -i on an ELF binary leaked raw bytes into
+    # the model prompt via the auto-generated mutation diff.
+    let before = "ELF\x00\x01\x02\x03binary\x00gunk\n" & "garbage\0\0\n"
+    let d = computeDiff(before, "", "tools/hanging_server")
+    check "suppressed" in d
+    check '\0' notin d
+
+  test "binary after is not diffed":
+    let after = "\x00\x01\x02\x03\x00\x01\x02\x03\x00\x01\x02\x03\x00\x01\x02\x03"
+    let d = computeDiff("", after, "bin/thing")
+    check "suppressed" in d
+    check '\0' notin d
+
 suite "runAction write returns new contents":
   test "third tuple value is the file body, not a diff":
     let path = getTempDir() / "write_display_test.txt"

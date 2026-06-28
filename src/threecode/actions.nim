@@ -253,6 +253,13 @@ proc computeDiff*(before, after, label: string): string =
   ## Output is consumed by the green/red painter in display.nim and by
   ## tests that assert changed text appears in the result.
   if before == after: return ""
+  # Refuse to diff binary content: emitting raw bytes into the model prompt
+  # wastes tokens and corrupts the transcript (e.g. `cat`-ing an ELF binary,
+  # or a sed -i on a compiled artifact). The `read` tool already refuses
+  # binaries; this covers the shell-mutation and write/patch paths that
+  # arrive here with whatever the file held.
+  if isBinaryContent(before) or isBinaryContent(after):
+    return &"--- a/{label}\n+++ b/{label}\n[binary content changed: diff suppressed]"
   let a = before.splitLines(keepEol = false)
   let b = after.splitLines(keepEol = false)
   let ops = lcsOps(a, b)
