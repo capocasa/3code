@@ -1,0 +1,64 @@
+{
+  "version": 2,
+  "packages": {
+    "nim": {
+      "version": "2.2.10",
+      "vcsRevision": "9fe2137fa2f3f66cf5a44f357d461829ac9e20c4",
+      "url": "https://github.com/nim-lang/Nim.git",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "17ec440fdb89f8903db29a17898af590087d2b64"
+      }
+    },
+    "streamhttp": {
+      "version": "0.3.1",
+      "vcsRevision": "7fdc6afed529d38c991d4898dc518d47d50d3597",
+      "url": "https://github.com/capocasa/streamhttp",
+      "downloadMethod": "git",
+      "dependencies": [
+        "nim"
+      ],
+      "checksums": {
+        "sha1": "84d22c80f34febba08f9f367d15a07ee15b6231e"
+      }
+    },
+    "unicodedb": {
+      "version": "0.13.2",
+      "vcsRevision": "66f2458710dc641dd4640368f9483c8a0ec70561",
+      "url": "https://github.com/nitely/nim-unicodedb",
+      "downloadMethod": "git",
+      "dependencies": [
+        "nim"
+      ],
+      "checksums": {
+        "sha1": "739102d885d99bb4571b1955f5f12aee423c935b"
+      }
+    },
+    "ttty": {
+      "version": "0.3.0",
+      "vcsRevision": "11ae65d86043f84924f35c5070d0c03a816696c2",
+      "url": "",
+      "downloadMethod": "git",
+      "dependencies": [
+        "nim"
+      ],
+      "checksums": {
+        "sha1": "c13581348aad6f6f96efd9afc47e7b0b05d774ea"
+      }
+    },
+    "tinotify": {
+      "version": "0.1.1",
+      "vcsRevision": "",
+      "url": "https://github.com/capocasa/tinotify",
+      "downloadMethod": "git",
+      "dependencies": [
+        "nim"
+      ],
+      "checksums": {
+        "sha1": "aff350425fdb32fdd7e552b7c34bc7023c5aacdc"
+      }
+    }
+  },
+  "tasks": {}
+}
