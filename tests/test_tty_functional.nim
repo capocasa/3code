@@ -429,6 +429,48 @@ suite "terminal visual contract":
       SimpleVisualTestFrames,
       root / "simple_visual_test_actual.txt")
 
+  test "api retry notice is a harness line in scrollback, not stderr noise":
+    # Regression: the retry notice used to be `stderr.writeLine` from the
+    # transport layer (api.nim). That bypassed fat-prompt preservation and
+    # landed on the prompt row, scrolling it up. It must instead commit as
+    # a harness line through the same transcript path as `interrupted by
+    # user`: non-bold magenta, no indent, one scrollback line, fat prompt
+    # preserved, and NOT persisted to the `.3log` (it is controller feedback,
+    # not a conversation message).
+    if getEnv("THREECODE_TTY_ONLY").len > 0 and
+        getEnv("THREECODE_TTY_ONLY") != "api_retry_notice":
+      check true
+    else:
+      let root = newFixture("api_retry_notice")
+      writeConfiguredProvider(root)
+      # First response is a 429 (retryable as 'rate', 1s backoff at level 0);
+      # second succeeds. `delayMs: 0` keeps the failure path snappy.
+      writeStubResponses(root, %*[
+        {"failure": "429", "delayMs": 0,
+          "body": "{\"error\":\"rate limit\"}"},
+        {"role": "assistant",
+          "content": "reply after retry",
+          "contentChunks": ["reply after retry"],
+          "usage": {"promptTokens": 10, "completionTokens": 3,
+                     "totalTokens": 13, "cachedTokens": 0}}
+      ])
+      let tty = startStub(root)
+      defer: tty.close()
+
+      tty.expect "❯"
+      tty.send "go"
+      tty.send "\n"
+      # The retry notice is visible in scrollback as ordinary history.
+      tty.expectInHistory "3code: api 429; retry 2/8 in 1s"
+      # ...and the retried reply reaches scrollback after the backoff.
+      tty.expectInHistory "reply after retry"
+      # The prompt is live again afterward (the footer was preserved, not
+      # scrolled away by the raw stderr write).
+      tty.expect "❯"
+      # The notice is controller feedback, not a conversation message, so it
+      # must never reach the persisted session transcript.
+      check "api 429" notin root.sessionLogText()
+
   test "submitting a prompt survives the working directory being removed":
     # Regression: the process's cwd can be deleted out from under it (tmpfs
     # reaper, an editor dropping a workspace dir, etc.). Nim's getCurrentDir

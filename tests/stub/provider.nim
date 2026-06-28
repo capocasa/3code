@@ -270,7 +270,7 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
         elif category == "rate": min(1 shl rateRetryLevel, 90)
         else: min(1 shl serverRetryLevel, 16)
       hookStopSpinner()
-      stderr.writeLine &"3code: {errMsg}; retry {attempt + 1}/{StubMaxAttempts} in {backoff}s"
+      hookRetryNotice &"3code: {errMsg}; retry {attempt + 1}/{StubMaxAttempts} in {backoff}s"
       var waitMs = backoff * 1000
       while waitMs > 0:
         if isInterrupted():
