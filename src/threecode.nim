@@ -315,7 +315,7 @@ proc main() =
     messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
     refreshSystemPrompt(messages, prof)
     try:
-      runTurns(prof, messages, session)
+      discard runTurns(prof, messages, session)
     except ApiError as e:
       saveSession(session, messages)
       die(e.msg, ExitApi)
@@ -445,7 +445,7 @@ proc main() =
       editor.renderRow = 0
       editor.echoRows = 0
       clearDraft(session)
-      runTurnsInteractive(prof, messages, session)
+      discard runTurnsInteractive(prof, messages, session)
       return handleBufferedAfterTurn()
     false
 
@@ -487,7 +487,7 @@ proc main() =
       messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
       refreshSystemPrompt(messages, prof)
       clearDraft(session)
-      runTurnsInteractive(prof, messages, session)
+      discard runTurnsInteractive(prof, messages, session)
       if handleBufferedAfterTurn(): return
   else:
     if restoredDraft.len > 0:
@@ -501,7 +501,7 @@ proc main() =
       messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
       refreshSystemPrompt(messages, prof)
       clearDraft(session)
-      runTurnsInteractive(prof, messages, session)
+      discard runTurnsInteractive(prof, messages, session)
       if handleBufferedAfterTurn(): return
   while true:
     var done = false
@@ -569,8 +569,9 @@ proc main() =
     # clean exit doesn't restore text the user already sent.
     clearDraft(session)
     let turnStart = epochTime()
-    runTurnsInteractive(prof, messages, session)
-    if notifyEnabled and epochTime() - turnStart >= NotifyMinSeconds:
+    let interrupted = runTurnsInteractive(prof, messages, session)
+    if not interrupted and notifyEnabled and
+        epochTime() - turnStart >= NotifyMinSeconds:
       notifyTurnFinished(messages)
     if handleBufferedAfterTurn(): break
 

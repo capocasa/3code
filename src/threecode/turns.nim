@@ -226,7 +226,11 @@ proc commitTranscriptItem(formatBody: proc(); restoreEditor = true;
     restoreEditor,
     transcriptOwnsSpacing = true)
 
-proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
+proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
+  ## Returns true if the turn was interrupted by the user (Ctrl-C / ESC).
+  ## Callers use this to skip end-of-turn side effects like desktop
+  ## notifications: the user was at the keyboard to cancel, so alerting
+  ## them that the turn finished would be noise.
   installApiStreamHooks()
   clearInterrupted()
   # `beginTurn` hides the terminal cursor for the duration of the
@@ -255,7 +259,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
     saveSession(session, messages)
     if isInterrupted():
       onTurnInterrupted()
-      return
+      return true
     let window = contextWindowFor(p)
     case decideContextAction(usage.promptTokens, window, messages.len)
     of caSummarize:
@@ -455,7 +459,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
       saveSession(session, messages)
       if isInterrupted():
         onTurnInterrupted()
-        return
+        return true
       if queuedUser:
         endTurn(repaintPrompt = false)
         turnEnded = true
@@ -477,19 +481,22 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session) =
     if queuedBeforeFinalRender or hasQueuedAutosend():
       stopTurnInputForFinalRender()
       turnEnded = true
-      return
+      return false
     if streamedLive:
       stopTurnInputForFinalRender()
     endTurnAfterTranscriptAppend()
     turnEnded = true
     break
+  result = false
 
-proc runTurnsInteractive*(p: Profile, messages: var JsonNode, session: var Session) =
+proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
+    session: var Session): bool =
+  ## Returns true if the turn was interrupted by the user. See `runTurns`.
   if not gateExperimental(p):
     explainExperimentalGate(p)
-    return
+    return false
   try:
-    runTurns(p, messages, session)
+    return runTurns(p, messages, session)
   except ApiError as e:
     saveSession(session, messages)
     # User-triggered interrupts are not urgent — they pressed the
@@ -497,8 +504,10 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode, session: var Sessi
     # errors the user needs to read.
     if e.msg.startsWith("interrupted by user"):
       onTurnInterrupted()
+      return true
     else:
       stdout.styledWriteLine fgMagenta, "  ", e.msg, resetStyle
+      return false
   except OSError as e:
     # The working directory was removed out from under us (e.g. the
     # user `rm -rf`'d it in another shell). There is nothing useful
