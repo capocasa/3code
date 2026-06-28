@@ -649,7 +649,7 @@ proc runActionStreaming*(act: Action, cache: ReadCache = nil,
     body.add outClip
     if not outClip.endsWith("\n"): body.add "\n"
   if code == 124:
-    body.add &"[timed out after {cap}s — raise `timeout` or run in the background]"
+    body.add &"[timed out after {cap}s. This is your own setting, not a system limit: pass timeout={maxBashTimeoutSecs()} (or any value up to that) and rerun. Or background the work.]"
   if cache != nil and code == 0:
     if readPath != "":
       let p = resolvePath(readPath)
