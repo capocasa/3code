@@ -1310,6 +1310,15 @@ proc apiNoUsage*(elapsed: int) =
   writeTranscriptWithFatPrompt:
     hint &"  · {elapsed}s", resetStyle, "\n"
 
+proc apiRetryNotice*(msg: string) =
+  ## Controller-side retry notice committed as a harness line: non-bold
+  ## magenta, no indent, no bullet. Same scrollback contract as
+  ## `interrupted by user`: one ordinary line, fat prompt preserved, not
+  ## persisted to the `.3log` (it is not a conversation message).
+  writeTranscriptWithFatPrompt:
+    stdout.styledWrite(fgMagenta, msg, resetStyle)
+    stdout.write "\r\n"
+
 proc installApiStreamHooks*() =
   setApiStreamHooks(ApiStreamHooks(
     beforeCall: apiBeforeCall,
@@ -1325,7 +1334,8 @@ proc installApiStreamHooks*() =
     trimTrailingContent: apiTrimTrailingContent,
     afterLiveContent: apiAfterLiveContent,
     finalUsage: apiFinalUsage,
-    noUsage: apiNoUsage))
+    noUsage: apiNoUsage,
+    retryNotice: apiRetryNotice))
 proc inputThreadProc() {.thread.} =
   ## Runs readline for the UI lifetime. Completed text is queued for the
   ## controller; during active turns the same editor keeps accepting buffered

@@ -185,18 +185,28 @@ tool viewport setup, receipt rendering, or prompt height changes.
 ## Harness Messages
 
 Harness messages are output from the controller itself, not from the model
-or a tool. Examples: `interrupted by user`, cancel confirmations, and other
-controller-side status. They are plain text: no bullet, no indent, no dim
-styling. They must not compete with the fat prompt for output lines; the fat
-prompt owns its rows. A harness message occupies exactly one ordinary
+or a tool. Examples: `interrupted by user`, cancel confirmations, api retry
+notices, and other controller-side status. They are plain text: no bullet,
+no indent. They must not compete with the fat prompt for output lines; the
+fat prompt owns its rows. A harness message occupies exactly one ordinary
 scrollback line and then returns control to the prompt.
 
-Because harness messages are plain text with no marker, they are visually
-distinct from transcript items (which always carry a leading bullet). This is
-the only visual cue separating them from model or tool output. An interrupt
+Neutral harness messages (interrupts, cancels) are unstyled plain text.
+Error/warning-class harness messages (api retry notices, transport errors)
+use non-bold magenta to flag the user without competing with transcript
+content. In both cases there is no leading bullet and no indentation.
+
+Because harness messages carry no leading marker, they are visually distinct
+from transcript items (which always carry a leading bullet). An interrupt
 has exactly one response procedure regardless of how many triggers can fire
 (Ctrl-C, ESC, other). That procedure emits the harness message once, clears
 the interrupt flag, and returns control to the prompt.
+
+Api retry notices come from the transport layer (`api.nim`) but are reported
+through a controller-registered hook (`retryNotice`), never written directly
+to stderr. They land in scrollback as harness items and are not persisted to
+the `.3log` session transcript, like `:commands`: they are controller
+feedback, not conversation messages.
 
 ## Exit Contract
 

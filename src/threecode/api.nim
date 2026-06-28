@@ -106,6 +106,7 @@ type
     finalUsage*: proc(usage: Usage; window, elapsed: int;
                       assistantContent: string; streamedLive: bool) {.closure.}
     noUsage*: proc(elapsed: int) {.closure.}
+    retryNotice*: proc(msg: string) {.closure.}
 
 var apiStreamHooks*: ApiStreamHooks
 
@@ -167,6 +168,9 @@ proc hookFinalUsage(usage: Usage; window, elapsed: int;
 
 proc hookNoUsage(elapsed: int) =
   if apiStreamHooks.noUsage != nil: apiStreamHooks.noUsage(elapsed)
+
+proc hookRetryNotice(msg: string) =
+  if apiStreamHooks.retryNotice != nil: apiStreamHooks.retryNotice(msg)
 
 
 proc parseUsage*(u: JsonNode): Usage =
@@ -1192,7 +1196,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       else:
         min(1 shl serverRetryLevel, 16)
     hookStopSpinner()
-    stderr.writeLine &"3code: {errMsg}; retry {attempt + 1}/{MaxAttempts} in {backoff}s"
+    hookRetryNotice &"3code: {errMsg}; retry {attempt + 1}/{MaxAttempts} in {backoff}s"
     block wait:
       var remaining = backoff * 1000
       while remaining > 0:
