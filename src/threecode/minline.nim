@@ -275,50 +275,101 @@ proc expectedSeqLen(lead: int): int =
   elif lead < 0xF8: 4
   else: 0
 
+type LineSpan = tuple[start, stop: int]
+
+proc lineSpans(text: string; promptW, contW, width: int): seq[LineSpan] =
+  ## Visual line byte spans under greedy word-wrap: break at whitespace when
+  ## possible, char-wrap words longer than the width. ``stop`` excludes the
+  ## trailing break spaces and the terminating newline; the renderer re-adds
+  ## the newline/continuation. ``\n`` always starts a new span.
+  result.add (0, 0)
+  if width <= 0:
+    result[0].stop = text.len
+    return
+  var col = promptW
+  var i = 0
+  var lastBreak = -1   # byte offset of the last space available as a break
+  var contentEnd = 0   # byte offset just past the last non-space on this line
+  while i < text.len:
+    let rl = runeLenSafe(text, i)
+    if text[i] == '\n':
+      result[result.high].stop = contentEnd
+      result.add (i + rl, i + rl)
+      col = contW
+      lastBreak = -1
+      contentEnd = i + rl
+      i += rl
+      continue
+    let rw = runeCellWidth(text.runeAt(i))
+    if col + rw > width:
+      if text[i] == ' ':
+        # A space that overflows is itself the break.
+        result[result.high].stop = contentEnd
+        var s = i
+        while s < text.len and text[s] == ' ':
+          s += runeLenSafe(text, s)
+        result.add (s, s)
+        i = s
+        col = contW
+        lastBreak = -1
+        contentEnd = s
+        continue
+      if lastBreak >= 0 and lastBreak < i:
+        # Word-wrap: the line ends at the last non-space content; the next
+        # line starts after the space run beginning at lastBreak.
+        result[result.high].stop = contentEnd
+        var s = lastBreak
+        while s < text.len and text[s] == ' ':
+          s += runeLenSafe(text, s)
+        result.add (s, s)
+        i = s
+        col = contW
+        lastBreak = -1
+        contentEnd = s
+        continue
+      # Char-wrap an over-long word.
+      result[result.high].stop = contentEnd
+      result.add (i, i)
+      col = contW
+      lastBreak = -1
+      contentEnd = i
+      continue
+    if text[i] == ' ':
+      lastBreak = i
+    else:
+      contentEnd = i + rl
+    inc col, rw
+    i += rl
+  result[result.high].stop = contentEnd
+
 proc cursorVisual*(text: string, position, promptW, contW, width: int): (int, int) =
   ## (visualRow, visualCol) of the cursor when ``text[0 ..< position]``
   ## has been rendered into a ``width``-wide grid with ``promptW`` cells
   ## reserved before the first logical line and ``contW`` cells reserved
   ## before each subsequent logical line.
   if width <= 0: return (0, 0)
+  let p = min(max(position, 0), text.len)
   var row = 0
-  var col = promptW
-  var i = 0
-  while i < position and i < text.len:
-    let c = text[i]
-    if c == '\n':
-      inc row
-      col = contW
-      inc i
-    else:
-      let w = runeCellWidth(text.runeAt(i))
-      if col + w > width:
-        inc row
-        col = contW
-      inc col, w
-      i += runeLenSafe(text, i)
-  (row, col)
+  for sp in lineSpans(text, promptW, contW, width):
+    if p <= sp.start and not (row == 0 and p == 0):
+      # Cursor sits in the gap between spans (on a break or newline); it
+      # belongs at the start of this span.
+      return (row, if row == 0: promptW else: contW)
+    if p <= sp.stop:
+      var col = if row == 0: promptW else: contW
+      var i = sp.start
+      while i < p:
+        inc col, runeCellWidth(text.runeAt(i))
+        i += runeLenSafe(text, i)
+      return (row, col)
+    inc row
+  let lastRow = max(0, row - 1)
+  (lastRow, if lastRow == 0: promptW else: contW)
 
 proc totalRows*(text: string, promptW, contW, width: int): int =
   ## Number of visual rows the rendered buffer occupies, always ``>= 1``.
   if width <= 0: return 1
-  var row = 0
-  var col = promptW
-  var i = 0
-  while i < text.len:
-    let c = text[i]
-    if c == '\n':
-      inc row
-      col = contW
-      inc i
-    else:
-      let w = runeCellWidth(text.runeAt(i))
-      if col + w > width:
-        inc row
-        col = contW
-      inc col, w
-      i += runeLenSafe(text, i)
-  row + 1
+  lineSpans(text, promptW, contW, width).len
 
 proc renderBuffer*(text, prompt, cont: string, width: int): string =
   ## Bytes that paint the buffer. Visual rows are joined with ``"\r\n"``
@@ -328,26 +379,11 @@ proc renderBuffer*(text, prompt, cont: string, width: int): string =
   let promptW = visualCols(prompt)
   let contW = visualCols(cont)
   if width <= 0: return prompt & text
-  var col = promptW
   result = prompt
-  var i = 0
-  while i < text.len:
-    let c = text[i]
-    if c == '\n':
-      result.add "\r\n"
-      result.add cont
-      col = contW
-      inc i
-    else:
-      let rl = runeLenSafe(text, i)
-      let w = runeCellWidth(text.runeAt(i))
-      if col + w > width:
-        result.add "\r\n"
-        result.add cont
-        col = contW
-      result.add text[i ..< i + rl]
-      inc col, w
-      i += rl
+  for li, sp in lineSpans(text, promptW, contW, width):
+    if li > 0:
+      result.add "\r\n" & cont
+    result.add text[sp.start ..< sp.stop]
 
 # History
 #

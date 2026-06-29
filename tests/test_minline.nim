@@ -105,6 +105,31 @@ suite "minline pure helpers":
     let bytes = renderBuffer("ab\ncd", "P ", "..", 80)
     check bytes == "P ab\r\n..cd"
 
+  test "renderBuffer: wraps at whitespace, not mid-word":
+    # width 7, prompt 2, contW 2 -> 5 data cells per row. "alpha beta"
+    # would char-wrap as "alpha"/" beta"; word-wrap keeps "beta" whole.
+    let bytes = renderBuffer("alpha beta", "P ", "  ", 7)
+    check bytes == "P alpha\r\n  beta"
+
+  test "totalRows: word-wrap keeps words intact":
+    # width 7, prompt 2 -> 5 data cells. "aa bb cc" -> "aa bb"/" cc" (2 rows)
+    # rather than "aa bb"/" cc" mid-word; "aaa bbb" -> "aaa"/" bbb" (2 rows).
+    check totalRows("aa bb cc", 2, 2, 7) == 2
+    check totalRows("aaa bbb", 2, 2, 7) == 2
+
+  test "cursorVisual: lands after the word that wrapped":
+    # width 7, prompt 2 -> 5 data cells. "alpha beta" wraps after "alpha";
+    # cursor at end (position 10) is on row 1, after contW(2) + "beta"(4) = 6.
+    let (r, c) = cursorVisual("alpha beta", 10, 2, 2, 7)
+    check r == 1
+    check c == 6
+
+  test "renderBuffer: over-long word still char-wraps":
+    # width 5, prompt 2 -> 3 data cells. "abcdef" has no space; must
+    # char-wrap as "abc"/"def" rather than overflow.
+    let bytes = renderBuffer("abcdef", "P ", "  ", 5)
+    check bytes == "P abc\r\n  def"
+
   test "editor prompt marker uses same default style as typed text":
     let d = newDriver()
     d.terminal.write renderBuffer("x", EditorPromptBytes, "  ", 80)
