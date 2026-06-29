@@ -11,6 +11,13 @@ requires "ttty >= 0.2.0"
 requires "unicodedb >= 0.13.0"
 requires "https://github.com/capocasa/tinotify >= 0.1.0"
 
+task test, "Run the test suite (parallel compile + run)":
+  # Overrides nimble's default sequential test runner, which recompiles the
+  # full src tree once per test file. tools/test.sh compiles all tests in
+  # parallel and builds the ./3code binary the spawn-based tests need.
+  # For filters/flags (e.g. a single test, -j N) call tools/test.sh directly.
+  exec "tools/test.sh"
+
 task docs, "Build HTML manual from docs/manual.md":
   # nim md2html regenerates nimdoc.out.css from nimdoc's built-in default
   # (light theme + visible theme switcher). Our curated dark theme lives

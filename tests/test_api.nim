@@ -1,5 +1,6 @@
 import std/[json, os, osproc, strutils, unittest]
 import threecode/[api, prompts, types]
+import stub_helpers
 
 suite "api request shaping":
   test "z.ai glm sets tool_stream (streamhttp TLS truncation fixed)":
@@ -101,7 +102,7 @@ proc queueAutosend() {.thread, gcsafe.} =
 
 var t: Thread[void]
 createThread(t, queueAutosend)
-runTurns(profile, messages, session)
+discard runTurns(profile, messages, session)
 joinThread(t)
 
 acquire inputStateLock
@@ -113,7 +114,7 @@ doAssert messages[2]{"role"}.getStr == "assistant"
 doAssert messages[3]{"role"}.getStr == "tool"
 doAssert "SHOULD_NOT_BE_CALLED" notin $messages
 """)
-    let compileCmd = "nim c -d:ssl -d:providerStub --threads:on --path:src --nimcache:" &
+    let compileCmd = "nim c -d:ssl -d:providerStub --threads:on --path:src " & nimbleDepFlags() & " --nimcache:" &
       cacheDir.quoteShell & " -o:" & outPath.quoteShell & " " &
       probePath.quoteShell
     let (compileOut, compileCode) = execCmdEx(compileCmd)
@@ -177,7 +178,7 @@ proc queueAutosend() {.thread, gcsafe.} =
 
 var t: Thread[void]
 createThread(t, queueAutosend)
-runTurns(profile, messages, session)
+discard runTurns(profile, messages, session)
 joinThread(t)
 
 acquire inputStateLock
@@ -191,7 +192,7 @@ doAssert "SHOULD_RUN" in messages[3]{"content"}.getStr
 doAssert "skipped" notin messages[3]{"content"}.getStr
 doAssert "SHOULD_NOT_BE_CALLED" notin $messages
 """)
-    let compileCmd = "nim c -d:ssl -d:providerStub --threads:on --path:src --nimcache:" &
+    let compileCmd = "nim c -d:ssl -d:providerStub --threads:on --path:src " & nimbleDepFlags() & " --nimcache:" &
       cacheDir.quoteShell & " -o:" & outPath.quoteShell & " " &
       probePath.quoteShell
     let (compileOut, compileCode) = execCmdEx(compileCmd)
@@ -261,7 +262,7 @@ proc queueAutosend() {.thread, gcsafe.} =
 
 var t: Thread[void]
 createThread(t, queueAutosend)
-runTurns(profile, messages, session)
+discard runTurns(profile, messages, session)
 joinThread(t)
 
 acquire inputStateLock
@@ -277,7 +278,7 @@ doAssert "second-tool" in messages[4]{"content"}.getStr
 doAssert "skipped" notin messages[4]{"content"}.getStr
 doAssert "SHOULD_NOT_BE_CALLED" notin $messages
 """)
-    let compileCmd = "nim c -d:ssl -d:providerStub --threads:on --path:src --nimcache:" &
+    let compileCmd = "nim c -d:ssl -d:providerStub --threads:on --path:src " & nimbleDepFlags() & " --nimcache:" &
       cacheDir.quoteShell & " -o:" & outPath.quoteShell & " " &
       probePath.quoteShell
     let (compileOut, compileCode) = execCmdEx(compileCmd)
@@ -326,7 +327,7 @@ doAssert stubHttpStatus(parseStubFailure("502")) == 502
 doAssert stubHttpStatus(parseStubFailure("503")) == 503
 doAssert stubHttpStatus(parseStubFailure("504")) == 504
 """)
-    let compileCmd = "nim c -d:ssl -d:providerStub --path:src --nimcache:" &
+    let compileCmd = "nim c -d:ssl -d:providerStub --path:src " & nimbleDepFlags() & " --nimcache:" &
       cacheDir.quoteShell & " -o:" & outPath.quoteShell & " " &
       probePath.quoteShell
     let (compileOut, compileCode) = execCmdEx(compileCmd)

@@ -1,4 +1,5 @@
 /3code
+build/
 tests/test_*
 !tests/test_*.nim
 !tests/test_http_nonstream.nims
