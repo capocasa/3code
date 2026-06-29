@@ -36,15 +36,15 @@ proc emitTestFrameEvent() =
 proc onTurnInterrupted*() =
   ## Single response to a user-triggered interrupt (Ctrl-C, ESC, or any
   ## other trigger wired to `requestTurnInterrupt`). Emits the notice to
-  ## scrollback as a plain harness line and clears the interrupt flag so
-  ## the editor resumes normally on the next input.
+  ## scrollback in error magenta and clears the interrupt flag so the
+  ## editor resumes normally on the next input.
   ##
   ## This is the only place that renders an interrupt. Whether the
   ## interrupt was noticed mid-stream, after a tool call, or propagated up
   ## as an `ApiError` once the stream had already torn itself down, the
   ## response is identical.
   writeTranscriptWithFatPrompt:
-    stdout.writeLine "interrupted by user"
+    stdout.styledWriteLine(fgMagenta, "interrupted by user", resetStyle)
   clearInterrupted()
 
 proc stubToolCallResult(stub: JsonNode; onLine: proc(line: string) = nil):
@@ -499,9 +499,6 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
     return runTurns(p, messages, session)
   except ApiError as e:
     saveSession(session, messages)
-    # User-triggered interrupts are not urgent — they pressed the
-    # button. Render as dim grey hint, reserve magenta for actual
-    # errors the user needs to read.
     if e.msg.startsWith("interrupted by user"):
       onTurnInterrupted()
       return true
