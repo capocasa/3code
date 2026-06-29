@@ -1,6 +1,6 @@
 import std/[json, os, osproc, strutils, times, unicode, unittest]
 import posix except SocketHandle
-import tty_expect
+import tty_expect, testcompile
 
 const VisualOutputRoot = "tests" / "output" / "tty"
 const SimpleVisualTestFrames = "tests" / "fixtures" / "tty" / "simple.txt"
@@ -10,17 +10,7 @@ const OtherToolsVisualTestFrames = "tests" / "fixtures" / "tty" / "other_tools.t
 const ResizeStreamFrames = "tests" / "fixtures" / "tty" / "resize_stream_frames.txt"
 const HarnessCommandFrames = "tests" / "fixtures" / "tty" / "harness_commands.txt"
 
-proc ensureStubBinary(): string =
-  let pid = $getCurrentProcessId()
-  result = getTempDir() / ("3code_tty_stub_" & pid)
-  if fileExists(result):
-    removeFile(result)
-  let cacheDir = getTempDir() / ("3code_tty_stub_cache_" & pid)
-  createDir(cacheDir)
-  let cmd = "nim c -d:ssl -d:providerStub -d:QuietThresholdMs=1000 --threads:on --path:src --nimcache:" &
-    cacheDir.quoteShell & " -o:" & result.quoteShell & " src/threecode.nim"
-  let (outp, code) = execCmdEx(cmd)
-  doAssert code == 0, outp
+template ensureStubBinary(): string = compileStubBinary($getCurrentProcessId())
 
 proc newFixture(name: string): string =
   result = getCurrentDir() / VisualOutputRoot / (name & "_" & $getCurrentProcessId())
