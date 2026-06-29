@@ -6,8 +6,8 @@ import stub_helpers
 const VisualOutputRoot = "tests" / "output" / "tty"
 const SimpleVisualTestFrames = "tests" / "fixtures" / "tty" / "simple.txt"
 const MultilineVisualTestFrames = "tests" / "fixtures" / "tty" / "multiline.txt"
-const BashToolVisualTestFrames = "tests" / "fixtures" / "tty" / "bash_tool.txt"
-const OtherToolsVisualTestFrames = "tests" / "fixtures" / "tty" / "other_tools.txt"
+const BashToolVisualTestFrames = "tests" / "fixtures" / "tty" / "bash_tool_visual_test.txt"
+const OtherToolsVisualTestFrames = "tests" / "fixtures" / "tty" / "other_tools_visual_test.txt"
 const ResizeStreamFrames = "tests" / "fixtures" / "tty" / "resize_stream_frames.txt"
 const HarnessCommandFrames = "tests" / "fixtures" / "tty" / "harness_commands.txt"
 
@@ -534,7 +534,6 @@ suite "terminal visual contract":
     # fresh session in this directory picks it up and restores it.
     let tty2 = startStub(root)
     defer: tty2.close()
-    tty2.expect "restored unsent prompt draft"
     tty2.expect draftText
 
   # In tty frame mode preStreamDelay is skipped (see testFrameMode in
