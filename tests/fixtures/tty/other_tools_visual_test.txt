@@ -1,0 +1,140 @@
+===== 562 =====
+
+  ╭─╮
+   ─┤  3code v0.4.1   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run other tool checks
+===== 633 =====
+
+  ╭─╮
+   ─┤  3code v0.4.1   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run other tool checks
+
+⣿ ○0% ↓6 0s
+❯
+===== 919 =====
+
+  ╭─╮
+   ─┤  3code v0.4.1   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run other tool checks
+● Exercising non-bash tools.
+
+r notes.txt
+  read-one
+  read-two
+  read-three
+
+w notes.txt
+  --- /tmp/notes.txt
+  +++ /tmp/notes.txt
+  +new notes
+
+p --- /tmp/notes.txt
+  +++ /tmp/notes.txt
+  -new notes
+  +patched notes
+
+p --- /tmp/applied.txt
+  +++ /tmp/applied.txt
+  +hello
+
+⌕ terminal rendering
+  1. Terminal Rendering Guide
+  https://example.test/rendering
+  Useful result snippet.
+
+⇊ https://example.test/rendering
+  Fetched page title
+  Fetched page body line
+
+≡ ──────────
+  ✓ inspect
+  ~ adjust
+  ○ verify
+
+✕ unknown tool: not_a_tool
+
+═════════════════════════════════════════
+↻ fresh context prompt
+  ○2%  ↑300  ↓44  0s
+
+⣿ ○0% ↓4 0s
+❯
+===== 811 =====
+
+  ╭─╮
+   ─┤  3code v0.4.1   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run other tool checks
+● Exercising non-bash tools.
+
+r notes.txt
+  read-one
+  read-two
+  read-three
+
+w notes.txt
+  --- /tmp/notes.txt
+  +++ /tmp/notes.txt
+  +new notes
+
+p --- /tmp/notes.txt
+  +++ /tmp/notes.txt
+  -new notes
+  +patched notes
+
+p --- /tmp/applied.txt
+  +++ /tmp/applied.txt
+  +hello
+
+⌕ terminal rendering
+  1. Terminal Rendering Guide
+  https://example.test/rendering
+  Useful result snippet.
+
+⇊ https://example.test/rendering
+  Fetched page title
+  Fetched page body line
+
+≡ ──────────
+  ✓ inspect
+  ~ adjust
+  ○ verify
+
+✕ unknown tool: not_a_tool
+
+═════════════════════════════════════════
+↻ fresh context prompt
+  ○2%  ↑300  ↓44  0s
+
+● Clear completed.
+  ○0%  ↑90  ↓12  0s
+
+  ○0%
+❯
