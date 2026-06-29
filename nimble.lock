@@ -12,15 +12,15 @@
       }
     },
     "streamhttp": {
-      "version": "0.3.1",
-      "vcsRevision": "7fdc6afed529d38c991d4898dc518d47d50d3597",
+      "version": "0.3.2",
+      "vcsRevision": "92dd7db706994537ee49ad54d3e4353a136e263d",
       "url": "https://github.com/capocasa/streamhttp",
       "downloadMethod": "git",
       "dependencies": [
         "nim"
       ],
       "checksums": {
-        "sha1": "84d22c80f34febba08f9f367d15a07ee15b6231e"
+        "sha1": "8dfb66ee30feeb4544fb03ad71361cd06428eadb"
       }
     },
     "unicodedb": {
