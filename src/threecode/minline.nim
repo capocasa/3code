@@ -275,9 +275,9 @@ proc expectedSeqLen(lead: int): int =
   elif lead < 0xF8: 4
   else: 0
 
-type LineSpan = tuple[start, stop: int]
+type LineSpan* = tuple[start, stop: int]
 
-proc lineSpans(text: string; promptW, contW, width: int): seq[LineSpan] =
+proc lineSpans*(text: string; promptW, contW, width: int): seq[LineSpan] =
   ## Visual line byte spans under greedy word-wrap: break at whitespace when
   ## possible, char-wrap words longer than the width. ``stop`` excludes the
   ## trailing break spaces and the terminating newline; the renderer re-adds

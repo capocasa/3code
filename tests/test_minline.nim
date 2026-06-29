@@ -130,6 +130,39 @@ suite "minline pure helpers":
     let bytes = renderBuffer("abcdef", "P ", "  ", 5)
     check bytes == "P abc\r\n  def"
 
+  test "totalRows: word-wrap break counts for whitespace edge cases":
+    # These inputs previously disagreed between the editor geometry
+    # (lineSpans) and the transcript display wrap (rendering.wrapPlain):
+    # trailing spaces, overflow spaces, and multi-space runs were counted
+    # differently. Pin the geometry row counts that the display must match.
+    check totalRows("hello world", 0, 0, 5) == 2      # overflow space is the break
+    check totalRows("hello world foo bar baz", 0, 0, 5) == 5
+    check totalRows("a b c d e f g h", 0, 0, 5) == 3
+    check totalRows("multiple   spaces   here", 0, 0, 5) == 5   # multi-space run
+    check totalRows("trailing space ", 0, 0, 5) == 4  # trailing space after wrap
+    check totalRows(" leading space", 0, 0, 5) == 4   # leading space at row 0
+    check totalRows("x y z  w", 0, 0, 5) == 2         # double space before last word
+    check totalRows("a        b", 0, 0, 5) == 2       # long space run
+
+  test "totalRows: char-wrap fallback for words longer than width":
+    # No break opportunity: the whole buffer is one over-long word that
+    # char-wraps every `width` cells.
+    check totalRows("supercalifragilisticexpialidocious word", 0, 0, 5) == 8
+    check totalRows("verylongwordwithnobreaks", 0, 0, 5) == 5
+    check totalRows("supercalifragilisticexpialidocious word", 0, 0, 2) == 19
+
+  test "renderBuffer: overflow space is the break, not kept on next row":
+    # width 5, prompt 0: "hello" fills the row, the space overflows and is
+    # itself the break, so "world" starts clean on row 1 (no leading space).
+    let bytes = renderBuffer("hello world", "", "", 5)
+    check bytes == "hello\r\nworld"
+
+  test "renderBuffer: multi-space run collapses at the break":
+    # width 5: "a" then 8 spaces then "b". The spaces overflow and form one
+    # break run; "b" lands on row 1 with no leading spaces.
+    let bytes = renderBuffer("a        b", "", "", 5)
+    check bytes == "a\r\nb"
+
   test "editor prompt marker uses same default style as typed text":
     let d = newDriver()
     d.terminal.write renderBuffer("x", EditorPromptBytes, "  ", 80)

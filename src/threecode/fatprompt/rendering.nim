@@ -9,6 +9,7 @@
 import std/[strformat, strutils, terminal, unicode]
 import ../types, ../util
 import ../unicodewidth
+import ../minline
 
 type
   PromptMode* = enum
@@ -187,57 +188,14 @@ proc splitLogicalLines(s: string): seq[string] =
   if result.len == 0:
     result.add ""
 
-proc wrapPlain(line: string, width: int): seq[string] =
-  ## Word-wrap on whitespace, preserving runs of spaces; char-wraps words
-  ## longer than the width.
-  let w = max(1, width)
-  if line.len == 0:
-    return @[""]
-  # Build the line greedily; when it overflows, break at the last space
-  # that still fits, emitting everything before it as a row. Bytes past the
-  # break are re-examined from scratch on the next row.
-  var start = 0
-  while start < line.len:
-    var endIdx = start
-    var cells = 0
-    var lastSpace = -1
-    var lastSpaceCells = 0
-    while endIdx < line.len:
-      let rl = max(1, runeLenAt(line, endIdx))
-      let c = runeCellWidth(line.runeAt(endIdx))
-      if cells + c > w:
-        break
-      if line[endIdx] == ' ':
-        lastSpace = endIdx + rl
-        lastSpaceCells = cells + c
-      inc cells, c
-      endIdx += rl
-    if endIdx >= line.len:
-      # Rest fits on one row.
-      result.add line[start ..< line.len]
-      break
-    if lastSpace > start:
-      # Break after the last space that fit; trailing spaces on the row
-      # are kept, the break itself consumes one space run start.
-      result.add line[start ..< lastSpace]
-      start = lastSpace
-      # Skip exactly the spaces at the new row start (they were the break).
-      while start < line.len and line[start] == ' ': inc start
-    else:
-      # No space to break at: the word starting at `start` is too long.
-      # Emit w cells worth of it, then continue.
-      var wordEnd = start
-      var wordCells = 0
-      while wordEnd < line.len:
-        let rl = max(1, runeLenAt(line, wordEnd))
-        let c = runeCellWidth(line.runeAt(wordEnd))
-        if wordCells + c > w and wordEnd > start: break
-        inc wordCells, c
-        wordEnd += rl
-      result.add line[start ..< wordEnd]
-      start = wordEnd
-  if result.len == 0:
-    result.add ""
+proc wrapPlain*(line: string, width: int): seq[string] =
+  ## Word-wrap on whitespace; char-wrap words longer than the width. Shares
+  ## the single wrap algorithm in ``minline.lineSpans`` (called with no
+  ## prompt/continuation indent) so the transcript display wraps identically
+  ## to the editor's cursor geometry; the two can never drift and re-trigger
+  ## the typed-character-then-erased echo bug.
+  for sp in lineSpans(line, 0, 0, max(1, width)):
+    result.add line[sp.start ..< sp.stop]
 
 proc cellWidth(s: string): int =
   var i = 0
