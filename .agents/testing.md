@@ -46,6 +46,17 @@ Run the full suite:
 nimble test
 ```
 
+`nimble test` runs `tools/test.sh`, which compiles all tests in parallel
+(roughly N-core faster than nimble's default sequential runner), builds the
+`./3code` binary the spawn-based tests need, then runs the tests in order.
+For fast iteration on one test, skip the suite and invoke the script
+with a name filter:
+
+```sh
+tools/test.sh test_util        # compile + run a single test
+tools/test.sh --compile         # compile everything, don't run
+```
+
 Visual artifacts are written under:
 
 ```text
