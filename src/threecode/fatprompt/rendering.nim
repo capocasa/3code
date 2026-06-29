@@ -188,19 +188,56 @@ proc splitLogicalLines(s: string): seq[string] =
     result.add ""
 
 proc wrapPlain(line: string, width: int): seq[string] =
+  ## Word-wrap on whitespace, preserving runs of spaces; char-wraps words
+  ## longer than the width.
   let w = max(1, width)
   if line.len == 0:
     return @[""]
-  var i = 0
-  while i < line.len:
-    let start = i
+  # Build the line greedily; when it overflows, break at the last space
+  # that still fits, emitting everything before it as a row. Bytes past the
+  # break are re-examined from scratch on the next row.
+  var start = 0
+  while start < line.len:
+    var endIdx = start
     var cells = 0
-    while i < line.len and cells + runeCellWidth(line.runeAt(i)) <= w:
-      cells += runeCellWidth(line.runeAt(i))
-      i += max(1, runeLenAt(line, i))
-    if i == start:  # single rune wider than w: emit it anyway
-      i += max(1, runeLenAt(line, i))
-    result.add line[start ..< i]
+    var lastSpace = -1
+    var lastSpaceCells = 0
+    while endIdx < line.len:
+      let rl = max(1, runeLenAt(line, endIdx))
+      let c = runeCellWidth(line.runeAt(endIdx))
+      if cells + c > w:
+        break
+      if line[endIdx] == ' ':
+        lastSpace = endIdx + rl
+        lastSpaceCells = cells + c
+      inc cells, c
+      endIdx += rl
+    if endIdx >= line.len:
+      # Rest fits on one row.
+      result.add line[start ..< line.len]
+      break
+    if lastSpace > start:
+      # Break after the last space that fit; trailing spaces on the row
+      # are kept, the break itself consumes one space run start.
+      result.add line[start ..< lastSpace]
+      start = lastSpace
+      # Skip exactly the spaces at the new row start (they were the break).
+      while start < line.len and line[start] == ' ': inc start
+    else:
+      # No space to break at: the word starting at `start` is too long.
+      # Emit w cells worth of it, then continue.
+      var wordEnd = start
+      var wordCells = 0
+      while wordEnd < line.len:
+        let rl = max(1, runeLenAt(line, wordEnd))
+        let c = runeCellWidth(line.runeAt(wordEnd))
+        if wordCells + c > w and wordEnd > start: break
+        inc wordCells, c
+        wordEnd += rl
+      result.add line[start ..< wordEnd]
+      start = wordEnd
+  if result.len == 0:
+    result.add ""
 
 proc cellWidth(s: string): int =
   var i = 0
@@ -487,17 +524,10 @@ proc addUserEcho(result: var string, line: string; trailingNewline = true) =
     if termW <= 0:
       result.add l
     else:
-      var col = 2
-      var i = 0
-      while i < l.len:
-        let rl = max(1, runeLenAt(l, i))
-        let w = runeCellWidth(l.runeAt(i))
-        if col + w > termW:
-          result.add "\r\n  "
-          col = 2
-        result.add l[i ..< i + rl]
-        inc col, w
-        i += rl
+      let chunks = wrapPlain(l, max(1, termW - 2))
+      result.add chunks[0]
+      for chunk in chunks[1 ..< chunks.len]:
+        result.add "\r\n  " & chunk
     if trailingNewline or idx < lines.high:
       result.add "\r\n"
 
