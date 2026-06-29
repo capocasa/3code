@@ -4,20 +4,9 @@
 ## only inserted a newline and never sent. The input thread and the
 ## controller disagreed about whether a turn was still active, so a queued
 ## idle submit was never consumed.
-import std/[json, os, osproc, strutils, unittest]
+import std/[json, os, unittest]
 import tty_expect
-
-proc ensureStubBinary(): string =
-  let pid = $getCurrentProcessId()
-  result = getTempDir() / ("3code_tty_stub_" & pid)
-  if fileExists(result):
-    removeFile(result)
-  let cacheDir = getTempDir() / ("3code_tty_stub_cache_" & pid)
-  createDir(cacheDir)
-  let cmd = "nim c -d:ssl -d:providerStub -d:QuietThresholdMs=1000 --threads:on --path:src --nimcache:" &
-    cacheDir.quoteShell & " -o:" & result.quoteShell & " src/threecode.nim"
-  let (outp, code) = execCmdEx(cmd)
-  doAssert code == 0, outp
+import stub_helpers
 
 proc newFixture(name: string): string =
   result = getCurrentDir() / "tests/output/tty" / (name & "_" & $getCurrentProcessId())
