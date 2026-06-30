@@ -470,8 +470,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     discard stopBarTick()
     stopSpinner(clearLiveFooter = false)
     if streamedLive:
-      if queuedBeforeFinalRender:
-        commitPendingReceiptAfterStream(restoreEditor = false)
+      commitPendingReceiptAfterStream(restoreEditor = not queuedBeforeFinalRender)
     else:
       if not queuedBeforeFinalRender:
         stopTurnInputForFinalRender()
