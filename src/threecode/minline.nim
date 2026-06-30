@@ -350,7 +350,8 @@ proc cursorVisual*(text: string, position, promptW, contW, width: int): (int, in
   if width <= 0: return (0, 0)
   let p = min(max(position, 0), text.len)
   var row = 0
-  for sp in lineSpans(text, promptW, contW, width):
+  let allSpans = lineSpans(text, promptW, contW, width)
+  for si, sp in allSpans:
     if p <= sp.start and not (row == 0 and p == 0):
       # Cursor sits in the gap between spans (on a break or newline); it
       # belongs at the start of this span.
@@ -359,6 +360,17 @@ proc cursorVisual*(text: string, position, promptW, contW, width: int): (int, in
       var col = if row == 0: promptW else: contW
       var i = sp.start
       while i < p:
+        inc col, runeCellWidth(text.runeAt(i))
+        i += runeLenSafe(text, i)
+      return (row, col)
+    # p is past sp.stop — check if it's in trailing spaces of this span
+    # before the next span starts (or past the end of text). Trailing
+    # spaces are excluded from rendered spans; position the cursor at the
+    # end of the rendered content for this row.
+    if si + 1 >= allSpans.len or p < allSpans[si + 1].start:
+      var col = if row == 0: promptW else: contW
+      var i = sp.start
+      while i < sp.stop:
         inc col, runeCellWidth(text.runeAt(i))
         i += runeLenSafe(text, i)
       return (row, col)
