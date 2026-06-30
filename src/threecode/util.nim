@@ -677,6 +677,10 @@ proc replaceFirst*(s, needle, repl: string): (string, bool) =
 proc isBinaryContent*(s: string): bool =
   ## Scan the first 512 bytes for binary indicators: any NUL byte, or
   ## >5% non-printable control chars (excluding \t \n \r).
+  ## On Windows the heuristic is disabled: process output encoding
+  ## varies too widely for a byte-level scan to be reliable.
+  when defined(windows):
+    return false
   let scan = min(512, s.len)
   if scan == 0: return false
   var bad = 0
