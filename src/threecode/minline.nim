@@ -365,12 +365,13 @@ proc cursorVisual*(text: string, position, promptW, contW, width: int): (int, in
       return (row, col)
     # p is past sp.stop — check if it's in trailing spaces of this span
     # before the next span starts (or past the end of text). Trailing
-    # spaces are excluded from rendered spans; position the cursor at the
-    # end of the rendered content for this row.
+    # spaces are excluded from rendered spans; walk every character from
+    # span start through p so the cursor column accounts for unrendered
+    # characters (e.g. a trailing space the user just typed).
     if si + 1 >= allSpans.len or p < allSpans[si + 1].start:
       var col = if row == 0: promptW else: contW
       var i = sp.start
-      while i < sp.stop:
+      while i < p:
         inc col, runeCellWidth(text.runeAt(i))
         i += runeLenSafe(text, i)
       return (row, col)
