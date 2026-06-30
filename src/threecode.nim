@@ -174,13 +174,15 @@ proc main() =
   setupTlsEnv()
   cleanupStaleBinaries()
   refuseRoot()
-  ensureBash()
   # Internal flag for the detached background worker. Run silently and
   # exit before any other startup work (skill extraction, config load).
   let cl = commandLineParams()
   if cl.len == 1 and cl[0] == "--self-update-check":
     selfUpdateCheck()
     return
+
+  # ── CLI parse: run before any dependency checks so -h / -v / --list
+  #    work on Windows even when bash is not installed yet ──
   var model = ""
   var args: seq[string]
   var pending = ""  # flag awaiting a space-separated value
@@ -261,10 +263,12 @@ proc main() =
     let flag = if resume: "--resume" else: "--interactive"
     die("unexpected argument with " & flag & ": " & args.join(" "), ExitUsage)
 
-  # All syntax validation and fast-exit dispatches are done. Only now do we
-  # run the side-effecting startup work (global interrupt hook, skill
-  # extraction disk I/O, background auto-update fork) — a usage error must
-  # bail before any of it, and a session load must not pay for it twice.
+  # ── All syntax validation and fast-exit dispatches are done; only now
+  #    do we gate on bash (Windows) and run the side-effecting startup work
+  #    (global interrupt hook, skill extraction disk I/O, background
+  #    auto-update fork). A usage error must bail before any of it, and a
+  #    session load must not pay for it twice. ──
+  ensureBash()
   installInterruptHook()
   materializeBuiltinSkills()
   showUpdateNoticeMaybe()
