@@ -1,4 +1,4 @@
-name: Linux 
+name: Linux
 
 on:
   push:
@@ -6,16 +6,6 @@ on:
     tags: ['[0-9]+.[0-9]+.[0-9]+']
   pull_request:
   workflow_dispatch:
-    inputs:
-      target:
-        description: 'Build only this platform (default: all)'
-        type: choice
-        options:
-          - all
-          - macos
-          - linux
-          - windows
-        default: all
 
 jobs:
   build:
@@ -26,29 +16,11 @@ jobs:
           - os: ubuntu-22.04
             artifact: 3code-linux-amd64
             ext: tar.gz
-            platform: linux
           - os: ubuntu-22.04-arm
             artifact: 3code-linux-arm64
             ext: tar.gz
-            platform: linux
-          - os: macos-latest
-            artifact: 3code-macos-universal
-            ext: tar.gz
-            platform: macos
-          - os: windows-latest
-            artifact: 3code-windows-amd64
-            ext: zip
-            platform: windows
 
     runs-on: ${{ matrix.os }}
-
-    # git-bash on every runner. The Windows default (pwsh) does not
-    # propagate non-zero exit codes from native exes like nimble, so a
-    # failed build/test is swallowed and the job runs on into packaging,
-    # which then fails for a misleading reason (missing artifact).
-    defaults:
-      run:
-        shell: bash
 
     steps:
       - uses: actions/checkout@v4
@@ -75,165 +47,18 @@ jobs:
       - name: Build
         run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
 
-      - name: Build x86_64 and create universal binary (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          mv 3code 3code-arm64
-          rm -rf ~/.cache/nim/threecode_r
-          nim c -d:release ${{ env.BUILD_FLAGS }} --passC:"-arch x86_64" --passL:"-arch x86_64" --cpu:amd64 -o:3code-x86_64 src/threecode.nim
-          lipo -create 3code-arm64 3code-x86_64 -output 3code
-          file 3code
-
       - name: Run tests
         run: nimble test
         timeout-minutes: 20
 
-      - name: Package (Linux)
-        if: runner.os == 'Linux'
+      - name: Package
         run: |
           mkdir -p ${{ matrix.artifact }}
           cp 3code ${{ matrix.artifact }}/
           cp README.md LICENSE ${{ matrix.artifact }}/
           tar czf ${{ matrix.artifact }}.${{ matrix.ext }} ${{ matrix.artifact }}
-
-      - name: Package (macOS) — bundle OpenSSL dylibs alongside binary
-        if: runner.os == 'macOS'
-        run: |
-          mkdir -p ${{ matrix.artifact }}
-          cp 3code ${{ matrix.artifact }}/
-          cp README.md LICENSE ${{ matrix.artifact }}/
-          # Stock macOS ships LibreSSL at /usr/lib/libssl.dylib which trips
-          # TLS handshakes against most modern endpoints. Bundle Homebrew
-          # OpenSSL 3 dylibs and rewrite install names so they're loaded
-          # via @loader_path. Main binary picks them up via DYLD_LIBRARY_PATH
-          # set in main() before any TLS use.
-          OPENSSL_PREFIX="$(brew --prefix openssl@3)"
-          cp "${OPENSSL_PREFIX}/lib/libssl.3.dylib"    ${{ matrix.artifact }}/
-          cp "${OPENSSL_PREFIX}/lib/libcrypto.3.dylib" ${{ matrix.artifact }}/
-          chmod +w ${{ matrix.artifact }}/libssl.3.dylib ${{ matrix.artifact }}/libcrypto.3.dylib
-          install_name_tool -id @loader_path/libcrypto.3.dylib ${{ matrix.artifact }}/libcrypto.3.dylib
-          install_name_tool -id @loader_path/libssl.3.dylib    ${{ matrix.artifact }}/libssl.3.dylib
-          install_name_tool -change "${OPENSSL_PREFIX}/lib/libcrypto.3.dylib" \
-            @loader_path/libcrypto.3.dylib ${{ matrix.artifact }}/libssl.3.dylib
-          # Aliases so dlopen("libssl.dylib") / dlopen("libcrypto.dylib") hit too
-          ln -sf libssl.3.dylib    ${{ matrix.artifact }}/libssl.dylib
-          ln -sf libcrypto.3.dylib ${{ matrix.artifact }}/libcrypto.dylib
-          # CA bundle: Homebrew's OpenSSL has its OPENSSLDIR baked to a
-          # build-time path that won't exist on user systems. Ship the
-          # Mozilla bundle (canonical curl.se source) and point
-          # SSL_CERT_FILE at it from main().
-          curl -fsSL https://curl.se/ca/cacert.pem -o ${{ matrix.artifact }}/cacert.pem
-          tar czf ${{ matrix.artifact }}.${{ matrix.ext }} ${{ matrix.artifact }}
-
-      - name: Package (Windows) — bundle OpenSSL DLLs alongside .exe
-        if: matrix.ext == 'zip'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path ${{ matrix.artifact }} | Out-Null
-          Copy-Item 3code.exe ${{ matrix.artifact }}/
-          Copy-Item README.md, LICENSE ${{ matrix.artifact }}/
-          # Stock Windows ships no OpenSSL. Nim's std/net dlopens libssl /
-          # libcrypto by hardcoded names; without these DLLs alongside
-          # 3code.exe, any TLS code path dies with
-          #   could not load: (libcrypto-1_1-x64|libeay64).dll
-          # Use the canonical Nim Windows DLL bundle from nim-lang.org;
-          # it also ships a cacert.pem that we point SSL_CERT_FILE at.
-          Invoke-WebRequest -Uri https://nim-lang.org/download/dlls.zip -OutFile dlls.zip
-          Expand-Archive -Path dlls.zip -DestinationPath dlls
-          Copy-Item dlls/libssl-1_1-x64.dll, dlls/libcrypto-1_1-x64.dll, dlls/cacert.pem ${{ matrix.artifact }}/
-          Compress-Archive -Path ${{ matrix.artifact }} -DestinationPath ${{ matrix.artifact }}.${{ matrix.ext }}
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}.${{ matrix.ext }}
-
-  pages:
-    # `needs: build` alone blocks publishing whenever any matrix leg fails
-    # (e.g. Windows DLL packaging) or hangs (a stuck tty test), freezing the
-    # install script's artifact supply for every platform. `always()` lets this
-    # job run regardless; download-artifact then only pulls artifacts from
-    # successful legs, and the assemble step tolerates whichever are missing.
-    needs: build
-    # Deploy on every push to main, and on a manual workflow_dispatch run
-    # that targets main (e.g. a macOS-only rebuild for a quick publish).
-    # `always()` means a failed/hung matrix leg elsewhere doesn't block this;
-    # download-artifact only pulls successful artifacts anyway.
-    if: |
-      always() && github.ref == 'refs/heads/main' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: 3code-*
-          path: dl
-          merge-multiple: true
-
-      - name: Assemble site
-        run: |
-          mkdir -p site/main
-          # download-artifact only pulls artifacts from jobs that succeeded,
-          # so a failed matrix leg (e.g. Windows DLL packaging) simply leaves
-          # its file absent here. Tolerate that with `|| true` and build the
-          # index from whatever actually landed.
-          cp dl/3code-linux-amd64.tar.gz     site/main/ 2>/dev/null || true
-          cp dl/3code-linux-arm64.tar.gz     site/main/ 2>/dev/null || true
-          cp dl/3code-macos-universal.tar.gz site/main/ 2>/dev/null || true
-          cp dl/3code-windows-amd64.zip      site/main/ 2>/dev/null || true
-          cat > site/index.html <<EOF
-          <!doctype html><meta charset=utf-8><title>3code main builds</title>
-          <h1>3code main builds</h1>
-          <p>Per-commit builds from <code>main</code> (commit ${GITHUB_SHA}).</p>
-          <ul>
-          EOF
-          for f in site/main/*; do
-            [ -f "$f" ] || continue
-            b=$(basename "$f")
-            echo "            <li><a href=\"main/$b\">$b</a></li>" >> site/index.html
-          done
-          cat >> site/index.html <<EOF
-          </ul>
-          EOF
-
-      - uses: actions/configure-pages@v5
-
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
-      - id: deploy
-        uses: actions/deploy-pages@v4
-
-  release:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          merge-multiple: true
-
-      - name: Create release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create ${{ github.ref_name }} \
-            --repo ${{ github.repository }} \
-            --title "${{ github.ref_name }}" \
-            --generate-notes \
-            3code-linux-amd64.tar.gz \
-            3code-linux-arm64.tar.gz \
-            3code-macos-universal.tar.gz \
-            3code-windows-amd64.zip

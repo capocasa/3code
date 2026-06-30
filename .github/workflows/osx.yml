@@ -14,6 +14,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
     paths:
       - '.github/workflows/osx.yml'
       - 'src/**'
@@ -84,51 +85,3 @@ jobs:
         with:
           name: 3code-macos-universal
           path: 3code-macos-universal.tar.gz
-
-  pages:
-    # Deploy on a manual workflow_dispatch (fast macOS-only publish for
-    # live testing). On push, the full Release workflow owns the site.
-    needs: build
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: 3code-macos-universal
-          path: dl
-
-      - name: Assemble site
-        run: |
-          mkdir -p site/main
-          cp dl/3code-macos-universal.tar.gz site/main/ 2>/dev/null || true
-          cat > site/index.html <<EOF
-          <!doctype html><meta charset=utf-8><title>3code main builds</title>
-          <h1>3code main builds</h1>
-          <p>Per-commit builds from <code>main</code> (commit ${GITHUB_SHA}).</p>
-          <ul>
-          EOF
-          for f in site/main/*; do
-            [ -f "$f" ] || continue
-            b=$(basename "$f")
-            echo "            <li><a href=\"main/$b\">$b</a></li>" >> site/index.html
-          done
-          cat >> site/index.html <<EOF
-          </ul>
-          EOF
-
-      - uses: actions/configure-pages@v5
-
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
-      - id: deploy
-        uses: actions/deploy-pages@v4

@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to create release from'
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Wait for platform builds and download artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sha="${{ github.sha }}"
+          tag="${{ github.ref_name }}"
+          mkdir -p dl
+
+          for workflow in Linux OSX Windows; do
+            echo "--- $workflow ---"
+            for i in $(seq 1 60); do
+              # Fail fast: if this workflow already failed for this tag+commit,
+              # stop immediately instead of waiting for the timeout.
+              failed=$(gh run list --workflow "$workflow" \
+                --status failure --event push --limit 20 \
+                --json databaseId,headBranch,headSha \
+                -q ".[] | select(.headSha==\"$sha\" and .headBranch==\"$tag\") | .databaseId")
+              if [ -n "$failed" ]; then
+                echo "  $workflow run $failed FAILED — aborting" >&2
+                exit 1
+              fi
+
+              # Match on commit SHA (unique) + headBranch (tag name for tag-
+              # triggered runs per GitHub REST API docs). Double match
+              # disambiguates from a branch-push run on the same commit.
+              run_id=$(gh run list --workflow "$workflow" \
+                --status success --event push --limit 20 \
+                --json databaseId,headBranch,headSha \
+                -q ".[] | select(.headSha==\"$sha\" and .headBranch==\"$tag\") | .databaseId")
+              if [ -n "$run_id" ]; then
+                echo "  found run $run_id"
+                gh run download "$run_id" --dir dl
+                break
+              fi
+              echo "  attempt $i/60, sleeping 20s..."
+              sleep 20
+            done
+            if [ -z "$run_id" ]; then
+              echo "  ERROR: $workflow did not complete for tag $tag (sha $sha) after 20min" >&2
+              exit 1
+            fi
+          done
+
+          echo "--- artifacts ---"
+          find dl -type f
+
+      - name: Collect archive files
+        run: |
+          cp dl/3code-linux-amd64/3code-linux-amd64.tar.gz     . 2>/dev/null || true
+          cp dl/3code-linux-arm64/3code-linux-arm64.tar.gz     . 2>/dev/null || true
+          cp dl/3code-macos-universal/3code-macos-universal.tar.gz . 2>/dev/null || true
+          cp dl/3code-windows-amd64/3code-windows-amd64.zip    . 2>/dev/null || true
+          ls -la *.tar.gz *.zip
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --repo ${{ github.repository }} \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            3code-linux-amd64.tar.gz \
+            3code-linux-arm64.tar.gz \
+            3code-macos-universal.tar.gz \
+            3code-windows-amd64.zip
