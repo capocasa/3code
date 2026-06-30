@@ -123,9 +123,15 @@ proc commitUserPromptTranscript(line: string) =
   ## Controller-owned transcript append for user prompt items. Formatters
   ## return trimmed item bodies; this proc owns the receipt/user separator and
   ## clears volatile footer state before the next turn starts.
+  let receiptLabel =
+    if pendingHint.active:
+      tokenLineLabel(pendingHint.usage, pendingHint.window, pendingHint.elapsed)
+    else:
+      ""
   var bytes = ""
-  if pendingHint.active:
-    bytes.add "\n"
+  if receiptLabel.len > 0:
+    bytes.add receiptBytes(receiptLabel)
+    bytes.add "\r\n\r\n"
   bytes.add formatUserPromptItem(line)
   proc clearSubmittedFooterState() =
     emitFatPromptEvent clearPendingHintEvent()
