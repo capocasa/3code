@@ -12,8 +12,8 @@ import ../types, ../util, ../compact, ../display, ../minline,
   ../signals, ../terminal as termui, ../session
 import ../engine as termengine
 import rendering
-from ../api import ApiStreamHooks, requestTurnInterrupt, setApiStreamHooks,
-  setInterrupted, QuietTooLongMs, markNetworkQuiet, clearNetworkQuiet
+from ../api import ApiStreamHooks, requestTurnInterrupt, requestQuietShutdown,
+  setApiStreamHooks, setInterrupted, QuietTooLongMs, clearNetworkQuiet
 
 
 var contentStreamedLive*: bool = false
@@ -938,17 +938,25 @@ proc markProviderActivity*() =
 
 proc quietWatchLoop(baseLabel: string) {.thread.} =
   var shown = false
-  var timedOut = false
+  var lastFiredMs = 0
   while not quietStop.load(moRelaxed):
     let idleMs = nowMs() - lastProviderActivity.load(moRelaxed)
-    if not timedOut and idleMs >= QuietTooLongMs:
-      # No data for the full window: the provider has gone silent. Raise a
-      # network-quiet error by setting the flag and waking the blocking recv
-      # via the same socket-shutdown path used for Ctrl-C. The stream loop then
-      # surfaces a non-retryable error and the turn mechanism shows it + retries.
-      markNetworkQuiet()
-      requestTurnInterrupt()
-      timedOut = true
+    if idleMs >= QuietTooLongMs:
+      # No data for the full window: the provider has gone silent. Wake the
+      # blocking recv and mark the connection dead. Deliberately does NOT
+      # call `requestTurnInterrupt` — that would set `interruptedFlag` and
+      # cause `callModel` to retry the error as "interrupted by user during
+      # backoff", masking the real timeout. Instead the stream loop checks
+      # `isNetworkQuiet()` directly and surfaces a dedicated error.
+      # Re-fires periodically (via shutdown) in case a stale `SSL_read`
+      # returned buffered data on the first wake and the main thread
+      # re-entered a blocking read.
+      let now = nowMs()
+      if now - lastFiredMs > 10_000:  # Don't hammer shutdown every 500ms
+        lastFiredMs = now
+        requestQuietShutdown()
+      setSpinLabel("⧖")
+      shown = true
     elif idleMs >= QuietThresholdMs:
       setSpinLabel("⧖")
       shown = true

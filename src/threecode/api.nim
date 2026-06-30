@@ -254,11 +254,12 @@ proc closeCachedStreamConn*() =
     cachedStreamHostKey = ""
   cachedStreamFd = osInvalidSocket
 
-proc shutdownCachedStreamFd() {.gcsafe.} =
+proc shutdownCachedStreamFd*() {.gcsafe.} =
   ## Async-signal-safe: only the `shutdown` syscall, no allocation, no
   ## Nim GC traffic. Forces a blocking `recv` on `cachedStreamConn` to
-  ## return so the streamHttp loop observes the interrupt flag and bails.
-  ## Safe to call from a SIGINT hook or from the stdin watcher thread.
+  ## return so the streamHttp loop observes the interrupt/quiet flags and
+  ## bails. Safe to call from a SIGINT hook, the quiet-watch thread, or
+  ## the stdin watcher thread.
   when defined(posix):
     let fd = cachedStreamFd
     if fd != osInvalidSocket:
@@ -273,6 +274,17 @@ proc requestTurnInterrupt*() {.gcsafe.} =
   setInterrupted(true)
   shutdownCachedStreamFd()
   cancelActiveTool()
+
+proc requestQuietShutdown*() {.gcsafe.} =
+  ## Wakes a blocked HTTP read because the provider has been quiet too long,
+  ## WITHOUT setting the user-interrupt flag. The streamHttp loop will see
+  ## `isNetworkQuiet()` and surface a dedicated error; the user sees a
+  ## timeout notice, not "interrupted by user". Kept separate from
+  ## `requestTurnInterrupt` because that path sets `interruptedFlag`, which
+  ## confuses `callModel`'s retry logic (retries fail immediately as
+  ## "interrupted during backoff") and masks the real cause.
+  markNetworkQuiet()
+  shutdownCachedStreamFd()
 
 type StreamOutcome = object
   statusCode: int
@@ -517,7 +529,10 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
         # Head loop bailed on interrupt/quiet before any head bytes
         # arrived. The outer except won't fire (no exception), so exit
         # the attempt loop here.
-        if isInterrupted():
+        if isNetworkQuiet():
+          result.errMsg = "network quiet too long (no data for " &
+            $(QuietTooLongMs div 1000) & "s)"
+        elif isInterrupted():
           result.errMsg = "interrupted by user"
         else:
           result.errMsg = "network quiet too long (no data for " &
@@ -1206,6 +1221,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
         remaining -= step
     if isInterrupted():
       raise newException(ApiError, "interrupted by user during retry backoff")
+    clearNetworkQuiet()
     hookSetStatusLabel(&"retry {attempt + 1}/{MaxAttempts}")
     hookStartSpinner("")
     if category == "rate":
