@@ -62,7 +62,7 @@ proc feedOutputChunk(rawOut: var string; lineBuf: var string; chunk: string;
   for ch in chunk:
     if ch == '\x00':
       suppress = true
-    if ch == '\n':
+    elif ch == '\n':
       emitCompleteLine(rawOut, lineBuf, onLine, partialShown, partialText, suppress)
     elif ch != '\r':
       lineBuf.add ch
@@ -350,7 +350,7 @@ export DEBIAN_FRONTEND=noninteractive
         let ch = outStream.readChar()
         if ch == '\x00':
           suppress = true
-        if ch == '\n':
+        elif ch == '\n':
           emitCompleteLine(rawOut, lineBuf, onLine, partialShown, partialText, suppress)
         elif ch != '\r':
           lineBuf.add ch
