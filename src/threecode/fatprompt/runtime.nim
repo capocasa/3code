@@ -584,15 +584,10 @@ proc resetEditorRowModel(ed: ptr minline.LineEditor) =
 
 proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
                             beforeRepaint: proc() = nil;
-                            reserveFooter = true;
-                            transcriptOwnsSpacing = false) =
+                            reserveFooter = true) =
   ## Commit transcript output while preserving the volatile footer.
-  ## The controller owns the transcript bytes and item spacing. This proc owns
-  ## the terminal mechanics: clear the volatile footer, append the bytes as
-  ## scrollback, then repaint whatever footer state remains. ``beforeRepaint``
-  ## runs after transcript bytes are known but before repaint bytes are
-  ## computed, so a controller can convert a live bar into a receipt and clear
-  ## it without fatprompt reintroducing stale chrome.
+  ## The engine owns the trailing separator row; callers provide content
+  ## without trailing spacing.
   debugOut &"writeTranscriptWithFatPrompt enter barLabel={currentBarLabel.len}"
   let oldFooter = footerFrame(fatPromptState)
   if receiptTouchesNextResponse and transcriptBytes.hasNonNewlineBytes:
@@ -600,13 +595,6 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
   if beforeRepaint != nil:
     beforeRepaint()
   let newFooter = footerFrame(fatPromptState)
-  # The submit path (restoreEditor=false) commits the prompt as scrollback and
-  # then drops the editor chrome. Reset the editor's row model inside the same
-  # terminal-write critical section as the transcript append: without this,
-  # there is a window between appendTranscript (which reads the editor's
-  # pre-submit row model) and the controller's later reset where a background
-  # repainter (spinner/bar-tick) can observe a stale multi-row editor and
-  # over-walk its clear into the just-committed scrollback rows.
   if not restoreEditor and inputEditor != nil:
     withTerminalWriteLock:
       termengine.appendTranscript(
@@ -618,8 +606,7 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
         newFooter,
         0,
         restoreEditor,
-        reserveFooter,
-        transcriptOwnsSpacing)
+        reserveFooter)
       resetEditorRowModel(inputEditor)
   else:
     termengine.appendTranscript(
@@ -631,8 +618,7 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
       newFooter,
       0,
       restoreEditor,
-      reserveFooter,
-      transcriptOwnsSpacing)
+      reserveFooter)
   if reserveFooter and transcriptBytes.hasNonNewlineBytes and currentBarLabel.len > 0:
     emitFatPromptEvent setBarEvent(currentBarLabel, hasGap = true)
   debugOut "writeTranscriptWithFatPrompt exit"
@@ -1736,7 +1722,6 @@ proc emitUserSubmit*(line: string) =
     bytes.add receiptBytes(receiptLabel)
     bytes.add "\r\n\r\n"
   bytes.add formatUserPromptItem(line)
-  bytes.add "\r\n"
   proc clearSubmittedFooterState() =
     emitFatPromptEvent clearPendingHintEvent()
     emitFatPromptEvent clearBarEvent()
@@ -1745,5 +1730,4 @@ proc emitUserSubmit*(line: string) =
     bytes,
     restoreEditor = false,
     beforeRepaint = clearSubmittedFooterState,
-    reserveFooter = false,
-    transcriptOwnsSpacing = true)
+    reserveFooter = false)

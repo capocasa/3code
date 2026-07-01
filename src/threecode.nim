@@ -137,15 +137,11 @@ proc commitUserPromptTranscript(line: string) =
     emitFatPromptEvent clearPendingHintEvent()
     emitFatPromptEvent clearBarEvent()
     emitFatPromptEvent clearTickerEvent()
-  while bytes.len > 0 and bytes[^1] in {'\r', '\n'}:
-    bytes.setLen(bytes.len - 1)
-  bytes.add "\r\n"
   commitTranscriptBytes(
     bytes,
     restoreEditor = false,
     beforeRepaint = clearSubmittedFooterState,
-    reserveFooter = false,
-    transcriptOwnsSpacing = true)
+    reserveFooter = false)
   receiptTouchesNextResponse = true
 
 proc cleanup() {.noconv.} =
@@ -392,8 +388,7 @@ proc main() =
             plainCommandBodyBytes(res.body)
           else:
             formatItem(commandItem(res.name, res.body, res.ok))
-        commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true,
-                              transcriptOwnsSpacing = true)
+        commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true)
       of ckQuit:
         acquire inputStateLock
         try:
@@ -404,13 +399,11 @@ proc main() =
       of ckMutating, ckModal:
         let msg = "cannot run " & cmd.strip & " while a turn is active"
         let bytes = formatItem(commandItem("command", msg & "\n", false))
-        commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true,
-                              transcriptOwnsSpacing = true)
+        commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true)
       else:
         let bytes = formatItem(commandItem("command",
           "unknown command: " & cmd.strip & "  (try :help)\n", false))
-        commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true,
-                              transcriptOwnsSpacing = true)
+        commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true)
   )
 
   proc handleBufferedAfterTurn(): bool =
@@ -546,8 +539,7 @@ proc main() =
         bytes,
         restoreEditor = true,
         beforeRepaint = clearSubmittedCommandEditor,
-        reserveFooter = true,
-        transcriptOwnsSpacing = true)
+        reserveFooter = true)
       releaseIdleSubmittedInput()
       continue
     if prof.name == "":
