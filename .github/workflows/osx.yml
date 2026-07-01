@@ -72,5 +72,5 @@ jobs:
       - name: Upload artifact to 3code.capocasa.dev
         if: github.ref == 'refs/heads/main'
         run: |
-          curl -sf -F -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" "file=@3code-macos-universal.tar.gz" \
+          curl -H -sf -F "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" "file=@3code-macos-universal.tar.gz" \
             https://3code.capocasa.dev/main/upload.nim
