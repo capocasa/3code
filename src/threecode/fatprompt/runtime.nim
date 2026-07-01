@@ -92,7 +92,11 @@ var inputStateLock*: Lock
 initLock(inputStateLock)
 var inputTurnActive: Atomic[bool]
 var inputEditorReady: Atomic[bool]
-var inputIdleSubmitted: Atomic[bool]
+var inputIdleLinePending: Atomic[bool]
+  ## Set by the input thread after an idle Enter; cleared by the controller
+  ## when it drains the event or when beginTurn starts the next turn.
+  ## The input thread's getCh returns -1 while this is set, parking the
+  ## editor so keystrokes don't append to an uncleared prompt.
 var inputThread: Thread[void]
 var inputThreadRunning* = false
 
@@ -272,80 +276,71 @@ proc liveEditorFooterAnchored*(): bool =
   inputThreadRunning and inputEditor != nil and terminalHeight() > 0 and
     stdout.isatty
 
-proc hasQueuedAutosend*(): bool =
-  ## True once the background editor has accepted Enter and the text is
-  ## waiting for the outer REPL to echo as transcript. At that point it must
-  ## not be restored as live editor chrome after transcript appends.
+proc pushInputEvent*(ev: InputEvent) =
+  ## Called by the input thread to queue a completed line/command/interrupt.
   acquire inputStateLock
   try:
-    result = inputState.autoSend
+    inputState.eventQueue.add ev
+  finally:
+    release inputStateLock
+
+proc pollInputEvent*(): InputEvent =
+  ## Called by the controller to drain the next queued event. Returns
+  ## `ieNone` when the queue is empty. Unparks the input thread when an
+  ## idle line is consumed.
+  acquire inputStateLock
+  try:
+    if inputState.eventQueue.len > 0:
+      result = inputState.eventQueue[0]
+      inputState.eventQueue.delete(0)
+      if result.kind == ieLine and inputIdleLinePending.load(moAcquire):
+        # Check if this was the last idle line; if so, unpark.
+        var hasMoreIdle = false
+        for ev in inputState.eventQueue:
+          if ev.kind == ieLine:
+            hasMoreIdle = true
+            break
+        if not hasMoreIdle:
+          inputIdleLinePending.store(false, moRelease)
+    else:
+      result = InputEvent(kind: ieNone)
+  finally:
+    release inputStateLock
+
+proc hasQueuedAutosend*(): bool =
+  ## True when the queue has at least one ieLine event — the background
+  ## editor has accepted Enter and the text is waiting.
+  acquire inputStateLock
+  try:
+    for ev in inputState.eventQueue:
+      if ev.kind == ieLine:
+        return true
   finally:
     release inputStateLock
 
 proc consumeQueuedInput*(line: var string; echoRows: var int;
                          cmdWasQuit: var bool): bool =
-  ## Consume the next submitted editor line, regardless of whether it was
-  ## entered while the controller was idle or while a turn was active.
-  ##
-  ## Inherent-unpark: the idle input thread parks itself in `getCh` (returns
-  ## -1 -> EOFError) when `inputIdleSubmitted` is set. That park must be
-  ## released by *this* controller thread. Rather than rely on every call
-  ## site remembering `releaseIdleSubmittedInput()`, the release is folded
-  ## into polling: if we found nothing to consume yet the flag is still set,
-  ## the submitted line must already have been consumed on a prior pass (or
-  ## was never real text) — clear the park so the input thread stops
-  ## spinning in its EOFError busy-wait and resumes reading keystrokes.
-  ## Missing this means a frozen prompt: both threads sleep-loop forever.
-  acquire inputStateLock
-  try:
-    cmdWasQuit = inputState.cmdWasQuit
-    if inputState.autoSend:
-      if inputState.queuedPrompts.len > 0:
-        (line, echoRows) = inputState.queuedPrompts[0]
-        inputState.queuedPrompts.delete(0)
-        if inputState.queuedPrompts.len == 0:
-          inputState.autoSend = false
-          inputState.queuedText = ""
-          inputState.queuedEchoRows = 0
-        return true
-      elif inputState.queuedText.len > 0 or
-          (inputEditor != nil and inputEditor[].line.text.len > 0):
-        line =
-          if inputState.queuedText.len > 0: inputState.queuedText
-          else: inputEditor[].line.text
-        echoRows = inputState.queuedEchoRows
-        inputState.queuedText = ""
-        inputState.queuedEchoRows = 0
-        inputState.autoSend = false
-        return true
-    if inputIdleSubmitted.load(moAcquire):
-      inputIdleSubmitted.store(false, moRelease)
-  finally:
-    release inputStateLock
-
-proc consumeQueuedCommand*(line: var string; echoRows: var int): bool =
-  ## Consume a colon command submitted while a turn was active. Commands are
-  ## intentionally separate from autosend prompts so they never enter the model
-  ## conversation by mistake.
-  acquire inputStateLock
-  try:
-    if inputState.queuedCommand.len > 0:
-      line = inputState.queuedCommand
-      echoRows = inputState.queuedCommandRows
-      inputState.queuedCommand = ""
-      inputState.queuedCommandRows = 0
-      return true
-  finally:
-    release inputStateLock
+  ## Drain the next line, command, interrupt, or quit event from the queue.
+  ## Returns true when a line or command was consumed.
+  let ev = pollInputEvent()
+  case ev.kind
+  of ieLine:
+    line = ev.text
+    echoRows = ev.echoRows
+    return true
+  of ieCommand:
+    line = ev.text
+    echoRows = ev.echoRows
+    return true
+  of ieQuit:
+    cmdWasQuit = true
+  of ieInterrupt:
+    discard  # consumed by controller via requestTurnInterrupt path
+  of ieNone:
+    discard
 
 proc setActiveCommandHook*(hook: proc(cmd: string) {.gcsafe.}) =
   activeCommandHook = hook
-
-proc releaseIdleSubmittedInput*() =
-  ## Let the persistent editor leave the submitted-line state after an idle
-  ## controller path has consumed and committed the line. Model turns use
-  ## ``beginTurn`` for the same acknowledgement.
-  inputIdleSubmitted.store(false, moRelease)
 
 proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
   ## Called by the editor before every redraw while a turn is active.
@@ -1354,7 +1349,7 @@ proc inputThreadProc() {.thread.} =
 
       let getCh: minline.GetChProc = proc(): int =
         while inputRunning():
-          if inputIdleSubmitted.load(moAcquire):
+          if inputIdleLinePending.load(moAcquire):
             return -1
           if pendingInput.len > 0 or fillPending(200.cint):
             result = pendingInput[0]
@@ -1381,7 +1376,7 @@ proc inputThreadProc() {.thread.} =
         pendingInput.len > 0 and minline.isEscapeTailByte(pendingInput[0])
     else:
       let getCh: minline.GetChProc = proc(): int =
-        if inputRunning() and not inputIdleSubmitted.load(moAcquire):
+        if inputRunning() and not inputIdleLinePending.load(moAcquire):
           getchr().int
         else:
           -1
@@ -1400,38 +1395,25 @@ proc inputThreadProc() {.thread.} =
       # editor text on its debounce. No I/O here — the input thread stays fast.
       draftDirty.store(true, moRelease)
     edPtr[].onCancelDeferredSubmit = proc(ed: var minline.LineEditor) =
-      # The user resumed typing after a queued submit: drop the queue so the
-      # next Enter re-queues the edited text rather than submitting a stale
-      # copy. The editor keeps its text and cursor; only the queue state goes.
-      #
-      # This makes a mid-turn queue one editable prompt, not a stack of
-      # frozen ones. That is a deliberate design choice: an immutable queue
-      # is more state to track, less flexible (no "change your mind"), and
-      # still concatenates into one user turn anyway, so the extra machinery
-      # buys nothing.
+      # The user resumed typing after a queued submit: drop the matching
+      # ieLine events from the queue so the next Enter re-queues the edited
+      # text rather than submitting a stale copy.
       acquire inputStateLock
       try:
-        let t = ed.line.text
-        while inputState.queuedPrompts.len > 0 and
-            inputState.queuedPrompts[^1].text == t:
-          inputState.queuedPrompts.delete(inputState.queuedPrompts.high)
-        if inputState.queuedPrompts.len == 0:
-          inputState.autoSend = false
-          inputState.queuedText = ""
-          inputState.queuedEchoRows = 0
+        var i = inputState.eventQueue.high
+        while i >= 0:
+          if inputState.eventQueue[i].kind == ieLine and
+             inputState.eventQueue[i].text == ed.line.text:
+            inputState.eventQueue.delete(i)
+          dec i
       finally:
         release inputStateLock
     edPtr[].onSubmit = proc(ed: var minline.LineEditor) =
       if inputTurnActive.load(moAcquire) and ed.line.text.startsWith(":"):
         let cmd = ed.line.text
-        acquire inputStateLock
-        try:
-          inputState.queuedCommand = cmd
-          inputState.queuedCommandRows = minline.totalRows(ed.line.text,
-            ed.promptW, ed.contPromptW, max(2, ed.width))
-          inputState.autoSend = false
-        finally:
-          release inputStateLock
+        let rows = minline.totalRows(ed.line.text, ed.promptW, ed.contPromptW,
+                                     max(2, ed.width))
+        pushInputEvent(InputEvent(kind: ieCommand, text: cmd, echoRows: rows))
         ed.line = minline.Line(text: "", position: 0)
         ed.renderSuffix = ""
         ed.renderSuffixCursor = false
@@ -1439,40 +1421,23 @@ proc inputThreadProc() {.thread.} =
         ed.echoRows = 0
         if activeCommandHook != nil:
           activeCommandHook(cmd)
-          acquire inputStateLock
-          try:
-            if inputState.queuedCommand == cmd:
-              inputState.queuedCommand = ""
-              inputState.queuedCommandRows = 0
-          finally:
-            release inputStateLock
         return
-      acquire inputStateLock
-      try:
-        inputState.queuedEchoRows = minline.totalRows(ed.line.text, ed.promptW,
-                                                      ed.contPromptW,
-                                                      max(2, ed.width))
-        inputState.autoSend = ed.line.text.len > 0
-        if inputTurnActive.load(moAcquire) and ed.line.text.len > 0:
-          inputState.queuedPrompts.add((ed.line.text, inputState.queuedEchoRows))
-      finally:
-        release inputStateLock
-      if inputTurnActive.load(moAcquire) and ed.line.text.len > 0:
-        # Keep the line intact: the pending caret glyph stands in for the
-        # native caret at the cursor position, so the display must not change.
+      let rows = minline.totalRows(ed.line.text, ed.promptW, ed.contPromptW,
+                                    max(2, ed.width))
+      let hasText = ed.line.text.len > 0
+      if hasText:
+        pushInputEvent(InputEvent(kind: ieLine, text: ed.line.text,
+                                   echoRows: rows))
+      if inputTurnActive.load(moAcquire) and hasText:
         ed.pendingCaret = true
       else:
         ed.line.position = ed.line.text.len
-        # Only park for a real line with text. An empty idle Enter sets
-        # neither queuedText nor autoSend, so the controller has nothing
-        # to consume and would never release the park. Parking here would
-        # wedge the input thread forever (getCh returns -1 -> EOFError ->
-        # busy-wait) and freeze the prompt. With no park, readLineWith
-        # just continues its loop for the next keystroke.
-        if not inputTurnActive.load(moAcquire) and ed.line.text.len > 0:
-          inputIdleSubmitted.store(true, moRelease)
+        # Park the input thread so keystrokes don't append to the
+        # uncleared editor before the controller drains this event.
+        if hasText:
+          inputIdleLinePending.store(true, moRelease)
       ed.renderSuffix =
-        if inputTurnActive.load(moAcquire) and inputState.autoSend:
+        if inputTurnActive.load(moAcquire) and hasText:
           " " & DeferredSubmitMarker
         else: ""
       ed.renderSuffixCursor = false
@@ -1503,45 +1468,24 @@ proc inputThreadProc() {.thread.} =
                                         EditorPromptBytes,
                                         getCh, writeProc,
                                         hasPendingInput = hasPendingInput)
+        # onSubmit already pushed the event and called activeCommandHook.
+        # This path fires only when deferSubmit is false (idle Enter),
+        # which never happens in practice; still handle it defensively.
         if text.len == 0:
           continue
         if text[0] == ':':
-          let isActiveCommand = inputTurnActive.load(moAcquire)
-          acquire inputStateLock
-          try:
-            if isActiveCommand:
-              inputState.queuedCommand = text
-              inputState.queuedCommandRows = edPtr[].echoRows
-            else:
-              inputState.queuedText = text
-              inputState.queuedEchoRows = edPtr[].echoRows
-              inputState.autoSend = true
-          finally:
-            release inputStateLock
-          edPtr[].line = minline.Line(text: "", position: 0)
-          edPtr[].renderSuffix = ""
-          edPtr[].renderSuffixCursor = false
-          edPtr[].renderRow = 0
-          edPtr[].echoRows = 0
-          if isActiveCommand and activeCommandHook != nil:
-            activeCommandHook(text)
-            acquire inputStateLock
-            try:
-              if inputState.queuedCommand == text:
-                inputState.queuedCommand = ""
-                inputState.queuedCommandRows = 0
-            finally:
-              release inputStateLock
+          # idle colon commands: push a line event since there's no
+          # activeCommandHook wired for idle mode; the controller handles it.
+          pushInputEvent(InputEvent(kind: ieLine, text: text,
+                                     echoRows: edPtr[].echoRows))
         else:
-          termui.withTerminalWriteLock:
-            acquire inputStateLock
-            try:
-              inputState.queuedText = edPtr[].line.text
-              inputState.queuedEchoRows = edPtr[].echoRows
-              inputState.autoSend = true
-            finally:
-              release inputStateLock
-            emitFatPromptEvent setPromptModeEvent(pmBufferedInput)
+          pushInputEvent(InputEvent(kind: ieLine, text: text,
+                                     echoRows: edPtr[].echoRows))
+        edPtr[].line = minline.Line(text: "", position: 0)
+        edPtr[].renderSuffix = ""
+        edPtr[].renderSuffixCursor = false
+        edPtr[].renderRow = 0
+        edPtr[].echoRows = 0
       except minline.InputCancelled:
         if inputTurnActive.load(moAcquire):
           requestTurnInterrupt()
@@ -1550,36 +1494,13 @@ proc inputThreadProc() {.thread.} =
           edPtr[].renderSuffixCursor = false
           edPtr[].renderRow = 0
           continue
-        acquire inputStateLock
-        try:
-          inputState.cmdWasQuit = true
-        finally:
-          release inputStateLock
+        pushInputEvent(InputEvent(kind: ieQuit))
         break
       except EOFError:
-        if inputIdleSubmitted.load(moAcquire):
-          while inputIdleSubmitted.load(moAcquire) and
-              not inputTurnActive.load(moAcquire) and inputRunning():
-            sleep 5
-          edPtr[].line = minline.Line(text: "", position: 0)
-          edPtr[].renderSuffix = ""
-          edPtr[].renderSuffixCursor = false
-          edPtr[].renderRow = 0
-          continue
         if inputTurnActive.load(moAcquire) and edPtr[].line.text.len == 0:
-          acquire inputStateLock
-          try:
-            inputState.cmdWasQuit = true
-          finally:
-            release inputStateLock
           requestTurnInterrupt()
           continue
-        if not inputTurnActive.load(moAcquire) and edPtr[].line.text.len == 0:
-          acquire inputStateLock
-          try:
-            inputState.cmdWasQuit = true
-          finally:
-            release inputStateLock
+        pushInputEvent(InputEvent(kind: ieQuit))
         break
       except CatchableError:
         # A transient error (pty write backpressure, etc.) must not kill the
@@ -1636,7 +1557,7 @@ proc beginTurn*() =
   finally:
     release inputStateLock
   inputTurnActive.store(true, moRelease)
-  inputIdleSubmitted.store(false, moRelease)
+  inputIdleLinePending.store(false, moRelease)
 
 proc stopTurnInputForFinalRender*() =
   ## Mark the persistent input thread as idle before final assistant text is

@@ -372,7 +372,7 @@ export DEBIAN_FRONTEND=noninteractive
   if cancelled:
     if rawOut.len > 0 and not rawOut.endsWith("\n"):
       rawOut.add "\n"
-    rawOut.add ansiForegroundColorCode(fgMagenta) & "interrupted by user" & ansiResetCode
+    rawOut.add ansiForegroundColorCode(fgMagenta) & InterruptedByUserMsg & ansiResetCode
     return (rawOut, 130, cap)
   if timedOut:
     if rawOut.len > 0 and not rawOut.endsWith("\n"):

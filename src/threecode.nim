@@ -25,7 +25,7 @@
 ##     ├── types        shared types + globals
 ##     └── minline      readline-style input
 
-import std/[json, locks, os, parseopt, strformat, strutils, tables, terminal, times]
+import std/[json, os, parseopt, strformat, strutils, tables, terminal, times]
 import std/exitprocs
 when defined(posix):
   import std/posix
@@ -390,11 +390,7 @@ proc main() =
             formatItem(commandItem(res.name, res.body, res.ok))
         commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true)
       of ckQuit:
-        acquire inputStateLock
-        try:
-          inputState.cmdWasQuit = true
-        finally:
-          release inputStateLock
+        pushInputEvent(InputEvent(kind: ieQuit))
         requestTurnInterrupt()
       of ckMutating, ckModal:
         let msg = "cannot run " & cmd.strip & " while a turn is active"
@@ -407,32 +403,24 @@ proc main() =
   )
 
   proc handleBufferedAfterTurn(): bool =
-    var cmdWasQuit = false
     var queued = ""
     var queuedRows = 0
-    acquire inputStateLock
-    try:
-      cmdWasQuit = inputState.cmdWasQuit
-      if inputState.autoSend:
-        if inputState.queuedPrompts.len > 0:
-          (queued, queuedRows) = inputState.queuedPrompts[0]
-          inputState.queuedPrompts.delete(0)
-          if inputState.queuedPrompts.len == 0:
-            inputState.autoSend = false
-            inputState.queuedText = ""
-            inputState.queuedEchoRows = 0
-        else:
-          queued =
-            if inputState.queuedText.len > 0: inputState.queuedText
-            else: editor.line.text
-          queuedRows = inputState.queuedEchoRows
-          inputState.queuedText = ""
-          inputState.autoSend = false
-          inputState.queuedEchoRows = 0
-    finally:
-      release inputStateLock
-    if cmdWasQuit:
-      return true
+    while true:
+      let ev = pollInputEvent()
+      case ev.kind
+      of ieQuit:
+        return true
+      of ieLine:
+        if queued.len == 0:
+          queued = ev.text
+          queuedRows = ev.echoRows
+        # drain any remaining events; keep first line only
+      of ieCommand:
+        discard  # commands handled by activeCommandHook during turn
+      of ieInterrupt:
+        discard  # already handled
+      of ieNone:
+        break
     if queued.len > 0:
       if prof.name == "":
         editor.prefillText = queued
@@ -515,7 +503,6 @@ proc main() =
         editor.renderSuffixCursor = false
         editor.renderRow = 0
         editor.echoRows = 0
-        releaseIdleSubmittedInput()
         continue
       var echo = userPromptItem(line)
       echo.attachSeparator = true
@@ -539,7 +526,8 @@ proc main() =
         bytes,
         restoreEditor = true,
         beforeRepaint = clearSubmittedCommandEditor,
-        reserveFooter = true)
+        reserveFooter = true,
+        transcriptOwnsSpacing = true)
       releaseIdleSubmittedInput()
       continue
     if prof.name == "":

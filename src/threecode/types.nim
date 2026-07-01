@@ -110,18 +110,30 @@ type
     ## `line` is 1-indexed into the assistant reply.
     line*: int
     msg*: string
+  InputEventKind* = enum
+    ieNone
+    ieLine       ## user submitted a prompt line (idle or buffered during turn)
+    ieCommand    ## user submitted a colon :command during turn
+    ieInterrupt  ## ESC / Ctrl-C pressed during turn
+    ieQuit       ## Ctrl-D on empty line; exit the REPL
+
+  InputEvent* = object
+    kind*: InputEventKind
+    text*: string
+    echoRows*: int
+
   InputState* = object
     ## Shared between the main thread and the buffered prompt thread during
     ## model/tool turns.
     turnActive*: bool
     shutdown*: bool
-    autoSend*: bool
-    queuedText*: string
-    queuedEchoRows*: int
-    queuedPrompts*: seq[tuple[text: string, echoRows: int]]
-    queuedCommand*: string
-    queuedCommandRows*: int
-    cmdWasQuit*: bool
+    eventQueue*: seq[InputEvent]
+
+const
+  InterruptedByUserMsg* = "interrupted by user"
+
+proc isInterruptedMsg*(msg: string): bool =
+  msg == InterruptedByUserMsg
 
 proc die*(msg: string, code = 1) {.noreturn.} =
   stderr.writeLine "3code: " & msg
