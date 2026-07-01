@@ -479,7 +479,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   while true:
     if isInterrupted():
       closeCachedStreamConn()
-      result.errMsg = "interrupted by user"
+      result.errMsg = InterruptedByUserMsg
       return
     inc attempt
     if cachedStreamConn != nil and cachedStreamHostKey == hostKey:
@@ -507,15 +507,6 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
                                   ("Accept", "text/event-stream")],
                        body = bodyStr)
       hookProviderActivity()
-      # The head read uses the same QuietRecvWakeMs-bounded recv as the
-      # body loop, so it raises StreamTimeoutError periodically. Unlike
-      # the body loop, a slow head is the norm here: the provider holds
-      # the connection for several seconds while the model warms up
-      # before emitting even the HTTP status line. We must loop on the
-      # timeout (re-checking interrupt/quiet) rather than treating it as
-      # a stale connection; otherwise every request to a slow provider
-      # (z.ai GLM, ~7s to first byte) burns the two stale-conn retries
-      # and then fails with "recv timed out".
       while true:
         try:
           resp = conn.readResponseHead()
@@ -526,14 +517,11 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
             break
           continue
       if resp.status == 0 and resp.headers.len == 0:
-        # Head loop bailed on interrupt/quiet before any head bytes
-        # arrived. The outer except won't fire (no exception), so exit
-        # the attempt loop here.
         if isNetworkQuiet():
           result.errMsg = "network quiet too long (no data for " &
             $(QuietTooLongMs div 1000) & "s)"
         elif isInterrupted():
-          result.errMsg = "interrupted by user"
+          result.errMsg = InterruptedByUserMsg
         else:
           result.errMsg = "network quiet too long (no data for " &
             $(QuietTooLongMs div 1000) & "s)"
@@ -679,7 +667,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     # fd, so the conn is half-closed. Reusing it on the next turn
     # would fail on first send. The next call will reconnect cleanly.
     closeCachedStreamConn()
-    result.errMsg = "interrupted by user"
+    result.errMsg = InterruptedByUserMsg
     return
   if streamErr.len > 0:
     result.errMsg = "stream read: " & streamErr &
@@ -790,7 +778,7 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
   while true:
     if isInterrupted():
       closeCachedStreamConn()
-      result.errMsg = "interrupted by user"
+      result.errMsg = InterruptedByUserMsg
       return
     inc attempt
     if cachedStreamConn != nil and cachedStreamHostKey == hostKey:
@@ -818,9 +806,6 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
                                   ("Accept", "application/json")],
                        body = bodyStr)
       hookProviderActivity()
-      # Same head wake-loop as streamHttp: a slow head is normal (the
-      # model warms up before the status line arrives), so we loop on
-      # StreamTimeoutError rather than burning the stale-conn retry.
       while true:
         try:
           resp = conn.readResponseHead()
@@ -832,7 +817,7 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
           continue
       if resp.status == 0 and resp.headers.len == 0:
         if isInterrupted():
-          result.errMsg = "interrupted by user"
+          result.errMsg = InterruptedByUserMsg
         else:
           result.errMsg = "network quiet too long (no data for " &
             $(QuietTooLongMs div 1000) & "s)"
@@ -873,7 +858,7 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
     return
   if isInterrupted():
     closeCachedStreamConn()
-    result.errMsg = "interrupted by user"
+    result.errMsg = InterruptedByUserMsg
     return
   if readErr.len > 0:
     result.errMsg = "response read: " & readErr
@@ -1162,10 +1147,10 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       else:
         callHttp(p.url & "/chat/completions", p.key, bodyStr,
                  baseLabel, slurped)
-    if outcome.errMsg == "interrupted by user":
+    if isInterruptedMsg(outcome.errMsg):
       hookStopSpinner()
       if outcome.assistantMsg == nil:
-        raise newException(ApiError, "interrupted by user")
+        raise newException(ApiError, InterruptedByUserMsg)
       break
     let code = outcome.statusCode
     let category = retryCategory(outcome.errMsg, outcome.assistantMsg, code)

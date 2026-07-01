@@ -93,21 +93,14 @@ let profile = Profile(name: "stub", family: "glm", model: "stub-model")
 proc queueAutosend() {.thread, gcsafe.} =
   sleep 100
   {.cast(gcsafe).}:
-    acquire inputStateLock
-    try:
-      inputState.queuedEchoRows = 1
-      inputState.autoSend = true
-    finally:
-      release inputStateLock
+    pushInputEvent(InputEvent(kind: ieLine, text: "queued", echoRows: 1))
 
 var t: Thread[void]
 createThread(t, queueAutosend)
 discard runTurns(profile, messages, session)
 joinThread(t)
 
-acquire inputStateLock
-let queued = inputState.autoSend
-release inputStateLock
+let queued = hasQueuedAutosend()
 doAssert queued
 doAssert messages.len == 4
 doAssert messages[2]{"role"}.getStr == "assistant"
@@ -169,21 +162,14 @@ let profile = Profile(name: "stub", family: "glm", model: "stub-model")
 proc queueAutosend() {.thread, gcsafe.} =
   sleep 100
   {.cast(gcsafe).}:
-    acquire inputStateLock
-    try:
-      inputState.queuedEchoRows = 1
-      inputState.autoSend = true
-    finally:
-      release inputStateLock
+    pushInputEvent(InputEvent(kind: ieLine, text: "queued", echoRows: 1))
 
 var t: Thread[void]
 createThread(t, queueAutosend)
 discard runTurns(profile, messages, session)
 joinThread(t)
 
-acquire inputStateLock
-let queued = inputState.autoSend
-release inputStateLock
+let queued = hasQueuedAutosend()
 doAssert queued
 doAssert messages.len == 4
 doAssert messages[2]{"role"}.getStr == "assistant"
@@ -253,21 +239,14 @@ let profile = Profile(name: "stub", family: "glm", model: "stub-model")
 proc queueAutosend() {.thread, gcsafe.} =
   sleep 100
   {.cast(gcsafe).}:
-    acquire inputStateLock
-    try:
-      inputState.queuedEchoRows = 1
-      inputState.autoSend = true
-    finally:
-      release inputStateLock
+    pushInputEvent(InputEvent(kind: ieLine, text: "queued", echoRows: 1))
 
 var t: Thread[void]
 createThread(t, queueAutosend)
 discard runTurns(profile, messages, session)
 joinThread(t)
 
-acquire inputStateLock
-let queued = inputState.autoSend
-release inputStateLock
+let queued = hasQueuedAutosend()
 doAssert queued
 doAssert messages.len == 5
 doAssert messages[2]{"role"}.getStr == "assistant"

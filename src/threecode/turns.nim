@@ -6,7 +6,7 @@
 ## `api.nim` should stay transport/protocol focused; visual consequences of
 ## model/tool progress should flow through this layer.
 
-import std/[json, locks, os, strformat, strutils, terminal, times]
+import std/[json, os, strformat, strutils, terminal, times]
 when defined(posix):
   import std/posix except Time
 import types, util, prompts, session, compact, config, actions, api,
@@ -324,7 +324,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         if isInterrupted():
           # still emit a tool response so the assistant message's tool_calls
           # are all paired; the model sees the cancellation on the next turn.
-          let stopMsg = "interrupted by user"
+          let stopMsg = InterruptedByUserMsg
           messages.add %*{"role": "tool", "tool_call_id": id,
                           "content": stopMsg}
           continue
@@ -412,16 +412,12 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           deferredReceipt = ""
           emitFatPromptEvent clearPendingHintEvent()
         messages.add %*{"role": "tool", "tool_call_id": id, "content": r}
-        acquire inputStateLock
-        try:
-          if inputState.autoSend:
-            # Let the current assistant tool batch finish so the tool-call
-            # pairing stays faithful to what the model requested, then return
-            # before the model-initiated follow-up call. The interactive loop
-            # drains the queued user text and starts the next user turn.
-            queuedUser = true
-        finally:
-          release inputStateLock
+        if hasQueuedAutosend():
+          # Let the current assistant tool batch finish so the tool-call
+          # pairing stays faithful to what the model requested, then return
+          # before the model-initiated follow-up call. The interactive loop
+          # drains the queued user text and starts the next user turn.
+          queuedUser = true
         if act.kind == akClear:
           # Rebuild: fresh system prompt + synthetic user message, then
           # continue the loop so the model processes the prompt.
@@ -503,7 +499,7 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
     return runTurns(p, messages, session)
   except ApiError as e:
     saveSession(session, messages)
-    if e.msg.startsWith("interrupted by user"):
+    if isInterruptedMsg(e.msg):
       onTurnInterrupted()
       return true
     else:
