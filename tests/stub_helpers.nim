@@ -32,7 +32,7 @@ proc ensureStubBinary*(extraDefines = "", forceRebuild = false): string =
   ## additional define beyond the standard provider stub flags. The output
   ## path encodes the define set, so different flag combinations do not share
   ## a binary. Call `forceRebuild` to discard a cached binary first.
-  const baseDefines = "-d:ssl -d:providerStub -d:QuietThresholdMs=1000 --threads:on"
+  const baseDefines = "-d:ssl -d:providerStub --threads:on"
   let defines =
     if extraDefines.len > 0: baseDefines & " " & extraDefines
     else: baseDefines

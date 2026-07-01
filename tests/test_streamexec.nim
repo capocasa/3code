@@ -183,8 +183,9 @@ suite "streamexec: binary output suppression":
     check "before" in lines
     # Once binary content starts, no further lines stream to the callback.
     check "after" notin lines
-    # rawOut still collects everything for accurate post-hoc byte count.
-    check '\x00' in rawOut
+    # NUL bytes are skipped from rawOut (they are not valid text and
+    # trigger false-positive binary detection on Windows where the pipe
+    # layer appends a trailing NUL).
 
 suite "streamexec: callback is optional":
   test "nil callback works":

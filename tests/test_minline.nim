@@ -358,7 +358,7 @@ suite "minline editor: newline insertion (multiline)":
     ed.onSubmit = proc(e: var LineEditor) =
       submits.add e.line.text
       e.line.position = e.line.text.len
-      e.renderSuffix = " ⧖\n"
+      e.renderSuffix = " (queued)\n"
       e.renderSuffixCursor = true
     ed.onMutate = proc(e: var LineEditor) =
       e.renderSuffix = ""
@@ -377,7 +377,7 @@ suite "minline editor: newline insertion (multiline)":
       discard d.run(ed, prompt = "> ")
     check submits == @["line1\nline2", "line1\nline2 edited"]
     check ed.line.text == "line1\nline2 edited"
-    check rowText(d.grid, 1).contains("line2 edited ⧖")
+    check rowText(d.grid, 1).contains("line2 edited (queued)")
     check rowText(d.grid, 2).strip.len == 0
     check len(ed.history.entries) == 2
     check ed.history.entries[0] == "line1\nline2"

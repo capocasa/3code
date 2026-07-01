@@ -1,7 +1,7 @@
-===== 747 =====
+===== 161 =====
 
   ╭─╮
-   ─┤  3code v0.4.1   the economical coding agent
+   ─┤  3code v0.5.0   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,10 +10,10 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ This is a test prompt
-===== 180 =====
+===== 240 =====
 
   ╭─╮
-   ─┤  3code v0.4.1   the economical coding agent
+   ─┤  3code v0.5.0   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -25,10 +25,10 @@
   … Thinking about the test prompt
 ⣿ ○0% ↓7 0s
 ❯
-===== 153 =====
+===== 431 =====
 
   ╭─╮
-   ─┤  3code v0.4.1   the economical coding agent
+   ─┤  3code v0.5.0   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -40,10 +40,10 @@
   … Thinking about the test prompt
 ⣿ ○0% ↓13 0s
 ❯
-===== 146 =====
+===== 896 =====
 
   ╭─╮
-   ─┤  3code v0.4.1   the economical coding agent
+   ─┤  3code v0.5.0   the economical coding agent
   ╰─╯
 
   provider  stub

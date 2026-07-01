@@ -536,20 +536,11 @@ suite "terminal visual contract":
     defer: tty2.close()
     tty2.expect draftText
 
-  # In tty frame mode preStreamDelay is skipped (see testFrameMode in
-  # api.nim); a response with waitForTestContinue holds the turn open on a
-  # blocking read until continueStubApi releases it. The quiet-watch thread is
-  # real-time, so we wait past QuietThresholdMs then drive a spinner repaint via
-  # advanceTicker so the quiet label becomes visible in the recorded frames.
-  proc expectQuietLabel(tty: TtySession) =
-    let deadline = epochTime() + 5.0
-    while epochTime() < deadline:
-      tty.advanceTicker()
-      if "⧖" in tty.screenText():
-        return
-      sleep(100)
-    doAssert false, "quiet hourglass label never appeared\n" &
-      tty.dumpFramesAround("⧖")
+  # The quiet-watch thread now only fires a hard timeout; there is no
+  # intermediate hourglass label. Wait briefly so the spinner is active
+  # before exercising cancel.
+  proc expectActiveSpinner(tty: TtySession) =
+    tty.drain 200
 
   test "escape cancels during network-quiet":
     let root = newFixture("quiet_cancel_esc")
@@ -579,7 +570,7 @@ suite "terminal visual contract":
     tty.expect "❯"
     tty.send "first turn"
     tty.send "\n"
-    tty.expectQuietLabel()
+    tty.expectActiveSpinner()
     tty.send "\x1b"
     tty.expectInHistory "interrupted by user"
     tty.expect "❯"
@@ -615,7 +606,7 @@ suite "terminal visual contract":
     tty.expect "❯"
     tty.send "first turn"
     tty.send "\n"
-    tty.expectQuietLabel()
+    tty.expectActiveSpinner()
     tty.send "\x03"
     tty.expectInHistory "interrupted by user"
     tty.expect "❯"
@@ -819,11 +810,11 @@ suite "terminal visual contract":
     # the whole revised text.
     tty.send "queued alpha\n"
     tty.expect "queued alpha"
-    tty.expect "⧖"
+    tty.drain 50
     tty.send " queued beta"
     tty.expect "queued alpha queued beta"
     tty.send "\n"
-    tty.expect "⧖"
+    tty.drain 50
     tty.advanceTicker()
     tty.continueStubApi()
 
@@ -879,13 +870,13 @@ suite "terminal visual contract":
     tty.send "hello world"
     tty.expect "hello world"
     tty.send "\n"
-    tty.expect "⧖"
+    tty.drain 50
     tty.send "\x7f"           # backspace: delete the 'd'
     tty.send " edited"         # buffer now reads "hello worl edited"
     tty.expect "hello worl edited"
     tty.requireVisibleEditorCaret("hello worl edited")
     tty.send "\n"             # re-queue the edited text
-    tty.expect "⧖"
+    tty.drain 50
     tty.advanceTicker()
     tty.continueStubApi()
 
@@ -931,7 +922,7 @@ suite "terminal visual contract":
     tty.send "hello"
     tty.requireVisibleEditorCaret("hello")
     tty.send "\n"
-    tty.expect "⧖"
+    tty.drain 50
     var acc = "hello"
     for ch in " world":
       acc.add ch
@@ -989,7 +980,7 @@ suite "terminal visual contract":
     tty.send "queued prompt"
     tty.expect "queued prompt"
     tty.send "\n"
-    tty.expect "⧖"
+    tty.drain 50
     # Interrupt the current turn. The queued prompt must survive and be sent
     # as the next user turn, not dropped.
     tty.send "\x03"
@@ -1042,7 +1033,7 @@ suite "terminal visual contract":
     tty.send "queued prompt"
     tty.expect "queued prompt"
     tty.send "\n"
-    tty.expect "⧖"
+    tty.drain 50
     # Bare Esc cancels the current turn. The queued prompt must survive and
     # be sent as the next user turn, not dropped.
     tty.send "\x1b"

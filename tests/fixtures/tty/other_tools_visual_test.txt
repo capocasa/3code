@@ -1,40 +1,37 @@
-===== 562 =====
+===== 551 =====
 
   ╭─╮
-   ─┤  3code v0.4.1   the economical coding agent
+   ─┤  3code v0.5.0   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run other tool checks
-===== 633 =====
+===== 286 =====
 
   ╭─╮
-   ─┤  3code v0.4.1   the economical coding agent
+   ─┤  3code v0.5.0   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run other tool checks
 
 ⣿ ○0% ↓6 0s
 ❯
-===== 919 =====
+===== 636 =====
 
   ╭─╮
-   ─┤  3code v0.4.1   the economical coding agent
+   ─┤  3code v0.5.0   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run other tool checks
 ● Exercising non-bash tools.
@@ -80,16 +77,15 @@ p --- /tmp/applied.txt
 
 ⣿ ○0% ↓4 0s
 ❯
-===== 811 =====
+===== 348 =====
 
   ╭─╮
-   ─┤  3code v0.4.1   the economical coding agent
+   ─┤  3code v0.5.0   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run other tool checks
 ● Exercising non-bash tools.

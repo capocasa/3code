@@ -1,7 +1,21 @@
-===== 455 =====
+===== frame 0000 @0ms changed=@[0] cursor=visible@(0,0) =====
+█
+===== frame 0001 @7ms changed=@[1, 2, 3, 5, 6, 8, 10] cursor=visible@(10,12) =====
 
   ╭─╮
-   ─┤  3code v0.4.1   the economical coding agent
+   ─┤  3code v0.5.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line█
+===== frame 0002 @1010ms changed=@[11] cursor=visible@(11,2) =====
+
+  ╭─╮
+   ─┤  3code v0.5.0   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,10 +24,11 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
-===== 859 =====
+  █
+===== frame 0003 @1011ms changed=@[11] cursor=visible@(11,13) =====
 
   ╭─╮
-   ─┤  3code v0.4.1   the economical coding agent
+   ─┤  3code v0.5.0   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -22,11 +37,11 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
-  
-===== 128 =====
+  second line█
+===== frame 0004 @1038ms changed=@[13, 14] cursor=visible@(14,17) =====
 
   ╭─╮
-   ─┤  3code v0.4.1   the economical coding agent
+   ─┤  3code v0.5.0   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -36,10 +51,13 @@
 
 ❯ first line
   second line
-===== 181 =====
+
+⠋ ○0% 0s
+❯ queued line one█
+===== frame 0005 @2040ms changed=@[15] cursor=visible@(15,2) =====
 
   ╭─╮
-   ─┤  3code v0.4.1   the economical coding agent
+   ─┤  3code v0.5.0   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -50,12 +68,13 @@
 ❯ first line
   second line
 
-⣿ ○0% 0s
+⠋ ○0% 0s
 ❯ queued line one
-===== 714 =====
+  █
+===== frame 0006 @2041ms changed=@[15] cursor=visible@(15,17) =====
 
   ╭─╮
-   ─┤  3code v0.4.1   the economical coding agent
+   ─┤  3code v0.5.0   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -66,13 +85,13 @@
 ❯ first line
   second line
 
-⣿ ○0% 0s
+⠋ ○0% 0s
 ❯ queued line one
-  
-===== 473 =====
+  queued line two█
+===== frame 0007 @2090ms changed=@[13] cursor=visible@(15,17) =====
 
   ╭─╮
-   ─┤  3code v0.4.1   the economical coding agent
+   ─┤  3code v0.5.0   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -83,13 +102,13 @@
 ❯ first line
   second line
 
-⣿ ⧖ 0s
+⠙ ○0% 0s
 ❯ queued line one
-  queued line two
-===== 434 =====
+  queued line two█
+===== frame 0008 @2133ms changed=@[13] cursor=visible@(15,17) =====
 
   ╭─╮
-   ─┤  3code v0.4.1   the economical coding agent
+   ─┤  3code v0.5.0   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -100,13 +119,30 @@
 ❯ first line
   second line
 
-⣿ ⧖ 0s
+⠹ ○0% 0s
+❯ queued line one
+  queued line two█
+===== frame 0009 @2172ms changed=@[15] cursor=hidden =====
+
+  ╭─╮
+   ─┤  3code v0.5.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  second line
+
+⠹ ○0% 0s
 ❯ queued line one
   queued line two ⧖
-===== 305 =====
+===== frame 0010 @2174ms changed=@[13] cursor=hidden =====
 
   ╭─╮
-   ─┤  3code v0.4.1   the economical coding agent
+   ─┤  3code v0.5.0   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -117,13 +153,30 @@
 ❯ first line
   second line
 
-⣿ ○0% ↓6 0s
+⠸ ○0% 0s
 ❯ queued line one
   queued line two ⧖
-===== 720 =====
+===== frame 0011 @2199ms changed=@[13] cursor=hidden =====
 
   ╭─╮
-   ─┤  3code v0.4.1   the economical coding agent
+   ─┤  3code v0.5.0   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  second line
+
+⠼ ○0% ↓6 0s
+❯ queued line one
+  queued line two ⧖
+===== frame 0012 @2540ms changed=@[12, 13, 14, 15, 16, 18, 19] cursor=hidden =====
+
+  ╭─╮
+   ─┤  3code v0.5.0   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -139,12 +192,12 @@
 ❯ queued line one
   queued line two
 
-⣿ ○1% ↓6 0s
-❯
-===== 998 =====
+⠋ ○1% ↓6 0s
+❯ 
+===== frame 0013 @3043ms changed=@[17, 18, 19, 20, 21] cursor=visible@(21,2) =====
 
   ╭─╮
-   ─┤  3code v0.4.1   the economical coding agent
+   ─┤  3code v0.5.0   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -163,4 +216,4 @@
   ○1%  ↑180  ↓32  0s
 
   ○1%
-❯
+❯ █

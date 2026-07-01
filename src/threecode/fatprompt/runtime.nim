@@ -61,9 +61,8 @@ var spinnerStop: Atomic[bool]
 var spinnerFramePainted: Atomic[bool]
 var spinnerThread: Thread[string]
 var bufferedSubmitTurn: Atomic[bool]
-const QuietThresholdMs {.intdefine.} = 15_000
 var quietStop: Atomic[bool]
-var quietThread: Thread[string]
+var quietThread: Thread[void]
 var quietRunning = false
 var lastProviderActivity: Atomic[int]
 
@@ -936,8 +935,7 @@ proc nowMs(): int =
 proc markProviderActivity*() =
   lastProviderActivity.store(nowMs(), moRelaxed)
 
-proc quietWatchLoop(baseLabel: string) {.thread.} =
-  var shown = false
+proc quietWatchLoop() {.thread.} =
   var lastFiredMs = 0
   while not quietStop.load(moRelaxed):
     let idleMs = nowMs() - lastProviderActivity.load(moRelaxed)
@@ -955,22 +953,14 @@ proc quietWatchLoop(baseLabel: string) {.thread.} =
       if now - lastFiredMs > 10_000:  # Don't hammer shutdown every 500ms
         lastFiredMs = now
         requestQuietShutdown()
-      setSpinLabel("⧖")
-      shown = true
-    elif idleMs >= QuietThresholdMs:
-      setSpinLabel("⧖")
-      shown = true
-    elif shown:
-      setSpinLabel(baseLabel)
-      shown = false
     sleep 500
 
-proc startQuietWatch(baseLabel: string) =
+proc startQuietWatch() =
   if quietRunning: return
   markProviderActivity()
   clearNetworkQuiet()
   quietStop.store(false, moRelaxed)
-  createThread(quietThread, quietWatchLoop, baseLabel)
+  createThread(quietThread, quietWatchLoop)
   quietRunning = true
 
 proc stopQuietWatch() =
@@ -1219,7 +1209,7 @@ proc apiBeforeCall*(lastPromptTokens, window: int): string =
       stdout.flushFile
   setSpinLabel(liveLabel(baseLabel, 0))
   startSpinner("")
-  startQuietWatch(liveLabel(baseLabel, 0))
+  startQuietWatch()
   apiCancelWatcherStarted = inputEditor == nil
   if apiCancelWatcherStarted:
     startCancelWatcher()
