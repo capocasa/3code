@@ -948,6 +948,7 @@ when defined(posix):
     resetAttributes()
     stdout.flushFile()
     discard posix.kill(posix.getpid(), posix.SIGTSTP)
+    applyRawMode()
     ed.write "\e[?2004h"
     ed.renderRow = 0
     fullRedraw(ed)
@@ -1051,6 +1052,7 @@ proc initKeyTables*() =
       resetAttributes()
       stdout.flushFile()
       discard posix.kill(posix.getpid(), posix.SIGTSTP)
+      applyRawMode()
       ed.write "\e[?2004h"
       ed.renderRow = 0
       fullRedraw(ed)
@@ -1570,9 +1572,11 @@ proc readLine*(ed: var LineEditor, prompt = "", hidechars = false,
       rawMode.c_cc[VMIN] = char(1)
       rawMode.c_cc[VTIME] = char(0)
       discard fd.tcSetAttr(TCSANOW, addr rawMode)
+      storeRawMode()
     defer:
       if haveOldMode:
         discard fd.tcSetAttr(TCSADRAIN, addr oldMode)
+      clearRawMode()
     let getCh: GetChProc = proc(): int =
       stdout.flushFile()
       if termPeeked >= 0:

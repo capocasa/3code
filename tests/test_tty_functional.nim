@@ -1437,6 +1437,65 @@ suite "terminal visual contract":
     for p in prompts:
       check ("❯ " & p) in finalScreen
 
+  test "background and foreground restores raw mode and editor stays responsive":
+    if getEnv("THREECODE_TTY_ONLY").len > 0 and
+        getEnv("THREECODE_TTY_ONLY") != "bgfg_rawmode":
+      check true
+    else:
+      # Regression: after Ctrl+Z (SIGTSTP) + fg (SIGCONT) the terminal was
+      # left in cooked mode by the shell, and the editor's raw-mode-only read
+      # loop saw no input until a full line was entered. The fix re-applies
+      # raw mode after resume.
+      when defined(posix):
+        let root = newFixture("bgfg_rawmode")
+        writeConfiguredProvider(root)
+        writeStubResponses(root, %*[{
+          "role": "assistant",
+          "content": "reply after bg-fg",
+          "contentChunks": ["reply after bg-fg"],
+          "usage": {
+            "promptTokens": 16,
+            "completionTokens": 4,
+            "totalTokens": 20,
+            "cachedTokens": 0
+          }
+        }])
+        let tty = startStub(root, rows = 16)
+        defer:
+          if not tty.exited:
+            tty.hardKillAndWait()
+            tty.discardClose()
+          else:
+            tty.close()
+
+        tty.expect "❯"
+        # Type a few characters to confirm the editor is alive.
+        tty.send "hello"
+        tty.expect "hello"
+
+        # Simulate Ctrl+Z: the editor's handler sends SIGTSTP to itself.
+        tty.send "\x1a"
+
+        # Wait for the child to actually stop.
+        var status: cint = 0
+        var waitCount = 0
+        while waitpid(tty.pid, status, WNOHANG or WUNTRACED) != tty.pid and
+              waitCount < 50:
+          sleep 10
+          inc waitCount
+
+        # Resume the child.
+        discard kill(tty.pid, SIGCONT)
+        tty.drain(100)
+
+        # The editor should be responsive: send more text and submit.
+        tty.send " world\n"
+        tty.expectInHistory "reply after bg-fg"
+        # After the turn, a new prompt appears. Type into it.
+        tty.expect "❯"
+        tty.send "still working"
+        tty.expect "still working"
+
 when false:
   suite "disabled terminal visual contract tests":
     test "stub provider streams bash output without replaying it later":
