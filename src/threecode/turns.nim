@@ -374,15 +374,20 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         var code: int
         var diff: string
         try:
-          (r, code, diff) =
-            if act.kind == akBash:
-              runBashWithViewport(
-                act, session.readCache, toolStub, idx, addr streamedOutputShown)
-            else:
-              if toolStub != nil and toolStub.kind == JObject:
-                stubToolCallResult(toolStub)
+          try:
+            (r, code, diff) =
+              if act.kind == akBash:
+                runBashWithViewport(
+                  act, session.readCache, toolStub, idx, addr streamedOutputShown)
               else:
-                runAction(act, session.readCache)
+                if toolStub != nil and toolStub.kind == JObject:
+                  stubToolCallResult(toolStub)
+                else:
+                  runAction(act, session.readCache)
+          except CatchableError as e:
+            r = "ERROR: tool execution failed: " & e.msg
+            code = -1
+            diff = ""
         finally:
           if hadToolBar:
             discard stopBarTick()

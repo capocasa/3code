@@ -1003,6 +1003,48 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
       messages.add %*{"role": "tool", "tool_call_id": id, "content": r.body}
       lastAssistant = nil
     else: discard
+  # Repair orphaned tool_calls: if a session was saved after the assistant
+  # message arrived but before tool results were written (crash, kill),
+  # messages has assistant entries with `tool_calls` but no matching `tool`
+  # messages. DeepSeek and other strict validators reject this mismatch.
+  # Inject synthetic "result unavailable" tool messages so the session can
+  # resume without an API error.
+  block repairOrphanedToolCalls:
+    var repaired = newJArray()
+    var pending: seq[string] = @[]
+    for m in messages:
+      if m.kind != JObject:
+        repaired.add m
+        continue
+      let role = m{"role"}.getStr
+      if role == "tool":
+        let id = m{"tool_call_id"}.getStr
+        let idx = pending.find(id)
+        if idx >= 0: pending.delete(idx)
+        repaired.add m
+      elif role == "assistant":
+        # Flush orphans from the previous assistant before starting a new one.
+        for id in pending:
+          repaired.add %*{"role": "tool", "tool_call_id": id,
+            "content": "tool result unavailable (session was interrupted)"}
+        pending.setLen 0
+        let tcs = m{"tool_calls"}
+        if tcs != nil and tcs.kind == JArray:
+          for tc in tcs:
+            let id = tc{"id"}.getStr
+            if id.len > 0: pending.add id
+        repaired.add m
+      else:
+        # user / system — flush any remaining orphans before the next turn.
+        for id in pending:
+          repaired.add %*{"role": "tool", "tool_call_id": id,
+            "content": "tool result unavailable (session was interrupted)"}
+        pending.setLen 0
+        repaired.add m
+    for id in pending:
+      repaired.add %*{"role": "tool", "tool_call_id": id,
+        "content": "tool result unavailable (session was interrupted)"}
+    messages = repaired
   if messages.len == 0 or messages[0]{"role"}.getStr != "system":
     let backfill = newJArray()
     backfill.add %*{"role": "system", "content": DefaultSystemPrompt}
