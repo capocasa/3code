@@ -39,9 +39,8 @@ jobs:
       - name: Compute build flags
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            # autoupdate on releases only
             echo "BUILD_FLAGS=-d:autoUpdate" >> "$GITHUB_ENV"
-          else
-            echo "BUILD_FLAGS=-d:versionSuffix=-main-${GITHUB_SHA:0:8}" >> "$GITHUB_ENV"
           fi
 
       - name: Build
@@ -61,10 +60,6 @@ jobs:
       - name: Upload artifact to 3code.capocasa.dev
         if: github.ref == 'refs/heads/main'
         run: |
-          curl -sf -F "file=@${{ matrix.artifact }}.${{ matrix.ext }};filename=${{ matrix.artifact }}-${{ github.sha }}.${{ matrix.ext }}" \
-            https://3code.capocasa.dev/main/artifact-upload-1vWkc0apyXLLwaon88r6B9zTp5.nim
+          curl -sf -F -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" "file=${{ matrix.artifact }}.${{ matrix.ext }}" \
+            https://3code.capocasa.dev/main/upload.nim
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}.${{ matrix.ext }}

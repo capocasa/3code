@@ -16,13 +16,8 @@
 import std/[algorithm, hashes, json, os, sequtils, strutils]
 import types, util
 
-const versionSuffix* {.strdefine.} = ""
-  ## Set via `-d:versionSuffix=-main-<sha8>` for non-release builds so the
-  ## reported version distinguishes commits on main from the tagged release.
-  ## Empty for `nimble install` and tagged release builds.
-
-const Version* = staticRead("../../threecode.nimble").splitLines().filterIt(it.startsWith("version")).
-    mapIt(it.split("=")[1].strip().strip(chars = {'"'}))[0] & versionSuffix
+# this is expected to be overridden by a more useful value in config.nims
+const Version* {.strdefine.} = "devel"
 
 type
   KnownGoodCombo* = tuple[
