@@ -676,9 +676,9 @@ proc replaceFirst*(s, needle, repl: string): (string, bool) =
 
 proc isBinaryContent*(s: string): bool =
   ## Scan the first 512 bytes for binary indicators: any NUL byte, or
-  ## >5% non-printable control chars (excluding \t \n \r and ANSI CSI).
-  ## ANSI CSI escape sequences (`\e[...<letter>`) are skipped so that
-  ## colorised `ls` / `grep` output is not misclassified as binary.
+  ## >5% non-printable control chars (excluding \t \n \r and ANSI escape
+  ## sequences). CSI, OSC, and short-form ANSI escapes are skipped so that
+  ## colourised/terminal-formatted tool output is not misclassified.
   let scan = min(512, s.len)
   if scan == 0: return false
   var bad = 0
@@ -686,13 +686,28 @@ proc isBinaryContent*(s: string): bool =
   while k < scan:
     let b = s[k].ord
     if b == 0: return true
-    # Skip ANSI CSI: ESC [ ... <terminating letter @..~>
-    if b == 27 and k + 1 < scan and s[k + 1] == '[':
+    if b == 27 and k + 1 < scan:
+      let next = s[k + 1].ord
+      if next == ord('['):
+        # CSI: ESC [ <parameter+intermediate bytes 0x20-0x3F> <final 0x40-0x7E>
+        inc k, 2
+        while k < scan and s[k].ord notin 0x40..0x7E:
+          inc k
+        if k < scan: inc k
+        continue
+      if next in {ord(']'), ord('P'), ord('^'), ord('_')}:
+        # OSC / DCS / SOS / PM / APC: terminated by BEL (0x07) or ST (ESC \)
+        inc k, 2
+        while k < scan:
+          let tb = s[k].ord
+          if tb == 7:
+            inc k; break
+          if tb == 27 and k + 1 < scan and s[k + 1] == '\\':
+            inc k, 2; break
+          inc k
+        continue
+      # Other ESC sequences: skip ESC + 1 byte (covers ESC c, ESC M, etc.)
       inc k, 2
-      while k < scan and s[k].ord notin 0x40..0x7E:
-        inc k
-      if k < scan:
-        inc k
       continue
     if b < 32 and b notin {9, 10, 13}:
       inc bad
