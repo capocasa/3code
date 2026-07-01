@@ -1,12 +1,26 @@
 name: OSX
 
-# macOS build. Fires on every push to main and on tags. Deploys its
-# artifact to GitHub Pages after build.
+# Fast macOS-only build + publish. The full Release workflow waits on every
+# matrix leg (Linux/Windows), and the tty visual test can hang on Linux for
+# the full 20m step timeout before pages can deploy. This workflow builds only
+# the macOS universal binary and publishes it to the Pages site so a single
+# platform fix can be live-tested in minutes.
+#
+# Trigger manually:
+#   gh workflow run osx.yml --ref main
+# Or it fires on push to main alongside Release.
 
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     tags: ['[0-9]+.[0-9]+.[0-9]+']
+    paths:
+      - '.github/workflows/osx.yml'
+      - 'src/**'
+      - 'tests/**'
+      - '*.nimble'
+      - 'config.nims'
 
 jobs:
   build:
@@ -65,88 +79,9 @@ jobs:
           ln -sf libssl.3.dylib    3code-macos-universal/libssl.dylib
           ln -sf libcrypto.3.dylib 3code-macos-universal/libcrypto.dylib
           curl -fsSL https://curl.se/ca/cacert.pem -o 3code-macos-universal/cacert.pem
-          VER=$(grep 'version\s*=' threecode.nimble | head -1 | sed 's/.*=\s*"\(.*\)".*/\1/')
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            echo "$VER" > 3code-macos-universal/VERSION
-          else
-            echo "${VER}-main-${GITHUB_SHA:0:8}" > 3code-macos-universal/VERSION
-          fi
           tar czf 3code-macos-universal.tar.gz 3code-macos-universal
 
       - uses: actions/upload-artifact@v4
         with:
           name: 3code-macos-universal
           path: 3code-macos-universal.tar.gz
-
-  deploy:
-    needs: build
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    concurrency:
-      group: pages-${{ github.sha }}
-      cancel-in-progress: false
-    permissions:
-      contents: read
-      actions: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download artifacts for this commit
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          commit="${{ github.sha }}"
-          mkdir -p dl
-
-          gh run download ${{ github.run_id }} --dir dl
-
-          for workflow in Linux OSX Windows; do
-            run_id=$(gh run list --workflow "$workflow" --branch main \
-              --status success --event push --limit 20 \
-              --json databaseId,headSha -q ".[] | select(.headSha==\"$commit\") | .databaseId" || true)
-            if [ -n "$run_id" ] && [ "$run_id" != "${{ github.run_id }}" ]; then
-              echo "$workflow: run $run_id — downloading"
-              gh run download "$run_id" --dir dl
-            fi
-          done
-
-          echo "--- artifacts ---"
-          find dl -type f
-
-      - name: Assemble site
-        run: |
-          mkdir -p site/main
-          cp dl/3code-linux-amd64/3code-linux-amd64.tar.gz     site/main/ 2>/dev/null || true
-          cp dl/3code-linux-arm64/3code-linux-arm64.tar.gz     site/main/ 2>/dev/null || true
-          cp dl/3code-macos-universal/3code-macos-universal.tar.gz site/main/ 2>/dev/null || true
-          cp dl/3code-windows-amd64/3code-windows-amd64.zip    site/main/ 2>/dev/null || true
-          cat > site/index.html <<EOF
-          <!doctype html><meta charset=utf-8><title>3code main builds</title>
-          <h1>3code main builds</h1>
-          <p>Per-commit builds from <code>main</code> (commit ${{ github.sha }}).</p>
-          <ul>
-          EOF
-          for f in site/main/*; do
-            [ -f "$f" ] || continue
-            b=$(basename "$f")
-            echo "            <li><a href=\"main/$b\">$b</a></li>" >> site/index.html
-          done
-          cat >> site/index.html <<EOF
-          </ul>
-          EOF
-
-      - uses: actions/configure-pages@v5
-
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
-      - id: deploy
-        uses: actions/deploy-pages@v4
