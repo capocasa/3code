@@ -6,7 +6,7 @@
 ## callback for live display. Returns the raw merged output and the
 ## exit code — clipping and post-processing live in `actions.nim`.
 
-import std/[atomics, os, osproc, strformat, strutils, tables, times]
+import std/[atomics, os, osproc, strformat, strutils, tables, terminal, times]
 when defined(posix):
   import std/posix except Time
   import std/termios
@@ -370,7 +370,7 @@ export DEBIAN_FRONTEND=noninteractive
   if cancelled:
     if rawOut.len > 0 and not rawOut.endsWith("\n"):
       rawOut.add "\n"
-    rawOut.add "[interrupted by user]"
+    rawOut.add ansiForegroundColorCode(fgMagenta) & "interrupted by user" & ansiResetCode
     return (rawOut, 130, cap)
   if timedOut:
     if rawOut.len > 0 and not rawOut.endsWith("\n"):

@@ -71,6 +71,11 @@ proc encode*(encoding: KeyEncoding, chord: KeyChord): seq[int] =
 template push*(d: Driver, encoding: KeyEncoding, body: untyped) =
   d.push encode(encoding, body)
 
+var testPendingInput: Input
+
+proc testPollStdinNow(): bool =
+  testPendingInput.hasPendingInput()
+
 proc run*(d: Driver, ed: var LineEditor, prompt = "> ",
           hidechars = false): string =
   let getCh: GetChProc = proc(): int = d.terminal.read()
@@ -82,6 +87,13 @@ proc run*(d: Driver, ed: var LineEditor, prompt = "> ",
       d.pendingInput()
     else:
       d.terminal.hasPendingInput()
+  # In test mode, pollStdinNowHook uses terminal pending-input check
+  # (no real stdin poll). Bytes pushed before run() are "immediately
+  # available" when the per-byte loop's newline handler checks.
+  testPendingInput = d.terminal.input
+  let prevPollHook = pollStdinNowHook
+  pollStdinNowHook = testPollStdinNow
+  defer: pollStdinNowHook = prevPollHook
   ed.readLineWith(prompt, getCh, write, hidechars = hidechars,
                   getWidth = widthProc, hasPendingInput = hasPendingInput)
 

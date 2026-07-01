@@ -65,6 +65,9 @@ if isatty(stdin):
 # peek never loses user input.
 var termPeeked*: int = -1
 
+var pollStdinNowHook*: proc(): bool {.closure.}
+  ## Override for tests; nil means use real pollStdinNow().
+
 when defined(windows):
   proc putchr*(c: cint): cint {.discardable, header: "<conio.h>", importc: "_putch".}
     ## Prints an ASCII character to stdout.
@@ -1121,6 +1124,22 @@ proc readBracketedPaste(ed: var LineEditor): string =
         result.setLen(result.len - endLen)
         return result
 
+proc stdinHasByteNow*(): bool =
+  ## Return true if stdin has at least one byte available right now
+  ## (0ms poll). Used to detect paste bursts: when bytes arrive with
+  ## no inter-byte gap, we're in a paste, and a newline should be
+  ## treated as part of the paste rather than as submit.
+  if pollStdinNowHook != nil:
+    return pollStdinNowHook()
+  when defined(posix):
+    if isatty(0.cint) != 0:
+      var pfd: TPollfd
+      pfd.fd = 0.cint
+      pfd.events = POLLIN
+      let r = poll(addr pfd, 1.Tnfds, 0.cint)
+      return r > 0 and (pfd.revents and POLLIN) != 0
+  false
+
 proc terminalHasPendingInput*(): bool =
   ## Return whether stdin has a pending byte that could be the tail of an
   ## ESC-prefixed escape sequence. Polls briefly for burst-delivered
@@ -1395,6 +1414,13 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
       ed.eof = true
       raise newException(EOFError, "")
     if c1 == 10 or c1 == 13:
+      # Hidden-mode (api key) paste burst detection: when a newline
+      # arrives immediately after other bytes (no inter-byte gap),
+      # it's part of a paste, not an Enter press. Drop it so the
+      # user doesn't submit a truncated key. Real Enter has a human
+      # pause before it — pollStdinNow() catches paste bursts only.
+      if hidechars and ed.line.text.len > 0 and stdinHasByteNow():
+        continue
       if ed.deferSubmit:
         ed.submitted = true
         if ed.onSubmit != nil:

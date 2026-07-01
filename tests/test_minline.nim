@@ -658,6 +658,28 @@ suite "minline editor: bracketed paste":
     check d.run(ed, prompt = "> ", hidechars = true) == "secret42"
     check rowText(d.grid, 0).startsWith("> ********")
 
+  test "hidechars: paste with trailing newline dropped, Enter submits":
+    # When bracketed paste is NOT active and a paste contains a trailing
+    # newline (common when copying from browsers/password managers), the
+    # per-byte handler must drop the embedded newline instead of submitting
+    # the key early. The paste burst is detected because further input
+    # (the real Enter) is still pending in stdin.
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "sk-ant-key\n"  # paste with trailing newline
+    d.push Enter                  # real Enter press
+    let got = d.run(ed, prompt = "> ", hidechars = true)
+    check got == "sk-ant-key"
+    check rowText(d.grid, 0).startsWith("> *********")  # 9 stars
+
+  test "hidechars: typed key with Enter submits normally":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "sk-ant-key"
+    d.push Enter
+    check d.run(ed, prompt = "> ", hidechars = true) == "sk-ant-key"
+    check rowText(d.grid, 0).startsWith("> *********")  # 9 stars
+
 # ---------------- SIGWINCH / EINTR ----------------
 
 suite "minline editor: SIGWINCH EINTR":
