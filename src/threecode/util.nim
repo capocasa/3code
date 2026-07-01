@@ -676,14 +676,27 @@ proc replaceFirst*(s, needle, repl: string): (string, bool) =
 
 proc isBinaryContent*(s: string): bool =
   ## Scan the first 512 bytes for binary indicators: any NUL byte, or
-  ## >5% non-printable control chars (excluding \t \n \r).
+  ## >5% non-printable control chars (excluding \t \n \r and ANSI CSI).
+  ## ANSI CSI escape sequences (`\e[...<letter>`) are skipped so that
+  ## colorised `ls` / `grep` output is not misclassified as binary.
   let scan = min(512, s.len)
   if scan == 0: return false
   var bad = 0
-  for k in 0 ..< scan:
+  var k = 0
+  while k < scan:
     let b = s[k].ord
     if b == 0: return true
-    if b < 32 and b notin {9, 10, 13}: inc bad
+    # Skip ANSI CSI: ESC [ ... <terminating letter @..~>
+    if b == 27 and k + 1 < scan and s[k + 1] == '[':
+      inc k, 2
+      while k < scan and s[k].ord notin 0x40..0x7E:
+        inc k
+      if k < scan:
+        inc k
+      continue
+    if b < 32 and b notin {9, 10, 13}:
+      inc bad
+    inc k
   bad * 20 > scan
 
 proc looksLikePath*(s: string): bool =
