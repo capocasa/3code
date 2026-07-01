@@ -784,3 +784,70 @@ suite "minline editor: unicode input":
     # makes the sequence invalid. The lead is discarded and the ASCII byte
     # is typed normally.
     check feedBytes([0xC3, 0x41]) == "A"
+
+# ---------------- termPeeked draining ----------------
+
+suite "minline editor: termPeeked drain":
+  test "getchr drains termPeeked before reading stdin":
+    termPeeked = 'Z'.ord
+    let c = getchr()
+    check c == 'Z'.ord.cint
+    check termPeeked == -1
+
+  test "readLineWith getCh drains termPeeked first":
+    termPeeked = 'X'.ord
+    var ed = initEditor()
+    let d = newDriver()
+    d.push Enter
+    let got = d.run(ed, prompt = "> ")
+    check got == "X"
+    check termPeeked == -1
+
+  test "peeked non-tail byte survives Esc cancel":
+    termPeeked = -1
+    var ed = initEditor()
+    let d = newDriver()
+    # pendingInput peeks at next byte and, if not an escape tail,
+    # stashes it in termPeeked (mirroring terminalHasPendingInput).
+    d.pendingInput = proc(): bool =
+      if d.terminal.input.hasPendingInput:
+        let b = d.terminal.input.read()
+        if isEscapeTailByte(b):
+          termPeeked = b
+          return true
+        termPeeked = b
+        return false
+      return false
+    d.push Esc
+    d.pushString "x"
+    expect InputCancelled:
+      discard d.run(ed, prompt = "> ")
+    # After cancel, termPeeked holds 'x'. A fresh readLineWith must
+    # drain it so the character is not lost.
+    check termPeeked == 'x'.ord
+    d.push Enter
+    let got = d.run(ed, prompt = "> ")
+    check got == "x"
+    check termPeeked == -1
+
+  test "peeked tail byte feeds escape sequence":
+    termPeeked = -1
+    var ed = initEditor()
+    let d = newDriver()
+    d.pendingInput = proc(): bool =
+      if d.terminal.input.hasPendingInput:
+        let b = d.terminal.input.read()
+        if isEscapeTailByte(b):
+          termPeeked = b
+          return true
+        termPeeked = b
+        return false
+      return false
+    d.pushString "abc"
+    d.push Left   # Esc [ D
+    d.pushString "X"
+    d.push Enter
+    let got = d.run(ed, prompt = "> ")
+    # Cursor moved left before 'X', so X is inserted between 'b' and 'c'.
+    check got == "abXc"
+    check termPeeked == -1

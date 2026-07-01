@@ -78,7 +78,12 @@ proc testPollStdinNow(): bool =
 
 proc run*(d: Driver, ed: var LineEditor, prompt = "> ",
           hidechars = false): string =
-  let getCh: GetChProc = proc(): int = d.terminal.read()
+  let getCh: GetChProc = proc(): int =
+    if termPeeked >= 0:
+      result = termPeeked
+      termPeeked = -1
+      return result
+    d.terminal.read()
   let write: WriteProc = proc(s: string) =
     d.terminal.write s
   let widthProc: WidthProc = proc(): int = d.width
