@@ -1,7 +1,7 @@
 ===== 551 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -12,7 +12,7 @@
 ===== 286 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -26,7 +26,7 @@
 ===== 636 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -80,7 +80,7 @@ p --- /tmp/applied.txt
 ===== 348 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub

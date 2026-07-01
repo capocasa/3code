@@ -1,7 +1,7 @@
 ===== 874 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -13,7 +13,7 @@
 ===== 444 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -30,7 +30,7 @@
 ===== 609 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -50,7 +50,7 @@ $ printf 'ok-one\nok-two\n'
 ===== 207 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -71,7 +71,7 @@ $ printf 'ok-one\nok-two\n'
 ===== 725 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -93,7 +93,7 @@ $ printf 'ok-one\nok-two\n'
 ===== 821 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -117,7 +117,7 @@ $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
 ===== 345 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -142,7 +142,7 @@ $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
 ===== 933 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -168,7 +168,7 @@ $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
 ===== 593 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -195,7 +195,7 @@ $ printf 'ok-one\nok-two\n'
 ===== 254 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -224,7 +224,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 ===== 431 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -254,7 +254,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 ===== 317 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -285,7 +285,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 ===== 584 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -317,7 +317,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 ===== 191 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -350,7 +350,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 ===== 856 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -384,7 +384,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 ===== 149 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -419,7 +419,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 ===== 440 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -455,7 +455,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 ===== 593 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -492,7 +492,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 ===== 220 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -529,7 +529,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 ===== 509 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -566,7 +566,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 ===== 170 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -605,7 +605,7 @@ $ sleep 3; printf 'slow-done\n'
 ===== 531 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub

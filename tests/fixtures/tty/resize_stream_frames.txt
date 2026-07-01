@@ -3,7 +3,7 @@
 ===== frame 0001 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -16,7 +16,7 @@
 ===== frame 0002 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -31,7 +31,7 @@
 ===== frame 0003 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -46,7 +46,7 @@
 ===== frame 0004 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -61,7 +61,7 @@
 ===== frame 0005 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -76,7 +76,7 @@
 ===== frame 0006 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -91,7 +91,7 @@
 ===== frame 0007 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -106,7 +106,7 @@
 ===== frame 0008 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -121,7 +121,7 @@
 ===== frame 0009 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -136,7 +136,7 @@
 ===== frame 0010 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -151,7 +151,7 @@
 ===== frame 0011 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -166,7 +166,7 @@
 ===== frame 0012 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -181,7 +181,7 @@
 ===== frame 0013 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -196,7 +196,7 @@
 ===== frame 0014 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -211,7 +211,7 @@
 ===== frame 0015 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -226,7 +226,7 @@
 ===== frame 0016 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -241,7 +241,7 @@
 ===== frame 0017 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -256,7 +256,7 @@
 ===== frame 0018 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -271,7 +271,7 @@
 ===== frame 0019 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -286,7 +286,7 @@
 ===== frame 0020 =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub

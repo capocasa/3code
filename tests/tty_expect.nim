@@ -603,6 +603,18 @@ proc normalizeFrameSeparators(text: string): string =
     else:
       result.add line
 
+proc normalizeVersionBanner(text: string): string =
+  ## Replace version strings like `v0.5.0-main-6e809ef1-unstaged` with a
+  ## stable placeholder so fixture comparison doesn't break on every commit.
+  var inBanner = false
+  for line in text.splitLines(keepEol = true):
+    if "3code v" in line and "the economical coding agent" in line:
+      result.add line.replacef(
+        peg"'3code v' {@} '   the economical coding agent'",
+        "3code vVERSION   the economical coding agent")
+    else:
+      result.add line
+
 proc stripFrameBlanks(text: string): string =
   ## Drop blank rows inside each frame for comparison. The separator row a
   ## full repaint inserts between the prompt echo and arriving assistant
@@ -639,8 +651,8 @@ proc expectMeaningfulFrameArtifact*(s: TtySession; expectedPath,
     "missing expected full-frame artifact: " & expectedPath & "\nactual written to: " &
       actualPath
   let expected = readFile(expectedPath)
-  doAssert actual.normalizeFrameSeparators.stripFrameBlanks ==
-      expected.normalizeFrameSeparators.stripFrameBlanks,
+  doAssert actual.normalizeVersionBanner.normalizeFrameSeparators.stripFrameBlanks ==
+      expected.normalizeVersionBanner.normalizeFrameSeparators.stripFrameBlanks,
     "full-frame recording differed from expected frames\nexpected: " & expectedPath &
       "\nactual: " & actualPath
 

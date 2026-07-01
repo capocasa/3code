@@ -3,7 +3,7 @@
 ===== frame 0001 @7ms changed=@[1, 2, 3, 5, 6, 8, 10] cursor=visible@(10,12) =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -15,7 +15,7 @@
 ===== frame 0002 @1010ms changed=@[11] cursor=visible@(11,2) =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -28,7 +28,7 @@
 ===== frame 0003 @1011ms changed=@[11] cursor=visible@(11,13) =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -41,7 +41,7 @@
 ===== frame 0004 @1038ms changed=@[13, 14] cursor=visible@(14,17) =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -57,7 +57,7 @@
 ===== frame 0005 @2040ms changed=@[15] cursor=visible@(15,2) =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -74,7 +74,7 @@
 ===== frame 0006 @2041ms changed=@[15] cursor=visible@(15,17) =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -91,7 +91,7 @@
 ===== frame 0007 @2090ms changed=@[13] cursor=visible@(15,17) =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -108,7 +108,7 @@
 ===== frame 0008 @2133ms changed=@[13] cursor=visible@(15,17) =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -125,7 +125,7 @@
 ===== frame 0009 @2172ms changed=@[15] cursor=hidden =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -142,7 +142,7 @@
 ===== frame 0010 @2174ms changed=@[13] cursor=hidden =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -159,7 +159,7 @@
 ===== frame 0011 @2199ms changed=@[13] cursor=hidden =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -176,7 +176,7 @@
 ===== frame 0012 @2540ms changed=@[12, 13, 14, 15, 16, 18, 19] cursor=hidden =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -197,7 +197,7 @@
 ===== frame 0013 @3043ms changed=@[17, 18, 19, 20, 21] cursor=visible@(21,2) =====
 
   ╭─╮
-   ─┤  3code v0.5.0   the economical coding agent
+   ─┤  3code vVERSION   the economical coding agent
   ╰─╯
 
   provider  stub

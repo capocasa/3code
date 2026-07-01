@@ -138,7 +138,14 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
         stdout.write termio.SyncBegin
         stdout.write "\x1b[?25l"
         refreshEditorWidth(edPtr[])
-        let up = max(0, e.rowsAboveCursorToFooterTop + e.toolViewportHeight)
+        let growth =
+          if e.footerRowsAboveEditor > 0:
+            max(0, footerRowsAboveEditor - e.footerRowsAboveEditor)
+          else:
+            0
+        let shrink = max(0, e.footerRowsAboveEditor - footerRowsAboveEditor)
+        let up = max(0, e.rowsAboveCursorToFooterTop + e.toolViewportHeight +
+                       growth - shrink)
         stdout.write "\r"
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
@@ -186,7 +193,14 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
       stdout.write "\x1b[?25l"
       if inputRunning and editor != nil:
         refreshEditorWidth(editor[])
-        let up = max(0, e.rowsAboveCursorToFooterTop + e.toolViewportHeight)
+        let growth =
+          if e.footerRowsAboveEditor > 0:
+            max(0, footerRowsAboveEditor - e.footerRowsAboveEditor)
+          else:
+            0
+        let shrink = max(0, e.footerRowsAboveEditor - footerRowsAboveEditor)
+        let up = max(0, e.rowsAboveCursorToFooterTop + e.toolViewportHeight +
+                       growth - shrink)
         stdout.write "\r"
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
@@ -240,16 +254,20 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
                        oldFooter, newFooter: FooterFrame;
                        compactRowsAboveFooter = 0;
                        restoreEditor = true;
-                       reserveFooter = true) =
-  ## Append transcript bytes as real scrollback. The engine always appends
-  ## a trailing separator row (`\r\n\r\n`) so the volatile footer's ticker
-  ## row never collides with committed content. Callers provide content
-  ## without trailing spacing; trailing \r/\n bytes are trimmed.
+                       reserveFooter = true;
+                       transcriptOwnsSpacing = false) =
+  ## Append transcript bytes as real scrollback while preserving or clearing
+  ## the volatile footer. The engine always appends a trailing separator row
+  ## (`\r\n\r\n`) so the volatile footer's ticker row never collides with
+  ## committed content. Callers provide content without trailing spacing;
+  ## trailing \r/\n bytes are trimmed unless ``transcriptOwnsSpacing`` is set.
   termio.withTerminalWriteLock:
     let termW = try: terminalWidth() except CatchableError: 0
     let footerBytes = newFooter.footerFrameBytes(termW)
     let footerRowsAboveEditor = newFooter.rowsAboveEditor(termW)
-    let transcript = trimTrailingNewlines(transcriptBytes)
+    let transcript =
+      if transcriptOwnsSpacing: transcriptBytes
+      else: trimTrailingNewlines(transcriptBytes)
     if liveAnchored:
       let edPtr = editor
       if edPtr == nil:
@@ -266,7 +284,7 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
       e.toolViewportRows = @[]
       if transcript.len > 0:
         stdout.write transcript
-        if reserveFooter:
+        if reserveFooter and not transcriptOwnsSpacing:
           stdout.write "\r\n\r\n"
       if reserveFooter:
         if footerBytes.len > 0:
@@ -300,7 +318,7 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
       e.toolViewportRows = @[]
       if transcript.len > 0:
         stdout.write transcript
-        if reserveFooter:
+        if reserveFooter and not transcriptOwnsSpacing:
           stdout.write "\r\n\r\n"
       if reserveFooter:
         if footerBytes.len > 0:
@@ -383,7 +401,8 @@ proc appendTranscript*(transcriptBytes: string;
                        oldFooter, newFooter: FooterFrame;
                        compactRowsAboveFooter = 0;
                        restoreEditor = true;
-                       reserveFooter = true) =
+                       reserveFooter = true;
+                       transcriptOwnsSpacing = false) =
   defaultEngine.appendTranscript(
     transcriptBytes,
     liveAnchored,
@@ -393,4 +412,5 @@ proc appendTranscript*(transcriptBytes: string;
     newFooter,
     compactRowsAboveFooter,
     restoreEditor,
-    reserveFooter)
+    reserveFooter,
+    transcriptOwnsSpacing)
