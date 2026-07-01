@@ -19,6 +19,7 @@ jobs:
       - name: Wait for platform builds and download artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           sha="${{ github.sha }}"
           tag="${{ github.ref_name }}"

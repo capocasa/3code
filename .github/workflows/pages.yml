@@ -23,9 +23,12 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Wait for platform builds and download artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           commit="${{ github.sha }}"
           mkdir -p dl
