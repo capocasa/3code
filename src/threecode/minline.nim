@@ -1575,6 +1575,10 @@ proc readLine*(ed: var LineEditor, prompt = "", hidechars = false,
         discard fd.tcSetAttr(TCSADRAIN, addr oldMode)
     let getCh: GetChProc = proc(): int =
       stdout.flushFile()
+      if termPeeked >= 0:
+        result = termPeeked.int
+        termPeeked = -1
+        return result
       while true:
         var ch: char
         let n = posix.read(fd.cint, addr ch, 1)
