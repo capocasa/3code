@@ -141,5 +141,4 @@ proc appendItem*(item: TranscriptItem; restoreEditor = true;
     bytes,
     restoreEditor,
     beforeRepaint,
-    reserveFooter = reserveFooter,
-    transcriptOwnsSpacing = true)
+    reserveFooter = reserveFooter)

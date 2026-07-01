@@ -173,8 +173,7 @@ proc commitAssistantItem(content: string; restoreEditor = true;
       bytes,
       restoreEditor,
       afterCommit,
-      reserveFooter = restoreEditor,
-      transcriptOwnsSpacing = true)
+      reserveFooter = restoreEditor)
     return
   var bytes = captureStdoutWrites:
     renderAssistantContent(content)
@@ -188,8 +187,7 @@ proc commitAssistantItem(content: string; restoreEditor = true;
     bytes,
     restoreEditor,
     afterCommit,
-    reserveFooter = restoreEditor,
-    transcriptOwnsSpacing = true)
+    reserveFooter = restoreEditor)
 
 proc commitPendingReceiptAfterStream(restoreEditor = true) =
   ## Streaming assistant content is already in scrollback. Once usage arrives,
@@ -203,8 +201,7 @@ proc commitPendingReceiptAfterStream(restoreEditor = true) =
     bytes,
     restoreEditor,
     clearSubmittedReceiptState,
-    reserveFooter = restoreEditor,
-    transcriptOwnsSpacing = true)
+    reserveFooter = restoreEditor)
 
 proc commitTranscriptItem(formatBody: proc(); restoreEditor = true;
                           prefixBoundary = false; receipt = "") =
@@ -223,8 +220,7 @@ proc commitTranscriptItem(formatBody: proc(); restoreEditor = true;
     bytes = "\r\n" & bytes
   commitTranscriptBytes(
     bytes,
-    restoreEditor,
-    transcriptOwnsSpacing = true)
+    restoreEditor)
 
 proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
   ## Returns true if the turn was interrupted by the user (Ctrl-C / ESC).
