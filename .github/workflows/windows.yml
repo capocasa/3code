@@ -89,6 +89,12 @@ jobs:
           Copy-Item dlls/libssl-1_1-x64.dll, dlls/libcrypto-1_1-x64.dll, dlls/cacert.pem 3code-windows-amd64/
           Compress-Archive -Path 3code-windows-amd64 -DestinationPath 3code-windows-amd64.zip
 
+      - name: Upload artifact to 3code.capocasa.dev
+        if: github.ref == 'refs/heads/main'
+        run: |
+          curl -sf -F "file=@3code-windows-amd64.zip;filename=3code-windows-amd64-${{ github.sha }}.zip" \
+            https://3code.capocasa.dev/main/artifact-upload-1vWkc0apyXLLwaon88r6B9zTp5.nim
+
       - uses: actions/upload-artifact@v4
         with:
           name: 3code-windows-amd64

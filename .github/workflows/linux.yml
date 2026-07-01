@@ -58,6 +58,12 @@ jobs:
           cp README.md LICENSE ${{ matrix.artifact }}/
           tar czf ${{ matrix.artifact }}.${{ matrix.ext }} ${{ matrix.artifact }}
 
+      - name: Upload artifact to 3code.capocasa.dev
+        if: github.ref == 'refs/heads/main'
+        run: |
+          curl -sf -F "file=@${{ matrix.artifact }}.${{ matrix.ext }};filename=${{ matrix.artifact }}-${{ github.sha }}.${{ matrix.ext }}" \
+            https://3code.capocasa.dev/main/artifact-upload-1vWkc0apyXLLwaon88r6B9zTp5.nim
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}

@@ -81,6 +81,12 @@ jobs:
           curl -fsSL https://curl.se/ca/cacert.pem -o 3code-macos-universal/cacert.pem
           tar czf 3code-macos-universal.tar.gz 3code-macos-universal
 
+      - name: Upload artifact to 3code.capocasa.dev
+        if: github.ref == 'refs/heads/main'
+        run: |
+          curl -sf -F "file=@3code-macos-universal.tar.gz;filename=3code-macos-universal-${{ github.sha }}.tar.gz" \
+            https://3code.capocasa.dev/main/artifact-upload-1vWkc0apyXLLwaon88r6B9zTp5.nim
+
       - uses: actions/upload-artifact@v4
         with:
           name: 3code-macos-universal
