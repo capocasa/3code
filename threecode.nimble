@@ -6,10 +6,10 @@ srcDir        = "src"
 namedBin["threecode"] = "3code"
 
 requires "nim >= 2.0.0"
-requires "https://github.com/capocasa/streamhttp >= 0.3.0"
+requires "streamhttp >= 0.3.2"
 requires "ttty >= 0.2.0"
 requires "unicodedb >= 0.13.0"
-requires "https://github.com/capocasa/tinotify >= 0.1.0"
+requires "tinotify >= 0.1.1"
 
 task test, "Run the test suite (parallel compile + run)":
   # Overrides nimble's default sequential test runner, which recompiles the
