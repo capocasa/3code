@@ -37,7 +37,7 @@ jobs:
               # stop immediately instead of waiting for the timeout.
               failed=$(gh run list --workflow "$workflow" --branch main \
                 --status failure --event push --limit 20 \
-                --json databaseId,headSha -q ".[] | select(.headSha==\"$commit\") | .databaseId" 2>/dev/null)
+                --json databaseId,headSha -q ".[] | select(.headSha==\"$commit\") | .databaseId" || true)
               if [ -n "$failed" ]; then
                 echo "  $workflow run $failed FAILED — aborting" >&2
                 exit 1
@@ -45,7 +45,7 @@ jobs:
 
               run_id=$(gh run list --workflow "$workflow" --branch main \
                 --status success --event push --limit 20 \
-                --json databaseId,headSha -q ".[] | select(.headSha==\"$commit\") | .databaseId" 2>/dev/null)
+                --json databaseId,headSha -q ".[] | select(.headSha==\"$commit\") | .databaseId" || true)
               if [ -n "$run_id" ]; then
                 echo "  found run $run_id"
                 gh run download "$run_id" --dir dl
