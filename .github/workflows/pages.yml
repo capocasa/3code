@@ -1,17 +1,22 @@
 name: Pages
 
+# Deploys to GitHub Pages incrementally: fires whenever Linux, OSX, or Windows
+# completes on main. Each run gathers whatever platform artifacts are ready
+# for the triggering commit and deploys. The site populates progressively as
+# platforms finish — no polling, no waiting for all three.
+
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - '*.nimble'
-      - 'config.nims'
+  workflow_run:
+    workflows: [Linux, OSX, Windows]
+    types: [completed]
   workflow_dispatch:
 
 jobs:
   deploy:
+    # Only deploy on success. The workflow_run trigger fires for all
+    # conclusions (success, failure, cancelled); skip non-success so a
+    # single broken platform doesn't blank the site.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -25,41 +30,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Wait for platform builds and download artifacts
+      - name: Download artifacts for this commit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          commit="${{ github.sha }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            commit="${{ github.sha }}"
+          else
+            commit="${{ github.event.workflow_run.head_sha }}"
+          fi
           mkdir -p dl
 
           for workflow in Linux OSX Windows; do
-            echo "--- $workflow ---"
-            for i in $(seq 1 30); do
-              # Fail fast: if this workflow already failed for this commit,
-              # stop immediately instead of waiting for the timeout.
-              failed=$(gh run list --workflow "$workflow" --branch main \
-                --status failure --event push --limit 20 \
-                --json databaseId,headSha -q ".[] | select(.headSha==\"$commit\") | .databaseId" || true)
-              if [ -n "$failed" ]; then
-                echo "  $workflow run $failed FAILED — aborting" >&2
-                exit 1
-              fi
-
-              run_id=$(gh run list --workflow "$workflow" --branch main \
-                --status success --event push --limit 20 \
-                --json databaseId,headSha -q ".[] | select(.headSha==\"$commit\") | .databaseId" || true)
-              if [ -n "$run_id" ]; then
-                echo "  found run $run_id"
-                gh run download "$run_id" --dir dl
-                break
-              fi
-              echo "  attempt $i/30, sleeping 20s..."
-              sleep 20
-            done
-            if [ -z "$run_id" ]; then
-              echo "  ERROR: $workflow did not complete for $commit after 10min" >&2
-              exit 1
+            run_id=$(gh run list --workflow "$workflow" --branch main \
+              --status success --event push --limit 20 \
+              --json databaseId,headSha -q ".[] | select(.headSha==\"$commit\") | .databaseId" || true)
+            if [ -n "$run_id" ]; then
+              echo "$workflow: run $run_id — downloading"
+              gh run download "$run_id" --dir dl
+            else
+              echo "$workflow: no successful run yet for $commit, skipping"
             fi
           done
 
@@ -68,6 +59,11 @@ jobs:
 
       - name: Assemble site
         run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            commit="${{ github.sha }}"
+          else
+            commit="${{ github.event.workflow_run.head_sha }}"
+          fi
           mkdir -p site/main
           cp dl/3code-linux-amd64/3code-linux-amd64.tar.gz     site/main/ 2>/dev/null || true
           cp dl/3code-linux-arm64/3code-linux-arm64.tar.gz     site/main/ 2>/dev/null || true
@@ -76,7 +72,7 @@ jobs:
           cat > site/index.html <<EOF
           <!doctype html><meta charset=utf-8><title>3code main builds</title>
           <h1>3code main builds</h1>
-          <p>Per-commit builds from <code>main</code> (commit ${{ github.sha }}).</p>
+          <p>Per-commit builds from <code>main</code> (commit $commit).</p>
           <ul>
           EOF
           for f in site/main/*; do
