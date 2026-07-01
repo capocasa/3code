@@ -314,7 +314,10 @@ export DEBIAN_FRONTEND=noninteractive
   writeFile(stdinPath, act.stdin)
 
   let cap = bashTimeoutSecs(act.timeoutSecs)
-  let wrapped = &"exec sh \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
+  let wrapped = when defined(windows):
+    &". \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
+  else:
+    &"exec sh \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
 
   var p =
     when defined(posix):
