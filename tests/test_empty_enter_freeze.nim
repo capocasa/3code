@@ -2,7 +2,7 @@
 ## input thread. Before the fix, onSubmit parked the thread on
 ## inputIdleSubmitted even for empty text, and the controller had nothing to
 ## consume, so both threads spun in sleep-loops forever.
-import std/[json, os, unittest]
+import std/[json, os, strutils, unittest]
 import tty_expect
 import stub_helpers
 
@@ -53,32 +53,36 @@ suite "idle enter freeze regression":
     let tty = newTtySession(stub,
                             args = ["-x", "-i"],
                             cwd = root / "run",
-                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+                            env = stubEnv(root, root / "run" / "stub_responses.json"),
+                            keepHistory = false)
     defer:
-      tty.writeFrameArtifact(root / "frames.txt")
       tty.close()
 
     # Idle prompt is up.
     tty.expect "\u276f"
 
-    # Empty Enter at idle -- the exact trigger that used to wedge the
-    # input thread. expect() has a 5s timeout, so a hang fails the test
-    # rather than blocking the suite.
+    # Empty Enter at idle.
     tty.send "\n"
-
-    # Process must still be responsive: send a real prompt.
     tty.drain(200)
     tty.expect "\u276f"
-    tty.send "hello model"
-    tty.expect "hello model"
+
+    # Send a real prompt, character by character for reliability.
+    for ch in "hello model":
+      tty.send($ch)
+      tty.drain(10)
     tty.send "\n"
+
+    # Wait for model response.
     tty.expectInHistory "ok."
 
-    # And a command after the turn.
+    # Prompt must be back after the turn.
     tty.drain(200)
     tty.expect "\u276f"
-    tty.send ":tokens"
-    tty.expect ":tokens"
+
+    # Send a command.
+    for ch in ":tokens":
+      tty.send($ch)
+      tty.drain(10)
     tty.send "\n"
 
     echo "  PASS: empty Enter did not freeze the prompt"

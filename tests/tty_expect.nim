@@ -194,7 +194,10 @@ proc pollOnce(s: TtySession, waitMs: int; recordIdleFrame = true): bool =
   if pr > 0 and pollCount == 2.Tnfds and
       (pfds[1].revents and (POLLIN or POLLHUP or POLLERR)) != 0:
     var buf: array[256, char]
-    discard posix.read(s.frameEventFd, addr buf[0], buf.len)
+    let n = posix.read(s.frameEventFd, addr buf[0], buf.len)
+    # Child exited: frame event pipe is closed, no point draining.
+    if n <= 0:
+      return result
     while s.readPtyChunk(5):
       discard
     s.flushFrame(force = true)
