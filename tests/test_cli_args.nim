@@ -1,4 +1,4 @@
-import std/[os, osproc, strutils, times, unittest]
+import std/[os, osproc, strutils, tables, times, unittest]
 import threecode/session
 
 const binName = when defined(windows): "3code.exe" else: "3code"
@@ -47,16 +47,18 @@ suite "cli --list cap and short-flag stacking":
 
   proc runIn(envCwd: string; flags: string): tuple[o: string, code: int] =
     when defined(windows):
-      # cmd.exe can't inline VAR=VAL prefix; run through shell.
-      let cmd = "set XDG_DATA_HOME=" & tmp & " && " &
-                binPath().quoteShell & " " & flags
-      let (outp, code) = execCmdEx(cmd, options = {poEvalCommand, poStdErrToStdOut, poUsePath}, workingDir = envCwd)
-      result = (outp.strip(), code)
+      # Use execCmdEx with env parameter (VAR=VAL prefix doesn't work in cmd.exe)
+      var env = newStringTable()
+      for k, v in envPairs():
+        env[k] = v
+      env["XDG_DATA_HOME"] = tmp
+      result = execCmdEx(binPath() & " " & flags, env = env, workingDir = envCwd)
+      result[0] = result[0].strip()
     else:
       let cmd = "XDG_DATA_HOME=" & tmp.quoteShell & " " &
                 binPath().quoteShell & " " & flags
-      let (outp, code) = execCmdEx(cmd, workingDir = envCwd)
-      result = (outp.strip(), code)
+      result = execCmdEx(cmd, workingDir = envCwd)
+      result[0] = result[0].strip()
 
   proc seedSession(stamp: string) =
     # Minimal valid .3log under the isolated sessions dir, plus a cwd-index
@@ -124,15 +126,17 @@ suite "cli syntax errors do no startup work":
 
   proc runIn(envCwd: string; flags: string): tuple[o: string, code: int] =
     when defined(windows):
-      let cmd = "set XDG_DATA_HOME=" & tmp & " && " &
-                binPath().quoteShell & " " & flags
-      let (outp, code) = execCmdEx(cmd, options = {poEvalCommand, poStdErrToStdOut, poUsePath}, workingDir = envCwd)
-      result = (outp.strip(), code)
+      var env = newStringTable()
+      for k, v in envPairs():
+        env[k] = v
+      env["XDG_DATA_HOME"] = tmp
+      result = execCmdEx(binPath() & " " & flags, env = env, workingDir = envCwd)
+      result[0] = result[0].strip()
     else:
       let cmd = "XDG_DATA_HOME=" & tmp.quoteShell & " " &
                 binPath().quoteShell & " " & flags
-      let (outp, code) = execCmdEx(cmd, workingDir = envCwd)
-      result = (outp.strip(), code)
+      result = execCmdEx(cmd, workingDir = envCwd)
+      result[0] = result[0].strip()
 
   proc skillsDirExists(): bool = dirExists(tmp / "3code" / "skills")
 

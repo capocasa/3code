@@ -79,7 +79,7 @@ for t in "${tests[@]}"; do
         filtered+=("$t")
       fi
       ;;
-    test_history|test_minline|test_api|test_session|test_streamexec)
+    test_history|test_minline|test_api|test_session|test_streamexec|test_update|test_util_extra)
       if [[ $is_windows -eq 0 ]]; then
         filtered+=("$t")
       fi
