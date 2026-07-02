@@ -1370,7 +1370,8 @@ proc inputThreadProc() {.thread.} =
       let getCh: minline.GetChProc = proc(): int =
         while inputRunning():
           if inputIdleLinePending.load(moAcquire):
-            return -1
+            sleep(5)
+            continue
           if pendingInput.len > 0 or fillPending(200.cint):
             result = pendingInput[0]
             pendingInput.delete(0)
@@ -1396,10 +1397,12 @@ proc inputThreadProc() {.thread.} =
         pendingInput.len > 0 and minline.isEscapeTailByte(pendingInput[0])
     else:
       let getCh: minline.GetChProc = proc(): int =
-        if inputRunning() and not inputIdleLinePending.load(moAcquire):
-          getchr().int
-        else:
-          -1
+        while inputRunning():
+          if inputIdleLinePending.load(moAcquire):
+            sleep(5)
+            continue
+          return getchr().int
+        -1
       let hasPendingInput: minline.HasPendingInputProc = nil
 
     let writeProc: minline.WriteProc = proc(s: string) =
