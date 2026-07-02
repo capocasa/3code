@@ -109,6 +109,9 @@ if [[ ${#failed_compiles[@]} -gt 0 ]]; then
   echo "[test] ${#failed_compiles[@]} compile(s) failed:" >&2
   for name in "${failed_compiles[@]}"; do
     echo "  FAILED: $name (log: $outdir/$name.compile.log)" >&2
+    echo "  --- compile log for $name ---" >&2
+    cat "$outdir/$name.compile.log" >&2 || true
+    echo "  --- end compile log ---" >&2
   done
   exit 1
 fi
