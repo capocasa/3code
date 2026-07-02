@@ -515,6 +515,7 @@ proc main() =
     if prof.name == "":
       stdout.styledWriteLine fgMagenta,
         "  no provider configured. use :provider add", resetStyle
+      releaseIdleSubmittedInput()
       continue
     messages.add %*{"role": "user", "content": buildUserMessage(messages, line)}
     refreshSystemPrompt(messages, prof)

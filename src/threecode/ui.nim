@@ -876,6 +876,7 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
       editor.echoRows = echoRows
       if line.strip == "":
         resetPromptInputAfterEmpty(editor.echoRows)
+        releaseIdleSubmittedInput()
         return ""
       return line
     if cmdWasQuit:

@@ -286,22 +286,16 @@ proc pushInputEvent*(ev: InputEvent) =
 
 proc pollInputEvent*(): InputEvent =
   ## Called by the controller to drain the next queued event. Returns
-  ## `ieNone` when the queue is empty. Unparks the input thread when an
-  ## idle line is consumed.
+  ## `ieNone` when the queue is empty. Does NOT unpark the input thread:
+  ## the consuming controller path must clear the editor first, then call
+  ## ``releaseIdleSubmittedInput`` (idle) or ``beginTurn`` (turn). Unparking
+  ## here races the editor clear and lets the next keystrokes merge into
+  ## stale editor text.
   acquire inputStateLock
   try:
     if inputState.eventQueue.len > 0:
       result = inputState.eventQueue[0]
       inputState.eventQueue.delete(0)
-      if result.kind == ieLine and inputIdleLinePending.load(moAcquire):
-        # Check if this was the last idle line; if so, unpark.
-        var hasMoreIdle = false
-        for ev in inputState.eventQueue:
-          if ev.kind == ieLine:
-            hasMoreIdle = true
-            break
-        if not hasMoreIdle:
-          inputIdleLinePending.store(false, moRelease)
     else:
       result = InputEvent(kind: ieNone)
   finally:
