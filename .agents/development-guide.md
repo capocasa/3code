@@ -1,6 +1,22 @@
 # Development Guide
 
-## Bugfixing
+## Development process
+
+1. Test results, not actions
+
+The main regression testing works via unit tests. Important: Always test the result- not that something was done. Visually, this means we use the ttty testing termal to render the bytes and check the result, we don't check the bytes themselves.
+
+2. First end to end, then adapt tests
+
+When receiving a bug report, first reproduce the bug without the test suite- start up 3code, use the interactive 'expect' tool or comparable, and do what the bug report says to reproduce the bug. If it's not possible to reproduce the bug, stop, and say so.
+
+When the bug is clearly reproduced, find tests that reflect the bad behavior, and change them to the good behavior, if you find any.
+
+Then develop the fix to reflect the tests.
+
+When receiving a feature request, first develop it by reproducing the behavior end to end- run the full tool with the interactive 'expect' tool or comparable,
+
+## Types of Tests
 
 Any bug report must be reproduced with visual tests before attempting a fix.
 For terminal/UI behavior, "visual tests" means interactive PTY tests that drive

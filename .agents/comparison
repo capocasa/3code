@@ -1,0 +1,27 @@
+Comparison of 3code to competition
+==================================
+
+zcode
+-----
+
+negative
+
+  No auto retry on network failure- not very agentic
+
+  usage is hard to see (could be by design)
+
+  git is inflexible- you can branch without a full lock
+
+  detailed sandboxing is not agentic- like claude code without its LLM guard
+
+Positive
+
+  Displays thinking very nicely in ephemeral GUI bubble
+
+  The auto formatting is great
+
+  git integration is extremely convenient
+
+  repo wiki is cool but might be expensive
+
+
