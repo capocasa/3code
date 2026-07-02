@@ -1,4 +1,4 @@
-import std/[os, osproc, strutils, strtabs, times, unittest]
+import std/[os, osproc, strutils, times, unittest]
 import threecode/session
 
 const binName = when defined(windows): "3code.exe" else: "3code"
@@ -47,12 +47,9 @@ suite "cli --list cap and short-flag stacking":
 
   proc runIn(envCwd: string; flags: string): tuple[o: string, code: int] =
     when defined(windows):
-      # Use execCmdEx with env parameter (VAR=VAL prefix doesn't work in cmd.exe)
-      var env = newStringTable()
-      for k, v in envPairs():
-        env[k] = v
-      env["XDG_DATA_HOME"] = tmp
-      let (outp, code) = execCmdEx(binPath() & " " & flags, env = env, workingDir = envCwd)
+      let cmd = "cmd /c set XDG_DATA_HOME=" & tmp & "&& " &
+                quoteShell(binPath()) & " " & flags
+      let (outp, code) = execCmdEx(cmd, workingDir = envCwd)
       result = (outp.strip(), code)
     else:
       let cmd = "XDG_DATA_HOME=" & tmp.quoteShell & " " &
@@ -126,11 +123,9 @@ suite "cli syntax errors do no startup work":
 
   proc runIn(envCwd: string; flags: string): tuple[o: string, code: int] =
     when defined(windows):
-      var env = newStringTable()
-      for k, v in envPairs():
-        env[k] = v
-      env["XDG_DATA_HOME"] = tmp
-      let (outp, code) = execCmdEx(binPath() & " " & flags, env = env, workingDir = envCwd)
+      let cmd = "cmd /c set XDG_DATA_HOME=" & tmp & "&& " &
+                quoteShell(binPath()) & " " & flags
+      let (outp, code) = execCmdEx(cmd, workingDir = envCwd)
       result = (outp.strip(), code)
     else:
       let cmd = "XDG_DATA_HOME=" & tmp.quoteShell & " " &
