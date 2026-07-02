@@ -5,15 +5,11 @@ Goal: make the test suite strong enough that a lazy, hallucination-prone agent
 
 ## STATUS
 
-The tty functional suite is **ALL GREEN: 25 OK / 0 FAILED**. Both remaining
-content-overflow failures were fixed this round (per-test terminal sizing
-+ a path-wrap normalizer). Neither was a code regression; both were golden
-brittleness at the fixed 40-row/120-col test boundary. Details below.
-
-The test binary still exits 1 — that is the PRE-EXISTING non-fatal `check`
-failure at test_tty_functional.nim:162 (in the PASSING `queued prompt
-typed during a turn` test: `needle was hello` / `row was ❯ hello`). It does
-NOT fail any test; it only trips Nim's failed-check counter. Not in scope.
+The tty functional suite is **ALL GREEN: 25 OK / 0 FAILED**, and the test
+binary now **EXITS 0**. The non-fatal `check` failure that made the binary
+exit 1 was fixed this round (see FIXED THIS ROUND below): it was a test-side
+bug, not a program bug. Both prior content-overflow failures (per-test
+terminal sizing + a path-wrap normalizer) are also green. Details below.
 
 ### Commits so far
 
@@ -29,6 +25,7 @@ NOT fail any test; it only trips Nim's failed-check counter. Not in scope.
   44b64c0 regenerate stale multiline fixture: raw spinner phases → normalized ⣿
   647038d bash_tool test: raise terminal to 48 rows so prompt-echo separator doesn't scroll banner
   9bc7f63 harness_commands test: 128 cols + rejoin wrapped path tail so skill path no longer scrolls # Git
+  (this round) requireVisibleEditorCaret: trim trailing whitespace from needle before comparing against the cursor row
 
 ## What was fixed
 
@@ -239,17 +236,42 @@ Fix (two commits):
    token bar renders, and the final idle `❯` prompt appears.
    - `multiline prompt and queued multiline autosend` ✅
 
-NOTE: the `needle was hello` / `row was ❯ hello` check failure that prints is
-a non-fatal `check` inside the PASSING `queued prompt typed during a turn`
-test (line 162), NOT the multiline test.
+## FIXED THIS ROUND — the exit-1 (trailing-whitespace caret check) ✅
+
+The test binary used to exit 1 even with 25/25 green: a non-fatal `check`
+inside the PASSING `queued prompt typed during a turn` test printed
+`needle was hello` / `row was ❯ hello` and tripped Nim's failed-check
+counter. Root cause is a TEST-SIDE bug, not a program bug.
+
+The test types `" world"` one char at a time into a queued prompt editor
+and, after each char, asserts the accumulated text is on the cursor row:
+`acc` starts `"hello"`, and the first loop iteration appends `' '` → acc is
+`"hello "` (with a TRAILING SPACE). But the editor's wrap algorithm
+(`lineSpans` in minline.nim) intentionally excludes trailing break-spaces
+from rendered rows: `contentEnd` tracks "just past the last non-space", so
+the rendered row for editor text `"hello "` is `"❯ hello"` (no trailing
+space). The caret IS correctly placed after the space; the space is simply
+invisible (trailing whitespace is never rendered). Confirmed by hex-dumping
+the cursor row at every loop step: after the space, row bytes are
+`E2 9D AF 20 68 65 6C 6C 6F` (`❯ hello`); after the next char `w`, they are
+`...68 65 6C 6C 6F 20 77` (`❯ hello w`) — the space appears only once a
+non-space char follows it. So the assertion `"hello " in "❯ hello"` is
+checking for text that is NEVER rendered. This is a rendering invariant
+(correct editor behavior), not a regression.
+
+Fix: `requireVisibleEditorCaret` (test_tty_functional.nim:156) now compares
+against the needle with trailing whitespace trimmed
+(`needle.strip(leading = false)`), with a comment citing the lineSpans
+invariant. This is a no-op for the other callers (`"queued line two"`,
+`"hello worl edited"` — no trailing whitespace). The binary now exits 0;
+verified 4/4 runs exit 0, 25 OK, 0 check failures.
 
 ## HOW TO PROCEED (next round)
 
-**All 25 tty functional tests are GREEN.** The two golden-brittleness
-failures are fixed (647038d, 9bc7f63). Both fixes use per-test terminal
-sizing (an established pattern) plus, for the harness test, a
-`normalizeWrappedPathTail` comparison guard. No code was changed — neither
-was a render bug.
+**All 25 tty functional tests are GREEN and the binary EXITS 0.** Both
+prior golden-brittleness failures are fixed (647038d, 9bc7f63) and the
+exit-1 is fixed (trailing-whitespace caret check above). The suite is now
+suitable for CI gating.
 
 Next phases from the original plan:
 - **Phase 2**: thread assertions through tests (make `expectInHistory` /
@@ -257,10 +279,8 @@ Next phases from the original plan:
 - **Phase 3**: shakedown + failure-message quality (run the suite against
   deliberately-broken source to confirm regressions surface clearly).
 
-The non-fatal `check` at test_tty_functional.nim:162 (the `needle was
-hello` / `row was ❯ hello` in `queued prompt typed during a turn`) makes
-the test binary exit 1 even though all tests pass. It is PRE-EXISTING and
-out of scope for the tty-greening goal, but worth fixing in Phase 2/3.
+(The non-fatal `check` that used to make the binary exit 1 is now FIXED —
+see FIXED THIS ROUND above. The suite is CI-gate-ready.)
 
 ### Brittle fixtures — regenerate guidance (if the suite re-breaks)
 

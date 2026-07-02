@@ -159,7 +159,12 @@ proc requireVisibleEditorCaret(s: TtySession; needle: string) =
   let frame = s.frames[^1]
   check not frame.cursorHidden
   require frame.cursorRow >= 0 and frame.cursorRow < frame.rows.len
-  check needle in frame.rows[frame.cursorRow]
+  # lineSpans (minline.nim) intentionally excludes trailing break-spaces from
+  # rendered rows (contentEnd stops at the last non-space), so a caret placed
+  # after a just-typed trailing space sits on a row whose text is the prefix
+  # without that space. Compare against the trimmed needle.
+  let visible = needle.strip(leading = false)
+  check visible in frame.rows[frame.cursorRow]
 
 suite "terminal visual contract":
   test "resumed session replays the full conversation into scrollback":
