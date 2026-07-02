@@ -52,13 +52,13 @@ suite "cli --list cap and short-flag stacking":
       for k, v in envPairs():
         env[k] = v
       env["XDG_DATA_HOME"] = tmp
-      result = execCmdEx(binPath() & " " & flags, env = env, workingDir = envCwd)
-      result[0] = result[0].strip()
+      let (outp, code) = execCmdEx(binPath() & " " & flags, env = env, workingDir = envCwd)
+      result = (outp.strip(), code)
     else:
       let cmd = "XDG_DATA_HOME=" & tmp.quoteShell & " " &
                 binPath().quoteShell & " " & flags
-      result = execCmdEx(cmd, workingDir = envCwd)
-      result[0] = result[0].strip()
+      let (outp, code) = execCmdEx(cmd, workingDir = envCwd)
+      result = (outp.strip(), code)
 
   proc seedSession(stamp: string) =
     # Minimal valid .3log under the isolated sessions dir, plus a cwd-index
@@ -130,13 +130,13 @@ suite "cli syntax errors do no startup work":
       for k, v in envPairs():
         env[k] = v
       env["XDG_DATA_HOME"] = tmp
-      result = execCmdEx(binPath() & " " & flags, env = env, workingDir = envCwd)
-      result[0] = result[0].strip()
+      let (outp, code) = execCmdEx(binPath() & " " & flags, env = env, workingDir = envCwd)
+      result = (outp.strip(), code)
     else:
       let cmd = "XDG_DATA_HOME=" & tmp.quoteShell & " " &
                 binPath().quoteShell & " " & flags
-      result = execCmdEx(cmd, workingDir = envCwd)
-      result[0] = result[0].strip()
+      let (outp, code) = execCmdEx(cmd, workingDir = envCwd)
+      result = (outp.strip(), code)
 
   proc skillsDirExists(): bool = dirExists(tmp / "3code" / "skills")
 
