@@ -1,4 +1,4 @@
-/# Known-good model registry and per-family (prompt, tools) pairs.
+#[ Known-good model registry and per-family (prompt, tools) pairs.
 ##
 ## `KnownGoodCombos` is the single source of truth for validated
 ## provider/model pairings. Each entry bundles the full wire model id, a
@@ -12,6 +12,7 @@
 ## a tool schema constant, and a new branch in `systemPromptFor`/`toolsFor`.
 ##
 ## Anything outside `KnownGoodCombos` requires `--experimental` to run.
+]#
 
 import std/[algorithm, hashes, json, os, sequtils, strutils]
 import types, util
