@@ -1684,6 +1684,7 @@ proc emitUserSubmit*(line: string) =
     emitFatPromptEvent clearPendingHintEvent()
     emitFatPromptEvent clearBarEvent()
     emitFatPromptEvent clearTickerEvent()
+  receiptTouchesNextResponse = true
   commitTranscriptBytes(
     bytes,
     restoreEditor = false,

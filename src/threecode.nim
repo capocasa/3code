@@ -120,29 +120,10 @@ proc notifyTurnFinished(messages: JsonNode) =
   notify("3code", "Turn finished", body)
 
 proc commitUserPromptTranscript(line: string) =
-  ## Controller-owned transcript append for user prompt items. Formatters
-  ## return trimmed item bodies; this proc owns the receipt/user separator and
-  ## clears volatile footer state before the next turn starts.
-  let receiptLabel =
-    if pendingHint.active:
-      tokenLineLabel(pendingHint.usage, pendingHint.window, pendingHint.elapsed)
-    else:
-      ""
-  var bytes = ""
-  if receiptLabel.len > 0:
-    bytes.add receiptBytes(receiptLabel)
-    bytes.add "\r\n\r\n"
-  bytes.add formatUserPromptItem(line)
-  proc clearSubmittedFooterState() =
-    emitFatPromptEvent clearPendingHintEvent()
-    emitFatPromptEvent clearBarEvent()
-    emitFatPromptEvent clearTickerEvent()
-  commitTranscriptBytes(
-    bytes,
-    restoreEditor = false,
-    beforeRepaint = clearSubmittedFooterState,
-    reserveFooter = false)
-  receiptTouchesNextResponse = true
+  ## Controller-owned transcript append for user prompt items submitted
+  ## mid-turn (the queued-prompt path). Delegates to emitUserSubmit so both
+  ## the normal and queued submit paths share one separator/spacing model.
+  emitUserSubmit(line)
 
 proc cleanup() {.noconv.} =
   ## Single point of process teardown. Restores terminal state and
