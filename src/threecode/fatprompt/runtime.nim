@@ -1520,6 +1520,12 @@ proc inputThreadProc() {.thread.} =
         if inputTurnActive.load(moAcquire) and edPtr[].line.text.len == 0:
           requestTurnInterrupt()
           continue
+        # A pending idle line means the controller hasn't consumed the
+        # submit yet; getCh returned -1 for backpressure, not because
+        # stdin closed. Don't push ieQuit—wait for the controller.
+        if not inputTurnActive.load(moAcquire) and
+           inputIdleLinePending.load(moAcquire):
+          continue
         pushInputEvent(InputEvent(kind: ieQuit))
         break
       except CatchableError:
