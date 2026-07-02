@@ -609,9 +609,14 @@ proc normalizeVersionBanner(text: string): string =
   var inBanner = false
   for line in text.splitLines(keepEol = true):
     if "3code v" in line and "the economical coding agent" in line:
-      result.add line.replacef(
-        peg"'3code v' {@} '   the economical coding agent'",
-        "3code vVERSION   the economical coding agent")
+      let prefix = "3code v"
+      let suffix = "   the economical coding agent"
+      let startPos = line.find(prefix)
+      let endPos = line.find(suffix, startPos + prefix.len)
+      if startPos >= 0 and endPos > startPos:
+        result.add line[0..<startPos] & prefix & "VERSION" & suffix & line[endPos+suffix.len..^1]
+      else:
+        result.add line
     else:
       result.add line
 

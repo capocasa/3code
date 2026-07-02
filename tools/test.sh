@@ -78,8 +78,8 @@ run_parallel() {
     compile_one "$name" &
     running=$((running + 1))
     if [[ $running -ge $jobs ]]; then
-      wait -n
-      running=$((running - 1))
+      wait
+      running=0
     fi
   done
   wait
