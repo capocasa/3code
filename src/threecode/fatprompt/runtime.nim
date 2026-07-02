@@ -1514,8 +1514,15 @@ proc inputThreadProc() {.thread.} =
           edPtr[].renderSuffixCursor = false
           edPtr[].renderRow = 0
           continue
-        pushInputEvent(InputEvent(kind: ieQuit))
-        break
+        # At idle: clear current input and return to a fresh prompt.
+        pushInputEvent(InputEvent(kind: ieLine, text: "",
+                                   echoRows: edPtr[].echoRows))
+        edPtr[].line = minline.Line(text: "", position: 0)
+        edPtr[].renderSuffix = ""
+        edPtr[].renderSuffixCursor = false
+        edPtr[].renderRow = 0
+        edPtr[].echoRows = 0
+        continue
       except EOFError:
         if inputTurnActive.load(moAcquire) and edPtr[].line.text.len == 0:
           requestTurnInterrupt()
