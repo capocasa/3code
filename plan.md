@@ -3,79 +3,164 @@
 Goal: make the test suite strong enough that a lazy, hallucination-prone agent
 (deepseek-class) cannot ship a behavioral regression without seeing it fail.
 
-## CRITICAL CONTEXT (established by investigation)
+## STATUS
 
-The tty functional suite is **13/24 red on the current `testimp` branch, and
-this is correct**. The 13 failures are real, live behavioral bugs:
+The tty functional suite is at **14 OK / 11 FAILED** (24 total). The flicker
+regression from commit 80361b8 is FIXED. The DRY unification is done. The
+remaining 11 failures are pre-existing bugs unrelated to our commits.
 
-  - **Scrollback overwrite bug**: committed scrollback rows (prompt echoes,
-    replies) get erased by footer repaints as a turn progresses. The fixture
-    `simple.txt` expects `❯ This is a test prompt` in 4 frames; the actual
-    output keeps it in only ~1 of ~25 frames. Same root cause as the
-    bug-hall-of-fame "first line dropped when footer shrinks".
-  - **Queued/multiline concatenation**: echoes lose their newline separators
-    (`second linequeued line one`).
-  - **Queued prompt not reaching history** under various race windows.
+### Commits so far
 
-**The fixtures are the source of truth and they are correct.** The 6
-"golden drift" failures are NOT drift - they are the same bugs captured by the
-golden files. Do not regenerate fixtures to match broken output. Do not treat
-red tests as "flaky" - they are catching real bugs.
+  a425974 isolate TMPDIR per fixture to stop session lock collisions
+  391673e Phase 1: add assertion vocabulary to tty_expect.nim
+  80361b8 refactor engine height to derive walk-up from live state; fix prompt echo erasure
+  05d8bf1 fix bash tool flicker: renderFooter must not wipe live tool viewport
+  36f225e unify queued-prompt transcript with emitUserSubmit (DRY)
 
-The task here is NOT to fix those bugs. It is to make the suite catch this
-class of bug more loudly and more cheaply for a weak agent, so when deepseek
-re-introduces one, the test fails with a focused, actionable message instead
-of a wall-of-frames golden diff.
+## What was fixed
 
-## What is already done
+1. **Session lock collisions** (TMPDIR isolation). The failure set is now
+   stable (deterministic) across runs.
 
-  [x] 0a. Isolate TMPDIR per fixture in all three spawned-process env builders
-       (test_tty_functional.nim:133, test_empty_enter_freeze.nim:31,
-       test_interrupt_prestream_freeze.nim:31). This STABILIZED the failure
-       set: it was 13-14 nondeterministic, now it is a stable 13 across runs.
-       Session lock files live in TMPDIR/3code/lock keyed by a
-       second-resolution timestamp; without per-fixture TMPDIR isolation,
-       back-to-back fixtures collided. Committed (unstaged) in working tree.
+2. **Engine height model** (engine.nim). Replaced the cached
+   `rowsAboveCursorToFooterTop` + `footerRowsAboveEditor` fields (the
+   "remember file.close" anti-pattern) with a single `paintedFooterRows`
+   field. Walk-up is now derived at each paint site via `walkUp(ed)`:
+   `editorRowsAboveCursor(ed) + paintedFooterRows + viewportHeight`. Killed
+   the growth/shrink reconciliation math entirely.
 
-## Remaining work
+3. **Prompt echo erasure** (fatprompt/runtime.nim emitUserSubmit). The prompt
+   echo was written with `reserveFooter=false` and no trailing separator, so
+   the spinner painted over it on the same row. Fix: added `\r\n\r\n` to the
+   echo bytes and set `transcriptOwnsSpacing=true`. This fixed:
+   - `simple one-turn prompt and reply` ✅
+   - `every prompt first line survives a reasoning-ticker to content transition` ✅
 
-### Phase 1: Assertion vocabulary (tests/tty_expect.nim only)
+4. **Bash tool flicker** (engine.nim renderFooter). Commit 80361b8 added
+   `e.toolViewportRows = @[]` to `renderFooter`, which wiped the live bash-tool
+   viewport during a footer repaint. A streamed line (`$ printf 'flicker-marker'`)
+   got erased in one sync frame and redrawn in a later one → visible blank
+   flash. Fix (05d8bf1): removed that line. `renderFooter` must PRESERVE the
+   viewport; only `renderToolViewport` (replace) and `appendTranscript`
+   (commit/clear) own the viewport lifecycle. `walkUp` already counts the
+   viewport height, so erasing the right number of rows while rewriting the
+   same viewport text is correct.
+   - `bash tool output does not flicker blank on commit` ✅
 
-No source changes. All helpers added next to expectExit (line ~725).
+5. **DRY: unified queued-prompt transcript** (36f225e). `commitUserPromptTranscript`
+   (threecode.nim) was a near-duplicate of `emitUserSubmit` (runtime.nim) with
+   a different (broken) spacing model. Replaced its body with a delegate call
+   to `emitUserSubmit`; folded `receiptTouchesNextResponse = true` into
+   `emitUserSubmit` so both submit paths share it. This is a structural fix
+   (no test moved), but prevents the two paths from drifting again.
 
-  [x] 1a. expectAlive(s, msg="process exited unexpectedly") + expectPromptLive
-  [x] 1b. countIn(s, text, where) + expectCount(s, text, n, where)
-  [x] 1c. expectOnScreen(s, text, timeout) - grid-only match, no cleanRaw
-  [x] 1d. promote framePresenceRuns (test_tty_functional.nim:150) into
-       tty_expect.nim as expectRowAppearsOnce
+### IMPORTANT: the plan's original diagnosis was WRONG on two counts
 
-### Phase 2: Thread assertions through tests
+- The **flicker** was NOT caused by the `\r\n\r\n` in emitUserSubmit. It was
+  caused by `e.toolViewportRows = @[]` added to `renderFooter` in engine.nim.
+  Proven by isolation: runtime.nim at 80361b8 + engine.nim at 391673e → no
+  flicker. The `\r\n\r\n` is correct and must stay (it gives the prompt echo
+  its separator row; with `transcriptOwnsSpacing=true` the engine trims nothing).
 
-  [ ] 2a. expectAlive() after expect "..." in interrupt/command/model-edit tests
-  [ ] 2b. expectCount(_, 1) on prompt echoes and replies
-  [ ] 2c. expectNeverInHistory on half-typed text that must not commit
+- **`consecutive turns never accumulate extra blank separator lines`** is a
+  PRE-EXISTING bug. It fails on 391673e (pre-our-work) too. The double-blank
+  is at END-OF-TURN (between the last token bar and the idle prompt), NOT at
+  the prompt echo. Changing `\r\n\r\n` → `\r\n` does not affect it. The `\r\n`
+  variant was reverted — keep `\r\n\r\n`.
 
-### Phase 3: Shakedown + failure messages
+## THEN: remaining pre-existing failures (11)
 
-  [ ] 3a. consolidated shakedown test (prompt/reply, interrupt+resend,
-       :model edit, multiline, :q exit)
-  [ ] 3b. bug-class names in assertion failure messages
+These are NOT caused by our commits (all fail on 391673e too). Investigate
+each individually.
 
-## Verification gate
+### Queued/multiline (5) — input/editing layer, NOT transcript commit
 
-A chunk is done when:
-  - it compiles (`env -u CI tools/test.sh --compile` or building the one test)
-  - the pre-existing 13 failures are unchanged (we are not fixing source bugs)
-  - any NEW assertions added are demonstrably exercised
+These fail BEFORE the transcript commit is reached. The failures are in live
+editor visibility / queue-editing behavior during a turn. Confirmed by running
+the suite before the DRY change: same failures, at the same `tty.expect` /
+`expectInHistory` lines.
 
-Do NOT regenerate golden fixtures. Do NOT weaken tests. Do NOT fix the source
-bugs as part of this work (separate effort). The TMPDIR fix is the only
-test-infra change; commit it first.
+- `multiline prompt and queued multiline autosend` — fails at
+  `expectInHistory "❯ queued line one"`: only the last editor line reaches the
+  committed transcript. The queued multiline text isn't preserved (look at how
+  `ieLine` events carry `ed.line.text` and how `queued` is captured in
+  threecode.nim:~397 — "keep first line only").
+- `queued prompt survives a second submit during one turn` — fails at
+  `tty.expect "queued alpha queued beta"` (LIVE editor, line 678): after queuing
+  "queued alpha" and typing more, the editor doesn't show the revised text.
+  Queue-cancel-and-edit logic in fatprompt/runtime.nim (~line 1422, the
+  `inputState.eventQueue` filtering).
+- `editing a queued prompt keeps the text instead of wiping it` — same root.
+- `interrupt during a queued mid-turn prompt sends the queue next` — fails at
+  `expectInHistory "❯ queued prompt"`: queued prompt not committed after interrupt.
+- `bare escape during a queued mid-turn prompt sends the queue next` — same root.
 
-## Decisions
+### Token / wizard (2)
 
-- No chunked plan files. Context clears decided ongoing.
-- Golden brittleness: deferred, will be FIXED (not reduced) later. Current
-  golden failures are real bugs, not brittleness.
-- The 13 red tests stay red until the underlying source bugs are fixed in a
-  separate effort. This plan only adds detection strength.
+- `active turn colon commands are controller handled` — fails looking for
+  "no tokens used yet". The `:tokens` command during an active turn. Token-bar
+  display issue.
+- `idle provider add wizard is visible and masks input` — fails looking for
+  masked input `********************`. Wizard masking issue.
+
+### Golden diffs (3)
+
+- `harness commands are transcript items` — golden diff
+- `bash tool success and nonzero exit` — golden diff
+- `non-bash tool transcript shapes` — golden diff
+
+The golden diffs may resolve once the underlying bugs are fixed (the fixtures
+are correct; they encode the non-buggy behavior). Investigate each individually.
+
+### End-of-turn spacing (1)
+
+- `consecutive turns never accumulate extra blank separator lines` — double
+  blank row between the last token bar (row 16) and the idle prompt, with a
+  stray `0%` token-bar fragment (row 19) in between. Inspect the `endTurn` /
+  `endTurnAfterTranscriptAppend` transition in fatprompt/runtime.nim. The
+  stable idle frame is what's checked.
+
+## HOW TO RUN TESTS
+
+```sh
+# Build + run the tty functional test (the main behavioral suite):
+env -u CI tools/test.sh test_tty_functional
+
+# Run just the compiled test binary directly:
+env -u CI timeout 120 ./build/tests/test_tty_functional
+
+# After ANY source change, rebuild the stub binary before running tests:
+env -u CI nim c -d:ssl -d:providerStub --threads:on \
+  $(for p in unicodedb streamhttp ttty tinotify; do echo "--path:$(nimble path $p 2>/dev/null | head -1)"; done) \
+  --path:src --hints:off --warnings:off -o:build/3code_stub src/threecode.nim
+```
+
+CI=1 is set in the environment which makes test.sh SKIP tty tests. Always
+prefix with `env -u CI`. The PTY tests only run on Linux.
+
+## KEY ARCHITECTURE NOTES
+
+- The fat prompt footer (ticker + bar + editor) is volatile. Scrollback is
+  append-only. The engine (engine.nim) owns cursor geometry for clearing the
+  footer around transcript appends.
+- `walkUp(ed)` in engine.nim derives the rows-to-move-up from live state:
+  `editorRowsAboveCursor(ed) + paintedFooterRows + toolViewportRows.len`.
+  Never cache it.
+- `renderFooter` repaints the footer + editor and PRESERVES the live tool
+  viewport. It must not clear `toolViewportRows`. (Bug 05d8bf1.)
+- `renderToolViewport` REPLACES the viewport with new rows. `appendTranscript`
+  COMMITS the viewport to scrollback and clears it. These three are the only
+  owners of the viewport lifecycle.
+- `emitUserSubmit` (runtime.nim) commits a prompt echo as scrollback and drops
+  the editor. It is the normal submit path AND (now) the queued-prompt path,
+  via `commitUserPromptTranscript` delegating to it.
+- The fixtures in tests/fixtures/tty/*.txt are CORRECT and encode non-buggy
+  behavior. Never regenerate them to match broken output.
+
+## DECISIONS
+
+- Fix real bugs in source; never weaken tests.
+- The fixtures are the source of truth.
+- Golden brittleness is deferred (will be fixed, not reduced, in a later pass).
+- After all bugs are green, proceed with Phase 2 (thread assertions through
+  tests) and Phase 3 (shakedown + failure messages) from the original plan.
