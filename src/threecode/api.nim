@@ -1196,7 +1196,8 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       else:
         min(1 shl serverRetryLevel, 16)
     hookStopSpinner()
-    hookRetryNotice &"3code: {errMsg}; retry {attempt + 1}/{MaxAttempts} in {backoff}s"
+    let body = if outcome.errBody.len > 0: outcome.errBody else: errMsg
+    hookRetryNotice &"{code}: {body}. retry {attempt + 1}/{MaxAttempts} in {backoff}s"
     block wait:
       var remaining = backoff * 1000
       while remaining > 0:

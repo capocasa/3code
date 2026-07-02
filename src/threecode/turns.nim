@@ -499,7 +499,7 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
       onTurnInterrupted()
       return true
     else:
-      stdout.styledWriteLine fgMagenta, "  ", e.msg, resetStyle
+      stdout.styledWriteLine fgMagenta, e.msg, resetStyle
       return false
   except OSError as e:
     # The working directory was removed out from under us (e.g. the
