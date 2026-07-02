@@ -5,11 +5,15 @@ Goal: make the test suite strong enough that a lazy, hallucination-prone agent
 
 ## STATUS
 
-The tty functional suite is at **23 OK / 2 FAILED** (25 total). The goal is
-to fix them all, one or two at a time, committing each verified fix. The
-remaining 2 are NOT code regressions; they are content-overflow on the
-fixed 40-row test terminal (golden brittleness). Details in the REMAINING
-section below.
+The tty functional suite is **ALL GREEN: 25 OK / 0 FAILED**. Both remaining
+content-overflow failures were fixed this round (per-test terminal sizing
++ a path-wrap normalizer). Neither was a code regression; both were golden
+brittleness at the fixed 40-row/120-col test boundary. Details below.
+
+The test binary still exits 1 — that is the PRE-EXISTING non-fatal `check`
+failure at test_tty_functional.nim:162 (in the PASSING `queued prompt
+typed during a turn` test: `needle was hello` / `row was ❯ hello`). It does
+NOT fail any test; it only trips Nim's failed-check counter. Not in scope.
 
 ### Commits so far
 
@@ -23,6 +27,8 @@ section below.
   0c990f5 update stale other_tools fixture: add welcome hint line at all banners
   2ad665b tty_expect: normalize spinner phases symmetrically in frame comparison
   44b64c0 regenerate stale multiline fixture: raw spinner phases → normalized ⣿
+  647038d bash_tool test: raise terminal to 48 rows so prompt-echo separator doesn't scroll banner
+  9bc7f63 harness_commands test: 128 cols + rejoin wrapped path tail so skill path no longer scrolls # Git
 
 ## What was fixed
 
@@ -113,33 +119,40 @@ section below.
    program behavior, not a regression).
    - `non-bash tool transcript shapes` ✅
 
-## REMAINING: 2 failures — all content-overflow, NOT code bugs
+## FIXED THIS ROUND (the last 2 tests) — content-overflow, NOT code bugs
 
-Both pass their `expectInHistory` / `expect` checks and fail ONLY on the
+Both passed their `expectInHistory` / `expect` checks and failed ONLY on the
 final `expectMeaningfulFrameArtifact` full-frame golden comparison. Root cause
-for both is identical: the test terminal is a fixed 40 rows, and the
-fixture's content sits at or over that boundary. Any single extra row scrolls
+for both was identical: the test terminal was a fixed 40 rows, and the
+fixture's content sat at or over that boundary. Any single extra row scrolled
 the top of scrollback (the `╭─╮` banner, or a content header like `# Git`)
 off the grid, where ttty DELETES it (scrollback=0). `stripFrameBlanks` can
 remove intra-frame blank rows but cannot restore a row that was scrolled off
-and deleted. Neither is a render bug; both are golden brittleness.
+and deleted. Neither was a render bug; both were golden brittleness.
 
-### bash tool success and nonzero exit — prompt-echo separator overflow
+### bash tool success and nonzero exit — prompt-echo separator overflow ✅
 
-The fixture's final frame is EXACTLY 40 rows with `╭─╮` at row 0. The actual
-emits 41 rows: `emitUserSubmit` (runtime.nim:1664) ends the prompt-echo bytes
-with `\r\n\r\n` and `transcriptOwnsSpacing = true`. That double-newline is
-INTENTIONAL and correct (gives the prompt echo its separator row; confirmed
-by the flicker diagnosis — the `\r\n` variant was reverted). The same blank
-appears in the PASSING `simple one-turn prompt and reply` test, where
-`stripFrameBlanks` removes it harmlessly. Here the content is at the exact
-40-row boundary, so the one separator blank overflows and scrolls `╭─╮` off.
+The fixture's final frame was EXACTLY 40 rows with `╭─╮` at row 0. The actual
+emitted 41 rows: `emitUserSubmit` (runtime.nim:1664) ends the prompt-echo
+bytes with `\r\n\r\n` and `transcriptOwnsSpacing = true`. That double-newline
+is INTENTIONAL and correct (gives the prompt echo its separator row;
+confirmed by the flicker diagnosis — the `\r\n` variant was reverted). The
+same blank appears in the PASSING `simple one-turn prompt and reply` test,
+where `stripFrameBlanks` removes it harmlessly. Here the content was at the
+exact 40-row boundary, so the one separator blank overflowed and scrolled
+`╭─╮` off.
 
-Diff: expected frame row 0 = `╭─╮`, actual row 0 = blank; actual has an extra
-blank at row 9 (between `❯ run bash checks` and `● Running bash checks.`).
-Otherwise byte-identical (only the version string differs).
+Fix (647038d): per-test terminal headroom. `startStub(root, rows = 48)` for
+THIS test only (line ~1145). The existing fixture already encoded the correct
+"banner visible" state (it had `╭─╮`); the 40-row terminal was just too small
+to hold it on this checkout. NO fixture regeneration was needed — at 48 rows
+the actual now also keeps the banner visible, and the normalized forms
+matched byte-for-byte (verified: 5/5 runs identical md5
+`8c652462ffffc1c8ad4da153fb902c28`). Per-test sizing is an established
+pattern (see the `cols = 18` test at line ~947). Do NOT change the `\r\n\r\n`
+in emitUserSubmit — it is correct.
 
-### harness commands are transcript items — skill-path line wraps at 120 cols
+### harness commands are transcript items — skill-path line wraps at 120 cols ✅
 
 The system-prompt skills list (prompts.nim `discoverSkills`) emits full paths
 like `- <data-root>/data/3code/skills/task-chunked-implementation.md`. After
@@ -156,15 +169,42 @@ scrolls `# Git` (and the banner) off the grid. Frame 33: expected 40 rows
 with `# Git`, actual 40 rows without it. The fixture was generated on a
 checkout whose absolute path fit in 120 cols.
 
-Fix precision: `normalizeTtyRunRoots` (tests/tty_expect.nim:528) redacts a
-PREFIX via the marker `tests/output/tty/` → `<tty-run>/data/`. To un-wrap,
-it must detect a bare tail line like `d` (or `d` / `e` etc.) immediately
-following a line whose redacted form ends mid-token at a `.m` / `.m` split,
-and rejoin them. Because the split point is deterministic (always after
-`task-chunked-implementation.m`), a targeted rejoin of a lone trailing
-short fragment onto the previous line is safe. The PID width (6 vs 7
-digits) shifts the exact count but `task-chunked-implementation.md` always
-overflows on this checkout (`/home/carlo/p/3code/testimp/...`).
+This one needed TWO coordinated fixes (9bc7f63):
+
+1. **Eliminate the wrap at capture (the geometry problem).** The rejoin
+   below fixes the path TEXT in the comparison, but a row the grid already
+   deleted cannot be restored. So the wrap must not happen at capture.
+   `startStub(root, cols = 128)` for THIS test only (line ~329). The path is
+   121 cols; at 128 it never wraps, so `# Git` stays on the grid. This is
+   checkout-independent: the only checkout-dependent line is the skill path,
+   and 128 cols fits any realistic cwd. (The system-prompt PARAGRAPHS also
+   rewrap at 128 vs 120, but that text is fixed/checkout-independent, so the
+   rewrap is deterministic and stable.)
+
+2. **`normalizeWrappedPathTail` (tests/tty_expect.nim) — the comparison
+   guard.** Rejoins a wrapped path tail: when a line's stripped form ends
+   with `.m` and the next line's stripped form is exactly `d`, merge the `d`
+   back onto the preceding line. Applied symmetrically in
+   `expectMeaningfulFrameArtifact` (both fixture and actual). This is the
+   right layer (same philosophy as spinner/version normalization): terminal
+   width is content noise, not behavior. It defends the comparison on
+   checkouts with an EVEN longer cwd where even 128 cols would wrap.
+
+The fixture was regenerated at 128 cols from a verified-correct recording
+(all 17 command/marker `expectInHistory` checks pass; 8/8 runs byte-identical
+after normalization, md5 `d32919fc056f0be183dd51c09cdd07eb`). The regen is
+legitimate: the only diffs vs the old 120-col fixture were paragraph
+rewraps (identical text wrapped at a different column) plus the recovered
+`# Git` rows — pure presentation, zero behavioral change.
+
+LESSON: raising ROWS alone was NOT enough and NOT viable. At rows=44 the
+rejoin reduced 6 diffs to a deterministic 2 (both `# Git`), but `# Git`
+STILL scrolled off — the wrap's extra row is consumed at capture regardless
+of total height when the frame's content is at the boundary. And raising
+rows to 48 showed heavy frame-to-frame capture variance (the help-text
+frames' visible window is timing-sensitive). COLS is the stable knob here:
+widening the terminal to fit the path removes the wrap at the source, and
+the only rewrap is fixed system-prompt text (deterministic).
 
 ### multiline prompt and queued multiline autosend — FIXED THIS ROUND ✅
 
@@ -205,19 +245,34 @@ test (line 162), NOT the multiline test.
 
 ## HOW TO PROCEED (next round)
 
-These two are golden brittleness. Options, in order of preference:
+**All 25 tty functional tests are GREEN.** The two golden-brittleness
+failures are fixed (647038d, 9bc7f63). Both fixes use per-test terminal
+sizing (an established pattern) plus, for the harness test, a
+`normalizeWrappedPathTail` comparison guard. No code was changed — neither
+was a render bug.
 
-1. **bash_tool**: either (a) raise the test terminal to 41+ rows so the
-   intentional separator blank doesn't overflow the exact boundary, or (b)
-   accept as deferred golden brittleness. Do NOT change the `\r\n\r\n` in
-   emitUserSubmit — it is correct. NOTE: raising rows shifts all row
-   positions, so the fixture would need regeneration.
+Next phases from the original plan:
+- **Phase 2**: thread assertions through tests (make `expectInHistory` /
+  token-bar / caret checks first-class, with better failure messages).
+- **Phase 3**: shakedown + failure-message quality (run the suite against
+  deliberately-broken source to confirm regressions surface clearly).
 
-2. **harness**: the skill-path wrap is path-length-dependent. Cleanest fix is
-   to make `normalizeTtyRunRoots` collapse a wrapped path tail back onto its
-   line (rejoin `...implementation.m` + `d`), OR shorten the test data root so
-   paths always fit 120 cols. Deferred per the brittleness policy unless
-tackled explicitly.
+The non-fatal `check` at test_tty_functional.nim:162 (the `needle was
+hello` / `row was ❯ hello` in `queued prompt typed during a turn`) makes
+the test binary exit 1 even though all tests pass. It is PRE-EXISTING and
+out of scope for the tty-greening goal, but worth fixing in Phase 2/3.
+
+### Brittle fixtures — regenerate guidance (if the suite re-breaks)
+
+The remaining fixtures encode checkout-independent behavior EXCEPT for
+path/terminal-width assumptions:
+- The skill paths redact via `normalizeTtyRunRoots`; `normalizeWrappedPathTail`
+  guards against a wrap. If a NEW skill name is long enough to wrap at 128
+  cols, extend `normalizeWrappedPathTail`'s detection (it currently keys on
+  `.m` + `d`).
+- Per-test `rows`/`cols` overrides (bash_tool=48 rows, harness=128 cols) are
+  set on the `startStub` call. If content grows, bump them; regenerate the
+  fixture from a verified-correct actual (see DEBUGGING TECHNIQUES).
 
 ## DEBUGGING TECHNIQUES (learned this round)
 
