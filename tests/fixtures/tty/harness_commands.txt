@@ -1,7 +1,7 @@
-===== 867 =====
+===== 248 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-testimp-0c990f50   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,7 +10,7 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ :help
-===== 931 =====
+===== 298 =====
   3code the economical coding agent
 
   commands:
@@ -51,7 +51,7 @@
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯
-===== 632 =====
+===== 420 =====
   3code the economical coding agent
 
   commands:
@@ -92,7 +92,7 @@
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
-===== 668 =====
+===== 482 =====
   :model            list models for current provider (current marked with *)
   :model X          switch to model X (within current provider)
   :provider         list configured providers (current marked with *)
@@ -133,7 +133,7 @@
       alt
 
 ❯
-===== 330 =====
+===== 203 =====
   :model            list models for current provider (current marked with *)
   :model X          switch to model X (within current provider)
   :provider         list configured providers (current marked with *)
@@ -174,7 +174,7 @@
       alt
 
 ❯ :model
-===== 427 =====
+===== 330 =====
   :provider rm X    remove provider X
   :reasoning        list reasoning levels for current model (* marks active)
   :reasoning X      switch reasoning level (low / medium / high)
@@ -215,7 +215,7 @@
       stub-large
 
 ❯
-===== 333 =====
+===== 967 =====
   :provider rm X    remove provider X
   :reasoning        list reasoning levels for current model (* marks active)
   :reasoning X      switch reasoning level (low / medium / high)
@@ -256,7 +256,7 @@
       stub-large
 
 ❯ :reasoning
-===== 989 =====
+===== 261 =====
   :notify on|off    toggle turn-end desktop notification
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
@@ -297,7 +297,7 @@
     experimental: level is free-form, type any value
 
 ❯
-===== 719 =====
+===== 505 =====
   :notify on|off    toggle turn-end desktop notification
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
@@ -338,7 +338,7 @@
     experimental: level is free-form, type any value
 
 ❯ :model stub-large
-===== 475 =====
+===== 454 =====
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -379,7 +379,7 @@ provider  stub
 model     stub-large
 
 ❯
-===== 892 =====
+===== 479 =====
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :q :quit          exit (also Ctrl-D)
 
@@ -420,7 +420,7 @@ provider  stub
 model     stub-large
 
 ❯ :reasoning high
-===== 557 =====
+===== 933 =====
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
@@ -461,7 +461,7 @@ model     stub-large
 reasoning high
 
 ❯
-===== 992 =====
+===== 353 =====
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
@@ -502,7 +502,7 @@ model     stub-large
 reasoning high
 
 ❯ :provider alt
-===== 310 =====
+===== 611 =====
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
@@ -543,7 +543,7 @@ provider  alt
 model     alt-model
 
 ❯
-===== 311 =====
+===== 266 =====
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
@@ -584,7 +584,7 @@ provider  alt
 model     alt-model
 
 ❯ :tokens
-===== 878 =====
+===== 363 =====
 ❯ :provider
 
 : providers
@@ -625,7 +625,7 @@ model     alt-model
   no tokens used yet
 
 ❯
-===== 304 =====
+===== 690 =====
 ❯ :provider
 
 : providers
@@ -666,7 +666,7 @@ model     alt-model
   no tokens used yet
 
 ❯ :clear
-===== 314 =====
+===== 912 =====
       alt
 
 ❯ :model
@@ -707,7 +707,7 @@ model     alt-model
 ════════════════════════════════════════
 
 ❯
-===== 553 =====
+===== 686 =====
       alt
 
 ❯ :model
@@ -748,7 +748,7 @@ model     alt-model
 ════════════════════════════════════════
 
 ❯ :sessions
-===== 404 =====
+===== 826 =====
     * stub-model
       stub-large
 
@@ -789,7 +789,7 @@ model     alt-model
   no saved sessions for this directory
 
 ❯
-===== 540 =====
+===== 847 =====
     * stub-model
       stub-large
 
@@ -830,7 +830,7 @@ model     alt-model
   no saved sessions for this directory
 
 ❯ :sessions all
-===== 868 =====
+===== 444 =====
 
 ❯ :model stub-large
 
@@ -871,7 +871,7 @@ model     alt-model
   listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯
-===== 282 =====
+===== 488 =====
 
 ❯ :model stub-large
 
@@ -912,7 +912,7 @@ model     alt-model
   listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯ :log
-===== 724 =====
+===== 419 =====
 
 ❯ :reasoning high
 
@@ -953,7 +953,7 @@ model     alt-model
     no tool calls yet
 
 ❯
-===== 315 =====
+===== 618 =====
 
 ❯ :reasoning high
 
@@ -994,7 +994,7 @@ model     alt-model
     no tool calls yet
 
 ❯ :show
-===== 600 =====
+===== 624 =====
 reasoning high
 
 ❯ :provider alt
@@ -1035,7 +1035,7 @@ model     alt-model
     no tool calls yet
 
 ❯
-===== 954 =====
+===== 223 =====
 reasoning high
 
 ❯ :provider alt
@@ -1076,7 +1076,7 @@ model     alt-model
     no tool calls yet
 
 ❯ :compact
-===== 146 =====
+===== 449 =====
 model     alt-model
 
 ❯ :tokens
@@ -1117,7 +1117,7 @@ model     alt-model
   unknown command: :compact  (try :help)
 
 ❯
-===== 928 =====
+===== 233 =====
 model     alt-model
 
 ❯ :tokens
@@ -1158,7 +1158,7 @@ model     alt-model
   unknown command: :compact  (try :help)
 
 ❯ :summarize
-===== 356 =====
+===== 179 =====
   no tokens used yet
 
 ❯ :clear
@@ -1199,7 +1199,7 @@ model     alt-model
   failed or not worth it
 
 ❯
-===== 310 =====
+===== 438 =====
   no tokens used yet
 
 ❯ :clear
@@ -1240,28 +1240,28 @@ model     alt-model
   failed or not worth it
 
 ❯ :prompt
-===== 870 =====
+===== 365 =====
 
-  Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping ta
-bles), hard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (
-pushing code, opening PRs, sending email). When in doubt, ask.
+  Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), h
+ard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (pushing code, op
+ening PRs, sending email). When in doubt, ask.
 
   # Git
 
-  Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`.
-Don't push or commit unless asked.
+  Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`. Don't pu
+sh or commit unless asked.
 
   # Security
 
-  Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Do
-n't disable TLS verification. If you spot something insecure, fix it immediately.
+  Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Don't disa
+ble TLS verification. If you spot something insecure, fix it immediately.
 
   # Web research
 
-  Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you'd read the pag
-e — fetch it. Prefer primary sources (official docs, spec, repo) over aggregators. Two independent sources before claimi
-ng a fact; mark single-source claims. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question.
-If searches don't turn up a clear answer, say so — don't guess.
+  Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you'd read the page — fetc
+h it. Prefer primary sources (official docs, spec, repo) over aggregators. Two independent sources before claiming a fact; mark
+single-source claims. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question. If searches don't turn u
+p a clear answer, say so — don't guess.
 
   # Skills
 
@@ -1277,32 +1277,32 @@ If searches don't turn up a clear answer, say so — don't guess.
 
   # Tone
 
-  Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one o
-n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
+  Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one on what's
+ next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯
-===== 459 =====
+===== 372 =====
 
-  Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping ta
-bles), hard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (
-pushing code, opening PRs, sending email). When in doubt, ask.
+  Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), h
+ard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (pushing code, op
+ening PRs, sending email). When in doubt, ask.
 
   # Git
 
-  Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`.
-Don't push or commit unless asked.
+  Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`. Don't pu
+sh or commit unless asked.
 
   # Security
 
-  Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Do
-n't disable TLS verification. If you spot something insecure, fix it immediately.
+  Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Don't disa
+ble TLS verification. If you spot something insecure, fix it immediately.
 
   # Web research
 
-  Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you'd read the pag
-e — fetch it. Prefer primary sources (official docs, spec, repo) over aggregators. Two independent sources before claimi
-ng a fact; mark single-source claims. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question.
-If searches don't turn up a clear answer, say so — don't guess.
+  Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you'd read the page — fetc
+h it. Prefer primary sources (official docs, spec, repo) over aggregators. Two independent sources before claiming a fact; mark
+single-source claims. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question. If searches don't turn u
+p a clear answer, say so — don't guess.
 
   # Skills
 
@@ -1318,27 +1318,27 @@ If searches don't turn up a clear answer, say so — don't guess.
 
   # Tone
 
-  Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one o
-n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
+  Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one on what's
+ next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯ :toknes
-===== 446 =====
+===== 812 =====
   # Git
 
-  Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`.
-Don't push or commit unless asked.
+  Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`. Don't pu
+sh or commit unless asked.
 
   # Security
 
-  Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Do
-n't disable TLS verification. If you spot something insecure, fix it immediately.
+  Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Don't disa
+ble TLS verification. If you spot something insecure, fix it immediately.
 
   # Web research
 
-  Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you'd read the pag
-e — fetch it. Prefer primary sources (official docs, spec, repo) over aggregators. Two independent sources before claimi
-ng a fact; mark single-source claims. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question.
-If searches don't turn up a clear answer, say so — don't guess.
+  Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you'd read the page — fetc
+h it. Prefer primary sources (official docs, spec, repo) over aggregators. Two independent sources before claiming a fact; mark
+single-source claims. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question. If searches don't turn u
+p a clear answer, say so — don't guess.
 
   # Skills
 
@@ -1354,8 +1354,8 @@ If searches don't turn up a clear answer, say so — don't guess.
 
   # Tone
 
-  Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one o
-n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
+  Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one on what's
+ next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯ :toknes
 
@@ -1363,23 +1363,23 @@ n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task 
   unknown command: :toknes  did you mean :tokens?
 
 ❯
-===== 838 =====
+===== 310 =====
   # Git
 
-  Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`.
-Don't push or commit unless asked.
+  Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`. Don't pu
+sh or commit unless asked.
 
   # Security
 
-  Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Do
-n't disable TLS verification. If you spot something insecure, fix it immediately.
+  Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Don't disa
+ble TLS verification. If you spot something insecure, fix it immediately.
 
   # Web research
 
-  Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you'd read the pag
-e — fetch it. Prefer primary sources (official docs, spec, repo) over aggregators. Two independent sources before claimi
-ng a fact; mark single-source claims. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question.
-If searches don't turn up a clear answer, say so — don't guess.
+  Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you'd read the page — fetc
+h it. Prefer primary sources (official docs, spec, repo) over aggregators. Two independent sources before claiming a fact; mark
+single-source claims. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question. If searches don't turn u
+p a clear answer, say so — don't guess.
 
   # Skills
 
@@ -1395,8 +1395,8 @@ If searches don't turn up a clear answer, say so — don't guess.
 
   # Tone
 
-  Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one o
-n what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
+  Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one on what's
+ next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯ :toknes
 

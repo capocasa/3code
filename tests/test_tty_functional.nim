@@ -326,7 +326,15 @@ suite "terminal visual contract":
     writeStubResponses(root, %*[])
     check fileExists(HarnessCommandFrames)
 
-    let tty = startStub(root)
+    # 128 cols (was 120 default): the rendered skill path
+    # (`<output>/.../task-chunked-implementation.md`) is 121 cols on this
+    # checkout and hard-wraps at 120, adding rows that scroll `# Git` off the
+    # grid. 128 cols fits the path so it never wraps. The rejoin normalizer
+    # (`normalizeWrappedPathTail`) still guards the comparison against wraps on
+    # checkouts with an even longer cwd. Per-test sizing is an established
+    # pattern; cols change only rewraps the fixed system-prompt text
+    # (deterministic, checkout-independent), so the fixture regenerates cleanly.
+    let tty = startStub(root, cols = 128)
     defer:
       tty.writeFrameArtifact(root / "frames.txt")
       tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")

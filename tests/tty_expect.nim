@@ -635,6 +635,29 @@ proc normalizeSpinnerPhases(text: string): string =
   for line in text.splitLines(keepEol = true):
     result.add line.normalizeSpinnerGlyphs()
 
+proc normalizeWrappedPathTail(text: string): string =
+  ## A long skill path that exceeds the 120-col terminal hard-wraps; the
+  ## `normalizeTtyRunRoots` prefix redaction collapses the path AFTER capture
+  ## but cannot UN-wrap a line the terminal already broke. The wrap point is
+  ## deterministic: the skill path always lands as `...implementation.m` + a
+  ## lone `d` on the next row. Rejoin such a lone trailing fragment back onto
+  ## the line it broke from, applied symmetrically so a captured wrap on either
+  ## side of the comparison cannot break the golden match. The split is content
+  ## (terminal width), not behavior.
+  let lines = text.splitLines(keepEol = true)
+  var i = 0
+  while i < lines.len:
+    let cur = lines[i]
+    let curStripped = cur.strip()
+    if i + 1 < lines.len and curStripped.endsWith(".m") and
+        lines[i + 1].strip() == "d":
+      let eol = if cur.endsWith("\n"): "\n" else: ""
+      result.add cur[0 ..< cur.len - eol.len] & "d" & eol
+      inc i, 2
+      continue
+    result.add cur
+    inc i
+
 proc stripFrameBlanks(text: string): string =
   ## Drop blank rows inside each frame for comparison. The separator row a
   ## full repaint inserts between the prompt echo and arriving assistant
@@ -671,8 +694,10 @@ proc expectMeaningfulFrameArtifact*(s: TtySession; expectedPath,
     "missing expected full-frame artifact: " & expectedPath & "\nactual written to: " &
       actualPath
   let expected = readFile(expectedPath)
-  doAssert actual.normalizeVersionBanner.normalizeSpinnerPhases.normalizeFrameSeparators.stripFrameBlanks ==
-      expected.normalizeVersionBanner.normalizeSpinnerPhases.normalizeFrameSeparators.stripFrameBlanks,
+  doAssert actual.normalizeVersionBanner.normalizeSpinnerPhases.normalizeFrameSeparators.
+      normalizeWrappedPathTail.stripFrameBlanks ==
+      expected.normalizeVersionBanner.normalizeSpinnerPhases.normalizeFrameSeparators.
+      normalizeWrappedPathTail.stripFrameBlanks,
     "full-frame recording differed from expected frames\nexpected: " & expectedPath &
       "\nactual: " & actualPath
 
