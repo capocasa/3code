@@ -512,10 +512,12 @@ proc normalizeElapsed(row: string): string =
       inc i
 
 proc normalizeSpinnerGlyphs(row: string): string =
+  ## Replace any animated spinner phase glyph at the start of a row with the
+  ## canonical solid `⣿`. The phase is timing-dependent (which animation
+  ## frame the capture landed on) and must never break a golden comparison,
+  ## so this collapses all phases unconditionally — not only when an elapsed
+  ## token happens to trail the glyph.
   result = row
-  if " 0s" notin result and not result.endsWith("0s"):
-    return
-
   for glyph in ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]:
     if result.strip(leading = true, trailing = false).startsWith(glyph):
       let pos = result.find(glyph)
@@ -623,6 +625,16 @@ proc normalizeVersionBanner(text: string): string =
     else:
       result.add line
 
+proc normalizeSpinnerPhases(text: string): string =
+  ## Text-level pass over a whole recording: collapse animated spinner phase
+  ## glyphs to the canonical `⣿` on every row. Applied symmetrically to both
+  ## the fixture and the actual in `expectMeaningfulFrameArtifact`, so a raw
+  ## phase captured into either side (the multiline fixture predates
+  ## per-row spinner normalization and carries raw `⠋`/`⠙`/`⠹` phases) cannot
+  ## break the comparison. The phase is timing noise, not content.
+  for line in text.splitLines(keepEol = true):
+    result.add line.normalizeSpinnerGlyphs()
+
 proc stripFrameBlanks(text: string): string =
   ## Drop blank rows inside each frame for comparison. The separator row a
   ## full repaint inserts between the prompt echo and arriving assistant
@@ -659,8 +671,8 @@ proc expectMeaningfulFrameArtifact*(s: TtySession; expectedPath,
     "missing expected full-frame artifact: " & expectedPath & "\nactual written to: " &
       actualPath
   let expected = readFile(expectedPath)
-  doAssert actual.normalizeVersionBanner.normalizeFrameSeparators.stripFrameBlanks ==
-      expected.normalizeVersionBanner.normalizeFrameSeparators.stripFrameBlanks,
+  doAssert actual.normalizeVersionBanner.normalizeSpinnerPhases.normalizeFrameSeparators.stripFrameBlanks ==
+      expected.normalizeVersionBanner.normalizeSpinnerPhases.normalizeFrameSeparators.stripFrameBlanks,
     "full-frame recording differed from expected frames\nexpected: " & expectedPath &
       "\nactual: " & actualPath
 
