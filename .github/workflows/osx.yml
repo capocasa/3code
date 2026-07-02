@@ -4,12 +4,6 @@ on:
   push:
     branches: [main]
     tags: ['[0-9]+.[0-9]+.[0-9]+']
-    paths:
-      - '.github/workflows/osx.yml'
-      - 'src/**'
-      - 'tests/**'
-      - '*.nimble'
-      - 'config.nims'
 
 jobs:
   build:
@@ -23,10 +17,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install dependencies
-        run: |
-          nimble install -y --depsOnly
-          nimble setup -y
-          echo '--path:"src"' >> nimble.paths
+        run: nimble install -y --depsOnly
 
       - name: Compute build flags
         shell: bash
@@ -68,6 +59,12 @@ jobs:
           ln -sf libcrypto.3.dylib 3code-macos-universal/libcrypto.dylib
           curl -fsSL https://curl.se/ca/cacert.pem -o 3code-macos-universal/cacert.pem
           tar czf 3code-macos-universal.tar.gz 3code-macos-universal
+
+      - name: Upload artifact (GitHub Actions)
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3code-macos-universal
+          path: 3code-macos-universal.tar.gz
 
       - name: Upload artifact to 3code.capocasa.dev
         if: github.ref == 'refs/heads/main'

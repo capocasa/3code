@@ -21,8 +21,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          sha="${{ github.sha }}"
-          tag="${{ github.ref_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+            sha=$(gh api "repos/${{ github.repository }}/commits/$tag" -q '.sha')
+          else
+            tag="${{ github.ref_name }}"
+            sha="${{ github.sha }}"
+          fi
+          echo "tag=$tag sha=$sha"
           mkdir -p dl
 
           for workflow in Linux OSX Windows; do
@@ -75,9 +81,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${{ github.ref_name }}" \
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${{ github.ref_name }}"
+          fi
+          gh release create "$tag" \
             --repo ${{ github.repository }} \
-            --title "${{ github.ref_name }}" \
+            --title "$tag" \
             --generate-notes \
             3code-linux-amd64.tar.gz \
             3code-linux-arm64.tar.gz \

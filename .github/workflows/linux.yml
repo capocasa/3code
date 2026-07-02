@@ -31,10 +31,7 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install dependencies
-        run: |
-          nimble install -y --depsOnly
-          nimble setup -y
-          echo '--path:"src"' >> nimble.paths
+        run: nimble install -y --depsOnly
 
       - name: Compute build flags
         run: |
@@ -56,6 +53,12 @@ jobs:
           cp 3code ${{ matrix.artifact }}/
           cp README.md LICENSE ${{ matrix.artifact }}/
           tar czf ${{ matrix.artifact }}.${{ matrix.ext }} ${{ matrix.artifact }}
+
+      - name: Upload artifact (GitHub Actions)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.${{ matrix.ext }}
 
       - name: Upload artifact to 3code.capocasa.dev
         if: github.ref == 'refs/heads/main'
