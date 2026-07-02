@@ -802,6 +802,22 @@ proc expectOnScreen*(s: TtySession; text: string;
   doAssert false, "expected text not found on screen: " & text & "\n" &
     s.dumpFramesAround(text)
 
+proc framePresenceRuns*(s: TtySession; needle: string): int =
+  ## Count contiguous runs of frames whose rows contain an exact
+  ## (whitespace-stripped) match for `needle`. One run means the row
+  ## committed once and was never erased; zero means it never appeared;
+  ## more than one means it flickered out and back in (the overwrite bug).
+  var wasPresent = false
+  for frame in s.frames:
+    var present = false
+    for row in frame.rows:
+      if row.strip == needle:
+        present = true
+        break
+    if present and not wasPresent:
+      inc result
+    wasPresent = present
+
 proc expectRowAppearsOnce*(s: TtySession; text: string): bool {.discardable.} =
   ## Assert a row exactly equal to `text` (after stripping whitespace)
   ## appears in exactly one contiguous run of recorded frames — i.e. it

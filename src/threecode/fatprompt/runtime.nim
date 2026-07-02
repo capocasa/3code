@@ -1679,6 +1679,7 @@ proc emitUserSubmit*(line: string) =
     bytes.add receiptBytes(receiptLabel)
     bytes.add "\r\n\r\n"
   bytes.add formatUserPromptItem(line)
+  bytes.add "\r\n\r\n"
   proc clearSubmittedFooterState() =
     emitFatPromptEvent clearPendingHintEvent()
     emitFatPromptEvent clearBarEvent()
@@ -1687,4 +1688,5 @@ proc emitUserSubmit*(line: string) =
     bytes,
     restoreEditor = false,
     beforeRepaint = clearSubmittedFooterState,
-    reserveFooter = false)
+    reserveFooter = false,
+    transcriptOwnsSpacing = true)

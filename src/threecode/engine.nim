@@ -13,9 +13,19 @@
 ##
 ## Every transcript commit writes `content + \r\n\r\n`. The first \r\n ends
 ## the content; the second is the separator. The footer is always painted
-## starting at the ticker row directly below the separator. Walk-up from
-## cursor to the volatile top is always `rowsAboveCursorToFooterTop` (ticker
-## + bar rows + editor rows above cursor). No adjustments, no flags.
+## starting at the ticker row directly below the separator.
+##
+## The walk-up from cursor to the top of the volatile region is always derived
+## from live state, never cached:
+##
+##   walkUp(ed) = editorRowsAboveCursor(ed) + paintedFooterRows + viewportHeight
+##
+## `paintedFooterRows` is the bar+ticker row count of whatever footer is
+## currently on screen (zero if none). It changes only on explicit footer
+## transitions (renderFooter, appendTranscript's reserve/clear paths). The
+## editor's row-above-cursor (`renderRow`) changes on every keystroke, so it
+## must be read live — caching it leads to stale walk-ups that walk into
+## committed scrollback.
 
 import std/[terminal, unicode]
 import minline
@@ -24,11 +34,11 @@ import ./fatprompt/rendering
 
 type
   TerminalEngine* = object
-    ## Rows from cursor to the top of the volatile footer (ticker row).
-    ## Zero means no footer geometry is currently known — nothing volatile
-    ## to clear, so walk-up is a no-op.
-    rowsAboveCursorToFooterTop: int
-    footerRowsAboveEditor: int
+    ## Bar+ticker rows of the footer currently painted on screen. Zero when
+    ## no footer chrome is live. Updated by every footer paint/clear path.
+    ## The editor's own rows are NOT included here; they are read live from
+    ## the editor's `renderRow` at each walk-up.
+    paintedFooterRows: int
     toolViewportRows: seq[string]
     editorRedrawPending: bool
     editorRedrawFooterRows: int
@@ -49,27 +59,22 @@ proc editorRowsAboveCursor(ed: var minline.LineEditor): int =
   refreshEditorWidth(ed)
   min(ed.renderRow, max(1, minline.renderedRows(ed)) - 1)
 
-proc rowsToFooterTop(ed: var minline.LineEditor;
-                     footerRowsAboveEditor: int): int =
-  editorRowsAboveCursor(ed) + max(0, footerRowsAboveEditor)
+proc walkUp(e: TerminalEngine; ed: var minline.LineEditor): int =
+  ## Rows from the cursor to the top of the volatile region (ticker row).
+  ## Always derived from live editor + footer state. This is the number of
+  ## rows to move up before erasing the volatile region.
+  editorRowsAboveCursor(ed) + e.paintedFooterRows + e.toolViewportRows.len
 
-proc noteFooterPainted(e: var TerminalEngine; ed: var minline.LineEditor;
-                       footerRowsAboveEditor: int) =
-  let rows = max(0, footerRowsAboveEditor)
-  e.rowsAboveCursorToFooterTop = rowsToFooterTop(ed, rows)
-  e.footerRowsAboveEditor = rows
+proc noteFooterPainted(e: var TerminalEngine; footerRowsAboveEditor: int) =
+  e.paintedFooterRows = max(0, footerRowsAboveEditor)
 
 proc noteNoFooter(e: var TerminalEngine) =
-  e.rowsAboveCursorToFooterTop = 0
-  e.footerRowsAboveEditor = 0
+  e.paintedFooterRows = 0
 
 proc writeViewportRows(rows: openArray[string]) =
   for row in rows:
     stdout.write row
     stdout.write "\r\n"
-
-proc toolViewportHeight(e: TerminalEngine): int =
-  e.toolViewportRows.len
 
 proc writeToolViewportRows(e: TerminalEngine) =
   writeViewportRows(e.toolViewportRows)
@@ -114,7 +119,7 @@ proc finishEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor;
                          showCaret = true) =
   if e.editorRedrawPending:
     if e.editorRedrawFooterRows > 0:
-      e.noteFooterPainted(ed, e.editorRedrawFooterRows)
+      e.noteFooterPainted(e.editorRedrawFooterRows)
     else:
       e.noteNoFooter()
     e.editorRedrawPending = false
@@ -128,7 +133,9 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
                    editor: ptr minline.LineEditor;
                    termW = 0) {.gcsafe.} =
   ## Replace the volatile footer and repaint the editor in one synchronized
-  ## frame.
+  ## frame. The walk-up is derived from the currently-painted footer height
+  ## (e.paintedFooterRows) and the editor's live renderRow, so it always
+  ## matches reality regardless of what changed since the last paint.
   {.cast(gcsafe).}:
     termio.withTerminalWriteLock:
       let bytes = frame.footerFrameBytes(termW)
@@ -138,18 +145,12 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
         stdout.write termio.SyncBegin
         stdout.write "\x1b[?25l"
         refreshEditorWidth(edPtr[])
-        let growth =
-          if e.footerRowsAboveEditor > 0:
-            max(0, footerRowsAboveEditor - e.footerRowsAboveEditor)
-          else:
-            0
-        let shrink = max(0, e.footerRowsAboveEditor - footerRowsAboveEditor)
-        let up = max(0, e.rowsAboveCursorToFooterTop + e.toolViewportHeight +
-                       growth - shrink)
+        let up = max(0, e.walkUp(edPtr[]))
         stdout.write "\r"
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
         stdout.write "\x1b[J"
+        e.toolViewportRows = @[]
         e.writeToolViewportRows()
         stdout.write bytes
         stdout.write "\r\n"
@@ -160,7 +161,7 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
         if frame.kind == ffClear:
           e.noteNoFooter()
         else:
-          e.noteFooterPainted(edPtr[], footerRowsAboveEditor)
+          e.noteFooterPainted(footerRowsAboveEditor)
         stdout.write termio.SyncEnd
         stdout.flushFile
       else:
@@ -193,14 +194,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
       stdout.write "\x1b[?25l"
       if inputRunning and editor != nil:
         refreshEditorWidth(editor[])
-        let growth =
-          if e.footerRowsAboveEditor > 0:
-            max(0, footerRowsAboveEditor - e.footerRowsAboveEditor)
-          else:
-            0
-        let shrink = max(0, e.footerRowsAboveEditor - footerRowsAboveEditor)
-        let up = max(0, e.rowsAboveCursorToFooterTop + e.toolViewportHeight +
-                       growth - shrink)
+        let up = max(0, e.walkUp(editor[]))
         stdout.write "\r"
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
@@ -217,7 +211,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         if frame.kind == ffClear:
           e.noteNoFooter()
         else:
-          e.noteFooterPainted(editor[], footerRowsAboveEditor)
+          e.noteFooterPainted(footerRowsAboveEditor)
       else:
         e.toolViewportRows = @rows
         e.writeToolViewportRows()
@@ -275,9 +269,7 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
       refreshEditorWidth(edPtr[])
       stdout.write termio.SyncBegin
       stdout.write "\x1b[?25l\r"
-      let viewportH = e.toolViewportHeight()
-      let up = max(0, e.rowsAboveCursorToFooterTop + viewportH +
-                   max(0, compactRowsAboveFooter))
+      let up = max(0, e.walkUp(edPtr[]) + max(0, compactRowsAboveFooter))
       if up > 0:
         stdout.write "\x1b[" & $up & "A"
       stdout.write "\x1b[J"
@@ -295,23 +287,24 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
           stdout.write edPtr[].redrawBytes()
           if not edPtr[].pendingCaret:
             stdout.write "\x1b[?25h"
-          e.noteFooterPainted(edPtr[], footerRowsAboveEditor)
+          e.noteFooterPainted(footerRowsAboveEditor)
         else:
-          e.rowsAboveCursorToFooterTop =
-            if footerBytes.len > 0: max(1, footerRowsAboveEditor)
-            else: 0
+          if footerBytes.len > 0:
+            e.noteFooterPainted(max(1, footerRowsAboveEditor))
+          else:
+            e.noteNoFooter()
       else:
         e.noteNoFooter()
       stdout.write termio.SyncEnd
       stdout.flushFile
     else:
       if inputRunning and editor != nil:
-        let up = max(0, e.rowsAboveCursorToFooterTop)
+        let up = max(0, e.walkUp(editor[]))
         stdout.write "\r"
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
       if e.toolViewportRows.len > 0:
-        stdout.write "\x1b[" & $e.toolViewportHeight() & "A"
+        stdout.write "\x1b[" & $e.toolViewportRows.len & "A"
       if compactRowsAboveFooter > 0:
         stdout.write "\x1b[" & $compactRowsAboveFooter & "A"
       stdout.write "\r\x1b[J"
@@ -330,11 +323,12 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
           stdout.write editor[].redrawBytes()
           if not editor[].pendingCaret:
             stdout.write "\x1b[?25h"
-          e.noteFooterPainted(editor[], footerRowsAboveEditor)
+          e.noteFooterPainted(footerRowsAboveEditor)
         else:
-          e.rowsAboveCursorToFooterTop =
-            if footerBytes.len > 0: max(1, footerRowsAboveEditor)
-            else: 0
+          if footerBytes.len > 0:
+            e.noteFooterPainted(max(1, footerRowsAboveEditor))
+          else:
+            e.noteNoFooter()
       else:
         e.noteNoFooter()
       stdout.flushFile
@@ -346,13 +340,12 @@ proc prepareAssistantContentStart*(e: var TerminalEngine;
                                    hadBufferedSubmit: bool;
                                    flush = true) =
   ## Clear volatile footer chrome so live assistant content can begin as
-  ## ordinary transcript output. Uses the engine's tracked footer geometry;
-  ## when no footer is tracked there is nothing to clear.
+  ## ordinary transcript output. Walk-up is derived from live state.
   termio.withTerminalWriteLock:
     let termW = try: terminalWidth() except CatchableError: 0
     if inputRunning and editor != nil:
       refreshEditorWidth(editor[])
-      let up = max(0, e.rowsAboveCursorToFooterTop)
+      let up = max(0, e.walkUp(editor[]))
       stdout.write "\r"
       if up > 0:
         stdout.write "\x1b[" & $up & "A"
@@ -377,12 +370,11 @@ proc endTurn*(e: var TerminalEngine; inputRunning: bool;
               bytes: string) =
   ## Render the transition from running turn to idle prompt. The visual
   ## transition bytes are produced by the fat-prompt renderer; cursor
-  ## geometry uses the engine's tracked footer state.
+  ## geometry uses the engine's live footer state.
   termio.withTerminalWriteLock:
-    let termW = try: terminalWidth() except CatchableError: 0
     if inputRunning and editor != nil:
       refreshEditorWidth(editor[])
-      let up = max(0, e.rowsAboveCursorToFooterTop)
+      let up = max(0, e.walkUp(editor[]))
       stdout.write "\r"
       if up > 0:
         stdout.write "\x1b[" & $up & "A"

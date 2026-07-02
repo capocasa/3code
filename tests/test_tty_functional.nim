@@ -153,18 +153,6 @@ proc startStub(root: string; args: openArray[string] = ["-x", "-i"];
   newTtySession(ensureStubBinary(), args = args, cwd = root / "run",
                 env = stubEnv(root, resp), cols = cols, rows = rows)
 
-proc framePresenceRuns(s: TtySession; needle: string): int =
-  var wasPresent = false
-  for frame in s.frames:
-    var present = false
-    for row in frame.rows:
-      if row.strip == needle:
-        present = true
-        break
-    if present and not wasPresent:
-      inc result
-    wasPresent = present
-
 proc requireVisibleEditorCaret(s: TtySession; needle: string) =
   s.drain(20)
   require s.frames.len > 0
