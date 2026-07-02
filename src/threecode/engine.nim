@@ -150,7 +150,6 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
         stdout.write "\x1b[J"
-        e.toolViewportRows = @[]
         e.writeToolViewportRows()
         stdout.write bytes
         stdout.write "\r\n"
