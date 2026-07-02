@@ -47,14 +47,16 @@ suite "cli --list cap and short-flag stacking":
 
   proc runIn(envCwd: string; flags: string): tuple[o: string, code: int] =
     when defined(windows):
-      # cmd.exe doesn't support VAR=VAL prefix; use set+&&.
+      # cmd.exe can't inline VAR=VAL prefix; run through shell.
       let cmd = "set XDG_DATA_HOME=" & tmp & " && " &
-                binPath() & " " & flags
+                binPath().quoteShell & " " & flags
+      let (outp, code) = execCmdEx(cmd, options = {poEvalCommand, poStdErrToStdOut, poUsePath}, workingDir = envCwd)
+      result = (outp.strip(), code)
     else:
       let cmd = "XDG_DATA_HOME=" & tmp.quoteShell & " " &
                 binPath().quoteShell & " " & flags
-    let (outp, code) = execCmdEx(cmd, workingDir = envCwd)
-    return (outp.strip(), code)
+      let (outp, code) = execCmdEx(cmd, workingDir = envCwd)
+      result = (outp.strip(), code)
 
   proc seedSession(stamp: string) =
     # Minimal valid .3log under the isolated sessions dir, plus a cwd-index
@@ -123,12 +125,14 @@ suite "cli syntax errors do no startup work":
   proc runIn(envCwd: string; flags: string): tuple[o: string, code: int] =
     when defined(windows):
       let cmd = "set XDG_DATA_HOME=" & tmp & " && " &
-                binPath() & " " & flags
+                binPath().quoteShell & " " & flags
+      let (outp, code) = execCmdEx(cmd, options = {poEvalCommand, poStdErrToStdOut, poUsePath}, workingDir = envCwd)
+      result = (outp.strip(), code)
     else:
       let cmd = "XDG_DATA_HOME=" & tmp.quoteShell & " " &
                 binPath().quoteShell & " " & flags
-    let (outp, code) = execCmdEx(cmd, workingDir = envCwd)
-    return (outp.strip(), code)
+      let (outp, code) = execCmdEx(cmd, workingDir = envCwd)
+      result = (outp.strip(), code)
 
   proc skillsDirExists(): bool = dirExists(tmp / "3code" / "skills")
 
