@@ -148,10 +148,23 @@ rendered path on this checkout is 121 chars
 (`/home/carlo/p/3code/testimp/tests/output/tty/<pid>/data/...`), which
 exceeds the 120-col terminal and hard-wraps (`...implementation.m` + `d`).
 The redaction collapses the prefix post-capture but cannot UN-wrap a line
-the terminal already broke. Each wrapped skill line adds a row; with several
-skill lines wrapping, the content overflows 40 rows and `# Git` (and the
-banner) scroll off. Frame 33: expected 40 rows with `# Git`, actual 40 rows
-without it. The fixture was generated on a checkout whose path fit in 120.
+the terminal already broke. Only ONE skill wraps: `task-chunked-implementation.md`
+(121 cols); the other 6 skill names are all ≤104 cols and fit. But the
+system-prompt skills block is redrawn 4× across the test's frames, so that
+one wrap adds 4 extra rows total. That tips the content over 40 rows and
+scrolls `# Git` (and the banner) off the grid. Frame 33: expected 40 rows
+with `# Git`, actual 40 rows without it. The fixture was generated on a
+checkout whose absolute path fit in 120 cols.
+
+Fix precision: `normalizeTtyRunRoots` (tests/tty_expect.nim:528) redacts a
+PREFIX via the marker `tests/output/tty/` → `<tty-run>/data/`. To un-wrap,
+it must detect a bare tail line like `d` (or `d` / `e` etc.) immediately
+following a line whose redacted form ends mid-token at a `.m` / `.m` split,
+and rejoin them. Because the split point is deterministic (always after
+`task-chunked-implementation.m`), a targeted rejoin of a lone trailing
+short fragment onto the previous line is safe. The PID width (6 vs 7
+digits) shifts the exact count but `task-chunked-implementation.md` always
+overflows on this checkout (`/home/carlo/p/3code/testimp/...`).
 
 ### multiline prompt and queued multiline autosend — FIXED THIS ROUND ✅
 
@@ -205,6 +218,47 @@ These two are golden brittleness. Options, in order of preference:
    line (rejoin `...implementation.m` + `d`), OR shorten the test data root so
    paths always fit 120 cols. Deferred per the brittleness policy unless
 tackled explicitly.
+
+## DEBUGGING TECHNIQUES (learned this round)
+
+- **See the EXACT normalized diff the test sees.** The assertion in
+  `expectMeaningfulFrameArtifact` (tty_expect.nim:~671) compares both sides
+  through `normalizeVersionBanner.normalizeSpinnerPhases.normalizeFrameSeparators.stripFrameBlanks`.
+  A raw `diff fixture actual` lies — it shows spinner phases, version strings,
+  and frame-separator labels that the comparison already normalizes away.
+  To see the real diff, temporarily add two `writeFile` calls in the assert
+  that dump `aNorm` and `eNorm` (the normalized actual and expected strings):
+  ```nim
+  let aNorm = actual.normalizeVersionBanner.normalizeSpinnerPhases.normalizeFrameSeparators.stripFrameBlanks
+  let eNorm = expected.normalizeVersionBanner.normalizeSpinnerPhases.normalizeFrameSeparators.stripFrameBlanks
+  writeFile(actualPath & ".norm", aNorm)
+  writeFile(actualPath & ".expnorm", eNorm)
+  ```
+  Then `diff actual.txt.norm actual.txt.expnorm`. REMOVE the instrumentation
+  before committing. (This is exactly how the trailing-newline mismatch was
+  found — a Python replica of the normalizer missed the final-newline
+  difference.)
+
+- **Verify fixture determinism before regenerating.** PTY captures are not
+  byte-identical run-to-run (spinner phase, frame boundaries). Before
+  regenerating any fixture from an actual recording, run the test 5× and
+  confirm the NORMALIZED output is stable: pipe each actual through the
+  comparison pipeline and `md5sum`. The multiline regen was 5/5 identical.
+  One outlier will have DEBUG instrumentation leaking (`DBG appendTranscript...`)
+  if you forget to rebuild the stub clean — ignore that one.
+
+- **Fixture format gotcha.** `meaningfulFrameText` (tty_expect.nim:~583) ends
+  EVERY row with a newline, including the last. So fixtures MUST end with a
+  trailing newline. A fixture generated via a Python `'\n'.join(...)` will be
+  missing the final newline and fail the comparison by exactly one byte.
+  Regenerate by copying a verified actual verbatim (it already has the right
+  format), or append a newline with `printf '\n' >>`.
+
+- **Stale-fixture vs broken-output test.** Before regenerating, confirm the
+  actual represents CORRECT behavior: all the test's `expectInHistory` /
+  `expectTokenBar` / `requireVisibleEditorCaret` assertions pass, and the
+  recording shows the expected content reaching scrollback. Only then is a
+  regen legitimate under the "fixtures are source of truth" convention.
 
 ## HOW TO RUN TESTS
 
