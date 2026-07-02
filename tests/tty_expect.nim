@@ -733,6 +733,86 @@ proc expectExit*(s: TtySession; code: int; timeoutMs = 5000): bool {.discardable
     sleep 5
   doAssert false, &"expected process exit code {code}, still running"
 
+proc expectAlive*(s: TtySession; msg = "process exited unexpectedly") =
+  s.drain(5, recordFrame = false)
+  doAssert not s.exited, msg & "\n" & s.dumpFramesAround("")
+
+proc expectPromptLive*(s: TtySession; timeoutMs = 5000): bool {.discardable.} =
+  ## Assert the prompt is present AND the process is still alive. Catches the
+  ## regression where a turn repaints the prompt but the child has already died.
+  discard s.expect("\u276f", timeoutMs)
+  s.expectAlive()
+  true
+
+proc countIn*(s: TtySession; text: string;
+              where = "history"): int =
+  ## Count non-overlapping occurrences of `text` in the chosen view.
+  ## `where` is "screen" (live grid), "history" (recorded frames), or
+  ## "raw" (cleaned raw byte stream).
+  let hay =
+    case where
+    of "screen": s.screenText()
+    of "raw": s.cleanRaw()
+    else: s.historyText()
+  if text.len == 0:
+    return 0
+  var i = 0
+  while i <= hay.len - text.len:
+    if hay[i ..< i + text.len] == text:
+      inc result
+      i += text.len
+    else:
+      inc i
+
+proc expectCount*(s: TtySession; text: string; n: int;
+                  where = "history";
+                  timeoutMs = 5000): bool {.discardable.} =
+  let deadline = epochTime() + timeoutMs.float / 1000.0
+  var last = -1
+  while epochTime() < deadline:
+    s.drain(5, recordFrame = false)
+    last = s.countIn(text, where)
+    if last == n:
+      return true
+    if s.exited:
+      s.drain(20, recordFrame = false)
+      last = s.countIn(text, where)
+      if last == n:
+        return true
+      break
+    sleep 5
+  doAssert false, &"expected count {n} of {text} in {where}, got {last}\n" &
+    s.dumpFramesAround(text)
+
+proc expectOnScreen*(s: TtySession; text: string;
+                     timeoutMs = 5000): bool {.discardable.} =
+  ## Like `expect` but matches ONLY the live screen grid, never cleanRaw().
+  ## Use this to assert text is actually painted on the terminal, not merely
+  ## present in the byte stream that scrolled past.
+  let deadline = epochTime() + timeoutMs.float / 1000.0
+  while epochTime() < deadline:
+    s.drain(5, recordFrame = false)
+    if text in s.screenText():
+      return true
+    if s.exited:
+      s.drain(20, recordFrame = false)
+      if text in s.screenText():
+        return true
+    sleep 5
+  doAssert false, "expected text not found on screen: " & text & "\n" &
+    s.dumpFramesAround(text)
+
+proc expectRowAppearsOnce*(s: TtySession; text: string): bool {.discardable.} =
+  ## Assert a row exactly equal to `text` (after stripping whitespace)
+  ## appears in exactly one contiguous run of recorded frames — i.e. it
+  ## commits once and is never erased and re-committed. Catches the
+  ## scrollback-overwrite regression where a committed row flickers out and
+  ## back in. Drain all the frames you care about before calling this.
+  let runs = s.framePresenceRuns(text)
+  doAssert runs == 1, &"expected row to appear once (one run), appeared {runs} " &
+    &"times: {text}\n" & s.dumpFramesAround(text)
+  true
+
 proc tokenBarRows(s: TtySession): seq[string] =
   ## Return rows that look like the compact token/status bar.
   for row in s.currentRows():
