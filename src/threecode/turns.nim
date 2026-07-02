@@ -143,6 +143,15 @@ proc finishTranscriptItem(bytes: var string) =
   bytes.trimTranscriptTail()
   bytes.add "\r\n\r\n"
 
+proc finishFinalTranscriptItem(bytes: var string) =
+  ## Variant for the last item before the idle footer is reserved. The
+  ## reserved footer frame opens with its own cleared gap/ticker row, which is
+  ## the visible separator between content and the bar. Ending the bytes with a
+  ## full `\r\n\r\n` separator here would leave that gap row as a second,
+  ## redundant blank. End the line only and let the footer own the gap.
+  bytes.trimTranscriptTail()
+  bytes.add "\r\n"
+
 proc clearSubmittedReceiptState() =
   let restingLabel =
     if pendingHint.active:
@@ -158,22 +167,26 @@ proc clearSubmittedTickerState() =
   emitFatPromptEvent clearTickerEvent()
 
 proc commitAssistantItem(content: string; restoreEditor = true;
-                         attachReceipt = true) =
+                         attachReceipt = true; finalBeforeIdle = false) =
   let afterCommit =
     if attachReceipt: clearSubmittedReceiptState
     else: clearSubmittedTickerState
+  let reserveFooter = restoreEditor
+  let collapseGap = reserveFooter and finalBeforeIdle
   if content.strip.len == 0:
     var bytes = GreyFg & "  (empty reply — no content, no tool calls)" & Reset
     let receipt = if attachReceipt: pendingReceiptBytes() else: ""
     if attachReceipt and receipt.len > 0:
       bytes.add "\r\n"
       bytes.add receipt
-    bytes.finishTranscriptItem()
+    if collapseGap: bytes.finishFinalTranscriptItem()
+    else: bytes.finishTranscriptItem()
     commitTranscriptBytes(
       bytes,
       restoreEditor,
       afterCommit,
-      reserveFooter = restoreEditor)
+      reserveFooter = reserveFooter,
+      transcriptOwnsSpacing = collapseGap)
     return
   var bytes = captureStdoutWrites:
     renderAssistantContent(content)
@@ -182,12 +195,14 @@ proc commitAssistantItem(content: string; restoreEditor = true;
   if attachReceipt and receipt.len > 0:
     bytes.add "\r\n"
     bytes.add receipt
-  bytes.finishTranscriptItem()
+  if collapseGap: bytes.finishFinalTranscriptItem()
+  else: bytes.finishTranscriptItem()
   commitTranscriptBytes(
     bytes,
     restoreEditor,
     afterCommit,
-    reserveFooter = restoreEditor)
+    reserveFooter = reserveFooter,
+    transcriptOwnsSpacing = collapseGap)
 
 proc commitPendingReceiptAfterStream(restoreEditor = true) =
   ## Streaming assistant content is already in scrollback. Once usage arrives,
@@ -196,12 +211,15 @@ proc commitPendingReceiptAfterStream(restoreEditor = true) =
   var bytes = pendingReceiptBytes()
   if bytes.len == 0:
     return
-  bytes.finishTranscriptItem()
+  let reserveFooter = restoreEditor
+  if reserveFooter: bytes.finishFinalTranscriptItem()
+  else: bytes.finishTranscriptItem()
   commitTranscriptBytes(
     bytes,
     restoreEditor,
     clearSubmittedReceiptState,
-    reserveFooter = restoreEditor)
+    reserveFooter = reserveFooter,
+    transcriptOwnsSpacing = reserveFooter)
 
 proc commitTranscriptItem(formatBody: proc(); restoreEditor = true;
                           prefixBoundary = false; receipt = "") =
@@ -473,7 +491,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         stopTurnInputForFinalRender()
       commitAssistantItem(
         content,
-        restoreEditor = not queuedBeforeFinalRender)
+        restoreEditor = not queuedBeforeFinalRender,
+        finalBeforeIdle = not queuedBeforeFinalRender)
     if queuedBeforeFinalRender or hasQueuedAutosend():
       stopTurnInputForFinalRender()
       turnEnded = true
