@@ -63,41 +63,43 @@ suite "display: printSessionList cap":
     # listSessionPathsForCwd (which reads the index, not the dir) finds it.
     appendSessionIndex(cwd, stamp)
 
-  proc captureList(paths: seq[string]): string =
-    # Mirror the `captureStdout` helper in test_streaming_view.nim: swap
-    # the `stdout` var for a temp file around the call.
-    let outPath = tmpRoot / "list_out.txt"
-    let saved = stdout
-    let f = open(outPath, fmWrite)
-    stdout = f
-    try:
-      printSessionList(paths, "", showCwd = false)
-    finally:
-      stdout.flushFile
-      stdout = saved
-      close(f)
-    result = readFile(outPath).strip(leading = false)
+  when not defined(windows):
+    proc captureList(paths: seq[string]): string =
+      # Mirror the `captureStdout` helper in test_streaming_view.nim: swap
+      # the `stdout` var for a temp file around the call.
+      let outPath = tmpRoot / "list_out.txt"
+      let saved = stdout
+      let f = open(outPath, fmWrite)
+      stdout = f
+      try:
+        printSessionList(paths, "", showCwd = false)
+      finally:
+        stdout.flushFile
+        stdout = saved
+        close(f)
+      result = readFile(outPath).strip(leading = false)
 
-  test "caps at SessionListCap and shows truncation hint":
-    for i in 0 ..< 25:
-      seedSession("2026010" & (if i < 10: "0" & $i else: $i) & "T120000",
-                  "session number " & $i)
-    let paths = listSessionPathsForCwd(cwd)
-    check paths.len == 25
-    let listing = captureList(paths)
-    # 25 sessions (indices 0..24), newest-first → the 20 shown are
-    # indices 24..5. Index 5 is the last shown; index 4 is the first cut.
-    check "202601024T120000" in listing  # newest
-    check "202601005T120000" in listing  # 20th shown (last)
-    check "202601004T120000" notin listing  # 21st (capped out)
-    check "202601000T120000" notin listing  # oldest
-    check "20 of 25" in listing           # truncation hint
-    check "more in" in listing
+  when not defined(windows):
+    test "caps at SessionListCap and shows truncation hint":
+      for i in 0 ..< 25:
+        seedSession("2026010" & (if i < 10: "0" & $i else: $i) & "T120000",
+                    "session number " & $i)
+      let paths = listSessionPathsForCwd(cwd)
+      check paths.len == 25
+      let listing = captureList(paths)
+      # 25 sessions (indices 0..24), newest-first → the 20 shown are
+      # indices 24..5. Index 5 is the last shown; index 4 is the first cut.
+      check "202601024T120000" in listing  # newest
+      check "202601005T120000" in listing  # 20th shown (last)
+      check "202601004T120000" notin listing  # 21st (capped out)
+      check "202601000T120000" notin listing  # oldest
+      check "20 of 25" in listing           # truncation hint
+      check "more in" in listing
 
-  test "no hint when under the cap":
-    for i in 0 ..< 3:
-      seedSession("2026020" & $i & "T120000", "session " & $i)
-    let paths = listSessionPathsForCwd(cwd)
-    check paths.len == 3
-    let listing = captureList(paths)
-    check "of 3" notin listing  # no truncation hint
+    test "no hint when under the cap":
+      for i in 0 ..< 3:
+        seedSession("2026020" & $i & "T120000", "session " & $i)
+      let paths = listSessionPathsForCwd(cwd)
+      check paths.len == 3
+      let listing = captureList(paths)
+      check "of 3" notin listing  # no truncation hint

@@ -59,6 +59,19 @@ else
   done
 fi
 
+# PTY tests (test_empty_enter_freeze, test_interrupt_prestream_freeze,
+# test_tty_functional) use forkpty/openpty which are Linux-only.
+if [[ "$(uname -s)" != "Linux" ]]; then
+  filtered=()
+  for t in "${tests[@]}"; do
+    case "$t" in
+      test_empty_enter_freeze|test_interrupt_prestream_freeze|test_tty_functional) ;;
+      *) filtered+=("$t") ;;
+    esac
+  done
+  tests=("${filtered[@]}")
+fi
+
 # Compile one test. Reads the paths array from the enclosing scope.
 compile_one() {
   local name="$1"
