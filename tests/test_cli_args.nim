@@ -46,10 +46,16 @@ suite "cli --list cap and short-flag stacking":
     if dirExists(tmp): removeDir(tmp)
 
   proc runIn(envCwd: string; flags: string): tuple[o: string, code: int] =
-    let cmd = "XDG_DATA_HOME=" & tmp.quoteShell & " " &
-              binPath().quoteShell & " " & flags
-    let (outp, code) = execCmdEx(cmd, workingDir = envCwd)
-    return (outp.strip(), code)
+    when defined(windows):
+      let cmd = "cmd /c set XDG_DATA_HOME=" & tmp & "&& " &
+                quoteShell(binPath()) & " " & flags
+      let (outp, code) = execCmdEx(cmd, workingDir = envCwd)
+      result = (outp.strip(), code)
+    else:
+      let cmd = "XDG_DATA_HOME=" & tmp.quoteShell & " " &
+                binPath().quoteShell & " " & flags
+      let (outp, code) = execCmdEx(cmd, workingDir = envCwd)
+      result = (outp.strip(), code)
 
   proc seedSession(stamp: string) =
     # Minimal valid .3log under the isolated sessions dir, plus a cwd-index
@@ -116,10 +122,16 @@ suite "cli syntax errors do no startup work":
     if dirExists(tmp): removeDir(tmp)
 
   proc runIn(envCwd: string; flags: string): tuple[o: string, code: int] =
-    let cmd = "XDG_DATA_HOME=" & tmp.quoteShell & " " &
-              binPath().quoteShell & " " & flags
-    let (outp, code) = execCmdEx(cmd, workingDir = envCwd)
-    return (outp.strip(), code)
+    when defined(windows):
+      let cmd = "cmd /c set XDG_DATA_HOME=" & tmp & "&& " &
+                quoteShell(binPath()) & " " & flags
+      let (outp, code) = execCmdEx(cmd, workingDir = envCwd)
+      result = (outp.strip(), code)
+    else:
+      let cmd = "XDG_DATA_HOME=" & tmp.quoteShell & " " &
+                binPath().quoteShell & " " & flags
+      let (outp, code) = execCmdEx(cmd, workingDir = envCwd)
+      result = (outp.strip(), code)
 
   proc skillsDirExists(): bool = dirExists(tmp / "3code" / "skills")
 
