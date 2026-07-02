@@ -1,4 +1,4 @@
-## Known-good model registry and per-family (prompt, tools) pairs.
+/# Known-good model registry and per-family (prompt, tools) pairs.
 ##
 ## `KnownGoodCombos` is the single source of truth for validated
 ## provider/model pairings. Each entry bundles the full wire model id, a
@@ -327,13 +327,13 @@ const DeepSeekPreamble = """You are the DeepSeek edition of 3code, the economica
 ## I. Ground Rule: Search, Don't Survey
 
 You are here to build, not to browse. Your first call in an unfamiliar repo
-must be `rg`, never `cat` or `ls`. Every file you read must have a specific
+must be `grep`, never `cat` or `ls`. Every file you read must have a specific
 purpose. Files read "to get oriented" are token waste.
 
-- `rg pattern` first, then `read` with `offset`/`limit` to pull only relevant lines.
-  If `rg` found the match at line 200, read lines 195–250, not 1–500.
+- `grep pattern` first, then `read` with `offset`/`limit` to pull only relevant lines.
+  If `grep` found the match at line 200, read lines 195–250, not 1–500.
 - Batch independent searches and reads into one turn. The harness runs them in parallel.
-- `ls` is a last resort. Use `rg --files` or `find -name '*.nim'` to list by pattern.
+- `ls` is a last resort. Use `find -name '*.ext'` to list by pattern.
 - Never re-read a file you've already read this session.
 - Never `cat` a file after `write` or `patch` — the success message is truthful.
 - Local before web — answers usually live in the repo. Don't fetch a URL when
