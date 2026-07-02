@@ -5,9 +5,9 @@ Goal: make the test suite strong enough that a lazy, hallucination-prone agent
 
 ## STATUS
 
-The tty functional suite is at **14 OK / 11 FAILED** (24 total). The flicker
-regression from commit 80361b8 is FIXED. The DRY unification is done. The
-remaining 11 failures are pre-existing bugs unrelated to our commits.
+The tty functional suite is at **20 OK / 5 FAILED** (24 total). The goal is
+to fix them all, one or two at a time, committing each verified fix. Next up:
+the golden-diff cluster and the consecutive-turns end-of-turn spacing bug.
 
 ### Commits so far
 
@@ -16,6 +16,7 @@ remaining 11 failures are pre-existing bugs unrelated to our commits.
   80361b8 refactor engine height to derive walk-up from live state; fix prompt echo erasure
   05d8bf1 fix bash tool flicker: renderFooter must not wipe live tool viewport
   36f225e unify queued-prompt transcript with emitUserSubmit (DRY)
+  8048e35 fix idle-submit input race: unpark input thread after editor clear, not at poll
 
 ## What was fixed
 
@@ -54,6 +55,24 @@ remaining 11 failures are pre-existing bugs unrelated to our commits.
    `emitUserSubmit` so both submit paths share it. This is a structural fix
    (no test moved), but prevents the two paths from drifting again.
 
+6. **Idle-submit input race** (8048e35). `pollInputEvent` eagerly unparked the
+   input thread the moment the controller drained an idle-submitted line —
+   BEFORE the controller cleared the editor and called `beginTurn`. The thread
+   resumed reading keystrokes into stale editor text, so the next prompt
+   merged into the previous one (`start active command turn:tokens` instead of
+   a clean `:tokens`; `queued alpha` + ` queued beta` lost). Fix: removed the
+   unpark from `pollInputEvent`; the consuming path now explicitly calls
+   `releaseIdleSubmittedInput` (idle) or `beginTurn` (turn) AFTER clearing the
+   editor. Added `releaseIdleSubmittedInput` to the no-provider path
+   (threecode.nim) and the whitespace-only-empty path (ui.nim readInput).
+   This fixed SIX tests at once:
+   - `active turn colon commands are controller handled` ✅
+   - `queued prompt survives a second submit during one turn` ✅
+   - `editing a queued prompt keeps the text instead of wiping it` ✅
+   - `interrupt during a queued mid-turn prompt sends the queue next` ✅
+   - `bare escape during a queued mid-turn prompt sends the queue next` ✅
+   - (`idle provider add wizard` was NOT fixed by this — see below)
+
 ### IMPORTANT: the plan's original diagnosis was WRONG on two counts
 
 - The **flicker** was NOT caused by the `\r\n\r\n` in emitUserSubmit. It was
@@ -68,57 +87,72 @@ remaining 11 failures are pre-existing bugs unrelated to our commits.
   the prompt echo. Changing `\r\n\r\n` → `\r\n` does not affect it. The `\r\n`
   variant was reverted — keep `\r\n\r\n`.
 
-## THEN: remaining pre-existing failures (11)
+## REMAINING: 5 failures (goal: fix all, one or two at a time)
 
-These are NOT caused by our commits (all fail on 391673e too). Investigate
-each individually.
+All were pre-existing (fail on 391673e). The idle-submit race fix (8048e35)
+cleared 6 of the original 11. These 5 remain:
 
-### Queued/multiline (5) — input/editing layer, NOT transcript commit
+### Golden diffs (3) — PICK NEXT
 
-These fail BEFORE the transcript commit is reached. The failures are in live
-editor visibility / queue-editing behavior during a turn. Confirmed by running
-the suite before the DRY change: same failures, at the same `tty.expect` /
-`expectInHistory` lines.
+These pass all their `expectInHistory` / `expect` checks and fail ONLY on the
+final `expectMeaningfulFrameArtifact` full-frame golden comparison. The
+fixtures are correct (source of truth). To diagnose, diff the normalized
+actual vs fixture (see the python normalizer snippet below — the test already
+normalizes version banners, frame-separator labels, and intra-frame blank
+rows, so diff the RAW files then mentally apply those normalizations, or run
+the normalizer).
 
-- `multiline prompt and queued multiline autosend` — fails at
-  `expectInHistory "❯ queued line one"`: only the last editor line reaches the
-  committed transcript. The queued multiline text isn't preserved (look at how
-  `ieLine` events carry `ed.line.text` and how `queued` is captured in
-  threecode.nim:~397 — "keep first line only").
-- `queued prompt survives a second submit during one turn` — fails at
-  `tty.expect "queued alpha queued beta"` (LIVE editor, line 678): after queuing
-  "queued alpha" and typing more, the editor doesn't show the revised text.
-  Queue-cancel-and-edit logic in fatprompt/runtime.nim (~line 1422, the
-  `inputState.eventQueue` filtering).
-- `editing a queued prompt keeps the text instead of wiping it` — same root.
-- `interrupt during a queued mid-turn prompt sends the queue next` — fails at
-  `expectInHistory "❯ queued prompt"`: queued prompt not committed after interrupt.
-- `bare escape during a queued mid-turn prompt sends the queue next` — same root.
+- `bash tool success and nonzero exit` — normalized diff is TINY: one frame
+  where the expected shows the full 3-row welcome banner (`╭─╮` / `─┤ 3code...`
+  / `╰─╯`) but actual shows only `╰─╯` (top two banner rows blank). A
+  transient partial-redraw frame where the banner top isn't repainted. Look at
+  how the banner is cleared/redrawn during turns (the welcome banner lives at
+  the top of the scrollback; a `renderFooter`/`appendTranscript` walk-up that
+  over-erases could blank it in a transient frame).
+- `non-bash tool transcript shapes` — same class of golden diff.
+- `harness commands are transcript items` — golden diff; uses a pre-written
+  fixture `HarnessCommandFrames`. Inspect what differs.
 
-### Token / wizard (2)
+Normalizer snippet (diff normalized actual vs fixture):
+```
+python3 -c '
+import re,sys,difflib
+def norm(t):
+  out=[];inf=False
+  for line in t.splitlines(keepends=True):
+    s=line.strip()
+    if s.startswith("=====") and s.endswith("====="): out.append("===== frame =====\n");inf=True;continue
+    if "3code v" in line and "the economical coding agent" in line:
+      line=re.sub(r"3code v\S+   the economical coding agent","3code vVERSION   the economical coding agent",line)
+    if inf and s=="": continue
+    out.append(line)
+  return "".join(out)
+for l in difflib.unified_diff(norm(open(sys.argv[2]).read()).splitlines(),norm(open(sys.argv[1]).read()).splitlines(),"expected","actual",lineterm=""):
+  print(l)
+' ACTUAL.txt FIXTURE.txt
+```
 
-- `active turn colon commands are controller handled` — fails looking for
-  "no tokens used yet". The `:tokens` command during an active turn. Token-bar
-  display issue.
-- `idle provider add wizard is visible and masks input` — fails looking for
-  masked input `********************`. Wizard masking issue.
-
-### Golden diffs (3)
-
-- `harness commands are transcript items` — golden diff
-- `bash tool success and nonzero exit` — golden diff
-- `non-bash tool transcript shapes` — golden diff
-
-The golden diffs may resolve once the underlying bugs are fixed (the fixtures
-are correct; they encode the non-buggy behavior). Investigate each individually.
-
-### End-of-turn spacing (1)
+### End-of-turn spacing (1) — PICK NEXT
 
 - `consecutive turns never accumulate extra blank separator lines` — double
   blank row between the last token bar (row 16) and the idle prompt, with a
-  stray `0%` token-bar fragment (row 19) in between. Inspect the `endTurn` /
-  `endTurnAfterTranscriptAppend` transition in fatprompt/runtime.nim. The
-  stable idle frame is what's checked.
+  stray `0%` token-bar fragment (row 19) in between. The idle frame rows
+  (captured via debug, see git history) were:
+  `16: ○0% ↑10 ↓5 0s` / `17: <BLANK>` / `18: <BLANK>` / `19: ○0%` / `20: ❯ `.
+  The double blank + stray `0%` is the `endTurnAfterTranscriptAppend` path
+  (fatprompt/runtime.nim:1654). The stray `0%` suggests the bar is repainted
+  with stale/zeroed token values at turn end. Inspect `setBarEvent(label,
+  hasGap = true)` there and whether the gap row + bar fragment double up.
+
+### Multiline queued (1)
+
+- `multiline prompt and queued multiline autosend` — now fails at line 162
+  (`needle in frame.rows[frame.cursorRow]`, a cursor-row visibility check),
+  NOT the old history check. The queue race is fixed; this is a separate
+  MULTILINE editor display issue: a queued multiline prompt (editor newline
+  via `\x1b[13;2u`) doesn't render both lines on the live footer during the
+  turn. Look at `minline.totalRows` / `echoRows` for multiline queued prompts
+  and how `renderToolViewport`/footer reserve the multiline height.
 
 ## HOW TO RUN TESTS
 
