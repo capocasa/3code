@@ -7,6 +7,7 @@
   provider  stub
   model     stub-model
 
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run other tool checks
 ===== 286 =====
@@ -18,6 +19,7 @@
   provider  stub
   model     stub-model
 
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run other tool checks
 
@@ -32,6 +34,7 @@
   provider  stub
   model     stub-model
 
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run other tool checks
 ● Exercising non-bash tools.
@@ -86,6 +89,7 @@ p --- /tmp/applied.txt
   provider  stub
   model     stub-model
 
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run other tool checks
 ● Exercising non-bash tools.
