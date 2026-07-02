@@ -1,4 +1,4 @@
-import std/[os, osproc, strutils, tables, times, unittest]
+import std/[os, osproc, strutils, strtabs, times, unittest]
 import threecode/session
 
 const binName = when defined(windows): "3code.exe" else: "3code"
