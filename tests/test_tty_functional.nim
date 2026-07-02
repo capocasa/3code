@@ -131,10 +131,16 @@ proc discardClose(tty: TtySession) =
   tty.closed = true
 
 proc stubEnv(root, responsesPath: string): seq[EnvVar] =
+  # Isolate TMPDIR per fixture so session lock files (TMPDIR/3code/lock,
+  # keyed by a second-resolution session-id timestamp) cannot collide across
+  # fixtures that happen to start in the same wall-clock second. The data
+  # dirs are already isolated via XDG_DATA_HOME; the lock dir was the hole.
+  createDir(root / "tmp")
   @[
     (key: "TERM", val: "xterm-256color"),
     (key: "PATH", val: getEnv("PATH")),
     (key: "HOME", val: root),
+    (key: "TMPDIR", val: root / "tmp"),
     (key: "XDG_CONFIG_HOME", val: root / "xdg"),
     (key: "XDG_DATA_HOME", val: root / "data"),
     (key: "THREECODE_STUB_RESPONSES", val: responsesPath),

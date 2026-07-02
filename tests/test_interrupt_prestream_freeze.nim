@@ -30,10 +30,12 @@ models = "stub-model"
 
 proc stubEnv(root, responsesPath: string): seq[EnvVar] =
   let data = root / "data"
+  createDir(root / "tmp")
   @[
     (key: "XDG_DATA_HOME", val: root / "xdg"),
     (key: "XDG_CONFIG_HOME", val: root / "xdg"),
     (key: "XDG_CACHE_HOME", val: root / "xdg" / "cache"),
+    (key: "TMPDIR", val: root / "tmp"),
     (key: "HOME", val: root),
     (key: "THREECODE_STUB_RESPONSES", val: responsesPath),
     (key: "THREECODE_STUB_STREAM", val: "1"),
