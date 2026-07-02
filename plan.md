@@ -5,9 +5,9 @@ Goal: make the test suite strong enough that a lazy, hallucination-prone agent
 
 ## STATUS
 
-The tty functional suite is at **22 OK / 3 FAILED** (25 total). The goal is
+The tty functional suite is at **23 OK / 2 FAILED** (25 total). The goal is
 to fix them all, one or two at a time, committing each verified fix. The
-remaining 3 are NOT code regressions; they are content-overflow on the
+remaining 2 are NOT code regressions; they are content-overflow on the
 fixed 40-row test terminal (golden brittleness). Details in the REMAINING
 section below.
 
@@ -21,6 +21,8 @@ section below.
   8048e35 fix idle-submit input race: unpark input thread after editor clear, not at poll
   b5b05f2 fix end-of-turn double blank: final item lets footer own the gap row
   0c990f5 update stale other_tools fixture: add welcome hint line at all banners
+  2ad665b tty_expect: normalize spinner phases symmetrically in frame comparison
+  44b64c0 regenerate stale multiline fixture: raw spinner phases → normalized ⣿
 
 ## What was fixed
 
@@ -111,16 +113,16 @@ section below.
    program behavior, not a regression).
    - `non-bash tool transcript shapes` ✅
 
-## REMAINING: 3 failures — all content-overflow, NOT code bugs
+## REMAINING: 2 failures — all content-overflow, NOT code bugs
 
-All three pass their `expectInHistory` / `expect` checks and fail ONLY on the
+Both pass their `expectInHistory` / `expect` checks and fail ONLY on the
 final `expectMeaningfulFrameArtifact` full-frame golden comparison. Root cause
-for ALL three is identical: the test terminal is a fixed 40 rows, and the
+for both is identical: the test terminal is a fixed 40 rows, and the
 fixture's content sits at or over that boundary. Any single extra row scrolls
 the top of scrollback (the `╭─╮` banner, or a content header like `# Git`)
 off the grid, where ttty DELETES it (scrollback=0). `stripFrameBlanks` can
 remove intra-frame blank rows but cannot restore a row that was scrolled off
-and deleted. None of these are render bugs; all are golden brittleness.
+and deleted. Neither is a render bug; both are golden brittleness.
 
 ### bash tool success and nonzero exit — prompt-echo separator overflow
 
@@ -151,35 +153,54 @@ skill lines wrapping, the content overflows 40 rows and `# Git` (and the
 banner) scroll off. Frame 33: expected 40 rows with `# Git`, actual 40 rows
 without it. The fixture was generated on a checkout whose path fit in 120.
 
-### multiline prompt and queued multiline autosend — spinner phases
+### multiline prompt and queued multiline autosend — FIXED THIS ROUND ✅
 
-Fails only on the golden comparison. The diff is large but the real issues
-are (a) spinner glyph phases: fixture has `⠋`/`⠙`/`⠹` (animated), actual has
-`⣿` (normalized); `normalizeSpinnerGlyphs` only fires when `0s` is present,
-and several spinner rows in this test lack the elapsed token; (b) caret `█`
-markers in different positions.
+The original diagnosis was PARTIALLY WRONG about the mechanism. The plan
+said `normalizeSpinnerGlyphs` "only fires when `0s` is present, and several
+spinner rows lack the elapsed token." In fact every spinner row in this test
+DOES carry `0s`. The real problem was ASYMMETRIC application:
+`normalizeSpinnerGlyphs` runs only inside `meaningfulFrameText` (at actual-
+generation time) and NEVER on the fixture side of the comparison. The fixture
+`multiline.txt` was a legitimately STALE recording: it predated spinner
+normalization, so it carried raw animated phases (`⠋`/`⠙`/`⠹`). Because those
+phases were un-normalized, each spinner tick made a frame unique, which kept
+many cursor-visible frames (`...line█`) from being compressed out by
+`meaningfulFrameText`'s adjacent-duplicate filter. Once the actual side
+normalized phases to `⣿`, those frames collapsed and their cursor markers
+vanished — so the fixture's cursor markers (and a transient first-response
+token bar `○1% ↑120 ↓24 0s` that only a debug-slowed run captures) became
+unmatchable diffs.
+
+Fix (two commits):
+1. `2ad665b` — harness robustness. `normalizeSpinnerGlyphs` no longer gates
+   on a `0s` token (the phase is timing noise regardless). Added a text-level
+   `normalizeSpinnerPhases` and threaded it into `expectMeaningfulFrameArtifact`
+   SYMMETRICALLY (both fixture and actual), so a raw phase on either side
+   collapses to `⣿`. This is the right layer: spinner animation phase must
+   never break a golden comparison.
+2. `44b64c0` — regenerated the stale multiline fixture from a verified-correct
+   recording (all `expectInHistory` / `requireVisibleEditorCaret` / token-bar
+   assertions pass; 5/5 fresh runs byte-identical after normalization).
+   Verified behavior: both prompts and both responses land in scrollback, the
+   queued prompt's editor caret is visible during typing, the second response's
+   token bar renders, and the final idle `❯` prompt appears.
+   - `multiline prompt and queued multiline autosend` ✅
 
 NOTE: the `needle was hello` / `row was ❯ hello` check failure that prints is
 a non-fatal `check` inside the PASSING `queued prompt typed during a turn`
-test (line 162), NOT the multiline test — the multiline test itself fails
-purely on the golden assert.
+test (line 162), NOT the multiline test.
 
 ## HOW TO PROCEED (next round)
 
-These three are golden brittleness. Options, in order of preference:
+These two are golden brittleness. Options, in order of preference:
 
-1. **Multiline**: fix `normalizeSpinnerGlyphs` to normalize spinner phases
-   regardless of the `0s` token presence (the `⠋`→`⣿` collapse should not
-   depend on a trailing elapsed value). Legitimate test-harness robustness
-   fix, not a fixture weakening. Re-diff after; if only caret positions
-   remain, assess those separately.
-
-2. **bash_tool**: either (a) raise the test terminal to 41+ rows so the
+1. **bash_tool**: either (a) raise the test terminal to 41+ rows so the
    intentional separator blank doesn't overflow the exact boundary, or (b)
    accept as deferred golden brittleness. Do NOT change the `\r\n\r\n` in
-   emitUserSubmit — it is correct.
+   emitUserSubmit — it is correct. NOTE: raising rows shifts all row
+   positions, so the fixture would need regeneration.
 
-3. **harness**: the skill-path wrap is path-length-dependent. Cleanest fix is
+2. **harness**: the skill-path wrap is path-length-dependent. Cleanest fix is
    to make `normalizeTtyRunRoots` collapse a wrapped path tail back onto its
    line (rejoin `...implementation.m` + `d`), OR shorten the test data root so
    paths always fit 120 cols. Deferred per the brittleness policy unless
