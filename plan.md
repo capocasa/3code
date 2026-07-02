@@ -5,9 +5,11 @@ Goal: make the test suite strong enough that a lazy, hallucination-prone agent
 
 ## STATUS
 
-The tty functional suite is at **20 OK / 5 FAILED** (24 total). The goal is
-to fix them all, one or two at a time, committing each verified fix. Next up:
-the golden-diff cluster and the consecutive-turns end-of-turn spacing bug.
+The tty functional suite is at **22 OK / 3 FAILED** (25 total). The goal is
+to fix them all, one or two at a time, committing each verified fix. The
+remaining 3 are NOT code regressions; they are content-overflow on the
+fixed 40-row test terminal (golden brittleness). Details in the REMAINING
+section below.
 
 ### Commits so far
 
@@ -17,6 +19,8 @@ the golden-diff cluster and the consecutive-turns end-of-turn spacing bug.
   05d8bf1 fix bash tool flicker: renderFooter must not wipe live tool viewport
   36f225e unify queued-prompt transcript with emitUserSubmit (DRY)
   8048e35 fix idle-submit input race: unpark input thread after editor clear, not at poll
+  b5b05f2 fix end-of-turn double blank: final item lets footer own the gap row
+  0c990f5 update stale other_tools fixture: add welcome hint line at all banners
 
 ## What was fixed
 
@@ -85,74 +89,101 @@ the golden-diff cluster and the consecutive-turns end-of-turn spacing bug.
   PRE-EXISTING bug. It fails on 391673e (pre-our-work) too. The double-blank
   is at END-OF-TURN (between the last token bar and the idle prompt), NOT at
   the prompt echo. Changing `\r\n\r\n` → `\r\n` does not affect it. The `\r\n`
-  variant was reverted — keep `\r\n\r\n`.
+  variant was reverted — keep `\r\n\r\n`.  **NOW FIXED** in b5b05f2 (see below).
 
-## REMAINING: 5 failures (goal: fix all, one or two at a time)
+## FIXED THIS ROUND (2 tests)
 
-All were pre-existing (fail on 391673e). The idle-submit race fix (8048e35)
-cleared 6 of the original 11. These 5 remain:
+7. **End-of-turn double blank** (b5b05f2, turns.nim). The final assistant
+   item before idle ended its transcript bytes with `\r\n\r\n`, and the
+   engine ALSO added its separator row when reserving the footer, doubling
+   the gap. Fix: `commitAssistantItem` gained a `finalBeforeIdle` flag; when
+   set, it calls `finishFinalTranscriptItem` (ends bytes with `\r\n` only)
+   and passes `transcriptOwnsSpacing = true` so the engine skips its own
+   separator. The footer's own gap/ticker row is the visible separator.
+   - `consecutive turns never accumulate extra blank separator lines` ✅
 
-### Golden diffs (3) — PICK NEXT
+8. **Stale other_tools fixture** (0c990f5). `other_tools_visual_test.txt`
+   lacked the `type a prompt. :help for commands. :q or Ctrl-D to exit.`
+   welcome-hint line that `welcome()` emits whenever the profile has a name
+   (display.nim:784). All OTHER fixtures (simple, bash_tool, multiline,
+   harness) already had it; this one was generated before the hint existed.
+   Added the hint line at all 4 banners. Legitimately stale fixture (correct
+   program behavior, not a regression).
+   - `non-bash tool transcript shapes` ✅
 
-These pass all their `expectInHistory` / `expect` checks and fail ONLY on the
-final `expectMeaningfulFrameArtifact` full-frame golden comparison. The
-fixtures are correct (source of truth). To diagnose, diff the normalized
-actual vs fixture (see the python normalizer snippet below — the test already
-normalizes version banners, frame-separator labels, and intra-frame blank
-rows, so diff the RAW files then mentally apply those normalizations, or run
-the normalizer).
+## REMAINING: 3 failures — all content-overflow, NOT code bugs
 
-- `bash tool success and nonzero exit` — normalized diff is TINY: one frame
-  where the expected shows the full 3-row welcome banner (`╭─╮` / `─┤ 3code...`
-  / `╰─╯`) but actual shows only `╰─╯` (top two banner rows blank). A
-  transient partial-redraw frame where the banner top isn't repainted. Look at
-  how the banner is cleared/redrawn during turns (the welcome banner lives at
-  the top of the scrollback; a `renderFooter`/`appendTranscript` walk-up that
-  over-erases could blank it in a transient frame).
-- `non-bash tool transcript shapes` — same class of golden diff.
-- `harness commands are transcript items` — golden diff; uses a pre-written
-  fixture `HarnessCommandFrames`. Inspect what differs.
+All three pass their `expectInHistory` / `expect` checks and fail ONLY on the
+final `expectMeaningfulFrameArtifact` full-frame golden comparison. Root cause
+for ALL three is identical: the test terminal is a fixed 40 rows, and the
+fixture's content sits at or over that boundary. Any single extra row scrolls
+the top of scrollback (the `╭─╮` banner, or a content header like `# Git`)
+off the grid, where ttty DELETES it (scrollback=0). `stripFrameBlanks` can
+remove intra-frame blank rows but cannot restore a row that was scrolled off
+and deleted. None of these are render bugs; all are golden brittleness.
 
-Normalizer snippet (diff normalized actual vs fixture):
-```
-python3 -c '
-import re,sys,difflib
-def norm(t):
-  out=[];inf=False
-  for line in t.splitlines(keepends=True):
-    s=line.strip()
-    if s.startswith("=====") and s.endswith("====="): out.append("===== frame =====\n");inf=True;continue
-    if "3code v" in line and "the economical coding agent" in line:
-      line=re.sub(r"3code v\S+   the economical coding agent","3code vVERSION   the economical coding agent",line)
-    if inf and s=="": continue
-    out.append(line)
-  return "".join(out)
-for l in difflib.unified_diff(norm(open(sys.argv[2]).read()).splitlines(),norm(open(sys.argv[1]).read()).splitlines(),"expected","actual",lineterm=""):
-  print(l)
-' ACTUAL.txt FIXTURE.txt
-```
+### bash tool success and nonzero exit — prompt-echo separator overflow
 
-### End-of-turn spacing (1) — PICK NEXT
+The fixture's final frame is EXACTLY 40 rows with `╭─╮` at row 0. The actual
+emits 41 rows: `emitUserSubmit` (runtime.nim:1664) ends the prompt-echo bytes
+with `\r\n\r\n` and `transcriptOwnsSpacing = true`. That double-newline is
+INTENTIONAL and correct (gives the prompt echo its separator row; confirmed
+by the flicker diagnosis — the `\r\n` variant was reverted). The same blank
+appears in the PASSING `simple one-turn prompt and reply` test, where
+`stripFrameBlanks` removes it harmlessly. Here the content is at the exact
+40-row boundary, so the one separator blank overflows and scrolls `╭─╮` off.
 
-- `consecutive turns never accumulate extra blank separator lines` — double
-  blank row between the last token bar (row 16) and the idle prompt, with a
-  stray `0%` token-bar fragment (row 19) in between. The idle frame rows
-  (captured via debug, see git history) were:
-  `16: ○0% ↑10 ↓5 0s` / `17: <BLANK>` / `18: <BLANK>` / `19: ○0%` / `20: ❯ `.
-  The double blank + stray `0%` is the `endTurnAfterTranscriptAppend` path
-  (fatprompt/runtime.nim:1654). The stray `0%` suggests the bar is repainted
-  with stale/zeroed token values at turn end. Inspect `setBarEvent(label,
-  hasGap = true)` there and whether the gap row + bar fragment double up.
+Diff: expected frame row 0 = `╭─╮`, actual row 0 = blank; actual has an extra
+blank at row 9 (between `❯ run bash checks` and `● Running bash checks.`).
+Otherwise byte-identical (only the version string differs).
 
-### Multiline queued (1)
+### harness commands are transcript items — skill-path line wraps at 120 cols
 
-- `multiline prompt and queued multiline autosend` — now fails at line 162
-  (`needle in frame.rows[frame.cursorRow]`, a cursor-row visibility check),
-  NOT the old history check. The queue race is fixed; this is a separate
-  MULTILINE editor display issue: a queued multiline prompt (editor newline
-  via `\x1b[13;2u`) doesn't render both lines on the live footer during the
-  turn. Look at `minline.totalRows` / `echoRows` for multiline queued prompts
-  and how `renderToolViewport`/footer reserve the multiline height.
+The system-prompt skills list (prompts.nim `discoverSkills`) emits full paths
+like `- <data-root>/data/3code/skills/task-chunked-implementation.md`. After
+`normalizeTtyRunRoots` redaction this is 62 chars (fits), but the REAL
+rendered path on this checkout is 121 chars
+(`/home/carlo/p/3code/testimp/tests/output/tty/<pid>/data/...`), which
+exceeds the 120-col terminal and hard-wraps (`...implementation.m` + `d`).
+The redaction collapses the prefix post-capture but cannot UN-wrap a line
+the terminal already broke. Each wrapped skill line adds a row; with several
+skill lines wrapping, the content overflows 40 rows and `# Git` (and the
+banner) scroll off. Frame 33: expected 40 rows with `# Git`, actual 40 rows
+without it. The fixture was generated on a checkout whose path fit in 120.
+
+### multiline prompt and queued multiline autosend — spinner phases
+
+Fails only on the golden comparison. The diff is large but the real issues
+are (a) spinner glyph phases: fixture has `⠋`/`⠙`/`⠹` (animated), actual has
+`⣿` (normalized); `normalizeSpinnerGlyphs` only fires when `0s` is present,
+and several spinner rows in this test lack the elapsed token; (b) caret `█`
+markers in different positions.
+
+NOTE: the `needle was hello` / `row was ❯ hello` check failure that prints is
+a non-fatal `check` inside the PASSING `queued prompt typed during a turn`
+test (line 162), NOT the multiline test — the multiline test itself fails
+purely on the golden assert.
+
+## HOW TO PROCEED (next round)
+
+These three are golden brittleness. Options, in order of preference:
+
+1. **Multiline**: fix `normalizeSpinnerGlyphs` to normalize spinner phases
+   regardless of the `0s` token presence (the `⠋`→`⣿` collapse should not
+   depend on a trailing elapsed value). Legitimate test-harness robustness
+   fix, not a fixture weakening. Re-diff after; if only caret positions
+   remain, assess those separately.
+
+2. **bash_tool**: either (a) raise the test terminal to 41+ rows so the
+   intentional separator blank doesn't overflow the exact boundary, or (b)
+   accept as deferred golden brittleness. Do NOT change the `\r\n\r\n` in
+   emitUserSubmit — it is correct.
+
+3. **harness**: the skill-path wrap is path-length-dependent. Cleanest fix is
+   to make `normalizeTtyRunRoots` collapse a wrapped path tail back onto its
+   line (rejoin `...implementation.m` + `d`), OR shorten the test data root so
+   paths always fit 120 cols. Deferred per the brittleness policy unless
+tackled explicitly.
 
 ## HOW TO RUN TESTS
 
