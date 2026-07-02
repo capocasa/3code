@@ -16,10 +16,7 @@ task test, "Run the test suite (parallel compile + run)":
   # full src tree once per test file. tools/test.sh compiles all tests in
   # parallel and builds the ./3code binary the spawn-based tests need.
   # For filters/flags (e.g. a single test, -j N) call tools/test.sh directly.
-  when defined(windows):
-    exec "bash tools/test.sh"
-  else:
-    exec "tools/test.sh"
+  exec "tools/test.sh"
 
 task docs, "Build HTML manual from docs/manual.md":
   # nim md2html regenerates nimdoc.out.css from nimdoc's built-in default

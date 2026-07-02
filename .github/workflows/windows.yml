@@ -46,7 +46,9 @@ jobs:
         # runStreamingBash returns 127 on a clean runner, since no installer
         # has staged MSYS2 into the bundle path). The POSIX suites guard the
         # shared launcher logic both platforms use.
-        run: nimble test
+        # nimble's exec() can't launch .sh directly on Windows (uses
+        # CreateProcess, not the bash shell), so we invoke bash explicitly.
+        run: bash tools/test.sh
         timeout-minutes: 20
 
       - name: Package (Windows) - bundle OpenSSL DLLs alongside .exe
