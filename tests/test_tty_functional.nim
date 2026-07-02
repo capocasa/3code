@@ -1137,7 +1137,12 @@ suite "terminal visual contract":
       }
     ])
 
-    let tty = startStub(root)
+    # 48 rows: the test content sits at the 40-row default boundary, and the
+    # intentional prompt-echo separator blank (emitUserSubmit's \r\n\r\n,
+    # transcriptOwnsSpacing=true) would scroll the `╭─╮` banner off the grid.
+    # Headroom keeps the whole transcript visible. Per-test sizing is an
+    # established pattern (see the cols=18 test above).
+    let tty = startStub(root, rows = 48)
     defer:
       tty.writeFrameArtifact(root / "frames.txt")
       tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
