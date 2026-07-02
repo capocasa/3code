@@ -198,6 +198,20 @@ proc classifyRetry*(exc: ref CatchableError, code: int): string =
   of 500, 502, 503, 504: "server"
   else: ""
 
+proc extractErrorMsg*(errBody: string): string =
+  ## Pull a human-readable message from a JSON error body.
+  ## Falls back to the raw body if parsing fails.
+  if errBody.len == 0: return ""
+  let j = try: parseJson(errBody) except CatchableError: nil
+  if j == nil or j.kind != JObject: return errBody
+  let err = j{"error"}
+  if err != nil and err.kind == JObject:
+    let msg = err{"message"}.getStr("")
+    if msg.len > 0: return msg
+  let msg = j{"message"}.getStr("")
+  if msg.len > 0: return msg
+  return errBody
+
 proc retryCategory*(errMsg: string, assistantMsg: JsonNode, statusCode: int): string =
   let netFailed = errMsg != "" and assistantMsg == nil
   if netFailed:
@@ -1161,7 +1175,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       hookStopSpinner()
       if outcome.assistantMsg == nil:
         raise newException(ApiError,
-          errMsg & (if outcome.errBody.len > 0: ": " & outcome.errBody else: ""))
+          errMsg & (if outcome.errBody.len > 0: ": " & extractErrorMsg(outcome.errBody) else: ""))
       # Promote any leaked GLM/Qwen native `<tool_call>...</tool_call>`
       # blocks in the assistant content to synthetic OpenAI tool_calls.
       # Some endpoints (notably nvidia z-ai/glm4.7) don't reliably
@@ -1182,7 +1196,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
     if attempt >= MaxAttempts:
       hookStopSpinner()
       raise newException(ApiError,
-        errMsg & (if outcome.errBody.len > 0: ": " & outcome.errBody else: ""))
+        errMsg & (if outcome.errBody.len > 0: ": " & extractErrorMsg(outcome.errBody) else: ""))
     let retryAfter = try: parseInt(outcome.retryAfter) except CatchableError: 0
     let backoff =
       if retryAfter > 0:
@@ -1196,8 +1210,9 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
       else:
         min(1 shl serverRetryLevel, 16)
     hookStopSpinner()
-    let body = if outcome.errBody.len > 0: outcome.errBody else: errMsg
-    hookRetryNotice &"{code}: {body}. retry {attempt + 1}/{MaxAttempts} in {backoff}s"
+    let body = extractErrorMsg(outcome.errBody)
+    let detail = if body.len > 0: body else: errMsg
+    hookRetryNotice &"{code}: {detail}. retry {attempt + 1}/{MaxAttempts} in {backoff}s"
     block wait:
       var remaining = backoff * 1000
       while remaining > 0:

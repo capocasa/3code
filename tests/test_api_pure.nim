@@ -223,3 +223,24 @@ suite "api: buildStreamAssistantMsg":
     check msg{"content"}.getStr == "partial answer"
     check msg{"interrupted"}.getBool == true
     check msg.hasKey("reasoning_content")
+
+suite "api: extractErrorMsg":
+  test "extracts OpenAI-style error message":
+    let msg = extractErrorMsg("""{"error":{"message":"Rate limit exceeded","type":"rate_limit_error"}}""")
+    check msg == "Rate limit exceeded"
+
+  test "extracts Anthropic-style error message":
+    let msg = extractErrorMsg("""{"error":{"type":"rate_limit_error","message":"Rate limit exceeded"}}""")
+    check msg == "Rate limit exceeded"
+
+  test "extracts flat message field (Gemini-style)":
+    let msg = extractErrorMsg("""{"error":{"code":429,"message":"Resource exhausted","status":"RESOURCE_EXHAUSTED"}}""")
+    check msg == "Resource exhausted"
+
+  test "falls back to raw body for non-JSON":
+    let msg = extractErrorMsg("plain text error")
+    check msg == "plain text error"
+
+  test "returns empty string for empty input":
+    let msg = extractErrorMsg("")
+    check msg == ""
