@@ -380,6 +380,43 @@ suite "terminal visual contract":
       HarnessCommandFrames,
       root / "harness_commands_actual.txt")
 
+  test "profile commands return to prompt and accept further input":
+    let root = newFixture("profile_cmd_noexit")
+    writeHarnessProviders(root)
+    writeStubResponses(root, %*[
+      {"role": "assistant", "preStreamDelayMs": 100,
+       "content": "hello", "contentChunks": ["hello"],
+       "usage": {"promptTokens": 5, "completionTokens": 2,
+                  "totalTokens": 7, "cachedTokens": 0}}
+    ])
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    # Change provider
+    tty.send ":provider alt"
+    tty.send "\n"
+    tty.drain(200)
+    tty.expect "\u276f"  # prompt must return
+    # Send a message — if the program exited this times out
+    tty.send "hi"
+    tty.expect "hi"
+    tty.send "\n"
+    tty.expectInHistory "hello"
+    tty.expect "\u276f"
+    # Change model
+    tty.send ":model stub-large"
+    tty.send "\n"
+    tty.drain(200)
+    tty.expect "\u276f"  # prompt must return
+    tty.send "hey"
+    tty.expect "hey"
+    tty.send "\n"
+    tty.expectInHistory "hello"
+
   test "simple one-turn prompt and reply":
     let root = newFixture("simple_visual_test")
     writeConfiguredProvider(root)

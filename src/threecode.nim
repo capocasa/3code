@@ -503,6 +503,7 @@ proc main() =
         editor.renderSuffixCursor = false
         editor.renderRow = 0
         editor.echoRows = 0
+        releaseIdleSubmittedInput()
         continue
       var echo = userPromptItem(line)
       echo.attachSeparator = true
