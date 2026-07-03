@@ -1,3 +1,8 @@
+discard """
+  # See docs/windows-testing.md. The tty_expect harness uses openpty/fork/
+  # execv (POSIX only). A ConPTY port is the path to re-enable on Windows.
+  disabled: "win"
+"""
 ## Targeted regression: pressing Ctrl-C or ESC while a model call is in
 ## flight but has produced NO answer yet (the pre-stream delay / thinking
 ## phase) used to leave the prompt in a state where typing worked but Enter
@@ -9,7 +14,7 @@ import tty_expect
 import stub_helpers
 
 proc newFixture(name: string): string =
-  result = getCurrentDir() / "tests/output/tty" / (name & "_" & $getCurrentProcessId())
+  result = getCurrentDir() / "testdata/output/tty" / (name & "_" & $getCurrentProcessId())
   if dirExists(result): removeDir(result)
   createDir(result); createDir(result / "data"); createDir(result / "run")
 

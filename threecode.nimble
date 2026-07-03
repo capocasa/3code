@@ -11,12 +11,28 @@ requires "ttty >= 0.2.0"
 requires "unicodedb >= 0.13.0"
 requires "tinotify >= 0.1.1"
 
-task test, "Run the test suite (parallel compile + run)":
-  # Overrides nimble's default sequential test runner, which recompiles the
-  # full src tree once per test file. tools/test.sh compiles all tests in
-  # parallel and builds the ./3code binary the spawn-based tests need.
-  # For filters/flags (e.g. a single test, -j N) call tools/test.sh directly.
-  exec "tools/test.sh"
+task test, "Run the test suite via testament (all, or named files)":
+  # testament ships with Nim: it runs each test in its own process with
+  # isolation and reporting, and parallelizes across tests/ category
+  # subdirectories (tty, stream, api, config, shell, core). Megatest is off
+  # because our unittest-style tests print to stdout, which megatest would
+  # miscompare as expected output. Tests that can't run on a platform
+  # self-disable via specs (disabled: "win"); see docs/windows-testing.md.
+  #
+  # commandLineParams carries nimble's own flags plus any trailing file
+  # args; we forward only the non-flag args so `nimble test foo.nim` runs
+  # just that file, matching nimble's default runner UX. Nimscript has no
+  # PATH lookup or filesystem walk, so the testament-or-fallback choice and
+  # the named-files dispatch live in one shell command.
+  var files: seq[string] = @[]
+  for p in commandLineParams:
+    if p.len > 0 and p[0] notin {'-'}:
+      files.add p
+  exec "sh -c 'if command -v testament >/dev/null 2>&1; then " &
+    "testament --print --megatest:off " &
+    (if files.len == 0: "all" else: "r " & files.join(" ")) & "; " &
+    "else echo \"Warning: testament not found, falling back to sequential run\" >&2; " &
+    "for d in tests/*/; do for f in \"$d\"*.nim; do nim c -r --path:src --path:tests \"$f\"; done; done; fi'"
 
 task docs, "Build HTML manual from docs/manual.md":
   # nim md2html regenerates nimdoc.out.css from nimdoc's built-in default

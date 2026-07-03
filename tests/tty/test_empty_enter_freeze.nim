@@ -1,3 +1,8 @@
+discard """
+  # See docs/windows-testing.md. The tty_expect harness uses openpty/fork/
+  # execv (POSIX only). A ConPTY port is the path to re-enable on Windows.
+  disabled: "win"
+"""
 ## Targeted regression: empty Enter at the idle prompt must not freeze the
 ## input thread. Before the fix, onSubmit parked the thread on
 ## inputIdleSubmitted even for empty text, and the controller had nothing to
@@ -6,10 +11,10 @@ import std/[json, os, strutils, unittest]
 import tty_expect
 import stub_helpers
 
-const Root = "tests/output/tty/empty_enter_freeze"
+const Root = "testdata/output/tty/empty_enter_freeze"
 
 proc newFixture(name: string): string =
-  result = getCurrentDir() / "tests/output/tty" / (name & "_" & $getCurrentProcessId())
+  result = getCurrentDir() / "testdata/output/tty" / (name & "_" & $getCurrentProcessId())
   if dirExists(result): removeDir(result)
   createDir(result); createDir(result / "data"); createDir(result / "run")
 

@@ -41,14 +41,10 @@ jobs:
         run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
 
       - name: Run tests
-        # The `when defined(windows):` suite in tests/test_streamexec.nim
-        # asserts the no-bundled-bash contract (resolveBash() == "" and
-        # runStreamingBash returns 127 on a clean runner, since no installer
-        # has staged MSYS2 into the bundle path). The POSIX suites guard the
-        # shared launcher logic both platforms use.
-        # nimble's exec() can't launch .sh directly on Windows (uses
-        # CreateProcess, not the bash shell), so we invoke bash explicitly.
-        run: bash tools/test.sh
+        # nimble test runs Nim's bundled testament. Tests that can't run on
+        # Windows yet (the PTY harness) self-disable via disabled:"win"
+        # specs; see docs/windows-testing.md for the gap and fix path.
+        run: nimble test
         timeout-minutes: 20
 
       - name: Package (Windows) - bundle OpenSSL DLLs alongside .exe

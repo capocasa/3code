@@ -36,7 +36,7 @@ proc parseFrames(path: string): seq[Frame] =
     result.add current
 
 proc latestFramesPath(): string =
-  let root = "tests" / "output" / "tty"
+  let root = "testdata" / "output" / "tty"
   if not dirExists(root):
     return ""
 
@@ -117,7 +117,7 @@ proc render(frames: openArray[Frame]; frameNo, speed: int; path: string) =
   stdout.flushFile()
 
 proc usage() =
-  quit "usage: nim r tools/pty_frames.nim -- [tests/output/tty/.../frames.txt]", 2
+  quit "usage: nim r tools/pty_frames.nim -- [testdata/output/tty/.../frames.txt]", 2
 
 proc main() =
   if paramCount() > 1:
@@ -127,7 +127,7 @@ proc main() =
     if paramCount() == 1: paramStr(1)
     else: latestFramesPath()
   if path.len == 0:
-    quit "no frames.txt found under tests/output/tty", 1
+    quit "no frames.txt found under testdata/output/tty", 1
   if not fileExists(path):
     quit "frames file not found: " & path, 1
 
