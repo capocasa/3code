@@ -67,6 +67,12 @@ key = "..."
 model_prefix = "meta-llama/"
 models = "Llama-3.3-70B-Instruct-Turbo"
 
+[provider]
+name = "longcat"
+url = "https://api.longcat.chat/openai"
+key = "..."
+models = "longcat"
+
 # `family` is an experimental-only override (only honored under
 # `--experimental`) that picks the system-prompt branch by family
 # name, when the (provider, model) combo isn't on the known-good
