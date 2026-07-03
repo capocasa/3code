@@ -41,12 +41,17 @@ const
   DefaultTtyCols* = 120
   DefaultTtyRows* = 40
 
+when defined(macosx):
+  const PtyHeader = "<util.h>"
+else:
+  const PtyHeader = "<pty.h>"
+
 proc openpty(masterFd, slaveFd: ptr cint; name: pointer; termp: pointer;
              winp: pointer): cint {.cdecl, importc: "openpty",
-                                    header: "<pty.h>".}
+                                    header: PtyHeader.}
 
 proc login_tty(fd: cint): cint {.cdecl, importc: "login_tty",
-                                 header: "<utmp.h>".}
+                                 header: PtyHeader.}
 
 proc clearenv(): cint {.cdecl, importc: "clearenv", header: "<stdlib.h>".}
 
