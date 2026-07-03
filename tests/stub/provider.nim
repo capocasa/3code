@@ -235,7 +235,7 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
   let stubBaseLabel = hookBeforeCall(lastPromptTokens, stubWindow)
   defer:
     hookAfterCall()
-  const StubMaxAttempts = 8
+  const StubMaxAttempts = 12
   var attempt = 0
   var lastFailure = sfNone
   while true:
