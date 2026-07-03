@@ -509,7 +509,7 @@ suite "terminal visual contract":
       tty.send "go"
       tty.send "\n"
       # The retry notice is visible in scrollback as ordinary history.
-      tty.expectInHistory "3code: api 429; retry 2/8 in 1s"
+      tty.expectInHistory "3code: api 429; retry 2/12 in 1s"
       # ...and the retried reply reaches scrollback after the backoff.
       tty.expectInHistory "reply after retry"
       # The prompt is live again afterward (the footer was preserved, not
@@ -764,6 +764,46 @@ suite "terminal visual contract":
     tty.expectTypedAtPrompt("hello")
     tty.send "\n"
     tty.expectInHistory "after interrupt ok"
+
+  test "idle ctrl-c clears typed line without eating the row above":
+    # Regression: at the idle prompt (no turn running), pressing Ctrl-C
+    # after typing text cleared the typed line correctly, but the prompt
+    # also moved up one row and erased the line directly above it (the
+    # previous assistant reply). The idle cancel pushed an event with a
+    # stale echoRows (0, since plain typing never updates it), so the
+    # empty-input reset walked the cursor up one row it never owned.
+    let root = newFixture("idle_ctrlc_keeps_row_above")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "content": "above-line-marker stays put",
+        "contentChunks": ["above-line-marker stays put"],
+        "usage": {"promptTokens": 10, "completionTokens": 5,
+                  "totalTokens": 15, "cachedTokens": 0}
+      }
+    ])
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+      tty.close()
+    tty.expect "❯"
+    tty.send "hi\n"
+    tty.expectInHistory "above-line-marker stays put"
+    # Settle so the assistant reply is committed to scrollback and the
+    # prompt is the live bottom row.
+    tty.drain(300)
+    # Type a draft at the idle prompt, then cancel it with Ctrl-C.
+    tty.send "draft that will be cancelled"
+    tty.expectTypedAtPrompt("draft that will be cancelled")
+    tty.send "\x03"
+    # The draft is gone from the live prompt...
+    tty.expectOnScreen "❯"
+    tty.expectAlive()
+    # ...and critically, the assistant reply directly above the prompt
+    # must still be on the live grid, not erased by the cancel.
+    tty.expectOnScreen "above-line-marker stays put"
 
   test "multiline prompt and queued multiline autosend":
     let root = newFixture("multiline_visual_test")
@@ -1440,7 +1480,7 @@ suite "terminal visual contract":
     writeStubResponses(root, %*[
       {"role": "assistant", "content": "First reply line.",
        "contentChunks": ["First reply line."],
-       "preStreamDelayMs": 600,
+       "preStreamDelayMs": 1500,
        "usage": {"promptTokens": 10, "completionTokens": 5,
                  "totalTokens": 15, "cachedTokens": 0}},
       {"role": "assistant", "content": "Second reply line.",
@@ -1453,6 +1493,31 @@ suite "terminal visual contract":
     defer: tty.close()
     tty.expect "❯"
     tty.send "hello one"; tty.expect "hello one"; tty.send "\n"
+    # Sample the mid-turn frame while the spinner is up but before the reply
+    # streams (the first response has a long preStreamDelay for this window).
+    # The prompt echo is the last committed scrollback block. The footer
+    # (spinner bar here) opens with its own cleared ticker/gap row, which is
+    # the visible separator. There must be exactly one blank row between the
+    # prompt echo and the bar — the old emitUserSubmit wrote a full
+    # "\r\n\r\n" separator, stranding a second redundant blank below the
+    # prompt, visible right after submit.
+    tty.expectTokenBar(["○"])
+    tty.drain(120)
+    doAssert tty.frames.len > 0
+    let midRows = tty.frames[^1].rows
+    var promptRow = -1
+    for idx, r in midRows:
+      if "❯ hello one" in r: promptRow = idx
+    doAssert promptRow >= 0, "prompt echo row not found\n" &
+      tty.dumpFramesAround("hello one")
+    doAssert promptRow + 3 <= midRows.len,
+      "not enough rows below prompt echo\n" & tty.dumpFramesAround("hello one")
+    doAssert midRows[promptRow + 1].strip.len == 0,
+      "expected the footer gap row directly below the prompt echo, got [" &
+      midRows[promptRow + 1] & "]\n" & tty.dumpFramesAround("hello one")
+    doAssert midRows[promptRow + 2].strip.len != 0 and "○" in midRows[promptRow + 2],
+      "expected the token bar directly below the gap row, got [" &
+      midRows[promptRow + 2] & "]\n" & tty.dumpFramesAround("hello one")
     tty.expectInHistory "First reply line."
     tty.expectTokenBar(["○", "↑10", "↓5"])
     tty.drain(300)

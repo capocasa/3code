@@ -6,7 +6,7 @@
 ## needs it. Previously each test recompiled its own copy keyed by PID with a
 ## throwaway cache, which was the single biggest runtime cost in the suite.
 
-import std/[os, osproc, strutils]
+import std/[os, osproc, strutils, times]
 
 proc nimbleDepPaths(): seq[string] =
   ## The dep include paths nimble injects, resolved the same way nimble does.
@@ -42,6 +42,18 @@ proc ensureStubBinary*(extraDefines = "", forceRebuild = false): string =
   result = getCurrentDir() / "build" / ("3code_stub" & tag)
   if forceRebuild and fileExists(result):
     removeFile(result)
+  # Invalidate the cache when source is newer than the cached binary.
+  # Without this, a source edit is silently ignored because the old binary
+  # is reused, so tests run against stale code and fail for the wrong reason.
+  if fileExists(result):
+    let binMtime = getLastModificationTime(result)
+    var stale = false
+    for f in walkDirRec(getCurrentDir() / "src"):
+      if f.endsWith(".nim") and getLastModificationTime(f) > binMtime:
+        stale = true
+        break
+    if stale:
+      removeFile(result)
   if fileExists(result):
     return
   createDir(result.parentDir)

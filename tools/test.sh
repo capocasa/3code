@@ -64,8 +64,9 @@ esac
 
 # Some tests are platform-specific:
 #   PTY tests (test_empty_enter_freeze, test_interrupt_prestream_freeze,
-#     test_tty_functional) use forkpty/openpty which are Linux-only.
-#     They also hang in GitHub Actions containers (no /dev/pts).
+#     test_tty_functional, test_provider_edit_cancel) use forkpty/openpty
+#     which are Linux-only. They also hang in GitHub Actions containers
+#     (no /dev/pts).
 #   test_history, test_minline use ttty simulated terminal; escape
 #     sequence handling differs on Windows (KEYSEQS expects _getch()
 #     format 0xE0/0x00 vs POSIX ESC [).
@@ -74,7 +75,7 @@ esac
 filtered=()
 for t in "${tests[@]}"; do
   case "$t" in
-    test_empty_enter_freeze|test_interrupt_prestream_freeze|test_tty_functional)
+    test_empty_enter_freeze|test_interrupt_prestream_freeze|test_tty_functional|test_provider_edit_cancel)
       if [[ "$os" == "Linux" && -z "${CI:-}" ]]; then
         filtered+=("$t")
       fi
