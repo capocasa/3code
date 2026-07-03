@@ -1068,6 +1068,17 @@ proc applyMinimaxReasoning(p: Profile, body: JsonNode) =
     body["chat_template_kwargs"] = %*{"enable_thinking": true}
   else: discard
 
+proc applyLongcatReasoning(p: Profile, body: JsonNode) =
+  ## LongCat-2.0 toggles reasoning via `thinking.type`, a binary
+  ## enabled/disabled flag. The default deploy reasons unconditionally,
+  ## so `off` must send `{"type": "disabled"}`; `on` relies on the
+  ## server default and sends nothing.
+  case p.reasoning
+  of "off":
+    body["thinking"] = %*{"type": "disabled"}
+  of "on": discard
+  else: discard
+
 proc applyKimiReasoning(p: Profile, body: JsonNode) =
   ## Kimi K2.x is served on vLLM stacks (nebius, together, deepinfra,
   ## baseten, fireworks) and toggles reasoning via
@@ -1092,6 +1103,7 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "deepseek": applyDeepseekReasoning(p, body)
   of "minimax": applyMinimaxReasoning(p, body)
   of "kimi": applyKimiReasoning(p, body)
+  of "longcat": applyLongcatReasoning(p, body)
   else: discard
 
 when providerStub:

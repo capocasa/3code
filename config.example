@@ -71,7 +71,7 @@ models = "Llama-3.3-70B-Instruct-Turbo"
 name = "longcat"
 url = "https://api.longcat.chat/openai"
 key = "..."
-models = "longcat"
+models = "LongCat-2.0"
 
 # `family` is an experimental-only override (only honored under
 # `--experimental`) that picks the system-prompt branch by family

@@ -112,7 +112,7 @@ const KnownGoodCombos* = [
     ("deepinfra", "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.2, 8192, false, 262_144),
 
     # longcat
-    ("longcat",   "longcat",                                       "longcat",  "1",   "",          "on",     0.2, 8192, false, 200_000),
+    ("longcat",   "LongCat-2.0",                                    "longcat",  "2",   "",          "on",     0.2, 8192, false, 1_000_000),
   ]
     ## (provider, model, family, version, variant, reasoning, temperature,
     ## maxTokens, contextWindow) tuples.
@@ -1294,9 +1294,10 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
   ## pair. Reflects each model's real wire surface: glm 4.7/5/5.1 expose
   ## on/off only (`thinking.type` or the vLLM `enable_thinking` bool);
   ## glm-5.2 on z.ai additionally exposes `thinking.effort` with `high`
-  ## (default) and `max`. Falls back to `@ReasoningLevels` for the
-  ## level-based families (gpt-oss, deepseek, minimax), and `@[]` when the
-  ## pair is off the table.
+  ## (default) and `max`. LongCat also exposes `thinking.type` as a
+  ## binary enabled/disabled toggle. Falls back to `@ReasoningLevels` for
+  ## the level-based families (gpt-oss, deepseek, minimax), and `@[]` when
+  ## the pair is off the table.
   let p = provider.toLowerAscii
   let m = model.toLowerAscii
   for combo in KnownGoodCombos:
@@ -1305,7 +1306,7 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
       if fam == "glm":
         if m == "glm-5.2": return @["off", "high", "max"]
         return @["off", "on"]
-      if fam == "kimi":
+      if fam in ["kimi", "longcat"]:
         return @["off", "on"]
       return @ReasoningLevels
   @[]
