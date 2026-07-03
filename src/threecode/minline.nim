@@ -71,8 +71,18 @@ var pollStdinNowHook*: proc(): bool {.closure.}
 when defined(windows):
   proc putchr*(c: cint): cint {.discardable, header: "<conio.h>", importc: "_putch".}
     ## Prints an ASCII character to stdout.
-  proc getchr*(): cint {.header: "<conio.h>", importc: "_getch".}
-    ## Retrieves an ASCII character from stdin.
+  proc rawGetch(): cint {.header: "<conio.h>", importc: "_getch".}
+    ## Raw blocking key read; wrapped by `getchr` below.
+
+  proc getchr*(): cint =
+    ## Retrieves an ASCII character from stdin. Drains `termPeeked` first
+    ## (a byte stashed by `terminalHasPendingInput` that was not an escape
+    ## tail) so it is not lost; mirrors the POSIX branch's contract.
+    if termPeeked >= 0:
+      result = termPeeked.cint
+      termPeeked = -1
+      return result
+    rawGetch()
 else:
   proc putchr*(c: cint) {.header: "stdio.h", importc: "putchar"} =
     ## Prints an ASCII character to stdout.
