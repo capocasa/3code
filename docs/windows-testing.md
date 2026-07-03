@@ -6,14 +6,26 @@ options for closing that gap. It is a working TODO, not a permanent state.
 
 ## Current status
 
-30 of 33 tests run on Windows. The 3 disabled tests are:
+26 of 33 tests run on Windows. The 7 disabled tests are:
 
 - `tests/tty/test_tty_functional.nim`
 - `tests/tty/test_empty_enter_freeze.nim`
 - `tests/tty/test_interrupt_prestream_freeze.nim`
 
-Each carries a `disabled: "win"` spec block pointing back here. When you see
-that spec, this document is the "why" and the "how to fix".
+  These three drive `3code` as a subprocess through a pseudo-terminal via
+  `tests/tty_expect.nim` (POSIX-only; needs a ConPTY port — see below).
+
+- `tests/api/test_api.nim` — autosend probe tests spawn a child nim compiler
+  with threading; flaky on Windows runners.
+- `tests/core/test_cli_args.nim` — spawns the `3code` binary with path/env
+  assumptions (session list, skills dir) that differ on Windows.
+- `tests/core/test_history.nim` — uses the ttty simulated terminal; escape-
+  sequence key decoding differs on Windows (`_getch` 0xE0/0x00 vs POSIX ESC [).
+- `tests/stream/test_streamexec.nim` — `runStreamingBash` needs the bundled
+  MSYS2 bash (`%LOCALAPPDATA%\3code\msys64`), absent on CI runners (exit 127).
+
+Each skipped test carries a `disabled: "win"` spec pointing back here. When
+you see that spec, this document is the "why" and the "how to fix".
 
 ## Why they are disabled
 

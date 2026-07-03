@@ -164,17 +164,22 @@ proc userConfigRoot*(): string =
 
 proc userDataRoot*(): string =
   ## XDG data root for 3code: `~/.local/share/3code/` on Linux,
-  ## `~/Library/Application Support/3code/` on macOS, `%APPDATA%/3code/`
-  ## on Windows (collapses with config-root there — fine, the split is
-  ## a Linux convention). Holds app-managed state: sessions, history,
-  ## extracted built-in skills.
+  ## `~/.config/3code/` on macOS, `%APPDATA%/3code/` on Windows (collapses
+  ## with config-root there — fine, the split is a Linux convention). Holds
+  ## app-managed state: sessions, history, extracted built-in skills.
+  ##
+  ## `XDG_DATA_HOME` overrides the platform default on all POSIX platforms.
+  ## Honoring it on macOS (not just Linux) matches the spec and makes the
+  ## data root redirectable for tests; the platform default is unchanged
+  ## when the variable is unset.
   when defined(windows):
-    getConfigDir() / "3code"
-  elif defined(macosx):
     getConfigDir() / "3code"
   else:
     let xdg = getEnv("XDG_DATA_HOME")
-    let base = if xdg.len > 0: xdg else: getHomeDir() / ".local" / "share"
+    when defined(macosx):
+      let base = if xdg.len > 0: xdg else: getConfigDir()
+    else:
+      let base = if xdg.len > 0: xdg else: getHomeDir() / ".local" / "share"
     base / "3code"
 
 proc resolvePath*(path: string): string =

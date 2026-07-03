@@ -41,19 +41,27 @@ const
   DefaultTtyCols* = 120
   DefaultTtyRows* = 40
 
-when defined(macosx):
-  const PtyHeader = "<util.h>"
-else:
-  const PtyHeader = "<pty.h>"
-
+# openpty and login_tty live in different headers across platforms:
+# openpty is in <pty.h> on glibc, <util.h> on macOS; login_tty is in
+# <utmp.h> on glibc (older glibc declared it in <pty.h>, but current
+# releases moved it), <util.h> on macOS. Import each symbol from its own
+# header so a single-platform header swap doesn't silently misdeclare the
+# other.
 proc openpty(masterFd, slaveFd: ptr cint; name: pointer; termp: pointer;
              winp: pointer): cint {.cdecl, importc: "openpty",
-                                    header: PtyHeader.}
+                                    header: (when defined(macosx): "<util.h>"
+                                             else: "<pty.h>").}
 
 proc login_tty(fd: cint): cint {.cdecl, importc: "login_tty",
-                                 header: PtyHeader.}
+                                 header: (when defined(macosx): "<util.h>"
+                                          else: "<utmp.h>").}
 
-proc clearenv(): cint {.cdecl, importc: "clearenv", header: "<stdlib.h>".}
+# Clear the child's environment before re-seeding it. clearenv() is a
+# glibc/BSD extension absent from macOS <stdlib.h> (undeclared -> compile
+# error under Xcode), so delete each variable via Nim's portable delEnv.
+proc clearEnv() =
+  for key, val in envPairs():
+    delEnv(key)
 
 var TIOCSWINSZ {.importc, header: "<sys/ioctl.h>".}: culong
 const SigWinch = 28.cint
@@ -302,7 +310,7 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     discard close(tickerAckPipe[0])
     discard close(apiContinuePipe[1])
     discard login_tty(slaveFd)
-    discard clearenv()
+    clearEnv()
 
     var hasTerm = false
     for item in env:
