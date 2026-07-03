@@ -760,6 +760,86 @@ suite "terminal visual contract":
     tty.send "\n"
     tty.expectInHistory "after interrupt ok"
 
+  test "idle ctrl-c clears typed line without eating the row above":
+    # At the idle prompt, plain typing never updates ed.echoRows (only
+    # parkAtEnd on submit and the pendingCaret block touch it), so it stays
+    # at the 0 resetForRead left. When Ctrl-C cancels the draft, the empty
+    # event carried that stale 0, so resetPromptInputAfterEmpty walked the
+    # cursor back only one row instead of the draft's full visual height,
+    # leaving wrapped draft rows uncleared (they repaint as duplicate
+    # footer rows) and drifting the prompt down.
+    let root = newFixture("idle_ctrlc_keeps_row_above")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "content": "above-line-marker stays put",
+        "contentChunks": ["above-line-marker stays put"],
+        "usage": {"promptTokens": 10, "completionTokens": 5,
+                  "totalTokens": 15, "cachedTokens": 0}
+      }
+    ])
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+      tty.close()
+    tty.expect "❯"
+    tty.send "first turn"
+    tty.send "\n"
+    tty.expectInHistory "above-line-marker stays put"
+    tty.expectOnScreen "❯"
+    # A draft long enough to wrap to three visual rows at 120 cols. The
+    # stale-echoRows defect is invisible for a single-row draft (n clamps
+    # to 1 either way); it needs a multi-row draft to expose the gap
+    # between the rows the reset cleared and the rows the draft occupied.
+    let draft = "a sufficiently long idle draft that wraps across more than one terminal row when typed at the prompt here and keeps going well past the first line boundary so it occupies two full rows of editor space before the user abandons it completely now"
+    tty.send draft
+    tty.drain(200)
+    # Snapshot the raw byte offset so we can isolate the reset escapes that
+    # follow the Ctrl-C from the typing repaints that preceded it.
+    let rawBeforeCancel = tty.raw.len
+    tty.send "\x03"
+    tty.drain(200)
+    # The reset emits ESC[<N>A where N = echoRows+1 (the bar branch). With
+    # the stale 0 it was always 2 regardless of draft length; the fix makes
+    # N track the draft's real row count. Extract the largest cursor-up
+    # count in the post-cancel raw window: it must exceed 2 for a draft
+    # that wrapped past one row.
+    var maxCursorUp = 0
+    let win = tty.raw[rawBeforeCancel ..< tty.raw.len]
+    var k = 0
+    while k < win.len:
+      if win[k] == '\x1b' and k + 1 < win.len and win[k + 1] == '[':
+        var j = k + 2
+        var num = 0
+        var hasNum = false
+        while j < win.len and win[j] in '0' .. '9':
+          num = num * 10 + (ord(win[j]) - ord('0'))
+          hasNum = true
+          inc j
+        if j < win.len and win[j] == 'A' and hasNum:
+          if num > maxCursorUp: maxCursorUp = num
+        k = j + 1
+      else:
+        inc k
+    doAssert maxCursorUp > 2,
+      "idle Ctrl-C reset only walked the cursor up " & $maxCursorUp &
+      " rows; a multi-row draft needs more (stale echoRows was 0).\n" &
+      tty.dumpFramesAround("❯")
+    # The prompt and the assistant reply above it must both survive on the
+    # live grid, and there must be exactly one resting footer row.
+    tty.expectOnScreen "❯"
+    tty.expectOnScreen "above-line-marker stays put"
+    tty.expectAlive()
+    var restingFooterRows = 0
+    for row in tty.rows():
+      if row.strip == "○0%": inc restingFooterRows
+    doAssert restingFooterRows == 1,
+      "expected one resting footer row, found " & $restingFooterRows &
+      ": stale echoRows left the cancelled draft's extra rows uncleared.\n" &
+      tty.dumpFramesAround("○0%")
+
   test "multiline prompt and queued multiline autosend":
     let root = newFixture("multiline_visual_test")
     writeConfiguredProvider(root)
