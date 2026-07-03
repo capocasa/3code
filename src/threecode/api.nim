@@ -1148,7 +1148,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   # cause a flicker between callModel iterations within a turn.
   defer:
     hookAfterCall()
-  const MaxAttempts = 8
+  const MaxAttempts = 12
   var outcome: StreamOutcome
   var attempt = 0
   while true:
