@@ -1435,7 +1435,7 @@ suite "terminal visual contract":
     writeStubResponses(root, %*[
       {"role": "assistant", "content": "First reply line.",
        "contentChunks": ["First reply line."],
-       "preStreamDelayMs": 600,
+       "preStreamDelayMs": 1500,
        "usage": {"promptTokens": 10, "completionTokens": 5,
                  "totalTokens": 15, "cachedTokens": 0}},
       {"role": "assistant", "content": "Second reply line.",
@@ -1448,6 +1448,31 @@ suite "terminal visual contract":
     defer: tty.close()
     tty.expect "❯"
     tty.send "hello one"; tty.expect "hello one"; tty.send "\n"
+    # Sample the mid-turn frame while the spinner is up but before the reply
+    # streams (the first response has a long preStreamDelay for this window).
+    # The prompt echo is the last committed scrollback block. The footer
+    # (spinner bar here) opens with its own cleared ticker/gap row, which is
+    # the visible separator. There must be exactly one blank row between the
+    # prompt echo and the bar — the old emitUserSubmit wrote a full
+    # "\r\n\r\n" separator, stranding a second redundant blank below the
+    # prompt, visible right after submit.
+    tty.expectTokenBar(["○"])
+    tty.drain(120)
+    doAssert tty.frames.len > 0
+    let midRows = tty.frames[^1].rows
+    var promptRow = -1
+    for idx, r in midRows:
+      if "❯ hello one" in r: promptRow = idx
+    doAssert promptRow >= 0, "prompt echo row not found\n" &
+      tty.dumpFramesAround("hello one")
+    doAssert promptRow + 3 <= midRows.len,
+      "not enough rows below prompt echo\n" & tty.dumpFramesAround("hello one")
+    doAssert midRows[promptRow + 1].strip.len == 0,
+      "expected the footer gap row directly below the prompt echo, got [" &
+      midRows[promptRow + 1] & "]\n" & tty.dumpFramesAround("hello one")
+    doAssert midRows[promptRow + 2].strip.len != 0 and "○" in midRows[promptRow + 2],
+      "expected the token bar directly below the gap row, got [" &
+      midRows[promptRow + 2] & "]\n" & tty.dumpFramesAround("hello one")
     tty.expectInHistory "First reply line."
     tty.expectTokenBar(["○", "↑10", "↓5"])
     tty.drain(300)

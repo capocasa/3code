@@ -1672,8 +1672,13 @@ proc emitUserSubmit*(line: string) =
   if receiptLabel.len > 0:
     bytes.add receiptBytes(receiptLabel)
     bytes.add "\r\n\r\n"
+  # The prompt echo is the last scrollback block before the turn's footer
+  # takes over. The footer (spinner on submit, idle bar otherwise) opens with
+  # its own cleared gap/ticker row, which is the visible separator. Ending
+  # with a full "\r\n\r\n" would strand that gap as a second, redundant
+  # blank row between the prompt and the bar. End the line only.
   bytes.add formatUserPromptItem(line)
-  bytes.add "\r\n\r\n"
+  bytes.add "\r\n"
   proc clearSubmittedFooterState() =
     emitFatPromptEvent clearPendingHintEvent()
     emitFatPromptEvent clearBarEvent()
