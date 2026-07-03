@@ -770,9 +770,14 @@ proc expectExit*(s: TtySession; code: int; timeoutMs = 5000): bool {.discardable
     sleep 5
   doAssert false, &"expected process exit code {code}, still running"
 
-proc expectAlive*(s: TtySession; msg = "process exited unexpectedly") =
+proc expectAlive*(s: TtySession;
+    msg = "REGRESSION (premature exit): the REPL exited mid-session. " &
+           "This is the 'fix premature exit' bug class. " &
+           "The process must stay alive across every interaction.") =
   s.drain(5, recordFrame = false)
-  doAssert not s.exited, msg & "\n" & s.dumpFramesAround("")
+  if s.exited:
+    doAssert false, msg & "\nexit code: " & $s.exitCode & "\n" &
+      s.dumpFramesAround("")
 
 proc expectPromptLive*(s: TtySession; timeoutMs = 5000): bool {.discardable.} =
   ## Assert the prompt is present AND the process is still alive. Catches the
@@ -818,8 +823,9 @@ proc expectCount*(s: TtySession; text: string; n: int;
         return true
       break
     sleep 5
-  doAssert false, &"expected count {n} of {text} in {where}, got {last}\n" &
-    s.dumpFramesAround(text)
+  doAssert false, &"REGRESSION (duplicate or swallow): expected count {n} of " &
+    &"{text} in {where}, got {last}. This is the 'prompt echoed twice / " &
+    &"line swallowed' bug class. \n" & s.dumpFramesAround(text)
 
 proc expectOnScreen*(s: TtySession; text: string;
                      timeoutMs = 5000): bool {.discardable.} =
@@ -836,8 +842,10 @@ proc expectOnScreen*(s: TtySession; text: string;
       if text in s.screenText():
         return true
     sleep 5
-  doAssert false, "expected text not found on screen: " & text & "\n" &
-    s.dumpFramesAround(text)
+  doAssert false, "REGRESSION (render-then-overwrite): expected text not " &
+    "found on the live grid: " & text & ". This is the bug class where a " &
+    "frame flashes correctly then gets overwritten; the bytes were in the " &
+    "raw stream but are no longer visible. \n" & s.dumpFramesAround(text)
 
 proc framePresenceRuns*(s: TtySession; needle: string): int =
   ## Count contiguous runs of frames whose rows contain an exact
@@ -862,8 +870,10 @@ proc expectRowAppearsOnce*(s: TtySession; text: string): bool {.discardable.} =
   ## scrollback-overwrite regression where a committed row flickers out and
   ## back in. Drain all the frames you care about before calling this.
   let runs = s.framePresenceRuns(text)
-  doAssert runs == 1, &"expected row to appear once (one run), appeared {runs} " &
-    &"times: {text}\n" & s.dumpFramesAround(text)
+  doAssert runs == 1, &"REGRESSION (scrollback overwrite): expected row to " &
+    &"appear once (one contiguous run), appeared {runs} times: {text}. This " &
+    &"is the bug class where a committed row flickers out and back in. \n" &
+    s.dumpFramesAround(text)
   true
 
 proc tokenBarRows(s: TtySession): seq[string] =

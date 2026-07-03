@@ -291,6 +291,7 @@ suite "terminal visual contract":
     tty.expect "cannot run :provider add while a turn is active"
     tty.continueStubApi()
     tty.expectInHistory "Active command turn complete."
+    tty.expectAlive()  # an active turn that ran colon commands must not exit
     tty.drain(200)
 
     let log = sessionLogText(root)
@@ -324,6 +325,7 @@ suite "terminal visual contract":
     tty.send "\x1b"
     tty.expect "cancelled"
     tty.expectNo "nvapi-visible-secret"
+    tty.expectAlive()  # cancelling :provider add must not exit the process
 
   test "harness commands are transcript items":
     let root = newFixture("harness_commands")
@@ -379,6 +381,7 @@ suite "terminal visual contract":
       tty.expectInHistory "❯ " & command
       tty.expectInHistory marker
       tty.drain(120)
+    tty.expectAlive()  # no command in the suite exited the process
     tty.expectInHistory "unknown command: :toknes  did you mean :tokens?"
     tty.send "\x1b[A"
     tty.expect "❯ :toknes"
@@ -408,17 +411,20 @@ suite "terminal visual contract":
     tty.send "\n"
     tty.drain(200)
     tty.expect "\u276f"  # prompt must return
+    tty.expectAlive()  # must not exit after :provider
     # Send a message — if the program exited this times out
     tty.send "hi"
     tty.expect "hi"
     tty.send "\n"
     tty.expectInHistory "hello"
     tty.expect "\u276f"
+    tty.expectAlive()
     # Change model
     tty.send ":model stub-large"
     tty.send "\n"
     tty.drain(200)
     tty.expect "\u276f"  # prompt must return
+    tty.expectAlive()  # must not exit after :model
     tty.send "hey"
     tty.expect "hey"
     tty.send "\n"
@@ -456,6 +462,10 @@ suite "terminal visual contract":
     tty.send "\n"
     tty.expectInHistory "Thinking about the test prompt"
     tty.expectInHistory "This is a test response."
+    # Prompt row committed exactly once (not duplicated, not dropped);
+    # the reply streamed exactly once (not duplicated, not dropped).
+    tty.expectRowAppearsOnce("❯ This is a test prompt")
+    tty.expectCount("This is a test response.", 1, where = "raw")
     tty.expectTokenBar(["○", "↑120", "↓24"])
     tty.drain(200)
     tty.expectMeaningfulFrameArtifact(
@@ -617,10 +627,14 @@ suite "terminal visual contract":
     tty.expectActiveSpinner()
     tty.send "\x1b"
     tty.expectInHistory "interrupted by user"
-    tty.expect "❯"
+    tty.expectOnScreen "❯"  # prompt painted on the grid after ESC, not just raw bytes
+    tty.expectAlive()
     tty.send "second"
     tty.send "\n"
     tty.expectInHistory "second turn ok"
+    # The cancelled turn's reply never reached scrollback (dropped, not
+    # leaked into the next turn).
+    tty.expectNeverInHistory("should not appear")
 
   test "ctrl-c cancels during network-quiet":
     let root = newFixture("quiet_cancel_ctrlc")
@@ -653,10 +667,14 @@ suite "terminal visual contract":
     tty.expectActiveSpinner()
     tty.send "\x03"
     tty.expectInHistory "interrupted by user"
-    tty.expect "❯"
+    tty.expectOnScreen "❯"  # prompt painted on the grid after Ctrl-C, not just raw bytes
+    tty.expectAlive()
     tty.send "second"
     tty.send "\n"
     tty.expectInHistory "second turn ok"
+    # The cancelled turn's reply never reached scrollback (dropped, not
+    # leaked into the next turn).
+    tty.expectNeverInHistory("should not appear")
 
   test "ctrl-c during bash tool then prompt accepts input":
     let root = newFixture("ctrlc_during_bash")
@@ -695,7 +713,8 @@ suite "terminal visual contract":
     tty.drain(300)
     tty.send "\x03"
     tty.expectInHistory "interrupted by user"
-    tty.expect "❯"
+    tty.expectOnScreen "❯"  # prompt painted on the grid after Ctrl-C, not just raw bytes
+    tty.expectAlive()
     # The regression: after interrupt the prompt must accept typing.
     tty.send "hello"
     tty.expectTypedAtPrompt("hello")
@@ -734,7 +753,8 @@ suite "terminal visual contract":
     tty.drain(300)
     tty.send "\x03"
     tty.expectInHistory "interrupted by user"
-    tty.expect "❯"
+    tty.expectOnScreen "❯"  # prompt painted on the grid after Ctrl-C, not just raw bytes
+    tty.expectAlive()
     tty.send "hello"
     tty.expectTypedAtPrompt("hello")
     tty.send "\n"
@@ -802,6 +822,9 @@ suite "terminal visual contract":
     tty.expectInHistory "❯ queued line one"
     tty.expectInHistory "  queued line two"
     tty.expectInHistory "Queued multiline response."
+    # Each reply streamed exactly once (not duplicated, not dropped).
+    tty.expectCount("First multiline response.", 1, where = "raw")
+    tty.expectCount("Queued multiline response.", 1, where = "raw")
     tty.expectTokenBar(["○", "↑180", "↓32"])
     tty.drain(200)
     tty.expectMeaningfulFrameArtifact(
@@ -1029,8 +1052,12 @@ suite "terminal visual contract":
     # as the next user turn, not dropped.
     tty.send "\x03"
     tty.expectInHistory "interrupted by user"
+    tty.expectAlive()
     tty.expectInHistory "❯ queued prompt"
     tty.expectInHistory "Reply to queued prompt."
+    # The queued turn was sent exactly once: its reply reached scrollback
+    # once (not dropped by the cancel, not double-sent).
+    tty.expectCount("Reply to queued prompt.", 1, where = "raw")
 
   test "bare escape during a queued mid-turn prompt sends the queue next":
     # Same contract as the Ctrl-C variant above, exercised with a bare Esc.
@@ -1082,8 +1109,12 @@ suite "terminal visual contract":
     # be sent as the next user turn, not dropped.
     tty.send "\x1b"
     tty.expectInHistory "interrupted by user"
+    tty.expectAlive()
     tty.expectInHistory "❯ queued prompt"
     tty.expectInHistory "Reply to queued prompt."
+    # The queued turn was sent exactly once: its reply reached scrollback
+    # once (not dropped by the cancel, not double-sent).
+    tty.expectCount("Reply to queued prompt.", 1, where = "raw")
 
   test "bash tool success and nonzero exit":
     let root = newFixture("bash_tool_visual_test")
@@ -1254,12 +1285,22 @@ suite "terminal visual contract":
         firstMarkerFrame = i
         break
     require firstMarkerFrame >= 0
+    # The flicker regression is an erase-then-redraw pair: a sync frame
+    # clears the viewport (`\x1b[J`) without the marker, and the next frame
+    # rewrites the marker as committed scrollback. Report the offending pair
+    # so a regression points straight at the erase.
+    var flickerAt = -1
     for i in firstMarkerFrame ..< syncPayloads.len - 1:
       if "\x1b[J" in syncPayloads[i] and
           "flicker-marker" notin syncPayloads[i] and
           "flicker-marker" in syncPayloads[i + 1]:
-        check false
+        flickerAt = i
         break
+    doAssert flickerAt < 0, "bash tool viewport flickered blank: sync frame " &
+      $flickerAt & " erases the viewport (ESC[J) while flicker-marker is " &
+      "absent, then frame " & $(flickerAt + 1) &
+      " redraws it — an erase-then-redraw pair.\n" &
+      tty.dumpFramesAround("flicker-marker")
 
   test "non-bash tool transcript shapes":
     let root = newFixture("other_tools_visual_test")
@@ -1434,13 +1475,21 @@ suite "terminal visual contract":
     # scrollback: that is the visual symptom of the extra-line bug.
     let rows = if tty.frames.len > 0: tty.frames[^1].rows else: @[]
     var maxRun = 0
+    var maxRunStart = -1
     var curRun = 0
-    for r in rows:
+    var curRunStart = -1
+    for idx, r in rows:
       if r.strip.len == 0:
-        inc curRun; maxRun = max(maxRun, curRun)
+        if curRun == 0: curRunStart = idx
+        inc curRun
+        if curRun > maxRun:
+          maxRun = curRun; maxRunStart = curRunStart
       else:
         curRun = 0
-    check maxRun <= 1
+    doAssert maxRun <= 1, "scrollback has " & $maxRun &
+      " consecutive blank rows at rows " & $maxRunStart & ".." &
+      $(maxRunStart + maxRun - 1) & " (the extra-line bug):\n" &
+      tty.dumpFramesAround("")
 
   test "every prompt first line survives a reasoning-ticker to content transition":
     # Regression: when a thinking ticker clears at the start of streamed
@@ -1542,8 +1591,97 @@ suite "terminal visual contract":
         tty.expectInHistory "reply after bg-fg"
         # After the turn, a new prompt appears. Type into it.
         tty.expect "❯"
+        tty.expectAlive()  # bg-fg resume must not have exited the process
         tty.send "still working"
         tty.expect "still working"
+
+  test "shakedown: one session exercises the full REPL contract":
+    # The canonical consolidated contract test (report.md Pattern C). If this
+    # one test is green, the three regression classes are closed in a single
+    # session: (1) premature exit, (2) prompt echoed twice / line swallowed,
+    # (3) committed row overwritten. It threads expectAlive, expectCount and
+    # expectNeverInHistory through every interaction rather than relying on a
+    # golden file at the end.
+    let root = newFixture("shakedown_contract")
+    writeHarnessProviders(root)
+    writeStubResponses(root, %*[
+      # Turn 1: plain prompt and reply.
+      {"role": "assistant", "preStreamDelayMs": 50,
+       "content": "turn one reply", "contentChunks": ["turn one reply"],
+       "usage": {"promptTokens": 10, "completionTokens": 3,
+                  "totalTokens": 13, "cachedTokens": 0}},
+      # Turn 2: held open so we can interrupt it mid-stream.
+      {"role": "assistant", "waitForTestContinue": true,
+       "content": "streaming that should be interrupted",
+       "contentChunks": ["streaming that should be interrupted"],
+       "usage": {"promptTokens": 10, "completionTokens": 5,
+                  "totalTokens": 15, "cachedTokens": 0}},
+      # Turn 3: reply after interrupt.
+      {"role": "assistant", "content": "turn three reply",
+       "contentChunks": ["turn three reply"],
+       "usage": {"promptTokens": 10, "completionTokens": 3,
+                  "totalTokens": 13, "cachedTokens": 0}},
+      # Turn 4: reply to a multiline prompt.
+      {"role": "assistant", "content": "turn four reply",
+       "contentChunks": ["turn four reply"],
+       "usage": {"promptTokens": 10, "completionTokens": 3,
+                  "totalTokens": 13, "cachedTokens": 0}}
+    ])
+
+    let tty = startStub(root)
+    defer: tty.close()
+
+    # --- Turn 1: plain prompt and reply (not duplicated, not dropped). ---
+    tty.expect "❯"
+    tty.expectAlive()
+    tty.send "turn one"
+    tty.send "\n"
+    tty.expectInHistory "turn one"
+    tty.expectCount("turn one reply", 1, where = "raw")
+    tty.expect "❯"
+    tty.expectAlive()
+
+    # --- Turn 2: interrupt mid-stream; process stays alive, cancelled reply
+    # never reaches scrollback, prompt accepts a fresh prompt. ---
+    tty.send "turn two"
+    tty.send "\n"
+    tty.drain(300)
+    tty.send "\x03"
+    tty.expectInHistory "interrupted by user"
+    # The cancelled turn's reply must not leak (not-duplicated / not-merged).
+    tty.expectNeverInHistory("streaming that should be interrupted")
+    tty.expectOnScreen "❯"  # prompt painted on the grid, not just raw bytes
+    tty.expectAlive()
+
+    # --- Turn 3: a second prompt after interrupt (process still interactive). ---
+    tty.send "turn three"
+    tty.send "\n"
+    tty.expectInHistory "turn three"
+    tty.expectCount("turn three reply", 1, where = "raw")
+    tty.expect "❯"
+    tty.expectAlive()
+
+    # --- Edit the model via :model; process must not exit, prompt returns. ---
+    tty.send ":model stub-large"
+    tty.send "\n"
+    tty.drain(200)
+    tty.expect "❯"  # prompt must return
+    tty.expectAlive()  # must not exit after :model
+
+    # --- Multiline prompt; every line must survive into scrollback. ---
+    tty.send "line alpha"
+    tty.send "\x1b[13;2u"
+    tty.send "line beta"
+    tty.expect "line beta"
+    tty.send "\n"
+    tty.expectInHistory "❯ line alpha"
+    tty.expectInHistory "  line beta"
+    tty.expectCount("turn four reply", 1, where = "raw")
+    tty.expect "❯"
+    tty.expectAlive()
+    # Prompt is live and interactive at session end (the deferred close reaps
+    # the child; a clean :q exit is not asserted because the harness's
+    # shutdown frame-sync drain is known to hang, per the cwd-removed test).
 
 when false:
   suite "disabled terminal visual contract tests":
@@ -1667,7 +1805,19 @@ when false:
           editorText.add row.dropRunes(2)
         elif inEditor and row.strip().len == 0:
           break
-      check editorText == "this is a long enough line of idle text to wrap when narrowed"
+      const expected = "this is a long enough line of idle text to wrap when narrowed"
+      if editorText != expected:
+        var diverge = 0
+        while diverge < min(editorText.len, expected.len) and
+            editorText[diverge] == expected[diverge]:
+          inc diverge
+        doAssert false, "editor text did not survive the narrow rewrap: " &
+          "first divergence at byte " & $diverge &
+          " (got len " & $editorText.len & ", want " & $expected.len & ").\n" &
+          "got:    " & editorText & "\n" &
+          "expect: " & expected & "\n" &
+          tty.dumpFramesAround("")
+      check true
 
   test "main visual test":
     if getEnv("THREECODE_TTY_ONLY").len > 0 and

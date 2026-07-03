@@ -86,5 +86,7 @@ suite "idle enter freeze regression":
       tty.send($ch)
       tty.drain(10)
     tty.send "\n"
+    tty.drain(200)
+    tty.expectAlive()  # empty Enter + command must not exit the process
 
     echo "  PASS: empty Enter did not freeze the prompt"

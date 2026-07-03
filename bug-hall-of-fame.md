@@ -74,3 +74,44 @@ client's second request raises instead of looping.
 progress count will spin on a half-dead connection. A cached connection is
 a liability as well as a latency win: the cache must be dropped the moment
 a write fails, and writes need a real bound, not an unbounded retry.
+
+---
+
+## The invisible space that failed every run (test-side, exit code 1)
+
+**Symptom:** The tty functional suite reported 25/25 `[OK]` yet the test
+binary exited 1. A non-fatal `check` inside the *passing* `queued prompt
+typed during a turn` test printed `needle was hello` / `row was ❯ hello`
+and tripped Nim's failed-check counter. The test never *failed* — it only
+leaked a failed `check` — so the `[OK]` line and the exit code disagreed.
+
+**Root cause:** A test-side assumption, not a program bug. The test types
+`" world"` into a queued prompt editor one char at a time, accumulating
+`acc` (`"hello"` → `"hello "` → `"hello w"` …) and asserting each step's
+`acc` is on the cursor row. But the editor's word-wrap — `lineSpans` in
+minline.nim — intentionally excludes trailing break-spaces from rendered
+rows: `contentEnd` tracks "just past the last non-space," so editor text
+`"hello "` renders as the row `"hello"` (no trailing space). The caret is
+correctly placed *after* the space; the space is simply never drawn.
+
+The misleading part: the check failure prints `row was ❯ hello`, which
+*visually* looks like it contains `"hello"` — and it does. But the needle
+was `"hello "` (len 6, trailing space), and `"hello " in "❯ hello"` is
+false. The printed `needle was hello` drops the trailing space because
+terminal output trims it, hiding the real mismatch. Hex-dumping the cursor
+row at every loop step proved it: after the space, bytes are
+`E2 9D AF 20 68 65 6C 6C 6F` (`❯ hello`); only once the next non-space char
+`w` lands does the space appear (`❯ hello w`).
+
+**Fix:** `requireVisibleEditorCaret` compares against the needle with
+trailing whitespace trimmed (`needle.strip(leading = false)`), with a
+comment citing the lineSpans invariant. No-op for the other callers (their
+needles have no trailing whitespace). Binary now exits 0.
+
+**Lesson:** A trailing space in an assertion string is invisible in both
+the source and the failure message — the one place a human looks. When a
+`check ... in row` fails but the printed row *looks* like it contains the
+needle, suspect unprintable or trailing-whitespace bytes and hex-dump
+before reasoning further. And: a green `[OK]` with a non-zero exit code is
+itself a bug — a non-fatal `check` in a passing test is a silent failure
+that will break CI gating.

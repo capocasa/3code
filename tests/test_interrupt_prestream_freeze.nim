@@ -78,6 +78,7 @@ suite "interrupt during pre-stream freeze regression":
 
     # The prompt must come back and accept a real prompt.
     tty.expect "\u276f"
+    tty.expectAlive()  # ESC during in-flight call must not exit
     tty.send "hello model"
     tty.expect "hello model"
     tty.send "\n"
@@ -117,6 +118,7 @@ suite "interrupt during pre-stream freeze regression":
     tty.expectInHistory "interrupted by user"
 
     tty.expect "\u276f"
+    tty.expectAlive()  # Ctrl-C during in-flight call must not exit
     tty.send "hello model"
     tty.expect "hello model"
     tty.send "\n"
@@ -163,4 +165,5 @@ suite "interrupt during pre-stream freeze regression":
     # follow-up must produce the second response. A freeze shows up as a
     # timeout here.
     tty.expectInHistory "ok."
+    tty.expectAlive()  # the ESC+follow-up race must not exit the process
     echo "  PASS: ESC + immediate follow-up did not freeze"
