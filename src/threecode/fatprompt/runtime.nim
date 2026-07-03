@@ -1512,8 +1512,16 @@ proc inputThreadProc() {.thread.} =
           edPtr[].renderRow = 0
           continue
         # At idle: clear current input and return to a fresh prompt.
+        # echoRows is never updated by plain typing (only parkAtEnd and the
+        # pendingCaret block touch it), so it is stale 0 from resetForRead.
+        # Push the real visual row count of the just-typed line so the
+        # resetPromptInputAfterEmpty walk-back covers every wrapped row the
+        # draft occupied, instead of only one.
+        let typedRows = minline.totalRows(edPtr[].line.text, edPtr[].promptW,
+                                          edPtr[].contPromptW,
+                                          max(2, edPtr[].width))
         pushInputEvent(InputEvent(kind: ieLine, text: "",
-                                   echoRows: edPtr[].echoRows))
+                                   echoRows: typedRows))
         edPtr[].line = minline.Line(text: "", position: 0)
         edPtr[].renderSuffix = ""
         edPtr[].renderSuffixCursor = false
