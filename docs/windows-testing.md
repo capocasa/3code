@@ -6,7 +6,7 @@ options for closing that gap. It is a working TODO, not a permanent state.
 
 ## Current status
 
-26 of 33 tests run on Windows. The 7 disabled tests are:
+26 of 33 tests run on Windows; 30 of 33 on macOS. The 7 Windows-disabled tests are:
 
 - `tests/tty/test_tty_functional.nim`
 - `tests/tty/test_empty_enter_freeze.nim`
@@ -24,8 +24,14 @@ options for closing that gap. It is a working TODO, not a permanent state.
 - `tests/stream/test_streamexec.nim` — `runStreamingBash` needs the bundled
   MSYS2 bash (`%LOCALAPPDATA%\3code\msys64`), absent on CI runners (exit 127).
 
-Each skipped test carries a `disabled: "win"` spec pointing back here. When
-you see that spec, this document is the "why" and the "how to fix".
+On macOS the same three tty tests are also skipped: the harness compiles
+(post util.h/clearEnv fix) but hangs deterministically because the `expect*`
+procs poll on wall-clock deadlines that starve under the OSX runner's
+scheduler. The fix is the frame-event sync rewrite in `plan-flakiness.md`;
+until then they carry `disabled: "osx"`.
+
+Each skipped test carries a `disabled:` spec pointing back here. When you
+see that spec, this document is the "why" and the "how to fix".
 
 ## Why they are disabled
 

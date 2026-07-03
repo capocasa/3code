@@ -49,6 +49,11 @@ frame-event channel (`THREECODE_TEST_FRAME_FD` / `emitTestFrameEvent` in
 `pollOnce`. Under load the polling cadence starves and a back-to-back
 assertion times out before the child produces the bytes.
 
+**macOS note:** on the OSX CI runner this manifests as a deterministic hang
+(a subtest never returns), not just a flake, so the three tty tests carry
+`disabled: "osx"` until the frame-event sync rewrite lands. They still run
+on Linux, where they pass (intermittently under heavy parallel load).
+
 **Fix direction:** make `expect*` block on the frame-event pipe before
 checking screen state (child becomes the clock), wall-clock timeout kept only
 as a hung-child detector. Harness-only change; no src/ production code, no

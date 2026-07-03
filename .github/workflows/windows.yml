@@ -43,9 +43,12 @@ jobs:
       - name: Run tests
         # nimble test runs Nim's bundled testament. Tests that can't run on
         # Windows yet (the PTY harness) self-disable via disabled:"win"
-        # specs; see docs/windows-testing.md for the gap and fix path.
+        # specs; see docs/windows-testing.md for the gap and fix path. The
+        # timeout is generous because the Windows runner compiles each test
+        # separately (~15-20s each) with no shared cache; actual test runtime
+        # is only ~4-5 min.
         run: nimble test
-        timeout-minutes: 20
+        timeout-minutes: 30
 
       - name: Package (Windows) - bundle OpenSSL DLLs alongside .exe
         shell: pwsh
@@ -72,6 +75,7 @@ jobs:
 
       - name: Upload artifact to 3code.capocasa.dev
         if: github.ref == 'refs/heads/main'
+        continue-on-error: true
         run: |
           curl -f -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-windows-amd64.zip" \
             https://3code.capocasa.dev/main/upload.nim
