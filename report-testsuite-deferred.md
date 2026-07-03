@@ -96,11 +96,19 @@ with a portable Nim `clearEnv` using `envPairs`/`delEnv`.
 
 ## Deferred issue 4: Windows test skips (restore old coverage)
 
-The deleted `tools/test.sh` skipped 8 tests on Windows; CI shows only 4
-actually fail there (test_api, test_cli_args, test_history, test_streamexec).
-The other 4 (test_minline, test_session, test_update, test_util_extra) pass.
-All 4 now carry `disabled: "win"` specs: test_streamexec's failure is the
-missing bundled MSYS2 bash (exit 127), not the NUL logic (issue 2, resolved).
+CI shows 8 tests fail on Windows: the 4 originally identified
+(test_api, test_cli_args, test_history, test_streamexec) plus test_minline,
+test_session, test_update, and test_util_extra. All 8 now carry
+`disabled: "win"` specs:
+- test_streamexec: missing bundled MSYS2 bash (exit 127), not the NUL logic.
+- test_minline: `_getch` arrow-key encoding (0xE0 prefix vs POSIX ESC [).
+- test_session/test_update: assume XDG/HOME config isolation; Windows uses
+  APPDATA via getConfigDir().
+- test_util_extra: collapseHome forward-slash path assertions.
+
+The Windows step also now runs testament directly (not via `nimble test`)
+because git-bash did not propagate nimble's non-zero exit, silently reporting
+green on failing test runs.
 
 ## What NOT to do (applies to all deferred work)
 

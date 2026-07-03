@@ -6,7 +6,7 @@ options for closing that gap. It is a working TODO, not a permanent state.
 
 ## Current status
 
-26 of 33 tests run on Windows; 30 of 33 on macOS. The 7 Windows-disabled tests are:
+22 of 33 tests run on Windows; 30 of 33 on macOS. The 11 Windows-disabled tests are:
 
 - `tests/tty/test_tty_functional.nim`
 - `tests/tty/test_empty_enter_freeze.nim`
@@ -23,6 +23,14 @@ options for closing that gap. It is a working TODO, not a permanent state.
   sequence key decoding differs on Windows (`_getch` 0xE0/0x00 vs POSIX ESC [).
 - `tests/stream/test_streamexec.nim` — `runStreamingBash` needs the bundled
   MSYS2 bash (`%LOCALAPPDATA%\3code\msys64`), absent on CI runners (exit 127).
+- `tests/core/test_minline.nim` — arrow-key encoding differs (`_getch` 0xE0
+  prefix vs POSIX `ESC [`), so cursor-movement subtests fail.
+- `tests/core/test_session.nim` — draft/session-path tests assume
+  `XDG_DATA_HOME` isolation, but Windows `userDataRoot()` reads `APPDATA`.
+- `tests/core/test_update.nim` — config-isolation tests assume `HOME/.config`
+  (XDG), but Windows reads `APPDATA` via `getConfigDir()`.
+- `tests/core/test_util_extra.nim` — `collapseHome` assertions use forward-
+  slash POSIX paths; Windows backslash paths fail the comparison.
 
 On macOS the same three tty tests are also skipped: the harness compiles
 (post util.h/clearEnv fix) but hangs deterministically because the `expect*`

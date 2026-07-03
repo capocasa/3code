@@ -47,7 +47,21 @@ jobs:
         # timeout is generous because the Windows runner compiles each test
         # separately (~15-20s each) with no shared cache; actual test runtime
         # is only ~4-5 min.
-        run: nimble test
+        #
+        # git-bash does not reliably propagate nimble's non-zero exit code,
+        # so run testament directly and propagate $? explicitly. Without this
+        # a failing testament reports green (only the OSError shows in the
+        # log), which silently masks regressions.
+        run: |
+          if command -v testament >/dev/null 2>&1; then
+            testament --print --megatest:off all
+          else
+            for d in tests/*/; do
+              for f in "$d"*.nim; do
+                nim c -r --path:src --path:tests "$f" || exit 1
+              done
+            done
+          fi
         timeout-minutes: 30
 
       - name: Package (Windows) - bundle OpenSSL DLLs alongside .exe
