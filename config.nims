@@ -7,8 +7,14 @@ proc getNimbleVersion(): string =
       return
   result = "devel"
 
+proc onTag(): bool =
+  # Exits 0 only when HEAD is exactly a tag; nonzero (empty output) on a
+  # branch or nightly. Distinguishes a tagged release from a release-mode
+  # nightly build, which both run with -d:release.
+  gorgeEx("git describe --tags --exact-match HEAD").exitCode == 0
+
 proc getVersionString(): string =
-  if defined(release):
+  if onTag():
     getNimbleVersion()
   else:
     getNimbleVersion() & "-" &
