@@ -1,7 +1,7 @@
-===== 551 =====
+===== 683 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,25 +10,10 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run other tool checks
-===== 286 =====
+===== 495 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
-  ╰─╯
-
-  provider  stub
-  model     stub-model
-
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
-
-❯ run other tool checks
-
-⣿ ○0% ↓6 0s
-❯
-===== 636 =====
-
-  ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -39,51 +24,46 @@
 ❯ run other tool checks
 ● Exercising non-bash tools.
 
-r notes.txt
-  read-one
-  read-two
-  read-three
-
-w notes.txt
-  --- /tmp/notes.txt
-  +++ /tmp/notes.txt
-  +new notes
-
-p --- /tmp/notes.txt
-  +++ /tmp/notes.txt
-  -new notes
-  +patched notes
-
-p --- /tmp/applied.txt
-  +++ /tmp/applied.txt
-  +hello
-
-⌕ terminal rendering
-  1. Terminal Rendering Guide
-  https://example.test/rendering
-  Useful result snippet.
-
-⇊ https://example.test/rendering
-  Fetched page title
-  Fetched page body line
-
-≡ ──────────
-  ✓ inspect
-  ~ adjust
-  ○ verify
-
-✕ unknown tool: not_a_tool
-
-═════════════════════════════════════════
-↻ fresh context prompt
-  ○2%  ↑300  ↓44  0s
-
-⣿ ○0% ↓4 0s
+  ○0% ↓6
 ❯
-===== 348 =====
+===== 633 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run other tool checks
+● Exercising non-bash tools.
+
+
+⣿ ○0% ↓6 0s
+❯
+===== 798 =====
+
+  ╭─╮
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run other tool checks
+● Exercising non-bash tools.
+
+
+  ○2%  ↑300  ↓44  0s
+❯
+===== 861 =====
+
+  ╭─╮
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -134,6 +114,180 @@ p --- /tmp/applied.txt
   ○2%  ↑300  ↓44  0s
 
 ● Clear completed.
+
+  ○0% ↓4
+❯
+===== 133 =====
+
+  ╭─╮
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run other tool checks
+● Exercising non-bash tools.
+
+r notes.txt
+  read-one
+  read-two
+  read-three
+
+w notes.txt
+  --- /tmp/notes.txt
+  +++ /tmp/notes.txt
+  +new notes
+
+p --- /tmp/notes.txt
+  +++ /tmp/notes.txt
+  -new notes
+  +patched notes
+
+p --- /tmp/applied.txt
+  +++ /tmp/applied.txt
+  +hello
+
+⌕ terminal rendering
+  1. Terminal Rendering Guide
+  https://example.test/rendering
+  Useful result snippet.
+
+⇊ https://example.test/rendering
+  Fetched page title
+  Fetched page body line
+
+≡ ──────────
+  ✓ inspect
+  ~ adjust
+  ○ verify
+
+✕ unknown tool: not_a_tool
+
+═════════════════════════════════════════
+↻ fresh context prompt
+  ○2%  ↑300  ↓44  0s
+
+● Clear completed.
+
+
+⣿ ○0% ↓4 0s
+❯
+===== 404 =====
+
+  ╭─╮
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run other tool checks
+● Exercising non-bash tools.
+
+r notes.txt
+  read-one
+  read-two
+  read-three
+
+w notes.txt
+  --- /tmp/notes.txt
+  +++ /tmp/notes.txt
+  +new notes
+
+p --- /tmp/notes.txt
+  +++ /tmp/notes.txt
+  -new notes
+  +patched notes
+
+p --- /tmp/applied.txt
+  +++ /tmp/applied.txt
+  +hello
+
+⌕ terminal rendering
+  1. Terminal Rendering Guide
+  https://example.test/rendering
+  Useful result snippet.
+
+⇊ https://example.test/rendering
+  Fetched page title
+  Fetched page body line
+
+≡ ──────────
+  ✓ inspect
+  ~ adjust
+  ○ verify
+
+✕ unknown tool: not_a_tool
+
+═════════════════════════════════════════
+↻ fresh context prompt
+  ○2%  ↑300  ↓44  0s
+
+● Clear completed.
+
+
+  ○0%  ↑90  ↓12  0s
+❯
+===== 746 =====
+
+  ╭─╮
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run other tool checks
+● Exercising non-bash tools.
+
+r notes.txt
+  read-one
+  read-two
+  read-three
+
+w notes.txt
+  --- /tmp/notes.txt
+  +++ /tmp/notes.txt
+  +new notes
+
+p --- /tmp/notes.txt
+  +++ /tmp/notes.txt
+  -new notes
+  +patched notes
+
+p --- /tmp/applied.txt
+  +++ /tmp/applied.txt
+  +hello
+
+⌕ terminal rendering
+  1. Terminal Rendering Guide
+  https://example.test/rendering
+  Useful result snippet.
+
+⇊ https://example.test/rendering
+  Fetched page title
+  Fetched page body line
+
+≡ ──────────
+  ✓ inspect
+  ~ adjust
+  ○ verify
+
+✕ unknown tool: not_a_tool
+
+═════════════════════════════════════════
+↻ fresh context prompt
+  ○2%  ↑300  ↓44  0s
+
+● Clear completed.
+
   ○0%  ↑90  ↓12  0s
 
   ○0%

@@ -1,7 +1,7 @@
-===== 127 =====
+===== 629 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,10 +10,10 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run bash checks
-===== 602 =====
+===== 454 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -22,13 +22,48 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run bash checks
+● Running bash checks.
+
+  ○0% ↓5
+❯
+===== 150 =====
+
+  ╭─╮
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+● Running bash checks.
+
 
 ⣿ ○0% ↓5 0s
 ❯
-===== 978 =====
+===== 508 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+● Running bash checks.
+
+
+  ○1%  ↑130  ↓18  0s
+❯
+===== 112 =====
+
+  ╭─╮
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -40,12 +75,13 @@
 ● Running bash checks.
 
 $ printf 'ok-one\nok-two\n'
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 268 =====
+===== 209 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -58,12 +94,13 @@ $ printf 'ok-one\nok-two\n'
 
 $ printf 'ok-one\nok-two\n'
   ok-one
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 557 =====
+===== 637 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -77,12 +114,13 @@ $ printf 'ok-one\nok-two\n'
 $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 953 =====
+===== 644 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -98,12 +136,13 @@ $ printf 'ok-one\nok-two\n'
   ok-two
 
 $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 395 =====
+===== 251 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -120,12 +159,13 @@ $ printf 'ok-one\nok-two\n'
 
 $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 641 =====
+===== 467 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -143,12 +183,13 @@ $ printf 'ok-one\nok-two\n'
 $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
   bad-two
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 934 =====
+===== 743 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -167,12 +208,13 @@ $ printf 'ok-one\nok-two\n'
   bad-one
   bad-two
   bad-three
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 839 =====
+===== 235 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -193,12 +235,13 @@ $ printf 'ok-one\nok-two\n'
   bad-three
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 327 =====
+===== 607 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -220,12 +263,13 @@ $ printf 'ok-one\nok-two\n'
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
   scroll-1
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 118 =====
+===== 974 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -248,12 +292,13 @@ $ printf 'ok-one\nok-two\n'
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
   scroll-1
   scroll-2
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 651 =====
+===== 646 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -277,12 +322,13 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
   scroll-1
   scroll-2
   scroll-3
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 105 =====
+===== 501 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -307,12 +353,13 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
   scroll-2
   scroll-3
   scroll-4
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 814 =====
+===== 342 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -338,12 +385,13 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
   scroll-3
   scroll-4
   scroll-5
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 764 =====
+===== 872 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -370,12 +418,13 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
   scroll-4
   scroll-5
   scroll-6
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 744 =====
+===== 543 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -403,12 +452,13 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
   scroll-5
   scroll-6
   scroll-7
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 650 =====
+===== 794 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -437,12 +487,13 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
   scroll-6
   scroll-7
   scroll-8
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 178 =====
+===== 329 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -471,12 +522,13 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
   scroll-7
   scroll-8
   scroll-9
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 835 =====
+===== 864 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -505,12 +557,13 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
   scroll-8
   scroll-9
   scroll-10
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 557 =====
+===== 285 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -541,50 +594,13 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
   scroll-10
 
 $ sleep 3; printf 'slow-done\n'
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 385 =====
+===== 510 =====
 
   ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
-  ╰─╯
-
-  provider  stub
-  model     stub-model
-
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
-
-❯ run bash checks
-● Running bash checks.
-
-$ printf 'ok-one\nok-two\n'
-  ok-one
-  ok-two
-
-Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
-  bad-one
-  bad-two
-  bad-three
-
-$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
-  ... 3 lines omitted :show 3 for full
-  scroll-4
-  scroll-5
-  scroll-6
-  scroll-7
-  scroll-8
-  scroll-9
-  scroll-10
-
-$ sleep 3; printf 'slow-done\n'  (0s)
-  slow-done
-  ○1%  ↑130  ↓18  0s
-
-⣿ ○1% ↓5 0s
-❯
-===== 468 =====
-  ╭─╮
-   ─┤  3code vVERSION   the economical coding agent
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -619,6 +635,132 @@ $ sleep 3; printf 'slow-done\n'  (0s)
   ○1%  ↑130  ↓18  0s
 
 ● Bash checks complete.
+
+  ○1% ↓5
+❯
+===== 244 =====
+
+  ╭─╮
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+● Running bash checks.
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+  ... 3 lines omitted :show 3 for full
+  scroll-4
+  scroll-5
+  scroll-6
+  scroll-7
+  scroll-8
+  scroll-9
+  scroll-10
+
+$ sleep 3; printf 'slow-done\n'  (0s)
+  slow-done
+  ○1%  ↑130  ↓18  0s
+
+● Bash checks complete.
+
+
+⣿ ○1% ↓5 0s
+❯
+===== 784 =====
+
+  ╭─╮
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+● Running bash checks.
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+  ... 3 lines omitted :show 3 for full
+  scroll-4
+  scroll-5
+  scroll-6
+  scroll-7
+  scroll-8
+  scroll-9
+  scroll-10
+
+$ sleep 3; printf 'slow-done\n'  (0s)
+  slow-done
+  ○1%  ↑130  ↓18  0s
+
+● Bash checks complete.
+
+
+  ○1%  ↑210  ↓20  0s
+❯
+===== 756 =====
+
+  ╭─╮
+   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+● Running bash checks.
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+  ... 3 lines omitted :show 3 for full
+  scroll-4
+  scroll-5
+  scroll-6
+  scroll-7
+  scroll-8
+  scroll-9
+  scroll-10
+
+$ sleep 3; printf 'slow-done\n'  (0s)
+  slow-done
+  ○1%  ↑130  ↓18  0s
+
+● Bash checks complete.
+
   ○1%  ↑210  ↓20  0s
 
   ○1%
