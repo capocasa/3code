@@ -31,7 +31,7 @@ jobs:
           echo "tag=$tag sha=$sha"
           mkdir -p dl
 
-          for workflow in Linux OSX Windows; do
+          for workflow in linux-amd64.yml linux-arm64.yml osx.yml windows.yml; do
             echo "--- $workflow ---"
             for i in $(seq 1 60); do
               # Fail fast: if this workflow already failed for this tag+commit,

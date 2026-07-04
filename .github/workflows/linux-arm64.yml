@@ -1,0 +1,51 @@
+name: Linux arm64
+
+on:
+  push:
+    branches: [main]
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: stable
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dependencies
+        run: nimble install -y --depsOnly
+
+      - name: Compute build flags
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            # autoupdate on releases only
+            echo "BUILD_FLAGS=-d:autoUpdate" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build
+        run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
+
+      - name: Package
+        run: |
+          mkdir -p 3code-linux-arm64
+          cp 3code 3code-linux-arm64/
+          cp README.md LICENSE 3code-linux-arm64/
+          tar czf 3code-linux-arm64.tar.gz 3code-linux-arm64
+
+      - name: Upload artifact (GitHub Actions)
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3code-linux-arm64
+          path: 3code-linux-arm64.tar.gz
+
+      - name: Upload artifact to 3code.capocasa.dev
+        if: github.ref == 'refs/heads/main'
+        run: |
+          curl -f -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-linux-arm64.tar.gz" \
+            https://3code.capocasa.dev/main/upload.nim
