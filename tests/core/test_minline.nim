@@ -238,6 +238,31 @@ suite "minline editor: cursor navigation":
     expect InputCancelled:
       discard d.run(ed, prompt = "> ")
 
+  test "Ctrl+C at idle does not erase the row above the prompt":
+    # The editor owns only its own rendered rows; the row above the prompt
+    # is scrollback it must never touch. Cancel raises InputCancelled before
+    # clearing the draft, so the contract to lock here is that the row above
+    # survives. (Clearing the draft in place is the controller/input-thread
+    # job, covered by the PTY regression test.)
+    var ed = initEditor()
+    let d = newDriver()
+    d.terminal.write "previous line\r\n"
+    d.pushString "hello"
+    d.push CtrlC
+    expect InputCancelled:
+      discard d.run(ed, prompt = "> ")
+    check rowText(d.grid, 0) == "previous line"
+
+  test "bare ESC at idle does not erase the row above the prompt":
+    var ed = initEditor()
+    let d = newDriver()
+    d.terminal.write "previous line\r\n"
+    d.pushString "hello"
+    d.push Esc
+    expect InputCancelled:
+      discard d.run(ed, prompt = "> ")
+    check rowText(d.grid, 0) == "previous line"
+
   test "Ctrl+D exits only from an empty prompt":
     block nonEmpty:
       var ed = initEditor()

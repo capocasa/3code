@@ -313,9 +313,13 @@ proc hasQueuedAutosend*(): bool =
     release inputStateLock
 
 proc consumeQueuedInput*(line: var string; echoRows: var int;
-                         cmdWasQuit: var bool): bool =
+                         cmdWasQuit: var bool;
+                         wasInterrupt: var bool): bool =
   ## Drain the next line, command, interrupt, or quit event from the queue.
-  ## Returns true when a line or command was consumed.
+  ## Returns true when a line or command was consumed. ``wasInterrupt`` is
+  ## set when an idle Ctrl-C / ESC was handled entirely by the input thread
+  ## (the editor already repainted the empty prompt in place), so the caller
+  ## must skip the empty-line walk-back.
   let ev = pollInputEvent()
   case ev.kind
   of ieLine:
@@ -329,7 +333,7 @@ proc consumeQueuedInput*(line: var string; echoRows: var int;
   of ieQuit:
     cmdWasQuit = true
   of ieInterrupt:
-    discard  # consumed by controller via requestTurnInterrupt path
+    wasInterrupt = true
   of ieNone:
     discard
 
@@ -1511,22 +1515,31 @@ proc inputThreadProc() {.thread.} =
           edPtr[].renderSuffixCursor = false
           edPtr[].renderRow = 0
           continue
-        # At idle: clear current input and return to a fresh prompt.
-        # echoRows is never updated by plain typing (only parkAtEnd and the
-        # pendingCaret block touch it), so it is stale 0 from resetForRead.
-        # Push the real visual row count of the just-typed line so the
-        # resetPromptInputAfterEmpty walk-back covers every wrapped row the
-        # draft occupied, instead of only one.
-        let typedRows = minline.totalRows(edPtr[].line.text, edPtr[].promptW,
-                                          edPtr[].contPromptW,
-                                          max(2, edPtr[].width))
-        pushInputEvent(InputEvent(kind: ieLine, text: "",
-                                   echoRows: typedRows))
+        # At idle: clear the draft in place and signal an interrupt. The
+        # editor's renderRow still tracks the cursor's visual row from the
+        # last typing repaint, so fullRedraw walks up to the draft's top row,
+        # erases to end (clearing every wrapped row), and repaints an empty
+        # prompt there. The cursor lands on that single row, so the next
+        # readLineWith's resetForRead + fullRedraw (renderRow = 0) repaints at
+        # the same spot. Do NOT fake an empty ieLine: the controller would
+        # then run resetPromptInputAfterEmpty, whose walk-up assumes the
+        # cursor sits at the bottom of the just-cleared region; after this
+        # in-place repaint the cursor is at the top, so the walk-up would
+        # erase real scrollback above the prompt. Push ieInterrupt so the
+        # controller drains and continues with no walk-back of its own.
         edPtr[].line = minline.Line(text: "", position: 0)
         edPtr[].renderSuffix = ""
         edPtr[].renderSuffixCursor = false
-        edPtr[].renderRow = 0
         edPtr[].echoRows = 0
+        # readLineWith's defer nilled ed.write when it raised, so restore it
+        # for this in-place repaint. renderRow still tracks the cursor's
+        # visual row from the last typing repaint, so fullRedraw walks up to
+        # the draft's top row, erases to end (clearing every wrapped row),
+        # and repaints an empty prompt there.
+        edPtr[].write = writeProc
+        minline.fullRedraw(edPtr[])
+        edPtr[].write = nil
+        pushInputEvent(InputEvent(kind: ieInterrupt))
         continue
       except EOFError:
         if inputTurnActive.load(moAcquire) and edPtr[].line.text.len == 0:

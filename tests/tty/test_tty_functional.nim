@@ -686,6 +686,53 @@ suite "terminal visual contract":
     # leaked into the next turn).
     tty.expectNeverInHistory("should not appear")
 
+  test "bare esc at idle clears the draft without eating scrollback":
+    # ESC at idle shares the InputCancelled path with Ctrl-C, so the same
+    # scrollback contract applies: the marker row above the prompt must
+    # survive the cancel and a fresh submit must round-trip cleanly after.
+    let root = newFixture("idle_cancel_esc_scrollback")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "content": "MARKER-ABOVE-PROMPT is here",
+        "contentChunks": ["MARKER-ABOVE-PROMPT is here"],
+        "usage": {"promptTokens": 10, "completionTokens": 5,
+                  "totalTokens": 15, "cachedTokens": 0}
+      }
+    ])
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+    tty.expect "❯"
+    tty.send "seed the marker\n"
+    tty.expectInHistory "MARKER-ABOVE-PROMPT is here"
+    tty.expect "❯"
+    tty.send "draft text"
+    tty.expectTypedAtPrompt "draft text"
+    tty.send "\x1b"   # bare Escape
+    tty.expectOnScreen "❯"
+    tty.expectAlive()
+    # The bug eats the row directly above the prompt on each cancel and
+    # compounds: by the second or third cancel the marker (and the bar) are
+    # gone from the live screen. Repeat the type-and-cancel a few times and
+    # assert the marker is STILL on screen afterward. On the unfixed code
+    # this fails; on the fixed code the screen is stable across cancels.
+    for i in 2..3:
+      tty.send "more draft"
+      tty.drain(100)
+      tty.send "\x1b"
+      tty.drain(300)
+    tty.expectOnScreen "MARKER-ABOVE-PROMPT is here"
+    tty.expectOnScreen "❯"
+    tty.expectAlive()
+    tty.expectInHistory "MARKER-ABOVE-PROMPT is here"
+    tty.send "after cancel"
+    tty.expectTypedAtPrompt "after cancel"
+    tty.send "\n"
+    tty.expectInHistory "after cancel"
+
   test "ctrl-c during bash tool then prompt accepts input":
     let root = newFixture("ctrlc_during_bash")
     writeConfiguredProvider(root)
@@ -771,13 +818,15 @@ suite "terminal visual contract":
     tty.expectInHistory "after interrupt ok"
 
   test "idle ctrl-c clears typed line without eating the row above":
-    # At the idle prompt, plain typing never updates ed.echoRows (only
-    # parkAtEnd on submit and the pendingCaret block touch it), so it stays
-    # at the 0 resetForRead left. When Ctrl-C cancels the draft, the empty
-    # event carried that stale 0, so resetPromptInputAfterEmpty walked the
-    # cursor back only one row instead of the draft's full visual height,
-    # leaving wrapped draft rows uncleared (they repaint as duplicate
-    # footer rows) and drifting the prompt down.
+    # Regression: at the idle prompt, cancelling a typed draft used to push
+    # a fake empty ieLine so the controller ran resetPromptInputAfterEmpty.
+    # That walk-up assumes the cursor sits at the bottom of the just-cleared
+    # region, but the input thread had already repainted in place (cursor at
+    # the top), so the walk-up erased the scrollback row directly above the
+    # prompt. For a multi-row draft it also left wrapped rows uncleared when
+    # echoRows was stale. The fix clears the draft in place in the input
+    # thread (fullRedraw walks up by the cursor's real row and erases to
+    # end) and signals ieInterrupt so the controller does no walk-back.
     let root = newFixture("idle_ctrlc_keeps_row_above")
     writeConfiguredProvider(root)
     writeStubResponses(root, %*[
@@ -799,56 +848,40 @@ suite "terminal visual contract":
     tty.send "\n"
     tty.expectInHistory "above-line-marker stays put"
     tty.expectOnScreen "❯"
-    # A draft long enough to wrap to three visual rows at 120 cols. The
-    # stale-echoRows defect is invisible for a single-row draft (n clamps
-    # to 1 either way); it needs a multi-row draft to expose the gap
-    # between the rows the reset cleared and the rows the draft occupied.
+    # A draft long enough to wrap across several visual rows at 120 cols.
+    # A single-row draft hides both defects; the multi-row draft exposes a
+    # walk-back that only clears part of the region (leaving duplicate
+    # footer rows) as well as the scrollback-eating walk-up.
     let draft = "a sufficiently long idle draft that wraps across more than one terminal row when typed at the prompt here and keeps going well past the first line boundary so it occupies two full rows of editor space before the user abandons it completely now"
     tty.send draft
     tty.drain(200)
-    # Snapshot the raw byte offset so we can isolate the reset escapes that
-    # follow the Ctrl-C from the typing repaints that preceded it.
-    let rawBeforeCancel = tty.raw.len
     tty.send "\x03"
     tty.drain(200)
-    # The reset emits ESC[<N>A where N = echoRows+1 (the bar branch). With
-    # the stale 0 it was always 2 regardless of draft length; the fix makes
-    # N track the draft's real row count. Extract the largest cursor-up
-    # count in the post-cancel raw window: it must exceed 2 for a draft
-    # that wrapped past one row.
-    var maxCursorUp = 0
-    let win = tty.raw[rawBeforeCancel ..< tty.raw.len]
-    var k = 0
-    while k < win.len:
-      if win[k] == '\x1b' and k + 1 < win.len and win[k + 1] == '[':
-        var j = k + 2
-        var num = 0
-        var hasNum = false
-        while j < win.len and win[j] in '0' .. '9':
-          num = num * 10 + (ord(win[j]) - ord('0'))
-          hasNum = true
-          inc j
-        if j < win.len and win[j] == 'A' and hasNum:
-          if num > maxCursorUp: maxCursorUp = num
-        k = j + 1
-      else:
-        inc k
-    doAssert maxCursorUp > 2,
-      "idle Ctrl-C reset only walked the cursor up " & $maxCursorUp &
-      " rows; a multi-row draft needs more (stale echoRows was 0).\n" &
-      tty.dumpFramesAround("❯")
-    # The prompt and the assistant reply above it must both survive on the
-    # live grid, and there must be exactly one resting footer row.
+    # The cancelled draft's wrapped rows must be gone, not left as duplicate
+    # footer rows: exactly one resting footer row remains.
     tty.expectOnScreen "❯"
-    tty.expectOnScreen "above-line-marker stays put"
     tty.expectAlive()
     var restingFooterRows = 0
     for row in tty.rows():
       if row.strip == "○0%": inc restingFooterRows
     doAssert restingFooterRows == 1,
       "expected one resting footer row, found " & $restingFooterRows &
-      ": stale echoRows left the cancelled draft's extra rows uncleared.\n" &
+      ": the cancelled draft's wrapped rows were not cleared.\n" &
       tty.dumpFramesAround("○0%")
+    # The scrollback-eating defect compounds: each cancel erases the row
+    # directly above the prompt, so after a few more cancels the assistant
+    # reply above is gone from the live grid. Repeat and assert it survives.
+    for i in 2..3:
+      tty.send "more draft"
+      tty.drain(100)
+      tty.send "\x03"
+      tty.drain(300)
+    tty.expectOnScreen "above-line-marker stays put"
+    tty.expectOnScreen "❯"
+    tty.expectAlive()
+    # The editor is live at the right row and accepts fresh input.
+    tty.send "after cancel"
+    tty.expectTypedAtPrompt "after cancel"
 
   test "multiline prompt and queued multiline autosend":
     let root = newFixture("multiline_visual_test")

@@ -871,7 +871,8 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
     var line = ""
     var echoRows = 0
     var cmdWasQuit = false
-    if consumeQueuedInput(line, echoRows, cmdWasQuit):
+    var wasInterrupt = false
+    if consumeQueuedInput(line, echoRows, cmdWasQuit, wasInterrupt):
       navigatedUp = false
       editor.echoRows = echoRows
       if line.strip == "":
@@ -879,6 +880,13 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
         releaseIdleSubmittedInput()
         return ""
       return line
+    if wasInterrupt:
+      # An idle Ctrl-C / ESC: the input thread already repainted the empty
+      # prompt in place, so no walk-back. Just clear the idle-submitted flag
+      # and return to the prompt loop.
+      navigatedUp = false
+      releaseIdleSubmittedInput()
+      return ""
     if cmdWasQuit:
       done = true
       return ""
