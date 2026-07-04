@@ -431,6 +431,114 @@ suite "session: session lock acquire/release":
     check activeLockPath == lp
     check readFile(lp).strip == $getCurrentProcessId()
 
+suite "session: directory lock acquire/release":
+  var activeDirBefore: string
+
+  setup:
+    activeDirBefore = activeDirLockPath
+
+  teardown:
+    if activeDirLockPath != "": releaseActiveDirLock()
+    activeDirLockPath = activeDirBefore
+
+  test "acquire creates the lock file holding our pid":
+    let cwd = "/home/carlo/p/test-dir-lock"
+    acquireDirLock(cwd)
+    let lp = dirLockPathFor(cwd)
+    check fileExists(lp)
+    check readFile(lp).strip == $getCurrentProcessId()
+    check activeDirLockPath == lp
+
+  test "acquiring a held lock raises DirLocked with guidance":
+    let cwd = "/home/carlo/p/test-dir-lock-live"
+    acquireDirLock(cwd)
+    let lp = dirLockPathFor(cwd)
+    var msg = ""
+    try:
+      acquireDirLock(cwd)
+      fail()
+    except DirLocked as e:
+      msg = e.msg
+    check cwd in msg
+    check lp in msg
+    check $getCurrentProcessId() in msg
+    check "stale" in msg.toLowerAscii
+
+  test "releaseDirLock removes the file":
+    let cwd = "/home/carlo/p/test-dir-lock-rel"
+    acquireDirLock(cwd)
+    let lp = dirLockPathFor(cwd)
+    check fileExists(lp)
+    releaseDirLock(cwd)
+    check not fileExists(lp)
+    check activeDirLockPath == ""
+
+  test "releaseActiveDirLock removes the held file":
+    let cwd = "/home/carlo/p/test-dir-lock-active"
+    acquireDirLock(cwd)
+    let lp = dirLockPathFor(cwd)
+    check activeDirLockPath == lp
+    releaseActiveDirLock()
+    check not fileExists(lp)
+    check activeDirLockPath == ""
+
+  test "release of a never-held lock is a no-op":
+    releaseDirLock("/home/carlo/p/test-dir-lock-never")
+    check activeDirLockPath == ""
+
+  test "acquire on empty path is a no-op":
+    acquireDirLock("")
+    check activeDirLockPath == ""
+
+  test "distinct cwds get distinct locks":
+    let cwdA = "/home/carlo/p/a"
+    let cwdB = "/home/carlo/p/b"
+    acquireDirLock(cwdA)
+    acquireDirLock(cwdB)
+    check dirLockPathFor(cwdA) != dirLockPathFor(cwdB)
+    check fileExists(dirLockPathFor(cwdA))
+    check fileExists(dirLockPathFor(cwdB))
+    releaseDirLock(cwdB)
+    releaseDirLock(cwdA)
+
+  test "stale lock whose owner pid is dead is auto-deleted and acquired":
+    let cwd = "/home/carlo/p/test-dir-lock-stale"
+    let sleepCmd = when defined(windows): "cmd /c exit 0" else: "true"
+    var p = startProcess(sleepCmd, options = {poEvalCommand})
+    let deadPid = p.processID()
+    discard p.waitForExit()
+    p.close()
+    check deadPid != getCurrentProcessId()
+
+    let lp = dirLockPathFor(cwd)
+    createDir(parentDir(lp))
+    writeFile(lp, $deadPid)
+    check fileExists(lp)
+
+    acquireDirLock(cwd)
+    check activeDirLockPath == lp
+    check readFile(lp).strip == $getCurrentProcessId()
+
+  test "corrupt lock (non-numeric pid) is reclaimed and acquired":
+    let cwd = "/home/carlo/p/test-dir-lock-corrupt"
+    let lp = dirLockPathFor(cwd)
+    createDir(parentDir(lp))
+    writeFile(lp, "not-a-pid")
+    check fileExists(lp)
+    acquireDirLock(cwd)
+    check activeDirLockPath == lp
+    check readFile(lp).strip == $getCurrentProcessId()
+
+  test "empty lock file is reclaimed and acquired":
+    let cwd = "/home/carlo/p/test-dir-lock-empty"
+    let lp = dirLockPathFor(cwd)
+    createDir(parentDir(lp))
+    writeFile(lp, "")
+    check fileExists(lp)
+    acquireDirLock(cwd)
+    check activeDirLockPath == lp
+    check readFile(lp).strip == $getCurrentProcessId()
+
 suite "session: prompt draft sidecar":
   var tmpDir: string
   var savedXdg: string

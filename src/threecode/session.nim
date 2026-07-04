@@ -344,6 +344,105 @@ proc releaseActiveSessionLock*() =
     try: removeFile(activeLockPath) except OSError: discard
     activeLockPath = ""
 
+# ---------------------------------------------------------------------------
+# Directory locks.
+#
+# Only one 3code process may hold a given working directory at a time: two
+# sessions editing the same cwd would race on prompt drafts, the cwd session
+# index, and the per-cwd pending draft file. The lock is keyed by the
+# collision-free mangled cwd (same scheme as the cwd session index and the
+# pending draft path) so distinct directories never share a lock.
+#
+# Same atomic-create + stale-reclaim pattern as the session lock: POSIX uses
+# open(O_CREAT|O_EXCL), Windows uses CreateFileW(CREATE_NEW). On collision
+# we read the holding pid; if that process is no longer alive the stale lock
+# is removed and acquisition retries once. Only a genuinely-live holder raises
+# DirLocked. The currently-held dir-lock path is tracked in a module global
+# so an exit proc can release whatever the process most recently held.
+# ---------------------------------------------------------------------------
+
+var activeDirLockPath* = ""
+
+proc dirLockDir*(): string =
+  getTempDir() / "3code" / "dirlock"
+
+proc dirLockPathFor*(cwd: string): string =
+  dirLockDir() / (mangleCwd(cwd) & ".lock")
+
+type DirLocked* = object of CatchableError
+
+proc lockHeldDirError*(cwd, lockPath, owner: string): ref DirLocked =
+  var mtime = getTime()
+  try: mtime = getLastModificationTime(lockPath) except OSError: discard
+  newException(DirLocked,
+    "directory \"" & cwd & "\" is already open" &
+    (if owner.len > 0: " (pid " & owner & ")" else: "") &
+    " in another running 3code process. Lock file: " & lockPath &
+    " (last modified " & format(mtime.local, "yyyy-MM-dd HH:mm:ss") & ")." &
+    " If no 3code is running, the lock is stale and the pid check failed —" &
+    " delete it: " & lockPath)
+
+proc tryCreateDirLockFile(lockPath: string; pid: string): int =
+  ## Atomically create `lockPath` and write `pid` into it. Returns 0 on
+  ## success, -1 if the file already exists (collision). Any other failure
+  ## raises DirLocked.
+  when defined(posix):
+    let p = lockPath.cstring
+    let fd = open(p, O_WRONLY or O_CREAT or O_EXCL, 0o600.cint)
+    if fd < 0:
+      let errno = osLastError()
+      if errno.int32 == EEXIST.int32: return -1
+      raise newException(DirLocked,
+        "could not create directory lock " & lockPath & ": " & osErrorMsg(errno))
+    writeOwnerPid(fd, pid)
+    discard close(fd)
+    0
+  else:
+    let h = winlean.createFileW(newWideCString(lockPath),
+                                WingenGenericWrite, 0'i32, nil,
+                                WinCreateNew, WinFileAttributeNormal, 0)
+    if h == INVALID_HANDLE_VALUE:
+      let errno = osLastError()
+      if errno.int32 == 80'i32 or errno.int32 == 183'i32: return -1
+      raise newException(DirLocked,
+        "could not create directory lock " & lockPath & ": " & osErrorMsg(errno))
+    writeOwnerPid(h, pid)
+    discard winlean.closeHandle(h)
+    0
+
+proc acquireDirLock*(cwd: string) =
+  ## Atomically claim the directory lock for `cwd`. If a lock exists but its
+  ## owner process is no longer alive, it's treated as stale and removed
+  ## automatically, then acquisition retries once. Raises DirLocked only when
+  ## another live 3code process genuinely holds the lock.
+  if cwd == "": return
+  let dir = dirLockDir()
+  try: createDir(dir) except OSError: discard
+  let lockPath = dirLockPathFor(cwd)
+  let pid = $getCurrentProcessId()
+  for attempt in 0 .. 1:
+    if tryCreateDirLockFile(lockPath, pid) >= 0:
+      activeDirLockPath = lockPath
+      return
+    let owner = readOwnerPid(lockPath)
+    var ownerPid = -1
+    try: ownerPid = parseInt(owner) except ValueError: discard
+    if ownerPid > 0 and pidAlive(ownerPid):
+      raise lockHeldDirError(cwd, lockPath, owner)
+    try: removeFile(lockPath) except OSError: discard
+  raise lockHeldDirError(cwd, lockPath, readOwnerPid(lockPath))
+
+proc releaseDirLock*(cwd: string) =
+  if cwd == "": return
+  let lockPath = dirLockPathFor(cwd)
+  try: removeFile(lockPath) except OSError: discard
+  if activeDirLockPath == lockPath: activeDirLockPath = ""
+
+proc releaseActiveDirLock*() =
+  if activeDirLockPath != "":
+    try: removeFile(activeDirLockPath) except OSError: discard
+    activeDirLockPath = ""
+
 proc listSessionPaths*(): seq[string] =
   let d = sessionDir()
   if not dirExists(d): return

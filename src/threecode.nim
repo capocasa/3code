@@ -152,6 +152,7 @@ proc cleanup() {.noconv.} =
   fatprompt.stopDraftFlusher()
   fatprompt.flushDraftNow()
   releaseActiveSessionLock()
+  releaseActiveDirLock()
 
 proc main() =
   setupTlsEnv()
@@ -289,8 +290,14 @@ proc main() =
       restoredDraft = loadPendingDraft(session.cwd)
 
   try:
+    acquireDirLock(session.cwd)
+  except DirLocked as e:
+    die(e.msg, ExitConfig)
+
+  try:
     acquireSessionLock(session.savePath)
   except SessionLocked as e:
+    releaseDirLock(session.cwd)
     die(e.msg, ExitConfig)
 
   if prompt != "" and not resume and not forceInteractive:
