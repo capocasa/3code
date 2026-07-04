@@ -202,6 +202,8 @@ type LiveMarkdownStream* = object
   liveBarBelow: bool
   liveLineEmitted: bool
   liveCol: int
+  partialActive: bool
+  partialStartCol: int
 
 var apiLiveStream: LiveMarkdownStream
 
@@ -948,7 +950,14 @@ proc quietWatchLoop() {.thread.} =
       if now - lastFiredMs > 10_000:  # Don't hammer shutdown every 500ms
         lastFiredMs = now
         requestQuietShutdown()
-    sleep 500
+    # Sleep in short increments so the loop notices `quietStop` promptly and
+    # `stopQuietWatch`'s joinThread returns without a long stall. A single
+    # long nanosleep can leave the thread unscheduled past the join window
+    # under heavy GC pressure from concurrent streaming allocations.
+    var slept = 0
+    while slept < 500 and not quietStop.load(moRelaxed):
+      sleep 50
+      slept += 50
 
 proc startQuietWatch() =
   if quietRunning: return
@@ -1005,25 +1014,23 @@ proc startContent(s: var LiveMarkdownStream, slurpedNow: int) =
   let hadBufferedSubmit = bufferedSubmitTurn.load(moRelaxed)
   bufferedSubmitTurn.store(false, moRelaxed)
   stopSpinner(clearLiveFooter = false)
-  ## Pause the bar-tick thread across the footer teardown + content start so it
-  ## can't repaint the footer between prepareAssistantContentStart (which erases
-  ## the footer area) and writeAssistantBullet/paintBarBelow (which anchor the
-  ## new content).  A stray repaint in that window leaves a gap row in
-  ## scrollback.
-  let barTicks = stopBarTick()
+  # Pause the bar-tick thread across the footer teardown + content start so it
+  # can't repaint the footer between prepareAssistantContentStart (which erases
+  # the footer area) and the first `renderLiveContent` (which anchors the
+  # partial + new footer). A stray repaint in that window leaves a gap row in
+  # scrollback.
+  # The bar-tick thread is NOT restarted here: it repaints the footer via
+  # `renderFooter`, which erases the volatile live-content rows without
+  # redrawing them, clobbering the streaming partial. The partial repaint
+  # (`renderLiveContent`) keeps the bar label fresh on each chunk instead.
+  discard stopBarTick()
   termengine.prepareAssistantContentStart(
     inputThreadRunning,
     inputEditor,
     oldFooter,
     hadBufferedSubmit,
     flush = false)
-  termui.withTerminalWriteLock:
-    writeAssistantBullet()
-    s.started = true
-    paintBarBelow(s.currentLabel(slurpedNow))
-    s.liveBarBelow = true
-  if barTicks > 0:
-    startBarTick(s.baseLabel)
+  s.started = true
 
 proc advanceLiveCol(s: var LiveMarkdownStream, text: string) =
   let termW = max(1, try: terminalWidth() except CatchableError: 80)
@@ -1072,10 +1079,74 @@ proc writeRendered(s: var LiveMarkdownStream, bytes: string,
       s.liveBarBelow = true
 
 proc suppressLiveAssistantStream(): bool =
-  ## Streaming assistant text and an always-live editor both need the terminal
-  ## cursor. Prefer prompt stability: keep the spinner/bar live, then let the
-  ## caller commit the completed assistant text through `writeTranscriptWithFatPrompt`.
-  liveEditorFooterAnchored()
+  ## Streaming assistant text writes to the scrollback area while the live
+  ## editor occupies the fat-prompt rows below. Both are serialized by the
+  ## terminal write lock, and the caret is hidden for the whole turn, so the
+  ## only real conflict would be an editor redraw landing on a content row.
+  ## The redraw path (`reserveEditorFooterForRedraw` + `renderFooter`) paints
+  ## only the reserved footer rows, never the scrollback, so streaming is safe
+  ## alongside a live editor. Returning false unconditionally lets every
+  ## provider's content flow to the screen as it arrives instead of being
+  ## held back and dumped at end of turn.
+  false
+
+proc partialContentRows(s: LiveMarkdownStream): seq[string] =
+  ## The volatile row(s) for the in-progress line: the bullet on the first
+  ## emitted line, then the inline-markdown-rendered pending text wrapped to
+  ## the terminal width. These rows are live chrome (erased/rewritten each
+  ## chunk) until a newline commits them to real scrollback.
+  let termW = max(1, try: terminalWidth() except CatchableError: 80)
+  let bodyW = max(1, termW - 2)
+  let styled = assistantTextBytes(applyInlineMd(s.pendingLine))
+  if s.md.firstEmit:
+    let chunks = wrapAnsi(styled, bodyW)
+    if chunks.len == 0:
+      result.add "\u25CF "
+    else:
+      for k, chunk in chunks:
+        if k == 0:
+          result.add AssistantTextStyle & "\u25CF " & Reset & chunk
+        else:
+          result.add "  " & chunk
+  else:
+    let chunks = wrapAnsi(styled, bodyW)
+    if chunks.len == 0:
+      result.add "  "
+    else:
+      for chunk in chunks:
+        result.add "  " & chunk
+
+proc renderPendingPartial(s: var LiveMarkdownStream, slurpedNow: int) =
+  ## Paint the accumulating `pendingLine` as volatile live content so text
+  ## flows as fast as chunks arrive, instead of being held back until a
+  ## newline. The partial rows are erased and rewritten each chunk (they are
+  ## live chrome, not scrollback); at a newline `commitPendingLine` sends the
+  ## line through the block-level markdown renderer to real scrollback, so
+  ## fences/tables/word-wrap match replay exactly.
+  s.startContent(slurpedNow)
+  emitFatPromptEvent setBarEvent(s.currentLabel(slurpedNow))
+  termengine.renderLiveContent(s.partialContentRows(),
+    footerFrame(fatPromptState), inputThreadRunning, inputEditor,
+    currentTermW())
+  s.partialActive = true
+
+proc commitPendingLine(s: var LiveMarkdownStream, slurpedNow: int) =
+  ## Commit the accumulated `pendingLine` to real scrollback through the
+  ## block-level markdown renderer. `appendTranscript` walks up past the
+  ## volatile partial (still tracked in the engine) to erase it, writes the
+  ## committed render, and re-anchors the footer; then the partial tracking
+  ## is cleared so the next line starts fresh.
+  let isFirstLine = s.md.firstEmit
+  let body = s.captureMd(s.pendingLine)
+  s.pendingLine = ""
+  let rendered =
+    if isFirstLine and body.len > 0:
+      assistantTextBytes(AssistantTextStyle & "\u25CF " & Reset & body)
+    else:
+      assistantTextBytes(body)
+  commitTranscriptBytes(rendered)
+  termengine.clearLiveContent()
+  s.partialActive = false
 
 proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
   if chunk.len == 0: return
@@ -1086,9 +1157,7 @@ proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
     var i = 0
     while i < data.len:
       if data[i] == '\n':
-        let rendered = assistantTextBytes(s.captureMd(s.pendingLine))
-        s.pendingLine = ""
-        s.writeRendered(rendered, slurpedNow)
+        s.commitPendingLine(slurpedNow)
         inc i
       else:
         let charLen = utf8LenAt(data, i)
@@ -1097,6 +1166,8 @@ proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
           break
         s.pendingLine.add data[i ..< i + charLen]
         i += charLen
+    if s.pendingLine.len > 0:
+      s.renderPendingPartial(slurpedNow)
     stdout.flushFile()
 
 proc finishContent*(s: var LiveMarkdownStream, slurpedNow: int) =
@@ -1105,15 +1176,11 @@ proc finishContent*(s: var LiveMarkdownStream, slurpedNow: int) =
     s.pendingLine.add s.utf8Pending
     s.utf8Pending = ""
   if s.pendingLine.len > 0:
-    let rendered = assistantTextBytes(s.captureMd(s.pendingLine))
-    s.pendingLine = ""
-    s.writeRendered(rendered, slurpedNow)
-  let tail = assistantTextBytes(s.captureMd("", finish = true))
-  s.writeRendered(tail, slurpedNow)
-  if s.started and s.liveBarBelow:
-    paintBarPrompt(s.currentLabel(slurpedNow))
-    s.liveBarAtCursor = true
-    s.liveBarBelow = false
+    s.commitPendingLine(slurpedNow)
+  discard s.captureMd("", finish = true)
+  if s.partialActive:
+    termengine.clearLiveContent()
+    s.partialActive = false
 
 when defined(posix):
   var
@@ -1195,6 +1262,11 @@ proc apiBeforeCall*(lastPromptTokens, window: int): string =
   result = baseLabel
   apiLiveStream = initLiveMarkdownStream(baseLabel)
   contentStreamedLive = false
+  # A turn can end without `finishContent` clearing the volatile live-content
+  # rows (interrupt before any content, a thrown error). Reset the engine's
+  # tracker so a leftover from the previous turn can't corrupt this turn's
+  # walk-up.
+  termengine.clearLiveContent()
   setSpinTicker("")
   let startsAfterReceipt = followupStartsAfterReceipt
   followupStartsAfterReceipt = false

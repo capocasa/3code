@@ -40,6 +40,10 @@ type
     ## the editor's `renderRow` at each walk-up.
     paintedFooterRows: int
     toolViewportRows: seq[string]
+    ## Volatile in-progress assistant content above the footer during live
+    ## streaming. Like the tool viewport it is erased and rewritten each
+    ## frame; committed lines go to real scrollback via `appendTranscript`.
+    liveContentRows: seq[string]
     editorRedrawPending: bool
     editorRedrawFooterRows: int
 
@@ -63,7 +67,8 @@ proc walkUp(e: TerminalEngine; ed: var minline.LineEditor): int =
   ## Rows from the cursor to the top of the volatile region (ticker row).
   ## Always derived from live editor + footer state. This is the number of
   ## rows to move up before erasing the volatile region.
-  editorRowsAboveCursor(ed) + e.paintedFooterRows + e.toolViewportRows.len
+  editorRowsAboveCursor(ed) + e.paintedFooterRows + e.toolViewportRows.len +
+    e.liveContentRows.len
 
 proc noteFooterPainted(e: var TerminalEngine; footerRowsAboveEditor: int) =
   e.paintedFooterRows = max(0, footerRowsAboveEditor)
@@ -239,6 +244,80 @@ proc clearToolViewport*(frame: FooterFrame; inputRunning: bool;
     {.gcsafe.} =
   {.cast(gcsafe).}:
     defaultEngine.clearToolViewport(frame, inputRunning, editor, termW)
+
+proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
+                        frame: FooterFrame; inputRunning: bool;
+                        editor: ptr minline.LineEditor;
+                        termW = 0) {.gcsafe.} =
+  ## Replace the volatile in-progress assistant content (plus the footer)
+  ## in one synchronized frame. The partial content rows are live chrome,
+  ## erased and rewritten on each streaming chunk; committed lines are sent
+  ## to real scrollback via `appendTranscript`. Mirrors `renderToolViewport`
+  ## but draws below committed scrollback, above the token bar.
+  {.cast(gcsafe).}:
+    termio.withTerminalWriteLock:
+      let width = if termW > 0: termW else:
+        try: terminalWidth() except CatchableError: 0
+      let bytes = frame.footerFrameBytes(width)
+      let footerRowsAboveEditor = frame.rowsAboveEditor(width)
+      stdout.write termio.SyncBegin
+      stdout.write "\x1b[?25l"
+      if inputRunning and editor != nil:
+        refreshEditorWidth(editor[])
+        let up = max(0, e.walkUp(editor[]))
+        stdout.write "\r"
+        if up > 0:
+          stdout.write "\x1b[" & $up & "A"
+        stdout.write "\x1b[J"
+        e.liveContentRows = @rows
+        for row in rows:
+          stdout.write row
+          stdout.write "\r\n"
+        if bytes.len > 0:
+          stdout.write bytes
+          stdout.write "\r\n"
+        editor[].renderRow = 0
+        stdout.write editor[].redrawBytes(synchronized = false)
+        # Keep the caret hidden for the whole turn (beginTurn hid it). The
+        # streaming partial repaint must not re-show it, otherwise the
+        # visible-caret signal can't distinguish a live partial from idle.
+        if frame.kind == ffClear:
+          e.noteNoFooter()
+        else:
+          e.noteFooterPainted(footerRowsAboveEditor)
+      else:
+        e.liveContentRows = @rows
+        for row in rows:
+          stdout.write row
+          stdout.write "\r\n"
+        if bytes.len > 0:
+          stdout.write bytes
+        e.noteNoFooter()
+      stdout.write termio.SyncEnd
+      stdout.flushFile
+
+proc renderLiveContent*(rows: openArray[string]; frame: FooterFrame;
+                        inputRunning: bool; editor: ptr minline.LineEditor;
+                        termW = 0) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    defaultEngine.renderLiveContent(rows, frame, inputRunning, editor, termW)
+
+proc clearLiveContent*(e: var TerminalEngine) {.gcsafe.} =
+  ## Drop the tracked volatile live-content rows without painting. Called
+  ## after a line is committed to real scrollback so the next partial starts
+  ## fresh and the walk-up no longer counts the just-committed rows.
+  {.cast(gcsafe).}:
+    e.liveContentRows = @[]
+
+proc clearLiveContent*() {.gcsafe.} =
+  {.cast(gcsafe).}:
+    defaultEngine.clearLiveContent()
+
+proc liveContentRowCount*(e: TerminalEngine): int {.gcsafe.} =
+  e.liveContentRows.len
+
+proc paintedFooterRowCount*(e: TerminalEngine): int {.gcsafe.} =
+  e.paintedFooterRows
 
 proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
                        liveAnchored: bool;
