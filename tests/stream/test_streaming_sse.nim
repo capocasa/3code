@@ -46,7 +46,7 @@ proc makeSseTruncatedToolDelta(cmd, id: string, cutAfter: int): string =
   # NO finish_reason, NO [DONE] — truncated
 
 proc makeSseCompleteContent(text, id: string): string =
-  ## Complete SSE stream with plain text content (no tool calls).
+  ## Complete SSE stream with plain text content - no tool calls.
   let d = $(%*{"choices":[{"index":0,"delta":{"content":text},"finish_reason":"stop"}],"id":id})
   result = "data: " & d & "\n\n" & "data: [DONE]\n\n"
 
@@ -168,7 +168,7 @@ suite "streaming SSE tool-call accumulation":
     server.socket.close()
     closeCachedStreamConn()
 
-  test "complete plain content (no tool calls)":
+  test "complete plain content - no tool calls":
     let server = newSseServer(makeSseCompleteContent("Hello from the model!", "id-3"))
     spawn serveThread(server)
     var usage = Usage()

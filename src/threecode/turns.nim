@@ -174,7 +174,7 @@ proc commitAssistantItem(content: string; restoreEditor = true;
   let reserveFooter = restoreEditor
   let collapseGap = reserveFooter and finalBeforeIdle
   if content.strip.len == 0:
-    var bytes = GreyFg & "  (empty reply — no content, no tool calls)" & Reset
+    var bytes = GreyFg & "empty reply - no content, no tool calls" & Reset
     let receipt = if attachReceipt: pendingReceiptBytes() else: ""
     if attachReceipt and receipt.len > 0:
       bytes.add "\r\n"

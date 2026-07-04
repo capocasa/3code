@@ -920,7 +920,7 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
     # 200 with a well-formed but empty message — treat as an error so the
     # turn loop surfaces it instead of silently advancing with nothing.
     result.errBody = body
-    result.errMsg = "empty completion (no content, no tool calls)"
+    result.errMsg = "empty completion - no content, no tool calls"
     return
   let u2 = j{"usage"}
   if u2 != nil and u2.kind == JObject:

@@ -90,7 +90,7 @@ proc commandItem*(name, body: string; ok = true): TranscriptItem =
                  attachSeparator: true)
 
 proc emptyAssistantBytes(attachReceipt: bool; receipt = ""): string =
-  result.add GreyFg & "  (empty reply — no content, no tool calls)" & Reset
+  result.add GreyFg & "empty reply - no content, no tool calls" & Reset
   if attachReceipt and receipt.len > 0:
     result.add "\r\n"
     result.add receipt

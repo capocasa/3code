@@ -713,9 +713,14 @@ proc renderSession*(session: Session, messages: JsonNode): string =
       let reasoning = m{"reasoning_content"}.getStr("")
       if reasoning.len > 0:
         emitRecord s, "reasoning", reasoning
-      emitRecord s, "assistant", m{"content"}.getStr("")
+      let content = m{"content"}.getStr("")
       let tcs = m{"tool_calls"}
-      if tcs != nil and tcs.kind == JArray:
+      let hasToolCalls = tcs != nil and tcs.kind == JArray and tcs.len > 0
+      if content.len == 0 and not hasToolCalls:
+        emitRecord s, "assistant", "empty reply - no content, no tool calls"
+      else:
+        emitRecord s, "assistant", content
+      if hasToolCalls:
         for tc in tcs:
           emitToolUse s, tc
       emitTokens s, m{"usage"}
