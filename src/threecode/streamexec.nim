@@ -333,7 +333,11 @@ export DEBIAN_FRONTEND=noninteractive
       let b = resolveBash()
       if b == "":
         return ("bash not found", 127, cap)
-      startProcess(b, args = ["-c", wrapped],
+      # Login shell: `/etc/profile` prepends /usr/local/bin:/usr/bin:/bin
+      # to PATH. A plain `-c` shell inherits only the Windows PATH, which
+      # has none of the MSYS2 tools, so `ls`, `cat`, `grep` etc. would be
+      # "command not found".
+      startProcess(b, args = ["-lc", wrapped],
                    options = {poStdErrToStdOut, poUsePath})
   startToolCancelWatcher(p.processID)
   startToolTimeoutWatcher(cap)
