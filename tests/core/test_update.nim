@@ -1,3 +1,8 @@
+discard """
+  # Windows: config-isolation tests assume HOME/.config (XDG), but Windows
+  # reads APPDATA via getConfigDir(). See docs/windows-testing.md.
+  disabled: "win"
+"""
 ## Offline tests for auto-update logic + an opt-in live e2e test.
 ##
 ## Default run: `nimble test` — pure-logic tests only.

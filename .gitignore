@@ -1,11 +1,13 @@
 /3code
 build/
-tests/test_*
-!tests/test_*.nim
-!tests/test_http_nonstream.nims
-tests/output/
+testdata/output/
 nimcache/
 config.local.nims
+
+# testament drops compiled test binaries next to their source (no extension)
+tests/*/*
+!tests/*/*.nim
+!tests/*/*.nims
 
 .archive/
 .agents/

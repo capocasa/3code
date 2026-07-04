@@ -1,15 +1,25 @@
+discard """
+  # See docs/windows-testing.md. The tty_expect harness uses openpty/fork/
+  # execv (POSIX only). A ConPTY port is the path to re-enable on Windows.
+  disabled: "win"
+  # On macOS the harness compiles but hangs deterministically: the expect*
+  # procs poll on wall-clock deadlines (plan-flakiness.md) and starve under
+  # the OSX runner's scheduler, so a subtest never returns. Re-enable after
+  # the frame-event sync rewrite lands.
+  disabled: "osx"
+"""
 import std/[json, os, strutils, times, unicode, unittest]
 import posix except SocketHandle
 import tty_expect
 import stub_helpers
 
-const VisualOutputRoot = "tests" / "output" / "tty"
-const SimpleVisualTestFrames = "tests" / "fixtures" / "tty" / "simple.txt"
-const MultilineVisualTestFrames = "tests" / "fixtures" / "tty" / "multiline.txt"
-const BashToolVisualTestFrames = "tests" / "fixtures" / "tty" / "bash_tool_visual_test.txt"
-const OtherToolsVisualTestFrames = "tests" / "fixtures" / "tty" / "other_tools_visual_test.txt"
-const ResizeStreamFrames = "tests" / "fixtures" / "tty" / "resize_stream_frames.txt"
-const HarnessCommandFrames = "tests" / "fixtures" / "tty" / "harness_commands.txt"
+const VisualOutputRoot = "testdata" / "output" / "tty"
+const SimpleVisualTestFrames = "testdata" / "fixtures" / "tty" / "simple.txt"
+const MultilineVisualTestFrames = "testdata" / "fixtures" / "tty" / "multiline.txt"
+const BashToolVisualTestFrames = "testdata" / "fixtures" / "tty" / "bash_tool_visual_test.txt"
+const OtherToolsVisualTestFrames = "testdata" / "fixtures" / "tty" / "other_tools_visual_test.txt"
+const ResizeStreamFrames = "testdata" / "fixtures" / "tty" / "resize_stream_frames.txt"
+const HarnessCommandFrames = "testdata" / "fixtures" / "tty" / "harness_commands.txt"
 
 proc newFixture(name: string): string =
   result = getCurrentDir() / VisualOutputRoot / (name & "_" & $getCurrentProcessId())

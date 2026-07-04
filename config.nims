@@ -17,6 +17,7 @@ proc getVersionString(): string =
       (if gorge("git status --porcelain=v1").strip() != "": "-unstaged" else: "")
 
 switch("path", "src")
+switch("path", "tests")  # test helpers (tty_expect, stub_helpers, minline_testutils)
 switch("d", "ssl")
 switch("d", "testPlainHttp")
 

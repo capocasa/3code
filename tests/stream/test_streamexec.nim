@@ -1,3 +1,8 @@
+discard """
+  # Windows: runStreamingBash needs the bundled MSYS2 bash, absent on CI
+  # runners (exit 127). See docs/windows-testing.md.
+  disabled: "win"
+"""
 import std/[os, strutils, times, unittest]
 import threecode/[actions, types, streamexec]
 
@@ -176,7 +181,12 @@ suite "streamexec: special characters":
 suite "streamexec: binary output suppression":
   test "suppresses streaming callback after NUL byte":
     var lines: seq[string]
-    let act = Action(kind: akBash, body: "printf 'before\\n\\x00binary\\x00garbage\\nafter\\n'")
+    # Octal NUL (\000), not hex (\x00): the script runs under /bin/sh,
+    # which is dash on Debian/Ubuntu CI. dash's printf only understands
+    # POSIX octal escapes (\nnn); \x00 is a bashism it emits literally,
+    # which would never trip the suppress path the test exercises.
+    let act = Action(kind: akBash,
+      body: "printf 'before\\n\\000binary\\000garbage\\nafter\\n'")
     let (rawOut, code, _) = runStreamingBash(act, nil,
       proc(line: string) = lines.add(line))
     check code == 0

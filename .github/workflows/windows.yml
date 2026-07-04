@@ -41,15 +41,28 @@ jobs:
         run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
 
       - name: Run tests
-        # The `when defined(windows):` suite in tests/test_streamexec.nim
-        # asserts the no-bundled-bash contract (resolveBash() == "" and
-        # runStreamingBash returns 127 on a clean runner, since no installer
-        # has staged MSYS2 into the bundle path). The POSIX suites guard the
-        # shared launcher logic both platforms use.
-        # nimble's exec() can't launch .sh directly on Windows (uses
-        # CreateProcess, not the bash shell), so we invoke bash explicitly.
-        run: bash tools/test.sh
-        timeout-minutes: 20
+        # nimble test runs Nim's bundled testament. Tests that can't run on
+        # Windows yet (the PTY harness) self-disable via disabled:"win"
+        # specs; see docs/windows-testing.md for the gap and fix path. The
+        # timeout is generous because the Windows runner compiles each test
+        # separately (~15-20s each) with no shared cache; actual test runtime
+        # is only ~4-5 min.
+        #
+        # git-bash does not reliably propagate nimble's non-zero exit code,
+        # so run testament directly and propagate $? explicitly. Without this
+        # a failing testament reports green (only the OSError shows in the
+        # log), which silently masks regressions.
+        run: |
+          if command -v testament >/dev/null 2>&1; then
+            testament --print --megatest:off all
+          else
+            for d in tests/*/; do
+              for f in "$d"*.nim; do
+                nim c -r --path:src --path:tests "$f" || exit 1
+              done
+            done
+          fi
+        timeout-minutes: 30
 
       - name: Package (Windows) - bundle OpenSSL DLLs alongside .exe
         shell: pwsh
@@ -76,6 +89,7 @@ jobs:
 
       - name: Upload artifact to 3code.capocasa.dev
         if: github.ref == 'refs/heads/main'
+        continue-on-error: true
         run: |
           curl -f -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-windows-amd64.zip" \
             https://3code.capocasa.dev/main/upload.nim

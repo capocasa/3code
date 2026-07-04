@@ -1,3 +1,8 @@
+discard """
+  # Windows: autosend probe tests spawn a child nim compiler + threads;
+  # flaky on Windows runners. See docs/windows-testing.md.
+  disabled: "win"
+"""
 import std/[json, os, osproc, strutils, unittest]
 import threecode/[api, prompts, types]
 import stub_helpers

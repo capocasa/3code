@@ -27,7 +27,7 @@ var
 
 const providerStub {.booldefine.} = false
 const httpStub {.booldefine.} = false
-  ## Test-only define. When true, `tests/stub/http.nim` is included and
+  ## Test-only define. When true, `testdata/stub/http.nim` is included and
   ## `callHttp` is replaced by `callHttpStub` so the non-streaming path's
   ## body→assistantMsg reconstruction, usage parsing, retry categorization,
   ## and xml-tool-call promotion can be unit-tested without a network.
@@ -744,7 +744,7 @@ when httpStub:
   ## site. Shares this module's scope (`StreamOutcome`,
   ## `buildBatchAssistantMsg`, `parseUsage`, `hookProgress`, etc.) so the
   ## stub returns the same shape the real `callHttp` builds.
-  include "../../tests/stub/http.nim"
+  include "../../testdata/stub/http.nim"
 
 proc callHttp(url, key, bodyStr: string; baseLabel: string;
               slurped: var int): StreamOutcome =
@@ -1107,10 +1107,10 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   else: discard
 
 when providerStub:
-  ## Test-only stub provider. Lives in `tests/stub/provider.nim` and is
+  ## Test-only stub provider. Lives in `testdata/stub/provider.nim` and is
   ## `include`d here so it shares this module's scope (private hook
   ## callbacks, retry state, `ApiError`, etc.) without exporting them.
-  include "../../tests/stub/provider.nim"
+  include "../../testdata/stub/provider.nim"
 
 proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
   when providerStub:

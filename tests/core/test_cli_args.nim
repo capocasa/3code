@@ -1,3 +1,8 @@
+discard """
+  # Windows: spawns the 3code binary with path/env assumptions (session
+  # list, skills dir) that differ on Windows. See docs/windows-testing.md.
+  disabled: "win"
+"""
 import std/[os, osproc, strutils, times, unittest]
 import threecode/session
 
@@ -41,6 +46,15 @@ suite "cli --list cap and short-flag stacking":
     tmp = getTempDir() / ("3code-cli-list-" & $getCurrentProcessId() & "-" &
                           $epochTime().int64)
     createDir(tmp)
+    # Resolve symlinks so the cwd key the test seeds under matches the cwd
+    # the spawned binary computes via getCurrentDir(). On macOS getTempDir()
+    # returns /var/folders/... but getcwd() resolves the /var -> /private/var
+    # symlink, so an unresolved seed key would never match and -l would
+    # report "no saved sessions".
+    let savedCwd = getCurrentDir()
+    setCurrentDir(tmp)
+    tmp = getCurrentDir()
+    setCurrentDir(savedCwd)
 
   teardown:
     if dirExists(tmp): removeDir(tmp)

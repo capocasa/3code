@@ -62,6 +62,7 @@ jobs:
 
       - name: Upload artifact to 3code.capocasa.dev
         if: github.ref == 'refs/heads/main'
+        continue-on-error: true
         run: |
           curl -f -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=${{ matrix.artifact }}.${{ matrix.ext }}" \
             https://3code.capocasa.dev/main/upload.nim

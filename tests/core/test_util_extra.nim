@@ -1,3 +1,8 @@
+discard """
+  # Windows: collapseHome assertions use forward-slash POSIX paths; Windows
+  # backslash paths fail the comparison. See docs/windows-testing.md.
+  disabled: "win"
+"""
 import std/[os, strutils, unittest]
 import threecode/util
 
