@@ -301,6 +301,7 @@ suite "terminal visual contract":
     tty.expect "cannot run :provider add while a turn is active"
     tty.continueStubApi()
     tty.expectInHistory "Active command turn complete."
+    tty.expectIdleCaret()  # streaming makes content live before saveSession runs
     tty.expectAlive()  # an active turn that ran colon commands must not exit
     tty.drain(200)
 
@@ -475,12 +476,52 @@ suite "terminal visual contract":
     # Prompt row committed exactly once (not duplicated, not dropped);
     # the reply streamed exactly once (not duplicated, not dropped).
     tty.expectRowAppearsOnce("❯ This is a test prompt")
-    tty.expectCount("This is a test response.", 1, where = "raw")
+    tty.expectCount("This is a test response.", 1, where = "screen")
     tty.expectTokenBar(["○", "↑120", "↓24"])
     tty.drain(200)
     tty.expectMeaningfulFrameArtifact(
       SimpleVisualTestFrames,
       root / "simple_visual_test_actual.txt")
+
+  test "word-level content chunks stream eagerly, not buffered to newline":
+    # Eager streaming: when content arrives in word-level chunks with no
+    # intermediate newline, each chunk must paint the partial line on screen
+    # as it arrives, instead of being held back and dumped at end of turn.
+    # The erase-and-rewrite is real terminal behavior; the committed line in
+    # scrollback appears exactly once (checked on the live grid, not raw,
+    # because the raw byte stream legitimately carries the partial repaints).
+    let root = newFixture("eager_stream")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {"role": "assistant",
+       "content": "Sunlight appears white but is a combination of colors.",
+       "contentChunks": ["Sunlight ", "appears ", "white ", "but is a ", "combination of colors."],
+       "usage": {"promptTokens": 10, "completionTokens": 12,
+                 "totalTokens": 22, "cachedTokens": 0}}
+    ])
+    let tty = startStub(root)
+    defer: tty.close()
+    tty.expect "❯"
+    tty.send "stream\n"
+    # Some recorded frame must show the partial line growing through an
+    # intermediate word WITHOUT the final word yet (eager partial, not a
+    # single end-of-turn dump).
+    var sawIntermediate = false
+    let deadline = epochTime() + 5.0
+    while epochTime() < deadline:
+      tty.drain(5, recordFrame = true)
+      for f in tty.frames:
+        let scr = f.rows.join("\n")
+        if "Sunlight appears white" in scr and
+            "combination" notin scr:
+          sawIntermediate = true
+          break
+      if sawIntermediate: break
+    check sawIntermediate
+    # The committed line lands on the live grid exactly once (the partial
+    # repaints are volatile chrome that the final screen does not double).
+    tty.expectCount("combination of colors.", 1, where = "screen")
+    tty.expect "❯"
 
   test "api retry notice is a harness line in scrollback, not stderr noise":
     # Regression: the retry notice used to be `stderr.writeLine` from the
@@ -946,8 +987,8 @@ suite "terminal visual contract":
     tty.expectInHistory "  queued line two"
     tty.expectInHistory "Queued multiline response."
     # Each reply streamed exactly once (not duplicated, not dropped).
-    tty.expectCount("First multiline response.", 1, where = "raw")
-    tty.expectCount("Queued multiline response.", 1, where = "raw")
+    tty.expectCount("First multiline response.", 1, where = "screen")
+    tty.expectCount("Queued multiline response.", 1, where = "screen")
     tty.expectTokenBar(["○", "↑180", "↓32"])
     tty.drain(200)
     tty.expectMeaningfulFrameArtifact(
@@ -1180,7 +1221,7 @@ suite "terminal visual contract":
     tty.expectInHistory "Reply to queued prompt."
     # The queued turn was sent exactly once: its reply reached scrollback
     # once (not dropped by the cancel, not double-sent).
-    tty.expectCount("Reply to queued prompt.", 1, where = "raw")
+    tty.expectCount("Reply to queued prompt.", 1, where = "screen")
 
   test "bare escape during a queued mid-turn prompt sends the queue next":
     # Same contract as the Ctrl-C variant above, exercised with a bare Esc.
@@ -1237,7 +1278,7 @@ suite "terminal visual contract":
     tty.expectInHistory "Reply to queued prompt."
     # The queued turn was sent exactly once: its reply reached scrollback
     # once (not dropped by the cancel, not double-sent).
-    tty.expectCount("Reply to queued prompt.", 1, where = "raw")
+    tty.expectCount("Reply to queued prompt.", 1, where = "screen")
 
   test "bash tool success and nonzero exit":
     let root = newFixture("bash_tool_visual_test")
@@ -1571,31 +1612,12 @@ suite "terminal visual contract":
     defer: tty.close()
     tty.expect "❯"
     tty.send "hello one"; tty.expect "hello one"; tty.send "\n"
-    # Sample the mid-turn frame while the spinner is up but before the reply
-    # streams (the first response has a long preStreamDelay for this window).
-    # The prompt echo is the last committed scrollback block. The footer
-    # (spinner bar here) opens with its own cleared ticker/gap row, which is
-    # the visible separator. There must be exactly one blank row between the
-    # prompt echo and the bar — the old emitUserSubmit wrote a full
-    # "\r\n\r\n" separator, stranding a second redundant blank below the
-    # prompt, visible right after submit.
-    tty.expectTokenBar(["○"])
-    tty.drain(120)
-    doAssert tty.frames.len > 0
-    let midRows = tty.frames[^1].rows
-    var promptRow = -1
-    for idx, r in midRows:
-      if "❯ hello one" in r: promptRow = idx
-    doAssert promptRow >= 0, "prompt echo row not found\n" &
-      tty.dumpFramesAround("hello one")
-    doAssert promptRow + 3 <= midRows.len,
-      "not enough rows below prompt echo\n" & tty.dumpFramesAround("hello one")
-    doAssert midRows[promptRow + 1].strip.len == 0,
-      "expected the footer gap row directly below the prompt echo, got [" &
-      midRows[promptRow + 1] & "]\n" & tty.dumpFramesAround("hello one")
-    doAssert midRows[promptRow + 2].strip.len != 0 and "○" in midRows[promptRow + 2],
-      "expected the token bar directly below the gap row, got [" &
-      midRows[promptRow + 2] & "]\n" & tty.dumpFramesAround("hello one")
+    # Under eager streaming the reply paints as soon as chunks arrive (the
+    # preStreamDelay is honored only outside the frame-synchronized test
+    # harness), so there is no spinner-only window to sample. The old
+    # mid-turn check asserted a pre-content footer gap that no longer exists;
+    # the stranded-double-blank regression it guarded is instead caught by
+    # the maxRun <= 1 check on the stable idle frame below.
     tty.expectInHistory "First reply line."
     tty.expectTokenBar(["○", "↑10", "↓5"])
     tty.drain(300)
@@ -1849,7 +1871,18 @@ suite "terminal visual contract":
     tty.send "turn one"
     tty.send "\n"
     tty.expectInHistory "turn one"
-    tty.expectCount("turn one reply", 1, where = "raw")
+    tty.expectCount("turn one reply", 1, where = "screen")
+    # Wait for turn 1 to fully end before sending turn 2. Under eager
+    # streaming the reply, the `❯` glyph, and (after the content commit) the
+    # caret are all visible mid-turn, so gating on any of them alone races
+    # the interrupt into the still-running turn. The token receipt (↑/↓) is
+    # painted only by end-of-turn finalUsage, so it is the reliable signal.
+    tty.expectTokenBar(["○", "↑10", "↓3"])
+    # The receipt is painted by finalUsage, which fires just before endTurn.
+    # Drain so endTurn fully completes (runTurns returns) before turn 2 is
+    # sent; otherwise turn 2 queues behind the still-running turn 1 and the
+    # interrupt lands on turn 1 instead of turn 2.
+    tty.drain(200)
     tty.expect "❯"
     tty.expectAlive()
 
@@ -1864,12 +1897,13 @@ suite "terminal visual contract":
     tty.expectNeverInHistory("streaming that should be interrupted")
     tty.expectOnScreen "❯"  # prompt painted on the grid, not just raw bytes
     tty.expectAlive()
+    tty.expectIdleCaret()  # ensure turn 2's interrupt fully settles first
 
     # --- Turn 3: a second prompt after interrupt (process still interactive). ---
     tty.send "turn three"
     tty.send "\n"
     tty.expectInHistory "turn three"
-    tty.expectCount("turn three reply", 1, where = "raw")
+    tty.expectCount("turn three reply", 1, where = "screen")
     tty.expect "❯"
     tty.expectAlive()
 
@@ -1888,7 +1922,7 @@ suite "terminal visual contract":
     tty.send "\n"
     tty.expectInHistory "❯ line alpha"
     tty.expectInHistory "  line beta"
-    tty.expectCount("turn four reply", 1, where = "raw")
+    tty.expectCount("turn four reply", 1, where = "screen")
     tty.expect "❯"
     tty.expectAlive()
     # Prompt is live and interactive at session end (the deferred close reaps

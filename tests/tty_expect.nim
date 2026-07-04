@@ -792,6 +792,27 @@ proc expectAlive*(s: TtySession;
     doAssert false, msg & "\nexit code: " & $s.exitCode & "\n" &
       s.dumpFramesAround("")
 
+proc expectIdleCaret*(s: TtySession; timeoutMs = 5000) =
+  ## Wait for the turn to fully end: the caret is visible again (the cursor is
+  ## hidden for the whole turn by `beginTurn`, shown again by `endTurn`) and
+  ## sits on the live `❯` prompt row. This is the reliable turn-completion
+  ## signal under eager streaming, where content and the prompt glyph both
+  ## appear mid-turn, so `expect "❯"` and content-count checks can fire while
+  ## the turn is still running and race the next send.
+  let deadline = epochTime() + timeoutMs.float / 1000.0
+  while epochTime() < deadline:
+    s.drain(5)
+    if s.frames.len > 0:
+      let f = s.frames[^1]
+      if not f.cursorHidden and f.cursorRow >= 0 and
+          f.cursorRow < f.rows.len and "\u276f" in f.rows[f.cursorRow]:
+        return
+    if s.exited:
+      break
+    sleep 5
+  doAssert false, "turn did not reach idle (caret not visible on prompt):\n" &
+    s.dumpFramesAround("")
+
 proc expectPromptLive*(s: TtySession; timeoutMs = 5000): bool {.discardable.} =
   ## Assert the prompt is present AND the process is still alive. Catches the
   ## regression where a turn repaints the prompt but the child has already died.
