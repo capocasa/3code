@@ -8,6 +8,7 @@ config.local.nims
 tests/*/*
 !tests/*/*.nim
 !tests/*/*.nims
+testresults/
 
 .archive/
 .agents/
