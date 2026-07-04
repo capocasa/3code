@@ -117,6 +117,7 @@ proc notifyTurnFinished(messages: JsonNode) =
   let last = messages[^1]
   if last.kind != JObject or last{"role"}.getStr != "assistant": return
   let body = last{"content"}.getStr
+  if body.len == 0: return
   notify("3code", "Turn finished", body)
 
 proc commitUserPromptTranscript(line: string) =
