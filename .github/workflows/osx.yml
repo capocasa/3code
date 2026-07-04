@@ -11,6 +11,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache Nim toolchain
+        id: cache-nim
+        uses: actions/cache@v4
+        with:
+          path: $HOME/nim-toolchain
+          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-${{ hashFiles('*.nimble') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-
+
       - uses: jiro4989/setup-nim-action@v2
         with:
           nim-version: stable
