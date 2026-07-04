@@ -268,6 +268,19 @@ suite "session: renderSession → loadSessionFile round-trip":
     check lm[2]["content"].getStr == "answer"
     check lm[2]["reasoning_content"].getStr == "thinking..."
 
+  test "round-trips empty assistant reply":
+    let sess = Session(created: "20250101T120000", profileName: "test",
+                       cwd: "/tmp")
+    let msgs = %*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "hi"},
+      {"role": "assistant", "content": ""}
+    ]
+    let (ls, lm) = roundTrip(sess, msgs)
+    check lm.len == 3
+    check lm[2]["role"].getStr == "assistant"
+    check lm[2]["content"].getStr == "empty reply - no content, no tool calls"
+
   test "round-trips session_context / project_notes preamble":
     let sess = Session(created: "20250101T120000", profileName: "test",
                        cwd: "/tmp")
