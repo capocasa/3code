@@ -1719,20 +1719,15 @@ suite "terminal visual contract":
         tty.send "hello"
         tty.expect "hello"
 
-        # Simulate Ctrl+Z: the editor's handler sends SIGTSTP to itself.
+        # Simulate Ctrl+Z: the editor's handler blocks in sigwait(SIGCONT).
+        # The harness spawns the child via forkpty -> login_tty -> setsid,
+        # which makes it an orphaned process group; SIGTSTP is ignored there,
+        # so waitpid(WUNTRACED) would never report a stop and just spins. We
+        # instead give the handler time to reach sigwait, then SIGCONT it.
         tty.send "\x1a"
-
-        # Wait for the child to actually stop.
-        var status: cint = 0
-        var waitCount = 0
-        while waitpid(tty.pid, status, WNOHANG or WUNTRACED) != tty.pid and
-              waitCount < 50:
-          sleep 10
-          inc waitCount
-
-        # Resume the child.
+        tty.drain(200)
         discard kill(tty.pid, SIGCONT)
-        tty.drain(100)
+        tty.drain(500)
 
         # The editor should be responsive: send more text and submit.
         tty.send " world\n"
@@ -1742,6 +1737,75 @@ suite "terminal visual contract":
         tty.expectAlive()  # bg-fg resume must not have exited the process
         tty.send "still working"
         tty.expect "still working"
+
+  test "prompt repaints clean after bg/fg following a completed turn":
+    if getEnv("THREECODE_TTY_ONLY").len > 0 and
+        getEnv("THREECODE_TTY_ONLY") != "bgfg_after_turn":
+      check true
+    else:
+      # Regression: the Ctrl-Z handler painted the prompt *before* the
+      # process actually suspended (kill returns at once but the kernel stops
+      # asynchronously). The pre-suspend redraw was clobbered by whatever the
+      # shell wrote between stop and resume, and nothing repainted afterward,
+      # so the first typed character landed on a bare row without the prompt
+      # marker instead of next to it. The fix blocks until SIGCONT, then
+      # redraws.
+      #
+      # This reproduces the reported scenario: complete a turn, then bg/fg,
+      # then type. The completed turn matters because the idle-prompt repaint
+      # path (with its footer geometry) is the one active on resume.
+      when defined(posix):
+        let root = newFixture("bgfg_after_turn")
+        writeConfiguredProvider(root)
+        writeStubResponses(root, %*[
+          {"role": "assistant",
+           "content": "reply before suspend",
+           "contentChunks": ["reply before suspend"],
+           "usage": {"promptTokens": 16, "completionTokens": 4,
+                      "totalTokens": 20, "cachedTokens": 0}},
+          {"role": "assistant",
+           "content": "reply after suspend",
+           "contentChunks": ["reply after suspend"],
+           "usage": {"promptTokens": 16, "completionTokens": 4,
+                      "totalTokens": 20, "cachedTokens": 0}}
+        ])
+        let tty = startStub(root, rows = 24)
+        defer:
+          if not tty.exited:
+            tty.hardKillAndWait()
+            tty.discardClose()
+          else:
+            tty.close()
+
+        tty.expect "❯"
+        # Complete a turn so the idle-prompt repaint path is active on resume.
+        tty.send "first prompt\n"
+        tty.expectInHistory "reply before suspend"
+        tty.expect "❯"
+
+        # Suspend and resume. Orphaned process groups ignore SIGTSTP, so
+        # waitpid(WUNTRACED) can never observe a stop here; drain to let the
+        # handler reach sigwait, then SIGCONT directly.
+        tty.send "\x1a"
+        tty.drain(200)
+        discard kill(tty.pid, SIGCONT)
+        tty.drain(500)
+        # The proof: the first typed character must append to a clean prompt
+        # (❯ x on the cursor row), not land orphaned on a bare row. `expect`
+        # confirms the byte reached the editor via the live grid; the settling
+        # drain then records the idle repaint as a frame, since the editor
+        # emits no test frame event on plain typing and expectTypedAtPrompt
+        # asserts against recorded frames (the cursor-row state).
+        tty.send "x"
+        tty.expect "❯ x"
+        tty.drain(200)
+        tty.expectTypedAtPrompt "❯ x"
+        tty.expectAlive()
+
+        # The editor stays usable: submit the line and get a reply.
+        tty.send "\n"
+        tty.expectInHistory "reply after suspend"
+        tty.expect "❯"
 
   test "shakedown: one session exercises the full REPL contract":
     # The canonical consolidated contract test (report.md Pattern C). If this

@@ -957,8 +957,10 @@ when defined(posix):
     ed.write "\n\e[?2004l"
     resetAttributes()
     stdout.flushFile()
-    discard posix.kill(posix.getpid(), posix.SIGTSTP)
-    applyRawMode()
+    # Suspend and block until resumed, then repaint. requestBackground
+    # returns only after SIGCONT, so this redraw runs in the foreground
+    # after the shell's job-control output, not before the stop.
+    requestBackground()
     ed.write "\e[?2004h"
     ed.renderRow = 0
     fullRedraw(ed)
@@ -1061,8 +1063,7 @@ proc initKeyTables*() =
       ed.write "\n\e[?2004l"
       resetAttributes()
       stdout.flushFile()
-      discard posix.kill(posix.getpid(), posix.SIGTSTP)
-      applyRawMode()
+      requestBackground()
       ed.write "\e[?2004h"
       ed.renderRow = 0
       fullRedraw(ed)
@@ -1572,6 +1573,7 @@ proc readLine*(ed: var LineEditor, prompt = "", hidechars = false,
     var haveOldMode = false
     if isatty(fd) != 0 and fd.tcGetAttr(addr oldMode) == 0:
       haveOldMode = true
+      recordCookedMode()
       var rawMode = oldMode
       rawMode.c_iflag = rawMode.c_iflag and not Cflag(BRKINT or ICRNL or
         INPCK or ISTRIP or IXON)
@@ -1582,7 +1584,7 @@ proc readLine*(ed: var LineEditor, prompt = "", hidechars = false,
       rawMode.c_cc[VMIN] = char(1)
       rawMode.c_cc[VTIME] = char(0)
       discard fd.tcSetAttr(TCSANOW, addr rawMode)
-      storeRawMode()
+      recordRawMode()
     defer:
       if haveOldMode:
         discard fd.tcSetAttr(TCSADRAIN, addr oldMode)

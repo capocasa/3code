@@ -1471,6 +1471,9 @@ proc inputThreadProc() {.thread.} =
     when defined(posix):
       if isatty(fd) != 0 and fd.tcGetAttr(addr inputOrigTermios) == 0:
         inputOrigTermiosValid = true
+        # Capture the cooked mode once, before entering raw mode, so Ctrl-Z
+        # can hand the terminal back to the shell in a readable state.
+        recordCookedMode()
         var rawMode = inputOrigTermios
         rawMode.c_iflag = rawMode.c_iflag and not Cflag(BRKINT or ICRNL or
           INPCK or ISTRIP or IXON)
@@ -1480,6 +1483,10 @@ proc inputThreadProc() {.thread.} =
         rawMode.c_cc[VMIN] = 1.char
         rawMode.c_cc[VTIME] = 0.char
         discard fd.tcSetAttr(TCSANOW, addr rawMode)
+        # Feed the process-wide suspend/resume snapshot so Ctrl-Z can restore
+        # this exact mode on resume. The runtime keeps its own copy
+        # (inputOrigTermios) for exit cleanup; this one is for SIGTSTP.
+        recordRawMode()
 
     edPtr[].deferSubmit = true
     edPtr[].submitIcon = DeferredSubmitMarker
