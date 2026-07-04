@@ -307,14 +307,15 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       # belongs under the LAST tool of the turn, not under the prose. Attaching
       # it to the prose item here would render the receipt between the answer
       # and the tool calls it documents. Defer it instead.
-      var deferredReceipt = ""
+      var deferredReceipt = pendingReceiptBytes()
       if content.strip.len > 0:
         # Streamed content is already in scrollback; non-streamed content is
-        # committed here as a receipt-less item. Either way, capture the
-        # pending receipt so it can cap the last tool below.
+        # committed here as a receipt-less item. Either way, the pending
+        # receipt (captured above) caps the last tool below so the turn's
+        # token usage lands in scrollback even when the model emits only
+        # tool calls and no prose.
         if not streamedLive:
           commitAssistantItem(content, attachReceipt = false)
-        deferredReceipt = pendingReceiptBytes()
       # The last tool that will actually reach its commit is the one the
       # deferred receipt caps. Tools that are interrupted or have malformed
       # arguments skip their transcript commit, so the cap may fall to an
