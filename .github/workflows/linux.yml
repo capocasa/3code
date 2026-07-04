@@ -18,18 +18,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Default (push/tag/PR): both arches. On workflow_dispatch, the
-        # caller picks one to skip the slow ARM64 runner.
-        arch: ${{ (github.event_name != 'workflow_dispatch' || inputs.arch == 'both') && fromJson('["amd64","arm64"]') || fromJson(format('["{0}"]', inputs.arch)) }}
-        include:
-          - arch: amd64
-            os: ubuntu-22.04
-            artifact: 3code-linux-amd64
-          - arch: arm64
-            os: ubuntu-22.04-arm
-            artifact: 3code-linux-arm64
+        # On workflow_dispatch the caller picks one arch to skip the slow
+        # ARM64 runner; every other trigger builds both.
+        config: ${{ (github.event_name != 'workflow_dispatch' || inputs.arch == 'both') && fromJson('[{"arch":"amd64","os":"ubuntu-22.04","artifact":"3code-linux-amd64"},{"arch":"arm64","os":"ubuntu-22.04-arm","artifact":"3code-linux-arm64"}]') || fromJson(format('[{{"arch":"{0}","os":"{1}","artifact":"3code-linux-{0}"}}]', inputs.arch, inputs.arch == 'arm64' && 'ubuntu-22.04-arm' || 'ubuntu-22.04')) }}
 
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.config.os }}
 
     steps:
       - uses: actions/checkout@v4
@@ -58,19 +51,19 @@ jobs:
 
       - name: Package
         run: |
-          mkdir -p ${{ matrix.artifact }}
-          cp 3code ${{ matrix.artifact }}/
-          cp README.md LICENSE ${{ matrix.artifact }}/
-          tar czf ${{ matrix.artifact }}.tar.gz ${{ matrix.artifact }}
+          mkdir -p ${{ matrix.config.artifact }}
+          cp 3code ${{ matrix.config.artifact }}/
+          cp README.md LICENSE ${{ matrix.config.artifact }}/
+          tar czf ${{ matrix.config.artifact }}.tar.gz ${{ matrix.config.artifact }}
 
       - name: Upload artifact (GitHub Actions)
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}.tar.gz
+          name: ${{ matrix.config.artifact }}
+          path: ${{ matrix.config.artifact }}.tar.gz
 
       - name: Upload artifact to 3code.capocasa.dev
         if: github.ref == 'refs/heads/main'
         run: |
-          curl -f -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@${{ matrix.artifact }}.tar.gz" \
+          curl -f -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@${{ matrix.config.artifact }}.tar.gz" \
             https://3code.capocasa.dev/main/upload.nim
