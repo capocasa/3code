@@ -18,22 +18,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Default (push/tag/PR): both arches. On workflow_dispatch, the
+        # caller picks one to skip the slow ARM64 runner.
+        arch: ${{ (github.event_name != 'workflow_dispatch' || inputs.arch == 'both') && fromJson('["amd64","arm64"]') || fromJson(format('["{0}"]', inputs.arch)) }}
         include:
-          - os: ubuntu-22.04
-            arch: amd64
+          - arch: amd64
+            os: ubuntu-22.04
             artifact: 3code-linux-amd64
-            ext: tar.gz
-          - os: ubuntu-22.04-arm
-            arch: arm64
+          - arch: arm64
+            os: ubuntu-22.04-arm
             artifact: 3code-linux-arm64
-            ext: tar.gz
-
-    # On manual runs, honor the arch selector; for all other triggers
-    # (push, tag, PR) inputs.arch is empty so every entry runs.
-    if: |
-      github.event_name != 'workflow_dispatch' ||
-      inputs.arch == 'both' ||
-      inputs.arch == matrix.arch
 
     runs-on: ${{ matrix.os }}
 
@@ -67,16 +61,16 @@ jobs:
           mkdir -p ${{ matrix.artifact }}
           cp 3code ${{ matrix.artifact }}/
           cp README.md LICENSE ${{ matrix.artifact }}/
-          tar czf ${{ matrix.artifact }}.${{ matrix.ext }} ${{ matrix.artifact }}
+          tar czf ${{ matrix.artifact }}.tar.gz ${{ matrix.artifact }}
 
       - name: Upload artifact (GitHub Actions)
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}.${{ matrix.ext }}
+          path: ${{ matrix.artifact }}.tar.gz
 
       - name: Upload artifact to 3code.capocasa.dev
         if: github.ref == 'refs/heads/main'
         run: |
-          curl -f -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@${{ matrix.artifact }}.${{ matrix.ext }}" \
+          curl -f -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@${{ matrix.artifact }}.tar.gz" \
             https://3code.capocasa.dev/main/upload.nim
