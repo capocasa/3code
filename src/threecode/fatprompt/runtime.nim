@@ -799,9 +799,12 @@ proc barTickLoop() {.thread.} =
                             inputEditor, currentTermW())
     sleep 250
 
-proc startBarTick*(base: string) =
+proc startBarTick*(base: string): bool =
+  ## Returns true if this call started a new tick, false if one was
+  ## already running (idempotent). Lets `withBarTick` know whether it
+  ## owns the tick and must stop it on scope exit.
   debugOut "startBarTick"
-  if barTickRunning: return
+  if barTickRunning: return false
   {.cast(gcsafe).}:
     acquire barTickLock
     barTickBase = base
@@ -810,6 +813,20 @@ proc startBarTick*(base: string) =
   barTickStop.store(false, moRelaxed)
   createThread(barTickThread, barTickLoop)
   barTickRunning = true
+  return true
+
+template withBarTick*(label: string; body: untyped) =
+  ## RAII-style bar tick: starts the tick before `body`, stops it after,
+  ## on any exit (normal, exception, return). Like withFile: the stop
+  ## can't be forgotten because it's inherent to the scope. Returns true
+  ## if a tick was started by this call (so callers can gate side effects
+  ## like `prefixBoundary`).
+  let barTickStarted = startBarTick(label)
+  try:
+    body
+  finally:
+    if barTickStarted:
+      discard stopBarTick()
 
 proc stopBarTick*(): int =
   ## Stops the bar tick and returns elapsed seconds.
