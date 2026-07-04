@@ -31,6 +31,10 @@ jobs:
       - name: Build
         run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
 
+      - name: Run tests
+        run: nimble test
+        timeout-minutes: 20
+
       - name: Package
         run: |
           mkdir -p 3code-linux-arm64
