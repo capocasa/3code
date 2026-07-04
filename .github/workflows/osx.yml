@@ -21,18 +21,12 @@ jobs:
             ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-
 
       - uses: jiro4989/setup-nim-action@v2
+        if: steps.cache-nim.outputs.cache-hit != 'true'
         with:
           nim-version: stable
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           parent-nim-install-directory: $HOME
           nim-install-directory: nim-toolchain
-
-      - name: Save Nim toolchain cache
-        if: steps.cache-nim.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
-        with:
-          path: /Users/runner/nim-toolchain
-          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-${{ hashFiles('*.nimble') }}
 
       - name: Install dependencies
         run: nimble install -y --depsOnly
