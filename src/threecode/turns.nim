@@ -373,22 +373,17 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         let act = toolCallToAction(p.family, name, args)
         let silent = isSkillRead(act)
         let hadToolBar = currentBarLabel.len > 0
-        if hadToolBar:
-          startBarTick(currentBarLabel)
         let toolT0 = epochTime()
         if session.readCache == nil: session.readCache = newReadCache()
         var streamedOutputShown = false
-        # try/finally guarantees `stopBarTick` runs even if `runAction`
-        # raises. Without this, an unhandled exception in a non-bash
-        # action leaves the bar-tick thread painting the bottom row
-        # with an ever-growing seconds counter and no spinner glyph —
-        # the symptom users see is a frozen-looking bar with an
-        # incrementing timer and a Ctrl-C that does nothing because
-        # the main thread has already unwound past the tool block.
+        # withBarTick is the RAII scope: the bar-tick thread is stopped on
+        # any exit (normal, exception, return) — it can't be leaked by a
+        # forgotten stopBarTick, the class of bug that froze the footer
+        # with an ever-climbing seconds counter and a dead prompt.
         var r: string
         var code: int
         var diff: string
-        try:
+        withBarTick(currentBarLabel):
           try:
             (r, code, diff) =
               if act.kind == akBash:
@@ -403,9 +398,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
             r = "ERROR: tool execution failed: " & e.msg
             code = -1
             diff = ""
-        finally:
-          if hadToolBar:
-            discard stopBarTick()
         if act.kind == akPlan and code == 0:
           session.plan = act.plan
         let toolElapsed = epochTime() - toolT0
