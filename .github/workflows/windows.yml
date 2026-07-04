@@ -89,7 +89,6 @@ jobs:
 
       - name: Upload artifact to 3code.capocasa.dev
         if: github.ref == 'refs/heads/main'
-        continue-on-error: true
         run: |
           curl -f -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-windows-amd64.zip" \
             https://3code.capocasa.dev/main/upload.nim
