@@ -26,6 +26,8 @@ jobs:
         with:
           nim-version: stable
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+          parent-nim-install-directory: $HOME
+          nim-install-directory: nim-toolchain
 
       - name: Install dependencies
         run: nimble install -y --depsOnly

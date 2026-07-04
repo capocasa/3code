@@ -15,6 +15,8 @@ jobs:
         with:
           nim-version: stable
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+          parent-nim-install-directory: $HOME
+          nim-install-directory: nim-toolchain
 
       - name: Install dependencies
         run: nimble install -y --depsOnly
@@ -31,11 +33,13 @@ jobs:
         run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
 
       - name: Build x86_64 and create universal binary
+        env:
+          SLICE_DIR: ${{ runner.temp }}
         run: |
-          mv 3code 3code-arm64
+          mv 3code "$SLICE_DIR/3code-arm64"
           rm -rf ~/.cache/nim/threecode_r
-          nim c -d:release ${{ env.BUILD_FLAGS }} --passC:"-arch x86_64" --passL:"-arch x86_64" --cpu:amd64 -o:3code-x86_64 src/threecode.nim
-          lipo -create 3code-arm64 3code-x86_64 -output 3code
+          nim c -d:release ${{ env.BUILD_FLAGS }} --passC:"-arch x86_64" --passL:"-arch x86_64" --cpu:amd64 -o:"$SLICE_DIR/3code-x86_64" src/threecode.nim
+          lipo -create "$SLICE_DIR/3code-arm64" "$SLICE_DIR/3code-x86_64" -output 3code
           file 3code
 
       - name: Run tests
