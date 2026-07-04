@@ -50,6 +50,9 @@ jobs:
         run: |
           mkdir -p 3code-macos-universal
           cp 3code 3code-macos-universal/
+          # Capture the version from the built binary so it can be checked
+          # without running the binary on its target OS.
+          ./3code -v > 3code-macos-universal/VERSION
           cp README.md LICENSE 3code-macos-universal/
           OPENSSL_PREFIX="$(brew --prefix openssl@3)"
           cp "${OPENSSL_PREFIX}/lib/libssl.3.dylib"    3code-macos-universal/

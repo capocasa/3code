@@ -81,6 +81,10 @@ jobs:
           Invoke-WebRequest -Uri https://nim-lang.org/download/dlls.zip -OutFile dlls.zip
           Expand-Archive -Path dlls.zip -DestinationPath dlls
           Copy-Item dlls/libssl-1_1-x64.dll, dlls/libcrypto-1_1-x64.dll, dlls/cacert.pem 3code-windows-amd64/
+          # Capture the version from the staged binary (needs the DLLs
+          # alongside it to launch) so it can be checked without running
+          # the binary on its target OS.
+          & 3code-windows-amd64/3code.exe -v | Set-Content -Encoding ascii 3code-windows-amd64/VERSION
           Compress-Archive -Path 3code-windows-amd64 -DestinationPath 3code-windows-amd64.zip
 
       - name: Upload artifact (GitHub Actions)

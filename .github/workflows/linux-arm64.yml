@@ -41,6 +41,9 @@ jobs:
         run: |
           mkdir -p 3code-linux-arm64
           cp 3code 3code-linux-arm64/
+          # Capture the version from the built binary so it can be checked
+          # without running the binary on its target OS.
+          ./3code -v > 3code-linux-arm64/VERSION
           cp README.md LICENSE 3code-linux-arm64/
           tar czf 3code-linux-arm64.tar.gz 3code-linux-arm64
 
