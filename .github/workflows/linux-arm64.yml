@@ -13,11 +13,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache Nim toolchain
+      - name: Restore Nim toolchain cache
         id: cache-nim
         uses: actions/cache@v4
         with:
-          path: $HOME/nim-toolchain
+          path: /home/runner/nim-toolchain
           key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-${{ hashFiles('*.nimble') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-
@@ -28,6 +28,13 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           parent-nim-install-directory: $HOME
           nim-install-directory: nim-toolchain
+
+      - name: Save Nim toolchain cache
+        if: steps.cache-nim.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/nim-toolchain
+          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-${{ hashFiles('*.nimble') }}
 
       - name: Install dependencies
         run: nimble install -y --depsOnly
