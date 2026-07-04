@@ -6,6 +6,12 @@ on:
     tags: ['[0-9]+.[0-9]+.[0-9]+']
   pull_request:
   workflow_dispatch:
+    inputs:
+      arch:
+        description: 'Architecture to build'
+        type: choice
+        options: [amd64, arm64, both]
+        default: amd64
 
 jobs:
   build:
@@ -14,11 +20,20 @@ jobs:
       matrix:
         include:
           - os: ubuntu-22.04
+            arch: amd64
             artifact: 3code-linux-amd64
             ext: tar.gz
           - os: ubuntu-22.04-arm
+            arch: arm64
             artifact: 3code-linux-arm64
             ext: tar.gz
+
+    # On manual runs, honor the arch selector; for all other triggers
+    # (push, tag, PR) inputs.arch is empty so every entry runs.
+    if: |
+      github.event_name != 'workflow_dispatch' ||
+      inputs.arch == 'both' ||
+      inputs.arch == matrix.arch
 
     runs-on: ${{ matrix.os }}
 
@@ -65,4 +80,3 @@ jobs:
         run: |
           curl -f -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@${{ matrix.artifact }}.${{ matrix.ext }}" \
             https://3code.capocasa.dev/main/upload.nim
-
