@@ -97,6 +97,24 @@ suite "provider wizard configuration":
     check activeCurrent == "groq.openai/gpt-oss-20b"
     check verifiedModels == @["openai/gpt-oss-20b"]
 
+  test "add rejects duplicate provider name":
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-existing", models: @["openai/gpt-oss-120b"])
+    ]
+    activeCurrent = "nvidia.openai/gpt-oss-120b"
+    inputs = @["nvapi-add", "gpt-oss-20b"]
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider add", messages, session, prof, editor)
+
+    check activeProviders.len == 1
+    check activeProviders[0].name == "nvidia"
+    check activeCurrent == "nvidia.openai/gpt-oss-120b"
+
   test "edit prompts for model before verifying updated provider":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",

@@ -461,6 +461,10 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
              except minline.InputCancelled:
                hintLn "  cancelled", resetStyle
                return
+  for pr in activeProviders:
+    if pr.name == prov.name:
+      errLn &"  duplicate provider: {prov.name} already configured"
+      return
   activeProviders.add prov
   if activeCurrent == "":
     activeCurrent = prov.name & "." & firstModel(prov)
