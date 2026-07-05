@@ -11,6 +11,16 @@
 
 import std/[json, jsonutils, net, os, strutils, threadpool, unittest]
 
+proc mark(msg: string) =
+  stderr.writeLine("[marker] " & msg)
+  stderr.flushFile()
+
+proc syncPool() =
+  ## Flush the Nim threadpool: every `spawn serveThread` must complete
+  ## before the process tears down or the pool's join on Windows CI
+  ## runners races the GC and crashes at exit. Called at suite end.
+  sync()
+
 import threecode/[api, types]
 
 {.push checks: off.}
@@ -162,6 +172,7 @@ proc testProfile(server: SseServer): Profile =
 # Tests
 # ---------------------------------------------------------------------------
 
+mark "start suite 1"
 suite "streaming SSE tool-call accumulation":
   test "complete fragmented tool_call reassembles correct arguments":
     let server = newSseServer(makeSseToolDeltas("echo HELLO_WORLD_42", "id-1"))
@@ -237,6 +248,9 @@ suite "streaming SSE tool-call accumulation":
     check body.hasKey("tool_stream")
     check body{"tool_stream"}.getBool == true
 
+  syncPool()
+
+mark "start suite 2"
 suite "streaming SSE: slow response head":
   # Regression: readResponseHead used the same QuietRecvWakeMs-bounded recv
   # as the streaming body loop, but treated StreamTimeoutError as a stale-conn
@@ -261,6 +275,7 @@ suite "streaming SSE: slow response head":
     server.socket.close()
     closeCachedStreamConn()
 
+mark "start suite 3"
 suite "streaming SSE: empty-content with finish_reason":
   # The bug: GLM/Qwen/gpt-oss reasoning models routinely return 200 OK with a
   # well-formed body where content is empty and the model spent its whole
@@ -308,3 +323,7 @@ suite "streaming SSE: empty-content with finish_reason":
     check result{"finish_reason"}.getStr == "content_filter"
     server.socket.close()
     closeCachedStreamConn()
+
+  syncPool()
+
+mark "all done"
