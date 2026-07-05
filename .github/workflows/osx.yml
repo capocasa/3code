@@ -91,4 +91,4 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           curl -f -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-macos-universal.tar.gz" \
-            https://3code.capocasa.dev/main/upload.nim
+            https://3code.capocasa.dev/main/builds/upload.nim

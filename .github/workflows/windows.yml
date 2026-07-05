@@ -97,5 +97,5 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           curl -f -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-windows-amd64.zip" \
-            https://3code.capocasa.dev/main/upload.nim
+            https://3code.capocasa.dev/main/builds/upload.nim
 
