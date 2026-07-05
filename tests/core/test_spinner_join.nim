@@ -46,7 +46,7 @@ suite "spinner join deadlock":
 
   test "stopBarTick completes when called while holding the terminal lock":
     # Same hazard: barTickLoop paints via renderFooter, which needs the lock.
-    startBarTick("tool")
+    discard startBarTick("tool")
     sleep 150
     termui.acquireTerminalWrite()
     check termui.terminalLockDepth == 1
