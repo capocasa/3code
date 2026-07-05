@@ -11,9 +11,18 @@ const
   SyncBegin* = "\x1b[?2026h"
   SyncEnd* = "\x1b[?2026l"
 
+## Terminal write serialization lock.
+##
+## Invariant: a thread holding this lock must never join (or otherwise block
+## on) a background thread that renders via `renderFooter` (spinner, barTick).
+## Those threads need the lock to finish their current frame and exit, so
+## joining them while holding it is a guaranteed deadlock: the holder waits
+## for the render thread to exit, the render thread waits for the lock the
+## holder holds. Any join of such a thread must go through
+## `withTerminalLockDroppedForJoin`, which releases the lock around the join.
 var terminalLock*: Lock
 initLock(terminalLock)
-var terminalLockDepth {.threadvar.}: int
+var terminalLockDepth* {.threadvar.}: int
 
 proc acquireTerminalWrite*() =
   ## Enter the single terminal-writer critical section. Reentrant so editor
@@ -30,6 +39,45 @@ proc releaseTerminalWrite*() =
   dec terminalLockDepth
   if terminalLockDepth == 0:
     release terminalLock
+
+proc releaseTerminalWriteFully*(): int =
+  ## Drop the terminal write lock completely regardless of reentrant depth,
+  ## returning the depth so it can be restored by `restoreTerminalWriteDepth`.
+  ## Used around `joinThread` of a render thread (spinner/barTick): those
+  ## threads need the lock to finish their current frame and exit, so joining
+  ## them while the caller holds the lock deadlocks (caller waits for the
+  ## thread; thread waits for the lock the caller holds). Releasing fully
+  ## around the join lets the render thread drain and exit. Returns 0 when
+  ## the caller did not hold the lock (no restore needed).
+  result = terminalLockDepth
+  if result > 0:
+    terminalLockDepth = 0
+    release terminalLock
+
+proc restoreTerminalWriteDepth*(depth: int) =
+  ## Restore a terminal write lock depth previously dropped by
+  ## `releaseTerminalWriteFully`. Re-acquires the underlying lock and resets
+  ## the reentrant counter so the caller's later `releaseTerminalWrite`
+  ## calls stay balanced.
+  if depth <= 0: return
+  acquire terminalLock
+  terminalLockDepth = depth
+
+template withTerminalLockDroppedForJoin*(joinStmt: untyped) =
+  ## Run a `joinThread` of a terminal-rendering background thread
+  ## (spinner/barTick) with the calling thread's terminal write lock
+  ## temporarily fully released, restoring it afterward regardless of how
+  ## the join resolves. Those threads need the lock to finish their current
+  ## render frame and observe their stop flag; joining them while the caller
+  ## holds the lock is a guaranteed deadlock (caller waits for the thread to
+  ## exit; thread waits for the lock the caller holds). Scoping the drop
+  ## around the join statement makes the restore mandatory by syntax, like
+  ## a `withFile` block, so a future caller cannot forget to restore.
+  let savedDepth = releaseTerminalWriteFully()
+  try:
+    joinStmt
+  finally:
+    restoreTerminalWriteDepth(savedDepth)
 
 template withTerminalWriteLock*(body: untyped) =
   ## Serialize all terminal writes. Reentrant for helpers that compose other

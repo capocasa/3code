@@ -182,11 +182,14 @@ proc parseUsage*(u: JsonNode): Usage =
   result.promptTokens = u{"prompt_tokens"}.getInt(0)
   result.completionTokens = u{"completion_tokens"}.getInt(0)
   result.totalTokens = u{"total_tokens"}.getInt(0)
-  let details = u{"prompt_tokens_details"}
-  if details != nil and details.kind == JObject:
-    result.cachedTokens = details{"cached_tokens"}.getInt(0)
+  let promptDetails = u{"prompt_tokens_details"}
+  if promptDetails != nil and promptDetails.kind == JObject:
+    result.cachedTokens = promptDetails{"cached_tokens"}.getInt(0)
   if result.cachedTokens == 0:
     result.cachedTokens = u{"prompt_cache_hit_tokens"}.getInt(0)
+  let completionDetails = u{"completion_tokens_details"}
+  if completionDetails != nil and completionDetails.kind == JObject:
+    result.reasoningTokens = completionDetails{"reasoning_tokens"}.getInt(0)
 
 proc classifyRetry*(exc: ref CatchableError, code: int): string =
   ## Returns "server" for network errors and 5xx, "rate" for 429, "" for
@@ -308,17 +311,30 @@ type StreamOutcome = object
   assistantMsg: JsonNode  # reconstructed from SSE when status=200
   usage: Usage
   streamedLive: bool
+  finishReason: string    # choices[0].finish_reason. "length" = token-budget
+                          # starved; "content_filter" = terminal; "stop" +
+                          # empty content = anomaly. Carried out of the
+                          # transport so the turn loop can branch on it.
 
 proc buildStreamAssistantMsg*(content, reasoning: string,
                               tools: OrderedTable[int, JsonNode],
                               usage: Usage,
-                              wasInterrupted = false): JsonNode =
+                              wasInterrupted = false;
+                              finishReason = ""): JsonNode =
   ## Build the assistant message reconstructed from an SSE stream.
-  ## Returns nil when the stream produced no assistant data.
+  ## Returns nil only when the stream produced nothing at all: no
+  ## content/tools/reasoning, no usage, no finish_reason, which signals a
+  ## transport-level problem the callModel retry block handles. A stream
+  ## that produced usage and/or a finish_reason but no visible content
+  ## (e.g. the model spent its whole budget on reasoning, finish_reason
+  ## "length") is NOT nil: it is handed back carrying `finish_reason` so
+  ## the turn loop can branch on it instead of dead-ending.
   if content.len == 0 and tools.len == 0 and reasoning.len == 0 and
-     usage.totalTokens == 0:
+     usage.totalTokens == 0 and finishReason.len == 0:
     return nil
   result = %*{"role": "assistant", "content": content}
+  if finishReason.len > 0:
+    result["finish_reason"] = %finishReason
   # DeepSeek-R1-style reasoning models REQUIRE the `reasoning_content`
   # field on every assistant message in history — even when the model
   # emitted no reasoning on that turn. Drop it and the next API call
@@ -569,6 +585,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   # marker on screen and stranding the user with an unfinished job.
   var sawDone = false
   var sawFinish = false
+  var finishReason = ""
   var line = ""
   var streamErr = ""
   while true:
@@ -605,6 +622,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
         let fr = choices[0]{"finish_reason"}
         if fr != nil and fr.kind == JString and fr.getStr.len > 0:
           sawFinish = true
+          finishReason = fr.getStr
         let delta = choices[0]{"delta"}
         if delta != nil and delta.kind == JObject:
           # Reasoning chunks arrive on `reasoning_content` (DeepSeek, Qwen,
@@ -701,27 +719,37 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   #  result.errMsg = "stream truncated before completion"
   #  return
 
-  # Build assistant message if we saw any SSE content.
+  result.finishReason = finishReason
+  # Build assistant message. A stream with usage and/or a finish_reason but
+  # no visible content is still a real (if empty) assistant turn: the model
+  # may have spent its whole token budget on reasoning (finish_reason
+  # "length") or hit a content filter. Build a minimal message carrying the
+  # finish_reason so the turn loop can branch on it. Only the case with no
+  # content, no usage, and no finish_reason is a transport-level problem
+  # surfaced as an error here.
   if result.assistantMsg == nil:
     result.assistantMsg = buildStreamAssistantMsg(accContent, accReasoning,
-      accTools, result.usage, isInterrupted())
+      accTools, result.usage, isInterrupted(), finishReason)
   if result.assistantMsg == nil:
-    # No SSE data — provider may have returned a plain JSON error body.
+    # No SSE data at all. Provider may have returned a plain JSON error
+    # body. Surface as a retryable transport error so callModel handles it
+    # via the network retry block, NOT the empty-content auto-handling mode.
     result.errBody = nonSSE.join("\n")
-    # 200 with a well-formed but empty message — treat as an error so the
-    # turn loop retries it instead of silently advancing with nothing.
     result.errMsg = "empty reply - no content, no tool calls"
-  debugOut &"streamHttp end — contentStarted={contentStarted} accTools={accTools.len}"
+  debugOut &"streamHttp end contentStarted={contentStarted} accTools={accTools.len} finishReason={finishReason}"
 
 proc buildBatchAssistantMsg*(message, reasoning: string;
-                             toolCalls: JsonNode): JsonNode =
+                             toolCalls: JsonNode;
+                             finishReason = ""): JsonNode =
   ## Build an assistant message from a non-streaming completion's
   ## `choices[0].message`. Mirrors `buildStreamAssistantMsg`'s shape so the
   ## rest of the pipeline (history replay, tool dispatch) sees a uniform
   ## object regardless of transport. Returns nil only when the message is
-  ## genuinely empty (no content, no tool_calls, no reasoning) — the caller
-  ## treats that as an error to surface.
-  if message.len == 0 and reasoning.len == 0 and
+  ## genuinely empty (no content, no tool_calls, no reasoning) AND has no
+  ## finish_reason. The caller treats that as a transport error to surface.
+  ## An empty message with a finish_reason (length/content_filter) is NOT
+  ## nil so the turn loop can branch on it.
+  if message.len == 0 and reasoning.len == 0 and finishReason.len == 0 and
      (toolCalls == nil or toolCalls.kind != JArray or toolCalls.len == 0):
     return nil
   result = %*{"role": "assistant", "content": message}
@@ -730,6 +758,8 @@ proc buildBatchAssistantMsg*(message, reasoning: string;
   result["reasoning_content"] = %reasoning
   if toolCalls != nil and toolCalls.kind == JArray and toolCalls.len > 0:
     result["tool_calls"] = toolCalls
+  if finishReason.len > 0:
+    result["finish_reason"] = %finishReason
 
 proc readFullBody(conn: StreamConn): string =
   ## Drain the response body into a single string. streamhttp's `readLine`
@@ -915,34 +945,46 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
     if message{"tool_calls"} != nil and message{"tool_calls"}.kind == JArray:
       message{"tool_calls"}
     else: newJArray()
+  let frNode = choices[0]{"finish_reason"}
+  let finishReason =
+    if frNode != nil and frNode.kind == JString and frNode.getStr.len > 0:
+      frNode.getStr
+    else: ""
+  result.finishReason = finishReason
   slurped = content.len + reasoning.len
   hookProgress(baseLabel, slurped)
 
-  result.assistantMsg = buildBatchAssistantMsg(content, reasoning, toolCalls)
+  result.assistantMsg = buildBatchAssistantMsg(content, reasoning, toolCalls, finishReason)
   if result.assistantMsg == nil:
-    # 200 with a well-formed but empty message — treat as an error so the
-    # turn loop surfaces it instead of silently advancing with nothing.
+    # No content, no tool_calls, no reasoning, no finish_reason: a genuine
+    # transport anomaly (not a budget-starved empty turn). Surface as a
+    # retryable transport error so callModel's network retry block handles
+    # it. Empty-with-finish_reason is handled above (non-nil msg).
     result.errBody = body
     result.errMsg = "empty reply - no content, no tool calls"
     return
   let u2 = j{"usage"}
   if u2 != nil and u2.kind == JObject:
     result.usage = parseUsage(u2)
-  debugOut &"callHttp end — content={content.len} tools={toolCalls.len}"
+  debugOut &"callHttp end content={content.len} tools={toolCalls.len} finishReason={finishReason}"
 
 proc stripInternalFields*(messages: JsonNode): JsonNode =
   ## Return a wire-safe copy of `messages` with internal bookkeeping fields
   ## removed. `usage` is stored on assistant messages for local replay but
-  ## rejected by strict validators (fireworks, glm-5p1, etc.).
+  ## rejected by strict validators (fireworks, glm-5p1, etc.). `finish_reason`
+  ## is attached to empty assistant turns so the turn loop can branch on it
+  ## but is not a wire field. `interrupted` marks user-cancelled turns.
   if messages == nil or messages.kind != JArray: return messages
   result = newJArray()
   for m in messages:
-    if m.kind != JObject or ("usage" notin m and "interrupted" notin m):
+    if m.kind != JObject or
+       ("usage" notin m and "interrupted" notin m and "finish_reason" notin m):
       result.add m
       continue
     var clean = newJObject()
     for k, v in m.pairs:
-      if k != "usage" and k != "interrupted": clean[k] = v
+      if k != "usage" and k != "interrupted" and k != "finish_reason":
+        clean[k] = v
     result.add clean
 
 proc ensureReasoningField(messages: JsonNode) =
@@ -1115,9 +1157,15 @@ when providerStub:
   ## callbacks, retry state, `ApiError`, etc.) without exporting them.
   include "../../testdata/stub/provider.nim"
 
-proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptTokens: int): JsonNode =
+proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
+    lastPromptTokens: int, maxTokensOverride = 0): JsonNode =
+  ## `maxTokensOverride`, when > 0, replaces the known-good `max_tokens` in
+  ## the request body. Used by the turn loop's empty-content auto-handling
+  ## to escalate the budget when a `finish_reason: "length"` reply starved
+  ## on reasoning tokens. The body is rebuilt fresh on every callModel so
+  ## an override takes effect without rebuilding anything externally.
   when providerStub:
-    return callModelStub(p, messages, usage, lastPromptTokens)
+    return callModelStub(p, messages, usage, lastPromptTokens, maxTokensOverride)
   debugOut "callModel start"
   if p.family == "deepseek":
     ensureReasoningField(messages)
@@ -1140,6 +1188,8 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage, lastPromptToke
   body["tool_choice"] = %"auto"
   applyStreamingOptions(p, body)
   applyGenerationDefaults(p, body)
+  if maxTokensOverride > 0:
+    body["max_tokens"] = %maxTokensOverride
   if p.reasoning.len > 0:
     applyReasoning(p, body)
   let bodyStr = sanitizeUtf8($body)

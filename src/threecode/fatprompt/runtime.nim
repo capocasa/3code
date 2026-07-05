@@ -834,7 +834,8 @@ proc stopBarTick*(): int =
   if not barTickRunning: return 0
   let elapsed = (epochTime() - barTickStart).int
   barTickStop.store(true, moRelaxed)
-  joinThread(barTickThread)
+  termui.withTerminalLockDroppedForJoin:
+    joinThread(barTickThread)
   barTickRunning = false
   commandStatusActive.store(false, moRelaxed)
   return elapsed
@@ -936,7 +937,8 @@ proc stopSpinner*(clearLiveFooter = true) =
   debugOut "stopSpinner"
   if not spinnerRunning: return
   spinnerStop.store(true, moRelaxed)
-  joinThread(spinnerThread)
+  termui.withTerminalLockDroppedForJoin:
+    joinThread(spinnerThread)
   spinnerRunning = false
   if clearLiveFooter and inputThreadRunning and inputEditor != nil and
       spinnerFramePainted.load(moRelaxed):

@@ -4,7 +4,13 @@
 ## callbacks, the retry-level state, `ApiError`, `isInterrupted`, and the
 ## other helpers are all visible here without being exported.
 
-var stubResponseIdx = 0
+var
+  stubResponseIdx = 0
+  stubMaxTokensOverride* = 0  # last override passed to callModelStub; a
+                              # turns-level test asserts this to confirm
+                              # the empty-content escalation bumped the budget
+
+proc lastStubMaxTokensOverride*(): int = stubMaxTokensOverride
 
 proc emitTestFrameEvent() =
   when defined(posix):
@@ -229,10 +235,11 @@ proc stubStringChunks(node: JsonNode; key, fallback: string): seq[string] =
       result.add $ch
 
 proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
-                   lastPromptTokens: int): JsonNode =
+                   lastPromptTokens: int, maxTokensOverride = 0): JsonNode =
   let stubT0 = epochTime()
   let stubWindow = contextWindowFor(p)
   let stubBaseLabel = hookBeforeCall(lastPromptTokens, stubWindow)
+  stubMaxTokensOverride = maxTokensOverride
   defer:
     hookAfterCall()
   const StubMaxAttempts = 12

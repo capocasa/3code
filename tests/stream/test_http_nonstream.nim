@@ -136,15 +136,34 @@ suite "non-streaming callModel via httpStub":
       discard callModel(glmProfile(),
         %*[{"role": "user", "content": "go"}], usage, 0)
 
-  test "200 with empty message is retried then surfaces an error, not an empty reply":
-    # The streaming bug manifested as silent empty replies. The non-streaming
-    # path turns a genuinely-empty completion into a surfaced error so the
-    # turn loop never silently advances with nothing. First response is the
-    # empty 200 (parseable, so this exercises the empty-message branch, not
-    # the parse branch); a following non-retryable 401 terminates the turn.
+  test "200 with empty message but finish_reason returns a msg, not an error":
+    # Empty-content auto-handling is now a turn-loop concern, not a
+    # transport-layer one. A 200 with a well-formed but empty message that
+    # still carries a finish_reason (length/content_filter/stop) is NOT a
+    # transport error: callModel returns a minimal assistant message tagged
+    # with finish_reason so runTurns can branch on it (escalate max_tokens on
+    # "length", steer on "stop", terminal on "content_filter"). Only the
+    # case with no content AND no finish_reason stays a transport error.
     writeResponses("tc_http_empty.json", """[
       {"choices": [{"index": 0, "message": {"content": "", "reasoning_content": ""},
-        "finish_reason": "stop"}],
+        "finish_reason": "length"}],
+       "usage": {"prompt_tokens": 5, "completion_tokens": 0, "total_tokens": 5}}
+    ]""")
+    var usage: Usage
+    let msg = callModel(glmProfile(),
+      %*[{"role": "user", "content": "go"}], usage, 0)
+    check msg != nil
+    check msg{"content"}.getStr == ""
+    check msg{"finish_reason"}.getStr == "length"
+
+  test "200 with empty message and no finish_reason surfaces a transport error":
+    # The genuinely-empty case (no content, no finish_reason) stays a
+    # transport-level error so callModel's network retry block handles it,
+    # preserving the layer separation: empty-content auto-handling lives in
+    # the turn loop, transport anomalies live here. A following 401
+    # terminates after the retry.
+    writeResponses("tc_http_empty_noFR.json", """[
+      {"choices": [{"index": 0, "message": {"content": "", "reasoning_content": ""}}],
        "usage": {"prompt_tokens": 5, "completion_tokens": 0, "total_tokens": 5}},
       {"status": 401, "body": "{\"error\":\"unauthorized\"}"}
     ]""")
