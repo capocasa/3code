@@ -301,7 +301,7 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
   debugOut &"callModel stub idx={stubResponseIdx-1} failure={stubFailureName(lastFailure)}"
   var slurped = 0
   let preStreamDelay = stubDelayMs(result, "preStreamDelayMs", 0)
-  if preStreamDelay > 0 and not testFrameMode():
+  if preStreamDelay > 0:
     var remaining = preStreamDelay
     while remaining > 0:
       if isInterrupted():

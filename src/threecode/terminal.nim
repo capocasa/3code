@@ -11,6 +11,15 @@ const
   SyncBegin* = "\x1b[?2026h"
   SyncEnd* = "\x1b[?2026l"
 
+## Terminal write serialization lock.
+##
+## Invariant: a thread holding this lock must never join (or otherwise block
+## on) a background thread that renders via `renderFooter` (spinner, barTick).
+## Those threads need the lock to finish their current frame and exit, so
+## joining them while holding it is a guaranteed deadlock: the holder waits
+## for the render thread to exit, the render thread waits for the lock the
+## holder holds. Any join of such a thread must go through
+## `withTerminalLockDroppedForJoin`, which releases the lock around the join.
 var terminalLock*: Lock
 initLock(terminalLock)
 var terminalLockDepth* {.threadvar.}: int
