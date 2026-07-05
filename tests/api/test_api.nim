@@ -378,3 +378,75 @@ suite "xml tool_call fallback":
       model: "glm-5.1", family: "glm")) == false
     check xmlToolCallsFallback(Profile(name: "nvidia.openai/gpt-oss-120b",
       model: "openai/gpt-oss-120b", family: "gpt-oss")) == false
+
+suite "runTurns empty-content auto-handling":
+
+  test "runTurns escalates max_tokens then recovers on empty length reply":
+    # The headline bug: GLM/Qwen/gpt-oss return 200 OK with content empty and
+    # finish_reason "length" (reasoning ate the whole budget). runTurns must
+    # NOT dead-end here: it escalates max_tokens and retries within the same
+    # turn, recovering when the second response carries real content. This is
+    # a turns-layer concern (the transport retry block stays untouched).
+    let pid = $getCurrentProcessId()
+    let probeDir = getTempDir() / ("tc_empty_esc_" & pid)
+    let probePath = probeDir / "probe.nim"
+    let outPath = probeDir / "probe"
+    let cacheDir = probeDir / "nimcache"
+    createDir(probeDir)
+    createDir(cacheDir)
+    defer:
+      try: removeDir(probeDir) except OSError: discard
+    # First response: empty content, finish_reason length (budget starved).
+    # Second response: real content, proving the turn recovered.
+    writeFile(probeDir / "stub_responses.json", """[{
+  "role": "assistant",
+  "content": "",
+  "stream": false,
+  "finish_reason": "length"
+},{
+  "role": "assistant",
+  "content": "RECOVERED_AFTER_ESCALATION",
+  "stream": false
+}]""")
+    writeFile(probePath, """
+import std/[json, strutils]
+import threecode
+import threecode/api except callModel
+
+var messages = %*[
+  {"role": "system", "content": "sys"},
+  {"role": "user", "content": "go"}
+]
+var session: Session
+session.savePath = ""
+session.readCache = newReadCache()
+# Known-good combo so knownGoodGeneration returns a real budget (8192) for
+# the escalation math; runTurnsInteractive's gateExperimental requires it.
+let profile = Profile(name: "nebius.glm-5.1", url: "stub://", key: "k",
+  family: "glm", model: "zai-org/GLM-5.1")
+
+discard runTurnsInteractive(profile, messages, session)
+
+# The empty turn is NOT added to history on a length-escalation retry (it
+# would pollute context); only the recovered content lands. The escalation
+# must have bumped max_tokens above the known-good 8192.
+let lastAssistant = messages[^1]
+doAssert lastAssistant{"role"}.getStr == "assistant",
+  "last msg role: " & lastAssistant{"role"}.getStr
+doAssert lastAssistant{"content"}.getStr == "RECOVERED_AFTER_ESCALATION",
+  "content: " & lastAssistant{"content"}.getStr
+doAssert lastStubMaxTokensOverride() > 8192,
+  "override was " & $lastStubMaxTokensOverride() & " (no escalation happened)"
+echo "OK"
+""")
+    let compileCmd = "nim c -d:ssl -d:providerStub --threads:on --path:src " &
+      nimbleDepFlags() & " --nimcache:" & cacheDir.quoteShell &
+      " -o:" & outPath.quoteShell & " " & probePath.quoteShell
+    let (compileOut, compileCode) = execCmdEx(compileCmd)
+    check compileCode == 0
+    if compileCode != 0:
+      checkpoint compileOut
+    let (runOut, runCode) = execCmdEx(outPath.quoteShell, workingDir = probeDir)
+    check runCode == 0
+    if runCode != 0:
+      checkpoint runOut

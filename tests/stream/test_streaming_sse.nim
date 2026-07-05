@@ -50,6 +50,27 @@ proc makeSseCompleteContent(text, id: string): string =
   let d = $(%*{"choices":[{"index":0,"delta":{"content":text},"finish_reason":"stop"}],"id":id})
   result = "data: " & d & "\n\n" & "data: [DONE]\n\n"
 
+proc makeSseEmptyWithFinish(finishReason, id: string;
+    completionTokens = 0; reasoningTokens = 0): string =
+  ## SSE stream that emits NO content/tools/reasoning deltas at all, only a
+  ## terminal choice carrying finish_reason plus a usage chunk. This is the
+  ## GLM/Qwen/gpt-oss failure mode where the model spent its whole token
+  ## budget on internal reasoning and left content empty. The provider
+  ## sends usage on a separate final chunk via stream_options.include_usage.
+  result = ""
+  if completionTokens > 0 or reasoningTokens > 0:
+    let details = %*{"reasoning_tokens": %reasoningTokens}
+    result.add("data: " & $ %*{"choices":[{"index":0,"delta":{},
+      "finish_reason":finishReason}],"id":id} & "\n\n")
+    result.add("data: " & $ %*{"choices":[],"id":id,
+      "usage":{"prompt_tokens":5,"completion_tokens":completionTokens,
+        "total_tokens":5+completionTokens,
+        "completion_tokens_details":details}} & "\n\n")
+  else:
+    result.add("data: " & $ %*{"choices":[{"index":0,"delta":{},
+      "finish_reason":finishReason}],"id":id} & "\n\n")
+  result.add("data: [DONE]\n\n")
+
 proc makeSseReasoningThenTool(reasoning, cmd, id: string): string =
   ## SSE with reasoning_content first, then a tool_call in many fragments.
   result = ""
@@ -237,5 +258,53 @@ suite "streaming SSE: slow response head":
     joinThread(thr)
     check result != nil
     check result{"content"}.getStr() == "slow but done"
+    server.socket.close()
+    closeCachedStreamConn()
+
+suite "streaming SSE: empty-content with finish_reason":
+  # The bug: GLM/Qwen/gpt-oss reasoning models routinely return 200 OK with a
+  # well-formed body where content is empty and the model spent its whole
+  # token budget on reasoning (finish_reason "length"). The empty-content
+  # auto-handling mode must NOT treat this as a transport error. callModel
+  # returns a minimal assistant message tagged with finish_reason so runTurns
+  # can branch on it (escalate max_tokens on "length", steer on "stop",
+  # terminal on "content_filter"). These are the streaming-equivalent guards
+  # for the non-stream tests in test_http_nonstream.nim.
+  test "empty with finish_reason length returns a tagged msg, not an error":
+    let server = newSseServer(
+      makeSseEmptyWithFinish("length", "id-empty-length",
+        completionTokens = 8192, reasoningTokens = 8192))
+    spawn serveThread(server)
+    var usage = Usage()
+    let result = callModel(testProfile(server),
+      %*[{"role": "user", "content": "go"}], usage, 0)
+    check result != nil
+    check result{"content"}.getStr() == ""
+    check result{"finish_reason"}.getStr == "length"
+    check usage.reasoningTokens == 8192
+    server.socket.close()
+    closeCachedStreamConn()
+
+  test "empty with finish_reason stop returns a tagged msg, not an error":
+    let server = newSseServer(makeSseEmptyWithFinish("stop", "id-empty-stop"))
+    spawn serveThread(server)
+    var usage = Usage()
+    let result = callModel(testProfile(server),
+      %*[{"role": "user", "content": "go"}], usage, 0)
+    check result != nil
+    check result{"content"}.getStr() == ""
+    check result{"finish_reason"}.getStr == "stop"
+    server.socket.close()
+    closeCachedStreamConn()
+
+  test "empty with finish_reason content_filter returns a tagged msg":
+    let server = newSseServer(
+      makeSseEmptyWithFinish("content_filter", "id-empty-cf"))
+    spawn serveThread(server)
+    var usage = Usage()
+    let result = callModel(testProfile(server),
+      %*[{"role": "user", "content": "go"}], usage, 0)
+    check result != nil
+    check result{"finish_reason"}.getStr == "content_filter"
     server.socket.close()
     closeCachedStreamConn()

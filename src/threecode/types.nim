@@ -86,6 +86,9 @@ type
                         ## (gpt-oss: `reasoning_effort`; glm: `thinking.type`).
   Usage* = object
     promptTokens*, completionTokens*, totalTokens*, cachedTokens*: int
+    reasoningTokens*: int  # tokens consumed by internal reasoning
+                            # (completion_tokens_details.reasoning_tokens).
+                            # High + empty content = budget starved.
   ToolRecord* = object
     banner*: string
     output*: string

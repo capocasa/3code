@@ -80,9 +80,15 @@ proc consumeHttpStubCompletion(j: JsonNode; outcome: var StreamOutcome;
     if message{"tool_calls"} != nil and message{"tool_calls"}.kind == JArray:
       message{"tool_calls"}
     else: newJArray()
+  let frNode = choices[0]{"finish_reason"}
+  let finishReason =
+    if frNode != nil and frNode.kind == JString and frNode.getStr.len > 0:
+      frNode.getStr
+    else: ""
+  outcome.finishReason = finishReason
   slurped = content.len + reasoning.len
   hookProgress(baseLabel, slurped)
-  outcome.assistantMsg = buildBatchAssistantMsg(content, reasoning, toolCalls)
+  outcome.assistantMsg = buildBatchAssistantMsg(content, reasoning, toolCalls, finishReason)
   if outcome.assistantMsg == nil:
     outcome.errBody = $j
     outcome.errMsg = "empty reply - no content, no tool calls"

@@ -261,19 +261,88 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       endTurn(repaintPrompt = not isInterrupted())
       turnEnded = true
   defer: finishTurn()
+  # Empty-content auto-handling state (lives at turn scope so it survives
+  # the `continue` that re-enters the loop for an escalation/steering retry).
+  # "length" escalations reuse the same conversation and just bump max_tokens;
+  # "stop"/unknown steering appends a nudge. Both are bounded so a hostile or
+  # broken provider can't pin the turn in a retry loop. See the empty-handling
+  # block below (after toolCalls is computed).
+  var
+    maxTokensOverride = 0          # > 0 replaces known-good max_tokens
+    lengthEscalations = 0          # "length" retries so far this turn
+    steerAttempts = 0              # "stop"/unknown steering retries
+  const
+    MaxLengthEscalations = 3
+    MaxSteerAttempts = 1
   while true:
     var usage: Usage
-    let msg = callModel(p, messages, usage, session.lastPromptTokens)
+    let msg = callModel(p, messages, usage, session.lastPromptTokens,
+      maxTokensOverride)
     session.usage.promptTokens += usage.promptTokens
     session.usage.completionTokens += usage.completionTokens
     session.usage.totalTokens += usage.totalTokens
     session.usage.cachedTokens += usage.cachedTokens
     session.lastPromptTokens = usage.promptTokens
-    messages.add msg
-    saveSession(session, messages)
     if isInterrupted():
+      saveSession(session, messages)
       onTurnInterrupted()
       return true
+    let content = msg{"content"}.getStr("")
+    let streamedLive = contentStreamedLive
+    contentStreamedLive = false
+    let tcNode = msg{"tool_calls"}
+    let toolCalls =
+      if tcNode != nil and tcNode.kind == JArray: tcNode
+      else: newJArray()
+    let finishReason = msg{"finish_reason"}.getStr("")
+    if content.strip.len == 0 and toolCalls.len == 0:
+      # Empty assistant turn. Branch on finish_reason rather than blindly
+      # retrying (a bare resend reproduces the empty reply). This is a
+      # conversational concern, kept out of callModel's transport retry block.
+      let budgetStarved =
+        finishReason == "length" or
+        usage.completionTokens >= knownGoodGeneration(p).maxTokens or
+        usage.reasoningTokens > 0
+      if finishReason == "content_filter":
+        # Terminal: the provider refused the content. Persist the empty turn
+        # and surface the existing dead-end notice; no point retrying as-is.
+        messages.add msg
+        saveSession(session, messages)
+        writeTranscriptWithFatPrompt:
+          hintLn "empty reply - content filtered by provider", resetStyle
+        endTurnAfterTranscriptAppend()
+        turnEnded = true
+        break
+      if budgetStarved and lengthEscalations < MaxLengthEscalations:
+        inc lengthEscalations
+        let cur = knownGoodGeneration(p).maxTokens
+        let window = contextWindowFor(p)
+        let bumped = min(cur * 2, window)
+        maxTokensOverride = max(maxTokensOverride, bumped)
+        writeTranscriptWithFatPrompt:
+          hintLn &"empty reply (finish_reason: {finishReason}); " &
+            "retrying with {humanTokens(maxTokensOverride)} token budget",
+            resetStyle
+        debugOut &"runTurns: empty length-retry {lengthEscalations}/{MaxLengthEscalations} max_tokens={maxTokensOverride}"
+        continue
+      if steerAttempts < MaxSteerAttempts:
+        inc steerAttempts
+        # Append the empty assistant turn (so the exchange stays paired) plus
+        # a short steering user message asking for the final answer, then
+        # retry the same callModel with the nudged history.
+        messages.add msg
+        messages.add %*{"role": "user",
+          "content": "Please provide your final answer now."}
+        saveSession(session, messages)
+        writeTranscriptWithFatPrompt:
+          hintLn "empty reply; re-prompting for a final answer", resetStyle
+        debugOut &"runTurns: empty steer-retry {steerAttempts}/{MaxSteerAttempts}"
+        continue
+      # Exhausted auto-handling. Persist the empty turn and fall through to
+      # the existing dead-end notice below (commitAssistantItem renders
+      # "empty reply - no content, no tool calls").
+    messages.add msg
+    saveSession(session, messages)
     let window = contextWindowFor(p)
     case decideContextAction(usage.promptTokens, window, messages.len)
     of caSummarize:
@@ -286,13 +355,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
             resetStyle
         saveSession(session, messages)
     of caNone: discard
-    let content = msg{"content"}.getStr("")
-    let streamedLive = contentStreamedLive
-    contentStreamedLive = false
-    let tcNode = msg{"tool_calls"}
-    let toolCalls =
-      if tcNode != nil and tcNode.kind == JArray: tcNode
-      else: newJArray()
     if toolCalls.len > 0:
       debugOut $toolCalls.len & " tool calls"
       # Each emit (blank row, assistant content, pending banner, tool
