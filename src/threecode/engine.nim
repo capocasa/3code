@@ -46,6 +46,10 @@ type
     liveContentRows: seq[string]
     editorRedrawPending: bool
     editorRedrawFooterRows: int
+    ## When true, the gap row at the top of the footer is committed
+    ## scrollback (the previous item's trailing `\r\n\r\n`), not volatile
+    ## chrome. Walk-up codepaths stop one row short to preserve it.
+    gapIsSeparator: bool
 
 var defaultEngine*: TerminalEngine
 
@@ -67,14 +71,20 @@ proc walkUp(e: TerminalEngine; ed: var minline.LineEditor): int =
   ## Rows from the cursor to the top of the volatile region (ticker row).
   ## Always derived from live editor + footer state. This is the number of
   ## rows to move up before erasing the volatile region.
+  ## When gapIsSeparator is set, the gap row at the top of the footer is
+  ## committed scrollback (not chrome), so the walk-up stops one row short
+  ## to preserve it.
+  let gap = if e.gapIsSeparator: 1 else: 0
   editorRowsAboveCursor(ed) + e.paintedFooterRows + e.toolViewportRows.len +
-    e.liveContentRows.len
+    e.liveContentRows.len - gap
 
 proc noteFooterPainted(e: var TerminalEngine; footerRowsAboveEditor: int) =
   e.paintedFooterRows = max(0, footerRowsAboveEditor)
+  e.gapIsSeparator = false
 
 proc noteNoFooter(e: var TerminalEngine) =
   e.paintedFooterRows = 0
+  e.gapIsSeparator = false
 
 proc writeViewportRows(rows: openArray[string]) =
   for row in rows:
@@ -143,7 +153,10 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
   ## matches reality regardless of what changed since the last paint.
   {.cast(gcsafe).}:
     termio.withTerminalWriteLock:
-      let bytes = frame.footerFrameBytes(termW)
+      let bytes = if e.gapIsSeparator:
+        frame.footerBarOnlyBytes(termW)
+      else:
+        frame.footerFrameBytes(termW)
       let footerRowsAboveEditor = frame.rowsAboveEditor(termW)
       if inputRunning and editor != nil:
         let edPtr = editor
@@ -192,7 +205,10 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
     termio.withTerminalWriteLock:
       let width = if termW > 0: termW else:
         try: terminalWidth() except CatchableError: 0
-      let bytes = frame.footerFrameBytes(width)
+      let bytes = if e.gapIsSeparator:
+        frame.footerBarOnlyBytes(width)
+      else:
+        frame.footerFrameBytes(width)
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
       stdout.write termio.SyncBegin
       stdout.write "\x1b[?25l"
@@ -258,7 +274,10 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
     termio.withTerminalWriteLock:
       let width = if termW > 0: termW else:
         try: terminalWidth() except CatchableError: 0
-      let bytes = frame.footerFrameBytes(width)
+      let bytes = if e.gapIsSeparator:
+        frame.footerBarOnlyBytes(width)
+      else:
+        frame.footerFrameBytes(width)
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
       stdout.write termio.SyncBegin
       stdout.write "\x1b[?25l"
@@ -373,6 +392,8 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
             e.noteNoFooter()
       else:
         e.noteNoFooter()
+      if transcriptOwnsSpacing and transcript.len > 0 and reserveFooter and footerBytes.len > 0:
+        e.gapIsSeparator = true
       stdout.write termio.SyncEnd
       stdout.flushFile
     else:
@@ -409,6 +430,8 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
             e.noteNoFooter()
       else:
         e.noteNoFooter()
+      if transcriptOwnsSpacing and transcript.len > 0 and reserveFooter and footerBytes.len > 0:
+        e.gapIsSeparator = true
       stdout.flushFile
 
 proc prepareAssistantContentStart*(e: var TerminalEngine;
