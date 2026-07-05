@@ -11,7 +11,7 @@
 
 import std/[json, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline,
-  fatprompt
+  fatprompt, streamexec
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":prompt", ":show",
@@ -773,7 +773,14 @@ proc shellCapture(cmd: string, timeoutS = 3): string =
   let tmp = getTempDir() / ("3code_ctx_" & $getCurrentProcessId() & "_" & $epochTime().int64)
   createDir(tmp)
   let outPath = tmp / "out"
-  let wrapped = &"timeout {timeoutS}s sh -c \"{cmd}\" >\"{outPath}\" 2>/dev/null"
+  let wrapped = when defined(windows):
+    let b = resolveBash()
+    if b.len == 0: return ""
+    # `timeout` (MSYS2 coreutils) bounds the run; the redirect lives outside
+    # bash quotes so cmd.exe handles it with Windows-correct `2>nul`.
+    &"{b} -lc \"timeout {timeoutS}s {cmd}\" >\"{outPath}\" 2>nul"
+  else:
+    &"timeout {timeoutS}s sh -c \"{cmd}\" >\"{outPath}\" 2>/dev/null"
   discard execShellCmd(wrapped)
   result =
     if fileExists(outPath): readFile(outPath).strip

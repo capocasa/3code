@@ -24,6 +24,14 @@ when defined(windows):
     ## system MSYS2 roots or PATH: a single deterministic location.
     result = getEnv("LOCALAPPDATA") & r"\3code\msys64\usr\bin\bash.exe"
 
+  proc toPosixPath(path: string): string =
+    ## Convert a Windows path to a POSIX path for MSYS2 bash.
+    ## C:\Users\foo -> /c/Users/foo
+    result = path.replace('\\', '/')
+    if result.len >= 2 and result[1] == ':':
+      let drive = result[0].toLowerAscii
+      result = "/" & drive & result[2 .. ^1]
+
   proc resolveBash*(): string =
     ## Windows bash resolution. Order: the 3code-owned bundled MSYS2
     ## (the supported, always-present source), then an explicit config
@@ -315,13 +323,9 @@ export DEBIAN_FRONTEND=noninteractive
   writeFile(stdinPath, act.stdin)
 
   let cap = bashTimeoutSecs(act.timeoutSecs)
-  let wrapped = when defined(windows):
-    &". \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
-  else:
-    &"exec sh \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
-
   var p =
     when defined(posix):
+      let wrapped = &"exec sh \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
       let setsidExe = findExe("setsid")
       if setsidExe.len > 0:
         startProcess(setsidExe, args = ["/bin/sh", "-c", wrapped],
@@ -333,11 +337,21 @@ export DEBIAN_FRONTEND=noninteractive
       let b = resolveBash()
       if b == "":
         return ("bash not found", 127, cap)
-      # Login shell: `/etc/profile` prepends /usr/local/bin:/usr/bin:/bin
-      # to PATH. A plain `-c` shell inherits only the Windows PATH, which
-      # has none of the MSYS2 tools, so `ls`, `cat`, `grep` etc. would be
-      # "command not found".
-      startProcess(b, args = ["-lc", wrapped],
+      # On Windows, we use bash -c with the script file path.
+      # We set MSYSTEM, HOME, and PATH using putenv so that bash
+      # can find its tools and the user's home directory.
+      # We don't pass env to startProcess because that would replace
+      # the entire environment (including SYSTEMROOT, WINDIR, etc.)
+      # which would cause bash to fail.
+      putenv("MSYSTEM", "MSYS")
+      putenv("HOME", getEnv("USERPROFILE"))
+      let msysBin = getEnv("LOCALAPPDATA") & r"\3code\msys64\usr\bin"
+      putenv("PATH", msysBin & ";" & getEnv("PATH"))
+      let posixScript = toPosixPath(scriptPath)
+      let posixStdin = toPosixPath(stdinPath)
+      # Use bash -c to source the script and exit
+      let bashCmd = &"source \"{posixScript}\" <\"{posixStdin}\" 2>&1; exit"
+      startProcess(b, args = ["-c", bashCmd],
                    options = {poStdErrToStdOut, poUsePath})
   startToolCancelWatcher(p.processID)
   startToolTimeoutWatcher(cap)

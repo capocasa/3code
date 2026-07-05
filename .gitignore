@@ -18,3 +18,4 @@ tests/golden/*.actual
 nimble.develop
 nimble.paths
 nimbledeps
+src/threecode.exe
