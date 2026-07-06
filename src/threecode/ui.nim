@@ -9,7 +9,7 @@
 ## provider list to offer only valid model names. The provider-add wizard in
 ## `runProviderAdd` validates the API key with a one-token probe before saving.
 
-import std/[json, os, sequtils, strformat, strutils, tables, terminal, times]
+import std/[algorithm, json, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline,
   fatprompt, streamexec
 
@@ -283,24 +283,25 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
   hint "  fetching models...   ", resetStyle
   stdout.flushFile
   let (available, fetchErr) = fetchModels(url, key)
-  let lookup = shortToFull(available)
+  let sortedAvailable = available.sorted
+  let lookup = shortToFull(sortedAvailable)
   if fetchErr.len > 0:
     errLn "unavailable — ", fetchErr
-  elif available.len == 0:
+  elif sortedAvailable.len == 0:
     hintLn "unavailable — enter manually", resetStyle
   else:
-    hintLn &"{available.len} available", resetStyle
-    for m in available:
+    hintLn &"{sortedAvailable.len} available", resetStyle
+    for m in sortedAvailable:
       hintLn "    ", resetStyle, shortModel(m)
   let prevCb = editor.completionCallback
   editor.completionCallback = proc(ed: LineEditor): seq[string] =
-    for m in available: result.add shortModel(m)
+    for m in sortedAvailable: result.add shortModel(m)
   defer: editor.completionCallback = prevCb
   # Pre-populate with known-good models for this provider (KnownGoodCombos order).
   var knownGoodInit: seq[string]
   for combo in KnownGoodCombos:
     if combo[0].toLowerAscii == name.toLowerAscii:
-      for avail in available:
+      for avail in sortedAvailable:
         if avail == combo[1]:
           knownGoodInit.add shortModel(combo[1])
           break
@@ -369,17 +370,18 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     hint "  fetching models...   ", resetStyle
     stdout.flushFile
     let (available, fetchErr) = fetchModels(url, key)
+    let sortedAvailable = available.sorted
     let prevCb = editor.completionCallback
     editor.completionCallback = proc(ed: LineEditor): seq[string] =
-      available.mapIt(shortModel(it))
+      sortedAvailable.mapIt(shortModel(it))
     defer: editor.completionCallback = prevCb
     if fetchErr.len > 0:
       errLn "  unavailable — ", fetchErr
-    elif available.len == 0:
+    elif sortedAvailable.len == 0:
       hintLn "  unavailable — enter manually", resetStyle
     else:
-      hintLn &"  {available.len} available", resetStyle
-      for m in available:
+      hintLn &"  {sortedAvailable.len} available", resetStyle
+      for m in sortedAvailable:
         hintLn "    ", resetStyle, shortModel(m)
     let modelsCurrent = existing.models.mapIt(shortModel(it)).join(" ")
     let newModels = readOptional(editor,
@@ -388,7 +390,7 @@ proc promptEditProvider*(editor: var minline.LineEditor,
                    else: splitModels(newModels)
     # Resolve short names against the fetched model list; unknown names
     # pass through as-is (full id entered by the user).
-    let lookup = shortToFull(available)
+    let lookup = shortToFull(sortedAvailable)
     let models = rawModels.mapIt(lookup.getOrDefault(it, it))
     if models.len == 0:
       errLn "  need at least one model"
@@ -460,6 +462,7 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
   let prov = try: promptNewProvider(editor)
              except minline.InputCancelled:
                hintLn "  cancelled", resetStyle
+               fatprompt.restoreInputTermios()
                return
   for pr in activeProviders:
     if pr.name == prov.name:
@@ -473,6 +476,7 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
     prof = buildProfile(activeCurrent, activeProviders, "")
   hintLn &"  added {prov.name}", resetStyle
   showProfile(prof)
+  fatprompt.restoreInputTermios()
 
 proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
                      prof: var Profile) =
@@ -485,6 +489,7 @@ proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
   let updated = try: promptEditProvider(editor, activeProviders[idx])
                 except minline.InputCancelled:
                   hintLn "  cancelled", resetStyle
+                  fatprompt.restoreInputTermios()
                   return
   activeProviders[idx] = updated
   let curName = if activeCurrent == "": "" else: activeCurrent.split('.')[0]
@@ -497,6 +502,7 @@ proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
     prof = buildProfile(activeCurrent, activeProviders, "")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   hintLn &"  updated {target}", resetStyle
+  fatprompt.restoreInputTermios()
 
 proc cmdProviderRm(target: string, prof: var Profile) =
   var idx = -1
