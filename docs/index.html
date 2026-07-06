@@ -63,6 +63,7 @@ irm https://3code.capocasa.dev/install.ps1 | iex</pre></p>
 
 <h2 id="picking-a-provider">Picking a provider</h2><p>There are two categories of provider that are interesting to use with 3code: the nvidia free tier and Chinese flat-rate providers. Other providers work but will most likely be too expensive except to test-drive different models.</p>
 <p><a class="reference external" href="https://build.nvidia.com">nvidia</a> - Free tier. You get gpt-oss-120b, which is good enough for a lot of cases. You will notice when it starts to get limiting. MiniMax M2.7 is a very modern option on nvidia but it is pretty slow, something you want to use in the background.</p>
+<p><a class="reference external" href="https://platform.minimax.io">MiniMax</a> - First-party API for the MiniMax M-series: M3 frontier (1M context) and M2.7. The first-party endpoint is the cheapest way to run M3 and the only one that exposes the Anthropic-style <tt class="docutils literal"><span class="pre">thinking.type</span></tt> knob; the OpenAI-compatible surface (api.minimax.io/v1) is what 3code talks to and uses the vLLM-style <tt class="docutils literal"><span class="pre">chat_template_kwargs</span></tt> knob under the hood. M2.7 is also available on nvidia, fireworks, together, sambanova, and deepinfra as a hosted alternative.</p>
 <p><a class="reference external" href="https://z.ai/">z.ai</a> - GLM 5.1 on the z.ai coding plan is my provider of choice. Privacy and jurisdiction is not an issue because all code is open source and hence public. Excellent quality at an affordable flat rate.</p>
 <p><a class="reference external" href="https://endpoints.ai.cloud.ovh.net/">OVH</a> - An interesting EU-resident choice: gpt-oss on pay-per-token, cheap enough, and great if you need EU ownership and data.</p>
 <p>Add a provider inside the REPL:</p>
@@ -125,6 +126,9 @@ irm https://3code.capocasa.dev/install.ps1 | iex</pre></p>
 <tr><td>sambanova</td><td>deepseek-v3.2</td><td></td></tr>
 </table><p><strong>MiniMax</strong></p>
 <table border="1" class="docutils"><tr><th>provider</th><th>model</th><th>notes</th></tr>
+<tr><td>minimax</td><td>minimax-m3</td><td>1M context</td></tr>
+<tr><td>minimax</td><td>minimax-m2.7</td><td></td></tr>
+<tr><td>minimax</td><td>minimax-m2.7-highspeed</td><td></td></tr>
 <tr><td>nvidia</td><td>minimax-m2.7</td><td></td></tr>
 <tr><td>nvidia</td><td>minimax-m2.5</td><td></td></tr>
 <tr><td>fireworks</td><td>minimax-m2.7</td><td></td></tr>

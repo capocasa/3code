@@ -74,6 +74,14 @@ is good enough for a lot of cases. You will notice when it starts to get
 limiting. MiniMax M2.7 is a very modern option on nvidia but it is pretty slow,
 something you want to use in the background.
 
+`MiniMax <https://platform.minimax.io>`_ - First-party API for the MiniMax
+M-series: M3 frontier (1M context) and M2.7. The first-party endpoint is the
+cheapest way to run M3 and the only one that exposes the Anthropic-style
+`thinking.type` knob; the OpenAI-compatible surface (api.minimax.io/v1) is
+what 3code talks to and uses the vLLM-style `chat_template_kwargs` knob
+under the hood. M2.7 is also available on nvidia, fireworks, together,
+sambanova, and deepinfra as a hosted alternative.
+
 `z.ai <https://z.ai/>`_ - GLM 5.1 on the z.ai coding plan is my provider of
 choice. Privacy and jurisdiction is not an issue because all code is open
 source and hence public. Excellent quality at an affordable flat rate.
@@ -191,6 +199,9 @@ Tokens can still be burnt on errors - that is part of the game.
 
 | provider   | model          | notes      |
 |------------|----------------|------------|
+| minimax    | minimax-m3     | 1M context |
+| minimax    | minimax-m2.7   |            |
+| minimax    | minimax-m2.7-highspeed |   |
 | nvidia     | minimax-m2.7   |            |
 | nvidia     | minimax-m2.5   |            |
 | fireworks  | minimax-m2.7   |            |

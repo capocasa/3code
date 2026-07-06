@@ -1101,11 +1101,29 @@ proc applyDeepseekReasoning(p: Profile, body: JsonNode) =
     body["reasoning_effort"] = %p.reasoning
 
 proc applyMinimaxReasoning(p: Profile, body: JsonNode) =
-  ## MiniMax M2.x uses vLLM's `chat_template_kwargs.enable_thinking`
-  ## to toggle reasoning. NVIDIA NIM exposes the same knob. Thinking
-  ## is disabled at "low" for snappy responses; "medium" and "high"
-  ## enable it with increasing effort. Temperature is pinned to 0.2
-  ## per MiniMax's recommended deployment settings.
+  ## MiniMax M-series reasoning toggle on the OpenAI-compatible endpoint
+  ## (api.minimax.io/v1) and vLLM stacks (nvidia, fireworks, together,
+  ## deepinfra, sambanova). The knob is the vLLM-style
+  ## `chat_template_kwargs.enable_thinking`:
+  ## - M2.x (v2.5, v2.7) is a reasoning-only model: enable_thinking=true
+  ##   engages interleaved reasoning, enable_thinking=false cuts it off.
+  ## - M3 (frontier) defaults to thinking on; the knob is the same shape
+  ##   and works the same way. "low" disables it for snappy responses;
+  ##   "medium" and "high" enable it with increasing effort. Anthropic-
+  ##   protocol deployments (api.minimax.io/anthropic) also accept
+  ##   `thinking.type = "enabled"/"disabled"`, but we only talk to the
+  ##   OpenAI-compatible surface, so the vLLM knob is what we send.
+  ##
+  ## `reasoning_split = true` (top-level body field) is hardcoded: it
+  ## tells the model to return thinking content as a separate
+  ## `reasoning_details` block instead of leaking it into the
+  ## `content` stream as `<think>...</think>` tags. Without it, the
+  ## model's interleaved thinking shows up inline in the visible text
+  ## and pollutes both the UI transcript and any text the harness hands
+  ## to tools that don't expect it. The split field is also part of
+  ## the official Anthropic-compatible format, which the harness
+  ## already relies on for the round-trip (the assistant message must
+  ## come back with reasoning preserved on history replay).
   case p.reasoning
   of "low":
     body["chat_template_kwargs"] = %*{"enable_thinking": false}
@@ -1114,6 +1132,7 @@ proc applyMinimaxReasoning(p: Profile, body: JsonNode) =
   of "high":
     body["chat_template_kwargs"] = %*{"enable_thinking": true}
   else: discard
+  body["reasoning_split"] = %true
 
 proc applyLongcatReasoning(p: Profile, body: JsonNode) =
   ## LongCat-2.0 toggles reasoning via `thinking.type`, a binary
