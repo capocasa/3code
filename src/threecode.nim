@@ -48,7 +48,7 @@ proc usage() {.noreturn.} =
 
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
   -r, --resume[=ID]    resume latest session from this directory (or by id)
-  -i, --interactive    run prompt then continue interactively
+  -i, --interactive    (default) run prompt then continue interactively
   -l, --list           list recent sessions for this directory (max 20) and exit
   -a, --all            (reserved) with -l, accepted but a no-op for now
   -g, --good           list known-good provider/variant combos and exit
@@ -244,9 +244,16 @@ proc main() =
     of "good": printKnownGood(); return
     else: discard
 
-  if (resume or forceInteractive) and args.len > 0:
-    let flag = if resume: "--resume" else: "--interactive"
-    die("unexpected argument with " & flag & ": " & args.join(" "), ExitUsage)
+  # Validate --resume targets before side-effecting startup work so a
+  # bogus id fails fast (no skill extraction, no lock) the same way a
+  # usage error does. A prompt alongside --resume is now legitimate
+  # (run it once resumed), so only the id is checked here.
+  if resume:
+    if resolveSessionPath(resumeId, safeCwd()) == "":
+      if resumeId == "":
+        die("no saved sessions for " & safeCwd(), ExitConfig)
+      else:
+        die("session not found: " & resumeId, ExitConfig)
 
   # ── All syntax validation and fast-exit dispatches are done; only now
   #    do we gate on bash (Windows) and run the side-effecting startup work
@@ -265,13 +272,10 @@ proc main() =
   var restoredDraft = ""
 
   if resume:
-    let path = resolveSessionPath(resumeId, safeCwd())
-    if path == "":
-      if resumeId == "":
-        die("no saved sessions for " & safeCwd(), ExitConfig)
-      else:
-        die("session not found: " & resumeId, ExitConfig)
-    (session, messages) = loadSessionFile(path)
+    # `resolveSessionPath` already ran (and bailed) above; recompute the
+    # resolved path here without re-validating, since nothing between the two
+    # points can change the on-disk set.
+    (session, messages) = loadSessionFile(resolveSessionPath(resumeId, safeCwd()))
     # Recover any prompt that was in-flight when the previous process ended
     # (kill, power-off, Ctrl-C). Only restored when no explicit --prompt was
     # passed: the user's command-line intent wins over the recovered draft.
@@ -300,24 +304,6 @@ proc main() =
   except SessionLocked as e:
     releaseDirLock(session.cwd)
     die(e.msg, ExitConfig)
-
-  if prompt != "" and not resume and not forceInteractive:
-    let prof = loadProfile(model)
-    if not gateExperimental(prof):
-      explainExperimentalGate(prof)
-      quit ExitConfig
-    session.profileName = prof.name
-    messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
-    refreshSystemPrompt(messages, prof)
-    try:
-      discard runTurns(prof, messages, session)
-    except ApiError as e:
-      saveSession(session, messages)
-      die(e.msg, ExitApi)
-    if session.usage.totalTokens > 0:
-      hintLn &"  · {humanTokens(session.usage.totalTokens)} total", resetStyle
-    stderr.writeLine "session: " & sessionIdFromPath(session.savePath)
-    return
 
   var activeColorKeys: Table[string, string]
   (activeCurrent, activeProviders, activeColorKeys) = loadStateOrEmpty(configPath())
@@ -462,6 +448,7 @@ proc main() =
     if prompt != "":
       messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
       refreshSystemPrompt(messages, prof)
+      commitUserPromptTranscript(prompt)
       clearDraft(session)
       discard runTurnsInteractive(prof, messages, session)
       if handleBufferedAfterTurn(): return
@@ -472,6 +459,7 @@ proc main() =
     if prompt != "":
       messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
       refreshSystemPrompt(messages, prof)
+      commitUserPromptTranscript(prompt)
       clearDraft(session)
       discard runTurnsInteractive(prof, messages, session)
       if handleBufferedAfterTurn(): return
