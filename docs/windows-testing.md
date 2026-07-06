@@ -6,7 +6,9 @@ options for closing that gap. It is a working TODO, not a permanent state.
 
 ## Current status
 
-22 of 33 tests run on Windows; 30 of 33 on macOS. The 11 Windows-disabled tests are:
+22 of 33 test files run on Windows; one of them (`test_provider_wizard`)
+runs 7 of its 9 subtests. 30 of 33 on macOS. The 11 Windows-disabled test
+files are:
 
 - `tests/tty/test_tty_functional.nim`
 - `tests/tty/test_empty_enter_freeze.nim`
@@ -31,6 +33,17 @@ options for closing that gap. It is a working TODO, not a permanent state.
   (XDG), but Windows reads `APPDATA` via `getConfigDir()`.
 - `tests/core/test_util_extra.nim` — `collapseHome` assertions use forward-
   slash POSIX paths; Windows backslash paths fail the comparison.
+- `tests/config/test_provider_wizard.nim` — two of the nine subtests
+  ("add wizard lists models sorted alphabetically", "edit wizard lists
+  models sorted alphabetically") capture wizard stdout by reassigning the
+  `stdout` global var. On Windows MinGW, `stdout` is a macro
+  (`(&__iob_func()[1])`), so the generated C assignment `stdout = f`
+  fails to compile with `error: lvalue required as left operand of
+  assignment`. The other seven subtests in the file don't use stdout
+  capture and run unchanged on Windows. The two capture subtests are
+  gated with `when not defined(windows):`; re-enabling them cross-
+  platform would require plumbing a hook through `display.nim` so
+  `hintLn` writes to a caller-supplied `File`.
 
 On macOS the same three tty tests are also skipped: the harness compiles
 (post util.h/clearEnv fix) but hangs deterministically because the `expect*`

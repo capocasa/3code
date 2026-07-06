@@ -160,55 +160,61 @@ suite "provider wizard configuration":
     var messages = newJArray()
     var session = Session()
 
-  test "add wizard lists models sorted alphabetically":
-    activeProviders = @[
-      ProviderRec(name: "groq", url: "https://api.groq.com/openai/v1",
-                  key: "gsk-existing", models: @["openai/gpt-oss-20b"])
-    ]
-    activeCurrent = "groq.openai/gpt-oss-20b"
-    experimentalEnabled = true
-    inputs = @["nvapi-add", "gpt-oss-120b"]
-    var editor: LineEditor
-    var prof = buildProfile(activeCurrent, activeProviders, "")
-    var messages = newJArray()
-    var session = Session()
+  # These two tests capture wizard stdout to a temp file by reassigning
+  # the `stdout` global var. On Windows MinGW, `stdout` is a macro
+  # (`(&__iob_func()[1])`), so the generated C assignment `stdout = f`
+  # fails to compile with `error: lvalue required as left operand of
+  # assignment`. The other 7 subtests in this file don't use stdout
+  # capture and run unchanged on Windows. See docs/windows-testing.md.
+  when not defined(windows):
+    test "add wizard lists models sorted alphabetically":
+      activeProviders = @[
+        ProviderRec(name: "groq", url: "https://api.groq.com/openai/v1",
+                    key: "gsk-existing", models: @["openai/gpt-oss-20b"])
+      ]
+      activeCurrent = "groq.openai/gpt-oss-20b"
+      experimentalEnabled = true
+      inputs = @["nvapi-add", "gpt-oss-120b"]
+      var editor: LineEditor
+      var prof = buildProfile(activeCurrent, activeProviders, "")
+      var messages = newJArray()
+      var session = Session()
 
-    # Capture stdout to verify model listing order. The wizard writes
-    # directly to stdout via hintLn, so we swap the `stdout` var for a
-    # temp file around the call. Reassigning the C-level `FILE*` var
-    # works on both POSIX and Windows; the earlier posix.dup/dup2 trick
-    # only redirected the OS fd, which the C runtime ignores on Windows
-    # (it writes to the buffered FILE*'s own HANDLE, not fd 1).
-    let capturePath = getTempDir() / "wizard_add_capture.txt"
-    let savedStdout = stdout
-    let captureFile = open(capturePath, fmWrite)
-    stdout = captureFile
-    try:
-      discard handleCommand(":provider add", messages, session, prof, editor)
-    finally:
-      flushFile(stdout)
-      stdout = savedStdout
-      close(captureFile)
-    let capturedOutput = readFile(capturePath)
-    try: removeFile(capturePath) except OSError: discard
+      # Capture stdout to verify model listing order. The wizard writes
+      # directly to stdout via hintLn, so we swap the `stdout` var for a
+      # temp file around the call. The earlier posix.dup/dup2 trick
+      # only redirected the OS fd, which the C runtime ignores on Windows
+      # (it writes to the buffered FILE*'s own HANDLE, not fd 1).
+      let capturePath = getTempDir() / "wizard_add_capture.txt"
+      let savedStdout = stdout
+      let captureFile = open(capturePath, fmWrite)
+      stdout = captureFile
+      try:
+        discard handleCommand(":provider add", messages, session, prof, editor)
+      finally:
+        flushFile(stdout)
+        stdout = savedStdout
+        close(captureFile)
+      let capturedOutput = readFile(capturePath)
+      try: removeFile(capturePath) except OSError: discard
 
-    # The models should be listed in sorted order.
-    # The nvidiaModels() stub returns them jumbled; the wizard must sort.
-    # Extract the short model names in the order they appear in the output.
-    var listedModels: seq[string]
-    for line in capturedOutput.splitLines:
-      let stripped = stripAnsiCsi(line.strip)
-      # Model lines start with "    " (4 spaces) and contain a model name
-      if stripped.len > 4 and stripped[0..3] == "    " and
-         stripped[4..^1].shortModel() != "" and
-         stripped[4..^1] != "5 available" and
-         stripped[4..^1] != "verifying..." and
-         stripped[4..^1] != "ok" and
-         stripped[4..^1] != "added nvidia" and
-         stripped[4..^1] != "detected: nvidia -> https://integrate.api.nvidia.com/v1":
-        listedModels.add stripped[4..^1].shortModel()
-    check listedModels == @["minimax-m2.5", "minimax-m2.7", "gpt-oss-120b",
-                           "gpt-oss-20b", "glm4.7"]
+      # The models should be listed in sorted order.
+      # The nvidiaModels() stub returns them jumbled; the wizard must sort.
+      # Extract the short model names in the order they appear in the output.
+      var listedModels: seq[string]
+      for line in capturedOutput.splitLines:
+        let stripped = stripAnsiCsi(line.strip)
+        # Model lines start with "    " (4 spaces) and contain a model name
+        if stripped.len > 4 and stripped[0..3] == "    " and
+           stripped[4..^1].shortModel() != "" and
+           stripped[4..^1] != "5 available" and
+           stripped[4..^1] != "verifying..." and
+           stripped[4..^1] != "ok" and
+           stripped[4..^1] != "added nvidia" and
+           stripped[4..^1] != "detected: nvidia -> https://integrate.api.nvidia.com/v1":
+          listedModels.add stripped[4..^1].shortModel()
+      check listedModels == @["minimax-m2.5", "minimax-m2.7", "gpt-oss-120b",
+                             "gpt-oss-20b", "glm4.7"]
 
   test "wizard inputs are not added to history":
     # Bug 2: wizard inputs must not pollute history. readRequired/readOptional
@@ -278,48 +284,48 @@ suite "provider wizard configuration":
     check capturedModels.len > 0
     check "gpt-oss-120b" in capturedModels
 
-  test "edit wizard lists models sorted alphabetically":
-    activeProviders = @[
-      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
-                  key: "nvapi-old", models: @["z-ai/glm4.7"])
-    ]
-    activeCurrent = "nvidia.z-ai/glm4.7"
-    inputs = @["", "", "", "gpt-oss-120b"]
-    var editor: LineEditor
-    var prof = buildProfile(activeCurrent, activeProviders, "")
-    var messages = newJArray()
-    var session = Session()
+  when not defined(windows):
+    test "edit wizard lists models sorted alphabetically":
+      activeProviders = @[
+        ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                    key: "nvapi-old", models: @["z-ai/glm4.7"])
+      ]
+      activeCurrent = "nvidia.z-ai/glm4.7"
+      inputs = @["", "", "", "gpt-oss-120b"]
+      var editor: LineEditor
+      var prof = buildProfile(activeCurrent, activeProviders, "")
+      var messages = newJArray()
+      var session = Session()
 
-    # Capture stdout to verify model listing order. See the add-wizard
-    # test above for why we swap the `stdout` var instead of using
-    # posix.dup/dup2.
-    let capturePath = getTempDir() / "wizard_edit_capture.txt"
-    let savedStdout = stdout
-    let captureFile = open(capturePath, fmWrite)
-    stdout = captureFile
-    try:
-      discard handleCommand(":provider edit nvidia", messages, session, prof,
-                            editor)
-    finally:
-      flushFile(stdout)
-      stdout = savedStdout
-      close(captureFile)
-    let capturedOutput = readFile(capturePath)
-    try: removeFile(capturePath) except OSError: discard
+      # Capture stdout to verify model listing order. See the add-wizard
+      # test above for why we swap the `stdout` var.
+      let capturePath = getTempDir() / "wizard_edit_capture.txt"
+      let savedStdout = stdout
+      let captureFile = open(capturePath, fmWrite)
+      stdout = captureFile
+      try:
+        discard handleCommand(":provider edit nvidia", messages, session, prof,
+                              editor)
+      finally:
+        flushFile(stdout)
+        stdout = savedStdout
+        close(captureFile)
+      let capturedOutput = readFile(capturePath)
+      try: removeFile(capturePath) except OSError: discard
 
-    # The models should be listed in sorted order in the edit wizard too.
-    var listedModels: seq[string]
-    for line in capturedOutput.splitLines:
-      let stripped = stripAnsiCsi(line.strip)
-      # Model lines start with "    " (4 spaces) and contain a model name
-      if stripped.len > 4 and stripped[0..3] == "    " and
-         stripped[4..^1].shortModel() != "" and
-         stripped[4..^1] != "5 available" and
-         stripped[4..^1] != "verifying..." and
-         stripped[4..^1] != "ok" and
-         stripped[4..^1] != "updated nvidia" and
-         stripped[4..^1] != "editing 'nvidia' (enter to keep, ctrl+c to abort)" and
-         stripped[4..^1] != "# tip: change name + url to point at a fine-tune deployment":
-        listedModels.add stripped[4..^1].shortModel()
-    check listedModels == @["minimax-m2.5", "minimax-m2.7", "gpt-oss-120b",
-                           "gpt-oss-20b", "glm4.7"]
+      # The models should be listed in sorted order in the edit wizard too.
+      var listedModels: seq[string]
+      for line in capturedOutput.splitLines:
+        let stripped = stripAnsiCsi(line.strip)
+        # Model lines start with "    " (4 spaces) and contain a model name
+        if stripped.len > 4 and stripped[0..3] == "    " and
+           stripped[4..^1].shortModel() != "" and
+           stripped[4..^1] != "5 available" and
+           stripped[4..^1] != "verifying..." and
+           stripped[4..^1] != "ok" and
+           stripped[4..^1] != "updated nvidia" and
+           stripped[4..^1] != "editing 'nvidia' (enter to keep, ctrl+c to abort)" and
+           stripped[4..^1] != "# tip: change name + url to point at a fine-tune deployment":
+          listedModels.add stripped[4..^1].shortModel()
+      check listedModels == @["minimax-m2.5", "minimax-m2.7", "gpt-oss-120b",
+                             "gpt-oss-20b", "glm4.7"]
