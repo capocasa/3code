@@ -585,7 +585,14 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
   except ApiError as e:
     saveSession(session, messages)
     if isInterruptedMsg(e.msg):
+      # Safety net: `callModel`'s interrupt raises are caught inside
+      # `runTurns` so `onTurnInterrupted` lands before the deferred
+      # `endTurn`. If an interrupt ApiError nonetheless escapes `runTurns`,
+      # the deferred `endTurn` already ran with the flag still set
+      # (`repaintPrompt = false`), so repaint the idle prompt here after
+      # appending the harness line.
       onTurnInterrupted()
+      endTurn(repaintPrompt = true)
       return true
     else:
       stdout.styledWriteLine fgMagenta, e.msg, resetStyle
