@@ -208,16 +208,18 @@ proc pollOnce(s: TtySession, waitMs: int; recordIdleFrame = true): bool =
       (pfds[1].revents and (POLLIN or POLLHUP or POLLERR)) != 0:
     var buf: array[256, char]
     let n = posix.read(s.frameEventFd, addr buf[0], buf.len)
-    # Child exited: frame event pipe is closed, no point draining.
-    if n <= 0:
-      return result
-    while s.readPtyChunk(5):
-      discard
-    s.flushFrame(force = true)
-    if s.frameAckFd > 0:
-      var ch = 'a'
-      discard posix.write(s.frameAckFd, addr ch, 1)
-    result = true
+    # Child exited: frame event pipe is closed, no point draining. Fall
+    # through to the waitpid below rather than returning early, so the exit
+    # is reaped and `s.exited` is set (an early return here skips reaping
+    # and leaves a zombie the caller never observes).
+    if n > 0:
+      while s.readPtyChunk(5):
+        discard
+      s.flushFrame(force = true)
+      if s.frameAckFd > 0:
+        var ch = 'a'
+        discard posix.write(s.frameAckFd, addr ch, 1)
+      result = true
   elif not result and recordIdleFrame:
     s.flushFrame()
 

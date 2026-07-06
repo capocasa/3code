@@ -483,12 +483,10 @@ suite "terminal visual contract":
       SimpleVisualTestFrames,
       root / "simple_visual_test_actual.txt")
 
-  test "initial prompt argument runs through the full UI":
-    # Regression: `3code <prompt>` used to take a stripped-down path that
-    # skipped the welcome screen, editor, and prompt-mode setup, emitting
-    # raw spinner/bar fragments and stray carets. The initial prompt must
-    # flow through the same stack as a typed prompt: welcome, committed
-    # user row, streamed reply, and a typing-ready caret afterward.
+  test "initial prompt with -i stays in the interactive REPL":
+    # `-i` runs an initial prompt then drops into the REPL, just like a
+    # typed prompt. The initial prompt must flow through the same stack
+    # (welcome, committed user row, streamed reply) and end typing-ready.
     let root = newFixture("initial_prompt_arg")
     writeConfiguredProvider(root)
     writeStubResponses(root, %*[
@@ -505,9 +503,30 @@ suite "terminal visual contract":
     tty.expectRowAppearsOnce("❯ This is an initial prompt")
     tty.expectCount("Initial reply.", 1, where = "screen")
     tty.expectTokenBar(["○", "↑30", "↓5"])
-    # The turn ends in a typing-ready REPL: the caret is visible and idle.
+    # With -i the process stays alive and the caret is visible and idle.
     tty.drain(200)
+    tty.expectAlive()
     tty.expect "❯"
+
+  test "initial prompt without -i runs once and exits (oneshot)":
+    # The default for a command-line prompt is oneshot: run the turn and
+    # exit. Only -i/--interactive keeps the REPL open afterward. Regression
+    # for the bug where `3code <prompt>` dropped into the REPL instead of
+    # exiting on completion.
+    let root = newFixture("oneshot_exit")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {"role": "assistant",
+       "content": "Oneshot reply.",
+       "contentChunks": ["Oneshot reply."],
+       "usage": {"promptTokens": 30, "completionTokens": 5,
+                 "totalTokens": 35, "cachedTokens": 0}}
+    ])
+    let tty = startStub(root, args = ["-x", "Oneshot prompt"])
+    tty.expect "❯ Oneshot prompt"
+    tty.expectInHistory "Oneshot reply."
+    # No -i: the turn completes and the process exits cleanly with code 0.
+    tty.expectExit 0
 
   test "word-level content chunks stream eagerly, not buffered to newline":
     # Eager streaming: when content arrives in word-level chunks with no

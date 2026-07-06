@@ -36,6 +36,7 @@ when defined(windows):
   import threecode/streamexec  # for resolveBash, used by ensureBash
 import tinotify
 import threecode/minline
+import threecode/engine as termengine
 export types, util, prompts, shell, session, compact,
        config, actions, api, display, ui, fatprompt, toolstream, turns,
        transcript
@@ -48,7 +49,8 @@ proc usage() {.noreturn.} =
 
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
   -r, --resume[=ID]    resume latest session from this directory (or by id)
-  -i, --interactive    (default) accepted for back-compat, no-op
+  -i, --interactive    drop into the REPL after running an initial prompt
+                      (without it, a prompt runs once and exits)
   -l, --list           list recent sessions for this directory (max 20) and exit
   -a, --all            (reserved) with -l, accepted but a no-op for now
   -g, --good           list known-good provider/variant combos and exit
@@ -176,6 +178,7 @@ proc main() =
   var resumeId = ""
   var sessionOut = ""
   var listSessions = false
+  var interactive = false
   var p = initOptParser(commandLineParams())
   for kind, k, v in p.getopt():
     case kind
@@ -188,7 +191,7 @@ proc main() =
       of "light": colorForce = cmLight
       of "dark":  colorForce = cmDark  # explicit default; accepted for symmetry
       of "D", "debug": debugEnabled = true
-      of "i", "interactive": discard  # default; accepted for back-compat
+      of "i", "interactive": interactive = true
       of "m", "model":
         if v != "": model = v
         else: pending = "model"
@@ -476,6 +479,17 @@ proc main() =
     paintInitialPrompt(prof)
     if prompt != "":
       if runInitialPrompt(prompt): return
+  # Oneshot: a prompt given on the command line runs once and exits. Only
+  # -i/--interactive keeps the REPL open afterward (and no prompt at all
+  # means a fresh interactive session). The idle prompt painted by endTurn
+  # is transient chrome; clear it so the process ends on the last reply
+  # line rather than a dangling caret.
+  if prompt != "" and not interactive:
+    emitFatPromptEvent clearPendingHintEvent()
+    emitFatPromptEvent clearBarEvent()
+    termengine.renderFooter(clearFooterFrame(), inputThreadRunning,
+                            addr editor)
+    return
   while true:
     var done = false
     var line = readInput(editor, done)
