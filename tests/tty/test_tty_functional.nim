@@ -723,7 +723,25 @@ suite "terminal visual contract":
     tty.expectActiveSpinner()
     tty.send "\x1b"
     tty.expectInHistory "interrupted by user"
+    tty.drain 300  # let the post-interrupt prompt frame settle
     tty.expectOnScreen "❯"  # prompt painted on the grid after ESC, not just raw bytes
+    # Regression: the cancel must leave the prompt glyph on the caret
+    # row with the caret at col 2. A passing `expectOnScreen "❯"` is not
+    # enough — an earlier `❯` from a prior turn can match, and without
+    # the `drain` above the post-interrupt frame may not be recorded
+    # yet. Verify the caret row, the glyph on it, and the col 2
+    # position explicitly so the bug that cleared the row and parked
+    # the caret at col 0 cannot slip through.
+    let f = tty.frames[^1]
+    doAssert not f.cursorHidden,
+      "REGRESSION (interrupted-by-user): caret hidden after ESC; expected col 2 on prompt row"
+    doAssert f.cursorCol == 2,
+      "REGRESSION (interrupted-by-user): expected caret at col 2 after ❯, got " &
+        $f.cursorCol & " (rows: " & $f.rows.len & ")"
+    let promptRow = f.rows[f.cursorRow]
+    doAssert "❯" in promptRow,
+      "REGRESSION (interrupted-by-user): prompt glyph ❯ missing from caret row " &
+        $f.cursorRow & ", got: '" & promptRow & "'"
     tty.expectAlive()
     tty.send "second"
     tty.send "\n"
@@ -763,7 +781,19 @@ suite "terminal visual contract":
     tty.expectActiveSpinner()
     tty.send "\x03"
     tty.expectInHistory "interrupted by user"
+    tty.drain 300  # let the post-interrupt prompt frame settle
     tty.expectOnScreen "❯"  # prompt painted on the grid after Ctrl-C, not just raw bytes
+    # Regression: same interrupted-by-user prompt contract as the ESC
+    # case — glyph on the caret row, caret at col 2. See the matching
+    # assertion in the ESC test for the bug being locked out.
+    let f = tty.frames[^1]
+    doAssert not f.cursorHidden,
+      "REGRESSION (interrupted-by-user): caret hidden after Ctrl-C; expected col 2 on prompt row"
+    doAssert f.cursorCol == 2,
+      "REGRESSION (interrupted-by-user): expected caret at col 2 after ❯, got " & $f.cursorCol
+    doAssert "❯" in f.rows[f.cursorRow],
+      "REGRESSION (interrupted-by-user): prompt glyph ❯ missing from caret row " &
+        $f.cursorRow & ", got: '" & f.rows[f.cursorRow] & "'"
     tty.expectAlive()
     tty.send "second"
     tty.send "\n"

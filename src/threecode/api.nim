@@ -1440,7 +1440,8 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     if isInterrupted():
       raise newException(ApiError, "interrupted by user during retry backoff")
     clearNetworkQuiet()
-    hookSetStatusLabel(&"retry {attempt + 1}/{MaxAttempts}")
+    # don't set retry as status lable- it's show as message
+    #hookSetStatusLabel(&"retry {attempt + 1}/{MaxAttempts}")
     hookStartSpinner("")
     if category == "rate":
       inc rateRetryLevel

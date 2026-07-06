@@ -35,23 +35,27 @@ proc emitTestFrameEvent() =
 
 proc onTurnInterrupted*() =
   ## Single response to a user-triggered interrupt (Ctrl-C, ESC, or any
-  ## other trigger wired to `requestTurnInterrupt`). Appends the notice to
-  ## scrollback as an ordinary harness line and clears the interrupt flag.
+  ## other trigger wired to `requestTurnInterrupt`). Same scrollback
+  ## contract as `apiRetryNotice`: one ordinary harness line, no leading
+  ## bullet, written through `writeTranscriptWithFatPrompt` so the fat
+  ## prompt's editor is preserved in place across this line.
   ##
   ## This is the only place that renders an interrupt message. Whether the
   ## interrupt was noticed mid-stream, after a tool call, or propagated up
   ## as an `ApiError` once the stream had already torn itself down, the
   ## response is identical.
   ##
-  ## This proc appends ONLY the harness line; it does not repaint the idle
-  ## prompt. The caller (`runTurns`) runs this before its deferred
-  ## `endTurn`, so clearing the flag here makes that `endTurn` take the
-  ## `repaintPrompt = not isInterrupted() = true` branch and own the single
-  ## idle prompt paint. Repainting the prompt here as well would race that
-  ## `endTurn` paint for the prompt row and leave a half-overwritten caret.
-  var bytes = ansiForegroundColorCode(fgMagenta) &
-    InterruptedByUserMsg & ansiResetCode & "\r\n"
-  commitTranscriptBytes(bytes, restoreEditor = false)
+  ## The spinner or bar-tick thread may still be running when this fires.
+  ## Stop them with `clearLiveFooter = false` so the freshly-painted
+  ## editor row below is not overwritten, then commit the harness line
+  ## through `writeTranscriptWithFatPrompt` (the same primitive
+  ## `apiRetryNotice` and the normal turn-end path use). Callers in
+  ## `runTurns` skip their deferred `endTurn` afterwards — the editor
+  ## paint here owns the final prompt position.
+  stopSpinner(clearLiveFooter = false)
+  discard stopBarTick()
+  writeTranscriptWithFatPrompt:
+    stdout.styledWriteLine(fgMagenta, InterruptedByUserMsg, resetStyle)
   clearInterrupted()
 
 proc stubToolCallResult(stub: JsonNode; onLine: proc(line: string) = nil):
@@ -291,6 +295,10 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       if isInterruptedMsg(e.msg):
         saveSession(session, messages)
         onTurnInterrupted()
+        # onTurnInterrupted already stopped the spinner/bar-tick and
+        # repainted the editor via writeTranscriptWithFatPrompt; the
+        # deferred endTurn would erase that and reset the cursor to col 0.
+        turnEnded = true
         return true
       raise
     session.usage.promptTokens += usage.promptTokens
@@ -301,6 +309,10 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     if isInterrupted():
       saveSession(session, messages)
       onTurnInterrupted()
+      # onTurnInterrupted already stopped the spinner/bar-tick and
+      # repainted the editor via writeTranscriptWithFatPrompt; the
+      # deferred endTurn would erase that and reset the cursor to col 0.
+      turnEnded = true
       return true
     let content = msg{"content"}.getStr("")
     let streamedLive = contentStreamedLive
@@ -589,14 +601,14 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
   except ApiError as e:
     saveSession(session, messages)
     if isInterruptedMsg(e.msg):
-      # Safety net: `callModel`'s interrupt raises are caught inside
+      # Safety net: `callModel`'s interrupt raises are normally caught inside
       # `runTurns` so `onTurnInterrupted` lands before the deferred
+      # `endTurn` and its callers set `turnEnded = true` to skip that
       # `endTurn`. If an interrupt ApiError nonetheless escapes `runTurns`,
       # the deferred `endTurn` already ran with the flag still set
-      # (`repaintPrompt = false`), so repaint the idle prompt here after
-      # appending the harness line.
+      # (`repaintPrompt = false`), so `onTurnInterrupted` owns the prompt
+      # repaint here.
       onTurnInterrupted()
-      endTurn(repaintPrompt = true)
       return true
     else:
       stdout.styledWriteLine fgMagenta, e.msg, resetStyle
