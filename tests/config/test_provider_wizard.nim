@@ -1,4 +1,4 @@
-import std/[json, os, posix, sequtils, strutils, unittest]
+import std/[json, os, sequtils, strutils, unittest]
 import threecode/[api, config, minline, types, ui]
 
 proc stripAnsiCsi(line: string): string =
@@ -174,20 +174,21 @@ suite "provider wizard configuration":
     var session = Session()
 
     # Capture stdout to verify model listing order. The wizard writes
-    # directly to stdout via hintLn, so we redirect fd 1 to a temp file.
+    # directly to stdout via hintLn, so we swap the `stdout` var for a
+    # temp file around the call. Reassigning the C-level `FILE*` var
+    # works on both POSIX and Windows; the earlier posix.dup/dup2 trick
+    # only redirected the OS fd, which the C runtime ignores on Windows
+    # (it writes to the buffered FILE*'s own HANDLE, not fd 1).
     let capturePath = getTempDir() / "wizard_add_capture.txt"
-    flushFile(stdout)
-    let savedStdout = dup(1)
-    let captureFd = posix.open(capturePath.cstring,
-      posix.O_WRONLY or posix.O_CREAT or posix.O_TRUNC, 0o600)
-    if captureFd >= 0:
-      discard posix.dup2(captureFd, 1)
-      discard posix.close(captureFd)
-    discard handleCommand(":provider add", messages, session, prof, editor)
-    flushFile(stdout)
-    if captureFd >= 0:
-      discard posix.dup2(savedStdout, 1)
-      discard posix.close(savedStdout)
+    let savedStdout = stdout
+    let captureFile = open(capturePath, fmWrite)
+    stdout = captureFile
+    try:
+      discard handleCommand(":provider add", messages, session, prof, editor)
+    finally:
+      flushFile(stdout)
+      stdout = savedStdout
+      close(captureFile)
     let capturedOutput = readFile(capturePath)
     try: removeFile(capturePath) except OSError: discard
 
@@ -289,21 +290,20 @@ suite "provider wizard configuration":
     var messages = newJArray()
     var session = Session()
 
-    # Capture stdout to verify model listing order.
+    # Capture stdout to verify model listing order. See the add-wizard
+    # test above for why we swap the `stdout` var instead of using
+    # posix.dup/dup2.
     let capturePath = getTempDir() / "wizard_edit_capture.txt"
-    flushFile(stdout)
-    let savedStdout = dup(1)
-    let captureFd = posix.open(capturePath.cstring,
-      posix.O_WRONLY or posix.O_CREAT or posix.O_TRUNC, 0o600)
-    if captureFd >= 0:
-      discard posix.dup2(captureFd, 1)
-      discard posix.close(captureFd)
-    discard handleCommand(":provider edit nvidia", messages, session, prof,
-                          editor)
-    flushFile(stdout)
-    if captureFd >= 0:
-      discard posix.dup2(savedStdout, 1)
-      discard posix.close(savedStdout)
+    let savedStdout = stdout
+    let captureFile = open(capturePath, fmWrite)
+    stdout = captureFile
+    try:
+      discard handleCommand(":provider edit nvidia", messages, session, prof,
+                            editor)
+    finally:
+      flushFile(stdout)
+      stdout = savedStdout
+      close(captureFile)
     let capturedOutput = readFile(capturePath)
     try: removeFile(capturePath) except OSError: discard
 
