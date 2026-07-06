@@ -209,6 +209,74 @@ suite "provider wizard configuration":
     check listedModels == @["minimax-m2.5", "minimax-m2.7", "gpt-oss-120b",
                            "gpt-oss-20b", "glm4.7"]
 
+  test "wizard inputs are not added to history":
+    # Bug 2: wizard inputs must not pollute history. readRequired/readOptional
+    # default to noHistory = true, so the wizard's readLine calls must pass
+    # noHistory = true. We verify by checking the hook receives noHistory = true.
+    var historyFlags: seq[bool]
+    wizardReadLineHook = proc(prompt: string, hidden, noHistory: bool): string =
+      historyFlags.add noHistory
+      if inputs.len == 0:
+        raise newException(AssertionDefect, "missing wizard input for " & prompt)
+      result = inputs[0]
+      inputs.delete(0)
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-existing", models: @["openai/gpt-oss-120b"])
+    ]
+    activeCurrent = "nvidia.openai/gpt-oss-120b"
+    inputs = @["nvapi-add", "gpt-oss-20b"]
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider add", messages, session, prof, editor)
+
+    # Every wizard input must have been called with noHistory = true
+    check historyFlags.len > 0
+    for flag in historyFlags:
+      check flag == true
+
+  test "wizard model prompt has tab completion":
+    # Bug 3: tab completion must be available for model entry. The wizard
+    # sets editor.completionCallback to return available models. We verify
+    # the callback is set during the wizard and returns model names.
+    # Use a fresh provider (groq) so the wizard doesn't return early.
+    var callbackWasSet = false
+    var capturedModels: seq[string]
+    activeProviders = @[
+      ProviderRec(name: "groq", url: "https://api.groq.com/openai/v1",
+                  key: "gsk-existing", models: @["openai/gpt-oss-20b"])
+    ]
+    activeCurrent = "groq.openai/gpt-oss-20b"
+    experimentalEnabled = true
+    inputs = @["nvapi-add", "gpt-oss-120b"]
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    # Wrap the wizardReadLineHook to capture editor state
+    wizardReadLineHook = proc(prompt: string, hidden, noHistory: bool): string =
+      prompts.add prompt
+      # Capture the callback whenever it's set (non-nil)
+      if editor.completionCallback != nil:
+        callbackWasSet = true
+        capturedModels = editor.completionCallback(editor)
+      if inputs.len == 0:
+        raise newException(AssertionDefect, "missing wizard input for " & prompt)
+      result = inputs[0]
+      inputs.delete(0)
+
+    discard handleCommand(":provider add", messages, session, prof, editor)
+
+    # The completion callback must have been set during the wizard
+    check callbackWasSet
+    # The callback should return model names
+    check capturedModels.len > 0
+    check "gpt-oss-120b" in capturedModels
+
   test "edit wizard lists models sorted alphabetically":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",

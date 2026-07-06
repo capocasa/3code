@@ -462,7 +462,6 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
   let prov = try: promptNewProvider(editor)
              except minline.InputCancelled:
                hintLn "  cancelled", resetStyle
-               fatprompt.restoreInputTermios()
                return
   for pr in activeProviders:
     if pr.name == prov.name:
@@ -476,7 +475,6 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
     prof = buildProfile(activeCurrent, activeProviders, "")
   hintLn &"  added {prov.name}", resetStyle
   showProfile(prof)
-  fatprompt.restoreInputTermios()
 
 proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
                      prof: var Profile) =
@@ -489,7 +487,6 @@ proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
   let updated = try: promptEditProvider(editor, activeProviders[idx])
                 except minline.InputCancelled:
                   hintLn "  cancelled", resetStyle
-                  fatprompt.restoreInputTermios()
                   return
   activeProviders[idx] = updated
   let curName = if activeCurrent == "": "" else: activeCurrent.split('.')[0]
@@ -502,7 +499,6 @@ proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
     prof = buildProfile(activeCurrent, activeProviders, "")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   hintLn &"  updated {target}", resetStyle
-  fatprompt.restoreInputTermios()
 
 proc cmdProviderRm(target: string, prof: var Profile) =
   var idx = -1
