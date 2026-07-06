@@ -48,7 +48,7 @@ proc usage() {.noreturn.} =
 
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
   -r, --resume[=ID]    resume latest session from this directory (or by id)
-  -i, --interactive    (default) run prompt then continue interactively
+  -i, --interactive    (default) accepted for back-compat, no-op
   -l, --list           list recent sessions for this directory (max 20) and exit
   -a, --all            (reserved) with -l, accepted but a no-op for now
   -g, --good           list known-good provider/variant combos and exit
@@ -175,7 +175,6 @@ proc main() =
   var resume = false
   var resumeId = ""
   var sessionOut = ""
-  var forceInteractive = false
   var listSessions = false
   var p = initOptParser(commandLineParams())
   for kind, k, v in p.getopt():
@@ -189,7 +188,7 @@ proc main() =
       of "light": colorForce = cmLight
       of "dark":  colorForce = cmDark  # explicit default; accepted for symmetry
       of "D", "debug": debugEnabled = true
-      of "i", "interactive": forceInteractive = true
+      of "i", "interactive": discard  # default; accepted for back-compat
       of "m", "model":
         if v != "": model = v
         else: pending = "model"
@@ -415,6 +414,30 @@ proc main() =
       return handleBufferedAfterTurn()
     false
 
+  # Run a prompt that arrived on the command line (or was queued during
+  # startup) through the exact same sequence as a typed submit in the
+  # REPL loop below: append the message, refresh the system prompt, do
+  # the user-submit transition (receipt repaint + prompt echo), reset the
+  # editor, clear the draft, run the turn, and fire the turn-finished
+  # notification under the same condition as a typed turn. Returns true
+  # if a buffered quit/interrupt event should end the session.
+  proc runInitialPrompt(text: string): bool =
+    messages.add %*{"role": "user", "content": buildUserMessage(messages, text)}
+    refreshSystemPrompt(messages, prof)
+    emitUserSubmit(text)
+    editor.line = minline.Line(text: "", position: 0)
+    editor.renderSuffix = ""
+    editor.renderSuffixCursor = false
+    editor.renderRow = 0
+    editor.echoRows = 0
+    clearDraft(session)
+    let turnStart = epochTime()
+    let interrupted = runTurnsInteractive(prof, messages, session)
+    if not interrupted and notifyEnabled and
+        epochTime() - turnStart >= NotifyMinSeconds:
+      notifyTurnFinished(messages)
+    result = handleBufferedAfterTurn()
+
   # Draw the initial chrome at the bottom of the welcome screen. On
   # resume with prior usage we paint bar+prompt carrying the last
   # response's tokens (typing-ready shape from `endTurn`). On resume
@@ -446,23 +469,13 @@ proc main() =
     else:
       paintInitialPrompt(prof)
     if prompt != "":
-      messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
-      refreshSystemPrompt(messages, prof)
-      commitUserPromptTranscript(prompt)
-      clearDraft(session)
-      discard runTurnsInteractive(prof, messages, session)
-      if handleBufferedAfterTurn(): return
+      if runInitialPrompt(prompt): return
   else:
     if restoredDraft.len > 0:
       editor.prefillText = restoredDraft
     paintInitialPrompt(prof)
     if prompt != "":
-      messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
-      refreshSystemPrompt(messages, prof)
-      commitUserPromptTranscript(prompt)
-      clearDraft(session)
-      discard runTurnsInteractive(prof, messages, session)
-      if handleBufferedAfterTurn(): return
+      if runInitialPrompt(prompt): return
   while true:
     var done = false
     var line = readInput(editor, done)
