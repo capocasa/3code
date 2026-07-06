@@ -1,5 +1,18 @@
-import std/[json, os, sequtils, strutils, unittest]
+import std/[json, os, posix, sequtils, strutils, unittest]
 import threecode/[api, config, minline, types, ui]
+
+proc stripAnsiCsi(line: string): string =
+  var i = 0
+  while i < line.len:
+    if line[i] == '\e' and i + 1 < line.len and line[i + 1] == '[':
+      i += 2
+      while i < line.len and line[i] notin {'@'..'~'}:
+        inc i
+      if i < line.len:
+        inc i
+    else:
+      result.add line[i]
+      inc i
 
 proc nvidiaModels(): seq[string] =
   @[
@@ -134,3 +147,111 @@ suite "provider wizard configuration":
     check activeProviders[0].models == @["openai/gpt-oss-120b"]
     check activeCurrent == "nvidia.openai/gpt-oss-120b"
     check verifiedModels == @["openai/gpt-oss-120b"]
+
+  test "add wizard lists models sorted alphabetically":
+    activeProviders = @[
+      ProviderRec(name: "groq", url: "https://api.groq.com/openai/v1",
+                  key: "gsk-existing", models: @["openai/gpt-oss-20b"])
+    ]
+    activeCurrent = "groq.openai/gpt-oss-20b"
+    inputs = @["nvapi-add", "gpt-oss-120b"]
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+  test "add wizard lists models sorted alphabetically":
+    activeProviders = @[
+      ProviderRec(name: "groq", url: "https://api.groq.com/openai/v1",
+                  key: "gsk-existing", models: @["openai/gpt-oss-20b"])
+    ]
+    activeCurrent = "groq.openai/gpt-oss-20b"
+    experimentalEnabled = true
+    inputs = @["nvapi-add", "gpt-oss-120b"]
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    # Capture stdout to verify model listing order. The wizard writes
+    # directly to stdout via hintLn, so we redirect fd 1 to a temp file.
+    let capturePath = getTempDir() / "wizard_add_capture.txt"
+    flushFile(stdout)
+    let savedStdout = dup(1)
+    let captureFd = posix.open(capturePath.cstring,
+      posix.O_WRONLY or posix.O_CREAT or posix.O_TRUNC, 0o600)
+    if captureFd >= 0:
+      discard posix.dup2(captureFd, 1)
+      discard posix.close(captureFd)
+    discard handleCommand(":provider add", messages, session, prof, editor)
+    flushFile(stdout)
+    if captureFd >= 0:
+      discard posix.dup2(savedStdout, 1)
+      discard posix.close(savedStdout)
+    let capturedOutput = readFile(capturePath)
+    try: removeFile(capturePath) except OSError: discard
+
+    # The models should be listed in sorted order.
+    # The nvidiaModels() stub returns them jumbled; the wizard must sort.
+    # Extract the short model names in the order they appear in the output.
+    var listedModels: seq[string]
+    for line in capturedOutput.splitLines:
+      let stripped = stripAnsiCsi(line.strip)
+      # Model lines start with "    " (4 spaces) and contain a model name
+      if stripped.len > 4 and stripped[0..3] == "    " and
+         stripped[4..^1].shortModel() != "" and
+         stripped[4..^1] != "5 available" and
+         stripped[4..^1] != "verifying..." and
+         stripped[4..^1] != "ok" and
+         stripped[4..^1] != "added nvidia" and
+         stripped[4..^1] != "detected: nvidia -> https://integrate.api.nvidia.com/v1":
+        listedModels.add stripped[4..^1].shortModel()
+    check listedModels == @["minimax-m2.5", "minimax-m2.7", "gpt-oss-120b",
+                           "gpt-oss-20b", "glm4.7"]
+
+  test "edit wizard lists models sorted alphabetically":
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["z-ai/glm4.7"])
+    ]
+    activeCurrent = "nvidia.z-ai/glm4.7"
+    inputs = @["", "", "", "gpt-oss-120b"]
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    # Capture stdout to verify model listing order.
+    let capturePath = getTempDir() / "wizard_edit_capture.txt"
+    flushFile(stdout)
+    let savedStdout = dup(1)
+    let captureFd = posix.open(capturePath.cstring,
+      posix.O_WRONLY or posix.O_CREAT or posix.O_TRUNC, 0o600)
+    if captureFd >= 0:
+      discard posix.dup2(captureFd, 1)
+      discard posix.close(captureFd)
+    discard handleCommand(":provider edit nvidia", messages, session, prof,
+                          editor)
+    flushFile(stdout)
+    if captureFd >= 0:
+      discard posix.dup2(savedStdout, 1)
+      discard posix.close(savedStdout)
+    let capturedOutput = readFile(capturePath)
+    try: removeFile(capturePath) except OSError: discard
+
+    # The models should be listed in sorted order in the edit wizard too.
+    var listedModels: seq[string]
+    for line in capturedOutput.splitLines:
+      let stripped = stripAnsiCsi(line.strip)
+      # Model lines start with "    " (4 spaces) and contain a model name
+      if stripped.len > 4 and stripped[0..3] == "    " and
+         stripped[4..^1].shortModel() != "" and
+         stripped[4..^1] != "5 available" and
+         stripped[4..^1] != "verifying..." and
+         stripped[4..^1] != "ok" and
+         stripped[4..^1] != "updated nvidia" and
+         stripped[4..^1] != "editing 'nvidia' (enter to keep, ctrl+c to abort)" and
+         stripped[4..^1] != "# tip: change name + url to point at a fine-tune deployment":
+        listedModels.add stripped[4..^1].shortModel()
+    check listedModels == @["minimax-m2.5", "minimax-m2.7", "gpt-oss-120b",
+                           "gpt-oss-20b", "glm4.7"]
