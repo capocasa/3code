@@ -11,11 +11,11 @@
 ## combo, `callModel` promotes those tags to synthetic tool_calls so the rest
 ## of the pipeline sees a uniform shape.
 
-import std/[algorithm, atomics, hashes, httpclient, json, nativesockets, net, os, sequtils, strformat, strutils, tables, times, uri]
+import std/[algorithm, atomics, hashes, httpclient, json, locks, nativesockets, net, os, sequtils, strformat, strutils, tables, times, uri]
 when defined(posix):
   import std/posix except SocketHandle
 import streamhttp
-import types, util, prompts, compact, streamexec
+import types, util, prompts, compact, streamexec, netthread
 
 type
   VerifyProfileHook* = proc(p: Profile): (bool, string) {.closure.}
@@ -303,19 +303,6 @@ proc requestQuietShutdown*() {.gcsafe.} =
   markNetworkQuiet()
   shutdownCachedStreamFd()
 
-type StreamOutcome = object
-  statusCode: int
-  retryAfter: string
-  errMsg: string          # non-empty on transport-level failure
-  errBody: string         # non-SSE response body (error responses)
-  assistantMsg: JsonNode  # reconstructed from SSE when status=200
-  usage: Usage
-  streamedLive: bool
-  finishReason: string    # choices[0].finish_reason. "length" = token-budget
-                          # starved; "content_filter" = terminal; "stop" +
-                          # empty content = anomaly. Carried out of the
-                          # transport so the turn loop can branch on it.
-
 proc buildStreamAssistantMsg*(content, reasoning: string,
                               tools: OrderedTable[int, JsonNode],
                               usage: Usage,
@@ -472,7 +459,8 @@ proc flushTail(f: var XmlToolFilter): string =
   f.pending = ""
 
 proc streamHttp(url, key, bodyStr: string, baseLabel: string,
-                slurped: var int, suppressXml: bool): StreamOutcome =
+                slurped: var int, suppressXml: bool,
+                job: NetJob): StreamOutcome =
   debugOut "streamHttp start"
   # Post `bodyStr` to `url` and consume SSE chunks until `[DONE]`. `slurped`
   # accumulates an approximate output-character count so the caller can
@@ -480,6 +468,12 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   # `suppressXml` enables a streaming filter that drops the model's
   # `<tool_call>...</tool_call>` chat-template tags from live output for
   # endpoints that leak them into delta.content (see xmlToolCallsFallback).
+  #
+  # Side effects (progress, content deltas, reasoning, the final assistant
+  # message) are fired as `NetDelta`s into `job` instead of calling the
+  # terminal hooks directly. The main thread drains and replays them. This
+  # lets the blocking recv loop run on a worker thread while the UI stays
+  # responsive.
   let u = try: parseUri(url) except CatchableError as e:
     result.errMsg = "bad url: " & e.msg
     return
@@ -523,6 +517,9 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
           conn = connectTls(host, port, timeoutMs = ConnectTimeoutMs,
                             caFile = bundledCaFile())
       except CatchableError as e:
+        # Drop the cached IP so the next attempt re-resolves: a stale record
+        # pointing at a dead host must not pin every retry.
+        invalidateResolved(host, port)
         result.errMsg =
           (if plainHttp: "connect failed: " else: "TLS connect failed: ") & e.msg
         return
@@ -536,7 +533,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
                                   ("Content-Type", "application/json"),
                                   ("Accept", "text/event-stream")],
                        body = bodyStr)
-      hookProviderActivity()
+      fireActivity(job)
       while true:
         try:
           resp = conn.readResponseHead()
@@ -556,7 +553,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
           result.errMsg = "network quiet too long (no data for " &
             $(QuietTooLongMs div 1000) & "s)"
         return
-      hookProviderActivity()
+      fireActivity(job)
       break
     except CatchableError as e:
       # Cached conn was stale (server-side keep-alive timeout, etc.) or
@@ -601,7 +598,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       closeCachedStreamConn()
       break
     if not hasLine: break
-    hookProviderActivity()
+    fireActivity(job)
     if isInterrupted():
       closeCachedStreamConn()
       break
@@ -633,19 +630,20 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
           if r.len > 0:
             accReasoning &= r
             slurped += r.len
-            hookProgress(baseLabel, slurped)
+            fireProgress(job, slurped)
             if not contentStarted:
-              hookReasoningDelta(accReasoning, baseLabel, slurped, contentStarted)
+              fireReasoning(job, accReasoning, slurped)
           let c = delta{"content"}.getStr("")
           if c.len > 0:
             accContent &= c
             slurped += c.len
-            hookProgress(baseLabel, slurped)
+            fireProgress(job, slurped)
             let visible =
               if suppressXml: feed(xmlFilter, c)
               else: c
             if visible.len > 0:
-              contentStarted = hookContentDelta(visible, baseLabel, slurped)
+              fireContent(job, visible, slurped)
+              contentStarted = true
           let tcDelta = delta{"tool_calls"}
           if tcDelta != nil and tcDelta.kind == JArray:
             for tc in tcDelta:
@@ -660,7 +658,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
               let fn = tc{"function"}
               if fn != nil:
                 slurped += fn{"arguments"}.getStr("").len
-                hookProgress(baseLabel, slurped)
+                fireProgress(job, slurped)
       let u = j{"usage"}
       if u != nil and u.kind == JObject:
         result.usage = parseUsage(u)
@@ -673,13 +671,14 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   if suppressXml:
     let tail = flushTail(xmlFilter)
     if tail.len > 0:
-      contentStarted = hookContentDelta(tail, baseLabel, slurped)
+      fireContent(job, tail, slurped)
+      contentStarted = true
 
   if contentStarted:
-    result.streamedLive = hookContentFinished(accContent, baseLabel, slurped)
-    hookTrimTrailingContent(accContent, baseLabel, slurped)
-    if result.streamedLive:
-      hookAfterLiveContent(baseLabel, slurped)
+    result.streamedLive = true
+    fireContentFinished(job, accContent, slurped)
+    fireTrimTrailing(job, accContent, slurped)
+    fireAfterLive(job, slurped)
 
   if isNetworkQuiet():
     # The quiet-watch thread marked the connection dead and shut down the
@@ -839,6 +838,9 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
           conn = connectTls(host, port, timeoutMs = ConnectTimeoutMs,
                             caFile = bundledCaFile())
       except CatchableError as e:
+        # Drop the cached IP so the next attempt re-resolves: a stale record
+        # pointing at a dead host must not pin every retry.
+        invalidateResolved(host, port)
         result.errMsg =
           (if plainHttp: "connect failed: " else: "TLS connect failed: ") & e.msg
         return
@@ -1151,6 +1153,123 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "longcat": applyLongcatReasoning(p, body)
   else: discard
 
+# ---------- network worker thread (Tier 2) ----------
+#
+# `streamHttp` fires deltas into a `NetJob` instead of calling hooks. The
+# worker runs `streamHttp`; the main thread drains and replays the deltas
+# through the (unchanged) hook layer on a ~50ms cadence, keeping the UI
+# responsive while the blocking recv loop runs off-thread.
+#
+# ORC constraint: the worker holds no closures and no refs the main thread
+# also mutates. The `NetJobState` is a stack var whose lifetime encloses the
+# worker's run; the only ref handed across is the final `assistantMsg`
+# `JsonNode`, built solely by the worker and read once by main after join.
+
+const NetWorkerPollMs = 50
+
+type
+  NetWorkerArgs = object
+    job: NetJob
+    url: string
+    key: string
+    bodyStr: string
+    baseLabel: string
+    suppressXml: bool
+
+proc networkWorker(a: NetWorkerArgs) {.thread.} =
+  ## Runs the full connect+send+SSE loop on a worker thread. Fires deltas
+  ## into `job`; publishes the outcome and sets phase=npDone on exit.
+  ## GC-safe cast is valid: only this worker touches the module-global
+  ## connection cache during a call (calls are serialized one at a time),
+  ## and the NetJobState is a stack var whose lifetime encloses this run.
+  {.cast(gcsafe).}:
+    setPhase(a.job, npConnecting)
+    var slurped = 0
+    var outcome = streamHttp(a.url, a.key, a.bodyStr, a.baseLabel, slurped,
+                             a.suppressXml, a.job)
+    # The StreamConn is a ref with internal cycles (Socket + SslContext).
+    # Under ORC, freeing it from a different thread than the one that
+    # allocated it segfaults the cycle collector. The worker owns the
+    # entire connection lifecycle: always close and clear here, on this
+    # thread, before returning. This sacrifices cross-turn connection
+    # reuse on the threaded path (acceptable for Tier 2; the TLS handshake
+    # cost is regained in responsiveness).
+    closeCachedStreamConn()
+    # Serialize the assistant message and drop the ref before publishing.
+    # JsonNode trees form cycles; a ref built on this thread and freed on
+    # the main thread after join corrupts ORC's cycle tracker. The string
+    # crosses safely; main parses it back into a fresh node.
+    if outcome.assistantMsg != nil:
+      outcome.assistantMsgJson = $outcome.assistantMsg
+      outcome.assistantMsg = nil
+    publishOutcome(a.job, outcome)
+
+proc drainAndDispatch(job: NetJob; baseLabel: string) =
+  ## Copy unconsumed deltas under the lock, then replay them through the
+  ## real hook callbacks on the main thread. Ordering is preserved because
+  ## the worker appends in order and we drain in order.
+  var batch: seq[NetDelta]
+  drainDeltas(job, batch)
+  for d in batch:
+    case d.kind
+    of ndkActivity:
+      hookProviderActivity()
+    of ndkProgress:
+      hookProgress(baseLabel, d.slurped)
+    of ndkReasoning:
+      hookReasoningDelta(d.reasoning, baseLabel, d.reasoningSlurped, true)
+    of ndkContent:
+      discard hookContentDelta(d.content, baseLabel, d.contentSlurped)
+    of ndkContentFinished:
+      discard hookContentFinished(d.fullContent, baseLabel, d.finishedSlurped)
+    of ndkTrimTrailing:
+      hookTrimTrailingContent(d.trimFullContent, baseLabel, d.trimSlurped)
+    of ndkAfterLive:
+      hookAfterLiveContent(baseLabel, d.afterSlurped)
+
+proc callModelThreaded*(p: Profile, bodyStr, baseLabel: string;
+                        suppressXml: bool): StreamOutcome =
+  ## The threaded streaming path. Spawns a worker to run `streamHttp`, polls
+  ## the shared state on a ~50ms cadence to replay deltas through the hooks,
+  ## and joins the worker once it signals done (or the user interrupts).
+  var job: NetJobState
+  job.lock.initLock()
+  defer: job.lock.deinitLock()
+  var t: Thread[NetWorkerArgs]
+  let args = NetWorkerArgs(
+    job: addr job,
+    url: p.url & "/chat/completions",
+    key: p.key,
+    bodyStr: bodyStr,
+    baseLabel: baseLabel,
+    suppressXml: suppressXml)
+  createThread(t, networkWorker, args)
+  while job.phase != npDone and not isInterrupted():
+    drainAndDispatch(addr job, baseLabel)
+    sleep(NetWorkerPollMs)
+  if isInterrupted():
+    shutdownCachedStreamFd()
+  # Bounded join: every worker syscall is bounded (connect by
+  # ConnectTimeoutMs, recv by QuietRecvWakeMs, TLS handshake internally),
+  # so the worker returns within a known worst case. The one exception is
+  # a first-time getAddrInfo wedge (documented, accepted): if the poll
+  # times out we detach rather than block forever.
+  var waited = 0
+  let joinBudget = ConnectTimeoutMs + QuietTooLongMs + 5_000
+  while t.running() and waited < joinBudget:
+    sleep(NetWorkerPollMs)
+    waited += NetWorkerPollMs
+  if t.running():
+    discard
+  else:
+    joinThread(t)
+  drainAndDispatch(addr job, baseLabel)
+  if job.outcomeWritten:
+    result = job.outcome
+    if result.assistantMsgJson.len > 0:
+      result.assistantMsg = parseJson(result.assistantMsgJson)
+      result.assistantMsgJson = ""
+
 when providerStub:
   ## Test-only stub provider. Lives in `testdata/stub/provider.nim` and is
   ## `include`d here so it shares this module's scope (private hook
@@ -1214,6 +1333,11 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
   defer:
     hookAfterCall()
   const MaxAttempts = 12
+  const networkSync {.booldefine.} = false
+    ## Fallback switch for the streaming transport. Default (false) runs
+    ## the blocking recv loop on a worker thread so the UI stays
+    ## responsive. Set `-d:networkSync=true` to run it inline on the main
+    ## thread (the old behavior) for debugging.
   var outcome: StreamOutcome
   var attempt = 0
   while true:
@@ -1221,8 +1345,17 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     var slurped = 0
     outcome =
       if streamingEnabled:
-        streamHttp(p.url & "/chat/completions", p.key, bodyStr,
-                   baseLabel, slurped, xmlToolCallsFallback(p))
+        when networkSync:
+          var syncJob: NetJobState
+          syncJob.lock.initLock()
+          defer: syncJob.lock.deinitLock()
+          let o = streamHttp(p.url & "/chat/completions", p.key, bodyStr,
+                             baseLabel, slurped, xmlToolCallsFallback(p),
+                             addr syncJob)
+          drainAndDispatch(addr syncJob, baseLabel)
+          o
+        else:
+          callModelThreaded(p, bodyStr, baseLabel, xmlToolCallsFallback(p))
       else:
         callHttp(p.url & "/chat/completions", p.key, bodyStr,
                  baseLabel, slurped)
