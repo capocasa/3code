@@ -13,7 +13,7 @@ discard """
 ## only inserted a newline and never sent. The input thread and the
 ## controller disagreed about whether a turn was still active, so a queued
 ## idle submit was never consumed.
-import std/[json, os, unittest]
+import std/[json, os, unittest, strutils]
 import tty_expect
 import stub_helpers
 
@@ -84,6 +84,20 @@ suite "interrupt during pre-stream freeze regression":
     tty.drain(300)
     tty.send "\x1b"
     tty.expectInHistory "interrupted by user"
+    tty.drain 300  # let the post-interrupt prompt frame settle
+    # Regression: cancel must leave the prompt glyph on the caret row
+    # with the caret at col 2. A passing `expect "❯"` is not enough —
+    # the earlier `❯` from the submitted prompt row can match. See the
+    # matching assertion in the waitForTestContinue-based tests for the
+    # full bug description.
+    let fEsc = tty.frames[^1]
+    doAssert not fEsc.cursorHidden,
+      "REGRESSION (interrupted-by-user): caret hidden after ESC; expected col 2 on prompt row"
+    doAssert fEsc.cursorCol == 2,
+      "REGRESSION (interrupted-by-user): expected caret at col 2 after ❯, got " & $fEsc.cursorCol
+    doAssert fEsc.rows[fEsc.cursorRow].contains("❯"),
+      "REGRESSION (interrupted-by-user): prompt glyph ❯ missing from caret row " &
+        $fEsc.cursorRow & ", got: '" & fEsc.rows[fEsc.cursorRow] & "'"
 
     # The prompt must come back and accept a real prompt.
     tty.expect "\u276f"
@@ -125,6 +139,18 @@ suite "interrupt during pre-stream freeze regression":
     tty.drain(300)
     tty.send "\x03"
     tty.expectInHistory "interrupted by user"
+    tty.drain 300  # let the post-interrupt prompt frame settle
+    # Same interrupted-by-user prompt contract as the ESC case — glyph
+    # on the caret row, caret at col 2. See the matching assertion in
+    # the ESC test for the bug being locked out.
+    let fCtlc = tty.frames[^1]
+    doAssert not fCtlc.cursorHidden,
+      "REGRESSION (interrupted-by-user): caret hidden after Ctrl-C; expected col 2 on prompt row"
+    doAssert fCtlc.cursorCol == 2,
+      "REGRESSION (interrupted-by-user): expected caret at col 2 after ❯, got " & $fCtlc.cursorCol
+    doAssert fCtlc.rows[fCtlc.cursorRow].contains("❯"),
+      "REGRESSION (interrupted-by-user): prompt glyph ❯ missing from caret row " &
+        $fCtlc.cursorRow & ", got: '" & fCtlc.rows[fCtlc.cursorRow] & "'"
 
     tty.expect "\u276f"
     tty.expectAlive()  # Ctrl-C during in-flight call must not exit
