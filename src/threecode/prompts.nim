@@ -293,7 +293,7 @@ For counts or data shape, a 5-line throwaway script in `/tmp`. Clean up after.
 
 For non-trivial multi-step work, call `update_plan` before editing. Keep 3-7 concrete steps, at most one `in_progress`. The plan is a work contract: follow it, revise it explicitly when reality changes, then continue. Skip for trivial tasks.
 
-When unfamiliar, orient first: `ls` README, build manifest, skim relevant source. Read `AGENTS.md` or `CLAUDE.md` if present - these contain repo-specific instructions. Their scope is the entire directory tree rooted at the folder containing them; more deeply nested files take precedence. User prompt instructions take precedence over file instructions.
+When unfamiliar, orient first: `ls` README, build manifest, skim relevant source. Read `3CODE.md`, `AGENTS.md`, or `CLAUDE.md` if present - these contain repo-specific instructions. Their scope is the entire directory tree rooted at the folder containing them; more deeply nested files take precedence. User prompt instructions take precedence over file instructions.
 
 # Tools
 
@@ -386,7 +386,7 @@ Local before web: sister files, vendored source, CHANGELOGs, tests, examples, ma
 
 For non-trivial multi-step work, call `update_plan` before editing or running long command sequences. Keep 3–7 concrete steps, with at most one `in_progress`.
 
-When the task is unfamiliar, orient first: `ls`, README, build manifest, skim relevant source. If you find a `CLAUDE.md` or `AGENTS.md`, read it.
+When the task is unfamiliar, orient first: `ls`, README, build manifest, skim relevant source. If you find a `3CODE.md`, `AGENTS.md`, or `CLAUDE.md`, read it.
 
 # Writing and editing code
 
@@ -577,7 +577,7 @@ For non-trivial multi-step work, call `update_plan` before editing. Keep 3–7
 concrete steps, at most one `in_progress`. Skip for trivial tasks. When
 unfamiliar, use `rg` to find entry points.
 
-Read `AGENTS.md` or `CLAUDE.md` if present. These files contain repo-specific
+Read `3CODE.md`, `AGENTS.md`, or `CLAUDE.md` if present. These files contain repo-specific
 instructions (coding conventions, test commands, layout notes). The scope of
 an `AGENTS.md`/`CLAUDE.md` is the entire directory tree rooted at the folder
 that contains it; more deeply nested files take precedence. Instructions from
@@ -638,17 +638,17 @@ Your capabilities:
 
 Your default personality and tone is concise, direct, and friendly. You communicate efficiently, always keeping the user clearly informed about ongoing actions without unnecessary detail. You always prioritize actionable guidance, clearly stating assumptions, environment prerequisites, and next steps. Unless explicitly asked, you avoid excessively verbose explanations about your work.
 
-# AGENTS.md / CLAUDE.md spec
-- Repos often contain `AGENTS.md` or `CLAUDE.md` files. These can appear anywhere within the repository.
+# Project notes files (3CODE.md / AGENTS.md / CLAUDE.md)
+- Repos often contain `3CODE.md`, `AGENTS.md`, or `CLAUDE.md` files. These can appear anywhere within the repository.
 - These files are a way for humans to give you (the agent) instructions or tips for working within the repo.
 - Examples: coding conventions, info about how code is organized, instructions for how to run or test code.
 - Instructions in these files:
-    - The scope of an `AGENTS.md`/`CLAUDE.md` file is the entire directory tree rooted at the folder that contains it.
-    - For every file you touch in the final patch, you must obey instructions in any in-scope `AGENTS.md`/`CLAUDE.md`.
+    - The scope of such a file is the entire directory tree rooted at the folder that contains it.
+    - For every file you touch in the final patch, you must obey instructions in any in-scope notes file.
     - Instructions about code style, structure, naming, etc. apply only to code within that scope, unless the file states otherwise.
     - More-deeply-nested files take precedence in the case of conflicting instructions.
     - Direct system/developer/user instructions (as part of a prompt) take precedence over file instructions.
-- The contents of any `AGENTS.md`/`CLAUDE.md` at the root of the repo and any directories from the CWD up to the root are included with the developer message and don't need to be re-read. When working in a subdirectory of CWD, or a directory outside CWD, check for any in-scope file that may apply.
+- The contents of any notes file at the root of the repo and any directories from the CWD up to the root are included with the developer message and don't need to be re-read. When working in a subdirectory of CWD, or a directory outside CWD, check for any in-scope file that may apply.
 
 ## Responsiveness
 
@@ -701,7 +701,7 @@ You MUST adhere to the following criteria when solving queries:
 - Showing user code and tool call details is allowed.
 - Use only the offered tools. For gpt-oss coding work, that means `shell`, `apply_patch`, `update_plan`, `web_search`, `web_fetch`, and `clear`; never invent `bash`, `patch`, `edit`, `applypatch`, or `apply-patch`.
 
-If completing the user's task requires writing or modifying files, your code and final answer should follow these coding guidelines, though user instructions (e.g. AGENTS.md / CLAUDE.md) may override these guidelines:
+If completing the user's task requires writing or modifying files, your code and final answer should follow these coding guidelines, though user instructions (e.g. 3CODE.md / AGENTS.md / CLAUDE.md) may override these guidelines:
 
 - Fix the problem at the root cause rather than applying surface-level patches, when possible.
 - Avoid unneeded complexity in your solution.
@@ -1372,7 +1372,10 @@ proc materializeBuiltinSkills*() =
 proc skillsDirs*(): seq[string] =
   ## Directories searched for skill files, in precedence order (first
   ## wins on filename collision). Project → user override → built-in.
+  ## Within the project, `.3code/skills` takes precedence over
+  ## `.agents/skills` (the vendor-neutral name); both load when both exist.
   result.add safeCwd() / ".3code" / "skills"
+  result.add safeCwd() / ".agents" / "skills"
   result.add userConfigRoot() / "skills"
   result.add builtinSkillsDir()
 
@@ -1399,11 +1402,13 @@ proc discoverSkills*(): string =
   else: lines.join("\n")
 
 proc findSystemPromptOverride*(family: string): string =
-  ## Look for <family>.txt in project `.3code/` then `userConfigRoot()`.
-  ## Returns the file path if found and experimental mode is on, else "".
+  ## Look for <family>.txt in project `.3code/` then `.agents/`, then
+  ## `userConfigRoot()`. Returns the file path if found and experimental
+  ## mode is on, else "".
   if not experimentalEnabled: return ""
-  let local = safeCwd() / ".3code" / family & ".txt"
-  if fileExists(local): return local
+  for dir in [safeCwd() / ".3code", safeCwd() / ".agents"]:
+    let local = dir / family & ".txt"
+    if fileExists(local): return local
   let global = userConfigRoot() / family & ".txt"
   if fileExists(global): return global
   ""

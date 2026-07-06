@@ -744,26 +744,21 @@ proc commandTitle(name, arg: string; ok: bool): string =
 # ---------- Session preamble + user-input prep ----------
 
 proc loadAgentsMd(start: string): string =
-  ## Walk from `start` up to the filesystem root. At each level, prefer
-  ## 3CODE.md over AGENTS.md. If 3CODE.md is found, load it and stop
-  ## (never mix both files). Otherwise collect AGENTS.md as before.
+  ## Walk from `start` up to the filesystem root, collecting project-notes
+  ## files in precedence order. At each directory level, `3CODE.md` is read
+  ## before `AGENTS.md` (both load when both exist). The deepest level (cwd)
+  ## is emitted first, so more-deeply-nested files take precedence by virtue
+  ## of appearing earlier in the developer message.
   var dir = resolvePath(start)
   while true:
-    let candidate3 = dir / "3CODE.md"
-    if fileExists(candidate3):
-      try:
-        let body = readFile(candidate3)
-        if not isBinaryContent(body):
-          result = "# " & candidate3 & "\n\n" & body
-      except CatchableError: discard
-      break
-    let candidate = dir / "AGENTS.md"
-    if fileExists(candidate):
+    for name in ["3CODE.md", "AGENTS.md"]:
+      let candidate = dir / name
+      if not fileExists(candidate): continue
       try:
         let body = readFile(candidate)
-        if not isBinaryContent(body):
-          if result.len > 0: result.add "\n\n"
-          result.add "# " & candidate & "\n\n" & body
+        if isBinaryContent(body): continue
+        if result.len > 0: result.add "\n\n"
+        result.add "# " & candidate & "\n\n" & body
       except CatchableError: discard
     let parent = parentDir(dir)
     if parent == dir or parent == "": break
