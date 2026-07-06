@@ -450,3 +450,9 @@ echo "OK"
     check runCode == 0
     if runCode != 0:
       checkpoint runOut
+    # The hint line must use the new phrasing and the placeholder must be
+    # filled with the actual budget, not the literal template text.
+    check "finished by length, retrying with" in runOut
+    check "{humanTokens(maxTokensOverride)}" notin runOut
+    # The bumped budget for 8192 is min(16384, 200000) = 16384 = "16.4k"
+    check "16.4k" in runOut

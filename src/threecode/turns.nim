@@ -335,9 +335,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         let bumped = min(cur * 2, window)
         maxTokensOverride = max(maxTokensOverride, bumped)
         writeTranscriptWithFatPrompt:
-          hintLn &"empty reply (finish_reason: {finishReason}); " &
-            "retrying with {humanTokens(maxTokensOverride)} token budget",
-            resetStyle
+          errLn "finished by length, retrying with ", humanTokens(maxTokensOverride), " token budget", resetStyle
         debugOut &"runTurns: empty length-retry {lengthEscalations}/{MaxLengthEscalations} max_tokens={maxTokensOverride}"
         continue
       if steerAttempts < MaxSteerAttempts:
