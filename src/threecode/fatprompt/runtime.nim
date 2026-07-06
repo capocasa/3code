@@ -97,6 +97,14 @@ var inputIdleLinePending: Atomic[bool]
   ## when it drains the event or when beginTurn starts the next turn.
   ## The input thread's getCh returns -1 while this is set, parking the
   ## editor so keystrokes don't append to an uncleared prompt.
+var inputModalActive*: Atomic[bool]
+  ## Set by a modal REPL command for the lifetime of its wizard. The input
+  ## thread's editor hooks consult this flag and skip their work while it
+  ## is set, so the modal can drive the terminal without racing the input
+  ## thread over the editor's closure fields. A torn read of a closure
+  ## field (one word zero, the other the prior value) is a SIGSEGV when
+  ## the input thread calls the torn closure, so all hook bodies must
+  ## check this flag instead of relying on the modal to nil the field.
 var inputThread: Thread[void]
 var inputThreadRunning* = false
 
@@ -354,6 +362,8 @@ proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
   ## (wraps, multiline input, history navigation, submit suffix). Cursor
   ## out: top row of the editor area. The subsequent editor redraw is the
   ## only code allowed to paint those rows.
+  if inputModalActive.load(moAcquire):
+    return
   if not liveEditorFooterAnchored():
     return
   let frameModel =
@@ -1521,7 +1531,8 @@ proc inputThreadProc() {.thread.} =
       finally:
         release inputStateLock
     edPtr[].onSubmit = proc(ed: var minline.LineEditor) =
-      if inputTurnActive.load(moAcquire) and ed.line.text.startsWith(":"):
+      let modal = inputModalActive.load(moAcquire)
+      if inputTurnActive.load(moAcquire) and ed.line.text.startsWith(":") and not modal:
         let cmd = ed.line.text
         let rows = minline.totalRows(ed.line.text, ed.promptW, ed.contPromptW,
                                      max(2, ed.width))
@@ -1537,7 +1548,10 @@ proc inputThreadProc() {.thread.} =
       let rows = minline.totalRows(ed.line.text, ed.promptW, ed.contPromptW,
                                     max(2, ed.width))
       let hasText = ed.line.text.len > 0
-      if hasText:
+      if hasText and not modal:
+        # A modal wizard owns the editor; bytes the input thread steals
+        # from the wizard's readline must not surface as controller
+        # events or the controller will treat them as the next prompt.
         pushInputEvent(InputEvent(kind: ieLine, text: ed.line.text,
                                    echoRows: rows))
       if inputTurnActive.load(moAcquire) and hasText:
@@ -1556,6 +1570,11 @@ proc inputThreadProc() {.thread.} =
     edPtr[].preRedraw = proc(ed: var minline.LineEditor) =
       reserveEditorFooterForRedraw(ed)
     edPtr[].postRedraw = proc(ed: var minline.LineEditor) =
+      if inputModalActive.load(moAcquire):
+        # The modal wizard owns the terminal during its prompts; the
+        # input thread must not paint the footer or signal editor-ready,
+        # or it will overwrite the wizard's UI.
+        return
       termengine.finishEditorRedraw(ed, showCaret = not ed.pendingCaret)
       inputEditorReady.store(true, moRelease)
 
@@ -1636,7 +1655,9 @@ proc inputThreadProc() {.thread.} =
         # and repaints an empty prompt there.
         edPtr[].write = writeProc
         minline.fullRedraw(edPtr[])
-        edPtr[].write = nil
+        # Leave ed.write set; the next readLineWith restores it and
+        # nilling here would race with a concurrent fullRedraw in the
+        # other thread.
         pushInputEvent(InputEvent(kind: ieInterrupt))
         continue
       except EOFError:

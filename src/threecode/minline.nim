@@ -233,6 +233,30 @@ const EscapeTailPollMs* = 50
   ## a bare ESC (user pressed Escape, then started typing) cancels
   ## instantly: the peek rejects printable tail bytes.
 
+type HookRawFn = proc(ed: var LineEditor, env: pointer) {.nimcall.}
+
+template callHook*(hook, ed: untyped) =
+  ## Invoke a closure-typed editor hook, skipping the call when the hook
+  ## is nil. Written as a template (not an `if hook != nil: hook(ed)`)
+  ## because Nim 2.2.10's `{.closure.}` codegen for that exact pattern
+  ## tests only the env field and assumes the fn field is non-zero when
+  ## env is non-zero; a torn write (one word nil, the other the prior
+  ## value) makes that assumption false and the subsequent call jumps to
+  ## nil. The template casts the closure's first word to a plain
+  ## `{.nimcall.}` proc pointer, tests it, and calls through it; the
+  ## plain-proc calling convention is what the underlying thunk expects
+  ## on x86-64 (args in rdi, rsi), so the call lands in the right place.
+  ## `readLineWith` deliberately does not nil its hook fields on exit
+  ## (see the defer there) so the next readLineWith can overwrite them
+  ## without a window where a concurrent fullRedraw in the other thread
+  ## would observe nil and SIGSEGV through this template's call site.
+  let rawArr = cast[ptr UncheckedArray[pointer]](unsafeAddr hook)
+  let fnWord = rawArr[0]
+  if fnWord != nil:
+    let fn = cast[HookRawFn](fnWord)
+    let env = rawArr[1]
+    fn(ed, env)
+
 proc isEscapeTailByte*(b: int): bool =
   ## True when `b` can validly be the second byte of a terminal escape
   ## sequence (the byte immediately following a leading ESC). Printable
@@ -570,13 +594,11 @@ proc fullRedraw*(ed: var LineEditor) =
   ## wrapped in DEC 2026 synchronized-output (``CSI ? 2026 h/l``) so
   ## conhost treats the repaint as one atomic frame; terminals that
   ## don't recognize the mode ignore it silently.
-  if ed.preRedraw != nil:
-    ed.preRedraw(ed)
+  callHook(ed.preRedraw, ed)
   let synchronized = not ed.redrawWrappedExternally
   ed.write ed.redrawBytes(synchronized = synchronized)
   ed.redrawWrappedExternally = false
-  if ed.postRedraw != nil:
-    ed.postRedraw(ed)
+  callHook(ed.postRedraw, ed)
 
 proc parkAtEnd(ed: var LineEditor) =
   ## After submit, leave the cursor at column 0 of the row directly
@@ -622,8 +644,7 @@ proc deletePrevious*(ed: var LineEditor) =
   ed.line.text = ed.line.text[0 ..< start] &
                  ed.line.text[ed.line.position .. ^1]
   ed.line.position = start
-  if ed.onMutate != nil:
-    ed.onMutate(ed)
+  callHook(ed.onMutate, ed)
   fullRedraw(ed)
 
 proc deleteNext*(ed: var LineEditor) =
@@ -633,8 +654,7 @@ proc deleteNext*(ed: var LineEditor) =
     else: ed.line.position + runeLenSafe(ed.line.text, ed.line.position)
   ed.line.text = ed.line.text[0 ..< ed.line.position] &
                  ed.line.text[stop .. ^1]
-  if ed.onMutate != nil:
-    ed.onMutate(ed)
+  callHook(ed.onMutate, ed)
   fullRedraw(ed)
 
 proc insertText*(ed: var LineEditor, s: string) =
@@ -660,8 +680,7 @@ proc insertText*(ed: var LineEditor, s: string) =
       p += rl
       i += rl
     ed.line.position = p
-  if ed.onMutate != nil:
-    ed.onMutate(ed)
+  callHook(ed.onMutate, ed)
   fullRedraw(ed)
 
 proc printChar*(ed: var LineEditor, c: int) =
@@ -674,8 +693,7 @@ proc changeLine*(ed: var LineEditor, s: string) =
   ## Replace the entire buffer.
   ed.line.text = s
   ed.line.position = s.len
-  if ed.onMutate != nil:
-    ed.onMutate(ed)
+  callHook(ed.onMutate, ed)
   fullRedraw(ed)
 
 proc clearLine*(ed: var LineEditor) =
@@ -738,8 +756,7 @@ proc deleteWordLeft*(ed: var LineEditor) =
   if p == stop: return
   ed.line.text = ed.line.text[0 ..< p] & ed.line.text[stop .. ^1]
   ed.line.position = p
-  if ed.onMutate != nil:
-    ed.onMutate(ed)
+  callHook(ed.onMutate, ed)
   fullRedraw(ed)
 
 proc visualUp*(ed: var LineEditor) =
@@ -1378,10 +1395,13 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
   ed.getWidth = getWidth
   ed.hasPendingInput = hasPendingInput
   defer:
-    ed.getCh = nil
-    ed.write = nil
-    ed.getWidth = nil
-    ed.hasPendingInput = nil
+    # Leave ed.getCh, ed.write, ed.getWidth, ed.hasPendingInput set:
+    # the wizard and the input thread both overwrite them on their next
+    # readLineWith, and nilling them here races with a concurrent
+    # fullRedraw or getCh call in the other thread (the nil fn pointer
+    # is observable to the other thread's redraw, which then calls
+    # through nil).
+    discard
   resetForRead(ed, prompt, hidechars)
   # Enable bracketed paste in both modes. For hidden inputs (api keys),
   # this lets the bracketed-paste handler atomically capture the paste
@@ -1436,8 +1456,7 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
         continue
       if ed.deferSubmit:
         ed.submitted = true
-        if ed.onSubmit != nil:
-          ed.onSubmit(ed)
+        callHook(ed.onSubmit, ed)
         fullRedraw(ed)
         if not noHistory and not hidechars:
           ed.historyAdd()
@@ -1477,8 +1496,7 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
       ed.pendingCaret = false
       ed.renderSuffix = ""
       ed.renderSuffixCursor = false
-      if ed.onCancelDeferredSubmit != nil:
-        ed.onCancelDeferredSubmit(ed)
+      callHook(ed.onCancelDeferredSubmit, ed)
       ed.echoRows = totalRows(ed.line.text, ed.promptW, ed.contPromptW,
                               max(2, ed.width))
       suffixJustCleared = true
@@ -1503,8 +1521,7 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
         if nxt == 10 or nxt == 13:
           if ed.deferSubmit:
             ed.submitted = true
-            if ed.onSubmit != nil:
-              ed.onSubmit(ed)
+            callHook(ed.onSubmit, ed)
             fullRedraw(ed)
             if not noHistory and not hidechars:
               ed.historyAdd()

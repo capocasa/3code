@@ -1,0 +1,108 @@
+discard """
+  # See docs/windows-testing.md. The tty_expect harness uses openpty/fork/
+  # execv (POSIX only). A ConPTY port is the path to re-enable on Windows.
+  disabled: "win"
+  # On macOS the harness compiles but hangs deterministically: the expect*
+  # procs poll on wall-clock deadlines (plan-flakiness.md) and starve under
+  # the OSX runner's scheduler, so a subtest never returns. Re-enable after
+  # the frame-event sync rewrite lands.
+  disabled: "osx"
+"""
+## Regression: editing a provider (`:provider edit <name>`) used to
+## SIGSEGV the input thread on the next redraw after the wizard returned.
+## The modal's save/nil/save dance on the editor's hook closures raced
+## with the input thread reading those fields; a torn read (one word
+## zero, the other the prior value) made the input thread's
+## `if hook != nil: hook(ed)` codegen jump to a nil function pointer.
+## The fix routes every hook call through a `callHook` template that
+## loads the fn word directly, and the modal no longer nils the
+## closures (it only flips an atomic flag the hook bodies check).
+## This test drives the wizard through the stub provider and then
+## types `:q` to exercise the post-wizard redraw path that crashed.
+import std/[json, os, strutils, unittest]
+import tty_expect
+import stub_helpers
+
+const Root = "testdata/output/tty/provider_edit_crash"
+
+proc newFixture(name: string): string =
+  result = getCurrentDir() / "testdata/output/tty" / (name & "_" & $getCurrentProcessId())
+  if dirExists(result): removeDir(result)
+  createDir(result); createDir(result / "data"); createDir(result / "run")
+
+proc writeConfiguredProvider(root: string) =
+  createDir(root / "xdg" / "3code")
+  writeFile(root / "xdg" / "3code" / "config", """
+[settings]
+current = "stub.stub-model"
+search-url = "http://127.0.0.1:1/?q="
+
+[provider]
+name = "stub"
+url = "stub://provider"
+key = "stub"
+family = "glm"
+models = "stub-model"
+""")
+
+proc stubEnv(root, responsesPath: string): seq[EnvVar] =
+  let data = root / "data"
+  createDir(root / "tmp")
+  @[
+    (key: "XDG_DATA_HOME", val: root / "xdg"),
+    (key: "XDG_CONFIG_HOME", val: root / "xdg"),
+    (key: "XDG_CACHE_HOME", val: root / "xdg" / "cache"),
+    (key: "TMPDIR", val: root / "tmp"),
+    (key: "HOME", val: root),
+    (key: "THREECODE_STUB_RESPONSES", val: responsesPath),
+    (key: "THREECODE_STUB_STREAM", val: "1"),
+  ]
+
+suite "provider edit crash regression":
+  test ":provider edit then :q keeps the input thread alive":
+    let root = newFixture("provider_edit_crash")
+    writeConfiguredProvider(root)
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, ""),
+                            keepHistory = false)
+    defer:
+      tty.close()
+
+    # Idle prompt is up.
+    tty.expect "\u276f"
+
+    # Run the edit wizard, accepting every default (Enter on each prompt).
+    tty.send ":provider edit stub"
+    tty.send "\r"
+    tty.drain(200)
+    tty.expect "name \\[stub\\]"
+    tty.send "\r"
+    tty.expect "url \\["
+    tty.send "\r"
+    tty.expect "api key \\[keep existing\\]"
+    tty.send "\r"
+    tty.expect "models \\["
+    tty.send "\r"
+    tty.expect "verifying"
+    tty.expect "ok"
+
+    # Wait for the modal to fully return and the prompt to repaint.
+    tty.drain(500)
+    tty.expect "\u276f"
+
+    # Now drive the post-wizard redraw path that used to crash. Type :q
+    # one character at a time so the input thread's fullRedraw fires
+    # between every keystroke, exercising the hook call site repeatedly.
+    for ch in ":q":
+      tty.send($ch)
+      tty.drain(20)
+    tty.send "\r"
+    tty.drain(300)
+
+    # The process must still be alive; a SIGSEGV would have exited it.
+    tty.expectAlive()
+
+    echo "  PASS: :provider edit then :q did not segfault"

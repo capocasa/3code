@@ -9,7 +9,7 @@
 ## provider list to offer only valid model names. The provider-add wizard in
 ## `runProviderAdd` validates the API key with a one-token probe before saving.
 
-import std/[algorithm, json, os, sequtils, strformat, strutils, tables, terminal, times]
+import std/[algorithm, atomics, json, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline,
   fatprompt, streamexec
 
@@ -930,24 +930,26 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
   if kind == ckModal:
     stdout.write "\r\n"
     stdout.flushFile
-    let savedOnSubmit = editor.onSubmit
-    let savedPreRedraw = editor.preRedraw
-    let savedPostRedraw = editor.postRedraw
+    # The modal wizard drives the editor for the lifetime of its prompts.
+    # The editor's hook closures (onSubmit, preRedraw, postRedraw) used to
+    # be nilled here and restored on exit; that nil/restore was racy with
+    # the input thread reading those fields, and a torn read (one word
+    # zero, the other the prior value) is a SIGSEGV when the input thread
+    # calls the torn closure. The hook bodies now gate on
+    # `inputModalActive` instead, so the modal flips a single atomic flag
+    # and leaves the closures intact. Data fields keep the save/nil dance
+    # since a torn read there renders garbage but never crashes.
     let savedDeferSubmit = editor.deferSubmit
     let savedSubmitIcon = editor.submitIcon
     let savedRenderSuffix = editor.renderSuffix
     let savedRenderSuffixCursor = editor.renderSuffixCursor
-    editor.onSubmit = nil
-    editor.preRedraw = nil
-    editor.postRedraw = nil
     editor.deferSubmit = false
     editor.submitIcon = ""
     editor.renderSuffix = ""
     editor.renderSuffixCursor = false
+    inputModalActive.store(true, moRelease)
     defer:
-      editor.onSubmit = savedOnSubmit
-      editor.preRedraw = savedPreRedraw
-      editor.postRedraw = savedPostRedraw
+      inputModalActive.store(false, moRelease)
       editor.deferSubmit = savedDeferSubmit
       editor.submitIcon = savedSubmitIcon
       editor.renderSuffix = savedRenderSuffix
