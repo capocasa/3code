@@ -35,16 +35,23 @@ proc emitTestFrameEvent() =
 
 proc onTurnInterrupted*() =
   ## Single response to a user-triggered interrupt (Ctrl-C, ESC, or any
-  ## other trigger wired to `requestTurnInterrupt`). Emits the notice to
-  ## scrollback in error magenta and clears the interrupt flag so the
-  ## editor resumes normally on the next input.
+  ## other trigger wired to `requestTurnInterrupt`). Appends the notice to
+  ## scrollback as an ordinary harness line and clears the interrupt flag.
   ##
-  ## This is the only place that renders an interrupt. Whether the
+  ## This is the only place that renders an interrupt message. Whether the
   ## interrupt was noticed mid-stream, after a tool call, or propagated up
   ## as an `ApiError` once the stream had already torn itself down, the
   ## response is identical.
-  writeTranscriptWithFatPrompt:
-    stdout.styledWriteLine(fgMagenta, "interrupted by user", resetStyle)
+  ##
+  ## This proc appends ONLY the harness line; it does not repaint the idle
+  ## prompt. The caller (`runTurns`) runs this before its deferred
+  ## `endTurn`, so clearing the flag here makes that `endTurn` take the
+  ## `repaintPrompt = not isInterrupted() = true` branch and own the single
+  ## idle prompt paint. Repainting the prompt here as well would race that
+  ## `endTurn` paint for the prompt row and leave a half-overwritten caret.
+  var bytes = ansiForegroundColorCode(fgMagenta) &
+    InterruptedByUserMsg & ansiResetCode & "\r\n"
+  commitTranscriptBytes(bytes, restoreEditor = false)
   clearInterrupted()
 
 proc stubToolCallResult(stub: JsonNode; onLine: proc(line: string) = nil):
@@ -276,8 +283,16 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     MaxSteerAttempts = 1
   while true:
     var usage: Usage
-    let msg = callModel(p, messages, usage, session.lastPromptTokens,
-      maxTokensOverride)
+    var msg: JsonNode
+    try:
+      msg = callModel(p, messages, usage, session.lastPromptTokens,
+        maxTokensOverride)
+    except ApiError as e:
+      if isInterruptedMsg(e.msg):
+        saveSession(session, messages)
+        onTurnInterrupted()
+        return true
+      raise
     session.usage.promptTokens += usage.promptTokens
     session.usage.completionTokens += usage.completionTokens
     session.usage.totalTokens += usage.totalTokens
