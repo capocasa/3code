@@ -1,4 +1,4 @@
-import std/[strutils, unittest]
+import std/[json, strutils, unittest]
 import threecode/[prompts, compact, types]
 
 suite "prompts: knownGoodFamily":
@@ -17,6 +17,15 @@ suite "prompts: knownGoodFamily":
 
   test "case-insensitive match":
     check knownGoodFamily("ZAI", "GLM-5.1") == "glm"
+
+  test "MiniMax M3 is known-good on the first-party provider":
+    check knownGoodFamily("minimax", "MiniMax-M3") == "minimax"
+
+  test "MiniMax M2.7 is known-good on the first-party provider":
+    check knownGoodFamily("minimax", "MiniMax-M2.7") == "minimax"
+
+  test "MiniMax M2.7-highspeed is known-good":
+    check knownGoodFamily("minimax", "MiniMax-M2.7-highspeed") == "minimax"
 
 suite "prompts: isKnownGood":
   test "true for known-good profile":
@@ -41,6 +50,18 @@ suite "prompts: knownGoodTags":
     check f == ""
     check v == ""
     check r == ""
+
+  test "MiniMax M3 tags are version=3, variant=empty":
+    let (family, ver, vrt) = knownGoodTags("minimax", "MiniMax-M3")
+    check family == "minimax"
+    check ver == "3"
+    check vrt == ""
+
+  test "MiniMax M2.7 tags are version=2, variant=7":
+    let (family, ver, vrt) = knownGoodTags("minimax", "MiniMax-M2.7")
+    check family == "minimax"
+    check ver == "2"
+    check vrt == "7"
 
 suite "prompts: knownGoodReasoning":
   test "returns reasoning level for known-good combo":
@@ -95,6 +116,47 @@ suite "prompts: defaultReasoningsFor":
       @["low", "medium", "high"]
     check defaultReasoningsFor("nebius", "deepseek-ai/DeepSeek-V3.2", "deepseek") ==
       @["low", "medium", "high"]
+
+  test "minimax uses ReasoningLevels (not off/on like glm/kimi)":
+    check defaultReasoningsFor("minimax", "MiniMax-M3", "minimax") ==
+      @["low", "medium", "high"]
+    check defaultReasoningsFor("minimax", "MiniMax-M2.7", "minimax") ==
+      @["low", "medium", "high"]
+
+suite "prompts: setup — minimax":
+  test "M3 returns the MiniMax preamble":
+    let p = Profile(name: "minimax.MiniMax-M3", url: "x", key: "k",
+                    model: "MiniMax-M3", family: "minimax")
+    let s = setup(p)
+    check "MiniMax" in s.prompt
+    check "M-series" in s.prompt
+
+  test "M2.7 also returns the MiniMax preamble (not the old GLM alias)":
+    let p = Profile(name: "minimax.MiniMax-M2.7", url: "x", key: "k",
+                    model: "MiniMax-M2.7", family: "minimax")
+    let s = setup(p)
+    check "MiniMax" in s.prompt
+    check "M-series" in s.prompt
+    # The old M2.x entries aliased to GlmPreamble; verify the new prompt
+    # is the MiniMax one for both versions.
+    check "reasoning_split" in s.prompt or
+          "deliberate" in s.prompt or
+          "Tool use" in s.prompt
+
+  test "tools are glmAndQwenTools (bash/read/write/patch)":
+    let p = Profile(name: "minimax.MiniMax-M3", url: "x", key: "k",
+                    model: "MiniMax-M3", family: "minimax")
+    let s = setup(p)
+    check s.tools.kind == JArray
+    check s.tools.len == 8
+    # Spot-check that the bash tool is present, with the expected
+    # parameter shape.
+    var foundBash = false
+    for t in s.tools:
+      if t{"function"}{"name"}.getStr == "bash":
+        foundBash = true
+        check t{"function"}{"parameters"}{"properties"}.hasKey("command")
+    check foundBash
 
   test "returns empty for unsupported family":
     check defaultReasoningsFor("x", "y", "llama").len == 0
@@ -152,6 +214,14 @@ suite "compact: contextWindowFor":
   test "kimi-k2 returns 262144":
     check contextWindowFor("kimi-k2") == 262_144
 
+  test "minimax-m3 returns 1000000":
+    check contextWindowFor("MiniMax-M3") == 1_000_000
+    check contextWindowFor("minimaxai/MiniMax-M3") == 1_000_000
+
+  test "minimax-m2.7 falls back to 204800":
+    check contextWindowFor("MiniMax-M2.7") == 204_800
+    check contextWindowFor("minimaxai/MiniMax-M2.7") == 204_800
+
 suite "compact: contextWindowFor (known-good)":
   test "glm-5.2 profile returns 1000000":
     let p = Profile(name: "zai.test", model: "glm-5.2", family: "glm")
@@ -170,6 +240,16 @@ suite "compact: contextWindowFor (known-good)":
     let p = Profile(name: "deepseek.test", model: "deepseek-v4-pro",
                     family: "deepseek")
     check contextWindowFor(p) == 1_000_000
+
+  test "minimax M3 profile returns 1000000":
+    let p = Profile(name: "minimax.MiniMax-M3", model: "MiniMax-M3",
+                    family: "minimax")
+    check contextWindowFor(p) == 1_000_000
+
+  test "minimax M2.7 profile returns 204800":
+    let p = Profile(name: "minimax.MiniMax-M2.7", model: "MiniMax-M2.7",
+                    family: "minimax")
+    check contextWindowFor(p) == 204_800
 
   test "off-table profile falls back to heuristic":
     # Not a known-good (provider, model) pair, so heuristic kicks in.
