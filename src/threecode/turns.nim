@@ -577,6 +577,12 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
   ## Returns true if the turn was interrupted by the user. See `runTurns`.
   if not gateExperimental(p):
     explainExperimentalGate(p)
+    # The controller already ran `emitUserSubmit`, which parks the input
+    # thread (`inputIdleLinePending`) until the turn starts. A normal turn
+    # unparks via `beginTurn`; this bail-out never reaches it, so unpark
+    # here or the editor wedges until kill -9. Same idiom as the
+    # `no provider configured` bail-out in the REPL loop.
+    releaseIdleSubmittedInput()
     return false
   try:
     return runTurns(p, messages, session)
