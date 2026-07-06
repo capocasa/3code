@@ -48,7 +48,7 @@ proc usage() {.noreturn.} =
 
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
   -r, --resume[=ID]    resume latest session from this directory (or by id)
-  -i, --interactive    run prompt then continue interactively
+  -i, --interactive    (default) accepted for back-compat, no-op
   -l, --list           list recent sessions for this directory (max 20) and exit
   -a, --all            (reserved) with -l, accepted but a no-op for now
   -g, --good           list known-good provider/variant combos and exit
@@ -175,7 +175,6 @@ proc main() =
   var resume = false
   var resumeId = ""
   var sessionOut = ""
-  var forceInteractive = false
   var listSessions = false
   var p = initOptParser(commandLineParams())
   for kind, k, v in p.getopt():
@@ -189,7 +188,7 @@ proc main() =
       of "light": colorForce = cmLight
       of "dark":  colorForce = cmDark  # explicit default; accepted for symmetry
       of "D", "debug": debugEnabled = true
-      of "i", "interactive": forceInteractive = true
+      of "i", "interactive": discard  # default; accepted for back-compat
       of "m", "model":
         if v != "": model = v
         else: pending = "model"
@@ -244,9 +243,16 @@ proc main() =
     of "good": printKnownGood(); return
     else: discard
 
-  if (resume or forceInteractive) and args.len > 0:
-    let flag = if resume: "--resume" else: "--interactive"
-    die("unexpected argument with " & flag & ": " & args.join(" "), ExitUsage)
+  # Validate --resume targets before side-effecting startup work so a
+  # bogus id fails fast (no skill extraction, no lock) the same way a
+  # usage error does. A prompt alongside --resume is now legitimate
+  # (run it once resumed), so only the id is checked here.
+  if resume:
+    if resolveSessionPath(resumeId, safeCwd()) == "":
+      if resumeId == "":
+        die("no saved sessions for " & safeCwd(), ExitConfig)
+      else:
+        die("session not found: " & resumeId, ExitConfig)
 
   # ── All syntax validation and fast-exit dispatches are done; only now
   #    do we gate on bash (Windows) and run the side-effecting startup work
@@ -265,13 +271,10 @@ proc main() =
   var restoredDraft = ""
 
   if resume:
-    let path = resolveSessionPath(resumeId, safeCwd())
-    if path == "":
-      if resumeId == "":
-        die("no saved sessions for " & safeCwd(), ExitConfig)
-      else:
-        die("session not found: " & resumeId, ExitConfig)
-    (session, messages) = loadSessionFile(path)
+    # `resolveSessionPath` already ran (and bailed) above; recompute the
+    # resolved path here without re-validating, since nothing between the two
+    # points can change the on-disk set.
+    (session, messages) = loadSessionFile(resolveSessionPath(resumeId, safeCwd()))
     # Recover any prompt that was in-flight when the previous process ended
     # (kill, power-off, Ctrl-C). Only restored when no explicit --prompt was
     # passed: the user's command-line intent wins over the recovered draft.
@@ -300,24 +303,6 @@ proc main() =
   except SessionLocked as e:
     releaseDirLock(session.cwd)
     die(e.msg, ExitConfig)
-
-  if prompt != "" and not resume and not forceInteractive:
-    let prof = loadProfile(model)
-    if not gateExperimental(prof):
-      explainExperimentalGate(prof)
-      quit ExitConfig
-    session.profileName = prof.name
-    messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
-    refreshSystemPrompt(messages, prof)
-    try:
-      discard runTurns(prof, messages, session)
-    except ApiError as e:
-      saveSession(session, messages)
-      die(e.msg, ExitApi)
-    if session.usage.totalTokens > 0:
-      hintLn &"  · {humanTokens(session.usage.totalTokens)} total", resetStyle
-    stderr.writeLine "session: " & sessionIdFromPath(session.savePath)
-    return
 
   var activeColorKeys: Table[string, string]
   (activeCurrent, activeProviders, activeColorKeys) = loadStateOrEmpty(configPath())
@@ -429,6 +414,30 @@ proc main() =
       return handleBufferedAfterTurn()
     false
 
+  # Run a prompt that arrived on the command line (or was queued during
+  # startup) through the exact same sequence as a typed submit in the
+  # REPL loop below: append the message, refresh the system prompt, do
+  # the user-submit transition (receipt repaint + prompt echo), reset the
+  # editor, clear the draft, run the turn, and fire the turn-finished
+  # notification under the same condition as a typed turn. Returns true
+  # if a buffered quit/interrupt event should end the session.
+  proc runInitialPrompt(text: string): bool =
+    messages.add %*{"role": "user", "content": buildUserMessage(messages, text)}
+    refreshSystemPrompt(messages, prof)
+    emitUserSubmit(text)
+    editor.line = minline.Line(text: "", position: 0)
+    editor.renderSuffix = ""
+    editor.renderSuffixCursor = false
+    editor.renderRow = 0
+    editor.echoRows = 0
+    clearDraft(session)
+    let turnStart = epochTime()
+    let interrupted = runTurnsInteractive(prof, messages, session)
+    if not interrupted and notifyEnabled and
+        epochTime() - turnStart >= NotifyMinSeconds:
+      notifyTurnFinished(messages)
+    result = handleBufferedAfterTurn()
+
   # Draw the initial chrome at the bottom of the welcome screen. On
   # resume with prior usage we paint bar+prompt carrying the last
   # response's tokens (typing-ready shape from `endTurn`). On resume
@@ -460,21 +469,13 @@ proc main() =
     else:
       paintInitialPrompt(prof)
     if prompt != "":
-      messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
-      refreshSystemPrompt(messages, prof)
-      clearDraft(session)
-      discard runTurnsInteractive(prof, messages, session)
-      if handleBufferedAfterTurn(): return
+      if runInitialPrompt(prompt): return
   else:
     if restoredDraft.len > 0:
       editor.prefillText = restoredDraft
     paintInitialPrompt(prof)
     if prompt != "":
-      messages.add %*{"role": "user", "content": buildUserMessage(messages, prompt)}
-      refreshSystemPrompt(messages, prof)
-      clearDraft(session)
-      discard runTurnsInteractive(prof, messages, session)
-      if handleBufferedAfterTurn(): return
+      if runInitialPrompt(prompt): return
   while true:
     var done = false
     var line = readInput(editor, done)

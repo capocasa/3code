@@ -3,7 +3,7 @@ discard """
   # list, skills dir) that differ on Windows. See docs/windows-testing.md.
   disabled: "win"
 """
-import std/[os, osproc, strutils, times, unittest]
+import std/[os, osproc, strtabs, strutils, times, unittest]
 import threecode/session
 
 const binName = when defined(windows): "3code.exe" else: "3code"
@@ -25,15 +25,30 @@ suite "cli argument validation":
     check r.code == 2
     check "unknown option: -Z" in r.o
 
-  test "positional arg with --resume errors":
+  test "positional arg with --resume reports session-not-found":
+    # A positional arg is no longer a syntax error with --resume; it is the
+    # prompt to run once the session is resumed. A bogus id still fails,
+    # but as a config error (session not found), not a usage error.
     let r = run(["--resume=does-not-exist", "ignored text"])
-    check r.code == 2
-    check "unexpected argument" in r.o
+    check r.code == 3  # ExitConfig
+    check "session not found" in r.o
 
-  test "positional arg with --interactive errors":
-    let r = run(["--interactive", "ignored text"])
-    check r.code == 2
-    check "unexpected argument" in r.o
+  test "--interactive accepts a positional prompt":
+    # --interactive <prompt> runs the prompt then drops into the REPL; it is
+    # no longer a usage error. With an isolated XDG (no config) and EOF on
+    # stdin, it reaches the provider wizard and aborts cleanly. We assert
+    # only that it is accepted, not rejected as a usage error (exit 2).
+    var tmp = getTempDir() / ("3code-cli-i-" & $getCurrentProcessId() & "-" &
+                              $epochTime().int64)
+    createDir(tmp)
+    let env = newStringTable({"XDG_DATA_HOME": tmp, "XDG_CONFIG_HOME": tmp})
+    let (outp, code) = execCmdEx(binPath().quoteShell & " --interactive ignored-text",
+                                  {poStdErrToStdOut, poUsePath, poDaemon},
+                                  env, tmp)
+    discard outp
+    removeDir(tmp)
+    check code != 2
+    check "unexpected argument" notin outp
 
 suite "cli --list cap and short-flag stacking":
   # Runs the real binary with an isolated XDG_DATA_HOME and a temp cwd so
@@ -149,10 +164,13 @@ suite "cli syntax errors do no startup work":
 
   proc skillsDirExists(): bool = dirExists(tmp / "3code" / "skills")
 
-  test "positional arg with --resume bails before skill extraction":
+  test "bad --resume id bails before skill extraction":
+    # A bogus --resume id is validated before side-effecting startup, so the
+    # skills dir is never created. A positional prompt alongside --resume is
+    # now legitimate (run once resumed), so only the id is rejected.
     let r = runIn(tmp, "--resume=does-not-exist extra")
-    check r.code == 2
-    check "unexpected argument" in r.o
+    check r.code == 3  # ExitConfig
+    check "session not found" in r.o
     check not skillsDirExists()
 
   test "unknown option bails before skill extraction":

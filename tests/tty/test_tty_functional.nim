@@ -483,6 +483,32 @@ suite "terminal visual contract":
       SimpleVisualTestFrames,
       root / "simple_visual_test_actual.txt")
 
+  test "initial prompt argument runs through the full UI":
+    # Regression: `3code <prompt>` used to take a stripped-down path that
+    # skipped the welcome screen, editor, and prompt-mode setup, emitting
+    # raw spinner/bar fragments and stray carets. The initial prompt must
+    # flow through the same stack as a typed prompt: welcome, committed
+    # user row, streamed reply, and a typing-ready caret afterward.
+    let root = newFixture("initial_prompt_arg")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {"role": "assistant",
+       "content": "Initial reply.",
+       "contentChunks": ["Initial reply."],
+       "usage": {"promptTokens": 30, "completionTokens": 5,
+                 "totalTokens": 35, "cachedTokens": 0}}
+    ])
+    let tty = startStub(root, args = ["-x", "-i", "This is an initial prompt"])
+    defer: tty.close()
+    tty.expect "❯ This is an initial prompt"
+    tty.expectInHistory "Initial reply."
+    tty.expectRowAppearsOnce("❯ This is an initial prompt")
+    tty.expectCount("Initial reply.", 1, where = "screen")
+    tty.expectTokenBar(["○", "↑30", "↓5"])
+    # The turn ends in a typing-ready REPL: the caret is visible and idle.
+    tty.drain(200)
+    tty.expect "❯"
+
   test "word-level content chunks stream eagerly, not buffered to newline":
     # Eager streaming: when content arrives in word-level chunks with no
     # intermediate newline, each chunk must paint the partial line on screen
