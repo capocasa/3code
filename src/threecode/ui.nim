@@ -120,8 +120,8 @@ proc readRequired*(editor: var minline.LineEditor, prompt: string,
       if wizardReadLineHook != nil:
         wizardReadLineHook(prompt, hidden, noHistory).strip
       else:
-        try: editor.readLine(prompt, hidechars = hidden,
-                             noHistory = noHistory).strip
+        try: wizardReadLine(editor, prompt, hidechars = hidden,
+                            noHistory = noHistory).strip
         except EOFError:
           stdout.write "\n"
           die "aborted", ExitConfig
@@ -133,7 +133,7 @@ proc readOptional*(editor: var minline.LineEditor, prompt: string,
   ## the program. Empty input is returned as "".
   if wizardReadLineHook != nil:
     return wizardReadLineHook(prompt, hidden, noHistory).strip
-  try: editor.readLine(prompt, hidechars = hidden, noHistory = noHistory).strip
+  try: wizardReadLine(editor, prompt, hidechars = hidden, noHistory = noHistory).strip
   except EOFError:
     stdout.write "\n"
     die "aborted", ExitConfig
@@ -459,10 +459,12 @@ proc cmdProviderSelect(target: string, prof: var Profile) =
     explainExperimentalGate(candidate)
 
 proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
-  let prov = try: promptNewProvider(editor)
-             except minline.InputCancelled:
-               hintLn "  cancelled", resetStyle
-               return
+  # Cancel propagates from `wizardReadLine` through `promptNewProvider`
+  # back to `handleCommandResult`, which turns it into an empty
+  # `cdModal` return. No message, no state change — the prompt is
+  # repainted by the input thread's cancel handler before we get
+  # here.
+  let prov = promptNewProvider(editor)
   for pr in activeProviders:
     if pr.name == prov.name:
       errLn &"  duplicate provider: {prov.name} already configured"
@@ -484,10 +486,7 @@ proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
   if idx < 0:
     errLn &"  unknown provider: {target}"
     return
-  let updated = try: promptEditProvider(editor, activeProviders[idx])
-                except minline.InputCancelled:
-                  hintLn "  cancelled", resetStyle
-                  return
+  let updated = promptEditProvider(editor, activeProviders[idx])
   activeProviders[idx] = updated
   let curName = if activeCurrent == "": "" else: activeCurrent.split('.')[0]
   if curName == target:
@@ -930,35 +929,22 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
   if kind == ckModal:
     stdout.write "\r\n"
     stdout.flushFile
-    # The modal wizard drives the editor for the lifetime of its prompts.
-    # The editor's hook closures (onSubmit, preRedraw, postRedraw) used to
-    # be nilled here and restored on exit; that nil/restore was racy with
-    # the input thread reading those fields, and a torn read (one word
-    # zero, the other the prior value) is a SIGSEGV when the input thread
-    # calls the torn closure. The hook bodies now gate on
-    # `inputModalActive` instead, so the modal flips a single atomic flag
-    # and leaves the closures intact. Data fields keep the save/nil dance
-    # since a torn read there renders garbage but never crashes.
-    let savedDeferSubmit = editor.deferSubmit
-    let savedSubmitIcon = editor.submitIcon
-    let savedRenderSuffix = editor.renderSuffix
-    let savedRenderSuffixCursor = editor.renderSuffixCursor
-    editor.deferSubmit = false
-    editor.submitIcon = ""
-    editor.renderSuffix = ""
-    editor.renderSuffixCursor = false
-    inputModalActive.store(true, moRelease)
-    defer:
-      inputModalActive.store(false, moRelease)
-      editor.deferSubmit = savedDeferSubmit
-      editor.submitIcon = savedSubmitIcon
-      editor.renderSuffix = savedRenderSuffix
-      editor.renderSuffixCursor = savedRenderSuffixCursor
-    case name
-    of ":provider":
-      cmdProvider(arg, editor, prof)
-      session.profileName = prof.name
-    else:
+    # The modal wizard runs each prompt on the input thread (see
+    # `wizardReadLine`), so it owns `inputModalActive` and the
+    # per-field save/restore dance itself. The controller only needs
+    # to call the wizard and let it return. Cancel propagates as
+    # `minline.InputCancelled` from `wizardReadLine`; we let it
+    # propagate up to the outer `try` in `handleCommandResult` and
+    # turn it into an empty `cdModal` return so the main loop
+    # restores its idle state.
+    try:
+      case name
+      of ":provider":
+        cmdProvider(arg, editor, prof)
+        session.profileName = prof.name
+      else:
+        discard
+    except minline.InputCancelled:
       discard
     return CommandResult(recognized: true, ok: true,
                          name: commandTitle(name, arg, true),

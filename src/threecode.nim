@@ -510,12 +510,12 @@ proc main() =
     let commandResult = handleCommandResult(line, messages, session, prof, editor)
     if commandResult.recognized:
       if commandResult.disposition == cdModal:
-        editor.line = minline.Line(text: "", position: 0)
-        editor.renderSuffix = ""
-        editor.renderSuffixCursor = false
-        editor.renderRow = 0
-        editor.echoRows = 0
-        releaseIdleSubmittedInput()
+        # The modal wizard runs on the input thread via
+        # `wizardReadLine` (see `src/threecode/fatprompt/runtime.nim`).
+        # By the time we get here, the input thread has already
+        # reset the editor, cleared the idle-submitted flag, and
+        # cleared `inputModalActive` — there is nothing
+        # modal-specific for the controller to do.
         continue
       var echo = userPromptItem(line)
       echo.attachSeparator = true

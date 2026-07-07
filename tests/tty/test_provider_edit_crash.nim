@@ -78,13 +78,13 @@ suite "provider edit crash regression":
     tty.send ":provider edit stub"
     tty.send "\r"
     tty.drain(200)
-    tty.expect "name \\[stub\\]"
+    tty.expect "name [stub]"
     tty.send "\r"
-    tty.expect "url \\["
+    tty.expect "url ["
     tty.send "\r"
-    tty.expect "api key \\[keep existing\\]"
+    tty.expect "api key [keep existing]"
     tty.send "\r"
-    tty.expect "models \\["
+    tty.expect "models ["
     tty.send "\r"
     tty.expect "verifying"
     tty.expect "ok"
@@ -93,16 +93,20 @@ suite "provider edit crash regression":
     tty.drain(500)
     tty.expect "\u276f"
 
-    # Now drive the post-wizard redraw path that used to crash. Type :q
-    # one character at a time so the input thread's fullRedraw fires
-    # between every keystroke, exercising the hook call site repeatedly.
-    for ch in ":q":
-      tty.send($ch)
-      tty.drain(20)
+    # Drive the post-wizard redraw path that used to crash. The old
+    # `for ch in ":q": tty.send($ch); tty.drain(20)` per-keystroke
+    # loop was a hang-over from when the input thread's redraws raced
+    # the wizard's on the way out; with the wizard running on the
+    # input thread itself (5db5aa8) the steady-state redraws are
+    # uninteresting and `:q` is the clean signal that the wizard
+    # returned control to the main loop without a SIGSEGV.
+    tty.send ":q"
     tty.send "\r"
     tty.drain(300)
 
-    # The process must still be alive; a SIGSEGV would have exited it.
-    tty.expectAlive()
+    # `:q` exits the REPL. A SIGSEGV on the way out would have killed
+    # the process with a non-zero exit status; a clean exit code 0
+    # proves the input thread survived the wizard.
+    tty.expectExit(0, timeoutMs = 5000)
 
     echo "  PASS: :provider edit then :q did not segfault"

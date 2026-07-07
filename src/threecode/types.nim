@@ -132,6 +132,27 @@ type
     shutdown*: bool
     eventQueue*: seq[InputEvent]
 
+  WizardReadRequest* = object
+    ## Main thread → input thread: run one `readLineWith` for the modal
+    ## wizard with this prompt, return the result. The input thread is
+    ## the only place that owns stdin and the termios raw mode, so the
+    ## wizard plugs in here instead of running its own `editor.readLine`
+    ## on the main thread (which would race the input thread's
+    ## `posix.read` on the same fd and corrupt the editor's hook
+    ## closures).
+    prompt*: string
+    hidechars*: bool
+    noHistory*: bool
+
+  WizardReadResultKind* = enum
+    wrSubmitted  ## user pressed Enter; `text` holds the line
+    wrCancelled  ## ESC / Ctrl-C; main thread raises InputCancelled
+    wrEof        ## stdin closed; main thread raises EOFError
+
+  WizardReadResponse* = object
+    kind*: WizardReadResultKind
+    text*: string
+
 const
   InterruptedByUserMsg* = "interrupted by user"
 

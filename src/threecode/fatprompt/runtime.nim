@@ -93,18 +93,99 @@ initLock(inputStateLock)
 var inputTurnActive: Atomic[bool]
 var inputEditorReady: Atomic[bool]
 var inputIdleLinePending: Atomic[bool]
-  ## Set by the input thread after an idle Enter; cleared by the controller
-  ## when it drains the event or when beginTurn starts the next turn.
-  ## The input thread's getCh returns -1 while this is set, parking the
-  ## editor so keystrokes don't append to an uncleared prompt.
+  ## Set by the persistent prompt's `onSubmit` after an idle Enter;
+  ## cleared by `wizardReadLine` once the modal returns. The
+  ## persistent prompt's `getCh` parks while this is true (and
+  ## `inputModalActive == false`) so the controller has a chance
+  ## to drain the event; the wizard's `getCh` deliberately ignores
+  ## it. See the wizard protocol header above `wizardRequest`.
 var inputModalActive*: Atomic[bool]
-  ## Set by a modal REPL command for the lifetime of its wizard. The input
-  ## thread's editor hooks consult this flag and skip their work while it
-  ## is set, so the modal can drive the terminal without racing the input
-  ## thread over the editor's closure fields. A torn read of a closure
+  ## Set by the input thread itself for the lifetime of a modal wizard
+  ## `readLineWith`. The input thread's editor hooks consult this flag
+  ## and skip their work while it is set, so the wizard owns the
+  ## terminal without racing the hook bodies. A torn read of a closure
   ## field (one word zero, the other the prior value) is a SIGSEGV when
   ## the input thread calls the torn closure, so all hook bodies must
   ## check this flag instead of relying on the modal to nil the field.
+  ## Previously the controller flipped this flag; the input thread now
+  ## owns the lifecycle so the flag tracks `wizardRequestPosted` 1:1.
+
+# --- Modal wizard RPC. The controller (main thread) blocks in
+#     `wizardReadLine` while the input thread runs a one-shot
+#     `readLineWith` for the wizard prompt. The input thread is the
+#     only owner of stdin and the termios raw mode, so routing the
+#     wizard through it eliminates the dual-`posix.read` race that
+#     caused flaky cancel + SIGSEGV on `:provider edit`/`:provider add`.
+#
+#     ## Protocol (one round-trip)
+#
+#     1. Main thread (caller of `wizardReadLine`): fills
+#        `wizardRequest` under `wizardRequestLock`, then sets
+#        `wizardRequestPosted = true`. The lock is for the request
+#        struct only — the posted/response flags are atomic and
+#        lock-free.
+#     2. Input thread (running `inputThreadProc`): the persistent
+#        `readLineWith`'s `getCh` sees `wizardRequestPosted == true`
+#        and returns the `wizardSentinel` (-2). `readLineWith`
+#        raises `WizardSwitched`; the outer loop's `except
+#        minline.WizardSwitched` branch clears the editor and
+#        `continue`s to the top.
+#     3. Input thread (top of outer loop): sees
+#        `wizardRequestPosted == true`, clears the flag, sets
+#        `inputModalActive = true` (gates the hook bodies so the
+#        wizard owns the terminal), reads the request, sets
+#        `deferSubmit = false` + `submitIcon = ""` (the wizard's
+#        values; the persistent prompt is parked, so no save
+#        needed), and runs a one-shot `minline.readLineWith` with
+#        the same `getCh` / `writeProc` / `hasPendingInput`
+#        closures the persistent prompt uses.
+#     4. The wizard's `readLineWith` returns (Enter → submit,
+#        Ctrl-C / ESC → `InputCancelled`, Ctrl-D on empty →
+#        `EOFError`). The input thread's `except` branches build a
+#        `WizardReadResponse`, `finally` restores
+#        `deferSubmit`/`submitIcon`, the unified publish path
+#        stores the response and sets `wizardResponsePosted = true`,
+#        then `continue`s back to the persistent prompt.
+#     5. Main thread: wakes up, reads the response under the lock,
+#        clears the flags + `inputModalActive`, resets the editor
+#        fields, clears `inputIdleLinePending`, and either returns
+#        the line or raises `InputCancelled` / `EOFError`.
+#
+#     ## Why not a condvar
+#
+#     We match the existing `releaseIdleSubmittedInput` /
+#     `consumeQueuedInput` idiom: an atomic flag + 5ms `sleep`
+#     poll. The wizard prompts are interactive (user typing speed)
+#     so 5ms latency is invisible. A condvar would shave the
+#     wakeup latency but would not simplify the code (we'd still
+#     need the lock for the request/response structs, and the
+#     persistent prompt's `getCh` already needs the
+#     `wizardRequestPosted` flag for its own yield check).
+#
+#     ## Call sites covered
+#
+#     All production modal prompts go through `wizardReadLine` via
+#     `ui.readRequired` / `ui.readOptional`. The standalone
+#     `minline.readLine` is test-only (sets its own termios raw
+#     mode, no input thread). `api.conn.readLine` is the HTTP read,
+#     not a UI prompt. No production code uses `editor.readLine`
+#     directly. Audited 2026-01; no exceptions found.
+var wizardRequest: WizardReadRequest
+var wizardResponse: WizardReadResponse
+var wizardRequestPosted: Atomic[bool]
+  ## Set by `wizardReadLine` (main thread) when a wizard prompt is
+  ## pending. The input thread's `getCh` returns the wizard sentinel
+  ## when this is true, so the persistent `readLineWith` yields. The
+  ## input thread clears this when it picks the request up at the
+  ## top of its outer loop.
+var wizardResponsePosted: Atomic[bool]
+  ## Set by the input thread when it has published a response; cleared
+  ## by `wizardReadLine` after it consumes the response. The
+  ## handshake is: main thread sets request, input thread clears
+  ## request + sets response, main thread clears response.
+var wizardRequestLock: Lock
+initLock(wizardRequestLock)
+
 var inputThread: Thread[void]
 var inputThreadRunning* = false
 
@@ -351,9 +432,10 @@ proc setActiveCommandHook*(hook: proc(cmd: string) {.gcsafe.}) =
   activeCommandHook = hook
 
 proc releaseIdleSubmittedInput*() =
-  ## Let the persistent editor leave the submitted-line state after an idle
-  ## controller path has consumed and committed the line. Model turns use
-  ## ``beginTurn`` for the same acknowledgement.
+  ## Clear the persistent-prompt idle-submit flag. Called by
+  ## `wizardReadLine` after a modal returns; the protocol comment
+  ## above `wizardRequest` explains why the input thread is the
+  ## single owner of this flag's lifecycle.
   inputIdleLinePending.store(false, moRelease)
 
 proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
@@ -1464,11 +1546,29 @@ proc inputThreadProc() {.thread.} =
         let n = posix.read(fd, addr ch, 1)
         if n == 1:
           pendingInput.add ch.ord.int
-        pendingInput.len > 0
+        result = pendingInput.len > 0
 
       let getCh: minline.GetChProc = proc(): int =
         while inputRunning():
-          if inputIdleLinePending.load(moAcquire):
+          # Yield to a modal wizard if one is pending AND the wizard
+          # hasn't actually started yet (i.e. the persistent prompt
+          # is the active reader). The wizard's own readLineWith
+          # sets `inputModalActive` and then runs under the same
+          # `getCh` closure; we must NOT return the sentinel from
+          # that inner call, or the wizard would cancel itself
+          # before the user typed a thing.
+          # Yield the persistent prompt while a wizard is pending.
+          # The wizard branch at the top of the outer loop will run
+          # its readLineWith; once it has picked the request up,
+          # `wizardRequestPosted` is cleared and `inputModalActive`
+          # is set, so the wizard's own getCh calls stop returning
+          # the sentinel and the user can type into the wizard.
+          if wizardRequestPosted.load(moAcquire):
+            return minline.wizardSentinel
+          # Park the persistent prompt (not the wizard) on a stale
+          # idle-submit; see the protocol header for the lifecycle.
+          if inputIdleLinePending.load(moAcquire) and
+             not inputModalActive.load(moAcquire):
             sleep(5)
             continue
           if pendingInput.len > 0 or fillPending(200.cint):
@@ -1497,7 +1597,10 @@ proc inputThreadProc() {.thread.} =
     else:
       let getCh: minline.GetChProc = proc(): int =
         while inputRunning():
-          if inputIdleLinePending.load(moAcquire):
+          if wizardRequestPosted.load(moAcquire):
+            return minline.wizardSentinel
+          if inputIdleLinePending.load(moAcquire) and
+             not inputModalActive.load(moAcquire):
             sleep(5)
             continue
           return getchr().int
@@ -1505,6 +1608,18 @@ proc inputThreadProc() {.thread.} =
       let hasPendingInput: minline.HasPendingInputProc = nil
 
     let writeProc: minline.WriteProc = proc(s: string) =
+      termengine.writeRaw(s)
+
+    # Dedicated writer for the modal wizard branch. The
+    # implementation is identical to `writeProc`; the seam exists
+    # so a future terminal recorder (or footer-suppression) can
+    # pattern-match on which closure is installed without having to
+    # thread `inputModalActive` through every layer of
+    # `termengine`. The wizard's own `bracketed-paste` enable /
+    # disable (`\x1b[?2004h` / `\x1b[?2004l`) and the
+    # `redrawBytes(...)` frame flow through this writer, not the
+    # persistent prompt's `writeProc`.
+    let wizardWriteProc: minline.WriteProc = proc(s: string) =
       termengine.writeRaw(s)
 
     edPtr[].onMutate = proc(ed: var minline.LineEditor) =
@@ -1597,10 +1712,96 @@ proc inputThreadProc() {.thread.} =
         # this exact mode on resume. The runtime keeps its own copy
         # (inputOrigTermios) for exit cleanup; this one is for SIGTSTP.
         recordRawMode()
+        # Enable bracketed paste for the process lifetime. `readLineWith`
+        # used to enable/disable around every read; the toggle was
+        # idempotent noise, and a per-read disable let the host shell
+        # briefly see a paste before the next read re-enabled. The
+        # disable on process exit is handled by `minline.restoreTerminal`
+        # (registered as an exit proc), so the host shell is left in
+        # its original state on clean exit. Hosts that don't support
+        # bracketed paste (older `xterm`, some `screen` configs)
+        # ignore the sequence silently.
+        termui.writeRaw("\x1b[?2004h")
 
     edPtr[].deferSubmit = true
     edPtr[].submitIcon = DeferredSubmitMarker
     while inputRunning():
+      if wizardRequestPosted.load(moAcquire):
+        # A modal wizard is parked on the main thread waiting for a
+        # response. Run a one-shot `readLineWith` for it, then publish
+        # the result. The persistent prompt's `readLineWith` raised
+        # `WizardSwitched` to land us here; its editor state was
+        # already cleared by its own defer and the cancel/submit
+        # handlers, so we only need to repaint the wizard's prompt.
+        # Clear `wizardRequestPosted` up front so the persistent
+        # loop's `getCh` no longer parks us on the sentinel during
+        # the wizard's own readLineWith; the main thread's caller
+        # The persistent prompt's getCh sees `wizardRequestPosted`
+        # stay false from here on (we just cleared it above) and
+        # stops returning the sentinel, so the persistent prompt is
+        # ready to repaint as soon as the wizard's readLineWith
+        # returns.
+        wizardRequestPosted.store(false, moRelease)
+        inputModalActive.store(true, moRelease)
+        var req: WizardReadRequest
+        var resp = WizardReadResponse(kind: wrSubmitted, text: "")
+        acquire wizardRequestLock
+        try:
+          req = wizardRequest
+        finally:
+          release wizardRequestLock
+        # Park deferSubmit so the wizard's Enter submits directly
+        # (the wizard owns the response, not the queue). The
+        # persistent prompt is the only other writer of these two
+        # fields, and it is parked while `inputModalActive == true`,
+        # so a `try/finally` around the wizard's readLineWith is
+        # enough to bracket the field change — no per-call save
+        # needed.
+        edPtr[].deferSubmit = false
+        edPtr[].submitIcon = ""
+        try:
+          let text = minline.readLineWith(edPtr[],
+                                          req.prompt,
+                                          getCh, wizardWriteProc,
+                                          hidechars = req.hidechars,
+                                          noHistory = req.noHistory,
+                                          hasPendingInput = hasPendingInput)
+          resp = WizardReadResponse(kind: wrSubmitted, text: text)
+        except minline.WizardSwitched:
+          # The wizard's own `getCh` should never see the sentinel
+          # because the main thread blocks on the previous response
+          # before publishing the next request. If it ever does,
+          # treat it as a cancellation so the parked caller unblocks
+          # instead of hanging forever.
+          resp = WizardReadResponse(kind: wrCancelled, text: "")
+        except minline.InputCancelled:
+          # Repaint the persistent prompt so the next iteration of
+          # the outer loop starts from a clean state. `fullRedraw`
+          # runs here (with the wizard's empty `submitIcon`); the
+          # deferred-submit marker is irrelevant for an empty line
+          # and the persistent prompt's next readLineWith repaints
+          # with the restored marker via the `finally` below.
+          edPtr[].line = minline.Line(text: "", position: 0)
+          edPtr[].renderSuffix = ""
+          edPtr[].renderSuffixCursor = false
+          edPtr[].echoRows = 0
+          edPtr[].write = writeProc
+          minline.fullRedraw(edPtr[])
+          resp = WizardReadResponse(kind: wrCancelled, text: "")
+        except EOFError:
+          resp = WizardReadResponse(kind: wrEof, text: "")
+        except CatchableError:
+          resp = WizardReadResponse(kind: wrEof, text: "")
+        finally:
+          edPtr[].deferSubmit = true
+          edPtr[].submitIcon = DeferredSubmitMarker
+        acquire wizardRequestLock
+        try:
+          wizardResponse = resp
+          wizardResponsePosted.store(true, moRelease)
+        finally:
+          release wizardRequestLock
+        continue
       try:
         let text = minline.readLineWith(edPtr[],
                                         EditorPromptBytes,
@@ -1624,6 +1825,21 @@ proc inputThreadProc() {.thread.} =
         edPtr[].renderSuffixCursor = false
         edPtr[].renderRow = 0
         edPtr[].echoRows = 0
+      except minline.WizardSwitched:
+        # `getCh` returned the wizard sentinel because a modal
+        # wizard is waiting. Drop any text the user typed in the
+        # persistent prompt before the wizard arrived and loop
+        # back to the top of the outer loop, where the wizard
+        # branch runs the wizard's `readLineWith` and publishes
+        # the result. The editor's defer + cancel/submit handlers
+        # have already cleaned up the persistent readLineWith's
+        # own state; we only clear our outer-loop residue.
+        edPtr[].line = minline.Line(text: "", position: 0)
+        edPtr[].renderSuffix = ""
+        edPtr[].renderSuffixCursor = false
+        edPtr[].renderRow = 0
+        edPtr[].echoRows = 0
+        continue
       except minline.InputCancelled:
         if inputTurnActive.load(moAcquire):
           requestTurnInterrupt()
@@ -1714,6 +1930,65 @@ proc ensureInputThreadStarted*() =
     while not inputEditorReady.load(moAcquire) and epochTime() < deadline:
       sleep 5
     inputEditorReady.store(true, moRelease)
+
+proc wizardReadLine*(editor: var minline.LineEditor, prompt: string,
+                     hidechars = false, noHistory = true): string =
+  ## Run a wizard prompt on the input thread. The main thread parks
+  ## here until the user submits, cancels, or EOFs. The input thread
+  ## is the only reader of stdin, so there is no race with the
+  ## persistent prompt.
+  ##
+  ## Returns the submitted line. Raises `minline.InputCancelled` on
+  ## ESC / Ctrl-C and `IOError` on EOF. Callers that want a stripped
+  ## line should call `.strip` on the result (matches the old
+  ## `editor.readLine` contract).
+  ensureInputThreadStarted()
+  acquire wizardRequestLock
+  try:
+    wizardRequest = WizardReadRequest(prompt: prompt, hidechars: hidechars,
+                                      noHistory: noHistory)
+    wizardRequestPosted.store(true, moRelease)
+    # The input thread's persistent `getCh` returns the wizard
+    # sentinel while `wizardRequestPosted` is true. That sentinel
+    # propagates up the persistent `readLineWith` as `WizardSwitched`,
+    # which the input thread's outer loop catches to run the wizard
+    # branch. Once the wizard branch has picked the request up, it
+    # clears `wizardRequestPosted` and sets `inputModalActive`; the
+    # persistent getCh no longer returns the sentinel, and the
+    # wizard's own getCh can read user input normally.
+  finally:
+    release wizardRequestLock
+  while not wizardResponsePosted.load(moAcquire):
+    if not inputThreadRunning:
+      raise newException(IOError, "input thread stopped")
+    sleep 5
+  acquire wizardRequestLock
+  try:
+    result = wizardResponse.text
+    let kind = wizardResponse.kind
+    wizardResponsePosted.store(false, moRelease)
+    # Clear the editor's draft so the persistent prompt repaints
+    # cleanly on its next readLineWith.
+    editor.line = minline.Line(text: "", position: 0)
+    editor.renderSuffix = ""
+    editor.renderSuffixCursor = false
+    editor.renderRow = 0
+    editor.echoRows = 0
+    inputModalActive.store(false, moRelease)
+    # The persistent prompt's `onSubmit` set this flag before the
+    # wizard took over. The wizard's `getCh` deliberately ignored
+    # it while `inputModalActive == true`; now that the modal is
+    # done and the persistent prompt's `getCh` is about to run
+    # again, the park would deadlock the next keystroke. Clear it
+    # here so the input thread is the single owner of the modal
+    # lifecycle (the main loop's `cdModal` branch used to do this).
+    inputIdleLinePending.store(false, moRelease)
+    case kind
+    of wrSubmitted: discard
+    of wrCancelled: raise newException(minline.InputCancelled, "")
+    of wrEof: raise newException(EOFError, "")
+  finally:
+    release wizardRequestLock
 
 proc beginTurn*() =
   ## Hide the physical terminal caret for the duration of the turn. The
