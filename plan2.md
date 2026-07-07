@@ -36,56 +36,41 @@ not free.
 
 **Files:** `src/threecode.nim`, `src/threecode/fatprompt/runtime.nim`
 
-**Status:** working but smelly. The flag is now set/cleared twice
-on every modal command:
+**Status:** planning, post items 1+8. Re-reading the code in
+preparation for this work surfaced a *correction* to the original
+description: `wizardReadLine` does NOT currently call
+`releaseIdleSubmittedInput`. The flag is set by the persistent
+prompt's `onSubmit` and is *only* cleared in the main loop's
+`cdModal` branch (threecode.nim:511). The wizard's `getCh`
+deliberately ignores `inputIdleLinePending` while
+`inputModalActive == true`, so during the wizard nothing is
+parked; the moment the wizard returns and `inputModalActive`
+goes back to false, the next persistent `getCh` parks and waits
+for the main loop to clear the flag via `releaseIdleSubmittedInput`.
 
-1. `wizardReadLine` (in `runtime.nim:1885-1895`) clears it as part
-   of "wizard done, repaint the persistent prompt" — necessary
-   because the wizard's own `getCh` deliberately ignores
-   `inputIdleLinePending` while `inputModalActive == true` (the
-   fix that broke the original deadlock), so the controller has to
-   clear it on the way out.
-2. The main loop's `cdModal` branch in `threecode.nim:505-511`
-   also calls `releaseIdleSubmittedInput()` after the command
-   returns — this is the original call site from before the
-   refactor.
+So this is not a duplicate — it's a single call in the wrong
+place. The fix is to move it: `wizardReadLine` should clear the
+flag as part of its "wizard done, repaint the persistent prompt"
+sequence, alongside the editor reset it already does. The
+`cdModal` branch in `threecode.nim` then shrinks to just
+`continue`.
 
-The second call is a no-op (both write `false`) but the
-duplication is a smell that hints at a wrong layering: the
-modal's "we're done" protocol now lives partly in the input
-thread and partly in the controller.
+**Plan, post-correction:**
 
-**Two options, in order of preference:**
+- In `wizardReadLine` (runtime.nim:1895-1900), add
+  `inputIdleLinePending.store(false, moRelease)` inside the
+  existing `try` that resets the editor fields. This is the
+  right layer: the input thread knows the wizard is done, the
+  persistent prompt is about to be re-painted, and the flag
+  must be cleared before the next `getCh` call.
+- In `threecode.nim:505-511`, remove the `cdModal` branch
+  body. The branch becomes `if commandResult.disposition ==
+  cdModal: continue`. All five lines (the four editor resets +
+  the `releaseIdleSubmittedInput()`) go away because the input
+  thread now does them inside `wizardReadLine`.
 
-**(a) Make the input thread own the full lifecycle.** Move the
-"clear the persistent prompt's input state" logic out of the
-`cdModal` branch in `threecode.nim`. The input thread already
-resets `editor.line`, `editor.renderSuffix`, etc. inside
-`wizardReadLine` after the response is consumed, so by the time
-the controller sees the `cdModal` return the editor is already
-clean. The `cdModal` branch should just `continue` the main loop
-(no `releaseIdleSubmittedInput`, no editor reset, no nothing
-modal-specific — those happen inside the input thread's wizard
-branch now).
-
-Risk: the persistent prompt's next `readLineWith` happens on the
-*next* outer-loop iteration, after `continue`. If the input
-thread's "wizard is done, repaint the persistent prompt" hook
-fires synchronously (it does — `wizardReadLine` resets the editor
-synchronously before returning), the next `readLineWith` will see a
-clean state. So this is safe.
-
-**(b) Document the duplication and add an assertion** in
-`releaseIdleSubmittedInput` that it is idempotent (which it is,
-via the atomic store). Cheaper but leaves the smell.
-
-**Recommendation:** (a). The input thread is the right layer; the
-controller shouldn't need to know about modal-specific cleanup
-anymore.
-
-**Acceptance:** the controller's `cdModal` branch shrinks to
-`continue`; all existing tty tests + the new cancel tests still
-pass.
+**Acceptance:** the main loop's `cdModal` branch is one line;
+all existing tty tests + the 4 cancel subtests still pass.
 
 ## 3. Route the wizard's terminal writes through a dedicated writer
 
@@ -367,13 +352,37 @@ state machine in a separate, reviewable PR.
 
 ---
 
+## What I learned shipping items 1 and 8
+
+- **The plan's description of item 2 was wrong.** Re-reading the
+  code, `wizardReadLine` does NOT currently call
+  `releaseIdleSubmittedInput`. The "duplicate" is a misread: the
+  call is in the main loop's `cdModal` branch, full stop. Item 2
+  is "move the call to the right place" (the input thread), not
+  "remove a duplicate." Updated the status block above.
+- **Item 8 turned out cleaner than the plan predicted.** The
+  `except minline.WizardSwitched` branch's hand-rolled
+  `acquire wizardRequestLock` + `continue` was redundant once the
+  `try/finally` was in place — the unified publish path handles
+  it just fine. So the change was 18 insertions / 19 deletions
+  instead of "−4 lines." Worth calling out because the unified
+  publish path is now simpler than the original code; the
+  "unify the lock acquisition order" outcome is a real
+  improvement, not just a refactor.
+- **The `tty.expect "name [stub]"` fix in item 1 also fixed
+  CI silently.** That test was passing in CI before (the
+  `doAssert false` was masked because of how the tty harness
+  reports failures? no — it was just never run). Either way,
+  the test now does what it says on the tin.
+
 ## Order of operations for execution
 
 1. ~~**1** — unblock the existing test (mechanical, low risk)~~ DONE `35f508f`
 2. ~~**8** — small source cleanup in the wizard branch~~ DONE `497e83e`
-3. **2** — single-source the modal cleanup (small but touches the
-   main loop)
-4. **9** — write the protocol header comment (no code change)
+3. **2** — move `releaseIdleSubmittedInput` into `wizardReadLine`,
+   shrink `cdModal` to `continue` (in progress, this session)
+4. **9** — write the protocol header comment (in progress, this
+   session)
 5. **4** — clarify `inputIdleLinePending`'s contract (comment-only)
 6. **3** — wizard-dedicated writer (no-op tag, no behaviour change)
 7. **6** — stress test (catches any of the above's mistakes)
