@@ -419,36 +419,6 @@ proc parseXmlToolCalls*(content: string): tuple[cleaned: string, calls: seq[Json
   result.cleaned = cleaned.strip(leading = false)
   result.calls = calls
 
-proc extractReasoningText*(delta: JsonNode): string =
-  ## Pull the reasoning/thinking text out of an SSE delta object.
-  ## Three wire shapes are seen in the wild:
-  ## - `reasoning_content`: DeepSeek, Qwen, Kimi, and MiniMax (when
-  ##   `reasoning_split` is not set, or in batch responses). Plain string.
-  ## - `reasoning`: a few OpenAI-compatible stacks. Plain string.
-  ## - `reasoning_details`: MiniMax with `reasoning_split: true` on
-  ##   the streaming surface. Array of objects with a `text` field;
-  ##   concatenate every `text` in order so the running accumulation
-  ##   stays a single string the rest of the pipeline can append to.
-  ##   Without this, the harness ignores MiniMax's thinking entirely:
-  ##   no ticker, no history replay, and the model's plans never reach
-  ##   the tool-dispatch layer.
-  if delta == nil or delta.kind != JObject: return
-  let s = delta{"reasoning_content"}.getStr("")
-  if s.len > 0: return s
-  let s2 = delta{"reasoning"}.getStr("")
-  if s2.len > 0: return s2
-  let details = delta{"reasoning_details"}
-  if details == nil: return
-  if details.kind == JArray:
-    for d in details:
-      if d.kind == JObject:
-        let t = d{"text"}.getStr("")
-        if t.len > 0: result.add t
-  elif details.kind == JObject:
-    # Defensive: some stacks may emit a single object instead of an array.
-    let t = details{"text"}.getStr("")
-    if t.len > 0: result.add t
-
 proc accumulateToolCall(dst: JsonNode, delta: JsonNode) =
   # Merge a tool_calls delta chunk into the accumulator slot. OpenAI-style
   # providers emit `arguments` as partial strings across chunks; concatenate.
@@ -683,12 +653,10 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
         let delta = choices[0]{"delta"}
         if delta != nil and delta.kind == JObject:
           # Reasoning chunks arrive on `reasoning_content` (DeepSeek, Qwen,
-          # Kimi, MiniMax without split) or `reasoning` (a few others), or
-          # `reasoning_details` (MiniMax with `reasoning_split: true`,
-          # which is what we always ask for). See `extractReasoningText`.
-          # Always accumulate so we can echo back on the next turn; only
-          # render the ticker when enabled.
-          let r = extractReasoningText(delta)
+          # Kimi) or `reasoning` (a few others). Always accumulate so we can
+          # echo back on the next turn; only render the ticker when enabled.
+          var r = delta{"reasoning_content"}.getStr("")
+          if r.len == 0: r = delta{"reasoning"}.getStr("")
           if r.len > 0:
             accReasoning &= r
             slurped += r.len
@@ -1006,10 +974,8 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
     result.errMsg = "response missing choices[0].message"
     return
   let content = message{"content"}.getStr("")
-  # Batch responses: MiniMax with split can land reasoning either in
-  # `reasoning_content` (when the server normalises) or `reasoning_details`
-  # (when it doesn't). The delta-shape helper handles all three families.
-  var reasoning = extractReasoningText(message)
+  var reasoning = message{"reasoning_content"}.getStr("")
+  if reasoning.len == 0: reasoning = message{"reasoning"}.getStr("")
   var toolCalls =
     if message{"tool_calls"} != nil and message{"tool_calls"}.kind == JArray:
       message{"tool_calls"}
@@ -1194,18 +1160,7 @@ proc applyMinimaxReasoning(p: Profile, body: JsonNode) =
   ## to tools that don't expect it. The split field is also part of
   ## the official Anthropic-compatible format, which the harness
   ## already relies on for the round-trip (the assistant message must
-  ##
-  ## CAVEAT: the v1 surface doesn't honor split on every request. A
-  ## sweep of 8 prompts against `api.minimax.io/v1` with this body
-  ## shape found 7 returning the structured `reasoning_details` /
-  ## `reasoning_content` blocks (the path `extractReasoningText`
-  ## already covers) and 1 — a trivial single-token reply, "What is
-  ## 7*8? Reply with one line." — returning the plan as ``
-  ## inside `delta.content` with no structured fields. The leak is
-  ## cosmetic: the visible answer is still correct, just without a
-  ## thinking ticker. We accept it rather than ship a `<think>`
-  ## content filter, which would add a 60-line code path for an
-  ## edge case the model itself treats as skip-thinking.
+  ## come back with reasoning preserved on history replay).
   case p.reasoning
   of "off":
     body["chat_template_kwargs"] = %*{"enable_thinking": false}
