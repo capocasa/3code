@@ -1712,6 +1712,16 @@ proc inputThreadProc() {.thread.} =
         # this exact mode on resume. The runtime keeps its own copy
         # (inputOrigTermios) for exit cleanup; this one is for SIGTSTP.
         recordRawMode()
+        # Enable bracketed paste for the process lifetime. `readLineWith`
+        # used to enable/disable around every read; the toggle was
+        # idempotent noise, and a per-read disable let the host shell
+        # briefly see a paste before the next read re-enabled. The
+        # disable on process exit is handled by `minline.restoreTerminal`
+        # (registered as an exit proc), so the host shell is left in
+        # its original state on clean exit. Hosts that don't support
+        # bracketed paste (older `xterm`, some `screen` configs)
+        # ignore the sequence silently.
+        termui.writeRaw("\x1b[?2004h")
 
     edPtr[].deferSubmit = true
     edPtr[].submitIcon = DeferredSubmitMarker

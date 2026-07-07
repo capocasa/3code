@@ -1413,19 +1413,17 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
     # through nil).
     discard
   resetForRead(ed, prompt, hidechars)
-  # Enable bracketed paste in both modes. For hidden inputs (api keys),
-  # this lets the bracketed-paste handler atomically capture the paste
-  # and mask it as `*`s, instead of letting the per-byte loop see
-  # embedded CR/LF (early submit) or drop high UTF-8 bytes silently.
-  # The matching disable is also in `defer` so the host terminal doesn't
-  # stay in bracketed-paste mode after EOFError / InputCancelled, which
-  # otherwise causes the shell to swallow the next paste as literal
-  # `[200~…[201~` instead of input.
-  ed.write "\x1b[?2004h"
-  defer:
-    # Idempotent: the normal-submit paths also write this before
-    # returning. A second copy on top of that is harmless.
-    try: ed.write "\x1b[?2004l" except CatchableError: discard
+  # Bracketed paste is enabled by the caller (the input thread
+  # enables once in its termios setup; the test-only `readLine`
+  # enables once after its own termios setup) and disabled on
+  # process exit by `restoreTerminal` (registered as an exit
+  # proc). The per-read toggle used to live here but was
+  # idempotent noise — the host terminal only cares whether
+  # bracketed paste is on or off at the moment a paste arrives,
+  # and we want it on for the entire editor lifetime so the
+  # shell doesn't briefly see a literal `[200~…[201~` sequence
+  # between the disable (in the old defer) and the next read's
+  # enable.
   fullRedraw(ed)
   var c1: int
   var putback = -1
@@ -1616,6 +1614,16 @@ proc readLine*(ed: var LineEditor, prompt = "", hidechars = false,
       rawMode.c_cc[VTIME] = char(0)
       discard fd.tcSetAttr(TCSANOW, addr rawMode)
       recordRawMode()
+      # Enable bracketed paste. The production path (the input
+      # thread) enables once in its termios setup; the test-only
+      # `readLine` proc owns its own terminal, so it enables
+      # here. `restoreTerminal` (registered as an exit proc)
+      # disables on clean exit. The local `write` closure (the
+      # one passed to `ed.readLineWith`) is used instead of
+      # `stdout.write` directly so the bracketed-paste enable
+      # flows through the same path as the rest of the editor
+      # output.
+      write("\x1b[?2004h")
     defer:
       if haveOldMode:
         discard fd.tcSetAttr(TCSADRAIN, addr oldMode)
