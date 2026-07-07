@@ -1194,7 +1194,18 @@ proc applyMinimaxReasoning(p: Profile, body: JsonNode) =
   ## to tools that don't expect it. The split field is also part of
   ## the official Anthropic-compatible format, which the harness
   ## already relies on for the round-trip (the assistant message must
-  ## come back with reasoning preserved on history replay).
+  ##
+  ## CAVEAT: the v1 surface doesn't honor split on every request. A
+  ## sweep of 8 prompts against `api.minimax.io/v1` with this body
+  ## shape found 7 returning the structured `reasoning_details` /
+  ## `reasoning_content` blocks (the path `extractReasoningText`
+  ## already covers) and 1 — a trivial single-token reply, "What is
+  ## 7*8? Reply with one line." — returning the plan as ``
+  ## inside `delta.content` with no structured fields. The leak is
+  ## cosmetic: the visible answer is still correct, just without a
+  ## thinking ticker. We accept it rather than ship a `<think>`
+  ## content filter, which would add a 60-line code path for an
+  ## edge case the model itself treats as skip-thinking.
   case p.reasoning
   of "off":
     body["chat_template_kwargs"] = %*{"enable_thinking": false}
