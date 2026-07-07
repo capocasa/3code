@@ -42,9 +42,9 @@ const QuietRecvWakeMs* {.intdefine.} = 500
   ## the quiet/interrupt flags. Must be well under `QuietTooLongMs`.
   ## Kept at 1s so user interrupts (Ctrl-C) are honored within ~1s;
   ## the extra poll overhead is negligible for trickle-rate streams.
-const QuietTooLongMs* {.intdefine.} = 180_000
+const QuietTooLongMs* {.intdefine.} = 45_000
   ## If a streaming response goes this long with no data from the
-  ## provider, the turn is aborted. `posix.shutdown(fd)` from another
+  ## provider (45s), the turn is aborted. `posix.shutdown(fd)` from another
   ## thread does not reliably wake a blocked TLS `recv`, so the stream
   ## loop instead relies on `QuietRecvWakeMs`-bounded reads to wake up
   ## and observe this threshold. That bound is enforced twice now:
