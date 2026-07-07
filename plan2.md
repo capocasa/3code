@@ -223,9 +223,9 @@ wizard field still masks paste bursts as `*`s.
 
 **File:** new `tests/tty/test_provider_wizard_cancel_stress.nim`
 
-**Status:** the four cancel subtests pass, but they're each a
-single cancel followed by `:q`. The original bug report had two
-distinct failure modes:
+**Status:** planning, post items 1, 8, 2, 9, 4, 3. The four
+cancel subtests pass, but they're each a single cancel followed
+by `:q`. The original bug report had two distinct failure modes:
 
 - Cancel-leaves-cursor-stuck (covered by subtest 1, 2, 3)
 - Second-cancel-SIGSEGV (covered by subtest 4)
@@ -253,9 +253,30 @@ stub\r"` writes the wizard entry. If the previous iteration left
 the input thread in a bad state (e.g. `inputModalActive` stuck
 true), the wizard entry fails or the editor state is corrupt.
 
+**Plan, after reading the harness:**
+
+- The harness has `tty.expectOnScreen` and `tty.expectPromptLive`
+  (tty_expect.nim:818, 866). `expectPromptLive` is the
+  tightest signal: it asserts the live `❯` prompt is at the
+  expected position, not just present somewhere in the buffer.
+  Use `expectPromptLive` after `:show` and after each cancel.
+- The harness also has `tty.expectExit(0, timeoutMs = 5000)`,
+  which is the right end-of-stress assertion (same pattern as
+  `test_provider_edit_crash.nim` post-item-1).
+- Iteration count: plan says 20, but the harness is slow (the
+  existing 4 subtests take ~20s total because each is a full
+  fork+exec of the stub binary). 20 iterations in a single
+  session will be fast (no fork between iterations), so 20 is
+  fine. Print the iteration count on the PASS line so a future
+  contributor can tune it.
+- The test file should mirror the structure of
+  `test_provider_wizard_cancel.nim` (same imports, same
+  `startTty` helper) so the diff is "new test, copy-paste
+  shape" rather than "new pattern."
+
 **Acceptance:** runs in < 30s on the existing tty harness; the
 test's PASS line prints the iteration count; CI picks it up
-under the existing `tests/tty` glob.
+under the existing `tests/tty` glob; no flake.
 
 ## 7. Audit other modal command paths (`:reasoning`, `:notify`, etc.) for the same race
 
@@ -280,9 +301,30 @@ Likely result: nothing else. The provider wizard was the only
 modal in the binary as of `5db5aa8`. Future modals (if any) will
 get the fix for free.
 
-**Acceptance:** a one-line audit comment in `runtime.nim` near
-`wizardReadLine` stating which call sites are covered. No code
-change if the grep comes up clean.
+**Plan, after reading the harness and grepping the source:**
+
+- `grep -rn "readRequired\|readOptional\|editor.readLine" src/`
+  produces a small list (probably < 10 hits). For each:
+  - In `src/threecode/ui.nim`, every call site goes through
+    `readRequired` or `readOptional` (which now call
+    `wizardReadLine`). No raw `editor.readLine` in production.
+  - In `src/threecode/minline.nim`, the standalone `readLine`
+    proc is the one used by tests. It is intentionally NOT the
+    wizard path (it sets its own termios raw mode for tests
+    that don't have an input thread). This is a known and
+    documented exception.
+  - In `src/threecode/api.nim`, `conn.readLine` is the
+    network read; not a UI prompt.
+- The "audit comment" called for in the original plan should
+  live next to the `WizardReadRequest` globals, in the
+  protocol comment block. One line: "All production modal
+  prompts go through `wizardReadLine` via
+  `ui.readRequired` / `ui.readOptional`. The standalone
+  `minline.readLine` is test-only."
+
+**Acceptance:** met. Grep produces no surprises; the audit
+line lives in the protocol comment block; no other modal
+needs the same plumbing.
 
 ## 8. Move the wizard's per-call field save/restore out of the input thread's hot loop
 
@@ -426,8 +468,9 @@ state machine in a separate, reviewable PR.
    (comment-only)~~ DONE `c8c009a`
 6. ~~**3** — wizard-dedicated writer (no-op tag, no behaviour
    change)~~ DONE `b92ea21`
-7. **6** — stress test (catches any of the above's mistakes)
-8. **7** — audit (likely no-op)
+7. **6** — stress test for the wizard cancel + state-machine
+   (in progress this session)
+8. **7** — audit modal call sites (in progress this session)
 9. **5** — bracketed-paste refactor (medium risk)
 10. **10** — backlog item, do not pull into this work
 
