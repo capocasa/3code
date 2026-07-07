@@ -168,6 +168,13 @@ suite "minline pure helpers":
     let bytes = renderBuffer("a        b", "", "", 5)
     check bytes == "a\r\nb"
 
+  test "renderBuffer: word-wrap does not duplicate fragment on original line":
+    # width 30, prompt 2, contW 2 -> 28 data cells per row.
+    # "This is a word that was broken" wraps after "was"; the fragment
+    # "brok" must NOT remain on row 0.
+    let bytes = renderBuffer("This is a word that was broken", "P ", "  ", 30)
+    check bytes == "P This is a word that was\r\n  broken"
+
   test "editor prompt marker uses same default style as typed text":
     let d = newDriver()
     d.terminal.write renderBuffer("x", EditorPromptBytes, "  ", 80)

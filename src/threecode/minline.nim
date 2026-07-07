@@ -327,6 +327,7 @@ proc lineSpans*(text: string; promptW, contW, width: int): seq[LineSpan] =
   var i = 0
   var lastBreak = -1   # byte offset of the last space available as a break
   var contentEnd = 0   # byte offset just past the last non-space on this line
+  var lineEnd = 0      # contentEnd at the last space boundary (for word-wrap)
   while i < text.len:
     let rl = runeLenSafe(text, i)
     if text[i] == '\n':
@@ -354,7 +355,7 @@ proc lineSpans*(text: string; promptW, contW, width: int): seq[LineSpan] =
       if lastBreak >= 0 and lastBreak < i:
         # Word-wrap: the line ends at the last non-space content; the next
         # line starts after the space run beginning at lastBreak.
-        result[result.high].stop = contentEnd
+        result[result.high].stop = lineEnd
         var s = lastBreak
         while s < text.len and text[s] == ' ':
           s += runeLenSafe(text, s)
@@ -373,6 +374,7 @@ proc lineSpans*(text: string; promptW, contW, width: int): seq[LineSpan] =
       continue
     if text[i] == ' ':
       lastBreak = i
+      lineEnd = contentEnd
     else:
       contentEnd = i + rl
     inc col, rw
