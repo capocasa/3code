@@ -1273,6 +1273,7 @@ commands:
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
+  :version          show the running 3code version
   :q :quit          exit (also Ctrl-D)
 
 input:
