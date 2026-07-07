@@ -1,6 +1,14 @@
 /3code
 build/
 testdata/output/
+# Compiled probe binaries next to their .nim sources. Sources are tracked
+# by virtue of having a .nim extension; the bare binary (no extension) is
+# build output and contains the API key inlined by the source.
+# Compiled probe binaries next to their .nim sources. The source has
+# a .nim extension; the bare binary (no extension) is build output
+# and contains the API key inlined by the source.
+/testdata/probe_minimax_sse
+/testdata/probe_minimax_split
 nimcache/
 config.local.nims
 
