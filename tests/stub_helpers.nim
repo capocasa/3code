@@ -25,6 +25,38 @@ proc nimbleDepFlags*(): string =
   ## threecode and must resolve its transitive deps).
   result = nimbleDepPaths().join(" ")
 
+proc buildBinary*(defines, outName: string; forceRebuild = false): string =
+  ## Build a `3code` binary with an arbitrary `-d:` define set into
+  ## `build/<outName>`, caching by name + mtime like `ensureStubBinary`.
+  ## Used by tests that need a non-stub binary (e.g. the real-transport
+  ## connect/stream tests that point at a local mock HTTP server).
+  result = getCurrentDir() / "build" / outName
+  if forceRebuild and fileExists(result):
+    removeFile(result)
+  if fileExists(result):
+    let binMtime = getLastModificationTime(result)
+    var stale = false
+    for f in walkDirRec(getCurrentDir() / "src"):
+      if f.endsWith(".nim") and getLastModificationTime(f) > binMtime:
+        stale = true
+        break
+    if stale:
+      removeFile(result)
+  if fileExists(result):
+    return
+  createDir(result.parentDir)
+  let cacheDir = getCurrentDir() / "build" / (outName & "_cache")
+  createDir(cacheDir)
+  var cmd = "nim c " & defines
+  for p in nimbleDepPaths():
+    cmd.add(" " & p)
+  cmd.add(" --path:src")
+  cmd.add(" --nimcache:" & cacheDir.quoteShell)
+  cmd.add(" -o:" & result.quoteShell)
+  cmd.add(" src/threecode.nim")
+  let (outp, code) = execCmdEx(cmd)
+  doAssert code == 0, outp
+
 proc ensureStubBinary*(extraDefines = "", forceRebuild = false): string =
   ## Returns the path to a stub `3code` binary, building it once if missing.
   ##
