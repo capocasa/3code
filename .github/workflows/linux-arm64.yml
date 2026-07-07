@@ -49,11 +49,7 @@ jobs:
 
       - name: Run tests
         run: nimble test
-        # tty category alone can run 8-15 min on a busy runner (PTY/ttty
-        # wall-clock polling is sensitive to load); the other 7 categories
-        # combined take ~2-3 min. 30 min gives headroom for one slow tty
-        # run without being a license to add many more tests.
-        timeout-minutes: 30
+        timeout-minutes: 20
 
       - name: Package
         run: |
