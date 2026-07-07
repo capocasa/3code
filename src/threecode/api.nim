@@ -1108,11 +1108,15 @@ proc applyMinimaxReasoning(p: Profile, body: JsonNode) =
   ## - M2.x (v2.5, v2.7) is a reasoning-only model: enable_thinking=true
   ##   engages interleaved reasoning, enable_thinking=false cuts it off.
   ## - M3 (frontier) defaults to thinking on; the knob is the same shape
-  ##   and works the same way. "low" disables it for snappy responses;
-  ##   "medium" and "high" enable it with increasing effort. Anthropic-
-  ##   protocol deployments (api.minimax.io/anthropic) also accept
+  ##   and works the same way. Anthropic-protocol deployments
+  ##   (api.minimax.io/anthropic) also accept
   ##   `thinking.type = "enabled"/"disabled"`, but we only talk to the
   ##   OpenAI-compatible surface, so the vLLM knob is what we send.
+  ##
+  ## Allowed values are `on` / `off` (set via `:reasoning`). The model
+  ## has no graded effort knob on this surface — `low/medium/high` are
+  ## rejected by `knownGoodReasonings` for the minimax family and are
+  ## only available to unknown models under `--experimental`.
   ##
   ## `reasoning_split = true` (top-level body field) is hardcoded: it
   ## tells the model to return thinking content as a separate
@@ -1125,11 +1129,9 @@ proc applyMinimaxReasoning(p: Profile, body: JsonNode) =
   ## already relies on for the round-trip (the assistant message must
   ## come back with reasoning preserved on history replay).
   case p.reasoning
-  of "low":
+  of "off":
     body["chat_template_kwargs"] = %*{"enable_thinking": false}
-  of "medium":
-    body["chat_template_kwargs"] = %*{"enable_thinking": true}
-  of "high":
+  of "on":
     body["chat_template_kwargs"] = %*{"enable_thinking": true}
   else: discard
   body["reasoning_split"] = %true
