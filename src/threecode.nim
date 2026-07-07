@@ -156,6 +156,9 @@ proc cleanup() {.noconv.} =
   fatprompt.flushDraftNow()
   releaseActiveSessionLock()
   releaseActiveDirLock()
+  # Restore the Windows Terminal palette if we modified it at startup.
+  when defined(windows):
+    restoreWindowsPalette()
 
 proc main() =
   setupTlsEnv()
@@ -232,6 +235,11 @@ proc main() =
   # Config overrides (the [colors] section) are layered on after the config
   # file is loaded, but detection must run here so pre-config output is sane.
   applyPalette(detectColorMode(colorForce))
+
+  # Windows: swap the Campbell palette's cyan indices so \e[36m renders as
+  # cyan (not light blue) and \e[96m as bright cyan. No-op on other platforms.
+  when defined(windows):
+    saveAndModWindowsPalette()
 
   if listSessions:
     let paths = listSessionPathsForCwd(safeCwd())
