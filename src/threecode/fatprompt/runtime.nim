@@ -93,10 +93,12 @@ initLock(inputStateLock)
 var inputTurnActive: Atomic[bool]
 var inputEditorReady: Atomic[bool]
 var inputIdleLinePending: Atomic[bool]
-  ## Set by the input thread after an idle Enter; cleared by the controller
-  ## when it drains the event or when beginTurn starts the next turn.
-  ## The input thread's getCh returns -1 while this is set, parking the
-  ## editor so keystrokes don't append to an uncleared prompt.
+  ## Set by the persistent prompt's `onSubmit` after an idle Enter;
+  ## cleared by `wizardReadLine` once the modal returns. The
+  ## persistent prompt's `getCh` parks while this is true (and
+  ## `inputModalActive == false`) so the controller has a chance
+  ## to drain the event; the wizard's `getCh` deliberately ignores
+  ## it. See the wizard protocol header above `wizardRequest`.
 var inputModalActive*: Atomic[bool]
   ## Set by the input thread itself for the lifetime of a modal wizard
   ## `readLineWith`. The input thread's editor hooks consult this flag
@@ -421,9 +423,10 @@ proc setActiveCommandHook*(hook: proc(cmd: string) {.gcsafe.}) =
   activeCommandHook = hook
 
 proc releaseIdleSubmittedInput*() =
-  ## Let the persistent editor leave the submitted-line state after an idle
-  ## controller path has consumed and committed the line. Model turns use
-  ## ``beginTurn`` for the same acknowledgement.
+  ## Clear the persistent-prompt idle-submit flag. Called by
+  ## `wizardReadLine` after a modal returns; the protocol comment
+  ## above `wizardRequest` explains why the input thread is the
+  ## single owner of this flag's lifecycle.
   inputIdleLinePending.store(false, moRelease)
 
 proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
@@ -1553,13 +1556,8 @@ proc inputThreadProc() {.thread.} =
           # the sentinel and the user can type into the wizard.
           if wizardRequestPosted.load(moAcquire):
             return minline.wizardSentinel
-          # `inputIdleLinePending` parks the *persistent* prompt
-          # after it submits, so the controller can drain the
-          # ieLine event before the next byte reaches the editor.
-          # The persistent prompt isn't running while a wizard is
-          # in flight (it raised `WizardSwitched` to yield), so the
-          # parking is stale and would deadlock the wizard's own
-          # getCh. Skip it.
+          # Park the persistent prompt (not the wizard) on a stale
+          # idle-submit; see the protocol header for the lifecycle.
           if inputIdleLinePending.load(moAcquire) and
              not inputModalActive.load(moAcquire):
             sleep(5)
