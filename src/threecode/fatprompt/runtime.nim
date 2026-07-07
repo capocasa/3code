@@ -114,6 +114,51 @@ var inputModalActive*: Atomic[bool]
 #     only owner of stdin and the termios raw mode, so routing the
 #     wizard through it eliminates the dual-`posix.read` race that
 #     caused flaky cancel + SIGSEGV on `:provider edit`/`:provider add`.
+#
+#     ## Protocol (one round-trip)
+#
+#     1. Main thread (caller of `wizardReadLine`): fills
+#        `wizardRequest` under `wizardRequestLock`, then sets
+#        `wizardRequestPosted = true`. The lock is for the request
+#        struct only — the posted/response flags are atomic and
+#        lock-free.
+#     2. Input thread (running `inputThreadProc`): the persistent
+#        `readLineWith`'s `getCh` sees `wizardRequestPosted == true`
+#        and returns the `wizardSentinel` (-2). `readLineWith`
+#        raises `WizardSwitched`; the outer loop's `except
+#        minline.WizardSwitched` branch clears the editor and
+#        `continue`s to the top.
+#     3. Input thread (top of outer loop): sees
+#        `wizardRequestPosted == true`, clears the flag, sets
+#        `inputModalActive = true` (gates the hook bodies so the
+#        wizard owns the terminal), reads the request, sets
+#        `deferSubmit = false` + `submitIcon = ""` (the wizard's
+#        values; the persistent prompt is parked, so no save
+#        needed), and runs a one-shot `minline.readLineWith` with
+#        the same `getCh` / `writeProc` / `hasPendingInput`
+#        closures the persistent prompt uses.
+#     4. The wizard's `readLineWith` returns (Enter → submit,
+#        Ctrl-C / ESC → `InputCancelled`, Ctrl-D on empty →
+#        `EOFError`). The input thread's `except` branches build a
+#        `WizardReadResponse`, `finally` restores
+#        `deferSubmit`/`submitIcon`, the unified publish path
+#        stores the response and sets `wizardResponsePosted = true`,
+#        then `continue`s back to the persistent prompt.
+#     5. Main thread: wakes up, reads the response under the lock,
+#        clears the flags + `inputModalActive`, resets the editor
+#        fields, clears `inputIdleLinePending`, and either returns
+#        the line or raises `InputCancelled` / `EOFError`.
+#
+#     ## Why not a condvar
+#
+#     We match the existing `releaseIdleSubmittedInput` /
+#     `consumeQueuedInput` idiom: an atomic flag + 5ms `sleep`
+#     poll. The wizard prompts are interactive (user typing speed)
+#     so 5ms latency is invisible. A condvar would shave the
+#     wakeup latency but would not simplify the code (we'd still
+#     need the lock for the request/response structs, and the
+#     persistent prompt's `getCh` already needs the
+#     `wizardRequestPosted` flag for its own yield check).
 var wizardRequest: WizardReadRequest
 var wizardResponse: WizardReadResponse
 var wizardRequestPosted: Atomic[bool]
