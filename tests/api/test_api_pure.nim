@@ -211,6 +211,91 @@ suite "api: applyReasoning — unknown family":
     check "reasoning_effort" notin body
     check "chat_template_kwargs" notin body
 
+suite "api: extractReasoningText":
+  # Wire shapes the harness must accept. Regression suite for the
+  # MiniMax reasoning loss bug: when `reasoning_split: true` is on,
+  # MiniMax streams thinking in `reasoning_details` as an array of
+  # objects with a `text` field, not the `reasoning_content` string
+  # we used to read. Before the fix, all reasoning for that family
+  # was silently dropped.
+  test "returns empty for nil":
+    check extractReasoningText(nil) == ""
+
+  test "returns empty for non-object":
+    check extractReasoningText(newJArray()) == ""
+    check extractReasoningText(%*"just a string") == ""
+
+  test "reads reasoning_content (DeepSeek / Kimi / MiniMax-no-split)":
+    check extractReasoningText(%*{"reasoning_content": "thinking..."}) ==
+      "thinking..."
+
+  test "reads reasoning (a few OpenAI-compatible stacks)":
+    check extractReasoningText(%*{"reasoning": "step by step"}) ==
+      "step by step"
+
+  test "prefers reasoning_content over reasoning when both are present":
+    # The two carry the same intent; the first non-empty wins so we
+    # don't double-count when a stack hybrid-emits both.
+    check extractReasoningText(%*{
+      "reasoning_content": "primary",
+      "reasoning": "secondary",
+    }) == "primary"
+
+  test "reads reasoning_details array (MiniMax reasoning_split)":
+    let delta = %*{
+      "reasoning_details": [
+        {"text": "Plan: "},
+        {"text": "read the file, then "},
+        {"text": "patch the parser."}
+      ]
+    }
+    check extractReasoningText(delta) ==
+      "Plan: read the file, then patch the parser."
+
+  test "reads reasoning_details when interleaved with content":
+    # The realistic streaming shape: a delta carries both visible
+    # content and a reasoning_details entry. The helper must return
+    # only the reasoning text so the call site can route it to the
+    # ticker, not the content stream.
+    let delta = %*{
+      "content": "I'll add the helper.",
+      "reasoning_details": [{"text": "Need a pure function."}]
+    }
+    check extractReasoningText(delta) == "Need a pure function."
+
+  test "ignores reasoning_details entries with no text field":
+    # Some entries carry type/id metadata without text. Skip them
+    # rather than emit a stray space.
+    let delta = %*{
+      "reasoning_details": [
+        {"type": "thinking", "id": "abc"},
+        {"text": "actual thought"},
+        {"text": ""}
+      ]
+    }
+    check extractReasoningText(delta) == "actual thought"
+
+  test "tolerates a single reasoning_details object instead of array":
+    # Defensive: some stacks may emit a single object. The helper
+    # should still pull the text rather than crash.
+    check extractReasoningText(%*{
+      "reasoning_details": {"text": "one-shot thought"}
+    }) == "one-shot thought"
+
+  test "returns empty when no reasoning field is present":
+    check extractReasoningText(%*{"content": "hi"}) == ""
+    check extractReasoningText(%*{"tool_calls": []}) == ""
+
+  test "works on a batch message shape (choices[0].message)":
+    # The batch parser also goes through this helper, so a message
+    # with reasoning_details must round-trip the same way.
+    let msg = %*{
+      "role": "assistant",
+      "content": "answer",
+      "reasoning_details": [{"text": "step 1"}, {"text": "step 2"}]
+    }
+    check extractReasoningText(msg) == "step 1step 2"
+
 suite "api: stripInternalFields":
   test "strips usage from assistant messages":
     let messages = %*[
