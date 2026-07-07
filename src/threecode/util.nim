@@ -2,9 +2,6 @@ import std/[net, os, sequtils, strformat, strutils, tables, unicode, times]
 import types
 import threecode/unicodewidth
 
-when defined(windows):
-  import std/terminal
-
 # ---------- Color palette ----------
 #
 # Three-tier palette designed to read on both light and dark terminal
@@ -71,55 +68,6 @@ proc resetPalettes*() =
   LightPalette = (brightWhite: "\x1b[30m", offWhite: "\x1b[38;5;238m",
                   dimWhite: "\x1b[38;5;250m")
   applyPalette(colorMode)
-
-when defined(windows):
-  type
-    CONSOLE_SCREEN_BUFFER_INFOEX = object
-      cbSize: DWORD
-      dwSize: COORD
-      dwCursorPosition: COORD
-      wAttributes: int16
-      srWindow: SMALL_RECT
-      dwMaximumWindowSize: COORD
-      wPopupAttributes: int16
-      bFullscreenSupported: WINBOOL
-      ColorTable: array[16, DWORD]
-
-  proc getConsoleScreenBufferInfoEx(hConsoleOutput: Handle,
-      lpConsoleScreenBufferInfo: ptr CONSOLE_SCREEN_BUFFER_INFOEX): WINBOOL{.
-      stdcall, dynlib: "kernel32", importc: "GetConsoleScreenBufferInfoEx".}
-  proc setConsoleScreenBufferInfoEx(hConsoleOutput: Handle,
-      lpConsoleScreenBufferInfo: ptr CONSOLE_SCREEN_BUFFER_INFOEX): WINBOOL{.
-      stdcall, dynlib: "kernel32", importc: "SetConsoleScreenBufferInfoEx".}
-
-  var winPaletteSaved = false
-  var winPaletteOriginal: array[16, DWORD]
-
-  proc saveAndModWindowsPalette*() =
-    ## On Windows Terminal, the Campbell palette has index 6 (cyan) as light
-    ## blue #3A96DD and index 14 (bright cyan) as true cyan #61D6D6. We swap
-    ## them so \e[36m renders as cyan and \e[96m as bright cyan. Saves the
-    ## original values for restore.
-    var hOut = getStdHandle(STD_OUTPUT_HANDLE)
-    var info: CONSOLE_SCREEN_BUFFER_INFOEX
-    info.cbSize = sizeof(info).DWORD
-    if not getConsoleScreenBufferInfoEx(hOut, addr info): return
-    winPaletteOriginal = info.ColorTable
-    winPaletteSaved = true
-    info.ColorTable[6] = 0x00D6D636  # rgb:36/D6/D6 (true cyan)
-    info.ColorTable[14] = 0x00DD963A  # rgb:3A/96/DD (light blue)
-    discard setConsoleScreenBufferInfoEx(hOut, addr info)
-
-  proc restoreWindowsPalette*() =
-    ## Restore the original Windows Terminal palette.
-    if not winPaletteSaved: return
-    var hOut = getStdHandle(STD_OUTPUT_HANDLE)
-    var info: CONSOLE_SCREEN_BUFFER_INFOEX
-    info.cbSize = sizeof(info).DWORD
-    if not getConsoleScreenBufferInfoEx(hOut, addr info): return
-    info.ColorTable = winPaletteOriginal
-    discard setConsoleScreenBufferInfoEx(hOut, addr info)
-    winPaletteSaved = false
 
 proc applyColorOverrides*(dark, light: Table[string, string]) =
   ## Apply user `[colors]` config overrides on top of the mode palettes.

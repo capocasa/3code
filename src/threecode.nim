@@ -27,6 +27,8 @@
 
 import std/[json, os, parseopt, strformat, strutils, tables, terminal, times]
 import std/exitprocs
+when defined(windows):
+  import threecode/utilwin
 when defined(posix):
   import std/posix
 import threecode/[types, util, prompts, shell, session, compact,
