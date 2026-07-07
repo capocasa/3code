@@ -1901,6 +1901,14 @@ proc wizardReadLine*(editor: var minline.LineEditor, prompt: string,
     editor.renderRow = 0
     editor.echoRows = 0
     inputModalActive.store(false, moRelease)
+    # The persistent prompt's `onSubmit` set this flag before the
+    # wizard took over. The wizard's `getCh` deliberately ignored
+    # it while `inputModalActive == true`; now that the modal is
+    # done and the persistent prompt's `getCh` is about to run
+    # again, the park would deadlock the next keystroke. Clear it
+    # here so the input thread is the single owner of the modal
+    # lifecycle (the main loop's `cdModal` branch used to do this).
+    inputIdleLinePending.store(false, moRelease)
     case kind
     of wrSubmitted: discard
     of wrCancelled: raise newException(minline.InputCancelled, "")
