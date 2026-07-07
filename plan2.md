@@ -182,42 +182,61 @@ the protocol comment is the single source of truth for the
 flag's contract, the conditional expression and the proc body
 are unchanged. Cancel tests pass.
 
-## 5. Move the bracketed-paste `[200~`/`[201~` sentinel out of the wizard's frame
+## 5. Move the bracketed-paste `[200~`/`[201~` enable/disable out of `readLineWith`
 
-**File:** `src/threecode/minline.nim`
+**File:** `src/threecode/minline.nim`, `src/threecode/fatprompt/runtime.nim`
 
-**Status:** the wizard enables bracketed paste (`\x1b[?2004h`) at
-the start of its `readLineWith` and disables it (`\x1b[?2004l`)
-at the end via `defer`. The persistent prompt also enables and
-disables it on every read. The wizard's enable/disable is nested
-inside the persistent's lifetime, so we get a sequence like
-`persistent-enable → wizard-enable → ... → wizard-disable →
-persistent-disable` which is technically redundant. The disable
-is idempotent (the terminal just stops looking for the sequence),
-so this is correctness-safe but not clean.
+**Status:** planning, post items 1, 8, 2, 9, 4, 3, 6, 7.
+Re-reading the code in preparation for this work surfaced a
+*correction* to the original framing. The plan said "the
+wizard's enable/disable is nested inside the persistent's
+lifetime." That's wrong: both the persistent prompt's
+`readLineWith` and the wizard's `readLineWith` call the SAME
+`minline.readLineWith` proc in `minline.nim:1411-1426`. The
+enable/disable is in the shared proc, not nested. So the
+"wizard's frame" doesn't exist as a separate thing.
 
-**Refactor:** the wizard's `readLineWith` shouldn't toggle
-bracketed paste if the persistent prompt already enabled it. The
-cleanest fix is to lift the bracketed-paste enable to the input
-thread's termios-raw-mode setup (it sets raw mode once on
-`inputThreadProc` startup) and never disable it for the
-process's lifetime. The hidden-input use case for the wizard
-(api-key paste) still works because the per-byte loop in
-`readLineWith` already handles the `[200~` / `[201~` sequence.
+The real smell is that `readLineWith` enables + disables
+bracketed paste on every call, even when the terminal is
+already in bracketed-paste mode (which it is, for the entire
+process lifetime after the first call). The enable is
+idempotent, the disable is idempotent — neither is
+necessary inside the call. The toggle is just noise.
 
-Risk: hosts that don't have bracketed-paste support (older
-`xterm`s, some `screen` configs) get a stray `[?2004h` byte that
-they ignore silently, so no behaviour change. The current code's
-"disable in defer" exists to keep the host shell from misbehaving
-on the next paste after the editor exits; that risk stays
-mitigated because the persistent prompt still disables on its
-own `defer`.
+**Plan, post-correction:**
 
-**Acceptance:** the persistent prompt's first read enables
-bracketed paste once; the wizard's read doesn't toggle; the
-process-lifetime terminal mode is correct. The hidden-input paste
-test in `test_minline.nim` (if any) still passes; the API-key
-wizard field still masks paste bursts as `*`s.
+- Add `\x1b[?2004h` (enable) to the input thread's termios
+  setup, right after the termios raw mode is set. This is
+  the right layer: the input thread owns the terminal, so it
+  owns the bracketed-paste mode.
+- Add `\x1b[?2004l` (disable) to the input thread's termios
+  teardown, right before `restoreInputTermios()`. This restores
+  the host shell's bracketed-paste state on clean exit.
+- Remove the enable from `readLineWith`
+  (`minline.nim:1422`) and the matching disable from the
+  `defer` at `minline.nim:1424-1427`. Same for the `readLine`
+  proc in `minline.nim:1652` (the test-only one) and the
+  other internal callers at `minline.nim:984`, `991`, `1090`,
+  `1094` — these are helper procs that call `ed.write` to
+  paint, not `readLineWith`, so the enable/disable there is
+  the *editor's* enable/disable, not a per-read one. Re-check
+  during implementation; if those are independent enable/disable
+  pairs (for the standalone test editor's lifetime), they may
+  stay.
+
+**Acceptance criteria, post-correction:**
+
+- `readLineWith` does not enable/disable bracketed paste.
+- The input thread enables once at termios setup and disables
+  once at teardown.
+- The standalone `readLine` proc in `minline.nim:1590+` (the
+  test-only one) keeps its own enable/disable (it sets up
+  its own termios raw mode, so it owns its own bracketed-paste
+  mode).
+- All 4 cancel subtests + the 20-iter stress test + the
+  item-1 edit-crash test still pass. The api-key paste
+  handling still works (the per-byte loop in `readLineWith`
+  handles the `[200~` / `[201~` sequences).
 
 ## 6. Add a stress test for wizard cancel under load
 
@@ -501,7 +520,8 @@ state machine in a separate, reviewable PR.
 7. **6** — stress test for the wizard cancel + state-machine
    (in progress this session)
 8. **7** — audit modal call sites (in progress this session)
-9. **5** — bracketed-paste refactor (medium risk)
+9. **5** — bracketed-paste refactor (medium risk, in
+   progress this session)
 10. **10** — backlog item, do not pull into this work
 
 Each step should land as its own commit with a one-line message.
