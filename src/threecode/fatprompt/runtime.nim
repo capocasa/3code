@@ -1601,6 +1601,18 @@ proc inputThreadProc() {.thread.} =
     let writeProc: minline.WriteProc = proc(s: string) =
       termengine.writeRaw(s)
 
+    # Dedicated writer for the modal wizard branch. The
+    # implementation is identical to `writeProc`; the seam exists
+    # so a future terminal recorder (or footer-suppression) can
+    # pattern-match on which closure is installed without having to
+    # thread `inputModalActive` through every layer of
+    # `termengine`. The wizard's own `bracketed-paste` enable /
+    # disable (`\x1b[?2004h` / `\x1b[?2004l`) and the
+    # `redrawBytes(...)` frame flow through this writer, not the
+    # persistent prompt's `writeProc`.
+    let wizardWriteProc: minline.WriteProc = proc(s: string) =
+      termengine.writeRaw(s)
+
     edPtr[].onMutate = proc(ed: var minline.LineEditor) =
       acquire inputStateLock
       try:
@@ -1731,7 +1743,7 @@ proc inputThreadProc() {.thread.} =
         try:
           let text = minline.readLineWith(edPtr[],
                                           req.prompt,
-                                          getCh, writeProc,
+                                          getCh, wizardWriteProc,
                                           hidechars = req.hidechars,
                                           noHistory = req.noHistory,
                                           hasPendingInput = hasPendingInput)
