@@ -140,26 +140,22 @@ suite "api: applyReasoning — deepseek":
     check not body.hasKey("thinking")
 
 suite "api: applyReasoning — minimax":
-  test "low disables thinking and splits reasoning out of content":
+  # M-series on the OpenAI-compatible surface exposes a binary on/off
+  # knob (`chat_template_kwargs.enable_thinking`). low/medium/high are
+  # not valid for the minimax family — the `:reasoning` selector rejects
+  # them, and `applyReasoning` simply omits the field if it sees one.
+  test "off disables thinking and splits reasoning out of content":
     var body = %*{"stream": true}
     let p = Profile(name: "test.model", family: "minimax", model: "model",
-                    reasoning: "low")
+                    reasoning: "off")
     applyReasoning(p, body)
     check body{"chat_template_kwargs"}{"enable_thinking"}.getBool == false
     check body{"reasoning_split"}.getBool == true
 
-  test "medium enables thinking and splits reasoning out of content":
+  test "on enables thinking and splits reasoning out of content":
     var body = %*{"stream": true}
     let p = Profile(name: "test.model", family: "minimax", model: "model",
-                    reasoning: "medium")
-    applyReasoning(p, body)
-    check body{"chat_template_kwargs"}{"enable_thinking"}.getBool == true
-    check body{"reasoning_split"}.getBool == true
-
-  test "high enables thinking and splits reasoning out of content":
-    var body = %*{"stream": true}
-    let p = Profile(name: "test.model", family: "minimax", model: "model",
-                    reasoning: "high")
+                    reasoning: "on")
     applyReasoning(p, body)
     check body{"chat_template_kwargs"}{"enable_thinking"}.getBool == true
     check body{"reasoning_split"}.getBool == true
@@ -169,13 +165,13 @@ suite "api: applyReasoning — minimax":
     # OpenAI-compatible endpoint; the family-level mapping is shared.
     # The version distinction lives in KnownGoodCombos, not the wire
     # mapping — verify it stays that way.
-    for effort in ["low", "medium", "high"]:
+    for effort in ["off", "on"]:
       var body = %*{"stream": true}
       let p = Profile(name: "minimax.MiniMax-M3", family: "minimax",
                       model: "MiniMax-M3", reasoning: effort)
       applyReasoning(p, body)
       check body{"reasoning_split"}.getBool == true
-      if effort == "low":
+      if effort == "off":
         check body{"chat_template_kwargs"}{"enable_thinking"}.getBool == false
       else:
         check body{"chat_template_kwargs"}{"enable_thinking"}.getBool == true
@@ -185,12 +181,24 @@ suite "api: applyReasoning — minimax":
     # so M-series thinking content never lands in the visible content
     # stream as <think>...</think>. Verify it sticks for empty reasoning
     # too — the only case where enable_thinking is omitted entirely.
-    for effort in ["", "low", "medium", "high"]:
+    for effort in ["", "off", "on"]:
       var body = %*{"stream": true}
       let p = Profile(name: "minimax.MiniMax-M3", family: "minimax",
                       model: "MiniMax-M3", reasoning: effort)
       applyReasoning(p, body)
       check body.hasKey("reasoning_split")
+      check body{"reasoning_split"}.getBool == true
+
+  test "stale low/medium/high values are ignored (no enable_thinking sent)":
+    # Belt-and-braces: a config file from before this rewrite may still
+    # carry a level value. We don't crash, we don't silently coerce —
+    # we just omit the knob and the model defaults to its own policy.
+    for effort in ["low", "medium", "high"]:
+      var body = %*{"stream": true}
+      let p = Profile(name: "minimax.MiniMax-M3", family: "minimax",
+                      model: "MiniMax-M3", reasoning: effort)
+      applyReasoning(p, body)
+      check not body.hasKey("chat_template_kwargs")
       check body{"reasoning_split"}.getBool == true
 
 suite "api: applyReasoning — unknown family":

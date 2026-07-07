@@ -117,11 +117,11 @@ suite "prompts: defaultReasoningsFor":
     check defaultReasoningsFor("nebius", "deepseek-ai/DeepSeek-V3.2", "deepseek") ==
       @["low", "medium", "high"]
 
-  test "minimax uses ReasoningLevels (not off/on like glm/kimi)":
+  test "minimax exposes off/on (same binary knob as kimi/longcat)":
     check defaultReasoningsFor("minimax", "MiniMax-M3", "minimax") ==
-      @["low", "medium", "high"]
+      @["off", "on"]
     check defaultReasoningsFor("minimax", "MiniMax-M2.7", "minimax") ==
-      @["low", "medium", "high"]
+      @["off", "on"]
 
 suite "prompts: setup — minimax":
   test "M3 returns the MiniMax preamble":
@@ -139,9 +139,8 @@ suite "prompts: setup — minimax":
     check "M-series" in s.prompt
     # The old M2.x entries aliased to GlmPreamble; verify the new prompt
     # is the MiniMax one for both versions.
-    check "reasoning_split" in s.prompt or
-          "deliberate" in s.prompt or
-          "Tool use" in s.prompt
+    check "M-series" in s.prompt
+    check "Tool discipline" in s.prompt
 
   test "tools are glmAndQwenTools (bash/read/write/patch)":
     let p = Profile(name: "minimax.MiniMax-M3", url: "x", key: "k",
