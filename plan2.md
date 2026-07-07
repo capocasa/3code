@@ -137,42 +137,44 @@ the wizard's footers or record wizard frames separately.
 
 **File:** `src/threecode/fatprompt/runtime.nim`
 
-**Status:** works, but the condition is a head-scratcher on
-re-read:
+**Status:** planning, post items 1, 8, 2, 9. The original
+proposal had two options (rename the flag, or add a helper with
+a comment). Items 2 and 9 changed the picture:
 
-```nim
-if inputIdleLinePending.load(moAcquire) and
-   not inputModalActive.load(moAcquire):
-  sleep(5)
-  continue
-```
+- Item 2 moved the flag's clear from the controller's `cdModal`
+  branch into `wizardReadLine`. The flag is now *only* set by the
+  persistent prompt's `onSubmit` and cleared inside the input
+  thread (by `wizardReadLine`). The "controller clears it" half
+  of the contract is dead.
+- Item 9 added a 45-line protocol comment at the top of the
+  wizard section that walks through the flag's role in step 5
+  ("clears `inputIdleLinePending`").
 
-The intent is: "park the persistent prompt while the controller
-drains its just-submitted line; the wizard doesn't have an
-idle-submit to park on, so it ignores the flag." The comment in
-the source explains it, but a future reader is going to spend a
-cycle going "but what about a wizard prompt submitted in flight?"
+So the right fix is no longer a new comment block — it's a
+*trim*:
 
-**Refactor:**
+- The 4-line comment on the `inputIdleLinePending` check inside
+  `getCh` (runtime.nim:1511-1515) restates the contract in
+  detail. Trim it to one line that points at the protocol
+  comment: "See the wizard protocol header for the lifecycle."
+- The 4-line doc on the `inputIdleLinePending` declaration at
+  the top of the file (runtime.nim:91-95) describes the
+  pre-item-2 controller-clears-it contract. Update it to:
+  "Set by the persistent prompt's `onSubmit` after an idle
+  Enter; cleared by `wizardReadLine` once the modal returns.
+  The persistent prompt's `getCh` parks while this is true (and
+  `inputModalActive == false`) so the controller has a chance to
+  drain the event; the wizard's `getCh` deliberately ignores
+  it (see the protocol comment above the wizard RPC globals)."
+- The `releaseIdleSubmittedInput` proc (runtime.nim:378) is
+  now a thin wrapper around `inputIdleLinePending.store(false)`.
+  Add a one-line comment on the proc saying it's called by
+  `wizardReadLine` (no other caller remains after item 2).
 
-- Either rename the flag to something that reflects the
-  persistent-prompt-only intent
-  (`persistentPromptSubmittedPending`? `editorIdleEntered`? — both
-  are bad, but a rename is better than nothing), OR
-- Add a `parkedForController` helper that encapsulates the
-  `and not inputModalActive` check, with a comment that explains
-  the contract.
-
-**Recommendation:** the second option, lighter touch. Add a
-comment block at the top of `inputThreadProc` describing the
-flag's contract: "Set by the persistent prompt's onSubmit after
-an idle Enter; the controller is expected to clear it via
-`releaseIdleSubmittedInput` once the `ieLine` event is drained.
-The wizard's `readLineWith` does not set or honour this flag —
-its lifecycle is short and it doesn't push events."
-
-**Acceptance:** the source reads cleanly; the conditional
-expression is unchanged. No tests need to move.
+**Acceptance:** the three redundant comments are trimmed, the
+protocol comment is the single source of truth for the flag's
+contract, the conditional expression and the proc body are
+unchanged, all tests still pass.
 
 ## 5. Move the bracketed-paste `[200~`/`[201~` sentinel out of the wizard's frame
 
@@ -395,8 +397,10 @@ state machine in a separate, reviewable PR.
 3. ~~**2** — move `releaseIdleSubmittedInput` into `wizardReadLine`,
    shrink `cdModal` to `continue`~~ DONE `ee27792`
 4. ~~**9** — write the protocol header comment~~ DONE `efac27d`
-5. **4** — clarify `inputIdleLinePending`'s contract (comment-only)
-6. **3** — wizard-dedicated writer (no-op tag, no behaviour change)
+5. **4** — trim the redundant `inputIdleLinePending` comments
+   (comment-only, in progress this session)
+6. **3** — wizard-dedicated writer (no-op tag, no behaviour
+   change, in progress this session)
 7. **6** — stress test (catches any of the above's mistakes)
 8. **7** — audit (likely no-op)
 9. **5** — bracketed-paste refactor (medium risk)
