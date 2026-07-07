@@ -31,6 +31,7 @@ type
     syncDepth*: int
     pendingFrame*: bool
     lastOutputAt*: float
+    rawConsumedLen*: int
     frameEventFd*: cint
     frameAckFd*: cint
     tickerCommandFd*: cint
@@ -231,6 +232,36 @@ proc pollOnce(s: TtySession, waitMs: int; recordIdleFrame = true): bool =
       s.exitCode = statusCode(status)
       s.flushFrame(force = true)
 
+proc freshRaw*(s: TtySession): string =
+  ## Raw bytes that arrived since the last successful `expect` match: the
+  ## tail of `s.raw` past `rawConsumedLen`. This lets repeated flows match
+  ## text that re-appears each iteration (e.g. wizard prompts in a stress
+  ## loop) without latching onto stale bytes from a previous iteration.
+  if s.rawConsumedLen >= s.raw.len:
+    ""
+  else:
+    s.raw[s.rawConsumedLen ..< s.raw.len]
+
+proc advanceRawMark*(s: TtySession) =
+  s.rawConsumedLen = s.raw.len
+
+proc waitForOutput*(s: TtySession; timeoutMs = 5000): bool =
+  ## Block until the child produces new output (PTY bytes or a frame event),
+  ## or the timeout/deadline hits. This is the deterministic sync primitive:
+  ## instead of polling on wall-clock, we wait for the child to actually emit
+  ## something. PTY byte arrival is the ground-truth signal that the child
+  ## rendered new state; frame events are an additional explicit sync point
+  ## the child can emit at boundaries with no visible output.
+  ##
+  ## `pollOnce` watches both fds: the PTY master fd (bytes the child wrote)
+  ## and the frame-event fd (explicit sync signal). Either one wakes us.
+  ## Returns false on timeout or child exit.
+  let deadline = epochTime() + timeoutMs.float / 1000.0
+  while epochTime() < deadline and not s.exited:
+    if s.pollOnce(200, recordIdleFrame = false):
+      return true
+  return false
+
 proc drain*(s: TtySession; settleMs = 20; recordFrame = true) =
   ## Capture any bytes currently ready on the PTY.
   let deadline = epochTime() + settleMs.float / 1000.0
@@ -362,7 +393,10 @@ proc send*(s: TtySession; text: string) =
         printable notin s.currentRows().join("\n") and printable notin s.raw:
       discard s.pollOnce(20, recordIdleFrame = false)
   else:
-    discard s.pollOnce(1000, recordIdleFrame = false)
+    # Control sequence (Ctrl-C, ESC, etc.): no printable echo to wait for,
+    # so synchronize on the next frame event the child emits after processing
+    # the input. Cap at 1s as a safety net for a dead child.
+    discard s.waitForOutput(1000)
   while s.pollOnce(0):
     discard
   s.flushFrame(force = true)
@@ -719,14 +753,18 @@ proc expectMeaningfulFrameArtifact*(s: TtySession; expectedPath,
 proc expect*(s: TtySession; text: string; timeoutMs = 5000): bool {.discardable.} =
   let deadline = epochTime() + timeoutMs.float / 1000.0
   while epochTime() < deadline:
-    s.drain(5, recordFrame = false)
-    if text in s.screenText() or text in s.cleanRaw():
+    s.drain(0, recordFrame = false)
+    if text in s.screenText() or text in cleanRaw(s.freshRaw()):
+      s.advanceRawMark()
       return true
     if s.exited:
       s.drain(20, recordFrame = false)
-      if text in s.screenText() or text in s.cleanRaw():
+      if text in s.screenText() or text in cleanRaw(s.freshRaw()):
+        s.advanceRawMark()
         return true
-    sleep 5
+      return false
+    let remaining = max(1, int((deadline - epochTime()) * 1000))
+    discard s.waitForOutput(remaining)
   doAssert false, "expected text not found: " & text & "\n" &
     s.dumpFramesAround(text)
 
@@ -739,6 +777,12 @@ proc expectNo*(s: TtySession; text: string; settleMs = 250): bool {.discardable.
     sleep 5
   true
 
+proc cursorRowHasText(s: TtySession; text: string): bool =
+  if s.frames.len == 0: return false
+  let f = s.frames[^1]
+  not f.cursorHidden and f.cursorRow >= 0 and
+    f.cursorRow < f.rows.len and text in f.rows[f.cursorRow]
+
 proc expectTypedAtPrompt*(s: TtySession; text: string;
                            timeoutMs = 5000): bool {.discardable.} =
   ## Verify typed text is live at the prompt: caret visible and the text
@@ -746,26 +790,23 @@ proc expectTypedAtPrompt*(s: TtySession; text: string;
   ## leaves the prompt painted but the editor dead — `send` writes bytes to
   ## the pty but nothing repaints, so the text never appears on the cursor row.
   let deadline = epochTime() + timeoutMs.float / 1000.0
-  while epochTime() < deadline:
-    s.drain(5, recordFrame = false)
-    if s.frames.len > 0:
-      let f = s.frames[^1]
-      if not f.cursorHidden and f.cursorRow >= 0 and
-          f.cursorRow < f.rows.len and text in f.rows[f.cursorRow]:
-        return true
-    if s.exited:
-      break
-    sleep 5
+  while epochTime() < deadline and not s.exited:
+    s.drain(0, recordFrame = false)
+    if s.cursorRowHasText(text):
+      return true
+    let remaining = max(1, int((deadline - epochTime()) * 1000))
+    discard s.waitForOutput(remaining)
   doAssert false, "typed text not live at prompt: " & text & "\n" &
     s.dumpFramesAround(text)
 
 proc expectInHistory*(s: TtySession; text: string; timeoutMs = 5000): bool {.discardable.} =
   let deadline = epochTime() + timeoutMs.float / 1000.0
   while epochTime() < deadline:
-    s.drain(5, recordFrame = false)
+    s.drain(0, recordFrame = false)
     if text in s.historyText() or text in s.cleanRaw():
       return true
-    sleep 5
+    let remaining = max(1, int((deadline - epochTime()) * 1000))
+    discard s.waitForOutput(remaining)
   doAssert false, "expected history text not found: " & text & "\n" &
     s.dumpFramesAround(text)
 
@@ -777,12 +818,12 @@ proc expectNeverInHistory*(s: TtySession; text: string) =
 proc expectExit*(s: TtySession; code: int; timeoutMs = 5000): bool {.discardable.} =
   let deadline = epochTime() + timeoutMs.float / 1000.0
   while epochTime() < deadline:
-    s.drain(5, recordFrame = false)
+    s.drain(0, recordFrame = false)
     if s.exited:
-      doAssert s.exitCode == code,
-        &"expected exit code {code}, got {s.exitCode}"
+      doAssert s.exitCode == code, &"expected exit code {code}, got {s.exitCode}"
       return true
-    sleep 5
+    let remaining = max(1, int((deadline - epochTime()) * 1000))
+    discard s.waitForOutput(remaining)
   doAssert false, &"expected process exit code {code}, still running"
 
 proc expectAlive*(s: TtySession;
@@ -802,16 +843,12 @@ proc expectIdleCaret*(s: TtySession; timeoutMs = 5000) =
   ## appear mid-turn, so `expect "❯"` and content-count checks can fire while
   ## the turn is still running and race the next send.
   let deadline = epochTime() + timeoutMs.float / 1000.0
-  while epochTime() < deadline:
-    s.drain(5)
-    if s.frames.len > 0:
-      let f = s.frames[^1]
-      if not f.cursorHidden and f.cursorRow >= 0 and
-          f.cursorRow < f.rows.len and "\u276f" in f.rows[f.cursorRow]:
-        return
-    if s.exited:
-      break
-    sleep 5
+  while epochTime() < deadline and not s.exited:
+    s.drain(0, recordFrame = false)
+    if s.cursorRowHasText("\u276f"):
+      return
+    let remaining = max(1, int((deadline - epochTime()) * 1000))
+    discard s.waitForOutput(remaining)
   doAssert false, "turn did not reach idle (caret not visible on prompt):\n" &
     s.dumpFramesAround("")
 
@@ -845,20 +882,19 @@ proc countIn*(s: TtySession; text: string;
 proc expectCount*(s: TtySession; text: string; n: int;
                   where = "history";
                   timeoutMs = 5000): bool {.discardable.} =
-  let deadline = epochTime() + timeoutMs.float / 1000.0
   var last = -1
+  let deadline = epochTime() + timeoutMs.float / 1000.0
   while epochTime() < deadline:
-    s.drain(5, recordFrame = false)
+    s.drain(0, recordFrame = false)
     last = s.countIn(text, where)
     if last == n:
       return true
     if s.exited:
       s.drain(20, recordFrame = false)
       last = s.countIn(text, where)
-      if last == n:
-        return true
-      break
-    sleep 5
+      return last == n
+    let remaining = max(1, int((deadline - epochTime()) * 1000))
+    discard s.waitForOutput(remaining)
   doAssert false, &"REGRESSION (duplicate or swallow): expected count {n} of " &
     &"{text} in {where}, got {last}. This is the 'prompt echoed twice / " &
     &"line swallowed' bug class. \n" & s.dumpFramesAround(text)
@@ -870,14 +906,14 @@ proc expectOnScreen*(s: TtySession; text: string;
   ## present in the byte stream that scrolled past.
   let deadline = epochTime() + timeoutMs.float / 1000.0
   while epochTime() < deadline:
-    s.drain(5, recordFrame = false)
+    s.drain(0, recordFrame = false)
     if text in s.screenText():
       return true
     if s.exited:
       s.drain(20, recordFrame = false)
-      if text in s.screenText():
-        return true
-    sleep 5
+      return text in s.screenText()
+    let remaining = max(1, int((deadline - epochTime()) * 1000))
+    discard s.waitForOutput(remaining)
   doAssert false, "REGRESSION (render-then-overwrite): expected text not " &
     "found on the live grid: " & text & ". This is the bug class where a " &
     "frame flashes correctly then gets overwritten; the bytes were in the " &

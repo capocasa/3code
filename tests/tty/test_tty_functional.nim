@@ -334,7 +334,9 @@ suite "terminal visual contract":
     tty.expect "models"
     tty.expectNo "nvapi-visible-secret"
     tty.send "\x1b"
-    tty.expect "cancelled"
+    tty.drain(300)
+    tty.expect "\u276f"
+    tty.expectNo "cancelled"  # silent return per the bug report
     tty.expectNo "nvapi-visible-secret"
     tty.expectAlive()  # cancelling :provider add must not exit the process
 

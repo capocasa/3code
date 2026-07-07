@@ -43,7 +43,11 @@ type
     scenario*: MockScenario  ## shared via the ref; the server thread reads this
     chunkDelayMs*: int
 
-proc setRecvTimeoutMs(sock: Socket; ms: int) =
+proc setSocketTimeoutMs(sock: Socket; ms: int) =
+  ## Set SO_RCVTIMEO so blocking accept()/recv() wake periodically and the
+  ## server loop can re-check `stop`. Without this, `accept()` blocks forever
+  ## on Linux and `stopMockServer`'s `joinThread` hangs if the client never
+  ## connects (e.g. an interrupt kills the turn before connect completes).
   when defined(posix):
     var tv: Timeval
     tv.tv_sec = Time(ms div 1000)
@@ -74,7 +78,7 @@ proc handleOk(s: MockServer; client: Socket) =
 proc holdUntilGone(client: Socket) =
   ## Block without sending anything, holding the socket open until the client
   ## gives up (shutdown/close surfaces as a 0-length recv here).
-  client.setRecvTimeoutMs(200)
+  client.setSocketTimeoutMs(200)
   let deadline = epochTime() + 30.0
   while epochTime() < deadline:
     let chunk = try: client.recv(64) except CatchableError: ""
@@ -98,7 +102,12 @@ proc serverLoop(s: MockServer) {.thread.} =
     try:
       while not s.stop:
         var client: Socket
-        s.listener.accept(client)
+        try:
+          s.listener.accept(client)
+        except OSError:
+          # SO_RCVTIMEO on the listener wakes accept() every 200ms; the
+          # resulting timeout surfaces as OSError here. Re-check `stop`.
+          continue
         case s.scenario
         of msOk: s.handleOk(client)
         of msSilentAfterAccept: s.handleSilent(client)
@@ -115,6 +124,7 @@ proc startMockServer*(scenario: MockScenario; chunkDelayMs = 0): MockServer =
   result.listener.setSockOpt(OptReuseAddr, true)
   result.listener.bindAddr(Port(0))
   result.listener.listen()
+  result.listener.setSocketTimeoutMs(200)
   let (_, port) = result.listener.getLocalAddr()
   result.port = port
   result.stop = false

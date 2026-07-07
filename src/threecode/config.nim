@@ -12,6 +12,8 @@
 ## ranking determines what the user sees first when tabbing through models.
 
 import std/[os, parsecfg, sequtils, streams, strformat, strutils, tables, terminal, uri]
+when defined(posix):
+  import std/posix except SocketHandle
 import types, prompts, util, web
 
 type
@@ -83,6 +85,25 @@ proc gateExperimental*(p: Profile): bool =
   ## and call `explainExperimentalGate` for the user-facing hint.
   p.name == "" or isKnownGood(p) or experimentalEnabled
 
+proc emitTestFrameEvent*() =
+  ## Same hook as turns.nim's emitTestFrameEvent, for render boundaries that
+  ## live in config.nim (the experimental-gate refusal). Tests synchronize on
+  ## this instead of wall-clock polling.
+  when defined(posix):
+    let fdText = getEnv("THREECODE_TEST_FRAME_FD")
+    if fdText.len > 0:
+      try:
+        let fd = cint(parseInt(fdText))
+        var ch = 'f'
+        discard posix.write(fd, addr ch, 1)
+        let ackText = getEnv("THREECODE_TEST_FRAME_ACK_FD")
+        if ackText.len > 0:
+          let ackFd = cint(parseInt(ackText))
+          var ack: array[1, char]
+          discard posix.read(ackFd, addr ack[0], 1)
+      except CatchableError:
+        discard
+
 proc explainExperimentalGate*(p: Profile) =
   let dot = p.name.find('.')
   let display =
@@ -92,6 +113,7 @@ proc explainExperimentalGate*(p: Profile) =
     "  ", display,
     " is experimental (start 3code with --experimental to use anyway, not recommended)",
     resetStyle
+  emitTestFrameEvent()
 
 proc hasKnownGoodModel*(prov: ProviderRec): bool =
   for m in prov.models:

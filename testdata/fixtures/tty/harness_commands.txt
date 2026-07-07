@@ -1,7 +1,7 @@
-===== 517 =====
+===== 795 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-3430d28b-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,8 +10,7 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ :help
-===== 753 =====
-  3code the economical coding agent
+===== 246 =====
 
   commands:
   :help             show this message
@@ -35,6 +34,7 @@
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
+  :version          show the running 3code version
   :q :quit          exit (also Ctrl-D)
 
   input:
@@ -51,8 +51,7 @@
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯
-===== 898 =====
-  3code the economical coding agent
+===== 845 =====
 
   commands:
   :help             show this message
@@ -76,6 +75,7 @@
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
+  :version          show the running 3code version
   :q :quit          exit (also Ctrl-D)
 
   input:
@@ -92,8 +92,7 @@
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
-===== 484 =====
-  :model            list models for current provider (current marked with *)
+===== 497 =====
   :model X          switch to model X (within current provider)
   :provider         list configured providers (current marked with *)
   :provider X       switch to provider X (model defaults to first in its list)
@@ -111,6 +110,7 @@
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
+  :version          show the running 3code version
   :q :quit          exit (also Ctrl-D)
 
   input:
@@ -133,8 +133,7 @@
       alt
 
 ❯
-===== 244 =====
-  :model            list models for current provider (current marked with *)
+===== 337 =====
   :model X          switch to model X (within current provider)
   :provider         list configured providers (current marked with *)
   :provider X       switch to provider X (model defaults to first in its list)
@@ -152,6 +151,7 @@
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
+  :version          show the running 3code version
   :q :quit          exit (also Ctrl-D)
 
   input:
@@ -174,8 +174,7 @@
       alt
 
 ❯ :model
-===== 600 =====
-  :provider rm X    remove provider X
+===== 471 =====
   :reasoning        list reasoning levels for current model (* marks active)
   :reasoning X      switch reasoning level (low / medium / high)
   :streaming        show streaming mode (on = live output, off = request/response)
@@ -187,6 +186,7 @@
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
+  :version          show the running 3code version
   :q :quit          exit (also Ctrl-D)
 
   input:
@@ -215,8 +215,7 @@
       stub-large
 
 ❯
-===== 491 =====
-  :provider rm X    remove provider X
+===== 612 =====
   :reasoning        list reasoning levels for current model (* marks active)
   :reasoning X      switch reasoning level (low / medium / high)
   :streaming        show streaming mode (on = live output, off = request/response)
@@ -228,6 +227,7 @@
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
+  :version          show the running 3code version
   :q :quit          exit (also Ctrl-D)
 
   input:
@@ -256,13 +256,13 @@
       stub-large
 
 ❯ :reasoning
-===== 438 =====
-  :notify on|off    toggle turn-end desktop notification
+===== 262 =====
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
+  :version          show the running 3code version
   :q :quit          exit (also Ctrl-D)
 
   input:
@@ -297,13 +297,13 @@
     experimental: level is free-form, type any value
 
 ❯
-===== 124 =====
-  :notify on|off    toggle turn-end desktop notification
+===== 416 =====
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
+  :version          show the running 3code version
   :q :quit          exit (also Ctrl-D)
 
   input:
@@ -338,8 +338,8 @@
     experimental: level is free-form, type any value
 
 ❯ :model stub-large
-===== 173 =====
-  :summarize        collapse old turns into a synthetic recap (meta model call)
+===== 496 =====
+  :version          show the running 3code version
   :q :quit          exit (also Ctrl-D)
 
   input:
@@ -379,8 +379,8 @@ provider  stub
 model     stub-large
 
 ❯
-===== 725 =====
-  :summarize        collapse old turns into a synthetic recap (meta model call)
+===== 391 =====
+  :version          show the running 3code version
   :q :quit          exit (also Ctrl-D)
 
   input:
@@ -420,7 +420,7 @@ provider  stub
 model     stub-large
 
 ❯ :reasoning high
-===== 800 =====
+===== 806 =====
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
@@ -461,7 +461,7 @@ model     stub-large
 reasoning high
 
 ❯
-===== 661 =====
+===== 390 =====
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
@@ -502,7 +502,7 @@ model     stub-large
 reasoning high
 
 ❯ :provider alt
-===== 335 =====
+===== 334 =====
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
@@ -543,7 +543,7 @@ provider  alt
 model     alt-model
 
 ❯
-===== 846 =====
+===== 675 =====
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
@@ -584,7 +584,7 @@ provider  alt
 model     alt-model
 
 ❯ :tokens
-===== 838 =====
+===== 930 =====
 ❯ :provider
 
 : providers
@@ -625,7 +625,7 @@ model     alt-model
   no tokens used yet
 
 ❯
-===== 125 =====
+===== 786 =====
 ❯ :provider
 
 : providers
@@ -666,7 +666,7 @@ model     alt-model
   no tokens used yet
 
 ❯ :clear
-===== 276 =====
+===== 870 =====
       alt
 
 ❯ :model
@@ -707,7 +707,7 @@ model     alt-model
 ════════════════════════════════════════
 
 ❯
-===== 782 =====
+===== 296 =====
       alt
 
 ❯ :model
@@ -748,7 +748,7 @@ model     alt-model
 ════════════════════════════════════════
 
 ❯ :sessions
-===== 776 =====
+===== 589 =====
     * stub-model
       stub-large
 
@@ -789,7 +789,7 @@ model     alt-model
   no saved sessions for this directory
 
 ❯
-===== 994 =====
+===== 642 =====
     * stub-model
       stub-large
 
@@ -830,7 +830,7 @@ model     alt-model
   no saved sessions for this directory
 
 ❯ :sessions all
-===== 822 =====
+===== 920 =====
 
 ❯ :model stub-large
 
@@ -871,7 +871,7 @@ model     alt-model
   listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯
-===== 141 =====
+===== 460 =====
 
 ❯ :model stub-large
 
@@ -912,7 +912,7 @@ model     alt-model
   listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯ :log
-===== 882 =====
+===== 605 =====
 
 ❯ :reasoning high
 
@@ -953,7 +953,7 @@ model     alt-model
     no tool calls yet
 
 ❯
-===== 525 =====
+===== 630 =====
 
 ❯ :reasoning high
 
@@ -994,7 +994,7 @@ model     alt-model
     no tool calls yet
 
 ❯ :show
-===== 600 =====
+===== 410 =====
 reasoning high
 
 ❯ :provider alt
@@ -1035,7 +1035,7 @@ model     alt-model
     no tool calls yet
 
 ❯
-===== 694 =====
+===== 931 =====
 reasoning high
 
 ❯ :provider alt
@@ -1076,7 +1076,7 @@ model     alt-model
     no tool calls yet
 
 ❯ :compact
-===== 380 =====
+===== 165 =====
 model     alt-model
 
 ❯ :tokens
@@ -1117,7 +1117,7 @@ model     alt-model
   unknown command: :compact  (try :help)
 
 ❯
-===== 993 =====
+===== 343 =====
 model     alt-model
 
 ❯ :tokens
@@ -1158,7 +1158,7 @@ model     alt-model
   unknown command: :compact  (try :help)
 
 ❯ :summarize
-===== 533 =====
+===== 238 =====
   no tokens used yet
 
 ❯ :clear
@@ -1199,7 +1199,7 @@ model     alt-model
   failed or not worth it
 
 ❯
-===== 290 =====
+===== 623 =====
   no tokens used yet
 
 ❯ :clear
@@ -1240,7 +1240,7 @@ model     alt-model
   failed or not worth it
 
 ❯ :prompt
-===== 496 =====
+===== 319 =====
 
   Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), h
 ard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (pushing code, op
@@ -1281,7 +1281,7 @@ p a clear answer, say so — don't guess.
  next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯
-===== 163 =====
+===== 991 =====
 
   Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), h
 ard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (pushing code, op
@@ -1322,7 +1322,7 @@ p a clear answer, say so — don't guess.
  next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯ :toknes
-===== 633 =====
+===== 805 =====
   # Git
 
   Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`. Don't pu
@@ -1363,7 +1363,7 @@ p a clear answer, say so — don't guess.
   unknown command: :toknes  did you mean :tokens?
 
 ❯
-===== 535 =====
+===== 669 =====
   # Git
 
   Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`. Don't pu

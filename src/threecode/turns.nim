@@ -56,6 +56,7 @@ proc onTurnInterrupted*() =
   discard stopBarTick()
   writeTranscriptWithFatPrompt:
     stdout.styledWriteLine(fgMagenta, InterruptedByUserMsg, resetStyle)
+  emitTestFrameEvent()
   clearInterrupted()
 
 proc stubToolCallResult(stub: JsonNode; onLine: proc(line: string) = nil):
