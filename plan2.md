@@ -238,6 +238,26 @@ necessary inside the call. The toggle is just noise.
   handling still works (the per-byte loop in `readLineWith`
   handles the `[200~` / `[201~` sequences).
 
+**Status:** DONE (commit `00fbca6`). The refactor turned out
+to be three changes: (1) remove the per-call enable + defer
+disable from the shared `minline.readLineWith`; (2) add
+`termui.writeRaw("\x1b[?2004h")` to the input thread's
+termios setup, right after `recordRawMode()`; (3) add
+`write("\x1b[?2004h")` to the test-only `minline.readLine`
+proc, right after its own termios setup. The disable on
+process exit was already handled by
+`minline.restoreTerminal` (registered as an exit proc), so
+no new disable was needed. Tests: all 6 tty + config test
+suites pass, including the 5 `minline editor: bracketed
+paste` subtests (api-key paste, per-byte typed key, paste
+with trailing newline, etc.). Implementation gotcha: the
+test-only `readLine` proc has a local `let write: WriteProc`
+that shadows the system `write` proc; `stdout.write "\x1b..."`
+resolves via UFCS to `write(stdout, "\x1b...")` which the
+compiler rejects. Fix: call the local `write` closure
+directly. See the "What I learned" section below for the
+full story.
+
 ## 6. Add a stress test for wizard cancel under load
 
 **File:** new `tests/tty/test_provider_wizard_cancel_stress.nim`
@@ -417,7 +437,7 @@ state machine in a separate, reviewable PR.
 
 ---
 
-## What I learned shipping items 1, 8, 2, 9, 4, 3
+## What I learned shipping items 1, 8, 2, 9, 4, 3, 6, 7, 5
 
 - **The plan's description of item 2 was wrong.** Re-reading the
   code, `wizardReadLine` does NOT currently call
@@ -505,6 +525,43 @@ state machine in a separate, reviewable PR.
   push it over. If it flakes, the fix is to drop
   `iterations` from 20 to 10; the bug it's catching (if it
   were real) would show up in 2-3 iterations.
+- **Item 5's plan was wrong about the framing AND the
+  shape.** The plan said "the wizard's enable/disable is
+  nested inside the persistent's lifetime." Wrong: both
+  the persistent prompt and the wizard call the SAME
+  `minline.readLineWith`, which has a single toggle. The
+  real fix was simpler than the plan: remove ONE toggle
+  from the shared proc, add ONE enable to the input
+  thread's termios setup, add ONE enable to the test-only
+  `readLine` proc. The "nested" framing would have led
+  me to add a wizard-specific override that wasn't
+  needed.
+- **The UFCS gotcha in the test-only `readLine` was
+  the only real friction.** The `let write: WriteProc`
+  local shadowed the system `write` proc, and
+  `stdout.write "\x1b..."` resolved to
+  `write(stdout, "\x1b...")` which the compiler
+  rejected. Calling the local `write` closure directly
+  (`write("\x1b...")`) was both the fix and the
+  semantically correct thing — the bracketed-paste
+  enable should flow through the same writer as the
+  rest of the editor output.
+- **The `bracketed paste` test suite was the right
+  regression barrier.** 5 subtests covering api-key
+  paste, per-byte typed key, paste with trailing
+  newline, etc. All still pass. If any of those had
+  regressed, the change would have been caught
+  immediately. This is the test suite that the original
+  bracketed-paste implementation was protected by; the
+  refactor preserved that protection.
+- **The "medium risk" label in the plan was overstated.**
+  The risk was in the framing, not the change. Once the
+  framing was corrected to "one toggle, not nested,"
+  the change was a 3-line edit. The plan's 20-item
+  risk list (host shell misbehaving, older xterm, etc.)
+  was all addressed by `restoreTerminal` (the existing
+  exit proc), so the new code didn't need to touch any
+  of it.
 
 ## Order of operations for execution
 
@@ -520,8 +577,7 @@ state machine in a separate, reviewable PR.
 7. **6** — stress test for the wizard cancel + state-machine
    (in progress this session)
 8. **7** — audit modal call sites (in progress this session)
-9. **5** — bracketed-paste refactor (medium risk, in
-   progress this session)
+9. ~~**5** — bracketed-paste refactor (medium risk)~~ DONE `00fbca6`
 10. **10** — backlog item, do not pull into this work
 
 Each step should land as its own commit with a one-line message.
