@@ -15,7 +15,7 @@ import types, util, prompts, session, config, api, compact, display, minline,
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":prompt", ":show",
-                      ":log", ":sessions", ":summarize",
+                      ":log", ":sessions", ":summarize", ":version",
                       ":q", ":quit", ":exit"]
 
 type WizardReadLineHook* = proc(prompt: string, hidden,
@@ -50,7 +50,7 @@ proc classifyCommand*(cmd: string): CommandKind =
   let arg = if sp < 0: "" else: c[sp+1 .. ^1].strip
   let parts = arg.splitWhitespace()
   case name
-  of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":prompt":
+  of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":prompt", ":version":
     ckSafeImmediate
   of ":streaming", ":notify":
     if parts.len == 0 or (parts.len == 1 and parts[0] == "list"): ckSafeImmediate
@@ -1009,6 +1009,8 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       cmdNotify(arg)
     of ":prompt":
       cmdResponse buildSystemPrompt(prof)
+    of ":version":
+      cmdResponse "3code v" & Version
     of ":show":
       showTool(arg, session.toolLog)
     of ":log":
