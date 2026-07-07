@@ -18,7 +18,10 @@ import threecode/unicodewidth
 # modes. See `applyPalette` / `applyColorOverrides` / `detectColorMode`.
 
 const
-  CyanFg* = "\x1b[36m"
+  # Windows Terminal maps ANSI cyan (\e[36m) to a light blue, not cyan.
+  # Use bright cyan there so the brand tone renders as actual cyan.
+  # Campbell's bright cyan slot is the only one that is true cyan.
+  CyanFg* = (when defined(windows): "\x1b[96m" else: "\x1b[36m")
   BoldOn* = "\x1b[1m"
   BlueFg* = "\x1b[34m"
   Reset* = "\x1b[0m"
