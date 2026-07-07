@@ -88,16 +88,22 @@ all existing tty tests + the 4 cancel subtests still pass.
 
 **File:** `src/threecode/fatprompt/runtime.nim`
 
-**Status:** functional but architecturally off. The wizard's
-`readLineWith` reuses the input thread's `writeProc =
-termengine.writeRaw` closure. The input thread's `postRedraw` hook
-calls `termengine.finishEditorRedraw` which paints the footer +
-sets `inputEditorReady`. The wizard has `inputModalActive == true`
-so the hook returns early — good, no double-paint. But the
-wizard's `bracketed-paste` enable bytes (`\x1b[?2004h` / `\x1b[?2004l`)
-and the `redrawBytes(...)` frame still go through
-`termengine.writeRaw` on the same path the persistent prompt
-uses.
+**Status:** DONE (commit `b92ea21`). Added a `wizardWriteProc`
+closure next to the input thread's `writeProc`. The
+implementation is the same (`termengine.writeRaw(s)`), but the
+wizard branch now passes `wizardWriteProc` to its
+`readLineWith` instead of `writeProc`. The wizard's own
+`bracketed-paste` enable/disable and `redrawBytes(...)` frame
+now flow through the dedicated writer, so a future recorder
+can pattern-match on which closure is installed without
+threading `inputModalActive` through `termengine`.
+
+The audit called out in the plan ("hook bodies that assume
+wizard paint == persistent paint") found nothing: every
+hook body in `inputThreadProc` already gates on
+`inputModalActive`, so the wizard's `readLineWith` paints
+into the terminal with no double-paint risk. The dedup was
+the only real change.
 
 In practice this works because `termio.withTerminalWriteLock`
 serialises both threads, and the wizard runs single-threaded on
@@ -137,9 +143,9 @@ the wizard's footers or record wizard frames separately.
 
 **File:** `src/threecode/fatprompt/runtime.nim`
 
-**Status:** planning, post items 1, 8, 2, 9. The original
-proposal had two options (rename the flag, or add a helper with
-a comment). Items 2 and 9 changed the picture:
+**Status:** DONE (commit `c8c009a`). The original proposal had two
+options (rename the flag, or add a helper with a comment).
+Items 2 and 9 changed the picture:
 
 - Item 2 moved the flag's clear from the controller's `cdModal`
   branch into `wizardReadLine`. The flag is now *only* set by the
@@ -171,10 +177,10 @@ So the right fix is no longer a new comment block — it's a
   Add a one-line comment on the proc saying it's called by
   `wizardReadLine` (no other caller remains after item 2).
 
-**Acceptance:** the three redundant comments are trimmed, the
-protocol comment is the single source of truth for the flag's
-contract, the conditional expression and the proc body are
-unchanged, all tests still pass.
+**Acceptance:** met. The three redundant comments are trimmed,
+the protocol comment is the single source of truth for the
+flag's contract, the conditional expression and the proc body
+are unchanged. Cancel tests pass.
 
 ## 5. Move the bracketed-paste `[200~`/`[201~` sentinel out of the wizard's frame
 
@@ -350,7 +356,7 @@ state machine in a separate, reviewable PR.
 
 ---
 
-## What I learned shipping items 1, 8, 2, 9
+## What I learned shipping items 1, 8, 2, 9, 4, 3
 
 - **The plan's description of item 2 was wrong.** Re-reading the
   code, `wizardReadLine` does NOT currently call
@@ -389,6 +395,25 @@ state machine in a separate, reviewable PR.
   the "round-trip" once and walking through the steps linearly
   was the right level of detail; reproducing the source in
   prose would have made the comment worse than the code.
+- **Item 4 was a trim, not an addition.** Re-reading the
+  source with the protocol comment in hand made the
+  pre-existing `inputIdleLinePending` doc and the `getCh`
+  body comment obviously redundant. The right move was not
+  to add a new comment block (the plan's original idea) but
+  to delete the redundant prose and point everyone at the
+  protocol comment. Net change: 12 inserts / 14 deletes,
+  same conditional expression, same behaviour. The plan's
+  framing was right about the smell being in the comments
+  but wrong about the fix being an addition.
+- **Item 3's "audit hook bodies" check was a no-op.** The
+  plan predicted the audit might find a hook that needed
+  wizard-specific code; the audit found zero. Every hook
+  body in `inputThreadProc` already gates on
+  `inputModalActive`, so the dedup was the only real change.
+  The `wizardWriteProc` seam is now in place for a future
+  recorder, but no current code consumes it. That's the
+  correct shape for a refactor: a real seam with no current
+  user, justified by the future need the plan called out.
 
 ## Order of operations for execution
 
@@ -397,10 +422,10 @@ state machine in a separate, reviewable PR.
 3. ~~**2** — move `releaseIdleSubmittedInput` into `wizardReadLine`,
    shrink `cdModal` to `continue`~~ DONE `ee27792`
 4. ~~**9** — write the protocol header comment~~ DONE `efac27d`
-5. **4** — trim the redundant `inputIdleLinePending` comments
-   (comment-only, in progress this session)
-6. **3** — wizard-dedicated writer (no-op tag, no behaviour
-   change, in progress this session)
+5. ~~**4** — trim the redundant `inputIdleLinePending` comments
+   (comment-only)~~ DONE `c8c009a`
+6. ~~**3** — wizard-dedicated writer (no-op tag, no behaviour
+   change)~~ DONE `b92ea21`
 7. **6** — stress test (catches any of the above's mistakes)
 8. **7** — audit (likely no-op)
 9. **5** — bracketed-paste refactor (medium risk)
