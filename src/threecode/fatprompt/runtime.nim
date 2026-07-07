@@ -1677,9 +1677,12 @@ proc inputThreadProc() {.thread.} =
         finally:
           release wizardRequestLock
         # Park deferSubmit so the wizard's Enter submits directly
-        # (the wizard owns the response, not the queue).
-        let savedDeferSubmit = edPtr[].deferSubmit
-        let savedSubmitIcon = edPtr[].submitIcon
+        # (the wizard owns the response, not the queue). The
+        # persistent prompt is the only other writer of these two
+        # fields, and it is parked while `inputModalActive == true`,
+        # so a `try/finally` around the wizard's readLineWith is
+        # enough to bracket the field change — no per-call save
+        # needed.
         edPtr[].deferSubmit = false
         edPtr[].submitIcon = ""
         try:
@@ -1693,22 +1696,17 @@ proc inputThreadProc() {.thread.} =
         except minline.WizardSwitched:
           # The wizard's own `getCh` should never see the sentinel
           # because the main thread blocks on the previous response
-          # before publishing the next request. If it ever does, fall
-          # through to the wizard-cancelled path: the wizard has
-          # nothing meaningful to say and we return an empty
-          # cancellation to the parked caller.
-          edPtr[].deferSubmit = savedDeferSubmit
-          edPtr[].submitIcon = savedSubmitIcon
-          acquire wizardRequestLock
-          try:
-            wizardResponse = WizardReadResponse(kind: wrCancelled, text: "")
-            wizardResponsePosted.store(true, moRelease)
-          finally:
-            release wizardRequestLock
-          continue
+          # before publishing the next request. If it ever does,
+          # treat it as a cancellation so the parked caller unblocks
+          # instead of hanging forever.
+          resp = WizardReadResponse(kind: wrCancelled, text: "")
         except minline.InputCancelled:
           # Repaint the persistent prompt so the next iteration of
-          # the outer loop starts from a clean state.
+          # the outer loop starts from a clean state. `fullRedraw`
+          # runs here (with the wizard's empty `submitIcon`); the
+          # deferred-submit marker is irrelevant for an empty line
+          # and the persistent prompt's next readLineWith repaints
+          # with the restored marker via the `finally` below.
           edPtr[].line = minline.Line(text: "", position: 0)
           edPtr[].renderSuffix = ""
           edPtr[].renderSuffixCursor = false
@@ -1720,8 +1718,9 @@ proc inputThreadProc() {.thread.} =
           resp = WizardReadResponse(kind: wrEof, text: "")
         except CatchableError:
           resp = WizardReadResponse(kind: wrEof, text: "")
-        edPtr[].deferSubmit = savedDeferSubmit
-        edPtr[].submitIcon = savedSubmitIcon
+        finally:
+          edPtr[].deferSubmit = true
+          edPtr[].submitIcon = DeferredSubmitMarker
         acquire wizardRequestLock
         try:
           wizardResponse = resp
