@@ -456,6 +456,36 @@ state machine in a separate, reviewable PR.
   recorder, but no current code consumes it. That's the
   correct shape for a refactor: a real seam with no current
   user, justified by the future need the plan called out.
+- **Item 6 is the regression test I should have written
+  first.** The 4 cancel subtests in
+  `test_provider_wizard_cancel.nim` cover the *first*
+  cancel of a wizard, but they don't catch a state-machine
+  bug that only shows up on the *second* entry. The 20-iter
+  stress test would have caught any such bug instantly. If
+  the original cancel-bug fix (`5db5aa8`) had shipped with
+  this test, the work would have been more confident. Live
+  and learn.
+- **Item 7 was a clean negative result.** The grep produced
+  exactly the three call sites the plan predicted; no
+  surprises, no hidden modal in another file. The audit
+  line in the protocol comment is now a permanent reminder
+  to the next person who wonders "does this need the
+  wizard plumbing?" — the answer is yes for production
+  modals, no for the test path, and the line points at the
+  actual call sites.
+- **The `expectPromptLive` mention in the plan update was
+  unused.** I wrote about it as the right signal, but in
+  the stress test I used the simpler `tty.expect "\u276f"`
+  + `tty.drain(300)` pattern, matching the existing cancel
+  tests. `expectPromptLive` would have been tighter but
+  also would have made the test diverge from the existing
+  pattern. Stuck with the existing pattern for consistency.
+- **The "no flake" acceptance criterion is a real worry.**
+  The test took 17.7s on the dev machine; the plan
+  predicted < 30s. A CI runner under load could plausibly
+  push it over. If it flakes, the fix is to drop
+  `iterations` from 20 to 10; the bug it's catching (if it
+  were real) would show up in 2-3 iterations.
 
 ## Order of operations for execution
 
