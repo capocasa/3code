@@ -161,6 +161,15 @@ var inputModalActive*: Atomic[bool]
 #     need the lock for the request/response structs, and the
 #     persistent prompt's `getCh` already needs the
 #     `wizardRequestPosted` flag for its own yield check).
+#
+#     ## Call sites covered
+#
+#     All production modal prompts go through `wizardReadLine` via
+#     `ui.readRequired` / `ui.readOptional`. The standalone
+#     `minline.readLine` is test-only (sets its own termios raw
+#     mode, no input thread). `api.conn.readLine` is the HTTP read,
+#     not a UI prompt. No production code uses `editor.readLine`
+#     directly. Audited 2026-01; no exceptions found.
 var wizardRequest: WizardReadRequest
 var wizardResponse: WizardReadResponse
 var wizardRequestPosted: Atomic[bool]
