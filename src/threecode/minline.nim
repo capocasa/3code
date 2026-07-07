@@ -209,6 +209,11 @@ type
     complMatches*: seq[string] ## current match list
     complIndex*: int           ## current match index (-1 = none)
   InputCancelled* = object of CatchableError
+  WizardSwitched* = object of CatchableError
+    ## Raised by `readLineWith` when `getCh` returns the `wizardSentinel`
+    ## (-2). The input thread catches this at its outer loop and starts
+    ## a wizard `readLineWith` instead. Only the input thread can raise
+    ## and catch this — main-thread callers never see it.
 
 const
   CTRL*        = {0 .. 31}
@@ -217,6 +222,11 @@ const
   UPPERLETTER* = {65 .. 90}
   LOWERLETTER* = {97 .. 122}
   PRINTABLE*   = {32 .. 126}
+  wizardSentinel* = -2
+    ## Returned by the input thread's `getCh` to signal that the
+    ## persistent `readLineWith` should yield to a modal wizard
+    ## `readLineWith`. `readLineWith` raises `WizardSwitched` when
+    ## it sees this; -1 keeps its existing EOFError meaning.
 when defined(windows):
   const
     ESCAPES* = {0, 22, 224}
@@ -1443,6 +1453,10 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
             fullRedraw(ed)
             continue
           raise
+    if c1 == wizardSentinel:
+      # The input thread is signalling a modal wizard wants the
+      # editor. Yield this readLineWith so the wizard can start.
+      raise newException(WizardSwitched, "")
     if c1 < 0:
       ed.eof = true
       raise newException(EOFError, "")
