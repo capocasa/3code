@@ -264,6 +264,29 @@ var cachedStreamHostKey: string
 # the GC'd `StreamConn` ref. Set/cleared alongside `cachedStreamConn`.
 var cachedStreamFd: SocketHandle = osInvalidSocket
 
+# A connect-in-progress fd, published by streamhttp's `onConnectingFd` hook
+# the instant the socket is created, before the blocking connect. Held in
+# `cachedStreamFd` so `shutdownCachedStreamFd` can interrupt a connect that
+# has not yet produced a `StreamConn` (the connect path only sets the cached
+# conn/fd after a successful connect). Cleared by `closeCachedStreamConn`.
+# See `installConnectingFdHook`.
+proc onConnectingFdHook(fd: SocketHandle) {.gcsafe.} =
+  cachedStreamFd = fd
+
+proc installConnectingFdHook*() =
+  ## Wire streamhttp's connect-time hook so a Ctrl-C / quiet-watch shutdown
+  # can wake a blocking TCP connect or TLS handshake. Without this the fd is
+  # unknown to us until connectTls/connectPlain returns, so there is nothing
+  # to `shutdown`, and a slow/black-holed remote pins the caller for the full
+  # connect budget regardless of any interrupt. Idempotent.
+  onConnectingFd = onConnectingFdHook
+
+# Install at module load so every connect path (streaming, non-streaming,
+# first turn or retry) publishes its fd before the blocking connect. There is
+# no scenario where we want a connect to be uninterruptible, so this is not
+# opt-in.
+installConnectingFdHook()
+
 proc closeCachedStreamConn*() =
   if cachedStreamConn != nil:
     try: cachedStreamConn.close() except CatchableError: discard
@@ -520,6 +543,13 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
         # Drop the cached IP so the next attempt re-resolves: a stale record
         # pointing at a dead host must not pin every retry.
         invalidateResolved(host, port)
+        # A Ctrl-C during connect shuts down the in-progress fd (via the
+        # `onConnectingFd` hook), which makes the blocking connect raise. The
+        # user cancelled, so surface that, not a misleading connect error —
+        # and skip the retry the generic error path would trigger.
+        if isInterrupted():
+          result.errMsg = InterruptedByUserMsg
+          return
         result.errMsg =
           (if plainHttp: "connect failed: " else: "TLS connect failed: ") & e.msg
         return
@@ -841,6 +871,9 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
         # Drop the cached IP so the next attempt re-resolves: a stale record
         # pointing at a dead host must not pin every retry.
         invalidateResolved(host, port)
+        if isInterrupted():
+          result.errMsg = InterruptedByUserMsg
+          return
         result.errMsg =
           (if plainHttp: "connect failed: " else: "TLS connect failed: ") & e.msg
         return
