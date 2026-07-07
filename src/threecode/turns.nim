@@ -300,7 +300,23 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         # deferred endTurn would erase that and reset the cursor to col 0.
         turnEnded = true
         return true
-      raise
+      # Transport retry budget exhausted (or another fatal callModel error).
+      # `callModel` already stopped the spinner, but the deferred `endTurn`
+      # below still owns the prompt repaint, and the outer catch path used
+      # to `stdout.styledWriteLine` the error after that repaint — which
+      # stranded the caret one row above the prompt on the stale spinner
+      # row and made the next keystroke land in scrollback. Render the
+      # error through the transcript primitive (same as the empty-content
+      # branches above) so the prompt lands in the right place and the
+      # error is part of the same scrollback block as the rest of the
+      # turn. `endTurnAfterTranscriptAppend` finalizes the turn without
+      # rewriting the prompt.
+      saveSession(session, messages)
+      writeTranscriptWithFatPrompt:
+        errLn e.msg, resetStyle
+      endTurnAfterTranscriptAppend()
+      turnEnded = true
+      return false
     session.usage.promptTokens += usage.promptTokens
     session.usage.completionTokens += usage.completionTokens
     session.usage.totalTokens += usage.totalTokens
@@ -610,9 +626,15 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
       # repaint here.
       onTurnInterrupted()
       return true
-    else:
-      stdout.styledWriteLine fgMagenta, e.msg, resetStyle
-      return false
+    # Safety net for ApiErrors that escape `runTurns` other than from the
+    # callModel retry-exhaustion path (which is handled inside the loop
+    # and never reaches here). By the time we get here, `runTurns`'s
+    # deferred `endTurn` has already repainted the prompt; writing the
+    # error to stdout would walk past the prompt and strand the caret on
+    # the error line, so route through stderr (the existing channel for
+    # transient post-prompt feedback) instead.
+    stderr.writeLine e.msg
+    return false
   except OSError as e:
     # The working directory was removed out from under us (e.g. the
     # user `rm -rf`'d it in another shell). There is nothing useful
