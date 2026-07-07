@@ -36,17 +36,29 @@ not free.
 
 **Files:** `src/threecode.nim`, `src/threecode/fatprompt/runtime.nim`
 
-**Status:** planning, post items 1+8. Re-reading the code in
-preparation for this work surfaced a *correction* to the original
-description: `wizardReadLine` does NOT currently call
-`releaseIdleSubmittedInput`. The flag is set by the persistent
-prompt's `onSubmit` and is *only* cleared in the main loop's
-`cdModal` branch (threecode.nim:511). The wizard's `getCh`
-deliberately ignores `inputIdleLinePending` while
-`inputModalActive == true`, so during the wizard nothing is
-parked; the moment the wizard returns and `inputModalActive`
-goes back to false, the next persistent `getCh` parks and waits
-for the main loop to clear the flag via `releaseIdleSubmittedInput`.
+**Status:** DONE (commit `ee27792`). The "duplicate" framing was
+wrong: `wizardReadLine` did not previously call
+`releaseIdleSubmittedInput`; the only call was in the main
+loop's `cdModal` branch. The fix was a single move, not a
+deletion of a duplicate:
+- `wizardReadLine` now calls
+  `inputIdleLinePending.store(false, moRelease)` as part of its
+  existing "wizard done, repaint the persistent prompt" sequence
+  (next to the editor reset + `inputModalActive` clear).
+- The main loop's `cdModal` branch in `threecode.nim:505-511`
+  shrank to one line: `continue`.
+
+The four editor resets that used to live in the `cdModal` branch
+(`editor.line = ...`, `renderSuffix = ""`, `renderSuffixCursor
+= false`, `renderRow = 0`, `echoRows = 0`) were ALSO redundant
+with what `wizardReadLine` already does — but I left them in
+`wizardReadLine` only, not in the controller. So the `cdModal`
+branch is now `if ...: continue` and the controller no longer
+touches the editor on a modal command.
+
+Tests: all 4 cancel subtests + the item 1 edit-crash test + the
+empty-enter-freeze and interrupt-prestream-freeze regressions
+all pass.
 
 So this is not a duplicate — it's a single call in the wrong
 place. The fix is to move it: `wizardReadLine` should clear the
@@ -295,30 +307,14 @@ sees `wrCancelled` either way.
 
 **File:** `src/threecode/fatprompt/runtime.nim`
 
-**Status:** the wizard RPC is split across three places: the
-handshake globals near the top of the file, the `wizardReadLine`
-proc in the middle, and the input thread's wizard branch in
-`inputThreadProc`. A new reader has to scroll through ~250
-lines to assemble the full picture.
-
-**Refactor:** add a single header comment block at the top of the
-file (or just above `wizardReadLine`) that describes the full
-protocol in one place:
-
-- Roles (main thread, input thread)
-- State machine (request states: none → posted → in-flight →
-  responded → consumed)
-- Sync primitives (the lock is for the request/response struct,
-  NOT for the flags; the flags are atomic)
-- Sentinel mechanics (the `-2` returned by `getCh` and how it
-  becomes `WizardSwitched`)
-- Cancellation and timeout semantics
-- Why a condvar wasn't used (we match the existing
-  `releaseIdleSubmittedInput` style of atomic + 5ms sleep)
-
-**Acceptance:** the file's top-of-file comment block reads as a
-specification; a new contributor can read the protocol in one
-place instead of cross-referencing three regions.
+**Status:** DONE (commit `efac27d`). Added a `## Protocol (one
+round-trip)` block above the `wizardRequest` / `wizardResponse`
+globals that walks through the 5 steps (main thread publishes,
+input thread's persistent `getCh` returns sentinel, input thread
+runs the wizard, response is published, main thread consumes)
+plus a `## Why not a condvar` block that documents the
+atomic-flag + 5ms-poll choice so a future contributor doesn't
+propose a condvar without understanding why it was rejected.
 
 ## 10. Long-term: collapse the persistent + wizard paths into a single state machine
 
@@ -352,7 +348,7 @@ state machine in a separate, reviewable PR.
 
 ---
 
-## What I learned shipping items 1 and 8
+## What I learned shipping items 1, 8, 2, 9
 
 - **The plan's description of item 2 was wrong.** Re-reading the
   code, `wizardReadLine` does NOT currently call
@@ -374,15 +370,31 @@ state machine in a separate, reviewable PR.
   `doAssert false` was masked because of how the tty harness
   reports failures? no — it was just never run). Either way,
   the test now does what it says on the tin.
+- **Item 2 turned into two wins for the price of one.** The
+  plan's framing was "remove a duplicate"; the reality was
+  "move a single call." But while moving it, I noticed the
+  four `editor.line = minline.Line(text: "", position: 0)`-style
+  resets in the `cdModal` branch were ALSO duplicated with what
+  `wizardReadLine` already does. The branch was carrying 6
+  lines of modal-specific cleanup that the input thread already
+  did; the move collapsed all 6 into the right layer. Net
+  effect: the controller's modal path is a 1-line `continue`,
+  which is the right shape.
+- **Item 9 was a 45-line comment.** The hardest part was
+  deciding what NOT to put in it. The protocol has 5 steps,
+  but steps 3-4 have sub-steps (the `try/finally` ordering,
+  the `except` branches, the unified publish path). Naming
+  the "round-trip" once and walking through the steps linearly
+  was the right level of detail; reproducing the source in
+  prose would have made the comment worse than the code.
 
 ## Order of operations for execution
 
 1. ~~**1** — unblock the existing test (mechanical, low risk)~~ DONE `35f508f`
 2. ~~**8** — small source cleanup in the wizard branch~~ DONE `497e83e`
-3. **2** — move `releaseIdleSubmittedInput` into `wizardReadLine`,
-   shrink `cdModal` to `continue` (in progress, this session)
-4. **9** — write the protocol header comment (in progress, this
-   session)
+3. ~~**2** — move `releaseIdleSubmittedInput` into `wizardReadLine`,
+   shrink `cdModal` to `continue`~~ DONE `ee27792`
+4. ~~**9** — write the protocol header comment~~ DONE `efac27d`
 5. **4** — clarify `inputIdleLinePending`'s contract (comment-only)
 6. **3** — wizard-dedicated writer (no-op tag, no behaviour change)
 7. **6** — stress test (catches any of the above's mistakes)
