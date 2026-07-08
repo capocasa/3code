@@ -288,8 +288,21 @@ proc installConnectingFdHook*() =
 installConnectingFdHook()
 
 proc closeCachedStreamConn*() =
+  ## Drop the cached connection. When the connection is known dead (the user
+  ## interrupted, or the quiet-watch marked the link dead) the peer is a
+  ## black-holed socket, so a graceful TLS `close_notify` would hang forever
+  ## waiting for the peer's second leg (and, under the stdlib's `blockSigpipe`,
+  ## also block in `sigwait` for a SIGPIPE that never arrives) - the exact
+  ## wedge threecode hit on flaky links, where the network worker leaked a
+  ## thread stuck in close()/sigwait and Ctrl-C/ESC could not cancel it. In
+  ## that case `abruptClose` tears the fd straight down (SO_LINGER=0 +
+  ## posix.close) and skips the close_notify. Otherwise a normal graceful
+  ## close is fine.
   if cachedStreamConn != nil:
-    try: cachedStreamConn.close() except CatchableError: discard
+    if isInterrupted() or isNetworkQuiet():
+      cachedStreamConn.abruptClose()
+    else:
+      try: cachedStreamConn.close() except CatchableError: discard
     cachedStreamConn = nil
     cachedStreamHostKey = ""
   cachedStreamFd = osInvalidSocket
