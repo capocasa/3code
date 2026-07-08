@@ -642,6 +642,5 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
     # to keep doing, so save what we have and exit cleanly. `quit`
     # runs the registered exit procs, which restore terminal state.
     saveSession(session, messages)
-    stdout.styledWriteLine fgMagenta, "  ",
-      "working directory gone: ", e.msg, resetStyle
+    stdout.styledWriteLine fgMagenta, "working directory gone: ", e.msg, resetStyle
     quit()

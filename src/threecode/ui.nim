@@ -216,7 +216,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
     while true:
       let (n, u) = promptNameAndUrl(editor)
       if n == "":
-        errLn "  name required"
+        errLn "name required"
         continue
       var clash = false
       for pr in activeProviders:
@@ -224,7 +224,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
           clash = true
           break
       if clash:
-        errLn &"  name already used: {n}"
+        errLn &"name already used: {n}"
         continue
       name = n
       url = u
@@ -256,9 +256,9 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
         else:
           unknown.add rm
       if models.len == 0:
-        errLn "  need at least one model"
+        errLn "need at least one model"
       elif unknown.len > 0:
-        errLn "  unknown known-good model: " & unknown.join(", ")
+        errLn "unknown known-good model: " & unknown.join(", ")
         prev = models.mapIt(shortModel(it)).join(" ")
       else:
         let prov = ProviderRec(name: name, url: url, key: key, models: models)
@@ -270,7 +270,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
         if ok:
           stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
           return prov
-        errLn "  failed: " & err
+        errLn "failed: " & err
         prev = models.mapIt(shortModel(it)).join(" ")
       let choice = readOptional(editor,
         "  [enter]=retry models, k=re-enter key, c=cancel : ").toLowerAscii
@@ -321,7 +321,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
     for rm in rawModels:
       models.add lookup.getOrDefault(rm, rm)
     if models.len == 0:
-      errLn "  need at least one model"
+      errLn "need at least one model"
       continue
     let prov = ProviderRec(name: name, url: url, key: key, models: models)
     let prof = Profile(name: name & "." & models[0], url: url,
@@ -332,7 +332,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
     if ok:
       stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
       return prov
-    errLn "  failed: " & err
+    errLn "failed: " & err
     prev = models.mapIt(shortModel(it)).join(" ")
     let choice = readOptional(editor,
       "  [enter]=retry models, k=re-enter key, c=cancel : ").toLowerAscii
@@ -359,7 +359,7 @@ proc promptEditProvider*(editor: var minline.LineEditor,
           clash = true
           break
       if clash:
-        errLn &"  name already used: {name}"
+        errLn &"name already used: {name}"
         continue
     let newUrl = readOptional(editor,
       &"  url [{existing.url}]  : ").strip(chars = {'/', ' '})
@@ -376,7 +376,7 @@ proc promptEditProvider*(editor: var minline.LineEditor,
       sortedAvailable.mapIt(shortModel(it))
     defer: editor.completionCallback = prevCb
     if fetchErr.len > 0:
-      errLn "  unavailable — ", fetchErr
+      errLn "unavailable — ", fetchErr
     elif sortedAvailable.len == 0:
       hintLn "  unavailable — enter manually", resetStyle
     else:
@@ -393,7 +393,7 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     let lookup = shortToFull(sortedAvailable)
     let models = rawModels.mapIt(lookup.getOrDefault(it, it))
     if models.len == 0:
-      errLn "  need at least one model"
+      errLn "need at least one model"
       continue
     let prof = Profile(name: name & "." & models[0], url: url,
                        key: key, model: models[0])
@@ -403,11 +403,11 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     if ok:
       stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
       return ProviderRec(name: name, url: url, key: key, models: models)
-    errLn "  failed: " & err
+    errLn "failed: " & err
 
 proc bootstrapProvider*(editor: var minline.LineEditor): Profile =
-  stdout.styledWriteLine fgMagenta, styleBright,
-    "  no provider configured, let's add one. (ctrl+c or ctrl+d to quit)",
+  stdout.styledWriteLine fgMagenta,
+    "no provider configured, let's add one. (ctrl+c or ctrl+d to quit)",
     resetStyle
   let prov = try: promptNewProvider(editor)
              except minline.InputCancelled:
@@ -444,10 +444,10 @@ proc cmdProviderSelect(target: string, prof: var Profile) =
       found = true
       break
   if not found:
-    errLn &"  unknown provider: {target}"
+    errLn &"unknown provider: {target}"
     return
   if prov.models.len == 0:
-    errLn &"  provider {target} has no models"
+    errLn &"provider {target} has no models"
     return
   let newCurrent = prov.name & "." & firstModel(prov)
   let candidate = buildProfile(newCurrent, activeProviders, "")
@@ -467,7 +467,7 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
   let prov = promptNewProvider(editor)
   for pr in activeProviders:
     if pr.name == prov.name:
-      errLn &"  duplicate provider: {prov.name} already configured"
+      errLn &"duplicate provider: {prov.name} already configured"
       return
   activeProviders.add prov
   if activeCurrent == "":
@@ -484,7 +484,7 @@ proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
   for i, pr in activeProviders:
     if pr.name == target: idx = i; break
   if idx < 0:
-    errLn &"  unknown provider: {target}"
+    errLn &"unknown provider: {target}"
     return
   let updated = promptEditProvider(editor, activeProviders[idx])
   activeProviders[idx] = updated
@@ -504,7 +504,7 @@ proc cmdProviderRm(target: string, prof: var Profile) =
   for i, pr in activeProviders:
     if pr.name == target: idx = i; break
   if idx < 0:
-    errLn &"  unknown provider: {target}"
+    errLn &"unknown provider: {target}"
     return
   activeProviders.delete(idx)
   let curName = if activeCurrent == "": "" else: activeCurrent.split('.')[0]
@@ -528,22 +528,22 @@ proc cmdProvider(arg: string, editor: var minline.LineEditor,
   case parts[0]
   of "add":
     if parts.len != 1:
-      errLn "  usage: :provider add"
+      errLn "usage: :provider add"
     else:
       cmdProviderAdd(editor, prof)
   of "edit":
     if parts.len != 2:
-      errLn "  usage: :provider edit <name>"
+      errLn "usage: :provider edit <name>"
     else:
       cmdProviderEdit(parts[1], editor, prof)
   of "rm", "remove":
     if parts.len != 2:
-      errLn &"  usage: :provider {parts[0]} <name>"
+      errLn &"usage: :provider {parts[0]} <name>"
     else:
       cmdProviderRm(parts[1], prof)
   else:
     if parts.len != 1:
-      errLn "  usage: :provider [<name> | add | rm <name>]"
+      errLn "usage: :provider [<name> | add | rm <name>]"
     else:
       cmdProviderSelect(parts[0], prof)
 
@@ -568,11 +568,11 @@ proc cmdModelList(prof: Profile) =
 proc cmdModelSelect(target: string, prof: var Profile) =
   let prov = currentProvider()
   if prov.name == "":
-    errLn "  no provider selected"
+    errLn "no provider selected"
     return
   let idx = prov.findModel(target)
   if idx < 0:
-    errLn &"  unknown model: {target}"
+    errLn &"unknown model: {target}"
     return
   let fullModel = prov.models[idx]
   let newCurrent = prov.name & "." & fullModel
@@ -596,7 +596,7 @@ proc cmdModel(arg: string, prof: var Profile) =
     else:
       cmdModelSelect(parts[0], prof)
   else:
-    errLn "  usage: :model [<name>]"
+    errLn "usage: :model [<name>]"
 
 proc cmdReasoningList(prof: Profile) =
   let prov = providerForProfile(prof)
@@ -619,13 +619,13 @@ proc cmdReasoningList(prof: Profile) =
 proc cmdReasoningSelect(target: string, prof: var Profile) =
   let prov = providerForProfile(prof)
   if prov.name == "":
-    errLn "  no provider selected"
+    errLn "no provider selected"
     return
   let value = target.toLowerAscii
   if not experimentalEnabled:
     let levels = availableReasonings(prov, prof.family, prof.model)
     if value notin levels:
-      errLn &"  unknown reasoning level: {target} (choose from {levels.join(\" \")})"
+      errLn &"unknown reasoning level: {target} (choose from {levels.join(\" \")})"
       return
   prof.reasoning = value
   for i, pr in activeProviders:
@@ -646,7 +646,7 @@ proc cmdReasoning(arg: string, prof: var Profile) =
     else:
       cmdReasoningSelect(parts[0], prof)
   else:
-    errLn "  usage: :reasoning [<level>]"
+    errLn "usage: :reasoning [<level>]"
 
 proc cmdStreamingList() =
   let mark = if streamingEnabled: "on" else: "off"
@@ -660,7 +660,7 @@ proc cmdStreamingSelect(target: string) =
   of "off":
     streamingEnabled = false
   else:
-    errLn &"  unknown value: {target} (choose on or off)"
+    errLn &"unknown value: {target} (choose on or off)"
     return
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   cmdStreamingList()
@@ -676,7 +676,7 @@ proc cmdStreaming(arg: string) =
     else:
       cmdStreamingSelect(parts[0])
   else:
-    errLn "  usage: :streaming [on|off]"
+    errLn "usage: :streaming [on|off]"
 
 proc cmdNotifyList() =
   let mark = if notifyEnabled: "on" else: "off"
@@ -690,7 +690,7 @@ proc cmdNotifySelect(target: string) =
   of "off":
     notifyEnabled = false
   else:
-    errLn &"  unknown value: {target} (choose on or off)"
+    errLn &"unknown value: {target} (choose on or off)"
     return
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   cmdNotifyList()
@@ -706,7 +706,7 @@ proc cmdNotify(arg: string) =
     else:
       cmdNotifySelect(parts[0])
   else:
-    errLn "  usage: :notify [on|off]"
+    errLn "usage: :notify [on|off]"
 
 proc nearestCommand(name: string): string =
   var bestDist = high(int)
