@@ -471,126 +471,140 @@ proc main() =
     clearDraft(session)
     result = runTurnWithSafetyNet()
 
-  # Draw the initial chrome at the bottom of the welcome screen. On
-  # resume with prior usage we paint bar+prompt carrying the last
-  # response's tokens (typing-ready shape from `endTurn`). On resume
-  # without usage we still paint the bar at zeros. On a fresh start
-  # we paint *just* the prompt — the bar stays hidden until the first
-  # model response brings real values to put in it. From the first
-  # `paintBarPrompt` onward the bar+prompt are always visible.
-  if resume:
-    stdout.write "\n"
-    stdout.styledWriteLine styleDim, &"● resumed {sessionIdFromPath(session.savePath)}", resetStyle
-    if restoredDraft.len > 0:
-      editor.prefillText = restoredDraft
-    let window = contextWindowFor(prof)
-    let lastUsage = replaySessionTail(messages, session.toolLog,
-                                      window, prof.family)
-    if lastUsage.totalTokens > 0:
-      # Same shape as `endTurn`: gap row + bar+prompt in typing-ready
-      # state, carrying the last response's usage so
-      # the bar replaces what would otherwise be the last receipt.
-      # `pendingHint` is primed so the next user submit converts this
-      # bar into the receipt for that response.
+  try:
+    # Draw the initial chrome at the bottom of the welcome screen. On
+    # resume with prior usage we paint bar+prompt carrying the last
+    # response's tokens (typing-ready shape from `endTurn`). On resume
+    # without usage we still paint the bar at zeros. On a fresh start
+    # we paint *just* the prompt — the bar stays hidden until the first
+    # model response brings real values to put in it. From the first
+    # `paintBarPrompt` onward the bar+prompt are always visible.
+    if resume:
       stdout.write "\n"
-      let label = tokenLineLabel(lastUsage, window)
-      let tw = try: terminalWidth() except CatchableError: 0
-      stdout.write barFooterBytes(label, tw)
-      stdout.flushFile
-      emitFatPromptEvent setBarEvent(label, hasGap = true)
-      emitFatPromptEvent setPendingHintEvent(lastUsage, window, -1)
+      stdout.styledWriteLine styleDim, &"● resumed {sessionIdFromPath(session.savePath)}", resetStyle
+      if restoredDraft.len > 0:
+        editor.prefillText = restoredDraft
+      let window = contextWindowFor(prof)
+      let lastUsage = replaySessionTail(messages, session.toolLog,
+                                        window, prof.family)
+      if lastUsage.totalTokens > 0:
+        # Same shape as `endTurn`: gap row + bar+prompt in typing-ready
+        # state, carrying the last response's usage so
+        # the bar replaces what would otherwise be the last receipt.
+        # `pendingHint` is primed so the next user submit converts this
+        # bar into the receipt for that response.
+        stdout.write "\n"
+        let label = tokenLineLabel(lastUsage, window)
+        let tw = try: terminalWidth() except CatchableError: 0
+        stdout.write barFooterBytes(label, tw)
+        stdout.flushFile
+        emitFatPromptEvent setBarEvent(label, hasGap = true)
+        emitFatPromptEvent setPendingHintEvent(lastUsage, window, -1)
+      else:
+        paintInitialPrompt(prof)
+      if prompt != "":
+        if runInitialPrompt(prompt): return
     else:
+      if restoredDraft.len > 0:
+        editor.prefillText = restoredDraft
       paintInitialPrompt(prof)
-    if prompt != "":
-      if runInitialPrompt(prompt): return
-  else:
-    if restoredDraft.len > 0:
-      editor.prefillText = restoredDraft
-    paintInitialPrompt(prof)
-    if prompt != "":
-      if runInitialPrompt(prompt): return
-  # Oneshot: a prompt given on the command line runs once and exits. Only
-  # -i/--interactive keeps the REPL open afterward (and no prompt at all
-  # means a fresh interactive session). The idle prompt painted by endTurn
-  # is transient chrome; clear it so the process ends on the last reply
-  # line rather than a dangling caret.
-  if prompt != "" and not interactive:
-    emitFatPromptEvent clearPendingHintEvent()
-    emitFatPromptEvent clearBarEvent()
-    termengine.renderFooter(clearFooterFrame(), inputThreadRunning,
-                            addr editor)
-    return
-  while true:
-    var done = false
-    var line = readInput(editor, done)
-    if done:
-      echo ""
-      break
-    if line == "": continue
-    let t = line.strip
-    if t in ["exit", "quit", ":q", ":quit", ":exit"]: break
-    let commandResult = handleCommandResult(line, messages, session, prof, editor)
-    if commandResult.recognized:
-      if commandResult.disposition == cdModal:
-        # The modal wizard runs on the input thread via
-        # `wizardReadLine` (see `src/threecode/fatprompt/runtime.nim`).
-        # The wizard keeps `inputModalActive` held across successful
-        # submits so the persistent prompt cannot race the wizard's
-        # post-processing (verify round-trip, ledger write, status
-        # lines). Releasing the hold here, after `handleCommandResult`
-        # returns, lets the input thread repaint the persistent prompt
-        # on the row directly below whatever the wizard's caller wrote
-        # — instead of overlapping `❯ ` with `verifying... ok`.
-        wizardFinish()
+      if prompt != "":
+        if runInitialPrompt(prompt): return
+    # Oneshot: a prompt given on the command line runs once and exits. Only
+    # -i/--interactive keeps the REPL open afterward (and no prompt at all
+    # means a fresh interactive session). The idle prompt painted by endTurn
+    # is transient chrome; clear it so the process ends on the last reply
+    # line rather than a dangling caret.
+    if prompt != "" and not interactive:
+      emitFatPromptEvent clearPendingHintEvent()
+      emitFatPromptEvent clearBarEvent()
+      termengine.renderFooter(clearFooterFrame(), inputThreadRunning,
+                              addr editor)
+      return
+    while true:
+      var done = false
+      var line = readInput(editor, done)
+      if done:
+        echo ""
+        break
+      if line == "": continue
+      let t = line.strip
+      if t in ["exit", "quit", ":q", ":quit", ":exit"]: break
+      let commandResult = handleCommandResult(line, messages, session, prof, editor)
+      if commandResult.recognized:
+        if commandResult.disposition == cdModal:
+          # The modal wizard runs on the input thread via
+          # `wizardReadLine` (see `src/threecode/fatprompt/runtime.nim`).
+          # The wizard keeps `inputModalActive` held across successful
+          # submits so the persistent prompt cannot race the wizard's
+          # post-processing (verify round-trip, ledger write, status
+          # lines). Releasing the hold here, after `handleCommandResult`
+          # returns, lets the input thread repaint the persistent prompt
+          # on the row directly below whatever the wizard's caller wrote
+          # — instead of overlapping `❯ ` with `verifying... ok`.
+          wizardFinish()
+          continue
+        var echo = userPromptItem(line)
+        echo.attachSeparator = true
+        let commandBytes =
+          if commandResult.plainBody:
+            plainCommandBodyBytes(commandResult.body)
+          else:
+            formatItem(commandItem(commandResult.name, commandResult.body,
+                                  commandResult.ok))
+        let bytes = formatItem(echo) & commandBytes
+        proc clearSubmittedCommandEditor() =
+          editor.line = minline.Line(text: "", position: 0)
+          editor.renderSuffix = ""
+          editor.renderSuffixCursor = false
+          editor.renderRow = 0
+          editor.echoRows = 0
+          if commandResult.clearFooter:
+            emitFatPromptEvent clearPendingHintEvent()
+            emitFatPromptEvent clearBarEvent()
+        commitTranscriptBytes(
+          bytes,
+          restoreEditor = true,
+          beforeRepaint = clearSubmittedCommandEditor,
+          reserveFooter = true,
+          transcriptOwnsSpacing = true)
+        releaseIdleSubmittedInput()
         continue
-      var echo = userPromptItem(line)
-      echo.attachSeparator = true
-      let commandBytes =
-        if commandResult.plainBody:
-          plainCommandBodyBytes(commandResult.body)
-        else:
-          formatItem(commandItem(commandResult.name, commandResult.body,
-                                commandResult.ok))
-      let bytes = formatItem(echo) & commandBytes
-      proc clearSubmittedCommandEditor() =
-        editor.line = minline.Line(text: "", position: 0)
-        editor.renderSuffix = ""
-        editor.renderSuffixCursor = false
-        editor.renderRow = 0
-        editor.echoRows = 0
-        if commandResult.clearFooter:
-          emitFatPromptEvent clearPendingHintEvent()
-          emitFatPromptEvent clearBarEvent()
-      commitTranscriptBytes(
-        bytes,
-        restoreEditor = true,
-        beforeRepaint = clearSubmittedCommandEditor,
-        reserveFooter = true,
-        transcriptOwnsSpacing = true)
-      releaseIdleSubmittedInput()
-      continue
-    if prof.name == "":
-      stdout.styledWriteLine fgMagenta,
-        "  no provider configured. use :provider add", resetStyle
-      releaseIdleSubmittedInput()
-      continue
-    messages.add %*{"role": "user", "content": buildUserMessage(messages, line)}
-    refreshSystemPrompt(messages, prof)
-    # User-submit transition: walk back to the previous turn's bar
-    # row, repaint it as the receipt (cyan, skipped on the first turn),
-    # echo the user's input as scroll-history content. Cursor lands
-    # on the row directly after the last echo line, where callModel's
-    # leading `\n` will set up the new spinner-footer scratch row.
-    emitUserSubmit(line)
-    editor.line = minline.Line(text: "", position: 0)
-    editor.renderSuffix = ""
-    editor.renderSuffixCursor = false
-    editor.renderRow = 0
-    editor.echoRows = 0
-    # The prompt is now a committed user turn: drop the draft sidecar so a
-    # clean exit doesn't restore text the user already sent.
-    clearDraft(session)
-    if runTurnWithSafetyNet(): break
+      if prof.name == "":
+        stdout.styledWriteLine fgMagenta,
+          "  no provider configured. use :provider add", resetStyle
+        releaseIdleSubmittedInput()
+        continue
+      messages.add %*{"role": "user", "content": buildUserMessage(messages, line)}
+      refreshSystemPrompt(messages, prof)
+      # User-submit transition: walk back to the previous turn's bar
+      # row, repaint it as the receipt (cyan, skipped on the first turn),
+      # echo the user's input as scroll-history content. Cursor lands
+      # on the row directly after the last echo line, where callModel's
+      # leading `\n` will set up the new spinner-footer scratch row.
+      emitUserSubmit(line)
+      editor.line = minline.Line(text: "", position: 0)
+      editor.renderSuffix = ""
+      editor.renderSuffixCursor = false
+      editor.renderRow = 0
+      editor.echoRows = 0
+      # The prompt is now a committed user turn: drop the draft sidecar so a
+      # clean exit doesn't restore text the user already sent.
+      clearDraft(session)
+      if runTurnWithSafetyNet(): break
 
+  except IOError as e:
+    stderr.writeLine "3code: output stream broken (" & e.msg &
+      "); session saved."
+    return
+  except CatchableError as e:
+    when not defined(release):
+      raise
+    let trace = e.getStackTrace()
+    stderr.writeLine "3code: internal error: " & e.msg
+    if trace.len > 0:
+      stderr.writeLine trace
+    stderr.writeLine "3code: session saved at " & session.savePath &
+      ". Please open an issue with the lines above."
 when isMainModule:
   main()

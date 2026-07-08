@@ -636,11 +636,49 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
     # transient post-prompt feedback) instead.
     stderr.writeLine e.msg
     return false
+  except IOError as e:
+    # stdout (or another fd we write to) became unwritable mid-turn:
+    # closed pipe, ssh disconnect, terminal hang-up, broken tty. The
+    # runTurns deferred `finishTurn` has already repainted the prompt
+    # (or tried to — if stdout is gone, the editor is gone with it),
+    # and the session was already saved at the end of the last tool
+    # batch / assistant commit, so we don't re-save here (a second
+    # saveDraft-style write can race with a stale .tmp left behind by
+    # the previous saveSession and surface its own IOError). Surface
+    # the error on stderr (the only fd we can trust at this point)
+    # and return so the REPL loop decides whether to keep going.
+    # Without this catch the unhandled IOError propagates all the way
+    # out and the process dies silently, which is the user-visible
+    # "3code just exits during a turn" bug.
+    stderr.writeLine "3code: output stream broken (" & e.msg &
+      "); turn ended, session saved. If you ran 3code from a pipe " &
+      "or a now-closed terminal, reattach before sending more prompts."
+    return false
   except OSError as e:
     # The working directory was removed out from under us (e.g. the
     # user `rm -rf`'d it in another shell). There is nothing useful
     # to keep doing, so save what we have and exit cleanly. `quit`
     # runs the registered exit procs, which restore terminal state.
-    saveSession(session, messages)
+    try: saveSession(session, messages) except CatchableError: discard
     stdout.styledWriteLine fgMagenta, "working directory gone: ", e.msg, resetStyle
+    quit()
+  except CatchableError as e:
+    # Last-resort safety net: anything else that escapes `runTurns`
+    # (JsonError, ValueError, KeyError, IOError subtypes, library
+    # defects wrapped as CatchableError, etc.). The session was saved
+    # on the last tool-batch / assistant-commit boundary inside
+    # runTurns, so we don't re-save here either. In debug builds we
+    # re-raise so the developer sees the full stack via Nim's
+    # unhandled-exception printer. In release builds we render a
+    # one-line notice plus the stack trace to stderr and quit cleanly
+    # so the user isn't left staring at a dead prompt after a crash
+    # that would otherwise vanish silently.
+    when not defined(release):
+      raise
+    let trace = e.getStackTrace()
+    stderr.writeLine "3code: internal error during turn: " & e.msg
+    if trace.len > 0:
+      stderr.writeLine trace
+    stderr.writeLine "3code: session saved at " & session.savePath &
+      ". Please open an issue with the lines above."
     quit()
