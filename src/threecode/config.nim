@@ -36,7 +36,7 @@ type
                               ## listing. Empty means "fall back to the
                               ## model default" (`defaultReasoningsFor`).
 
-proc shortModel*(model: string): string =
+func shortModel*(model: string): string =
   ## Everything after the last `/` in a model id. This is the
   ## user-visible short name: `gpt-oss-120b` for `openai/gpt-oss-120b`,
   ## `glm-5p1` for `accounts/fireworks/models/glm-5p1`. When there is no
@@ -57,7 +57,7 @@ proc shortToFull*(models: seq[string]): Table[string, string] =
     if s notin result:
       result[s] = m
 
-proc findModel*(p: ProviderRec, name: string): int =
+func findModel*(p: ProviderRec, name: string): int =
   ## Matches by full model id or by short name (everything after the last
   ## `/`). Short-name matching handles `:variant <name>` from users who
   ## type the bare model name and old `current = provider.shortname` config
@@ -277,7 +277,7 @@ proc parseConfigFile*(path: string): (string, string, seq[ProviderRec], Table[st
   p.close
   (current, searchUrl, providers, colors)
 
-proc quoteVal(s: string): string =
+func quoteVal(s: string): string =
   result = "\""
   for c in s:
     case c

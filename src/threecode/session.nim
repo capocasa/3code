@@ -107,10 +107,10 @@ proc mangleCwd*(cwd: string): string =
 # latest session; `indexIdsAt` returns ids latest-first.
 # ---------------------------------------------------------------------------
 
-proc sessionPathIndexDir*(): string =
+func sessionPathIndexDir*(): string =
   userDataRoot() / "session-paths"
 
-proc indexPathAt*(indexDir, cwd: string): string =
+func indexPathAt*(indexDir, cwd: string): string =
   indexDir / mangleCwd(cwd)
 
 proc appendIndexAt*(indexDir, cwd, id: string) =
@@ -122,7 +122,7 @@ proc appendIndexAt*(indexDir, cwd, id: string) =
     createDir(path.parentDir)
     let f = open(path, fmAppend)
     f.writeLine(id)
-    f.close()
+    defer: f.close()
   except CatchableError: discard
 
 proc indexIdsAt*(indexDir, cwd: string): seq[string] =

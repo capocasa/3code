@@ -357,6 +357,7 @@ export DEBIAN_FRONTEND=noninteractive
   startToolTimeoutWatcher(cap)
   var cancelled = false
   var timedOut = false
+  var code = 0
 
   var rawOut = ""
   try:
@@ -381,11 +382,9 @@ export DEBIAN_FRONTEND=noninteractive
   finally:
     cancelled = stopToolCancelWatcher()
     timedOut = stopToolTimeoutWatcher()
-
-  let code = p.waitForExit()
-  p.close()
-
-  try: removeDir(tmp) except CatchableError: discard
+    code = p.waitForExit()
+    p.close()
+    try: removeDir(tmp) except CatchableError: discard
 
   if cancelled:
     if rawOut.len > 0 and not rawOut.endsWith("\n"):
