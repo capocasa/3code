@@ -43,7 +43,10 @@ suite "palette application":
 
   test "colorful constants are unaffected by mode":
     applyPalette(cmLight)
-    check CyanFg == "\x1b[36m"                 # brand tone, mode-independent
+    when defined(windows):
+      check CyanFg == "\x1b[96m"               # bright cyan on Windows (true cyan there)
+    else:
+      check CyanFg == "\x1b[36m"               # brand tone, mode-independent
     check BoldOn == "\x1b[1m"
     check Reset == "\x1b[0m"
 
