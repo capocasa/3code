@@ -1226,6 +1226,23 @@ proc applyKimiReasoning(p: Profile, body: JsonNode) =
     body["chat_template_kwargs"] = %*{"enable_thinking": true}
   else: discard
 
+proc applyHy3Reasoning(p: Profile, body: JsonNode) =
+  ## Hy3 (Tencent Hunyuan v3) carries a graded effort knob, not a binary
+  ## switch. Values are `no_think` (default direct response), `low`, and
+  ## `high`, driven by `:reasoning`. Two wire surfaces:
+  ## - vLLM stacks (novita, nvidia, ...): `chat_template_kwargs` with the
+  ##   `reasoning_effort` key, matching Hy3's own chat template
+  ##   (`reasoning_effort not in ['high', 'low', 'no_think']` raises).
+  ## - OpenRouter: normalized `reasoning.effort` (same three levels).
+  ## Empty `p.reasoning` means "no wire param" — the server default
+  ## (`no_think`) applies, which is the intended cheap path.
+  if p.reasoning == "": return
+  case providerOf(p)
+  of "openrouter":
+    body["reasoning"] = %*{"effort": p.reasoning}
+  else:
+    body["chat_template_kwargs"] = %*{"reasoning_effort": p.reasoning}
+
 proc applyReasoning*(p: Profile, body: JsonNode) =
   ## Per-family wire mapping for `Profile.reasoning`. Adding a new
   ## family means: (1) set `reasoning` in the known-good combo table,
@@ -1237,6 +1254,7 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "minimax": applyMinimaxReasoning(p, body)
   of "kimi": applyKimiReasoning(p, body)
   of "longcat": applyLongcatReasoning(p, body)
+  of "hy3": applyHy3Reasoning(p, body)
   else: discard
 
 # ---------- network worker thread (Tier 2) ----------

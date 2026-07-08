@@ -56,6 +56,28 @@ suite "api request shaping":
     applyReasoning(p, body)
     check body{"chat_template_kwargs"}{"enable_thinking"}.getBool == false
 
+  test "hy3 on novita sends chat_template_kwargs.reasoning_effort":
+    var body = %*{"stream": true}
+    let p = Profile(name: "novita.tencent/hy3", family: "hy3",
+                    model: "tencent/hy3", reasoning: "high")
+    applyReasoning(p, body)
+    check body{"chat_template_kwargs"}{"reasoning_effort"}.getStr == "high"
+
+  test "hy3 on openrouter normalizes to reasoning.effort":
+    var body = %*{"stream": true}
+    let p = Profile(name: "openrouter.tencent/hy3:free", family: "hy3",
+                    model: "tencent/hy3:free", reasoning: "low")
+    applyReasoning(p, body)
+    check body{"reasoning"}{"effort"}.getStr == "low"
+
+  test "hy3 with empty reasoning sends no wire knob":
+    var body = %*{"stream": true}
+    let p = Profile(name: "novita.tencent/hy3", family: "hy3",
+                    model: "tencent/hy3", reasoning: "")
+    applyReasoning(p, body)
+    check "chat_template_kwargs" notin body
+    check "reasoning" notin body
+
   test "provider stub returns before next API call when autosend is queued during tool":
     let pid = $getCurrentProcessId()
     let probeDir = getTempDir() / ("tc_autosend_probe_" & pid)

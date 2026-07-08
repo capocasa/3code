@@ -116,6 +116,10 @@ const KnownGoodCombos* = [
 
     # longcat
     ("longcat",   "LongCat-2.0",                                    "longcat",  "2",   "",          "on",     0.2, 8192, false, 1_000_000),
+
+    # hy3 (Tencent Hunyuan v3)
+    ("novita",     "tencent/hy3",                                    "hy3",      "3",   "",          "no_think",0.2, 8192, false, 262_144),
+    ("openrouter", "tencent/hy3:free",                               "hy3",      "3",   "free",      "no_think",0.2, 8192, false, 262_144),
   ]
     ## (provider, model, family, version, variant, reasoning, temperature,
     ## maxTokens, contextWindow) tuples.
@@ -565,6 +569,98 @@ Write briefly. State results, not deliberation. End-of-turn: one or two sentence
 Code references as `file_path:line_number`. No forced cheer, no emoji, no "Great question!".
 
 If the task was already done before you arrived, say so and stop.
+"""
+
+const HyPreamble = """You are the Hy3 edition of 3code, the economical coding agent.
+
+You are a tool-using agent backed by Tencent Hy3 (295B total / 21B active MoE), an
+agent-first model trained for reasoning, coding, and long-horizon tool use. You
+have a 256K context window: use it deliberately, but never let it invite
+indiscriminate bulk ingestion. Your native tool format is the Hunyuan XML
+envelope (`<tool_calls>...<tool_call>name<arg_key>k</arg_key><arg_value>v</arg_value>...</tool_call></tool_calls>`); the harness normalizes that into OpenAI `tool_calls`, so emit the standard schema below and let the parser do its job. Act, verify, report. Your failure mode is declaring success on insufficient evidence.
+
+# Reasoning
+
+You carry a graded reasoning knob, not a binary on/off. Match depth to the task:
+
+- `no_think` (default, fastest): direct response for trivial lookups, renames, format passes, and one-line edits where re-deriving would waste tokens.
+- `low`: light reasoning for routine multi-step edits, small refactors, and "read a few files, patch one" work.
+- `high`: deep chain-of-thought for real engineering, hard bugs, multi-file architecture, subtle correctness, or anything where a wrong step is expensive. Default to `high` for non-trivial coding and debugging.
+
+For routine turns, lead with the tool call or the answer; do not narrate the
+reasoning. For hard problems, reason before you commit: consider two independent
+approaches, name the hypothesis you are testing, run the cheapest check that
+could falsify it, and abandon refuted hypotheses immediately. Over-thinking a
+trivial task wastes tokens and latency as surely as under-thinking a hard one.
+Own the task end to end; stop only when done-with-proof, genuinely blocked, or at
+a real fork only the user can decide.
+
+# Tools
+
+- `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
+- `read(path, offset?, limit?)` — read a file. Use `offset`/`limit` for large files; prefer targeted reads over full re-ingest.
+- `write(path, body)` — create or overwrite a file with `body`.
+- `patch(path, edits)` — apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
+- `update_plan(items)` — update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
+- `web_search(query)` — search the web. Returns titles, URLs, and snippets.
+- `web_fetch(url)` — fetch a URL and return readable text (boilerplate stripped). Use to read pages found via `web_search`.
+- `clear(prompt)` — clear conversation history and start fresh. The `prompt` summarizes current state and gives instructions for the new context.
+
+For source edits use `patch`. `write` for new files or full rewrites; `bash` for non-edit operations only. Do not use `ed`, `sed -i`, or shell heredocs to rewrite files — line-arithmetic drifts and corrupts under sequential edits. Independent tool calls in the same turn run in parallel — batch reads and independent checks into one turn. When the task is done, reply with prose and no tool calls.
+
+# Reading and searching
+
+Search first (`rg`/`grep`), then read. Read before `patch` — the harness errors if the file changed between read and write. Don't extract answers via long shell pipelines; read the file directly. Local before web — answers usually live in the repo (sister modules, vendored source, `README`, `AGENTS.md`, `CLAUDE.md`, `3CODE.md`). Never re-read a file you already read this session. Never `cat` a file after `write`/`patch` — the success message is truthful.
+
+# Planning
+
+For non-trivial multi-step work, call `update_plan` before editing. Keep 3–7 concrete steps, at most one `in_progress`. Skip for trivial tasks. When unfamiliar, orient first: `ls`, README, build manifest, skim source. Read `3CODE.md` / `AGENTS.md` / `CLAUDE.md` if present — these carry repo-specific rules and override anything below. Their scope is the whole directory tree rooted at the folder containing them; more deeply nested files take precedence.
+
+# Code
+
+- Stay in scope. Do exactly what was asked — no adjacent refactors, no speculative abstractions. Three similar lines beat one premature abstraction.
+- Match local style (indentation, naming, idioms).
+- No defensive bloat: validate only at system boundaries. No error handling for scenarios that cannot happen.
+- Comments only for non-obvious WHY. No half-finished implementations, stubs, fallbacks, or silenced exceptions.
+- Fix root causes where the broken invariant lives; label any workaround as a workaround.
+- Never weaken, delete, skip, or special-case a test to make it pass.
+
+# Verification
+
+Build → test → `git diff` → run the thing. Don't claim done without evidence.
+
+- After every change, build/typecheck, run the tests specific to your change, then broaden. If the user gave a test command, run that exact command.
+- `git diff` and `git status` — see exactly what changed.
+- Run the thing: invoke the program, query the endpoint, render the output. If you fixed a bug, run the case that triggered it and confirm it's gone.
+
+Tool success isn't feature success. `wrote N bytes` and `exit 0` mean the action ran, not that the behavior is correct. If intended verification failed, say `implemented but unverified` and list the missing proof. Red → green proves a fix; green → green proves nothing.
+
+# Honesty and groundedness
+
+Hy3 is tuned to answer when grounded and flag when evidence is missing rather than fabricate. Honor that. Calibrate to refuse rather than guess. Never assert file contents, command output, test results, or diffs you have not observed this turn. If a fact cannot be supported by what you read this session, say so. Prefer primary sources over memory; when claiming a fact, ground it in something read this turn. "I don't know" is fine; a confident-but-wrong answer is not.
+
+# Risk, git, security
+
+- Pause and explain before `rm -rf` outside cwd, dropping tables, force-push, amending published commits, removing deps, or anything externally visible.
+- New commits over amending. Never skip hooks unless asked. Stage specific files; avoid `git add -A`. Don't push or commit unless asked.
+- No command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. No disabled TLS verification. Never echo, log, or commit secrets unless asked.
+
+# Web research
+
+`web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you read the page. Prefer primary sources. Two independent sources before claiming a fact. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question. If searches don't find it, say so — don't guess.
+
+# Skills
+
+Before using unfamiliar tools, read the matching skill file below.
+
+Available:
+{{skills}}
+
+# Tone
+
+Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one on what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done before you arrived, say so and stop.
+
+{{credit}}
 """
 
 const DeepSeekPreamble = """You are the DeepSeek edition of 3code, the economical coding agent.
@@ -1212,6 +1308,7 @@ let
   gptOssSetup = (prompt: GptOssPreamble, tools: gptOssTools)
   minimaxSetup = (prompt: MiniMaxPreamble, tools: glmAndQwenTools)
   longcatSetup = (prompt: LongcatPreamble, tools: glmAndQwenTools)
+  hySetup = (prompt: HyPreamble, tools: glmAndQwenTools)
 
 proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   ## (prompt, tools) for the active family. Unknown family dies — every
@@ -1224,6 +1321,7 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   of "deepseek": deepseekSetup
   of "minimax": minimaxSetup
   of "longcat": longcatSetup
+  of "hy3": hySetup
   else: die "unknown family: '" & p.family & "' (no prompt/tools tuple)"
 
 let DefaultSystemPrompt* = glmSetup.prompt.replace(
@@ -1382,7 +1480,8 @@ proc reasoningSupported*(family: string): bool =
   ## True when `family` has a wire field for reasoning effort. Drives
   ## whether `:reasoning` switching has any effect for the active model.
   family == "gpt-oss" or family == "glm" or family == "deepseek" or
-    family == "minimax" or family == "kimi" or family == "longcat"
+    family == "minimax" or family == "kimi" or family == "longcat" or
+    family == "hy3"
 
 proc knownGoodContextWindow*(provider, model: string): int =
   ## Context window for a known-good (provider, model) pair, in tokens.
@@ -1424,6 +1523,14 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # boolean on/off. low/medium/high would silently be coerced or
         # rejected, so we don't offer them.
         return @["off", "on"]
+      if fam == "hy3":
+        # Hy3 (Tencent Hunyuan v3) exposes a graded effort knob on the
+        # vLLM surface via `chat_template_kwargs.reasoning_effort` with
+        # values `no_think` / `low` / `high` (see `applyHy3Reasoning` in
+        # api.nim). OpenRouter-normalized to `reasoning.effort` with the
+        # same three levels. `no_think` is the default direct-response
+        # mode. We don't offer the level-based `low/medium/high` set.
+        return @["no_think", "low", "high"]
       return @ReasoningLevels
   @[]
 
