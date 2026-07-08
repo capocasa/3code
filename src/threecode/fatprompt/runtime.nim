@@ -1291,6 +1291,12 @@ proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
   if chunk.len == 0: return
   if suppressLiveAssistantStream(): return
   termui.withTerminalWriteLock:
+    # Drop leading blank lines before the first real content so model
+    # padding never renders as blank rows above the answer.
+    var chunk = chunk
+    if not s.md.firstEmit:
+      while chunk.len > 0 and (chunk[0] == '\n' or chunk[0] == '\r'):
+        chunk.delete 0 .. 0
     var data = s.utf8Pending & chunk
     s.utf8Pending = ""
     var i = 0
