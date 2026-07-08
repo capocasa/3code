@@ -159,6 +159,23 @@ proc bundledSslContext*(): SslContext =
   ## internally), so the bundle wiring lives in one place either way.
   newContext(verifyMode = CVerifyPeer, caFile = bundledCaFile())
 
+proc connectErrorDetail*(e: ref CatchableError): string =
+  ## The message a connect raises. `nativesockets.getAddrInfo` surfaces DNS
+  ## failures as `raiseOSError(osLastError(), gai_strerror(...))`, which packs
+  ## a useless OS strerror (`Resource temporarily unavailable`) in front of the
+  ## real cause, appended as `Additional info: "..."`. Keep only the
+  ## `Additional info:` part (the actual diagnosis) and fall back to the whole
+  ## message when it isn't there.
+  let msg = e.msg.strip
+  const Marker = "Additional info: "
+  let idx = msg.find(Marker)
+  if idx >= 0:
+    result = msg[idx + Marker.len .. ^1].strip
+    if result.startsWith('"') and result.endsWith('"') and result.len >= 2:
+      result = result[1 .. ^2]
+  else:
+    result = msg
+
 proc userConfigRoot*(): string =
   ## XDG config root for 3code: `~/.config/3code/` on Linux,
   ## `~/Library/Application Support/3code/` on macOS, `%APPDATA%/3code/`

@@ -581,7 +581,8 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
           result.errMsg = InterruptedByUserMsg
           return
         result.errMsg =
-          (if plainHttp: "connect failed: " else: "TLS connect failed: ") & e.msg
+          (if plainHttp: "connect failed: " else: "TLS connect failed: ") &
+          connectErrorDetail(e)
         return
       cachedStreamConn = conn
       cachedStreamHostKey = hostKey
@@ -905,7 +906,8 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
           result.errMsg = InterruptedByUserMsg
           return
         result.errMsg =
-          (if plainHttp: "connect failed: " else: "TLS connect failed: ") & e.msg
+          (if plainHttp: "connect failed: " else: "TLS connect failed: ") &
+          connectErrorDetail(e)
         return
       cachedStreamConn = conn
       cachedStreamHostKey = hostKey
