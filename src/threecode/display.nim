@@ -28,33 +28,32 @@ import terminal as termui
 
 # Three visible tiers, designed to read on both light + dark terminal
 # backgrounds:
-#   hint = bold cyan        (primary "look here": labels, CTAs)
-#   note = plain cyan       (secondary: help text, validation, errors)
-#   subtle = dim white      (FYI: skill markers, tool output)
-# Cyan is mode-independent (brand tone). The white family (`BrightWhiteFg`,
-# `OffWhiteFg`, `GreyFg`) is resolved per `ColorMode` in `util.applyPalette`.
-# We still avoid SGR `dim` (\x1b[2m): it renders below readable contrast on
-# light backgrounds and has no clean mode switch.
+#   hint/note/warn = regular white   (status, help, validation — not brand)
+#   err            = non-bold magenta (never indented)
+#   subtle         = dim white        (FYI: skill markers, tool output)
+# Bold cyan stays on the startup screen and the live token bar only. The
+# white family (`BrightWhiteFg`, `OffWhiteFg`, `GreyFg`) is resolved per
+# `ColorMode` in `util.applyPalette`.
 
 template hint*(args: varargs[untyped]) =
-  stdout.styledWrite(fgCyan, styleBright, args, resetStyle)
+  stdout.styledWrite(fgDefault, args, resetStyle)
 
 template hintLn*(args: varargs[untyped]) =
-  stdout.styledWrite(fgCyan, styleBright, args, resetStyle)
+  stdout.styledWrite(fgDefault, args, resetStyle)
   stdout.write "\r\n"
 
 template note*(args: varargs[untyped]) =
-  stdout.styledWrite(fgCyan, args, resetStyle)
+  stdout.styledWrite(fgDefault, args, resetStyle)
 
 template noteLn*(args: varargs[untyped]) =
-  stdout.styledWrite(fgCyan, args, resetStyle)
+  stdout.styledWrite(fgDefault, args, resetStyle)
   stdout.write "\r\n"
 
 template warn*(args: varargs[untyped]) =
-  stdout.styledWrite(fgCyan, args, resetStyle)
+  stdout.styledWrite(fgDefault, args, resetStyle)
 
 template warnLn*(args: varargs[untyped]) =
-  stdout.styledWrite(fgCyan, args, resetStyle)
+  stdout.styledWrite(fgDefault, args, resetStyle)
   stdout.write "\r\n"
 
 template err*(args: varargs[untyped]) =
@@ -85,13 +84,13 @@ proc cmdError*(body: string) =
 
 proc renderHelp*() =
   ## :help body in default terminal color. `3code` highlighted bright
-  ## bold cyan; `:command` tokens highlighted bright white.
+  ## white; `:command` tokens highlighted bright white.
   stdout.write "\n"
   for line in HelpText.splitLines:
     var i = 0
     while i < line.len:
       if i + 5 <= line.len and line[i ..< i + 5] == "3code":
-        stdout.styledWrite(fgCyan, styleBright, "3code", resetStyle)
+        stdout.styledWrite(BrightWhiteFg, "3code", resetStyle)
         i += 5
       elif line[i] == ':' and i + 1 < line.len and
            line[i + 1] in {'a'..'z', 'A'..'Z', '?'}:
@@ -737,14 +736,20 @@ proc renderTokenLine*(usage: Usage, window: int, elapsedS = -1) =
   if bytes.len > 0:
     stdout.write bytes
 
-proc showProfile*(p: Profile) =
+proc showProfile*(p: Profile; bold = false) =
   if p.name == "": return
   let dot = p.name.find('.')
   let provider = if dot < 0: p.name else: p.name[0 ..< dot]
-  stdout.styledWriteLine fgCyan, styleBright, "  provider  ", resetStyle, provider
-  stdout.styledWriteLine fgCyan, styleBright, "  model     ", resetStyle, shortModel(p.model)
-  if p.reasoning != "":
-    stdout.styledWriteLine fgCyan, styleBright, "  reasoning ", resetStyle, p.reasoning
+  if bold:
+    stdout.styledWriteLine fgCyan, styleBright, "  provider  ", resetStyle, provider
+    stdout.styledWriteLine fgCyan, styleBright, "  model     ", resetStyle, shortModel(p.model)
+    if p.reasoning != "":
+      stdout.styledWriteLine fgCyan, styleBright, "  reasoning ", resetStyle, p.reasoning
+  else:
+    stdout.styledWriteLine fgDefault, "  provider  ", resetStyle, provider
+    stdout.styledWriteLine fgDefault, "  model     ", resetStyle, shortModel(p.model)
+    if p.reasoning != "":
+      stdout.styledWriteLine fgDefault, "  reasoning ", resetStyle, p.reasoning
 
 # Track up-navigation so "down past last" can return to blank line.
 var navigatedUp*: bool = false
@@ -776,7 +781,7 @@ proc welcome*(p: Profile): minline.LineEditor =
   stdout.styledWriteLine fgCyan, styleBright, "  ╰─╯"
   stdout.write "\n"
   if p.name != "":
-    showProfile(p)
+    showProfile(p, bold = true)
     stdout.write "\n"
     stdout.styledWrite fgCyan, styleBright, "  type a prompt. ", resetStyle
     subtleWriteLn(stdout, ":help for commands. :q or Ctrl-D to exit.")
@@ -826,7 +831,7 @@ proc printSessionList*(paths: seq[string], currentPath: string, showCwd: bool) =
     let cwdStr =
       if showCwd and preview.cwd != "": "  " & collapseHome(preview.cwd)
       else: ""
-    hint &"  {mark} ", resetStyle, id, fgCyan, styleBright,
+    hint &"  {mark} ", resetStyle, id, fgDefault,
       &"   ({preview.msgCount} msg" & (if preview.msgCount == 1: "" else: "s") & ")",
       resetStyle, cwdStr, snip, "\n"
   if paths.len > shown.len:
@@ -931,7 +936,7 @@ proc showTool*(arg: string, toolLog: seq[ToolRecord]) =
       &"show: T{n} out of range (1..{toolLog.len})", resetStyle
     return
   let rec = toolLog[n-1]
-  stdout.styledWriteLine fgCyan, styleBright, &"── T{n}  ", rec.banner, resetStyle
+  stdout.styledWriteLine fgDefault, &"── T{n}  ", rec.banner, resetStyle
   if rec.kind in {akBash, akRead, akWebSearch, akWebFetch}:
     for l in rec.output.splitLines: printLine(l)
   else:
@@ -956,5 +961,5 @@ proc listTools*(toolLog: seq[ToolRecord]) =
     hint &"  {tag:>4}  ", resetStyle,
       color, mark, resetStyle, " ",
       rec.banner,
-      fgCyan, styleBright, &"   ({lines} line" & (if lines == 1: "" else: "s") & ")",
+      fgDefault, &"   ({lines} line" & (if lines == 1: "" else: "s") & ")",
       resetStyle, "\n"

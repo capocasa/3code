@@ -110,7 +110,7 @@ proc explainExperimentalGate*(p: Profile) =
     if dot < 0: p.name
     else: p.name[0 ..< dot] & " " & p.name[dot+1 .. ^1]
   stdout.styledWriteLine fgMagenta,
-    "  ", display,
+    display,
     " is experimental (start 3code with --experimental to use anyway, not recommended)",
     resetStyle
   emitTestFrameEvent()
