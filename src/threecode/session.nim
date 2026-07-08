@@ -107,7 +107,7 @@ proc mangleCwd*(cwd: string): string =
 # latest session; `indexIdsAt` returns ids latest-first.
 # ---------------------------------------------------------------------------
 
-func sessionPathIndexDir*(): string =
+proc sessionPathIndexDir*(): string =
   userDataRoot() / "session-paths"
 
 func indexPathAt*(indexDir, cwd: string): string =
