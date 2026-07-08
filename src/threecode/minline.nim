@@ -205,6 +205,7 @@ type
     canceled*: bool
     eof*: bool
     hidechars*: bool
+    wizardMode*: bool         ## true while a modal provider wizard owns the editor; alters ctrl+c/ctrl+d/esc
     complPrefix*: string       ## original prefix before first completion
     complMatches*: seq[string] ## current match list
     complIndex*: int           ## current match index (-1 = none)
@@ -1076,9 +1077,23 @@ proc initKeyTables*() =
   KEYMAP["end"]       = proc(ed: var LineEditor) = ed.goToEnd()
   KEYMAP["ctrl+w"]    = proc(ed: var LineEditor) = ed.deleteWordLeft()
   KEYMAP["ctrl+c"]    = proc(ed: var LineEditor) =
-    ed.canceled = true
-    raise newException(InputCancelled, "")
+    if ed.wizardMode:
+      # In the provider wizard, Ctrl-C clears the line if text is
+      # present, otherwise aborts the wizard (returns to prompt).
+      if ed.line.text.len > 0:
+        ed.clearLine()
+      else:
+        ed.canceled = true
+        raise newException(InputCancelled, "")
+    else:
+      ed.canceled = true
+      raise newException(InputCancelled, "")
   KEYMAP["ctrl+d"]    = proc(ed: var LineEditor) =
+    if ed.wizardMode:
+      # Ctrl-D is ignored in the provider wizard: it neither clears a
+      # char nor aborts. The user aborts with Ctrl-C or ESC on an empty
+      # line.
+      return
     if ed.line.text.len == 0:
       ed.eof = true
       raise newException(EOFError, "")

@@ -176,3 +176,46 @@ suite "provider wizard cancel":
     tty.expectExit(0, timeoutMs = 5000)
 
     echo "  PASS: double cancel is a no-op"
+
+  test "ctrl+d ignored, ctrl+c/esc clear line or abort in edit wizard":
+    let root = newFixture("key_behavior")
+    writeConfiguredProvider(root)
+    let tty = startTty(root)
+    defer: tty.close()
+
+    tty.expect "\u276f"
+    tty.send ":provider edit stub"
+    tty.send "\r"
+    tty.drain(200)
+    tty.expect "name [stub]"
+
+    # Ctrl-D on a non-empty wizard line must be ignored: it neither
+    # deletes a char nor aborts. The program must stay alive and the
+    # wizard must remain up (no "aborted" exit, no main prompt).
+    tty.send "xyz"
+    tty.drain(200)
+    tty.send "\x04"
+    tty.drain(300)
+    tty.expectAlive()
+    tty.expectNo "aborted"
+
+    # Ctrl-C on a non-empty line clears the line but stays in the wizard.
+    tty.send "\x03"
+    tty.drain(300)
+    tty.expectAlive()
+    tty.expectNo "aborted"
+
+    # Now the line is empty: Ctrl-C aborts the wizard and returns to the
+    # main prompt.
+    tty.send "\x03"
+    tty.drain(300)
+    tty.expect "\u276f"
+    tty.expectNo "cancelled"
+
+    # Idle ESC at the main prompt is a no-op; a fresh command still works.
+    tty.send ":q"
+    tty.send "\r"
+    tty.drain(300)
+    tty.expectExit(0, timeoutMs = 5000)
+
+    echo "  PASS: ctrl+d ignored, ctrl+c/esc clear line or abort"

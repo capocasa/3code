@@ -1789,6 +1789,9 @@ proc inputThreadProc() {.thread.} =
         # needed.
         edPtr[].deferSubmit = false
         edPtr[].submitIcon = ""
+        # Flag the editor as wizard-owned so ctrl+c/ctrl+d/esc behave as
+        # the provider wizard wants (clear line vs abort; ctrl+d ignored).
+        edPtr[].wizardMode = true
         try:
           let text = minline.readLineWith(edPtr[],
                                           req.prompt,
@@ -1825,6 +1828,7 @@ proc inputThreadProc() {.thread.} =
         finally:
           edPtr[].deferSubmit = true
           edPtr[].submitIcon = DeferredSubmitMarker
+          edPtr[].wizardMode = false
         acquire wizardRequestLock
         try:
           wizardResponse = resp
