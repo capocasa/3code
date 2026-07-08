@@ -100,15 +100,25 @@ var inputIdleLinePending: Atomic[bool]
   ## to drain the event; the wizard's `getCh` deliberately ignores
   ## it. See the wizard protocol header above `wizardRequest`.
 var inputModalActive*: Atomic[bool]
-  ## Set by the input thread itself for the lifetime of a modal wizard
-  ## `readLineWith`. The input thread's editor hooks consult this flag
-  ## and skip their work while it is set, so the wizard owns the
-  ## terminal without racing the hook bodies. A torn read of a closure
-  ## field (one word zero, the other the prior value) is a SIGSEGV when
-  ## the input thread calls the torn closure, so all hook bodies must
-  ## check this flag instead of relying on the modal to nil the field.
-  ## Previously the controller flipped this flag; the input thread now
-  ## owns the lifecycle so the flag tracks `wizardRequestPosted` 1:1.
+  ## Held for the lifetime of a modal wizard, including the gaps
+  ## between `wizardReadLine` calls while the wizard's caller does
+  ## post-processing (verify round-trip, status lines, ledger
+  ## writes). The input thread's editor hooks consult this flag and
+  ## skip their work while it is set, so the wizard owns the
+  ## terminal without racing the hook bodies. A torn read of a
+  ## closure field (one word zero, the other the prior value) is a
+  ## SIGSEGV when the input thread calls the torn closure, so all
+  ## hook bodies must check this flag instead of relying on the
+  ## modal to nil the field.
+  ##
+  ## Successful submits keep the flag held: the wizard's caller may
+  ## still be writing to stdout (the verifier line and
+  ## `added <name>` status both land after the last prompt submits).
+  ## The controller calls `wizardFinish` once the entire sequence,
+  ## including caller post-writes, has flushed. Cancel and EOF
+  ## release it inline because there is nothing left to race and the
+  ## cancel handler's in-place `fullRedraw` already anchors the
+  ## prompt.
 
 # --- Modal wizard RPC. The controller (main thread) blocks in
 #     `wizardReadLine` while the input thread runs a one-shot
@@ -144,12 +154,26 @@ var inputModalActive*: Atomic[bool]
 #        `EOFError`). The input thread's `except` branches build a
 #        `WizardReadResponse`, `finally` restores
 #        `deferSubmit`/`submitIcon`, the unified publish path
-#        stores the response and sets `wizardResponsePosted = true`,
-#        then `continue`s back to the persistent prompt.
+#        stores the response and sets `wizardResponsePosted = true`.
+#        On cancel / EOF the flag also clears `inputModalActive`
+#        immediately; on a successful submit the flag stays held
+#        until the controller calls `wizardFinish`, so the input
+#        thread does not race the wizard caller's post-processing
+#        (verify round-trip, status lines, ledger writes) by
+#        repainting the persistent prompt on the row the wizard
+#        just left. The input thread `continue`s back to the outer
+#        loop, where it parks in `inputModalActive` (or exits to
+#        the persistent `readLineWith` when the controller finally
+#        releases the flag).
 #     5. Main thread: wakes up, reads the response under the lock,
-#        clears the flags + `inputModalActive`, resets the editor
-#        fields, clears `inputIdleLinePending`, and either returns
-#        the line or raises `InputCancelled` / `EOFError`.
+#        resets the editor fields, clears `inputIdleLinePending`,
+#        and either returns the line or raises `InputCancelled` /
+#        `EOFError`. The successful-submit path leaves
+#        `inputModalActive` held; the controller must call
+#        `wizardFinish` after the wizard's caller has fully
+#        processed the response and flushed its terminal output, so
+#        the input thread can repaint the persistent prompt on a
+#        fresh row.
 #
 #     ## Why not a condvar
 #
@@ -1801,6 +1825,21 @@ proc inputThreadProc() {.thread.} =
           wizardResponsePosted.store(true, moRelease)
         finally:
           release wizardRequestLock
+        # Hold the wizard branch open until the controller releases
+        # `inputModalActive` (`wizardFinish`) OR the wizard posts a
+        # follow-up prompt. Falling through to the persistent prompt
+        # immediately would let it paint `❯ ` at the cursor row the
+        # wizard just left; the caller's verify round-trip and
+        # post-writes then race that paint, garbling frames and
+        # leaving the main prompt overlapping the verifier line. A
+        # fresh `wizardRequestPosted` means the same wizard issued
+        # another `wizardReadLine` and we should pick it up; the
+        # release means the wizard is truly done and the persistent
+        # prompt is safe to repaint.
+        while inputModalActive.load(moAcquire) and
+              not wizardRequestPosted.load(moAcquire) and
+              inputThreadRunning:
+          sleep 5
         continue
       try:
         let text = minline.readLineWith(edPtr[],
@@ -1942,6 +1981,17 @@ proc wizardReadLine*(editor: var minline.LineEditor, prompt: string,
   ## ESC / Ctrl-C and `IOError` on EOF. Callers that want a stripped
   ## line should call `.strip` on the result (matches the old
   ## `editor.readLine` contract).
+  ##
+  ## On successful submit the modal-active flag stays held: the
+  ## wizard may issue follow-up prompts or do post-processing
+  ## (verify round-trip, ledger write) that races the input thread.
+  ## The controller must call `wizardFinish` after the entire wizard
+  ## sequence — including all caller post-writes — has flushed to
+  ## the terminal, so the persistent prompt paints on a fresh row
+  ## instead of sharing a row with the wizard's last message. Cancel
+  ## and EOF clear the flag inline because there is nothing left to
+  ## race and the cancel handler's own `fullRedraw` already anchors
+  ## the prompt.
   ensureInputThreadStarted()
   acquire wizardRequestLock
   try:
@@ -1974,7 +2024,6 @@ proc wizardReadLine*(editor: var minline.LineEditor, prompt: string,
     editor.renderSuffixCursor = false
     editor.renderRow = 0
     editor.echoRows = 0
-    inputModalActive.store(false, moRelease)
     # The persistent prompt's `onSubmit` set this flag before the
     # wizard took over. The wizard's `getCh` deliberately ignored
     # it while `inputModalActive == true`; now that the modal is
@@ -1985,10 +2034,33 @@ proc wizardReadLine*(editor: var minline.LineEditor, prompt: string,
     inputIdleLinePending.store(false, moRelease)
     case kind
     of wrSubmitted: discard
-    of wrCancelled: raise newException(minline.InputCancelled, "")
-    of wrEof: raise newException(EOFError, "")
+    of wrCancelled:
+      # Cancel has no follow-up writes; clear the flag now so the
+      # input thread can re-enter the persistent prompt and the
+      # cancel handler's in-place `fullRedraw` lands cleanly.
+      inputModalActive.store(false, moRelease)
+      raise newException(minline.InputCancelled, "")
+    of wrEof:
+      inputModalActive.store(false, moRelease)
+      raise newException(EOFError, "")
   finally:
     release wizardRequestLock
+
+proc wizardFinish*() =
+  ## Release the modal-active hold that `wizardReadLine` keeps across
+  ## successful submits. The controller calls this once after the
+  ## wizard's caller has done all post-processing and flushed its
+  ## terminal output: at that point the input thread can re-enter the
+  ## persistent `readLineWith` and paint `❯ ` on a fresh row below
+  ## the wizard's last message.
+  ##
+  ## Without this gate the input thread would exit the wizard branch
+  ## the moment `wizardResponsePosted` was set, repaint the persistent
+  ## prompt at the row the wizard last occupied, and then run a tight
+  ## race against the wizard's caller writing its verifier output —
+  ## leaving `❯ ` and `verifying... ok` on the same line.
+  stdout.flushFile
+  inputModalActive.store(false, moRelease)
 
 proc beginTurn*() =
   ## Hide the physical terminal caret for the duration of the turn. The

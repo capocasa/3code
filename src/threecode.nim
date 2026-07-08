@@ -504,10 +504,14 @@ proc main() =
       if commandResult.disposition == cdModal:
         # The modal wizard runs on the input thread via
         # `wizardReadLine` (see `src/threecode/fatprompt/runtime.nim`).
-        # By the time we get here, the input thread has already
-        # reset the editor, cleared the idle-submitted flag, and
-        # cleared `inputModalActive` — there is nothing
-        # modal-specific for the controller to do.
+        # The wizard keeps `inputModalActive` held across successful
+        # submits so the persistent prompt cannot race the wizard's
+        # post-processing (verify round-trip, ledger write, status
+        # lines). Releasing the hold here, after `handleCommandResult`
+        # returns, lets the input thread repaint the persistent prompt
+        # on the row directly below whatever the wizard's caller wrote
+        # — instead of overlapping `❯ ` with `verifying... ok`.
+        wizardFinish()
         continue
       var echo = userPromptItem(line)
       echo.attachSeparator = true

@@ -340,6 +340,69 @@ suite "terminal visual contract":
     tty.expectNo "nvapi-visible-secret"
     tty.expectAlive()  # cancelling :provider add must not exit the process
 
+  test "idle provider add that completes returns to a fresh main prompt":
+    ## Regression: when `:provider add` ran through to completion, the
+    ## input thread exited the wizard branch the moment its readLineWith
+    ## returned and raced the wizard caller's verify/probe output. The
+    ## persistent prompt's `❯ ` glyph landed on the same row as
+    ## `verifying... ok`, leaving the user with an empty line and a
+    ## caret that the next keystroke would erase along with a row of
+    ## scrollback. Ctrl-C hid the bug because its handler explicitly
+    ## repaints the prompt.
+    let root = newFixture("provider_add_completes")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[])
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send ":provider add\n"
+    tty.drain(200)
+    tty.expect "api key"
+    tty.send "stub-test-key-xyz\n"
+    tty.drain(300)
+    tty.expect "provider name"
+    tty.send "myprov\n"
+    tty.drain(300)
+    tty.expect "url"
+    tty.send "stub://myprov\n"
+    tty.drain(500)
+    tty.expect "fetching models"
+    tty.expect "available"
+    tty.expect "models"
+    tty.send "stub-model\n"
+    tty.drain(500)
+    tty.expect "verifying"
+    tty.expect "ok"
+    # The wizard's caller writes "added myprov" + showProfile before
+    # `handleCommandResult` returns. The controller's `cdModal` branch
+    # now calls `wizardFinish` so the persistent prompt paints on a
+    # row below all of that, not on the verifier's row.
+    tty.drain(300)
+    tty.expect "added myprov"
+    tty.expect "❯"
+    # The buggy frame had `❯   verifying... ok` on a shared row; the
+    # frames after the fix should have `verifying... ok` and `❯ ` on
+    # separate rows.
+    let post = tty.frames[^1].rows.join("\n")
+    let verifyIdx = post.find("verifying")
+    let promptIdx = post.rfind("\u276f")
+    check verifyIdx > 0
+    check promptIdx > verifyIdx
+    # Typing must land on the fresh prompt; if the bug regresses, the
+    # keystrokes go into the abyss and :q never reaches the parser.
+    tty.send "hello"
+    tty.drain(200)
+    tty.expect "\u276f hello"
+    tty.send "\x15"  # Ctrl-U clears the editor line
+    tty.send ":q\n"
+    tty.drain(300)
+    tty.expectExit(0, timeoutMs = 5000)
+
   test "harness commands are transcript items":
     let root = newFixture("harness_commands")
     writeHarnessProviders(root)
