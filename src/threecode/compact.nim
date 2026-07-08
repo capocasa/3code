@@ -34,6 +34,7 @@ proc contextWindowFor*(model: string): int =
   elif "mistral" in m or "mixtral" in m: 128_000
   elif "minimax-m3" in m: 1_000_000
   elif "minimax" in m: 204_800
+  elif "hy3" in m or "hunyuan" in m: 262_144
   else: 128_000
 
 proc contextWindowFor*(p: Profile): int =
