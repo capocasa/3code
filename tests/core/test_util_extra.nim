@@ -150,3 +150,17 @@ suite "util: resolvePath":
 
   test "relative path gets resolved to absolute":
     check resolvePath("src/main.nim").isAbsolute
+
+suite "util: connectErrorDetail":
+  # nativesockets.getAddrInfo surfaces DNS failures as
+  # raiseOSError(osLastError(), gai_strerror(...)), so the message packs a
+  # useless OS strerror in front of the real cause (appended as
+  # `Additional info: "..."`). connectErrorDetail keeps only the cause.
+  test "keeps only the additional-info cause, dropping OS strerror":
+    let e = newException(CatchableError, "Resource temporarily unavailable\n" &
+      "Additional info: \"Temporary failure in name resolution\"")
+    check connectErrorDetail(e) == "Temporary failure in name resolution"
+
+  test "falls back to whole message when no additional info":
+    let e = newException(CatchableError, "Something else weird")
+    check connectErrorDetail(e) == "Something else weird"
