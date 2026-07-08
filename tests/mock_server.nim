@@ -34,6 +34,7 @@ type
     msOk                 ## complete SSE response immediately
     msSilentAfterAccept  ## accept TCP, then never reply (recv stall)
     msSlowStream         ## valid SSE head + first chunk, then stall
+    msStallAfterDone     ## complete SSE response, then black-hole (teardown close hang)
 
   MockServer* = ref object of RootObj
     listener*: Socket
@@ -87,6 +88,19 @@ proc holdUntilGone(client: Socket) =
 
 proc handleSilent(s: MockServer; client: Socket) = client.holdUntilGone()
 
+proc handleStallAfterDone(s: MockServer; client: Socket) =
+  ## Serve a complete, prompt SSE response (so the client's stream loop
+  ## finishes cleanly and returns), then black-hole: hold the socket open
+  ## without sending anything. The client then tears the connection down in
+  ## `closeCachedStreamConn`. Against a black-holed peer a graceful TLS
+  ## `close_notify` would hang forever waiting for the peer's second leg
+  ## (and, under the stdlib's `blockSigpipe`, also block in `sigwait` for a
+  ## SIGPIPE that never arrives) - the teardown deadlock threecode hit on
+  ## flaky links. Mirrors the real flaky-network case where the response
+  ## lands but the link dies as the connection is being closed.
+  s.handleOk(client)
+  client.holdUntilGone()
+
 proc handleSlowStream(s: MockServer; client: Socket) =
   let body = """{"choices":[{"delta":{"content":"fi"},"finish_reason":""}],""" &
     """"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7,"cached_tokens":0}}"""
@@ -112,6 +126,7 @@ proc serverLoop(s: MockServer) {.thread.} =
         of msOk: s.handleOk(client)
         of msSilentAfterAccept: s.handleSilent(client)
         of msSlowStream: s.handleSlowStream(client)
+        of msStallAfterDone: s.handleStallAfterDone(client)
         try: client.close() except CatchableError: discard
     except CatchableError:
       discard

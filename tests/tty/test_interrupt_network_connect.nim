@@ -150,3 +150,46 @@ suite "interrupt during real network connect/stream":
     tty.expectInHistory "hi"
     tty.expectAlive()
     echo "  PASS: happy-path response rendered after prior interrupt state"
+
+  test "Ctrl-C after full response tears down promptly (black-holed teardown)":
+    # The response lands completely, but the link then dies (the mock holds
+    # the socket open without sending anything). The client's stream loop
+    # returns cleanly, then `closeCachedStreamConn` tears the connection
+    # down. Against a black-holed peer a graceful TLS `close_notify` would
+    # hang forever - the teardown deadlock threecode hit on flaky links,
+    # where the network worker leaked a thread stuck in close()/sigwait and
+    # Ctrl-C/ESC could not cancel it. This test asserts the turn still comes
+    # back to the prompt (the worker's teardown close is now abrupt and
+    # bounded), not that the user interrupt cancels an in-flight recv.
+    let root = newFixture("interrupt_teardown")
+    let srv = startMockServer(msStallAfterDone)
+    defer: stopMockServer(srv)
+    writeProviderConfig(root, srv.url)
+    let tty = newTtySession(realBin,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = env(root))
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    tty.send "go"
+    tty.expect "go"
+    tty.send "\n"
+    # The full response should render (the mock sends a complete SSE body).
+    tty.expectInHistory "hi"
+    # The turn should return to the prompt without hanging in teardown
+    # close(). The connect budget is 30s; before the fix the worker leaked
+    # a thread stuck in close()/sigwait for the life of the process.
+    let t0 = epochTime()
+    tty.expectIdleCaret(5000)
+    let elapsed = epochTime() - t0
+    doAssert elapsed < 6.0,
+      "turn did not return after full response: " &
+      formatFloat(elapsed, ffDecimal, 1) &
+      "s; teardown close() hung on black-holed peer"
+    let f = tty.frames[^1]
+    check f.rows[f.cursorRow].contains("\u276f")
+    echo "  PASS: teardown after full response returned in ",
+      formatFloat(elapsed, ffDecimal, 2), "s"
