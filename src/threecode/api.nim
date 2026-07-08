@@ -326,6 +326,23 @@ proc requestQuietShutdown*() {.gcsafe.} =
   markNetworkQuiet()
   shutdownCachedStreamFd()
 
+proc stripLeadingTrailingBlankLines*(s: string): string =
+  ## Drop blank (whitespace-only) lines from the start and end of `s`.
+  ## Internal blank lines survive so paragraph spacing and fenced code
+  ## stay intact. Normalizes assistant content the model pads with
+  ## leading/trailing newlines.
+  if s.len == 0: return s
+  var lines = s.replace("\r\n", "\n").replace("\r", "\n").splitLines
+  var first = 0
+  while first < lines.len and lines[first].strip.len == 0:
+    inc first
+  if first >= lines.len:
+    return ""
+  var last = lines.len - 1
+  while last > first and lines[last].strip.len == 0:
+    dec last
+  result = lines[first .. last].join("\n")
+
 proc buildStreamAssistantMsg*(content, reasoning: string,
                               tools: OrderedTable[int, JsonNode],
                               usage: Usage,
@@ -342,7 +359,7 @@ proc buildStreamAssistantMsg*(content, reasoning: string,
   if content.len == 0 and tools.len == 0 and reasoning.len == 0 and
      usage.totalTokens == 0 and finishReason.len == 0:
     return nil
-  result = %*{"role": "assistant", "content": content}
+  result = %*{"role": "assistant", "content": stripLeadingTrailingBlankLines(content)}
   if finishReason.len > 0:
     result["finish_reason"] = %finishReason
   # DeepSeek-R1-style reasoning models REQUIRE the `reasoning_content`
@@ -781,7 +798,7 @@ proc buildBatchAssistantMsg*(message, reasoning: string;
   if message.len == 0 and reasoning.len == 0 and finishReason.len == 0 and
      (toolCalls == nil or toolCalls.kind != JArray or toolCalls.len == 0):
     return nil
-  result = %*{"role": "assistant", "content": message}
+  result = %*{"role": "assistant", "content": stripLeadingTrailingBlankLines(message)}
   # Same rationale as buildStreamAssistantMsg: DeepSeek-R1-style models
   # require `reasoning_content` on every assistant message in history.
   result["reasoning_content"] = %reasoning
