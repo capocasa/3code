@@ -575,12 +575,12 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
           continue
       if resp.status == 0 and resp.headers.len == 0:
         if isNetworkQuiet():
-          result.errMsg = "network quiet too long (no data for " &
+          result.errMsg = "network quiet for " &
             $(QuietTooLongMs div 1000) & "s)"
         elif isInterrupted():
           result.errMsg = InterruptedByUserMsg
         else:
-          result.errMsg = "network quiet too long (no data for " &
+          result.errMsg = "network quiet for " &
             $(QuietTooLongMs div 1000) & "s)"
         return
       fireActivity(job)
@@ -717,8 +717,8 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     # loop shows it and the user can retry, rather than hanging on a dead
     # connection forever.
     closeCachedStreamConn()
-    result.errMsg = "network quiet too long (no data for " &
-      $(QuietTooLongMs div 1000) & "s)"
+    result.errMsg = "network quiet for " &
+      $(QuietTooLongMs div 1000) & "s"
     return
   if isInterrupted():
     if result.assistantMsg == nil:
@@ -901,7 +901,7 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
         if isInterrupted():
           result.errMsg = InterruptedByUserMsg
         else:
-          result.errMsg = "network quiet too long (no data for " &
+          result.errMsg = "network quiet for " &
             $(QuietTooLongMs div 1000) & "s)"
         return
       hookProviderActivity()
@@ -935,7 +935,7 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
 
   if isNetworkQuiet():
     closeCachedStreamConn()
-    result.errMsg = "network quiet too long (no data for " &
+    result.errMsg = "network quiet for " &
       $(QuietTooLongMs div 1000) & "s)"
     return
   if isInterrupted():
@@ -1464,7 +1464,9 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     hookStopSpinner()
     let body = extractErrorMsg(outcome.errBody)
     let detail = if body.len > 0: body else: errMsg
-    hookRetryNotice &"{code}: {detail}. retry {attempt + 1}/{MaxAttempts} in {backoff}s"
+    let codeLabel = if code != 0: $(code) & ": " else: ""
+    hookRetryNotice codeLabel & detail & ". retry " & $(attempt + 1) &
+      "/" & $MaxAttempts & " in " & $backoff & "s"
     block wait:
       var remaining = backoff * 1000
       while remaining > 0:
