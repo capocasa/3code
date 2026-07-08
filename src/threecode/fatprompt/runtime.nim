@@ -1882,7 +1882,18 @@ proc inputThreadProc() {.thread.} =
       except minline.InputCancelled:
         if inputTurnActive.load(moAcquire):
           requestTurnInterrupt()
-          edPtr[].line = minline.Line(text: "", position: 0)
+          # Preserve any text the user typed into the buffered editor so the
+          # prompt that comes back after the cancel lands with the same text
+          # (and cursor position) the user had before pressing Ctrl-C. The
+          # outer loop's next readLineWith calls resetForRead, which would
+          # otherwise wipe the line; stashing it in prefillText keeps it
+          # alive across that reset. Without this, every keystroke the user
+          # made during the spinner / retry backoff is silently dropped —
+          # the visual cursor lands on an empty `❯ ` and the user has to
+          # retype the whole follow-up.
+          if edPtr[].line.text.len > 0:
+            edPtr[].prefillText = edPtr[].line.text
+            edPtr[].line = minline.Line(text: "", position: 0)
           edPtr[].renderSuffix = ""
           edPtr[].renderSuffixCursor = false
           edPtr[].renderRow = 0
