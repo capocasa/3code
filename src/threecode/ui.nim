@@ -346,8 +346,6 @@ proc promptEditProvider*(editor: var minline.LineEditor,
                         existing: ProviderRec): ProviderRec =
   hintLn &"  editing '{existing.name}' (enter to keep, ctrl+c to abort)",
     resetStyle
-  subtleWriteLn(stdout,
-    "  # tip: change name + url to point at a fine-tune deployment")
   while true:
     let newName = readOptional(editor,
       &"  name [{existing.name}]  : ")

@@ -324,8 +324,7 @@ suite "provider wizard configuration":
            stripped[4..^1] != "verifying..." and
            stripped[4..^1] != "ok" and
            stripped[4..^1] != "updated nvidia" and
-           stripped[4..^1] != "editing 'nvidia' (enter to keep, ctrl+c to abort)" and
-           stripped[4..^1] != "# tip: change name + url to point at a fine-tune deployment":
+           stripped[4..^1] != "editing 'nvidia' (enter to keep, ctrl+c to abort)":
           listedModels.add stripped[4..^1].shortModel()
       check listedModels == @["minimax-m2.5", "minimax-m2.7", "gpt-oss-120b",
                              "gpt-oss-20b", "glm4.7"]
