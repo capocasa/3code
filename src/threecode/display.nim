@@ -549,17 +549,15 @@ proc assistantTextBytes*(bytes: string): string =
 proc captureMarkdownBytes(s: MarkdownState; line = ""; finish = false): string =
   let path = getTempDir() / "3code_assistant_md_" & $getCurrentProcessId()
   let f = open(path, fmWrite)
+  defer: close(f)
   if finish:
     discard finishMd(s, f)
   else:
     discard handleMdLine(s, line, f)
   f.flushFile
-  close(f)
+  defer:
+    try: removeFile(path) except OSError: discard
   result = readFile(path)
-  try:
-    removeFile(path)
-  except OSError:
-    discard
 
 proc writeAssistantBullet*(outFile: File = stdout) =
   outFile.write AssistantTextStyle & "● " & Reset
