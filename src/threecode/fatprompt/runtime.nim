@@ -2082,6 +2082,12 @@ proc wizardFinish*() =
   ## leaving `❯ ` and `verifying... ok` on the same line.
   stdout.flushFile
   inputModalActive.store(false, moRelease)
+  # A cdModal command may bail out on a usage error before any wizard
+  # prompt runs (e.g. `:provider add foo`). Its submit already parked
+  # the input thread on `inputIdleLinePending`; with no `wizardReadLine`
+  # to clear it, the thread stays parked and the prompt freezes. Every
+  # cdModal exit routes through `wizardFinish`, so clear it here.
+  inputIdleLinePending.store(false, moRelease)
 
 proc beginTurn*() =
   ## Hide the physical terminal caret for the duration of the turn. The
