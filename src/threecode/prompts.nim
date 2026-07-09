@@ -117,9 +117,9 @@ const KnownGoodCombos* = [
     # longcat
     ("longcat",   "LongCat-2.0",                                    "longcat",  "2",   "",          "on",     0.2, 8192, false, 1_000_000),
 
-    # hy3 (Tencent Hunyuan v3)
-    ("novita",     "tencent/hy3",                                    "hy3",      "3",   "",          "no_think",0.2, 8192, false, 262_144),
-    ("openrouter", "tencent/hy3:free",                               "hy3",      "3",   "free",      "no_think",0.2, 8192, false, 262_144),
+    # hy (Tencent Hunyuan v3)
+    ("novita",     "tencent/hy3",                                    "hy",       "3",   "",          "no_think",0.2, 8192, false, 262_144),
+    ("openrouter", "tencent/hy3:free",                               "hy",       "3",   "free",      "no_think",0.2, 8192, false, 262_144)
   ]
     ## (provider, model, family, version, variant, reasoning, temperature,
     ## maxTokens, contextWindow) tuples.
@@ -1321,7 +1321,7 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   of "deepseek": deepseekSetup
   of "minimax": minimaxSetup
   of "longcat": longcatSetup
-  of "hy3": hySetup
+  of "hy": hySetup
   else: die "unknown family: '" & p.family & "' (no prompt/tools tuple)"
 
 let DefaultSystemPrompt* = glmSetup.prompt.replace(
@@ -1481,7 +1481,7 @@ proc reasoningSupported*(family: string): bool =
   ## whether `:reasoning` switching has any effect for the active model.
   family == "gpt-oss" or family == "glm" or family == "deepseek" or
     family == "minimax" or family == "kimi" or family == "longcat" or
-    family == "hy3"
+    family == "hy"
 
 proc knownGoodContextWindow*(provider, model: string): int =
   ## Context window for a known-good (provider, model) pair, in tokens.
@@ -1523,7 +1523,7 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # boolean on/off. low/medium/high would silently be coerced or
         # rejected, so we don't offer them.
         return @["off", "on"]
-      if fam == "hy3":
+      if fam == "hy":
         # Hy3 (Tencent Hunyuan v3) exposes a graded effort knob on the
         # vLLM surface via `chat_template_kwargs.reasoning_effort` with
         # values `no_think` / `low` / `high` (see `applyHy3Reasoning` in

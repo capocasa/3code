@@ -1254,7 +1254,7 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "minimax": applyMinimaxReasoning(p, body)
   of "kimi": applyKimiReasoning(p, body)
   of "longcat": applyLongcatReasoning(p, body)
-  of "hy3": applyHy3Reasoning(p, body)
+  of "hy": applyHy3Reasoning(p, body)
   else: discard
 
 # ---------- network worker thread (Tier 2) ----------
