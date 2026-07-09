@@ -132,16 +132,27 @@ proc beginEditorRedraw*(ed: var minline.LineEditor; ready: bool;
   stdout.write "\x1b[?25l\r"
   ed.redrawWrappedExternally = true
   if footerBarBytes.len > 0:
+    # Reserve the bar's own row(s) above the editor, then walk back up to
+    # the editor's current top so the erase lands on the editor, not the bar.
     let rows = ed.renderRow + max(1, footerRowsAboveEditor)
     stdout.write "\x1b[" & $rows & "A"
   elif ready:
+    # The editor was last painted here, so walk up to its top row and
+    # redraw in place. Net cursor movement is zero (up N, then the
+    # trailing newline steps back down N), so this never orphans a line.
     stdout.write "\x1b[" & $(ed.renderRow + 1) & "A"
+  # Only advance to a fresh row when we had reserved chrome above us
+  # (a bar, or a previously-walked-up editor). On the very first bar-less
+  # paint the editor is already on the current row — a bare newline would
+  # strand the `❯ ` that `paintInitialPrompt`/a finished wizard just
+  # wrote on a blank line. Redraw in place instead.
   stdout.write "\x1b[J"
   if footerBarBytes.len > 0:
     stdout.write footerBarBytes
   else:
     stdout.write "\r\x1b[2K"
-  stdout.write "\r\n"
+  if footerBarBytes.len > 0 or ready:
+    stdout.write "\r\n"
   ed.renderRow = 0
 
 proc finishEditorRedraw*(showCaret = true) =

@@ -417,6 +417,41 @@ proc main() =
       return handleBufferedAfterTurn()
     false
 
+  # Run one turn + its post-turn cleanup under a single safety net.
+  # `runTurnsInteractive` catches ApiError/OSError/IOError/CatchableError
+  # inside the turn body, but the cleanup that follows it
+  # (`notifyTurnFinished`, `handleBufferedAfterTurn`, the editor redraw)
+  # writes to stdout and can raise IOError if the terminal/pipe is
+  # already gone. Without this outer catch the IOError escapes main
+  # and the process dies silently. We surface it on stderr and quit
+  # cleanly so the user isn't left staring at a dead prompt.
+  # In debug builds (`nim c`, no `-d:release`) we re-raise so the
+  # developer sees the full Nim stack via the unhandled-exception
+  # printer instead of the sanitized one-liner.
+  proc runTurnWithSafetyNet(): bool =
+    let turnStart = epochTime()
+    try:
+      let interrupted = runTurnsInteractive(prof, messages, session)
+      if not interrupted and notifyEnabled and
+          epochTime() - turnStart >= NotifyMinSeconds:
+        notifyTurnFinished(messages)
+      result = handleBufferedAfterTurn()
+    except IOError as e:
+      stderr.writeLine "3code: output stream broken (" & e.msg &
+        "); session saved. If you ran 3code from a pipe or a now-closed " &
+        "terminal, reattach before sending more prompts."
+      result = true   # treat as quit so the REPL loop exits cleanly
+    except CatchableError as e:
+      when not defined(release):
+        raise
+      let trace = e.getStackTrace()
+      stderr.writeLine "3code: internal error during turn: " & e.msg
+      if trace.len > 0:
+        stderr.writeLine trace
+      stderr.writeLine "3code: session saved at " & session.savePath &
+        ". Please open an issue with the lines above."
+      result = true
+
   # Run a prompt that arrived on the command line (or was queued during
   # startup) through the exact same sequence as a typed submit in the
   # REPL loop below: append the message, refresh the system prompt, do
@@ -434,12 +469,7 @@ proc main() =
     editor.renderRow = 0
     editor.echoRows = 0
     clearDraft(session)
-    let turnStart = epochTime()
-    let interrupted = runTurnsInteractive(prof, messages, session)
-    if not interrupted and notifyEnabled and
-        epochTime() - turnStart >= NotifyMinSeconds:
-      notifyTurnFinished(messages)
-    result = handleBufferedAfterTurn()
+    result = runTurnWithSafetyNet()
 
   # Draw the initial chrome at the bottom of the welcome screen. On
   # resume with prior usage we paint bar+prompt carrying the last
@@ -560,12 +590,7 @@ proc main() =
     # The prompt is now a committed user turn: drop the draft sidecar so a
     # clean exit doesn't restore text the user already sent.
     clearDraft(session)
-    let turnStart = epochTime()
-    let interrupted = runTurnsInteractive(prof, messages, session)
-    if not interrupted and notifyEnabled and
-        epochTime() - turnStart >= NotifyMinSeconds:
-      notifyTurnFinished(messages)
-    if handleBufferedAfterTurn(): break
+    if runTurnWithSafetyNet(): break
 
 when isMainModule:
   main()

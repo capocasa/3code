@@ -593,6 +593,64 @@ suite "terminal visual contract":
     # No -i: the turn completes and the process exits cleanly with code 0.
     tty.expectExit 0
 
+  test "startup prompt paints immediately with no orphan blank line":
+    # Regression: at startup `paintInitialPrompt` painted `❯ ` on the fresh
+    # line the welcome left the cursor on, then the input thread's first
+    # `beginEditorRedraw` erased that line and advanced one row down (the
+    # bar-less first-paint branch ends in `\r\n`), stranding the painted
+    # `❯ ` row as a blank line. The user saw a blank line with the caret at
+    # column 0, and the real `❯ ` only appeared on the row below. The prompt
+    # must sit directly below the welcome's last hint line with no blank row
+    # between them, and it must be present on the very first frame that shows
+    # it.
+    let root = newFixture("startup_no_orphan")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[])
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+      tty.close()
+    # Wait for the idle prompt to be live.
+    tty.expect "❯"
+    tty.drain(200)
+    # Walk the captured frames and find the first one showing the `❯ `.
+    # Between the welcome's "type a prompt" hint and that prompt there must
+    # be no blank row.
+    var promptRow = -1
+    var hintRow = -1
+    var sawBlankBetween = false
+    for f in tty.frames:
+      let rows = f.rows
+      var p = -1
+      for ri, r in rows:
+        if "❯" in r:
+          p = ri
+          break
+      if p >= 0 and promptRow < 0:
+        promptRow = p
+        # hint row is the one above that still contains "type a prompt"
+        for r in countdown(p - 1, 0):
+          if "type a prompt" in rows[r]:
+            hintRow = r
+            break
+        if hintRow >= 0:
+          for r in (hintRow + 1) ..< promptRow:
+            if rows[r].strip.len == 0:
+              sawBlankBetween = true
+      # Once the prompt is showing we only need the first occurrence.
+      if promptRow >= 0:
+        break
+    doAssert promptRow >= 0, "startup prompt never appeared in frames"
+    doAssert hintRow >= 0, "welcome hint line not found"
+    doAssert not sawBlankBetween,
+      "blank row between welcome hint and startup prompt (orphan bug)"
+    # The prompt must anchor at column 2 (after the `❯ ` glyph).
+    require tty.frames[^1].cursorRow >= 0
+    let liveRow = tty.frames[^1].rows[tty.frames[^1].cursorRow]
+    doAssert liveRow.startsWith("❯"),
+      "startup prompt not anchored at the `❯ ` glyph: '" & liveRow & "'"
+
   test "word-level content chunks stream eagerly, not buffered to newline":
     # Eager streaming: when content arrives in word-level chunks with no
     # intermediate newline, each chunk must paint the partial line on screen
