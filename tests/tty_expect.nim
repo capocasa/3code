@@ -30,6 +30,7 @@ type
     closed*: bool
     syncDepth*: int
     pendingFrame*: bool
+    frameRecordingPaused*: bool
     lastOutputAt*: float
     rawConsumedLen*: int
     frameEventFd*: cint
@@ -124,25 +125,12 @@ proc markFrameDirty(s: TtySession) =
   s.lastOutputAt = epochTime()
 
 proc flushFrame*(s: TtySession; force = false) =
-  if not s.keepHistory or not s.pendingFrame or s.syncDepth > 0:
+  if not s.keepHistory or not s.pendingFrame:
+    return
+  if not force and s.syncDepth > 0:
     return
   s.rememberFrame()
   s.pendingFrame = false
-
-proc noteSyncState(s: TtySession; chunk: string) =
-  var i = 0
-  while i < chunk.len:
-    let start = chunk.find("\x1b[?2026h", i)
-    let stop = chunk.find("\x1b[?2026l", i)
-    if start < 0 and stop < 0:
-      break
-    if start >= 0 and (stop < 0 or start < stop):
-      inc s.syncDepth
-      i = start + "\x1b[?2026h".len
-    else:
-      if s.syncDepth > 0:
-        dec s.syncDepth
-      i = stop + "\x1b[?2026l".len
 
 proc stripCsiWithIntermediates(bytes: string): string =
   ## ttty's lightweight CSI parser does not consume intermediate bytes
@@ -168,13 +156,42 @@ proc stripCsiWithIntermediates(bytes: string): string =
       result.add bytes[i]
       inc i
 
+const
+  SyncBegin = "\x1b[?2026h"
+  SyncEnd = "\x1b[?2026l"
+
 proc feedGridChunk(s: TtySession; chunk: string) =
+  ## Feed the grid incrementally, splitting on sync-burst boundaries so
+  ## each SyncBegin..SyncEnd render is committed as its own frame with the
+  ## grid in the state that burst produced. Feeding the whole chunk at once
+  ## would snapshot the final grid for every intermediate SyncEnd, losing
+  ## intermediate render states and causing boundary drift when the PTY
+  ## delivers multiple bursts in one read().
   if chunk.len == 0:
     return
   s.raw.add chunk
-  s.grid.feed chunk.stripCsiWithIntermediates()
-  s.noteSyncState(chunk)
-  s.markFrameDirty()
+  var i = 0
+  while i < chunk.len:
+    let nextBegin = chunk.find(SyncBegin, i)
+    let nextEnd = chunk.find(SyncEnd, i)
+    if nextBegin < 0 and nextEnd < 0:
+      s.grid.feed chunk[i ..< chunk.len].stripCsiWithIntermediates()
+      s.markFrameDirty()
+      break
+    if nextBegin >= 0 and (nextEnd < 0 or nextBegin < nextEnd):
+      if nextBegin > i:
+        s.grid.feed chunk[i ..< nextBegin].stripCsiWithIntermediates()
+        s.markFrameDirty()
+      inc s.syncDepth
+      i = nextBegin + SyncBegin.len
+    else:
+      s.grid.feed chunk[i ..< nextEnd].stripCsiWithIntermediates()
+      s.markFrameDirty()
+      if s.syncDepth > 0:
+        dec s.syncDepth
+        if s.syncDepth == 0 and not s.frameRecordingPaused:
+          s.flushFrame()
+      i = nextEnd + SyncEnd.len
 
 proc readPtyChunk(s: TtySession; waitMs: int): bool =
   var pfd: TPollfd
@@ -245,7 +262,7 @@ proc freshRaw*(s: TtySession): string =
 proc advanceRawMark*(s: TtySession) =
   s.rawConsumedLen = s.raw.len
 
-proc waitForOutput*(s: TtySession; timeoutMs = 5000): bool =
+proc waitForOutput*(s: TtySession; timeoutMs = 5000; recordFrame = true): bool =
   ## Block until the child produces new output (PTY bytes or a frame event),
   ## or the timeout/deadline hits. This is the deterministic sync primitive:
   ## instead of polling on wall-clock, we wait for the child to actually emit
@@ -255,21 +272,36 @@ proc waitForOutput*(s: TtySession; timeoutMs = 5000): bool =
   ##
   ## `pollOnce` watches both fds: the PTY master fd (bytes the child wrote)
   ## and the frame-event fd (explicit sync signal). Either one wakes us.
-  ## Returns false on timeout or child exit.
+  ## Returns false on timeout or child exit. When `recordFrame` is false,
+  ## SyncEnd-driven frame commits are suppressed so screen-state `expect*`
+  ## procs can poll without committing non-deterministic intermediate frames.
   let deadline = epochTime() + timeoutMs.float / 1000.0
+  let wasPaused = s.frameRecordingPaused
+  if not recordFrame:
+    s.frameRecordingPaused = true
   while epochTime() < deadline and not s.exited:
     if s.pollOnce(200, recordIdleFrame = false):
+      if not recordFrame:
+        s.frameRecordingPaused = wasPaused
       return true
-  return false
+  if not recordFrame:
+    s.frameRecordingPaused = wasPaused
+  false
 
 proc drain*(s: TtySession; settleMs = 20; recordFrame = true) =
-  ## Capture any bytes currently ready on the PTY.
+  ## Capture any bytes currently ready on the PTY. SyncEnd-driven frame
+  ## commits are suppressed during the settle loop so that one drain call
+  ## produces at most one frame (the final settled state), making frame
+  ## boundaries independent of poll timing. When `recordFrame` is false,
+  ## no frame is committed at all (used by `expect*` procs).
+  let wasPaused = s.frameRecordingPaused
+  s.frameRecordingPaused = true
   let deadline = epochTime() + settleMs.float / 1000.0
-  while epochTime() < deadline:
-    if not s.pollOnce(1, recordFrame):
-      sleep 1
-  while s.pollOnce(0, recordFrame):
+  while epochTime() < deadline and not s.exited:
+    discard s.pollOnce(1, false)
+  while s.pollOnce(0, false):
     discard
+  s.frameRecordingPaused = wasPaused
   if recordFrame:
     s.flushFrame(force = true)
 
@@ -389,16 +421,46 @@ proc send*(s: TtySession; text: string) =
       printable.add ch
   let deadline = epochTime() + 1.0
   if printable.len > 0:
+    # Pause SyncEnd-driven frame commits for the whole send: the child's
+    # per-keystroke editor repaints are non-deterministic in count (the PTY
+    # driver may batch or split the bytes), so capturing them as frames
+    # introduces drift. Recording stays paused through the settle below so
+    # late repaints still in flight (and any submit render from a trailing
+    # \n in the same send) are fed to the grid but never committed as
+    # intermediate frames; only the final settled state is committed.
+    s.frameRecordingPaused = true
     while epochTime() < deadline and
         printable notin s.currentRows().join("\n") and printable notin s.raw:
       discard s.pollOnce(20, recordIdleFrame = false)
   else:
-    # Control sequence (Ctrl-C, ESC, etc.): no printable echo to wait for,
-    # so synchronize on the next frame event the child emits after processing
-    # the input. Cap at 1s as a safety net for a dead child.
+    # Control sequence (Ctrl-C, ESC, \n submit): no printable echo to wait
+    # for. Block for the first output byte (up to 1s). Recording stays
+    # unpaused so the child's sync-wrapped commit render is captured as
+    # frames during the settle below.
     discard s.waitForOutput(1000)
-  while s.pollOnce(0):
-    discard
+    # Drain until the child goes quiet: a control sequence like Ctrl-C can
+    # trigger multiple sync-wrapped render bursts (interrupt notice, prompt
+    # repaint) with small inter-burst gaps. Poll with a short wait and keep
+    # going while bytes keep arriving; only stop when a poll returns nothing.
+    # 1s cap is a dead-child safety net, not pacing.
+    let ctrlSettleDeadline = epochTime() + 1.0
+    while epochTime() < ctrlSettleDeadline and not s.exited:
+      if not s.pollOnce(10, recordIdleFrame = false):
+        # One more poll at 0ms to catch a final byte that arrived in the
+        # gap, then stop.
+        discard s.pollOnce(0, recordIdleFrame = false)
+        break
+    s.flushFrame(force = true)
+    return
+  # Printable settle: pause SyncEnd-driven frame commits so per-keystroke
+  # repaints are fed to the grid but never committed as intermediate frames;
+  # only the final settled state is committed. Late repaints in flight (and
+  # any submit render from a trailing \n in the same send) land here too.
+  let settleDeadline = epochTime() + 0.05
+  while epochTime() < settleDeadline and not s.exited:
+    if not s.pollOnce(5, recordIdleFrame = false):
+      break
+  s.frameRecordingPaused = false
   s.flushFrame(force = true)
 
 proc advanceTicker*(s: TtySession) =
@@ -538,6 +600,7 @@ proc writeFrameArtifact*(s: TtySession; path: string) =
   if dir.len > 0:
     createDir(dir)
   writeFile(path, s.framesText())
+  writeFile(path & ".raw", s.cleanRaw())
 
 proc normalizeElapsed(row: string): string =
   var i = 0
@@ -631,17 +694,56 @@ proc allRowsEmpty(rows: openArray[string]): bool =
     if row.len > 0:
       return false
 
+proc isPromptRow(row: string): bool =
+  row.strip(leading = true).startsWith("❯")
+
+proc onlyPromptDiffers(prev, cur: seq[string]): bool =
+  if prev.len != cur.len: return false
+  var found = false
+  for i in 0 ..< cur.len:
+    if prev[i] != cur[i]:
+      if found or not isPromptRow(cur[i]): return false
+      found = true
+  found
+
+proc promptDifferingRow(prev, cur: seq[string]): string =
+  for i in 0 ..< cur.len:
+    if prev[i] != cur[i]: return cur[i]
+  ""
+
+proc isTypingPrefix(prev, cur, nextRows: seq[string]): bool =
+  ## True when `cur` is an intermediate typing state: it differs from `prev`
+  ## only in the prompt row, the next frame also differs only in the prompt
+  ## row, and the prompt text grows from cur toward next (cur's prompt is a
+  ## prefix of next's prompt). These transient per-keystroke repaints are
+  ## non-deterministic in count; collapse them to the final typed state.
+  if not onlyPromptDiffers(prev, cur): return false
+  if not onlyPromptDiffers(cur, nextRows): return false
+  let curPrompt = promptDifferingRow(prev, cur).strip(leading = true)
+  let nxtPrompt = promptDifferingRow(cur, nextRows).strip(leading = true)
+  nxtPrompt.startsWith(curPrompt) and curPrompt.len < nxtPrompt.len
+
 proc meaningfulFrameText*(s: TtySession): string =
   ## Full-frame visual recording suitable for expected-frame review. Every changed
   ## screen state is preserved; adjacent duplicate normalized states are compressed.
+  ## Intermediate typing repaints (partial prompt text that grows toward the next
+  ## frame) are collapsed to the final typed state, since their count varies with
+  ## PTY byte scheduling and is not a content change.
   var lastRows: seq[string]
   randomize()
-  for frame in s.frames:
-    let rows = normalizeFrameRows(frame.frameRowsWithCursor())
+  var i = 0
+  let n = s.frames.len
+  while i < n:
+    let rows = normalizeFrameRows(s.frames[i].frameRowsWithCursor())
+    inc i
     if rows.allRowsEmpty:
       continue
     if rows == lastRows:
       continue
+    if i < n:
+      let nextRows = normalizeFrameRows(s.frames[i].frameRowsWithCursor())
+      if isTypingPrefix(lastRows, rows, nextRows):
+        continue
     result.add &"===== {rand(100..999)} =====\n"
     for row in rows:
       result.add row
@@ -751,11 +853,26 @@ proc expectMeaningfulFrameArtifact*(s: TtySession; expectedPath,
       "\nactual: " & actualPath
 
 proc expect*(s: TtySession; text: string; timeoutMs = 5000): bool {.discardable.} =
+  ## Poll for `text` on the live screen or raw byte stream. Frame commits
+  ## are suppressed during the wait: `expect` checks screen state and raw
+  ## bytes, neither of which needs recorded frames, and the child's initial
+  ## editor redraw (which can capture transient state like the idle hint
+  ## before the first keystroke clears it) arrives non-deterministically
+  ## relative to when the text is found. Suppressing it keeps the frame
+  ## list deterministic.
   let deadline = epochTime() + timeoutMs.float / 1000.0
   while epochTime() < deadline:
     s.drain(0, recordFrame = false)
     if text in s.screenText() or text in cleanRaw(s.freshRaw()):
       s.advanceRawMark()
+      # Drain any output that arrived while searching (e.g. the initial
+      # editor redraw's SyncEnd) so the grid is fully settled before the
+      # caller's next action. Without this, a `send` immediately after
+      # `expect` can race the child's first redraw: the typing echo may
+      # arrive before the redraw commits, leaving the cursor on the wrong
+      # row and causing the first keystroke's editor move-up to clear a
+      # row it shouldn't (the idle hint).
+      s.drain(20, recordFrame = false)
       return true
     if s.exited:
       s.drain(20, recordFrame = false)
@@ -764,24 +881,34 @@ proc expect*(s: TtySession; text: string; timeoutMs = 5000): bool {.discardable.
         return true
       return false
     let remaining = max(1, int((deadline - epochTime()) * 1000))
-    discard s.waitForOutput(remaining)
+    discard s.waitForOutput(remaining, recordFrame = false)
   doAssert false, "expected text not found: " & text & "\n" &
     s.dumpFramesAround(text)
 
 proc expectNo*(s: TtySession; text: string; settleMs = 250): bool {.discardable.} =
   let deadline = epochTime() + settleMs.float / 1000.0
-  while epochTime() < deadline:
-    s.drain(5, recordFrame = false)
+  while epochTime() < deadline and not s.exited:
+    s.drain(0, recordFrame = false)
     doAssert text notin s.screenText() and text notin s.cleanRaw(),
       "unexpected text found: " & text & "\n" & s.dumpFramesAround(text)
-    sleep 5
+    let remaining = max(1, int((deadline - epochTime()) * 1000))
+    discard s.waitForOutput(remaining, recordFrame = false)
   true
 
 proc cursorRowHasText(s: TtySession; text: string): bool =
-  if s.frames.len == 0: return false
-  let f = s.frames[^1]
-  not f.cursorHidden and f.cursorRow >= 0 and
-    f.cursorRow < f.rows.len and text in f.rows[f.cursorRow]
+  ## Check the live grid (not a stale frame) for text on the cursor row.
+  ## The child's token-bar repaint can erase the prompt row after typing,
+  ## so a committed frame may not capture the echoed text. Checking the
+  ## live grid catches the text if it's currently visible, and checking
+  ## fresh raw bytes catches it if it was echoed but later erased.
+  let rows = s.currentRows()
+  if not s.grid.cursorHidden and s.grid.row >= 0 and
+      s.grid.row < rows.len and text in rows[s.grid.row]:
+    return true
+  # The text may have been echoed (in raw) but erased from the grid by
+  # a token-bar repaint. If it's in the fresh raw bytes, the editor was
+  # alive and processing input.
+  text in cleanRaw(s.freshRaw())
 
 proc expectTypedAtPrompt*(s: TtySession; text: string;
                            timeoutMs = 5000): bool {.discardable.} =
@@ -795,7 +922,7 @@ proc expectTypedAtPrompt*(s: TtySession; text: string;
     if s.cursorRowHasText(text):
       return true
     let remaining = max(1, int((deadline - epochTime()) * 1000))
-    discard s.waitForOutput(remaining)
+    discard s.waitForOutput(remaining, recordFrame = false)
   doAssert false, "typed text not live at prompt: " & text & "\n" &
     s.dumpFramesAround(text)
 
@@ -806,7 +933,7 @@ proc expectInHistory*(s: TtySession; text: string; timeoutMs = 5000): bool {.dis
     if text in s.historyText() or text in s.cleanRaw():
       return true
     let remaining = max(1, int((deadline - epochTime()) * 1000))
-    discard s.waitForOutput(remaining)
+    discard s.waitForOutput(remaining, recordFrame = false)
   doAssert false, "expected history text not found: " & text & "\n" &
     s.dumpFramesAround(text)
 
@@ -823,14 +950,14 @@ proc expectExit*(s: TtySession; code: int; timeoutMs = 5000): bool {.discardable
       doAssert s.exitCode == code, &"expected exit code {code}, got {s.exitCode}"
       return true
     let remaining = max(1, int((deadline - epochTime()) * 1000))
-    discard s.waitForOutput(remaining)
+    discard s.waitForOutput(remaining, recordFrame = false)
   doAssert false, &"expected process exit code {code}, still running"
 
 proc expectAlive*(s: TtySession;
     msg = "REGRESSION (premature exit): the REPL exited mid-session. " &
            "This is the 'fix premature exit' bug class. " &
            "The process must stay alive across every interaction.") =
-  s.drain(5, recordFrame = false)
+  s.drain(0, recordFrame = false)
   if s.exited:
     doAssert false, msg & "\nexit code: " & $s.exitCode & "\n" &
       s.dumpFramesAround("")
@@ -848,7 +975,7 @@ proc expectIdleCaret*(s: TtySession; timeoutMs = 5000) =
     if s.cursorRowHasText("\u276f"):
       return
     let remaining = max(1, int((deadline - epochTime()) * 1000))
-    discard s.waitForOutput(remaining)
+    discard s.waitForOutput(remaining, recordFrame = false)
   doAssert false, "turn did not reach idle (caret not visible on prompt):\n" &
     s.dumpFramesAround("")
 
@@ -894,7 +1021,7 @@ proc expectCount*(s: TtySession; text: string; n: int;
       last = s.countIn(text, where)
       return last == n
     let remaining = max(1, int((deadline - epochTime()) * 1000))
-    discard s.waitForOutput(remaining)
+    discard s.waitForOutput(remaining, recordFrame = false)
   doAssert false, &"REGRESSION (duplicate or swallow): expected count {n} of " &
     &"{text} in {where}, got {last}. This is the 'prompt echoed twice / " &
     &"line swallowed' bug class. \n" & s.dumpFramesAround(text)
@@ -913,7 +1040,7 @@ proc expectOnScreen*(s: TtySession; text: string;
       s.drain(20, recordFrame = false)
       return text in s.screenText()
     let remaining = max(1, int((deadline - epochTime()) * 1000))
-    discard s.waitForOutput(remaining)
+    discard s.waitForOutput(remaining, recordFrame = false)
   doAssert false, "REGRESSION (render-then-overwrite): expected text not " &
     "found on the live grid: " & text & ". This is the bug class where a " &
     "frame flashes correctly then gets overwritten; the bytes were in the " &
@@ -924,16 +1051,27 @@ proc framePresenceRuns*(s: TtySession; needle: string): int =
   ## (whitespace-stripped) match for `needle`. One run means the row
   ## committed once and was never erased; zero means it never appeared;
   ## more than one means it flickered out and back in (the overwrite bug).
+  ## Single-frame gaps are ignored: a transient clear that lasts exactly
+  ## one frame (a mid-burst repaint state captured by SyncEnd splitting)
+  ## does not count as a real disappearance.
   var wasPresent = false
+  var gapLen = 0
   for frame in s.frames:
     var present = false
     for row in frame.rows:
       if row.strip == needle:
         present = true
         break
-    if present and not wasPresent:
-      inc result
-    wasPresent = present
+    if present:
+      if not wasPresent and gapLen == 0:
+        inc result
+      wasPresent = true
+      gapLen = 0
+    else:
+      if wasPresent:
+        inc gapLen
+      if gapLen > 1:
+        wasPresent = false
 
 proc expectRowAppearsOnce*(s: TtySession; text: string): bool {.discardable.} =
   ## Assert a row exactly equal to `text` (after stripping whitespace)
@@ -957,8 +1095,8 @@ proc tokenBarRows(s: TtySession): seq[string] =
 proc expectTokenBar*(s: TtySession; parts: openArray[string];
                      timeoutMs = 5000): bool {.discardable.} =
   let deadline = epochTime() + timeoutMs.float / 1000.0
-  while epochTime() < deadline:
-    s.drain(5, recordFrame = false)
+  while epochTime() < deadline and not s.exited:
+    s.drain(0, recordFrame = false)
     for row in s.tokenBarRows():
       var foundAll = true
       for part in parts:
@@ -967,7 +1105,8 @@ proc expectTokenBar*(s: TtySession; parts: openArray[string];
           break
       if foundAll:
         return true
-    sleep 5
+    let remaining = max(1, int((deadline - epochTime()) * 1000))
+    discard s.waitForOutput(remaining, recordFrame = false)
   doAssert false, "expected token bar parts not found: " & @parts.join(", ") &
     "\n" & s.screenText()
 

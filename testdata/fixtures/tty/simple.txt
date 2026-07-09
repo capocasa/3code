@@ -1,67 +1,52 @@
-===== 745 =====
+===== 109 =====
 
   ╭─╮
-   ─┤  3code v0.5.0--c0541edf-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
-❯ This is a test prompt
-===== 400 =====
-
-  ╭─╮
-   ─┤  3code v0.5.0--c0541edf-unstaged   the economical coding agent
-  ╰─╯
-
-  provider  stub
-  model     stub-model
-
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ This is a test prompt
-===== 402 =====
+===== 534 =====
 
   ╭─╮
-   ─┤  3code v0.5.0--c0541edf-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ This is a test prompt
   … Thinking about the test prompt
 ⣿ ○0% ↓7 0s
 ❯
-===== 325 =====
+===== 100 =====
 
   ╭─╮
-   ─┤  3code v0.5.0--c0541edf-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ This is a test prompt
 ● This is a test response.
 
   ○0% ↓13
 ❯
-===== 560 =====
+===== 133 =====
 
   ╭─╮
-   ─┤  3code v0.5.0--c0541edf-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ This is a test prompt
 ● This is a test response.
@@ -69,16 +54,15 @@
 
 ⣿ ○0% ↓13 0s
 ❯
-===== 274 =====
+===== 828 =====
 
   ╭─╮
-   ─┤  3code v0.5.0--c0541edf-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ This is a test prompt
 ● This is a test response.
@@ -86,16 +70,15 @@
 
   ○1%  ↑120  ↓24  0s
 ❯
-===== 206 =====
+===== 454 =====
 
   ╭─╮
-   ─┤  3code v0.5.0--c0541edf-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ This is a test prompt
 ● This is a test response.

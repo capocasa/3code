@@ -1,16 +1,15 @@
-===== 795 =====
+===== 828 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-main-3430d28b-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ :help
-===== 246 =====
+===== 338 =====
 
   commands:
   :help             show this message
@@ -51,7 +50,7 @@
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯
-===== 845 =====
+===== 294 =====
 
   commands:
   :help             show this message
@@ -92,7 +91,7 @@
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
-===== 497 =====
+===== 533 =====
   :model X          switch to model X (within current provider)
   :provider         list configured providers (current marked with *)
   :provider X       switch to provider X (model defaults to first in its list)
@@ -133,7 +132,7 @@
       alt
 
 ❯
-===== 337 =====
+===== 392 =====
   :model X          switch to model X (within current provider)
   :provider         list configured providers (current marked with *)
   :provider X       switch to provider X (model defaults to first in its list)
@@ -174,7 +173,7 @@
       alt
 
 ❯ :model
-===== 471 =====
+===== 726 =====
   :reasoning        list reasoning levels for current model (* marks active)
   :reasoning X      switch reasoning level (low / medium / high)
   :streaming        show streaming mode (on = live output, off = request/response)
@@ -215,7 +214,7 @@
       stub-large
 
 ❯
-===== 612 =====
+===== 441 =====
   :reasoning        list reasoning levels for current model (* marks active)
   :reasoning X      switch reasoning level (low / medium / high)
   :streaming        show streaming mode (on = live output, off = request/response)
@@ -256,7 +255,7 @@
       stub-large
 
 ❯ :reasoning
-===== 262 =====
+===== 617 =====
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
@@ -297,7 +296,7 @@
     experimental: level is free-form, type any value
 
 ❯
-===== 416 =====
+===== 102 =====
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
@@ -338,7 +337,7 @@
     experimental: level is free-form, type any value
 
 ❯ :model stub-large
-===== 496 =====
+===== 700 =====
   :version          show the running 3code version
   :q :quit          exit (also Ctrl-D)
 
@@ -379,7 +378,7 @@ provider  stub
 model     stub-large
 
 ❯
-===== 391 =====
+===== 550 =====
   :version          show the running 3code version
   :q :quit          exit (also Ctrl-D)
 
@@ -420,7 +419,7 @@ provider  stub
 model     stub-large
 
 ❯ :reasoning high
-===== 806 =====
+===== 772 =====
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
@@ -461,7 +460,7 @@ model     stub-large
 reasoning high
 
 ❯
-===== 390 =====
+===== 827 =====
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
@@ -502,7 +501,7 @@ model     stub-large
 reasoning high
 
 ❯ :provider alt
-===== 334 =====
+===== 631 =====
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
@@ -543,7 +542,7 @@ provider  alt
 model     alt-model
 
 ❯
-===== 675 =====
+===== 686 =====
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
@@ -584,7 +583,7 @@ provider  alt
 model     alt-model
 
 ❯ :tokens
-===== 930 =====
+===== 353 =====
 ❯ :provider
 
 : providers
@@ -625,7 +624,7 @@ model     alt-model
   no tokens used yet
 
 ❯
-===== 786 =====
+===== 588 =====
 ❯ :provider
 
 : providers
@@ -666,7 +665,7 @@ model     alt-model
   no tokens used yet
 
 ❯ :clear
-===== 870 =====
+===== 130 =====
       alt
 
 ❯ :model
@@ -707,7 +706,7 @@ model     alt-model
 ════════════════════════════════════════
 
 ❯
-===== 296 =====
+===== 767 =====
       alt
 
 ❯ :model
@@ -748,7 +747,7 @@ model     alt-model
 ════════════════════════════════════════
 
 ❯ :sessions
-===== 589 =====
+===== 778 =====
     * stub-model
       stub-large
 
@@ -789,7 +788,7 @@ model     alt-model
   no saved sessions for this directory
 
 ❯
-===== 642 =====
+===== 795 =====
     * stub-model
       stub-large
 
@@ -830,7 +829,7 @@ model     alt-model
   no saved sessions for this directory
 
 ❯ :sessions all
-===== 920 =====
+===== 253 =====
 
 ❯ :model stub-large
 
@@ -871,7 +870,7 @@ model     alt-model
   listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯
-===== 460 =====
+===== 390 =====
 
 ❯ :model stub-large
 
@@ -912,7 +911,7 @@ model     alt-model
   listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯ :log
-===== 605 =====
+===== 914 =====
 
 ❯ :reasoning high
 
@@ -953,7 +952,7 @@ model     alt-model
     no tool calls yet
 
 ❯
-===== 630 =====
+===== 324 =====
 
 ❯ :reasoning high
 
@@ -994,7 +993,7 @@ model     alt-model
     no tool calls yet
 
 ❯ :show
-===== 410 =====
+===== 652 =====
 reasoning high
 
 ❯ :provider alt
@@ -1035,7 +1034,7 @@ model     alt-model
     no tool calls yet
 
 ❯
-===== 931 =====
+===== 745 =====
 reasoning high
 
 ❯ :provider alt
@@ -1076,7 +1075,7 @@ model     alt-model
     no tool calls yet
 
 ❯ :compact
-===== 165 =====
+===== 710 =====
 model     alt-model
 
 ❯ :tokens
@@ -1117,7 +1116,7 @@ model     alt-model
   unknown command: :compact  (try :help)
 
 ❯
-===== 343 =====
+===== 702 =====
 model     alt-model
 
 ❯ :tokens
@@ -1158,7 +1157,7 @@ model     alt-model
   unknown command: :compact  (try :help)
 
 ❯ :summarize
-===== 238 =====
+===== 257 =====
   no tokens used yet
 
 ❯ :clear
@@ -1199,7 +1198,7 @@ model     alt-model
   failed or not worth it
 
 ❯
-===== 623 =====
+===== 214 =====
   no tokens used yet
 
 ❯ :clear
@@ -1240,7 +1239,7 @@ model     alt-model
   failed or not worth it
 
 ❯ :prompt
-===== 319 =====
+===== 181 =====
 
   Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), h
 ard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (pushing code, op
@@ -1281,7 +1280,7 @@ p a clear answer, say so — don't guess.
  next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯
-===== 991 =====
+===== 308 =====
 
   Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), h
 ard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (pushing code, op
@@ -1322,7 +1321,7 @@ p a clear answer, say so — don't guess.
  next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯ :toknes
-===== 805 =====
+===== 110 =====
   # Git
 
   Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`. Don't pu
@@ -1363,7 +1362,7 @@ p a clear answer, say so — don't guess.
   unknown command: :toknes  did you mean :tokens?
 
 ❯
-===== 669 =====
+===== 444 =====
   # Git
 
   Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`. Don't pu
