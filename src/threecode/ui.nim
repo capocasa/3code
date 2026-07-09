@@ -344,7 +344,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
 
 proc promptEditProvider*(editor: var minline.LineEditor,
                         existing: ProviderRec): ProviderRec =
-  hintLn &"  editing '{existing.name}' (enter to keep, ctrl+c to abort)",
+  hintLn &"  editing '{existing.name}' (enter to keep; ctrl+c/esc clears line, empty line aborts)",
     resetStyle
   while true:
     let newName = readOptional(editor,
@@ -405,7 +405,7 @@ proc promptEditProvider*(editor: var minline.LineEditor,
 
 proc bootstrapProvider*(editor: var minline.LineEditor): Profile =
   stdout.styledWriteLine fgMagenta,
-    "no provider configured, let's add one. (ctrl+c or ctrl+d to quit)",
+    "no provider configured, let's add one. (ctrl+c to abort; esc clears line)",
     resetStyle
   let prov = try: promptNewProvider(editor)
              except minline.InputCancelled:
