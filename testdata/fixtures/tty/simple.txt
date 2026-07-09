@@ -1,7 +1,18 @@
-===== 423 =====
+===== 745 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
+   ─┤  3code v0.5.0--c0541edf-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+❯ This is a test prompt
+===== 400 =====
+
+  ╭─╮
+   ─┤  3code v0.5.0--c0541edf-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,10 +21,10 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ This is a test prompt
-===== 857 =====
+===== 402 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
+   ─┤  3code v0.5.0--c0541edf-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -25,10 +36,10 @@
   … Thinking about the test prompt
 ⣿ ○0% ↓7 0s
 ❯
-===== 366 =====
+===== 325 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
+   ─┤  3code v0.5.0--c0541edf-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -41,10 +52,10 @@
 
   ○0% ↓13
 ❯
-===== 612 =====
+===== 560 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
+   ─┤  3code v0.5.0--c0541edf-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -58,10 +69,10 @@
 
 ⣿ ○0% ↓13 0s
 ❯
-===== 688 =====
+===== 274 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
+   ─┤  3code v0.5.0--c0541edf-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -75,10 +86,10 @@
 
   ○1%  ↑120  ↓24  0s
 ❯
-===== 217 =====
+===== 206 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-main-8c3eb1ee-unstaged   the economical coding agent
+   ─┤  3code v0.5.0--c0541edf-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
