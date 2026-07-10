@@ -1511,12 +1511,18 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
         min(1 shl base, 90)
       else:
         min(1 shl serverRetryLevel, 16)
-    hookStopSpinner()
+    # Keep the spinner twirling across the backoff. Stopping it before the
+    # sleep and restarting it after left the whole retry window with a frozen
+    # bar and no animation, so a slow provider looked like the turn had
+    # stalled. The retry notice below commits as a transcript line (the
+    # spinner's footer repaint re-asserts itself on the next 80ms tick), and
+    # the backoff sleep is the long phase that most needs a live indicator.
     let body = extractErrorMsg(outcome.errBody)
     let detail = if body.len > 0: body else: errMsg
     let codeLabel = if code != 0: $(code) & ": " else: ""
     hookRetryNotice codeLabel & detail & ". retry " & $(attempt + 1) &
       "/" & $MaxAttempts & " in " & $backoff & "s"
+    hookStartSpinner("")
     block wait:
       var remaining = backoff * 1000
       while remaining > 0:
@@ -1527,9 +1533,6 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     if isInterrupted():
       raise newException(ApiError, "interrupted by user during retry backoff")
     clearNetworkQuiet()
-    # don't set retry as status lable- it's show as message
-    #hookSetStatusLabel(&"retry {attempt + 1}/{MaxAttempts}")
-    hookStartSpinner("")
     if category == "rate":
       inc rateRetryLevel
       rateLastTs = epochTime()

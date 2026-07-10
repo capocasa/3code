@@ -278,8 +278,8 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
         if retryAfter > 0: retryAfter
         elif category == "rate": min(1 shl rateRetryLevel, 90)
         else: min(1 shl serverRetryLevel, 16)
-      hookStopSpinner()
       hookRetryNotice &"3code: {errMsg}; retry {attempt + 1}/{StubMaxAttempts} in {backoff}s"
+      hookStartSpinner("")
       var waitMs = backoff * 1000
       while waitMs > 0:
         if isInterrupted():
@@ -293,8 +293,6 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
       else:
         inc serverRetryLevel
         serverLastTs = epochTime()
-      hookSetStatusLabel(&"retry {attempt + 1}/{StubMaxAttempts}")
-      hookStartSpinner("")
     else:
       result = node
       break
