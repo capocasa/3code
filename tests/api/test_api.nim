@@ -478,3 +478,74 @@ echo "OK"
     check "{humanTokens(maxTokensOverride)}" notin runOut
     # The bumped budget for 8192 is min(16384, 200000) = 16384 = "16.4k"
     check "16.4k" in runOut
+
+  test "runTurns retries then recovers on a bare empty reply (no finish_reason)":
+    # A 200 OK that comes back with no content, no tool calls, and no
+    # finish_reason is not budget-starved and not steerable. runTurns must
+    # still not dead-end: it resends the bare call, printing the reason and
+    # a retry counter, and recovers when a later response carries content.
+    let pid = $getCurrentProcessId()
+    let probeDir = getTempDir() / ("tc_empty_resend_" & pid)
+    let probePath = probeDir / "probe.nim"
+    let outPath = probeDir / "probe"
+    let cacheDir = probeDir / "nimcache"
+    createDir(probeDir)
+    createDir(cacheDir)
+    defer:
+      try: removeDir(probeDir) except OSError: discard
+    # Response 1: bare empty (no finish_reason) -> steering retry.
+    # Response 2: bare empty -> empty-resend 1.
+    # Response 3: real content, proving recovery.
+    writeFile(probeDir / "stub_responses.json", """[{
+  "role": "assistant",
+  "content": "",
+  "stream": false
+},{
+  "role": "assistant",
+  "content": "",
+  "stream": false
+},{
+  "role": "assistant",
+  "content": "RECOVERED_AFTER_RESEND",
+  "stream": false
+}]""")
+    writeFile(probePath, """
+import std/[json, strutils]
+import threecode
+import threecode/api except callModel
+
+var messages = %*[
+  {"role": "system", "content": "sys"},
+  {"role": "user", "content": "go"}
+]
+var session: Session
+session.savePath = ""
+session.readCache = newReadCache()
+let profile = Profile(name: "nebius.glm-5.1", url: "stub://", key: "k",
+  family: "glm", model: "zai-org/GLM-5.1")
+
+discard runTurnsInteractive(profile, messages, session)
+
+let lastAssistant = messages[^1]
+doAssert lastAssistant{"role"}.getStr == "assistant",
+  "last msg role: " & lastAssistant{"role"}.getStr
+doAssert lastAssistant{"content"}.getStr == "RECOVERED_AFTER_RESEND",
+  "content: " & lastAssistant{"content"}.getStr
+echo "OK"
+""")
+    let compileCmd = "nim c -d:ssl -d:providerStub --threads:on --path:src " &
+      nimbleDepFlags() & " --nimcache:" & cacheDir.quoteShell &
+      " -o:" & outPath.quoteShell & " " & probePath.quoteShell
+    let (compileOut, compileCode) = execCmdEx(compileCmd)
+    check compileCode == 0
+    if compileCode != 0:
+      checkpoint compileOut
+    let (runOut, runCode) = execCmdEx(outPath.quoteShell, workingDir = probeDir)
+    check runCode == 0
+    if runCode != 0:
+      checkpoint runOut
+    # The bare-resend notice must carry the reason and the retry counter,
+    # matching the requested format: "empty reply: <reason>. retrying N/12".
+    check "empty reply: no content, no tool calls. retrying 1/12" in runOut
+    # The old dead-end string must NOT appear when recovery succeeds.
+    check "empty reply - no content, no tool calls" notin runOut

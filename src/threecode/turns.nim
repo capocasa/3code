@@ -283,9 +283,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     maxTokensOverride = 0          # > 0 replaces known-good max_tokens
     lengthEscalations = 0          # "length" retries so far this turn
     steerAttempts = 0              # "stop"/unknown steering retries
+    emptyRetries = 0               # bare empty-reply resends after smart-handling
   const
     MaxLengthEscalations = 3
     MaxSteerAttempts = 1
+    MaxEmptyRetries = 12
   while true:
     var usage: Usage
     var msg: JsonNode
@@ -340,23 +342,16 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       else: newJArray()
     let finishReason = msg{"finish_reason"}.getStr("")
     if content.strip.len == 0 and toolCalls.len == 0:
-      # Empty assistant turn. Branch on finish_reason rather than blindly
-      # retrying (a bare resend reproduces the empty reply). This is a
-      # conversational concern, kept out of callModel's transport retry block.
+      # Empty assistant turn. Try the targeted recoveries first (escalate the
+      # budget on "length", steer on "stop"/unknown), then fall back to a
+      # bare resend. A hostile or broken provider can't pin the turn: each
+      # path has its own ceiling, and the final resend loop is bounded by
+      # MaxEmptyRetries. This is a conversational concern, kept out of
+      # callModel's transport retry block.
       let budgetStarved =
         finishReason == "length" or
         usage.completionTokens >= knownGoodGeneration(p).maxTokens or
         usage.reasoningTokens > 0
-      if finishReason == "content_filter":
-        # Terminal: the provider refused the content. Persist the empty turn
-        # and surface the existing dead-end notice; no point retrying as-is.
-        messages.add msg
-        saveSession(session, messages)
-        writeTranscriptWithFatPrompt:
-          hintLn "empty reply - content filtered by provider", resetStyle
-        endTurnAfterTranscriptAppend()
-        turnEnded = true
-        break
       if budgetStarved and lengthEscalations < MaxLengthEscalations:
         inc lengthEscalations
         let cur = knownGoodGeneration(p).maxTokens
@@ -380,9 +375,28 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           hintLn "empty reply; re-prompting for a final answer", resetStyle
         debugOut &"runTurns: empty steer-retry {steerAttempts}/{MaxSteerAttempts}"
         continue
-      # Exhausted auto-handling. Persist the empty turn and fall through to
-      # the existing dead-end notice below (commitAssistantItem renders
-      # "empty reply - no content, no tool calls").
+      # Smart-handling exhausted (or never applicable). Retry the bare call,
+      # surfacing whatever signal the reply carried as the reason. Bounded so
+      # a permanently-empty provider gives up rather than looping forever.
+      if emptyRetries < MaxEmptyRetries:
+        inc emptyRetries
+        let reason =
+          if finishReason.len > 0: finishReason
+          elif usage.reasoningTokens > 0: "reasoning only"
+          else: "no content, no tool calls"
+        writeTranscriptWithFatPrompt:
+          errLn "empty reply: ", reason, ". retrying ", $emptyRetries, "/", $MaxEmptyRetries, resetStyle
+        debugOut &"runTurns: empty resend {emptyRetries}/{MaxEmptyRetries} finishReason={finishReason}"
+        continue
+      # All retries exhausted. Persist the empty turn and surface a final
+      # notice so the user knows the model gave nothing back.
+      messages.add msg
+      saveSession(session, messages)
+      writeTranscriptWithFatPrompt:
+        errLn "empty reply - giving up after ", $MaxEmptyRetries, " retries", resetStyle
+      endTurnAfterTranscriptAppend()
+      turnEnded = true
+      break
     messages.add msg
     saveSession(session, messages)
     let window = contextWindowFor(p)
