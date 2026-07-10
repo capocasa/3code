@@ -1,85 +1,85 @@
-===== 109 =====
+===== 908 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ This is a test prompt
-===== 534 =====
+===== 803 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ This is a test prompt
   … Thinking about the test prompt
 ⣿ ○0% ↓7 0s
 ❯
-===== 100 =====
+===== 241 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ This is a test prompt
 ● This is a test response.
 
   ○0% ↓13
 ❯
-===== 133 =====
+===== 405 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ This is a test prompt
 ● This is a test response.
 
 
 ⣿ ○0% ↓13 0s
 ❯
-===== 828 =====
+===== 557 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ This is a test prompt
 ● This is a test response.
 
 
   ○1%  ↑120  ↓24  0s
 ❯
-===== 454 =====
+===== 598 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ This is a test prompt
 ● This is a test response.
 

@@ -1,71 +1,71 @@
-===== 887 =====
+===== 857 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
-===== 723 =====
+===== 911 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
   ○0% ↓5
 ❯
-===== 622 =====
+===== 280 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
 
 ⣿ ○0% ↓5 0s
 ❯
-===== 686 =====
+===== 601 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 392 =====
+===== 797 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -73,16 +73,16 @@ $ printf 'ok-one\nok-two\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 124 =====
+===== 629 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -91,16 +91,16 @@ $ printf 'ok-one\nok-two\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 997 =====
+===== 724 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -110,16 +110,16 @@ $ printf 'ok-one\nok-two\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 646 =====
+===== 511 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -131,16 +131,16 @@ $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 715 =====
+===== 265 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -153,16 +153,16 @@ $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 184 =====
+===== 516 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -176,16 +176,16 @@ $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 752 =====
+===== 174 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -200,16 +200,16 @@ $ printf 'ok-one\nok-two\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 483 =====
+===== 807 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -226,16 +226,16 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 590 =====
+===== 397 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -253,16 +253,16 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 858 =====
+===== 618 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -281,16 +281,16 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 393 =====
+===== 889 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -310,16 +310,16 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 461 =====
+===== 197 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -340,16 +340,16 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 327 =====
+===== 663 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -371,16 +371,16 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 547 =====
+===== 765 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -403,16 +403,16 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 909 =====
+===== 872 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -436,16 +436,16 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 573 =====
+===== 959 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -470,16 +470,16 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 563 =====
+===== 138 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -504,16 +504,16 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 868 =====
+===== 907 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -538,16 +538,16 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 308 =====
+===== 257 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -574,16 +574,16 @@ $ sleep 3; printf 'slow-done\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 286 =====
+===== 116 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -614,16 +614,16 @@ $ sleep 3; printf 'slow-done\n'  (0s)
 
   ○1% ↓5
 ❯
-===== 849 =====
+===== 146 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -655,16 +655,16 @@ $ sleep 3; printf 'slow-done\n'  (0s)
 
 ⣿ ○1% ↓5 0s
 ❯
-===== 310 =====
+===== 251 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 
@@ -696,16 +696,16 @@ $ sleep 3; printf 'slow-done\n'  (0s)
 
   ○1%  ↑210  ↓20  0s
 ❯
-===== 435 =====
+===== 120 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run bash checks
 ● Running bash checks.
 

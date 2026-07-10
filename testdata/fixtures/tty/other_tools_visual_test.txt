@@ -1,71 +1,71 @@
-===== 315 =====
+===== 973 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run other tool checks
-===== 871 =====
+===== 909 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run other tool checks
 ● Exercising non-bash tools.
 
   ○0% ↓6
 ❯
-===== 413 =====
+===== 696 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run other tool checks
 ● Exercising non-bash tools.
 
 
 ⣿ ○0% ↓6 0s
 ❯
-===== 664 =====
+===== 870 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run other tool checks
 ● Exercising non-bash tools.
 
 
   ○2%  ↑300  ↓44  0s
 ❯
-===== 978 =====
+===== 558 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run other tool checks
 ● Exercising non-bash tools.
 
@@ -112,16 +112,16 @@ p --- /tmp/applied.txt
 
   ○0% ↓4
 ❯
-===== 490 =====
+===== 134 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run other tool checks
 ● Exercising non-bash tools.
 
@@ -169,16 +169,16 @@ p --- /tmp/applied.txt
 
 ⣿ ○0% ↓4 0s
 ❯
-===== 603 =====
+===== 293 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run other tool checks
 ● Exercising non-bash tools.
 
@@ -226,16 +226,16 @@ p --- /tmp/applied.txt
 
   ○0%  ↑90  ↓12  0s
 ❯
-===== 972 =====
+===== 430 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ run other tool checks
 ● Exercising non-bash tools.
 

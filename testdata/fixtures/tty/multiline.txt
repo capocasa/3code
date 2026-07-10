@@ -1,30 +1,30 @@
-===== 356 =====
+===== 244 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ first line
-===== 852 =====
+===== 923 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
-
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 ❯ first line
   
-===== 413 =====
+===== 793 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -33,10 +33,10 @@
 
 ❯ first line
   second line
-===== 370 =====
+===== 357 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -48,10 +48,10 @@
 
 ⣿ ○0% 0s
 ❯ queued line one
-===== 744 =====
+===== 300 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -64,10 +64,10 @@
 ⣿ ○0% 0s
 ❯ queued line one
   
-===== 522 =====
+===== 668 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -80,10 +80,10 @@
 ⣿ ○0% 0s
 ❯ queued line one
   queued line two
-===== 900 =====
+===== 868 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -96,10 +96,10 @@
 ⣿ ○0% 0s
 ❯ queued line one
   queued line two ⧖
-===== 392 =====
+===== 848 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -112,10 +112,10 @@
   ○0% ↓6
 ❯ queued line one
   queued line two ⧖
-===== 438 =====
+===== 777 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -129,10 +129,10 @@
 ⣿ ○0% ↓6 0s
 ❯ queued line one
   queued line two ⧖
-===== 707 =====
+===== 149 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -146,10 +146,10 @@
   ○1%  ↑120  ↓24  0s
 ❯ queued line one
   queued line two ⧖
-===== 360 =====
+===== 163 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -165,10 +165,10 @@
 
   ○1% ↓6
 ❯
-===== 554 =====
+===== 340 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -185,10 +185,10 @@
 
 ⣿ ○1% ↓6 0s
 ❯
-===== 782 =====
+===== 592 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -205,10 +205,10 @@
 
   ○1%  ↑180  ↓32  0s
 ❯
-===== 369 =====
+===== 780 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-e7c6e570-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
