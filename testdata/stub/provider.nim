@@ -262,24 +262,22 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
         sleep(step)
         remaining -= step
       let code = stubHttpStatus(lastFailure)
-      var errMsg =
-        if code > 0: "api " & $code
-        else: stubTransportError(lastFailure)
+      var errMsg = stubTransportError(lastFailure)
       if errMsg.len == 0:
         errMsg = stubFailureName(lastFailure)
       let category = retryCategory(errMsg, nil, code)
       if category.len == 0 or attempt >= StubMaxAttempts:
         hookStopSpinner()
         raise newException(ApiError,
-          errMsg & (if stubErrBody(lastFailure, node).len > 0:
-            ": " & stubErrBody(lastFailure, node) else: ""))
+          formatApiDetail(errMsg, stubErrBody(lastFailure, node), code))
       let retryAfter = try: parseInt(stubRetryAfter(node)) except CatchableError: 0
       let backoff =
         if retryAfter > 0: retryAfter
         elif category == "rate": min(1 shl rateRetryLevel, 90)
         else: min(1 shl serverRetryLevel, 16)
       hookStopSpinner()
-      hookRetryNotice &"3code: {errMsg}; retry {attempt + 1}/{StubMaxAttempts} in {backoff}s"
+      hookRetryNotice formatApiDetail(errMsg, stubErrBody(lastFailure, node), code) &
+        ". retry " & $(attempt + 1) & "/" & $StubMaxAttempts & " in " & $backoff & "s"
       var waitMs = backoff * 1000
       while waitMs > 0:
         if isInterrupted():

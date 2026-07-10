@@ -211,17 +211,49 @@ proc extractErrorMsg*(errBody: string): string =
   if err != nil and err.kind == JObject:
     let msg = err{"message"}.getStr("")
     if msg.len > 0: return msg
+  elif err != nil and err.kind == JString and err.getStr.len > 0:
+    return err.getStr
   let msg = j{"message"}.getStr("")
   if msg.len > 0: return msg
   return errBody
 
+proc isCodeEcho(s: string; code: int): bool =
+  ## True when `s` carries no information beyond restating the HTTP status,
+  ## e.g. "", "error code: 502", "502". Such a message is redundant once the
+  ## code is shown in the trailing `(code N)` suffix.
+  let stripped = s.strip
+  if stripped.len == 0: return true
+  if code > 0 and stripped == $code: return true
+  if code > 0 and stripped == "error code: " & $code: return true
+  if stripped == "error": return true
+  false
+
+proc formatApiDetail*(errMsg, errBody: string; code: int): string =
+  ## Build the human-readable detail for an API error or retry notice in the
+  ## form `<message> (code N)` or just `<message>`. The message is the body's
+  ## error text if present, then the transport `errMsg`, then a bare "error".
+  ## The code is shown as a trailing `(code N)` so it never duplicates the
+  ## message the way a leading `502: error code: 502` did. Some gateways emit
+  ## a body whose message is just an "error code: N" echo of the status;
+  ## that carries no information beyond the code we already show, so it is
+  ## collapsed to a bare "error".
+  let rawBody = extractErrorMsg(errBody)
+  let msg =
+    if rawBody.len > 0 and not isCodeEcho(rawBody, code): rawBody
+    elif errMsg.len > 0: errMsg
+    else: "error"
+  if code != 0: msg & " (code " & $code & ")"
+  else: msg
+
 proc retryCategory*(errMsg: string, assistantMsg: JsonNode, statusCode: int): string =
-  let netFailed = errMsg != "" and assistantMsg == nil
-  if netFailed:
-    return "server"
+  # An explicit HTTP status wins: a 400/401/403 with an error body still has
+  # errMsg set and assistantMsg nil (the body isn't an assistant message), so
+  # the old "netFailed implies server" shortcut would wrongly retry a
+  # malformed request as if it were a transport blip. Only an unknown status
+  # (no HTTP response at all) falls back to the network heuristic.
   case statusCode
   of 0:
-    if assistantMsg == nil: "server" else: ""
+    if errMsg != "" and assistantMsg == nil: "server" else: ""
   of 429: "rate"
   of 500, 502, 503, 504: "server"
   else: ""
@@ -1471,13 +1503,11 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     let code = outcome.statusCode
     let category = retryCategory(outcome.errMsg, outcome.assistantMsg, code)
     let retryable = category != ""
-    var errMsg = outcome.errMsg
-    if errMsg == "" and retryable: errMsg = "api " & $code
+    let errMsg = outcome.errMsg
     if not retryable:
       hookStopSpinner()
       if outcome.assistantMsg == nil:
-        raise newException(ApiError,
-          errMsg & (if outcome.errBody.len > 0: ": " & extractErrorMsg(outcome.errBody) else: ""))
+        raise newException(ApiError, formatApiDetail(errMsg, outcome.errBody, code))
       # Promote any leaked GLM/Qwen native `<tool_call>...</tool_call>`
       # blocks in the assistant content to synthetic OpenAI tool_calls.
       # Some endpoints (notably nvidia z-ai/glm4.7) don't reliably
@@ -1497,8 +1527,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
       break
     if attempt >= MaxAttempts:
       hookStopSpinner()
-      raise newException(ApiError,
-        errMsg & (if outcome.errBody.len > 0: ": " & extractErrorMsg(outcome.errBody) else: ""))
+      raise newException(ApiError, formatApiDetail(errMsg, outcome.errBody, code))
     let retryAfter = try: parseInt(outcome.retryAfter) except CatchableError: 0
     let backoff =
       if retryAfter > 0:
@@ -1512,10 +1541,8 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
       else:
         min(1 shl serverRetryLevel, 16)
     hookStopSpinner()
-    let body = extractErrorMsg(outcome.errBody)
-    let detail = if body.len > 0: body else: errMsg
-    let codeLabel = if code != 0: $(code) & ": " else: ""
-    hookRetryNotice codeLabel & detail & ". retry " & $(attempt + 1) &
+    let detail = formatApiDetail(errMsg, outcome.errBody, code)
+    hookRetryNotice detail & ". retry " & $(attempt + 1) &
       "/" & $MaxAttempts & " in " & $backoff & "s"
     block wait:
       var remaining = backoff * 1000

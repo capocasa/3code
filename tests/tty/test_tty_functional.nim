@@ -723,7 +723,7 @@ suite "terminal visual contract":
       tty.send "go"
       tty.send "\n"
       # The retry notice is visible in scrollback as ordinary history.
-      tty.expectInHistory "3code: api 429; retry 2/12 in 1s"
+      tty.expectInHistory "rate limit (code 429). retry 2/12 in 1s"
       # ...and the retried reply reaches scrollback after the backoff.
       tty.expectInHistory "reply after retry"
       # The prompt is live again afterward (the footer was preserved, not
@@ -731,7 +731,7 @@ suite "terminal visual contract":
       tty.expect "❯"
       # The notice is controller feedback, not a conversation message, so it
       # must never reach the persisted session transcript.
-      check "api 429" notin root.sessionLogText()
+      check "rate limit" notin root.sessionLogText()
 
   test "submitting a prompt survives the working directory being removed":
     # Regression: the process's cwd can be deleted out from under it (tmpfs
