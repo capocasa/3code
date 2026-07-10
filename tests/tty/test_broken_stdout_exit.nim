@@ -90,9 +90,14 @@ suite "silent exit on broken stdout mid-turn":
                  "sys.exit(0)'"
     # pipefail makes the pipeline's exit code reflect 3code's, not the
     # reader's. Before the fix 3code dies with a non-zero (crash) exit; the
-    # fix returns 0.
-    let cmd = "set -o pipefail; " & stubBin.quoteShell &
-              " -x tell me a story | " & reader
+    # fix returns 0. Use bash explicitly: dash (the default /bin/sh on many
+    # CI images) rejects `set -o pipefail`, which would otherwise make the
+    # pipeline fail before 3code even runs. Write the pipeline to a script
+    # so the reader's own single quotes can't break the outer quoting.
+    let script = root / "run" / "broken_stdout.sh"
+    writeFile(script, "set -o pipefail\n" & stubBin.quoteShell &
+              " -x tell me a story | " & reader & "\n")
+    let cmd = "bash " & script.quoteShell
     let (outp, exitCode) = execCmdEx(
       cmd,
       {poStdErrToStdOut, poUsePath, poDaemon},

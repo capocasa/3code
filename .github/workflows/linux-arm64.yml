@@ -48,7 +48,20 @@ jobs:
         run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
 
       - name: Run tests
-        run: nimble test
+        # nimble's nimscript task swallows a non-zero testament exit (it
+        # converts the OSError into a logged exception but still exits 0),
+        # so a failing test reports green. Call testament directly and
+        # propagate $? so a test failure actually fails the step.
+        run: |
+          if command -v testament >/dev/null 2>&1; then
+            testament --print --megatest:off all
+          else
+            for d in tests/*/; do
+              for f in "$d"*.nim; do
+                nim c -r --path:src --path:tests "$f" || exit 1
+              done
+            done
+          fi
         timeout-minutes: 20
 
       - name: Package
