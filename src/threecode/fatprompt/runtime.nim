@@ -1567,9 +1567,12 @@ proc inputThreadProc() {.thread.} =
     when defined(posix):
       let fd = STDIN_FILENO.cint
       var pendingInput: seq[int]
+      var stdinEof = false
       proc fillPending(waitMs: cint): bool =
         if pendingInput.len > 0:
           return true
+        if stdinEof:
+          return false
         var pfd: Tpollfd
         pfd.fd = STDIN_FILENO
         pfd.events = POLLIN
@@ -1580,6 +1583,14 @@ proc inputThreadProc() {.thread.} =
         let n = posix.read(fd, addr ch, 1)
         if n == 1:
           pendingInput.add ch.ord.int
+        elif n == 0:
+          # poll() reports a closed/EOF fd (e.g. `/dev/null` stdin, a
+          # daemonized process, or a closed PTY) as perpetually readable,
+          # so without this latch `getCh` busy-loops on poll→read(0)
+          # forever and never returns the -1 that signals EOF. Latch it:
+          # stdin is at EOF for the process lifetime, so every later
+          # `getCh` returns -1 and `readLineWith` raises EOFError.
+          stdinEof = true
         result = pendingInput.len > 0
 
       let getCh: minline.GetChProc = proc(): int =
@@ -1609,6 +1620,11 @@ proc inputThreadProc() {.thread.} =
             result = pendingInput[0]
             pendingInput.delete(0)
             return
+          # fillPending returned false. If stdin hit EOF, surface it as
+          # -1 so readLineWith raises EOFError; otherwise it was just a
+          # poll timeout / SIGWINCH, so keep looping.
+          if stdinEof:
+            return -1
           # SIGWINCH is caught with SA_RESTART, so poll() is restarted
           # rather than returning EINTR. Detect the resize via the shared
           # flag on each poll cycle and surface it as IOError so readLineWith
@@ -2024,7 +2040,13 @@ proc wizardReadLine*(editor: var minline.LineEditor, prompt: string,
   ## and EOF clear the flag inline because there is nothing left to
   ## race and the cancel handler's own `fullRedraw` already anchors
   ## the prompt.
-  ensureInputThreadStarted()
+  # Post the request BEFORE starting the input thread. If the thread
+  # starts first, its persistent `getCh` may consume real input or hit
+  # EOF and exit the persistent readLineWith before the wizard sentinel
+  # is visible — leaving this caller parked forever waiting for a
+  # response that never comes. With the request posted up front, the
+  # thread's first `getCh` sees `wizardRequestPosted` and returns the
+  # sentinel, so the wizard branch runs instead of the persistent prompt.
   acquire wizardRequestLock
   try:
     wizardRequest = WizardReadRequest(prompt: prompt, hidechars: hidechars,
@@ -2040,6 +2062,7 @@ proc wizardReadLine*(editor: var minline.LineEditor, prompt: string,
     # wizard's own getCh can read user input normally.
   finally:
     release wizardRequestLock
+  ensureInputThreadStarted()
   while not wizardResponsePosted.load(moAcquire):
     if not inputThreadRunning:
       raise newException(IOError, "input thread stopped")
