@@ -1722,6 +1722,13 @@ proc inputThreadProc() {.thread.} =
         return
       termengine.finishEditorRedraw(ed, showCaret = not ed.pendingCaret)
       inputEditorReady.store(true, moRelease)
+    # Hold the terminal write lock across editor mutation + redraw so the
+    # background render threads (spinner/barTick) that read the same editor
+    # state under this lock can never observe a half-mutated or freed buffer.
+    edPtr[].preMutate = proc(ed: var minline.LineEditor) =
+      termui.acquireTerminalWrite()
+    edPtr[].postMutate = proc(ed: var minline.LineEditor) =
+      termui.releaseTerminalWrite()
 
     when defined(posix):
       if isatty(fd) != 0 and fd.tcGetAttr(addr inputOrigTermios) == 0:
