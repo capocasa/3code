@@ -616,10 +616,11 @@ suite "terminal visual contract":
     tty.drain(200)
     # Walk the captured frames and find the first one showing the `❯ `.
     # Between the welcome's "type a prompt" hint and that prompt there must
-    # be no blank row.
+    # be exactly one blank gap row: the prompt must not sit flush against
+    # the hint (no gap), nor must there be more than one blank row.
     var promptRow = -1
     var hintRow = -1
-    var sawBlankBetween = false
+    var blankRowsBetween = 0
     for f in tty.frames:
       let rows = f.rows
       var p = -1
@@ -637,19 +638,68 @@ suite "terminal visual contract":
         if hintRow >= 0:
           for r in (hintRow + 1) ..< promptRow:
             if rows[r].strip.len == 0:
-              sawBlankBetween = true
+              inc blankRowsBetween
       # Once the prompt is showing we only need the first occurrence.
       if promptRow >= 0:
         break
     doAssert promptRow >= 0, "startup prompt never appeared in frames"
     doAssert hintRow >= 0, "welcome hint line not found"
-    doAssert not sawBlankBetween,
-      "blank row between welcome hint and startup prompt (orphan bug)"
+    doAssert blankRowsBetween == 1,
+      "expected exactly one blank gap row between welcome hint and " &
+      "startup prompt, found " & $blankRowsBetween & " (orphan/flush bug)"
     # The prompt must anchor at column 2 (after the `❯ ` glyph).
     require tty.frames[^1].cursorRow >= 0
     let liveRow = tty.frames[^1].rows[tty.frames[^1].cursorRow]
     doAssert liveRow.startsWith("❯"),
       "startup prompt not anchored at the `❯ ` glyph: '" & liveRow & "'"
+
+  test "prompt-only startup leaves exactly one blank gap above the prompt":
+    # The prompt-only startup path (`paintInitialPrompt` -> `paintPromptOnly`,
+    # used on a fresh start and on resume without prior usage) paints `❯ `
+    # directly on the row the caller left the cursor on. When prior content sits
+    # above (the welcome screen, or resumed scrollback), that leaves the prompt
+    # flush against it with no separator. It must sit exactly one blank row
+    # below the last prior-content line, matching the bar+prompt `endTurn` gap.
+    let root = newFixture("prompt_only_gap")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[])
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+      tty.close()
+    tty.expect "❯"
+    tty.drain(200)
+    # Find the first frame showing the prompt-only `❯ ` and count the
+    # blank rows between the last non-blank prior-content row and the prompt row.
+    var promptRow = -1
+    var contentRow = -1
+    var blankRowsBetween = 0
+    for f in tty.frames:
+      let rows = f.rows
+      var p = -1
+      for ri, r in rows:
+        if r.strip(leading = true).startsWith("❯"):
+          p = ri
+          break
+      if p >= 0 and promptRow < 0:
+        promptRow = p
+        # last non-blank row above the prompt is prior content
+        for r in countdown(p - 1, 0):
+          if rows[r].strip.len > 0:
+            contentRow = r
+            break
+        if contentRow >= 0:
+          for r in (contentRow + 1) ..< promptRow:
+            if rows[r].strip.len == 0:
+              inc blankRowsBetween
+      if promptRow >= 0:
+        break
+    doAssert promptRow >= 0, "prompt-only prompt never appeared in frames"
+    doAssert contentRow >= 0, "no prior-content line above prompt-only prompt"
+    doAssert blankRowsBetween == 1,
+      "expected exactly one blank gap row above prompt-only prompt, found " &
+        $blankRowsBetween
 
   test "word-level content chunks stream eagerly, not buffered to newline":
     # Eager streaming: when content arrives in word-level chunks with no

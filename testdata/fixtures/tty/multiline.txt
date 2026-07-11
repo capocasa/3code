@@ -1,62 +1,67 @@
-===== 244 =====
+===== 606 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
+
 ❯ first line
-===== 923 =====
+===== 670 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
+
 ❯ first line
   
-===== 793 =====
+===== 211 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
   second line
-===== 357 =====
+===== 448 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
   second line
 
 ⣿ ○0% 0s
 ❯ queued line one
-===== 300 =====
+===== 550 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
   second line
@@ -64,15 +69,16 @@
 ⣿ ○0% 0s
 ❯ queued line one
   
-===== 668 =====
+===== 106 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
   second line
@@ -80,15 +86,16 @@
 ⣿ ○0% 0s
 ❯ queued line one
   queued line two
-===== 868 =====
+===== 816 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
   second line
@@ -96,15 +103,16 @@
 ⣿ ○0% 0s
 ❯ queued line one
   queued line two ⧖
-===== 848 =====
+===== 599 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
 ● First multiline response.
@@ -112,15 +120,16 @@
   ○0% ↓6
 ❯ queued line one
   queued line two ⧖
-===== 777 =====
+===== 347 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
 ● First multiline response.
@@ -129,15 +138,16 @@
 ⣿ ○0% ↓6 0s
 ❯ queued line one
   queued line two ⧖
-===== 149 =====
+===== 300 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
 ● First multiline response.
@@ -146,15 +156,16 @@
   ○1%  ↑120  ↓24  0s
 ❯ queued line one
   queued line two ⧖
-===== 163 =====
+===== 270 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
 ● First multiline response.
@@ -165,15 +176,16 @@
 
   ○1% ↓6
 ❯
-===== 340 =====
+===== 908 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
 ● First multiline response.
@@ -185,15 +197,16 @@
 
 ⣿ ○1% ↓6 0s
 ❯
-===== 592 =====
+===== 978 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
 ● First multiline response.
@@ -205,15 +218,16 @@
 
   ○1%  ↑180  ↓32  0s
 ❯
-===== 780 =====
+===== 597 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
 ● First multiline response.

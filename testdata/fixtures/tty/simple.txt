@@ -1,53 +1,57 @@
-===== 908 =====
+===== 495 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
+
 ❯ This is a test prompt
-===== 803 =====
+===== 290 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
+
 ❯ This is a test prompt
   … Thinking about the test prompt
 ⣿ ○0% ↓7 0s
 ❯
-===== 241 =====
+===== 685 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
+
 ❯ This is a test prompt
 ● This is a test response.
 
   ○0% ↓13
 ❯
-===== 405 =====
+===== 576 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
+
 ❯ This is a test prompt
 ● This is a test response.
 
@@ -57,29 +61,31 @@
 ===== 557 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
+
 ❯ This is a test prompt
 ● This is a test response.
 
 
   ○1%  ↑120  ↓24  0s
 ❯
-===== 598 =====
+===== 224 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noflake-736ee790-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
+
 ❯ This is a test prompt
 ● This is a test response.
 

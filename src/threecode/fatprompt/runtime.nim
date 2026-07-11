@@ -859,7 +859,11 @@ proc paintPromptOnly*() =
   ## Leaves `currentBarLabel = ""` and `currentBarHasGap = false` —
   ## the signals `readInput`, `emitUserSubmit`, and the slash-command
   ## repaint use to detect prompt-only mode.
-  termengine.writeRaw(promptOnlyResetBytes())
+  # Drop to a fresh row below whatever content precedes us (the welcome
+  # screen, or resumed scrollback) so the prompt never sits flush against
+  # it, then hide the caret like the bar path does. The entry `❯ ` paints
+  # on the new row; the bar repaint that follows restores the caret.
+  termengine.writeRaw("\n\x1b[?25l" & promptOnlyResetBytes())
   emitFatPromptEvent clearBarEvent()
 
 proc paintInitialPrompt*(p: Profile) =
