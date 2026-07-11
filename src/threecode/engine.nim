@@ -96,12 +96,15 @@ proc writeToolViewportRows(e: TerminalEngine) =
 
 proc updateToolViewportSymbol*(symbol: string) {.gcsafe.} =
   {.cast(gcsafe).}:
-    if defaultEngine.toolViewportRows.len > 0:
-      let row = defaultEngine.toolViewportRows[0]
-      if row.len > 0:
-        let firstLen = runeLenAt(row, 0)
-        if firstLen > 0:
-          defaultEngine.toolViewportRows[0] = symbol & row.substr(firstLen)
+    # Mutates shared engine state: serialize with the render threads that
+    # read/replace `toolViewportRows` under the same lock.
+    termio.withTerminalWriteLock:
+      if defaultEngine.toolViewportRows.len > 0:
+        let row = defaultEngine.toolViewportRows[0]
+        if row.len > 0:
+          let firstLen = runeLenAt(row, 0)
+          if firstLen > 0:
+            defaultEngine.toolViewportRows[0] = symbol & row.substr(firstLen)
 
 proc syncWrite*(e: var TerminalEngine; bytes: string) =
   termio.syncWrite(bytes)
@@ -326,7 +329,10 @@ proc clearLiveContent*(e: var TerminalEngine) {.gcsafe.} =
   ## after a line is committed to real scrollback so the next partial starts
   ## fresh and the walk-up no longer counts the just-committed rows.
   {.cast(gcsafe).}:
-    e.liveContentRows = @[]
+    # Mutates shared engine state: serialize with the render threads that
+    # read/replace `liveContentRows` under the same lock.
+    termio.withTerminalWriteLock:
+      e.liveContentRows = @[]
 
 proc clearLiveContent*() {.gcsafe.} =
   {.cast(gcsafe).}:
