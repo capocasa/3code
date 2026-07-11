@@ -1577,7 +1577,12 @@ proc inputThreadProc() {.thread.} =
         pfd.fd = STDIN_FILENO
         pfd.events = POLLIN
         let r = poll(addr pfd, 1.Tnfds, waitMs)
-        if r <= 0 or (pfd.revents and POLLIN) == 0:
+        # A closed write-end of a pipe (e.g. the stdin pipe `execCmdEx`
+        # hands a spawned `3code`) reports POLLHUP without POLLIN on some
+        # kernels, so checking POLLIN alone skips the read and busy-loops.
+        # Treat any readiness (POLLIN, POLLHUP, POLLERR) as "try to read";
+        # read() itself disambiguates data from EOF (0) vs error (-1).
+        if r <= 0 or (pfd.revents and (POLLIN or POLLHUP or POLLERR)) == 0:
           return false
         var ch: char
         let n = posix.read(fd, addr ch, 1)
