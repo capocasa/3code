@@ -785,7 +785,6 @@ proc spinnerLoop(unused: string) {.thread.} =
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
   let start = epochTime()
   var i = 0
-  var lastTicker = ""
   var observedTestTick = testSpinnerPainted.load(moAcquire)
   while not spinnerStop.load(moRelaxed):
     let elapsed =
@@ -801,7 +800,6 @@ proc spinnerLoop(unused: string) {.thread.} =
         epochTime() - start
     let label = getSpinLabel()
     let ticker = getSpinTicker()
-    lastTicker = ticker
     try:
       let frame = frames[i mod frames.len]
       setSpinFrame(frame, elapsed.int)
@@ -818,13 +816,13 @@ proc spinnerLoop(unused: string) {.thread.} =
       sleep 80
     inc i
   try:
-    let termW = try: terminalWidth() except CatchableError: 80
     if not inputThreadRunning:
-      # gap+bar is always 2 rows; a wrapping ticker may add more.
-      let tickerRows =
-        if lastTicker.len == 0: 1
-        else: max(1, (visibleWidth(lastTicker) + max(1, termW) - 1) div max(1, termW))
-      termengine.syncWrite(spinnerCleanupBytes(1 + tickerRows))
+      # The ticker is always one row (clamped to width on render), so the
+      # spinner footer is gap(1) + bar. Walk up one row to the gap and
+      # erase down. Computing a wrapping row count from the raw ticker text
+      # over-erased into committed scrollback — the render path already
+      # overwrites the ticker in place, so no compensating removal is owed.
+      termengine.syncWrite(spinnerCleanupBytes(1))
   except CatchableError: discard
 
 proc liveLabel*(base: string, slurped: int): string =
