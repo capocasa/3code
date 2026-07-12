@@ -27,3 +27,6 @@ nimble.develop
 nimble.paths
 nimbledeps
 src/threecode.exe
+
+# stress runner binary
+tools/stress

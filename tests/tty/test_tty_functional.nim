@@ -1585,6 +1585,10 @@ suite "terminal visual contract":
           }),
           toolCall("call_slow", "bash", %*{
             "command": "sleep 3; printf 'slow-done\\n'"
+          }, %*{
+            "stream": ["slow-done"],
+            "output": "slow-done\n",
+            "code": 0
           })
         ],
         "usage": {
