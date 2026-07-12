@@ -289,13 +289,19 @@ proc waitForOutput*(s: TtySession; timeoutMs = 5000; recordFrame = true): bool =
   false
 
 proc drain*(s: TtySession; settleMs = 20; recordFrame = true) =
-  ## Capture any bytes currently ready on the PTY. SyncEnd-driven frame
-  ## commits are suppressed during the settle loop so that one drain call
-  ## produces at most one frame (the final settled state), making frame
-  ## boundaries independent of poll timing. When `recordFrame` is false,
-  ## no frame is committed at all (used by `expect*` procs).
+  ## Capture any bytes currently ready on the PTY. When `recordFrame` is true,
+  ## every SyncEnd-wrapped render is committed as its own frame as it arrives,
+  ## so the frame sequence is the child's deterministic sequence of sync-wrapped
+  ## renders regardless of how the settle loop's poll timing slices the bytes.
+  ## (Suppressing these commits and force-flushing one merged frame instead meant
+  ## a render arriving *during* a drain got folded in while the same render
+  ## arriving *between* drains became its own frame — same content, different
+  ## partitioning, flaky golden comparison.) The trailing force-flush catches any
+  ## pending state not closed by a SyncEnd. When `recordFrame` is false, no frame
+  ## is committed (used by `expect*` procs, which poll screen state).
   let wasPaused = s.frameRecordingPaused
-  s.frameRecordingPaused = true
+  if not recordFrame:
+    s.frameRecordingPaused = true
   let deadline = epochTime() + settleMs.float / 1000.0
   while epochTime() < deadline and not s.exited:
     discard s.pollOnce(1, false)
