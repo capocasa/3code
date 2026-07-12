@@ -599,11 +599,14 @@ proc renderToolPending*(banner: string, kind: ActionKind) =
 
 proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -1) =
   ## Final tool banner. Icons render in default text color regardless of
-  ## exit code. Optional `(Ns)` suffix when `elapsedS >= 1`
-  ## (live); replay passes -1 to omit it.
+  ## exit code; the banner/command text renders nonbright white (the
+  ## mode-aware `off-white` tier). Optional `(Ns)` suffix when
+  ## `elapsedS >= 1` (live); replay passes -1 to omit it.
   let icon = if kind == akBash and code > 0: "Ø" else: toolIcon(kind)
   stdout.write icon & " "
+  stdout.write OffWhiteFg
   stdout.write banner
+  stdout.write Reset
   if elapsedS >= 1:
     subtleWrite(stdout, &"  ({elapsedS}s)")
   stdout.write "\n"
@@ -612,7 +615,7 @@ proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -
 proc toolBannerBytes*(banner: string; kind: ActionKind; code: int;
                       elapsedS = -1): string =
   let icon = if kind == akBash and code > 0: "Ø" else: toolIcon(kind)
-  result.add icon & " " & banner
+  result.add icon & " " & OffWhiteFg & banner & Reset
   if elapsedS >= 1:
     result.add GreyFg & &"  ({elapsedS}s)" & Reset
   result.add "\r\n"

@@ -28,7 +28,7 @@ const
 
 var
   BrightWhiteFg* = "\x1b[97m"      # assistant text + `:command` help tokens
-  OffWhiteFg* = "\x1b[38;5;252m"   # reserved high-tier near-white
+  OffWhiteFg* = "\x1b[38;5;252m"   # high-tier near-white (tool banners)
   GreyFg* = "\x1b[38;5;244m"       # subtle FYI tier (tool output, markers)
 
 type
