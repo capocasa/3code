@@ -31,6 +31,7 @@ import std/[terminal, unicode, times]
 import minline
 import ./terminal as termio
 import ./fatprompt/rendering
+import ./util
 
 type
   TerminalEngine* = object
@@ -124,8 +125,23 @@ proc writeViewportRows(rows: openArray[string]) =
     stdout.write row
     stdout.write "\r\n"
 
+# Row 0 is the tool banner (command line); the rest is streaming bash
+# output. Color them at the write boundary so the semantic rows held in
+# `toolViewportRows` stay plain — `updateToolViewportSymbol` swaps the
+# first rune of row 0 in place, and the unit tests assert the raw text.
+# OffWhiteFg = nonbright white for the command; GreyFg = light grey for
+# the output. Both honor the mode-aware `[colors]` config.
 proc writeToolViewportRows(e: TerminalEngine) =
-  writeViewportRows(e.toolViewportRows)
+  if e.toolViewportRows.len == 0: return
+  stdout.write OffWhiteFg
+  stdout.write e.toolViewportRows[0]
+  stdout.write Reset
+  stdout.write "\r\n"
+  for i in 1 ..< e.toolViewportRows.len:
+    stdout.write GreyFg
+    stdout.write e.toolViewportRows[i]
+    stdout.write Reset
+    stdout.write "\r\n"
 
 proc updateToolViewportSymbol*(symbol: string) {.gcsafe.} =
   {.cast(gcsafe).}:
