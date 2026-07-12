@@ -773,7 +773,7 @@ suite "terminal visual contract":
       tty.send "go"
       tty.send "\n"
       # The retry notice is visible in scrollback as ordinary history.
-      tty.expectInHistory "3code: api 429; retry 2/12 in 1s"
+      tty.expectInHistory "rate limit (code 429). retry 2/12 in 1s"
       # ...and the retried reply reaches scrollback after the backoff.
       tty.expectInHistory "reply after retry"
       # The prompt is live again afterward (the footer was preserved, not
@@ -781,19 +781,19 @@ suite "terminal visual contract":
       tty.expect "❯"
       # The notice is controller feedback, not a conversation message, so it
       # must never reach the persisted session transcript.
-      check "api 429" notin root.sessionLogText()
+      check "rate limit" notin root.sessionLogText()
       # Spacing contract: an alert line (429 retry notice) is bracketed by
       # exactly one blank line above and one below — not flush against the
       # preceding prompt echo (0 above) and not separated by a double gap.
       var hist = tty.historyText().splitLines()
       var idx = -1
       for i, line in hist:
-        if line == "3code: api 429; retry 2/12 in 1s": idx = i
+        if line == "rate limit (code 429). retry 2/12 in 1s": idx = i
       check idx > 0
       check hist[idx - 1].strip.len == 0
       check hist[idx + 1].strip.len == 0
       # Color contract: alert lines (429 retry notice) are non-bold magenta.
-      check "\x1b[35m3code: api 429" in tty.raw
+      check "\x1b[35mrate limit (code 429)" in tty.raw
       # The startup profile shows model values in bright white.
       check "\x1b[97mstub-model" in tty.raw
 
