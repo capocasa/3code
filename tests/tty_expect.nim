@@ -310,6 +310,16 @@ proc resize*(s: TtySession; cols, rows: int): bool {.discardable.} =
   s.flushFrame(force = true)
   s.grid.width = max(1, cols)
   s.grid.height = max(1, rows)
+  # Real terminals clamp the cursor into the new viewport on a height change
+  # (and scroll content up to keep the cursor in view). The ttty grid only
+  # stores width/height and leaves the cursor row untouched, so without this
+  # clamp the child's next relative repaint walks up from a row that has been
+  # left below the visible area — the same "wall of chrome" bug a real
+  # terminal avoids by repositioning the cursor. Mirror that here.
+  if s.grid.row >= s.grid.height:
+    s.grid.row = max(0, s.grid.height - 1)
+  if s.grid.col >= s.grid.width:
+    s.grid.col = max(0, s.grid.width - 1)
   s.markFrameDirty()
   var ws = IOctl_WinSize(ws_row: rows.cushort, ws_col: cols.cushort,
                          ws_xpixel: 0, ws_ypixel: 0)
