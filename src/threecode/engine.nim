@@ -27,10 +27,11 @@
 ## must be read live — caching it leads to stale walk-ups that walk into
 ## committed scrollback.
 
-import std/[terminal, unicode]
+import std/[terminal, unicode, times]
 import minline
 import ./terminal as termio
 import ./fatprompt/rendering
+import ./util
 
 type
   TerminalEngine* = object
@@ -50,8 +51,34 @@ type
     ## scrollback (the previous item's trailing `\r\n\r\n`), not volatile
     ## chrome. Walk-up codepaths stop one row short to preserve it.
     gapIsSeparator: bool
+    ## Wall-clock ms of the most recent SIGWINCH, or 0. While `resizeRecent`
+    ## is true, footer repaints walk up one extra row before erasing: a
+    ## reflow can leave a stale footer row one above the recomputed footer
+    ## top (the spinner→content handoff changes the footer height at the same
+    ## moment the cursor is moving), and the normal walk-up — derived from
+    ## the NEW footer height — misses it. The extra row sits inside the
+    ## volatile region (the always-reserved ticker/gap row), so it never
+    ## reaches committed scrollback.
+    resizeAtMs: int64
 
 var defaultEngine*: TerminalEngine
+
+proc noteResize*(e: var TerminalEngine) =
+  e.resizeAtMs = int64(epochTime() * 1000.0)
+
+proc noteResize*() {.gcsafe.} =
+  {.cast(gcsafe).}:
+    defaultEngine.noteResize()
+
+proc resizeRecent*(e: var TerminalEngine): bool =
+  ## True within a short window after the last SIGWINCH. Expires the record
+  ## once the window passes so the extra erase row stops.
+  if e.resizeAtMs == 0:
+    return false
+  if int64(epochTime() * 1000.0) - e.resizeAtMs > 400:
+    e.resizeAtMs = 0
+    return false
+  true
 
 proc refreshEditorWidth(ed: var minline.LineEditor) =
   let w = try: terminalWidth() except CatchableError: 0
@@ -67,16 +94,23 @@ proc editorRowsAboveCursor(ed: var minline.LineEditor): int =
   refreshEditorWidth(ed)
   min(ed.renderRow, max(1, minline.renderedRows(ed)) - 1)
 
-proc walkUp(e: TerminalEngine; ed: var minline.LineEditor): int =
+proc walkUp(e: var TerminalEngine; ed: var minline.LineEditor): int =
   ## Rows from the cursor to the top of the volatile region (ticker row).
   ## Always derived from live editor + footer state. This is the number of
   ## rows to move up before erasing the volatile region.
   ## When gapIsSeparator is set, the gap row at the top of the footer is
   ## committed scrollback (not chrome), so the walk-up stops one row short
   ## to preserve it.
+  ## Right after a resize, walk one row higher: a reflow can strand a stale
+  ## footer row one above the recomputed footer top (the footer height
+  ## changes at the spinner→content handoff at the same moment the cursor is
+  ## moving), and the erase derived from the NEW height misses it. The extra
+  ## row sits inside the volatile region (the always-reserved ticker/gap
+  ## row), so it never reaches committed scrollback.
   let gap = if e.gapIsSeparator: 1 else: 0
+  let extra = if e.resizeRecent(): 1 else: 0
   editorRowsAboveCursor(ed) + e.paintedFooterRows + e.toolViewportRows.len +
-    e.liveContentRows.len - gap
+    e.liveContentRows.len - gap + extra
 
 proc noteFooterPainted(e: var TerminalEngine; footerRowsAboveEditor: int) =
   e.paintedFooterRows = max(0, footerRowsAboveEditor)
@@ -91,17 +125,35 @@ proc writeViewportRows(rows: openArray[string]) =
     stdout.write row
     stdout.write "\r\n"
 
+# Row 0 is the tool banner (command line); the rest is streaming bash
+# output. Color them at the write boundary so the semantic rows held in
+# `toolViewportRows` stay plain — `updateToolViewportSymbol` swaps the
+# first rune of row 0 in place, and the unit tests assert the raw text.
+# OffWhiteFg = nonbright white for the command; GreyFg = light grey for
+# the output. Both honor the mode-aware `[colors]` config.
 proc writeToolViewportRows(e: TerminalEngine) =
-  writeViewportRows(e.toolViewportRows)
+  if e.toolViewportRows.len == 0: return
+  stdout.write OffWhiteFg
+  stdout.write e.toolViewportRows[0]
+  stdout.write Reset
+  stdout.write "\r\n"
+  for i in 1 ..< e.toolViewportRows.len:
+    stdout.write GreyFg
+    stdout.write e.toolViewportRows[i]
+    stdout.write Reset
+    stdout.write "\r\n"
 
 proc updateToolViewportSymbol*(symbol: string) {.gcsafe.} =
   {.cast(gcsafe).}:
-    if defaultEngine.toolViewportRows.len > 0:
-      let row = defaultEngine.toolViewportRows[0]
-      if row.len > 0:
-        let firstLen = runeLenAt(row, 0)
-        if firstLen > 0:
-          defaultEngine.toolViewportRows[0] = symbol & row.substr(firstLen)
+    # Mutates shared engine state: serialize with the render threads that
+    # read/replace `toolViewportRows` under the same lock.
+    termio.withTerminalWriteLock:
+      if defaultEngine.toolViewportRows.len > 0:
+        let row = defaultEngine.toolViewportRows[0]
+        if row.len > 0:
+          let firstLen = runeLenAt(row, 0)
+          if firstLen > 0:
+            defaultEngine.toolViewportRows[0] = symbol & row.substr(firstLen)
 
 proc syncWrite*(e: var TerminalEngine; bytes: string) =
   termio.syncWrite(bytes)
@@ -121,8 +173,9 @@ proc beginEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor;
                         ready: bool; frame: FooterFrame) =
   let termW = try: terminalWidth() except CatchableError: 0
   let rows = frame.rowsAboveEditor(termW)
+  let extra = if e.resizeRecent(): 1 else: 0
   termio.beginEditorRedraw(ed, ready, frame.footerFrameBytes(termW),
-                           rows)
+                           rows + extra)
   e.editorRedrawPending = true
   e.editorRedrawFooterRows = rows
 
@@ -326,7 +379,10 @@ proc clearLiveContent*(e: var TerminalEngine) {.gcsafe.} =
   ## after a line is committed to real scrollback so the next partial starts
   ## fresh and the walk-up no longer counts the just-committed rows.
   {.cast(gcsafe).}:
-    e.liveContentRows = @[]
+    # Mutates shared engine state: serialize with the render threads that
+    # read/replace `liveContentRows` under the same lock.
+    termio.withTerminalWriteLock:
+      e.liveContentRows = @[]
 
 proc clearLiveContent*() {.gcsafe.} =
   {.cast(gcsafe).}:

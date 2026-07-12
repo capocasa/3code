@@ -317,6 +317,15 @@ type LiveMarkdownStream* = object
   liveCol: int
   partialActive: bool
   partialStartCol: int
+  ## Trailing-newline coalescing. A bare `\n` with an empty pending
+  ## line marks a paragraph break; we defer committing it as a blank
+  ## row until a non-empty line follows. Trailing breaks (stream ends
+  ## before another line arrives) are dropped at `finishContent`, so the
+  ## live stream never commits blank rows the receipt/separator would
+  ## then have to delete. Interior breaks are flushed the moment real
+  ## content resumes. This mirrors `splitLines` + `trimTranscriptTail`
+  ## in the batch path.
+  pendingBlank: bool
 
 var apiLiveStream: LiveMarkdownStream
 
@@ -776,7 +785,6 @@ proc spinnerLoop(unused: string) {.thread.} =
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
   let start = epochTime()
   var i = 0
-  var lastTicker = ""
   var observedTestTick = testSpinnerPainted.load(moAcquire)
   while not spinnerStop.load(moRelaxed):
     let elapsed =
@@ -792,7 +800,6 @@ proc spinnerLoop(unused: string) {.thread.} =
         epochTime() - start
     let label = getSpinLabel()
     let ticker = getSpinTicker()
-    lastTicker = ticker
     try:
       let frame = frames[i mod frames.len]
       setSpinFrame(frame, elapsed.int)
@@ -809,13 +816,13 @@ proc spinnerLoop(unused: string) {.thread.} =
       sleep 80
     inc i
   try:
-    let termW = try: terminalWidth() except CatchableError: 80
     if not inputThreadRunning:
-      # gap+bar is always 2 rows; a wrapping ticker may add more.
-      let tickerRows =
-        if lastTicker.len == 0: 1
-        else: max(1, (visibleWidth(lastTicker) + max(1, termW) - 1) div max(1, termW))
-      termengine.syncWrite(spinnerCleanupBytes(1 + tickerRows))
+      # The ticker is always one row (clamped to width on render), so the
+      # spinner footer is gap(1) + bar. Walk up one row to the gap and
+      # erase down. Computing a wrapping row count from the raw ticker text
+      # over-erased into committed scrollback — the render path already
+      # overwrites the ticker in place, so no compensating removal is owed.
+      termengine.syncWrite(spinnerCleanupBytes(1))
   except CatchableError: discard
 
 proc liveLabel*(base: string, slurped: int): string =
@@ -859,7 +866,11 @@ proc paintPromptOnly*() =
   ## Leaves `currentBarLabel = ""` and `currentBarHasGap = false` —
   ## the signals `readInput`, `emitUserSubmit`, and the slash-command
   ## repaint use to detect prompt-only mode.
-  termengine.writeRaw(promptOnlyResetBytes())
+  # Drop to a fresh row below whatever content precedes us (the welcome
+  # screen, or resumed scrollback) so the prompt never sits flush against
+  # it, then hide the caret like the bar path does. The entry `❯ ` paints
+  # on the new row; the bar repaint that follows restores the caret.
+  termengine.writeRaw("\n\x1b[?25l" & promptOnlyResetBytes())
   emitFatPromptEvent clearBarEvent()
 
 proc paintInitialPrompt*(p: Profile) =
@@ -1269,12 +1280,22 @@ proc renderPendingPartial(s: var LiveMarkdownStream, slurpedNow: int) =
     currentTermW())
   s.partialActive = true
 
+proc commitBlankLine(s: var LiveMarkdownStream) =
+  ## Commit one blank paragraph-break row to real scrollback.
+  commitTranscriptBytes(assistantTextBytes(""))
+  termengine.clearLiveContent()
+  s.partialActive = false
+
 proc commitPendingLine(s: var LiveMarkdownStream, slurpedNow: int) =
   ## Commit the accumulated `pendingLine` to real scrollback through the
   ## block-level markdown renderer. `appendTranscript` walks up past the
   ## volatile partial (still tracked in the engine) to erase it, writes the
   ## committed render, and re-anchors the footer; then the partial tracking
-  ## is cleared so the next line starts fresh.
+  ## is cleared so the next line starts fresh. A deferred paragraph break
+  ## (`pendingBlank`) is flushed first so interior blank rows land in order.
+  if s.pendingBlank:
+    s.pendingBlank = false
+    s.commitBlankLine()
   let isFirstLine = s.md.firstEmit
   let body = s.captureMd(s.pendingLine)
   s.pendingLine = ""
@@ -1292,9 +1313,12 @@ proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
   if suppressLiveAssistantStream(): return
   termui.withTerminalWriteLock:
     # Drop leading blank lines before the first real content so model
-    # padding never renders as blank rows above the answer.
+    # padding never renders as blank rows above the answer. Once content
+    # has started, blank lines are paragraph breaks handled by the
+    # `pendingBlank` coalescing below (interior breaks commit, trailing
+    # breaks are dropped at `finishContent`).
     var chunk = chunk
-    if not s.md.firstEmit:
+    if s.md.firstEmit:
       while chunk.len > 0 and (chunk[0] == '\n' or chunk[0] == '\r'):
         chunk.delete 0 .. 0
     var data = s.utf8Pending & chunk
@@ -1302,7 +1326,16 @@ proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
     var i = 0
     while i < data.len:
       if data[i] == '\n':
-        s.commitPendingLine(slurpedNow)
+        if s.pendingLine.len == 0 and not s.md.firstEmit:
+          # Bare newline with no accumulated text: a paragraph break.
+          # Defer it as `pendingBlank` rather than committing at once,
+          # so a trailing run of newlines never commits blank rows that
+          # the receipt/separator would then have to delete. The break
+          # is flushed by the next `commitPendingLine` (real content) or
+          # dropped at `finishContent`.
+          s.pendingBlank = true
+        else:
+          s.commitPendingLine(slurpedNow)
         inc i
       else:
         let charLen = utf8LenAt(data, i)
@@ -1322,6 +1355,10 @@ proc finishContent*(s: var LiveMarkdownStream, slurpedNow: int) =
     s.utf8Pending = ""
   if s.pendingLine.len > 0:
     s.commitPendingLine(slurpedNow)
+  # Drop a deferred trailing paragraph break: it was only meaningful if
+  # more content followed. Keeping it would commit a blank row the
+  # receipt/separator would have to compensate for.
+  s.pendingBlank = false
   discard s.captureMd("", finish = true)
   if s.partialActive:
     termengine.clearLiveContent()
@@ -1466,20 +1503,14 @@ proc apiContentFinished*(fullContent, baseLabel: string; slurped: int): bool =
   contentStreamedLive
 
 proc apiTrimTrailingContent*(fullContent, baseLabel: string; slurped: int) =
-  var trailingNl = 0
-  for i in countdown(fullContent.len - 1, 0):
-    if fullContent[i] == '\n': inc trailingNl
-    else: break
-  if trailingNl > 1:
-    termui.withTerminalWriteLock:
-      if apiLiveStream.liveBarAtCursor:
-        clearBarPrompt()
-        apiLiveStream.liveBarAtCursor = false
-      elif apiLiveStream.liveBarBelow:
-        termengine.writeRaw(ClearBarBelowBytes)
-        apiLiveStream.liveBarBelow = false
-      termui.eraseRowsAbove(trailingNl - 1)
-      paintBarPrompt(apiLiveStream.currentLabel(slurped))
+  ## Append-only: the scrollback is never edited after commit. Earlier
+  ## code deleted trailing blank rows that the live stream had already
+  ## committed (`eraseRowsAbove`) to compensate for the model emitting
+  ## `\n\n` at the end of its reply. That violated the append-only
+  ## scrollback contract. Trailing blank lines are now suppressed at
+  ## the source in `feedContent`/`finishContent`, so there is nothing
+  ## to retract here.
+  discard
 
 proc apiAfterLiveContent*(baseLabel: string; slurped: int) =
   if apiLiveStream.liveBarBelow:
@@ -1523,9 +1554,13 @@ proc apiNoUsage*(elapsed: int) =
 proc apiRetryNotice*(msg: string) =
   ## Controller-side retry notice committed as a harness line: non-bold
   ## magenta, no indent, no bullet. Same scrollback contract as
-  ## `interrupted by user`: one ordinary line, fat prompt preserved, not
-  ## persisted to the `.3log` (it is not a conversation message).
+  ## `interrupted by user`: one ordinary line bracketed by exactly one
+  ## blank line above and below, fat prompt preserved, not persisted to
+  ## the `.3log` (it is not a conversation message). The leading `\r\n`
+  ## opens the blank line above; `appendTranscript`'s separator closes
+  ## the blank line below.
   writeTranscriptWithFatPrompt:
+    stdout.write "\r\n"
     stdout.styledWrite(fgMagenta, msg, resetStyle)
     stdout.write "\r\n"
 
@@ -1563,19 +1598,35 @@ proc inputThreadProc() {.thread.} =
     when defined(posix):
       let fd = STDIN_FILENO.cint
       var pendingInput: seq[int]
+      var stdinEof = false
       proc fillPending(waitMs: cint): bool =
         if pendingInput.len > 0:
           return true
+        if stdinEof:
+          return false
         var pfd: Tpollfd
         pfd.fd = STDIN_FILENO
         pfd.events = POLLIN
         let r = poll(addr pfd, 1.Tnfds, waitMs)
-        if r <= 0 or (pfd.revents and POLLIN) == 0:
+        # A closed write-end of a pipe (e.g. the stdin pipe `execCmdEx`
+        # hands a spawned `3code`) reports POLLHUP without POLLIN on some
+        # kernels, so checking POLLIN alone skips the read and busy-loops.
+        # Treat any readiness (POLLIN, POLLHUP, POLLERR) as "try to read";
+        # read() itself disambiguates data from EOF (0) vs error (-1).
+        if r <= 0 or (pfd.revents and (POLLIN or POLLHUP or POLLERR)) == 0:
           return false
         var ch: char
         let n = posix.read(fd, addr ch, 1)
         if n == 1:
           pendingInput.add ch.ord.int
+        elif n == 0:
+          # poll() reports a closed/EOF fd (e.g. `/dev/null` stdin, a
+          # daemonized process, or a closed PTY) as perpetually readable,
+          # so without this latch `getCh` busy-loops on poll→read(0)
+          # forever and never returns the -1 that signals EOF. Latch it:
+          # stdin is at EOF for the process lifetime, so every later
+          # `getCh` returns -1 and `readLineWith` raises EOFError.
+          stdinEof = true
         result = pendingInput.len > 0
 
       let getCh: minline.GetChProc = proc(): int =
@@ -1605,12 +1656,18 @@ proc inputThreadProc() {.thread.} =
             result = pendingInput[0]
             pendingInput.delete(0)
             return
+          # fillPending returned false. If stdin hit EOF, surface it as
+          # -1 so readLineWith raises EOFError; otherwise it was just a
+          # poll timeout / SIGWINCH, so keep looping.
+          if stdinEof:
+            return -1
           # SIGWINCH is caught with SA_RESTART, so poll() is restarted
           # rather than returning EINTR. Detect the resize via the shared
           # flag on each poll cycle and surface it as IOError so readLineWith
           # redraws the editor and footer at the new geometry.
           if consumeResizePending():
             markResizePending()
+            termengine.noteResize()
             raise newException(IOError, "terminal resized")
           if errno == EINTR:
             continue
@@ -1722,6 +1779,13 @@ proc inputThreadProc() {.thread.} =
         return
       termengine.finishEditorRedraw(ed, showCaret = not ed.pendingCaret)
       inputEditorReady.store(true, moRelease)
+    # Hold the terminal write lock across editor mutation + redraw so the
+    # background render threads (spinner/barTick) that read the same editor
+    # state under this lock can never observe a half-mutated or freed buffer.
+    edPtr[].preMutate = proc(ed: var minline.LineEditor) =
+      termui.acquireTerminalWrite()
+    edPtr[].postMutate = proc(ed: var minline.LineEditor) =
+      termui.releaseTerminalWrite()
 
     when defined(posix):
       if isatty(fd) != 0 and fd.tcGetAttr(addr inputOrigTermios) == 0:
@@ -2013,7 +2077,13 @@ proc wizardReadLine*(editor: var minline.LineEditor, prompt: string,
   ## and EOF clear the flag inline because there is nothing left to
   ## race and the cancel handler's own `fullRedraw` already anchors
   ## the prompt.
-  ensureInputThreadStarted()
+  # Post the request BEFORE starting the input thread. If the thread
+  # starts first, its persistent `getCh` may consume real input or hit
+  # EOF and exit the persistent readLineWith before the wizard sentinel
+  # is visible — leaving this caller parked forever waiting for a
+  # response that never comes. With the request posted up front, the
+  # thread's first `getCh` sees `wizardRequestPosted` and returns the
+  # sentinel, so the wizard branch runs instead of the persistent prompt.
   acquire wizardRequestLock
   try:
     wizardRequest = WizardReadRequest(prompt: prompt, hidechars: hidechars,
@@ -2029,6 +2099,7 @@ proc wizardReadLine*(editor: var minline.LineEditor, prompt: string,
     # wizard's own getCh can read user input normally.
   finally:
     release wizardRequestLock
+  ensureInputThreadStarted()
   while not wizardResponsePosted.load(moAcquire):
     if not inputThreadRunning:
       raise newException(IOError, "input thread stopped")

@@ -616,10 +616,11 @@ suite "terminal visual contract":
     tty.drain(200)
     # Walk the captured frames and find the first one showing the `❯ `.
     # Between the welcome's "type a prompt" hint and that prompt there must
-    # be no blank row.
+    # be exactly one blank gap row: the prompt must not sit flush against
+    # the hint (no gap), nor must there be more than one blank row.
     var promptRow = -1
     var hintRow = -1
-    var sawBlankBetween = false
+    var blankRowsBetween = 0
     for f in tty.frames:
       let rows = f.rows
       var p = -1
@@ -637,19 +638,68 @@ suite "terminal visual contract":
         if hintRow >= 0:
           for r in (hintRow + 1) ..< promptRow:
             if rows[r].strip.len == 0:
-              sawBlankBetween = true
+              inc blankRowsBetween
       # Once the prompt is showing we only need the first occurrence.
       if promptRow >= 0:
         break
     doAssert promptRow >= 0, "startup prompt never appeared in frames"
     doAssert hintRow >= 0, "welcome hint line not found"
-    doAssert not sawBlankBetween,
-      "blank row between welcome hint and startup prompt (orphan bug)"
+    doAssert blankRowsBetween == 1,
+      "expected exactly one blank gap row between welcome hint and " &
+      "startup prompt, found " & $blankRowsBetween & " (orphan/flush bug)"
     # The prompt must anchor at column 2 (after the `❯ ` glyph).
     require tty.frames[^1].cursorRow >= 0
     let liveRow = tty.frames[^1].rows[tty.frames[^1].cursorRow]
     doAssert liveRow.startsWith("❯"),
       "startup prompt not anchored at the `❯ ` glyph: '" & liveRow & "'"
+
+  test "prompt-only startup leaves exactly one blank gap above the prompt":
+    # The prompt-only startup path (`paintInitialPrompt` -> `paintPromptOnly`,
+    # used on a fresh start and on resume without prior usage) paints `❯ `
+    # directly on the row the caller left the cursor on. When prior content sits
+    # above (the welcome screen, or resumed scrollback), that leaves the prompt
+    # flush against it with no separator. It must sit exactly one blank row
+    # below the last prior-content line, matching the bar+prompt `endTurn` gap.
+    let root = newFixture("prompt_only_gap")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[])
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
+      tty.close()
+    tty.expect "❯"
+    tty.drain(200)
+    # Find the first frame showing the prompt-only `❯ ` and count the
+    # blank rows between the last non-blank prior-content row and the prompt row.
+    var promptRow = -1
+    var contentRow = -1
+    var blankRowsBetween = 0
+    for f in tty.frames:
+      let rows = f.rows
+      var p = -1
+      for ri, r in rows:
+        if r.strip(leading = true).startsWith("❯"):
+          p = ri
+          break
+      if p >= 0 and promptRow < 0:
+        promptRow = p
+        # last non-blank row above the prompt is prior content
+        for r in countdown(p - 1, 0):
+          if rows[r].strip.len > 0:
+            contentRow = r
+            break
+        if contentRow >= 0:
+          for r in (contentRow + 1) ..< promptRow:
+            if rows[r].strip.len == 0:
+              inc blankRowsBetween
+      if promptRow >= 0:
+        break
+    doAssert promptRow >= 0, "prompt-only prompt never appeared in frames"
+    doAssert contentRow >= 0, "no prior-content line above prompt-only prompt"
+    doAssert blankRowsBetween == 1,
+      "expected exactly one blank gap row above prompt-only prompt, found " &
+        $blankRowsBetween
 
   test "word-level content chunks stream eagerly, not buffered to newline":
     # Eager streaming: when content arrives in word-level chunks with no
@@ -732,6 +782,20 @@ suite "terminal visual contract":
       # The notice is controller feedback, not a conversation message, so it
       # must never reach the persisted session transcript.
       check "rate limit" notin root.sessionLogText()
+      # Spacing contract: an alert line (429 retry notice) is bracketed by
+      # exactly one blank line above and one below — not flush against the
+      # preceding prompt echo (0 above) and not separated by a double gap.
+      var hist = tty.historyText().splitLines()
+      var idx = -1
+      for i, line in hist:
+        if line == "rate limit (code 429). retry 2/12 in 1s": idx = i
+      check idx > 0
+      check hist[idx - 1].strip.len == 0
+      check hist[idx + 1].strip.len == 0
+      # Color contract: alert lines (429 retry notice) are non-bold magenta.
+      check "\x1b[35mrate limit (code 429)" in tty.raw
+      # The startup profile shows model values in bright white.
+      check "\x1b[97mstub-model" in tty.raw
 
   test "submitting a prompt survives the working directory being removed":
     # Regression: the process's cwd can be deleted out from under it (tmpfs
@@ -1663,6 +1727,115 @@ suite "terminal visual contract":
       "absent, then frame " & $(flickerAt + 1) &
       " redraws it — an erase-then-redraw pair.\n" &
       tty.dumpFramesAround("flicker-marker")
+
+  test "streaming bash viewport never wipes scrollback lines above it":
+    # Contract guard for the bash tool viewport, the volatile display that
+    # sits above the token bar and BELOW committed scrollback while a bash
+    # command runs. Its height drifts as output streams: it grows one row
+    # per line, then SHRINKS when StreamingView caps at StreamMaxLines and
+    # folds the wrapped tail into the single "... N lines omitted" marker.
+    # The engine's walk-up (`editorRowsAboveCursor + paintedFooterRows +
+    # toolViewportRows.len`) must track that drift exactly; a stale taller
+    # height would make the erase-to-end (\x1b[J) reach past the viewport
+    # into committed scrollback. Scrollback is append-only — no committed
+    # line may ever disappear while the viewport is live. This is the same
+    # class of invariant the ticker cleanup fix (ea0deeb) protects.
+    #
+    # Detection: scan the recorded frames for an in-place wipe. A
+    # legitimate scroll-off shifts every row up by one (the row above the
+    # wiped row also changes). An in-place wipe blanks a row while the row
+    # directly above it stays byte-identical.
+    let root = newFixture("bash_viewport_scrollback")
+    writeConfiguredProvider(root)
+    # Each streamed line wraps across several rows at this narrow width, so
+    # the pre-cap viewport is tall. Once buf exceeds StreamMaxLines (8) the
+    # capped viewport replaces many wrapped tail rows with a single
+    # "... N lines omitted" marker and the height SHRINKS — the condition
+    # the over-erase needs.
+    var streamLines: seq[JsonNode]
+    var streamJoined = ""
+    for i in 1 .. 20:
+      let s = "line-" & align($i, 2, '0') & "-".repeat(60)
+      streamLines.add %s
+      if streamJoined.len > 0: streamJoined.add "\n"
+      streamJoined.add s
+    streamJoined.add "\n"
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "content": "Running a long bash stream.",
+        "contentChunks": ["Running a long bash stream."],
+        "tool_calls": [
+          toolCall("call_stream", "bash", %*{
+            "command": "printf 'line-01\\nline-02\\n'"
+          }, %*{
+            "stream": streamLines,
+            "output": streamJoined,
+            "code": 0
+          })
+        ],
+        "usage": {"promptTokens": 40, "completionTokens": 8,
+                  "totalTokens": 48, "cachedTokens": 0}
+      },
+      {
+        "role": "assistant",
+        "content": "Done.",
+        "contentChunks": ["Done."],
+        "usage": {"promptTokens": 60, "completionTokens": 6,
+                  "totalTokens": 66, "cachedTokens": 0}
+      }
+    ])
+
+    # cols=40 forces each ~70-char line to wrap across ~2 rows; rows=48 keeps
+    # the startup banner, committed prompt echo and assistant content on
+    # screen above the viewport through the grow→cap-shrink transition so a
+    # scroll-off never masks the in-place wipe.
+    let tty = startStub(root, cols = 40, rows = 48)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "run it\n"
+    tty.expectInHistory "line-01"
+    tty.expectInHistory "line-20"
+    tty.expectInHistory "Done."
+    tty.drain(100)
+
+    # Walk consecutive frame pairs. A wipe is a committed scrollback row that
+    # is non-blank in the earlier frame, blank in the later frame, while the
+    # row directly above it is byte-identical across the pair (so it was not a
+    # scroll-off — a scroll-off shifts everything up). Only committed content
+    # rows count: the token bar, ticker/gap, editor and the live viewport are
+    # volatile chrome that legitimately changes frame to frame. The over-erase
+    # reaches into the committed rows directly above the viewport (the
+    # assistant content line and the prompt echo above it).
+    const committedMarkers = ["Running a long bash stream.", "❯ run it"]
+    proc isCommitted(row: string): bool =
+      for m in committedMarkers:
+        if m in row: return true
+      false
+    var wipeAt = -1
+    var wipeDetail = ""
+    for i in 1 ..< tty.frames.len:
+      let prev = tty.frames[i - 1].rows
+      let cur = tty.frames[i].rows
+      for r in 1 ..< min(prev.len, cur.len):
+        let prevRow = prev[r]
+        let curRow = cur[r]
+        if not prevRow.isCommitted: continue
+        if curRow.strip.len > 0: continue
+        # Committed row r went non-blank → blank. If the row above (r-1) is
+        # unchanged, this is an in-place wipe, not a scroll-off.
+        if prev[r - 1] == cur[r - 1]:
+          wipeAt = i
+          wipeDetail = "frame " & $i & " row " & $r &
+            ": \"" & prevRow & "\" -> blank, row above unchanged (\"" &
+            prev[r - 1] & "\")"
+          break
+      if wipeAt >= 0: break
+    doAssert wipeAt < 0, "streaming bash viewport wiped a scrollback line " &
+      "in place: " & wipeDetail & "\n" & tty.dumpFramesAround("")
 
   test "non-bash tool transcript shapes":
     let root = newFixture("other_tools_visual_test")

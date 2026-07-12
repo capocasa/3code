@@ -180,6 +180,8 @@ type
     onCancelDeferredSubmit*: proc(ed: var LineEditor) {.closure.}
     preRedraw*: proc(ed: var LineEditor) {.closure.}
     postRedraw*: proc(ed: var LineEditor) {.closure.}
+    preMutate*: proc(ed: var LineEditor) {.closure.}
+    postMutate*: proc(ed: var LineEditor) {.closure.}
     redrawWrappedExternally*: bool
     submitIcon*: string ## Icon written at end of text before submit newline (set before readLineWith).
     renderSuffix*: string ## Transient suffix rendered after the buffer, not part of submitted text.
@@ -1475,129 +1477,137 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
     if c1 < 0:
       ed.eof = true
       raise newException(EOFError, "")
-    if c1 == 10 or c1 == 13:
-      # Hidden-mode (api key) paste burst detection: when a newline
-      # arrives immediately after other bytes (no inter-byte gap),
-      # it's part of a paste, not an Enter press. Drop it so the
-      # user doesn't submit a truncated key. Real Enter has a human
-      # pause before it — pollStdinNow() catches paste bursts only.
-      if hidechars and ed.line.text.len > 0 and stdinHasByteNow():
-        continue
-      if ed.deferSubmit:
-        ed.submitted = true
-        callHook(ed.onSubmit, ed)
-        fullRedraw(ed)
-        if not noHistory and not hidechars:
-          ed.historyAdd()
-        ed.historyFlush()
-        continue
-      parkAtEnd(ed)
-      if not noHistory and not hidechars:
-        ed.historyAdd()
-      ed.historyFlush()
-      ed.write "\x1b[?2004l"
-      ed.submitted = true
-      return ed.line.text
-    if ed.pendingCaret:
-      # Typing after a queued submit cancels the queue but keeps the
-      # buffered text and cursor position, so the new keystroke edits in
-      # place rather than starting over. Drop the pending glyph, restore
-      # the native caret, and recompute the editor height from the text
-      # alone (the suffix is gone). State only: no redraw here. The
-      # keystroke handler below (printChar, deletePrevious, etc.) already
-      # calls fullRedraw, so painting now would clear-and-repaint the
-      # whole footer region twice per keystroke. On terminals without
-      # DEC 2026 synchronized output that double clear is visible as a
-      # per-keystroke flash. Defer the single repaint to the handler; if
-      # the byte is ignored (no handler redraws), paint once below.
-      #
-      # Design contract: a prompt queued during a turn shows the
-      # hourglass. Cancelling the current turn with Ctrl-C or a bare ESC
-      # must send that queued prompt as the next user message, not drop
-      # it. So cancel keys raise InputCancelled *before* the teardown
-      # below drops the queue. If the user does not want it sent they
-      # delete the queued text first (any editing keystroke runs the
-      # teardown, cancels the queue, and lets them edit or clear the
-      # line before interrupting).
-      if c1 == 3 or (c1 == 27 and not ed.hasPendingEscapeTail()):
-        ed.canceled = true
-        raise newException(InputCancelled, "")
-      ed.pendingCaret = false
-      ed.renderSuffix = ""
-      ed.renderSuffixCursor = false
-      callHook(ed.onCancelDeferredSubmit, ed)
-      ed.echoRows = totalRows(ed.line.text, ed.promptW, ed.contPromptW,
-                              max(2, ed.width))
-      suffixJustCleared = true
-    if c1 == 8 or c1 == 127:
-      ed.deletePrevious()
-      continue
-    if c1 in PRINTABLE:
-      if hidechars:
-        ed.line.text.add c1.chr
-        inc ed.line.position
-        ed.write "*"
-      else:
-        ed.printChar(c1)
-      continue
-    if c1 == 9:
-      let nxt = ed.completeLine()
-      if nxt > 0:
-        # The completion absorbed a trailing keystroke we should treat
-        # as the next char. Re-dispatch via a tiny tail-call by
-        # synthesising a tiny `pending` slot — but we don't have one;
-        # so handle the common "Enter after completion" case here.
-        if nxt == 10 or nxt == 13:
-          if ed.deferSubmit:
-            ed.submitted = true
-            callHook(ed.onSubmit, ed)
-            fullRedraw(ed)
-            if not noHistory and not hidechars:
-              ed.historyAdd()
-            ed.historyFlush()
-            continue
-          parkAtEnd(ed)
+    # Serialize editor mutation + redraw with the background render threads
+    # (spinner/barTick) that read the same editor state under the terminal
+    # write lock. The mutation below (ed.line.text, ed.renderSuffix, ...) is
+    # otherwise unsynchronized with those readers and corrupts the heap.
+    callHook(ed.preMutate, ed)
+    try:
+      if c1 == 10 or c1 == 13:
+        # Hidden-mode (api key) paste burst detection: when a newline
+        # arrives immediately after other bytes (no inter-byte gap),
+        # it's part of a paste, not an Enter press. Drop it so the
+        # user doesn't submit a truncated key. Real Enter has a human
+        # pause before it — pollStdinNow() catches paste bursts only.
+        if hidechars and ed.line.text.len > 0 and stdinHasByteNow():
+          continue
+        if ed.deferSubmit:
+          ed.submitted = true
+          callHook(ed.onSubmit, ed)
+          fullRedraw(ed)
           if not noHistory and not hidechars:
             ed.historyAdd()
           ed.historyFlush()
-          ed.write "\x1b[?2004l"
-          ed.submitted = true
-          return ed.line.text
-        if nxt in PRINTABLE:
-          ed.printChar(nxt)
-      paintIfCleared(ed, suffixJustCleared)
-      continue
-    if c1 in ESCAPES:
-      discard handleEscape(ed, c1)
-      paintIfCleared(ed, suffixJustCleared)
-      continue
-    if c1 in CTRL and KEYMAP.hasKey(KEYNAMES[c1]):
-      KEYMAP[KEYNAMES[c1]](ed)
-      paintIfCleared(ed, suffixJustCleared)
-      continue
-    # Multi-byte UTF-8: decode the full sequence and insert it.
-    if c1 >= 0x80:
-      var buf = ""
-      buf.add c1.char
-      let n = expectedSeqLen(c1)
-      var bad = false
-      for _ in 1 ..< n:
-        let b = ed.getCh()
-        if b >= 0 and (b and 0xC0) == 0x80:
-          buf.add b.char
+          continue
+        parkAtEnd(ed)
+        if not noHistory and not hidechars:
+          ed.historyAdd()
+        ed.historyFlush()
+        ed.write "\x1b[?2004l"
+        ed.submitted = true
+        return ed.line.text
+      if ed.pendingCaret:
+        # Typing after a queued submit cancels the queue but keeps the
+        # buffered text and cursor position, so the new keystroke edits in
+        # place rather than starting over. Drop the pending glyph, restore
+        # the native caret, and recompute the editor height from the text
+        # alone (the suffix is gone). State only: no redraw here. The
+        # keystroke handler below (printChar, deletePrevious, etc.) already
+        # calls fullRedraw, so painting now would clear-and-repaint the
+        # whole footer region twice per keystroke. On terminals without
+        # DEC 2026 synchronized output that double clear is visible as a
+        # per-keystroke flash. Defer the single repaint to the handler; if
+        # the byte is ignored (no handler redraws), paint once below.
+        #
+        # Design contract: a prompt queued during a turn shows the
+        # hourglass. Cancelling the current turn with Ctrl-C or a bare ESC
+        # must send that queued prompt as the next user message, not drop
+        # it. So cancel keys raise InputCancelled *before* the teardown
+        # below drops the queue. If the user does not want it sent they
+        # delete the queued text first (any editing keystroke runs the
+        # teardown, cancels the queue, and lets them edit or clear the
+        # line before interrupting).
+        if c1 == 3 or (c1 == 27 and not ed.hasPendingEscapeTail()):
+          ed.canceled = true
+          raise newException(InputCancelled, "")
+        ed.pendingCaret = false
+        ed.renderSuffix = ""
+        ed.renderSuffixCursor = false
+        callHook(ed.onCancelDeferredSubmit, ed)
+        ed.echoRows = totalRows(ed.line.text, ed.promptW, ed.contPromptW,
+                                max(2, ed.width))
+        suffixJustCleared = true
+      if c1 == 8 or c1 == 127:
+        ed.deletePrevious()
+        continue
+      if c1 in PRINTABLE:
+        if hidechars:
+          ed.line.text.add c1.chr
+          inc ed.line.position
+          ed.write "*"
         else:
-          putback = b
-          bad = true
-          break
-      # Only commit a complete sequence; a truncated one would leave a
-      # malformed (invalid-UTF-8) buffer that breaks rune walking.
-      if not bad: ed.insertText(buf)
+          ed.printChar(c1)
+        continue
+      if c1 == 9:
+        let nxt = ed.completeLine()
+        if nxt > 0:
+          # The completion absorbed a trailing keystroke we should treat
+          # as the next char. Re-dispatch via a tiny tail-call by
+          # synthesising a tiny `pending` slot — but we don't have one;
+          # so handle the common "Enter after completion" case here.
+          if nxt == 10 or nxt == 13:
+            if ed.deferSubmit:
+              ed.submitted = true
+              callHook(ed.onSubmit, ed)
+              fullRedraw(ed)
+              if not noHistory and not hidechars:
+                ed.historyAdd()
+              ed.historyFlush()
+              continue
+            parkAtEnd(ed)
+            if not noHistory and not hidechars:
+              ed.historyAdd()
+            ed.historyFlush()
+            ed.write "\x1b[?2004l"
+            ed.submitted = true
+            return ed.line.text
+          if nxt in PRINTABLE:
+            ed.printChar(nxt)
+        paintIfCleared(ed, suffixJustCleared)
+        continue
+      if c1 in ESCAPES:
+        discard handleEscape(ed, c1)
+        paintIfCleared(ed, suffixJustCleared)
+        continue
+      if c1 in CTRL and KEYMAP.hasKey(KEYNAMES[c1]):
+        KEYMAP[KEYNAMES[c1]](ed)
+        paintIfCleared(ed, suffixJustCleared)
+        continue
+      # Multi-byte UTF-8: decode the full sequence and insert it.
+      if c1 >= 0x80:
+        var buf = ""
+        buf.add c1.char
+        let n = expectedSeqLen(c1)
+        var bad = false
+        for _ in 1 ..< n:
+          let b = ed.getCh()
+          if b >= 0 and (b and 0xC0) == 0x80:
+            buf.add b.char
+          else:
+            putback = b
+            bad = true
+            break
+        # Only commit a complete sequence; a truncated one would leave a
+        # malformed (invalid-UTF-8) buffer that breaks rune walking.
+        if not bad: ed.insertText(buf)
+        paintIfCleared(ed, suffixJustCleared)
+        continue
+      # Unknown byte: ignore. If we just cleared a deferred-submit suffix
+      # and no handler above redrew, paint once so the suffix glyph is gone.
       paintIfCleared(ed, suffixJustCleared)
-      continue
-    # Unknown byte: ignore. If we just cleared a deferred-submit suffix
-    # and no handler above redrew, paint once so the suffix glyph is gone.
-    paintIfCleared(ed, suffixJustCleared)
-
+  
+    finally:
+      callHook(ed.postMutate, ed)
 proc readLine*(ed: var LineEditor, prompt = "", hidechars = false,
                noHistory = false): string =
   let write: WriteProc = proc(s: string) =

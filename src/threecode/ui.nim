@@ -414,6 +414,11 @@ proc bootstrapProvider*(editor: var minline.LineEditor): Profile =
   activeCurrent = prov.name & "." & firstModel(prov)
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   hintLn &"  saved to {configPath()}", resetStyle
+  # The wizard's last `wizardReadLine` left `inputModalActive` held so
+  # the input thread could not race these post-writes; release it now that
+  # the config write and the "saved to" line have flushed, matching the
+  # `wizardFinish` the main loop calls after a `:provider` cdModal command.
+  wizardFinish()
   buildProfile(activeCurrent, activeProviders, "")
 
 # ---------- Provider / model commands ----------

@@ -599,11 +599,14 @@ proc renderToolPending*(banner: string, kind: ActionKind) =
 
 proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -1) =
   ## Final tool banner. Icons render in default text color regardless of
-  ## exit code. Optional `(Ns)` suffix when `elapsedS >= 1`
-  ## (live); replay passes -1 to omit it.
+  ## exit code; the banner/command text renders nonbright white (the
+  ## mode-aware `off-white` tier). Optional `(Ns)` suffix when
+  ## `elapsedS >= 1` (live); replay passes -1 to omit it.
   let icon = if kind == akBash and code > 0: "Ø" else: toolIcon(kind)
   stdout.write icon & " "
+  stdout.write OffWhiteFg
   stdout.write banner
+  stdout.write Reset
   if elapsedS >= 1:
     subtleWrite(stdout, &"  ({elapsedS}s)")
   stdout.write "\n"
@@ -612,7 +615,7 @@ proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -
 proc toolBannerBytes*(banner: string; kind: ActionKind; code: int;
                       elapsedS = -1): string =
   let icon = if kind == akBash and code > 0: "Ø" else: toolIcon(kind)
-  result.add icon & " " & banner
+  result.add icon & " " & OffWhiteFg & banner & Reset
   if elapsedS >= 1:
     result.add GreyFg & &"  ({elapsedS}s)" & Reset
   result.add "\r\n"
@@ -740,16 +743,27 @@ proc showProfile*(p: Profile; bold = false) =
   if p.name == "": return
   let dot = p.name.find('.')
   let provider = if dot < 0: p.name else: p.name[0 ..< dot]
+  # The provider/model/reasoning *values* are bright white so the active
+  # selection reads as the foreground subject; the labels stay in the
+  # mode-resolved default tier. `Bold` (welcome screen) keeps the cyan
+  # brand labels; the interactive `:model`/`:provider` path uses the
+  # plain default labels.
   if bold:
-    stdout.styledWriteLine fgCyan, styleBright, "  provider  ", resetStyle, provider
-    stdout.styledWriteLine fgCyan, styleBright, "  model     ", resetStyle, shortModel(p.model)
+    stdout.styledWriteLine fgCyan, styleBright, "  provider  ", resetStyle,
+      BrightWhiteFg, provider, resetStyle
+    stdout.styledWriteLine fgCyan, styleBright, "  model     ", resetStyle,
+      BrightWhiteFg, shortModel(p.model), resetStyle
     if p.reasoning != "":
-      stdout.styledWriteLine fgCyan, styleBright, "  reasoning ", resetStyle, p.reasoning
+      stdout.styledWriteLine fgCyan, styleBright, "  reasoning ", resetStyle,
+        BrightWhiteFg, p.reasoning, resetStyle
   else:
-    stdout.styledWriteLine fgDefault, "  provider  ", resetStyle, provider
-    stdout.styledWriteLine fgDefault, "  model     ", resetStyle, shortModel(p.model)
+    stdout.styledWriteLine fgDefault, "  provider  ", resetStyle,
+      BrightWhiteFg, provider, resetStyle
+    stdout.styledWriteLine fgDefault, "  model     ", resetStyle,
+      BrightWhiteFg, shortModel(p.model), resetStyle
     if p.reasoning != "":
-      stdout.styledWriteLine fgDefault, "  reasoning ", resetStyle, p.reasoning
+      stdout.styledWriteLine fgDefault, "  reasoning ", resetStyle,
+        BrightWhiteFg, p.reasoning, resetStyle
 
 # Track up-navigation so "down past last" can return to blank line.
 var navigatedUp*: bool = false

@@ -339,13 +339,17 @@ proc main() =
     signal(SIGHUP, signalCleanup)
   editor.completionCallback = proc(ed: minline.LineEditor): seq[string] =
     completionFor(ed.lineText)
-  if prof.name == "":
-    prof = bootstrapProvider(editor)
-  session.profileName = prof.name
+  # The bootstrap provider wizard (and every later prompt) reads via the
+  # input thread, whose startup guard is `inputEditor != nil`. Wire the
+  # module-global pointers before the wizard can run, or the first-run
+  # wizard raises `IOError("input thread stopped")` at its first prompt.
   inputEditor = addr(editor)
   inputMessages = addr(messages)
   inputSession = addr(session)
   inputProfile = addr(prof)
+  if prof.name == "":
+    prof = bootstrapProvider(editor)
+  session.profileName = prof.name
   setActiveCommandHook(proc(cmd: string) {.gcsafe.} =
     {.cast(gcsafe).}:
       let kind = classifyCommand(cmd)
