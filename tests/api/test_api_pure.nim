@@ -96,6 +96,56 @@ suite "api: retryCategory":
     let msg = %*{"role": "assistant", "content": "ok"}
     check retryCategory("", msg, 0) == ""
 
+  test "nonretryable status wins over net-error heuristic (regression)":
+    # The bug: the streaming transport sets errMsg ("empty reply - no content,
+    # no tool calls") and leaves assistantMsg nil for a non-200 error body.
+    # The old netFailed shortcut (errMsg != "" and msg == nil => "server")
+    # wrongly retried a 400/401/403 for the full 12-attempt budget. An
+    # explicit non-retryable status must win regardless of errMsg.
+    for code in [400, 401, 403, 408, 409, 425]:
+      check retryCategory("empty reply - no content, no tool calls", nil, code) == ""
+
+  test "retryable status wins over net-error heuristic":
+    # A 5xx that also carries an errMsg (streaming transport sets it on the
+    # empty-content path) must still retry as a server error.
+    check retryCategory("empty reply - no content, no tool calls", nil, 502) == "server"
+    check retryCategory("empty reply - no content, no tool calls", nil, 429) == "rate"
+
+  test "status 0 without errMsg is not a transport error":
+    # Only an explicit errMsg + nil msg at status 0 counts as a transport
+    # failure; a bare nil/empty is not an error.
+    check retryCategory("", nil, 0) == ""
+
+suite "api: formatApiDetail":
+  test "body message with code is suffixed":
+    let body = "{\"error\":{\"message\":\"invalid request error trace_id: abc\"}}"
+    check formatApiDetail("", body, 400) ==
+      "invalid request error trace_id: abc (code 400)"
+
+  test "code-only body collapses to bare error (no duplication)":
+    # Gateways emit `{"error":{"message":"error code: 502"}}` which adds
+    # nothing beyond the status; collapse to `error (code 502)`.
+    let body = "{\"error\":{\"message\":\"error code: 502\"}}"
+    check formatApiDetail("", body, 502) == "error (code 502)"
+
+  test "bare-error body collapses too":
+    let body = "{\"error\":{\"message\":\"error\"}}"
+    check formatApiDetail("", body, 400) == "error (code 400)"
+
+  test "falls back to errMsg when body empty":
+    check formatApiDetail("stream read: connection reset by peer", "", 502) ==
+      "stream read: connection reset by peer (code 502)"
+
+  test "falls back to bare error when both empty":
+    check formatApiDetail("", "", 400) == "error (code 400)"
+
+  test "omits code suffix when status is 0":
+    check formatApiDetail("stream read: connection reset", "", 0) ==
+      "stream read: connection reset"
+
+  test "bare error with no code":
+    check formatApiDetail("", "", 0) == "error"
+
 suite "api: applyReasoning — gpt-oss":
   test "sets reasoning_effort for gpt-oss":
     var body = %*{"stream": true}
