@@ -46,26 +46,28 @@ proc finishItem(bytes: var string; attachSeparator: bool) =
   if attachSeparator:
     bytes.add "\r\n\r\n"
 
-proc stripAnsiCsi(line: string): string =
+proc dropLeadingIndent(line: string): string =
+  ## Drop a leading two-space indent, skipping any opening SGR run so
+  ## styled lines (e.g. `showProfile`) keep their color but lose the
+  ## indent the plain-body layout does not want.
   var i = 0
-  while i < line.len:
-    if line[i] == '\e' and i + 1 < line.len and line[i + 1] == '[':
-      i += 2
-      while i < line.len and line[i] notin {'@'..'~'}:
-        inc i
-      if i < line.len:
-        inc i
-    else:
-      result.add line[i]
-      inc i
+  # Skip a leading CSI sequence (SGR color) if present.
+  if i + 1 < line.len and line[i] == '\e' and line[i + 1] == '[':
+    i += 2
+    while i < line.len and line[i] notin {'@'..'~'}: inc i
+    if i < line.len: inc i
+  if i + 1 < line.len and line[i] == ' ' and line[i + 1] == ' ':
+    result.add line[0 ..< i]
+    result.add line[i + 2 .. ^1]
+  else:
+    result = line
 
 proc plainCommandBodyBytes*(body: string): string =
+  ## Like `commandBodyBytes` but without the leading `: title` marker and
+  ## with the two-space indent dropped. ANSI styling is preserved so
+  ## `showProfile` can mark the active provider/model/reasoning values.
   for line in normalizeLines(body):
-    let plain = line.stripAnsiCsi()
-    if plain.startsWith("  "):
-      result.add plain[2 .. ^1] & "\r\n"
-    else:
-      result.add plain & "\r\n"
+    result.add line.dropLeadingIndent() & "\r\n"
   result.finishItem(true)
 
 proc userPromptItem*(line: string): TranscriptItem =

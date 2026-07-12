@@ -55,6 +55,7 @@ proc onTurnInterrupted*() =
   stopSpinner(clearLiveFooter = false)
   discard stopBarTick()
   writeTranscriptWithFatPrompt:
+    stdout.write "\r\n"
     stdout.styledWriteLine(fgMagenta, InterruptedByUserMsg, resetStyle)
   emitTestFrameEvent()
   clearInterrupted()
@@ -316,6 +317,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       # rewriting the prompt.
       saveSession(session, messages)
       writeTranscriptWithFatPrompt:
+        stdout.write "\r\n"
         errLn e.msg, resetStyle
       endTurnAfterTranscriptAppend()
       turnEnded = true
@@ -359,6 +361,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         let bumped = min(cur * 2, window)
         maxTokensOverride = max(maxTokensOverride, bumped)
         writeTranscriptWithFatPrompt:
+          stdout.write "\r\n"
           errLn "finished by length, retrying with ", humanTokens(maxTokensOverride), " token budget", resetStyle
         debugOut &"runTurns: empty length-retry {lengthEscalations}/{MaxLengthEscalations} max_tokens={maxTokensOverride}"
         continue
@@ -372,7 +375,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           "content": "Please provide your final answer now."}
         saveSession(session, messages)
         writeTranscriptWithFatPrompt:
-          hintLn "empty reply; re-prompting for a final answer", resetStyle
+          stdout.write "\r\n"
+          errLn "empty reply; re-prompting for a final answer", resetStyle
         debugOut &"runTurns: empty steer-retry {steerAttempts}/{MaxSteerAttempts}"
         continue
       # Smart-handling exhausted (or never applicable). Retry the bare call,
@@ -385,6 +389,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           elif usage.reasoningTokens > 0: "reasoning only"
           else: "no content, no tool calls"
         writeTranscriptWithFatPrompt:
+          stdout.write "\r\n"
           errLn "empty reply: ", reason, ". retrying ", $emptyRetries, "/", $MaxEmptyRetries, resetStyle
         debugOut &"runTurns: empty resend {emptyRetries}/{MaxEmptyRetries} finishReason={finishReason}"
         continue
@@ -393,6 +398,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       messages.add msg
       saveSession(session, messages)
       writeTranscriptWithFatPrompt:
+        stdout.write "\r\n"
         errLn "empty reply - giving up after ", $MaxEmptyRetries, " retries", resetStyle
       endTurnAfterTranscriptAppend()
       turnEnded = true
@@ -674,7 +680,9 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
     # to keep doing, so save what we have and exit cleanly. `quit`
     # runs the registered exit procs, which restore terminal state.
     try: saveSession(session, messages) except CatchableError: discard
+    stdout.write "\n\n"
     stdout.styledWriteLine fgMagenta, "working directory gone: ", e.msg, resetStyle
+    stdout.write "\n"
     quit()
   except CatchableError as e:
     # Last-resort safety net: anything else that escapes `runTurns`

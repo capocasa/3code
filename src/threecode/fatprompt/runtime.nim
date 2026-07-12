@@ -317,6 +317,15 @@ type LiveMarkdownStream* = object
   liveCol: int
   partialActive: bool
   partialStartCol: int
+  ## Trailing-newline coalescing. A bare `\n` with an empty pending
+  ## line marks a paragraph break; we defer committing it as a blank
+  ## row until a non-empty line follows. Trailing breaks (stream ends
+  ## before another line arrives) are dropped at `finishContent`, so the
+  ## live stream never commits blank rows the receipt/separator would
+  ## then have to delete. Interior breaks are flushed the moment real
+  ## content resumes. This mirrors `splitLines` + `trimTranscriptTail`
+  ## in the batch path.
+  pendingBlank: bool
 
 var apiLiveStream: LiveMarkdownStream
 
@@ -1273,12 +1282,22 @@ proc renderPendingPartial(s: var LiveMarkdownStream, slurpedNow: int) =
     currentTermW())
   s.partialActive = true
 
+proc commitBlankLine(s: var LiveMarkdownStream) =
+  ## Commit one blank paragraph-break row to real scrollback.
+  commitTranscriptBytes(assistantTextBytes(""))
+  termengine.clearLiveContent()
+  s.partialActive = false
+
 proc commitPendingLine(s: var LiveMarkdownStream, slurpedNow: int) =
   ## Commit the accumulated `pendingLine` to real scrollback through the
   ## block-level markdown renderer. `appendTranscript` walks up past the
   ## volatile partial (still tracked in the engine) to erase it, writes the
   ## committed render, and re-anchors the footer; then the partial tracking
-  ## is cleared so the next line starts fresh.
+  ## is cleared so the next line starts fresh. A deferred paragraph break
+  ## (`pendingBlank`) is flushed first so interior blank rows land in order.
+  if s.pendingBlank:
+    s.pendingBlank = false
+    s.commitBlankLine()
   let isFirstLine = s.md.firstEmit
   let body = s.captureMd(s.pendingLine)
   s.pendingLine = ""
@@ -1296,9 +1315,12 @@ proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
   if suppressLiveAssistantStream(): return
   termui.withTerminalWriteLock:
     # Drop leading blank lines before the first real content so model
-    # padding never renders as blank rows above the answer.
+    # padding never renders as blank rows above the answer. Once content
+    # has started, blank lines are paragraph breaks handled by the
+    # `pendingBlank` coalescing below (interior breaks commit, trailing
+    # breaks are dropped at `finishContent`).
     var chunk = chunk
-    if not s.md.firstEmit:
+    if s.md.firstEmit:
       while chunk.len > 0 and (chunk[0] == '\n' or chunk[0] == '\r'):
         chunk.delete 0 .. 0
     var data = s.utf8Pending & chunk
@@ -1306,7 +1328,16 @@ proc feedContent*(s: var LiveMarkdownStream, chunk: string, slurpedNow: int) =
     var i = 0
     while i < data.len:
       if data[i] == '\n':
-        s.commitPendingLine(slurpedNow)
+        if s.pendingLine.len == 0 and not s.md.firstEmit:
+          # Bare newline with no accumulated text: a paragraph break.
+          # Defer it as `pendingBlank` rather than committing at once,
+          # so a trailing run of newlines never commits blank rows that
+          # the receipt/separator would then have to delete. The break
+          # is flushed by the next `commitPendingLine` (real content) or
+          # dropped at `finishContent`.
+          s.pendingBlank = true
+        else:
+          s.commitPendingLine(slurpedNow)
         inc i
       else:
         let charLen = utf8LenAt(data, i)
@@ -1326,6 +1357,10 @@ proc finishContent*(s: var LiveMarkdownStream, slurpedNow: int) =
     s.utf8Pending = ""
   if s.pendingLine.len > 0:
     s.commitPendingLine(slurpedNow)
+  # Drop a deferred trailing paragraph break: it was only meaningful if
+  # more content followed. Keeping it would commit a blank row the
+  # receipt/separator would have to compensate for.
+  s.pendingBlank = false
   discard s.captureMd("", finish = true)
   if s.partialActive:
     termengine.clearLiveContent()
@@ -1470,20 +1505,14 @@ proc apiContentFinished*(fullContent, baseLabel: string; slurped: int): bool =
   contentStreamedLive
 
 proc apiTrimTrailingContent*(fullContent, baseLabel: string; slurped: int) =
-  var trailingNl = 0
-  for i in countdown(fullContent.len - 1, 0):
-    if fullContent[i] == '\n': inc trailingNl
-    else: break
-  if trailingNl > 1:
-    termui.withTerminalWriteLock:
-      if apiLiveStream.liveBarAtCursor:
-        clearBarPrompt()
-        apiLiveStream.liveBarAtCursor = false
-      elif apiLiveStream.liveBarBelow:
-        termengine.writeRaw(ClearBarBelowBytes)
-        apiLiveStream.liveBarBelow = false
-      termui.eraseRowsAbove(trailingNl - 1)
-      paintBarPrompt(apiLiveStream.currentLabel(slurped))
+  ## Append-only: the scrollback is never edited after commit. Earlier
+  ## code deleted trailing blank rows that the live stream had already
+  ## committed (`eraseRowsAbove`) to compensate for the model emitting
+  ## `\n\n` at the end of its reply. That violated the append-only
+  ## scrollback contract. Trailing blank lines are now suppressed at
+  ## the source in `feedContent`/`finishContent`, so there is nothing
+  ## to retract here.
+  discard
 
 proc apiAfterLiveContent*(baseLabel: string; slurped: int) =
   if apiLiveStream.liveBarBelow:
@@ -1527,9 +1556,13 @@ proc apiNoUsage*(elapsed: int) =
 proc apiRetryNotice*(msg: string) =
   ## Controller-side retry notice committed as a harness line: non-bold
   ## magenta, no indent, no bullet. Same scrollback contract as
-  ## `interrupted by user`: one ordinary line, fat prompt preserved, not
-  ## persisted to the `.3log` (it is not a conversation message).
+  ## `interrupted by user`: one ordinary line bracketed by exactly one
+  ## blank line above and below, fat prompt preserved, not persisted to
+  ## the `.3log` (it is not a conversation message). The leading `\r\n`
+  ## opens the blank line above; `appendTranscript`'s separator closes
+  ## the blank line below.
   writeTranscriptWithFatPrompt:
+    stdout.write "\r\n"
     stdout.styledWrite(fgMagenta, msg, resetStyle)
     stdout.write "\r\n"
 

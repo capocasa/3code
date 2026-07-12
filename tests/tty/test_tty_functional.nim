@@ -782,6 +782,20 @@ suite "terminal visual contract":
       # The notice is controller feedback, not a conversation message, so it
       # must never reach the persisted session transcript.
       check "api 429" notin root.sessionLogText()
+      # Spacing contract: an alert line (429 retry notice) is bracketed by
+      # exactly one blank line above and one below — not flush against the
+      # preceding prompt echo (0 above) and not separated by a double gap.
+      var hist = tty.historyText().splitLines()
+      var idx = -1
+      for i, line in hist:
+        if line == "3code: api 429; retry 2/12 in 1s": idx = i
+      check idx > 0
+      check hist[idx - 1].strip.len == 0
+      check hist[idx + 1].strip.len == 0
+      # Color contract: alert lines (429 retry notice) are non-bold magenta.
+      check "\x1b[35m3code: api 429" in tty.raw
+      # The startup profile shows model values in bright white.
+      check "\x1b[97mstub-model" in tty.raw
 
   test "submitting a prompt survives the working directory being removed":
     # Regression: the process's cwd can be deleted out from under it (tmpfs

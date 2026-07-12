@@ -188,10 +188,3 @@ proc resetPromptInputAfterEmpty*(hasBar: bool; rows: int;
       stdout.write "\x1b[" & $n & "A\r\x1b[J"
       stdout.write promptOnlyBytes
     stdout.flushFile
-
-proc eraseRowsAbove*(rows: int) =
-  ## Erase rows immediately above the current cursor.
-  withTerminalWriteLock:
-    for _ in 0 ..< max(0, rows):
-      stdout.write "\x1b[1A\x1b[2K"
-    stdout.flushFile

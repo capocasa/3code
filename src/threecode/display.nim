@@ -740,16 +740,27 @@ proc showProfile*(p: Profile; bold = false) =
   if p.name == "": return
   let dot = p.name.find('.')
   let provider = if dot < 0: p.name else: p.name[0 ..< dot]
+  # The provider/model/reasoning *values* are bright white so the active
+  # selection reads as the foreground subject; the labels stay in the
+  # mode-resolved default tier. `Bold` (welcome screen) keeps the cyan
+  # brand labels; the interactive `:model`/`:provider` path uses the
+  # plain default labels.
   if bold:
-    stdout.styledWriteLine fgCyan, styleBright, "  provider  ", resetStyle, provider
-    stdout.styledWriteLine fgCyan, styleBright, "  model     ", resetStyle, shortModel(p.model)
+    stdout.styledWriteLine fgCyan, styleBright, "  provider  ", resetStyle,
+      BrightWhiteFg, provider, resetStyle
+    stdout.styledWriteLine fgCyan, styleBright, "  model     ", resetStyle,
+      BrightWhiteFg, shortModel(p.model), resetStyle
     if p.reasoning != "":
-      stdout.styledWriteLine fgCyan, styleBright, "  reasoning ", resetStyle, p.reasoning
+      stdout.styledWriteLine fgCyan, styleBright, "  reasoning ", resetStyle,
+        BrightWhiteFg, p.reasoning, resetStyle
   else:
-    stdout.styledWriteLine fgDefault, "  provider  ", resetStyle, provider
-    stdout.styledWriteLine fgDefault, "  model     ", resetStyle, shortModel(p.model)
+    stdout.styledWriteLine fgDefault, "  provider  ", resetStyle,
+      BrightWhiteFg, provider, resetStyle
+    stdout.styledWriteLine fgDefault, "  model     ", resetStyle,
+      BrightWhiteFg, shortModel(p.model), resetStyle
     if p.reasoning != "":
-      stdout.styledWriteLine fgDefault, "  reasoning ", resetStyle, p.reasoning
+      stdout.styledWriteLine fgDefault, "  reasoning ", resetStyle,
+        BrightWhiteFg, p.reasoning, resetStyle
 
 # Track up-navigation so "down past last" can return to blank line.
 var navigatedUp*: bool = false
