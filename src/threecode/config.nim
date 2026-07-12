@@ -476,6 +476,7 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("moonshot-cn", "https://api.moonshot.cn/v1"),
   ("nebius",      "https://api.tokenfactory.nebius.com/v1"),
   ("nvidia",      "https://integrate.api.nvidia.com/v1"),
+  ("novita",      "https://api.novita.ai/openai"),
   ("openai",      "https://api.openai.com/v1"),
   ("openrouter",  "https://openrouter.ai/api/v1"),
   ("ovh",         "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"),
