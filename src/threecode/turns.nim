@@ -51,7 +51,12 @@ proc onTurnInterrupted*() =
   ## through `writeTranscriptWithFatPrompt` (the same primitive
   ## `apiRetryNotice` and the normal turn-end path use). Callers in
   ## `runTurns` skip their deferred `endTurn` afterwards — the editor
-  ## paint here owns the final prompt position.
+  ## paint here owns the final prompt position. Because `endTurn` is
+  ## skipped, `stopTurnInputForFinalRender` (which it normally calls) is
+  ## skipped too, so reset `inputTurnActive` here: otherwise the input
+  ## thread keeps believing a turn is in progress and routes every later
+  ## Ctrl-D to the interrupt branch instead of the quit branch.
+  stopTurnInputForFinalRender()
   stopSpinner(clearLiveFooter = false)
   discard stopBarTick()
   writeTranscriptWithFatPrompt:

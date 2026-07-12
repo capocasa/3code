@@ -191,3 +191,30 @@ suite "quit signals":
     tty.expectExit(0, timeoutMs = 8000)
     assertNoTrace(tty)
     echo "  PASS: :q queued during a turn exited cleanly after the turn"
+
+  test "Ctrl-C interrupt then Ctrl-D quits (inputTurnActive must reset)":
+    # Regression: a user interrupt (Ctrl-C/ESC) during an active turn left
+    # `inputTurnActive` stuck true because `runTurns` skips its deferred
+    # `endTurn` on interrupt and `onTurnInterrupted` never reset the flag.
+    # With the flag stuck, every later Ctrl-D was misrouted to the turn-
+    # interrupt branch instead of the quit branch, so Ctrl-D silently did
+    # nothing and the prompt was impossible to leave via the keyboard.
+    let root = newFixture("interrupt_then_ctrl_d")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, slowResponses())
+    let tty = startStub(root)
+    defer: tty.close()
+    tty.expect "\u276f"
+    for ch in "go":
+      tty.send($ch); tty.drain(10)
+    tty.send "\n"
+    tty.drain(400)               # turn running
+    tty.ctrlC()                  # user interrupt
+    tty.expectInHistory "interrupted by user"
+    tty.expectIdleCaret()        # prompt returns after the interrupt
+    tty.expectAlive()            # interrupt did not exit the process
+    # Now at an idle, empty prompt: Ctrl-D must quit like `:q` would.
+    tty.send "\x04"
+    tty.expectExit(0, timeoutMs = 5000)
+    assertNoTrace(tty)
+    echo "  PASS: Ctrl-C interrupt then Ctrl-D quit cleanly"
