@@ -14,17 +14,19 @@ import threecode/[fatprompt, terminal as termui]
 suite "ticker cleanup":
   test "spinner cleanup walks up exactly one row (no ticker over-erase)":
     let outPath = getTempDir() / ("3code_ticker_out_" & $getCurrentProcessId())
-    let saved = stdout
-    let f = open(outPath, fmWrite)
-    stdout = f
+    let savedFd = getOsFileHandle(stdout)
+    doAssert reopen(stdout, outPath, fmWrite)
     try:
       startSpinner("test")
       sleep 200
       stopSpinner(clearLiveFooter = false)
       stdout.flushFile
     finally:
-      stdout = saved
-      close(f)
+      # Restore stdout to its original OS file handle. The earlier form
+      # (`stdout = f`) reassigns the File variable, which on Windows/MinGW
+      # expands to a non-lvalue C macro and fails to compile, so the
+      # whole test (and the Windows CI job) could not build at all.
+      discard open(stdout, savedFd, fmWrite)
 
     let raw = readFile(outPath)
     removeFile(outPath)
