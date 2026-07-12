@@ -1728,6 +1728,115 @@ suite "terminal visual contract":
       " redraws it — an erase-then-redraw pair.\n" &
       tty.dumpFramesAround("flicker-marker")
 
+  test "streaming bash viewport never wipes scrollback lines above it":
+    # Contract guard for the bash tool viewport, the volatile display that
+    # sits above the token bar and BELOW committed scrollback while a bash
+    # command runs. Its height drifts as output streams: it grows one row
+    # per line, then SHRINKS when StreamingView caps at StreamMaxLines and
+    # folds the wrapped tail into the single "... N lines omitted" marker.
+    # The engine's walk-up (`editorRowsAboveCursor + paintedFooterRows +
+    # toolViewportRows.len`) must track that drift exactly; a stale taller
+    # height would make the erase-to-end (\x1b[J) reach past the viewport
+    # into committed scrollback. Scrollback is append-only — no committed
+    # line may ever disappear while the viewport is live. This is the same
+    # class of invariant the ticker cleanup fix (ea0deeb) protects.
+    #
+    # Detection: scan the recorded frames for an in-place wipe. A
+    # legitimate scroll-off shifts every row up by one (the row above the
+    # wiped row also changes). An in-place wipe blanks a row while the row
+    # directly above it stays byte-identical.
+    let root = newFixture("bash_viewport_scrollback")
+    writeConfiguredProvider(root)
+    # Each streamed line wraps across several rows at this narrow width, so
+    # the pre-cap viewport is tall. Once buf exceeds StreamMaxLines (8) the
+    # capped viewport replaces many wrapped tail rows with a single
+    # "... N lines omitted" marker and the height SHRINKS — the condition
+    # the over-erase needs.
+    var streamLines: seq[JsonNode]
+    var streamJoined = ""
+    for i in 1 .. 20:
+      let s = "line-" & align($i, 2, '0') & "-".repeat(60)
+      streamLines.add %s
+      if streamJoined.len > 0: streamJoined.add "\n"
+      streamJoined.add s
+    streamJoined.add "\n"
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "content": "Running a long bash stream.",
+        "contentChunks": ["Running a long bash stream."],
+        "tool_calls": [
+          toolCall("call_stream", "bash", %*{
+            "command": "printf 'line-01\\nline-02\\n'"
+          }, %*{
+            "stream": streamLines,
+            "output": streamJoined,
+            "code": 0
+          })
+        ],
+        "usage": {"promptTokens": 40, "completionTokens": 8,
+                  "totalTokens": 48, "cachedTokens": 0}
+      },
+      {
+        "role": "assistant",
+        "content": "Done.",
+        "contentChunks": ["Done."],
+        "usage": {"promptTokens": 60, "completionTokens": 6,
+                  "totalTokens": 66, "cachedTokens": 0}
+      }
+    ])
+
+    # cols=40 forces each ~70-char line to wrap across ~2 rows; rows=48 keeps
+    # the startup banner, committed prompt echo and assistant content on
+    # screen above the viewport through the grow→cap-shrink transition so a
+    # scroll-off never masks the in-place wipe.
+    let tty = startStub(root, cols = 40, rows = 48)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "run it\n"
+    tty.expectInHistory "line-01"
+    tty.expectInHistory "line-20"
+    tty.expectInHistory "Done."
+    tty.drain(100)
+
+    # Walk consecutive frame pairs. A wipe is a committed scrollback row that
+    # is non-blank in the earlier frame, blank in the later frame, while the
+    # row directly above it is byte-identical across the pair (so it was not a
+    # scroll-off — a scroll-off shifts everything up). Only committed content
+    # rows count: the token bar, ticker/gap, editor and the live viewport are
+    # volatile chrome that legitimately changes frame to frame. The over-erase
+    # reaches into the committed rows directly above the viewport (the
+    # assistant content line and the prompt echo above it).
+    const committedMarkers = ["Running a long bash stream.", "❯ run it"]
+    proc isCommitted(row: string): bool =
+      for m in committedMarkers:
+        if m in row: return true
+      false
+    var wipeAt = -1
+    var wipeDetail = ""
+    for i in 1 ..< tty.frames.len:
+      let prev = tty.frames[i - 1].rows
+      let cur = tty.frames[i].rows
+      for r in 1 ..< min(prev.len, cur.len):
+        let prevRow = prev[r]
+        let curRow = cur[r]
+        if not prevRow.isCommitted: continue
+        if curRow.strip.len > 0: continue
+        # Committed row r went non-blank → blank. If the row above (r-1) is
+        # unchanged, this is an in-place wipe, not a scroll-off.
+        if prev[r - 1] == cur[r - 1]:
+          wipeAt = i
+          wipeDetail = "frame " & $i & " row " & $r &
+            ": \"" & prevRow & "\" -> blank, row above unchanged (\"" &
+            prev[r - 1] & "\")"
+          break
+      if wipeAt >= 0: break
+    doAssert wipeAt < 0, "streaming bash viewport wiped a scrollback line " &
+      "in place: " & wipeDetail & "\n" & tty.dumpFramesAround("")
+
   test "non-bash tool transcript shapes":
     let root = newFixture("other_tools_visual_test")
     writeConfiguredProvider(root)
