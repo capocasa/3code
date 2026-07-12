@@ -12,33 +12,44 @@ import std/[os, strutils, unittest]
 import threecode/[fatprompt, terminal as termui]
 
 suite "ticker cleanup":
-  test "spinner cleanup walks up exactly one row (no ticker over-erase)":
-    let outPath = getTempDir() / ("3code_ticker_out_" & $getCurrentProcessId())
-    let savedFd = getOsFileHandle(stdout)
-    doAssert reopen(stdout, outPath, fmWrite)
-    try:
-      startSpinner("test")
-      sleep 200
-      stopSpinner(clearLiveFooter = false)
-      stdout.flushFile
-    finally:
-      # Restore stdout to its original OS file handle. The earlier form
-      # (`stdout = f`) reassigns the File variable, which on Windows/MinGW
-      # expands to a non-lvalue C macro and fails to compile, so the
-      # whole test (and the Windows CI job) could not build at all.
-      discard open(stdout, savedFd, fmWrite)
+  # This test captures the spinner's stdout by redirecting the global
+  # `stdout` File. On Windows MinGW `stdout` is a macro
+  # (`(&__iob_func()[1])`), so any `var File` operation on it (reopen,
+  # open, or `stdout = f`) fails to compile with
+  # `error: lvalue required as ...`. OS-level fd redirection (dup2 /
+  # SetStdHandle) does not capture the C runtime's buffered FILE* on
+  # Windows either, so the only portable option is to gate the capture
+  # test. The regression it guards (cleanup cursor-up count) is
+  # platform-independent, so Linux/macOS coverage is sufficient. See
+  # docs/windows-testing.md.
+  when not defined(windows):
+    test "spinner cleanup walks up exactly one row (no ticker over-erase)":
+      let outPath = getTempDir() / ("3code_ticker_out_" & $getCurrentProcessId())
+      let savedFd = getOsFileHandle(stdout)
+      doAssert reopen(stdout, outPath, fmWrite)
+      try:
+        startSpinner("test")
+        sleep 200
+        stopSpinner(clearLiveFooter = false)
+        stdout.flushFile
+      finally:
+        # Restore stdout to its original OS file handle. The earlier form
+        # (`stdout = f`) reassigns the File variable, which on Windows/MinGW
+        # expands to a non-lvalue C macro and fails to compile, so the
+        # whole test (and the Windows CI job) could not build at all.
+        discard open(stdout, savedFd, fmWrite)
 
-    let raw = readFile(outPath)
-    removeFile(outPath)
-    # The cleanup is the final erase-to-end (`\x1b[J`) the spinner emits as
-    # it exits. It must be preceded by a cursor-up of exactly one row — the
-    # gap/ticker row directly above the bar. Two or more reaches committed
-    # scrollback.
-    let cleanupIdx = raw.rfind("\x1b[J\n")
-    check cleanupIdx >= 0
-    let before = raw[0 ..< cleanupIdx]
-    let upIdx = before.rfind("\x1b[")
-    check upIdx >= 0
-    let esc = before[upIdx ..< before.len]
-    check "1A" in esc
-    check "2A" notin esc
+      let raw = readFile(outPath)
+      removeFile(outPath)
+      # The cleanup is the final erase-to-end (`\x1b[J`) the spinner emits as
+      # it exits. It must be preceded by a cursor-up of exactly one row — the
+      # gap/ticker row directly above the bar. Two or more reaches committed
+      # scrollback.
+      let cleanupIdx = raw.rfind("\x1b[J\n")
+      check cleanupIdx >= 0
+      let before = raw[0 ..< cleanupIdx]
+      let upIdx = before.rfind("\x1b[")
+      check upIdx >= 0
+      let esc = before[upIdx ..< before.len]
+      check "1A" in esc
+      check "2A" notin esc
