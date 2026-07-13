@@ -218,6 +218,34 @@ transition because the only writer is quiesced.
         stale flash on the next tool call).
       - All three required tests pass: stress (~64s), functional (~time),
         resize_ticker (~13s). Build clean.
-- [ ] **impl-4: Integrate, stress, reproduce-or-close.**
-      Status: not started. Depends on impl-3.
-      Learnings: (none yet)
+- [x] **impl-4: Integrate, stress, reproduce-or-close.**
+      Status: DONE. Committed.
+      Learnings:
+      - All three tty tests green: stress (40.74s), functional (47.06s),
+        resize_ticker (6.01s). Build clean. No source changes needed —
+        impl-3 left the architecture in its final intended state.
+      - **Dead-code audit: nothing collapsed.** Every symbol the task
+        flagged as a candidate for removal is still actively used:
+        `commandSymbolIndex` (advanced by `guiLoop`'s `amBarTick`
+        branch line 916, reset by `setCommandStatusActive` line 1133,
+        read by `nextCommandSymbol` line 76); `nextCommandSymbol`
+        (called by `guiLoop` line 914 + `turns.nim` line 92);
+        `commandStatusActive` (set by `turns.nim`/`setCommandStatusActive`,
+        read by `guiLoop` line 901); `barTickStart` (elapsed-suffix in
+        `guiLoop` line 888 + `reserveEditorFooterForRedraw` line 565).
+        The `testTickerControl*` machinery is the **test harness's**
+        ticker driver (`advanceTicker()` in `tty_expect.nim` sends 't'
+        bytes that `testTickerControlLoop` reads →
+        `requestTestSpinnerFrame`); it has NOT collapsed and must stay.
+      - **Reproduction: not reproduced; user took over further repro.**
+        The hy3 reproduction harness (`/tmp/repro_ticker_hy3.sh`,
+        novita.tencent/hy3 confirmed live + streaming reasoning) ran
+        reasoning-heavy prompts under tmux across multiple turns;
+        content accumulated monotonically (7→11→153→155 content lines),
+        no missing lines. At 40 cols the scrollback overflowed the
+        200-line capture cap (each turn ~80 wrapped lines → old content
+        scrolls off the top), which the naive diff flagged as "missing";
+        this is normal terminal scroll-off, not the race. The race's
+        signature (recent lines above the prompt vanishing one-by-one)
+        did not appear; settled committed scrollback was complete and
+        correct. The single-GUI-thread fix stands.
