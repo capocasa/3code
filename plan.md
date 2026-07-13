@@ -65,7 +65,8 @@ Rules:
 - **Item 4 DONE**: `showTool` body routes through `toolResultBytes` (plans unchanged via `planResultBytes`). Old green write/patch branch removed. Test added.
 - **Item 5 DONE**: `listTools` left as-is (it's an index, shares no body-render logic with the byte path).
 - **Item 6 DONE**: all alternate stdout renderers deleted (`printToolResult`, `renderToolBanner`, `printCompactHeadTail`, `printDiff`, `printBashScroll`, `printLine`, `writeWrappedLine`). Every caller now routes through the byte builders. All core/stream/shell suites green.
-- Only item 7 (final review + release build + commit) remains.
+- **Item 7 DONE**: full review, release build, all suites green, committed.
+- **ALL ITEMS COMPLETE. The plan is finished.**
 
 ## Items
 
@@ -106,8 +107,8 @@ Caveat carried to item 4: `showTool` currently renders write/patch body from `re
 
 **Note for item 7:** `:tools` (`listTools`) is the only remaining stdout-writing tool renderer, and it is an index (item 5), not a per-kind render — so it correctly does not share the byte path.
 
-### 7. Final review + commit
-- [ ] Re-read the whole diff. Confirm: exactly one renderer per concept (banner, body, diff, plan). No stdout-writing duplicate of a byte builder remains.
-- [ ] Build release: `nim c -d:release -o:/tmp/tc src/threecode.nim`.
-- [ ] Run `tests/core/test_display.nim`, `tests/core/test_session.nim`, `tests/stream/test_streamexec.nim`, `tests/stream/test_streaming_view.nim`.
-- [ ] Commit: `remove alternate tool renderers; unify on the live byte path` (or split into per-item commits if cleaner — one commit per item is fine and preferred).
+### 7. Final review + commit  ✅ DONE
+- [x] Re-read the whole diff (`git diff 805cf1e..HEAD -- src/`). One renderer per concept confirmed: banner=`toolBannerBytes`, body=`toolResultBytes`, composite=`toolTranscriptBytes` (2 byte-producing overloads), diff=`diffBytes`/`diffBytesSkippingFirst`, plan=`planResultBytes`+`planTranscriptBytes`, head/tail=`compactHeadTailBytes`, wrap=`wrappedSubtleBytes`. No stdout-writing duplicate of a byte builder remains (the only stdout writer left is `listTools`, an index — item 5).
+- [x] Release build clean: `nim c -d:release -o:/tmp/tc src/threecode.nim` → SuccessX.
+- [x] Suites all green (0 failures): `test_display` (11 OK), `test_session` (59), `test_streaming_view` (4), `test_streamexec` (37), `test_actions_extra` (29). tty suite skipped (env hang, per plan note).
+- [x] Committed one per item: 45b508b (item 1), 1d2ab87 (items 2+3), 85bb896 (item 4), 171e4d8 (items 5+6). No final squashing needed.
