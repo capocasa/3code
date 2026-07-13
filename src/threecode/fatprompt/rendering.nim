@@ -467,18 +467,6 @@ proc clearSpinnerFooterBytes*(hadTicker: bool): string =
   else:
     "\r\x1b[2K"
 
-proc footerBarOnlyBytes*(frame: FooterFrame; termW = 0): string =
-  ## The bar row(s) without the leading gap row. Used by transcript append
-  ## paths where the controller's item separator already supplies the gap;
-  ## adding the frame's own gap there would double it.
-  case frame.kind
-  of ffNone, ffClear:
-    result = ""
-  of ffTokenBar:
-    result = paintBarBytes(frame.label)
-  of ffSpinner:
-    result = liveEditorSpinnerBarBytes(frame.spinner, frame.label, frame.elapsed)
-
 proc footerFrameBytes*(frame: FooterFrame; termW = 0): string =
   case frame.kind
   of ffNone:

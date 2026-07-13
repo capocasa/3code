@@ -60,7 +60,6 @@ proc onTurnInterrupted*() =
   stopSpinner(clearLiveFooter = false)
   discard stopBarTick()
   writeTranscriptWithFatPrompt:
-    stdout.write "\r\n"
     stdout.styledWriteLine(fgMagenta, InterruptedByUserMsg, resetStyle)
   emitTestFrameEvent()
   clearInterrupted()
@@ -157,20 +156,11 @@ proc pendingReceiptBytes(): string =
   receiptBytes(label)
 
 proc finishTranscriptItem(bytes: var string) =
-  ## A transcript item owns its attached receipt and its following separator.
-  ## The terminal append primitive must not trim or synthesize spacing for
-  ## these controller-owned bytes.
+  ## Trim trailing whitespace before the write (append-only-safe). The
+  ## inter-item separator is owned by `appendTranscript`, which prepends
+  ## `\r\n\r\n` before every item after the first; items carry no trailing
+  ## separator.
   bytes.trimTranscriptTail()
-  bytes.add "\r\n\r\n"
-
-proc finishFinalTranscriptItem(bytes: var string) =
-  ## Variant for the last item before the idle footer is reserved. The
-  ## reserved footer frame opens with its own cleared gap/ticker row, which is
-  ## the visible separator between content and the bar. Ending the bytes with a
-  ## full `\r\n\r\n` separator here would leave that gap row as a second,
-  ## redundant blank. End the line only and let the footer own the gap.
-  bytes.trimTranscriptTail()
-  bytes.add "\r\n"
 
 proc clearSubmittedReceiptState() =
   let restingLabel =
@@ -187,26 +177,18 @@ proc clearSubmittedTickerState() =
   emitFatPromptEvent clearTickerEvent()
 
 proc commitAssistantItem(content: string; restoreEditor = true;
-                         attachReceipt = true; finalBeforeIdle = false) =
+                         attachReceipt = true) =
   let afterCommit =
     if attachReceipt: clearSubmittedReceiptState
     else: clearSubmittedTickerState
-  let reserveFooter = restoreEditor
-  let collapseGap = reserveFooter and finalBeforeIdle
   if content.strip.len == 0:
     var bytes = GreyFg & "empty reply - no content, no tool calls" & Reset
     let receipt = if attachReceipt: pendingReceiptBytes() else: ""
     if attachReceipt and receipt.len > 0:
       bytes.add "\r\n"
       bytes.add receipt
-    if collapseGap: bytes.finishFinalTranscriptItem()
-    else: bytes.finishTranscriptItem()
-    commitTranscriptBytes(
-      bytes,
-      restoreEditor,
-      afterCommit,
-      reserveFooter = reserveFooter,
-      transcriptOwnsSpacing = collapseGap)
+    bytes.finishTranscriptItem()
+    commitTranscriptBytes(bytes, restoreEditor, afterCommit)
     return
   var bytes = captureStdoutWrites:
     renderAssistantContent(content)
@@ -215,38 +197,20 @@ proc commitAssistantItem(content: string; restoreEditor = true;
   if attachReceipt and receipt.len > 0:
     bytes.add "\r\n"
     bytes.add receipt
-  if collapseGap: bytes.finishFinalTranscriptItem()
-  else: bytes.finishTranscriptItem()
-  commitTranscriptBytes(
-    bytes,
-    restoreEditor,
-    afterCommit,
-    reserveFooter = reserveFooter,
-    transcriptOwnsSpacing = collapseGap)
+  bytes.finishTranscriptItem()
+  commitTranscriptBytes(bytes, restoreEditor, afterCommit)
 
 proc commitPendingReceiptAfterStream(restoreEditor = true) =
   ## Streaming assistant content is already in scrollback. Once usage arrives,
-  ## append only the receipt and the following separator as ordinary history so
-  ## the next transcript item starts after a real blank row.
+  ## append only the receipt as an ordinary item with its trailing separator.
   var bytes = pendingReceiptBytes()
   if bytes.len == 0:
     return
-  let reserveFooter = restoreEditor
-  if reserveFooter: bytes.finishFinalTranscriptItem()
-  else: bytes.finishTranscriptItem()
-  commitTranscriptBytes(
-    bytes,
-    restoreEditor,
-    clearSubmittedReceiptState,
-    reserveFooter = reserveFooter,
-    transcriptOwnsSpacing = reserveFooter)
+  bytes.finishTranscriptItem()
+  commitTranscriptBytes(bytes, restoreEditor, clearSubmittedReceiptState)
 
 proc commitTranscriptItem(formatBody: proc(); restoreEditor = true;
-                          prefixBoundary = false; receipt = "") =
-  ## Commit one complete transcript item. ``prefixBoundary`` is used when the
-  ## previous item already restored the live prompt; the controller still owns
-  ## the inter-item blank row, so it emits that boundary before this marker
-  ## instead of asking terminal cursor cleanup to preserve it implicitly.
+                          receipt = "") =
   var bytes = captureStdoutWrites:
     formatBody()
   if receipt.len > 0:
@@ -254,11 +218,7 @@ proc commitTranscriptItem(formatBody: proc(); restoreEditor = true;
     bytes.add "\r\n"
     bytes.add receipt
   bytes.finishTranscriptItem()
-  if prefixBoundary:
-    bytes = "\r\n" & bytes
-  commitTranscriptBytes(
-    bytes,
-    restoreEditor)
+  commitTranscriptBytes(bytes, restoreEditor)
 
 proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
   ## Returns true if the turn was interrupted by the user (Ctrl-C / ESC).
@@ -324,7 +284,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       # rewriting the prompt.
       saveSession(session, messages)
       writeTranscriptWithFatPrompt:
-        stdout.write "\r\n"
         errLn e.msg, resetStyle
       endTurnAfterTranscriptAppend()
       turnEnded = true
@@ -368,7 +327,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         let bumped = min(cur * 2, window)
         maxTokensOverride = max(maxTokensOverride, bumped)
         writeTranscriptWithFatPrompt:
-          stdout.write "\r\n"
           errLn "finished by length, retrying with ", humanTokens(maxTokensOverride), " token budget", resetStyle
         debugOut &"runTurns: empty length-retry {lengthEscalations}/{MaxLengthEscalations} max_tokens={maxTokensOverride}"
         continue
@@ -382,7 +340,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           "content": "Please provide your final answer now."}
         saveSession(session, messages)
         writeTranscriptWithFatPrompt:
-          stdout.write "\r\n"
           errLn "empty reply; re-prompting for a final answer", resetStyle
         debugOut &"runTurns: empty steer-retry {steerAttempts}/{MaxSteerAttempts}"
         continue
@@ -396,7 +353,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           elif usage.reasoningTokens > 0: "reasoning only"
           else: "no content, no tool calls"
         writeTranscriptWithFatPrompt:
-          stdout.write "\r\n"
           errLn "empty reply: ", reason, ". retrying ", $emptyRetries, "/", $MaxEmptyRetries, resetStyle
         debugOut &"runTurns: empty resend {emptyRetries}/{MaxEmptyRetries} finishReason={finishReason}"
         continue
@@ -405,7 +361,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       messages.add msg
       saveSession(session, messages)
       writeTranscriptWithFatPrompt:
-        stdout.write "\r\n"
         errLn "empty reply - giving up after ", $MaxEmptyRetries, " retries", resetStyle
       endTurnAfterTranscriptAppend()
       turnEnded = true
@@ -505,7 +460,6 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           continue
         let act = toolCallToAction(p.family, name, args)
         let silent = isSkillRead(act)
-        let hadToolBar = currentBarLabel.len > 0
         let toolT0 = epochTime()
         if session.readCache == nil: session.readCache = newReadCache()
         var streamedOutputShown = false
@@ -541,13 +495,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         if not silent:
           appendItem(
             toolItem(act, r, code, idx, diff, toolElapsed.int),
-            prefixBoundary = not hadToolBar,
             receipt = if isReceiptCap: deferredReceipt else: "")
         else:
           commitTranscriptItem(proc() =
             printSkillLoaded(act)
-          , prefixBoundary = not hadToolBar,
-            receipt = if isReceiptCap: deferredReceipt else: "")
+          , receipt = if isReceiptCap: deferredReceipt else: "")
         if isReceiptCap:
           deferredReceipt = ""
           emitFatPromptEvent clearPendingHintEvent()
@@ -617,8 +569,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         stopTurnInputForFinalRender()
       commitAssistantItem(
         content,
-        restoreEditor = not queuedBeforeFinalRender,
-        finalBeforeIdle = not queuedBeforeFinalRender)
+        restoreEditor = not queuedBeforeFinalRender)
     if queuedBeforeFinalRender or hasQueuedAutosend():
       stopTurnInputForFinalRender()
       turnEnded = true

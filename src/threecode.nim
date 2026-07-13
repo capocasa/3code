@@ -548,15 +548,18 @@ proc main() =
           # — instead of overlapping `❯ ` with `verifying... ok`.
           wizardFinish()
           continue
-        var echo = userPromptItem(line)
-        echo.attachSeparator = true
+        # This path bundles two distinct items (prompt echo + command
+        # output) into a single transcript commit. `appendTranscript`
+        # prepends exactly one separator before the whole blob; the blank
+        # between the echo and the command output must be inserted here.
+        let echoBytes = formatItem(userPromptItem(line))
         let commandBytes =
           if commandResult.plainBody:
             plainCommandBodyBytes(commandResult.body)
           else:
             formatItem(commandItem(commandResult.name, commandResult.body,
                                   commandResult.ok))
-        let bytes = formatItem(echo) & commandBytes
+        let bytes = echoBytes & "\r\n\r\n" & commandBytes
         proc clearSubmittedCommandEditor() =
           editor.line = minline.Line(text: "", position: 0)
           editor.renderSuffix = ""
@@ -570,8 +573,7 @@ proc main() =
           bytes,
           restoreEditor = true,
           beforeRepaint = clearSubmittedCommandEditor,
-          reserveFooter = true,
-          transcriptOwnsSpacing = true)
+          reserveFooter = true)
         releaseIdleSubmittedInput()
         continue
       if prof.name == "":

@@ -7,13 +7,15 @@
 ## Layout (bottom → top):
 ##   editor rows (variable, cursor somewhere within)
 ##   bar row(s)
-##   ticker row (always reserved, even when blank)
-##   separator row (blank, always part of scrollback)
+##   ticker row (always reserved, even when blank) — volatile breathing room
 ##   scrollback content …
 ##
-## Every transcript commit writes `content + \r\n\r\n`. The first \r\n ends
-## the content; the second is the separator. The footer is always painted
-## starting at the ticker row directly below the separator.
+## One blank row separates every pair of scrollback items. The separator is
+## owned by a single emission point (`appendTranscript`): it prepends `\r\n`
+## before every item after the first (gated by `hasScrollback`) and
+## terminates each item's line with `\r\n`. No item carries its own trailing
+## separator. The footer's ticker row is separate volatile breathing room
+## below the last item, so the two never stack.
 ##
 ## The walk-up from cursor to the top of the volatile region is always derived
 ## from live state, never cached:
@@ -48,10 +50,11 @@ type
     liveContentRows: seq[string]
     editorRedrawPending: bool
     editorRedrawFooterRows: int
-    ## When true, the gap row at the top of the footer is committed
-    ## scrollback (the previous item's trailing `\r\n\r\n`), not volatile
-    ## chrome. Walk-up codepaths stop one row short to preserve it.
-    gapIsSeparator: bool
+    ## True once any non-empty transcript content has been committed. Gates
+    ## the inter-item separator: `appendTranscript` prepends `\r\n\r\n`
+    ## before every item after the first, so the separator is owned by one
+    ## emission point rather than carried by each item.
+    hasScrollback: bool
 
 var defaultEngine*: TerminalEngine
 
@@ -73,20 +76,14 @@ proc walkUp(e: var TerminalEngine; ed: var minline.LineEditor): int =
   ## Rows from the cursor to the top of the volatile region (ticker row).
   ## Always derived from live editor + footer state. This is the number of
   ## rows to move up before erasing the volatile region.
-  ## When gapIsSeparator is set, the gap row at the top of the footer is
-  ## committed scrollback (not chrome), so the walk-up stops one row short
-  ## to preserve it.
-  let gap = if e.gapIsSeparator: 1 else: 0
   editorRowsAboveCursor(ed) + e.paintedFooterRows +
-    e.toolViewportRows.len + e.liveContentRows.len - gap
+    e.toolViewportRows.len + e.liveContentRows.len
 
 proc noteFooterPainted(e: var TerminalEngine; footerRowsAboveEditor: int) =
   e.paintedFooterRows = max(0, footerRowsAboveEditor)
-  e.gapIsSeparator = false
 
 proc noteNoFooter(e: var TerminalEngine) =
   e.paintedFooterRows = 0
-  e.gapIsSeparator = false
 
 proc writeViewportRows(rows: openArray[string]) =
   for row in rows:
@@ -159,10 +156,7 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
   ## matches reality regardless of what changed since the last paint.
   {.cast(gcsafe).}:
     termio.withTerminalWriteLock:
-      let bytes = if e.gapIsSeparator:
-        frame.footerBarOnlyBytes(termW)
-      else:
-        frame.footerFrameBytes(termW)
+      let bytes = frame.footerFrameBytes(termW)
       let footerRowsAboveEditor = frame.rowsAboveEditor(termW)
       if inputRunning and editor != nil:
         let edPtr = editor
@@ -213,10 +207,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
     termio.withTerminalWriteLock:
       let width = if termW > 0: termW else:
         try: terminalWidth() except CatchableError: 0
-      let bytes = if e.gapIsSeparator:
-        frame.footerBarOnlyBytes(width)
-      else:
-        frame.footerFrameBytes(width)
+      let bytes = frame.footerFrameBytes(width)
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
       stdout.write termio.SyncBegin
       stdout.write "\x1b[?25l"
@@ -285,10 +276,7 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
     termio.withTerminalWriteLock:
       let width = if termW > 0: termW else:
         try: terminalWidth() except CatchableError: 0
-      let bytes = if e.gapIsSeparator:
-        frame.footerBarOnlyBytes(width)
-      else:
-        frame.footerFrameBytes(width)
+      let bytes = frame.footerFrameBytes(width)
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
       stdout.write termio.SyncBegin
       stdout.write "\x1b[?25l"
@@ -363,10 +351,7 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
     termio.withTerminalWriteLock:
       let width = if termW > 0: termW else:
         try: terminalWidth() except CatchableError: 0
-      let bytes = if e.gapIsSeparator:
-        frame.footerBarOnlyBytes(width)
-      else:
-        frame.footerFrameBytes(width)
+      let bytes = frame.footerFrameBytes(width)
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
       stdout.write termio.SyncBegin
       stdout.write "\x1b[?25l"
@@ -422,20 +407,19 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
                        oldFooter, newFooter: FooterFrame;
                        compactRowsAboveFooter = 0;
                        restoreEditor = true;
-                       reserveFooter = true;
-                       transcriptOwnsSpacing = false) =
+                       reserveFooter = true) =
   ## Append transcript bytes as real scrollback while preserving or clearing
-  ## the volatile footer. The engine always appends a trailing separator row
-  ## (`\r\n\r\n`) so the volatile footer's ticker row never collides with
-  ## committed content. Callers provide content without trailing spacing;
-  ## trailing \r/\n bytes are trimmed unless ``transcriptOwnsSpacing`` is set.
+  ## the volatile footer. One blank row separates every pair of items, owned
+  ## by one place: here. Before every item after the first, `\r\n` is
+  ## prepended (one blank row); content is bare (trailing \r/\n trimmed
+  ## before the write — append-only-safe) and terminated with a single `\r\n`
+  ## so the cursor advances past it. The footer's ticker row is separate
+  ## volatile breathing room below the last item, so the two never stack.
   termio.withTerminalWriteLock:
     let termW = try: terminalWidth() except CatchableError: 0
     let footerBytes = newFooter.footerFrameBytes(termW)
     let footerRowsAboveEditor = newFooter.rowsAboveEditor(termW)
-    let transcript =
-      if transcriptOwnsSpacing: transcriptBytes
-      else: trimTrailingNewlines(transcriptBytes)
+    let transcript = trimTrailingNewlines(transcriptBytes)
     if liveAnchored:
       let edPtr = editor
       if edPtr == nil:
@@ -449,9 +433,11 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
       stdout.write "\x1b[J"
       e.toolViewportRows = @[]
       if transcript.len > 0:
+        if e.hasScrollback:
+          stdout.write "\r\n"
         stdout.write transcript
-        if reserveFooter and not transcriptOwnsSpacing:
-          stdout.write "\r\n\r\n"
+        stdout.write "\r\n"
+        e.hasScrollback = true
       if reserveFooter:
         if footerBytes.len > 0:
           stdout.write footerBytes
@@ -469,8 +455,6 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
             e.noteNoFooter()
       else:
         e.noteNoFooter()
-      if transcriptOwnsSpacing and transcript.len > 0 and reserveFooter and footerBytes.len > 0:
-        e.gapIsSeparator = true
       stdout.write termio.SyncEnd
       stdout.flushFile
     else:
@@ -486,9 +470,11 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
       stdout.write "\r\x1b[J"
       e.toolViewportRows = @[]
       if transcript.len > 0:
+        if e.hasScrollback:
+          stdout.write "\r\n"
         stdout.write transcript
-        if reserveFooter and not transcriptOwnsSpacing:
-          stdout.write "\r\n\r\n"
+        stdout.write "\r\n"
+        e.hasScrollback = true
       if reserveFooter:
         if footerBytes.len > 0:
           stdout.write footerBytes
@@ -507,8 +493,6 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
             e.noteNoFooter()
       else:
         e.noteNoFooter()
-      if transcriptOwnsSpacing and transcript.len > 0 and reserveFooter and footerBytes.len > 0:
-        e.gapIsSeparator = true
       stdout.flushFile
 
 proc prepareAssistantContentStart*(e: var TerminalEngine;
@@ -571,8 +555,7 @@ proc appendTranscript*(transcriptBytes: string;
                        oldFooter, newFooter: FooterFrame;
                        compactRowsAboveFooter = 0;
                        restoreEditor = true;
-                       reserveFooter = true;
-                       transcriptOwnsSpacing = false) =
+                       reserveFooter = true) =
   defaultEngine.appendTranscript(
     transcriptBytes,
     liveAnchored,
@@ -582,5 +565,4 @@ proc appendTranscript*(transcriptBytes: string;
     newFooter,
     compactRowsAboveFooter,
     restoreEditor,
-    reserveFooter,
-    transcriptOwnsSpacing)
+    reserveFooter)
