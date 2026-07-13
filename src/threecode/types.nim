@@ -103,6 +103,7 @@ type
     output*: string
     code*: int
     kind*: ActionKind
+    plan*: seq[PlanItem]
   ReadCache* = ref object
     state*: Table[string, (Time, int)]
   Session* = object

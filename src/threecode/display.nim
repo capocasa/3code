@@ -312,11 +312,18 @@ proc planStatusGlyph(status: string): string =
   of "in_progress": "~"
   else: "○"
 
-proc planTranscriptBytes(act: Action): string =
-  result.add "≡ ──────────\r\n"
-  for item in act.plan:
+proc planResultBytes*(plan: seq[PlanItem]): string =
+  ## One item per line, glyph-prefixed. The single renderer for plan
+  ## output - used by both the live/transcript path (`planTranscriptBytes`)
+  ## and the replay paths (`printToolResult`, `showTool`) so a plan looks
+  ## identical whether it just ran or was scrolled back to.
+  for item in plan:
     result.add GreyFg & "  " & planStatusGlyph(item.status) & " " &
       item.text & Reset & "\r\n"
+
+proc planTranscriptBytes(act: Action): string =
+  result.add "≡ ──────────\r\n"
+  result.add planResultBytes(act.plan)
 
 proc clearTranscriptBytes(act: Action): string =
   result.add "═════════════════════════════════════════\r\n"
@@ -384,12 +391,6 @@ proc printToolResult*(kind: ActionKind, res: string, code: int, idx: int,
     return
   elif kind in {akWebSearch, akWebFetch}:
     printCompactHeadTail(res, idx)
-  elif kind == akPlan:
-    let termW = try: terminalWidth() except CatchableError: 80
-    let bodyW = max(20, termW - 3)
-    for line in res.splitLines:
-      for chunk in wrapAnsi(line, bodyW):
-        subtleWriteLn(stdout, "  " & chunk)
   else:
     let termW = try: terminalWidth() except CatchableError: 80
     let bodyW = max(20, termW - 3)
@@ -920,12 +921,14 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
           var code = 0
           var output = ""
           var kind = akBash
+          var plan: seq[PlanItem] = @[]
           if toolIdx <= toolLog.len:
             let rec = toolLog[toolIdx - 1]
             banner = rec.banner
             code = rec.code
             output = rec.output
             kind = rec.kind
+            plan = rec.plan
           else:
             let fn = tc{"function"}
             let name = if fn != nil: fn{"name"}.getStr else: "?"
@@ -935,8 +938,11 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
             let act = toolCallToAction(family, name, args)
             banner = bannerFor(act)
             kind = act.kind
+            plan = act.plan
           renderToolBanner(banner, kind, code)
-          if output.len > 0:
+          if kind == akPlan and plan.len > 0:
+            stdout.write planResultBytes(plan)
+          elif output.len > 0:
             printToolResult(kind, output, code, toolIdx)
           stdout.write "\n"
     of "tool":
@@ -963,7 +969,9 @@ proc showTool*(arg: string, toolLog: seq[ToolRecord]) =
     return
   let rec = toolLog[n-1]
   stdout.styledWriteLine fgDefault, &"── T{n}  ", rec.banner, resetStyle
-  if rec.kind in {akBash, akRead, akWebSearch, akWebFetch}:
+  if rec.kind == akPlan and rec.plan.len > 0:
+    stdout.write planResultBytes(rec.plan)
+  elif rec.kind in {akBash, akRead, akWebSearch, akWebFetch}:
     for l in rec.output.splitLines: printLine(l)
   else:
     let termW = try: terminalWidth() except CatchableError: 80

@@ -1007,6 +1007,7 @@ proc buildToolLogFromMessages(messages: JsonNode,
         output: idToContent.getOrDefault(id, ""),
         code: exitByCallId.getOrDefault(id, 0),
         kind: act.kind,
+        plan: act.plan,
       )
 
 proc buildPlanFromMessages(messages: JsonNode,

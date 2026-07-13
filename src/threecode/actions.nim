@@ -178,7 +178,7 @@ proc bannerFor*(act: Action): string =
   of akApplyPatch:
     act.path
   of akPlan:
-    &"({act.plan.len} item" & (if act.plan.len == 1: "" else: "s") & ")"
+    "update plan"
   of akWebSearch:
     act.body
   of akWebFetch:

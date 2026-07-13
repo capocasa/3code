@@ -135,3 +135,31 @@ suite "display: tool transcript body strips boundary blanks":
     let bannerEnd = bytes.find("\x1b[0m\r\n") + "\x1b[0m\r\n".len
     let between = bytes[bannerEnd ..< firstContent]
     check between.strip().len > 0
+
+suite "display: plan glyph rendering is unified":
+  # The plan tool must render glyphs in every path (live transcript,
+  # replay, :show) so a plan looks identical whether it just ran or was
+  # scrolled back to. The shared renderer is `planResultBytes`; the live
+  # transcript routes through it.
+  test "planResultBytes emits one glyph per item, never verbal status":
+    let plan = @[
+      PlanItem(text: "pending item", status: "pending"),
+      PlanItem(text: "ongoing item", status: "in_progress"),
+      PlanItem(text: "done item", status: "completed"),
+    ]
+    let bytes = planResultBytes(plan)
+    check "○ pending item" in bytes
+    check "~ ongoing item" in bytes
+    check "✓ done item" in bytes
+    check "pending: " notin bytes
+    check "in_progress: " notin bytes
+    check "completed: " notin bytes
+
+  test "live transcript renders plan glyphs, not the verbal res string":
+    let act = Action(kind: akPlan,
+      plan: @[PlanItem(text: "step one", status: "completed")])
+    let res = "completed: step one"  # model-facing verbal result
+    let bytes = toolTranscriptBytes(act, res, code = 0, idx = 1)
+    check "✓ step one" in bytes
+    check "completed: step one" notin bytes
+    check "(1 item" notin bytes  # banner title dropped

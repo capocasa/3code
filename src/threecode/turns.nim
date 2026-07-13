@@ -494,7 +494,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         let toolElapsed = epochTime() - toolT0
         debugOut &"tool done: {act.kind} code={code} elapsed={toolElapsed:.2f}"
 
-        session.toolLog.add ToolRecord(banner: bannerFor(act), output: r, code: code, kind: act.kind)
+        session.toolLog.add ToolRecord(banner: bannerFor(act), output: r,
+          code: code, kind: act.kind, plan: act.plan)
         let isReceiptCap = deferredReceipt.len > 0 and i == lastCommitIdx
         if not silent:
           appendItem(
