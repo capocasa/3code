@@ -48,15 +48,9 @@ suite "actions: bannerFor":
     let act = Action(kind: akPatch, path: "fix.nim")
     check bannerFor(act) == "fix.nim"
 
-  test "plan shows item count":
+  test "plan banner is the title, not an item count":
     let act = Action(kind: akPlan, plan: @[PlanItem(text: "a", status: "pending")])
-    check "(1 item)" in bannerFor(act)
-
-  test "plan shows plural items":
-    let act = Action(kind: akPlan,
-                     plan: @[PlanItem(text: "a", status: "pending"),
-                             PlanItem(text: "b", status: "pending")])
-    check "(2 items)" in bannerFor(act)
+    check bannerFor(act) == "update plan"
 
   test "webSearch shows query":
     let act = Action(kind: akWebSearch, body: "nim lang")

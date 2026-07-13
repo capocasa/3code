@@ -63,8 +63,9 @@ Rules:
 - **Item 1 DONE**: dead `akPlan` branch in `toolResultBytes`, `printActionResult`, and the stale `planResultBytes` docstring all removed. Build green; `test_display` + `test_session` green.
 - **Items 2+3 DONE**: `replaySessionTail` now routes through `toolTranscriptBytes` (string-banner overload, stored banner) + `planTranscriptBytes` (plans). Bridge decision: no `ToolRecord` change needed — use the stored banner directly. Replay tests added and green.
 - **Item 4 DONE**: `showTool` body routes through `toolResultBytes` (plans unchanged via `planResultBytes`). Old green write/patch branch removed. Test added.
-- Not yet started: items 5, 6.
-- The alternate stdout renderers still exist and are still called by `replaySessionTail`, `showTool`, `listTools`.
+- **Item 5 DONE**: `listTools` left as-is (it's an index, shares no body-render logic with the byte path).
+- **Item 6 DONE**: all alternate stdout renderers deleted (`printToolResult`, `renderToolBanner`, `printCompactHeadTail`, `printDiff`, `printBashScroll`, `printLine`, `writeWrappedLine`). Every caller now routes through the byte builders. All core/stream/shell suites green.
+- Only item 7 (final review + release build + commit) remains.
 
 ## Items
 
@@ -89,17 +90,21 @@ Caveat carried to item 4: `showTool` currently renders write/patch body from `re
 - [x] Implemented.
 - [x] Test added: `showTool body matches toolResultBytes for multi-line bash` asserts the `── T1` header + that the captured stdout `.contains` `toolResultBytes(akBash, output, 0, 1)`.
 
-### 5. Route `:tools` (`listTools`) through the byte path (or justify leaving it)
-`listTools` (display.nim:986) prints a one-line summary per tool (`T1 ✓ banner (N lines)`), not a full render. It does not duplicate the per-kind body logic — it just counts lines and shows a status mark. This may NOT need unification; it's an index, not a render. Decide:
-- [ ] If `listTools` shares no logic with the byte path, leave it and note why here. If it reimplements banner/mark logic, unify the shared parts.
-- [ ] Whatever the decision, record it here so the next context knows.
+### 5. Route `:tools` (`listTools`) through the byte path (or justify leaving it)  ✅ DECIDED: leave it
+`listTools` is an index, not a render: one line per tool (`T1 ✓ banner (N lines)`). It shares NONE of the byte path's per-kind body logic — it does not call any banner/body/diff/plan builder. Its status mark (`✓`/`✗`) is a trivial `code == 0` check distinct from the banner path's icon set (`$`/`Ø`/`▸`/…). Its banner is printed raw from `rec.banner` (no `bannerFor`, no icon). It counts lines, which the byte path does not expose.
+- [x] Decision: leave `listTools` as-is. It duplicates no renderer logic; unifying it would force the index into the shape of a full render, which is the wrong abstraction.
 
-### 6. Delete the alternate stdout renderers
-Only after items 2, 4, (5) reroute every caller:
-- [ ] Delete `printToolResult`, `renderToolBanner`, `printBashScroll`, `printCompactHeadTail`, `printDiff` (the stdout-writing variants). Keep the byte-producing equivalents.
-- [ ] Grep for any remaining callers (including tests — `tests/stream/test_streaming_view.nim` tests `printBashScroll` directly; those tests must be rewritten to test the byte equivalent `bashScrollBytes` or deleted if redundant).
-- [ ] Build + run all core/stream test suites. Note any tty-suite hang separately.
-- [ ] Confirm `rg 'proc (printToolResult|renderToolBanner|printBashScroll|printCompactHeadTail|printDiff)\b' src/` returns nothing.
+### 6. Delete the alternate stdout renderers  ✅ DONE
+- [x] Deleted `printToolResult`, `renderToolBanner`, `printCompactHeadTail`, `printDiff` from display.nim; deleted `printBashScroll`, `printLine`, `writeWrappedLine`, and the now-orphaned duplicate `trimBoundaryBlank` from toolstream.nim. (display.nim keeps its own `trimBoundaryBlank`, used by the byte path.) The byte-producing equivalents all remain.
+- [x] `tests/stream/test_streaming_view.nim`: removed the 3 `printBashScroll` tests + the now-orphaned `captureStdout` helper + unused `os` import. The byte-path bash body is covered by the replay/showTool tests in test_display.nim.
+- [x] Fixed a stale module docstring (`printLine` → `handleMdLine`) and the `renderToolPending` docstring (`renderToolBanner` → "final tool banner bytes").
+- [x] Fixed 2 pre-existing-stale tests in `tests/shell/test_actions_extra.nim` that asserted the old `(N items)` plan banner (removed by 805cf1e); now asserts `bannerFor(akPlan) == "update plan"`.
+- [x] Build green; `test_display`, `test_session`, `test_streaming_view`, `test_streamexec`, `test_actions_extra` all green.
+- [x] tty suite (`tests/tty/`) skipped — hangs in this environment per the plan note.
+- [x] `rg 'proc (printToolResult|renderToolBanner|printBashScroll|printCompactHeadTail|printDiff)\b' src/` returns nothing. Full `rg` across src/ + tests/ for all six names returns nothing.
+- NOTE: `renderToolPending` (display.nim) also has zero callers but is NOT a byte-builder duplicate (it's the volatile pre-execution banner) and was out of the item-6 list — left in place. Also `wrappedRows` in toolstream.nim was already dead before this work (pre-existing) — left.
+
+**Note for item 7:** `:tools` (`listTools`) is the only remaining stdout-writing tool renderer, and it is an index (item 5), not a per-kind render — so it correctly does not share the byte path.
 
 ### 7. Final review + commit
 - [ ] Re-read the whole diff. Confirm: exactly one renderer per concept (banner, body, diff, plan). No stdout-writing duplicate of a byte builder remains.

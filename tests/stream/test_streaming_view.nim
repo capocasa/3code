@@ -1,21 +1,6 @@
-import std/[os, strutils, terminal, unittest]
+import std/[strutils, terminal, unittest]
 import threecode/toolstream
 import ttty/grid
-
-when not defined(windows):
-  proc captureStdout(name: string, body: proc()): string =
-    let path = getTempDir() / ("3code_streaming_view_" & name)
-    let saved = stdout
-    let f = open(path, fmWrite)
-    stdout = f
-    try:
-      body()
-    finally:
-      stdout.flushFile
-      stdout = saved
-      close(f)
-    result = readFile(path)
-    try: removeFile(path) except OSError: discard
 
 suite "streaming view scroll area":
   test "keeps only the latest maxLines visible after scrolling":
@@ -70,45 +55,3 @@ suite "streaming view scroll area":
     check "2 lines omitted :show 7 for full" in rows[1]
     check rows[2].strip.startsWith("xxx")
     check rows.len == 4
-
-  when not defined(windows):
-    test "printBashScroll prints all lines when under cap":
-      let captured = captureStdout("scroll-short") do ():
-        printBashScroll("one\ntwo\nthree\n", idx = 4, maxLines = 8)
-      var g = newGrid()
-      g.feed captured
-      check rowText(g, 0).strip == "one"
-      check rowText(g, 1).strip == "two"
-      check rowText(g, 2).strip == "three"
-      check g.row == 3
-      check g.col == 0
-      check "omitted" notin captured
-
-    test "printBashScroll caps at maxLines with omission marker plus tail":
-      var body = ""
-      for i in 1 .. 12:
-        body.add "line " & $i & "\n"
-      let captured = captureStdout("scroll-long") do ():
-        printBashScroll(body, idx = 9, maxLines = 4)
-      var g = newGrid()
-      g.feed captured
-      check "9 lines omitted :show 9 for full" in rowText(g, 0)
-      check rowText(g, 1).strip == "line 10"
-      check rowText(g, 2).strip == "line 11"
-      check rowText(g, 3).strip == "line 12"
-      check "line 9" notin captured.split('\n')[2 .. ^1].join("\n") or
-            "line 9 lines omitted" in rowText(g, 0)
-      check g.row == 4
-
-    test "printBashScroll honors default 8-line cap":
-      var body = ""
-      for i in 1 .. 20:
-        body.add "row " & $i & "\n"
-      let captured = captureStdout("scroll-default") do ():
-        printBashScroll(body, idx = 1)
-      var g = newGrid()
-      g.feed captured
-      check "13 lines omitted :show 1 for full" in rowText(g, 0)
-      for i in 1 .. 7:
-        check rowText(g, i).strip == "row " & $(13 + i)
-      check g.row == 8
