@@ -1,7 +1,7 @@
-===== 495 =====
+===== 346 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,10 +10,10 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ This is a test prompt
-===== 290 =====
+===== 670 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -25,10 +25,10 @@
   … Thinking about the test prompt
 ⣿ ○0% ↓7 0s
 ❯
-===== 685 =====
+===== 166 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -39,12 +39,12 @@
 ❯ This is a test prompt
 ● This is a test response.
 
-  ○0% ↓13
+⣿ ○0% ↓13 0s
 ❯
-===== 576 =====
+===== 659 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -58,10 +58,10 @@
 
 ⣿ ○0% ↓13 0s
 ❯
-===== 557 =====
+===== 752 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -75,10 +75,10 @@
 
   ○1%  ↑120  ↓24  0s
 ❯
-===== 224 =====
+===== 792 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub

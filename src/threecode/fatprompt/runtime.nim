@@ -880,9 +880,22 @@ proc guiLoop(unused: string) {.thread.} =
       of amSpinner:
         let glyph = frames[i mod frames.len]
         setSpinFrame(glyph, elapsed.int)
-        termengine.renderFooter(currentFrameFromModel(),
-                                inputThreadRunning, inputEditor,
-                                currentTermW())
+        let frame = currentFrameFromModel()
+        # When assistant content is streaming, the controller has painted
+        # volatile partial rows into the engine. A bare `renderFooter` would
+        # erase them (`\x1b[J`) and repaint only the footer, clobbering the
+        # streaming partial. Instead paint the tracked live rows + the
+        # animated footer as one composite (the same shape
+        # `renderLiveContent` produces), so the spinner keeps rotating
+        # without destroying the partial.
+        if termengine.liveContentRowCount() > 0:
+          termengine.repaintLiveContent(frame,
+                                        inputThreadRunning, inputEditor,
+                                        currentTermW())
+        else:
+          termengine.renderFooter(frame,
+                                  inputThreadRunning, inputEditor,
+                                  currentTermW())
         spinnerFramePainted.store(true, moRelaxed)
       of amBarTick:
         let secs = (epochTime() - barTickStart).int
@@ -1259,10 +1272,6 @@ proc startContent(s: var LiveMarkdownStream, slurpedNow: int) =
   # GUI thread paints `renderFooter`, and it is stopped here, so
   # `prepareAssistantContentStart`'s `walkUp` reads a `paintedFooterRows`
   # no background thread can mutate.
-  # The GUI thread is NOT restarted here: it repaints the footer via
-  # `renderFooter`, which erases the volatile live-content rows without
-  # redrawing them, clobbering the streaming partial. The partial repaint
-  # (`renderLiveContent`) keeps the bar label fresh on each chunk instead.
   discard stopBarTick()
   termengine.prepareAssistantContentStart(
     inputThreadRunning,
@@ -1271,6 +1280,13 @@ proc startContent(s: var LiveMarkdownStream, slurpedNow: int) =
     hadBufferedSubmit,
     flush = false)
   s.started = true
+  # Restart the spinner so it keeps twirling through the streaming phase.
+  # The guiLoop's amSpinner paint path paints the tracked live-content rows
+  # + the animated footer as one composite (repaintLiveContent), so it can
+  # no longer clobber the streaming partial the controller wrote. This
+  # closes the mid-stream-stall gap: a provider that pauses between chunks
+  # still shows a rotating spinner, instead of a frozen static bar.
+  startSpinner("")
 
 proc advanceLiveCol(s: var LiveMarkdownStream, text: string) =
   let termW = max(1, try: terminalWidth() except CatchableError: 80)
@@ -1365,8 +1381,13 @@ proc renderPendingPartial(s: var LiveMarkdownStream, slurpedNow: int) =
   ## fences/tables/word-wrap match replay exactly.
   s.startContent(slurpedNow)
   emitFatPromptEvent setBarEvent(s.currentLabel(slurpedNow))
+  # Use currentFrameFromModel() (not footerFrame(fatPromptState)) so the
+  # footer the controller paints matches the one the guiLoop's amSpinner
+  # path repaints every 80ms. During streaming the model is in amSpinner
+  # mode; footerFrame(fatPromptState) would produce a static token-bar frame
+  # (no glyph), which flickers against the guiLoop's animated spinner frame.
   termengine.renderLiveContent(s.partialContentRows(),
-    footerFrame(fatPromptState), inputThreadRunning, inputEditor,
+    currentFrameFromModel(), inputThreadRunning, inputEditor,
     currentTermW())
   s.partialActive = true
 

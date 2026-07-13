@@ -1,7 +1,7 @@
-===== 418 =====
+===== 923 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,10 +10,10 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run other tool checks
-===== 319 =====
+===== 805 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -24,12 +24,12 @@
 ❯ run other tool checks
 ● Exercising non-bash tools.
 
-  ○0% ↓6
+⣿ ○0% ↓6 0s
 ❯
-===== 814 =====
+===== 720 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -43,10 +43,10 @@
 
 ⣿ ○0% ↓6 0s
 ❯
-===== 797 =====
+===== 451 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -60,10 +60,10 @@
 
   ○2%  ↑300  ↓44  0s
 ❯
-===== 119 =====
+===== 417 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -115,12 +115,12 @@ p --- /tmp/applied.txt
 
 ● Clear completed.
 
-  ○0% ↓4
+⣿ ○0% ↓4 0s
 ❯
-===== 879 =====
+===== 804 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -175,10 +175,10 @@ p --- /tmp/applied.txt
 
 ⣿ ○0% ↓4 0s
 ❯
-===== 827 =====
+===== 721 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -233,10 +233,10 @@ p --- /tmp/applied.txt
 
   ○0%  ↑90  ↓12  0s
 ❯
-===== 379 =====
+===== 169 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-fea62307-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub

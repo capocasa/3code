@@ -326,7 +326,17 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
         hookReasoningDelta(accReasoning, stubBaseLabel, slurped,
                            contentStarted)
       emitTestFrameEvent()
+    let contentChunkDelay = stubDelayMs(result, "contentChunkDelayMs", 0)
     for chunk in stubStringChunks(result, "contentChunks", stubContent):
+      if contentChunkDelay > 0:
+        var remaining = contentChunkDelay
+        while remaining > 0:
+          if isInterrupted():
+            hookStopSpinner()
+            raise newException(ApiError, "interrupted by user")
+          let step = min(50, remaining)
+          sleep(step)
+          remaining -= step
       slurped += chunk.len
       hookProgress(stubBaseLabel, slurped)
       contentStarted = hookContentDelta(chunk, stubBaseLabel, slurped)
