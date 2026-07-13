@@ -409,10 +409,10 @@ suite "terminal visual contract":
     writeStubResponses(root, %*[])
     check fileExists(HarnessCommandFrames)
 
-    # 128 cols (was 120 default): the rendered skill path
-    # (`<output>/.../task-chunked-implementation.md`) is 121 cols on this
-    # checkout and hard-wraps at 120, adding rows that scroll `# Git` off the
-    # grid. 128 cols fits the path so it never wraps. The rejoin normalizer
+    # 128 cols (was 120 default): a rendered built-in skill path
+    # (`<output>/.../<skill>.md`) can exceed 120 cols on some checkouts and
+    # hard-wrap, adding rows that scroll `# Git` off the grid. 128 cols fits
+    # the longest built-in skill path so it never wraps. The rejoin normalizer
     # (`normalizeWrappedPathTail`) still guards the comparison against wraps on
     # checkouts with an even longer cwd. Per-test sizing is an established
     # pattern; cols change only rewraps the fixed system-prompt text

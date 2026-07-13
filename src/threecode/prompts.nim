@@ -1633,7 +1633,7 @@ const BuiltinSkills*: array[6, (string, string)] = [
   ("role-thinking-partner.md", staticRead("skills/role-thinking-partner.md")),
   ("role-writing.md",          staticRead("skills/role-writing.md")),
   ("task-debug-systematic.md", staticRead("skills/task-debug-systematic.md")),
-  ("task-chunked-implementation.md", staticRead("skills/task-chunked-implementation.md")),
+  ("cybernetic-plan.md",       staticRead("skills/cybernetic-plan.md")),
 ]
   ## Universal skills compiled into the binary. Materialized to
   ## `~/.local/share/3code/skills/` on startup; re-extracted whenever
