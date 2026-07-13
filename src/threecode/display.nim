@@ -314,9 +314,8 @@ proc planStatusGlyph(status: string): string =
 
 proc planResultBytes*(plan: seq[PlanItem]): string =
   ## One item per line, glyph-prefixed. The single renderer for plan
-  ## output - used by both the live/transcript path (`planTranscriptBytes`)
-  ## and the replay paths (`printToolResult`, `showTool`) so a plan looks
-  ## identical whether it just ran or was scrolled back to.
+  ## output - used by `planTranscriptBytes` (live transcript) and `showTool`
+  ## so a plan looks identical whether it just ran or was scrolled back to.
   for item in plan:
     result.add GreyFg & "  " & planStatusGlyph(item.status) & " " &
       item.text & Reset & "\r\n"
@@ -405,9 +404,6 @@ proc printToolResult*(kind: ActionKind, res: string, code: int, idx: int,
         subtleWriteLn(stdout, "  " & chunk)
   if diff.len > 0 and kind notin {akWrite, akRead}:
     printDiff(diff)
-
-proc printActionResult*(act: Action, res: string, code: int, idx: int, diff = "") =
-  printToolResult(act.kind, res, code, idx, diff)
 
 proc contextLabel*(promptTokens, window: int): string =
   ## "○ 12%" / "◔ 25%" / … / "● 92%". Empty when there's no useful
@@ -660,8 +656,6 @@ proc toolResultBytes*(kind: ActionKind; res: string; code: int; idx: int;
     result.add compactHeadTailBytes(diff, idx, ReadHead, ReadTail)
   elif kind in {akWebSearch, akWebFetch}:
     result.add compactHeadTailBytes(res, idx)
-  elif kind == akPlan:
-    result.add wrappedSubtleBytes(res)
   else:
     if code == 0:
       result.add wrappedSubtleBytes(res)
