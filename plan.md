@@ -84,8 +84,9 @@ transition because the only writer is quiesced.
    suite, the spinner-race stress test, and the hy3 reproduction harness
    from `TICKER_RACE_HANDOFF.md` step 1 (reasoning-heavy prompts under
    tmux). If the race is gone, close it. Remove the now-dead
-   `barTickLock`/`barTickBase`/`barTickStart`/`commandSymbolIndex`
-   atomics and the `testTickerControl` two-thread dance if it collapses.
+   `barTickStart`/`commandSymbolIndex` atomics and the
+   `testTickerControl` two-thread dance if it collapses. (impl-2 already
+   removed `barTickLock`/`barTickBase`.)
 
 ## Notes for the chunked execution
 
@@ -124,9 +125,56 @@ transition because the only writer is quiesced.
       - Legacy spin vars (`spinLabelShared` etc.) are now write-only
         mirrors in the setters; all reads go through `getFrameModel()`.
         Chunk 2 can delete them.
-- [ ] **impl-2: Single GUI animation thread (merge spinnerLoop +
-      barTickLoop).** Status: not started. Depends on impl-1.
-      Learnings: (none yet)
+- [x] **impl-2: Single GUI animation thread (merge spinnerLoop +
+      barTickLoop).** Status: DONE. Committed.
+      Learnings:
+      - The merge was mechanical once impl-1 had centralized state: the
+        two loops already shared the same `renderFooter` call shape, so
+        `guiLoop` is just `spinnerLoop`'s cadence (80ms) wrapping a
+        `case m.mode` that dispatches to each loop's old paint body.
+        No new locks, no dirty-signal complexity needed — polling
+        `frameModelShared.mode` at 80ms is cheaper than a condvar and
+        the test-frame handshake was already poll-based.
+      - `commandSymbolIndex` (a `var`) and `nextCommandSymbol` (a proc)
+        had to be hoisted above `guiLoop` — they used to live just above
+        `barTickLoop`, which was the only caller. Nim has no forward decl
+        for module-level vars, so the var moved up to the GUI-thread
+        block; the proc moved with it (a single duplicate left behind
+        had to be cleaned up — patch-tool's sequential edits need care
+        when the same text appears twice).
+      - The test-frame handshake needed zero changes beyond the guard:
+        `requestTestSpinnerFrame`'s `if not spinnerRunning` became
+        `if not guiRunning`, and the `while spinnerRunning` poll loop
+        became `while guiRunning`. After `startContent`'s `stopSpinner`+
+        `stopBarTick`, `guiRunning == false`, so the
+        `requestTestSpinnerFrame` calls in `apiReasoningDelta`/
+        `apiContentDelta` early-return — no deadlock, no stale frame.
+      - `spinnerCleanupBytes` exit-cleanup stayed in `guiLoop`'s
+        post-loop block (the `if not inputThreadRunning` teardown).
+        `stopSpinner`'s explicit `clearFooterFrame(2)` render covers the
+        normal controller-driven teardown; the cleanup bytes are the
+        thread-exit-without-controller path. Both coexist; tests pass
+        with both. No regression observed.
+      - `barTickBase`/`barTickLock` deleted cleanly — nothing read
+        `barTickBase` after `setAnimLabel(base)` wrote the base into
+        `frameModelShared.label`. `barTickStart` stays (guiLoop +
+        `reserveEditorFooterForRedraw` both compute the elapsed suffix
+        from it).
+      - `stopBarTick` now stops the *entire* GUI thread, not just bar-
+        tick. This is correct because spinner and bar-tick are mutually
+        exclusive in practice (startContent stops both idempotently),
+        and `startSpinner`/`startBarTick` both `ensureGuiStarted()` to
+        restart. The `withBarTick` RAII template still works because
+        `stopBarTick`'s `if m.mode != amBarTick: return 0` guard makes
+        it a no-op when the spinner path already stopped the thread.
+      - All three required tests pass: stress (64.75s), functional
+        (64.24s), resize_ticker (12.59s). Build clean.
+      - Open for chunk 3: `guiLoop`'s `amBarTick` branch still calls
+        `termengine.updateToolViewportSymbol` directly — that's the
+        chunk-3 race (controller appends viewport rows + re-renders
+        while the GUI thread rotates the symbol). The chunk-3 work is
+        to push the viewport rows into `FrameModel` so the GUI thread
+        owns the whole composite.
 - [ ] **impl-3: Route tool-call animation through the GUI thread.**
       Status: not started. Depends on impl-2.
       Learnings: (none yet)

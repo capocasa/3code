@@ -57,23 +57,34 @@ template currentBarHasGap*(): untyped = fatPromptState.footer.hasGap
   ## leaving the receipt flush below the LLM content with no
   ## permanent gap in scroll history.
 
-var spinnerStop: Atomic[bool]
 var spinnerFramePainted: Atomic[bool]
-var spinnerThread: Thread[string]
 var bufferedSubmitTurn: Atomic[bool]
 var quietStop: Atomic[bool]
 var quietThread: Thread[void]
 var quietRunning = false
 var lastProviderActivity: Atomic[int]
 
-var barTickStop: Atomic[bool]
 var commandStatusActive: Atomic[bool]
-var barTickThread: Thread[void]
-var barTickRunning = false
 var barTickStart: float
-var barTickBase: string
-var barTickLock: Lock
-barTickLock.initLock()
+var commandSymbolIndex: Atomic[int]
+  ## Currency-symbol rotation index for the bash tool viewport's command
+  ## row, advanced by the GUI thread while a bash command runs. Chunk 3
+  ## will route the whole tool-viewport animation through the GUI thread.
+
+proc nextCommandSymbol*(): string =
+  const symbols = ["$", "€", "£", "¥"]
+  symbols[commandSymbolIndex.load(moAcquire) mod symbols.len]
+
+# --- Single GUI animation thread: the sole background painter of
+#     `renderFooter`. Replaces the two-thread `spinnerLoop` (80ms) /
+#     `barTickLoop` (250ms) design that both repainted the footer region
+#     independently. The controller sets `frameModelShared.mode` to pick
+#     what to paint and signals the thread (dirty); height-transition
+#     paths (`startContent`, `endTurn`) `stopGui` before reading
+#     `paintedFooterRows`, so no stale repaint can survive a transition.
+var guiStop: Atomic[bool]
+var guiRunning = false
+var guiThread: Thread[string]
 
 var apiCancelWatcherStarted = false
 
@@ -230,29 +241,22 @@ proc restoreInputTermios*() {.noconv.} =
     if inputOrigTermiosValid:
       discard tcSetAttr(STDIN_FILENO.cint, TCSADRAIN, addr inputOrigTermios)
       inputOrigTermiosValid = false
-var spinnerRunning = false  # only mutated by main thread
 var inputEditor*: ptr minline.LineEditor
 var inputProfile*: ptr Profile
 var inputSession*: ptr Session
 var inputMessages*: ptr JsonNode
 var activeCommandHook*: proc(cmd: string) {.gcsafe.}
 
-# Shared mutable spinner state. The spinner thread reads these every frame;
-# the main thread updates them as chunks arrive. Two separate lines:
-#   line 1 = the classic spinner (frame + label + elapsed seconds)
-#   line 2 = the reasoning ticker, dim, empty when no thinking is streaming
-# Both fields live under one lock for simplicity — writes are infrequent.
+# Shared mutable animation state. All footers are built from the unified
+# `frameModelShared` (under `frameModelLock`); the legacy per-field spin
+# vars are gone. `testSpinnerRequested`/`testSpinnerPainted` are the tty
+# test harness's deterministic-frame handshake: the GUI thread blocks until
+# a request arrives, paints one frame, then stores the ack.
 var
-  spinLabelLock: Lock
-  spinLabelShared: string
-  spinTickerShared: string
-  spinFrameShared: string
-  spinElapsedShared: int
   testSpinnerRequested: Atomic[int]
   testSpinnerPainted: Atomic[int]
   testTickerControlStarted: Atomic[bool]
   testTickerControlThread: Thread[void]
-spinLabelLock.initLock()
 
 var
   frameModelLock: Lock
@@ -316,10 +320,10 @@ proc testFrameMode(): bool =
   getEnv("THREECODE_TEST_FRAME_FD").len > 0
 
 proc requestTestSpinnerFrame() =
-  if not testFrameMode() or not spinnerRunning:
+  if not testFrameMode() or not guiRunning:
     return
   let requested = testSpinnerRequested.fetchAdd(1, moRelease) + 1
-  while spinnerRunning and testSpinnerPainted.load(moAcquire) < requested:
+  while guiRunning and testSpinnerPainted.load(moAcquire) < requested:
     sleep 1
 
 proc testTickerControlLoop() {.thread.} =
@@ -389,12 +393,6 @@ var apiLiveStream: LiveMarkdownStream
 
 proc setSpinLabel(s: string) {.gcsafe.} =
   setAnimLabel(s)
-  # Keep the legacy var in sync: chunk 1 still has readers (none expected
-  # after this migration, but the declaration stays until chunk 2).
-  {.cast(gcsafe).}:
-    acquire spinLabelLock
-    spinLabelShared = s
-    release spinLabelLock
 
 proc getSpinLabel(): string {.gcsafe.} =
   getFrameModel().label
@@ -402,9 +400,6 @@ proc getSpinLabel(): string {.gcsafe.} =
 proc setSpinTicker(s: string) {.gcsafe.} =
   setAnimTicker(s)
   {.cast(gcsafe).}:
-    acquire spinLabelLock
-    spinTickerShared = s
-    release spinLabelLock
     if s.len == 0:
       emitFatPromptEvent clearTickerEvent()
     else:
@@ -415,11 +410,6 @@ proc getSpinTicker(): string {.gcsafe.} =
 
 proc setSpinFrame(frame: string; elapsed: int) {.gcsafe.} =
   setAnimSpinner(frame, elapsed)
-  {.cast(gcsafe).}:
-    acquire spinLabelLock
-    spinFrameShared = frame
-    spinElapsedShared = elapsed
-    release spinLabelLock
 
 proc currentSpinnerFooterFrame(): FooterFrame {.gcsafe.} =
   let m = getFrameModel()
@@ -542,9 +532,9 @@ proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
         if m.spinner.len > 0: m.spinner else: "○",
         m.label, m.ticker, m.elapsed)
     of amBarTick:
-      # The elapsed suffix is ephemeral (changes every 250ms); recompute it
-      # locally from the model's base label. Chunk 2 moves this into the
-      # single animation thread.
+      # The elapsed suffix is ephemeral (changes every tick); recompute it
+      # locally from the model's base label. The single GUI thread does the
+      # same computation when painting bar-tick frames.
       let elapsed = (epochTime() - barTickStart).int
       let label =
         if m.label.hasElapsedSuffix: m.label
@@ -820,38 +810,60 @@ template writeTranscriptWithFatPrompt*(body: untyped) =
   writeTranscriptWithFatPromptRestore(true):
     body
 
-proc spinnerLoop(unused: string) {.thread.} =
-  ## Spinner footer rooted at the cursor row:
-  ##   row N     optional reasoning ticker when reasoning streams
-  ##   row N+1   spinner frame + token-slot bar
-  ##   row N+2   prompt editor row when live buffered typing is active
-  ## The ticker is a real fat-prompt row, not a scrollback overlay.
-  ## See `spinnerFooterBytes` for the byte sequence each frame writes.
+proc guiLoop(unused: string) {.thread.} =
+  ## The single background painter of `renderFooter`. Replaces the two-
+  ## thread `spinnerLoop` (80ms) / `barTickLoop` (250ms) design: both
+  ## repainted the same footer region on their own schedules with no
+  ## coordination, leaving `paintedFooterRows` stale across the
+  ## controller's height transitions. With one writer, the transition
+  ## paths (`startContent`, `endTurn`) `stopGui` before reading
+  ## `paintedFooterRows`, so no stale repaint can survive.
+  ##
+  ## Cadence: 80ms in normal mode (covers spinner glyph rotation and the
+  ## bar-tick's whole-second counter — 250ms vs 80ms makes no visible
+  ## difference since the counter shows whole seconds). In test frame
+  ## mode, blocks on the `testSpinnerRequested`/`testSpinnerPainted`
+  ## handshake so the tty harness can capture deterministic frames.
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
   let start = epochTime()
   var i = 0
   var observedTestTick = testSpinnerPainted.load(moAcquire)
-  while not spinnerStop.load(moRelaxed):
+  while not guiStop.load(moRelaxed):
     let elapsed =
       if testFrameMode():
-        while not spinnerStop.load(moRelaxed) and
+        while not guiStop.load(moRelaxed) and
             testSpinnerRequested.load(moAcquire) <= observedTestTick:
           sleep 1
-        if spinnerStop.load(moRelaxed):
-          break
+        if guiStop.load(moRelaxed): break
         observedTestTick = testSpinnerRequested.load(moAcquire)
         0.0
       else:
         epochTime() - start
+    let m = getFrameModel()
     try:
-      let frame = frames[i mod frames.len]
-      setSpinFrame(frame, elapsed.int)
-      termengine.renderFooter(
-        currentFrameFromModel(),
-        inputThreadRunning,
-        inputEditor,
-        currentTermW())
-      spinnerFramePainted.store(true, moRelaxed)
+      case m.mode
+      of amSpinner:
+        let glyph = frames[i mod frames.len]
+        setSpinFrame(glyph, elapsed.int)
+        termengine.renderFooter(currentFrameFromModel(),
+                                inputThreadRunning, inputEditor,
+                                currentTermW())
+        spinnerFramePainted.store(true, moRelaxed)
+      of amBarTick:
+        let secs = (epochTime() - barTickStart).int
+        let label =
+          if m.label.hasElapsedSuffix: m.label
+          else: m.label & "  " & $secs & "s"
+        if commandStatusActive.load(moRelaxed):
+          discard commandSymbolIndex.fetchAdd(1, moRelease)
+          termengine.updateToolViewportSymbol(nextCommandSymbol())
+        termengine.renderFooter(tokenBarFrame(label),
+                                inputThreadRunning, inputEditor,
+                                currentTermW())
+        # bar-tick never sets spinnerFramePainted; the test handshake keys
+        # on spinner frames, and bar-tick is not driven through it.
+      of amIdle:
+        discard  # nothing to animate; the controller paints idle frames
       if testFrameMode():
         testSpinnerPainted.store(observedTestTick, moRelease)
     except CatchableError: discard
@@ -927,64 +939,40 @@ proc paintInitialPrompt*(p: Profile) =
 #     during tool execution. Bash tool viewports can also attach a compact
 #     command-status row below the live output.
 
-# Currency symbols rotated by the bar-tick thread while a bash command runs.
-# The classic |/\-+timer command-status line lived here; the live bullet now
-# carries the rotation instead.
-var commandSymbolIndex: Atomic[int]
+proc ensureGuiStarted() =
+  ## Start the single GUI animation thread if it isn't running. Idempotent.
+  ## The thread paints whatever `frameModelShared.mode` says; the controller
+  ## switches modes via `startSpinner`/`startBarTick` without touching the
+  ## thread itself.
+  if guiRunning: return
+  ensureTestTickerControlStarted()
+  guiStop.store(false, moRelaxed)
+  testSpinnerRequested.store(0, moRelease)
+  testSpinnerPainted.store(0, moRelease)
+  createThread(guiThread, guiLoop, "")
+  guiRunning = true
 
-proc nextCommandSymbol*(): string =
-  const symbols = ["$", "€", "£", "¥"]
-  symbols[commandSymbolIndex.load(moAcquire) mod symbols.len]
-
-proc barTickLoop() {.thread.} =
-  var observedTick = testSpinnerPainted.load(moAcquire)
-  while not barTickStop.load(moRelaxed):
-    var base: string
-    {.cast(gcsafe).}:
-      acquire barTickLock
-      base = barTickBase
-      release barTickLock
-    let elapsedMs = int((epochTime() - barTickStart) * 1000.0)
-    let elapsed = elapsedMs div 1000
-    let label =
-      if base.hasElapsedSuffix: base
-      else: base & "  " & $elapsed & "s"
-    if commandStatusActive.load(moRelaxed):
-      var advance = false
-      if testFrameMode():
-        let painted = testSpinnerPainted.load(moAcquire)
-        if painted > observedTick:
-          observedTick = painted
-          advance = true
-      else:
-        advance = true
-      if advance:
-        discard commandSymbolIndex.fetchAdd(1, moRelease)
-        termengine.updateToolViewportSymbol(nextCommandSymbol())
-    # Re-assert hide-cursor each tick — same rationale as
-    # `spinnerFooterBytes`: some terminals transiently re-show the
-    # caret on cursor movement, and beginTurn's one-shot `?25l`
-    # isn't enough to keep it hidden over a long-running tool.
-    termengine.renderFooter(tokenBarFrame(label), inputThreadRunning,
-                            inputEditor, currentTermW())
-    sleep 250
+proc stopGui() =
+  ## Signal the GUI thread to stop and join it. Joins with the terminal
+  ## write lock dropped — the thread needs the lock to finish its current
+  ## render frame and observe `guiStop`; joining while we hold the lock
+  ## is a guaranteed deadlock.
+  if not guiRunning: return
+  guiStop.store(true, moRelaxed)
+  termui.withTerminalLockDroppedForJoin:
+    joinThread(guiThread)
+  guiRunning = false
 
 proc startBarTick*(base: string): bool =
   ## Returns true if this call started a new tick, false if one was
   ## already running (idempotent). Lets `withBarTick` know whether it
   ## owns the tick and must stop it on scope exit.
   debugOut "startBarTick"
-  if barTickRunning: return false
-  {.cast(gcsafe).}:
-    acquire barTickLock
-    barTickBase = base
-    release barTickLock
+  if getFrameModel().mode == amBarTick: return false
   setAnimLabel(base)
   setAnimMode(amBarTick)
   barTickStart = epochTime()
-  barTickStop.store(false, moRelaxed)
-  createThread(barTickThread, barTickLoop)
-  barTickRunning = true
+  ensureGuiStarted()
   return true
 
 template withBarTick*(label: string; body: untyped) =
@@ -1001,14 +989,12 @@ template withBarTick*(label: string; body: untyped) =
       discard stopBarTick()
 
 proc stopBarTick*(): int =
-  ## Stops the bar tick and returns elapsed seconds.
+  ## Stops the bar tick, stops the GUI thread, and returns elapsed seconds.
   debugOut "stopBarTick"
-  if not barTickRunning: return 0
+  let m = getFrameModel()
+  if m.mode != amBarTick: return 0
   let elapsed = (epochTime() - barTickStart).int
-  barTickStop.store(true, moRelaxed)
-  termui.withTerminalLockDroppedForJoin:
-    joinThread(barTickThread)
-  barTickRunning = false
+  stopGui()
   commandStatusActive.store(false, moRelaxed)
   setAnimMode(amIdle)
   return elapsed
@@ -1082,32 +1068,24 @@ proc setCommandStatusActive*(active: bool) =
 
 proc startSpinner*(label: string) =
   debugOut "startSpinner"
-  if spinnerRunning: return
-  ensureTestTickerControlStarted()
   if label.len > 0: setSpinLabel(label)
-  let frame = "⠋"
-  setSpinFrame(frame, 0)
+  setSpinFrame("⠋", 0)
   setAnimMode(amSpinner)
-  let m = getFrameModel()
-  termengine.renderFooter(
-    spinnerFooterFrame(frame, m.label, m.ticker, 0),
-    inputThreadRunning,
-    inputEditor,
-    currentTermW())
+  spinnerFramePainted.store(false, moRelaxed)
+  ensureGuiStarted()
+  # Paint one immediate frame so the spinner appears instantly (matches the
+  # old startSpinner which rendered before createThread).
+  termengine.renderFooter(currentFrameFromModel(),
+                          inputThreadRunning, inputEditor,
+                          currentTermW())
   spinnerFramePainted.store(true, moRelaxed)
-  testSpinnerRequested.store(0, moRelease)
-  testSpinnerPainted.store(0, moRelease)
-  spinnerStop.store(false, moRelaxed)
-  createThread(spinnerThread, spinnerLoop, "")
-  spinnerRunning = true
 
 proc stopSpinner*(clearLiveFooter = true) =
   debugOut "stopSpinner"
-  if not spinnerRunning: return
-  spinnerStop.store(true, moRelaxed)
-  termui.withTerminalLockDroppedForJoin:
-    joinThread(spinnerThread)
-  spinnerRunning = false
+  if not guiRunning:
+    setAnimMode(amIdle)
+    return
+  stopGui()
   setAnimMode(amIdle)
   if clearLiveFooter and inputThreadRunning and inputEditor != nil and
       spinnerFramePainted.load(moRelaxed):
@@ -1206,12 +1184,15 @@ proc startContent(s: var LiveMarkdownStream, slurpedNow: int) =
   let hadBufferedSubmit = bufferedSubmitTurn.load(moRelaxed)
   bufferedSubmitTurn.store(false, moRelaxed)
   stopSpinner(clearLiveFooter = false)
-  # Pause the bar-tick thread across the footer teardown + content start so it
-  # can't repaint the footer between prepareAssistantContentStart (which erases
-  # the footer area) and the first `renderLiveContent` (which anchors the
-  # partial + new footer). A stray repaint in that window leaves a gap row in
-  # scrollback.
-  # The bar-tick thread is NOT restarted here: it repaints the footer via
+  # Quiesce the GUI thread across the footer teardown + content start so it
+  # can't repaint the footer between prepareAssistantContentStart (which
+  # erases the footer area) and the first `renderLiveContent` (which anchors
+  # the partial + new footer). A stray repaint in that window leaves a gap
+  # row in scrollback. With one thread, this is the race closure: only the
+  # GUI thread paints `renderFooter`, and it is stopped here, so
+  # `prepareAssistantContentStart`'s `walkUp` reads a `paintedFooterRows`
+  # no background thread can mutate.
+  # The GUI thread is NOT restarted here: it repaints the footer via
   # `renderFooter`, which erases the volatile live-content rows without
   # redrawing them, clobbering the streaming partial. The partial repaint
   # (`renderLiveContent`) keeps the bar label fresh on each chunk instead.
@@ -2236,10 +2217,11 @@ proc endTurn*(repaintPrompt = true) =
   ## one-shot — `emitUserSubmit` overwrites it with the receipt at
   ## next submit, so it never persists in scroll history.
   # Defensive: nothing should be animating between turns. If a tool
-  # path leaked the bar-tick thread (e.g. an uncaught exception
-  # past the per-tool stopBarTick), the thread would otherwise keep
-  # painting the bottom row with a ticking seconds counter forever.
-  # Idempotent — these are no-ops when the threads aren't running.
+  # path leaked the GUI thread (e.g. an uncaught exception past the
+  # per-tool stopBarTick), the thread would otherwise keep painting the
+  # bottom row with a ticking seconds counter forever. Idempotent — these
+  # are no-ops when the thread isn't running. With one thread, both calls
+  # stop it: stopBarTick stops + sets amIdle, then stopSpinner is a no-op.
   discard stopBarTick()
   stopSpinner()
   let hadInputThread = inputThreadRunning
