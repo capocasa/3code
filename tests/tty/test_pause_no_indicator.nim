@@ -11,9 +11,17 @@ discard """
 ##     commands with streaming output, the $/€/£/¥ currency symbol must rotate
 ##     on the tool viewport).
 ##
-## This file exercises the retry-backoff window, where earlier code stopped the
-## spinner before entering the sleep and only restarted it after the sleep
-## returned, leaving the whole backoff gap with a frozen bar and no animation.
+## This file exercises every turn phase that can outlive a single render
+## tick. Two windows are covered:
+##   - the retry-backoff window, where earlier code stopped the spinner before
+##     entering the sleep and only restarted it after the sleep returned,
+##     leaving the whole backoff gap with a frozen bar and no animation.
+##   - the content-streaming window, where the first content chunk killed the
+##     GUI thread (so its rotating glyph could not clobber the streaming
+##     partial), and the controller's per-chunk repaint used a static label
+##     with no glyph at all. A provider that stalls mid-stream (slow second
+##     chunk) therefore showed a frozen bar and no spinner, identical to the
+##     backoff bug from the user's point of view.
 import std/[json, os, strutils, unittest]
 import tty_expect
 import stub_helpers
@@ -100,3 +108,45 @@ suite "activity indicator covers every turn phase":
     let sawBrailleDuringBackoff = tty.screenHasBraille()
     check sawBrailleDuringBackoff
     tty.expectInHistory "ok after retry"
+
+  test "braille spinner is animating during a mid-stream content gap":
+    let root = newFixture("pause_stream_spinner")
+    writeConfiguredProvider(root)
+    # Content arrives in two chunks with a long gap between them. The first
+    # chunk starts live streaming (which used to kill the GUI thread); the
+    # second chunk arrives only after `waitForTestContinue`, so there is a
+    # guaranteed window where content has started but nothing is arriving.
+    # The spinner must keep twirling through that gap, exactly as it does
+    # during the pre-stream wait and the retry backoff.
+    writeFile(root / "run" / "stub_responses.json", $(%*[
+      {"role": "assistant", "stream": true,
+       "content": "first then second",
+       "contentChunks": ["first", "second"],
+       "contentChunkDelayMs": 4000,
+       "usage": {"promptTokens": 5, "completionTokens": 2,
+                 "totalTokens": 7, "cachedTokens": 0}}
+    ]))
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    tty.send "go"
+    tty.expect "go"
+    tty.send "\n"
+    # First chunk lands in scrollback.
+    tty.expectInHistory "first"
+    # Now we are inside the contentChunkDelayMs gap: content has started,
+    # but the second chunk will not arrive for seconds. Sample the live
+    # screen through the gap.
+    tty.drain(50)
+    tty.advanceTicker()
+    tty.drain(50)
+    let sawBrailleDuringGap = tty.screenHasBraille()
+    check sawBrailleDuringGap
+    tty.expectInHistory "second"

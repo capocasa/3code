@@ -1,7 +1,7 @@
-===== 224 =====
+===== 552 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,10 +10,10 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run bash checks
-===== 654 =====
+===== 285 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -24,12 +24,12 @@
 ❯ run bash checks
 ● Running bash checks.
 
-  ○0% ↓5
+⣿ ○0% ↓5 0s
 ❯
-===== 310 =====
+===== 534 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -43,10 +43,10 @@
 
 ⣿ ○0% ↓5 0s
 ❯
-===== 536 =====
+===== 968 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -60,10 +60,10 @@
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 757 =====
+===== 297 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -78,10 +78,10 @@ $ printf 'ok-one\nok-two\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 187 =====
+===== 505 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -97,10 +97,10 @@ $ printf 'ok-one\nok-two\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 131 =====
+===== 920 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -117,10 +117,10 @@ $ printf 'ok-one\nok-two\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 409 =====
+===== 852 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -139,10 +139,10 @@ $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 602 =====
+===== 381 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -162,10 +162,10 @@ $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 271 =====
+===== 936 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -186,10 +186,10 @@ $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 944 =====
+===== 497 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -211,10 +211,10 @@ $ printf 'ok-one\nok-two\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 943 =====
+===== 903 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -238,10 +238,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 483 =====
+===== 168 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -266,10 +266,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 319 =====
+===== 706 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -295,10 +295,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 824 =====
+===== 756 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -325,10 +325,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 936 =====
+===== 896 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -356,10 +356,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 253 =====
+===== 178 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -388,10 +388,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 947 =====
+===== 460 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -421,10 +421,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 332 =====
+===== 140 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -455,10 +455,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 139 =====
+===== 461 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -490,10 +490,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 630 =====
+===== 240 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -525,10 +525,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 293 =====
+===== 562 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -560,10 +560,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 202 =====
+===== 818 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -597,10 +597,10 @@ $ sleep 3; printf 'slow-done\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 709 =====
+===== 296 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -635,10 +635,10 @@ $ sleep 3; printf 'slow-done\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 433 =====
+===== 915 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -674,12 +674,12 @@ $ sleep 3; printf 'slow-done\n'
 
 ● Bash checks complete.
 
-  ○1% ↓5
+⣿ ○1% ↓5 0s
 ❯
-===== 545 =====
+===== 939 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -718,10 +718,10 @@ $ sleep 3; printf 'slow-done\n'
 
 ⣿ ○1% ↓5 0s
 ❯
-===== 812 =====
+===== 943 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -760,10 +760,10 @@ $ sleep 3; printf 'slow-done\n'
 
   ○1%  ↑210  ↓20  0s
 ❯
-===== 527 =====
+===== 277 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-fuzzer-4a249102-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub

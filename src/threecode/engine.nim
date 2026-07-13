@@ -341,8 +341,71 @@ proc clearLiveContent*() {.gcsafe.} =
   {.cast(gcsafe).}:
     defaultEngine.clearLiveContent()
 
+proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
+                         inputRunning: bool;
+                         editor: ptr minline.LineEditor;
+                         termW = 0) {.gcsafe.} =
+  ## Repaint the currently-tracked live content rows together with a new
+  ## footer frame, in one synchronized frame. Unlike `renderLiveContent`
+  ## (which the controller calls with fresh rows on each chunk), this reads
+  ## the rows already stored in `e.liveContentRows` and only swaps the
+  ## footer. It is the GUI thread's spinner animation path: when content is
+  ## streaming the spinner must keep rotating, but the footer repaint must
+  ## not erase the volatile partial the controller wrote. Painting the
+  ## stored rows + the animated footer as one composite (the same shape
+  ## `renderLiveContent` produces) keeps the partial intact.
+  {.cast(gcsafe).}:
+    termio.withTerminalWriteLock:
+      let width = if termW > 0: termW else:
+        try: terminalWidth() except CatchableError: 0
+      let bytes = if e.gapIsSeparator:
+        frame.footerBarOnlyBytes(width)
+      else:
+        frame.footerFrameBytes(width)
+      let footerRowsAboveEditor = frame.rowsAboveEditor(width)
+      stdout.write termio.SyncBegin
+      stdout.write "\x1b[?25l"
+      if inputRunning and editor != nil:
+        refreshEditorWidth(editor[])
+        let up = max(0, e.walkUp(editor[]))
+        stdout.write "\r"
+        if up > 0:
+          stdout.write "\x1b[" & $up & "A"
+        stdout.write "\x1b[J"
+        for row in e.liveContentRows:
+          stdout.write row
+          stdout.write "\r\n"
+        if bytes.len > 0:
+          stdout.write bytes
+          stdout.write "\r\n"
+        editor[].renderRow = 0
+        stdout.write editor[].redrawBytes(synchronized = false)
+        if frame.kind == ffClear:
+          e.noteNoFooter()
+        else:
+          e.noteFooterPainted(footerRowsAboveEditor)
+      else:
+        for row in e.liveContentRows:
+          stdout.write row
+          stdout.write "\r\n"
+        if bytes.len > 0:
+          stdout.write bytes
+        e.noteNoFooter()
+      stdout.write termio.SyncEnd
+      stdout.flushFile
+
+proc repaintLiveContent*(frame: FooterFrame; inputRunning: bool;
+                         editor: ptr minline.LineEditor;
+                         termW = 0) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    defaultEngine.repaintLiveContent(frame, inputRunning, editor, termW)
+
 proc liveContentRowCount*(e: TerminalEngine): int {.gcsafe.} =
   e.liveContentRows.len
+
+proc liveContentRowCount*(): int {.gcsafe.} =
+  {.cast(gcsafe).}:
+    defaultEngine.liveContentRows.len
 
 proc paintedFooterRowCount*(e: TerminalEngine): int {.gcsafe.} =
   e.paintedFooterRows
