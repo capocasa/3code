@@ -3,7 +3,7 @@
 ## The live viewport is semantic state: command banner, streamed lines, cutoff
 ## policy, and final exit code. Terminal placement belongs to engine.
 
-import std/[strformat, strutils, terminal]
+import std/[strformat, terminal]
 import util
 
 const
@@ -51,9 +51,6 @@ proc wrappedRowsAt(line: string; termW: int): seq[string] =
   let bodyW = max(20, termW - 3)
   for chunk in charWrapAnsi(line, bodyW):
     result.add "  " & chunk
-
-proc wrappedRows(line: string): seq[string] =
-  wrappedRowsAt(line, try: terminalWidth() except CatchableError: 80)
 
 proc visibleOutputLines(v: StreamingView): seq[string] =
   var logical: seq[string]

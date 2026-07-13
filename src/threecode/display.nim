@@ -487,15 +487,6 @@ proc toolIcon*(kind: ActionKind): string =
   of akClear: "⟳"
   of akError: "✕"
 
-proc renderToolPending*(banner: string, kind: ActionKind) =
-  ## Pre-execution banner: grey bullet + grey banner. Live only; the live
-  ## caller overwrites this line with the final tool banner bytes once the
-  ## action returns. Replay skips this and goes straight to the result form.
-  let icon = toolIcon(kind)
-  subtleWrite(stdout, icon & " " & banner)
-  stdout.write "\n"
-  stdout.flushFile
-
 proc toolBannerBytes*(banner: string; kind: ActionKind; code: int;
                       elapsedS = -1): string =
   let icon = if kind == akBash and code > 0: "Ø" else: toolIcon(kind)
