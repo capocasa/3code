@@ -969,19 +969,14 @@ proc showTool*(arg: string, toolLog: seq[ToolRecord]) =
     return
   let rec = toolLog[n-1]
   stdout.styledWriteLine fgDefault, &"── T{n}  ", rec.banner, resetStyle
+  # Body comes from the SAME byte builder the live path uses so a `:show`
+  # tool matches the live transcript. Plans render glyphs; every other kind
+  # routes through `toolResultBytes` (head/tail-truncated + wrapped subtle
+  # for bash/read/web, summary line for write/patch/error).
   if rec.kind == akPlan and rec.plan.len > 0:
     stdout.write planResultBytes(rec.plan)
-  elif rec.kind in {akBash, akRead, akWebSearch, akWebFetch}:
-    for l in rec.output.splitLines: printLine(l)
   else:
-    let termW = try: terminalWidth() except CatchableError: 80
-    let bodyW = max(20, termW - 3)
-    for line in rec.output.splitLines:
-      for chunk in wrapAnsi(line, bodyW):
-        if rec.code == 0:
-          stdout.styledWriteLine fgGreen, "  " & chunk, resetStyle
-        else:
-          subtleWriteLn(stdout, "  " & chunk)
+    stdout.write toolResultBytes(rec.kind, rec.output, rec.code, n)
 
 proc listTools*(toolLog: seq[ToolRecord]) =
   if toolLog.len == 0:

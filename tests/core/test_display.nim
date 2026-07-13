@@ -221,3 +221,29 @@ when not defined(windows):
       check "✓ step one" in rendered
       check "○ step two" in rendered
       check "completed: " notin rendered
+
+    proc captureShow(arg: string; toolLog: seq[ToolRecord]): string =
+      let outPath = getTempDir() / ("tc_show_" & $getCurrentProcessId())
+      let saved = stdout
+      let f = open(outPath, fmWrite)
+      stdout = f
+      try:
+        showTool(arg, toolLog)
+      finally:
+        stdout.flushFile
+        stdout = saved
+        close(f)
+      result = readFile(outPath)
+      removeFile(outPath)
+
+    test "showTool body matches toolResultBytes for multi-line bash":
+      # :show keeps its own `── T{n}` header but the BODY must come from the
+      # shared byte builder so it matches the live transcript.
+      let output = "line one\nline two\nline three\n"
+      let toolLog = @[ToolRecord(banner: "echo long", output: output,
+        code: 0, kind: akBash)]
+      let rendered = captureShow("1", toolLog)
+      check "── T1" in rendered
+      check rendered.contains(toolResultBytes(akBash, output, 0, 1))
+      check "line one" in rendered
+      check "line three" in rendered

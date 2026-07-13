@@ -62,7 +62,8 @@ Rules:
 - `805cf1e` landed: plan tool unified to glyphs across live + replay + `:show`. `ToolRecord` carries `plan`.
 - **Item 1 DONE**: dead `akPlan` branch in `toolResultBytes`, `printActionResult`, and the stale `planResultBytes` docstring all removed. Build green; `test_display` + `test_session` green.
 - **Items 2+3 DONE**: `replaySessionTail` now routes through `toolTranscriptBytes` (string-banner overload, stored banner) + `planTranscriptBytes` (plans). Bridge decision: no `ToolRecord` change needed — use the stored banner directly. Replay tests added and green.
-- Not yet started: items 4, 5, 6.
+- **Item 4 DONE**: `showTool` body routes through `toolResultBytes` (plans unchanged via `planResultBytes`). Old green write/patch branch removed. Test added.
+- Not yet started: items 5, 6.
 - The alternate stdout renderers still exist and are still called by `replaySessionTail`, `showTool`, `listTools`.
 
 ## Items
@@ -83,10 +84,10 @@ Neither (a) nor (b). The string-banner overload `toolTranscriptBytes(banner, kin
 
 Caveat carried to item 4: `showTool` currently renders write/patch body from `rec.output` only (the summary line). The live byte path's akWrite branch renders the file CONTENT via `diff` (not stored on `ToolRecord`). So routing `showTool`'s body through `toolResultBytes` with `diff=""` reproduces the CURRENT (summary-only) `:show` behavior — not a regression, but a known fidelity gap (the live transcript shows full file content; `:show` does not). This is pre-existing and out of scope to fix here.
 
-### 4. Route `:show` (`showTool`) through the byte path
-`showTool` (display.nim:956) currently writes its own banner + body. Change it to reconstruct the `Action` (from item 3's bridge) and write `toolTranscriptBytes(act, rec.output, rec.code, n, "")`. Note `:show` prints a `── T{n}` header, not the normal tool banner — keep that header, only the BODY should come from the shared renderer. So this item is: replace the body-rendering part of `showTool` with the byte path's body builder (`toolResultBytes`), keep the `── T{n}` header.
-- [ ] Implement.
-- [ ] Add a test: build a `ToolRecord` (bash kind, multi-line output) and assert `showTool` output equals the `── T{n}` header + `toolResultBytes` body.
+### 4. Route `:show` (`showTool`) through the byte path  ✅ DONE
+`showTool` keeps its `── T{n}` header (per plan) but the body now routes through the shared byte builders: plans via `planResultBytes(rec.plan)` (unchanged), every other kind via `toolResultBytes(rec.kind, rec.output, rec.code, n)`. The old per-kind branches (printLine for bash/read/web, green-on-success for write/patch) are gone — that green rendering was the drift; `:show` now matches the live transcript (grey subtle).
+- [x] Implemented.
+- [x] Test added: `showTool body matches toolResultBytes for multi-line bash` asserts the `── T1` header + that the captured stdout `.contains` `toolResultBytes(akBash, output, 0, 1)`.
 
 ### 5. Route `:tools` (`listTools`) through the byte path (or justify leaving it)
 `listTools` (display.nim:986) prints a one-line summary per tool (`T1 ✓ banner (N lines)`), not a full render. It does not duplicate the per-kind body logic — it just counts lines and shows a status mark. This may NOT need unification; it's an index, not a render. Decide:
