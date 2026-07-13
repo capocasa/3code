@@ -27,7 +27,7 @@
 ## must be read live — caching it leads to stale walk-ups that walk into
 ## committed scrollback.
 
-import std/[terminal, unicode, times]
+import std/[terminal, times]
 import minline
 import ./terminal as termio
 import ./fatprompt/rendering
@@ -127,8 +127,7 @@ proc writeViewportRows(rows: openArray[string]) =
 
 # Row 0 is the tool banner (command line); the rest is streaming bash
 # output. Color them at the write boundary so the semantic rows held in
-# `toolViewportRows` stay plain — `updateToolViewportSymbol` swaps the
-# first rune of row 0 in place, and the unit tests assert the raw text.
+# `toolViewportRows` stay plain — the unit tests assert the raw text.
 # OffWhiteFg = nonbright white for the command; GreyFg = light grey for
 # the output. Both honor the mode-aware `[colors]` config.
 proc writeToolViewportRows(e: TerminalEngine) =
@@ -142,18 +141,6 @@ proc writeToolViewportRows(e: TerminalEngine) =
     stdout.write e.toolViewportRows[i]
     stdout.write Reset
     stdout.write "\r\n"
-
-proc updateToolViewportSymbol*(symbol: string) {.gcsafe.} =
-  {.cast(gcsafe).}:
-    # Mutates shared engine state: serialize with the render threads that
-    # read/replace `toolViewportRows` under the same lock.
-    termio.withTerminalWriteLock:
-      if defaultEngine.toolViewportRows.len > 0:
-        let row = defaultEngine.toolViewportRows[0]
-        if row.len > 0:
-          let firstLen = runeLenAt(row, 0)
-          if firstLen > 0:
-            defaultEngine.toolViewportRows[0] = symbol & row.substr(firstLen)
 
 proc syncWrite*(e: var TerminalEngine; bytes: string) =
   termio.syncWrite(bytes)
