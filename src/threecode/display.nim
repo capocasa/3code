@@ -181,9 +181,17 @@ proc printSkillLoaded*(act: Action) =
   if name.len == 0: return
   subtleWriteLn(stdout, "· loaded skill: " & name)
 
-proc trimTrailingBlank(lines: var seq[string]) =
+proc trimBoundaryBlank(lines: var seq[string]) =
+  ## Strip blank rows from both ends of a tool-output line list so an item
+  ## never brings its own newlines into scrollback. Only the transcript
+  ## separator (one place) is allowed to insert the inter-item blank.
   while lines.len > 0 and lines[^1].strip == "":
     lines.setLen lines.len - 1
+  var start = 0
+  while start < lines.len and lines[start].strip == "":
+    inc start
+  if start > 0:
+    lines = lines[start ..< lines.len]
 
 proc printCompactHeadTail*(res: string, idx: int,
                            head = CompactHead, tail = CompactTail) =
@@ -192,7 +200,7 @@ proc printCompactHeadTail*(res: string, idx: int,
   ## the first `head` and last `tail` lines with an "N lines hidden"
   ## marker in the middle. Bash uses `printBashScroll` instead.
   var lines = res.splitLines
-  trimTrailingBlank(lines)
+  trimBoundaryBlank(lines)
   var header = 0
   if header < lines.len and lines[header].startsWith("$ "):
     printLine(lines[header]); inc header
@@ -224,7 +232,7 @@ proc wrappedSubtleBytes(body: string; widthPad = 3): string =
 proc compactHeadTailBytes(res: string; idx: int;
                           head = CompactHead; tail = CompactTail): string =
   var lines = res.splitLines
-  trimTrailingBlank(lines)
+  trimBoundaryBlank(lines)
   var header = 0
   if header < lines.len and lines[header].startsWith("$ "):
     result.add wrappedSubtleBytes(lines[header])
@@ -628,7 +636,7 @@ proc toolResultBytes*(kind: ActionKind; res: string; code: int; idx: int;
                       diff = ""): string =
   if kind == akBash:
     var lines = res.splitLines
-    trimTrailingBlank(lines)
+    trimBoundaryBlank(lines)
     if lines.len <= StreamMaxLines:
       for l in lines:
         result.add wrappedSubtleBytes(l)

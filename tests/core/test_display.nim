@@ -103,3 +103,35 @@ suite "display: printSessionList cap":
       check paths.len == 3
       let listing = captureList(paths)
       check "of 3" notin listing  # no truncation hint
+
+import threecode/types
+
+suite "display: tool transcript body strips boundary blanks":
+  # A tool item must not bring its own newlines into scrollback. Web
+  # search/fetch output (and any other head/tail-truncated kind) can arrive
+  # with leading or trailing blank lines; the formatter strips both ends so
+  # only the single transcript separator owns the inter-item blank row.
+  test "web_search strips leading and trailing blank lines":
+    let act = Action(kind: akWebSearch, body: "query")
+    let res = "\n\n1. Hit one\n\n2. Hit two\n\n\n"
+    let bytes = toolTranscriptBytes(act, res, code = 0, idx = 1)
+    check "1. Hit one" in bytes
+    check "2. Hit two" in bytes
+    # No blank-wrapped row should appear before the first real content line.
+    let firstContent = bytes.find("1. Hit one")
+    check firstContent > 0
+    let bannerEnd = bytes.find("\x1b[0m\r\n") + "\x1b[0m\r\n".len
+    check bannerEnd > 0
+    let between = bytes[bannerEnd ..< firstContent]
+    check between.strip().len > 0
+
+  test "web_fetch strips leading blank lines":
+    let act = Action(kind: akWebFetch, body: "https://example.test/x")
+    let res = "\n\n\nPage body\nMore body\n\n"
+    let bytes = toolTranscriptBytes(act, res, code = 0, idx = 1)
+    check "Page body" in bytes
+    check "More body" in bytes
+    let firstContent = bytes.find("Page body")
+    let bannerEnd = bytes.find("\x1b[0m\r\n") + "\x1b[0m\r\n".len
+    let between = bytes[bannerEnd ..< firstContent]
+    check between.strip().len > 0
