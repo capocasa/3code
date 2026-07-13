@@ -1757,7 +1757,6 @@ proc inputThreadProc() {.thread.} =
           # redraws the editor and footer at the new geometry.
           if consumeResizePending():
             markResizePending()
-            termengine.noteResize()
             raise newException(IOError, "terminal resized")
           if errno == EINTR:
             continue

@@ -27,7 +27,7 @@
 ## must be read live — caching it leads to stale walk-ups that walk into
 ## committed scrollback.
 
-import std/[terminal, times]
+import std/terminal
 import minline
 import ./terminal as termio
 import ./fatprompt/rendering
@@ -51,34 +51,8 @@ type
     ## scrollback (the previous item's trailing `\r\n\r\n`), not volatile
     ## chrome. Walk-up codepaths stop one row short to preserve it.
     gapIsSeparator: bool
-    ## Wall-clock ms of the most recent SIGWINCH, or 0. While `resizeRecent`
-    ## is true, footer repaints walk up one extra row before erasing: a
-    ## reflow can leave a stale footer row one above the recomputed footer
-    ## top (the spinner→content handoff changes the footer height at the same
-    ## moment the cursor is moving), and the normal walk-up — derived from
-    ## the NEW footer height — misses it. The extra row sits inside the
-    ## volatile region (the always-reserved ticker/gap row), so it never
-    ## reaches committed scrollback.
-    resizeAtMs: int64
 
 var defaultEngine*: TerminalEngine
-
-proc noteResize*(e: var TerminalEngine) =
-  e.resizeAtMs = int64(epochTime() * 1000.0)
-
-proc noteResize*() {.gcsafe.} =
-  {.cast(gcsafe).}:
-    defaultEngine.noteResize()
-
-proc resizeRecent*(e: var TerminalEngine): bool =
-  ## True within a short window after the last SIGWINCH. Expires the record
-  ## once the window passes so the extra erase row stops.
-  if e.resizeAtMs == 0:
-    return false
-  if int64(epochTime() * 1000.0) - e.resizeAtMs > 400:
-    e.resizeAtMs = 0
-    return false
-  true
 
 proc refreshEditorWidth(ed: var minline.LineEditor) =
   let w = try: terminalWidth() except CatchableError: 0
@@ -101,16 +75,9 @@ proc walkUp(e: var TerminalEngine; ed: var minline.LineEditor): int =
   ## When gapIsSeparator is set, the gap row at the top of the footer is
   ## committed scrollback (not chrome), so the walk-up stops one row short
   ## to preserve it.
-  ## Right after a resize, walk one row higher: a reflow can strand a stale
-  ## footer row one above the recomputed footer top (the footer height
-  ## changes at the spinner→content handoff at the same moment the cursor is
-  ## moving), and the erase derived from the NEW height misses it. The extra
-  ## row sits inside the volatile region (the always-reserved ticker/gap
-  ## row), so it never reaches committed scrollback.
   let gap = if e.gapIsSeparator: 1 else: 0
-  let extra = if e.resizeRecent(): 1 else: 0
-  editorRowsAboveCursor(ed) + e.paintedFooterRows + e.toolViewportRows.len +
-    e.liveContentRows.len - gap + extra
+  editorRowsAboveCursor(ed) + e.paintedFooterRows +
+    e.toolViewportRows.len + e.liveContentRows.len - gap
 
 proc noteFooterPainted(e: var TerminalEngine; footerRowsAboveEditor: int) =
   e.paintedFooterRows = max(0, footerRowsAboveEditor)
@@ -160,9 +127,8 @@ proc beginEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor;
                         ready: bool; frame: FooterFrame) =
   let termW = try: terminalWidth() except CatchableError: 0
   let rows = frame.rowsAboveEditor(termW)
-  let extra = if e.resizeRecent(): 1 else: 0
   termio.beginEditorRedraw(ed, ready, frame.footerFrameBytes(termW),
-                           rows + extra)
+                           rows)
   e.editorRedrawPending = true
   e.editorRedrawFooterRows = rows
 
