@@ -1269,11 +1269,11 @@ p a clear answer, say so — don't guess.
   Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
   Available:
+  - <tty-run>/data/3code/skills/cybernetic-plan.md
   - <tty-run>/data/3code/skills/role-conversational.md
   - <tty-run>/data/3code/skills/role-sysadmin.md
   - <tty-run>/data/3code/skills/role-thinking-partner.md
   - <tty-run>/data/3code/skills/role-writing.md
-  - <tty-run>/data/3code/skills/task-chunked-implementation.md
   - <tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
@@ -1310,11 +1310,11 @@ p a clear answer, say so — don't guess.
   Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
   Available:
+  - <tty-run>/data/3code/skills/cybernetic-plan.md
   - <tty-run>/data/3code/skills/role-conversational.md
   - <tty-run>/data/3code/skills/role-sysadmin.md
   - <tty-run>/data/3code/skills/role-thinking-partner.md
   - <tty-run>/data/3code/skills/role-writing.md
-  - <tty-run>/data/3code/skills/task-chunked-implementation.md
   - <tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
@@ -1346,11 +1346,11 @@ p a clear answer, say so — don't guess.
   Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
   Available:
+  - <tty-run>/data/3code/skills/cybernetic-plan.md
   - <tty-run>/data/3code/skills/role-conversational.md
   - <tty-run>/data/3code/skills/role-sysadmin.md
   - <tty-run>/data/3code/skills/role-thinking-partner.md
   - <tty-run>/data/3code/skills/role-writing.md
-  - <tty-run>/data/3code/skills/task-chunked-implementation.md
   - <tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
@@ -1387,11 +1387,11 @@ p a clear answer, say so — don't guess.
   Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
   Available:
+  - <tty-run>/data/3code/skills/cybernetic-plan.md
   - <tty-run>/data/3code/skills/role-conversational.md
   - <tty-run>/data/3code/skills/role-sysadmin.md
   - <tty-run>/data/3code/skills/role-thinking-partner.md
   - <tty-run>/data/3code/skills/role-writing.md
-  - <tty-run>/data/3code/skills/task-chunked-implementation.md
   - <tty-run>/data/3code/skills/task-debug-systematic.md
 
   # Tone
