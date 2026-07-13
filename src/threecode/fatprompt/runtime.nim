@@ -254,6 +254,64 @@ var
   testTickerControlThread: Thread[void]
 spinLabelLock.initLock()
 
+var
+  frameModelLock: Lock
+  frameModelShared: FrameModel
+frameModelLock.initLock()
+
+proc setFrameModel*(m: FrameModel) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    acquire frameModelLock
+    frameModelShared = m
+    release frameModelLock
+
+proc getFrameModel*(): FrameModel {.gcsafe.} =
+  {.cast(gcsafe).}:
+    acquire frameModelLock
+    result = frameModelShared
+    release frameModelLock
+
+proc setAnimMode*(mode: AnimationMode) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    acquire frameModelLock
+    frameModelShared.mode = mode
+    release frameModelLock
+
+proc setAnimLabel*(label: string) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    acquire frameModelLock
+    frameModelShared.label = label
+    release frameModelLock
+
+proc setAnimTicker*(ticker: string) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    acquire frameModelLock
+    frameModelShared.ticker = ticker
+    release frameModelLock
+
+proc setAnimSpinner*(spinner: string; elapsed: int) {.gcsafe.} =
+  {.cast(gcsafe).}:
+    acquire frameModelLock
+    frameModelShared.spinner = spinner
+    frameModelShared.elapsed = elapsed
+    release frameModelLock
+
+proc currentFrameFromModel*(): FooterFrame {.gcsafe.} =
+  ## Build the live `FooterFrame` from the unified `frameModelShared`.
+  ## The animation threads and the input thread's editor redraw both use
+  ## this so they can never observe a torn spinner-vs-barTick state.
+  let m = getFrameModel()
+  {.cast(gcsafe).}:
+    case m.mode
+    of amSpinner:
+      spinnerFooterFrame(
+        if m.spinner.len > 0: m.spinner else: "○",
+        m.label, m.ticker, m.elapsed)
+    of amBarTick:
+      tokenBarFrame(m.label, m.ticker)
+    of amIdle:
+      footerFrame(fatPromptState)
+
 proc testFrameMode(): bool =
   getEnv("THREECODE_TEST_FRAME_FD").len > 0
 
@@ -330,18 +388,19 @@ type LiveMarkdownStream* = object
 var apiLiveStream: LiveMarkdownStream
 
 proc setSpinLabel(s: string) {.gcsafe.} =
+  setAnimLabel(s)
+  # Keep the legacy var in sync: chunk 1 still has readers (none expected
+  # after this migration, but the declaration stays until chunk 2).
   {.cast(gcsafe).}:
     acquire spinLabelLock
     spinLabelShared = s
     release spinLabelLock
 
 proc getSpinLabel(): string {.gcsafe.} =
-  {.cast(gcsafe).}:
-    acquire spinLabelLock
-    result = spinLabelShared
-    release spinLabelLock
+  getFrameModel().label
 
 proc setSpinTicker(s: string) {.gcsafe.} =
+  setAnimTicker(s)
   {.cast(gcsafe).}:
     acquire spinLabelLock
     spinTickerShared = s
@@ -352,12 +411,10 @@ proc setSpinTicker(s: string) {.gcsafe.} =
       emitFatPromptEvent setTickerEvent(s)
 
 proc getSpinTicker(): string {.gcsafe.} =
-  {.cast(gcsafe).}:
-    acquire spinLabelLock
-    result = spinTickerShared
-    release spinLabelLock
+  getFrameModel().ticker
 
 proc setSpinFrame(frame: string; elapsed: int) {.gcsafe.} =
+  setAnimSpinner(frame, elapsed)
   {.cast(gcsafe).}:
     acquire spinLabelLock
     spinFrameShared = frame
@@ -365,14 +422,10 @@ proc setSpinFrame(frame: string; elapsed: int) {.gcsafe.} =
     release spinLabelLock
 
 proc currentSpinnerFooterFrame(): FooterFrame {.gcsafe.} =
-  {.cast(gcsafe).}:
-    acquire spinLabelLock
-    result = spinnerFooterFrame(
-      if spinFrameShared.len > 0: spinFrameShared else: "○",
-      spinLabelShared,
-      spinTickerShared,
-      spinElapsedShared)
-    release spinLabelLock
+  let m = getFrameModel()
+  spinnerFooterFrame(
+    if m.spinner.len > 0: m.spinner else: "○",
+    m.label, m.ticker, m.elapsed)
 
 proc refreshEditorWidth(ed: var minline.LineEditor) =
   let w = try: terminalWidth() except CatchableError: 0
@@ -481,32 +534,24 @@ proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
     return
   if not liveEditorFooterAnchored():
     return
+  let m = getFrameModel()
   let frameModel =
-    if spinnerRunning and spinnerStop.load(moRelaxed) == false:
-      var frame: string
-      var label: string
-      var ticker: string
-      var elapsed: int
-      acquire spinLabelLock
-      frame = spinFrameShared
-      label = spinLabelShared
-      ticker = spinTickerShared
-      elapsed = spinElapsedShared
-      release spinLabelLock
-      spinnerFooterFrame(if frame.len > 0: frame else: "○", label, ticker,
-                         elapsed)
-    elif barTickRunning:
-      var base: string
-      acquire barTickLock
-      base = barTickBase
-      release barTickLock
+    case m.mode
+    of amSpinner:
+      spinnerFooterFrame(
+        if m.spinner.len > 0: m.spinner else: "○",
+        m.label, m.ticker, m.elapsed)
+    of amBarTick:
+      # The elapsed suffix is ephemeral (changes every 250ms); recompute it
+      # locally from the model's base label. Chunk 2 moves this into the
+      # single animation thread.
       let elapsed = (epochTime() - barTickStart).int
       let label =
-        if base.hasElapsedSuffix: base
-        else: base & "  " & $elapsed & "s"
+        if m.label.hasElapsedSuffix: m.label
+        else: m.label & "  " & $elapsed & "s"
       tokenBarFrame(label)
-  else:
-    footerFrame(fatPromptState)
+    of amIdle:
+      footerFrame(fatPromptState)
   termengine.beginEditorRedraw(ed, inputEditorReady.load(moAcquire),
                                frameModel)
 
@@ -798,13 +843,11 @@ proc spinnerLoop(unused: string) {.thread.} =
         0.0
       else:
         epochTime() - start
-    let label = getSpinLabel()
-    let ticker = getSpinTicker()
     try:
       let frame = frames[i mod frames.len]
       setSpinFrame(frame, elapsed.int)
       termengine.renderFooter(
-        spinnerFooterFrame(frame, label, ticker, elapsed.int),
+        currentFrameFromModel(),
         inputThreadRunning,
         inputEditor,
         currentTermW())
@@ -936,6 +979,8 @@ proc startBarTick*(base: string): bool =
     acquire barTickLock
     barTickBase = base
     release barTickLock
+  setAnimLabel(base)
+  setAnimMode(amBarTick)
   barTickStart = epochTime()
   barTickStop.store(false, moRelaxed)
   createThread(barTickThread, barTickLoop)
@@ -965,6 +1010,7 @@ proc stopBarTick*(): int =
     joinThread(barTickThread)
   barTickRunning = false
   commandStatusActive.store(false, moRelaxed)
+  setAnimMode(amIdle)
   return elapsed
 
 # --- Prompt draft flusher loop -------------------------------------------
@@ -1041,15 +1087,10 @@ proc startSpinner*(label: string) =
   if label.len > 0: setSpinLabel(label)
   let frame = "⠋"
   setSpinFrame(frame, 0)
-  var initialLabel: string
-  var initialTicker: string
-  {.cast(gcsafe).}:
-    acquire spinLabelLock
-    initialLabel = spinLabelShared
-    initialTicker = spinTickerShared
-    release spinLabelLock
+  setAnimMode(amSpinner)
+  let m = getFrameModel()
   termengine.renderFooter(
-    spinnerFooterFrame(frame, initialLabel, initialTicker, 0),
+    spinnerFooterFrame(frame, m.label, m.ticker, 0),
     inputThreadRunning,
     inputEditor,
     currentTermW())
@@ -1067,6 +1108,7 @@ proc stopSpinner*(clearLiveFooter = true) =
   termui.withTerminalLockDroppedForJoin:
     joinThread(spinnerThread)
   spinnerRunning = false
+  setAnimMode(amIdle)
   if clearLiveFooter and inputThreadRunning and inputEditor != nil and
       spinnerFramePainted.load(moRelaxed):
     # The spinner footer is always gap+bar (2 rows) now that the ticker row

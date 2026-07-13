@@ -109,6 +109,26 @@ type
     elapsed*: int
     clearRows*: int
 
+  AnimationMode* = enum
+    amIdle,     # nothing animating (no spinner, no bar-tick)
+    amSpinner,  # spinner running (reasoning / waiting for first content)
+    amBarTick   # bar-tick running (tool executing)
+
+  FrameModel* = object
+    ## Single source of truth for what the GUI animation thread paints.
+    ## The controller writes it under `frameModelLock`; the animation thread
+    ## reads it to build a `FooterFrame` each tick. Centralizing this state
+    ## (previously scattered across `spinLabelLock` vars, `barTickLock`
+    ## vars, and loose atomics) is the prerequisite to merging the two
+    ## render threads into one — it removes the torn-read window where a
+    ## spinner frame and a bar-tick frame disagree about footer height.
+    mode*: AnimationMode
+    spinner*: string   # braille glyph
+    label*: string     # token-slot label (shared by spinner + bar tick)
+    ticker*: string    # reasoning ticker tail text
+    elapsed*: int      # seconds (spinner) or whole-second bar-tick count
+    clearRows*: int    # for ffClear frames at teardown
+
 const
   DefaultWidth* = 80
   DefaultHeight* = 24
