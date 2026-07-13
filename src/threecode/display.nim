@@ -933,11 +933,17 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
             banner = bannerFor(act)
             kind = act.kind
             plan = act.plan
-          renderToolBanner(banner, kind, code)
+          # Route through the SAME byte builders the live path uses
+          # (toolTranscriptBytes / planTranscriptBytes) so a replayed tool
+          # looks byte-identical to how it rendered live. The banner is the
+          # stored one (or bannerFor for the no-toolLog fallback); the body
+          # comes from the shared per-kind renderer.
           if kind == akPlan and plan.len > 0:
-            stdout.write planResultBytes(plan)
-          elif output.len > 0:
-            printToolResult(kind, output, code, toolIdx)
+            let act = Action(kind: akPlan, plan: plan)
+            stdout.write planTranscriptBytes(act)
+          else:
+            stdout.write toolTranscriptBytes(
+              banner, kind, output, code, toolIdx)
           stdout.write "\n"
     of "tool":
       # Result already rendered alongside the assistant's tool_call via

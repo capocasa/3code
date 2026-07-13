@@ -61,7 +61,8 @@ Rules:
 
 - `805cf1e` landed: plan tool unified to glyphs across live + replay + `:show`. `ToolRecord` carries `plan`.
 - **Item 1 DONE**: dead `akPlan` branch in `toolResultBytes`, `printActionResult`, and the stale `planResultBytes` docstring all removed. Build green; `test_display` + `test_session` green.
-- Not yet started: items 2-6.
+- **Items 2+3 DONE**: `replaySessionTail` now routes through `toolTranscriptBytes` (string-banner overload, stored banner) + `planTranscriptBytes` (plans). Bridge decision: no `ToolRecord` change needed — use the stored banner directly. Replay tests added and green.
+- Not yet started: items 4, 5, 6.
 - The alternate stdout renderers still exist and are still called by `replaySessionTail`, `showTool`, `listTools`.
 
 ## Items
@@ -72,18 +73,15 @@ Rules:
 - [x] Updated `planResultBytes` docstring (315) to drop the stale `printToolResult` reference; it now names `planTranscriptBytes` + `showTool`.
 - [x] Build OK; `tests/core/test_display.nim` + `tests/core/test_session.nim` green.
 
-### 2. Route session replay (`replaySessionTail`) through the byte path
-Currently `replaySessionTail` (display.nim:867) calls `renderToolBanner` + `printToolResult` per tool_call. Change it to build the composite bytes via the same `toolTranscriptBytes(act, res, code, idx, diff)` the live path uses, and write those bytes to stdout. To do that it needs the `Action`; it already reconstructs one via `toolCallToAction` in the no-toolLog branch — extend the toolLog branch to reconstruct the `Action` too (the `ToolRecord` has `kind`, `output`, `code`, `banner`, `plan`; reconstruct a minimal `Action` from those, or better, store enough on `ToolRecord` — see item 3).
-- [ ] Make the per-tool_call loop reconstruct an `Action` in both branches (toolLog present and absent).
-- [ ] Replace `renderToolBanner` + `printToolResult` with `stdout.write toolTranscriptBytes(act, ...)`.
-- [ ] Verify a resumed session (with a bash call, a read, a plan) renders identically to how it looked live. Add a test to `tests/core/test_display.nim` that feeds a small message list + toolLog through `replaySessionTail` (capture stdout via the temp-file swap already used in that test file) and asserts the banner glyph + body bytes match the live `toolTranscriptBytes` output for the same action.
-- [ ] Do NOT delete `renderToolBanner`/`printToolResult` yet — `showTool` still uses them (item 5).
+### 2. Route session replay (`replaySessionTail`) through the byte path  ✅ DONE
+- [x] The per-tool_call loop now routes through the byte builders: plans via `planTranscriptBytes(act)` (matches live `≡ ──────────` header + glyphs), all other kinds via the string-banner `toolTranscriptBytes(banner, kind, output, code, idx)` overload passing the STORED banner. No `Action` reconstruction needed for the body path — the string-banner overload takes the banner as a param, so the stored `rec.banner` is used directly and there is no bannerFor-recompute mismatch.
+- [x] Tests added: `tests/core/test_display.nim` suite "display: replay routes through the live byte builders" — bash + plan cases assert the captured replay stdout `.contains` the live `toolTranscriptBytes` output for the same action, plus glyph/header checks.
+- [x] `renderToolBanner`/`printToolResult` NOT deleted — `showTool` (item 4) still uses them. Item 6 will remove them after showTool reroutes.
 
-### 3. Decide the `ToolRecord` ↔ `Action` bridge
-`replaySessionTail` and `showTool` need an `Action` to call the byte builders, but `ToolRecord` only stores `kind`, `output`, `code`, `banner`, `plan`. Two options:
-  - (a) Reconstruct a minimal `Action` from the `ToolRecord` fields (set `act.kind`, `act.body = output`, `act.plan = plan`, leave path/edits empty). Works for rendering but loses the original banner text and diff.
-  - (b) Store the original `Action` (or its render-relevant fields: `path`, `body`, `offset`, `limit`, `edits`) on `ToolRecord` so the byte path can reproduce the exact banner and body. More faithful; bigger change to types + both construction sites (turns.nim:497, session.nim:1005) + session save/load.
-- [ ] Decide a or b. Prefer (b) only if (a) visibly misrenders a kind in replay. Record the decision here. The banner is the riskiest field: `bannerFor(act)` is computed from the action, but `ToolRecord.banner` is stored — so the byte path's `bannerFor(act)` must match the stored banner, or the byte path should use the stored banner directly. Check this per kind before committing.
+### 3. Decide the `ToolRecord` ↔ `Action` bridge  ✅ DECIDED: neither — use the stored banner, no Action needed
+Neither (a) nor (b). The string-banner overload `toolTranscriptBytes(banner, kind, res, code, idx, diff)` takes the banner as a PARAM, so the stored `rec.banner` is passed directly — no `Action` reconstruction, no `bannerFor` recompute, no banner-mismatch risk. For plans, `planTranscriptBytes(act)` reads only `act.plan`, so a minimal `Action(kind: akPlan, plan: rec.plan)` suffices. No change to `ToolRecord` or session save/load required.
+
+Caveat carried to item 4: `showTool` currently renders write/patch body from `rec.output` only (the summary line). The live byte path's akWrite branch renders the file CONTENT via `diff` (not stored on `ToolRecord`). So routing `showTool`'s body through `toolResultBytes` with `diff=""` reproduces the CURRENT (summary-only) `:show` behavior — not a regression, but a known fidelity gap (the live transcript shows full file content; `:show` does not). This is pre-existing and out of scope to fix here.
 
 ### 4. Route `:show` (`showTool`) through the byte path
 `showTool` (display.nim:956) currently writes its own banner + body. Change it to reconstruct the `Action` (from item 3's bridge) and write `toolTranscriptBytes(act, rec.output, rec.code, n, "")`. Note `:show` prints a `── T{n}` header, not the normal tool banner — keep that header, only the BODY should come from the shared renderer. So this item is: replace the body-rendering part of `showTool` with the byte path's body builder (`toolResultBytes`), keep the `── T{n}` header.

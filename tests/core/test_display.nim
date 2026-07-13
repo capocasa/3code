@@ -163,3 +163,61 @@ suite "display: plan glyph rendering is unified":
     check "✓ step one" in bytes
     check "completed: step one" notin bytes
     check "(1 item" notin bytes  # banner title dropped
+
+when not defined(windows):
+  suite "display: replay routes through the live byte builders":
+    # replaySessionTail must render each tool through the SAME byte builders
+    # the live path uses, so a resumed tool looks byte-identical to how it
+    # looked live. Capture stdout (temp-file swap) and compare to the live
+    # toolTranscriptBytes output for the same action.
+    proc captureReplay(messages: JsonNode; toolLog: seq[ToolRecord];
+                       window = 0; family = "glm"): string =
+      let outPath = getTempDir() / ("tc_replay_" & $getCurrentProcessId())
+      let saved = stdout
+      let f = open(outPath, fmWrite)
+      stdout = f
+      try:
+        discard replaySessionTail(messages, toolLog, window, family)
+      finally:
+        stdout.flushFile
+        stdout = saved
+        close(f)
+      result = readFile(outPath)
+      removeFile(outPath)
+
+    test "bash tool in replay matches the live byte output":
+      let banner = "echo hi"
+      let output = "hi\n"
+      let toolLog = @[ToolRecord(banner: banner, output: output,
+        code: 0, kind: akBash)]
+      let msgs = %*[
+        {"role": "assistant", "content": "",
+         "tool_calls": [{"id": "1", "type": "function",
+           "function": {"name": "bash",
+             "arguments": "{\"command\": \"echo hi\"}"}}]},
+        {"role": "tool", "tool_call_id": "1", "content": output}]
+      let rendered = captureReplay(msgs, toolLog)
+      let live = toolTranscriptBytes(banner, akBash, output, 0, 1) & "\n"
+      check rendered.contains(live)
+      check "$ echo hi" in rendered   # banner icon + command
+      check "  hi" in rendered        # body line
+
+    test "plan in replay matches the live planTranscriptBytes output":
+      let plan = @[PlanItem(text: "step one", status: "completed"),
+                   PlanItem(text: "step two", status: "pending")]
+      let toolLog = @[ToolRecord(banner: "update plan", output: "",
+        code: 0, kind: akPlan, plan: plan)]
+      let msgs = %*[
+        {"role": "assistant", "content": "",
+         "tool_calls": [{"id": "1", "type": "function",
+           "function": {"name": "update_plan",
+             "arguments": "{\"items\": []}"}}]},
+        {"role": "tool", "tool_call_id": "1", "content": ""}]
+      let rendered = captureReplay(msgs, toolLog)
+      let act = Action(kind: akPlan, plan: plan)
+      let live = toolTranscriptBytes(act, "", 0, 1) & "\n"
+      check rendered.contains(live)
+      check "≡ ──────────" in rendered   # plan header matches live
+      check "✓ step one" in rendered
+      check "○ step two" in rendered
+      check "completed: " notin rendered
