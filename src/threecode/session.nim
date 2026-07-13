@@ -1181,7 +1181,7 @@ proc previewSession*(path: string): SessionPreview =
     of "user":
       inc result.msgCount
       if result.firstUser.len == 0:
-        result.firstUser = stripPreamble(r.body)
+        result.firstUser = stripPreamble(r.body).replace("\n", " ").replace("\r", " ").strip
     of "assistant", "tool_result":
       inc result.msgCount
     else: discard
