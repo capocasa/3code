@@ -478,6 +478,7 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
       stdout.write termio.SyncEnd
       stdout.flushFile
     else:
+      stdout.write termio.SyncBegin
       if inputRunning and editor != nil:
         let up = max(0, e.walkUp(editor[]))
         stdout.write "\r"
@@ -513,6 +514,7 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
             e.noteNoFooter()
       else:
         e.noteNoFooter()
+      stdout.write termio.SyncEnd
       stdout.flushFile
 
 proc prepareAssistantContentStart*(e: var TerminalEngine;
@@ -528,15 +530,23 @@ proc prepareAssistantContentStart*(e: var TerminalEngine;
     if inputRunning and editor != nil:
       refreshEditorWidth(editor[])
       let up = max(0, e.walkUp(editor[]))
+      stdout.write termio.SyncBegin
       stdout.write "\r"
       if up > 0:
         stdout.write "\x1b[" & $up & "A"
       stdout.write "\x1b[J"
       e.noteNoFooter()
+      stdout.write termio.SyncEnd
+      if flush:
+        stdout.flushFile
     elif oldFooter.kind != ffNone and not hadBufferedSubmit:
+      stdout.write termio.SyncBegin
       stdout.write oldFooter.footerFrameBytes(termW)
       e.noteNoFooter()
-    if flush:
+      stdout.write termio.SyncEnd
+      if flush:
+        stdout.flushFile
+    elif flush:
       stdout.flushFile
 
 proc prepareAssistantContentStart*(inputRunning: bool;
@@ -554,6 +564,7 @@ proc endTurn*(e: var TerminalEngine; inputRunning: bool;
   ## transition bytes are produced by the fat-prompt renderer; cursor
   ## geometry uses the engine's live footer state.
   termio.withTerminalWriteLock:
+    stdout.write termio.SyncBegin
     if inputRunning and editor != nil:
       refreshEditorWidth(editor[])
       let up = max(0, e.walkUp(editor[]))
@@ -562,6 +573,7 @@ proc endTurn*(e: var TerminalEngine; inputRunning: bool;
         stdout.write "\x1b[" & $up & "A"
     stdout.write bytes
     e.noteNoFooter()
+    stdout.write termio.SyncEnd
     stdout.flushFile
 
 proc endTurn*(inputRunning: bool; editor: ptr minline.LineEditor;
