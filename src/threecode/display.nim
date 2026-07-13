@@ -6,7 +6,7 @@
 ## own volatile cursor movement or prompt repainting.
 ##
 ## - **Markdown rendering**: headers, fences, tables, bold/italic/code pass
-##   through `printLine` which calls `applyInlineMd` and wraps at terminal
+##   through `handleMdLine` which calls `applyInlineMd` and wraps at terminal
 ##   width. Tables buffer rows and render aligned box-drawing via `renderMdTable`.
 ## - **Token receipt**: the cyan receipt in scroll history after each turn
 ##   (`renderTokenLine`). All receipts route through `receiptBytes`. Live
@@ -193,35 +193,6 @@ proc trimBoundaryBlank(lines: var seq[string]) =
   if start > 0:
     lines = lines[start ..< lines.len]
 
-proc printCompactHeadTail*(res: string, idx: int,
-                           head = CompactHead, tail = CompactTail) =
-  ## Head/tail truncation for non-bash tool kinds that don't have the
-  ## streaming-terminal semantics (read, web search, web fetch). Keeps
-  ## the first `head` and last `tail` lines with an "N lines hidden"
-  ## marker in the middle. Bash uses `printBashScroll` instead.
-  var lines = res.splitLines
-  trimBoundaryBlank(lines)
-  var header = 0
-  if header < lines.len and lines[header].startsWith("$ "):
-    printLine(lines[header]); inc header
-  var footer = lines.len
-  if footer > 0 and lines[footer-1].startsWith("[exit "):
-    dec footer
-  let bodyLen = footer - header
-  let hidden = bodyLen - head - tail
-  # Only truncate when the hidden count exceeds what we'd show in
-  # truncated form (head + tail + marker). Otherwise the marker is
-  # heavier than the saving, so just print all of it.
-  if hidden <= head + tail + 1:
-    for i in header ..< footer: printLine(lines[i])
-  else:
-    for i in header ..< header + head: printLine(lines[i])
-    subtleWriteLn(stdout,
-      &"  … {hidden} line" & (if hidden == 1: "" else: "s") &
-      &" hidden · :show {idx} for full …")
-    for i in footer - tail ..< footer: printLine(lines[i])
-  if footer < lines.len: printLine(lines[footer])
-
 proc wrappedSubtleBytes(body: string; widthPad = 3): string =
   let termW = try: terminalWidth() except CatchableError: 80
   let bodyW = max(20, termW - widthPad)
@@ -312,101 +283,21 @@ proc planStatusGlyph(status: string): string =
   of "in_progress": "~"
   else: "○"
 
-proc planTranscriptBytes(act: Action): string =
-  result.add "≡ ──────────\r\n"
-  for item in act.plan:
+proc planResultBytes*(plan: seq[PlanItem]): string =
+  ## One item per line, glyph-prefixed. The single renderer for plan
+  ## output - used by `planTranscriptBytes` (live transcript) and `showTool`
+  ## so a plan looks identical whether it just ran or was scrolled back to.
+  for item in plan:
     result.add GreyFg & "  " & planStatusGlyph(item.status) & " " &
       item.text & Reset & "\r\n"
+
+proc planTranscriptBytes(act: Action): string =
+  result.add "≡ ──────────\r\n"
+  result.add planResultBytes(act.plan)
 
 proc clearTranscriptBytes(act: Action): string =
   result.add "═════════════════════════════════════════\r\n"
   result.add "↻ " & act.body.strip & "\r\n"
-
-proc printDiff*(diff: string) =
-  const DiffHead = 15
-  const DiffTail = 20
-  var lines = diff.splitLines
-  while lines.len > 0 and lines[^1].strip == "":
-    lines.setLen lines.len - 1
-  if lines.len == 0: return
-  proc paint(l: string) =
-    let termW = try: terminalWidth() except CatchableError: 80
-    let bodyW = max(20, termW - 2)
-    let chunks = wrapAnsi(l, bodyW)
-    for chunk in chunks:
-      if l.len > 0 and l[0] == '+':
-        stdout.styledWriteLine fgGreen, "  " & chunk, resetStyle
-      elif l.len > 0 and l[0] == '-':
-        stdout.styledWriteLine fgRed, "  " & chunk, resetStyle
-      else:
-        subtleWriteLn(stdout, "  " & chunk)
-  if lines.len <= DiffHead + DiffTail + 2:
-    for l in lines: paint(l)
-    return
-  for i in 0 ..< DiffHead: paint(lines[i])
-  let hidden = lines.len - DiffHead - DiffTail
-  subtleWriteLn(stdout,
-    &"  … {hidden} line" & (if hidden == 1: "" else: "s") &
-    " hidden · `git diff` for full …")
-  for i in lines.len - DiffTail ..< lines.len: paint(lines[i])
-
-proc printToolResult*(kind: ActionKind, res: string, code: int, idx: int,
-                     diff = "") =
-  ## Body of a tool turn. bash uses the scroll-area shape via
-  ## `printBashScroll` (streaming-style: marker + tail), read/web use
-  ## the head/tail compact via `printCompactHeadTail`; write shows the
-  ## new file contents through the same head/tail path as read. patch
-  ## prints the headline only on success, or the first error line on
-  ## failure. A non-empty `diff` is colourised after the body (for patch).
-  ## Banner is drawn separately by `renderToolBanner`.
-  if kind == akBash:
-    printBashScroll(res, idx)
-  elif kind == akRead:
-    # Strip the trailing "... [N lines hidden, use offset/limit] ..."
-    # markers that runAction appends for the model. The display already
-    # shows the requested line range in the tool-call banner, so
-    # repeating it in the body is just noise to the user.
-    var lines = res.splitLines
-    while lines.len > 0 and lines[^1].startsWith("... [") and
-          lines[^1].endsWith("] ..."):
-      lines.setLen(lines.len - 1)
-    printCompactHeadTail(lines.join("\n"), idx, ReadHead, ReadTail)
-  elif kind == akWrite:
-    if code == 0:
-      printCompactHeadTail(diff, idx, ReadHead, ReadTail)
-    else:
-      let termW = try: terminalWidth() except CatchableError: 80
-      let bodyW = max(20, termW - 3)
-      let nl = res.find('\n')
-      let head = if nl < 0: res else: res[0 ..< nl]
-      for chunk in wrapAnsi(head, bodyW):
-        subtleWriteLn(stdout, "  " & chunk)
-    return
-  elif kind in {akWebSearch, akWebFetch}:
-    printCompactHeadTail(res, idx)
-  elif kind == akPlan:
-    let termW = try: terminalWidth() except CatchableError: 80
-    let bodyW = max(20, termW - 3)
-    for line in res.splitLines:
-      for chunk in wrapAnsi(line, bodyW):
-        subtleWriteLn(stdout, "  " & chunk)
-  else:
-    let termW = try: terminalWidth() except CatchableError: 80
-    let bodyW = max(20, termW - 3)
-    if code == 0:
-      for line in res.splitLines:
-        for chunk in wrapAnsi(line, bodyW):
-          subtleWriteLn(stdout, "  " & chunk)
-    else:
-      let nl = res.find('\n')
-      let head = if nl < 0: res else: res[0 ..< nl]
-      for chunk in wrapAnsi(head, bodyW):
-        subtleWriteLn(stdout, "  " & chunk)
-  if diff.len > 0 and kind notin {akWrite, akRead}:
-    printDiff(diff)
-
-proc printActionResult*(act: Action, res: string, code: int, idx: int, diff = "") =
-  printToolResult(act.kind, res, code, idx, diff)
 
 proc contextLabel*(promptTokens, window: int): string =
   ## "○ 12%" / "◔ 25%" / … / "● 92%". Empty when there's no useful
@@ -596,30 +487,6 @@ proc toolIcon*(kind: ActionKind): string =
   of akClear: "⟳"
   of akError: "✕"
 
-proc renderToolPending*(banner: string, kind: ActionKind) =
-  ## Pre-execution banner: grey bullet + grey banner. Live only; the live
-  ## caller overwrites this line with `renderToolBanner` once the action
-  ## returns. Replay skips this and goes straight to the result form.
-  let icon = toolIcon(kind)
-  subtleWrite(stdout, icon & " " & banner)
-  stdout.write "\n"
-  stdout.flushFile
-
-proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -1) =
-  ## Final tool banner. Icons render in default text color regardless of
-  ## exit code; the banner/command text renders nonbright white (the
-  ## mode-aware `off-white` tier). Optional `(Ns)` suffix when
-  ## `elapsedS >= 1` (live); replay passes -1 to omit it.
-  let icon = if kind == akBash and code > 0: "Ø" else: toolIcon(kind)
-  stdout.write icon & " "
-  stdout.write OffWhiteFg
-  stdout.write banner
-  stdout.write Reset
-  if elapsedS >= 1:
-    subtleWrite(stdout, &"  ({elapsedS}s)")
-  stdout.write "\n"
-  stdout.flushFile
-
 proc toolBannerBytes*(banner: string; kind: ActionKind; code: int;
                       elapsedS = -1): string =
   let icon = if kind == akBash and code > 0: "Ø" else: toolIcon(kind)
@@ -659,8 +526,6 @@ proc toolResultBytes*(kind: ActionKind; res: string; code: int; idx: int;
     result.add compactHeadTailBytes(diff, idx, ReadHead, ReadTail)
   elif kind in {akWebSearch, akWebFetch}:
     result.add compactHeadTailBytes(res, idx)
-  elif kind == akPlan:
-    result.add wrappedSubtleBytes(res)
   else:
     if code == 0:
       result.add wrappedSubtleBytes(res)
@@ -920,12 +785,14 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
           var code = 0
           var output = ""
           var kind = akBash
+          var plan: seq[PlanItem] = @[]
           if toolIdx <= toolLog.len:
             let rec = toolLog[toolIdx - 1]
             banner = rec.banner
             code = rec.code
             output = rec.output
             kind = rec.kind
+            plan = rec.plan
           else:
             let fn = tc{"function"}
             let name = if fn != nil: fn{"name"}.getStr else: "?"
@@ -935,14 +802,22 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
             let act = toolCallToAction(family, name, args)
             banner = bannerFor(act)
             kind = act.kind
-          renderToolBanner(banner, kind, code)
-          if output.len > 0:
-            printToolResult(kind, output, code, toolIdx)
+            plan = act.plan
+          # Route through the SAME byte builders the live path uses
+          # (toolTranscriptBytes / planTranscriptBytes) so a replayed tool
+          # looks byte-identical to how it rendered live. The banner is the
+          # stored one (or bannerFor for the no-toolLog fallback); the body
+          # comes from the shared per-kind renderer.
+          if kind == akPlan and plan.len > 0:
+            let act = Action(kind: akPlan, plan: plan)
+            stdout.write planTranscriptBytes(act)
+          else:
+            stdout.write toolTranscriptBytes(
+              banner, kind, output, code, toolIdx)
           stdout.write "\n"
     of "tool":
       # Result already rendered alongside the assistant's tool_call via
-      # toolLog; nothing to do here. Older sessions without a populated
-      # toolLog will fall through to the printToolResult path above.
+      # toolLog; nothing to do here.
       discard
     else: discard
   stdout.flushFile
@@ -963,17 +838,14 @@ proc showTool*(arg: string, toolLog: seq[ToolRecord]) =
     return
   let rec = toolLog[n-1]
   stdout.styledWriteLine fgDefault, &"── T{n}  ", rec.banner, resetStyle
-  if rec.kind in {akBash, akRead, akWebSearch, akWebFetch}:
-    for l in rec.output.splitLines: printLine(l)
+  # Body comes from the SAME byte builder the live path uses so a `:show`
+  # tool matches the live transcript. Plans render glyphs; every other kind
+  # routes through `toolResultBytes` (head/tail-truncated + wrapped subtle
+  # for bash/read/web, summary line for write/patch/error).
+  if rec.kind == akPlan and rec.plan.len > 0:
+    stdout.write planResultBytes(rec.plan)
   else:
-    let termW = try: terminalWidth() except CatchableError: 80
-    let bodyW = max(20, termW - 3)
-    for line in rec.output.splitLines:
-      for chunk in wrapAnsi(line, bodyW):
-        if rec.code == 0:
-          stdout.styledWriteLine fgGreen, "  " & chunk, resetStyle
-        else:
-          subtleWriteLn(stdout, "  " & chunk)
+    stdout.write toolResultBytes(rec.kind, rec.output, rec.code, n)
 
 proc listTools*(toolLog: seq[ToolRecord]) =
   if toolLog.len == 0:

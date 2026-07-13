@@ -3,7 +3,7 @@
 ## The live viewport is semantic state: command banner, streamed lines, cutoff
 ## policy, and final exit code. Terminal placement belongs to engine.
 
-import std/[strformat, strutils, terminal]
+import std/[strformat, terminal]
 import util
 
 const
@@ -14,29 +14,6 @@ proc subtleWriteLn*(outFile: File, body: string) =
   outFile.write body
   outFile.write Reset
   outFile.write "\r\n"
-
-proc trimBoundaryBlank(lines: var seq[string]) =
-  ## Strip blank rows from both ends so a tool item never brings its own
-  ## newlines into scrollback; only the transcript separator does that.
-  while lines.len > 0 and lines[^1].strip == "":
-    lines.setLen lines.len - 1
-  var start = 0
-  while start < lines.len and lines[start].strip == "":
-    inc start
-  if start > 0:
-    lines = lines[start ..< lines.len]
-
-proc writeWrappedLine(l: string) =
-  let termW = try: terminalWidth() except CatchableError: 80
-  let bodyW = max(20, termW - 3)
-  for chunk in charWrapAnsi(l, bodyW):
-    subtleWriteLn(stdout, "  " & chunk)
-
-proc printLine*(l: string) =
-  ## Print one wrapped tool-output line as an append-only transcript write.
-  ## This is exported for display formatting; live viewport operations below
-  ## take the terminal lock themselves.
-  writeWrappedLine(l)
 
 type
   StreamingView* = object
@@ -74,9 +51,6 @@ proc wrappedRowsAt(line: string; termW: int): seq[string] =
   let bodyW = max(20, termW - 3)
   for chunk in charWrapAnsi(line, bodyW):
     result.add "  " & chunk
-
-proc wrappedRows(line: string): seq[string] =
-  wrappedRowsAt(line, try: terminalWidth() except CatchableError: 80)
 
 proc visibleOutputLines(v: StreamingView): seq[string] =
   var logical: seq[string]
@@ -122,18 +96,3 @@ proc finalTranscriptRows*(banner: string; code: int; lines: openArray[string];
 proc addLine*(v: var StreamingView; line: string) =
   inc v.total
   v.buf.add line
-
-proc printBashScroll*(res: string, idx: int, maxLines = StreamMaxLines) =
-  var lines = res.splitLines
-  trimBoundaryBlank(lines)
-  if lines.len <= maxLines:
-    for l in lines: writeWrappedLine(l)
-    return
-  let tailLen = max(0, maxLines - 1)
-  let hidden = lines.len - tailLen
-  let show = if idx > 0: " :show " & $idx & " for full" else: ""
-  subtleWriteLn(stdout,
-    &"  ... {hidden} line" & (if hidden == 1: "" else: "s") &
-    " omitted" & show)
-  for i in lines.len - tailLen ..< lines.len:
-    writeWrappedLine(lines[i])
