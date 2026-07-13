@@ -15,9 +15,16 @@ proc subtleWriteLn*(outFile: File, body: string) =
   outFile.write Reset
   outFile.write "\r\n"
 
-proc trimTrailingBlank(lines: var seq[string]) =
+proc trimBoundaryBlank(lines: var seq[string]) =
+  ## Strip blank rows from both ends so a tool item never brings its own
+  ## newlines into scrollback; only the transcript separator does that.
   while lines.len > 0 and lines[^1].strip == "":
     lines.setLen lines.len - 1
+  var start = 0
+  while start < lines.len and lines[start].strip == "":
+    inc start
+  if start > 0:
+    lines = lines[start ..< lines.len]
 
 proc writeWrappedLine(l: string) =
   let termW = try: terminalWidth() except CatchableError: 80
@@ -118,7 +125,7 @@ proc addLine*(v: var StreamingView; line: string) =
 
 proc printBashScroll*(res: string, idx: int, maxLines = StreamMaxLines) =
   var lines = res.splitLines
-  trimTrailingBlank(lines)
+  trimBoundaryBlank(lines)
   if lines.len <= maxLines:
     for l in lines: writeWrappedLine(l)
     return

@@ -786,8 +786,7 @@ proc resetEditorRowModel(ed: ptr minline.LineEditor) =
 
 proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
                             beforeRepaint: proc() = nil;
-                            reserveFooter = true;
-                            transcriptOwnsSpacing = false) =
+                            reserveFooter = true) =
   ## Commit transcript output while preserving the volatile footer.
   ## The controller owns the transcript bytes and item spacing. This proc owns
   ## the terminal mechanics: clear the volatile footer, append the bytes as
@@ -820,8 +819,7 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
         newFooter,
         0,
         restoreEditor,
-        reserveFooter,
-        transcriptOwnsSpacing)
+        reserveFooter)
       resetEditorRowModel(inputEditor)
   else:
     termengine.appendTranscript(
@@ -833,8 +831,7 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
       newFooter,
       0,
       restoreEditor,
-      reserveFooter,
-      transcriptOwnsSpacing)
+      reserveFooter)
   if reserveFooter and transcriptBytes.hasNonNewlineBytes and currentBarLabel.len > 0:
     emitFatPromptEvent setBarEvent(currentBarLabel, hasGap = true)
   debugOut "writeTranscriptWithFatPrompt exit"
@@ -1678,16 +1675,10 @@ proc apiNoUsage*(elapsed: int) =
 
 proc apiRetryNotice*(msg: string) =
   ## Controller-side retry notice committed as a harness line: non-bold
-  ## magenta, no indent, no bullet. Same scrollback contract as
-  ## `interrupted by user`: one ordinary line bracketed by exactly one
-  ## blank line above and below, fat prompt preserved, not persisted to
-  ## the `.3log` (it is not a conversation message). The leading `\r\n`
-  ## opens the blank line above; `appendTranscript`'s separator closes
-  ## the blank line below.
+  ## magenta, no indent, no bullet, one line separated from surrounding
+  ## items by exactly one blank row like every other transcript item.
   writeTranscriptWithFatPrompt:
-    stdout.write "\r\n"
     stdout.styledWrite(fgMagenta, msg, resetStyle)
-    stdout.write "\r\n"
 
 proc installApiStreamHooks*() =
   setApiStreamHooks(ApiStreamHooks(
@@ -2336,10 +2327,10 @@ proc endTurn*(repaintPrompt = true) =
   var label = ""
   if hadBar:
     label = currentBarLabel
-    let gapAlready =
-      if hadInputThread: currentBarHasGap
-      else: false
-    bytes = endTurnBytes(label, repaintPrompt, currentTermW(), gapAlready)
+    # Every committed scrollback item owns its trailing \r\n\r\n separator,
+    # so the gap between the last content row and the bar is already in
+    # scrollback. Never add a second volatile gap row here.
+    bytes = endTurnBytes(label, repaintPrompt, currentTermW(), gapAlready = true)
   else:
     bytes = endTurnBytes("", repaintPrompt)
   termengine.endTurn(
@@ -2381,14 +2372,11 @@ proc emitUserSubmit*(line: string) =
   var bytes = ""
   if receiptLabel.len > 0:
     bytes.add receiptBytes(receiptLabel)
-    bytes.add "\r\n\r\n"
-  # The prompt echo is the last scrollback block before the turn's footer
-  # takes over. The footer (spinner on submit, idle bar otherwise) opens with
-  # its own cleared gap/ticker row, which is the visible separator. Ending
-  # with a full "\r\n\r\n" would strand that gap as a second, redundant
-  # blank row between the prompt and the bar. End the line only.
+    bytes.add "\r\n"
+  # The inter-item separator is owned by `appendTranscript` (one blank row
+  # prepended before every item after the first). Items carry bare content;
+  # the receipt sits flush above the prompt with a single \r\n joiner.
   bytes.add formatUserPromptItem(line)
-  bytes.add "\r\n"
   proc clearSubmittedFooterState() =
     emitFatPromptEvent clearPendingHintEvent()
     emitFatPromptEvent clearBarEvent()
@@ -2398,5 +2386,4 @@ proc emitUserSubmit*(line: string) =
     bytes,
     restoreEditor = false,
     beforeRepaint = clearSubmittedFooterState,
-    reserveFooter = false,
-    transcriptOwnsSpacing = true)
+    reserveFooter = false)

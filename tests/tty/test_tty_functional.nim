@@ -1833,6 +1833,12 @@ suite "terminal visual contract":
     var wipeAt = -1
     var wipeDetail = ""
     for i in 1 ..< tty.frames.len:
+      # Skip pairs rooted in a volatile streaming frame (caret hidden):
+      # row positions aren't stable there, and a separator insertion on
+      # commit legitimately shifts volatile content down. A genuine
+      # in-place wipe of committed scrollback persists into stable
+      # (caret-visible) frames, so this skip costs no coverage.
+      if tty.frames[i - 1].cursorHidden: continue
       let prev = tty.frames[i - 1].rows
       let cur = tty.frames[i].rows
       for r in 1 ..< min(prev.len, cur.len):

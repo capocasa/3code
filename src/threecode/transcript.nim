@@ -42,9 +42,11 @@ proc commandBodyBytes(body: string): string =
       result.add "  " & line & "\r\n"
 
 proc finishItem(bytes: var string; attachSeparator: bool) =
+  ## Trim trailing whitespace before the write (append-only-safe). The
+  ## inter-item separator is owned by `appendTranscript`; items carry no
+  ## trailing separator. (`attachSeparator` is retained on the item type for
+  ## construction-call compatibility but no longer appends anything.)
   bytes.trimTranscriptTail()
-  if attachSeparator:
-    bytes.add "\r\n\r\n"
 
 proc dropLeadingIndent(line: string): string =
   ## Drop a leading two-space indent, skipping any opening SGR run so
@@ -118,25 +120,19 @@ proc formatItem*(item: TranscriptItem): string =
   result.finishItem(item.attachSeparator)
 
 proc attachReceipt*(bytes: var string; receipt: string; attachSeparator: bool) =
-  ## Splice a token receipt row between an item body and its separator. The
-  ## body must already end in the item separator (`\r\n\r\n`) produced by
-  ## `finishItem`; this strips that separator, appends the receipt flush below
-  ## the body, then restores the separator so the receipt is owned by the item
-  ## it caps rather than becoming a separate blank-separated item.
+  ## Splice a token receipt row flush below an item body (a single `\r\n`
+  ## joins them, no blank between). The inter-item separator after the whole
+  ## item is owned by `appendTranscript`, so nothing trailing is appended here.
   if receipt.len == 0:
     return
   bytes.trimTranscriptTail()
   bytes.add "\r\n"
   bytes.add receipt
-  if attachSeparator:
-    bytes.add "\r\n\r\n"
 
 proc appendItem*(item: TranscriptItem; restoreEditor = true;
                  beforeRepaint: proc() = nil; reserveFooter = true;
-                 prefixBoundary = false; receipt = "") =
+                 receipt = "") =
   var bytes = formatItem(item)
-  if prefixBoundary:
-    bytes = "\r\n" & bytes
   if receipt.len > 0:
     bytes.attachReceipt(receipt, item.attachSeparator)
   commitTranscriptBytes(
