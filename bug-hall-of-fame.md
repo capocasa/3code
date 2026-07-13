@@ -77,6 +77,49 @@ a write fails, and writes need a real bound, not an unbounded retry.
 
 ---
 
+## The slurp that ate your scrollback one line at a time (0.5.0)
+
+**Symptom:** During a reasoning-heavy turn (hy3, glm-5.x), committed
+scrollback lines vanished one at a time, roughly one per 100ms, until whole
+paragraphs of the answer were gone. The effect was visible only against live
+reasoning providers; stubbed tests never reproduced it.
+
+**Root cause:** `resizeRecent()`, a guard added to fix a footer-stacking bug
+on terminal resize, added +1 to the erase-row walk-up in both `walkUp` and
+`beginEditorRedraw` for a 400ms window after every SIGWINCH. The comment
+claimed the extra row "sits inside the volatile region (the always-reserved
+ticker/gap row), so it never reaches committed scrollback." That was false:
+the footer's `rowsAboveEditor` already *includes* the gap row
+(`1 + barWrapRows`), so the +1 walked above the gap into committed content.
+Each 80ms spinner tick during the resize window erased one more committed
+line. A terminal that fires SIGWINCH intermittently (tmux pane adjustments,
+window-manager resizes) kept the window armed across many ticks, so the slurp
+was sustained rather than a one-line nick.
+
+The slurp branch's single-GUI-thread refactor, which collapsed the two
+footer-painting threads into one to close a *different* race on
+`paintedFooterRows`, did not touch this: the +1 overcount was always
+geometry, never a torn read.
+
+**Fix:** Removed the +1, the `resizeAtMs` field, and the now-dead
+`resizeRecent`/`noteResize` machinery from both walk-up sites. The
+footer-stacking bug the guard was added to fix is no longer reproducible
+(the single-thread renderer and the test-grid cursor clamp handle it), so
+this is a clean removal, not a tradeoff. A new tty test
+(`test_slurp_resize_reasoning.nim`) fires SIGWINCH during a reasoning burst
+and asserts no committed line is wiped in place across consecutive frames;
+it fails with the +1 present and passes without it.
+
+**Lesson:** A comment that asserts an invariant ("never reaches committed
+scrollback") without naming the arithmetic that proves it is a load-bearing
+assumption in disguise. `rowsAboveEditor` counting the gap row was the whole
+bug: double-count a row you think you are sparing and the spare becomes an
+extra victim. And a test that checks the symptom you fixed (footer stacking)
+but not the invariant you violated (scrollback integrity) is a guard dog
+watching the wrong door.
+
+---
+
 ## The invisible space that failed every run (test-side, exit code 1)
 
 **Symptom:** The tty functional suite reported 25/25 `[OK]` yet the test
