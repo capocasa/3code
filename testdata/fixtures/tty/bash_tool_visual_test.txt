@@ -1,7 +1,7 @@
-===== 552 =====
+===== 370 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,10 +10,10 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run bash checks
-===== 285 =====
+===== 789 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -26,10 +26,10 @@
 
 ⣿ ○0% ↓5 0s
 ❯
-===== 534 =====
+===== 816 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -43,10 +43,10 @@
 
 ⣿ ○0% ↓5 0s
 ❯
-===== 968 =====
+===== 322 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -60,10 +60,10 @@
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 297 =====
+===== 365 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -78,10 +78,10 @@ $ printf 'ok-one\nok-two\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 505 =====
+===== 318 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -97,10 +97,10 @@ $ printf 'ok-one\nok-two\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 920 =====
+===== 867 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -117,10 +117,10 @@ $ printf 'ok-one\nok-two\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 852 =====
+===== 153 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -139,10 +139,10 @@ $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 381 =====
+===== 774 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -162,10 +162,10 @@ $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 936 =====
+===== 128 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -186,10 +186,10 @@ $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 497 =====
+===== 704 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -211,10 +211,10 @@ $ printf 'ok-one\nok-two\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 903 =====
+===== 456 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -234,14 +234,14 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 168 =====
+===== 551 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -261,15 +261,15 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
   scroll-1
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 706 =====
+===== 275 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -289,16 +289,16 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
   scroll-1
   scroll-2
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 756 =====
+===== 721 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -318,17 +318,17 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
   scroll-1
   scroll-2
   scroll-3
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 896 =====
+===== 583 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -348,7 +348,7 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
   scroll-1
   scroll-2
   scroll-3
@@ -356,10 +356,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 178 =====
+===== 411 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -379,7 +379,7 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
   scroll-1
   scroll-2
   scroll-3
@@ -388,10 +388,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 460 =====
+===== 300 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -411,7 +411,7 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
   scroll-1
   scroll-2
   scroll-3
@@ -421,10 +421,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 140 =====
+===== 974 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -444,7 +444,7 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
   scroll-1
   scroll-2
   scroll-3
@@ -455,10 +455,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 461 =====
+===== 199 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -478,7 +478,7 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
   scroll-1
   scroll-2
   scroll-3
@@ -490,10 +490,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 240 =====
+===== 911 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -513,7 +513,7 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
   ... 2 lines omitted :show 3 for full
   scroll-3
   scroll-4
@@ -525,10 +525,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 562 =====
+===== 439 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -548,7 +548,7 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
   ... 3 lines omitted :show 3 for full
   scroll-4
   scroll-5
@@ -560,10 +560,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 818 =====
+===== 208 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -583,7 +583,7 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
   ... 3 lines omitted :show 3 for full
   scroll-4
   scroll-5
@@ -597,10 +597,10 @@ $ sleep 3; printf 'slow-done\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 296 =====
+===== 485 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -620,7 +620,45 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
+  ... 3 lines omitted :show 3 for full
+  scroll-4
+  scroll-5
+  scroll-6
+  scroll-7
+  scroll-8
+  scroll-9
+  scroll-10
+
+$ sleep 3; printf 'slow-done\n'
+  slow-done
+
+  ○1%  ↑130  ↓18  0s
+❯
+===== 487 =====
+
+  ╭─╮
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+● Running bash checks.
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
   ... 3 lines omitted :show 3 for full
   scroll-4
   scroll-5
@@ -633,12 +671,15 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 $ sleep 3; printf 'slow-done\n'
   slow-done
 
+$ echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  xxxxxxx
+
   ○1%  ↑130  ↓18  0s
 ❯
-===== 915 =====
+===== 227 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -658,7 +699,7 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
   ... 3 lines omitted :show 3 for full
   scroll-4
   scroll-5
@@ -670,16 +711,64 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
 $ sleep 3; printf 'slow-done\n'
   slow-done
+
+$ echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  xxxxxxx
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  xxx
+
+  ○1%  ↑130  ↓18  0s
+❯
+===== 733 =====
+
+  ╭─╮
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ run bash checks
+● Running bash checks.
+
+$ printf 'ok-one\nok-two\n'
+  ok-one
+  ok-two
+
+Ø printf 'bad-one\nbad-two\nbad-three\n'; exit 7
+  bad-one
+  bad-two
+  bad-three
+
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
+  ... 3 lines omitted :show 3 for full
+  scroll-4
+  scroll-5
+  scroll-6
+  scroll-7
+  scroll-8
+  scroll-9
+  scroll-10
+
+$ sleep 3; printf 'slow-done\n'
+  slow-done
+
+$ echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  xxxxxxx
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xx
   ○1%  ↑130  ↓18  0s
 
 ● Bash checks complete.
 
 ⣿ ○1% ↓5 0s
 ❯
-===== 939 =====
+===== 920 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -699,7 +788,7 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
   ... 3 lines omitted :show 3 for full
   scroll-4
   scroll-5
@@ -711,6 +800,11 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
 $ sleep 3; printf 'slow-done\n'
   slow-done
+
+$ echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  xxxxxxx
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xx
   ○1%  ↑130  ↓18  0s
 
 ● Bash checks complete.
@@ -718,10 +812,10 @@ $ sleep 3; printf 'slow-done\n'
 
 ⣿ ○1% ↓5 0s
 ❯
-===== 943 =====
+===== 992 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -741,7 +835,7 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
   ... 3 lines omitted :show 3 for full
   scroll-4
   scroll-5
@@ -753,6 +847,11 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
 $ sleep 3; printf 'slow-done\n'
   slow-done
+
+$ echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  xxxxxxx
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xx
   ○1%  ↑130  ↓18  0s
 
 ● Bash checks complete.
@@ -760,10 +859,10 @@ $ sleep 3; printf 'slow-done\n'
 
   ○1%  ↑210  ↓20  0s
 ❯
-===== 277 =====
+===== 601 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-main-46cc7471-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -783,7 +882,7 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
+$ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
   ... 3 lines omitted :show 3 for full
   scroll-4
   scroll-5
@@ -795,6 +894,11 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscrol…
 
 $ sleep 3; printf 'slow-done\n'
   slow-done
+
+$ echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  xxxxxxx
+  xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+xx
   ○1%  ↑130  ↓18  0s
 
 ● Bash checks complete.

@@ -41,6 +41,7 @@ type
     ## the editor's `renderRow` at each walk-up.
     paintedFooterRows: int
     toolViewportRows: seq[string]
+    toolViewportBannerRows: int  # leading rows that are banner (white), not output (grey)
     ## Volatile in-progress assistant content above the footer during live
     ## streaming. Like the tool viewport it is erased and rewritten each
     ## frame; committed lines go to real scrollback via `appendTranscript`.
@@ -99,13 +100,12 @@ proc writeViewportRows(rows: openArray[string]) =
 # the output. Both honor the mode-aware `[colors]` config.
 proc writeToolViewportRows(e: TerminalEngine) =
   if e.toolViewportRows.len == 0: return
-  stdout.write OffWhiteFg
-  stdout.write e.toolViewportRows[0]
-  stdout.write Reset
-  stdout.write "\r\n"
-  for i in 1 ..< e.toolViewportRows.len:
-    stdout.write GreyFg
-    stdout.write e.toolViewportRows[i]
+  for i, row in e.toolViewportRows:
+    if i < e.toolViewportBannerRows:
+      stdout.write OffWhiteFg
+    else:
+      stdout.write GreyFg
+    stdout.write row
     stdout.write Reset
     stdout.write "\r\n"
 
@@ -203,10 +203,12 @@ proc renderFooter*(frame: FooterFrame; inputRunning: bool;
 proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
                          frame: FooterFrame; inputRunning: bool;
                          editor: ptr minline.LineEditor;
-                         termW = 0) {.gcsafe.} =
+                         termW = 0; bannerRows = 1) {.gcsafe.} =
   ## Replace the volatile bash viewport and repaint footer/editor in one
   ## synchronized frame. The viewport is live chrome: it is not transcript
   ## scrollback, and the controller commits final output separately.
+  ## `bannerRows` is the count of leading rows that are banner (white),
+  ## not output (grey).
   {.cast(gcsafe).}:
     termio.withTerminalWriteLock:
       let width = if termW > 0: termW else:
@@ -226,6 +228,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
           stdout.write "\x1b[" & $up & "A"
         stdout.write "\x1b[J"
         e.toolViewportRows = @rows
+        e.toolViewportBannerRows = bannerRows
         e.writeToolViewportRows()
         if bytes.len > 0:
           stdout.write bytes
@@ -240,6 +243,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
           e.noteFooterPainted(footerRowsAboveEditor)
       else:
         e.toolViewportRows = @rows
+        e.toolViewportBannerRows = bannerRows
         e.writeToolViewportRows()
         if bytes.len > 0:
           stdout.write bytes
@@ -249,9 +253,10 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
 
 proc renderToolViewport*(rows: openArray[string]; frame: FooterFrame;
                          inputRunning: bool; editor: ptr minline.LineEditor;
-                         termW = 0) {.gcsafe.} =
+                         termW = 0; bannerRows = 1) {.gcsafe.} =
   {.cast(gcsafe).}:
-    defaultEngine.renderToolViewport(rows, frame, inputRunning, editor, termW)
+    defaultEngine.renderToolViewport(rows, frame, inputRunning, editor, termW,
+                                     bannerRows)
 
 proc clearToolViewport*(e: var TerminalEngine; frame: FooterFrame;
                         inputRunning: bool; editor: ptr minline.LineEditor;

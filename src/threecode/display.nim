@@ -615,10 +615,14 @@ proc renderToolBanner*(banner: string, kind: ActionKind, code: int, elapsedS = -
 proc toolBannerBytes*(banner: string; kind: ActionKind; code: int;
                       elapsedS = -1): string =
   let icon = if kind == akBash and code > 0: "Ø" else: toolIcon(kind)
-  result.add icon & " " & OffWhiteFg & banner & Reset
-  if elapsedS >= 1:
-    result.add GreyFg & &"  ({elapsedS}s)" & Reset
-  result.add "\r\n"
+  let suffix = if elapsedS >= 1: GreyFg & &"  ({elapsedS}s)" & Reset else: ""
+  let termW = try: terminalWidth() except CatchableError: 80
+  let rows = bannerWrapRows(icon & " ", banner, termW)
+  for i, row in rows:
+    result.add OffWhiteFg & row & Reset
+    if i == rows.high:
+      result.add suffix
+    result.add "\r\n"
 
 proc toolResultBytes*(kind: ActionKind; res: string; code: int; idx: int;
                       diff = ""): string =
