@@ -255,6 +255,8 @@ var activeCommandHook*: proc(cmd: string) {.gcsafe.}
 var
   testSpinnerRequested: Atomic[int]
   testSpinnerPainted: Atomic[int]
+  viewportPaintRequested: Atomic[int]
+  viewportPainted: Atomic[int]
   testTickerControlStarted: Atomic[bool]
   testTickerControlThread: Thread[void]
 
@@ -300,6 +302,18 @@ proc setAnimSpinner*(spinner: string; elapsed: int) {.gcsafe.} =
     frameModelShared.elapsed = elapsed
     release frameModelLock
 
+proc setAnimViewport*(rows: openArray[string]) {.gcsafe.} =
+  ## Push the bash tool viewport rows into the shared model. During
+  ## `amBarTick` the GUI thread owns the viewport+footer composite: it
+  ## reads these rows, applies the rotating command symbol to a local
+  ## copy, and paints the whole composite via `renderToolViewport`. The
+  ## controller calls this instead of rendering the viewport directly,
+  ## removing the two-writer race on `engine.toolViewportRows`.
+  {.cast(gcsafe).}:
+    acquire frameModelLock
+    frameModelShared.viewportRows = @rows
+    release frameModelLock
+
 proc currentFrameFromModel*(): FooterFrame {.gcsafe.} =
   ## Build the live `FooterFrame` from the unified `frameModelShared`.
   ## The animation threads and the input thread's editor redraw both use
@@ -324,6 +338,19 @@ proc requestTestSpinnerFrame() =
     return
   let requested = testSpinnerRequested.fetchAdd(1, moRelease) + 1
   while guiRunning and testSpinnerPainted.load(moAcquire) < requested:
+    sleep 1
+
+proc requestViewportPaint*() =
+  ## In test mode, request one viewport composite paint from the GUI thread
+  ## and block until it acknowledges. `runBashWithViewport.renderView` uses
+  ## this to guarantee the pushed viewport rows are on screen before it
+  ## emits a frame event, so the tty harness captures each streamed line as
+  ## a discrete frame (no stale frame committed before the paint). A no-op
+  ## outside test mode — the GUI thread's 80ms cadence paints the rows.
+  if not testFrameMode() or not guiRunning:
+    return
+  let requested = viewportPaintRequested.fetchAdd(1, moRelease) + 1
+  while guiRunning and viewportPainted.load(moAcquire) < requested:
     sleep 1
 
 proc testTickerControlLoop() {.thread.} =
@@ -828,18 +855,26 @@ proc guiLoop(unused: string) {.thread.} =
   let start = epochTime()
   var i = 0
   var observedTestTick = testSpinnerPainted.load(moAcquire)
+  var observedViewportTick = viewportPainted.load(moAcquire)
   while not guiStop.load(moRelaxed):
     let elapsed =
       if testFrameMode():
-        while not guiStop.load(moRelaxed) and
-            testSpinnerRequested.load(moAcquire) <= observedTestTick:
+        # Wait for either a spinner frame request or a viewport paint
+        # request. Both are controller-driven deterministic paint triggers
+        # (the spinner via advanceTicker, the viewport via the
+        # renderView() → requestViewportPaint handshake).
+        while not guiStop.load(moRelaxed):
+          if testSpinnerRequested.load(moAcquire) > observedTestTick: break
+          if viewportPaintRequested.load(moAcquire) > observedViewportTick: break
           sleep 1
         if guiStop.load(moRelaxed): break
         observedTestTick = testSpinnerRequested.load(moAcquire)
+        observedViewportTick = viewportPaintRequested.load(moAcquire)
         0.0
       else:
         epochTime() - start
     let m = getFrameModel()
+    var paintedViewport = false
     try:
       case m.mode
       of amSpinner:
@@ -854,18 +889,47 @@ proc guiLoop(unused: string) {.thread.} =
         let label =
           if m.label.hasElapsedSuffix: m.label
           else: m.label & "  " & $secs & "s"
-        if commandStatusActive.load(moRelaxed):
-          discard commandSymbolIndex.fetchAdd(1, moRelease)
-          termengine.updateToolViewportSymbol(nextCommandSymbol())
-        termengine.renderFooter(tokenBarFrame(label),
-                                inputThreadRunning, inputEditor,
-                                currentTermW())
-        # bar-tick never sets spinnerFramePainted; the test handshake keys
-        # on spinner frames, and bar-tick is not driven through it.
+        let frame = tokenBarFrame(label)
+        let vpRows = m.viewportRows
+        if vpRows.len > 0:
+          # Own the viewport+footer composite: read the rows from the
+          # model, apply the rotating command symbol to a LOCAL copy, and
+          # paint via renderToolViewport. No mutation of shared
+          # engine.toolViewportRows[0] (the old updateToolViewportSymbol
+          # path), so no race with the controller's row appends.
+          var rows = vpRows
+          if commandStatusActive.load(moRelaxed) and rows[0].len > 0:
+            # Apply the current command symbol (starts at `$`, index 0) to
+            # row 0. In normal mode advance the index so the next tick shows
+            # the next symbol — the live "currency ticker" effect during bash
+            # execution. In test mode the index stays put so every captured
+            # frame shows `$` (the controller bakes the same index into each
+            # renderView), matching the golden fixtures. We own this
+            # composite, so the swap is on a local copy, not shared engine
+            # state — no mutation of `engine.toolViewportRows`.
+            # Skip the rotation when row 0 already shows the exit-failure
+            # icon `Ø` (commandIcon bakes it once exitCode > 0): that icon is
+            # terminal, not part of the live rotation.
+            if not rows[0].startsWith("Ø"):
+              let sym = nextCommandSymbol()
+              if not testFrameMode():
+                discard commandSymbolIndex.fetchAdd(1, moRelease)
+              let firstLen = runeLenAt(rows[0], 0)
+              if firstLen > 0:
+                rows[0] = sym & rows[0].substr(firstLen)
+          termengine.renderToolViewport(rows, frame,
+                                        inputThreadRunning, inputEditor,
+                                        currentTermW())
+        else:
+          termengine.renderFooter(frame, inputThreadRunning, inputEditor,
+                                  currentTermW())
+        paintedViewport = true
       of amIdle:
         discard  # nothing to animate; the controller paints idle frames
       if testFrameMode():
         testSpinnerPainted.store(observedTestTick, moRelease)
+        if paintedViewport:
+          viewportPainted.store(observedViewportTick, moRelease)
     except CatchableError: discard
     if not testFrameMode():
       sleep 80
@@ -949,6 +1013,8 @@ proc ensureGuiStarted() =
   guiStop.store(false, moRelaxed)
   testSpinnerRequested.store(0, moRelease)
   testSpinnerPainted.store(0, moRelease)
+  viewportPaintRequested.store(0, moRelease)
+  viewportPainted.store(0, moRelease)
   createThread(guiThread, guiLoop, "")
   guiRunning = true
 
@@ -994,6 +1060,7 @@ proc stopBarTick*(): int =
   let m = getFrameModel()
   if m.mode != amBarTick: return 0
   let elapsed = (epochTime() - barTickStart).int
+  setAnimViewport(@[])
   stopGui()
   commandStatusActive.store(false, moRelaxed)
   setAnimMode(amIdle)

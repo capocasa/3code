@@ -175,9 +175,49 @@ transition because the only writer is quiesced.
         while the GUI thread rotates the symbol). The chunk-3 work is
         to push the viewport rows into `FrameModel` so the GUI thread
         owns the whole composite.
-- [ ] **impl-3: Route tool-call animation through the GUI thread.**
-      Status: not started. Depends on impl-2.
-      Learnings: (none yet)
+- [x] **impl-3: Route tool-call animation through the GUI thread.**
+      Status: DONE. Committed.
+      Learnings:
+      - Added `viewportRows: seq[string]` to `FrameModel` + `setAnimViewport*`
+        setter. The controller's `runBashWithViewport.renderView()` now
+        pushes rows into the model instead of calling `renderToolViewport`
+        directly; the GUI thread's `amBarTick` branch owns the whole
+        viewport+footer composite (reads rows from the model, applies the
+        rotating command symbol to a LOCAL copy, paints via
+        `renderToolViewport`). This removes the two-writer race on
+        `engine.toolViewportRows`.
+      - The tty harness captures frames via `emitTestFrameEvent()` ('f'
+        byte) which fires AFTER `renderView()`. Since the viewport render
+        moved to the GUI thread's 80ms loop, a **viewport paint handshake**
+        (`viewportPaintRequested`/`viewportPainted` atomics +
+        `requestViewportPaint*()`) was needed: `renderView()` requests a
+        paint and blocks for the ack in test mode so the harness captures
+        each streamed line as a discrete frame (no stale frame before the
+        paint). The `guiLoop` top-of-loop test-mode wait now watches BOTH
+        the spinner handshake and the viewport handshake.
+      - The command-symbol rotation (`$`/`€`/`£`/`¥`) had two subtleties:
+        (1) the index must NOT advance in test mode — the old `barTickLoop`
+        gated `fetchAdd` behind `if advance:` which in test mode only fired
+        on a spinner-tick (`advanceTicker`), so the bash stream path (which
+        never calls `advanceTicker`) kept the index at 0 → every captured
+        frame shows `$`. Replicate this with `if not testFrameMode():
+        fetchAdd`. (2) the exit-failure icon `Ø` (baked by `commandIcon`
+        once `exitCode > 0`) must not be overwritten by the rotation — the
+        GUI thread skips the swap when `rows[0].startsWith("Ø")`. Without
+        this, the nonzero-exit frame showed `$` instead of `Ø`.
+      - `updateToolViewportSymbol` deleted from engine.nim (zero callers
+        after the GUI thread operates on a local copy). `clearToolViewport`
+        kept (clean public API, no external callers now but harmless);
+        `unicode` import dropped from engine.nim (was only used by the
+        deleted proc).
+      - The exception-path `clearToolViewport` in `runBashWithViewport`
+        became `setAnimViewport(@[])` + `requestViewportPaint()` — clears
+        the composite via the model + a paint request rather than the
+        controller rendering directly. `stopBarTick` also clears the model
+        viewport rows before stopping the GUI thread (prevents a one-frame
+        stale flash on the next tool call).
+      - All three required tests pass: stress (~64s), functional (~time),
+        resize_ticker (~13s). Build clean.
 - [ ] **impl-4: Integrate, stress, reproduce-or-close.**
       Status: not started. Depends on impl-3.
       Learnings: (none yet)

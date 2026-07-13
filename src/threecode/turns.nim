@@ -90,11 +90,13 @@ proc runBashWithViewport(act: Action; cache: ReadCache; stub: JsonNode;
 
   proc renderView() =
     view.setSymbol(nextCommandSymbol())
-    termengine.renderToolViewport(
-      view.viewportRows(),
-      footerFrame(fatPromptState),
-      inputThreadRunning,
-      inputEditor)
+    # Push the viewport rows into the shared model; the GUI thread owns the
+    # viewport+footer composite during amBarTick and paints it. In test
+    # mode, request one paint and wait for the ack so the harness captures
+    # each streamed line as a discrete frame (the frame event fires after
+    # this returns). In normal mode the 80ms cadence paints the rows.
+    setAnimViewport(view.viewportRows())
+    requestViewportPaint()
 
   setToolStdinWatcherEnabled(not promptOwnsStdin)
   try:
@@ -141,11 +143,11 @@ proc runBashWithViewport(act: Action; cache: ReadCache; stub: JsonNode;
     # `appendItem` can fold it into one synchronized scrollback commit (no
     # blank intermediate frame). Only on exception, where the append will not
     # run, clear the viewport here so a stale live viewport does not linger.
+    # The GUI thread still owns the composite, so clear via the model + a
+    # paint request rather than rendering directly.
     if getCurrentException() != nil:
-      termengine.clearToolViewport(
-        footerFrame(fatPromptState),
-        inputThreadRunning,
-        inputEditor)
+      setAnimViewport(@[])
+      requestViewportPaint()
 
 proc pendingReceiptBytes(): string =
   if not pendingHint.active:

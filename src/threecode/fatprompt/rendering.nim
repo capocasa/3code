@@ -128,6 +128,9 @@ type
     ticker*: string    # reasoning ticker tail text
     elapsed*: int      # seconds (spinner) or whole-second bar-tick count
     clearRows*: int    # for ffClear frames at teardown
+    viewportRows*: seq[string]  # bash tool viewport rows (owned by the GUI
+                                # thread during amBarTick; the controller
+                                # pushes them via setAnimViewport)
 
 const
   DefaultWidth* = 80
