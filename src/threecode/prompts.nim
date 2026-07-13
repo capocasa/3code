@@ -63,6 +63,28 @@ const KnownGoodCombos* = [
     ("deepinfra", "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
     ("deepinfra", "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
     ("deepinfra", "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "on",     0.2, 8192, false, 200_000),
+    ("novita",    "zai-org/glm-4.7", "glm"       , "4", "7", "on", 0.2, 8192, false, 200000),
+    ("novita",    "zai-org/glm-4.7-flash", "glm"       , "4", "flash", "on", 0.2, 8192, false, 200000),
+    ("novita",    "zai-org/glm-5", "glm"       , "5", "", "on", 0.2, 8192, false, 200000),
+    ("novita",    "zai-org/glm-5-turbo", "glm"       , "5", "turbo", "on", 0.2, 8192, false, 200000),
+    ("novita",    "zai-org/glm-5.1", "glm"       , "5", "1", "on", 0.2, 8192, false, 200000),
+    ("novita",    "zai-org/glm-5.2", "glm"       , "5", "1", "high", 0.2, 8192, false, 1000000),
+    ("nvidia",    "z-ai/glm-5.2", "glm"       , "5", "1", "high", 0.2, 8192, false, 1000000),
+    ("deepinfra", "zai-org/GLM-4.7-Flash", "glm"       , "4", "flash", "on", 0.2, 8192, false, 200000),
+    ("deepinfra", "zai-org/GLM-5.2", "glm"       , "5", "1", "high", 0.2, 8192, false, 1000000),
+    ("deepinfra", "zai-org/GLM-5.2", "glm"       , "5", "1", "high", 0.2, 8192, false, 1000000),
+    ("deepinfra", "zai-org/GLM-4.7-Flash", "glm"       , "4", "flash", "on", 0.2, 8192, false, 200000),
+    ("openrouter", "z-ai/glm-4.7", "glm"       , "4", "7", "on", 0.2, 8192, false, 200000),
+    ("openrouter", "z-ai/glm-4.7-flash", "glm"       , "4", "flash", "on", 0.2, 8192, false, 200000),
+    ("openrouter", "z-ai/glm-5", "glm"       , "5", "", "on", 0.2, 8192, false, 200000),
+    ("openrouter", "z-ai/glm-5-turbo", "glm"       , "5", "turbo", "on", 0.2, 8192, false, 200000),
+    ("openrouter", "z-ai/glm-5.1", "glm"       , "5", "1", "on", 0.2, 8192, false, 200000),
+    ("openrouter", "z-ai/glm-5.2", "glm"       , "5", "1", "high", 0.2, 8192, false, 1000000),
+    ("together",  "zai-org/GLM-4.7", "glm"       , "4", "7", "on", 0.2, 8192, false, 200000),
+    ("together",  "zai-org/GLM-5.2", "glm"       , "5", "1", "high", 0.2, 8192, false, 1000000),
+    ("nebius",    "zai-org/GLM-5.2", "glm"       , "5", "1", "high", 0.2, 8192, false, 1000000),
+    ("baseten",   "zai-org/GLM-5.2", "glm"       , "5", "1", "high", 0.2, 8192, false, 1000000),
+    ("baseten",   "zai-org/GLM-5.1", "glm"       , "5", "1", "on", 0.2, 8192, false, 200000),
 
     # gpt-oss
     ("baseten",   "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
@@ -76,6 +98,17 @@ const KnownGoodCombos* = [
     ("sambanova", "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
     ("deepinfra", "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
     ("openrouter", "openai/gpt-oss-120b",                           "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
+    ("novita",    "openai/gpt-oss-20b", "gpt-oss"   , "", "20b", "medium", 0.2, 4096, false, 131072),
+    ("novita",    "openai/gpt-oss-120b", "gpt-oss"   , "", "120b", "medium", 0.2, 8192, false, 131072),
+    ("groq",      "openai/gpt-oss-20b", "gpt-oss"   , "", "20b", "medium", 0.2, 4096, false, 131072),
+    ("deepinfra", "openai/gpt-oss-20b", "gpt-oss"   , "", "20b", "medium", 0.2, 4096, false, 131072),
+    ("deepinfra", "openai/gpt-oss-20b", "gpt-oss"   , "", "20b", "medium", 0.2, 4096, false, 131072),
+    ("openrouter", "openai/gpt-oss-20b", "gpt-oss"   , "", "20b", "medium", 0.2, 4096, false, 131072),
+    ("fireworks", "accounts/fireworks/models/gpt-oss-120b", "gpt-oss"   , "", "120b", "medium", 0.2, 8192, false, 131072),
+    ("together",  "openai/gpt-oss-20b", "gpt-oss"   , "", "20b", "medium", 0.2, 4096, false, 131072),
+    ("together",  "openai/gpt-oss-120b", "gpt-oss"   , "", "120b", "medium", 0.2, 8192, false, 131072),
+    ("ovh",       "gpt-oss-20b", "gpt-oss"   , "", "20b", "medium", 0.2, 4096, false, 131072),
+    ("groq",      "openai/gpt-oss-20b", "gpt-oss"   , "", "20b", "medium", 0.2, 4096, false, 131072),
 
     # deepseek
     ("baseten",   "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
@@ -94,6 +127,19 @@ const KnownGoodCombos* = [
     ("fireworks", "accounts/fireworks/models/deepseek-v4-pro",       "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
     ("deepinfra", "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
     ("sambanova", "deepseek-ai/DeepSeek-V3.2",                       "deepseek", "3.2", "",          "medium", 0.2, 8192, false, 128_000),
+    ("novita",    "deepseek/deepseek-v3.2", "deepseek"  , "3.2", "", "medium", 0.2, 8192, false, 128000),
+    ("novita",    "deepseek/deepseek-v4-flash", "deepseek"  , "4", "flash", "low", 0.2, 4096, false, 1000000),
+    ("novita",    "deepseek/deepseek-v4-pro", "deepseek"  , "4", "pro", "low", 0.2, 8192, false, 1000000),
+    ("nvidia",    "deepseek-ai/deepseek-v4-pro", "deepseek"  , "4", "pro", "low", 0.2, 8192, false, 1000000),
+    ("nvidia",    "deepseek-ai/deepseek-v4-flash", "deepseek"  , "4", "flash", "low", 0.2, 4096, false, 1000000),
+    ("deepinfra", "deepseek-ai/DeepSeek-V4-Flash", "deepseek"  , "4", "flash", "low", 0.2, 4096, false, 1000000),
+    ("deepinfra", "deepseek-ai/DeepSeek-V3.2", "deepseek"  , "3.2", "", "medium", 0.2, 8192, false, 128000),
+    ("deepinfra", "deepseek-ai/DeepSeek-V3.2", "deepseek"  , "3.2", "", "medium", 0.2, 8192, false, 128000),
+    ("deepinfra", "deepseek-ai/DeepSeek-V4-Flash", "deepseek"  , "4", "flash", "low", 0.2, 4096, false, 1000000),
+    ("openrouter", "deepseek/deepseek-chat", "deepseek"  , "3", "", "medium", 0.2, 8192, false, 128000),
+    ("openrouter", "deepseek/deepseek-v3.2", "deepseek"  , "3.2", "", "medium", 0.2, 8192, false, 128000),
+    ("openrouter", "deepseek/deepseek-v4-flash", "deepseek"  , "4", "flash", "low", 0.2, 4096, false, 1000000),
+    ("openrouter", "deepseek/deepseek-v4-pro", "deepseek"  , "4", "pro", "low", 0.2, 8192, false, 1000000),
 
     # minimax
     ("minimax",   "MiniMax-M3",                                      "minimax",  "3",   "",          "on",     0.2, 8192, false, 1_000_000),
@@ -106,6 +152,21 @@ const KnownGoodCombos* = [
     ("together",  "minimaxai/MiniMax-M2.7",                          "minimax",  "2",   "7",         "on",     0.2, 8192, false, 204_800),
     ("sambanova", "minimaxai/MiniMax-M2.7",                          "minimax",  "2",   "7",         "on",     0.2, 8192, false, 204_800),
     ("sambanova", "minimaxai/MiniMax-M2.5",                          "minimax",  "2",   "5",         "on",     0.2, 8192, false, 204_800),
+    ("novita",    "minimax/minimax-m2.5", "minimax"   , "2", "5", "low", 0.2, 8192, false, 204800),
+    ("novita",    "minimax/minimax-m2.7", "minimax"   , "2", "7", "on", 0.2, 8192, false, 204800),
+    ("novita",    "minimax/minimax-m2.7-highspeed", "minimax"   , "2", "7-high", "on", 0.2, 4096, false, 204800),
+    ("novita",    "minimax/minimax-m3", "minimax"   , "3", "", "on", 0.2, 8192, false, 1000000),
+    ("minimax",   "MiniMax-M2.5", "minimax"   , "2", "5", "low", 0.2, 8192, false, 204800),
+    ("nvidia",    "minimaxai/minimax-m3", "minimax"   , "3", "", "on", 0.2, 8192, false, 1000000),
+    ("deepinfra", "MiniMaxAI/MiniMax-M2.7", "minimax"   , "2", "7", "on", 0.2, 8192, false, 204800),
+    ("deepinfra", "MiniMaxAI/MiniMax-M3", "minimax"   , "3", "", "on", 0.2, 8192, false, 1000000),
+    ("deepinfra", "MiniMaxAI/MiniMax-M3", "minimax"   , "3", "", "on", 0.2, 8192, false, 1000000),
+    ("deepinfra", "MiniMaxAI/MiniMax-M2.7", "minimax"   , "2", "7", "on", 0.2, 8192, false, 204800),
+    ("openrouter", "minimax/minimax-m2.5", "minimax"   , "2", "5", "low", 0.2, 8192, false, 204800),
+    ("openrouter", "minimax/minimax-m2.7", "minimax"   , "2", "7", "on", 0.2, 8192, false, 204800),
+    ("openrouter", "minimax/minimax-m3", "minimax"   , "3", "", "on", 0.2, 8192, false, 1000000),
+    ("together",  "MiniMaxAI/MiniMax-M3", "minimax"   , "3", "", "on", 0.2, 8192, false, 1000000),
+    ("nebius",    "MiniMaxAI/MiniMax-M3", "minimax"   , "3", "", "on", 0.2, 8192, false, 1000000),
 
     # kimi
     ("together",  "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.2, 8192, false, 262_144),
@@ -113,13 +174,24 @@ const KnownGoodCombos* = [
     ("together",  "moonshotai/Kimi-K2.6",                          "kimi",     "2",   "6",         "on",     0.2, 8192, false, 262_144),
     ("deepinfra", "moonshotai/Kimi-K2.6",                          "kimi",     "2",   "6",         "on",     0.2, 8192, false, 262_144),
     ("deepinfra", "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.2, 8192, false, 262_144),
+    ("novita",    "moonshotai/kimi-k2.5", "kimi"      , "2", "5", "on", 0.2, 8192, false, 262144),
+    ("novita",    "moonshotai/kimi-k2.6", "kimi"      , "2", "6", "on", 0.2, 8192, false, 262144),
+    ("nvidia",    "moonshotai/kimi-k2.6", "kimi"      , "2", "6", "on", 0.2, 8192, false, 262144),
+    ("openrouter", "moonshotai/kimi-k2.5", "kimi"      , "2", "5", "on", 0.2, 8192, false, 262144),
+    ("openrouter", "moonshotai/kimi-k2.6", "kimi"      , "2", "6", "on", 0.2, 8192, false, 262144),
+    ("nebius",    "moonshotai/Kimi-K2.6", "kimi"      , "2", "6", "on", 0.2, 8192, false, 262144),
+    ("baseten",   "moonshotai/Kimi-K2.6", "kimi"      , "2", "6", "on", 0.2, 8192, false, 262144),
+    ("baseten",   "moonshotai/Kimi-K2.5", "kimi"      , "2", "5", "on", 0.2, 8192, false, 262144),
 
     # longcat
     ("longcat",   "LongCat-2.0",                                    "longcat",  "2",   "",          "on",     0.2, 8192, false, 1_000_000),
 
     # hy (Tencent Hunyuan v3)
     ("novita",     "tencent/hy3",                                    "hy",       "3",   "",          "no_think",0.2, 8192, false, 262_144),
-    ("openrouter", "tencent/hy3:free",                               "hy",       "3",   "free",      "no_think",0.2, 8192, false, 262_144)
+    ("openrouter", "tencent/hy3:free",                               "hy",       "3",   "free",      "no_think",0.2, 8192, false, 262_144),
+    ("deepinfra", "tencent/Hy3", "hy"        , "3", "", "no_think", 0.2, 8192, false, 262144),
+    ("deepinfra", "tencent/Hy3", "hy"        , "3", "", "no_think", 0.2, 8192, false, 262144),
+    ("openrouter", "tencent/hy3", "hy"        , "3", "", "no_think", 0.2, 8192, false, 262144),
   ]
     ## (provider, model, family, version, variant, reasoning, temperature,
     ## maxTokens, contextWindow) tuples.
@@ -1668,3 +1740,4 @@ proc refreshSystemPrompt*(messages: JsonNode, p: Profile) =
   let m = messages[0]
   if m.kind != JObject or m{"role"}.getStr != "system": return
   m["content"] = %buildSystemPrompt(p)
+
