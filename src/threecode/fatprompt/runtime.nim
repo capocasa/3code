@@ -12,6 +12,8 @@ import ../types, ../util, ../compact, ../display, ../minline,
   ../signals, ../terminal as termui, ../session
 import ../engine as termengine
 import rendering
+from ../toolstream import StreamMaxLines, initStreamingView, addLine,
+  viewportRowsAt, bannerRowCountAt
 from ../api import ApiStreamHooks, requestTurnInterrupt, requestQuietShutdown,
   setApiStreamHooks, setInterrupted, QuietTooLongMs, clearNetworkQuiet
 
@@ -68,8 +70,7 @@ var commandStatusActive: Atomic[bool]
 var barTickStart: float
 var commandSymbolIndex: Atomic[int]
   ## Currency-symbol rotation index for the bash tool viewport's command
-  ## row, advanced by the GUI thread while a bash command runs. Chunk 3
-  ## will route the whole tool-viewport animation through the GUI thread.
+  ## row, advanced by the GUI thread while a bash command runs.
 
 proc nextCommandSymbol*(): string =
   const symbols = ["$", "€", "£", "¥"]
@@ -302,19 +303,29 @@ proc setAnimSpinner*(spinner: string; elapsed: int) {.gcsafe.} =
     frameModelShared.elapsed = elapsed
     release frameModelLock
 
-proc setAnimViewport*(rows: openArray[string]; bannerRows = 1) {.gcsafe.} =
-  ## Push the bash tool viewport rows into the shared model. During
-  ## `amBarTick` the GUI thread owns the viewport+footer composite: it
-  ## reads these rows, applies the rotating command symbol to a local
-  ## copy, and paints the whole composite via `renderToolViewport`. The
+proc setAnimViewport*(banner: string; lines: openArray[string];
+                      exitCode = -1; idx = 0;
+                      maxLines = StreamMaxLines) {.gcsafe.} =
+  ## Push a snapshot of the bash tool viewport's raw inputs into the shared
+  ## model. During `amBarTick` the GUI thread owns the viewport+footer
+  ## composite: it re-derives the wrapped rows from this snapshot at the
+  ## live terminal width each tick (so a resize re-wraps instead of
+  ## replaying stale pre-wrap rows), applies the rotating command symbol,
+  ## and paints the whole composite via `renderToolViewport`. The
   ## controller calls this instead of rendering the viewport directly,
   ## removing the two-writer race on `engine.toolViewportRows`.
-  ## `bannerRows` is the count of leading rows that are banner (white),
-  ## not output (grey); used by the engine to color the live viewport.
   {.cast(gcsafe).}:
     acquire frameModelLock
-    frameModelShared.viewportRows = @rows
-    frameModelShared.viewportBannerRows = bannerRows
+    frameModelShared.viewport = ViewportSnapshot(
+      active: true, banner: banner, lines: @lines,
+      exitCode: exitCode, idx: idx, maxLines: maxLines)
+    release frameModelLock
+
+proc clearAnimViewport*() {.gcsafe.} =
+  ## Mark the viewport snapshot inactive (no live bash tool viewport).
+  {.cast(gcsafe).}:
+    acquire frameModelLock
+    frameModelShared.viewport = ViewportSnapshot(active: false)
     release frameModelLock
 
 proc currentFrameFromModel*(): FooterFrame {.gcsafe.} =
@@ -906,37 +917,36 @@ proc guiLoop(unused: string) {.thread.} =
           if m.label.hasElapsedSuffix: m.label
           else: m.label & "  " & $secs & "s"
         let frame = tokenBarFrame(label)
-        let vpRows = m.viewportRows
-        if vpRows.len > 0:
-          # Own the viewport+footer composite: read the rows from the
-          # model, apply the rotating command symbol to a LOCAL copy, and
-          # paint via renderToolViewport. No mutation of shared
-          # engine.toolViewportRows[0] (the old updateToolViewportSymbol
-          # path), so no race with the controller's row appends.
-          var rows = vpRows
-          if commandStatusActive.load(moRelaxed) and rows[0].len > 0:
-            # Apply the current command symbol (starts at `$`, index 0) to
-            # row 0. In normal mode advance the index so the next tick shows
-            # the next symbol — the live "currency ticker" effect during bash
-            # execution. In test mode the index stays put so every captured
-            # frame shows `$` (the controller bakes the same index into each
-            # renderView), matching the golden fixtures. We own this
-            # composite, so the swap is on a local copy, not shared engine
-            # state — no mutation of `engine.toolViewportRows`.
-            # Skip the rotation when row 0 already shows the exit-failure
-            # icon `Ø` (commandIcon bakes it once exitCode > 0): that icon is
-            # terminal, not part of the live rotation.
-            if not rows[0].startsWith("Ø"):
-              let sym = nextCommandSymbol()
-              if not testFrameMode():
-                discard commandSymbolIndex.fetchAdd(1, moRelease)
-              let firstLen = runeLenAt(rows[0], 0)
-              if firstLen > 0:
-                rows[0] = sym & rows[0].substr(firstLen)
+        let snap = m.viewport
+        if snap.active:
+          # Re-derive the wrapped rows from the snapshot at the live
+          # terminal width each tick. Pre-wrap rows frozen at an old width
+          # stacked fragments into scrollback after a resize (the erase
+          # walk-up lagged the rows the terminal actually held); re-wrapping
+          # here keeps the painted rows and the engine's erase bookkeeping in
+          # sync with the current geometry.
+          let termW = currentTermW()
+          var view = initStreamingView(
+            snap.maxLines, snap.idx, snap.banner)
+          view.exitCode = snap.exitCode
+          # Apply the rotating command symbol (starts at `$`, index 0) for
+          # the live "currency ticker" effect during bash execution. The
+          # viewport repaints every 80ms; advance the index only every 4th
+          # frame (~320ms/symbol) so it reads as a slow ticker, not a blur.
+          # In test mode the index never advances so every captured frame
+          # shows `$`, matching the golden fixtures. Skip once exitCode > 0:
+          # `commandIcon` bakes the terminal `Ø` then.
+          if commandStatusActive.load(moRelaxed) and snap.exitCode <= 0:
+            if not testFrameMode() and i mod 4 == 0:
+              discard commandSymbolIndex.fetchAdd(1, moRelease)
+            view.symbol = nextCommandSymbol()
+          for line in snap.lines:
+            addLine(view, line)
+          let bannerRows = bannerRowCountAt(view, termW)
+          let rows = viewportRowsAt(view, termW)
           termengine.renderToolViewport(rows, frame,
                                         inputThreadRunning, inputEditor,
-                                        currentTermW(),
-                                        m.viewportBannerRows)
+                                        termW, bannerRows)
         else:
           termengine.renderFooter(frame, inputThreadRunning, inputEditor,
                                   currentTermW())
@@ -1077,7 +1087,7 @@ proc stopBarTick*(): int =
   let m = getFrameModel()
   if m.mode != amBarTick: return 0
   let elapsed = (epochTime() - barTickStart).int
-  setAnimViewport(@[])
+  clearAnimViewport()
   stopGui()
   commandStatusActive.store(false, moRelaxed)
   setAnimMode(amIdle)

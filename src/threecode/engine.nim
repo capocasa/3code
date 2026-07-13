@@ -52,6 +52,12 @@ type
     ## scrollback (the previous item's trailing `\r\n\r\n`), not volatile
     ## chrome. Walk-up codepaths stop one row short to preserve it.
     gapIsSeparator: bool
+    ## Terminal width at the last paint. A width change means the terminal
+    ## reflowed already-painted rows (a wide banner wraps to more rows, a
+    ## narrow one to fewer), so the relative walk-up from the stale
+    ## `toolViewportRows.len` no longer reaches the reflowed stale content.
+    ## On a change the erase inflates to clear the worst case.
+    lastPaintedWidth: int
 
 var defaultEngine*: TerminalEngine
 
@@ -218,11 +224,24 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
       else:
         frame.footerFrameBytes(width)
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
+      let reflowed = e.lastPaintedWidth > 0 and width > 0 and
+        width != e.lastPaintedWidth
       stdout.write termio.SyncBegin
       stdout.write "\x1b[?25l"
       if inputRunning and editor != nil:
         refreshEditorWidth(editor[])
-        let up = max(0, e.walkUp(editor[]))
+        # A width change reflowed the already-painted volatile rows: a wide
+        # banner/output wraps to more rows (or fewer) on screen, but the
+        # stored `toolViewportRows.len` still holds the pre-reflow count, so a
+        # plain walkUp would fall short and leave stale fragments. Inflate the
+        # erase to clear the whole volatile region — bounded by the terminal
+        # height, which always covers the reflowed stale content.
+        let up = if reflowed:
+            max(0, editorRowsAboveCursor(editor[]) +
+              e.paintedFooterRows + e.liveContentRows.len +
+              (try: terminalHeight() except CatchableError: 24))
+          else:
+            max(0, e.walkUp(editor[]))
         stdout.write "\r"
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
@@ -248,6 +267,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         if bytes.len > 0:
           stdout.write bytes
         e.noteNoFooter()
+      e.lastPaintedWidth = width
       stdout.write termio.SyncEnd
       stdout.flushFile
 

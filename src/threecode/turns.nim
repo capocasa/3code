@@ -89,13 +89,17 @@ proc runBashWithViewport(act: Action; cache: ReadCache; stub: JsonNode;
   let promptOwnsStdin = inputEditor != nil
 
   proc renderView() =
-    view.setSymbol(nextCommandSymbol())
-    # Push the viewport rows into the shared model; the GUI thread owns the
-    # viewport+footer composite during amBarTick and paints it. In test
-    # mode, request one paint and wait for the ack so the harness captures
-    # each streamed line as a discrete frame (the frame event fires after
-    # this returns). In normal mode the 80ms cadence paints the rows.
-    setAnimViewport(view.viewportRows(), view.bannerRowCount())
+    # Push a snapshot of the viewport's raw inputs into the shared model;
+    # the GUI thread owns the viewport+footer composite during amBarTick
+    # and re-wraps it at the live terminal width each tick (so a resize
+    # between output lines re-wraps instead of replaying stale rows). The
+    # GUI thread owns the rotating command symbol too, so don't set it
+    # here. In test mode, request one paint and wait for the ack so the
+    # harness captures each streamed line as a discrete frame (the frame
+    # event fires after this returns). In normal mode the 80ms cadence
+    # paints the rows.
+    setAnimViewport(view.banner, view.buf, view.exitCode, view.idx,
+                    view.maxLines)
     requestViewportPaint()
 
   setToolStdinWatcherEnabled(not promptOwnsStdin)
@@ -146,7 +150,7 @@ proc runBashWithViewport(act: Action; cache: ReadCache; stub: JsonNode;
     # The GUI thread still owns the composite, so clear via the model + a
     # paint request rather than rendering directly.
     if getCurrentException() != nil:
-      setAnimViewport(@[])
+      clearAnimViewport()
       requestViewportPaint()
 
 proc pendingReceiptBytes(): string =

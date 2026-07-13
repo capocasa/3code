@@ -114,6 +114,19 @@ type
     amSpinner,  # spinner running (reasoning / waiting for first content)
     amBarTick   # bar-tick running (tool executing)
 
+  ViewportSnapshot* = object
+    ## Raw inputs needed to re-wrap the bash tool viewport at the live
+    ## terminal width. The controller pushes a snapshot; the GUI thread
+    ## re-derives `viewportRows` from it each tick so a resize between
+    ## output lines re-wraps instead of replaying stale pre-wrap rows.
+    ## `active` is false when no viewport is live.
+    active*: bool
+    banner*: string
+    lines*: seq[string]
+    exitCode*: int
+    idx*: int
+    maxLines*: int
+
   FrameModel* = object
     ## Single source of truth for what the GUI animation thread paints.
     ## The controller writes it under `frameModelLock`; the animation thread
@@ -128,10 +141,7 @@ type
     ticker*: string    # reasoning ticker tail text
     elapsed*: int      # seconds (spinner) or whole-second bar-tick count
     clearRows*: int    # for ffClear frames at teardown
-    viewportRows*: seq[string]  # bash tool viewport rows (owned by the GUI
-                                # thread during amBarTick; the controller
-                                # pushes them via setAnimViewport)
-    viewportBannerRows*: int    # leading viewport rows that are banner
+    viewport*: ViewportSnapshot
 
 const
   DefaultWidth* = 80

@@ -63,11 +63,13 @@ proc setSymbol*(v: var StreamingView; symbol: string) =
 proc setExitCode*(v: var StreamingView; code: int) =
   v.exitCode = code
 
-proc wrappedRows(line: string): seq[string] =
-  let termW = try: terminalWidth() except CatchableError: 80
+proc wrappedRowsAt(line: string; termW: int): seq[string] =
   let bodyW = max(20, termW - 3)
   for chunk in charWrapAnsi(line, bodyW):
     result.add "  " & chunk
+
+proc wrappedRows(line: string): seq[string] =
+  wrappedRowsAt(line, try: terminalWidth() except CatchableError: 80)
 
 proc visibleOutputLines(v: StreamingView): seq[string] =
   var logical: seq[string]
@@ -81,17 +83,25 @@ proc visibleOutputLines(v: StreamingView): seq[string] =
       logical.add v.buf[i]
   logical
 
-proc viewportRows*(v: StreamingView): seq[string] =
-  let termW = try: terminalWidth() except CatchableError: 80
+proc viewportRowsAt*(v: StreamingView; termW: int): seq[string] =
+  ## Re-wrap the viewport at an explicit width. The GUI thread calls this
+  ## each tick so the rows always match the live terminal geometry — a
+  ## resize between output lines re-wraps the banner/output instead of
+  ## replaying stale pre-wrap rows (which stacked fragments into scrollback).
   for row in bannerWrapRows(v.commandIcon & " ", v.banner, termW):
     result.add row
   for line in v.visibleOutputLines():
-    for row in wrappedRows(line):
+    for row in wrappedRowsAt(line, termW):
       result.add row
 
-proc bannerRowCount*(v: StreamingView): int =
-  let termW = try: terminalWidth() except CatchableError: 80
+proc viewportRows*(v: StreamingView): seq[string] =
+  viewportRowsAt(v, try: terminalWidth() except CatchableError: 80)
+
+proc bannerRowCountAt*(v: StreamingView; termW: int): int =
   bannerWrapRows(v.commandIcon & " ", v.banner, termW).len
+
+proc bannerRowCount*(v: StreamingView): int =
+  bannerRowCountAt(v, try: terminalWidth() except CatchableError: 80)
 
 proc finalTranscriptRows*(banner: string; code: int; lines: openArray[string];
                           idx: int; maxLines = StreamMaxLines): seq[string] =
