@@ -1,6 +1,9 @@
 import std/[net, os, sequtils, strformat, strutils, tables, unicode, times]
 import types
 import threecode/unicodewidth
+when defined(posix):
+  import std/posix except Time
+  import std/termios
 
 # ---------- Color palette ----------
 #
@@ -95,20 +98,119 @@ proc applyColorOverrides*(dark, light: Table[string, string]) =
   LightPalette = lp
   applyPalette(colorMode)
 
-proc detectColorMode*(force: ColorMode = cmDark): ColorMode =
-  ## Decide dark vs light. `force == cmLight` (i.e. `--light` was passed)
-  ## wins. Otherwise inspect `$COLORFGBG` (the "fg;bg" convention): the
-  ## background field > 7 means a light background, so we select light;
-  ## <= 7 or unknown stays dark (prior behaviour).
+func parseHex16*(s: string): int =
+  ## Parse a 1-to-4 hex-digit colour channel value (OSC 11 emits 1, 2, or
+  ## 4 hex digits per channel) scaled to 0..255.
+  if s.len == 0: return 0
+  try:
+    result = parseHexInt(s)
+  except ValueError:
+    return 0
+  case s.len
+  of 1: result = result * 255 div 15      # 0..15
+  of 2: result = result                  # 0..255
+  of 3: result = result * 255 div 4095    # 0..4095
+  of 4: result = result * 255 div 65535   # 0..65535
+  else: result = (result * 255) div ((1 shl (4 * s.len)) - 1)
+
+func parseOscBg*(reply: string): (int, int, int) =
+  ## Extract the (r,g,b) background from an OSC 11 reply, which arrives as
+  ## `ESC ] 11 ; rgb:RRRR/GGGG/BBBB ST` (or the legacy `rgb:R/G/B` / a bare
+  ## `#rrggbb`). Returns (-1,-1,-1) when no colour can be parsed, so the
+  ## caller treats it as undetectable (stays dark). The trailing terminator
+  ## (BEL or ESC-backslash ST) and any surrounding OSC framing are stripped
+  ## before the colour spec is read.
+  let raw = reply.strip()
+  if raw.len == 0: return (-1, -1, -1)
+  var s = raw
+  # Drop a trailing BEL (0x07) or ST (ESC \).
+  if s.len > 0 and s[^1] == '\x07': s.setLen(s.len - 1)
+  elif s.len >= 2 and s[^2] == '\x1b' and s[^1] == '\\': s.setLen(s.len - 2)
+  let i = s.find("rgb:")
+  if i >= 0:
+    # Keep only hex digits and the channel separators so a stray terminator
+    # or OSC framing byte never leaks into a channel value.
+    var rest = ""
+    for c in s[i + 4 .. ^1]:
+      if c in {'0'..'9', 'a'..'f', 'A'..'F', '/'}: rest.add c
+    let parts = rest.split('/')
+    if parts.len >= 3:
+      return (parseHex16(parts[0]), parseHex16(parts[1]), parseHex16(parts[2]))
+  let j = s.find('#')
+  if j >= 0 and s.len - (j + 1) >= 6:
+    let hex = s[j + 1 .. j + 6]
+    return (parseHex16(hex[0 .. 1]), parseHex16(hex[2 .. 3]),
+            parseHex16(hex[4 .. 5]))
+  (-1, -1, -1)
+
+func luminance*(r, g, b: int): float =
+  ## Perceptual luminance (ITU-R BT.601 weights). 0..255 -> 0..1.
+  (0.299 * r.float + 0.587 * g.float + 0.114 * b.float) / 255.0
+
+proc detectColorMode*(force: ColorMode = cmAuto): ColorMode =
+  ## Resolve the active colour mode. A forced `cmDark`/`cmLight` wins
+  ## directly. `cmAuto` queries the terminal for its background colour via
+  ## OSC 11 (`ESC ] 11 ; ? BEL`), parses the `rgb:...` reply, and picks
+  ## light when the background luminance is high. On any failure (not a
+  ## tty, the terminal doesn't answer within the poll deadline, an
+  ## unparseable reply) it defaults to dark.
+  ##
+  ## Under the tty test harness the PTY doesn't answer OSC queries, so the
+  ## query bytes would pollute captured frames; detection skips the query
+  ## there (signalled by `THREECODE_TEST_FRAME_FD`) and stays dark.
+  if force == cmDark: return cmDark
   if force == cmLight: return cmLight
-  let env = getEnv("COLORFGBG")
-  if env.len > 0:
-    let parts = env.split(';')
-    if parts.len >= 2:
-      try:
-        if parts[^1].parseInt > 7: return cmLight
-      except ValueError: discard
-  cmDark
+  if getEnv("THREECODE_TEST_FRAME_FD").len > 0: return cmDark
+  when defined(posix):
+    const FdStdin {.used.} = 0.cint
+    if isatty(FdStdin) == 0: return cmDark
+    var orig: Termios
+    if tcGetAttr(FdStdin, addr orig) != 0: return cmDark
+    var rawMode = orig
+    rawMode.c_lflag = rawMode.c_lflag and not Cflag(ICANON or ECHO)
+    rawMode.c_cc[VMIN] = 0.char
+    rawMode.c_cc[VTIME] = 0.char
+    if tcSetAttr(FdStdin, TCSANOW, addr rawMode) != 0: return cmDark
+    # Drain any buffered input before the query so it isn't mistaken for
+    # the reply; restore termios no matter how we exit.
+    var drain: char
+    while posix.read(FdStdin, addr drain, 1) > 0: discard
+    try:
+      stdout.write "\x1b]11;?\x07"
+      stdout.flushFile()
+      var buf = ""
+      buf.setLen(256)
+      var total = 0
+      let deadlineMs = 150.cint
+      var elapsedMs = 0
+      const StepMs = 25.cint
+      while elapsedMs < deadlineMs:
+        var pfd: TPollfd
+        pfd.fd = FdStdin
+        pfd.events = POLLIN
+        let r = poll(addr pfd, 1.Tnfds, StepMs)
+        elapsedMs += StepMs.int
+        if r > 0 and (pfd.revents and POLLIN) != 0:
+          let n = posix.read(FdStdin, addr buf[total], buf.len - total)
+          if n > 0:
+            total += n
+            # The reply is terminated by BEL (0x07) or ST (ESC \); stop
+            # once a terminator lands so we don't block for the full window.
+            if '\x07' in buf.toOpenArray(0, total - 1) or
+               (total >= 2 and buf[total - 2] == '\x1b' and buf[total - 1] == '\\'):
+              break
+          else:
+            break
+      let reply = buf[0 ..< total]
+      let (r, g, b) = parseOscBg(reply)
+      if r >= 0:
+        if luminance(r, g, b) > 0.5: return cmLight
+        return cmDark
+      return cmDark
+    finally:
+      discard tcSetAttr(FdStdin, TCSANOW, addr orig)
+  else:
+    cmDark
 
 proc splitColorOverrides*(flat: Table[string, string]):
     tuple[both, light: Table[string, string]] =

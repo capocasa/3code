@@ -1,29 +1,55 @@
 import std/[os, unittest, tables]
 import threecode/[util, types]
 
-suite "color mode detection":
-  setup:
-    putEnv("COLORFGBG", "0;0")
-
-  test "COLORFGBG dark background stays dark":
-    putEnv("COLORFGBG", "0;0")
-    check detectColorMode(cmDark) == cmDark
-    putEnv("COLORFGBG", "7;0")
+suite "color mode resolution":
+  test "forced dark stays dark":
     check detectColorMode(cmDark) == cmDark
 
-  test "COLORFGBG light background selects light":
-    putEnv("COLORFGBG", "0;15")
-    check detectColorMode(cmDark) == cmLight
-    putEnv("COLORFGBG", "default;15")
-    check detectColorMode(cmDark) == cmLight
-
-  test "--light force wins over a dark background":
-    putEnv("COLORFGBG", "0;0")
+  test "forced light stays light":
     check detectColorMode(cmLight) == cmLight
 
-  test "missing/unknown COLORFGBG defaults to dark":
-    putEnv("COLORFGBG", "garbage")
-    check detectColorMode(cmDark) == cmDark
+  test "auto in a non-tty defaults to dark":
+    # Under the test runner stdin is not a tty, so OSC 11 is never sent
+    # and detection falls back to dark rather than blocking.
+    check detectColorMode(cmAuto) == cmDark
+
+suite "OSC 11 background reply parsing":
+  test "parseHex16 scales 1/2/4-digit channels to 0..255":
+    check parseHex16("f") == 255
+    check parseHex16("0") == 0
+    check parseHex16("ff") == 255
+    check parseHex16("00") == 0
+    check parseHex16("7f") == 127
+    check parseHex16("ffff") == 255
+    check parseHex16("0000") == 0
+    check parseHex16("") == 0
+
+  test "parseOscBg reads rgb:RRRR/GGGG/BBBB form":
+    let (r, g, b) = parseOscBg("\x1b]11;rgb:ffff/ffff/ffff\x07")
+    check (r, g, b) == (255, 255, 255)
+
+  test "parseOscBg reads 2-digit rgb form":
+    let (r, g, b) = parseOscBg("\x1b]11;rgb:00/00/00\x07")
+    check (r, g, b) == (0, 0, 0)
+
+  test "parseOscBg reads bare #rrggbb form":
+    let (r, g, b) = parseOscBg("\x1b]11;#1e1e1e\x07")
+    check (r, g, b) == (0x1e, 0x1e, 0x1e)
+
+  test "parseOscBg returns -1 on unparseable reply":
+    check parseOscBg("") == (-1, -1, -1)
+    check parseOscBg("garbage") == (-1, -1, -1)
+
+  test "luminance is high for white, low for black":
+    check luminance(255, 255, 255) > 0.9
+    check luminance(0, 0, 0) < 0.1
+  test "luminance threshold classifies light vs dark backgrounds":
+    # Terminal.app "Basic" white profile is near-white; a typical dark
+    # profile is near-black. The 0.5 cut must separate them.
+    let (wr, wg, wb) = parseOscBg("\x1b]11;rgb:ffff/ffff/ffff\x07")
+    check luminance(wr, wg, wb) > 0.5
+    let (dr, dg, db) = parseOscBg("\x1b]11;rgb:0000/0000/0000\x07")
+    check luminance(dr, dg, db) < 0.5
 
 suite "palette application":
   teardown:

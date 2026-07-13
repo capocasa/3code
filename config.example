@@ -17,17 +17,19 @@ current = "baseten.glm5"
 ; notify = off ; turn off the desktop notification that fires when a turn ends (on by default)
 ; bash_path = "C:\\tools\\msys64\\usr\\bin\\bash.exe"  ; Windows only: override bash detection
 
-# Colour mode. 3code picks dark or light automatically from $COLORFGBG
-# (a light terminal background triggers light mode; the macOS default
-# white Terminal does, for instance). Override with --light / --dark on
-# the command line.
+# Colour mode. 3code detects dark vs bright-background automatically by
+# querying the terminal background (OSC 11). Set `mode` to pin it instead:
+#   mode = "auto"    detect from the terminal (the default)
+#   mode = "dark"    force the dark palette
+#   mode = "bright"  force the bright-background palette
+; mode = "bright"
 #
 # The white-family colours can be overridden per mode. A plain key sets
-# BOTH modes; a "-light" key sets light mode only and wins there. Keys
+# BOTH modes; a "-light" key sets bright mode only and wins there. Keys
 # are bright-white, off-white, dim-white. Values are quoted ANSI escape
 # sequences (parsecfg interprets backslash escapes, so "\x1b[30m" becomes
 # a real ESC byte). Defaults:
-#   bright-white = "\x1b[97m"   (dark)  / "\x1b[30m"   (light, black)
+#   bright-white = "\x1b[97m"   (dark)  / "\x1b[30m"   (bright, black)
 #   off-white    = "\x1b[38;5;252m" / "\x1b[38;5;238m"
 #   dim-white    = "\x1b[38;5;244m" / "\x1b[38;5;250m"
 # The colourful colours (cyan/green/red/magenta) are fixed in both modes.

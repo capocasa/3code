@@ -257,6 +257,14 @@ proc parseConfigFile*(path: string): (string, string, seq[ProviderRec], Table[st
           of "on", "true", "yes", "1": streamingEnabled = true
           of "off", "false", "no", "0": streamingEnabled = false
           else: discard
+        of "mode":
+          # `auto` detects the background (default); `dark`/`bright` force a
+          # palette. `light` is accepted as an alias for `bright`.
+          case v.strip.toLowerAscii
+          of "auto": colorModePref = cmAuto
+          of "dark": colorModePref = cmDark
+          of "bright", "light": colorModePref = cmLight
+          else: discard
         of "bash_path", "bash-path":
           bashPathOverride = v
         else: discard
@@ -300,6 +308,10 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "streaming = \"off\"\n"
   if not notifyEnabled:
     buf.add "notify = \"off\"\n"
+  # Persist the colour mode only when it differs from `auto` (the default).
+  if colorModePref != cmAuto:
+    let label = if colorModePref == cmDark: "dark" else: "bright"
+    buf.add "mode = " & quoteVal(label) & "\n"
   for pr in providers:
     buf.add "\n[provider]\n"
     buf.add "name = " & quoteVal(pr.name) & "\n"

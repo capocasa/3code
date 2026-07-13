@@ -23,12 +23,21 @@ var notifyEnabled*: bool = true
 
 type
   ColorMode* = enum
-    cmDark, cmLight
+    cmAuto,   ## detect from the terminal (OSC 11 background query)
+    cmDark,   ## force dark palette
+    cmLight   ## force light/bright-background palette
 
 var colorMode*: ColorMode = cmDark
-  ## Active colour mode. Dark by default (prior behaviour). Set at startup
-  ## from `--light`/`--dark`, `$COLORFGBG` detection, or `[colors]` config.
+  ## Resolved active colour mode (always `cmDark` or `cmLight` after
+  ## startup; `cmAuto` is only ever a request, resolved to one of the
+  ## two before any colored output). Set in `threecode.main` from the
+  ## `[settings] mode` config key (default `auto`) then detection.
   ## Drives the white-family palette resolved in `util.applyPalette`.
+
+var colorModePref*: ColorMode = cmAuto
+  ## The raw `[settings] mode` request. `cmAuto` means detect; `cmDark`/
+  ## `cmLight` force a palette. Read during config parse, honored in
+  ## `main` before palette application.
 
 const
   ExitUsage* = 2

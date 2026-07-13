@@ -55,8 +55,6 @@ proc usage() {.noreturn.} =
   -a, --all            (reserved) with -l, accepted but a no-op for now
   -g, --good           list known-good provider/variant combos and exit
   -x, --experimental   allow combos outside the known-good list
-      --light          force light color mode (auto-detected from $COLORFGBG)
-      --dark           force dark color mode (the default)
   -D, --debug          colored debug trace to stderr
   -v, --version        print version
   -h, --help           this message
@@ -173,7 +171,6 @@ proc main() =
   var model = ""
   var args: seq[string]
   var pending = ""  # flag awaiting a space-separated value
-  var colorForce: ColorMode = cmDark
   var resume = false
   var resumeId = ""
   var sessionOut = ""
@@ -188,8 +185,6 @@ proc main() =
       of "h", "help": usage()
       of "g", "good": printKnownGood(); return
       of "x", "experimental": experimentalEnabled = true
-      of "light": colorForce = cmLight
-      of "dark":  colorForce = cmDark  # explicit default; accepted for symmetry
       of "D", "debug": debugEnabled = true
       of "i", "interactive": interactive = true
       of "m", "model":
@@ -227,11 +222,11 @@ proc main() =
   if pending != "":
     die("option --" & pending & " requires a value", ExitUsage)
 
-  # Resolve color mode and apply the palette before any colored output:
-  # update notices, onboarding, and the welcome screen all render below.
-  # Config overrides (the [colors] section) are layered on after the config
-  # file is loaded, but detection must run here so pre-config output is sane.
-  applyPalette(detectColorMode(colorForce))
+  # Apply a provisional palette before any colored output (update notices,
+  # onboarding). The mode can only be forced to dark/light here; full
+  # detection runs after the config file is read so `[settings] mode` can
+  # pin a palette, then `[colors]` overrides are layered on top.
+  applyPalette(cmDark)
 
   if listSessions:
     let paths = listSessionPathsForCwd(safeCwd())
@@ -309,6 +304,11 @@ proc main() =
 
   var activeColorKeys: Table[string, string]
   (activeCurrent, activeProviders, activeColorKeys) = loadStateOrEmpty(configPath())
+  # Resolve the real mode now that `[settings] mode` has been read: detect
+  # the terminal background unless the config pinned a palette. The palette
+  # is re-applied so the welcome screen (rendered next) uses the resolved
+  # colors before `[colors]` overrides are layered on top.
+  applyPalette(detectColorMode(colorModePref))
   if activeColorKeys.len > 0:
     let (both, lightOnly) = splitColorOverrides(activeColorKeys)
     applyColorOverrides(both, lightOnly)

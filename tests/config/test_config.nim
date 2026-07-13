@@ -113,6 +113,47 @@ suite "config: notify toggle":
     let raw2 = readFile(tmp)
     check raw2.find("notify") < 0  # on is the default — clean config
 
+suite "config: [settings] mode":
+  var tmp = ""
+
+  setup:
+    tmp = getTempDir() / "3code-test-mode.ini"
+    colorModePref = cmAuto
+
+  teardown:
+    removeFile(tmp)
+    colorModePref = cmAuto
+
+  test "parseConfigFile reads mode = bright as cmLight":
+    writeFile(tmp, "[settings]\nmode = \"bright\"\n")
+    discard parseConfigFile(tmp)
+    check colorModePref == cmLight
+
+  test "parseConfigFile accepts light as an alias for bright":
+    writeFile(tmp, "[settings]\nmode = \"light\"\n")
+    discard parseConfigFile(tmp)
+    check colorModePref == cmLight
+
+  test "parseConfigFile reads mode = dark as cmDark":
+    writeFile(tmp, "[settings]\nmode = \"dark\"\n")
+    discard parseConfigFile(tmp)
+    check colorModePref == cmDark
+
+  test "parseConfigFile leaves the default cmAuto when mode is absent":
+    writeFile(tmp, "[settings]\ncurrent = \"p.m\"\n")
+    discard parseConfigFile(tmp)
+    check colorModePref == cmAuto
+
+  test "writeConfigFile persists mode only when forced (auto is the default)":
+    colorModePref = cmLight
+    writeConfigFile(tmp, "p.m", @[])
+    let raw = readFile(tmp)
+    check raw.find("mode = \"bright\"") >= 0
+    colorModePref = cmAuto
+    writeConfigFile(tmp, "p.m", @[])
+    let raw2 = readFile(tmp)
+    check raw2.find("mode") < 0  # auto is the default — clean config
+
 suite "config: [colors] section":
   var tmp = ""
 
