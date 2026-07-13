@@ -157,9 +157,8 @@ proc toolCallToAction*(family, name: string, args: JsonNode): Action =
   of "gpt-oss": dispatchGptOss(family, name, args)
   else: die "unknown family in tool dispatch: '" & family & "'"
 
-proc previewCmd*(body: string, width = 64): string =
-  let first = body.strip.splitLines[0]
-  if first.len > width: first[0 ..< width-1] & "…" else: first
+proc previewCmd*(body: string): string =
+  body.strip.splitLines[0]
 
 proc bannerFor*(act: Action): string =
   ## Returns the parameter portion of the tool banner (no icon/prefix).

@@ -1589,6 +1589,13 @@ suite "terminal visual contract":
             "stream": ["slow-done"],
             "output": "slow-done\n",
             "code": 0
+          }),
+          toolCall("call_long", "bash", %*{
+            "command": "echo " & "x".repeat(120)
+          }, %*{
+            "stream": ["x".repeat(120)],
+            "output": "x".repeat(120) & "\n",
+            "code": 0
           })
         ],
         "usage": {
@@ -1633,6 +1640,10 @@ suite "terminal visual contract":
     tty.expectInHistory "scroll-10"
     tty.expectInHistory "$ sleep 3; printf 'slow-done"
     tty.expectInHistory "slow-done"
+    # A long bash command wraps to fill the terminal width instead of being
+    # clipped at a fixed column. The full command is present in scrollback,
+    # split across rows; its tail (well past the old 64-char clip) is visible.
+    tty.expectInHistory "echo xxxxxxxxxx"
     tty.expectInHistory "Bash checks complete."
     tty.expectTokenBar(["○", "↑210", "↓20"])
     tty.drain(200)

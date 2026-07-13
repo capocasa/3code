@@ -131,6 +131,7 @@ type
     viewportRows*: seq[string]  # bash tool viewport rows (owned by the GUI
                                 # thread during amBarTick; the controller
                                 # pushes them via setAnimViewport)
+    viewportBannerRows*: int    # leading viewport rows that are banner
 
 const
   DefaultWidth* = 80

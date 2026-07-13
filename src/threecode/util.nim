@@ -524,6 +524,25 @@ proc charWrapAnsi*(s: string, width: int): seq[string] =
   if line.len > 0:
     result.add line
 
+const BannerMaxRows* = 3
+
+proc bannerWrapRows*(prefix, body: string; termW: int): seq[string] =
+  ## Wrap a tool banner (icon + command/path) across the terminal width,
+  ## mirroring how output lines wrap. The `prefix` (e.g. "$ ") occupies
+  ## the first row; continuation rows align under the body with a 2-space
+  ## indent. Wide terminals show the whole banner; narrow ones wrap instead
+  ## of clipping. After `BannerMaxRows` rows the remainder is dropped with an
+  ## ellipsis so an extremely long banner cannot take over the fat prompt.
+  let firstW = max(1, termW - visibleWidth(prefix))
+  let contW = max(1, termW - 2)
+  var first = true
+  for chunk in charWrapAnsi(body, if first: firstW else: contW):
+    if result.len >= BannerMaxRows:
+      result[^1] = utf8ByteCut(result[^1], max(1, result[^1].len - 1)) & "…"
+      return
+    result.add (if first: prefix else: "  ") & chunk
+    first = false
+
 proc isMdTableRow*(line: string): bool =
   ## A markdown-table row both opens and closes with a `|`. Rejects
   ## bare prose that happens to contain a pipe.

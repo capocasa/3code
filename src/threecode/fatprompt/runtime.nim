@@ -302,16 +302,19 @@ proc setAnimSpinner*(spinner: string; elapsed: int) {.gcsafe.} =
     frameModelShared.elapsed = elapsed
     release frameModelLock
 
-proc setAnimViewport*(rows: openArray[string]) {.gcsafe.} =
+proc setAnimViewport*(rows: openArray[string]; bannerRows = 1) {.gcsafe.} =
   ## Push the bash tool viewport rows into the shared model. During
   ## `amBarTick` the GUI thread owns the viewport+footer composite: it
   ## reads these rows, applies the rotating command symbol to a local
   ## copy, and paints the whole composite via `renderToolViewport`. The
   ## controller calls this instead of rendering the viewport directly,
   ## removing the two-writer race on `engine.toolViewportRows`.
+  ## `bannerRows` is the count of leading rows that are banner (white),
+  ## not output (grey); used by the engine to color the live viewport.
   {.cast(gcsafe).}:
     acquire frameModelLock
     frameModelShared.viewportRows = @rows
+    frameModelShared.viewportBannerRows = bannerRows
     release frameModelLock
 
 proc currentFrameFromModel*(): FooterFrame {.gcsafe.} =
@@ -919,7 +922,8 @@ proc guiLoop(unused: string) {.thread.} =
                 rows[0] = sym & rows[0].substr(firstLen)
           termengine.renderToolViewport(rows, frame,
                                         inputThreadRunning, inputEditor,
-                                        currentTermW())
+                                        currentTermW(),
+                                        m.viewportBannerRows)
         else:
           termengine.renderFooter(frame, inputThreadRunning, inputEditor,
                                   currentTermW())

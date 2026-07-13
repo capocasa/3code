@@ -95,7 +95,7 @@ proc runBashWithViewport(act: Action; cache: ReadCache; stub: JsonNode;
     # mode, request one paint and wait for the ack so the harness captures
     # each streamed line as a discrete frame (the frame event fires after
     # this returns). In normal mode the 80ms cadence paints the rows.
-    setAnimViewport(view.viewportRows())
+    setAnimViewport(view.viewportRows(), view.bannerRowCount())
     requestViewportPaint()
 
   setToolStdinWatcherEnabled(not promptOwnsStdin)

@@ -82,10 +82,16 @@ proc visibleOutputLines(v: StreamingView): seq[string] =
   logical
 
 proc viewportRows*(v: StreamingView): seq[string] =
-  result.add v.commandIcon & " " & v.banner
+  let termW = try: terminalWidth() except CatchableError: 80
+  for row in bannerWrapRows(v.commandIcon & " ", v.banner, termW):
+    result.add row
   for line in v.visibleOutputLines():
     for row in wrappedRows(line):
       result.add row
+
+proc bannerRowCount*(v: StreamingView): int =
+  let termW = try: terminalWidth() except CatchableError: 80
+  bannerWrapRows(v.commandIcon & " ", v.banner, termW).len
 
 proc finalTranscriptRows*(banner: string; code: int; lines: openArray[string];
                           idx: int; maxLines = StreamMaxLines): seq[string] =

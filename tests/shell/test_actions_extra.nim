@@ -18,11 +18,9 @@ suite "actions: previewCmd":
   test "shows first line stripped":
     check previewCmd("  ls -la\nother") == "ls -la"
 
-  test "truncates long lines":
+  test "keeps long lines whole":
     let longCmd = "echo " & "a".repeat(100)
-    let p = previewCmd(longCmd)
-    check p.len <= 66
-    check p.endsWith("…")
+    check previewCmd(longCmd) == longCmd
 
   test "short command unchanged":
     check previewCmd("git status") == "git status"
