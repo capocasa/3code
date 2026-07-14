@@ -49,6 +49,7 @@ type
     ## streaming. Like the tool viewport it is erased and rewritten each
     ## frame; committed lines go to real scrollback via `appendTranscript`.
     liveContentRows: seq[string]
+    liveContentHasGap: bool  # separator row above live content, matching committed scrollback spacing
     editorRedrawPending: bool
     editorRedrawFooterRows: int
     ## True once any non-empty transcript content has been committed. Gates
@@ -82,12 +83,16 @@ proc editorRowsAboveCursor(ed: var minline.LineEditor): int =
 proc viewportGapRows(e: TerminalEngine): int {.inline.} =
   if e.toolViewportHasGap and e.toolViewportRows.len > 0: 1 else: 0
 
+proc liveContentGapRows(e: TerminalEngine): int {.inline.} =
+  if e.liveContentHasGap and e.liveContentRows.len > 0: 1 else: 0
+
 proc walkUp(e: var TerminalEngine; ed: var minline.LineEditor): int =
   ## Rows from the cursor to the top of the volatile region (ticker row).
   ## Always derived from live editor + footer state. This is the number of
   ## rows to move up before erasing the volatile region.
   editorRowsAboveCursor(ed) + e.paintedFooterRows +
-    e.viewportGapRows + e.toolViewportRows.len + e.liveContentRows.len
+    e.viewportGapRows + e.toolViewportRows.len +
+    e.liveContentGapRows + e.liveContentRows.len
 
 proc noteFooterPainted(e: var TerminalEngine; footerRowsAboveEditor: int) =
   e.paintedFooterRows = max(0, footerRowsAboveEditor)
@@ -116,6 +121,18 @@ proc writeToolViewportRows(e: TerminalEngine) =
       stdout.write GreyFg
     stdout.write row
     stdout.write Reset
+    stdout.write "\r\n"
+
+# Write the live-content rows with a leading separator row when the live
+# region sits below committed scrollback, so the gap is present during
+# streaming and commit does not push the item down (mirrors
+# `writeToolViewportRows`).
+proc writeLiveContentRows(e: TerminalEngine) =
+  if e.liveContentRows.len == 0: return
+  if e.liveContentHasGap:
+    stdout.write "\r\n"
+  for row in e.liveContentRows:
+    stdout.write row
     stdout.write "\r\n"
 
 proc syncWrite*(e: var TerminalEngine; bytes: string) =
@@ -236,6 +253,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         let up = if reflowed:
             max(0, editorRowsAboveCursor(editor[]) +
               e.paintedFooterRows + e.viewportGapRows + e.liveContentRows.len +
+              e.liveContentGapRows +
               (try: terminalHeight() except CatchableError: 24))
           else:
             max(0, e.walkUp(editor[]))
@@ -315,10 +333,9 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
         stdout.write "\x1b[J"
+        e.liveContentHasGap = e.hasScrollback
         e.liveContentRows = @rows
-        for row in rows:
-          stdout.write row
-          stdout.write "\r\n"
+        e.writeLiveContentRows()
         if bytes.len > 0:
           stdout.write bytes
           stdout.write "\r\n"
@@ -332,10 +349,9 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
         else:
           e.noteFooterPainted(footerRowsAboveEditor)
       else:
+        e.liveContentHasGap = e.hasScrollback
         e.liveContentRows = @rows
-        for row in rows:
-          stdout.write row
-          stdout.write "\r\n"
+        e.writeLiveContentRows()
         if bytes.len > 0:
           stdout.write bytes
         e.noteNoFooter()
@@ -357,6 +373,7 @@ proc clearLiveContent*(e: var TerminalEngine) {.gcsafe.} =
     # read/replace `liveContentRows` under the same lock.
     termio.withTerminalWriteLock:
       e.liveContentRows = @[]
+      e.liveContentHasGap = false
 
 proc clearLiveContent*() {.gcsafe.} =
   {.cast(gcsafe).}:
@@ -390,9 +407,7 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
         stdout.write "\x1b[J"
-        for row in e.liveContentRows:
-          stdout.write row
-          stdout.write "\r\n"
+        e.writeLiveContentRows()
         if bytes.len > 0:
           stdout.write bytes
           stdout.write "\r\n"
@@ -403,9 +418,7 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
         else:
           e.noteFooterPainted(footerRowsAboveEditor)
       else:
-        for row in e.liveContentRows:
-          stdout.write row
-          stdout.write "\r\n"
+        e.writeLiveContentRows()
         if bytes.len > 0:
           stdout.write bytes
         e.noteNoFooter()

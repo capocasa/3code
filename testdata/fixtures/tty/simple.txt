@@ -1,7 +1,7 @@
-===== 346 =====
+===== 745 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,10 +10,10 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ This is a test prompt
-===== 670 =====
+===== 623 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -25,10 +25,10 @@
   … Thinking about the test prompt
 ⣿ ○0% ↓7 0s
 ❯
-===== 166 =====
+===== 872 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -37,14 +37,15 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ This is a test prompt
+
 ● This is a test response.
 
 ⣿ ○0% ↓13 0s
 ❯
-===== 659 =====
+===== 475 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -53,32 +54,15 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ This is a test prompt
+
 ● This is a test response.
-
-
-⣿ ○0% ↓13 0s
-❯
-===== 752 =====
-
-  ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
-  ╰─╯
-
-  provider  stub
-  model     stub-model
-
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
-
-❯ This is a test prompt
-● This is a test response.
-
 
   ○1%  ↑120  ↓24  0s
 ❯
-===== 792 =====
+===== 986 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -87,6 +71,7 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ This is a test prompt
+
 ● This is a test response.
 
   ○1%  ↑120  ↓24  0s
