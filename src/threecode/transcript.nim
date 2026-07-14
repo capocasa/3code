@@ -12,13 +12,11 @@ type
   TranscriptKind* = enum
     tiUserPrompt,
     tiAssistant,
-    tiTool,
-    tiCommand
+    tiTool
 
   TranscriptItem* = object
     kind*: TranscriptKind
     marker*: string
-    title*: string
     body*: string
     attachSeparator*: bool
 
@@ -32,15 +30,6 @@ proc normalizeLines(body: string): seq[string] =
     return @[]
   text.replace("\r\n", "\n").replace("\r", "\n").splitLines
 
-proc commandBodyBytes(body: string): string =
-  for line in normalizeLines(body):
-    if line.len == 0:
-      result.add "\r\n"
-    elif line.startsWith("  "):
-      result.add line & "\r\n"
-    else:
-      result.add "  " & line & "\r\n"
-
 proc finishItem(bytes: var string; attachSeparator: bool) =
   ## Trim trailing whitespace before the write (append-only-safe). The
   ## inter-item separator is owned by `appendTranscript`; items carry no
@@ -48,28 +37,14 @@ proc finishItem(bytes: var string; attachSeparator: bool) =
   ## construction-call compatibility but no longer appends anything.)
   bytes.trimTranscriptTail()
 
-proc dropLeadingIndent(line: string): string =
-  ## Drop a leading two-space indent, skipping any opening SGR run so
-  ## styled lines (e.g. `showProfile`) keep their color but lose the
-  ## indent the plain-body layout does not want.
-  var i = 0
-  # Skip a leading CSI sequence (SGR color) if present.
-  if i + 1 < line.len and line[i] == '\e' and line[i + 1] == '[':
-    i += 2
-    while i < line.len and line[i] notin {'@'..'~'}: inc i
-    if i < line.len: inc i
-  if i + 1 < line.len and line[i] == ' ' and line[i + 1] == ' ':
-    result.add line[0 ..< i]
-    result.add line[i + 2 .. ^1]
-  else:
-    result = line
-
 proc plainCommandBodyBytes*(body: string): string =
-  ## Like `commandBodyBytes` but without the leading `: title` marker and
-  ## with the two-space indent dropped. ANSI styling is preserved so
-  ## `showProfile` can mark the active provider/model/reasoning values.
+  ## Format captured command output as a flush-left transcript body: each
+  ## line on its own row, no title marker, no indent, ANSI styling preserved.
+  ## Command bodies already emit flush-left, so this is normalization only
+  ## (collapse \r\n/\r to \r\n, trim the trailing separator owned by
+  ## `appendTranscript`).
   for line in normalizeLines(body):
-    result.add line.dropLeadingIndent() & "\r\n"
+    result.add line & "\r\n"
   result.finishItem(true)
 
 proc userPromptItem*(line: string): TranscriptItem =
@@ -84,13 +59,6 @@ proc toolItem*(act: Action; res: string; code, idx: int; diff = "";
                elapsedS = -1): TranscriptItem =
   TranscriptItem(kind: tiTool,
                  body: toolTranscriptBytes(act, res, code, idx, diff, elapsedS),
-                 attachSeparator: true)
-
-proc commandItem*(name, body: string; ok = true): TranscriptItem =
-  TranscriptItem(kind: tiCommand,
-                 marker: (if ok: ":" else: "!"),
-                 title: name,
-                 body: body,
                  attachSeparator: true)
 
 proc emptyAssistantBytes(attachReceipt: bool; receipt = ""): string =
@@ -111,12 +79,6 @@ proc formatItem*(item: TranscriptItem): string =
         renderAssistantContent(item.body)
   of tiTool:
     result = item.body
-  of tiCommand:
-    result.add item.marker
-    if item.title.len > 0:
-      result.add " " & item.title
-    result.add "\r\n"
-    result.add commandBodyBytes(item.body)
   result.finishItem(item.attachSeparator)
 
 proc attachReceipt*(bytes: var string; receipt: string; attachSeparator: bool) =

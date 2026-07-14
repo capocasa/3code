@@ -364,22 +364,18 @@ proc main() =
           res = CommandResult(recognized: true, ok: false, name: "command",
                               body: "unknown command: " & cmd.strip &
                                     "  (try :help)\n")
-        let bytes =
-          if res.plainBody:
-            plainCommandBodyBytes(res.body)
-          else:
-            formatItem(commandItem(res.name, res.body, res.ok))
+        let bytes = plainCommandBodyBytes(res.body)
         commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true)
       of ckQuit:
         pushInputEvent(InputEvent(kind: ieQuit))
         requestTurnInterrupt()
       of ckMutating, ckModal:
         let msg = "cannot run " & cmd.strip & " while a turn is active"
-        let bytes = formatItem(commandItem("command", msg & "\n", false))
+        let bytes = plainCommandBodyBytes(msg & "\n")
         commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true)
       else:
-        let bytes = formatItem(commandItem("command",
-          "unknown command: " & cmd.strip & "  (try :help)\n", false))
+        let bytes = plainCommandBodyBytes(
+          "unknown command: " & cmd.strip & "  (try :help)\n")
         commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true)
   )
 
@@ -553,12 +549,7 @@ proc main() =
         # prepends exactly one separator before the whole blob; the blank
         # between the echo and the command output must be inserted here.
         let echoBytes = formatItem(userPromptItem(line))
-        let commandBytes =
-          if commandResult.plainBody:
-            plainCommandBodyBytes(commandResult.body)
-          else:
-            formatItem(commandItem(commandResult.name, commandResult.body,
-                                  commandResult.ok))
+        let commandBytes = plainCommandBodyBytes(commandResult.body)
         let bytes = echoBytes & "\r\n\r\n" & commandBytes
         proc clearSubmittedCommandEditor() =
           editor.line = minline.Line(text: "", position: 0)

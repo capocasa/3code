@@ -634,12 +634,12 @@ proc showProfile*(p: Profile; bold = false) =
       stdout.styledWriteLine fgCyan, styleBright, "  reasoning ", resetStyle,
         BrightWhiteFg, p.reasoning, resetStyle
   else:
-    stdout.styledWriteLine fgDefault, "  provider  ", resetStyle,
+    stdout.styledWriteLine fgDefault, "provider  ", resetStyle,
       BrightWhiteFg, provider, resetStyle
-    stdout.styledWriteLine fgDefault, "  model     ", resetStyle,
+    stdout.styledWriteLine fgDefault, "model     ", resetStyle,
       BrightWhiteFg, shortModel(p.model), resetStyle
     if p.reasoning != "":
-      stdout.styledWriteLine fgDefault, "  reasoning ", resetStyle,
+      stdout.styledWriteLine fgDefault, "reasoning ", resetStyle,
         BrightWhiteFg, p.reasoning, resetStyle
 
 # Track up-navigation so "down past last" can return to blank line.
@@ -824,7 +824,7 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
 
 proc showTool*(arg: string, toolLog: seq[ToolRecord]) =
   if toolLog.len == 0:
-    hintLn "  no tool calls yet", resetStyle
+    hintLn "no tool calls yet", resetStyle
     return
   var n = toolLog.len
   if arg != "":
@@ -849,7 +849,7 @@ proc showTool*(arg: string, toolLog: seq[ToolRecord]) =
 
 proc listTools*(toolLog: seq[ToolRecord]) =
   if toolLog.len == 0:
-    hintLn "  no tool calls yet", resetStyle
+    hintLn "no tool calls yet", resetStyle
     return
   for i, rec in toolLog:
     let tag = &"T{i+1}"

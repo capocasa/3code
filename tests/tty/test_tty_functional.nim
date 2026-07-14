@@ -427,23 +427,23 @@ suite "terminal visual contract":
     tty.frames.setLen(0)
     var firstCommand = true
     for commandCase in [
-      (":help", ": help"),
-      (":provider", ": providers"),
-      (":model", ": models"),
-      (":reasoning", ": reasoning"),
+      (":help", "3code the economical coding agent"),
+      (":provider", "stub  [stub-model]"),
+      (":model", "stub-model"),
+      (":reasoning", "reasoning:"),
       (":model stub-large", "provider  stub"),
       (":reasoning high", "reasoning high"),
       (":provider alt", "provider  alt"),
-      (":tokens", ": tokens"),
+      (":tokens", "no tokens used yet"),
       (":clear", "═══"),
-      (":sessions", ": sessions"),
-      (":sessions all", ": sessions"),
-      (":log", ": log"),
-      (":show", ": show"),
-      (":compact", "! command"),
-      (":summarize", "! summarize"),
-      (":prompt", ": prompt"),
-      (":toknes", "! command")
+      (":sessions", "no saved sessions for this directory"),
+      (":sessions all", "no saved sessions for this directory"),
+      (":log", "no tool calls yet"),
+      (":show", "no tool calls yet"),
+      (":compact", "unknown command: :compact"),
+      (":summarize", "failed or not worth it"),
+      (":prompt", "# Risk"),
+      (":toknes", "unknown command: :toknes")
     ]:
       let (command, marker) = commandCase
       tty.send command
