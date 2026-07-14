@@ -425,18 +425,16 @@ proc bootstrapProvider*(editor: var minline.LineEditor): Profile =
 
 proc cmdProviderList(prof: Profile) =
   if activeProviders.len == 0:
-    hintLn "  no providers", resetStyle
+    hintLn "no providers", resetStyle
     return
   let curName = if prof.name == "": "" else: prof.name.split('.')[0]
   for pr in activeProviders:
     let current = pr.name == curName
-    let mark = if current: "*" else: " "
     let tail = if current: &"  [{shortModel(prof.model)}]" else: ""
     if not experimentalEnabled and not hasKnownGoodModel(pr):
-      subtleWriteLn(stdout,
-        "  " & mark & " " & pr.name & tail)
+      subtleWriteLn(stdout, pr.name & tail)
     else:
-      hintLn "  ", mark, " ", resetStyle, pr.name, tail
+      hintLn pr.name, tail, resetStyle
 
 proc cmdProviderSelect(target: string, prof: var Profile) =
   var prov: ProviderRec
@@ -478,7 +476,7 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   if prof.name == "":
     prof = buildProfile(activeCurrent, activeProviders, "")
-  hintLn &"  added {prov.name}", resetStyle
+  hintLn &"added {prov.name}", resetStyle
   showProfile(prof)
 
 proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
@@ -500,7 +498,7 @@ proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
     activeCurrent = updated.name & "." & model
     prof = buildProfile(activeCurrent, activeProviders, "")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
-  hintLn &"  updated {target}", resetStyle
+  hintLn &"updated {target}", resetStyle
 
 proc cmdProviderRm(target: string, prof: var Profile) =
   var idx = -1
@@ -520,7 +518,7 @@ proc cmdProviderRm(target: string, prof: var Profile) =
       activeCurrent = ""
       prof = Profile()
   writeConfigFile(configPath(), activeCurrent, activeProviders)
-  hintLn &"  removed {target}", resetStyle
+  hintLn &"removed {target}", resetStyle
 
 proc cmdProvider(arg: string, editor: var minline.LineEditor,
                  prof: var Profile) =
@@ -553,20 +551,19 @@ proc cmdProvider(arg: string, editor: var minline.LineEditor,
 proc cmdModelList(prof: Profile) =
   let prov = currentProvider()
   if prov.name == "":
-    hintLn "  no provider selected", resetStyle
+    hintLn "no provider selected", resetStyle
     return
   if prov.models.len == 0:
-    hintLn &"  {prov.name}: no models", resetStyle
+    hintLn &"{prov.name}: no models", resetStyle
     return
   for m in orderedModels(prov):
-    let mark = if m == prof.model: "*" else: " "
     let short = shortModel(m)
     let kg = knownGoodFamily(prov.name, m)
     if kg == "" and not experimentalEnabled:
-      subtleWriteLn(stdout, "  " & mark & " " & short)
+      subtleWriteLn(stdout, short)
     else:
       let kgSuffix = if experimentalEnabled and kg != "": "*" else: ""
-      hintLn "  ", mark, " ", resetStyle, short & kgSuffix, resetStyle
+      hintLn short & kgSuffix, resetStyle
 
 proc cmdModelSelect(target: string, prof: var Profile) =
   let prov = currentProvider()
@@ -604,20 +601,20 @@ proc cmdModel(arg: string, prof: var Profile) =
 proc cmdReasoningList(prof: Profile) =
   let prov = providerForProfile(prof)
   if prov.name == "":
-    hintLn "  no provider selected", resetStyle
+    hintLn "no provider selected", resetStyle
     return
   if experimentalEnabled:
     let cur = if prof.reasoning == "": "(none)" else: prof.reasoning
-    hintLn "  reasoning: ", resetStyle, cur
-    hintLn "  experimental: level is free-form, type any value", resetStyle
+    hintLn "reasoning: ", resetStyle, cur
+    hintLn "experimental: level is free-form, type any value", resetStyle
     return
   let levels = availableReasonings(prov, prof.family, prof.model)
   if levels.len == 0:
-    hintLn &"  {prof.family}: no reasoning knob", resetStyle
+    hintLn &"{prof.family}: no reasoning knob", resetStyle
     return
   for r in levels:
     let mark = if r == prof.reasoning: "*" else: " "
-    hintLn "  ", mark, " ", resetStyle, r
+    hintLn mark, " ", resetStyle, r
 
 proc cmdReasoningSelect(target: string, prof: var Profile) =
   let prov = providerForProfile(prof)
@@ -653,7 +650,7 @@ proc cmdReasoning(arg: string, prof: var Profile) =
 
 proc cmdStreamingList() =
   let mark = if streamingEnabled: "on" else: "off"
-  hintLn "  streaming: ", mark,
+  hintLn "streaming: ", mark,
     "  (on = live SSE output, off = single request/response)", resetStyle
 
 proc cmdStreamingSelect(target: string) =
@@ -683,7 +680,7 @@ proc cmdStreaming(arg: string) =
 
 proc cmdNotifyList() =
   let mark = if notifyEnabled: "on" else: "off"
-  hintLn "  notify: ", mark,
+  hintLn "notify: ", mark,
     "  (on = desktop notification when a turn ends, off = silent)", resetStyle
 
 proc cmdNotifySelect(target: string) =
@@ -1048,6 +1045,6 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
     else: cdTranscriptResult
   CommandResult(recognized: true, ok: ok, name: title,
                 body: body,
-                plainBody: ok and (title == "profile" or title == "clear"),
+                plainBody: ok,
                 clearFooter: ok and title == "profile",
                 disposition: disposition)
