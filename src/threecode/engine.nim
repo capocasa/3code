@@ -44,6 +44,7 @@ type
     paintedFooterRows: int
     toolViewportRows: seq[string]
     toolViewportBannerRows: int  # leading rows that are banner (white), not output (grey)
+    toolViewportHasGap: bool  # separator row above the viewport, matching committed scrollback spacing
     ## Volatile in-progress assistant content above the footer during live
     ## streaming. Like the tool viewport it is erased and rewritten each
     ## frame; committed lines go to real scrollback via `appendTranscript`.
@@ -78,12 +79,15 @@ proc editorRowsAboveCursor(ed: var minline.LineEditor): int =
   refreshEditorWidth(ed)
   min(ed.renderRow, max(1, minline.renderedRows(ed)) - 1)
 
+proc viewportGapRows(e: TerminalEngine): int {.inline.} =
+  if e.toolViewportHasGap and e.toolViewportRows.len > 0: 1 else: 0
+
 proc walkUp(e: var TerminalEngine; ed: var minline.LineEditor): int =
   ## Rows from the cursor to the top of the volatile region (ticker row).
   ## Always derived from live editor + footer state. This is the number of
   ## rows to move up before erasing the volatile region.
   editorRowsAboveCursor(ed) + e.paintedFooterRows +
-    e.toolViewportRows.len + e.liveContentRows.len
+    e.viewportGapRows + e.toolViewportRows.len + e.liveContentRows.len
 
 proc noteFooterPainted(e: var TerminalEngine; footerRowsAboveEditor: int) =
   e.paintedFooterRows = max(0, footerRowsAboveEditor)
@@ -103,6 +107,8 @@ proc writeViewportRows(rows: openArray[string]) =
 # the output. Both honor the mode-aware `[colors]` config.
 proc writeToolViewportRows(e: TerminalEngine) =
   if e.toolViewportRows.len == 0: return
+  if e.toolViewportHasGap:
+    stdout.write "\r\n"
   for i, row in e.toolViewportRows:
     if i < e.toolViewportBannerRows:
       stdout.write OffWhiteFg
@@ -229,7 +235,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         # height, which always covers the reflowed stale content.
         let up = if reflowed:
             max(0, editorRowsAboveCursor(editor[]) +
-              e.paintedFooterRows + e.liveContentRows.len +
+              e.paintedFooterRows + e.viewportGapRows + e.liveContentRows.len +
               (try: terminalHeight() except CatchableError: 24))
           else:
             max(0, e.walkUp(editor[]))
@@ -237,6 +243,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
         stdout.write "\x1b[J"
+        e.toolViewportHasGap = e.hasScrollback
         e.toolViewportRows = @rows
         e.toolViewportBannerRows = bannerRows
         e.writeToolViewportRows()
@@ -252,6 +259,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         else:
           e.noteFooterPainted(footerRowsAboveEditor)
       else:
+        e.toolViewportHasGap = e.hasScrollback
         e.toolViewportRows = @rows
         e.toolViewportBannerRows = bannerRows
         e.writeToolViewportRows()
