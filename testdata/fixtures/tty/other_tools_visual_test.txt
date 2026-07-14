@@ -1,7 +1,7 @@
-===== 923 =====
+===== 390 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,10 +10,10 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run other tool checks
-===== 805 =====
+===== 183 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -22,14 +22,15 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run other tool checks
+
 ● Exercising non-bash tools.
 
 ⣿ ○0% ↓6 0s
 ❯
-===== 720 =====
+===== 585 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -38,32 +39,15 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run other tool checks
+
 ● Exercising non-bash tools.
-
-
-⣿ ○0% ↓6 0s
-❯
-===== 451 =====
-
-  ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
-  ╰─╯
-
-  provider  stub
-  model     stub-model
-
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
-
-❯ run other tool checks
-● Exercising non-bash tools.
-
 
   ○2%  ↑300  ↓44  0s
 ❯
-===== 417 =====
+===== 774 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -72,6 +56,7 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run other tool checks
+
 ● Exercising non-bash tools.
 
 r notes.txt
@@ -117,10 +102,10 @@ p --- /tmp/applied.txt
 
 ⣿ ○0% ↓4 0s
 ❯
-===== 804 =====
+===== 283 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -129,6 +114,7 @@ p --- /tmp/applied.txt
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run other tool checks
+
 ● Exercising non-bash tools.
 
 r notes.txt
@@ -171,72 +157,13 @@ p --- /tmp/applied.txt
   ○2%  ↑300  ↓44  0s
 
 ● Clear completed.
-
-
-⣿ ○0% ↓4 0s
-❯
-===== 721 =====
-
-  ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
-  ╰─╯
-
-  provider  stub
-  model     stub-model
-
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
-
-❯ run other tool checks
-● Exercising non-bash tools.
-
-r notes.txt
-  read-one
-  read-two
-  read-three
-
-w notes.txt
-  --- /tmp/notes.txt
-  +++ /tmp/notes.txt
-  +new notes
-
-p --- /tmp/notes.txt
-  +++ /tmp/notes.txt
-  -new notes
-  +patched notes
-
-p --- /tmp/applied.txt
-  +++ /tmp/applied.txt
-  +hello
-
-⌕ terminal rendering
-  1. Terminal Rendering Guide
-  https://example.test/rendering
-  Useful result snippet.
-
-⇊ https://example.test/rendering
-  Fetched page title
-  Fetched page body line
-
-≡ ──────────
-  ✓ inspect
-  ~ adjust
-  ○ verify
-
-✕ unknown tool: not_a_tool
-
-═════════════════════════════════════════
-↻ fresh context prompt
-  ○2%  ↑300  ↓44  0s
-
-● Clear completed.
-
 
   ○0%  ↑90  ↓12  0s
 ❯
-===== 169 =====
+===== 675 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-noind-b7b2d8b4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -245,6 +172,7 @@ p --- /tmp/applied.txt
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run other tool checks
+
 ● Exercising non-bash tools.
 
 r notes.txt

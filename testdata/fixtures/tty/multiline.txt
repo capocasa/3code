@@ -1,7 +1,7 @@
-===== 816 =====
+===== 159 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-694951e4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,10 +10,10 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
-===== 447 =====
+===== 436 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-694951e4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -23,10 +23,10 @@
 
 ❯ first line
   
-===== 964 =====
+===== 504 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-694951e4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -36,10 +36,10 @@
 
 ❯ first line
   second line
-===== 923 =====
+===== 659 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-694951e4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -52,10 +52,10 @@
 
 ⣿ ○0% 0s
 ❯ queued line one
-===== 887 =====
+===== 742 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-694951e4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -69,10 +69,10 @@
 ⣿ ○0% 0s
 ❯ queued line one
   
-===== 714 =====
+===== 387 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-694951e4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -86,10 +86,10 @@
 ⣿ ○0% 0s
 ❯ queued line one
   queued line two
-===== 835 =====
+===== 192 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-694951e4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -103,27 +103,10 @@
 ⣿ ○0% 0s
 ❯ queued line one
   queued line two ⧖
-===== 551 =====
+===== 512 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-694951e4-unstaged   the economical coding agent
-  ╰─╯
-
-  provider  stub
-  model     stub-model
-
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
-
-❯ first line
-● First multiline response.
-
-⣿ ○0% ↓6 0s
-❯ queued line one
-  queued line two ⧖
-===== 298 =====
-
-  ╭─╮
-   ─┤  3code v0.5.0-line-694951e4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -138,10 +121,10 @@
 ⣿ ○0% ↓6 0s
 ❯ queued line one
   queued line two ⧖
-===== 498 =====
+===== 226 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-694951e4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -156,33 +139,10 @@
   ○1%  ↑120  ↓24  0s
 ❯ queued line one
   queued line two ⧖
-===== 259 =====
+===== 996 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-694951e4-unstaged   the economical coding agent
-  ╰─╯
-
-  provider  stub
-  model     stub-model
-
-  type a prompt. :help for commands. :q or Ctrl-D to exit.
-
-❯ first line
-
-● First multiline response.
-
-  ○1%  ↑120  ↓24  0s
-
-❯ queued line one
-  queued line two
-● Queued multiline response.
-
-⣿ ○1% ↓6 0s
-❯
-===== 287 =====
-
-  ╭─╮
-   ─┤  3code v0.5.0-line-694951e4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -203,10 +163,10 @@
 
 ⣿ ○1% ↓6 0s
 ❯
-===== 630 =====
+===== 483 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-694951e4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -227,10 +187,10 @@
 
   ○1%  ↑180  ↓32  0s
 ❯
-===== 366 =====
+===== 383 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-line-694951e4-unstaged   the economical coding agent
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub

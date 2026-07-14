@@ -83,15 +83,31 @@ erasing them). The repaint vanishes.
 
 ## Current state
 
-Not begun. The inter-item separator jump is fixed (shipped, see below):
-the live bash viewport now carries a gap row matching committed
-scrollback spacing, and `walkUp` accounts for it, so the commit's
-leading separator lands on the erased gap row instead of pushing the
-item down. Verified by row-position trace: every element is stable
-from first appearance through commit, no jump. The remaining work
-(this plan) is the deeper unification that makes the commit a no-op
-repaint, eliminating the four byte-level divergences (icon, wrap,
-truncation, color) that still cause a subtle repaint at commit.
+Not begun. The inter-item separator jump is now fixed for BOTH live
+paint paths (shipped, see below):
+
+- The live bash **viewport** carries a gap row matching committed
+  scrollback spacing, and `walkUp` accounts for it via
+  `viewportGapRows`/`toolViewportHasGap`.
+- The live **assistant content** path (`renderLiveContent` /
+  `repaintLiveContent`, the `liveContentRows` mechanism) now carries the
+  same gap via `liveContentHasGap`/`liveContentGapRows`, also counted by
+  `walkUp` and by the reflow branch in `renderToolViewport`.
+
+This closed the user's actual complaint: assistant prose streaming
+immediately below a committed bash tool output (or below the user
+prompt) was flush against the line above during the live phase, then
+jumped down one row at commit when the separator was inserted. The
+prose now sits one blank row below the prior item from the first
+streaming chunk, and stays on that row through commit. Verified by a
+row-position probe (prose row stable live == committed) and the
+observation that the golden fixtures encoded the old flush-then-jump
+behavior, which the fix removes.
+
+The remaining work (this plan) is the deeper unification that makes
+the commit a no-op repaint, eliminating the four byte-level
+divergences (icon, wrap, truncation, color) that still cause a subtle
+repaint at commit.
 
 ## Decision log
 

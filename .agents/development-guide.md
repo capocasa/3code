@@ -6,7 +6,49 @@
 
 The main regression testing works via unit tests. Important: Always test the result- not that something was done. Visually, this means we use the ttty testing termal to render the bytes and check the result, we don't check the bytes themselves.
 
-2. First end to end, then adapt tests
+2. Fixture-driven development (the main loop)
+
+Visual bugs are fixed by a loop that moves the desired end state into the
+fixture *before or alongside* the code change, never after. The flow is:
+
+  verbal description -> fixture representation -> development -> validation
+
+The golden fixtures (`testdata/fixtures/tty/*.txt`) are checked-in
+recordings of the intended screen. They are the design tool: a verbal bug
+report or feature description is translated into a concrete set of frames
+that encode the correct behavior. Two valid orderings:
+
+  (a) Describe the fix in fixtures first, then develop until they pass.
+      This is test-driven: the fixture is the spec.
+  (b) Make all code changes first, then run the suite. Read every fixture
+      failure and decide whether each changed frame encodes the behavior
+      the verbal description asked for. The failures ARE the review.
+
+Either way the contract is the same: the fixture is edited deliberately,
+never regenerated. Regenerating from actual output is reserved for when the
+harness itself changes (new normalizer, new capture point) and the frames
+would otherwise shift for reasons unrelated to behavior.
+
+Concretely, when a `expectMeaningfulFrameArtifact` fails:
+
+  - Open the run's recording in the frame viewer (`nim r
+    tools/pty_frames.nim -- testdata/output/tty/<run>/frames.txt`).
+  - Compare actual frames against the fixture and against the visual
+    contract in `.agents/design.md` (e.g. "exactly one blank row between
+    items").
+  - If the new frames are what the description asked for, edit the fixture
+    to encode them. A blind copy of `*_actual.txt` just hides what the
+    change did.
+  - If a frame changed in a way the description did NOT ask for, that is a
+    bug in the fix, not a fixture to update.
+
+The signal is symmetrical: a fixture can encode a bug (the program used to
+show prose flush against the line above, then jump a row on commit), and the
+fix makes those transient buggy frames disappear. When that happens the
+fixture MUST change, and every changed frame is an artifact of the fix
+being correct.
+
+3. First end to end, then adapt tests
 
 When receiving a bug report, first reproduce the bug without the test suite- start up 3code, use the interactive 'expect' tool or comparable, and do what the bug report says to reproduce the bug. If it's not possible to reproduce the bug, stop, and say so.
 
