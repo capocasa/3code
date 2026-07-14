@@ -341,9 +341,14 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
           stdout.write "\r\n"
         editor[].renderRow = 0
         stdout.write editor[].redrawBytes(synchronized = false)
-        # Keep the caret hidden for the whole turn (beginTurn hid it). The
-        # streaming partial repaint must not re-show it, otherwise the
-        # visible-caret signal can't distinguish a live partial from idle.
+        # Restore the caret to whatever the editor's pendingCaret dictates,
+        # matching `renderFooter` and the input thread's postRedraw. During
+        # buffered typing (pendingCaret == false) the caret must stay visible
+        # so the GUI thread's 80ms streaming repaint does not fight the
+        # input thread's keystroke redraw and flicker it on and off. Only a
+        # deferred-submit hourglass (pendingCaret == true) keeps it hidden.
+        if not editor[].pendingCaret:
+          stdout.write "\x1b[?25h"
         if frame.kind == ffClear:
           e.noteNoFooter()
         else:
@@ -413,6 +418,8 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
           stdout.write "\r\n"
         editor[].renderRow = 0
         stdout.write editor[].redrawBytes(synchronized = false)
+        if not editor[].pendingCaret:
+          stdout.write "\x1b[?25h"
         if frame.kind == ffClear:
           e.noteNoFooter()
         else:
