@@ -11,7 +11,7 @@
 ## combo, `callModel` promotes those tags to synthetic tool_calls so the rest
 ## of the pipeline sees a uniform shape.
 
-import std/[algorithm, atomics, hashes, httpclient, json, locks, nativesockets, net, os, sequtils, strformat, strutils, tables, times, uri]
+import std/[algorithm, atomics, hashes, httpclient, json, locks, monotimes, nativesockets, net, os, sequtils, strformat, strutils, tables, times, uri]
 when defined(posix):
   import std/posix except SocketHandle
 import streamhttp
@@ -42,6 +42,13 @@ const QuietRecvWakeMs* {.intdefine.} = 500
   ## the quiet/interrupt flags. Must be well under `QuietTooLongMs`.
   ## Kept at 1s so user interrupts (Ctrl-C) are honored within ~1s;
   ## the extra poll overhead is negligible for trickle-rate streams.
+const VerifyTimeoutMs* {.intdefine.} = 30_000
+  ## Hard budget for a provider-verification ping (`verifyProfile`). Every
+  ## recv is bounded by `QuietRecvWakeMs` via `SO_RCVTIMEO`, so a stall
+  ## surfaces as a `StreamTimeoutError` each window; we retry until this
+  ## deadline then fail cleanly instead of blocking forever. 30s is
+  ## generous for a `max_tokens=1` ping that should answer in well under a
+  ## second. An `intdefine` so tests can shrink it.
 const QuietTooLongMs* {.intdefine.} = 45_000
   ## If a streaming response goes this long with no data from the
   ## provider (45s), the turn is aborted. `posix.shutdown(fd)` from another
@@ -1624,30 +1631,95 @@ proc verifyProfile*(p: Profile): (bool, string) =
     if isStubUrl(p.url):
       return (true, "")
   let body = verifyBody(p)
+  # Use the same bounded streaming path as `callModel` (streamhttp) instead
+  # of stdlib `newHttpClient`. The blocking client's `request` reads a
+  # chunked body via `socket.recvLine()` with no timeout, so a provider that
+  # accepts the connection then never sends the first chunk (a transient
+  # network stall) blocks the main thread forever. streamhttp's
+  # `setReadTimeoutMs` mirrors the deadline onto the socket as
+  # `SO_RCVTIMEO`, hard-bounding every `recv`; we retry each bounded window
+  # until `VerifyTimeoutMs` then fail cleanly.
+  let u = try: parseUri(p.url & "/chat/completions") except CatchableError as e:
+    return (false, "bad url: " & e.msg)
+  let host = u.hostname
+  let plainHttp =
+    when defined(testPlainHttp):
+      u.scheme == "http" and (host == "127.0.0.1" or host == "localhost")
+    else:
+      false
+  if u.scheme != "https" and not plainHttp:
+    return (false, "only https supported, got: " & u.scheme)
+  let port =
+    if u.port.len > 0: Port(parseInt(u.port))
+    elif plainHttp: Port(80)
+    else: Port(443)
+  let pathQuery =
+    block:
+      var pq = if u.path.len > 0: u.path else: "/"
+      if u.query.len > 0: pq.add "?" & u.query
+      pq
+  var conn: StreamConn
   try:
-    let client = newHttpClient(timeout = 20_000, userAgent = "3code",
-                               sslContext = bundledSslContext())
-    defer: client.close()
-    client.headers["Authorization"] = "Bearer " & p.key
-    client.headers["Content-Type"] = "application/json"
-    client.headers["Accept"] = "text/event-stream"
-    let resp = client.request(p.url & "/chat/completions",
-                              httpMethod = HttpPost, body = body)
-    if resp.code.int != 200:
-      let snip = resp.body[0 ..< min(200, resp.body.len)]
-      return (false, $resp.code.int & ": " & snip)
-    # Streaming response — look for an error object in the first SSE chunk
-    # or just accept any 200 as success (we only need to know the endpoint
-    # is reachable and the key works).
-    if resp.body.len > 0:
-      let sse = resp.body
-      if sse.contains("\"error\""):
-        let start = max(0, sse.find("{"))
-        let snip = sse[start ..< min(start + 200, sse.len)]
-        return (false, snip)
-    (true, "")
+    conn = if plainHttp:
+             connectPlain(host, port, timeoutMs = ConnectTimeoutMs)
+           else:
+             connectTls(host, port, timeoutMs = ConnectTimeoutMs,
+                        caFile = bundledCaFile())
   except CatchableError as e:
-    (false, e.msg)
+    invalidateResolved(host, port)
+    return (false,
+      (if plainHttp: "connect failed: " else: "TLS connect failed: ") &
+      connectErrorDetail(e))
+  defer: {.cast(gcsafe).}:
+    try: conn.abruptClose() except CatchableError: discard
+  conn.setReadTimeoutMs(QuietRecvWakeMs)
+  try:
+    conn.sendRequest("POST", pathQuery, host,
+      headers = [("Authorization", "Bearer " & p.key),
+                 ("Content-Type", "application/json"),
+                 ("Accept", "text/event-stream")],
+      body = body)
+  except CatchableError as e:
+    return (false, "send failed: " & e.msg)
+  let deadline = getMonoTime() + initDuration(milliseconds = VerifyTimeoutMs)
+  var resp: StreamResponse
+  while true:
+    try:
+      resp = conn.readResponseHead()
+      break
+    except StreamTimeoutError:
+      if getMonoTime() >= deadline:
+        return (false, "no response within " & $(VerifyTimeoutMs div 1000) & "s")
+    except CatchableError as e:
+      return (false, "read failed: " & e.msg)
+  if resp.status != 200:
+    var snip = ""
+    while getMonoTime() < deadline and snip.len < 200:
+      var line: string
+      try:
+        if not conn.readLine(line): break
+      except StreamTimeoutError:
+        continue
+      except CatchableError:
+        break
+      snip.add line
+    return (false, $resp.status & ": " & snip)
+  # 200 — scan the streamed body for an in-band error object. The ping asks
+  # for max_tokens=1 so this is at most a couple of SSE lines.
+  var sse = ""
+  while getMonoTime() < deadline and sse.len < 2048:
+    var line: string
+    try:
+      if not conn.readLine(line): break
+    except StreamTimeoutError:
+      continue
+    except CatchableError:
+      break
+    sse.add line
+  if sse.contains("\"error\""):
+    let start = max(0, sse.find("{"))
+    return (false, sse[start ..< min(start + 200, sse.len)])
+  (true, "")
 
 proc fetchModels*(url, key: string): (seq[string], string) =
   ## GET /models on the provider. Returns (models, error) — error is empty on
