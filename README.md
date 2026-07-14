@@ -8,7 +8,7 @@ Make your AI plan last longer, lower your token bill, program locally faster. En
 
 → [3code.capocasa.dev](https://3code.capocasa.dev)
 
-![3code](3code-screen-1.png)
+![3code](docs/3code-screen-1.png)
 
 ---
 
