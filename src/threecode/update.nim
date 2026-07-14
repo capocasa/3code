@@ -137,10 +137,10 @@ proc extractArchive(archive, workDir: string): string =
       return parentDir(f)
   ""
 
-proc swapInstall(srcDir, destBin: string): bool =
+proc swapInstall*(srcDir, destBin: string): bool =
   ## Replace `destBin` and any sibling library files with the new versions
-  ## from `srcDir`. README/LICENSE are skipped — those are zip-bundle
-  ## documentation, not part of the running install.
+  ## from `srcDir`. README/LICENSE/VERSION are skipped — those are
+  ## zip-bundle documentation, not part of the running install.
   ##
   ## POSIX: stage each file as `<dest>.new` and atomic-rename. The running
   ## process keeps the old inode for any file it has open (the .exe / any
@@ -154,7 +154,7 @@ proc swapInstall(srcDir, destBin: string): bool =
   for entry in walkDir(srcDir):
     if entry.kind notin {pcFile, pcLinkToFile}: continue
     let name = entry.path.extractFilename
-    if name in ["README.md", "LICENSE"]: continue
+    if name in ["README.md", "LICENSE", "VERSION"]: continue
     let dest = destDir / name
     when defined(windows):
       if fileExists(dest):

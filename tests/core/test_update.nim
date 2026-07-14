@@ -36,6 +36,30 @@ suite "update: semver":
     check parseSemver("v1.0") == @[1, 0]
     check parseSemver("0.2.4-rc1") == @[0, 2, 4]
 
+suite "update: swapInstall skip list":
+  ## `swapInstall` must copy the binary (and any sibling runtime libs)
+  ## but leave zip-bundle documentation (README, LICENSE, and the
+  ## VERSION capture added in 0.5.0 CI) behind. A stray VERSION next
+  ## to the binary is the regression this guards.
+  test "README/LICENSE/VERSION are not installed beside the binary":
+    let src = getTempDir() / "3code-update-src"
+    let dst = getTempDir() / "3code-update-dst"
+    removeDir(src); removeDir(dst)
+    createDir(src); createDir(dst)
+    # fake bundle: binary + the three doc/metadata files
+    writeFile(src / "3code", "fake-bin")
+    writeFile(src / "README.md", "readme")
+    writeFile(src / "LICENSE", "license")
+    writeFile(src / "VERSION", "0.5.0")
+    let target = dst / "3code"
+    check swapInstall(src, target)
+    check fileExists(target)
+    check readFile(target) == "fake-bin"
+    check not fileExists(dst / "README.md")
+    check not fileExists(dst / "LICENSE")
+    check not fileExists(dst / "VERSION")
+    removeDir(src); removeDir(dst)
+
 suite "update: config gate":
   ## Exercise `autoUpdateEnabled` against a temp HOME so we don't
   ## clobber the developer's real config.
