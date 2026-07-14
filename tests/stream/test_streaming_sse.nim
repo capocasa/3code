@@ -10,6 +10,10 @@
 ## Must be compiled with -d:testPlainHttp so streamHttp accepts http://127.0.0.1.
 
 import std/[json, jsonutils, net, os, strutils, threadpool, unittest]
+from std/times import epochTime
+when defined(posix):
+  from std/posix import Timeval, Time, Suseconds, SockLen, SOL_SOCKET,
+                           SO_RCVTIMEO, setsockopt
 
 proc syncPool() =
   ## Flush the Nim threadpool: every `spawn serveThread` must complete
@@ -318,3 +322,99 @@ suite "streaming SSE: empty-content with finish_reason":
     closeCachedStreamConn()
 
   syncPool()
+
+# ---------------------------------------------------------------------------
+# verifyProfile
+# ---------------------------------------------------------------------------
+#
+# The provider-verification ping shares the transport with callModel but
+# used to run through stdlib `newHttpClient`. That client reads a chunked
+# body via `socket.recvLine()` with no timeout, so a provider that accepts
+# the connection then never sends the first SSE chunk (a transient network
+# stall) blocked the main thread forever — the deadlock reproduced live as
+# tid blocked in `wait_woken`. verifyProfile now uses the same bounded
+# streamhttp path (setReadTimeoutMs → SO_RCVTIMEO) as callModel, so a stall
+# surfaces as `(false, ...)` within VerifyTimeoutMs instead of hanging.
+#
+# These tests run the REAL transport (not -d:providerStub) against a local
+# plain-HTTP server, mirroring the SSE tests above.
+
+proc serveVerifyOk(server: SseServer) {.thread.} =
+  ## Serve a minimal 200 OK SSE ping response, draining the request first.
+  var client: Socket
+  server.socket.accept(client)
+  while client.recvLine(timeout = 3000).strip() != "":
+    discard
+  let body = "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}," &
+    "\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+  client.send("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n" &
+    "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
+  client.send(toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n")
+  client.send("0\r\n\r\n")
+  client.close()
+
+proc setSocketTimeoutMs(sock: Socket; ms: int) =
+  when defined(posix):
+    var tv: Timeval
+    tv.tv_sec = Time(ms div 1000)
+    tv.tv_usec = Suseconds((ms mod 1000) * 1000)
+    discard setsockopt(sock.getFd(), SOL_SOCKET, SO_RCVTIMEO,
+                       addr tv, sizeof(tv).SockLen)
+
+proc serveVerifySilent(server: SseServer) {.thread.} =
+  ## Accept the connection, drain the request, then hold the socket open
+  ## WITHOUT EVER REPLYING. This is the deadlock case: connect and the
+  ## request succeed, but the response head never arrives, so an unbounded
+  ## recv hangs forever. The client is silent after its request, so we just
+  ## sleep; on client teardown the peer-closed socket surfaces as a
+  ## recv returning "", which lets us exit.
+  var client: Socket
+  server.socket.accept(client)
+  client.setSocketTimeoutMs(200)
+  while client.recvLine(timeout = 3000).strip() != "":
+    discard
+  let deadline = epochTime() + 60.0
+  while epochTime() < deadline:
+    let chunk = try: client.recv(64, timeout = 200) except CatchableError: "x"
+    # A timeout raises TimeoutError (caught → "x"); a real peer close
+    # returns "". Only break on a genuine 0-length read.
+    if chunk.len == 0: break
+    sleep(50)
+  client.close()
+
+proc pingProfile(server: SseServer): Profile =
+  Profile(name: "test", url: server.url, key: "test-key",
+          model: "test-model", family: "glm")
+
+suite "verifyProfile bounded against silent provider":
+  test "happy path: 200 SSE verifies ok":
+    let server = newSseServer("")
+    var thr: Thread[SseServer]
+    createThread(thr, serveVerifyOk, server)
+    let (ok, err) = verifyProfile(pingProfile(server))
+    joinThread(thr)
+    server.socket.close()
+    check ok == true
+    check err == ""
+    closeCachedStreamConn()
+
+  test "silent-after-accept does not hang (returns false promptly)":
+    # Regression: before the fix this deadlocked the main thread in a
+    # timeout-less recv. Now the bounded streamhttp recv wakes every
+    # QuietRecvWakeMs, and VerifyTimeoutMs caps the whole ping, so this
+    # returns (false, ...) in well under a minute instead of hanging.
+    let server = newSseServer("")
+    var thr: Thread[SseServer]
+    createThread(thr, serveVerifySilent, server)
+    let t0 = epochTime()
+    let (ok, err) = verifyProfile(pingProfile(server))
+    let elapsed = epochTime() - t0
+    joinThread(thr)
+    server.socket.close()
+    check ok == false
+    check err.len > 0
+    # The test build shrinks VerifyTimeoutMs to 3s (see .nims), so a bounded
+    # return is ~3s; an unbounded one would run the full 60s hold. Allow
+    # generous headroom over the 3s budget but well under the 60s deadline.
+    check elapsed < 20.0
+    closeCachedStreamConn()
