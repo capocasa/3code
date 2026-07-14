@@ -193,3 +193,52 @@ suite "interrupt during real network connect/stream":
     check f.rows[f.cursorRow].contains("\u276f")
     echo "  PASS: teardown after full response returned in ",
       formatFloat(elapsed, ffDecimal, 2), "s"
+
+  test "Ctrl-C during content stream (no usage) emits no `· Xs` line":
+    # Regression: providers send usage as a separate end-of-stream SSE event.
+    # Interrupting mid-stream after content arrived but before usage left
+    # `callModel` with `usage.totalTokens == 0`, so it fell through to
+    # `hookNoUsage` and printed a spurious `· Xs` timing line above the
+    # magenta `interrupted by user` message. The fix makes callModel skip
+    # the usage/elapsed emission entirely when interrupted. This test sends
+    # a content delta with no usage object, then stalls — the exact shape —
+    # and asserts the timing line never appears in the rendered transcript.
+    let root = newFixture("interrupt_no_usage_line")
+    let srv = startMockServer(msSlowStreamNoUsage)
+    defer: stopMockServer(srv)
+    writeProviderConfig(root, srv.url)
+    let tty = newTtySession(realBin,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = env(root))
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    tty.send "go"
+    tty.expect "go"
+    tty.send "\n"
+    # Content arrives ("fi"), then the server stalls mid-body. The usage
+    # event never comes, so an interrupt here hits the no-usage path.
+    tty.drain(800)
+    tty.send "\x03"
+    tty.expectInHistory "interrupted by user"
+    tty.drain(300)
+    # The spurious line looks like `· 3s` — a middle dot, a space, then a
+    # number and `s`. The interrupt path must own the render; no timing
+    # line should precede the magenta interrupt message.
+    let hist = tty.cleanRaw()
+    const middleDot = "\u00b7"
+    for line in hist.splitLines():
+      let stripped = line.strip()
+      if stripped.len > 0 and stripped.startsWith(middleDot) and stripped.endsWith("s"):
+        # Allow the real interrupt message through; it does not start with ·.
+        doAssert false,
+          "REGRESSION (spurious timing line): found `" & stripped &
+          "` in transcript after interrupt; callModel emitted `· Xs` " &
+          "on the no-usage interrupt path\n" & tty.dumpFramesAround(stripped)
+    tty.expectAlive()
+    let f = tty.frames[^1]
+    check f.rows[f.cursorRow].contains("\u276f")
+    echo "  PASS: interrupt during content stream emitted no `· Xs` line"

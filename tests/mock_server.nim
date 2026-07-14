@@ -34,6 +34,7 @@ type
     msOk                 ## complete SSE response immediately
     msSilentAfterAccept  ## accept TCP, then never reply (recv stall)
     msSlowStream         ## valid SSE head + first chunk, then stall
+    msSlowStreamNoUsage  ## content chunk with NO usage object, then stall
     msStallAfterDone     ## complete SSE response, then black-hole (teardown close hang)
 
   MockServer* = ref object of RootObj
@@ -111,6 +112,19 @@ proc handleSlowStream(s: MockServer; client: Socket) =
   # Now stall: hold the socket, never send [DONE] or the closing chunk.
   client.holdUntilGone()
 
+proc handleSlowStreamNoUsage(s: MockServer; client: Socket) =
+  ## Content delta with no `usage` object, then stall. Models the real-world
+  ## interrupt shape: providers send usage as a separate end-of-stream SSE
+  ## event, so a mid-stream interrupt leaves `callModel` with content but
+  ## `usage.totalTokens == 0`. Used to lock out the spurious `· Xs` timing
+  ## line that `hookNoUsage` used to emit above the interrupt message.
+  let body = """{"choices":[{"delta":{"content":"fi"},"finish_reason":""}]}"""
+  client.send("HTTP/1.1 200 OK\r\n")
+  client.send("Content-Type: text/event-stream\r\n")
+  client.send("Transfer-Encoding: chunked\r\n\r\n")
+  client.send(sseChunk(body))
+  client.holdUntilGone()
+
 proc serverLoop(s: MockServer) {.thread.} =
   {.cast(gcsafe).}:
     try:
@@ -126,6 +140,7 @@ proc serverLoop(s: MockServer) {.thread.} =
         of msOk: s.handleOk(client)
         of msSilentAfterAccept: s.handleSilent(client)
         of msSlowStream: s.handleSlowStream(client)
+        of msSlowStreamNoUsage: s.handleSlowStreamNoUsage(client)
         of msStallAfterDone: s.handleStallAfterDone(client)
         try: client.close() except CatchableError: discard
     except CatchableError:

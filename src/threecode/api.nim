@@ -1568,7 +1568,16 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
       serverLastTs = epochTime()
   usage = outcome.usage
   let elapsed = epochTime() - t0
-  if usage.totalTokens > 0:
+  # An interrupted turn is rendered by the caller via `onTurnInterrupted`
+  # (the magenta "interrupted by user" line). Emitting a `· Xs` timing
+  # line (the no-usage branch) or repainting the token bar (the
+  # final-usage branch) here would leave spurious output above the
+  # interrupt message, so skip both when interrupted. Only the
+  # `break` path (streamed some content before the interrupt) reaches
+  # here; the `raise` path (no assistant content) returns above.
+  if isInterrupted():
+    discard  # caller owns the render via `onTurnInterrupted`; no timing/bar line
+  elif usage.totalTokens > 0:
     # Repaint the bar with accurate values now that `usage` is parsed
     # — the live values during streaming were rough estimates
     # (`slurped/4`). `pendingHint` carries the same numbers forward
