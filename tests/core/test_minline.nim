@@ -228,14 +228,19 @@ suite "minline editor: cursor navigation":
     check minline.isEscapeTailByte(48)   # '0'
     check minline.isEscapeTailByte(57)   # '9'
     check minline.isEscapeTailByte(126)  # '~'
-    # Printable letters are NEVER valid tails. This is the key property:
-    # ESC immediately followed by the user's next typed character must be
-    # treated as a bare Escape so the character is not swallowed.
-    check not minline.isEscapeTailByte('a'.ord)
-    check not minline.isEscapeTailByte('z'.ord)
-    check not minline.isEscapeTailByte('A'.ord)
-    check not minline.isEscapeTailByte('w'.ord)
-    check not minline.isEscapeTailByte(' '.ord)
+    # Printable letters ARE valid tails: a real Alt chord (Alt+F, Alt+B,
+    # ...) arrives as an ESC + letter burst, so the letter half must be
+    # recognized as a continuation. `handleEscape` decides per-binding
+    # whether to dispatch the chord or fall back to a bare-Esc cancel.
+    check minline.isEscapeTailByte('f'.ord)
+    check minline.isEscapeTailByte('b'.ord)
+    check minline.isEscapeTailByte('a'.ord)
+    check minline.isEscapeTailByte('z'.ord)
+    check minline.isEscapeTailByte('A'.ord)
+    check minline.isEscapeTailByte('w'.ord)
+    check minline.isEscapeTailByte(' '.ord)
+    # Ctrl+Alt+H arrives as ESC + backspace byte (0x08).
+    check minline.isEscapeTailByte(8)
 
   test "bare Escape cancels like Ctrl+C":
     var ed = initEditor()
@@ -918,12 +923,14 @@ suite "minline editor: termPeeked drain":
     check got == "X"
     check termPeeked == -1
 
-  test "peeked non-tail byte survives Esc cancel":
+  test "unbound Alt chord cancels and puts the letter back":
+    # ESC + a printable letter with no KEYMAP binding behaves like a
+    # bare Escape (cancel) but the letter is stashed in `escPutback` so
+    # the next readLineWith prints it instead of swallowing it. This is
+    # the burst-chord equivalent of bare-Esc-then-typing.
     termPeeked = -1
     var ed = initEditor()
     let d = newDriver()
-    # pendingInput peeks at next byte and, if not an escape tail,
-    # stashes it in termPeeked (mirroring terminalHasPendingInput).
     d.pendingInput = proc(): bool =
       if d.terminal.input.hasPendingInput:
         let b = d.terminal.input.read()
@@ -937,13 +944,13 @@ suite "minline editor: termPeeked drain":
     d.pushString "x"
     expect InputCancelled:
       discard d.run(ed, prompt = "> ")
-    # After cancel, termPeeked holds 'x'. A fresh readLineWith must
-    # drain it so the character is not lost.
-    check termPeeked == 'x'.ord
+    # 'x' is a printable tail, so it was consumed as the chord letter and
+    # stashed in escPutback (not termPeeked) for the next readLineWith.
+    check ed.escPutback == 'x'.ord
     d.push Enter
     let got = d.run(ed, prompt = "> ")
     check got == "x"
-    check termPeeked == -1
+    check ed.escPutback == -1
 
   test "peeked tail byte feeds escape sequence":
     termPeeked = -1

@@ -168,6 +168,15 @@ proc startStub(root: string; args: openArray[string] = ["-x", "-i"];
   newTtySession(ensureStubBinary(), args = args, cwd = root / "run",
                 env = stubEnv(root, resp), cols = cols, rows = rows)
 
+proc sendAltChord(s: TtySession; letter: char) =
+  ## Write ESC + letter as a single 2-byte burst to the PTY master,
+  ## bypassing `send`'s printable-echo waiting: an Alt chord doesn't
+  ## echo the letter (it triggers a motion/delete action instead), so
+  ## `send` would stall waiting for the letter to appear on screen.
+  var buf: array[2, char] = ['\x1b', letter]
+  discard posix.write(s.masterFd, addr buf[0], 2)
+  s.drain(30)
+
 proc requireVisibleEditorCaret(s: TtySession; needle: string) =
   s.drain(20)
   require s.frames.len > 0
@@ -1040,6 +1049,46 @@ suite "terminal visual contract":
     tty.expectTypedAtPrompt "after cancel"
     tty.send "\n"
     tty.expectInHistory "after cancel"
+
+  test "alt+f and alt+b move by word at idle":
+    # Alt+F / Alt+B arrive as ESC + letter bursts. They must be recognized
+    # as word-motion chords, not treated as a bare ESC (cancel) followed by
+    # a stray letter. Regression: isEscapeTailByte rejected printable tails,
+    # so the ESC half canceled the draft and the letter printed into the
+    # cleared line (visible as the whole draft vanishing + a lone f/b).
+    let root = newFixture("alt_word_motion")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {"role": "assistant", "content": "ok",
+       "contentChunks": ["ok"],
+       "usage": {"promptTokens": 5, "completionTokens": 1,
+                  "totalTokens": 6, "cachedTokens": 0}}
+    ])
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+    tty.expect "❯"
+    tty.send "foo bar baz"
+    tty.expectTypedAtPrompt "foo bar baz"
+    # Ctrl+A to start (pos 0), then Alt+F forward to start of "bar" (pos 4).
+    tty.send "\x01"
+    tty.drain 20
+    tty.sendAltChord('f')
+    # Insert a digit marker at the cursor (between "foo " and "bar").
+    tty.send "1"
+    tty.expectTypedAtPrompt "foo 1bar baz"
+    # Alt+F again -> forward to start of "baz" (now pos 9 after the insert).
+    tty.sendAltChord('f')
+    tty.send "2"
+    tty.expectTypedAtPrompt "foo 1bar 2baz"
+    # Alt+B back to start of "2baz" (pos 9), then again to "1bar" (pos 5).
+    tty.sendAltChord('b')
+    tty.sendAltChord('b')
+    tty.send "0"
+    tty.expectTypedAtPrompt "foo 01bar 2baz"
+    tty.send "\n"
+    tty.expectInHistory "foo 01bar 2baz"
 
   test "ctrl-c during bash tool then prompt accepts input":
     let root = newFixture("ctrlc_during_bash")
