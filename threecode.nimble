@@ -38,10 +38,12 @@ task docs, "Build HTML manual from docs/manual.md":
   # nim md2html regenerates nimdoc.out.css from nimdoc's built-in default
   # (light theme + visible theme switcher). Our curated dark theme lives
   # in 3code.css and wins by overwriting the generated file.
-  withDir "docs":
-    exec "nim md2html --docCmd:skip --outdir:. manual.md"
-    mvFile("manual.html", "index.html")
-    cpFile("3code.css", "nimdoc.out.css")
+  # Run from the base project directory: the nested `nim md2html` walks up to
+  # find config.nims, which reads threecode.nimble relative to cwd. withDir
+  # would break that path resolution.
+  exec "nim md2html --docCmd:skip --outdir:docs docs/manual.md"
+  mvFile("docs/manual.html", "docs/index.html")
+  cpFile("docs/3code.css", "docs/nimdoc.out.css")
 
 task devdocs, "Build developer HTML docs from source":
   # nim doc regenerates nimdoc.out.css and dochack.js from its built-in

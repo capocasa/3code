@@ -30,6 +30,13 @@ irm https://3code.capocasa.dev/install.ps1 | iex
 
 First run walks you through adding a provider (name, URL, API key, models) and verifies with a test call.
 
+## Manual
+
+The full documentation is available
+
+[https://3code.capocasa.dev/docs](https://3code.capocasa.dev/docs)
+
+
 ## Build from source
 
 ```
@@ -37,10 +44,6 @@ nimble install https://github.com/capocasa/3code
 ```
 
 Requires [Nim](https://nim-lang.org) >= 2.0 and `curl` on `PATH`.
-
-## Docs
-
-Full manual at [3code.capocasa.dev](https://3code.capocasa.dev). Developer docs via `nimble devdocs`.
 
 ## Changelog
 

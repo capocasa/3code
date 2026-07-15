@@ -2,31 +2,68 @@
 
 ## Introduction
 
-3code exists because I needed a coding agent to fill the gap between whatever
-the main American shops are offering and my day-to-day need for reliability.
-The main shops just don't deliver on reliability; there's always *something*
-going on.
+3code grew out of my frustration with AI studios not optimizing at all to conserve
+AI tokens. While I totally get that it's a good thing to take a "what if we had
+endless resources" approach in a rearch lab, in my world, I'm paying- and it looks
+to me like the AI companies are scaling the research lab up, free token fiction and all,
+instead of adapting their research to what my needs are today. So it seems clear our
+priorities are not aligned.
 
-3code takes a bare-bones "works right now" approach where everything is geared
-toward maximal value right now and minimal cost. No splurging because we're
-making a bet things will be cheaper tomorrow, no needing to deliver splurgy
-unnecessarily fancy features to keep up appearances.
+I find that open models- particularly GLM- are more than adequate to meet all my programming needs.
+But I also found the other open agents seem to have either taken a page out of the AI companies
+themselves- not optimizing very much for token use- or take a hyper-minimalistic 'the model will do
+what it does' approach. 3code does neither- it makes every decision based on the idea "what will
+bring better results with the least brainpower, tokens and computer resources used", and nothing else.
+That's why it's the economical coding agent.
 
-There are a few simpler offerings but they each had a few issues I just barely
-found enough to want to build my own.
+By being futurists and not having a proper product development vision based on today, the AI labs
+have left a real gap. The open AI companies have filled most of it- 3code is here to make the
+most of these.
 
 ## Quickstart
 
+The first thing you need to do is get a provider where you can buy inference via an API, or set up
+your computer with an open model so you can be your own provider.
+
+Note: Being your own provider is just barely workable in terms of the quality you can get.
+
 ### Get a provider
 
-Sign up at one of the supported providers and get an API key:
+There are lots and lots of providers to choose from.
 
-- `nvidia <https://build.nvidia.com>`_ - free tier, gpt-oss-120b, good for
-  most tasks
-- `z.ai <https://z.ai/>`_ - GLM 5.1 coding plan, excellent quality,
-  affordable flat rate
-- `deepinfra <https://deepinfra.com/>`_ - pay-per-token, reliable, broad
-  model selection
+#### Free providers
+
+The best way to get to know 3code is with a free provider.
+
+There are 2 notable ones I am aware of: `nvidia <https://build.nvidia.com>`_ has free deepseek v4 pro which is quite remarkable, and `novita.ai <novita.ai>`_ has tencent hy3 which is my favorite 'small' model. Both are usable- the rate limits don't make it impossible to work.
+
+#### GLM, The Workhorse
+
+To do proper work, nothing beats GLM 5.2, in my experience. I think it's in the same league as the more well known models- it can work a bit slower but the results are right there.
+
+The best place to get GLM 5.2 at the time of writing is `deepinfra <https://deepinfra.com>`_ at $3 per million tokens, which is very close to the kind of usage you get from monthly plans if you budget $100-$200 a month.
+
+While it is technically possible to use the `z.ai coding plan <https://z.ai/subscribe>`_ with 3code, it's not officially supported.
+
+I work with sensitive data that sometimes that I like to keep within EU jurisdiction- I like `tensorx <https://tensorx.ai>` a lot for this.
+
+#### More interesting models and providers 
+
+I tried them all!
+
+**Deepseek V4 Pro** is also very capable and inexpensive. I found it much more prone to create bugs than GLM but if you can keep it on track, when it does workit works very well. Available directly from `deepseek <https://deepseek.com>`_.
+
+**LongCat** is interesting- I find it very similar to deepseek and it seemed more focused. Available from openrouter and `longcat <https://longcat.chat>_` directly (alipay app needed).
+
+**Minimax M3** is very interesting- it has great general wide knowledge including of programming and comes up with pretty good approachs but it can be a bit hit or miss and doesn't stay focused very well for programming. It's might runner-up 'light'model. Super inexpensive plans are available directly from Minimax `<https://minimax.io>_`.
+
+**Tencent Hy3** is available for free at the moment- the openrouter free version is rather limited but it's also on a provider called `novita <https://novita.ai>` and I haven't run into a limit yet. It's a lot like GLM but you can't give it as tough jobs. My favorite light model. We'll have to see where it goes with the pricing. 
+
+**Kimi K2.7-code** worked just fine but I found it more expensive and especially much, much more verbose than GLM- so it costs more per task, so I haven't used it very much. Kimi K3 seems to be out but needs to be tested.
+
+#### Finding even more providers
+
+You can sign up at `openrouter <https://openrouter.com>`_ and `eurouter <https://www.eurouter.ai/>`, or you can do what I like to do and look at their models pages and sign up directly with the provider just to have one entity less in the loop.
 
 ### Install
 
@@ -153,110 +190,13 @@ The ticker has no effect if the provider does not emit reasoning content.
 
 ## Known good models
 
-These provider/model pairs have been tested to give fairly consistent results.
-Tokens can still be burnt on errors - that is part of the game.
-
-**GLM (ZAI)**
-
-| provider   | model         | notes              |
-|------------|---------------|--------------------|
-| zai        | glm-5.1       | recommended        |
-| zai        | glm-5         |                    |
-| zai        | glm-5-turbo   | faster             |
-| zai        | glm-4.7       |                    |
-| zaicode    | glm-5.1       | coding plan        |
-| fireworks  | glm-5.1       |                    |
-| together   | glm-5.1       |                    |
-| deepinfra  | glm-5.1       |                    |
-| nebius     | glm-5         |                    |
-| nvidia     | glm-4.7       |                    |
-
-**gpt-oss (Microsoft)**
-
-| provider   | model             | notes          |
-|------------|-------------------|----------------|
-| nvidia     | gpt-oss-120b      | free tier      |
-| ovh        | gpt-oss-120b      | EU             |
-| groq        | gpt-oss-120b     |                |
-| nebius     | gpt-oss-120b      |                |
-| sambanova  | gpt-oss-120b      |                |
-| deepinfra  | gpt-oss-120b      |                |
-
-**DeepSeek**
-
-| provider   | model             | notes          |
-|------------|-------------------|----------------|
-| deepseek   | deepseek-chat     | v3             |
-| deepseek   | deepseek-reasoner | r1             |
-| deepseek   | deepseek-v4-pro   |                |
-| nebius     | deepseek-v3.2     |                |
-| nebius     | deepseek-v4-pro   |                |
-| together   | deepseek-v4-pro   |                |
-| deepinfra  | deepseek-v4-pro   |                |
-| sambanova  | deepseek-v3.2     |                |
-
-**MiniMax**
-
-| provider   | model          | notes      |
-|------------|----------------|------------|
-| minimax    | minimax-m3     | 1M context |
-| minimax    | minimax-m2.7   |            |
-| minimax    | minimax-m2.7-highspeed |   |
-| nvidia     | minimax-m2.7   |            |
-| nvidia     | minimax-m2.5   |            |
-| fireworks  | minimax-m2.7   |            |
-| together   | minimax-m2.7   |            |
-| sambanova  | minimax-m2.7   |            |
-| deepinfra  | minimax-m2.5   |            |
-
-**Kimi**
-
-| provider   | model     | notes |
-|------------|-----------|-------|
-| together   | kimi-k2.6 |       |
-| fireworks  | kimi-k2.6 |       |
-| deepinfra  | kimi-k2.6 |       |
-| together   | kimi-k2.5 |       |
-
-Note: Qwen just barely did not make it into the known-good list but testing
-continues.
-
-To see the current list at any time:
+3code has a list of models and providers that have been tested to work- each provider usually needs a bit of handholding because there can be difference in the details of how the API is called. You can get the current list by running
 
 ```
 3code --good
 ```
 
-## Experimental mode
-
-Experimental mode unlocks any model from any provider. Any token burn from
-untested combinations is on you.
-
-```
-3code --experimental
-# or
-3code -x
-```
-
-Known-good models have preset tuning parameters (temperature, reasoning effort,
-max tokens). In experimental mode you can also control reasoning level and
-temperature directly:
-
-```
-:reasoning low
-:reasoning medium
-:reasoning high
-```
-
-## Resume
-
-Resume the most recent session in the current directory:
-
-```
-3code --resume
-# or
-3code -r
-```
+## Sessions
 
 List recent sessions for the current directory (newest first, up to 20):
 
@@ -273,7 +213,7 @@ session, run 3code from the sessions directory itself (e.g.
 Resume a specific session by ID:
 
 ```
-3code --resume=abc123
+3code -r:abc123
 ```
 
 Note: different providers expire their prompt cache at different rates. Resuming
@@ -306,13 +246,6 @@ Then execute chunk 1.
 Task: add comprehensive test coverage to the parser module.
 ```
 
-3code's built-in `task-chunked-implementation` skill documents the exact
-workflow. Invoke it with:
-
-```
-use the chunked implementation skill: <task description>
-```
-
 Chunked mode is well-suited to busywork that does not require human interaction,
 such as adding basic test coverage across a large codebase. A capable model is
 needed; GLM 5.1 works well.
@@ -321,14 +254,25 @@ Calling `context_clear` at the end of each chunk with the next file as the
 target also serves as a cheap capability test: if the model loses track enough
 to forget to call the next file, the task was probably too hard for this mode.
 
-**Chunked mode is not agent orchestration.** There is no spawning of sub-agents,
-no parallel execution, no shared state bus. It is one model, one session at a
-time, handing off context via a tool call. This is intentional: agent
-orchestration is expensive to program, expensive to reason about, and current
-approaches do not seem to result in token savings. That is the opposite of
-economical.
+## Cybernetic mode
 
-This stance may be revised as agent orchestration knowledge matures.
+Cybernetic mode is the go-to way to do a long-running coding session with 3code- agentic use.
+
+How it works is you get yourself a chunk of work in a worktree, and ask our model to use the built-in cybernetic skill to complete it.
+
+Here's what the skill does:
+
+- It makes a plan for your work and writes it to a plan file as a todo list
+- Has instructions in the file to pick one of the todo items, implement it, and update the plan file informed by the learnings of implementation
+- Clears the context, with instructions for the next session to load the file
+- Rinse and repeat
+- When all items are completed, the last session performs a review
+
+This allows for long-running task completion of large chunks of work while preserving only the context that is actually needed. This is different from summarizing, where all context is kept at a lower resolution, regardless of whether it is relevant.
+
+## No sub-agents
+
+Sub-agents are not supported because both research and user feedback says they are very expensive and bring unclear or negative benefits, so I consider it a feature that 3code doesn't have them. Use Cybernetic mode with worktrees instead.
 
 ## Developments
 
