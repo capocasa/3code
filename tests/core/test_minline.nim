@@ -334,6 +334,84 @@ suite "minline editor: cursor navigation":
     d.push Enter
     check d.run(ed, prompt = "> ") == "<foo bar\nbaz qux"
 
+  test "Alt+F moves forward to start of next word":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "foo bar baz"
+    d.push CtrlA          # start of line
+    d.push AltF           # forward -> start of 'bar' (pos 4)
+    d.pushString "<"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "foo <bar baz"
+
+  test "Alt+F at last word lands at end of buffer":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "foo bar"
+    d.push CtrlA          # start
+    d.push AltF           # -> start of 'bar' (pos 4)
+    d.push AltF           # -> end (pos 7)
+    d.pushString "<"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "foo bar<"
+
+  test "Alt+B moves backward to start of previous word":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "foo bar baz"
+    # cursor at end (pos 11); Alt+B x2 lands at start of 'bar' (pos 4)
+    d.push AltB           # back -> start of 'baz' (pos 8)
+    d.push AltB           # back -> start of 'bar' (pos 4)
+    d.pushString "<"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "foo <bar baz"
+
+  test "Alt+B at first word lands at start of buffer":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "foo bar"
+    d.push AltB           # back -> start of 'bar' (pos 4)
+    d.push AltB           # back -> start of 'foo' (pos 0)
+    d.pushString "<"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "<foo bar"
+
+  test "Alt+F then Alt+B round-trips to buffer start":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "alpha beta"
+    d.push CtrlA          # pos 0
+    d.push AltF           # -> start of 'beta' (pos 6)
+    d.push AltB           # -> start of 'alpha' (pos 0)
+    d.pushString "<"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "<alpha beta"
+
+  test "Ctrl+Alt+H deletes back to the most recent word boundary":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "/usr/local/bin"
+    d.push CtrlAltH       # delete 'bin' back to '/'
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "/usr/local/"
+
+  test "Ctrl+Alt+H peels one segment at a time":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "a/b/c"
+    d.push CtrlAltH       # delete 'c'
+    d.push CtrlAltH       # delete 'b'
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "a/"
+
+  test "Ctrl+Alt+H stops at non-alphanumeric, keeps the boundary char":
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "name.value"
+    d.push CtrlAltH       # delete 'value' back to '.'
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "name."
+
 # ---------------- Driver: multiline newlines ----------------
 
 suite "minline editor: newline insertion (multiline)":

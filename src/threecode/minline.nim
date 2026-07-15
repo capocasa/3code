@@ -774,6 +774,29 @@ proc deleteWordLeft*(ed: var LineEditor) =
   callHook(ed.onMutate, ed)
   fullRedraw(ed)
 
+proc deleteToBoundaryLeft*(ed: var LineEditor) =
+  ## Delete back to the most recent non-alphanumeric boundary. Like
+  ## readline's ``backward-kill-word``: first skip any non-word chars
+  ## (``/``, ``.``, etc.) immediately to the left, then delete the
+  ## alphanumeric run. This peels one path segment per press
+  ## (``/usr/local/bin`` -> ``/usr/local/`` -> ``/usr/``) instead of
+  ## stalling when the cursor lands right after a delimiter.
+  var p = ed.line.position
+  let stop = ed.line.position
+  while p > 0:
+    let c = ed.line.text[p - 1]
+    if c.isAlphanumeric or c == '_': break
+    dec p
+  while p > 0:
+    let c = ed.line.text[p - 1]
+    if not (c.isAlphanumeric or c == '_'): break
+    dec p
+  if p == stop: return
+  ed.line.text = ed.line.text[0 ..< p] & ed.line.text[stop .. ^1]
+  ed.line.position = p
+  callHook(ed.onMutate, ed)
+  fullRedraw(ed)
+
 proc visualUp*(ed: var LineEditor) =
   ## Move up by one visual row, preserving the visual column as best as
   ## possible. If already on the top visual row of the buffer, fall back
@@ -972,6 +995,9 @@ KEYMAP["ctrl+e"]    = proc(ed: var LineEditor) = ed.goToEnd()
 KEYMAP["home"]      = proc(ed: var LineEditor) = ed.goToStart()
 KEYMAP["end"]       = proc(ed: var LineEditor) = ed.goToEnd()
 KEYMAP["ctrl+w"]    = proc(ed: var LineEditor) = ed.deleteWordLeft()
+KEYMAP["alt+b"]     = proc(ed: var LineEditor) = ed.wordLeft()
+KEYMAP["alt+f"]     = proc(ed: var LineEditor) = ed.wordRight()
+KEYMAP["alt+h"]     = proc(ed: var LineEditor) = ed.deleteToBoundaryLeft()
 KEYMAP["ctrl+c"]    = proc(ed: var LineEditor) =
   ed.canceled = true
   raise newException(InputCancelled, "")
@@ -1078,6 +1104,9 @@ proc initKeyTables*() =
   KEYMAP["home"]      = proc(ed: var LineEditor) = ed.goToStart()
   KEYMAP["end"]       = proc(ed: var LineEditor) = ed.goToEnd()
   KEYMAP["ctrl+w"]    = proc(ed: var LineEditor) = ed.deleteWordLeft()
+  KEYMAP["alt+b"]     = proc(ed: var LineEditor) = ed.wordLeft()
+  KEYMAP["alt+f"]     = proc(ed: var LineEditor) = ed.wordRight()
+  KEYMAP["alt+h"]     = proc(ed: var LineEditor) = ed.deleteToBoundaryLeft()
   KEYMAP["ctrl+c"]    = proc(ed: var LineEditor) =
     if ed.wizardMode:
       # In the provider wizard, Ctrl-C clears the line if text is
@@ -1306,6 +1335,16 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
   if c1 != 27: return false
   if c2 == 13:
     ed.insertNewline()
+    return false
+  # Alt+<key> two-byte sequences: ESC followed by the key's byte.
+  # A real Alt chord arrives as a burst so `hasPendingEscapeTail` saw
+  # the letter as a tail and routed us here; a bare Escape (human-paced)
+  # already canceled at the top of this proc.
+  var altName: string
+  if c2 == 8: altName = "alt+h"        # Ctrl+Alt+H = ESC + backspace byte
+  elif c2 in 32..126: altName = "alt+" & c2.char.toLowerAscii
+  if altName.len > 0 and KEYMAP.hasKey(altName):
+    KEYMAP[altName](ed)
     return false
   if c2 == 91:  # CSI
     let c3 = escCh(25)

@@ -48,6 +48,9 @@ const
   CtrlE* = @[5]
   CtrlLeft* = @[27, 91, 49, 59, 53, 68]
   CtrlRight* = @[27, 91, 49, 59, 53, 67]
+  AltB* = @[27, 98]   # Alt+B: back one word
+  AltF* = @[27, 102]  # Alt+F: forward one word
+  CtrlAltH* = @[27, 8]  # Ctrl+Alt+H: delete back to word boundary
   AltEnter* = KeyAltEnter
   KittyShiftEnter = KeyKittyShiftEnter
   XModShiftEnter = KeyModifyOtherShiftEnter
