@@ -58,7 +58,13 @@ const KnownGoodCombos* = [
     ("zai",       "glm-5",                                           "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
     ("zai",       "glm-5-turbo",                                     "glm",      "5",   "turbo",     "on",     0.2, 8192, false, 200_000),
     ("zai",       "glm-5.1",                                         "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
-    ("zai",       "glm-5.2",                                         "glm",      "5",   "1",         "high",   0.2, 8192, false, 1_000_000),
+    ("zai",       "glm-5.2",                                         "glm",      "5",   "2",         "high",   0.2, 8192, false, 1_000_000),
+    ("zaicode",  "glm-4.7",                                         "glm",      "4",   "7",         "on",     0.2, 8192, false, 200_000),
+    ("zaicode",  "glm-4.7-flash",                                   "glm",      "4",   "flash",     "on",     0.2, 8192, false, 200_000),
+    ("zaicode",  "glm-5",                                           "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
+    ("zaicode",  "glm-5-turbo",                                     "glm",      "5",   "turbo",     "on",     0.2, 8192, false, 200_000),
+    ("zaicode",  "glm-5.1",                                         "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
+    ("zaicode",  "glm-5.2",                                         "glm",      "5",   "2",         "high",   0.2, 8192, false, 1_000_000),
     # qwen is out
     ("deepinfra", "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
     ("deepinfra", "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
@@ -68,22 +74,22 @@ const KnownGoodCombos* = [
     ("novita",    "zai-org/glm-5", "glm"       , "5", "", "on", 0.2, 8192, false, 200000),
     ("novita",    "zai-org/glm-5-turbo", "glm"       , "5", "turbo", "on", 0.2, 8192, false, 200000),
     ("novita",    "zai-org/glm-5.1", "glm"       , "5", "1", "on", 0.2, 8192, false, 200000),
-    ("novita",    "zai-org/glm-5.2", "glm"       , "5", "1", "high", 0.2, 8192, false, 1000000),
-    ("nvidia",    "z-ai/glm-5.2", "glm"       , "5", "1", "high", 0.2, 8192, false, 1000000),
+    ("novita",    "zai-org/glm-5.2", "glm"       , "5", "2", "high", 0.2, 8192, false, 1000000),
+    ("nvidia",    "z-ai/glm-5.2", "glm"       , "5", "2", "high", 0.2, 8192, false, 1000000),
     ("deepinfra", "zai-org/GLM-4.7-Flash", "glm"       , "4", "flash", "on", 0.2, 8192, false, 200000),
-    ("deepinfra", "zai-org/GLM-5.2", "glm"       , "5", "1", "high", 0.2, 8192, false, 1000000),
-    ("deepinfra", "zai-org/GLM-5.2", "glm"       , "5", "1", "high", 0.2, 8192, false, 1000000),
+    ("deepinfra", "zai-org/GLM-5.2", "glm"       , "5", "2", "high", 0.2, 8192, false, 1000000),
+    ("deepinfra", "zai-org/GLM-5.2", "glm"       , "5", "2", "high", 0.2, 8192, false, 1000000),
     ("deepinfra", "zai-org/GLM-4.7-Flash", "glm"       , "4", "flash", "on", 0.2, 8192, false, 200000),
     ("openrouter", "z-ai/glm-4.7", "glm"       , "4", "7", "on", 0.2, 8192, false, 200000),
     ("openrouter", "z-ai/glm-4.7-flash", "glm"       , "4", "flash", "on", 0.2, 8192, false, 200000),
     ("openrouter", "z-ai/glm-5", "glm"       , "5", "", "on", 0.2, 8192, false, 200000),
     ("openrouter", "z-ai/glm-5-turbo", "glm"       , "5", "turbo", "on", 0.2, 8192, false, 200000),
     ("openrouter", "z-ai/glm-5.1", "glm"       , "5", "1", "on", 0.2, 8192, false, 200000),
-    ("openrouter", "z-ai/glm-5.2", "glm"       , "5", "1", "high", 0.2, 8192, false, 1000000),
+    ("openrouter", "z-ai/glm-5.2", "glm"       , "5", "2", "high", 0.2, 8192, false, 1000000),
     ("together",  "zai-org/GLM-4.7", "glm"       , "4", "7", "on", 0.2, 8192, false, 200000),
-    ("together",  "zai-org/GLM-5.2", "glm"       , "5", "1", "high", 0.2, 8192, false, 1000000),
-    ("nebius",    "zai-org/GLM-5.2", "glm"       , "5", "1", "high", 0.2, 8192, false, 1000000),
-    ("baseten",   "zai-org/GLM-5.2", "glm"       , "5", "1", "high", 0.2, 8192, false, 1000000),
+    ("together",  "zai-org/GLM-5.2", "glm"       , "5", "2", "high", 0.2, 8192, false, 1000000),
+    ("nebius",    "zai-org/GLM-5.2", "glm"       , "5", "2", "high", 0.2, 8192, false, 1000000),
+    ("baseten",   "zai-org/GLM-5.2", "glm"       , "5", "2", "high", 0.2, 8192, false, 1000000),
     ("baseten",   "zai-org/GLM-5.1", "glm"       , "5", "1", "on", 0.2, 8192, false, 200000),
 
     # gpt-oss
@@ -1587,7 +1593,10 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
     if combo[0].toLowerAscii == p and combo[1].toLowerAscii == m:
       let fam = combo[2]
       if fam == "glm":
-        if m == "glm-5.2": return @["off", "high", "max"]
+        # 5.2 (variant "2") exposes a graded effort knob (high/max); older
+        # GLM is on/off only. Variant encodes the minor version digit
+        # (4.7 -> "7", 5.1 -> "1", 5.2 -> "2").
+        if combo[3] == "5" and combo[4] == "2": return @["off", "high", "max"]
         return @["off", "on"]
       if fam in ["kimi", "longcat", "minimax"]:
         # M-series has no graded effort knob on the OpenAI-compatible

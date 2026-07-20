@@ -70,6 +70,71 @@ suite "api request shaping":
     applyReasoning(p, body)
     check body{"reasoning"}{"effort"}.getStr == "low"
 
+  test "together glm-5.2 sends reasoning_effort for high/max":
+    block high:
+      var body = %*{"stream": true}
+      let p = Profile(name: "together.zai-org/GLM-5.2", family: "glm",
+                      version: "5", variant: "2",
+                      model: "zai-org/GLM-5.2", reasoning: "high")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "high"
+      check "reasoning" notin body
+    block maxn:
+      var body = %*{"stream": true}
+      let p = Profile(name: "together.zai-org/GLM-5.2", family: "glm",
+                      version: "5", variant: "2",
+                      model: "zai-org/GLM-5.2", reasoning: "max")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "max"
+    block offn:
+      var body = %*{"stream": true}
+      let p = Profile(name: "together.zai-org/GLM-5.2", family: "glm",
+                      version: "5", variant: "2",
+                      model: "zai-org/GLM-5.2", reasoning: "off")
+      applyReasoning(p, body)
+      check body{"reasoning"}{"enabled"}.getBool == false
+      check "reasoning_effort" notin body
+
+  test "openrouter glm-5.2 sends reasoning.effort, max->xhigh":
+    block high:
+      var body = %*{"stream": true}
+      let p = Profile(name: "openrouter.z-ai/glm-5.2", family: "glm",
+                      version: "5", variant: "2",
+                      model: "z-ai/glm-5.2", reasoning: "high")
+      applyReasoning(p, body)
+      check body{"reasoning"}{"effort"}.getStr == "high"
+    block maxn:
+      var body = %*{"stream": true}
+      let p = Profile(name: "openrouter.z-ai/glm-5.2", family: "glm",
+                      version: "5", variant: "2",
+                      model: "z-ai/glm-5.2", reasoning: "max")
+      applyReasoning(p, body)
+      check body{"reasoning"}{"effort"}.getStr == "xhigh"
+    block offn:
+      var body = %*{"stream": true}
+      let p = Profile(name: "openrouter.z-ai/glm-5.2", family: "glm",
+                      version: "5", variant: "2",
+                      model: "z-ai/glm-5.2", reasoning: "off")
+      applyReasoning(p, body)
+      check body{"reasoning"}{"enabled"}.getBool == false
+
+  test "together non-5.2 glm sends no effort knob":
+    var body = %*{"stream": true}
+    let p = Profile(name: "together.zai-org/GLM-5.1", family: "glm",
+                    version: "5", variant: "1",
+                    model: "zai-org/GLM-5.1", reasoning: "high")
+    applyReasoning(p, body)
+    check "reasoning_effort" notin body
+    check "reasoning" notin body
+
+  test "knownGoodReasonings offers high/max for third-party 5.2":
+    check knownGoodReasonings("together", "zai-org/GLM-5.2") == @["off", "high", "max"]
+    check knownGoodReasonings("openrouter", "z-ai/glm-5.2") == @["off", "high", "max"]
+    check knownGoodReasonings("nebius", "zai-org/GLM-5.2") == @["off", "high", "max"]
+    check knownGoodReasonings("zai", "glm-5.2") == @["off", "high", "max"]
+    check knownGoodReasonings("together", "zai-org/GLM-5.1") == @["off", "on"]
+    check knownGoodReasonings("together", "zai-org/GLM-5") == @["off", "on"]
+
   test "hy with empty reasoning sends no wire knob":
     var body = %*{"stream": true}
     let p = Profile(name: "novita.tencent/hy3", family: "hy",

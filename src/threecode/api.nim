@@ -1119,15 +1119,24 @@ proc applyGptOssReasoning(p: Profile, body: JsonNode) =
 
 proc applyGlmReasoning(p: Profile, body: JsonNode) =
   ## Wire mapping for GLM reasoning. Values are `off`/`on` (4.7/5/5.1) or
-  ## `off`/`high`/`max` (5.2 on z.ai). Two control surfaces:
+  ## `off`/`high`/`max` (5.2). Control surfaces by provider:
   ## - `thinking.type` ("enabled"/"disabled") on z.ai's first-party API
-  ##   (provider names `zai` / `zai-coding`), plus `thinking.effort`
-  ##   (`high` default, `max` deeper) on GLM-5.2 only.
-  ## - `chat_template_kwargs.enable_thinking` (bool) on vLLM stacks
-  ##   (nvidia); other vLLM GLM providers (nebius, deepinfra, fireworks)
-  ##   accept the same knob but always think when it's omitted.
-  ## Inert stacks (baseten, together, cerebras) accept nothing and always
-  ## think, so `off` is silently a no-op there.
+  ##   (provider names `zai` / `zai-coding` / `zaicode`), plus
+  ##   `thinking.effort` (`high` default, `max` deeper) on GLM-5.2 only.
+  ## - `reasoning_effort` (`high`/`max`) on Together for GLM-5.2; Together
+  ##   accepts only those two effort levels and ignores the field on older
+  ##   GLM (which think whenever the parameter is absent).
+  ## - `reasoning: {effort: ...}` on OpenRouter for GLM-5.2; OpenRouter maps
+  ##   `high` to high and `max` to its native `xhigh`.
+  ## - `chat_template_kwargs.enable_thinking` (bool) on vLLM stacks (nvidia);
+  ##   other vLLM GLM providers (nebius, deepinfra, fireworks) accept the
+  ##   same knob but always think when it's omitted.
+  ## Inert stacks (baseten, cerebras) accept nothing and always think, so
+  ## `off` is silently a no-op there.
+  # GLM-5.2 is the only GLM with a graded effort knob (variant "2");
+  # every other GLM is on/off. Variant encodes the minor version digit
+  # (4.7 -> "7", 5.1 -> "1", 5.2 -> "2").
+  let glm52 = p.family == "glm" and p.version == "5" and p.variant == "2"
   case providerOf(p)
   of "zai", "zai-coding", "zaicode":
     case p.reasoning
@@ -1136,6 +1145,18 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
     of "high": body["thinking"] = %*{"type": "enabled"}
     of "max": body["thinking"] = %*{"type": "enabled", "effort": "max"}
     else: discard
+  of "together":
+    if glm52:
+      case p.reasoning
+      of "off": body["reasoning"] = %*{"enabled": false}
+      of "max": body["reasoning_effort"] = %"max"
+      else: body["reasoning_effort"] = %"high"
+  of "openrouter":
+    if glm52:
+      case p.reasoning
+      of "off": body["reasoning"] = %*{"enabled": false}
+      of "max": body["reasoning"] = %*{"effort": "xhigh"}
+      else: body["reasoning"] = %*{"effort": "high"}
   of "nvidia":
     case p.reasoning
     of "off": body["chat_template_kwargs"] = %*{"enable_thinking": false}
