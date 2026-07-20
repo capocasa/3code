@@ -198,6 +198,23 @@ const KnownGoodCombos* = [
     ("deepinfra", "tencent/Hy3", "hy"        , "3", "", "no_think", 0.2, 8192, false, 262144),
     ("deepinfra", "tencent/Hy3", "hy"        , "3", "", "no_think", 0.2, 8192, false, 262144),
     ("openrouter", "tencent/hy3", "hy"        , "3", "", "no_think", 0.2, 8192, false, 262144),
+
+    # nanogpt (OpenAI-compatible aggregator; model ids carry a provider/ tag)
+    ("nanogpt",  "TEE/glm-4.7",                                "glm",      "4",   "7",         "on",     0.2, 8192, false, 200_000),
+    ("nanogpt",  "TEE/glm-5",                                  "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
+    ("nanogpt",  "TEE/glm-5.1",                                "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
+    ("nanogpt",  "TEE/glm-5.2",                                "glm",      "5",   "1",         "high",   0.2, 8192, false, 1_000_000),
+    ("nanogpt",  "TEE/gpt-oss-120b",                           "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
+    ("nanogpt",  "TEE/kimi-k2.6",                              "kimi",     "2",   "6",         "on",     0.2, 8192, false, 262_144),
+    ("nanogpt",  "moonshotai/kimi-k2.7-code",                  "kimi",     "2",   "7-code",    "on",     0.2, 8192, false, 262_144),
+    ("nanogpt",  "moonshotai/kimi-k2.7-code-highspeed",        "kimi",     "2",   "7-code-hs", "on",     0.2, 4096, false, 262_144),
+    ("nanogpt",  "TEE/qwen3.6-35b-a3b",                        "qwen",     "3.6", "35b-a3b",   "on",     0.2, 8192, false, 262_144),
+    ("nanogpt",  "TEE/qwen3.6-35b-a3b-uncensored",              "qwen",     "3.6", "35b-a3b-u", "on",     0.2, 8192, false, 262_144),
+    ("nanogpt",  "TEE/qwen3.6-27b",                            "qwen",     "3.6", "27b",       "on",     0.2, 8192, false, 128_000),
+    ("nanogpt",  "alibaba/qwen3.6-flash",                     "qwen",     "3.6", "flash",     "on",     0.2, 4096, false, 128_000),
+    ("nanogpt",  "TEE/deepseek-v4-flash",                      "deepseek", "4",   "flash",     "low",    0.2, 4096, false, 1_000_000),
+    ("nanogpt",  "deepseek/deepseek-v4-pro",                   "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
+    ("nanogpt",  "minimax/minimax-m3",                         "minimax",  "3",   "",          "on",     0.2, 8192, false, 1_000_000),
   ]
     ## (provider, model, family, version, variant, reasoning, temperature,
     ## maxTokens, contextWindow) tuples.
@@ -1558,8 +1575,8 @@ proc reasoningSupported*(family: string): bool =
   ## True when `family` has a wire field for reasoning effort. Drives
   ## whether `:reasoning` switching has any effect for the active model.
   family == "gpt-oss" or family == "glm" or family == "deepseek" or
-    family == "minimax" or family == "kimi" or family == "longcat" or
-    family == "hy"
+    family == "minimax" or family == "kimi" or family == "qwen" or
+    family == "longcat" or family == "hy"
 
 proc knownGoodContextWindow*(provider, model: string): int =
   ## Context window for a known-good (provider, model) pair, in tokens.
@@ -1598,7 +1615,7 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # (4.7 -> "7", 5.1 -> "1", 5.2 -> "2").
         if combo[3] == "5" and combo[4] == "2": return @["off", "high", "max"]
         return @["off", "on"]
-      if fam in ["kimi", "longcat", "minimax"]:
+      if fam in ["kimi", "qwen", "longcat", "minimax"]:
         # M-series has no graded effort knob on the OpenAI-compatible
         # surface (see `applyMiniMaxReasoning` in api.nim): it's a
         # boolean on/off. low/medium/high would silently be coerced or

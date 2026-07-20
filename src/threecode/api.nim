@@ -1286,6 +1286,19 @@ proc applyKimiReasoning(p: Profile, body: JsonNode) =
     body["chat_template_kwargs"] = %*{"enable_thinking": true}
   else: discard
 
+proc applyQwenReasoning(p: Profile, body: JsonNode) =
+  ## Qwen3.x toggles thinking via the vLLM
+  ## `chat_template_kwargs.enable_thinking` boolean, same shape as Kimi.
+  ## `on` engages interleaved reasoning, `off` cuts it to a direct
+  ## response. Served via aggregator routes (nanogpt) that expose the
+  ## same chat-template knob.
+  case p.reasoning
+  of "off":
+    body["chat_template_kwargs"] = %*{"enable_thinking": false}
+  of "on":
+    body["chat_template_kwargs"] = %*{"enable_thinking": true}
+  else: discard
+
 proc applyHy3Reasoning(p: Profile, body: JsonNode) =
   ## Hy3 (Tencent Hunyuan v3) carries a graded effort knob, not a binary
   ## switch. Values are `no_think` (default direct response), `low`, and
@@ -1313,6 +1326,7 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "deepseek": applyDeepseekReasoning(p, body)
   of "minimax": applyMinimaxReasoning(p, body)
   of "kimi": applyKimiReasoning(p, body)
+  of "qwen": applyQwenReasoning(p, body)
   of "longcat": applyLongcatReasoning(p, body)
   of "hy": applyHy3Reasoning(p, body)
   else: discard
