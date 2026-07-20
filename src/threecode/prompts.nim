@@ -203,7 +203,7 @@ const KnownGoodCombos* = [
     ("nanogpt",  "TEE/glm-4.7",                                "glm",      "4",   "7",         "on",     0.2, 8192, false, 200_000),
     ("nanogpt",  "TEE/glm-5",                                  "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
     ("nanogpt",  "TEE/glm-5.1",                                "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
-    ("nanogpt",  "TEE/glm-5.2",                                "glm",      "5",   "1",         "high",   0.2, 8192, false, 1_000_000),
+    ("nanogpt",  "TEE/glm-5.2",                                "glm",      "5",   "2",         "high",   0.2, 8192, false, 1_000_000),
     ("nanogpt",  "TEE/gpt-oss-120b",                           "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
     ("nanogpt",  "TEE/kimi-k2.6",                              "kimi",     "2",   "6",         "on",     0.2, 8192, false, 262_144),
     ("nanogpt",  "moonshotai/kimi-k2.7-code",                  "kimi",     "2",   "7-code",    "on",     0.2, 8192, false, 262_144),
