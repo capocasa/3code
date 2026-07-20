@@ -255,6 +255,54 @@ suite "compact: contextWindowFor (known-good)":
     let p = Profile(name: "acme.test", model: "gpt-5", family: "")
     check contextWindowFor(p) == 400_000
 
+suite "prompts: inkling family":
+  test "known-good on baseten / together / fireworks":
+    check knownGoodFamily("baseten", "thinkingmachines/inkling") == "inkling"
+    check knownGoodFamily("together", "thinkingmachines/Inkling") == "inkling"
+    check knownGoodFamily("fireworks",
+      "accounts/fireworks/models/inkling") == "inkling"
+
+  test "case-insensitive match":
+    check knownGoodFamily("BASETEN", "THINKINGMACHINES/INKLING") == "inkling"
+
+  test "version/variant tags":
+    let (f, v, vr) = knownGoodTags("together", "thinkingmachines/Inkling")
+    check f == "inkling"
+    check v == "1"
+    check vr == ""
+
+  test "default reasoning level is medium":
+    check knownGoodReasoning("together", "thinkingmachines/Inkling") == "medium"
+
+  test "reasoningSupported is true":
+    check reasoningSupported("inkling")
+
+  test "exposes the level-based low/medium/high set":
+    check defaultReasoningsFor("together", "thinkingmachines/Inkling",
+      "inkling") == @["low", "medium", "high"]
+
+  test "setup returns the Inkling preamble with the bash/write/patch tools":
+    let p = Profile(name: "together.thinkingmachines/Inkling", url: "x",
+                    key: "k", model: "thinkingmachines/Inkling",
+                    family: "inkling")
+    let s = setup(p)
+    check "Inkling" in s.prompt
+    # same tool surface as glm/qwen/deepseek (bash, write, patch, ...)
+    var names: seq[string]
+    for t in s.tools:
+      names.add t{"function"}{"name"}.getStr
+    check "bash" in names
+    check "write" in names
+    check "patch" in names
+
+  test "context windows per provider":
+    check knownGoodContextWindow("baseten",
+      "thinkingmachines/inkling") == 256_000
+    check knownGoodContextWindow("together",
+      "thinkingmachines/Inkling") == 1_000_000
+    check knownGoodContextWindow("fireworks",
+      "accounts/fireworks/models/inkling") == 1_040_000
+
 suite "compact: decideContextAction":
   test "returns caNone when under threshold":
     check decideContextAction(1000, 128_000, 10) == caNone

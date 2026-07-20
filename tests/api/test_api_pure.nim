@@ -251,6 +251,24 @@ suite "api: applyReasoning — minimax":
       check not body.hasKey("chat_template_kwargs")
       check body{"reasoning_split"}.getBool == true
 
+suite "api: applyReasoning — inkling":
+  test "sets reasoning_effort for inkling (gpt-oss shape)":
+    var body = %*{"stream": true}
+    let p = Profile(name: "together.thinkingmachines/Inkling",
+                    family: "inkling", model: "thinkingmachines/Inkling",
+                    reasoning: "high")
+    applyReasoning(p, body)
+    check body{"reasoning_effort"}.getStr == "high"
+
+  test "medium / low pass straight through":
+    for effort in ["low", "medium", "high"]:
+      var body = %*{"stream": true}
+      let p = Profile(name: "baseten.thinkingmachines/inkling",
+                      family: "inkling", model: "thinkingmachines/inkling",
+                      reasoning: effort)
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == effort
+
 suite "api: applyReasoning — unknown family":
   test "no-op for unknown family":
     var body = %*{"stream": true}

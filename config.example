@@ -42,7 +42,7 @@ current = "baseten.glm5"
 name = "baseten"
 url = "https://inference.baseten.co/v1"
 key = "..."
-models = "glm5 qwen3c"
+models = "zai-org/GLM-5 thinkingmachines/inkling"
 
 [provider]
 name = "openai"
@@ -66,8 +66,15 @@ models = "openai/gpt-oss-120b"
 name = "together"
 url = "https://api.together.xyz/v1"
 key = "..."
-model_prefix = "meta-llama/"
-models = "Llama-3.3-70B-Instruct-Turbo"
+models = "thinkingmachines/Inkling zai-org/GLM-5.2"
+; model_prefix = "meta-llama/"
+; models = "Llama-3.3-70B-Instruct-Turbo"
+
+[provider]
+name = "fireworks"
+url = "https://api.fireworks.ai/inference/v1"
+key = "fw..."
+models = "accounts/fireworks/models/inkling"
 
 [provider]
 name = "longcat"

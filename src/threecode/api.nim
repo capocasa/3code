@@ -1316,6 +1316,15 @@ proc applyHy3Reasoning(p: Profile, body: JsonNode) =
   else:
     body["chat_template_kwargs"] = %*{"reasoning_effort": p.reasoning}
 
+proc applyInklingReasoning(p: Profile, body: JsonNode) =
+  ## Thinking Machines Inkling exposes a level-based reasoning effort on
+  ## the OpenAI-compatible surface: `reasoning_effort` (low/medium/high),
+  ## same shape as gpt-oss. Reasoning traces stream back on
+  ## `reasoning_content` (parsed generically, DeepSeek-style). On-demand /
+  ## serverless deployments on Baseten and Fireworks, and the Together
+  ## serverless endpoint, all accept this field.
+  body["reasoning_effort"] = %p.reasoning
+
 proc applyReasoning*(p: Profile, body: JsonNode) =
   ## Per-family wire mapping for `Profile.reasoning`. Adding a new
   ## family means: (1) set `reasoning` in the known-good combo table,
@@ -1329,6 +1338,7 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "qwen": applyQwenReasoning(p, body)
   of "longcat": applyLongcatReasoning(p, body)
   of "hy": applyHy3Reasoning(p, body)
+  of "inkling": applyInklingReasoning(p, body)
   else: discard
 
 # ---------- network worker thread (Tier 2) ----------
