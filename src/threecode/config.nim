@@ -486,6 +486,7 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("mistral",     "https://api.mistral.ai/v1"),
   ("moonshot",    "https://api.moonshot.ai/v1"),
   ("moonshot-cn", "https://api.moonshot.cn/v1"),
+  ("nanogpt",     "https://nano-gpt.com/api/v1"),
   ("nebius",      "https://api.tokenfactory.nebius.com/v1"),
   ("nvidia",      "https://integrate.api.nvidia.com/v1"),
   ("novita",      "https://api.novita.ai/openai"),
