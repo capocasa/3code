@@ -47,6 +47,10 @@ The best way to use 3code is the `z.ai coding plan <https://z.ai/subscribe>`_ ! 
 
 I work with sensitive data that sometimes that I like to keep within EU jurisdiction- I like `tensorx <https://tensorx.ai>` a lot for this.
 
+#### Low cost providers
+
+There are 3 notable low cost providers supported by 3code- deepinfra, opencode and nano-gpt.com. They work by serving quantized versions of the open weights models and I find they work remarkably well.
+
 #### More interesting models and providers 
 
 I tried them all!
@@ -59,7 +63,7 @@ I tried them all!
 
 **Tencent Hy3** is available for free at the moment- the openrouter free version is rather limited but it's also on a provider called `novita <https://novita.ai>` and I haven't run into a limit yet. It's a lot like GLM but you can't give it as tough jobs. My favorite light model. We'll have to see where it goes with the pricing. 
 
-**Kimi K2.7-code** worked just fine but I found it more expensive and especially much, much more verbose than GLM- so it costs more per task, so I haven't used it very much. Kimi K3 seems to be out but needs to be tested.
+**Kimi K2.7-code** worked just fine but I found it more expensive and especially much, much more verbose than GLM- so it costs more per task, so I haven't used it very much. Kimi K3 has been met with much enthusiasm but I was unable to test as of yet!
 
 #### Finding even more providers
 
