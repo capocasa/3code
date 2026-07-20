@@ -242,6 +242,16 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencodego", "glm-5",                "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
     ("opencodego", "deepseek-v4-pro",      "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
     ("opencodego", "deepseek-v4-flash",    "deepseek", "4",   "flash",     "low",    0.2, 4096, false, 1_000_000),
+
+    # kimi (Kimi API Platform, api.moonshot.ai; bare model ids)
+    ("kimi",     "kimi-k3",              "kimi",     "3",   "",          "on",     0.2, 8192, false, 1_000_000),
+    ("kimi",     "kimi-k2.7-code",       "kimi",     "2",   "7-code",    "on",     0.2, 8192, false, 262_144),
+    ("kimi",     "kimi-k2.6",            "kimi",     "2",   "6",         "on",     0.2, 8192, false, 262_144),
+
+    # kimicode (Kimi Code subscription, api.kimi.com/coding; 3 model ids only)
+    ("kimicode", "k3",                   "kimi",     "3",   "",          "on",     0.2, 8192, false, 1_000_000),
+    ("kimicode", "kimi-for-coding",      "kimi",     "2",   "7-code",    "on",     0.2, 8192, false, 262_144),
+    ("kimicode", "kimi-for-coding-highspeed","kimi",  "2",   "7-code-hs", "on",     0.2, 4096, false, 262_144),
   ]
     ## (provider, model, family, version, variant, reasoning, temperature,
     ## maxTokens, contextWindow) tuples.
