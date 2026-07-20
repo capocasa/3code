@@ -191,11 +191,10 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
   printSupported()
   stdout.write "\n"
   var key = readRequired(editor, "  api key              : ", hidden = true)
-  # same key already configured?
-  for pr in activeProviders:
-    if pr.key == key:
-      hintLn &"  already configured as {pr.name}", resetStyle
-      return pr
+  # API keys are not unique: the same key may legitimately back several
+  # providers (e.g. an aggregator offering the same model under different
+  # names, or separate provider entries for different model sets). So a
+  # matching key is never a blocker; only a duplicate *name* is.
   var name, url: string
   var inferred = inferProvider(key)
   if not experimentalEnabled and inferred != "" and
@@ -204,13 +203,12 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
   if inferred != "":
     name = inferred
     url = catalogUrl(inferred)
-    # same provider already exists? offer to update key instead
+    # duplicate name? abort the add — a key alone is fine, but two
+    # providers can't share a name (it's the config selector).
     for pr in activeProviders:
       if pr.name == name:
-        hintLn "  detected: ", resetStyle, name, GreyFg,
-               " -> already configured, updating key", Reset
-        return ProviderRec(name: pr.name, url: pr.url, key: key,
-                           models: pr.models)
+        errLn &"already configured as {name}"
+        raise newException(minline.InputCancelled, "duplicate name")
     hintLn "  detected: ", resetStyle, name, GreyFg, " -> ", url, Reset
   else:
     while true:
@@ -218,14 +216,10 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
       if n == "":
         errLn "name required"
         continue
-      var clash = false
       for pr in activeProviders:
         if pr.name == n:
-          clash = true
-          break
-      if clash:
-        errLn &"name already used: {n}"
-        continue
+          errLn &"already configured as {n}"
+          raise newException(minline.InputCancelled, "duplicate name")
       name = n
       url = u
       break
@@ -466,10 +460,6 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
   # repainted by the input thread's cancel handler before we get
   # here.
   let prov = promptNewProvider(editor)
-  for pr in activeProviders:
-    if pr.name == prov.name:
-      errLn &"duplicate provider: {prov.name} already configured"
-      return
   activeProviders.add prov
   if activeCurrent == "":
     activeCurrent = prov.name & "." & firstModel(prov)
