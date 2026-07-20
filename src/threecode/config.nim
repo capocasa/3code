@@ -491,6 +491,8 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("nvidia",      "https://integrate.api.nvidia.com/v1"),
   ("novita",      "https://api.novita.ai/openai"),
   ("openai",      "https://api.openai.com/v1"),
+  ("opencode",    "https://opencode.ai/zen/v1"),
+  ("opencodego",  "https://opencode.ai/zen/go/v1"),
   ("openrouter",  "https://openrouter.ai/api/v1"),
   ("ovh",         "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"),
   ("perplexity",  "https://api.perplexity.ai"),

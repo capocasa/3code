@@ -215,6 +215,33 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt",  "TEE/deepseek-v4-flash",                      "deepseek", "4",   "flash",     "low",    0.2, 4096, false, 1_000_000),
     ("nanogpt",  "deepseek/deepseek-v4-pro",                   "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
     ("nanogpt",  "minimax/minimax-m3",                         "minimax",  "3",   "",          "on",     0.2, 8192, false, 1_000_000),
+
+    # opencode (OpenCode Zen gateway; bare model ids on the wire)
+    ("opencode",    "minimax-m3",           "minimax",  "3",   "",          "on",     0.2, 8192, false, 1_000_000),
+    ("opencode",    "hy3-free",             "hy",       "3",   "free",      "no_think",0.2, 8192, false, 262_144),
+    ("opencode",    "kimi-k2.6",            "kimi",     "2",   "6",         "on",     0.2, 8192, false, 262_144),
+    ("opencode",    "kimi-k2.7-code",       "kimi",     "2",   "7-code",    "on",     0.2, 8192, false, 262_144),
+    ("opencode",    "glm-5.2",              "glm",      "5",   "2",         "high",   0.2, 8192, false, 1_000_000),
+    ("opencode",    "glm-5.1",              "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
+    ("opencode",    "glm-5",                "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
+    ("opencode",    "deepseek-v4-pro",      "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
+    ("opencode",    "deepseek-v4-flash",    "deepseek", "4",   "flash",     "low",    0.2, 4096, false, 1_000_000),
+    ("opencode",    "deepseek-v4-flash-free","deepseek","4",   "flash-free","low",    0.2, 4096, false, 1_000_000),
+    ("opencode",    "qwen3.6-plus",         "qwen",     "3.6", "plus",      "on",     0.2, 8192, false, 262_144),
+
+    # opencodego (OpenCode Go subscription gateway; bare model ids)
+    ("opencodego", "qwen3.7-plus",         "qwen",     "3.7", "plus",      "on",     0.2, 8192, false, 262_144),
+    ("opencodego", "qwen3.7-max",          "qwen",     "3.7", "max",       "on",     0.2, 8192, false, 262_144),
+    ("opencodego", "qwen3.6-plus",         "qwen",     "3.6", "plus",      "on",     0.2, 8192, false, 262_144),
+    ("opencodego", "minimax-m3",           "minimax",  "3",   "",          "on",     0.2, 8192, false, 1_000_000),
+    ("opencodego", "kimi-k3",              "kimi",     "3",   "",          "on",     0.2, 8192, false, 262_144),
+    ("opencodego", "kimi-k2.7-code",       "kimi",     "2",   "7-code",    "on",     0.2, 8192, false, 262_144),
+    ("opencodego", "hy3-preview",          "hy",       "3",   "preview",   "no_think",0.2, 8192, false, 262_144),
+    ("opencodego", "glm-5.2",              "glm",      "5",   "2",         "high",   0.2, 8192, false, 1_000_000),
+    ("opencodego", "glm-5.1",              "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
+    ("opencodego", "glm-5",                "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
+    ("opencodego", "deepseek-v4-pro",      "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
+    ("opencodego", "deepseek-v4-flash",    "deepseek", "4",   "flash",     "low",    0.2, 4096, false, 1_000_000),
   ]
     ## (provider, model, family, version, variant, reasoning, temperature,
     ## maxTokens, contextWindow) tuples.
