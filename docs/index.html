@@ -79,13 +79,14 @@ irm https://3code.capocasa.dev/install.ps1 | iex</pre></p>
 <h2 id="picking-a-provider">Picking a provider</h2><p>There are two categories of provider that are interesting to use with 3code: the nvidia free tier and Chinese flat-rate providers. Other providers work but will most likely be too expensive except to test-drive different models.</p>
 <p><a class="reference external" href="https://build.nvidia.com">nvidia</a> - Free tier. You get gpt-oss-120b, which is good enough for a lot of cases. You will notice when it starts to get limiting. MiniMax M2.7 is a very modern option on nvidia but it is pretty slow, something you want to use in the background.</p>
 <p><a class="reference external" href="https://platform.minimax.io">MiniMax</a> - First-party API for the MiniMax M-series: M3 frontier (1M context) and M2.7. The first-party endpoint is the cheapest way to run M3 and the only one that exposes the Anthropic-style <tt class="docutils literal"><span class="pre">thinking.type</span></tt> knob; the OpenAI-compatible surface (api.minimax.io/v1) is what 3code talks to and uses the vLLM-style <tt class="docutils literal"><span class="pre">chat_template_kwargs</span></tt> knob under the hood. M2.7 is also available on nvidia, fireworks, together, sambanova, and deepinfra as a hosted alternative.</p>
-<p><a class="reference external" href="https://z.ai/">z.ai</a> - GLM 5.1 on the z.ai coding plan is my provider of choice. Privacy and jurisdiction is not an issue because all code is open source and hence public. Excellent quality at an affordable flat rate.</p>
-<p><a class="reference external" href="https://endpoints.ai.cloud.ovh.net/">OVH</a> - An interesting EU-resident choice: gpt-oss on pay-per-token, cheap enough, and great if you need EU ownership and data.</p>
+<p><a class="reference external" href="https://z.ai/">z.ai</a> - GLM 5.2 on the z.ai coding plan what I use to develop 3code! The effectiveness is absolutely top notch, you can throw hard problems at it, and it the tokens stack up considerably slower than on any other model I've tried.</p>
+<p><a class="reference external" href="https://tokenfactory.nebius.com/">nebius</a> - The EU-resident runner up. Only has GLM 5.1, not 5.2, but still a great choice if if tensorx isn't available.</p>
 <p>Add a provider inside the REPL:</p>
 <p><pre class="listing">:provider add</pre></p>
 <p>Or switch between configured providers:</p>
 <p><pre class="listing">:provider use nvidia
 :provider use zai.glm-5.1</pre></p>
+<p>Have a look at the <a class="reference external" href="#known-good">full list of providers</a>.</p>
 
 <h2 id="starting-programming">Starting programming</h2><p>Use the <tt class="docutils literal"><span class="pre">:model</span></tt> command (tab-complete it), then press Tab again to rotate through all the models configured for the current provider.</p>
 <p>Then tell the model what you want.</p>
@@ -110,7 +111,31 @@ irm https://3code.capocasa.dev/install.ps1 | iex</pre></p>
 
 <h2 id="known-good-models">Known good models</h2><p>3code has a list of models and providers that have been tested to work- each provider usually needs a bit of handholding because there can be difference in the details of how the API is called. You can get the current list by running</p>
 <p><pre class="listing">3code --good</pre></p>
-
+<p>At the time of writing that's these</p>
+<table border="1" class="docutils"><tr><th>Provider</th><th>Models</th></tr>
+<tr><td>baseten</td><td>GLM-5 GLM-4.7 GLM-5.2 GLM-5.1 gpt-oss-120b DeepSeek-V4-Pro Kimi-K2.6 Kimi-K2.5</td></tr>
+<tr><td>cerebras</td><td>zai-glm-4.7 gpt-oss-120b</td></tr>
+<tr><td>fireworks</td><td>glm-5p1 glm-5 gpt-oss-120b deepseek-v4-pro minimax-m2p7 kimi-k2p6</td></tr>
+<tr><td>nebius</td><td>GLM-5.1 GLM-5 GLM-5.2 gpt-oss-120b gpt-oss-120b-fast DeepSeek-V3.2 DeepSeek-V3.2-fast DeepSeek-V4-Pro Kimi-K2.5 Kimi-K2.5-fast MiniMax-M2.5 MiniMax-M2.5-fast MiniMax-M3 Kimi-K2.6</td></tr>
+<tr><td>nvidia</td><td>glm4.7 glm-5.2 gpt-oss-120b gpt-oss-20b deepseek-v4-pro deepseek-v4-flash minimax-m2.5 minimax-m2.7 minimax-m3 kimi-k2.6</td></tr>
+<tr><td>together</td><td>GLM-5.1 GLM-5 GLM-4.7 GLM-5.2 gpt-oss-20b gpt-oss-120b DeepSeek-V4-Pro MiniMax-M2.7 MiniMax-M3 Kimi-K2.5 Kimi-K2.6</td></tr>
+<tr><td>zai</td><td>glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2</td></tr>
+<tr><td>zaicode</td><td>glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2</td></tr>
+<tr><td>deepinfra</td><td>GLM-5.1 GLM-5 GLM-4.7 GLM-4.7-Flash GLM-5.2 gpt-oss-120b gpt-oss-20b DeepSeek-V4-Pro DeepSeek-V4-Flash DeepSeek-V3.2 MiniMax-M2.5 MiniMax-M2.7 MiniMax-M3 Kimi-K2.6 Kimi-K2.5 Hy3</td></tr>
+<tr><td>novita</td><td>glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2 gpt-oss-20b gpt-oss-120b deepseek-v3.2 deepseek-v4-flash deepseek-v4-pro minimax-m2.5 minimax-m2.7 minimax-m2.7-highspeed minimax-m3 kimi-k2.5 kimi-k2.6 hy3</td></tr>
+<tr><td>openrouter</td><td>glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2 gpt-oss-120b gpt-oss-20b deepseek-chat deepseek-v3.2 deepseek-v4-flash deepseek-v4-pro minimax-m2.5 minimax-m2.7 minimax-m3 kimi-k2.5 kimi-k2.6 hy3:free hy3</td></tr>
+<tr><td>groq</td><td>gpt-oss-120b gpt-oss-20b</td></tr>
+<tr><td>ovh</td><td>gpt-oss-120b gpt-oss-20b</td></tr>
+<tr><td>sambanova</td><td>gpt-oss-120b DeepSeek-V3.2 MiniMax-M2.7 MiniMax-M2.5</td></tr>
+<tr><td>deepseek</td><td>deepseek-chat deepseek-reasoner deepseek-v4-flash deepseek-v4-pro</td></tr>
+<tr><td>minimax</td><td>MiniMax-M3 MiniMax-M2.7 MiniMax-M2.7-highspeed MiniMax-M2.5</td></tr>
+<tr><td>longcat</td><td>LongCat-2.0</td></tr>
+<tr><td>nanogpt</td><td>glm-4.7 glm-5 glm-5.1 glm-5.2 gpt-oss-120b kimi-k2.6 kimi-k2.7-code kimi-k2.7-code-highspeed qwen3.6-35b-a3b qwen3.6-35b-a3b-uncensored qwen3.6-27b qwen3.6-flash deepseek-v4-flash deepseek-v4-pro minimax-m3</td></tr>
+<tr><td>opencode</td><td>minimax-m3 hy3-free kimi-k2.6 kimi-k2.7-code glm-5.2 glm-5.1 glm-5 deepseek-v4-pro deepseek-v4-flash deepseek-v4-flash-free qwen3.6-plus</td></tr>
+<tr><td>opencodego</td><td>qwen3.7-plus qwen3.7-max qwen3.6-plus minimax-m3 kimi-k3 kimi-k2.7-code hy3-preview glm-5.2 glm-5.1 glm-5 deepseek-v4-pro deepseek-v4-flash</td></tr>
+<tr><td>kimi</td><td>kimi-k3 kimi-k2.7-code kimi-k2.6</td></tr>
+<tr><td>kimicode</td><td>k3 kimi-for-coding kimi-for-coding-highspeed</td></tr>
+</table>
 <h2 id="sessions">Sessions</h2><p>List recent sessions for the current directory (newest first, up to 20):</p>
 <p><pre class="listing">3code --list
 # or
@@ -164,7 +189,7 @@ Task: add comprehensive test coverage to the parser module.</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-07-15 07:49:23 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-07-20 10:13:48 UTC</small>
       </div>
     </div>
   </div>

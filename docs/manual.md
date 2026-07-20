@@ -37,13 +37,13 @@ The best way to get to know 3code is with a free provider.
 
 There are 2 notable ones I am aware of: `nvidia <https://build.nvidia.com>`_ has free deepseek v4 pro which is quite remarkable, and `novita.ai <novita.ai>`_ has tencent hy3 which is my favorite 'small' model. Both are usable- the rate limits don't make it impossible to work.
 
-#### GLM, The Workhorse
+#### The z.ai coding plan
 
-To do proper work, nothing beats GLM 5.2, in my experience. I think it's in the same league as the more well known models- it can work a bit slower but the results are right there.
+To do proper work, nothing beats GLM 5.2, in my experience. I think it's in the same league as the more well known models- it can work a bit slower but the results are right there. 3code makes sure to be very agentic keep everything hands off- so that tradeoff usually really doesn't matter much!
 
-The best place to get GLM 5.2 at the time of writing is `deepinfra <https://deepinfra.com>`_ at $3 per million tokens, which is very close to the kind of usage you get from monthly plans if you budget $100-$200 a month.
+The best way to use 3code is the `z.ai coding plan <https://z.ai/subscribe>`_ ! This is the combination that really replaced Claude Code for me.
 
-While it is technically possible to use the `z.ai coding plan <https://z.ai/subscribe>`_ with 3code, it's not officially supported.
+#### EU jurisdiction
 
 I work with sensitive data that sometimes that I like to keep within EU jurisdiction- I like `tensorx <https://tensorx.ai>` a lot for this.
 
@@ -119,13 +119,10 @@ what 3code talks to and uses the vLLM-style `chat_template_kwargs` knob
 under the hood. M2.7 is also available on nvidia, fireworks, together,
 sambanova, and deepinfra as a hosted alternative.
 
-`z.ai <https://z.ai/>`_ - GLM 5.1 on the z.ai coding plan is my provider of
-choice. Privacy and jurisdiction is not an issue because all code is open
-source and hence public. Excellent quality at an affordable flat rate.
+`z.ai <https://z.ai/>`_ - GLM 5.2 on the z.ai coding plan what I use to develop 3code! The effectiveness is absolutely top notch, you can throw hard problems at it, and it the tokens stack up considerably slower than on any other model I've tried.
 
-`OVH <https://endpoints.ai.cloud.ovh.net/>`_ - An interesting EU-resident
-choice: gpt-oss on pay-per-token, cheap enough, and great if you need EU
-ownership and data.
+`nebius <https://tokenfactory.nebius.com/>`_ - The EU-resident runner up. Only has GLM 5.1, not 5.2, but still a great choice if if tensorx isn't available.
+
 
 Add a provider inside the REPL:
 
@@ -139,6 +136,8 @@ Or switch between configured providers:
 :provider use nvidia
 :provider use zai.glm-5.1
 ```
+
+Have a look at the `full list of providers <#known-good>`_.
 
 ## Starting programming
 
@@ -195,6 +194,27 @@ The ticker has no effect if the provider does not emit reasoning content.
 ```
 3code --good
 ```
+
+At the time of writing that's these
+
+| Provider | Models |
+| --- | --- |
+| baseten | GLM-5 GLM-4.7 GLM-5.2 GLM-5.1 gpt-oss-120b DeepSeek-V4-Pro Kimi-K2.6 Kimi-K2.5 |
+| cerebras | zai-glm-4.7 gpt-oss-120b |
+| fireworks | glm-5p1 glm-5 gpt-oss-120b deepseek-v4-pro minimax-m2p7 kimi-k2p6 |
+| nebius | GLM-5.1 GLM-5 GLM-5.2 gpt-oss-120b gpt-oss-120b-fast DeepSeek-V3.2 DeepSeek-V3.2-fast DeepSeek-V4-Pro Kimi-K2.5 Kimi-K2.5-fast MiniMax-M2.5 MiniMax-M2.5-fast MiniMax-M3 Kimi-K2.6 |
+| nvidia | glm4.7 glm-5.2 gpt-oss-120b gpt-oss-20b deepseek-v4-pro deepseek-v4-flash minimax-m2.5 minimax-m2.7 minimax-m3 kimi-k2.6 |
+| together | GLM-5.1 GLM-5 GLM-4.7 GLM-5.2 gpt-oss-20b gpt-oss-120b DeepSeek-V4-Pro MiniMax-M2.7 MiniMax-M3 Kimi-K2.5 Kimi-K2.6 |
+| zai | glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2 |
+| deepinfra | GLM-5.1 GLM-5 GLM-4.7 GLM-4.7-Flash GLM-5.2 gpt-oss-120b gpt-oss-20b DeepSeek-V4-Pro DeepSeek-V4-Flash DeepSeek-V3.2 MiniMax-M2.5 MiniMax-M2.7 MiniMax-M3 Kimi-K2.6 Kimi-K2.5 Hy3 |
+| novita | glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2 gpt-oss-20b gpt-oss-120b deepseek-v3.2 deepseek-v4-flash deepseek-v4-pro minimax-m2.5 minimax-m2.7 minimax-m2.7-highspeed minimax-m3 kimi-k2.5 kimi-k2.6 hy3 |
+| openrouter | glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2 gpt-oss-120b gpt-oss-20b deepseek-chat deepseek-v3.2 deepseek-v4-flash deepseek-v4-pro minimax-m2.5 minimax-m2.7 minimax-m3 kimi-k2.5 kimi-k2.6 hy3:free hy3 |
+| groq | gpt-oss-120b gpt-oss-20b |
+| ovh | gpt-oss-120b gpt-oss-20b |
+| sambanova | gpt-oss-120b DeepSeek-V3.2 MiniMax-M2.7 MiniMax-M2.5 |
+| deepseek | deepseek-chat deepseek-reasoner deepseek-v4-flash deepseek-v4-pro |
+| minimax | MiniMax-M3 MiniMax-M2.7 MiniMax-M2.7-highspeed MiniMax-M2.5 |
+| longcat | LongCat-2.0 |
 
 ## Sessions
 

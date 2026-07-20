@@ -1,4 +1,4 @@
-version       = "0.5.0"
+version       = "0.5.1"
 author        = "Carlo Capocasa"
 description   = "The economical coding agent. It's so lean you can use it for free!"
 license       = "MIT"
