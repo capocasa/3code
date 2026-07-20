@@ -1501,6 +1501,11 @@ commands:
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :version          show the running 3code version
+  :sandbox          show the active filesystem sandbox rules
+  :sandbox show     (same)
+  :sandbox allow P  add a writable rule for path P
+  :sandbox readonly P  add a read-only rule for path P
+  :sandbox deny P   add a deny rule for path P
   :q :quit          exit (also Ctrl-D)
 
 input:

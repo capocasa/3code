@@ -17,7 +17,7 @@
 ## `patch` can reject stale edits when the file changed since last read.
 
 import std/[json, os, sequtils, strformat, strutils, tables, times]
-import types, util, shell, web, config, streamexec
+import types, util, shell, web, config, streamexec, sandbox
 
 # ---------------------------------------------------------------------------
 # Tool dispatch: strictly per-model.
@@ -418,6 +418,9 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
     return runActionStreaming(act, cache)
   of akRead:
     let path = resolvePath(act.path)
+    let (rdOk, rdReason) = sandbox.checkRawPath(act.path, needsWrite = false)
+    if not rdOk:
+      return (&"error: {rdReason}", 1, "")
     if not fileExists(path):
       return (&"error: {path} does not exist", 1, "")
     # Dedupe: full reads with no offset/limit on an unchanged file don't
@@ -475,6 +478,9 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
     return (body, 0, "")
   of akWrite:
     let path = resolvePath(act.path)
+    let (wrOk, wrReason) = sandbox.checkRawPath(act.path, needsWrite = true)
+    if not wrOk:
+      return (&"error: {wrReason}", 1, "")
     try:
       let dir = parentDir(path)
       if dir != "": createDir(dir)
@@ -490,6 +496,9 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
     if act.path.len == 0:
       return ("error: patch: 'path' argument is required", 1, "")
     let path = resolvePath(act.path)
+    let (paOk, paReason) = sandbox.checkRawPath(act.path, needsWrite = true)
+    if not paOk:
+      return (&"error: {paReason}", 1, "")
     if not fileExists(path):
       return (&"error: {path} does not exist", 1, "")
     try:
@@ -527,6 +536,10 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
         msgs.add "error: missing path on operation"; anyFail = true
         continue
       let path = resolvePath(op.path)
+      # Every apply_patch op mutates (add/update/delete), so all need write.
+      let (apOk, apReason) = sandbox.checkRawPath(op.path, needsWrite = true)
+      if not apOk:
+        msgs.add &"error: {apReason}"; anyFail = true; continue
       case op.kind
       of vkAdd:
         try:
