@@ -129,9 +129,9 @@ proc orderedModels*(prov: ProviderRec): seq[string] =
   ## config was written or the API listed them.
   let p = prov.name.toLowerAscii
   for combo in KnownGoodCombos:
-    if combo[0].toLowerAscii == p:
+    if combo.provider.toLowerAscii == p:
       for m in prov.models:
-        if m == combo[1]:
+        if m == combo.model:
           result.add m
           break
   for m in prov.models:
@@ -153,9 +153,9 @@ proc firstKnownGoodCombo*(providers: seq[ProviderRec]): string =
   for combo in KnownGoodCombos:
     for pr in providers:
       if pr.url == "" or pr.key == "": continue
-      if pr.name.toLowerAscii != combo[0].toLowerAscii: continue
+      if pr.name.toLowerAscii != combo.provider.toLowerAscii: continue
       for m in pr.models:
-        if m == combo[1]:
+        if m == combo.model:
           return pr.name & "." & m
   ""
 

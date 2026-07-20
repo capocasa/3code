@@ -41,7 +41,7 @@ type
     temperature*: float  ## negative means omit the field
     maxTokens*: int      ## <= 0 means omit the field
 
-const KnownGoodCombos* = [
+const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # glm
     ("baseten",   "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
     ("baseten",   "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "on",     0.2, 8192, false, 200_000),
@@ -1490,8 +1490,8 @@ proc knownGoodFamily*(p: Profile): string =
   let provider = p.name[0 ..< dot].toLowerAscii
   let model = p.model.toLowerAscii
   for combo in KnownGoodCombos:
-    if combo[0].toLowerAscii == provider and
-       combo[1].toLowerAscii == model: return combo[2]
+    if combo.provider.toLowerAscii == provider and
+       combo.model.toLowerAscii == model: return combo.family
   ""
 
 proc isKnownGood*(p: Profile): bool =
@@ -1506,8 +1506,8 @@ proc knownGoodFamily*(provider, model: string): string =
   let p = provider.toLowerAscii
   let m = model.toLowerAscii
   for combo in KnownGoodCombos:
-    if combo[0].toLowerAscii == p and combo[1].toLowerAscii == m:
-      return combo[2]
+    if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
+      return combo.family
   ""
 
 proc knownGoodTags*(provider, model: string): (string, string, string) =
@@ -1517,8 +1517,8 @@ proc knownGoodTags*(provider, model: string): (string, string, string) =
   let p = provider.toLowerAscii
   let m = model.toLowerAscii
   for combo in KnownGoodCombos:
-    if combo[0].toLowerAscii == p and combo[1].toLowerAscii == m:
-      return (combo[2], combo[3], combo[4])
+    if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
+      return (combo.family, combo.version, combo.variant)
   ("", "", "")
 
 proc knownGoodReasoning*(provider, model: string): string =
@@ -1526,8 +1526,8 @@ proc knownGoodReasoning*(provider, model: string): string =
   let p = provider.toLowerAscii
   let m = model.toLowerAscii
   for combo in KnownGoodCombos:
-    if combo[0].toLowerAscii == p and combo[1].toLowerAscii == m:
-      return combo[5]
+    if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
+      return combo.reasoning
   ""
 
 proc knownGoodGeneration*(provider, model: string): GenerationDefaults =
@@ -1536,8 +1536,8 @@ proc knownGoodGeneration*(provider, model: string): GenerationDefaults =
   let p = provider.toLowerAscii
   let m = model.toLowerAscii
   for combo in KnownGoodCombos:
-    if combo[0].toLowerAscii == p and combo[1].toLowerAscii == m:
-      return GenerationDefaults(temperature: combo[6], maxTokens: combo[7])
+    if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
+      return GenerationDefaults(temperature: combo.temperature, maxTokens: combo.maxTokens)
   GenerationDefaults(temperature: -1.0, maxTokens: 0)
 
 proc knownGoodGeneration*(p: Profile): GenerationDefaults =
@@ -1559,8 +1559,8 @@ proc xmlToolCallsFallback*(p: Profile): bool =
   let provider = p.name[0 ..< dot].toLowerAscii
   let model = p.model.toLowerAscii
   for combo in KnownGoodCombos:
-    if combo[0].toLowerAscii == provider and combo[1].toLowerAscii == model:
-      return combo[8]
+    if combo.provider.toLowerAscii == provider and combo.model.toLowerAscii == model:
+      return combo.xmlToolCalls
   false
 
 const ReasoningLevels* = ["low", "medium", "high"]
@@ -1586,8 +1586,8 @@ proc knownGoodContextWindow*(provider, model: string): int =
   let p = provider.toLowerAscii
   let m = model.toLowerAscii
   for combo in KnownGoodCombos:
-    if combo[0].toLowerAscii == p and combo[1].toLowerAscii == m:
-      return combo[9]
+    if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
+      return combo.contextWindow
   0
 
 proc knownGoodContextWindow*(p: Profile): int =
@@ -1607,13 +1607,13 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
   let p = provider.toLowerAscii
   let m = model.toLowerAscii
   for combo in KnownGoodCombos:
-    if combo[0].toLowerAscii == p and combo[1].toLowerAscii == m:
-      let fam = combo[2]
+    if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
+      let fam = combo.family
       if fam == "glm":
         # 5.2 (variant "2") exposes a graded effort knob (high/max); older
         # GLM is on/off only. Variant encodes the minor version digit
         # (4.7 -> "7", 5.1 -> "1", 5.2 -> "2").
-        if combo[3] == "5" and combo[4] == "2": return @["off", "high", "max"]
+        if combo.version == "5" and combo.variant == "2": return @["off", "high", "max"]
         return @["off", "on"]
       if fam in ["kimi", "qwen", "longcat", "minimax"]:
         # M-series has no graded effort knob on the OpenAI-compatible

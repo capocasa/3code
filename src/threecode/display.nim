@@ -688,19 +688,19 @@ proc printKnownGood*() =
   echo ""
   var maxId = 0
   for c in KnownGoodCombos:
-    let id = c[0] & "." & c[1]
+    let id = c.provider & "." & c.model
     if id.len > maxId: maxId = id.len
   for c in KnownGoodCombos:
-    let id = c[0] & "." & c[1]
+    let id = c.provider & "." & c.model
     let v =
-      if c[3].len > 0 and c[4].len > 0: c[3] & "." & c[4]
-      elif c[3].len > 0: c[3]
-      else: c[4]
-    let tag = if v.len > 0: c[2] & " " & v else: c[2]
+      if c.version.len > 0 and c.variant.len > 0: c.version & "." & c.variant
+      elif c.version.len > 0: c.version
+      else: c.variant
+    let tag = if v.len > 0: c.family & " " & v else: c.family
     echo "  ", id.alignLeft(maxId), "  ", tag
   echo ""
-  echo "pass any of these to --model, e.g. 3code --model ", KnownGoodCombos[0][0],
-       ".", KnownGoodCombos[0][1]
+  echo "pass any of these to --model, e.g. 3code --model ", KnownGoodCombos[0].provider,
+       ".", KnownGoodCombos[0].model
   echo "other combos require --experimental."
 
 const SessionListCap* = 20

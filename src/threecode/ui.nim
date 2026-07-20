@@ -143,7 +143,7 @@ proc readOptional*(editor: var minline.LineEditor, prompt: string,
 proc printSupported() =
   var seen: seq[string]
   for combo in KnownGoodCombos:
-    if combo[0] notin seen: seen.add combo[0]
+    if combo.provider notin seen: seen.add combo.provider
   subtleWriteLn(stdout, "  supported: " & seen.join(", "))
 
 proc readProviderEntry(editor: var minline.LineEditor): string =
@@ -153,7 +153,7 @@ proc readProviderEntry(editor: var minline.LineEditor): string =
       for (n, _) in ProviderCatalog: result.add n
     else:
       for combo in KnownGoodCombos:
-        if combo[0] notin result: result.add combo[0]
+        if combo.provider notin result: result.add combo.provider
   let label =
     if experimentalEnabled: "  provider name or url : "
     else: "  provider name        : "
@@ -300,10 +300,10 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
   # Pre-populate with known-good models for this provider (KnownGoodCombos order).
   var knownGoodInit: seq[string]
   for combo in KnownGoodCombos:
-    if combo[0].toLowerAscii == name.toLowerAscii:
+    if combo.provider.toLowerAscii == name.toLowerAscii:
       for avail in sortedAvailable:
-        if avail == combo[1]:
-          knownGoodInit.add shortModel(combo[1])
+        if avail == combo.model:
+          knownGoodInit.add shortModel(combo.model)
           break
   var prev = knownGoodInit.join(" ")
   while true:
