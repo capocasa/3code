@@ -105,6 +105,18 @@ proc initSandbox(cwd: string) =
   # reload() set `active = true` from the file load. The bash tool re-execs
   # this binary as `3code box restrict ...`, so resolve our own path once.
   sandbox.nimboxExe = sandbox.findNimbox()
+  # Probe the backend: the box subcommand is always compiled in, but the
+  # OS-native restriction can still be nonfunctional (a kernel built without
+  # Landlock, a CI runner under a seccomp filter that blocks the syscall).
+  # When that happens, clear nimboxExe so the bash tool degrades to the
+  # unconfined setsid path (matching the pre-sandbox behaviour) instead of
+  # failing every bash command. The in-process read/write/patch checks stay
+  # in force via `active` regardless.
+  if not sandbox.backendWorks(sandbox.nimboxExe):
+    stderr.writeLine "3code: filesystem sandboxing unavailable on this " &
+      "host; bash commands will run unconfined. " &
+      "In-process read/write/patch checks remain active."
+    sandbox.nimboxExe = ""
 
 proc setupTlsEnv() =
   ## macOS: stock LibreSSL at `/usr/lib/libssl.dylib` fails handshakes
