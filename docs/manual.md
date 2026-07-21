@@ -43,6 +43,8 @@ To do proper work, nothing beats GLM 5.2, in my experience. I think it's in the 
 
 The best way to use 3code is the `z.ai coding plan <https://z.ai/subscribe>`_ ! This is the combination that really replaced Claude Code for me.
 
+Note: While z.ai coding plan doesn't publically list 3code as a supported agent yet because it's in alpha, its use is officially permitted by z.ai- many thanks!
+
 #### EU jurisdiction
 
 I work with sensitive data that sometimes that I like to keep within EU jurisdiction- I like `tensorx <https://tensorx.ai>` a lot for this.
