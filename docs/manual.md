@@ -400,6 +400,21 @@ Bash gets full kernel enforcement: the sandbox backend is compiled into
 The read/write/patch tools also check paths in-process, so the
 higher-risk operations (mutating your files directly) stay guarded.
 
+### Platform behavior and fallback
+
+The bash backend is OS-native: **Landlock** on Linux, **Seatbelt** on
+macOS, and a restricted-token **ACL** scheme on Windows. At startup 3code
+probes whether the backend can actually restrict on this host, then
+applies it. The probe can fail on a kernel built without Landlock, or in
+a container/CI runner whose seccomp filter blocks the syscall.
+
+When the probe fails, bash degrades gracefully: commands run unconfined
+(via the plain `setsid`+`sh` path) instead of failing outright. The
+in-process read/write/patch path checks stay in force regardless, so the
+highest-risk operations (directly mutating your files through the
+write/patch tools) remain guarded even when the kernel backend is
+unavailable. There is no way for the agent to bypass this layer.
+
 ## Developments
 
 3code will keep up with the "works right now" approach as agentic coding

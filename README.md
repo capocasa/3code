@@ -47,6 +47,10 @@ Requires [Nim](https://nim-lang.org) >= 2.0 and `curl` on `PATH`.
 
 ## Changelog
 
+**0.6.0** - filesystem sandbox backed by nimbox, folded into the `box` subcommand
+
+- **Filesystem sandbox.** Every tool call is now confined to a policy you define in `.3code/sandbox` (a one-line-per-rule DSL: deny, read-only, writable). The file is mandatory and created on first run with a safe default (root denied, working directory writable). Bash commands get full kernel enforcement via `3code box`, the nimbox sandbox (Landlock on Linux, Seatbelt on macOS, a restricted-token ACL scheme on Windows) compiled in and re-execed in-process, so a write outside the allowed paths fails with `EACCES` at the syscall level. The read/write/patch tools check paths against the same policy in-process. On a host where the kernel backend can't restrict (a kernel without Landlock, a seccomp-filtered CI runner), bash degrades gracefully to unconfined while the in-process checks stay in force. `:sandbox show|allow|readonly|deny` edit and reload the policy live; the agent never writes the file itself.
+
 **0.5.1** - new providers, GLM-5.2 reasoning fixes, Qwen family
 
 - **New providers and models.** OpenCode Zen + Go gateways, Kimi API Platform, Kimi Code subscription, nano-gpt, and `zaicode` (Z.ai coding endpoint). GLM-5.2, GLM-5.1, GLM-5, DeepSeek-V4 Pro/Flash, MiniMax-M3, Kimi K3/K2.7-code/K2.6, Qwen3.6/3.7, and Tencent Hy3 across these aggregators.
