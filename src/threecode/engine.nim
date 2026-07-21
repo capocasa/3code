@@ -100,6 +100,23 @@ proc noteFooterPainted(e: var TerminalEngine; footerRowsAboveEditor: int) =
 proc noteNoFooter(e: var TerminalEngine) =
   e.paintedFooterRows = 0
 
+proc eraseUp(e: var TerminalEngine; ed: var minline.LineEditor;
+             width, footerRowsAboveEditor: int): int =
+  ## Rows to move up before erasing the volatile region. Normally this is the
+  ## plain walkUp (editor rows + the previously-painted footer height +
+  ## viewport/live rows). But after a terminal resize the bar/label re-wraps:
+  ## paintedFooterRows still holds the pre-resize count while the rows
+  ## actually on screen may be taller (or shorter). Erasing only the stale
+  ## count leaves the extra wrapped rows behind in scrollback. On a width
+  ## change, erase the larger of the old and new footer heights so the whole
+  ## volatile region, old and new geometry alike, is cleared in one pass.
+  result = editorRowsAboveCursor(ed) + e.viewportGapRows +
+    e.toolViewportRows.len + e.liveContentRows.len
+  if width > 0 and e.lastPaintedWidth > 0 and width != e.lastPaintedWidth:
+    result += max(e.paintedFooterRows, footerRowsAboveEditor)
+  else:
+    result += e.paintedFooterRows
+
 proc writeViewportRows(rows: openArray[string]) =
   for row in rows:
     stdout.write row
@@ -185,14 +202,16 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
   ## matches reality regardless of what changed since the last paint.
   {.cast(gcsafe).}:
     termio.withTerminalWriteLock:
-      let bytes = frame.footerFrameBytes(termW)
-      let footerRowsAboveEditor = frame.rowsAboveEditor(termW)
+      let width = if termW > 0: termW else:
+        try: terminalWidth() except CatchableError: 0
+      let bytes = frame.footerFrameBytes(width)
+      let footerRowsAboveEditor = frame.rowsAboveEditor(width)
       if inputRunning and editor != nil:
         let edPtr = editor
         stdout.write termio.SyncBegin
         stdout.write "\x1b[?25l"
         refreshEditorWidth(edPtr[])
-        let up = max(0, e.walkUp(edPtr[]))
+        let up = eraseUp(e, edPtr[], width, footerRowsAboveEditor)
         stdout.write "\r"
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
@@ -216,6 +235,7 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
         e.noteNoFooter()
         stdout.write termio.SyncEnd
         stdout.flushFile
+      e.lastPaintedWidth = width
 
 proc renderFooter*(frame: FooterFrame; inputRunning: bool;
                    editor: ptr minline.LineEditor;
@@ -328,7 +348,7 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
       stdout.write "\x1b[?25l"
       if inputRunning and editor != nil:
         refreshEditorWidth(editor[])
-        let up = max(0, e.walkUp(editor[]))
+        let up = eraseUp(e, editor[], width, footerRowsAboveEditor)
         stdout.write "\r"
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
@@ -360,6 +380,7 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
         if bytes.len > 0:
           stdout.write bytes
         e.noteNoFooter()
+      e.lastPaintedWidth = width
       stdout.write termio.SyncEnd
       stdout.flushFile
 
@@ -407,7 +428,7 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
       stdout.write "\x1b[?25l"
       if inputRunning and editor != nil:
         refreshEditorWidth(editor[])
-        let up = max(0, e.walkUp(editor[]))
+        let up = eraseUp(e, editor[], width, footerRowsAboveEditor)
         stdout.write "\r"
         if up > 0:
           stdout.write "\x1b[" & $up & "A"
@@ -429,6 +450,7 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
         if bytes.len > 0:
           stdout.write bytes
         e.noteNoFooter()
+      e.lastPaintedWidth = width
       stdout.write termio.SyncEnd
       stdout.flushFile
 
