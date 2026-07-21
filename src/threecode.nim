@@ -112,10 +112,12 @@ proc initSandbox(cwd: string) =
   # unconfined setsid path (matching the pre-sandbox behaviour) instead of
   # failing every bash command. The in-process read/write/patch checks stay
   # in force via `active` regardless.
+  # Silent fallback: if the probe fails we clear nimboxExe so the bash
+  # tool degrades to unconfined. The in-process read/write/patch checks
+  # stay in force via `active`. We don't warn on stderr because that line
+  # would land in the interactive display / PTY capture; the backend being
+  # unavailable is a host limitation, not an error the user can act on.
   if not sandbox.backendWorks(sandbox.nimboxExe):
-    stderr.writeLine "3code: filesystem sandboxing unavailable on this " &
-      "host; bash commands will run unconfined. " &
-      "In-process read/write/patch checks remain active."
     sandbox.nimboxExe = ""
 
 proc setupTlsEnv() =
