@@ -84,7 +84,8 @@ proc backendWorks*(exe: string): bool =
     # traceback never leaks into the parent's output, which would trip
     # tests that assert no "unhandled exception" appears.
     let (outp, code) = execCmdEx(
-      quoteShell(exe) & " box restrict " & quoteShell(tmp) & " -- true")
+      quoteShell(exe) & " box restrict " & quoteShell(tmp) &
+        " -- true </dev/null >/dev/null 2>&1")
     discard outp
     result = code == 0
   except CatchableError:
