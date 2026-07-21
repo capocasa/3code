@@ -68,6 +68,24 @@ proc findNimbox*(): string =
   except CatchableError:
     result = ""
 
+proc backendWorks*(exe: string): bool =
+  ## Probe whether the OS-native sandbox backend (Landlock/Seatbelt/ACL)
+  ## can actually restrict on this host. Re-execs this binary as
+  ## `box restrict <tmpdir> -- true`; success means the kernel applies the
+  ## domain. Fails on kernels built without Landlock, runners under a
+  ## seccomp filter that blocks the syscall, etc. Callers clear `nimboxExe`
+  ## when this returns false so the bash tool falls back to the unconfined
+  ## setsid path rather than failing every bash command.
+  if exe.len == 0: return false
+  let tmp = getTempDir() / ("3code-probe-" & $getCurrentProcessId())
+  try:
+    if not dirExists(tmp): createDir(tmp)
+    let code = execShellCmd(
+      quoteShell(exe) & " box restrict " & quoteShell(tmp) & " -- true")
+    result = code == 0
+  except CatchableError:
+    result = false
+
 const
   SandboxDir* = ".3code"
   SandboxFile* = "sandbox"
