@@ -191,3 +191,44 @@ suite "cli syntax errors do no startup work":
     check "requires a value" in r.o
     check not skillsDirExists()
 
+suite "box subcommand (built-in nimbox)":
+  # `3code box` is the sandbox backend the bash tool re-execs. It must
+  # dispatch before any other startup (no TLS, no config, no sandbox file)
+  # and confine the command via the OS-native backend.
+  var boxTmp: string
+
+  setup:
+    boxTmp = getTempDir() / ("3code-box-" & $getCurrentProcessId() & "-" &
+                              $epochTime().int64)
+    createDir(boxTmp)
+
+  teardown:
+    removeDir(boxTmp)
+
+  test "box with no args prints usage":
+    let r = run(["box"])
+    check r.code == 0
+    check "3code box" in r.o
+    check "restrict" in r.o
+
+  test "box unknown subcommand errors":
+    let r = run(["box", "nope"])
+    check r.code == 2
+    check "unknown subcommand" in r.o
+
+  test "box restrict runs a command":
+    let r = run(["box", "restrict", boxTmp, "--", "echo", "confined-ok"])
+    check r.code == 0
+    check "confined-ok" in r.o
+
+  test "box restrict blocks writes outside the writable path":
+    # Writable path is boxTmp; a write to its sibling must fail with
+    # EACCES (Permission denied) at the syscall level, proving the
+    # kernel backend is actually applied, not just parsed. We use `touch`
+    # as a plain argv (no shell redirect) so the unquoted `run` join can't
+    # be reinterpreted by execCmdEx's shell.
+    let outside = getTempDir() / ("3code-box-leak-" & $epochTime().int64)
+    let r = run(["box", "restrict", boxTmp, "--", "touch", outside])
+    check r.code != 0
+    check "Permission denied" in r.o
+    check not fileExists(outside)

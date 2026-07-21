@@ -308,11 +308,11 @@ and it is mandatory: 3code refuses to run if it cannot create the file.
 Yolo mode (everything writable) is fine but you have to ask for it
 explicitly.
 
-The sandbox is enforced two ways. Bash commands run through `nimbox`, a
-kernel-enforced sandbox (Landlock on Linux, Seatbelt on macOS). The
-in-process read/write/patch tools check paths against the same policy in
-the 3code process. Both layers consult the same file, so the rules you
-write apply uniformly.
+The sandbox is enforced two ways. Bash commands run through `3code box`,
+the built-in nimbox sandbox (Landlock on Linux, Seatbelt on macOS), which
+3code re-execs itself as. The in-process read/write/patch tools check
+paths against the same policy in the 3code process. Both layers consult
+the same file, so the rules you write apply uniformly.
 
 ### The sandbox file
 
@@ -393,12 +393,12 @@ you, and the agent cannot weaken it.
 ### What gets sandboxed
 
 Bash commands, file reads, writes, and patches all consult the sandbox.
-When ``nimbox`` is on your ``PATH`` (``nimble install nimbox``), bash gets
-full kernel enforcement: a write outside the allowed paths fails with
-``Permission denied`` at the syscall level, and no child process can
-escape. Without nimbox, bash runs unconfined but the read/write/patch
-tools still check paths in-process, so the higher-risk operations
-(mutating your files directly) stay guarded.
+Bash gets full kernel enforcement: the sandbox backend is compiled into
+3code (the `box` subcommand), so every bash command is re-execed as
+`3code box restrict ...` and a write outside the allowed paths fails with
+``Permission denied`` at the syscall level. No child process can escape.
+The read/write/patch tools also check paths in-process, so the
+higher-risk operations (mutating your files directly) stay guarded.
 
 ## Developments
 

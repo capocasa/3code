@@ -11,8 +11,9 @@ import std/[os, osproc, strutils, times]
 proc nimbleDepPaths(): seq[string] =
   ## The dep include paths nimble injects, resolved the same way nimble does.
   ## The bare `nim c` the stub build uses needs these to find streamhttp,
-  ## unicodedb, ttty and tinotify, none of which sit on Nim's default path.
-  for pkg in ["unicodedb", "streamhttp", "ttty", "tinotify"]:
+  ## unicodedb, ttty, tinotify and nimbox, none of which sit on Nim's
+  ## default path.
+  for pkg in ["unicodedb", "streamhttp", "ttty", "tinotify", "nimbox"]:
     let (outp, code) = execCmdEx("nimble path " & pkg)
     if code == 0:
       let first = outp.splitLines()[0]
