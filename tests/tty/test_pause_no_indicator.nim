@@ -138,8 +138,10 @@ suite "activity indicator covers every turn phase":
     tty.send "go"
     tty.expect "go"
     tty.send "\n"
-    # First chunk lands in scrollback.
-    tty.expectInHistory "first"
+    # First chunk lands in scrollback. The stub injects a 4s
+    # contentChunkDelayMs before the first chunk, so give the wait
+    # headroom over the delay plus slower-CI startup.
+    tty.expectInHistory("first", timeoutMs = 12000)
     # Now we are inside the contentChunkDelayMs gap: content has started,
     # but the second chunk will not arrive for seconds. Sample the live
     # screen through the gap.
@@ -148,4 +150,4 @@ suite "activity indicator covers every turn phase":
     tty.drain(50)
     let sawBrailleDuringGap = tty.screenHasBraille()
     check sawBrailleDuringGap
-    tty.expectInHistory "second"
+    tty.expectInHistory("second", timeoutMs = 12000)
