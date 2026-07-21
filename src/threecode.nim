@@ -104,21 +104,23 @@ proc initSandbox(cwd: string) =
   sandbox.reload(cwd)
   # reload() set `active = true` from the file load. The bash tool re-execs
   # this binary as `3code box restrict ...`, so resolve our own path once.
-  sandbox.nimboxExe = sandbox.findNimbox()
-  # Probe the backend: the box subcommand is always compiled in, but the
-  # OS-native restriction can still be nonfunctional (a kernel built without
-  # Landlock, a CI runner under a seccomp filter that blocks the syscall).
-  # When that happens, clear nimboxExe so the bash tool degrades to the
-  # unconfined setsid path (matching the pre-sandbox behaviour) instead of
-  # failing every bash command. The in-process read/write/patch checks stay
-  # in force via `active` regardless.
-  # Silent fallback: if the probe fails we clear nimboxExe so the bash
-  # tool degrades to unconfined. The in-process read/write/patch checks
-  # stay in force via `active`. We don't warn on stderr because that line
-  # would land in the interactive display / PTY capture; the backend being
-  # unavailable is a host limitation, not an error the user can act on.
-  if not sandbox.backendWorks(sandbox.nimboxExe):
-    sandbox.nimboxExe = ""
+  # The provider stub binary (the tty/visual test harness) skips the box
+  # wrapping entirely: those tests drive REPL rendering, not sandbox
+  # enforcement, and the startup probe's fork shifts the wall-clock timing
+  # the spinner/SIGWINCH assertions depend on. The stub's bash commands run
+  # via the plain setsid path, exactly as they did before the sandbox landed.
+  when not defined(providerStub):
+    sandbox.nimboxExe = sandbox.findNimbox()
+    # Probe: the box subcommand is always compiled in, but the OS-native
+    # restriction can still be nonfunctional (a kernel without Landlock, a CI
+    # runner under a seccomp filter that blocks the syscall). On failure,
+    # clear nimboxExe so the bash tool degrades to the unconfined setsid path
+    # instead of failing every command. The in-process read/write/patch
+    # checks stay in force via `active` regardless. The probe runs silently;
+    # the backend being unavailable is a host limitation, not an error the
+    # user can act on.
+    if not sandbox.backendWorks(sandbox.nimboxExe):
+      sandbox.nimboxExe = ""
 
 proc setupTlsEnv() =
   ## macOS: stock LibreSSL at `/usr/lib/libssl.dylib` fails handshakes
