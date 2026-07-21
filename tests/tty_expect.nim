@@ -481,12 +481,23 @@ proc send*(s: TtySession; text: string) =
 
 proc advanceTicker*(s: TtySession) =
   ## Deterministically advance one live spinner/ticker frame in the child.
+  ## The ack read is bounded: a child that already exited (ticker thread
+  ## gone) or is starved under CI load can't service the ack, and an
+  ## unbounded read would hang the whole testament category. We poll the
+  ## ack fd with a timeout; on timeout we just proceed — a missing spinner
+  ## frame surfaces as a failed assertion downstream, not an infinite hang.
   if s.tickerCommandFd <= 0 or s.tickerAckFd <= 0:
+    return
+  if s.exited:
     return
   var ch = 't'
   discard posix.write(s.tickerCommandFd, addr ch, 1)
-  var ack: array[1, char]
-  discard posix.read(s.tickerAckFd, addr ack[0], 1)
+  var pfd: TPollfd
+  pfd.fd = s.tickerAckFd
+  pfd.events = POLLIN
+  if poll(addr pfd, 1.Tnfds, 2000.cint) > 0:
+    var ack: array[1, char]
+    discard posix.read(s.tickerAckFd, addr ack[0], 1)
   s.drain(20, recordFrame = true)
 
 proc continueStubApi*(s: TtySession) =
