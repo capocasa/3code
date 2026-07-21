@@ -27,7 +27,7 @@
 ## the access for a concrete path for the in-process read/write/patch
 ## tools.
 
-import std/[os, strutils, tables]
+import std/[os, osproc, strutils, tables]
 
 proc resolveRawPath(p: string): string =
   ## Absolute cleaned form of `p`, ~-expanded. Mirrors util.resolvePath
@@ -80,8 +80,12 @@ proc backendWorks*(exe: string): bool =
   let tmp = getTempDir() / ("3code-probe-" & $getCurrentProcessId())
   try:
     if not dirExists(tmp): createDir(tmp)
-    let code = execShellCmd(
+    # Capture (discard) stdout+stderr so a failing backend's OSError
+    # traceback never leaks into the parent's output, which would trip
+    # tests that assert no "unhandled exception" appears.
+    let (outp, code) = execCmdEx(
       quoteShell(exe) & " box restrict " & quoteShell(tmp) & " -- true")
+    discard outp
     result = code == 0
   except CatchableError:
     result = false
