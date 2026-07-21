@@ -1150,10 +1150,19 @@ proc close*(s: TtySession) =
       discard kill(s.pid, SIGKILL)
       discard s.pollOnce(20)
     if not s.exited:
+      # Bounded reap: a blocking waitpid(0) hangs forever if the child is
+      # stuck (e.g. uninterruptible I/O on the PTY under CI load). Poll with
+      # WNOHANG for a short window; if still unreaped, leave it — the runner
+      # reaps orphans at job end, and an infinite block here hangs the whole
+      # testament category.
       var status: cint = 0
-      if waitpid(s.pid, status, 0) == s.pid:
-        s.exited = true
-        s.exitCode = statusCode(status)
+      let reapDeadline = epochTime() + 2.0
+      while epochTime() < reapDeadline:
+        if waitpid(s.pid, status, WNOHANG) == s.pid:
+          s.exited = true
+          s.exitCode = statusCode(status)
+          break
+        sleep(10)
   discard close(s.masterFd)
   if s.frameEventFd > 0:
     discard close(s.frameEventFd)
