@@ -1,4 +1,4 @@
-## Filesystem sandbox: parse `.3code/sandbox`, check paths, drive nimbox.
+## Filesystem sandbox: parse `.3code/sandbox`, check paths, drive `3code box`.
 ##
 ## The sandbox file is a tiny ordered DSL. Each line is a one-char access
 ## code, a single space, and a path. Lines run top-to-bottom; each
@@ -23,8 +23,9 @@
 ##
 ## `loadSandbox` parses the file into a `Sandbox` (an ordered list of
 ## rules). `resolve` walks the rules into the `(writable, readonly)` pair
-## nimbox consumes, honouring last-wins nesting. `checkPath` answers the
-## access for a concrete path for the in-process read/write/patch tools.
+## `3code box` consumes, honouring last-wins nesting. `checkPath` answers
+## the access for a concrete path for the in-process read/write/patch
+## tools.
 
 import std/[os, strutils, tables]
 
@@ -51,20 +52,21 @@ type
 ## Global sandbox state, loaded once at startup. `active = false` means no
 ## sandbox file was found/created and bash runs unrestricted (the in-process
 ## read/write/patch tools still consult `current`, which is empty so they
-## allow everything). When `active = true`, bash is wrapped in nimbox and
-## read/write/patch check `current`.
+## allow everything). When `active = true`, bash is wrapped in `3code box`
+## and read/write/patch check `current`.
 var
   current*: Sandbox
   active*: bool = false
-  nimboxExe*: string = ""
+  nimboxExe*: string = ""  ## path to the binary to exec for `box restrict` (this one)
 
 proc findNimbox*(): string =
-  ## Locate the nimbox binary. Checks PATH first, then alongside the
-  ## running 3code binary (for bundled installs). Empty string = not found.
-  let p = findExe("nimbox")
-  if p.len > 0: return p
-  let bundled = parentDir(getAppFilename()) / "nimbox"
-  result = if fileExists(bundled): bundled else: ""
+  ## The nimbox CLI is built into 3code as the `box` subcommand, so the
+  ## "nimbox binary" the bash tool re-execs is just this process. Return
+  ## its own path; empty only if it can't be resolved (shouldn't happen).
+  try:
+    result = getAppFilename()
+  except CatchableError:
+    result = ""
 
 const
   SandboxDir* = ".3code"
@@ -128,7 +130,7 @@ proc loadSandbox*(path: string): Sandbox =
   parseSandbox(readFile(path), cwd)
 
 proc resolve*(s: Sandbox): tuple[writable, readonly: seq[string]] =
-  ## Walk the ordered rules into the (writable, readonly) pair nimbox
+  ## Walk the ordered rules into the (writable, readonly) pair `3code box`
   ## consumes. Last-wins per canonical path: a later rule for a path
   ## supersedes every earlier one for that same path. Deny is the
   ## default for anything unmentioned, so deny rules only matter as

@@ -326,15 +326,15 @@ export DEBIAN_FRONTEND=noninteractive
   var p =
     when defined(posix):
       let wrapped = &"exec sh \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
-      # Sandbox: when the global sandbox is active and nimbox is on PATH,
-      # wrap the command so nimbox restricts in its own process (fork,
-      # setsid, restrict, exec) before running sh. nimbox calls setsid()
-      # itself before exec, so the sh process is its own session/group
-      # leader and the cancel/timeout signal-the-pgroup path still works.
-      # We signal nimbox's pid (== sh's pid after exec), which is the group
-      # leader. When nimbox is unavailable we fall back to the unconfined
-      # setsid path so the tool still runs; the in-process read/write/patch
-      # checks remain in effect regardless.
+      # Sandbox: when the global sandbox is active, re-exec *this* binary
+      # as `3code box restrict ...` so it forks, setsid()s, applies the
+      # OS-native restriction (Landlock/Seatbelt), and exec()s sh. box calls
+      # setsid() itself before exec, so the sh process is its own
+      # session/group leader and the cancel/timeout signal-the-pgroup path
+      # still works: we signal box's pid (== sh's pid after exec), the group
+      # leader. The backend is compiled in, so `nimboxExe` is just our own
+      # path and is always set when `active`; the unconfined setsid fallback
+      # below only runs when the sandbox is off entirely.
       if sandbox.active and sandbox.nimboxExe.len > 0:
         let (writable, readonly0) = sandbox.current.resolve()
         # The script + stdin live in a temp dir under getTempDir(); the
@@ -342,14 +342,14 @@ export DEBIAN_FRONTEND=noninteractive
         # read-only (sh only reads the script, it never writes there).
         var readonly = readonly0
         readonly.add tmp
-        var args = @["restrict"]
+        var args = @["box", "restrict"]
         if writable.len > 0:
           args.add writable
         else:
-          # nimbox requires at least one writable path. Deny-everything is
+          # box requires at least one writable path. Deny-everything is
           # expressed as writable=/dev/null-equivalent: we pass the script
           # temp dir (already created and writable) as the single writable
-          # root so nimbox starts, and the deny rules ensure nothing real
+          # root so box starts, and the deny rules ensure nothing real
           # is touched. This is an edge case (a fully-locked policy).
           args.add tmp
         if readonly.len > 0:

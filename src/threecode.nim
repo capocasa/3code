@@ -31,7 +31,7 @@ when defined(posix):
   import std/posix
 import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
-                  toolstream, turns, transcript, sandbox]
+                  toolstream, turns, transcript, sandbox, box]
 when defined(windows):
   import threecode/streamexec  # for resolveBash, used by ensureBash
 import tinotify
@@ -90,10 +90,10 @@ proc ensureBash() =
 proc initSandbox(cwd: string) =
   ## Create the default `.3code/sandbox` if none exists, refuse to run if
   ## it can't be created, then load it into the global sandbox state and
-  ## resolve the nimbox binary for bash wrapping. Per spec the sandbox is
-  ## mandatory: yolo mode is fine but must be explicit (the user edits the
-  ## file). A missing nimbox binary is not fatal — bash falls back to the
-  ## unconfined setsid path and the in-process path checks still apply.
+  ## resolve this binary's own path for bash wrapping. The sandbox backend
+  ## (`3code box`) is compiled in, so it is always available: bash wrapping
+  ## never falls back. Per spec the sandbox is mandatory: yolo mode is fine
+  ## but must be explicit (the user edits the file).
   if not sandbox.ensureDefaultSandbox(cwd):
     stderr.writeLine "3code: could not create sandbox file at " &
       sandbox.sandboxPath(cwd)
@@ -102,15 +102,9 @@ proc initSandbox(cwd: string) =
       " by hand."
     quit ExitConfig
   sandbox.reload(cwd)
-  # reload() set `active = true` from the file load. If nimbox is missing
-  # the bash path degrades to unconfined (warned below) but the in-process
-  # read/write/patch checks stay in force via `active`.
+  # reload() set `active = true` from the file load. The bash tool re-execs
+  # this binary as `3code box restrict ...`, so resolve our own path once.
   sandbox.nimboxExe = sandbox.findNimbox()
-  if sandbox.nimboxExe.len == 0:
-    stderr.writeLine "3code: nimbox binary not found; bash commands will " &
-      "run without filesystem sandboxing. Install nimbox (nimble install " &
-      "nimbox) for full enforcement. In-process read/write/patch checks " &
-      "remain active."
 
 proc setupTlsEnv() =
   ## macOS: stock LibreSSL at `/usr/lib/libssl.dylib` fails handshakes
@@ -181,6 +175,14 @@ proc cleanup() {.noconv.} =
   releaseActiveDirLock()
 
 proc main() =
+  # `box` is the built-in nimbox: the bash tool re-execs this binary as
+  # `3code box restrict ...`. Dispatch before any other startup so the
+  # sandboxed command isn't weighed down by 3code's TLS/config/session init
+  # and so refuseRoot etc. don't run inside the confined child.
+  let rawParams = commandLineParams()
+  if rawParams.len > 0 and rawParams[0] == "box":
+    quit(boxMain(rawParams[1 .. ^1]))
+
   setupTlsEnv()
   cleanupStaleBinaries()
   refuseRoot()
