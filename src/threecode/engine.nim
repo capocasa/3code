@@ -111,7 +111,7 @@ proc eraseUp(e: var TerminalEngine; ed: var minline.LineEditor;
   ## change, erase the larger of the old and new footer heights so the whole
   ## volatile region, old and new geometry alike, is cleared in one pass.
   result = editorRowsAboveCursor(ed) + e.viewportGapRows +
-    e.toolViewportRows.len + e.liveContentRows.len
+    e.toolViewportRows.len + e.liveContentGapRows + e.liveContentRows.len
   if width > 0 and e.lastPaintedWidth > 0 and width != e.lastPaintedWidth:
     result += max(e.paintedFooterRows, footerRowsAboveEditor)
   else:
