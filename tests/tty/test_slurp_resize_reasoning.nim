@@ -1,7 +1,6 @@
 discard """
   # The tty_expect harness uses openpty/fork/execv (POSIX only).
   disabled: "win"
-  disabled: "osx"
 """
 ## Reproduction for the "line slurp" bug: scrollback lines vanish one at a
 ## time, roughly one per 80ms GUI-tick, while the spinner is animating after a

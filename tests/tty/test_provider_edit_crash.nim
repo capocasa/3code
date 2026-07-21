@@ -2,11 +2,6 @@ discard """
   # See docs/windows-testing.md. The tty_expect harness uses openpty/fork/
   # execv (POSIX only). A ConPTY port is the path to re-enable on Windows.
   disabled: "win"
-  # On macOS the harness compiles but hangs deterministically: the expect*
-  # procs poll on wall-clock deadlines (plan-flakiness.md) and starve under
-  # the OSX runner's scheduler, so a subtest never returns. Re-enable after
-  # the frame-event sync rewrite lands.
-  disabled: "osx"
 """
 ## Regression: editing a provider (`:provider edit <name>`) used to
 ## SIGSEGV the input thread on the next redraw after the wizard returned.

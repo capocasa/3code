@@ -1,7 +1,6 @@
 discard """
   # Same POSIX/PTY constraints as the other tty tests.
   disabled: "win"
-  disabled: "osx"
 """
 ## Reproduction for the "pause" problem: during long phases of a turn, no
 ## activity indicator is visible. The expected indicator depends on the phase:

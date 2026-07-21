@@ -1,7 +1,6 @@
 discard """
   # Same POSIX/PTY constraints as the other tty tests.
   disabled: "win"
-  disabled: "osx"
 """
 ## Regression: when `callModel` exhausts its retry budget (e.g. provider keeps
 ## returning 503), the session should land back at a clean prompt glyph. The

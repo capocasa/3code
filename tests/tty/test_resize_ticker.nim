@@ -1,10 +1,6 @@
 discard """
   # The tty_expect harness uses openpty/fork/execv (POSIX only).
   disabled: "win"
-  # Wall-clock polling in the expect helpers starves under the OSX runner's
-  # scheduler (plan-flakiness.md); the stubbed binary also differs. Re-enable
-  # after the frame-event sync rewrite lands.
-  disabled: "osx"
 """
 ## Regression: on a terminal resize while the fat prompt's thinking ticker /
 ## spinner footer is live, the footer used to stack — each repaint left the
