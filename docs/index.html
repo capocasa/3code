@@ -41,17 +41,19 @@
 <h4 id="free-providers">Free providers</h4><p>The best way to get to know 3code is with a free provider.</p>
 <p>There are 2 notable ones I am aware of: <a class="reference external" href="https://build.nvidia.com">nvidia</a> has free deepseek v4 pro which is quite remarkable, and <a class="reference external" href="novita.ai">novita.ai</a> has tencent hy3 which is my favorite 'small' model. Both are usable- the rate limits don't make it impossible to work.</p>
 
-<h4 id="glm-the-workhorse">GLM, The Workhorse</h4><p>To do proper work, nothing beats GLM 5.2, in my experience. I think it's in the same league as the more well known models- it can work a bit slower but the results are right there.</p>
-<p>The best place to get GLM 5.2 at the time of writing is <a class="reference external" href="https://deepinfra.com">deepinfra</a> at $3 per million tokens, which is very close to the kind of usage you get from monthly plans if you budget $100-$200 a month.</p>
-<p>While it is technically possible to use the <a class="reference external" href="https://z.ai/subscribe">z.ai coding plan</a> with 3code, it's not officially supported.</p>
-<p>I work with sensitive data that sometimes that I like to keep within EU jurisdiction- I like <tt class="docutils literal"><span class="pre">tensorx &lt;https://tensorx.ai&gt;</span></tt> a lot for this.</p>
+<h4 id="the-zdotai-coding-plan">The z.ai coding plan</h4><p>To do proper work, nothing beats GLM 5.2, in my experience. I think it's in the same league as the more well known models- it can work a bit slower but the results are right there. 3code makes sure to be very agentic keep everything hands off- so that tradeoff usually really doesn't matter much!</p>
+<p>The best way to use 3code is the <a class="reference external" href="https://z.ai/subscribe">z.ai coding plan</a> ! This is the combination that really replaced Claude Code for me.</p>
+
+<h4 id="eu-jurisdiction">EU jurisdiction</h4><p>I work with sensitive data that sometimes that I like to keep within EU jurisdiction- I like <tt class="docutils literal"><span class="pre">tensorx &lt;https://tensorx.ai&gt;</span></tt> a lot for this.</p>
+
+<h4 id="low-cost-providers">Low cost providers</h4><p>There are 3 notable low cost providers supported by 3code- deepinfra, opencode and nano-gpt.com. They work by serving quantized versions of the open weights models and I find they work remarkably well.</p>
 
 <h4 id="more-interesting-models-and-providers">More interesting models and providers</h4><p>I tried them all!</p>
 <p><strong>Deepseek V4 Pro</strong> is also very capable and inexpensive. I found it much more prone to create bugs than GLM but if you can keep it on track, when it does workit works very well. Available directly from <a class="reference external" href="https://deepseek.com">deepseek</a>.</p>
 <p><strong>LongCat</strong> is interesting- I find it very similar to deepseek and it seemed more focused. Available from openrouter and <tt class="docutils literal"><span class="pre">longcat &lt;https://longcat.chat&gt;_</span></tt> directly (alipay app needed).</p>
 <p><strong>Minimax M3</strong> is very interesting- it has great general wide knowledge including of programming and comes up with pretty good approachs but it can be a bit hit or miss and doesn't stay focused very well for programming. It's might runner-up 'light'model. Super inexpensive plans are available directly from Minimax <tt class="docutils literal"><span class="pre">&lt;https://minimax.io&gt;_</span></tt>.</p>
 <p><strong>Tencent Hy3</strong> is available for free at the moment- the openrouter free version is rather limited but it's also on a provider called <tt class="docutils literal"><span class="pre">novita &lt;https://novita.ai&gt;</span></tt> and I haven't run into a limit yet. It's a lot like GLM but you can't give it as tough jobs. My favorite light model. We'll have to see where it goes with the pricing.</p>
-<p><strong>Kimi K2.7-code</strong> worked just fine but I found it more expensive and especially much, much more verbose than GLM- so it costs more per task, so I haven't used it very much. Kimi K3 seems to be out but needs to be tested.</p>
+<p><strong>Kimi K2.7-code</strong> worked just fine but I found it more expensive and especially much, much more verbose than GLM- so it costs more per task, so I haven't used it very much. Kimi K3 has been met with much enthusiasm but I was unable to test as of yet!</p>
 
 <h4 id="finding-even-more-providers">Finding even more providers</h4><p>You can sign up at <a class="reference external" href="https://openrouter.com">openrouter</a> and <tt class="docutils literal"><span class="pre">eurouter &lt;https://www.eurouter.ai/&gt;</span></tt>, or you can do what I like to do and look at their models pages and sign up directly with the provider just to have one entity less in the loop.</p>
 
@@ -120,7 +122,6 @@ irm https://3code.capocasa.dev/install.ps1 | iex</pre></p>
 <tr><td>nvidia</td><td>glm4.7 glm-5.2 gpt-oss-120b gpt-oss-20b deepseek-v4-pro deepseek-v4-flash minimax-m2.5 minimax-m2.7 minimax-m3 kimi-k2.6</td></tr>
 <tr><td>together</td><td>GLM-5.1 GLM-5 GLM-4.7 GLM-5.2 gpt-oss-20b gpt-oss-120b DeepSeek-V4-Pro MiniMax-M2.7 MiniMax-M3 Kimi-K2.5 Kimi-K2.6</td></tr>
 <tr><td>zai</td><td>glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2</td></tr>
-<tr><td>zaicode</td><td>glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2</td></tr>
 <tr><td>deepinfra</td><td>GLM-5.1 GLM-5 GLM-4.7 GLM-4.7-Flash GLM-5.2 gpt-oss-120b gpt-oss-20b DeepSeek-V4-Pro DeepSeek-V4-Flash DeepSeek-V3.2 MiniMax-M2.5 MiniMax-M2.7 MiniMax-M3 Kimi-K2.6 Kimi-K2.5 Hy3</td></tr>
 <tr><td>novita</td><td>glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2 gpt-oss-20b gpt-oss-120b deepseek-v3.2 deepseek-v4-flash deepseek-v4-pro minimax-m2.5 minimax-m2.7 minimax-m2.7-highspeed minimax-m3 kimi-k2.5 kimi-k2.6 hy3</td></tr>
 <tr><td>openrouter</td><td>glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2 gpt-oss-120b gpt-oss-20b deepseek-chat deepseek-v3.2 deepseek-v4-flash deepseek-v4-pro minimax-m2.5 minimax-m2.7 minimax-m3 kimi-k2.5 kimi-k2.6 hy3:free hy3</td></tr>
@@ -130,11 +131,6 @@ irm https://3code.capocasa.dev/install.ps1 | iex</pre></p>
 <tr><td>deepseek</td><td>deepseek-chat deepseek-reasoner deepseek-v4-flash deepseek-v4-pro</td></tr>
 <tr><td>minimax</td><td>MiniMax-M3 MiniMax-M2.7 MiniMax-M2.7-highspeed MiniMax-M2.5</td></tr>
 <tr><td>longcat</td><td>LongCat-2.0</td></tr>
-<tr><td>nanogpt</td><td>glm-4.7 glm-5 glm-5.1 glm-5.2 gpt-oss-120b kimi-k2.6 kimi-k2.7-code kimi-k2.7-code-highspeed qwen3.6-35b-a3b qwen3.6-35b-a3b-uncensored qwen3.6-27b qwen3.6-flash deepseek-v4-flash deepseek-v4-pro minimax-m3</td></tr>
-<tr><td>opencode</td><td>minimax-m3 hy3-free kimi-k2.6 kimi-k2.7-code glm-5.2 glm-5.1 glm-5 deepseek-v4-pro deepseek-v4-flash deepseek-v4-flash-free qwen3.6-plus</td></tr>
-<tr><td>opencodego</td><td>qwen3.7-plus qwen3.7-max qwen3.6-plus minimax-m3 kimi-k3 kimi-k2.7-code hy3-preview glm-5.2 glm-5.1 glm-5 deepseek-v4-pro deepseek-v4-flash</td></tr>
-<tr><td>kimi</td><td>kimi-k3 kimi-k2.7-code kimi-k2.6</td></tr>
-<tr><td>kimicode</td><td>k3 kimi-for-coding kimi-for-coding-highspeed</td></tr>
 </table>
 <h2 id="sessions">Sessions</h2><p>List recent sessions for the current directory (newest first, up to 20):</p>
 <p><pre class="listing">3code --list
@@ -171,6 +167,41 @@ Task: add comprehensive test coverage to the parser module.</pre></p>
 
 <h2 id="no-subminusagents">No sub-agents</h2><p>Sub-agents are not supported because both research and user feedback says they are very expensive and bring unclear or negative benefits, so I consider it a feature that 3code doesn't have them. Use Cybernetic mode with worktrees instead.</p>
 
+<h2 id="sandbox">Sandbox</h2><p>3code confines every tool call to a filesystem sandbox you define. The sandbox is a plain text file at <tt class="docutils literal"><span class="pre">.3code/sandbox</span></tt> in your project directory, and it is mandatory: 3code refuses to run if it cannot create the file. Yolo mode (everything writable) is fine but you have to ask for it explicitly.</p>
+<p>The sandbox is enforced two ways. Bash commands run through <tt class="docutils literal"><span class="pre">nimbox</span></tt>, a kernel-enforced sandbox (Landlock on Linux, Seatbelt on macOS). The in-process read/write/patch tools check paths against the same policy in the 3code process. Both layers consult the same file, so the rules you write apply uniformly.</p>
+
+<h3 id="the-sandbox-file">The sandbox file</h3><p>Each line is a one-character access code, a space, and a path. Lines run top to bottom; each line supersedes the ones above it for the path it names. Later rules win, so you can open a broad path then narrow parts of it.</p>
+<table border="1" class="docutils"><tr><th>Code</th><th>Meaning</th></tr>
+<tr><td><tt class="docutils literal"><span class="pre">.</span></tt></td><td>deny: no read, no write</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">o</span></tt></td><td>read-only: read and execute</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">O</span></tt></td><td>writable: read, write, create, delete, rename</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">0</span></tt></td><td>writable: alias for <tt class="docutils literal"><span class="pre">O</span></tt> (the digit zero)</td></tr>
+</table><p>A blank path means the working directory itself. Relative paths resolve against the working directory; absolute paths are used as-is.</p>
+<p>On first run in a new directory, 3code creates this default:</p>
+<p><pre class="listing">. /
+O</pre></p>
+<p>The root is denied, the working directory is writable. This is the safe default: the agent can read and write your project, nothing else.</p>
+
+<h3 id="yolo-mode">Yolo mode</h3><p>If you want the agent to have free rein over the whole filesystem, replace the file with one line:</p>
+<p><pre class="listing">0 /</pre></p>
+<p>This is the explicit opt-in the spec requires. 3code never writes yolo for you; you type it.</p>
+
+<h3 id="nesting-and-overrides">Nesting and overrides</h3><p>Because each line supersedes the ones above, you can layer rules. This makes the working directory writable, opens <tt class="docutils literal"><span class="pre">/tmp</span></tt> read-only, then locks down a secrets directory inside the project:</p>
+<p><pre class="listing">. /
+O
+o /tmp
+. ./secrets</pre></p>
+<p>The last matching rule for a path wins. <tt class="docutils literal"><span class="pre">./secrets</span></tt> is covered by the root deny, the working-directory writable, and its own deny line - in that order - so the deny wins. Read the file bottom-up for the effective policy on any given path.</p>
+
+<h3 id="editing-the-sandbox">Editing the sandbox</h3><p>The sandbox file is yours. Edit it directly in your editor, or use the REPL commands which append a rule and reload immediately:</p>
+<p><pre class="listing">:sandbox show
+:sandbox allow /opt
+:sandbox readonly /var
+:sandbox deny ./secrets</pre></p>
+<p>The agent never writes the sandbox file. If the model proposes a policy change, it edits a copy and you move it into place. This keeps the trust boundary entirely on your side: the sandbox is defined at prompt time, by you, and the agent cannot weaken it.</p>
+
+<h3 id="what-gets-sandboxed">What gets sandboxed</h3><p>Bash commands, file reads, writes, and patches all consult the sandbox. When <tt class="docutils literal"><span class="pre">nimbox</span></tt> is on your <tt class="docutils literal"><span class="pre">PATH</span></tt> (<tt class="docutils literal"><span class="pre">nimble install nimbox</span></tt>), bash gets full kernel enforcement: a write outside the allowed paths fails with <tt class="docutils literal"><span class="pre">Permission denied</span></tt> at the syscall level, and no child process can escape. Without nimbox, bash runs unconfined but the read/write/patch tools still check paths in-process, so the higher-risk operations (mutating your files directly) stay guarded.</p>
+
 <h2 id="developments">Developments</h2><p>3code will keep up with the &quot;works right now&quot; approach as agentic coding develops.</p>
 <p>We will continue to support more models and providers as they come out.</p>
 
@@ -189,7 +220,7 @@ Task: add comprehensive test coverage to the parser module.</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-07-20 10:13:48 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-07-20 13:49:32 UTC</small>
       </div>
     </div>
   </div>

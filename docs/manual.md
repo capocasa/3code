@@ -300,6 +300,106 @@ This allows for long-running task completion of large chunks of work while prese
 
 Sub-agents are not supported because both research and user feedback says they are very expensive and bring unclear or negative benefits, so I consider it a feature that 3code doesn't have them. Use Cybernetic mode with worktrees instead.
 
+## Sandbox
+
+3code confines every tool call to a filesystem sandbox you define. The
+sandbox is a plain text file at `.3code/sandbox` in your project directory,
+and it is mandatory: 3code refuses to run if it cannot create the file.
+Yolo mode (everything writable) is fine but you have to ask for it
+explicitly.
+
+The sandbox is enforced two ways. Bash commands run through `nimbox`, a
+kernel-enforced sandbox (Landlock on Linux, Seatbelt on macOS). The
+in-process read/write/patch tools check paths against the same policy in
+the 3code process. Both layers consult the same file, so the rules you
+write apply uniformly.
+
+### The sandbox file
+
+Each line is a one-character access code, a space, and a path. Lines run
+top to bottom; each line supersedes the ones above it for the path it
+names. Later rules win, so you can open a broad path then narrow parts of
+it.
+
+==========  ==============================================
+Code        Meaning
+==========  ==============================================
+``.``       deny: no read, no write
+``o``       read-only: read and execute
+``O``       writable: read, write, create, delete, rename
+``0``       writable: alias for ``O`` (the digit zero)
+==========  ==============================================
+
+A blank path means the working directory itself. Relative paths resolve
+against the working directory; absolute paths are used as-is.
+
+On first run in a new directory, 3code creates this default:
+
+```
+. /
+O
+```
+
+The root is denied, the working directory is writable. This is the safe
+default: the agent can read and write your project, nothing else.
+
+### Yolo mode
+
+If you want the agent to have free rein over the whole filesystem, replace
+the file with one line:
+
+```
+0 /
+```
+
+This is the explicit opt-in the spec requires. 3code never writes yolo for
+you; you type it.
+
+### Nesting and overrides
+
+Because each line supersedes the ones above, you can layer rules. This
+makes the working directory writable, opens ``/tmp`` read-only, then locks
+down a secrets directory inside the project:
+
+```
+. /
+O
+o /tmp
+. ./secrets
+```
+
+The last matching rule for a path wins. ``./secrets`` is covered by the
+root deny, the working-directory writable, and its own deny line - in that
+order - so the deny wins. Read the file bottom-up for the effective policy
+on any given path.
+
+### Editing the sandbox
+
+The sandbox file is yours. Edit it directly in your editor, or use the
+REPL commands which append a rule and reload immediately:
+
+```
+:sandbox show
+:sandbox allow /opt
+:sandbox readonly /var
+:sandbox deny ./secrets
+```
+
+The agent never writes the sandbox file. If the model proposes a policy
+change, it edits a copy and you move it into place. This keeps the trust
+boundary entirely on your side: the sandbox is defined at prompt time, by
+you, and the agent cannot weaken it.
+
+### What gets sandboxed
+
+Bash commands, file reads, writes, and patches all consult the sandbox.
+When ``nimbox`` is on your ``PATH`` (``nimble install nimbox``), bash gets
+full kernel enforcement: a write outside the allowed paths fails with
+``Permission denied`` at the syscall level, and no child process can
+escape. Without nimbox, bash runs unconfined but the read/write/patch
+tools still check paths in-process, so the higher-risk operations
+(mutating your files directly) stay guarded.
+
 ## Developments
 
 3code will keep up with the "works right now" approach as agentic coding

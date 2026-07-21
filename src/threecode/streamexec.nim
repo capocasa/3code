@@ -12,7 +12,7 @@ when defined(posix):
   import std/termios
 else:
   import std/streams
-import types, util, shell
+import types, util, shell, sandbox
 
 when defined(windows):
   var cachedBash* {.threadvar.}: string
@@ -326,13 +326,49 @@ export DEBIAN_FRONTEND=noninteractive
   var p =
     when defined(posix):
       let wrapped = &"exec sh \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
-      let setsidExe = findExe("setsid")
-      if setsidExe.len > 0:
-        startProcess(setsidExe, args = ["/bin/sh", "-c", wrapped],
+      # Sandbox: when the global sandbox is active and nimbox is on PATH,
+      # wrap the command so nimbox restricts in its own process (fork,
+      # setsid, restrict, exec) before running sh. nimbox calls setsid()
+      # itself before exec, so the sh process is its own session/group
+      # leader and the cancel/timeout signal-the-pgroup path still works.
+      # We signal nimbox's pid (== sh's pid after exec), which is the group
+      # leader. When nimbox is unavailable we fall back to the unconfined
+      # setsid path so the tool still runs; the in-process read/write/patch
+      # checks remain in effect regardless.
+      if sandbox.active and sandbox.nimboxExe.len > 0:
+        let (writable, readonly0) = sandbox.current.resolve()
+        # The script + stdin live in a temp dir under getTempDir(); the
+        # sandboxed sh must be able to read them. Expose that temp dir as
+        # read-only (sh only reads the script, it never writes there).
+        var readonly = readonly0
+        readonly.add tmp
+        var args = @["restrict"]
+        if writable.len > 0:
+          args.add writable
+        else:
+          # nimbox requires at least one writable path. Deny-everything is
+          # expressed as writable=/dev/null-equivalent: we pass the script
+          # temp dir (already created and writable) as the single writable
+          # root so nimbox starts, and the deny rules ensure nothing real
+          # is touched. This is an edge case (a fully-locked policy).
+          args.add tmp
+        if readonly.len > 0:
+          args.add "--ro"
+          args.add readonly
+        args.add "--"
+        args.add "/bin/sh"
+        args.add "-c"
+        args.add wrapped
+        startProcess(sandbox.nimboxExe, args = args,
                      options = {poStdErrToStdOut, poUsePath})
       else:
-        startProcess("/bin/sh", args = ["-c", wrapped],
-                     options = {poStdErrToStdOut, poUsePath})
+        let setsidExe = findExe("setsid")
+        if setsidExe.len > 0:
+          startProcess(setsidExe, args = ["/bin/sh", "-c", wrapped],
+                       options = {poStdErrToStdOut, poUsePath})
+        else:
+          startProcess("/bin/sh", args = ["-c", wrapped],
+                       options = {poStdErrToStdOut, poUsePath})
     else:
       let b = resolveBash()
       if b == "":

@@ -31,7 +31,7 @@ when defined(posix):
   import std/posix
 import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
-                  toolstream, turns, transcript]
+                  toolstream, turns, transcript, sandbox]
 when defined(windows):
   import threecode/streamexec  # for resolveBash, used by ensureBash
 import tinotify
@@ -86,6 +86,31 @@ proc ensureBash() =
       stderr.writeLine "3code: bash not found. Re-run the installer to set it up:"
       stderr.writeLine "  irm https://3code.capocasa.dev/install.ps1 | iex"
       quit ExitUsage
+
+proc initSandbox(cwd: string) =
+  ## Create the default `.3code/sandbox` if none exists, refuse to run if
+  ## it can't be created, then load it into the global sandbox state and
+  ## resolve the nimbox binary for bash wrapping. Per spec the sandbox is
+  ## mandatory: yolo mode is fine but must be explicit (the user edits the
+  ## file). A missing nimbox binary is not fatal — bash falls back to the
+  ## unconfined setsid path and the in-process path checks still apply.
+  if not sandbox.ensureDefaultSandbox(cwd):
+    stderr.writeLine "3code: could not create sandbox file at " &
+      sandbox.sandboxPath(cwd)
+    stderr.writeLine "3code: the sandbox is mandatory. Fix the directory " &
+      "permissions or create " & sandbox.sandboxPath(cwd) &
+      " by hand."
+    quit ExitConfig
+  sandbox.reload(cwd)
+  # reload() set `active = true` from the file load. If nimbox is missing
+  # the bash path degrades to unconfined (warned below) but the in-process
+  # read/write/patch checks stay in force via `active`.
+  sandbox.nimboxExe = sandbox.findNimbox()
+  if sandbox.nimboxExe.len == 0:
+    stderr.writeLine "3code: nimbox binary not found; bash commands will " &
+      "run without filesystem sandboxing. Install nimbox (nimble install " &
+      "nimbox) for full enforcement. In-process read/write/patch checks " &
+      "remain active."
 
 proc setupTlsEnv() =
   ## macOS: stock LibreSSL at `/usr/lib/libssl.dylib` fails handshakes
@@ -290,6 +315,11 @@ proc main() =
     # passed — the user's command-line intent wins over the recovered draft.
     if prompt == "":
       restoredDraft = loadPendingDraft(session.cwd)
+
+  # Sandbox is mandatory: create the default policy if absent (refuses to
+  # run if the file can't be created), then load it. Paths resolve relative
+  # to the session cwd so the policy follows the project, not the binary.
+  initSandbox(session.cwd)
 
   try:
     acquireDirLock(session.cwd)

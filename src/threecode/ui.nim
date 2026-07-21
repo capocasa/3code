@@ -11,11 +11,11 @@
 
 import std/[algorithm, atomics, json, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline,
-  fatprompt, streamexec
+  fatprompt, streamexec, sandbox
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":prompt", ":show",
-                      ":log", ":sessions", ":summarize", ":version",
+                      ":log", ":sessions", ":summarize", ":version", ":sandbox",
                       ":q", ":quit", ":exit"]
 
 type WizardReadLineHook* = proc(prompt: string, hidden,
@@ -70,6 +70,11 @@ proc classifyCommand*(cmd: string): CommandKind =
   of ":reasoning":
     if parts.len == 0 or (parts.len == 1 and parts[0] == "list"): ckSafeImmediate
     else: ckMutating
+  of ":sandbox":
+    # `:sandbox` and `:sandbox show` are safe; the allow/deny/readonly
+    # verbs append to the sandbox file and reload, so they mutate.
+    if parts.len == 0 or (parts.len == 1 and parts[0] == "show"): ckSafeImmediate
+    else: ckMutating
   of ":clear", ":summarize":
     ckMutating
   of ":quit", ":q", ":exit":
@@ -109,6 +114,12 @@ proc completionFor*(line: string): seq[string] =
   if words[0] == ":notify" and words.len == 2:
     result.add "on"
     result.add "off"
+    return
+  if words[0] == ":sandbox" and words.len == 2:
+    result.add "show"
+    result.add "allow"
+    result.add "readonly"
+    result.add "deny"
     return
 
 proc readRequired*(editor: var minline.LineEditor, prompt: string,
@@ -915,6 +926,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
   let sp = c.find({' ', '\t'})
   let name = if sp < 0: c else: c[0 ..< sp]
   let arg = if sp < 0: "" else: c[sp+1 .. ^1].strip
+  let parts = arg.splitWhitespace()
   let kind = classifyCommand(c)
   if kind == ckModal:
     stdout.write "\r\n"
@@ -987,6 +999,38 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       cmdResponse buildSystemPrompt(prof)
     of ":version":
       cmdResponse "3code v" & Version
+    of ":sandbox":
+      # `:sandbox show` (or bare) dumps the rules; allow/readonly/deny
+      # append a line and reload. The path arg is written verbatim so
+      # relative paths stay portable in the file.
+      let verb = if parts.len == 0: "show" else: parts[0]
+      case verb
+      of "show":
+        if sandbox.active:
+          cmdResponse sandbox.renderSandbox(sandbox.current)
+        else:
+          cmdResponse "sandbox not active"
+      of "allow", "readonly", "deny":
+        if parts.len < 2:
+          ok = false
+          cmdError ":sandbox " & verb & " needs a path"
+        else:
+          let argPath = parts[1 .. ^1].join(" ")
+          let access =
+            case verb
+            of "allow": akWritable
+            of "readonly": akReadOnly
+            else: akDeny
+          let sf = sandbox.sandboxPathInCwd()
+          if sandbox.appendRule(sf, argPath, access):
+            sandbox.reload(getCurrentDir())
+            cmdResponse "sandbox updated: " & verb & " " & argPath
+          else:
+            ok = false
+            cmdError "could not write sandbox file at " & sf
+      else:
+        ok = false
+        cmdError "unknown :sandbox verb: " & verb & "  (show, allow, readonly, deny)"
     of ":show":
       showTool(arg, session.toolLog)
     of ":log":
