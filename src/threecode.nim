@@ -94,6 +94,14 @@ proc initSandbox(cwd: string) =
   ## (`3code box`) is compiled in, so it is always available: bash wrapping
   ## never falls back. Per spec the sandbox is mandatory: yolo mode is fine
   ## but must be explicit (the user edits the file).
+  # The provider stub binary (the tty/visual test harness) skips sandbox
+  # setup entirely so its behaviour matches the pre-sandbox binary. Those
+  # tests drive REPL rendering, not enforcement, and `active=true` plus the
+  # startup probe shift the wall-clock timing the spinner/SIGWINCH
+  # assertions depend on. Enforcement is covered by the cli_args `box`
+  # suite and by production.
+  when defined(providerStub):
+    return
   if not sandbox.ensureDefaultSandbox(cwd):
     stderr.writeLine "3code: could not create sandbox file at " &
       sandbox.sandboxPath(cwd)
