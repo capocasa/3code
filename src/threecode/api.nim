@@ -1325,11 +1325,24 @@ proc applyInklingReasoning(p: Profile, body: JsonNode) =
   ## serverless endpoint, all accept this field.
   body["reasoning_effort"] = %p.reasoning
 
+proc applyLagunaReasoning(p: Profile, body: JsonNode) =
+  ## Laguna models (S 2.1, XS 2.1, M.1) toggle reasoning via
+  ## the OpenAI-compatible `reasoning: {enabled: bool}` field, the same
+  ## shape used by OpenRouter for thinking-enabled models. Reasoning is
+  ## on by default; `off` sends `enabled: false`, `on` sends
+  ## `enabled: true`. The model returns thinking content on the
+  ## `reasoning_content` field (parsed generically, DeepSeek-style).
+  case p.reasoning
+  of "off": body["reasoning"] = %*{"enabled": false}
+  of "on": body["reasoning"] = %*{"enabled": true}
+  else: discard
+
 proc applyReasoning*(p: Profile, body: JsonNode) =
   ## Per-family wire mapping for `Profile.reasoning`. Adding a new
   ## family means: (1) set `reasoning` in the known-good combo table,
   ## (2) write an `applyXReasoning` proc, (3) add a case branch.
   case p.family
+  of "laguna": applyLagunaReasoning(p, body)
   of "gpt-oss": applyGptOssReasoning(p, body)
   of "glm": applyGlmReasoning(p, body)
   of "deepseek": applyDeepseekReasoning(p, body)
