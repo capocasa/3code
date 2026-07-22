@@ -21,6 +21,12 @@ var notifyEnabled*: bool = true
   ## Default on. Toggled at runtime via `:notify on/off`, persisted in
   ## `[settings]`; an explicit `off` opts out.
 
+var sandboxEnabled*: bool = true
+  ## When true, bash commands run under the filesystem sandbox via
+  ## `3code box restrict`. When false, commands execute directly. Default
+  ## on. Set via `[settings] sandbox = off` in the config; an explicit
+  ## `off` opts out.
+
 type
   ColorMode* = enum
     cmAuto,   ## detect from the terminal (OSC 11 background query)

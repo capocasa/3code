@@ -335,7 +335,7 @@ export DEBIAN_FRONTEND=noninteractive
       # leader. The backend is compiled in, so `nimboxExe` is just our own
       # path and is always set when `active`; the unconfined setsid fallback
       # below only runs when the sandbox is off entirely.
-      if sandbox.active and sandbox.nimboxExe.len > 0:
+      if sandboxEnabled and sandbox.active and sandbox.nimboxExe.len > 0:
         let (writable, readonly0) = sandbox.current.resolve()
         # The script + stdin live in a temp dir under getTempDir(); the
         # sandboxed sh must be able to read them. Expose that temp dir as

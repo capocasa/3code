@@ -28,6 +28,7 @@
 ## tools.
 
 import std/[os, osproc, strutils, tables]
+import types
 
 proc resolveRawPath(p: string): string =
   ## Absolute cleaned form of `p`, ~-expanded. Mirrors util.resolvePath
@@ -197,7 +198,7 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
   ## writable. Returns `(true, "")` when the path is allowed (or when the
   ## sandbox is inactive / the path escapes resolution). Used by the
   ## in-process read/write/patch tools.
-  if not active: return (true, "")
+  if not active or not sandboxEnabled: return (true, "")
   let resolved = resolveRawPath(path)
   if resolved.len == 0: return (true, "")
   let access = current.checkPath(resolved)
