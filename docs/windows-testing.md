@@ -6,33 +6,39 @@ options for closing that gap. It is a working TODO, not a permanent state.
 
 ## Current status
 
-22 of 33 test files run on Windows; one of them (`test_provider_wizard`)
-runs 7 of its 9 subtests. 30 of 33 on macOS. The 11 Windows-disabled test
-files are:
+31 of 40 test files run on Windows. The tty suite (18 files) plus one
+stream test are the remaining gap:
 
-- `tests/tty/test_tty_functional.nim`
-- `tests/tty/test_empty_enter_freeze.nim`
-- `tests/tty/test_interrupt_prestream_freeze.nim`
+- `tests/tty/*.nim` (18 files) — drive `3code` as a subprocess through a
+  pseudo-terminal via `tests/tty_expect.nim` (POSIX-only; needs a ConPTY
+  port — see below).
+- `tests/stream/test_netthread_blocks.nim` — asserts the
+  interrupt-returns-cleanly-from-a-stuck-socket contract. That relies on
+  `shutdownCachedStreamFd()` (src/threecode/api.nim), which is a no-op on
+  Windows because it wraps `posix.shutdown` to wake a blocking `recv`. The
+  Windows interrupt path needs an equivalent fd-wakeup (closesocket or a
+  self-pipe) before this test can pass.
 
-  These three drive `3code` as a subprocess through a pseudo-terminal via
-  `tests/tty_expect.nim` (POSIX-only; needs a ConPTY port — see below).
+The following were previously disabled and are now **enabled and adapted**
+(not skipped) to run meaningfully on Windows:
 
-- `tests/api/test_api.nim` — autosend probe tests spawn a child nim compiler
-  with threading; flaky on Windows runners.
-- `tests/core/test_cli_args.nim` — spawns the `3code` binary with path/env
-  assumptions (session list, skills dir) that differ on Windows.
-- `tests/core/test_history.nim` — uses the ttty simulated terminal; escape-
-  sequence key decoding differs on Windows (`_getch` 0xE0/0x00 vs POSIX ESC [).
-- `tests/stream/test_streamexec.nim` — `runStreamingBash` needs the bundled
-  MSYS2 bash (`%LOCALAPPDATA%\3code\msys64`), absent on CI runners (exit 127).
-- `tests/core/test_minline.nim` — arrow-key encoding differs (`_getch` 0xE0
-  prefix vs POSIX `ESC [`), so cursor-movement subtests fail.
-- `tests/core/test_session.nim` — draft/session-path tests assume
-  `XDG_DATA_HOME` isolation, but Windows `userDataRoot()` reads `APPDATA`.
-- `tests/core/test_update.nim` — config-isolation tests assume `HOME/.config`
-  (XDG), but Windows reads `APPDATA` via `getConfigDir()`.
-- `tests/core/test_util_extra.nim` — `collapseHome` assertions use forward-
-  slash POSIX paths; Windows backslash paths fail the comparison.
+- `tests/core/test_session.nim`, `test_update.nim`, `test_util_extra.nim`,
+  `test_cli_args.nim` — `userDataRoot()`/`userConfigRoot()` now honor
+  `XDG_DATA_HOME`/`XDG_CONFIG_HOME` on Windows (mirroring the macOS fix,
+  b7ea0f0), so the test env isolation that sets those vars actually redirects
+  on Windows instead of leaking into real `APPDATA`. The `collapseHome`
+  assertion is now separator-agnostic.
+- `tests/core/test_minline.nim`, `test_history.nim` — the simulated-terminal
+  `Driver` (tests/minline_testutils.nim) now feeds platform-correct nav-key
+  bytes via a compile-time split mirroring `minline.KEYSEQS`/`ESCAPES`
+  (Windows `_getch` `[224, X]` vs POSIX `ESC [ X`). The editor behavior under
+  test is identical cross-platform; only the input encoding differs.
+- `tests/api/test_api.nim` — probe subprocess outPath now carries the `.exe`
+  suffix on Windows.
+- `tests/stream/test_streamexec.nim` — injects the runner's git-bash via
+  `cachedBash` when the bundled MSYS2 is absent, so the streaming-plumbing
+  tests (line callback, stderr merge, exit codes, NUL suppression) run
+  against a real bash. Production `resolveBash()` is unchanged.
 - `tests/config/test_provider_wizard.nim` — two of the nine subtests
   ("add wizard lists models sorted alphabetically", "edit wizard lists
   models sorted alphabetically") capture wizard stdout by reassigning the
@@ -45,18 +51,12 @@ files are:
   platform would require plumbing a hook through `display.nim` so
   `hintLn` writes to a caller-supplied `File`.
 
-On macOS the same three tty tests are also skipped: the harness compiles
-(post util.h/clearEnv fix) but hangs deterministically because the `expect*`
-procs poll on wall-clock deadlines that starve under the OSX runner's
-scheduler. The fix is the frame-event sync rewrite in `plan-flakiness.md`;
-until then they carry `disabled: "osx"`.
+Each still-skipped test carries a `disabled:` spec pointing back here. When
+you see that spec, this document is the "why" and the "how to fix".
 
-Each skipped test carries a `disabled:` spec pointing back here. When you
-see that spec, this document is the "why" and the "how to fix".
+## Why the tty tests are disabled
 
-## Why they are disabled
-
-The three tests drive `3code` as a **real subprocess through a pseudo-terminal**
+The tty tests drive `3code` as a **real subprocess through a pseudo-terminal**
 via the `tests/tty_expect.nim` harness. That harness is POSIX-only:
 
 - `openpty` / `login_tty` (from `<pty.h>` / `<utmp.h>`) allocate the PTY pair.
@@ -75,10 +75,10 @@ reacting to real I/O timing. A simulated terminal cannot reproduce them.
 
 Note: the line editor and rendering layer that *doesn't* depend on timing is
 already tested cross-platform via `ttty.newTerminal` (an in-process virtual
-terminal): `test_minline` (72 tests) and `test_history` use it and run on
-Windows today. The disabled tests are the end-to-end / concurrency layer only.
+terminal): `test_minline` and `test_history` use it and run on Windows now.
+The disabled tests are the end-to-end / concurrency layer only.
 
-## Options to re-enable
+## Options to re-enable the tty suite
 
 ### Option A: Port `tty_expect.nim` to ConPTY (recommended)
 
