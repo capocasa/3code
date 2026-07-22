@@ -1,4 +1,3 @@
-discard """"""
 import std/[os, osproc, strtabs, strutils, times, unittest]
 import threecode/session
 

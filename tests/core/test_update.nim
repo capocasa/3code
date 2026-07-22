@@ -1,4 +1,3 @@
-discard """"""
 ## Offline tests for auto-update logic + an opt-in live e2e test.
 ##
 ## Default run: `nimble test` — pure-logic tests only.

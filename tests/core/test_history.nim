@@ -1,4 +1,3 @@
-discard """"""
 import std/[unittest, os, strutils, deques]
 import threecode/minline
 import minline_testutils

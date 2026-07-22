@@ -1,4 +1,3 @@
-discard """"""
 import std/[os, strutils, unittest]
 import threecode/util
 

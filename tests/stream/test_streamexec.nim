@@ -1,4 +1,3 @@
-discard """"""
 import std/[os, strutils, times, unittest]
 import threecode/[actions, types, streamexec]
 

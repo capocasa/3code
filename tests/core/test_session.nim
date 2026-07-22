@@ -1,4 +1,3 @@
-discard """"""
 import std/[json, os, osproc, sequtils, strutils, times, unittest]
 import threecode/[session, types]
 

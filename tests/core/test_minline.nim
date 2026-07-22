@@ -1,4 +1,3 @@
-discard """"""
 import std/[deques, unittest, strutils, sequtils, unicode]
 import threecode/fatprompt
 import threecode/minline

@@ -1,4 +1,3 @@
-discard """"""
 import std/[json, os, osproc, strutils, unittest]
 import threecode/[api, prompts, types]
 import stub_helpers
