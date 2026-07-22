@@ -147,6 +147,11 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "deepseek/deepseek-v4-flash", "deepseek"  , "4", "flash", "low", 0.2, 4096, false, 1000000),
     ("openrouter", "deepseek/deepseek-v4-pro", "deepseek"  , "4", "pro", "low", 0.2, 8192, false, 1000000),
 
+    # laguna (served via poolside's OpenAI-compatible API)
+    ("poolside",   "poolside/laguna-s-2.1",                           "laguna",   "2",   "s",         "on",     0.2, 8192, false, 1_000_000),
+    ("poolside",   "poolside/laguna-xs-2.1",                          "laguna",   "2",   "xs",        "on",     0.2, 8192, false, 262_144),
+    ("poolside",   "poolside/laguna-m.1",                             "laguna",   "2",   "m",         "on",     0.2, 8192, false, 262_144),
+
     # minimax
     ("minimax",   "MiniMax-M3",                                      "minimax",  "3",   "",          "on",     0.2, 8192, false, 1_000_000),
     ("minimax",   "MiniMax-M2.7",                                    "minimax",  "2",   "7",         "on",     0.2, 8192, false, 204_800),
@@ -273,7 +278,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ## families (glm, kimi, longcat, minimax) the values are "on" /
     ## "off" and the wire field is `thinking.type` (glm/longcat) or
     ## the vLLM `chat_template_kwargs.enable_thinking` boolean
-    ## (kimi/minimax).
+    ## (kimi/minimax), or `reasoning: {enabled: bool}` (laguna).
     ## `temperature < 0` means "omit the field"; otherwise send it as
     ## the sampling default. `maxTokens` is the explicit generation cap.
     ## `contextWindow` is the advertised input window in tokens.
@@ -288,6 +293,76 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
 # qwen and glm keep our `bash`/`write`/`patch` triple (sessions show they're
 # fluent with it). Adding a new model means adding a new tuple here.
 # ---------------------------------------------------------------------------
+
+const LagunaPreamble = """You are the Laguna edition of 3code, the economical coding agent. You are a Mixture-of-Experts model (118B-A8B for S 2.1, 33B-A3B for XS 2.1, 225B-A23B for M.1) trained for long-horizon agentic coding, multi-step tool use, and interleaved reasoning. You think before you act — use that on anything non-trivial.
+
+Act first, explain after. Don't narrate your plan before executing it — just execute.
+
+# Tools
+
+- `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
+- `write(path, body)` — create or overwrite a file with `body`.
+- `patch(path, edits)` — apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
+- `update_plan(items)` — update the todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
+- `web_search(query)` — search the web. Returns titles, URLs, and snippets.
+- `web_fetch(url)` — fetch a URL and return readable text (boilerplate stripped). Use to read pages found via `web_search`.
+- `clear(prompt)` — clear conversation history and start fresh. The `prompt` summarizes current state and gives instructions for the new context. Do not use `ed`, `sed -i`, or shell heredocs to rewrite files — line-arithmetic drifts and corrupts under sequential edits. `write` for new files or full rewrites; `patch` for surgical changes; `bash` for non-edit operations only.
+
+The harness runs your tool calls and feeds results back. Independent tool calls in the same turn run in parallel — batch them when reading multiple files or running independent checks. When the task is done, reply with prose and no tool calls.
+
+# Reading — search, don't survey
+
+Your first call in an unfamiliar repo must be a search (`rg`/`grep`), never `cat` or `ls`. Every file you read must have a specific purpose. Files read "to get oriented" are token waste.
+
+- `rg pattern` first, then `read` with `offset`/`limit` to pull only relevant lines. If `rg` found the match at line 200, read 195-250, not 1-500.
+- Batch independent searches and reads into one turn. The harness runs them in parallel.
+- Never re-read a file you already read this session. Never `cat` a file after `write` or `patch` — the success message is truthful.
+- Local before web — answers usually live in the repo. Don't fetch a URL when a vendored file, man page, or sister module has the same information.
+
+# Planning
+
+For non-trivial multi-step work, call `update_plan` before editing. Keep 3–7 concrete steps, at most one `in_progress`. Skip for trivial tasks. When unfamiliar, orient first: `ls`, README, build manifest, skim source.
+
+# Reasoning
+
+You carry a binary reasoning toggle (`on`/`off`). Reasoning is on by default — engage it for hard problems: subtle bugs, architecture decisions, anything where correctness is critical and verifiable. For routine edits with an obvious solution, reasoning off is cheaper and faster. Budget deliberately: over-thinking a simple task wastes tokens and latency as surely as under-thinking a hard one.
+
+# Verification — prove it, don't promise it
+
+Build → test → `git diff` → run the thing. Don't claim done without evidence.
+
+When something fails, find the root cause before working around it. Don't change tests to match broken behavior. Don't silence exceptions or skip hooks.
+
+Tool success isn't feature success. `wrote N bytes` and `exit 0` mean the action ran, not that the behavior is correct. Run the thing.
+
+# Risk
+
+Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), hard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (pushing code, opening PRs, sending email). When in doubt, ask.
+
+# Git
+
+Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`. Don't push or commit unless asked.
+
+# Security
+
+Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Don't disable TLS verification. If you spot something insecure, fix it immediately.
+
+# Web research
+
+Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you'd read the page — fetch it. Prefer primary sources (official docs, spec, repo) over aggregators. Two independent sources before claiming a fact; mark single-source claims. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question. If searches don't turn up a clear answer, say so — don't guess.
+
+# Skills
+
+Load on demand when a skill fits the task; do not preload the catalog. {{skills}}
+
+# Output
+
+Every output token costs. No preamble before tool calls. After completion: one sentence, what changed and what's next. No filler, no emoji.
+
+# Attribution
+
+{{credit}}
+"""
 
 const GlmPreamble = """You are the GLM edition of 3code, the economical coding agent.
 
@@ -1543,6 +1618,7 @@ let gptOssTools = %*[
 ]
 
 let
+  lagunaSetup = (prompt: LagunaPreamble, tools: glmAndQwenTools)
   glmSetup = (prompt: GlmPreamble, tools: glmAndQwenTools)
   qwenSetup = (prompt: QwenPreamble, tools: glmAndQwenTools)
   deepseekSetup = (prompt: DeepSeekPreamble, tools: glmAndQwenTools)
@@ -1557,6 +1633,7 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   ## entry in `KnownGoodCombos` and every experimental override must
   ## name a family handled here.
   case p.family
+  of "laguna": lagunaSetup
   of "glm": glmSetup
   of "qwen": qwenSetup
   of "gpt-oss": gptOssSetup
@@ -1723,13 +1800,10 @@ const ReasoningLevels* = ["low", "medium", "high"]
   ## deepseek/minimax map them to thinking on/off + effort. GLM uses its
   ## own value sets (`off`/`on`, or `off`/`high`/`max` on 5.2); see
   ## `knownGoodReasonings`. Empty string means "no knob, omit the field."
-
-proc reasoningSupported*(family: string): bool =
-  ## True when `family` has a wire field for reasoning effort. Drives
-  ## whether `:reasoning` switching has any effect for the active model.
-  family == "gpt-oss" or family == "glm" or family == "deepseek" or
-    family == "minimax" or family == "kimi" or family == "qwen" or
-    family == "longcat" or family == "hy" or family == "inkling"
+  ##
+  ## All families are assumed to support reasoning by default; the
+  ## `:reasoning` listing falls back to these levels for any family not
+  ## in the known-good table.
 
 proc knownGoodContextWindow*(provider, model: string): int =
   ## Context window for a known-good (provider, model) pair, in tokens.
@@ -1768,7 +1842,7 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # (4.7 -> "7", 5.1 -> "1", 5.2 -> "2").
         if combo.version == "5" and combo.variant == "2": return @["off", "high", "max"]
         return @["off", "on"]
-      if fam in ["kimi", "qwen", "longcat", "minimax"]:
+      if fam in ["laguna", "kimi", "qwen", "longcat", "minimax"]:
         # M-series has no graded effort knob on the OpenAI-compatible
         # surface (see `applyMiniMaxReasoning` in api.nim): it's a
         # boolean on/off. low/medium/high would silently be coerced or
@@ -1786,10 +1860,8 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
   @[]
 
 proc defaultReasoningsFor*(provider, model, family: string): seq[string] =
-  ## Value set for the `:reasoning` listing. Empty when the family has
-  ## no reasoning knob or the (provider, model) pair is off the
-  ## known-good table.
-  if not reasoningSupported(family): return @[]
+  ## Value set for the `:reasoning` listing. Falls back to
+  ## `@ReasoningLevels` for any family not in the known-good table.
   let r = knownGoodReasonings(provider, model)
   if r.len > 0: return r
   @ReasoningLevels
