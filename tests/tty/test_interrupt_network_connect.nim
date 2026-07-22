@@ -57,7 +57,15 @@ proc ensureRealBinary(): string =
   const defines = "-d:ssl -d:testPlainHttp --threads:on"
   buildBinary(defines, "3code_real")
 
+proc ensureQuietBinary(): string =
+  ## As `ensureRealBinary` but with a shrunk `QuietTooLongMs` so a black-holed
+  ## link surfaces the network-quiet timeout in ~3s instead of the production
+  ## 45s. The production value is an intdefine for exactly this.
+  const defines = "-d:ssl -d:testPlainHttp --threads:on -d:QuietTooLongMs=3000"
+  buildBinary(defines, "3code_quiet")
+
 let realBin = ensureRealBinary()
+let quietBin = ensureQuietBinary()
 
 suite "interrupt during real network connect/stream":
   test "Ctrl-C during connect (silent server) returns to prompt":
@@ -242,3 +250,53 @@ suite "interrupt during real network connect/stream":
     let f = tty.frames[^1]
     check f.rows[f.cursorRow].contains("\u276f")
     echo "  PASS: interrupt during content stream emitted no `· Xs` line"
+
+suite "network-quiet timeout on threaded transport (no interrupt)":
+  test "black-holed server surfaces network-quiet error and retries":
+    # Regression for the silent count-up bug (cell tower drop). The threaded
+    # transport (callModelThreaded) delegates the blocking recv/send to a
+    # worker thread and polls shared state. When the provider goes silent,
+    # the quiet-watch thread fires at QuietTooLongMs and the worker's bounded
+    # recv loop breaks, but two fixes make this robust end-to-end:
+    #   1. streamhttp now sets SO_SNDTIMEO alongside SO_RCVTIMEO, so a send
+    #      wedged mid-upload on a black-holed link (the real cell-tower case:
+    #      the FIN cannot leave, so shutdown() does not wake it) is bounded
+    #      by the kernel instead of TCP's ~15min retransmission budget.
+    #   2. callModelThreaded's poll loop now also checks isNetworkQuiet(), so
+    #      even a worker wedged in an unbounded path surfaces as a retryable
+    #      transport error instead of spinning forever.
+    # Before these fixes a black-holed provider made the GUI's elapsed
+    # counter climb silently (227s, 2000s) with no retry notice, because the
+    # worker never returned and callModel's retry loop was never reached.
+    # This test asserts a retry notice appears within the shrunk quiet
+    # window — impossible before the fix.
+    let root = newFixture("quiet_timeout_retry")
+    let srv = startMockServer(msSilentAfterAccept)
+    defer: stopMockServer(srv)
+    writeProviderConfig(root, srv.url)
+    let tty = newTtySession(quietBin,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = env(root))
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    tty.send "go"
+    tty.expect "go"
+    tty.send "\n"
+    # No user interrupt. The server accepted the connection and will never
+    # reply. Before the fix this hung silently past the quiet window; with
+    # the fix a retry notice must appear within a bounded time of the quiet
+    # flag firing (QuietTooLongMs=3s here + a margin).
+    let t0 = epochTime()
+    let seen = tty.expectInHistory("retry", timeoutMs = 12000)
+    let elapsed = epochTime() - t0
+    doAssert seen,
+      "no retry notice appeared after " & formatFloat(elapsed, ffDecimal, 1) &
+      "s against a black-holed server; the threaded transport did not " &
+      "surface the network-quiet timeout\n" & tty.dumpFramesAround("retry")
+    tty.expectAlive()
+    echo "  PASS: network-quiet surfaced and retried in ",
+      formatFloat(elapsed, ffDecimal, 2), "s"

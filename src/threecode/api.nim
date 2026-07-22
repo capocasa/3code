@@ -1432,11 +1432,21 @@ proc callModelThreaded*(p: Profile, bodyStr, baseLabel: string;
     baseLabel: baseLabel,
     suppressXml: suppressXml)
   createThread(t, networkWorker, args)
-  while job.phase != npDone and not isInterrupted():
+  while job.phase != npDone and not isInterrupted() and not isNetworkQuiet():
     drainAndDispatch(addr job, baseLabel)
     sleep(NetWorkerPollMs)
   if isInterrupted():
     shutdownCachedStreamFd()
+  if isNetworkQuiet():
+    # The quiet-watch thread marked the link dead (no provider data for
+    # `QuietTooLongMs`) and shut down the cached fd. Drop the cached conn
+    # so a wedged worker's stale socket is not reused, then surface a
+    # network error so callModel's retry loop reconnects on a fresh socket
+    # — exactly like a 503. streamhttp now bounds the send via SO_SNDTIMEO
+    # too, but this check is the backstop for any worker stall the socket
+    # timeouts do not cover (and for the recv-side quiet path, which wakes
+    # here rather than spinning on a worker that has already returned).
+    closeCachedStreamConn()
   # Bounded join: every worker syscall is bounded (connect by
   # ConnectTimeoutMs, recv by QuietRecvWakeMs, TLS handshake internally),
   # so the worker returns within a known worst case. The one exception is
@@ -1457,6 +1467,14 @@ proc callModelThreaded*(p: Profile, bodyStr, baseLabel: string;
     if result.assistantMsgJson.len > 0:
       result.assistantMsg = parseJson(result.assistantMsgJson)
       result.assistantMsgJson = ""
+  elif isNetworkQuiet():
+    # Broke out of the poll loop on the quiet flag and the detached worker
+    # never published an outcome (it was wedged in an unbounded send/handshake
+    # the send-timeout could not reach, or was detached at the join budget).
+    # Surface a retryable transport error so callModel's retry loop reconnects
+    # on a fresh socket, exactly like a 503. Same message/shape the
+    # non-threaded streamHttp path uses for the same condition.
+    result.errMsg = "network quiet for " & $(QuietTooLongMs div 1000) & "s"
 
 when providerStub:
   ## Test-only stub provider. Lives in `testdata/stub/provider.nim` and is
