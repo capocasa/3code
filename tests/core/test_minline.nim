@@ -1,8 +1,4 @@
-discard """
-  # Windows: arrow-key encoding differs (_getch 0xE0 prefix vs POSIX ESC [),
-  # so subtests asserting cursor movement fail. See docs/windows-testing.md.
-  disabled: "win"
-"""
+discard """"""
 import std/[deques, unittest, strutils, sequtils, unicode]
 import threecode/fatprompt
 import threecode/minline

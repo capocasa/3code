@@ -1,9 +1,4 @@
-discard """
-  # Windows: uses the ttty simulated terminal; escape-sequence handling
-  # differs on Windows (_getch 0xE0/0x00 vs POSIX ESC [). See
-  # docs/windows-testing.md.
-  disabled: "win"
-"""
+discard """"""
 import std/[unittest, os, strutils, deques]
 import threecode/minline
 import minline_testutils

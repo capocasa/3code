@@ -30,27 +30,47 @@ proc pushString*(d: Driver, s: string) =
   d.terminal.pushText s
 
 const
+  # Single-byte keys are platform-independent terminal control chars.
   CtrlC* = KeyCtrlC
   CtrlD* = @[4]
   Esc* = KeyEsc
   Enter* = KeyEnter
-  Left* = KeyLeft
-  Right* = KeyRight
-  Up* = KeyUp
-  Down* = KeyDown
-  Home* = KeyHome
-  End* = KeyEnd
-  Delete* = KeyDelete
   Backspace* = KeyBackspace
   CtrlU* = @[21]
   CtrlW* = @[23]
   CtrlA* = @[1]
   CtrlE* = @[5]
-  CtrlLeft* = @[27, 91, 49, 59, 53, 68]
-  CtrlRight* = @[27, 91, 49, 59, 53, 67]
   AltEnter* = KeyAltEnter
   KittyShiftEnter = KeyKittyShiftEnter
   XModShiftEnter = KeyModifyOtherShiftEnter
+  CtrlLeft* = @[27, 91, 49, 59, 53, 68]
+  CtrlRight* = @[27, 91, 49, 59, 53, 67]
+
+# Arrow / nav keys are multi-byte escape sequences whose encoding is
+# platform-conditional: POSIX terminals send `ESC [ X`, the Windows console
+# (`_getch`) sends `[224, X]`. The editor's `KEYSEQS`/`ESCAPES` tables
+# (src/threecode/minline.nim) mirror exactly this split, so the test must
+# feed the same bytes the platform build decodes. Mirrored here as a
+# compile-time split so the encoding is obvious and the tables stay in
+# lockstep by construction.
+when defined(windows):
+  const
+    Left* = @[224, 75]
+    Right* = @[224, 77]
+    Up* = @[224, 72]
+    Down* = @[224, 80]
+    Home* = @[224, 71]
+    End* = @[224, 79]
+    Delete* = @[224, 83]
+else:
+  const
+    Left* = KeyLeft
+    Right* = KeyRight
+    Up* = KeyUp
+    Down* = KeyDown
+    Home* = KeyHome
+    End* = KeyEnd
+    Delete* = KeyDelete
 
 proc `+`*(modifier: KeyMod, key: openArray[int]): KeyChord =
   KeyChord(mods: {modifier}, key: @key)
