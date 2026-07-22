@@ -3,9 +3,6 @@ discard """
   # provider over a pipe (POSIX-only process plumbing assumptions). A ConPTY
   # port is the path to re-enable on Windows.
   disabled: "win"
-  # Hangs deterministically on macOS under the OSX runner's scheduler (see
-  # plan-flakiness.md). Re-enable after the frame-event sync rewrite lands.
-  disabled: "osx"
 """
 ## Regression for the "3code silently exits mid-turn" bug.
 ##

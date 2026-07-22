@@ -2,10 +2,6 @@ discard """
   # See docs/windows-testing.md. The tty_expect harness uses openpty/fork/
   # execv (POSIX only). A ConPTY port is the path to re-enable on Windows.
   disabled: "win"
-  # Hangs deterministically on macOS (wall-clock polling starves under the
-  # OSX scheduler; see plan-flakiness.md). Re-enable after the frame-event
-  # sync rewrite.
-  disabled: "osx"
 """
 ## Targeted regression: pressing Ctrl-C or ESC while a model call is in
 ## flight but has produced NO answer yet (the pre-stream delay / thinking

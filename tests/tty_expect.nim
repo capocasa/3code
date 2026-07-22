@@ -424,7 +424,17 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
 proc send*(s: TtySession; text: string) =
   if text.len == 0:
     return
-  discard posix.write(s.masterFd, text[0].unsafeAddr, text.len)
+  # Bounded write: if the child has deadlocked and stopped reading stdin,
+  # the PTY input buffer fills and a plain write() blocks forever, hanging
+  # the whole testament category. Poll for writability first; a child that
+  # can't drain within a short window is treated as dead and the test fails
+  # its next assertion cleanly instead of hanging.
+  if not s.exited:
+    var wfd: TPollfd
+    wfd.fd = s.masterFd
+    wfd.events = POLLOUT
+    if poll(addr wfd, 1.Tnfds, 2000.cint) > 0:
+      discard posix.write(s.masterFd, text[0].unsafeAddr, text.len)
   var printable = ""
   var inEsc = false
   for ch in text:
@@ -481,12 +491,23 @@ proc send*(s: TtySession; text: string) =
 
 proc advanceTicker*(s: TtySession) =
   ## Deterministically advance one live spinner/ticker frame in the child.
+  ## The ack read is bounded: a child that already exited (ticker thread
+  ## gone) or is starved under CI load can't service the ack, and an
+  ## unbounded read would hang the whole testament category. We poll the
+  ## ack fd with a timeout; on timeout we just proceed — a missing spinner
+  ## frame surfaces as a failed assertion downstream, not an infinite hang.
   if s.tickerCommandFd <= 0 or s.tickerAckFd <= 0:
+    return
+  if s.exited:
     return
   var ch = 't'
   discard posix.write(s.tickerCommandFd, addr ch, 1)
-  var ack: array[1, char]
-  discard posix.read(s.tickerAckFd, addr ack[0], 1)
+  var pfd: TPollfd
+  pfd.fd = s.tickerAckFd
+  pfd.events = POLLIN
+  if poll(addr pfd, 1.Tnfds, 2000.cint) > 0:
+    var ack: array[1, char]
+    discard posix.read(s.tickerAckFd, addr ack[0], 1)
   s.drain(20, recordFrame = true)
 
 proc continueStubApi*(s: TtySession) =
@@ -1139,10 +1160,19 @@ proc close*(s: TtySession) =
       discard kill(s.pid, SIGKILL)
       discard s.pollOnce(20)
     if not s.exited:
+      # Bounded reap: a blocking waitpid(0) hangs forever if the child is
+      # stuck (e.g. uninterruptible I/O on the PTY under CI load). Poll with
+      # WNOHANG for a short window; if still unreaped, leave it — the runner
+      # reaps orphans at job end, and an infinite block here hangs the whole
+      # testament category.
       var status: cint = 0
-      if waitpid(s.pid, status, 0) == s.pid:
-        s.exited = true
-        s.exitCode = statusCode(status)
+      let reapDeadline = epochTime() + 2.0
+      while epochTime() < reapDeadline:
+        if waitpid(s.pid, status, WNOHANG) == s.pid:
+          s.exited = true
+          s.exitCode = statusCode(status)
+          break
+        sleep(10)
   discard close(s.masterFd)
   if s.frameEventFd > 0:
     discard close(s.frameEventFd)

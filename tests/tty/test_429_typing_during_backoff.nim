@@ -2,9 +2,6 @@ discard """
   # See docs/windows-testing.md. The tty_expect harness uses openpty/fork/
   # execv (POSIX only). A ConPTY port is the path to re-enable on Windows.
   disabled: "win"
-  # Hangs deterministically on macOS (wall-clock polling starves under the
-  # OSX runner's scheduler; see plan-flakiness.md).
-  disabled: "osx"
 """
 ## Regression: text typed into the buffered editor while a 429 retry is in
 ## flight must survive both ending paths of the retry block — Ctrl-C

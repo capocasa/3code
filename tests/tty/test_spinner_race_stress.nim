@@ -1,6 +1,5 @@
 discard """
   disabled: "win"
-  disabled: "osx"
 """
 ## Stress: type continuously into the buffered editor while the spinner is
 ## running through a 429 retry backoff. The spinner thread repaints the live
