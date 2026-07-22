@@ -72,7 +72,7 @@ jobs:
         # the parallel `all`; OSX does not.
         run: |
           if command -v testament >/dev/null 2>&1; then
-            for c in tty; do
+            for c in core config shell stream api tty; do
               testament --print --megatest:off cat "$c" || exit 1
             done
           else
