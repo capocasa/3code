@@ -81,7 +81,7 @@ test_history, test_api, test_streamexec). 1 remains precisely disabled:
 test_netthread_blocks (the interrupt-wakes-blocking-recv path is POSIX-only;
 shutdownCachedStreamFd is a no-op on Windows — a real source gap, documented).
 
-All verified passing on linux (no regression). Windows correctness is CI-gated.
+
 
 Step 4 (ConPTY port of tty_expect.nim for the 18 tty tests) is NOT begun.
 It is the largest piece: a full Windows pseudoconsole lifecycle behind
