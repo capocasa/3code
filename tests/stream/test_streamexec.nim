@@ -1,10 +1,30 @@
-discard """
-  # Windows: runStreamingBash needs the bundled MSYS2 bash, absent on CI
-  # runners (exit 127). See docs/windows-testing.md.
-  disabled: "win"
-"""
+discard """"""
 import std/[os, strutils, times, unittest]
 import threecode/[actions, types, streamexec]
+
+when defined(windows):
+  proc ensureBashForTest() =
+    ## On a clean Windows CI runner the bundled MSYS2
+    ## (`%LOCALAPPDATA%\3code\msys64`) is absent, so resolveBash() returns
+    ## "" and runStreamingBash would exit 127 for every case. The streaming
+    ## plumbing this suite exercises (line-by-line callback, stderr merge,
+    ## exit-code propagation, NUL suppression) is independent of *which*
+    ## bash runs it, so point cachedBash at the runner's git-bash when the
+    ## bundled one is missing. Production resolveBash is unchanged: it never
+    ## falls back to a system bash (the bundled toolset is the product
+    ## contract); only this test injects one.
+    if resolveBash().len == 0:
+      for cand in [r"C:\Program Files\Git\usr\bin\bash.exe",
+                   r"C:\Program Files\Git\bin\bash.exe"]:
+        if fileExists(cand):
+          cachedBash = cand
+          return
+else:
+  proc ensureBashForTest() = discard
+
+# Run once at process start. The Windows-specific suite at the bottom resets
+# cachedBash="" per-test and runs last, so this global set doesn't leak into it.
+ensureBashForTest()
 
 suite "streamexec: basic streaming":
   test "streams stdout lines":
@@ -45,6 +65,12 @@ suite "streamexec: basic streaming":
     check rawOut == "Prompt: waiting\nDone\n"
 
   test "preserves very long single-line output":
+    # Needs python3 on PATH; skip cleanly where it's absent (e.g. some
+    # Windows runners expose `python` but not `python3`). The streaming-
+    # plumbing invariant is independently covered by the partial-prompt
+    # and multi-line tests above.
+    if findExe("python3").len == 0:
+      skip()
     var lines: seq[string]
     let act = Action(kind: akBash,
       body: "python3 -c \"print('x' * 200000, end='')\"")
