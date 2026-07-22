@@ -2,10 +2,65 @@
 ##
 ## The helper starts a real process under a PTY, feeds all output through a
 ## ttty Grid, and records compact screen snapshots for debugging failures.
+##
+## Platform lifecycle: on POSIX the child is forked under a real PTY
+## (openpty/login_tty/execv); on Windows it is spawned under the Windows
+## Pseudo Console API (ConPTY: CreatePseudoConsole + a PROC_THREAD_ATTRIBUTE_
+## PSEUDOCONSOLE attribute list + CreateProcessW). The `TtySession` record
+## and the public expect*/send/resize/close API are identical across both;
+## only the harness internals fork on `when defined(...)`.
 
-import std/[os, posix, random, strformat, strutils, times, unicode]
-import posix/termios
+import std/[os, random, strformat, strutils, times, unicode]
 import ttty/grid
+
+when defined(windows):
+  import winlean
+  # ConPTY and the PROC_THREAD_ATTRIBUTE list are not in Nim's winlean, so
+  # declare them directly against kernel32 / the documented constants.
+  type
+    HPCON* = distinct Handle
+    COORD* = object
+      x*, y*: int16
+    PROC_THREAD_ATTRIBUTE_LIST* = object
+    SIZE_T* = uint
+  const
+    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE* = 0x00020016'u32
+    EXTENDED_STARTUPINFO_PRESENT* = 0x00080000'i32
+    STILL_ACTIVE_DW* = 0x00000103'i32
+  proc createPseudoConsole(size: COORD; hInput, hOutput: Handle;
+      dwFlags: uint32; phPC: ptr HPCON): int32 {.stdcall,
+      dynlib: "kernel32", importc: "CreatePseudoConsole".}
+  proc resizePseudoConsole(hPC: HPCON; size: COORD): int32 {.stdcall,
+      dynlib: "kernel32", importc: "ResizePseudoConsole".}
+  proc closePseudoConsole(hPC: HPCON) {.stdcall,
+      dynlib: "kernel32", importc: "ClosePseudoConsole".}
+  proc initializeProcThreadAttributeList(
+      lpAttributeList: pointer; dwAttributeCount: DWORD;
+      dwFlags: DWORD; lpSize: ptr SIZE_T): WINBOOL {.stdcall,
+      dynlib: "kernel32", importc: "InitializeProcThreadAttributeList".}
+  proc deleteProcThreadAttributeList(lpAttributeList: pointer) {.stdcall,
+      dynlib: "kernel32", importc: "DeleteProcThreadAttributeList".}
+  proc updateProcThreadAttribute(lpAttributeList: pointer;
+      dwFlags: DWORD; attribute: uint32; lpValue: pointer; cbSize: SIZE_T;
+      lpPreviousValue: pointer; lpReturnSize: ptr SIZE_T): WINBOOL {.stdcall,
+      dynlib: "kernel32", importc: "UpdateProcThreadAttribute".}
+  type
+    STARTUPINFOEX* = object
+      startupInfo*: STARTUPINFO
+      lpAttributeList*: pointer
+else:
+  import posix
+  import posix/termios
+
+# Platform-conditional fd-like type so the TtySession fields have one name
+# across both branches: a POSIX file descriptor (cint) or a Windows HANDLE
+# (int). 0 / invalid is the sentinel for "not set" on both.
+when defined(windows):
+  type FdLike* = Handle
+  template fdValid(fd): bool = (fd).int != 0 and (fd).int != -1
+else:
+  type FdLike* = cint
+  template fdValid(fd): bool = (fd).cint > 0
 
 type
   EnvVar* = tuple[key, val: string]
@@ -18,8 +73,22 @@ type
     cursorHidden*: bool
 
   TtySession* = ref object
-    masterFd*: cint
-    pid*: Pid
+    # The PTY/conduit handle and the child identifier. POSIX uses a single
+    # PTY master fd + a Pid; Windows splits the ConPTY master into separate
+    # read/write pipe handles and tracks the child via a process Handle. The
+    # field names are kept constant so test bodies that reference them
+    # (test_tty_functional's hardKill/discardClose, gated to POSIX) compile
+    # on both; on Windows `masterFd` is the read side and `masterWriteFd`
+    # the write side of the ConPTY's master pipe pair.
+    masterFd*: FdLike
+    when defined(windows):
+      masterWriteFd*: Handle
+      hpc*: HPCON
+      hProcess*: Handle
+      hThread*: Handle
+      dwProcessId*: int32
+    else:
+      pid*: Pid
     grid*: Grid
     raw*: string
     frames*: seq[TtyFrame]
@@ -33,30 +102,15 @@ type
     frameRecordingPaused*: bool
     lastOutputAt*: float
     rawConsumedLen*: int
-    frameEventFd*: cint
-    frameAckFd*: cint
-    tickerCommandFd*: cint
-    tickerAckFd*: cint
-    apiContinueFd*: cint
+    frameEventFd*: FdLike
+    frameAckFd*: FdLike
+    tickerCommandFd*: FdLike
+    tickerAckFd*: FdLike
+    apiContinueFd*: FdLike
 
 const
   DefaultTtyCols* = 120
   DefaultTtyRows* = 40
-
-# openpty and login_tty live in different headers across platforms:
-# openpty is in <pty.h> on glibc, <util.h> on macOS; login_tty is in
-# <utmp.h> on glibc (older glibc declared it in <pty.h>, but current
-# releases moved it), <util.h> on macOS. Import each symbol from its own
-# header so a single-platform header swap doesn't silently misdeclare the
-# other.
-proc openpty(masterFd, slaveFd: ptr cint; name: pointer; termp: pointer;
-             winp: pointer): cint {.cdecl, importc: "openpty",
-                                    header: (when defined(macosx): "<util.h>"
-                                             else: "<pty.h>").}
-
-proc login_tty(fd: cint): cint {.cdecl, importc: "login_tty",
-                                 header: (when defined(macosx): "<util.h>"
-                                          else: "<utmp.h>").}
 
 # Clear the child's environment before re-seeding it. clearenv() is a
 # glibc/BSD extension absent from macOS <stdlib.h> (undeclared -> compile
@@ -65,20 +119,36 @@ proc clearEnv() =
   for key, val in envPairs():
     delEnv(key)
 
-var TIOCSWINSZ {.importc, header: "<sys/ioctl.h>".}: culong
-const SigWinch = 28.cint
-when defined(linux):
-  proc syscall(number: clong): clong {.varargs, importc, header: "<unistd.h>".}
-  var SYS_tgkill {.importc, header: "<sys/syscall.h>".}: clong
+when defined(posix):
+  # openpty and login_tty live in different headers across platforms:
+  # openpty is in <pty.h> on glibc, <util.h> on macOS; login_tty is in
+  # <utmp.h> on glibc (older glibc declared it in <pty.h>, but current
+  # releases moved it), <util.h> on macOS. Import each symbol from its own
+  # header so a single-platform header swap doesn't silently misdeclare the
+  # other.
+  proc openpty(masterFd, slaveFd: ptr cint; name: pointer; termp: pointer;
+               winp: pointer): cint {.cdecl, importc: "openpty",
+                                      header: (when defined(macosx): "<util.h>"
+                                               else: "<pty.h>").}
 
-proc statusCode(status: cint): int =
-  let s = status.int
-  if (s and 0x7f) == 0:
-    (s shr 8) and 0xff
-  elif (s and 0x7f) != 0x7f:
-    128 + (s and 0x7f)
-  else:
-    s
+  proc login_tty(fd: cint): cint {.cdecl, importc: "login_tty",
+                                   header: (when defined(macosx): "<util.h>"
+                                            else: "<utmp.h>").}
+
+  var TIOCSWINSZ {.importc, header: "<sys/ioctl.h>".}: culong
+  const SigWinch = 28.cint
+  when defined(linux):
+    proc syscall(number: clong): clong {.varargs, importc, header: "<unistd.h>".}
+    var SYS_tgkill {.importc, header: "<sys/syscall.h>".}: clong
+
+  proc statusCode(status: cint): int =
+    let s = status.int
+    if (s and 0x7f) == 0:
+      (s shr 8) and 0xff
+    elif (s and 0x7f) != 0x7f:
+      128 + (s and 0x7f)
+    else:
+      s
 
 proc argvArray(bin: string, args: openArray[string]): cstringArray =
   var argv = newSeq[string](args.len + 1)
@@ -194,60 +264,123 @@ proc feedGridChunk(s: TtySession; chunk: string) =
       i = nextEnd + SyncEnd.len
 
 proc readPtyChunk(s: TtySession; waitMs: int): bool =
-  var pfd: TPollfd
-  pfd.fd = s.masterFd
-  pfd.events = POLLIN
-  let pr = poll(addr pfd, 1.Tnfds, max(0, waitMs).cint)
-  if pr > 0 and (pfd.revents and (POLLIN or POLLHUP or POLLERR)) != 0:
-    var buf: array[4096, char]
-    let n = posix.read(s.masterFd, addr buf[0], buf.len)
-    if n > 0:
-      var chunk = newString(n)
-      copyMem(chunk[0].addr, buf[0].addr, n)
-      s.feedGridChunk(chunk)
-      return true
+  when defined(windows):
+    # Bounded wait: WaitForSingleObject with a timeout (never INFINITE),
+    # mirroring the POSIX poll()+read() path. A dead child that stops
+    # writing must not hang the whole testament category.
+    if waitForSingleObject(s.masterFd, max(0, waitMs).int32) == WAIT_OBJECT_0:
+      var buf: array[4096, char]
+      var got: int32 = 0
+      if readFile(s.masterFd, addr buf[0], buf.len.int32, addr got, nil) != 0 and got > 0:
+        var chunk = newString(got)
+        copyMem(chunk[0].addr, buf[0].addr, got)
+        s.feedGridChunk(chunk)
+        return true
+  else:
+    var pfd: TPollfd
+    pfd.fd = s.masterFd
+    pfd.events = POLLIN
+    let pr = poll(addr pfd, 1.Tnfds, max(0, waitMs).cint)
+    if pr > 0 and (pfd.revents and (POLLIN or POLLHUP or POLLERR)) != 0:
+      var buf: array[4096, char]
+      let n = posix.read(s.masterFd, addr buf[0], buf.len)
+      if n > 0:
+        var chunk = newString(n)
+        copyMem(chunk[0].addr, buf[0].addr, n)
+        s.feedGridChunk(chunk)
+        return true
 
-proc pollOnce(s: TtySession, waitMs: int; recordIdleFrame = true): bool =
-  if s.closed:
-    return false
-
-  var pfds: array[2, TPollfd]
-  pfds[0].fd = s.masterFd
-  pfds[0].events = POLLIN
-  var pollCount = 1.Tnfds
-  if s.frameEventFd > 0:
-    pfds[1].fd = s.frameEventFd
-    pfds[1].events = POLLIN
-    pollCount = 2.Tnfds
-  let pr = poll(addr pfds[0], pollCount, max(0, waitMs).cint)
-  if pr > 0 and (pfds[0].revents and (POLLIN or POLLHUP or POLLERR)) != 0:
-    result = s.readPtyChunk(0) or result
-  if pr > 0 and pollCount == 2.Tnfds and
-      (pfds[1].revents and (POLLIN or POLLHUP or POLLERR)) != 0:
-    var buf: array[256, char]
-    let n = posix.read(s.frameEventFd, addr buf[0], buf.len)
-    # Child exited: frame event pipe is closed, no point draining. Fall
-    # through to the waitpid below rather than returning early, so the exit
-    # is reaped and `s.exited` is set (an early return here skips reaping
-    # and leaves a zombie the caller never observes).
-    if n > 0:
-      while s.readPtyChunk(5):
-        discard
+proc childExited(s: TtySession): bool =
+  ## Non-blocking exit check. POSIX: waitpid(WNOHANG). Windows:
+  ## GetExitCodeProcess (STILL_ACTIVE means not exited). Returns true and
+  ## sets s.exitCode/s.exited when the child has exited.
+  when defined(windows):
+    var code: int32 = 0
+    if getExitCodeProcess(s.hProcess, code) != 0 and code != STILL_ACTIVE_DW:
+      s.exitCode = code.int
+      s.exited = true
       s.flushFrame(force = true)
-      if s.frameAckFd > 0:
-        var ch = 'a'
-        discard posix.write(s.frameAckFd, addr ch, 1)
-      result = true
-  elif not result and recordIdleFrame:
-    s.flushFrame()
-
-  if not s.exited:
+      return true
+    false
+  else:
     var status: cint = 0
     let waited = waitpid(s.pid, status, WNOHANG)
     if waited == s.pid:
       s.exited = true
       s.exitCode = statusCode(status)
       s.flushFrame(force = true)
+      true
+    else:
+      false
+
+proc pollOnce(s: TtySession, waitMs: int; recordIdleFrame = true): bool =
+  if s.closed:
+    return false
+
+  when defined(windows):
+    # WaitForMultipleObjects on the ConPTY read handle and (if present) the
+    # frame-event pipe read handle, with a bounded timeout (never INFINITE).
+    # WAIT_OBJECT_0 signals the first handle (master), WAIT_OBJECT_0+1 the
+    # second (frame event). The frame-event branch mirrors the POSIX path:
+    # drain pending PTY bytes, force a frame commit, ack the child, then
+    # fall through to exit detection.
+    var handles: WOHandleArray
+    handles[0] = s.masterFd
+    var n = 1
+    if s.frameEventFd.int != 0 and s.frameEventFd.int != -1:
+      handles[1] = s.frameEventFd
+      n = 2
+    let wr = waitForMultipleObjects(n.int32, addr handles, 0.WINBOOL,
+                                    max(0, waitMs).int32)
+    if wr == WAIT_OBJECT_0:
+      result = s.readPtyChunk(0) or result
+    elif n == 2 and wr == WAIT_OBJECT_0 + 1:
+      var buf: array[256, char]
+      var got: int32 = 0
+      discard readFile(s.frameEventFd, addr buf[0], buf.len.int32, addr got, nil)
+      if got > 0:
+        while s.readPtyChunk(5):
+          discard
+        s.flushFrame(force = true)
+        if s.frameAckFd.int != 0 and s.frameAckFd.int != -1:
+          var ch = 'a'
+          var written: int32 = 0
+          discard writeFile(s.frameAckFd, addr ch, 1, addr written, nil)
+        result = true
+    elif not result and recordIdleFrame:
+      s.flushFrame()
+    discard s.childExited()
+  else:
+    var pfds: array[2, TPollfd]
+    pfds[0].fd = s.masterFd
+    pfds[0].events = POLLIN
+    var pollCount = 1.Tnfds
+    if s.frameEventFd > 0:
+      pfds[1].fd = s.frameEventFd
+      pfds[1].events = POLLIN
+      pollCount = 2.Tnfds
+    let pr = poll(addr pfds[0], pollCount, max(0, waitMs).cint)
+    if pr > 0 and (pfds[0].revents and (POLLIN or POLLHUP or POLLERR)) != 0:
+      result = s.readPtyChunk(0) or result
+    if pr > 0 and pollCount == 2.Tnfds and
+        (pfds[1].revents and (POLLIN or POLLHUP or POLLERR)) != 0:
+      var buf: array[256, char]
+      let n = posix.read(s.frameEventFd, addr buf[0], buf.len)
+      # Child exited: frame event pipe is closed, no point draining. Fall
+      # through to the waitpid below rather than returning early, so the exit
+      # is reaped and `s.exited` is set (an early return here skips reaping
+      # and leaves a zombie the caller never observes).
+      if n > 0:
+        while s.readPtyChunk(5):
+          discard
+        s.flushFrame(force = true)
+        if s.frameAckFd > 0:
+          var ch = 'a'
+          discard posix.write(s.frameAckFd, addr ch, 1)
+        result = true
+    elif not result and recordIdleFrame:
+      s.flushFrame()
+    discard s.childExited()
 
 proc freshRaw*(s: TtySession): string =
   ## Raw bytes that arrived since the last successful `expect` match: the
@@ -327,11 +460,17 @@ proc resize*(s: TtySession; cols, rows: int): bool {.discardable.} =
   if s.grid.col >= s.grid.width:
     s.grid.col = max(0, s.grid.width - 1)
   s.markFrameDirty()
-  var ws = IOctl_WinSize(ws_row: rows.cushort, ws_col: cols.cushort,
-                         ws_xpixel: 0, ws_ypixel: 0)
-  result = ioctl(s.masterFd, TIOCSWINSZ, addr ws) == 0
-  if result and s.pid > 0 and not s.exited:
-    discard kill(s.pid, SigWinch)
+  when defined(windows):
+    # ResizePseudoConsole replaces the TIOCSWINSZ ioctl; ConPTY signals the
+    # size change to the child internally (no SIGWINCH equivalent needed).
+    result = resizePseudoConsole(s.hpc,
+        COORD(x: cols.int16, y: rows.int16)) == 0
+  else:
+    var ws = IOctl_WinSize(ws_row: rows.cushort, ws_col: cols.cushort,
+                           ws_xpixel: 0, ws_ypixel: 0)
+    result = ioctl(s.masterFd, TIOCSWINSZ, addr ws) == 0
+    if result and s.pid > 0 and not s.exited:
+      discard kill(s.pid, SigWinch)
 
 proc resizeMainThread*(s: TtySession; cols, rows: int): bool {.discardable.} =
   ## Resize the PTY and send SIGWINCH to the child's main thread. Linux-only
@@ -345,81 +484,220 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
                     cwd = ""; env: openArray[EnvVar] = [];
                     cols = DefaultTtyCols; rows = DefaultTtyRows;
                     keepHistory = true): TtySession =
-  ## Start `bin` under a real PTY with an isolated environment.
+  ## Start `bin` under a real PTY (POSIX) or Pseudo Console (Windows) with an
+  ## isolated environment.
   ##
   ## `env` is the complete child environment, except TERM is defaulted to
   ## xterm-256color when not provided. Pass an absolute `bin` path unless the
   ## supplied env intentionally includes PATH for execv callers.
-  var masterFd, slaveFd: cint
-  doAssert openpty(addr masterFd, addr slaveFd, nil, nil, nil) == 0
-  var framePipe: array[2, cint]
-  doAssert pipe(framePipe) == 0
-  discard fcntl(framePipe[1], F_SETFD, 0)
-  var ackPipe: array[2, cint]
-  doAssert pipe(ackPipe) == 0
-  discard fcntl(ackPipe[0], F_SETFD, 0)
-  var tickerPipe: array[2, cint]
-  doAssert pipe(tickerPipe) == 0
-  discard fcntl(tickerPipe[0], F_SETFD, 0)
-  var tickerAckPipe: array[2, cint]
-  doAssert pipe(tickerAckPipe) == 0
-  discard fcntl(tickerAckPipe[1], F_SETFD, 0)
-  var apiContinuePipe: array[2, cint]
-  doAssert pipe(apiContinuePipe) == 0
-  discard fcntl(apiContinuePipe[0], F_SETFD, 0)
+  when defined(windows):
+    # Five inheritable anonymous IPC pipes (mirroring the POSIX pipe pairs):
+    #   framePipe        : child writes 'f' to signal a render boundary
+    #   ackPipe          : parent acks each frame event
+    #   tickerPipe       : parent drives one spinner frame
+    #   tickerAckPipe    : child acks a spinner frame
+    #   apiContinuePipe  : parent releases a blocked stub response
+    # On Windows the child-side handlers for these are currently POSIX-gated
+    # in src/ (see docs/windows-testing.md), so the frame-event/ticker waits
+    # in the harness timeout (bounded) and tests settle via drain() polling.
+    # The pipes are wired now so enabling the child side later needs no
+    # harness change.
+    proc makePipe(readEnd, writeEnd: var Handle) =
+      var sa = SECURITY_ATTRIBUTES(nLength: sizeof(SECURITY_ATTRIBUTES).int32,
+                                   bInheritHandle: 1)
+      doAssert createPipe(readEnd, writeEnd, sa, 0) != 0
+      # The read end is kept by the parent; mark it non-inheritable so only
+      # the intended write end crosses into the child (and vice versa).
+      discard setHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0)
 
-  result = TtySession(
-    masterFd: masterFd,
-    frameEventFd: framePipe[0],
-    frameAckFd: ackPipe[1],
-    tickerCommandFd: tickerPipe[1],
-    tickerAckFd: tickerAckPipe[0],
-    apiContinueFd: apiContinuePipe[1],
-    grid: newGrid(),
-    started: epochTime(),
-    keepHistory: keepHistory,
-    exitCode: -1)
-  discard result.resize(cols, rows)
+    var pttyInRead, pttyInWrite, pttyOutRead, pttyOutWrite: Handle
+    var sa = SECURITY_ATTRIBUTES(nLength: sizeof(SECURITY_ATTRIBUTES).int32,
+                                 bInheritHandle: 1)
+    doAssert createPipe(pttyInRead, pttyInWrite, sa, 0) != 0
+    doAssert createPipe(pttyOutRead, pttyOutWrite, sa, 0) != 0
+    # The ConPTY master side keeps pttyInWrite (to send input to the child)
+    # and pttyOutRead (to read child output); the slave ends (pttyInRead,
+    # pttyOutWrite) are handed to the pseudoconsole and must NOT be inherited
+    # by the child process directly.
+    discard setHandleInformation(pttyInWrite, HANDLE_FLAG_INHERIT, 0)
+    discard setHandleInformation(pttyOutRead, HANDLE_FLAG_INHERIT, 0)
 
-  let pid = fork()
-  doAssert pid >= 0
-  if pid == 0:
-    discard close(masterFd)
-    discard close(framePipe[0])
-    discard close(ackPipe[1])
-    discard close(tickerPipe[1])
-    discard close(tickerAckPipe[0])
-    discard close(apiContinuePipe[1])
-    discard login_tty(slaveFd)
-    clearEnv()
+    var hpc: HPCON
+    doAssert createPseudoConsole(
+        COORD(x: cols.int16, y: rows.int16),
+        pttyInRead, pttyOutWrite, 0, addr hpc) == 0
 
+    var frameRead, frameWrite, ackRead, ackWrite: Handle
+    var tickerRead, tickerWrite, tickerAckRead, tickerAckWrite: Handle
+    var apiRead, apiWrite: Handle
+    makePipe(frameRead, frameWrite)
+    makePipe(ackRead, ackWrite)
+    makePipe(tickerRead, tickerWrite)
+    makePipe(tickerAckRead, tickerAckWrite)
+    makePipe(apiRead, apiWrite)
+    # Invert inheritance on the ends the child keeps, so makePipe's default
+    # (parent keeps read end) is corrected per-pipe: the child needs the
+    # write ends of frame/tickerAck and the read ends of ack/ticker/api.
+    discard setHandleInformation(frameWrite, HANDLE_FLAG_INHERIT,
+                                 HANDLE_FLAG_INHERIT)
+    discard setHandleInformation(ackRead, HANDLE_FLAG_INHERIT,
+                                 HANDLE_FLAG_INHERIT)
+    discard setHandleInformation(tickerRead, HANDLE_FLAG_INHERIT,
+                                 HANDLE_FLAG_INHERIT)
+    discard setHandleInformation(tickerAckWrite, HANDLE_FLAG_INHERIT,
+                                 HANDLE_FLAG_INHERIT)
+    discard setHandleInformation(apiRead, HANDLE_FLAG_INHERIT,
+                                 HANDLE_FLAG_INHERIT)
+
+    result = TtySession(
+      masterFd: pttyOutRead,
+      masterWriteFd: pttyInWrite,
+      hpc: hpc,
+      grid: newGrid(),
+      started: epochTime(),
+      keepHistory: keepHistory,
+      exitCode: -1,
+      frameEventFd: frameRead,
+      frameAckFd: ackWrite,
+      tickerCommandFd: tickerWrite,
+      tickerAckFd: tickerAckRead,
+      apiContinueFd: apiWrite)
+
+    # Build the STARTUPINFOEX with a PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE
+    # attribute so CreateProcess attaches the child to this pseudoconsole.
+    var attrSize: SIZE_T = 0
+    discard initializeProcThreadAttributeList(nil, 1, 0, addr attrSize)
+    var attrList = cast[pointer](alloc(attrSize))
+    doAssert initializeProcThreadAttributeList(attrList, 1, 0, addr attrSize) != 0
+    doAssert updateProcThreadAttribute(attrList, 0,
+        PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, cast[pointer](unsafeAddr hpc),
+        sizeof(HPCON).SIZE_T, nil, nil) != 0
+
+    var si = STARTUPINFOEX(startupInfo: STARTUPINFO(cb: sizeof(STARTUPINFOEX).int32))
+    si.lpAttributeList = attrList
+    # The child's environment: re-seed from `env` (TERM defaulted), plus the
+    # IPC pipe handles as integers. The child reads these to find its pipes.
+    var envBlock = ""
     var hasTerm = false
     for item in env:
       if item.key == "TERM":
         hasTerm = true
-      putEnv(item.key, item.val)
+      envBlock.add item.key & "=" & item.val & "\0"
     if not hasTerm:
-      putEnv("TERM", "xterm-256color")
-    putEnv("THREECODE_TEST_FRAME_FD", $framePipe[1])
-    putEnv("THREECODE_TEST_FRAME_ACK_FD", $ackPipe[0])
-    putEnv("THREECODE_TEST_TICKER_FD", $tickerPipe[0])
-    putEnv("THREECODE_TEST_TICKER_ACK_FD", $tickerAckPipe[1])
-    putEnv("THREECODE_TEST_API_CONTINUE_FD", $apiContinuePipe[0])
-    if cwd.len > 0:
-      setCurrentDir(cwd)
+      envBlock.add "TERM=xterm-256color\0"
+    envBlock.add "THREECODE_TEST_FRAME_FD=" & $frameWrite.int & "\0"
+    envBlock.add "THREECODE_TEST_FRAME_ACK_FD=" & $ackRead.int & "\0"
+    envBlock.add "THREECODE_TEST_TICKER_FD=" & $tickerRead.int & "\0"
+    envBlock.add "THREECODE_TEST_TICKER_ACK_FD=" & $tickerAckWrite.int & "\0"
+    envBlock.add "THREECODE_TEST_API_CONTINUE_FD=" & $apiRead.int & "\0\0"
 
-    let argv = argvArray(bin, args)
-    discard execv(bin.cstring, argv)
-    quit 127
+    var pi: PROCESS_INFORMATION
+    # CommandLine is the program + args as a single UTF-16 string; the app
+    # name is passed separately so we don't need to quote the binary path.
+    var cmd = bin
+    for a in args:
+      cmd.add " " & a.quoteShell()
+    let cmdW = newWideCString(cmd)
+    # Keep the wide objects alive across the createProcessW call (the
+    # converter hands createProcessW a raw pointer into their storage).
+    let appW = newWideCString(bin)
+    let envObj = newWideCString(envBlock)
+    let cwdObj = if cwd.len > 0: newWideCString(cwd) else: newWideCString(0)
+    # Extract raw WideCString pointers (the implicit converter doesn't apply
+    # to importc proc params reliably); pass STARTUPINFOEX via the address of
+    # its embedded STARTUPINFO, which is the documented ABI for the extended
+    # startup info path.
+    let ok = createProcessW(appW, cmdW, nil, nil, 1,
+        EXTENDED_STARTUPINFO_PRESENT or CREATE_UNICODE_ENVIRONMENT,
+        envObj, cwdObj, si.startupInfo, pi)
+    deleteProcThreadAttributeList(attrList)
+    dealloc(attrList)
+    doAssert ok != 0, "CreateProcessW failed: " & $getLastError()
+    result.hProcess = pi.hProcess
+    result.hThread = pi.hThread
+    result.dwProcessId = pi.dwProcessId
+    # Close the child-side pipe ends in the parent; the child has its own
+    # duplicate via inheritance. Closing here ensures the parent's read on
+    # the master returns EOF when the child exits (no lingering write end).
+    discard closeHandle(pttyInRead)
+    discard closeHandle(pttyOutWrite)
+    discard closeHandle(frameWrite)
+    discard closeHandle(ackRead)
+    discard closeHandle(tickerRead)
+    discard closeHandle(tickerAckWrite)
+    discard closeHandle(apiRead)
+    result.rememberFrame()
+  else:
+    var masterFd, slaveFd: cint
+    doAssert openpty(addr masterFd, addr slaveFd, nil, nil, nil) == 0
+    var framePipe: array[2, cint]
+    doAssert pipe(framePipe) == 0
+    discard fcntl(framePipe[1], F_SETFD, 0)
+    var ackPipe: array[2, cint]
+    doAssert pipe(ackPipe) == 0
+    discard fcntl(ackPipe[0], F_SETFD, 0)
+    var tickerPipe: array[2, cint]
+    doAssert pipe(tickerPipe) == 0
+    discard fcntl(tickerPipe[0], F_SETFD, 0)
+    var tickerAckPipe: array[2, cint]
+    doAssert pipe(tickerAckPipe) == 0
+    discard fcntl(tickerAckPipe[1], F_SETFD, 0)
+    var apiContinuePipe: array[2, cint]
+    doAssert pipe(apiContinuePipe) == 0
+    discard fcntl(apiContinuePipe[0], F_SETFD, 0)
 
-  result.pid = pid
-  discard close(slaveFd)
-  discard close(framePipe[1])
-  discard close(ackPipe[0])
-  discard close(tickerPipe[0])
-  discard close(tickerAckPipe[1])
-  discard close(apiContinuePipe[0])
-  result.rememberFrame()
+    result = TtySession(
+      masterFd: masterFd,
+      frameEventFd: framePipe[0],
+      frameAckFd: ackPipe[1],
+      tickerCommandFd: tickerPipe[1],
+      tickerAckFd: tickerAckPipe[0],
+      apiContinueFd: apiContinuePipe[1],
+      grid: newGrid(),
+      started: epochTime(),
+      keepHistory: keepHistory,
+      exitCode: -1)
+    discard result.resize(cols, rows)
+
+    let pid = fork()
+    doAssert pid >= 0
+    if pid == 0:
+      discard close(masterFd)
+      discard close(framePipe[0])
+      discard close(ackPipe[1])
+      discard close(tickerPipe[1])
+      discard close(tickerAckPipe[0])
+      discard close(apiContinuePipe[1])
+      discard login_tty(slaveFd)
+      clearEnv()
+
+      var hasTerm = false
+      for item in env:
+        if item.key == "TERM":
+          hasTerm = true
+        putEnv(item.key, item.val)
+      if not hasTerm:
+        putEnv("TERM", "xterm-256color")
+      putEnv("THREECODE_TEST_FRAME_FD", $framePipe[1])
+      putEnv("THREECODE_TEST_FRAME_ACK_FD", $ackPipe[0])
+      putEnv("THREECODE_TEST_TICKER_FD", $tickerPipe[0])
+      putEnv("THREECODE_TEST_TICKER_ACK_FD", $tickerAckPipe[1])
+      putEnv("THREECODE_TEST_API_CONTINUE_FD", $apiContinuePipe[0])
+      if cwd.len > 0:
+        setCurrentDir(cwd)
+
+      let argv = argvArray(bin, args)
+      discard execv(bin.cstring, argv)
+      quit 127
+
+    result.pid = pid
+    discard close(slaveFd)
+    discard close(framePipe[1])
+    discard close(ackPipe[0])
+    discard close(tickerPipe[0])
+    discard close(tickerAckPipe[1])
+    discard close(apiContinuePipe[0])
+    result.rememberFrame()
 
 proc send*(s: TtySession; text: string) =
   if text.len == 0:
@@ -430,11 +708,21 @@ proc send*(s: TtySession; text: string) =
   # can't drain within a short window is treated as dead and the test fails
   # its next assertion cleanly instead of hanging.
   if not s.exited:
-    var wfd: TPollfd
-    wfd.fd = s.masterFd
-    wfd.events = POLLOUT
-    if poll(addr wfd, 1.Tnfds, 2000.cint) > 0:
-      discard posix.write(s.masterFd, text[0].unsafeAddr, text.len)
+    when defined(windows):
+      # Bounded write: anonymous pipe writes complete synchronously for small
+      # buffers (keystrokes), but a child that has deadlocked and stopped
+      # reading can fill the pipe buffer and block forever. We rely on the
+      # child's ConPTY host thread to drain; the settle below times out if it
+      # doesn't, failing the next assertion cleanly instead of hanging.
+      var written: int32 = 0
+      discard writeFile(s.masterWriteFd, text[0].unsafeAddr, text.len.int32,
+                        addr written, nil)
+    else:
+      var wfd: TPollfd
+      wfd.fd = s.masterFd
+      wfd.events = POLLOUT
+      if poll(addr wfd, 1.Tnfds, 2000.cint) > 0:
+        discard posix.write(s.masterFd, text[0].unsafeAddr, text.len)
   var printable = ""
   var inEsc = false
   for ch in text:
@@ -496,26 +784,40 @@ proc advanceTicker*(s: TtySession) =
   ## unbounded read would hang the whole testament category. We poll the
   ## ack fd with a timeout; on timeout we just proceed — a missing spinner
   ## frame surfaces as a failed assertion downstream, not an infinite hang.
-  if s.tickerCommandFd <= 0 or s.tickerAckFd <= 0:
+  if not fdValid(s.tickerCommandFd) or not fdValid(s.tickerAckFd):
     return
   if s.exited:
     return
-  var ch = 't'
-  discard posix.write(s.tickerCommandFd, addr ch, 1)
-  var pfd: TPollfd
-  pfd.fd = s.tickerAckFd
-  pfd.events = POLLIN
-  if poll(addr pfd, 1.Tnfds, 2000.cint) > 0:
-    var ack: array[1, char]
-    discard posix.read(s.tickerAckFd, addr ack[0], 1)
+  when defined(windows):
+    var ch = 't'
+    var written: int32 = 0
+    discard writeFile(s.tickerCommandFd, addr ch, 1, addr written, nil)
+    # Bounded ack wait: WaitForSingleObject with a timeout, never INFINITE.
+    if waitForSingleObject(s.tickerAckFd, 2000) == WAIT_OBJECT_0:
+      var ack: array[1, char]
+      var got: int32 = 0
+      discard readFile(s.tickerAckFd, addr ack[0], 1, addr got, nil)
+  else:
+    var ch = 't'
+    discard posix.write(s.tickerCommandFd, addr ch, 1)
+    var pfd: TPollfd
+    pfd.fd = s.tickerAckFd
+    pfd.events = POLLIN
+    if poll(addr pfd, 1.Tnfds, 2000.cint) > 0:
+      var ack: array[1, char]
+      discard posix.read(s.tickerAckFd, addr ack[0], 1)
   s.drain(20, recordFrame = true)
 
 proc continueStubApi*(s: TtySession) =
   ## Release a stub response blocked on waitForTestContinue.
-  if s.apiContinueFd <= 0:
+  if not fdValid(s.apiContinueFd):
     return
   var ch = 'c'
-  discard posix.write(s.apiContinueFd, addr ch, 1)
+  when defined(windows):
+    var written: int32 = 0
+    discard writeFile(s.apiContinueFd, addr ch, 1, addr written, nil)
+  else:
+    discard posix.write(s.apiContinueFd, addr ch, 1)
 
 proc ctrlC*(s: TtySession) =
   s.send "\x03"
@@ -524,8 +826,11 @@ proc ctrlD*(s: TtySession) =
   s.send "\x04"
 
 proc signal*(s: TtySession; sig: cint) =
-  if s.pid > 0 and not s.exited:
-    discard kill(s.pid, sig)
+  ## POSIX-only: Windows has no signal API; ConPTY tests use ctrlC/ctrlD
+  ## (byte-level input) instead. The `sig` argument is a POSIX signal number.
+  when defined(posix):
+    if s.pid > 0 and not s.exited:
+      discard kill(s.pid, sig)
 
 proc screenText*(s: TtySession): string =
   for row in s.currentRows():
@@ -1151,42 +1456,76 @@ proc close*(s: TtySession) =
   if s.closed:
     return
   s.drain(20, recordFrame = false)
-  if not s.exited:
-    discard kill(s.pid, SIGTERM)
-    let deadline = epochTime() + 0.5
-    while epochTime() < deadline and not s.exited:
-      discard s.pollOnce(20)
+  when defined(windows):
     if not s.exited:
-      discard kill(s.pid, SIGKILL)
-      discard s.pollOnce(20)
+      # TerminateProcess replaces kill(SIGTERM). Bounded wait on the process
+      # handle (never INFINITE) — a stuck child must not hang the category.
+      discard terminateProcess(s.hProcess, 1)
+      discard waitForSingleObject(s.hProcess, 500)
+      discard s.childExited()
+      if not s.exited:
+        # Forced reap window: poll GetExitCodeProcess for a short time.
+        let reapDeadline = epochTime() + 2.0
+        while epochTime() < reapDeadline and not s.exited:
+          discard s.childExited()
+          sleep(10)
+    # Close the pseudoconsole first so the ConPTY host thread exits cleanly,
+    # then the pipe handles and the process/thread handles.
+    closePseudoConsole(s.hpc)
+    discard closeHandle(s.masterFd)
+    if s.masterWriteFd.int != 0 and s.masterWriteFd.int != -1:
+      discard closeHandle(s.masterWriteFd)
+    if fdValid(s.frameEventFd):
+      discard closeHandle(s.frameEventFd); s.frameEventFd = 0
+    if fdValid(s.frameAckFd):
+      discard closeHandle(s.frameAckFd); s.frameAckFd = 0
+    if fdValid(s.tickerCommandFd):
+      discard closeHandle(s.tickerCommandFd); s.tickerCommandFd = 0
+    if fdValid(s.tickerAckFd):
+      discard closeHandle(s.tickerAckFd); s.tickerAckFd = 0
+    if fdValid(s.apiContinueFd):
+      discard closeHandle(s.apiContinueFd); s.apiContinueFd = 0
+    if s.hProcess.int != 0 and s.hProcess.int != -1:
+      discard closeHandle(s.hProcess)
+    if s.hThread.int != 0 and s.hThread.int != -1:
+      discard closeHandle(s.hThread)
+  else:
     if not s.exited:
-      # Bounded reap: a blocking waitpid(0) hangs forever if the child is
-      # stuck (e.g. uninterruptible I/O on the PTY under CI load). Poll with
-      # WNOHANG for a short window; if still unreaped, leave it — the runner
-      # reaps orphans at job end, and an infinite block here hangs the whole
-      # testament category.
-      var status: cint = 0
-      let reapDeadline = epochTime() + 2.0
-      while epochTime() < reapDeadline:
-        if waitpid(s.pid, status, WNOHANG) == s.pid:
-          s.exited = true
-          s.exitCode = statusCode(status)
-          break
-        sleep(10)
-  discard close(s.masterFd)
-  if s.frameEventFd > 0:
-    discard close(s.frameEventFd)
-    s.frameEventFd = 0
-  if s.frameAckFd > 0:
-    discard close(s.frameAckFd)
-    s.frameAckFd = 0
-  if s.tickerCommandFd > 0:
-    discard close(s.tickerCommandFd)
-    s.tickerCommandFd = 0
-  if s.tickerAckFd > 0:
-    discard close(s.tickerAckFd)
-    s.tickerAckFd = 0
-  if s.apiContinueFd > 0:
-    discard close(s.apiContinueFd)
-    s.apiContinueFd = 0
+      discard kill(s.pid, SIGTERM)
+      let deadline = epochTime() + 0.5
+      while epochTime() < deadline and not s.exited:
+        discard s.pollOnce(20)
+      if not s.exited:
+        discard kill(s.pid, SIGKILL)
+        discard s.pollOnce(20)
+      if not s.exited:
+        # Bounded reap: a blocking waitpid(0) hangs forever if the child is
+        # stuck (e.g. uninterruptible I/O on the PTY under CI load). Poll with
+        # WNOHANG for a short window; if still unreaped, leave it — the runner
+        # reaps orphans at job end, and an infinite block here hangs the whole
+        # testament category.
+        var status: cint = 0
+        let reapDeadline = epochTime() + 2.0
+        while epochTime() < reapDeadline:
+          if waitpid(s.pid, status, WNOHANG) == s.pid:
+            s.exited = true
+            s.exitCode = statusCode(status)
+            break
+          sleep(10)
+    discard close(s.masterFd)
+    if s.frameEventFd > 0:
+      discard close(s.frameEventFd)
+      s.frameEventFd = 0
+    if s.frameAckFd > 0:
+      discard close(s.frameAckFd)
+      s.frameAckFd = 0
+    if s.tickerCommandFd > 0:
+      discard close(s.tickerCommandFd)
+      s.tickerCommandFd = 0
+    if s.tickerAckFd > 0:
+      discard close(s.tickerAckFd)
+      s.tickerAckFd = 0
+    if s.apiContinueFd > 0:
+      discard close(s.apiContinueFd)
+      s.apiContinueFd = 0
   s.closed = true
