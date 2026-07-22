@@ -424,7 +424,17 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
 proc send*(s: TtySession; text: string) =
   if text.len == 0:
     return
-  discard posix.write(s.masterFd, text[0].unsafeAddr, text.len)
+  # Bounded write: if the child has deadlocked and stopped reading stdin,
+  # the PTY input buffer fills and a plain write() blocks forever, hanging
+  # the whole testament category. Poll for writability first; a child that
+  # can't drain within a short window is treated as dead and the test fails
+  # its next assertion cleanly instead of hanging.
+  if not s.exited:
+    var wfd: TPollfd
+    wfd.fd = s.masterFd
+    wfd.events = POLLOUT
+    if poll(addr wfd, 1.Tnfds, 2000.cint) > 0:
+      discard posix.write(s.masterFd, text[0].unsafeAddr, text.len)
   var printable = ""
   var inEsc = false
   for ch in text:
