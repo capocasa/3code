@@ -1,217 +1,171 @@
-# Cybernetic Plan: Option B — unify the bash viewport and transcript byte paths
+# Cybernetic Plan: re-enable Windows-disabled tests (adapt, don't skip)
 
 ## Context
 
-The bash tool has two independent code paths that paint the *same*
-command output at different lifecycle stages, and they diverge. This is
-the root cause behind the "volatile output is replaced by a rendered
-output" observation (issue 1): when a bash tool commits, the live
-volatile viewport is erased and the output is repainted from the
-transcript path, and the two paths disagree on five details. Option A
-(the already-shipped fix) patched the worst symptom (the missing
-inter-item separator). This plan eliminates the repaint entirely by
-making the two paths produce identical bytes, so the commit becomes a
-"silent append" of internal state with no visual change.
+Windows is a primary target on equal footing with Linux and macOS. Today 27
+test files carry `disabled: "win"`. The OSX work (this branch, commit
+eec8d80) took the "adapt to the OS, just as meaningful" path: it removed
+`disabled: "osx"` from 17 of 18 tty files and hardened the harness's blocking
+calls rather than loosening assertions. The goal here is the same for Windows
+— remove every `disabled: "win"` that can be made genuinely meaningful on
+Windows, and leave a precise, documented fallback only for what truly cannot.
 
-### The five divergences (confirmed by raw byte trace, see git history)
+The 27 `disabled: "win"` files split into three classes with distinct root
+causes (confirmed by reading source this session):
 
-These are why the painted pixels cannot today be frozen and declared
-scrollback:
+### Class A — OS-assumption in the test, not the harness (9 files)
 
-1. **Banner icon.**
-   - Live viewport: rotating currency symbol via `commandSymbolIndex`
-     (`$`/`€`/`£`/`¥`, runtime.nim:75) or `Ø` on failure, set in
-     `commandIcon` (toolstream.nim:41).
-   - Transcript: static `toolIcon` per `ActionKind` (`$`, display.nim:478)
-     via `toolBannerBytes` (display.nim:490).
+The tests assume POSIX env isolation that the production code does not honor
+on Windows. Three concrete root causes, all in `src/threecode/util.nim`:
 
-2. **Output wrapping algorithm.**
-   - Live viewport: `charWrapAnsi` (hard char break at width),
-     util.nim:592, via `wrappedRowsAt` (toolstream.nim:56).
-   - Transcript: `wrapAnsi` (greedy word-wrap on spaces), util.nim:561,
-     via `wrappedSubtleBytes` (display.nim:196).
+1. **`userDataRoot()` ignores `XDG_DATA_HOME` on Windows** (util.nim:298).
+   The POSIX branch reads `getEnv("XDG_DATA_HOME")` (line 300); the Windows
+   branch (line 298) is bare `getConfigDir() / "3code"`. Tests that set
+   `XDG_DATA_HOME` to a temp dir for isolation leak into real `APPDATA`.
+   Blocks: `tests/core/test_session.nim`, `tests/core/test_cli_args.nim`
+   (the `-l` and skills-dir suites), `tests/core/test_util_extra.nim` (the
+   `userDataRoot`-derived asserts).
+2. **`userConfigRoot()` ignores `XDG_CONFIG_HOME` on Windows** (util.nim:285).
+   Both branches use `getConfigDir()`. On Linux `getConfigDir()` honors
+   `XDG_CONFIG_HOME`; on Windows Nim's `getConfigDir()` returns `APPDATA` and
+   ignores it. So `test_update.nim`'s `putEnv("XDG_CONFIG_HOME", ...)` is
+   silently ignored on Windows. Blocks: `tests/core/test_update.nim`.
+3. **`collapseHome()` uses `/` separators** (util.nim:807). On Windows
+   `getHomeDir() / "x"` yields backslashes, and `collapseHome` strips `/`
+   only, so `~/src/test.nim` assertions fail. The proc itself is correct
+   (path separator agnostic via `getHomeDir()` prefix match), the test
+   expectations are not. Blocks the `collapseHome` suite in `test_util_extra`.
 
-3. **Banner wrapping.** Both call `bannerWrapRows` (util.nim:631), but
-   the viewport feeds it `commandIcon & " "` while the transcript feeds
-   it `toolIcon(kind) & " "`. When the icons differ (divergence 1), the
-   first-line width budget differs, so continuation rows can break at
-   different points.
+Fix: honor the XDG overrides on Windows too (mirrors the macOS XDG fix from
+b7ea0f0, same rationale: "makes the data root redirectable for tests; the
+platform default is unchanged when the variable is unset"). This is a source
+fix that *enables* correct test isolation, not a test workaround.
 
-4. **Truncation marker.**
-   - Live viewport: `omittedLine()` (toolstream.nim) recomputed each
-     stream line, shows live hidden count.
-   - Transcript: `toolResultBytes` (display.nim:502) re-derives from
-     full `res`, same `StreamMaxLines` cap, regenerated text.
+Files (4): `test_session.nim`, `test_update.nim`, `test_util_extra.nim`,
+`test_cli_args.nim` (already has `when defined(windows):` branches for the
+`-l` runIn proc; the XDG source fix makes them actually isolate).
 
-5. **Color placement.**
-   - Live viewport: SGR applied per-row at write boundary in
-     `writeToolViewportRows` (engine.nim:107): `OffWhiteFg` for banner
-     rows, `GreyFg` for output.
-   - Transcript: SGR baked into bytes per chunk in `wrappedSubtleBytes`
-     (`GreyFg` per output chunk) and `toolBannerBytes` (`OffWhiteFg`).
+### Class B — simulated-terminal tests feeding platform-wrong key bytes (2 files)
 
-### The target shape
+`test_minline.nim` and `test_history.nim` drive the editor through
+`tests/minline_testutils.nim`'s `Driver`, which pushes bytes into an in-process
+`ttty` terminal (NOT a real PTY, NOT `_getch`). The Driver hardcodes XMod
+escape sequences (`KeyUp = @[27,91,65]`) imported from `ttty/input.nim`.
 
-One function builds the rendered rows for a bash tool given (banner,
-output-lines, exit-code, idx, terminal-width). Both the live viewport
-paint and the transcript commit call it. The bytes are then identical;
-committing is a state-only append (mark the rows as scrollback, stop
-erasing them). The repaint vanishes.
+The editor's decode tables are platform-conditional (`src/threecode/minline.nim`):
+- `ESCAPES`: POSIX `{27}`, Windows `{0, 22, 224}` (the `_getch` extended-key prefix).
+- `KEYSEQS`: POSIX `@[27,91,68]` (ESC [ D), Windows `@[224,75]`.
 
-### Key code locations
+So on a Windows build the editor expects `@[224,75]` for Left, but the Driver
+pushes `@[27,91,68]`. The leading `27` is not in Windows `ESCAPES`, so it's
+treated as a bare char, not an escape prefix — cursor-move subtests misdecode.
 
-- `src/threecode/toolstream.nim` — `StreamingView`, `viewportRowsAt`,
-  `bannerRowCountAt`, `visibleOutputLines`, `omittedLine`,
-  `commandIcon`, `wrappedRowsAt`. The viewport row builder.
-- `src/threecode/display.nim` — `toolBannerBytes` (490),
-  `toolResultBytes` (502), `toolTranscriptBytes` (520, 531),
-  `wrappedSubtleBytes` (196), `trimBoundaryBlank` (184). The transcript
-  byte builder.
-- `src/threecode/engine.nim` — `renderToolViewport` (203),
-  `writeToolViewportRows` (107), `appendTranscript` (448),
-  `toolViewportRows`/`toolViewportBannerRows`/`toolViewportHasGap`
-  fields. The two paint paths.
-- `src/threecode/fatprompt/runtime.nim` — `guiLoop` amBarTick branch
-  (911), `setAnimViewport` (306), `requestViewportPaint` (357),
-  `commandSymbolIndex`/`nextCommandSymbol` (71-77). The GUI-thread
-  viewport ownership.
-- `src/threecode/turns.nim` — `runBashWithViewport` (84),
-  `renderView` (90), `appendItem` call site (505). The controller.
-- Golden fixtures: `testdata/fixtures/tty/bash_tool_visual_test.txt`,
-  `bash_tool.txt`. Several frames will change shape (icon unification,
-  wrap unification) and must be re-captured.
+The test path never touches `_getch`: `Driver.run` overrides `getCh` to read
+from `d.terminal.read()`. So the tests are correctly testing editor *behavior*
+(cursor movement, history nav), which is identical cross-platform; only the
+*byte encoding the test feeds* must match the platform's `KEYSEQS`.
+
+Fix: make the Driver's key constants read from `minline.KEYSEQS` at runtime
+instead of hardcoding XMod. `KEYSEQS` is already a public threadvar, so the
+Driver emits the exact bytes the platform build decodes. This makes the tests
+meaningful on every platform: same behavior assertions, platform-correct input.
+
+Files (2): `test_minline.nim`, `test_history.nim` (edit `minline_testutils.nim`).
+
+### Class C — API/shell subprocess tests (3 files)
+
+- `tests/api/test_api.nim` — the "request shaping" and "xml tool_call fallback"
+  suites (~20 tests) are pure in-process function checks (applyStreamingOptions,
+  applyReasoning, etc.) with no subprocess. The autosend/probe tests spawn a
+  child nim compiler with `--threads:on`, documented as flaky on Windows runners.
+  Fix: enable the whole file; the pure suites run on Windows unchanged. The
+  probe tests use `execCmdEx("nim c ...")` which works on Windows git-bash.
+  Re-enable; if a probe is genuinely flaky on Windows CI it gets a targeted
+  `when defined(windows): skip()` with a precise comment, but prefer running.
+- `tests/stream/test_streamexec.nim` — `runStreamingBash` shells out. On
+  Windows it resolves the bundled MSYS2 bash (`%LOCALAPPDATA%\3code\msys64`),
+  absent on CI runners (exit 127). The github-actions `windows-latest` image
+  ships git-bash at `C:\Program Files\Git\bin\bash.exe`. Assess: can
+  `resolveBash()` fall back to git-bash on CI? If yes, the tests run meaningfully
+  (they assert on streaming line semantics, which bash provides regardless of
+  source). Decision recorded in step.
+- `tests/stream/test_netthread_blocks.nim` — thread + socket timing test. The
+  StuckServer uses `net` sockets + a thread; the blocker cited is "timing
+  flakiness under load." This is the same class of harness-load issue the OSX
+  work bounded (poll with timeout vs blocking read). Assess whether it runs as-is.
+
+### Class D — real-subprocess PTY tests (18 files, the tty suite)
+
+All 18 `tests/tty/test_*.nim` drive the real `3code` binary through a PTY via
+`tests/tty_expect.nim`, which is POSIX-only (`openpty`/`fork`/`execv`/
+`waitpid`/`kill`/`TIOCSWINSZ`). The windows-testing.md Option A path: port
+`tty_expect.nim` to ConPTY behind `when defined(windows):`, keeping the
+`TtySession` record and `expect*` API identical so test bodies need no changes.
+The IPC pipes (`THREECODE_TEST_FRAME_FD` etc.) are already pipe-based and
+cross-platform. This is the largest single piece (1192-line harness port).
 
 ## Current state
 
-Not begun. The inter-item separator jump is now fixed for BOTH live
-paint paths (shipped, see below):
-
-- The live bash **viewport** carries a gap row matching committed
-  scrollback spacing, and `walkUp` accounts for it via
-  `viewportGapRows`/`toolViewportHasGap`.
-- The live **assistant content** path (`renderLiveContent` /
-  `repaintLiveContent`, the `liveContentRows` mechanism) now carries the
-  same gap via `liveContentHasGap`/`liveContentGapRows`, also counted by
-  `walkUp` and by the reflow branch in `renderToolViewport`.
-
-This closed the user's actual complaint: assistant prose streaming
-immediately below a committed bash tool output (or below the user
-prompt) was flush against the line above during the live phase, then
-jumped down one row at commit when the separator was inserted. The
-prose now sits one blank row below the prior item from the first
-streaming chunk, and stays on that row through commit. Verified by a
-row-position probe (prose row stable live == committed) and the
-observation that the golden fixtures encoded the old flush-then-jump
-behavior, which the fix removes.
-
-The remaining work (this plan) is the deeper unification that makes
-the commit a no-op repaint, eliminating the four byte-level
-divergences (icon, wrap, truncation, color) that still cause a subtle
-repaint at commit.
-
-## Decision log
-
-- **Do NOT attempt to freeze the painted volatile bytes and call them
-  scrollback without unifying the byte builders.** The divergences make
-  that produce permanently-wrong scrollback (wrong icon, wrong wrap).
-  This was the conclusion of the investigation that produced Option A.
-- **Pick ONE wrapping algorithm as the single source of truth.**
-  Candidate: `charWrapAnsi` (the viewport's), because it is
-  deterministic across terminal widths and matches what a terminal
-  itself would do. `wrapAnsi` (word-wrap) is nicer to read but
-  re-wraps non-trivially on resize. Unifying on `charWrapAnsi` means
-  the golden fixtures shift to char-wrap; unifying on `wrapAnsi` means
-  the viewport gains word-wrap. Decide in step 1; default to
-  `charWrapAnsi` to keep the live behavior stable.
-- **The rotating currency symbol (`commandSymbolIndex`) is a live-only
-  flourish.** The transcript never had it. To unify, the live viewport
-  must drop it (paint the final icon always) OR the transcript must
-  gain a way to render "the icon that was live." Simplest: drop the
-  rotation, always paint the final icon. This loses the ticker effect
-  but removes a whole divergence for free. If the ticker is wanted,
-  the unified builder takes the symbol as a parameter and the
-  transcript commit passes the final symbol the viewport used.
-- **`toolViewportHasGap` (Option A's field) becomes redundant once the
-  paths are unified**, because the commit stops repainting. Remove it
-  as part of this work (it was always a band-aid).
+Not begun. Investigation complete (this file). Baseline: linux build green,
+`test_minline`/`test_history` pass on linux. The `timing` branch is clean
+ahead of `eec8d80` except the two untracked plan files.
 
 ## Steps
 
-- [ ] 1. **Decide and lock the wrapping algorithm.** Write a 10-line
-      throwaway comparison of `charWrapAnsi` vs `wrapAnsi` for the
-      existing golden fixture inputs. Record the choice and its
-      rationale in this plan's decision log. Default: `charWrapAnsi`.
-      (Decision step, no production code.)
+- [ ] 1. **Class A source fix: honor XDG on Windows.** In `src/threecode/util.nim`,
+      make `userDataRoot()` and `userConfigRoot()` read `XDG_DATA_HOME` /
+      `XDG_CONFIG_HOME` on Windows the same way the POSIX/macOS branch does
+      (override when set, else platform default). Verify: `nim c -r` a probe
+      that sets the env var and checks the returned path on linux (the Windows
+      branch is symmetric, exercised via CI). Then remove `disabled: "win"`
+      from `test_session.nim`, `test_update.nim`, `test_util_extra.nim`,
+      `test_cli_args.nim`. Fix the `collapseHome` test expectations to be
+      separator-agnostic (`~/` + rest joined with `/`). Run all four on linux.
 
-- [ ] 2. **Write the unified row builder.** In `toolstream.nim`, add a
-      proc that takes `(banner, outputLines: seq[string], exitCode,
-      idx, termW)` and returns `(rows: seq[string], bannerRowCount:
-      int)`, using the chosen wrap algorithm and a single
-      icon-resolution rule. Both `StreamingView.viewportRowsAt` and
-      the transcript path will delegate to it. Keep
-      `commandSymbolIndex` as a parameter (caller-supplied symbol) so
-      the live path can still rotate while the commit passes the final
-      symbol; OR drop rotation entirely per the decision.
+- [ ] 2. **Class B: platform-correct key bytes in the Driver.** In
+      `tests/minline_testutils.nim`, replace the hardcoded XMod constants
+      (`Left`, `Right`, `Up`, `Down`, `Home`, `End`, `Delete`) with values read
+      from `minline.KEYSEQS["left"]` etc. at runtime. `Enter`/`CtrlC`/`Esc`/
+      `Backspace`/`AltEnter` stay as-is (platform-independent single bytes from
+      ttty). Remove `disabled: "win"` from `test_minline.nim`, `test_history.nim`.
+      Verify on linux (behavior unchanged since KEYSEQS == the old constants
+      there); Windows correctness follows from KEYSEQS being platform-correct.
 
-- [ ] 3. **Route the transcript path through the unified builder.**
-      `toolResultBytes` (display.nim:502) and `toolBannerBytes`
-      (display.nim:490) for `akBash` must produce byte-identical
-      output to the unified builder. This is the step that makes the
-      repaint a no-op. Verify with a unit test that feeds identical
-      inputs to both and asserts equality.
+- [ ] 3. **Class C: api + stream tests.** Remove `disabled: "win"` from
+      `test_api.nim` (pure suites definitely pass; probe tests use execCmdEx
+      which works under git-bash — verify or narrowly guard if flaky).
+      For `test_streamexec.nim` and `test_netthread_blocks.nim`: attempt a
+      `resolveBash()` git-bash fallback so `runStreamingBash` works on CI
+      runners; if the netthread test runs clean as-is, enable it. If either
+      genuinely cannot run on Windows CI, keep `disabled: "win"` on ONLY that
+      file with a precise comment pointing at the concrete blocker (not a
+      hand-wavy "flaky").
 
-- [ ] 4. **Make the bash commit a silent append.** In
-      `appendTranscript` (engine.nim:448) and/or a new
-      `commitToolViewport` path, when the incoming transcript bytes
-      match what the viewport currently paints, skip the erase+repaint
-      and instead just promote `toolViewportRows` to scrollback state
-      (set `hasScrollback`, clear the viewport tracking). The GUI
-      thread must be told the viewport is no longer volatile so its
-      next tick does not erase it. This is the delicate concurrency
-      step; the GUI-thread ownership model in `runtime.nim:911` is the
-      thing to coordinate with.
+- [ ] 4. **Class D: ConPTY port of tty_expect.nim.** Port the POSIX PTY
+      lifecycle to ConPTY behind `when defined(windows):` — `openpty`→
+      `CreatePseudoConsole`, `fork`+`login_tty`+`execv`→
+      `InitializeProcThreadAttributeList`+`UpdateProcThreadAttribute`+
+      `CreateProcessW`, `waitpid`→`GetExitCodeProcess`, `kill(SIGTERM)`→
+      `TerminateProcess`, `TIOCSWINSZ`+`SIGWINCH`→`ResizePseudoConsole`. Keep
+      `TtySession` and the `expect*`/`send`/`resize`/`close` API identical.
+      Then remove `disabled: "win"` from all 18 tty test files. Verify on linux
+      (no regression — the POSIX branch is untouched). Windows correctness
+      verified via CI (`windows.yml`). This step is large; may split.
 
-- [ ] 5. **Reconcile `toolViewportHasGap`** with the silent append.
-      The field currently makes the live viewport carry the
-      inter-item gap row so the commit doesn't push the item down
-      (the jump fix). Once the commit stops repainting (step 4),
-      the gap must still be painted during the live phase and then
-      become committed scrollback without an erase — decide whether
-      the field stays, becomes a scrollback-row promotion, or folds
-      into the unified builder's output.
-
-- [ ] 6. **Re-capture the golden fixtures.**
-      `bash_tool_visual_test.txt` and `bash_tool.txt` will change
-      (icon unification, wrap unification). Run the tty test, let it
-      write the `_actual.txt`, diff against the golden, sanity-check
-      the diff matches the expected divergences, then accept. Watch
-      for the "scrollback wipe" guard test (`streaming bash viewport
-      never wipes scrollback lines above it`) — the silent append
-      changes the erase geometry and could regress it.
-
-- [ ] 7. **Add a regression test: commit is visually a no-op.** Assert
-      on the raw sync-frame stream (like the existing flicker test in
-      test_tty_functional.nim) that the frame which commits a bash
-      tool contains NO erase (`ESC[J`) of the viewport region. This is
-      the direct, durable assertion that the repaint is gone. Without
-      it, `stripFrameBlanks` in the golden comparison will hide a
-      regression (this is exactly why the original separator bug
-      escaped the suite).
-
-- [ ] 8. **Full suite + review.** `nimble test`, release build, diff
-      review. Confirm `toolViewportHasGap` is gone, the unified
-      builder has exactly one caller for each path, and no dead
-      viewport-only wrapping code remains.
+- [ ] 5. **docs + workflow.** Update `docs/windows-testing.md` to reflect the
+      new state (XDG honored, Driver KEYSEQS, ConPTY port). If the ConPTY port
+      needs the windows.yml run to use categories-sequential like osx.yml did,
+      adjust it. Final: `grep -rn 'disabled: "win"' tests/` returns only files
+      with a concrete, documented, irreducible blocker.
 
 ## Notes
 
-- The flicker regression test (`bash tool output does not flicker
-  blank on commit`) already asserts an erase-then-redraw pair does not
-  exist. Step 7 strengthens this from "no blank flash" to "no repaint
-  at all." Keep both; they guard different invariants.
-- The GUI thread re-wraps at the live width each tick
-  (runtime.nim:926). The unified builder must remain width-parametric
-  for this to keep working after unification.
-- macOS (stefani VM) has different terminal-width assumptions; the
-  wrap-algorithm choice in step 1 should be checked there before
-  locking. See `.agents/osx-testing.md`.
+- Verification gate is CI (windows.yml) for Windows-correctness, same model as
+  the OSX work used osx.yml. Linux correctness verified locally each step.
+- The XDG-on-Windows source change mirrors the macOS XDG change (b7ea0f0) in
+  both shape and rationale — it's the established pattern in this codebase.
+- `minline.KEYSEQS` is `{.threadvar.}` and populated at module init AND in
+  `initKeyTables()`; the Driver reads it after the editor module is imported,
+  so it's populated. Reading at `push` time (runtime) not const-eval time.
+- Commit per step. Short one-line messages. Do NOT push or merge to main
+  (release-level action per ~/p/3CODE.md).

@@ -1,8 +1,4 @@
-discard """
-  # Windows: collapseHome assertions use forward-slash POSIX paths; Windows
-  # backslash paths fail the comparison. See docs/windows-testing.md.
-  disabled: "win"
-"""
+discard """"""
 import std/[os, strutils, unittest]
 import threecode/util
 
@@ -79,7 +75,11 @@ suite "util: wrapAnsi":
 
 suite "util: collapseHome":
   test "replaces home prefix with ~":
-    check collapseHome(getHomeDir() / "src/test.nim") == "~/src/test.nim"
+    # collapseHome strips the home prefix and leading forward slashes; feed
+    # a forward-slash path so the assertion is separator-agnostic across
+    # platforms (the proc is forward-slash-oriented by design).
+    let input = getHomeDir().replace('\\', '/') & "/src/test.nim"
+    check collapseHome(input) == "~/src/test.nim"
 
   test "no home prefix returns unchanged":
     check collapseHome("/tmp/test.nim") == "/tmp/test.nim"
