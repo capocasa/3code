@@ -32,6 +32,8 @@ proc buildBinary*(defines, outName: string; forceRebuild = false): string =
   ## Used by tests that need a non-stub binary (e.g. the real-transport
   ## connect/stream tests that point at a local mock HTTP server).
   result = getCurrentDir() / "build" / outName
+  when defined(windows):
+    result.add ".exe"
   if forceRebuild and fileExists(result):
     removeFile(result)
   if fileExists(result):
@@ -73,6 +75,8 @@ proc ensureStubBinary*(extraDefines = "", forceRebuild = false): string =
     if extraDefines.len > 0: "_" & extraDefines.replace(" ", "_")
     else: ""
   result = getCurrentDir() / "build" / ("3code_stub" & tag)
+  when defined(windows):
+    result.add ".exe"
   if forceRebuild and fileExists(result):
     removeFile(result)
   # Invalidate the cache when source is newer than the cached binary.
