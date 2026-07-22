@@ -1,9 +1,3 @@
-discard """
-  # See docs/windows-testing.md. Spawns the real 3code binary with a stub
-  # provider over a pipe (POSIX-only process plumbing assumptions). A ConPTY
-  # port is the path to re-enable on Windows.
-  disabled: "win"
-"""
 ## Regression for the "3code silently exits mid-turn" bug.
 ##
 ## Root cause: when the process's stdout becomes unwritable mid-turn

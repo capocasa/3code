@@ -1,8 +1,3 @@
-discard """
-  # See docs/windows-testing.md. The tty_expect harness uses openpty/fork/
-  # execv (POSIX only). A ConPTY port is the path to re-enable on Windows.
-  disabled: "win"
-"""
 ## Stress test: repeatedly enter `:provider edit`, accept defaults,
 ## Ctrl-C on the api-key prompt, then issue a non-modal `:show`
 ## command. If the wizard RPC (`wizardReadLine` in

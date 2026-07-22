@@ -1,8 +1,3 @@
-discard """
-  # See docs/windows-testing.md. The tty_expect harness uses openpty/fork/
-  # execv (POSIX only). A ConPTY port is the path to re-enable on Windows.
-  disabled: "win"
-"""
 ## Regression: `:provider edit` / `:provider add` cancel used to leave the
 ## prompt caret stuck on the wizard's first field, the next keystrokes went
 ## to that field instead of the main prompt, and a second Ctrl-C SIGSEGV'd

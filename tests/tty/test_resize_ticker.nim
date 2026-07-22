@@ -1,7 +1,3 @@
-discard """
-  # The tty_expect harness uses openpty/fork/execv (POSIX only).
-  disabled: "win"
-"""
 ## Regression: on a terminal resize while the fat prompt's thinking ticker /
 ## spinner footer is live, the footer used to stack — each repaint left the
 ## previous ticker/bar row on screen instead of replacing it in place, so a

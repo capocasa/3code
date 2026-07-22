@@ -1,8 +1,3 @@
-discard """
-  # See docs/windows-testing.md. The tty_expect harness uses openpty/fork/
-  # execv (POSIX only). A ConPTY port is the path to re-enable on Windows.
-  disabled: "win"
-"""
 ## Regression: editing a provider (`:provider edit <name>`) used to
 ## SIGSEGV the input thread on the next redraw after the wizard returned.
 ## The modal's save/nil/save dance on the editor's hook closures raced

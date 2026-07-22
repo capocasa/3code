@@ -1,7 +1,3 @@
-discard """
-  # Same POSIX/PTY constraints as the other tty tests.
-  disabled: "win"
-"""
 ## Reproduction for the "pause" problem: during long phases of a turn, no
 ## activity indicator is visible. The expected indicator depends on the phase:
 ##   - during an API call (connect, pre-stream wait, retry backoff) the braille

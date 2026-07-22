@@ -1,7 +1,3 @@
-discard """
-  # The tty_expect harness uses openpty/fork/execv (POSIX only).
-  disabled: "win"
-"""
 ## Regression: Ctrl-C / ESC during the network connect or streaming-body
 ## phase must return to the prompt promptly, not wait for the network call
 ## to finish.
