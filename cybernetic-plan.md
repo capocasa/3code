@@ -74,20 +74,29 @@ cross-platform. This is the largest single piece (1192-line harness port).
 
 ## Current state
 
-Steps 1-3 DONE and committed (branch `timing`, commits 006e20a, 97842b1,
-521f654, 15b0dab). 8 of 9 non-tty `disabled: "win"` files now enabled
+Steps 1-4 DONE and committed (branch `timing`). 8 of 9 non-tty
+`disabled: "win"` files enabled via source/test adaptation
 (test_session, test_update, test_util_extra, test_cli_args, test_minline,
 test_history, test_api, test_streamexec). 1 remains precisely disabled:
 test_netthread_blocks (the interrupt-wakes-blocking-recv path is POSIX-only;
 shutdownCachedStreamFd is a no-op on Windows — a real source gap, documented).
 
-
-
-Step 4 (ConPTY port of tty_expect.nim for the 18 tty tests) is NOT begun.
-It is the largest piece: a full Windows pseudoconsole lifecycle behind
-`when defined(windows):`, keeping TtySession + expect*/send/resize/close
-identical. Cannot be verified locally (no Windows box); CI is the gate.
-This step is large enough to warrant its own focused context.
+Step 4 (ConPTY port of tty_expect.nim) is DONE (commits 91130c4, acff7d9):
+the full POSIX PTY lifecycle is forked on `when defined(windows):` —
+openpty→CreatePseudoConsole, fork+login_tty+execv→ProcThreadAttributeList+
+CreateProcessW, waitpid→GetExitCodeProcess, kill→TerminateProcess,
+TIOCSWINSZ→ResizePseudoConsole. Every Windows blocking call is bounded
+(WaitForSingleObject with timeout, never INFINITE), mirroring the OSX
+hardening. TtySession + expect*/send/resize/close API identical across
+platforms; the 18 test bodies needed no changes (only test_tty_functional's
+POSIX-specific hardKillAndWait/discardClose were gated). All 18
+`disabled: "win"` removed. POSIX branch verified green on linux (8/8 on
+test_quit_signals; tty_expect + all 18 type-check clean under --os:windows).
+Windows runtime correctness is NOT yet verified — CI is the gate. The
+child-side test sync hooks (emitTestFrameEvent etc.) are POSIX-gated in
+src/, so frame-event/ticker waits timeout (bounded) on Windows and tests
+settle via drain() polling; IPC pipes are wired for a later child-side
+enablement with no harness change.
 
 ## Steps
 
@@ -102,16 +111,14 @@ This step is large enough to warrant its own focused context.
       disabled with a precise reason (shutdownCachedStreamFd is a no-op on
       Windows).
 
-- [ ] 4. **Class D: ConPTY port of tty_expect.nim.** Port the POSIX PTY
-      lifecycle to ConPTY behind `when defined(windows):` — `openpty`→
-      `CreatePseudoConsole`, `fork`+`login_tty`+`execv`→
-      `InitializeProcThreadAttributeList`+`UpdateProcThreadAttribute`+
-      `CreateProcessW`, `waitpid`→`GetExitCodeProcess`, `kill(SIGTERM)`→
-      `TerminateProcess`, `TIOCSWINSZ`+`SIGWINCH`→`ResizePseudoConsole`. Keep
-      `TtySession` and the `expect*`/`send`/`resize`/`close` API identical.
-      Then remove `disabled: "win"` from all 18 tty test files. Verify on linux
-      (no regression — the POSIX branch is untouched). Windows correctness
-      verified via CI (`windows.yml`). This step is large; may split.
+- [x] 4. **Class D: ConPTY port of tty_expect.nim.** DONE (commits 91130c4,
+      acff7d9). Full ConPTY lifecycle behind `when defined(windows):`, all
+      blocking calls bounded, TtySession + expect*/send/resize/close
+      identical, all 18 `disabled: "win"` removed. POSIX green on linux;
+      Windows type-checks clean under --os:windows. Runtime correctness
+      pending CI (`windows.yml`) — the child-side sync hooks are POSIX-gated
+      in src/ so frame-event/ticker waits timeout (bounded) and tests settle
+      via drain(); may surface timing assertions to iterate on.
 
 - [ ] 5. **docs + workflow.** Update `docs/windows-testing.md` to reflect the
       new state (XDG honored, Driver KEYSEQS, ConPTY port). If the ConPTY port

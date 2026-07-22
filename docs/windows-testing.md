@@ -6,18 +6,37 @@ options for closing that gap. It is a working TODO, not a permanent state.
 
 ## Current status
 
-31 of 40 test files run on Windows. The tty suite (18 files) plus one
-stream test are the remaining gap:
+39 of 40 test files run on Windows. The tty suite (18 files) is now enabled
+via a ConPTY port of `tests/tty_expect.nim` (see below). One stream test
+remains disabled with a precise, irreducible blocker:
 
-- `tests/tty/*.nim` (18 files) — drive `3code` as a subprocess through a
-  pseudo-terminal via `tests/tty_expect.nim` (POSIX-only; needs a ConPTY
-  port — see below).
 - `tests/stream/test_netthread_blocks.nim` — asserts the
   interrupt-returns-cleanly-from-a-stuck-socket contract. That relies on
   `shutdownCachedStreamFd()` (src/threecode/api.nim), which is a no-op on
   Windows because it wraps `posix.shutdown` to wake a blocking `recv`. The
   Windows interrupt path needs an equivalent fd-wakeup (closesocket or a
   self-pipe) before this test can pass.
+
+The tty suite (18 files) drives `3code` as a subprocess through the Windows
+Pseudo Console API (ConPTY). The POSIX PTY lifecycle in `tty_expect.nim` is
+forked on `when defined(windows):` — `openpty`→`CreatePseudoConsole`,
+`fork`+`login_tty`+`execv`→`InitializeProcThreadAttributeList`+
+`UpdateProcThreadAttribute(PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE)`+
+`CreateProcessW`, `waitpid`→`GetExitCodeProcess`, `kill`→`TerminateProcess`,
+`TIOCSWINSZ`+`SIGWINCH`→`ResizePseudoConsole`. Every blocking call on the
+Windows path is bounded (`WaitForSingleObject` with a timeout, never
+INFINITE), mirroring the OSX hardening discipline. The `TtySession` record
+and the public `expect*`/`send`/`resize`/`close` API are identical across
+both platforms, so the 18 test bodies needed no changes.
+
+**Caveat (initial enablement):** the child-side test synchronization hooks
+(`emitTestFrameEvent`, `waitForTestContinue`, `testTickerControlLoop` in
+`src/`) are currently `when defined(posix):`-gated, so on Windows the
+harness's frame-event waits and ticker-advance calls timeout (bounded — no
+hang) and tests settle via `drain()`/`waitForOutput` wall-clock polling
+instead. Some timing-sensitive assertions may need small tolerance
+adjustments surfaced by CI; the IPC pipes are wired end-to-end so enabling
+the child side later needs no harness change.
 
 The following were previously disabled and are now **enabled and adapted**
 (not skipped) to run meaningfully on Windows:
