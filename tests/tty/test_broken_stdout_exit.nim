@@ -1,3 +1,12 @@
+discard """
+  # This test reproduces a broken-stdout pipe via bash + python3 and asserts
+  # on the POSIX broken-pipe exit semantics. It does not use the ConPTY
+  # harness (it drives the binary through execCmdEx + a bash pipeline whose
+  # reader is python3). python3 is not guaranteed on the Windows runner and
+  # the pipe-break + pipefail contract is POSIX-specific, so it stays
+  # disabled on Windows pending a Windows-native broken-conpty reproduction.
+  disabled: "win"
+"""
 ## Regression for the "3code silently exits mid-turn" bug.
 ##
 ## Root cause: when the process's stdout becomes unwritable mid-turn
