@@ -600,7 +600,11 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     # attribute so CreateProcess attaches the child to this pseudoconsole.
     var attrSize: SIZE_T = 0
     discard initializeProcThreadAttributeList(nil, 1, 0, addr attrSize)
-    var attrList = cast[pointer](alloc(attrSize))
+    # The attribute list buffer must be zero-initialized: InitializeProcThread-
+    # AttributeList writes its header but leaves trailing slack uninitialized,
+    # and CreateProcessW reads it back as part of STARTUPINFOEX — garbage in
+    # there can corrupt the pseudoconsole attach.
+    var attrList = cast[pointer](alloc0(attrSize))
     doAssert initializeProcThreadAttributeList(attrList, 1, 0, addr attrSize) != 0
     doAssert updateProcThreadAttribute(attrList, 0,
         PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, cast[pointer](unsafeAddr hpc),
