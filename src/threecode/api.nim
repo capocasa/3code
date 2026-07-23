@@ -208,6 +208,14 @@ proc classifyRetry*(exc: ref CatchableError, code: int): string =
   of 500, 502, 503, 504: "server"
   else: ""
 
+proc networkQuietMsg*(): string =
+  ## Canonical "network quiet for Ns" message the transport writes into
+  ## `StreamOutcome.errMsg`. `callModel` detects it via `isNetworkQuietMsg`
+  ## and raises a `NetworkHealthError`, which the retry loop treats as a
+  ## server error. One constructor so every call site carries the same
+  ## text (and the `QuietTooLongMs` budget) without drift.
+  NetworkQuietPrefix & " " & $(QuietTooLongMs div 1000) & "s"
+
 proc extractErrorMsg*(errBody: string): string =
   ## Pull a human-readable message from a JSON error body.
   ## Falls back to the raw body if parsing fails.
@@ -251,6 +259,15 @@ proc formatApiDetail*(errMsg, errBody: string; code: int): string =
     else: "error"
   if code != 0: msg & " (code " & $code & ")"
   else: msg
+
+proc newHttpError*(code: int, errMsg, errBody: string): ref HttpError =
+  ## Build an `HttpError` carrying the status `code` as a field plus the
+  ## formatted detail as its message. Use this for every raise that has an
+  ## HTTP status, so callers can branch on the class (`except HttpError`)
+  ## and read `.code` instead of string-matching.
+  var e = newException(HttpError, formatApiDetail(errMsg, errBody, code))
+  e.code = code
+  e
 
 proc retryCategory*(errMsg: string, assistantMsg: JsonNode, statusCode: int): string =
   # An explicit HTTP status wins: a 400/401/403 with an error body still has
@@ -637,14 +654,10 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
             break
           continue
       if resp.status == 0 and resp.headers.len == 0:
-        if isNetworkQuiet():
-          result.errMsg = "network quiet for " &
-            $(QuietTooLongMs div 1000) & "s)"
-        elif isInterrupted():
+        if isInterrupted() and not isNetworkQuiet():
           result.errMsg = InterruptedByUserMsg
         else:
-          result.errMsg = "network quiet for " &
-            $(QuietTooLongMs div 1000) & "s)"
+          result.errMsg = networkQuietMsg()
         return
       fireActivity(job)
       break
@@ -776,12 +789,11 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   if isNetworkQuiet():
     # The quiet-watch thread marked the connection dead and shut down the
     # cached fd. The recv loop's bounded timeout (StreamTimeoutError) let it
-    # wake and check this flag. Surface a non-retryable error so the turn
-    # loop shows it and the user can retry, rather than hanging on a dead
-    # connection forever.
+    # wake and check this flag. Surface the canonical quiet message;
+    # `callModel` turns it into a `NetworkHealthError` and retries it as a
+    # server error rather than handing the caller a dead connection.
     closeCachedStreamConn()
-    result.errMsg = "network quiet for " &
-      $(QuietTooLongMs div 1000) & "s"
+    result.errMsg = networkQuietMsg()
     return
   if isInterrupted():
     if result.assistantMsg == nil:
@@ -962,11 +974,10 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
             break
           continue
       if resp.status == 0 and resp.headers.len == 0:
-        if isInterrupted():
+        if isInterrupted() and not isNetworkQuiet():
           result.errMsg = InterruptedByUserMsg
         else:
-          result.errMsg = "network quiet for " &
-            $(QuietTooLongMs div 1000) & "s)"
+          result.errMsg = networkQuietMsg()
         return
       hookProviderActivity()
       break
@@ -999,8 +1010,7 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
 
   if isNetworkQuiet():
     closeCachedStreamConn()
-    result.errMsg = "network quiet for " &
-      $(QuietTooLongMs div 1000) & "s)"
+    result.errMsg = networkQuietMsg()
     return
   if isInterrupted():
     closeCachedStreamConn()
@@ -1534,6 +1544,13 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     ## thread (the old behavior) for debugging.
   var outcome: StreamOutcome
   var attempt = 0
+  # Retry-decision state, hoisted out of the loop body so the
+  # `NetworkHealthError` handler can set it and fall through into the
+  # SAME backoff block the HTTP-error path uses. One retry loop, shared
+  # by 5xx/429/transport failures and network-health timeouts alike.
+  var errMsg = ""
+  var code = 0
+  var category = ""
   while true:
     inc attempt
     var slurped = 0
@@ -1558,14 +1575,30 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
       if outcome.assistantMsg == nil:
         raise newException(ApiError, InterruptedByUserMsg)
       break
-    let code = outcome.statusCode
-    let category = retryCategory(outcome.errMsg, outcome.assistantMsg, code)
+    # The transport signals a dead link by writing the canonical quiet
+    # message into `outcome.errMsg` (it cannot raise: the threaded path
+    # crosses a thread boundary via a serialized `StreamOutcome`). Promote
+    # it to a `NetworkHealthError` and catch it below so the retry loop
+    # handles network-health failures by class, exactly like a 5xx, instead
+    # of relying on the string heuristic in `retryCategory`.
+    try:
+      if isNetworkQuietMsg(outcome.errMsg):
+        raise newException(NetworkHealthError, outcome.errMsg)
+      code = outcome.statusCode
+      category = retryCategory(outcome.errMsg, outcome.assistantMsg, code)
+      errMsg = outcome.errMsg
+    except NetworkHealthError as e:
+      # Network quiet: treat as a retryable server error, same as a 5xx.
+      # Sets the shared decision vars and falls into the single backoff
+      # block below; no second retry loop.
+      code = 0
+      category = "server"
+      errMsg = e.msg
     let retryable = category != ""
-    let errMsg = outcome.errMsg
     if not retryable:
       hookStopSpinner()
       if outcome.assistantMsg == nil:
-        raise newException(ApiError, formatApiDetail(errMsg, outcome.errBody, code))
+        raise newHttpError(code, errMsg, outcome.errBody)
       # Promote any leaked GLM/Qwen native `<tool_call>...</tool_call>`
       # blocks in the assistant content to synthetic OpenAI tool_calls.
       # Some endpoints (notably nvidia z-ai/glm4.7) don't reliably
@@ -1585,7 +1618,12 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
       break
     if attempt >= MaxAttempts:
       hookStopSpinner()
-      raise newException(ApiError, formatApiDetail(errMsg, outcome.errBody, code))
+      # Preserve the error class on exhaustion: NetworkHealthError for a
+      # quiet-network failure, HttpError for a status-code failure. Both
+      # subclass ApiError, so the turn loop's `except ApiError` catches them.
+      if category == "server" and isNetworkQuietMsg(errMsg):
+        raise newException(NetworkHealthError, errMsg)
+      raise newHttpError(code, errMsg, outcome.errBody)
     let retryAfter = try: parseInt(outcome.retryAfter) except CatchableError: 0
     let backoff =
       if retryAfter > 0:
