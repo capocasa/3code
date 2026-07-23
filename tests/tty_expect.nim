@@ -601,6 +601,13 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     si.lpAttributeList = attrList
     # The child's environment: re-seed from `env` (TERM defaulted), plus the
     # IPC pipe handles as integers. The child reads these to find its pipes.
+    # Unlike the POSIX fork path (which wipes the parent env then re-seeds),
+    # the Windows child needs the parent's system variables for DLL
+    # resolution — without SystemRoot/windir the loader cannot find system
+    # DLLs and the child dies with STATUS_DLL_INIT_FAILED (0xC0000142).
+    # Start from the caller's `env` (test isolation), then inherit any
+    # system vars that DLL resolution or the runtime needs if the caller
+    # did not override them.
     var envBlock = ""
     var hasTerm = false
     for item in env:
@@ -609,6 +616,30 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       envBlock.add item.key & "=" & item.val & "\0"
     if not hasTerm:
       envBlock.add "TERM=xterm-256color\0"
+    # Inherit critical Windows system vars the loader/runtime depend on.
+    # These are safe to carry (they identify the OS install, not test state);
+    # the test's own isolation uses XDG_DATA_HOME etc., not these.
+    for sysKey in ["SystemRoot", "windir", "TEMP", "TMP", "COMSPEC",
+                   "PATHEXT", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA",
+                   "USERPROFILE"]:
+      var present = false
+      for item in env:
+        if item.key.cmpIgnoreCase(sysKey) == 0:
+          present = true
+          break
+      if not present:
+        let sysVal = getEnv(sysKey)
+        if sysVal.len > 0:
+          envBlock.add sysKey & "=" & sysVal & "\0"
+    # PATH must be present for the child to resolve DLLs via the standard
+    # search path; inherit it unless the caller explicitly set one.
+    var hasPath = false
+    for item in env:
+      if item.key.cmpIgnoreCase("PATH") == 0:
+        hasPath = true
+        break
+    if not hasPath and getEnv("PATH").len > 0:
+      envBlock.add "PATH=" & getEnv("PATH") & "\0"
     envBlock.add "THREECODE_TEST_FRAME_FD=" & $frameWrite.int & "\0"
     envBlock.add "THREECODE_TEST_FRAME_ACK_FD=" & $ackRead.int & "\0"
     envBlock.add "THREECODE_TEST_TICKER_FD=" & $tickerRead.int & "\0"
