@@ -651,15 +651,18 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       envBlock.add "THREECODE_TEST_API_CONTINUE_FD=" & $apiRead.int & "\0\0"
 
     var pi: PROCESS_INFORMATION
-    # CommandLine is the program + args as a single UTF-16 string; the app
-    # name is passed separately so we don't need to quote the binary path.
-    var cmd = bin
+    # Pass lpApplicationName=NULL and put the full program path as the first
+    # token of lpCommandLine, matching the canonical CreatePseudoConsole
+    # sample. Passing a non-NULL lpApplicationName alongside the pseudoconsole
+    # attribute leaves the child's stdout attached but unrelayed by conhost
+    # (the harness saw only conhost mode-set bytes, never the child's own
+    # output); NULL + cmdline-only makes conhost relay the child's stdout.
+    var cmd = bin.quoteShell()
     for a in args:
       cmd.add " " & a.quoteShell()
     let cmdW = newWideCString(cmd)
-    # Keep the wide objects alive across the createProcessW call (the
-    # converter hands createProcessW a raw pointer into their storage).
-    let appW = newWideCString(bin)
+    # Keep the wide objects alive across the createProcessW call.
+    let appW: WideCString = nil
     # An empty env block means "inherit the parent's environment entirely"
     # (lpEnvironment = NULL): pass no env pointer and drop the
     # CREATE_UNICODE_ENVIRONMENT flag. This is also the cleanest test of
