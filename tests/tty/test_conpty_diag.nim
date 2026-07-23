@@ -55,6 +55,18 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
   ]
 
 suite "conpty diagnostic":
+  test "A0: cmd.exe echo, INHERIT parent env (empty env)":
+    # Decisive: if this fails too, the env block is NOT the cause — the
+    # spawn mechanism (ConPTY attribute / handle inheritance) is broken.
+    let tty = newTtySession(getEnv("WINDIR") / "System32" / "cmd.exe",
+                            args = ["/c", "echo hello_inherit"],
+                            env = [])
+    defer: tty.close()
+    let got = tty.expect("hello_inherit", timeoutMs = 5000)
+    echo "A0 saw output: ", got, " | exited: ", tty.exited, " code: ", tty.exitCode
+    echo "A0 raw: [", tty.cleanRaw(), "]"
+    check got
+
   test "A: cmd.exe echo under ConPTY":
     let tty = newTtySession(getEnv("WINDIR") / "System32" / "cmd.exe",
                             args = ["/c", "echo hello_conpty"],

@@ -608,43 +608,48 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     # Start from the caller's `env` (test isolation), then inherit any
     # system vars that DLL resolution or the runtime needs if the caller
     # did not override them.
+    # An empty `env` means "inherit the parent environment entirely" — leave
+    # envBlock empty so createProcessW gets a NULL lpEnvironment (and the
+    # IPC FD vars are skipped). Otherwise build a double-null-terminated
+    # UTF-16 block from `env` plus inherited system vars and the IPC FDs.
     var envBlock = ""
-    var hasTerm = false
-    for item in env:
-      if item.key == "TERM":
-        hasTerm = true
-      envBlock.add item.key & "=" & item.val & "\0"
-    if not hasTerm:
-      envBlock.add "TERM=xterm-256color\0"
-    # Inherit critical Windows system vars the loader/runtime depend on.
-    # These are safe to carry (they identify the OS install, not test state);
-    # the test's own isolation uses XDG_DATA_HOME etc., not these.
-    for sysKey in ["SystemRoot", "windir", "TEMP", "TMP", "COMSPEC",
-                   "PATHEXT", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA",
-                   "USERPROFILE"]:
-      var present = false
+    if env.len > 0:
+      var hasTerm = false
       for item in env:
-        if item.key.cmpIgnoreCase(sysKey) == 0:
-          present = true
+        if item.key == "TERM":
+          hasTerm = true
+        envBlock.add item.key & "=" & item.val & "\0"
+      if not hasTerm:
+        envBlock.add "TERM=xterm-256color\0"
+      # Inherit critical Windows system vars the loader/runtime depend on.
+      # These are safe to carry (they identify the OS install, not test state);
+      # the test's own isolation uses XDG_DATA_HOME etc., not these.
+      for sysKey in ["SystemRoot", "windir", "TEMP", "TMP", "COMSPEC",
+                     "PATHEXT", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA",
+                     "USERPROFILE"]:
+        var present = false
+        for item in env:
+          if item.key.cmpIgnoreCase(sysKey) == 0:
+            present = true
+            break
+        if not present:
+          let sysVal = getEnv(sysKey)
+          if sysVal.len > 0:
+            envBlock.add sysKey & "=" & sysVal & "\0"
+      # PATH must be present for the child to resolve DLLs via the standard
+      # search path; inherit it unless the caller explicitly set one.
+      var hasPath = false
+      for item in env:
+        if item.key.cmpIgnoreCase("PATH") == 0:
+          hasPath = true
           break
-      if not present:
-        let sysVal = getEnv(sysKey)
-        if sysVal.len > 0:
-          envBlock.add sysKey & "=" & sysVal & "\0"
-    # PATH must be present for the child to resolve DLLs via the standard
-    # search path; inherit it unless the caller explicitly set one.
-    var hasPath = false
-    for item in env:
-      if item.key.cmpIgnoreCase("PATH") == 0:
-        hasPath = true
-        break
-    if not hasPath and getEnv("PATH").len > 0:
-      envBlock.add "PATH=" & getEnv("PATH") & "\0"
-    envBlock.add "THREECODE_TEST_FRAME_FD=" & $frameWrite.int & "\0"
-    envBlock.add "THREECODE_TEST_FRAME_ACK_FD=" & $ackRead.int & "\0"
-    envBlock.add "THREECODE_TEST_TICKER_FD=" & $tickerRead.int & "\0"
-    envBlock.add "THREECODE_TEST_TICKER_ACK_FD=" & $tickerAckWrite.int & "\0"
-    envBlock.add "THREECODE_TEST_API_CONTINUE_FD=" & $apiRead.int & "\0\0"
+      if not hasPath and getEnv("PATH").len > 0:
+        envBlock.add "PATH=" & getEnv("PATH") & "\0"
+      envBlock.add "THREECODE_TEST_FRAME_FD=" & $frameWrite.int & "\0"
+      envBlock.add "THREECODE_TEST_FRAME_ACK_FD=" & $ackRead.int & "\0"
+      envBlock.add "THREECODE_TEST_TICKER_FD=" & $tickerRead.int & "\0"
+      envBlock.add "THREECODE_TEST_TICKER_ACK_FD=" & $tickerAckWrite.int & "\0"
+      envBlock.add "THREECODE_TEST_API_CONTINUE_FD=" & $apiRead.int & "\0\0"
 
     var pi: PROCESS_INFORMATION
     # CommandLine is the program + args as a single UTF-16 string; the app
@@ -656,7 +661,17 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     # Keep the wide objects alive across the createProcessW call (the
     # converter hands createProcessW a raw pointer into their storage).
     let appW = newWideCString(bin)
-    let envObj = newWideCString(envBlock)
+    # An empty env block means "inherit the parent's environment entirely"
+    # (lpEnvironment = NULL): pass no env pointer and drop the
+    # CREATE_UNICODE_ENVIRONMENT flag. This is also the cleanest test of
+    # whether a constructed env block is the cause of a 0xC0000142 child.
+    var envPtr: WideCString = nil
+    var envObj: WideCStringObj
+    var createFlags = EXTENDED_STARTUPINFO_PRESENT
+    if envBlock.len > 0:
+      envObj = newWideCString(envBlock)
+      envPtr = envObj
+      createFlags = createFlags or CREATE_UNICODE_ENVIRONMENT
     # The child's working directory defaults to the parent's (NULL
     # lpCurrentDirectory) when cwd is empty; the child then finds DLLs via
     # the exe directory (always first in the search order) just as it does
@@ -667,8 +682,7 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       cwdW = newWideCString(cwd)
       cwdPtr = cwdW
     let ok = createProcessW(appW, cmdW, nil, nil, 1,
-        EXTENDED_STARTUPINFO_PRESENT or CREATE_UNICODE_ENVIRONMENT,
-        envObj, cwdPtr, si.startupInfo, pi)
+        createFlags, envPtr, cwdPtr, si.startupInfo, pi)
     deleteProcThreadAttributeList(attrList)
     dealloc(attrList)
     doAssert ok != 0, "CreateProcessW failed: " & $getLastError()
