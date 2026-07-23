@@ -42,6 +42,22 @@ jobs:
       - name: Build
         run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
 
+      - name: Stage OpenSSL DLLs for test binaries
+        # The tty tests spawn the real 3code binary (built -d:ssl), which
+        # dlopens libssl/libcrypto by Nim's hardcoded names. Stock Windows
+        # ships neither; without them next to the exe the child dies with
+        # STATUS_DLL_INIT_FAILED (0xC0000142). Place them next to the root
+        # binary and the test build dir so both load. cacert.pem feeds
+        # SSL_CERT_FILE for the stub provider's local TLS path.
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://nim-lang.org/download/dlls.zip -OutFile dlls.zip
+          Expand-Archive -Path dlls.zip -DestinationPath dlls
+          New-Item -ItemType Directory -Path build -Force | Out-Null
+          Copy-Item dlls/libssl-1_1-x64.dll, dlls/libcrypto-1_1-x64.dll, dlls/cacert.pem .
+          Copy-Item dlls/libssl-1_1-x64.dll, dlls/libcrypto-1_1-x64.dll, dlls/cacert.pem build/
+          echo "SSL_CERT_FILE=$PWD/cacert.pem" >> "$GITHUB_ENV"
+
       - name: Run tests
         # nimble test runs Nim's bundled testament. Tests that can't run on
         # Windows yet (the PTY harness) self-disable via disabled:"win"
