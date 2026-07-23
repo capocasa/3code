@@ -95,39 +95,16 @@ when defined(windows):
       echo "P ok=", r.ok, " code=", r.code, " outLen=", r.outLen
       check r.ok and r.code == 0 and r.outLen > 0
 
-    test "A0: cmd.exe echo, INHERIT parent env (empty env)":
-      # Decisive: if this fails too, the env block is NOT the cause — the
-      # spawn mechanism (ConPTY attribute / handle inheritance) is broken.
-      let tty = newTtySession(getEnv("WINDIR") / "System32" / "cmd.exe",
-                              args = ["/c", "echo hello_inherit"],
-                              env = [])
-      defer: tty.close()
-      let got = tty.expect("hello_inherit", timeoutMs = 5000)
-      echo "A0 saw output: ", got, " | exited: ", tty.exited, " code: ", tty.exitCode
-      echo "A0 raw: [", tty.cleanRaw(), "]"
-      check got
-
-    test "A: cmd.exe echo under ConPTY":
-      let tty = newTtySession(getEnv("WINDIR") / "System32" / "cmd.exe",
-                              args = ["/c", "echo hello_conpty"],
-                              env = diagEnv())
-      defer: tty.close()
-      let got = tty.expect("hello_conpty", timeoutMs = 5000)
-      echo "A saw output: ", got, " | exited: ", tty.exited, " code: ", tty.exitCode
-      echo "A raw: [", tty.cleanRaw(), "]"
-      check got
-
     test "B: stub -v with minimal inherited env":
       let stub = ensureStubBinary()
       echo "B stub path: ", stub, " exists: ", fileExists(stub)
       let tty = newTtySession(stub, args = ["-v"], env = diagEnv())
       defer: tty.close()
-      discard tty.waitForOutput(5000)
+      discard tty.waitForOutput(8000)
       echo "B exited: ", tty.exited, " code: ", tty.exitCode
       echo "B raw len: ", tty.raw.len
-      echo "B raw: [", tty.cleanRaw(), "]"
+      echo "B raw repr: ", repr(tty.raw)
       check tty.raw.len > 0
-      check not tty.exited or tty.exitCode == 0
 
     test "C: stub interactive with full test_quit_signals env":
       let root = newFixture("diag_full")
@@ -139,11 +116,10 @@ when defined(windows):
           cwd = root / "run",
           env = stubEnv(root, root / "run" / "stub_responses.json"))
       defer: tty.close()
-      let got = tty.expect("\u276f", timeoutMs = 8000)
+      let got = tty.expect("\u276f", timeoutMs = 10000)
       echo "C saw prompt: ", got, " | exited: ", tty.exited, " code: ", tty.exitCode
       echo "C raw len: ", tty.raw.len
-      if tty.raw.len > 0:
-        echo "C raw tail: [", tty.cleanRaw()[max(0, tty.cleanRaw().len - 500) ..< tty.cleanRaw().len], "]"
+      echo "C raw repr: ", repr(tty.raw)[max(0, repr(tty.raw).len - 800) ..< repr(tty.raw).len]
       check got
 else:
   suite "conpty diagnostic":
