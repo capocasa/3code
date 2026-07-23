@@ -77,6 +77,8 @@ jobs:
           # hypothesis: git-bash gives stdio as pipes (no console), which may
           # prevent the ConPTY conhost from initializing.
           cmd.exe /c conpty_smoke.exe; echo "via-cmd conpty exit=$?"
+          # And via pwsh (node-pty's default shell where ConPTY works):
+          pwsh -Command './conpty_smoke.exe; "via-pwsh conpty exit=$LASTEXITCODE"'
           if command -v testament >/dev/null 2>&1; then
             testament --print --megatest:off r tests/tty/test_conpty_diag.nim
             exit $?
