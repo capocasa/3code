@@ -1,32 +1,34 @@
 import std/[os, strutils, tables, unittest]
-import threecode/[config, types, util, web]
+import threecode/[config, types, util]
 
-suite "config: search-url":
+suite "config: [search] key":
   var tmp = ""
 
   setup:
-    tmp = getTempDir() / "3code-test-config.ini"
+    tmp = getTempDir() / "3code-test-search.ini"
+    activeSearchKey = ""
 
   teardown:
     removeFile(tmp)
+    activeSearchKey = ""
 
-  test "parseConfigFile returns the search-url when set":
-    writeFile(tmp, "[settings]\nsearch-url = \"https://example.com/search?q=\"\n")
-    let (_, searchUrl, _, _) = parseConfigFile(tmp)
-    check searchUrl == "https://example.com/search?q="
+  test "parseConfigFile returns the [search] key when set":
+    writeFile(tmp, "[search]\nkey = \"exa-abc123\"\n")
+    let (_, _, _, searchKey) = parseConfigFile(tmp)
+    check searchKey == "exa-abc123"
 
-  test "parseConfigFile returns empty string when search-url is absent":
+  test "parseConfigFile returns empty string when [search] key is absent":
     writeFile(tmp, "[settings]\ncurrent = \"some-provider\"\n")
-    let (_, searchUrl, _, _) = parseConfigFile(tmp)
-    check searchUrl == ""
+    let (_, _, _, searchKey) = parseConfigFile(tmp)
+    check searchKey == ""
 
-  test "parseConfigFile accepts search_url alias":
-    writeFile(tmp, "[settings]\nsearch_url = \"https://alias.example.com/?s=\"\n")
-    let (_, searchUrl, _, _) = parseConfigFile(tmp)
-    check searchUrl == "https://alias.example.com/?s="
+  test "loadStateOrEmpty sets activeSearchKey from [search] key":
+    writeFile(tmp, "[search]\nkey = \"exa-from-config\"\n")
+    discard loadStateOrEmpty(tmp)
+    check activeSearchKey == "exa-from-config"
 
-  test "activeSearchUrl defaults to DefaultSearchUrl":
-    check activeSearchUrl == DefaultSearchUrl
+  test "activeSearchKey defaults to empty":
+    check activeSearchKey == ""
 
 suite "config: streaming toggle":
   var tmp = ""
@@ -165,7 +167,7 @@ suite "config: [colors] section":
 
   test "parseConfigFile collects [colors] keys verbatim (suffix kept)":
     writeFile(tmp, "[colors]\nbright-white = \"\\x1b[37m\"\nbright-white-light = \"\\x1b[90m\"\n")
-    let (_, _, _, colors) = parseConfigFile(tmp)
+    let (_, _, colors, _) = parseConfigFile(tmp)
     # parsecfg interprets the backslash escape, so the value is the real
     # ESC byte, not the literal text "\x1b".
     check colors["bright-white"] == "\x1b[37m"
@@ -173,7 +175,7 @@ suite "config: [colors] section":
 
   test "parseConfigFile returns empty table when no [colors] section":
     writeFile(tmp, "[settings]\ncurrent = \"p.m\"\n")
-    let (_, _, _, colors) = parseConfigFile(tmp)
+    let (_, _, colors, _) = parseConfigFile(tmp)
     check colors.len == 0
 
   test "loadStateOrEmpty returns the colors map":

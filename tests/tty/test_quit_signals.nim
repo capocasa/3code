@@ -39,7 +39,6 @@ proc writeConfiguredProvider(root: string) =
   writeFile(root / "xdg" / "3code" / "config", """
 [settings]
 current = "stub.stub-model"
-search-url = "http://127.0.0.1:1/?q="
 
 [provider]
 name = "stub"

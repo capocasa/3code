@@ -1,6 +1,8 @@
 import std/[unittest, strutils]
 import threecode/web
 
+const ExaFixture = "Title: Nim Programming Language\nURL: https://nim-lang.org/\nPublished: 2024-01-15\nAuthor: Nim Team\nHighlights:\nNim is a statically typed compiled systems programming language.\nIt combines successful concepts from mature languages like Python, Ada and Modula.\n---\nTitle: Learn Nim in Y Minutes\nURL: https://learnxinyminutes.com/docs/nim/\nPublished: 2023-11-02\nHighlights:\nSingle-page tour of Nim syntax for the impatient.\nCovers procs, types, generics and macros."
+
 suite "web helpers":
   test "decodeEntities named and numeric":
     check decodeEntities("a &amp; b &lt;c&gt; &quot;d&quot; &#39;e&#39;") ==
@@ -29,27 +31,45 @@ suite "web helpers":
     let t = stripHtml(h)
     check t.splitLines.len >= 3
 
-  test "parseSearchHits extracts title / url / snippet":
-    let html = """
-      <div class="results">
-        <div class="result css-x">
-          <a class="result-title result-link css-y" href="https://example.com/a" target="_blank" rel="noopener nofollow noreferrer" data-testid="gl-title-link"><h2 class="wgl-title css-z">Title <b>One</b></h2></a>
-          <p class="description css-w"><b>Snippet</b> one text.</p>
-        </div>
-        <div class="result css-x">
-          <a class="result-title result-link css-y" href="https://example.com/b?x=1&amp;y=2" data-testid="gl-title-link"><h2 class="wgl-title css-z">Title Two</h2></a>
-          <p class="description css-w">Second snippet.</p>
-        </div>
-      </div>
-    """
-    let hits = parseSearchHits(html)
+  test "parseExaText extracts title / url / snippet":
+    let hits = parseExaText(ExaFixture)
     check hits.len == 2
-    check hits[0].title == "Title One"
-    check hits[0].url == "https://example.com/a"
-    check "Snippet one text." in hits[0].snippet
-    check hits[1].title == "Title Two"
-    check hits[1].url == "https://example.com/b?x=1&y=2"
-    check "Second snippet." in hits[1].snippet
+    check hits[0].title == "Nim Programming Language"
+    check hits[0].url == "https://nim-lang.org/"
+    check "statically typed" in hits[0].snippet
+    check "Python, Ada" in hits[0].snippet
+    check hits[1].title == "Learn Nim in Y Minutes"
+    check hits[1].url == "https://learnxinyminutes.com/docs/nim/"
+    check "Single-page tour" in hits[1].snippet
+
+  test "parseExaText tolerates records without Highlights":
+    let txt = "Title: Bare\nURL: https://bare.example/\n---\nTitle: Two\nURL: https://two.example/\nHighlights:\nSecond."
+    let hits = parseExaText(txt)
+    check hits.len == 2
+    check hits[0].title == "Bare"
+    check hits[0].url == "https://bare.example/"
+    check hits[0].snippet == ""
+    check hits[1].snippet == "Second."
+
+  test "parseExaText ignores empty leading record":
+    let txt = "\n---\nTitle: Only\nURL: https://only.example/"
+    let hits = parseExaText(txt)
+    check hits.len == 1
+    check hits[0].title == "Only"
+
+  test "extractSseData returns payload after data: line":
+    let body = "event: message\ndata: {\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"x\"}]}}\n\n"
+    let payload = extractSseData(body)
+    check payload.startsWith("{")
+    check "\"result\"" in payload
+
+  test "extractSseData falls back to whole body when no data: line":
+    let body = "{\"plain\": true}"
+    check extractSseData(body) == "{\"plain\": true}"
+
+  test "extractSseData handles data: with no space":
+    let body = "event: message\ndata:{\"k\":1}\n"
+    check extractSseData(body) == "{\"k\":1}"
 
   test "capText middle-truncates oversize input":
     let s = "a".repeat(30_000)

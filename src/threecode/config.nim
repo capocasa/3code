@@ -14,7 +14,7 @@
 import std/[os, parsecfg, sequtils, streams, strformat, strutils, tables, terminal, uri]
 when defined(posix):
   import std/posix except SocketHandle
-import types, prompts, util, web
+import types, prompts, util
 
 type
   ProviderRec* = object
@@ -68,10 +68,10 @@ func findModel*(p: ProviderRec, name: string): int =
 
 var activeCurrent*: string
 var activeProviders*: seq[ProviderRec]
-var activeSearchUrl*: string = DefaultSearchUrl
-  ## Resolved at config load. Overridden by `[settings]` `search-url = "..."`.
-  ## Persisted back to disk only when it differs from `DefaultSearchUrl`,
-  ## so users who never customize keep a clean config.
+var activeSearchKey*: string = ""
+  ## Optional Exa API key resolved at config load. Set via `[search] key = "..."`
+  ## or the `EXA_API_KEY` environment variable. Keyless by default; the key
+  ## is only persisted back to disk when non-empty.
 
 var bashPathOverride*: string
   ## Windows-only. `[settings]` `bash_path = "..."` overrides MSYS2
@@ -196,15 +196,15 @@ proc expandEnvValue(s: string): string =
     return getEnv(t[1 .. ^1])
   s
 
-proc parseConfigFile*(path: string): (string, string, seq[ProviderRec], Table[string, string]) =
+proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, string], string) =
   ## Streaming parse so that repeated [provider] sections accumulate as a list.
-  ## Returns `(current, searchUrl, providers, colors)`. `searchUrl` is "" when
-  ## the key was absent; the caller decides whether to fall back to the default.
-  ## `colors` is the flat `[colors]` map (raw keys verbatim, including any
-  ## `-light` suffix); the caller routes it through `splitColorOverrides` +
+  ## Returns `(current, providers, colors, searchKey)`. `searchKey` is the
+  ## optional `[search] key` value ("" when absent or keyless). `colors` is
+  ## the flat `[colors]` map (raw keys verbatim, including any `-light`
+  ## suffix); the caller routes it through `splitColorOverrides` +
   ## `applyColorOverrides`.
   var current = ""
-  var searchUrl = ""
+  var searchKey = ""
   var providers: seq[ProviderRec]
   var colors: Table[string, string]
   var section = ""
@@ -244,7 +244,6 @@ proc parseConfigFile*(path: string): (string, string, seq[ProviderRec], Table[st
       of "settings":
         case e.key
         of "current": current = v
-        of "search-url", "search_url": searchUrl = v
         of "notify":
           case v.toLowerAscii
           of "on", "true", "yes", "1": notifyEnabled = true
@@ -268,6 +267,10 @@ proc parseConfigFile*(path: string): (string, string, seq[ProviderRec], Table[st
         of "bash_path", "bash-path":
           bashPathOverride = v
         else: discard
+      of "search":
+        case e.key
+        of "key": searchKey = v
+        else: discard
       of "provider":
         case e.key
         of "name": prov.name = v
@@ -283,7 +286,7 @@ proc parseConfigFile*(path: string): (string, string, seq[ProviderRec], Table[st
     of cfgError:
       die &"{path}: {e.msg}", ExitConfig
   p.close
-  (current, searchUrl, providers, colors)
+  (current, providers, colors, searchKey)
 
 func quoteVal(s: string): string =
   result = "\""
@@ -299,11 +302,12 @@ proc writeConfigFile*(path: string, current: string,
   createDir(path.parentDir)
   var buf = "[settings]\n"
   buf.add "current = " & quoteVal(current) & "\n"
-  if activeSearchUrl != "" and activeSearchUrl != DefaultSearchUrl:
-    buf.add "search-url = " & quoteVal(activeSearchUrl) & "\n"
+  if activeSearchKey != "":
+    buf.add "\n[search]\n"
+    buf.add "key = " & quoteVal(activeSearchKey) & "\n"
   # Persist the streaming/notify toggles only when off — on is the default,
-  # so a user who never changes them keeps a clean config (same rationale as
-  # search-url). This also matches the defaults in types.nim.
+  # so a user who never changes them keeps a clean config. This also matches
+  # the defaults in types.nim.
   if not streamingEnabled:
     buf.add "streaming = \"off\"\n"
   if not notifyEnabled:
@@ -330,13 +334,16 @@ proc configPath*(): string =
   getConfigDir() / "3code" / "config"
 
 proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec], Table[string, string]) =
-  ## Returns `(current, providers, colors)` and updates `activeSearchUrl` as a
-  ## side effect when the config sets `search-url`. `colors` is the flat
+  ## Returns `(current, providers, colors)` and updates `activeSearchKey` as a
+  ## side effect when the config sets `[search] key`. `colors` is the flat
   ## `[colors]` map for the caller to route through the cascade. Missing
-  ## file is benign.
+  ## file is benign. Keyless search is the default; a key is honored when
+  ## `[search] key` is set or `EXA_API_KEY` is in the environment.
   if not fileExists(path): return ("", @[], initTable[string, string]())
-  let (current, searchUrl, providers, colors) = parseConfigFile(path)
-  if searchUrl != "": activeSearchUrl = searchUrl
+  let (current, providers, colors, searchKey) = parseConfigFile(path)
+  if searchKey != "": activeSearchKey = searchKey
+  if activeSearchKey == "" and existsEnv("EXA_API_KEY"):
+    activeSearchKey = getEnv("EXA_API_KEY")
   (current, providers, colors)
 
 proc resolveFamily*(prov: ProviderRec, prof: Profile): string =
@@ -420,8 +427,10 @@ proc loadProfile*(wanted: string): Profile =
     stderr.writeLine ""
     stderr.writeLine ConfigExample
     quit ExitConfig
-  let (current, searchUrl, providers, _) = parseConfigFile(path)
-  if searchUrl != "": activeSearchUrl = searchUrl
+  let (current, providers, _, searchKey) = parseConfigFile(path)
+  if searchKey != "": activeSearchKey = searchKey
+  if activeSearchKey == "" and existsEnv("EXA_API_KEY"):
+    activeSearchKey = getEnv("EXA_API_KEY")
   if providers.len == 0:
     die &"no [provider] section in {path}", ExitConfig
   var pick = wanted

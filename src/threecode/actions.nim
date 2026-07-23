@@ -605,7 +605,7 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
     if act.body.len == 0:
       return ("error: web_search requires a query", 1, "")
     try:
-      let hits = webSearch(act.body, activeSearchUrl)
+      let hits = webSearch(act.body, activeSearchKey)
       return (formatHits(hits), 0, "")
     except CatchableError as e:
       return ("error: web_search: " & e.msg, 1, "")

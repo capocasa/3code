@@ -55,7 +55,6 @@ proc newFixture(name: string): string =
   writeFile(result / "xdg" / "3code" / "config", """
 [settings]
 current = "stub.stub-model"
-search-url = "http://127.0.0.1:1/?q="
 
 [provider]
 name = "stub"
