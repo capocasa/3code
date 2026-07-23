@@ -1,23 +1,9 @@
 ## ConPTY diagnostic: hard-asserting probe to localize the 0xC0000142
-## (STATUS_DLL_INIT_FAILED) failure seen only when the real tty tests spawn
-## the stub via ensureStubBinary(). The prior diags had no assertions, so a
+## (STATUS_DLL_INIT_FAILED) failure. The prior diags had no assertions, so a
 ## dead child produced a false PASS. This one fails loudly.
-import std/[json, os, unittest]
+import std/[json, os, strutils, unittest]
 import tty_expect
 import stub_helpers
-
-proc diagEnv*(extra: openArray[EnvVar] = []): seq[EnvVar] =
-  ## Minimal env that still lets a Windows child resolve system DLLs: inherit
-  ## PATH and the loader-critical system vars, plus anything the caller adds.
-  result.add((key: "TERM", val: "xterm-256color"))
-  result.add((key: "PATH", val: getEnv("PATH")))
-  for k in ["SystemRoot", "windir", "TEMP", "TMP", "COMSPEC", "PATHEXT",
-            "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "USERPROFILE"]:
-    let v = getEnv(k)
-    if v.len > 0:
-      result.add((key: k, val: v))
-  for e in extra:
-    result.add e
 
 proc newFixture(name: string): string =
   result = getCurrentDir() / "testdata/output/tty" / (name & "_" & $getCurrentProcessId())
@@ -54,54 +40,112 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
     (key: "THREECODE_STUB_RESPONSES", val: responsesPath),
   ]
 
-suite "conpty diagnostic":
-  test "A0: cmd.exe echo, INHERIT parent env (empty env)":
-    # Decisive: if this fails too, the env block is NOT the cause — the
-    # spawn mechanism (ConPTY attribute / handle inheritance) is broken.
-    let tty = newTtySession(getEnv("WINDIR") / "System32" / "cmd.exe",
-                            args = ["/c", "echo hello_inherit"],
-                            env = [])
-    defer: tty.close()
-    let got = tty.expect("hello_inherit", timeoutMs = 5000)
-    echo "A0 saw output: ", got, " | exited: ", tty.exited, " code: ", tty.exitCode
-    echo "A0 raw: [", tty.cleanRaw(), "]"
-    check got
+proc diagEnv*(extra: openArray[EnvVar] = []): seq[EnvVar] =
+  result.add((key: "TERM", val: "xterm-256color"))
+  result.add((key: "PATH", val: getEnv("PATH")))
+  for k in ["SystemRoot", "windir", "TEMP", "TMP", "COMSPEC", "PATHEXT",
+            "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "USERPROFILE"]:
+    let v = getEnv(k)
+    if v.len > 0:
+      result.add((key: k, val: v))
+  for e in extra:
+    result.add e
 
-  test "A: cmd.exe echo under ConPTY":
-    let tty = newTtySession(getEnv("WINDIR") / "System32" / "cmd.exe",
-                            args = ["/c", "echo hello_conpty"],
-                            env = diagEnv())
-    defer: tty.close()
-    let got = tty.expect("hello_conpty", timeoutMs = 5000)
-    echo "A saw output: ", got, " | exited: ", tty.exited, " code: ", tty.exitCode
-    echo "A raw: [", tty.cleanRaw(), "]"
-    check got
+when defined(windows):
+  import winlean
 
-  test "B: stub -v with minimal inherited env":
-    let stub = ensureStubBinary()
-    echo "B stub path: ", stub, " exists: ", fileExists(stub)
-    let tty = newTtySession(stub, args = ["-v"], env = diagEnv())
-    defer: tty.close()
-    discard tty.waitForOutput(5000)
-    echo "B exited: ", tty.exited, " code: ", tty.exitCode
-    echo "B raw len: ", tty.raw.len
-    echo "B raw: [", tty.cleanRaw(), "]"
-    check tty.raw.len > 0
-    check not tty.exited or tty.exitCode == 0
+  proc plainSpawnEcho(cmdLine: string): tuple[ok: bool, code: int, outLen: int] =
+    ## Plain CreateProcessW (NO ConPTY, NO attribute list) capturing stdout
+    ## via a pipe. Isolates runner/session issues from the ConPTY mechanism.
+    ## If this works but ConPTY doesn't, the bug is in the pseudoconsole path.
+    var sa = SECURITY_ATTRIBUTES(nLength: sizeof(SECURITY_ATTRIBUTES).int32,
+                                 bInheritHandle: 1)
+    var rd, wr: Handle
+    doAssert createPipe(rd, wr, sa, 0) != 0
+    discard setHandleInformation(rd, HANDLE_FLAG_INHERIT, 0)
+    var si = STARTUPINFO(cb: sizeof(STARTUPINFO).int32,
+                         dwFlags: 0x100,  # STARTF_USESTDHANDLES
+                         hStdOutput: wr, hStdError: wr)
+    var pi: PROCESS_INFORMATION
+    let cmdW = newWideCString(cmdLine)
+    let appW: WideCString = nil
+    let ok = createProcessW(appW, cmdW, nil, nil, 1, 0, nil, nil, si, pi)
+    if ok == 0:
+      echo "  plainSpawn CreateProcessW failed le=", getLastError()
+      return (false, -1, 0)
+    discard closeHandle(wr)
+    var buf: array[4096, char]
+    var total = 0
+    var got: int32 = 0
+    while readFile(rd, addr buf[0], buf.len.int32, addr got, nil) != 0 and got > 0:
+      total += got.int
+    discard closeHandle(rd)
+    discard waitForSingleObject(pi.hProcess, 10000)
+    var code: int32 = 0
+    discard getExitCodeProcess(pi.hProcess, code)
+    discard closeHandle(pi.hProcess)
+    discard closeHandle(pi.hThread)
+    (true, code.int, total)
 
-  test "C: stub interactive with full test_quit_signals env":
-    let root = newFixture("diag_full")
-    writeConfiguredProvider(root)
-    writeStubResponses(root, %*[{"role": "assistant", "content": "ok"}])
-    let stub = ensureStubBinary()
-    let tty = newTtySession(stub,
-        args = ["-x", "-i"],
-        cwd = root / "run",
-        env = stubEnv(root, root / "run" / "stub_responses.json"))
-    defer: tty.close()
-    let got = tty.expect("\u276f", timeoutMs = 8000)
-    echo "C saw prompt: ", got, " | exited: ", tty.exited, " code: ", tty.exitCode
-    echo "C raw len: ", tty.raw.len
-    if tty.raw.len > 0:
-      echo "C raw tail: [", tty.cleanRaw()[max(0, tty.cleanRaw().len - 500) ..< tty.cleanRaw().len], "]"
-    check got
+when defined(windows):
+  suite "conpty diagnostic":
+    test "P: plain CreateProcessW (no ConPTY) echo":
+      # Baseline: does process creation work at all on this runner?
+      let r = plainSpawnEcho(getEnv("COMSPEC") & " /c echo plain_ok")
+      echo "P ok=", r.ok, " code=", r.code, " outLen=", r.outLen
+      check r.ok and r.code == 0 and r.outLen > 0
+
+    test "A0: cmd.exe echo, INHERIT parent env (empty env)":
+      # Decisive: if this fails too, the env block is NOT the cause — the
+      # spawn mechanism (ConPTY attribute / handle inheritance) is broken.
+      let tty = newTtySession(getEnv("WINDIR") / "System32" / "cmd.exe",
+                              args = ["/c", "echo hello_inherit"],
+                              env = [])
+      defer: tty.close()
+      let got = tty.expect("hello_inherit", timeoutMs = 5000)
+      echo "A0 saw output: ", got, " | exited: ", tty.exited, " code: ", tty.exitCode
+      echo "A0 raw: [", tty.cleanRaw(), "]"
+      check got
+
+    test "A: cmd.exe echo under ConPTY":
+      let tty = newTtySession(getEnv("WINDIR") / "System32" / "cmd.exe",
+                              args = ["/c", "echo hello_conpty"],
+                              env = diagEnv())
+      defer: tty.close()
+      let got = tty.expect("hello_conpty", timeoutMs = 5000)
+      echo "A saw output: ", got, " | exited: ", tty.exited, " code: ", tty.exitCode
+      echo "A raw: [", tty.cleanRaw(), "]"
+      check got
+
+    test "B: stub -v with minimal inherited env":
+      let stub = ensureStubBinary()
+      echo "B stub path: ", stub, " exists: ", fileExists(stub)
+      let tty = newTtySession(stub, args = ["-v"], env = diagEnv())
+      defer: tty.close()
+      discard tty.waitForOutput(5000)
+      echo "B exited: ", tty.exited, " code: ", tty.exitCode
+      echo "B raw len: ", tty.raw.len
+      echo "B raw: [", tty.cleanRaw(), "]"
+      check tty.raw.len > 0
+      check not tty.exited or tty.exitCode == 0
+
+    test "C: stub interactive with full test_quit_signals env":
+      let root = newFixture("diag_full")
+      writeConfiguredProvider(root)
+      writeStubResponses(root, %*[{"role": "assistant", "content": "ok"}])
+      let stub = ensureStubBinary()
+      let tty = newTtySession(stub,
+          args = ["-x", "-i"],
+          cwd = root / "run",
+          env = stubEnv(root, root / "run" / "stub_responses.json"))
+      defer: tty.close()
+      let got = tty.expect("\u276f", timeoutMs = 8000)
+      echo "C saw prompt: ", got, " | exited: ", tty.exited, " code: ", tty.exitCode
+      echo "C raw len: ", tty.raw.len
+      if tty.raw.len > 0:
+        echo "C raw tail: [", tty.cleanRaw()[max(0, tty.cleanRaw().len - 500) ..< tty.cleanRaw().len], "]"
+      check got
+else:
+  suite "conpty diagnostic":
+    test "conpty diagnostic is windows-only":
+      discard
