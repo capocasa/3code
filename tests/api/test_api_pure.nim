@@ -1,4 +1,4 @@
-import std/[json, tables, unittest]
+import std/[json, strutils, tables, unittest]
 import threecode/[api, types]
 
 suite "api: parseUsage":
@@ -352,3 +352,66 @@ suite "api: extractErrorMsg":
   test "returns empty string for empty input":
     let msg = extractErrorMsg("")
     check msg == ""
+
+suite "api: NetworkHealthError":
+  test "NetworkHealthError is a subclass of ApiError":
+    let e = newException(NetworkHealthError, "network quiet for 45s")
+    check e of NetworkHealthError
+    check e of ApiError
+    check e of CatchableError
+
+  test "NetworkHealthError carries the quiet message":
+    let e = newException(NetworkHealthError, networkQuietMsg())
+    check isNetworkQuietMsg(e.msg)
+    check e.msg == "network quiet for " & $(QuietTooLongMs div 1000) & "s"
+
+  test "isNetworkQuietMsg matches the canonical message and prefix":
+    check isNetworkQuietMsg(networkQuietMsg())
+    check isNetworkQuietMsg("network quiet for 45s")
+    check not isNetworkQuietMsg("interrupted by user")
+    check not isNetworkQuietMsg("")
+
+  test "networkQuietMsg carries no stray closing paren":
+    # Regression: the inline constructors used to emit "network quiet for 45s)"
+    # with a dangling ')'. The canonical constructor must not.
+    let m = networkQuietMsg()
+    check not m.endsWith(")")
+
+  test "a network-quiet outcome retries as server":
+    # callModel raises NetworkHealthError from a quiet outcome and the retry
+    # loop treats it as a server-category failure. Verify the decision the
+    # loop would reach: a quiet errMsg with no assistant msg and status 0 is
+    # retryable as "server" under the shared retryCategory helper too, so
+    # the class-based path and the legacy string path agree.
+    check retryCategory(networkQuietMsg(), nil, 0) == "server"
+
+suite "api: HttpError":
+  test "HttpError is a subclass of ApiError":
+    let e = newHttpError(502, "upstream error", "")
+    check e of HttpError
+    check e of ApiError
+    check e of CatchableError
+
+  test "HttpError carries the status code in the field":
+    let e = newHttpError(401, "", "")
+    check e.code == 401
+
+  test "HttpError message carries the (code N) suffix":
+    let e = newHttpError(503, "overloaded", "")
+    check e.msg == "overloaded (code 503)"
+
+  test "HttpError surfaces the body error text":
+    let body = "{\"error\":{\"message\":\"invalid api key\"}}"
+    let e = newHttpError(401, "", body)
+    check e.msg == "invalid api key (code 401)"
+    check e.code == 401
+
+  test "HttpError and NetworkHealthError are distinct classes":
+    let http = newHttpError(500, "", "")
+    let net = newException(NetworkHealthError, networkQuietMsg())
+    check http of HttpError
+    check http of ApiError
+    check net of NetworkHealthError
+    check net of ApiError
+    check not (http of NetworkHealthError)
+    check not (net of HttpError)
