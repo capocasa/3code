@@ -547,11 +547,9 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     discard setHandleInformation(pttyOutRead, HANDLE_FLAG_INHERIT, 0)
 
     var hpc: HPCON
-    let ptyRc = createPseudoConsole(
+    doAssert createPseudoConsole(
         COORD(x: cols.int16, y: rows.int16),
-        pttyInRead, pttyOutWrite, 0, addr hpc)
-    echo "DIAG createPseudoConsole rc=", ptyRc, " le=", getLastError(), " inRead=", pttyInRead.int, " outWrite=", pttyOutWrite.int
-    doAssert ptyRc == 0
+        pttyInRead, pttyOutWrite, 0, addr hpc) == 0
     # Close the PTY-slave ends now: CreatePseudoConsole holds its own copy,
     # and if these inheritable handles stay open they get inherited by the
     # child (bInheritHandles=TRUE), giving it raw duplicates of the
@@ -602,20 +600,11 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     # attribute so CreateProcess attaches the child to this pseudoconsole.
     var attrSize: SIZE_T = 0
     discard initializeProcThreadAttributeList(nil, 1, 0, addr attrSize)
-    echo "DIAG attrSize=", attrSize
-    # The attribute list buffer must be zero-initialized: InitializeProcThread-
-    # AttributeList writes its header but leaves trailing slack uninitialized,
-    # and CreateProcessW reads it back as part of STARTUPINFOEX — garbage in
-    # there can corrupt the pseudoconsole attach.
     var attrList = cast[pointer](alloc0(attrSize))
-    let initRc = initializeProcThreadAttributeList(attrList, 1, 0, addr attrSize)
-    echo "DIAG initAttrList rc=", initRc, " le=", getLastError()
-    doAssert initRc != 0
-    let updRc = updateProcThreadAttribute(attrList, 0,
+    doAssert initializeProcThreadAttributeList(attrList, 1, 0, addr attrSize) != 0
+    doAssert updateProcThreadAttribute(attrList, 0,
         PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, cast[pointer](hpc.Handle),
-        sizeof(HPCON).SIZE_T, nil, nil)
-    echo "DIAG updAttr rc=", updRc, " le=", getLastError(), " hpc=", hpc.int, " sizeofHPCON=", sizeof(HPCON)
-    doAssert updRc != 0
+        sizeof(HPCON).SIZE_T, nil, nil) != 0
 
     var si = STARTUPINFOEX(startupInfo: STARTUPINFO(cb: sizeof(STARTUPINFOEX).int32))
     si.lpAttributeList = attrList
@@ -711,7 +700,6 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     # pipes set in its env; it settles via drain() polling instead.
     let ok = createProcessW(appW, cmdW, nil, nil, 0,
         createFlags, envPtr, cwdPtr, si.startupInfo, pi)
-    echo "DIAG createProcessW ok=", ok, " le=", getLastError(), " pid=", pi.dwProcessId, " flags=", createFlags
     deleteProcThreadAttributeList(attrList)
     dealloc(attrList)
     doAssert ok != 0, "CreateProcessW failed: " & $getLastError()
