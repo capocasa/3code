@@ -73,6 +73,10 @@ jobs:
           # isolate whether 0xC0000142 is a testament/console-context issue.
           nim c -o:conpty_smoke.exe tools/conpty_smoke.nim || exit 1
           ./conpty_smoke.exe; echo "standalone conpty exit=$?"
+          # Also run it via cmd.exe (real console) to test the no-console
+          # hypothesis: git-bash gives stdio as pipes (no console), which may
+          # prevent the ConPTY conhost from initializing.
+          cmd.exe /c conpty_smoke.exe; echo "via-cmd conpty exit=$?"
           if command -v testament >/dev/null 2>&1; then
             testament --print --megatest:off r tests/tty/test_conpty_diag.nim
             exit $?
