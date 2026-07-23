@@ -21,6 +21,12 @@ var notifyEnabled*: bool = true
   ## Default on. Toggled at runtime via `:notify on/off`, persisted in
   ## `[settings]`; an explicit `off` opts out.
 
+var sandboxEnabled*: bool = true
+  ## When true, bash commands run under the filesystem sandbox via
+  ## `3code box restrict`. When false, commands execute directly. Default
+  ## on. Set via `[settings] sandbox = off` in the config; an explicit
+  ## `off` opts out.
+
 type
   ColorMode* = enum
     cmAuto,   ## detect from the terminal (OSC 11 background query)
@@ -117,6 +123,20 @@ type
     plan*: seq[PlanItem]
     readCache*: ReadCache
   ApiError* = object of CatchableError
+    ## Base for all model/API failures. `callModel`'s retry loop and the
+    ## turn loop catch this so every failure mode is handled uniformly.
+  HttpError* = object of ApiError
+    ## The server returned a response carrying an HTTP status code (any
+    ## non-success code: 4xx client errors, 5xx server errors, etc.). The
+    ## `code` field exposes it for programmatic handling; `msg` already
+    ## carries the formatted detail including the `(code N)` suffix.
+    code*: int
+  NetworkHealthError* = object of ApiError
+    ## Transport-level failure with no HTTP response: the network-quiet
+    ## watchdog fired (the provider sent nothing for `QuietTooLongMs` and
+    ## the cached socket was shut down), or the connect/read failed with a
+    ## bare transport error. `callModel`'s retry loop catches it and treats
+    ## it as a retryable server error, identical to a 5xx.
   ParseIssue* = object
     ## A syntax problem the text-mode parser surfaced on a fenced block
     ## (unterminated fence, orphan code-fence, malformed SEARCH/REPLACE).
@@ -165,9 +185,16 @@ type
 
 const
   InterruptedByUserMsg* = "interrupted by user"
+  NetworkQuietPrefix* = "network quiet for"
+    # Marker prefix the transport writes into `StreamOutcome.errMsg` when the
+    # network-quiet watchdog fires. `callModel` checks this to raise a
+    # `NetworkHealthError` and route it through the server-retry path.
 
 proc isInterruptedMsg*(msg: string): bool =
   msg == InterruptedByUserMsg
+
+proc isNetworkQuietMsg*(msg: string): bool =
+  msg.startsWith(NetworkQuietPrefix)
 
 proc die*(msg: string, code = 1) {.noreturn.} =
   stderr.writeLine "3code: " & msg

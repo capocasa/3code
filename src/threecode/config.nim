@@ -265,6 +265,14 @@ proc parseConfigFile*(path: string): (string, string, seq[ProviderRec], Table[st
           of "dark": colorModePref = cmDark
           of "bright", "light": colorModePref = cmLight
           else: discard
+        of "sandbox":
+          # Same boolean dialect as `notify`/`streaming`. Default is on;
+          # an explicit `off` runs bash commands directly instead of via
+          # `3code box restrict`.
+          case v.toLowerAscii
+          of "on", "true", "yes", "1": sandboxEnabled = true
+          of "off", "false", "no", "0": sandboxEnabled = false
+          else: discard
         of "bash_path", "bash-path":
           bashPathOverride = v
         else: discard
@@ -308,6 +316,8 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "streaming = \"off\"\n"
   if not notifyEnabled:
     buf.add "notify = \"off\"\n"
+  if not sandboxEnabled:
+    buf.add "sandbox = \"off\"\n"
   # Persist the colour mode only when it differs from `auto` (the default).
   if colorModePref != cmAuto:
     let label = if colorModePref == cmDark: "dark" else: "bright"
