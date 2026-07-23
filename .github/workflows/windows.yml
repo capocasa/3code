@@ -59,26 +59,24 @@ jobs:
           echo "SSL_CERT_FILE=$PWD/cacert.pem" >> "$GITHUB_ENV"
 
       - name: Run tests
-        # nimble test runs Nim's bundled testament. Tests that can't run on
-        # Windows yet (the PTY harness) self-disable via disabled:"win"
-        # specs; see docs/windows-testing.md for the gap and fix path. The
-        # timeout is generous because the Windows runner compiles each test
-        # separately (~15-20s each) with no shared cache; actual test runtime
-        # is only ~4-5 min.
+        # DIAGNOSTIC MODE: run only the ConPTY diagnostic to localize the
+        # 0xC0000142 (STATUS_DLL_INIT_FAILED) failure. Revert to
+        # `testament --print --megatest:off cat tty` once green. The prior
+        # diags had no assertions (false PASS); this one hard-checks.
         #
         # git-bash does not reliably propagate nimble's non-zero exit code,
-        # so run testament directly and propagate $? explicitly. Without this
-        # a failing testament reports green (only the OSError shows in the
-        # log), which silently masks regressions.
+        # so run testament directly and propagate $? explicitly.
         run: |
+          # Smoke-check: the built 3code binary loads its DLLs standalone.
+          ./3code.exe -v || { echo "3code.exe failed to start"; exit 1; }
           if command -v testament >/dev/null 2>&1; then
-            testament --print --megatest:off cat tty
+            testament --print --megatest:off r tests/tty/test_conpty_diag.nim
+            exit $?
           else
-            for f in tests/tty/*.nim; do
-              nim c -r --path:src --path:tests "$f" || exit 1
-            done
+            nim c -r --path:src --path:tests tests/tty/test_conpty_diag.nim
+            exit $?
           fi
-        timeout-minutes: 25
+        timeout-minutes: 12
 
       - name: Package (Windows) - bundle OpenSSL DLLs alongside .exe
         shell: pwsh
@@ -92,8 +90,14 @@ jobs:
           #   could not load: (libcrypto-1_1-x64|libeay64).dll
           # Use the canonical Nim Windows DLL bundle from nim-lang.org;
           # it also ships a cacert.pem that we point SSL_CERT_FILE at.
-          Invoke-WebRequest -Uri https://nim-lang.org/download/dlls.zip -OutFile dlls.zip
-          Expand-Archive -Path dlls.zip -DestinationPath dlls
+          # The "Stage OpenSSL DLLs" step already downloaded + extracted
+          # dlls/ earlier; reuse it instead of re-downloading (the second
+          # Expand-Archive fails on the existing cacert.pem). Re-fetch only
+          # if staging was skipped (e.g. running this job standalone).
+          if (-not (Test-Path dlls/libssl-1_1-x64.dll)) {
+            Invoke-WebRequest -Uri https://nim-lang.org/download/dlls.zip -OutFile dlls.zip
+            Expand-Archive -Path dlls.zip -DestinationPath dlls -Force
+          }
           Copy-Item dlls/libssl-1_1-x64.dll, dlls/libcrypto-1_1-x64.dll, dlls/cacert.pem 3code-windows-amd64/
           # Capture the version from the staged binary (needs the DLLs
           # alongside it to launch) so it can be checked without running
