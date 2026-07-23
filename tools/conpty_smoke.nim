@@ -41,77 +41,75 @@ proc allocConsole(): WINBOOL {.stdcall, dynlib: "kernel32", importc: "AllocConso
 proc getConsoleWindow(): Handle {.stdcall, dynlib: "kernel32", importc: "GetConsoleWindow".}
 
 proc main() =
-  # Diagnostics: console attachment state.
-  echo "consoleWindow before=", getConsoleWindow().int
-  let fc = freeConsole()
-  echo "FreeConsole rc=", fc, " le=", getLastError()
-
   var sa = SECURITY_ATTRIBUTES(nLength: sizeof(SECURITY_ATTRIBUTES).int32,
                                bInheritHandle: 0)
-  var inputRead, inputWrite, outputRead, outputWrite: Handle
-  doAssert createPipe(inputRead, inputWrite, sa, 0) != 0
-  doAssert createPipe(outputRead, outputWrite, sa, 0) != 0
-  echo "pipes: inR=", inputRead.int, " inW=", inputWrite.int,
-       " outR=", outputRead.int, " outW=", outputWrite.int
 
-  var hpc: HPCON
-  let rc = createPseudoConsole(COORD(x: 80.int16, y: 30.int16),
-                               inputRead, outputWrite, 0, addr hpc)
-  echo "createPseudoConsole rc=", rc, " hpc=", hpc.int
-  if rc != 0: quit("createPseudoConsole failed", 1)
+  proc attempt(label: string; allocFirst, freeFirst: bool): bool =
+    echo "--- attempt: ", label, " alloc=", allocFirst, " free=", freeFirst
+    if freeFirst: discard freeConsole()
+    if allocFirst: discard allocConsole()
+    var inputRead, inputWrite, outputRead, outputWrite: Handle
+    doAssert createPipe(inputRead, inputWrite, sa, 0) != 0
+    doAssert createPipe(outputRead, outputWrite, sa, 0) != 0
+    var hpc: HPCON
+    let rc = createPseudoConsole(COORD(x: 80.int16, y: 30.int16),
+                                 inputRead, outputWrite, 0, addr hpc)
+    echo "  createPseudoConsole rc=", rc
+    if rc != 0:
+      discard closeHandle(inputRead); discard closeHandle(inputWrite)
+      discard closeHandle(outputRead); discard closeHandle(outputWrite)
+      return false
+    var attrSize: SIZE_T = 0
+    discard initializeProcThreadAttributeList(nil, 1, 0, addr attrSize)
+    var attrList = cast[pointer](alloc0(attrSize))
+    doAssert initializeProcThreadAttributeList(attrList, 1, 0, addr attrSize) != 0
+    doAssert updateProcThreadAttribute(attrList, 0,
+        PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE.uint, cast[pointer](unsafeAddr hpc),
+        sizeof(HPCON).SIZE_T, nil, nil) != 0
+    var si = STARTUPINFOEX(startupInfo: STARTUPINFO(cb: sizeof(STARTUPINFOEX).int32))
+    si.lpAttributeList = attrList
+    var pi: PROCESS_INFORMATION
+    let cmd = getEnv("WINDIR") & "\\System32\\cmd.exe /c echo conpty_ok"
+    let cmdW = newWideCString(cmd)
+    let appW: WideCString = nil
+    let ok = createProcessW(appW, cmdW, nil, nil, 0,
+        EXTENDED_STARTUPINFO_PRESENT, nil, nil, si.startupInfo, pi)
+    echo "  createProcessW ok=", ok
+    if ok == 0:
+      closePseudoConsole(hpc)
+      discard closeHandle(inputRead); discard closeHandle(inputWrite)
+      discard closeHandle(outputRead); discard closeHandle(outputWrite)
+      return false
+    # Drain up to 3s.
+    var total = 0
+    var buf: array[4096, char]
+    let deadline = epochTime() + 3.0
+    while epochTime() < deadline:
+      var avail: int32 = 0
+      if peekNamedPipe(outputRead, nil, 0, nil, addr avail, nil) != 0 and avail > 0:
+        var got: int32 = 0
+        if readFile(outputRead, addr buf[0], avail, addr got, nil) != 0 and got > 0:
+          total += got.int
+      else: sleep(20)
+    discard waitForSingleObject(pi.hProcess, 5000)
+    var code: int32 = 0
+    discard getExitCodeProcess(pi.hProcess, code)
+    echo "  child exit=", code, " outBytes=", total
+    discard closeHandle(pi.hProcess); discard closeHandle(pi.hThread)
+    closePseudoConsole(hpc)
+    discard closeHandle(inputRead); discard closeHandle(inputWrite)
+    discard closeHandle(outputRead); discard closeHandle(outputWrite)
+    code == 0 and total > 0
 
-  var attrSize: SIZE_T = 0
-  discard initializeProcThreadAttributeList(nil, 1, 0, addr attrSize)
-  var attrList = cast[pointer](alloc0(attrSize))
-  doAssert initializeProcThreadAttributeList(attrList, 1, 0, addr attrSize) != 0
-  doAssert updateProcThreadAttribute(attrList, 0,
-      PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE.uint, cast[pointer](unsafeAddr hpc),
-      sizeof(HPCON).SIZE_T, nil, nil) != 0
-
-  var si = STARTUPINFOEX(startupInfo: STARTUPINFO(cb: sizeof(STARTUPINFOEX).int32))
-  si.lpAttributeList = attrList
-  var pi: PROCESS_INFORMATION
-  let cmd = getEnv("WINDIR") & "\\System32\\cmd.exe /c echo conpty_standalone_ok"
-  let cmdW = newWideCString(cmd)
-  let appW: WideCString = nil
-  let ok = createProcessW(appW, cmdW, nil, nil, 0,
-      EXTENDED_STARTUPINFO_PRESENT, nil, nil, si.startupInfo, pi)
-  echo "createProcessW ok=", ok, " le=", getLastError()
-  if ok == 0: quit("createProcessW failed", 1)
-
-  # Drain output for up to 3s using PeekNamedPipe to avoid blocking.
-  var total = 0
-  var buf: array[4096, char]
-  let deadline = epochTime() + 3.0
-  while epochTime() < deadline:
-    var avail: int32 = 0
-    if peekNamedPipe(outputRead, nil, 0, nil, addr avail, nil) != 0 and avail > 0:
-      var got: int32 = 0
-      if readFile(outputRead, addr buf[0], avail, addr got, nil) != 0 and got > 0:
-        total += got.int
-        var s = newString(got)
-        copyMem(s[0].addr, buf[0].addr, got)
-        echo "child output: [", s, "]"
-    else:
-      sleep(20)
-  echo "total output bytes: ", total
-
-  discard waitForSingleObject(pi.hProcess, 5000)
-  var code: int32 = 0
-  discard getExitCodeProcess(pi.hProcess, code)
-  echo "child exit code: ", code
-  discard closeHandle(pi.hProcess)
-  discard closeHandle(pi.hThread)
-  closePseudoConsole(hpc)
-  discard closeHandle(inputRead)
-  discard closeHandle(inputWrite)
-  discard closeHandle(outputRead)
-  discard closeHandle(outputWrite)
-  if code == 0 and total > 0:
-    echo "RESULT: SUCCESS"
-    quit(0)
-  else:
-    echo "RESULT: FAILURE"
-    quit(1)
+  echo "consoleWindow=", getConsoleWindow().int
+  let r1 = attempt("plain", false, false)
+  echo "RESULT plain=", r1
+  let r2 = attempt("allocFirst", true, false)
+  echo "RESULT allocFirst=", r2
+  let r3 = attempt("freeThenPlain", false, true)
+  echo "RESULT freeThenPlain=", r3
+  let r4 = attempt("freeThenAlloc", true, true)
+  echo "RESULT freeThenAlloc=", r4
+  quit(0)
 
 main()
