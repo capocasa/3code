@@ -550,6 +550,15 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     doAssert createPseudoConsole(
         COORD(x: cols.int16, y: rows.int16),
         pttyInRead, pttyOutWrite, 0, addr hpc) == 0
+    # Close the PTY-slave ends now: CreatePseudoConsole holds its own copy,
+    # and if these inheritable handles stay open they get inherited by the
+    # child (bInheritHandles=TRUE), giving it raw duplicates of the
+    # pseudoconsole pipes alongside the pseudoconsole attachment itself.
+    # That duplicate-attachment fails console init with
+    # STATUS_DLL_INIT_FAILED (0xC0000142) — even for cmd.exe. This matches
+    # the canonical CreatePseudoConsole sample, which closes these here.
+    discard closeHandle(pttyInRead)
+    discard closeHandle(pttyOutWrite)
 
     var frameRead, frameWrite, ackRead, ackWrite: Handle
     var tickerRead, tickerWrite, tickerAckRead, tickerAckWrite: Handle
@@ -689,11 +698,11 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     result.hProcess = pi.hProcess
     result.hThread = pi.hThread
     result.dwProcessId = pi.dwProcessId
-    # Close the child-side pipe ends in the parent; the child has its own
-    # duplicate via inheritance. Closing here ensures the parent's read on
-    # the master returns EOF when the child exits (no lingering write end).
-    discard closeHandle(pttyInRead)
-    discard closeHandle(pttyOutWrite)
+    # Close the child-side IPC pipe ends in the parent; the child has its
+    # own duplicates via inheritance. Closing here ensures the parent's read
+    # on the master returns EOF when the child exits (no lingering write
+    # end). The PTY-slave ends (pttyInRead/pttyOutWrite) were already closed
+    # right after CreatePseudoConsole above.
     discard closeHandle(frameWrite)
     discard closeHandle(ackRead)
     discard closeHandle(tickerRead)
