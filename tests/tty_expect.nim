@@ -272,10 +272,13 @@ when defined(windows):
     ## we poll with PeekNamedPipe instead — it returns immediately with the
     ## count of unread bytes, or 0 if nothing is ready.
     var avail: int32 = 0
-    if peekNamedPipe(h, nil, 0, nil, addr avail, nil):
+    let ok = peekNamedPipe(h, nil, 0, nil, addr avail, nil)
+    if conptyPeekCount < 12:
+      inc conptyPeekCount
+      echo "DIAG pipeBytesAvail h=", h.int, " ok=", ok, " avail=", avail,
+           " le=", getLastError()
+    if ok:
       return avail
-    # PeekNamedPipe fails when the write end is closed (child exited) — treat
-    # that as no bytes available; the exit poll picks up the exit separately.
     0
 
 proc readPtyChunk(s: TtySession; waitMs: int): bool =
@@ -287,10 +290,6 @@ proc readPtyChunk(s: TtySession; waitMs: int): bool =
     let deadline = epochTime() + max(0, waitMs).float / 1000.0
     while epochTime() < deadline:
       let avail = pipeBytesAvail(s.masterFd)
-      if conptyPeekCount < 8:
-        inc conptyPeekCount
-        echo "DIAG peek masterFd=", s.masterFd.int, " avail=", avail,
-             " le=", getLastError(), " exited=", s.exited
       if avail > 0:
         var buf: array[4096, char]
         var got: int32 = 0
@@ -697,6 +696,7 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     result.hProcess = pi.hProcess
     result.hThread = pi.hThread
     result.dwProcessId = pi.dwProcessId
+    conptyPeekCount = 0  # reset diag counter per session
     # Close the child-side IPC pipe ends in the parent; the child has its
     # own duplicates via inheritance. Closing here ensures the parent's read
     # on the master returns EOF when the child exits (no lingering write
