@@ -71,21 +71,14 @@ jobs:
         # a failing testament reports green (only the OSError shows in the
         # log), which silently masks regressions.
         run: |
-          # Smoke-check that the built 3code binary loads its DLLs before
-          # running any test that spawns it. STATUS_DLL_INIT_FAILED (0xC0000142)
-          # here means a DLL staging issue, not a harness bug.
-          ./3code.exe -v || { echo "3code.exe failed to start"; exit 1; }
-          # Build the stub binary the tty tests drive, then verify it loads.
-          nim c -d:ssl -d:providerStub --threads:on --path:src -o:build/3code_stub.exe src/threecode.nim || exit 1
-          ./build/3code_stub.exe -v || { echo "stub binary failed to start"; exit 1; }
           if command -v testament >/dev/null 2>&1; then
-            testament --print --megatest:off r tests/tty/test_conpty_diag.nim
+            testament --print --megatest:off cat tty
           else
-            for f in tests/tty/test_conpty_diag.nim; do
+            for f in tests/tty/*.nim; do
               nim c -r --path:src --path:tests "$f" || exit 1
             done
           fi
-        timeout-minutes: 12
+        timeout-minutes: 25
 
       - name: Package (Windows) - bundle OpenSSL DLLs alongside .exe
         shell: pwsh
