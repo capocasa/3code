@@ -8,12 +8,11 @@
 current = "baseten.glm5"
 ; current = "openai.gpt-4o-mini"
 ; auto_update = "true"    ; on for prebuilt binaries, off for source builds
-; search-url overrides the engine used by the `web_search` tool. The
-; query is URL-encoded and appended verbatim, so the value must end at
-; the point where the query goes (typically `?q=` or `&q=`). Default
-; is Startpage with the web filter; the parser is tuned for Startpage's
-; SERP, so swap only for a Startpage-compatible mirror.
-; search-url = "https://www.startpage.com/do/search?cat=web&q="
+; [search] configures the `web_search` tool. Keyless by default (Exa's
+; hosted MCP endpoint). Set `key` to use a paid Exa tier for higher
+; limits; also honored as the EXA_API_KEY environment variable.
+; [search]
+; key = "..."
 ; notify = off ; turn off the desktop notification that fires when a turn ends (on by default)
 ; sandbox = off ; run bash commands directly instead of under the filesystem sandbox (on by default)
 ; bash_path = "C:\\tools\\msys64\\usr\\bin\\bash.exe"  ; Windows only: override bash detection

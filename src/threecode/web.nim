@@ -1,24 +1,18 @@
-## Web helpers: fetch a URL and return readable text, or run a Startpage
+## Web helpers: fetch a URL and return readable text, or run an Exa
 ## search and return a compact list of hits. Exposed to the agent as native
 ## `web_search` and `web_fetch` tool calls (dispatched in actions.nim).
 ##
 ## No external binaries, no scripting runtimes, pure Nim httpclient + a
-## hand-rolled HTML-to-text pass.
+## hand-rolled HTML-to-text pass. The search backend is Exa's hosted MCP
+## endpoint (keyless by default); it speaks a single stateless JSON-RPC
+## call whose reply is one SSE frame.
 
-import std/[httpclient, strutils, uri, unicode, tables]
+import std/[httpclient, json, strutils, uri, unicode, tables]
 import util
 
 const UserAgent = "Mozilla/5.0 (X11; Linux x86_64) 3code/web"
 const DefaultFetchCap = 20_000
 const SearchResultCap = 10
-
-# Startpage's `do/search` endpoint returns a server-rendered SERP whose
-# anchors carry the real target URL (no redirector to unwrap) and whose
-# results are tagged with a stable `data-testid="gl-title-link"`. The
-# `cat=web` filter restricts to web hits (skipping the Wikipedia info-card
-# and image/news shelves) so the parser sees a clean stream of organic
-# results. Append the URL-encoded query directly.
-const DefaultSearchUrl* = "https://www.startpage.com/do/search?cat=web&q="
 
 type
   SearchHit* = object
@@ -161,66 +155,84 @@ proc capText*(s: string, cap = DefaultFetchCap): string =
   let half = cap div 2
   s[0 ..< half] & "\n... [truncated " & $(s.len - cap) & " chars] ...\n" & s[^half .. ^1]
 
-# ---------- Startpage search ----------
+# ---------- Exa search ----------
 
-proc innerText(html: string, afterTagOpen: int, closeTag: string): string =
-  let close = html.find(closeTag, afterTagOpen)
-  let raw = if close < 0: html[afterTagOpen .. ^1]
-            else: html[afterTagOpen ..< close]
-  stripHtml(raw).replace("\n", " ").strip
+proc extractSseData*(body: string): string =
+  ## Return the substring after the first `data: ` line of an SSE stream.
+  ## If there is no `data:` line, return the body unchanged (defensive
+  ## against a future plain-JSON response).
+  for ln in body.splitLines:
+    if ln.startsWith("data: "):
+      return ln[6 .. ^1]
+    if ln.startsWith("data:"):
+      return ln[5 .. ^1]
+  body
 
-proc extractAttr(tag: string, name: string): string =
-  let key = name & "=\""
-  let k = tag.find(key)
-  if k < 0: return ""
-  let s = k + key.len
-  let e = tag.find('"', s)
-  if e < 0: return ""
-  tag[s ..< e].replace("&amp;", "&")
-
-proc parseSearchHits*(html: string): seq[SearchHit] =
-  ## Extract Startpage organic web results. Each hit's anchor carries
-  ## `data-testid="gl-title-link"` and the title sits inside an `<h2>`;
-  ## the snippet follows in a `<p class="description ...">`. Class names
-  ## are stable identifiers; the surrounding emotion-css hashes are not,
-  ## so we never match on them.
-  let marker = "data-testid=\"gl-title-link\""
-  var i = 0
-  while result.len < SearchResultCap:
-    let mk = html.find(marker, i)
-    if mk < 0: break
-    let tagStart = html.rfind('<', 0, mk)
-    let tagEnd = html.find('>', mk)
-    if tagStart < 0 or tagEnd < 0: break
-    let anchor = html[tagStart .. tagEnd]
+proc parseExaText*(text: string): seq[SearchHit] =
+  ## Exa returns `result.content[0].text` as a block of records separated by
+  ## `\n---\n`. Each record begins with `Title: <t>` and `URL: <u>` lines,
+  ## optionally has `Published:` / `Author:` lines, and then a `Highlights:`
+  ## header followed by the body. We only rely on the `Title:` / `URL:` /
+  ## `Highlights:` prefixes and the `---` separators.
+  let records = text.split("\n---\n")
+  for rec in records:
+    if result.len >= SearchResultCap: break
     var hit: SearchHit
-    hit.url = extractAttr(anchor, "href")
-    let h2Open = html.find("<h2", tagEnd)
-    if h2Open >= 0 and h2Open < html.find("</a>", tagEnd):
-      let h2GT = html.find('>', h2Open)
-      if h2GT > 0:
-        hit.title = innerText(html, h2GT + 1, "</h2>")
-    let aClose = html.find("</a>", tagEnd)
-    let nextMk = html.find(marker, tagEnd + marker.len)
-    let scanEnd = if nextMk < 0: html.len else: nextMk
-    let descKey = "class=\"description"
-    let descMk = html.find(descKey, aClose)
-    if descMk > 0 and descMk < scanEnd:
-      let descGT = html.find('>', descMk)
-      if descGT > 0:
-        hit.snippet = innerText(html, descGT + 1, "</p>")
-    if hit.title.len > 0 or hit.url.len > 0:
-      result.add hit
-    i = if nextMk < 0: html.len else: nextMk
+    var seenHigh = false
+    var bodyLines: seq[string]
+    for ln in rec.splitLines:
+      if ln.startsWith("Title: "):
+        hit.title = ln[7 .. ^1].strip
+      elif ln.startsWith("URL: "):
+        hit.url = ln[5 .. ^1].strip
+      elif ln.strip == "Highlights:":
+        seenHigh = true
+      elif seenHigh:
+        if ln.strip.len > 0: bodyLines.add ln.strip
+    if hit.title.len == 0 and hit.url.len == 0: continue
+    if bodyLines.len > 0:
+      hit.snippet = bodyLines.join(" ")
+    result.add hit
 
-proc webSearch*(query: string, searchUrl = DefaultSearchUrl): seq[SearchHit] =
-  let client = newClient()
+proc webSearch*(query: string; key = ""): seq[SearchHit] =
+  ## POST a single JSON-RPC `tools/call` for `web_search_exa` to Exa's hosted
+  ## MCP endpoint. Keyless by default; pass `key` to use a paid tier (it goes
+  ## on the URL as `exaApiKey`). Raises `IOError` on non-2xx so callers
+  ## wrapping us in `except CatchableError` keep working.
+  let base =
+    if key.len > 0:
+      "https://mcp.exa.ai/mcp?exaApiKey=" & encodeUrl(key)
+    else:
+      "https://mcp.exa.ai/mcp"
+  let body = $(%*{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "web_search_exa",
+      "arguments": {
+        "query": query,
+        "numResults": SearchResultCap,
+        "type": "auto"
+      }
+    }
+  })
+  let client = newHttpClient(timeout = 30_000, userAgent = UserAgent,
+                             sslContext = bundledSslContext())
   defer: client.close()
-  let url = searchUrl & encodeUrl(query)
-  let resp = client.get(url)
+  client.headers = newHttpHeaders({
+    "Content-Type": "application/json",
+    "Accept": "application/json, text/event-stream"
+  })
+  let resp = client.post(base, body)
   if resp.code.int div 100 != 2:
     raise newException(IOError, "HTTP " & $resp.code & " searching")
-  parseSearchHits(resp.body)
+  let data = extractSseData(resp.body)
+  let j = try: parseJson(data) except CatchableError: nil
+  if j == nil: return
+  let txt = j{"result"}{"content"}{0}{"text"}.getStr("")
+  if txt.len == 0: return
+  parseExaText(txt)
 
 proc formatHits*(hits: seq[SearchHit]): string =
   if hits.len == 0: return "no results"
