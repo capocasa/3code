@@ -657,14 +657,18 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     # converter hands createProcessW a raw pointer into their storage).
     let appW = newWideCString(bin)
     let envObj = newWideCString(envBlock)
-    let cwdObj = if cwd.len > 0: newWideCString(cwd) else: newWideCString(0)
-    # Extract raw WideCString pointers (the implicit converter doesn't apply
-    # to importc proc params reliably); pass STARTUPINFOEX via the address of
-    # its embedded STARTUPINFO, which is the documented ABI for the extended
-    # startup info path.
+    # The child's working directory defaults to the parent's (NULL
+    # lpCurrentDirectory) when cwd is empty; the child then finds DLLs via
+    # the exe directory (always first in the search order) just as it does
+    # when launched standalone.
+    var cwdW: WideCStringObj
+    var cwdPtr: WideCString = nil
+    if cwd.len > 0:
+      cwdW = newWideCString(cwd)
+      cwdPtr = cwdW
     let ok = createProcessW(appW, cmdW, nil, nil, 1,
         EXTENDED_STARTUPINFO_PRESENT or CREATE_UNICODE_ENVIRONMENT,
-        envObj, cwdObj, si.startupInfo, pi)
+        envObj, cwdPtr, si.startupInfo, pi)
     deleteProcThreadAttributeList(attrList)
     dealloc(attrList)
     doAssert ok != 0, "CreateProcessW failed: " & $getLastError()
