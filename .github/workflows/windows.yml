@@ -56,7 +56,7 @@ jobs:
         # log), which silently masks regressions.
         run: |
           if command -v testament >/dev/null 2>&1; then
-            testament --print --megatest:off tty
+            testament --print --megatest:off cat tty
           else
             for f in tests/tty/*.nim; do
               nim c -r --path:src --path:tests "$f" || exit 1
