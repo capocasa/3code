@@ -106,6 +106,13 @@ proc sandboxPath*(dir: string): string =
 proc sandboxPathInCwd*(): string =
   sandboxPath(getCurrentDir())
 
+proc systemSandboxPath*(): string =
+  ## The system-level sandbox file: next to `~/.config/3code/config`
+  ## (or the platform equivalent under `getConfigDir() / "3code"`).
+  ## Inlined to mirror `config.configPath` without importing config (which
+  ## would form a module cycle).
+  getConfigDir() / "3code" / SandboxFile
+
 proc normalizeSandboxPath*(p: string; cwd: string): string =
   ## Resolve a sandbox path to an absolute, cleaned form. An empty path
   ## (the bare-cwd shorthand) becomes `cwd` itself. Tilde is expanded.
@@ -151,6 +158,34 @@ proc loadSandbox*(path: string): Sandbox =
   let projectDir = path.parentDir.parentDir
   let cwd = if projectDir.len > 0: projectDir else: getCurrentDir()
   parseSandbox(readFile(path), cwd)
+
+proc parseCascaded*(sysText, repoText, projectDir: string): Sandbox =
+  ## The pure, file-free core of `loadCascaded`: concatenate the two level
+  ## texts and parse once against `projectDir`. Factored out so the
+  ## last-wins concatenation semantics can be unit-tested without touching
+  ## the real `~/.config/3code/sandbox` or writing repo files.
+  parseSandbox(sysText & "\n" & repoText, projectDir)
+
+proc loadCascaded*(projectDir: string): Sandbox =
+  ## Build the effective sandbox by concatenating two levels and parsing
+  ## once:
+  ##
+  ##   1. system  -> `systemSandboxPath()` (next to `~/.config/3code/config`)
+  ##   2. repo    -> `sandboxPath(projectDir)` (`.3code/sandbox`)
+  ##
+  ## Each level's text is the file contents when present, or the built-in
+  ## `defaultSandboxText()` (`. /\nO\n`) when the file is absent, so the
+  ## sandbox is "always on" even on a fresh checkout. The spec names three
+  ## levels (system -> configdir -> repo), but in this codebase the config
+  ## and the system sandbox file live in the same `~/.config/3code/`
+  ## directory, so the first two collapse into the single "system" level
+  ## above. A repo-level `.` on `/` cleanly resets everything above it,
+  ## matching the per-file last-wins semantics.
+  let sysPath = systemSandboxPath()
+  let sysText = if fileExists(sysPath): readFile(sysPath) else: defaultSandboxText()
+  let repoPath = sandboxPath(projectDir)
+  let repoText = if fileExists(repoPath): readFile(repoPath) else: defaultSandboxText()
+  parseCascaded(sysText, repoText, projectDir)
 
 proc resolve*(s: Sandbox): tuple[writable, readonly: seq[string]] =
   ## Walk the ordered rules into the (writable, readonly) pair `3code box`
@@ -206,22 +241,15 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
   of akReadOnly: (not needsWrite, "sandbox: " & resolved & " is read-only")
   of akDeny: (false, "sandbox: " & resolved & " is outside the allowed paths")
 
-proc reload*(projectDir: string) =
-  ## Load (or reload) the sandbox file for `projectDir` into the global
-  ## `current`. Sets `active = true` when the file exists. `:sandbox`
-  ## commands call this after editing so the new policy takes effect on
-  ## the next tool call without restarting 3code.
-  let path = sandboxPath(projectDir)
-  if fileExists(path):
-    current = loadSandbox(path)
-    active = true
-
 proc ensureDefaultSandbox*(dir: string): bool =
   ## Create the default sandbox file at `dir/.3code/sandbox` if no file
-  ## exists there yet. Returns true if a usable sandbox file now exists
-  ## (either pre-existing or just created); false if creation failed
-  ## (unreadable dir, permission denied, etc.). Callers should refuse
-  ## to run in the false case per the spec.
+  ## exists there yet, seeding it with the built-in default policy.
+  ## Returns true if a usable sandbox file now exists (either pre-existing
+  ## or just created); false if creation failed (unreadable dir, permission
+  ## denied, etc.). Used only by `appendRule` to seed the repo file on the
+  ## first explicit `:sandbox allow|readonly|deny` edit, so the user has a
+  ## concrete file to version and share. Not part of startup: the cascade
+  ## loads the default in-memory when no file is present.
   let path = sandboxPath(dir)
   if fileExists(path): return true
   let sandboxDir = dir / SandboxDir

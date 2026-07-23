@@ -20,6 +20,12 @@ var notifyEnabled*: bool = true
   ## When true, a native desktop notification fires when a turn ends.
   ## Default on. Toggled at runtime via `:notify on/off`, persisted in
   ## `[settings]`; an explicit `off` opts out.
+var sandboxEnabled*: bool = true
+  ## When true, every tool call is confined to the filesystem sandbox
+  ## (the cascaded `.3code/sandbox` policy). When false, bash runs
+  ## unconfined and the in-process read/write/patch checks pass through.
+  ## Default on, preserving the historical sandboxed behavior. Toggled
+  ## at runtime via `:sandbox on/off`, persisted in `[settings]`.
 
 type
   ColorMode* = enum

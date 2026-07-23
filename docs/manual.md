@@ -303,10 +303,21 @@ Sub-agents are not supported because both research and user feedback says they a
 ## Sandbox
 
 3code confines every tool call to a filesystem sandbox you define. The
-sandbox is a plain text file at `.3code/sandbox` in your project directory,
-and it is mandatory: 3code refuses to run if it cannot create the file.
-Yolo mode (everything writable) is fine but you have to ask for it
-explicitly.
+sandbox is a plain text policy built from a cascade of files, each filling
+in for the ones below it:
+
+1. **system** - `~/.config/3code/sandbox`, next to your config.
+2. **repo** - `.3code/sandbox` in your project directory.
+
+A missing level is not empty: it contributes the built-in default
+(`.` deny `/`, then `O` writable cwd), so the sandbox is always on. The
+effective policy is the two texts concatenated (system then repo) and
+parsed once, so a repo-level `.` on `/` cleanly resets anything a
+system file opened above it. 3code never writes a sandbox file into your
+project on first run; the default lives in memory until you create one
+(explicitly, or via the `:sandbox` edit commands, which seed the repo
+file on first use). Yolo mode (everything writable) is fine but you have
+to ask for it explicitly.
 
 The sandbox is enforced two ways. Bash commands run through `3code box`,
 the built-in nimbox sandbox (Landlock on Linux, Seatbelt on macOS), which
@@ -383,7 +394,16 @@ REPL commands which append a rule and reload immediately:
 :sandbox allow /opt
 :sandbox readonly /var
 :sandbox deny ./secrets
+:sandbox on
+:sandbox off
 ```
+
+The first `allow`/`readonly`/`deny` in a project creates the `.3code/sandbox`
+file (seeded with the built-in default, then your appended rule) so you
+have something concrete to version and share. `:sandbox off` disables
+enforcement entirely for the session (bash runs unconfined, in-process
+checks pass through); it persists in `[settings]` as `sandbox = off`. This
+is the only way to run without a sandbox short of editing the file.
 
 The agent never writes the sandbox file. If the model proposes a policy
 change, it edits a copy and you move it into place. This keeps the trust
