@@ -13,14 +13,13 @@ type
   COORD = object
     x*, y*: int16
   SIZE_T = uint
-  PROC_THREAD_ATTRIBUTE_LIST = object
   STARTUPINFOEX = object
     startupInfo*: STARTUPINFO
     lpAttributeList*: pointer
 
 const
-  PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE* = 0x00020016'u32
-  EXTENDED_STARTUPINFO_PRESENT* = 0x00080000'i32
+  PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = 0x00020016'u32
+  EXTENDED_STARTUPINFO_PRESENT = 0x00080000'i32
 
 proc createPseudoConsole(size: COORD; hInput, hOutput: Handle;
     dwFlags: uint32; phPC: ptr HPCON): int32 {.stdcall,
@@ -30,8 +29,6 @@ proc closePseudoConsole(hPC: HPCON) {.stdcall,
 proc initializeProcThreadAttributeList(lpAttributeList: pointer;
     dwAttributeCount, dwFlags: DWORD; lpSize: ptr SIZE_T): WINBOOL {.stdcall,
     dynlib: "kernel32", importc: "InitializeProcThreadAttributeList".}
-proc deleteProcThreadAttributeList(lpAttributeList: pointer) {.stdcall,
-    dynlib: "kernel32", importc: "DeleteProcThreadAttributeList".}
 proc updateProcThreadAttribute(lpAttributeList: pointer; dwFlags: DWORD;
     attribute: uint; lpValue: pointer; cbSize: SIZE_T;
     lpPreviousValue: pointer; lpReturnSize: ptr SIZE_T): WINBOOL {.stdcall,
@@ -39,8 +36,16 @@ proc updateProcThreadAttribute(lpAttributeList: pointer; dwFlags: DWORD;
 proc peekNamedPipe(hNamedPipe: Handle; lpBuffer: pointer; nBufferSize: DWORD;
     lpBytesRead, lpTotalBytesAvail, lpBytesLeftThisMessage: ptr int32): WINBOOL {.
     stdcall, dynlib: "kernel32", importc: "PeekNamedPipe".}
+proc freeConsole(): WINBOOL {.stdcall, dynlib: "kernel32", importc: "FreeConsole".}
+proc allocConsole(): WINBOOL {.stdcall, dynlib: "kernel32", importc: "AllocConsole".}
+proc getConsoleWindow(): Handle {.stdcall, dynlib: "kernel32", importc: "GetConsoleWindow".}
 
 proc main() =
+  # Diagnostics: console attachment state.
+  echo "consoleWindow before=", getConsoleWindow().int
+  let fc = freeConsole()
+  echo "FreeConsole rc=", fc, " le=", getLastError()
+
   var sa = SECURITY_ATTRIBUTES(nLength: sizeof(SECURITY_ATTRIBUTES).int32,
                                bInheritHandle: 0)
   var inputRead, inputWrite, outputRead, outputWrite: Handle
