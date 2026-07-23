@@ -1314,23 +1314,15 @@ proc expect*(s: TtySession; text: string; timeoutMs = 5000): bool {.discardable.
       # The child process has exited, but on Windows the ConPTY conhost is a
       # separate process that may still be flushing the child's final output
       # to the pipe — bytes can arrive well after the child's exit code is
-      # observable. Keep draining until the pipe has been quiet for a sustained
-      # window (so the conhost has flushed everything) or the search text turns
-      # up. Without this the last render is lost and the assertion fails on
-      # output the child actually produced.
-      var quiet = 0
-      let exitDrainDeadline = epochTime() + 1.5
-      while epochTime() < exitDrainDeadline:
-        let before = s.raw.len
-        s.drain(20, recordFrame = false)
+      # observable, and the conhost lags the child. Keep draining for the
+      # remaining expect budget rather than giving up on the first quiet
+      # window; without this the last render is lost and the assertion fails
+      # on output the child actually produced.
+      while epochTime() < deadline:
+        s.drain(30, recordFrame = false)
         if text in s.screenText() or text in cleanRaw(s.freshRaw()):
           s.advanceRawMark()
           return true
-        if s.raw.len > before:
-          quiet = 0
-        else:
-          inc quiet
-          if quiet >= 5: break  # ~100ms of silence => conhost flushed
       return false
     let remaining = max(1, int((deadline - epochTime()) * 1000))
     discard s.waitForOutput(remaining, recordFrame = false)
