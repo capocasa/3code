@@ -527,12 +527,12 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     # The pipes are wired now so enabling the child side later needs no
     # harness change.
     proc makePipe(readEnd, writeEnd: var Handle) =
+      # The child is spawned with bInheritHandles=FALSE, so these IPC pipes
+      # are never inherited regardless; create them non-inheritable (the
+      # child-side hooks that would use them are POSIX-gated in src/ anyway).
       var sa = SECURITY_ATTRIBUTES(nLength: sizeof(SECURITY_ATTRIBUTES).int32,
-                                   bInheritHandle: 1)
+                                   bInheritHandle: 0)
       doAssert createPipe(readEnd, writeEnd, sa, 0) != 0
-      # The read end is kept by the parent; mark it non-inheritable so only
-      # the intended write end crosses into the child (and vice versa).
-      discard setHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0)
 
     # Create the ConPTY pipes non-inheritable (bInheritHandle=0): the child is
     # spawned with bInheritHandles=FALSE, and CreatePseudoConsole duplicates
@@ -567,19 +567,6 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     makePipe(tickerRead, tickerWrite)
     makePipe(tickerAckRead, tickerAckWrite)
     makePipe(apiRead, apiWrite)
-    # Invert inheritance on the ends the child keeps, so makePipe's default
-    # (parent keeps read end) is corrected per-pipe: the child needs the
-    # write ends of frame/tickerAck and the read ends of ack/ticker/api.
-    discard setHandleInformation(frameWrite, HANDLE_FLAG_INHERIT,
-                                 HANDLE_FLAG_INHERIT)
-    discard setHandleInformation(ackRead, HANDLE_FLAG_INHERIT,
-                                 HANDLE_FLAG_INHERIT)
-    discard setHandleInformation(tickerRead, HANDLE_FLAG_INHERIT,
-                                 HANDLE_FLAG_INHERIT)
-    discard setHandleInformation(tickerAckWrite, HANDLE_FLAG_INHERIT,
-                                 HANDLE_FLAG_INHERIT)
-    discard setHandleInformation(apiRead, HANDLE_FLAG_INHERIT,
-                                 HANDLE_FLAG_INHERIT)
 
     result = TtySession(
       masterFd: pttyOutRead,
