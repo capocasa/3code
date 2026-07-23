@@ -612,7 +612,7 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     echo "DIAG initAttrList rc=", initRc, " le=", getLastError()
     doAssert initRc != 0
     let updRc = updateProcThreadAttribute(attrList, 0,
-        PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, cast[pointer](unsafeAddr hpc),
+        PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, cast[pointer](hpc.Handle),
         sizeof(HPCON).SIZE_T, nil, nil)
     echo "DIAG updAttr rc=", updRc, " le=", getLastError(), " hpc=", hpc.int, " sizeofHPCON=", sizeof(HPCON)
     doAssert updRc != 0

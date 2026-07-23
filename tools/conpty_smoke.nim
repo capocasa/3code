@@ -94,7 +94,7 @@ proc main() =
   var attrList = cast[pointer](alloc0(attrSize))
   doAssert initializeProcThreadAttributeList(attrList, 1, 0, addr attrSize) != 0
   doAssert updateProcThreadAttribute(attrList, 0,
-      PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE.uint, cast[pointer](unsafeAddr hpc),
+      PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE.uint, cast[pointer](hpc.Handle),
       sizeof(HPCON).SIZE_T, nil, nil) != 0
 
   var si = STARTUPINFOEX(startupInfo: STARTUPINFO(cb: sizeof(STARTUPINFOEX).int32))
