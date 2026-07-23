@@ -27,6 +27,7 @@ when defined(windows):
     PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE* = 0x00020016'u32
     EXTENDED_STARTUPINFO_PRESENT* = 0x00080000'i32
     STILL_ACTIVE_DW* = 0x00000103'i32
+  var conptyPeekCount* = 0
   proc createPseudoConsole(size: COORD; hInput, hOutput: Handle;
       dwFlags: uint32; phPC: ptr HPCON): int32 {.stdcall,
       dynlib: "kernel32", importc: "CreatePseudoConsole".}
@@ -286,6 +287,10 @@ proc readPtyChunk(s: TtySession; waitMs: int): bool =
     let deadline = epochTime() + max(0, waitMs).float / 1000.0
     while epochTime() < deadline:
       let avail = pipeBytesAvail(s.masterFd)
+      if conptyPeekCount < 8:
+        inc conptyPeekCount
+        echo "DIAG peek masterFd=", s.masterFd.int, " avail=", avail,
+             " le=", getLastError(), " exited=", s.exited
       if avail > 0:
         var buf: array[4096, char]
         var got: int32 = 0
