@@ -27,7 +27,6 @@ when defined(windows):
     PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE* = 0x00020016'u32
     EXTENDED_STARTUPINFO_PRESENT* = 0x00080000'i32
     STILL_ACTIVE_DW* = 0x00000103'i32
-  var conptyPeekCount* = 0
   proc createPseudoConsole(size: COORD; hInput, hOutput: Handle;
       dwFlags: uint32; phPC: ptr HPCON): int32 {.stdcall,
       dynlib: "kernel32", importc: "CreatePseudoConsole".}
@@ -272,13 +271,10 @@ when defined(windows):
     ## we poll with PeekNamedPipe instead — it returns immediately with the
     ## count of unread bytes, or 0 if nothing is ready.
     var avail: int32 = 0
-    let ok = peekNamedPipe(h, nil, 0, nil, addr avail, nil)
-    if conptyPeekCount < 12:
-      inc conptyPeekCount
-      echo "DIAG pipeBytesAvail h=", h.int, " ok=", ok, " avail=", avail,
-           " le=", getLastError()
-    if ok:
+    if peekNamedPipe(h, nil, 0, nil, addr avail, nil):
       return avail
+    # PeekNamedPipe fails when the write end is closed (child exited) — treat
+    # that as no bytes available; the exit poll picks up the exit separately.
     0
 
 proc readPtyChunk(s: TtySession; waitMs: int): bool =
@@ -286,9 +282,12 @@ proc readPtyChunk(s: TtySession; waitMs: int): bool =
     # Bounded wait loop: poll PeekNamedPipe for available bytes, sleeping in
     # small increments, never issuing a blocking readFile on an empty pipe
     # (which would hang until the write end closes). A dead child that stops
-    # writing drains the poll budget and we return cleanly.
+    # writing drains the poll budget and we return cleanly. The body runs at
+    # least once even when waitMs=0 (pollOnce calls readPtyChunk(0) after it
+    # has already confirmed bytes are available — a 0ms deadline must not
+    # skip that read).
     let deadline = epochTime() + max(0, waitMs).float / 1000.0
-    while epochTime() < deadline:
+    while true:
       let avail = pipeBytesAvail(s.masterFd)
       if avail > 0:
         var buf: array[4096, char]
@@ -300,8 +299,9 @@ proc readPtyChunk(s: TtySession; waitMs: int): bool =
           s.feedGridChunk(chunk)
           return true
         return false
+      if epochTime() >= deadline:
+        return false
       sleep(1)
-    false
   else:
     var pfd: TPollfd
     pfd.fd = s.masterFd
@@ -696,7 +696,6 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     result.hProcess = pi.hProcess
     result.hThread = pi.hThread
     result.dwProcessId = pi.dwProcessId
-    conptyPeekCount = 0  # reset diag counter per session
     # Close the child-side IPC pipe ends in the parent; the child has its
     # own duplicates via inheritance. Closing here ensures the parent's read
     # on the master returns EOF when the child exits (no lingering write
