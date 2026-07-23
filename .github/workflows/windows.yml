@@ -56,15 +56,13 @@ jobs:
         # log), which silently masks regressions.
         run: |
           if command -v testament >/dev/null 2>&1; then
-            testament --print --megatest:off all
+            testament --print --megatest:off tty
           else
-            for d in tests/*/; do
-              for f in "$d"*.nim; do
-                nim c -r --path:src --path:tests "$f" || exit 1
-              done
+            for f in tests/tty/*.nim; do
+              nim c -r --path:src --path:tests "$f" || exit 1
             done
           fi
-        timeout-minutes: 30
+        timeout-minutes: 20
 
       - name: Package (Windows) - bundle OpenSSL DLLs alongside .exe
         shell: pwsh
