@@ -1691,6 +1691,7 @@ commands:
   :version          show the running 3code version
   :sandbox          show the active filesystem sandbox rules
   :sandbox show     (same)
+  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow P  add a writable rule for path P
   :sandbox readonly P  add a read-only rule for path P
   :sandbox deny P   add a deny rule for path P

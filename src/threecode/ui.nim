@@ -709,6 +709,20 @@ proc cmdNotify(arg: string) =
   else:
     errLn "usage: :notify [on|off]"
 
+proc cmdSandboxSettingSelect(target: string) =
+  case target.toLowerAscii
+  of "on":
+    sandboxEnabled = true
+  of "off":
+    sandboxEnabled = false
+  else:
+    errLn &"unknown value: {target} (choose on or off)"
+    return
+  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  hintLn "sandbox: ", if sandboxEnabled: "on" else: "off",
+    "  (on = enforce the .3code/sandbox policy, off = run unconfined)",
+    resetStyle
+
 proc nearestCommand(name: string): string =
   var bestDist = high(int)
   for c in CommandNames:
@@ -1010,6 +1024,8 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
           cmdResponse sandbox.renderSandbox(sandbox.current)
         else:
           cmdResponse "sandbox not active"
+      of "on", "off":
+        cmdSandboxSettingSelect(verb)
       of "allow", "readonly", "deny":
         if parts.len < 2:
           ok = false
@@ -1023,14 +1039,15 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
             else: akDeny
           let sf = sandbox.sandboxPathInCwd()
           if sandbox.appendRule(sf, argPath, access):
-            sandbox.reload(getCurrentDir())
+            sandbox.current = sandbox.loadCascaded(getCurrentDir())
             cmdResponse "sandbox updated: " & verb & " " & argPath
           else:
             ok = false
             cmdError "could not write sandbox file at " & sf
       else:
         ok = false
-        cmdError "unknown :sandbox verb: " & verb & "  (show, allow, readonly, deny)"
+        cmdError "unknown :sandbox verb: " & verb &
+          "  (show, on, off, allow, readonly, deny)"
     of ":show":
       showTool(arg, session.toolLog)
     of ":log":

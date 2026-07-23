@@ -1,7 +1,7 @@
-===== 387 =====
+===== 386 =====
 
   ╭─╮
-   ─┤  3code v0.5.1-sandbox-cb9793f3-unstaged   the economical coding agent
+   ─┤  3code v0.6.0-sandbox-8d2a4841-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,8 +10,7 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ :help
-===== 993 =====
-  :clear            reset conversation (keeps system prompt)
+===== 178 =====
   :model            list models for current provider (current marked with *)
   :model X          switch to model X (within current provider)
   :provider         list configured providers (current marked with *)
@@ -33,6 +32,7 @@
   :version          show the running 3code version
   :sandbox          show the active filesystem sandbox rules
   :sandbox show     (same)
+  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow P  add a writable rule for path P
   :sandbox readonly P  add a read-only rule for path P
   :sandbox deny P   add a deny rule for path P
@@ -51,8 +51,7 @@ input:
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
 ❯
-===== 366 =====
-  :clear            reset conversation (keeps system prompt)
+===== 237 =====
   :model            list models for current provider (current marked with *)
   :model X          switch to model X (within current provider)
   :provider         list configured providers (current marked with *)
@@ -74,6 +73,7 @@ input:
   :version          show the running 3code version
   :sandbox          show the active filesystem sandbox rules
   :sandbox show     (same)
+  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow P  add a writable rule for path P
   :sandbox readonly P  add a read-only rule for path P
   :sandbox deny P   add a deny rule for path P
@@ -92,8 +92,7 @@ input:
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
 ❯ :provider
-===== 780 =====
-  :provider add     add a new provider (interactive, verified)
+===== 549 =====
   :provider edit X  edit provider X (url, key, models)
   :provider rm X    remove provider X
   :reasoning        list reasoning levels for current model (* marks active)
@@ -110,6 +109,7 @@ input:
   :version          show the running 3code version
   :sandbox          show the active filesystem sandbox rules
   :sandbox show     (same)
+  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow P  add a writable rule for path P
   :sandbox readonly P  add a read-only rule for path P
   :sandbox deny P   add a deny rule for path P
@@ -133,8 +133,7 @@ input:
 stub  [stub-model]
 alt
 ❯
-===== 100 =====
-  :provider add     add a new provider (interactive, verified)
+===== 645 =====
   :provider edit X  edit provider X (url, key, models)
   :provider rm X    remove provider X
   :reasoning        list reasoning levels for current model (* marks active)
@@ -151,6 +150,7 @@ alt
   :version          show the running 3code version
   :sandbox          show the active filesystem sandbox rules
   :sandbox show     (same)
+  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow P  add a writable rule for path P
   :sandbox readonly P  add a read-only rule for path P
   :sandbox deny P   add a deny rule for path P
@@ -174,8 +174,7 @@ input:
 stub  [stub-model]
 alt
 ❯ :model
-===== 982 =====
-  :streaming        show streaming mode (on = live output, off = request/response)
+===== 482 =====
   :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
   :notify           show notify mode (on = desktop notification when a turn ends)
   :notify on|off    toggle turn-end desktop notification
@@ -187,6 +186,7 @@ alt
   :version          show the running 3code version
   :sandbox          show the active filesystem sandbox rules
   :sandbox show     (same)
+  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow P  add a writable rule for path P
   :sandbox readonly P  add a read-only rule for path P
   :sandbox deny P   add a deny rule for path P
@@ -215,8 +215,7 @@ alt
 stub-model
 stub-large
 ❯
-===== 180 =====
-  :streaming        show streaming mode (on = live output, off = request/response)
+===== 941 =====
   :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
   :notify           show notify mode (on = desktop notification when a turn ends)
   :notify on|off    toggle turn-end desktop notification
@@ -228,6 +227,7 @@ stub-large
   :version          show the running 3code version
   :sandbox          show the active filesystem sandbox rules
   :sandbox show     (same)
+  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow P  add a writable rule for path P
   :sandbox readonly P  add a read-only rule for path P
   :sandbox deny P   add a deny rule for path P
@@ -256,14 +256,14 @@ alt
 stub-model
 stub-large
 ❯ :reasoning
-===== 863 =====
-  :show [N]         show full output of tool call N (default: last)
+===== 758 =====
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :version          show the running 3code version
   :sandbox          show the active filesystem sandbox rules
   :sandbox show     (same)
+  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow P  add a writable rule for path P
   :sandbox readonly P  add a read-only rule for path P
   :sandbox deny P   add a deny rule for path P
@@ -297,14 +297,14 @@ stub-large
 reasoning: (none)
 experimental: level is free-form, type any value
 ❯
-===== 776 =====
-  :show [N]         show full output of tool call N (default: last)
+===== 970 =====
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :version          show the running 3code version
   :sandbox          show the active filesystem sandbox rules
   :sandbox show     (same)
+  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow P  add a writable rule for path P
   :sandbox readonly P  add a read-only rule for path P
   :sandbox deny P   add a deny rule for path P
@@ -338,9 +338,9 @@ stub-large
 reasoning: (none)
 experimental: level is free-form, type any value
 ❯ :model stub-large
-===== 836 =====
-  :sandbox          show the active filesystem sandbox rules
+===== 561 =====
   :sandbox show     (same)
+  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow P  add a writable rule for path P
   :sandbox readonly P  add a read-only rule for path P
   :sandbox deny P   add a deny rule for path P
@@ -379,9 +379,9 @@ experimental: level is free-form, type any value
 provider  stub
 model     stub-large
 ❯
-===== 673 =====
-  :sandbox          show the active filesystem sandbox rules
+===== 889 =====
   :sandbox show     (same)
+  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow P  add a writable rule for path P
   :sandbox readonly P  add a read-only rule for path P
   :sandbox deny P   add a deny rule for path P
@@ -420,7 +420,7 @@ experimental: level is free-form, type any value
 provider  stub
 model     stub-large
 ❯ :reasoning high
-===== 159 =====
+===== 216 =====
 
 input:
   single-line   just type and press Enter
@@ -461,7 +461,7 @@ provider  stub
 model     stub-large
 reasoning high
 ❯
-===== 551 =====
+===== 290 =====
 
 input:
   single-line   just type and press Enter
@@ -502,7 +502,7 @@ provider  stub
 model     stub-large
 reasoning high
 ❯ :provider alt
-===== 319 =====
+===== 402 =====
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
   ctrl+u        clear the buffer
@@ -543,7 +543,7 @@ reasoning high
 provider  alt
 model     alt-model
 ❯
-===== 113 =====
+===== 171 =====
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
   ctrl+u        clear the buffer
@@ -584,7 +584,7 @@ reasoning high
 provider  alt
 model     alt-model
 ❯ :tokens
-===== 499 =====
+===== 939 =====
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
@@ -625,7 +625,7 @@ model     alt-model
 
 no tokens used yet
 ❯
-===== 465 =====
+===== 913 =====
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
@@ -666,7 +666,7 @@ model     alt-model
 
 no tokens used yet
 ❯ :clear
-===== 260 =====
+===== 848 =====
 
 ❯ :provider
 
@@ -707,7 +707,7 @@ no tokens used yet
 
 ════════════════════════════════════════
 ❯
-===== 250 =====
+===== 316 =====
 
 ❯ :provider
 
@@ -748,7 +748,7 @@ no tokens used yet
 
 ════════════════════════════════════════
 ❯ :sessions
-===== 447 =====
+===== 859 =====
 alt
 
 ❯ :model
@@ -789,7 +789,7 @@ no tokens used yet
 
 no saved sessions for this directory
 ❯
-===== 976 =====
+===== 422 =====
 alt
 
 ❯ :model
@@ -830,7 +830,7 @@ no tokens used yet
 
 no saved sessions for this directory
 ❯ :sessions all
-===== 811 =====
+===== 731 =====
 ❯ :reasoning
 
 reasoning: (none)
@@ -871,7 +871,7 @@ no saved sessions for this directory
 
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 ❯
-===== 192 =====
+===== 269 =====
 ❯ :reasoning
 
 reasoning: (none)
@@ -912,7 +912,7 @@ no saved sessions for this directory
 
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 ❯ :log
-===== 333 =====
+===== 185 =====
 
 ❯ :model stub-large
 
@@ -953,7 +953,7 @@ listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 no tool calls yet
 ❯
-===== 180 =====
+===== 588 =====
 
 ❯ :model stub-large
 
@@ -994,7 +994,7 @@ listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 no tool calls yet
 ❯ :show
-===== 744 =====
+===== 840 =====
 model     stub-large
 
 ❯ :reasoning high
@@ -1035,7 +1035,7 @@ no tool calls yet
 
 no tool calls yet
 ❯
-===== 630 =====
+===== 953 =====
 model     stub-large
 
 ❯ :reasoning high
@@ -1076,7 +1076,7 @@ no tool calls yet
 
 no tool calls yet
 ❯ :compact
-===== 825 =====
+===== 776 =====
 provider  stub
 model     stub-large
 reasoning high
@@ -1117,7 +1117,7 @@ no tool calls yet
 
 unknown command: :compact  (try :help)
 ❯
-===== 140 =====
+===== 510 =====
 provider  stub
 model     stub-large
 reasoning high
@@ -1158,7 +1158,7 @@ no tool calls yet
 
 unknown command: :compact  (try :help)
 ❯ :summarize
-===== 216 =====
+===== 543 =====
 ❯ :provider alt
 
 provider  alt
@@ -1199,7 +1199,7 @@ unknown command: :compact  (try :help)
 
 failed or not worth it
 ❯
-===== 962 =====
+===== 746 =====
 ❯ :provider alt
 
 provider  alt
@@ -1240,7 +1240,7 @@ unknown command: :compact  (try :help)
 
 failed or not worth it
 ❯ :prompt
-===== 470 =====
+===== 228 =====
 # Risk
 
 Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), har
@@ -1281,7 +1281,7 @@ Available:
 Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one on what's n
 ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 ❯
-===== 145 =====
+===== 675 =====
 # Risk
 
 Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), har
@@ -1322,7 +1322,7 @@ Available:
 Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one on what's n
 ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 ❯ :toknes
-===== 868 =====
+===== 507 =====
 ing PRs, sending email). When in doubt, ask.
 
 # Git
@@ -1363,7 +1363,7 @@ ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was alread
 
 unknown command: :toknes  did you mean :tokens?
 ❯
-===== 467 =====
+===== 911 =====
 ing PRs, sending email). When in doubt, ask.
 
 # Git

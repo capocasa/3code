@@ -257,6 +257,14 @@ proc parseConfigFile*(path: string): (string, string, seq[ProviderRec], Table[st
           of "on", "true", "yes", "1": streamingEnabled = true
           of "off", "false", "no", "0": streamingEnabled = false
           else: discard
+        of "sandbox", "sandbox_enabled":
+          # Same boolean dialect as `notify`/`streaming`. Default on; an
+          # explicit `off` disables sandbox enforcement entirely (bash runs
+          # unconfined, in-process checks pass through).
+          case v.toLowerAscii
+          of "on", "true", "yes", "1": sandboxEnabled = true
+          of "off", "false", "no", "0": sandboxEnabled = false
+          else: discard
         of "mode":
           # `auto` detects the background (default); `dark`/`bright` force a
           # palette. `light` is accepted as an alias for `bright`.
@@ -264,14 +272,6 @@ proc parseConfigFile*(path: string): (string, string, seq[ProviderRec], Table[st
           of "auto": colorModePref = cmAuto
           of "dark": colorModePref = cmDark
           of "bright", "light": colorModePref = cmLight
-          else: discard
-        of "sandbox":
-          # Same boolean dialect as `notify`/`streaming`. Default is on;
-          # an explicit `off` runs bash commands directly instead of via
-          # `3code box restrict`.
-          case v.toLowerAscii
-          of "on", "true", "yes", "1": sandboxEnabled = true
-          of "off", "false", "no", "0": sandboxEnabled = false
           else: discard
         of "bash_path", "bash-path":
           bashPathOverride = v

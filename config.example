@@ -15,7 +15,7 @@ current = "baseten.glm5"
 ; SERP, so swap only for a Startpage-compatible mirror.
 ; search-url = "https://www.startpage.com/do/search?cat=web&q="
 ; notify = off ; turn off the desktop notification that fires when a turn ends (on by default)
-; sandbox = off ; run bash commands directly instead of under the filesystem sandbox (on by default)
+; sandbox = off ; disable filesystem sandbox enforcement (on by default: .3code/sandbox policy)
 ; bash_path = "C:\\tools\\msys64\\usr\\bin\\bash.exe"  ; Windows only: override bash detection
 
 # Colour mode. 3code detects dark vs bright-background automatically by

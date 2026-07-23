@@ -88,12 +88,14 @@ proc ensureBash() =
       quit ExitUsage
 
 proc initSandbox(cwd: string) =
-  ## Create the default `.3code/sandbox` if none exists, refuse to run if
-  ## it can't be created, then load it into the global sandbox state and
-  ## resolve this binary's own path for bash wrapping. The sandbox backend
-  ## (`3code box`) is compiled in, so it is always available: bash wrapping
-  ## never falls back. Per spec the sandbox is mandatory: yolo mode is fine
-  ## but must be explicit (the user edits the file).
+  ## Load the cascaded sandbox policy into the global state and resolve
+  ## this binary's own path for bash wrapping. The policy is built from the
+  ## system file (next to `~/.config/3code/config`) and the repo file
+  ## (`.3code/sandbox`), each falling back to the built-in default when
+  ## absent, so no file is ever written into the project on first run. When
+  ## `sandboxEnabled` is false (the `[settings] sandbox = off` switch), this
+  ## does nothing: bash runs unconfined and the in-process checks pass
+  ## through (`active` stays false).
   # The provider stub binary (the tty/visual test harness) skips sandbox
   # setup entirely so its behaviour matches the pre-sandbox binary. Those
   # tests drive REPL rendering, not enforcement, and `active=true` plus the
@@ -102,33 +104,22 @@ proc initSandbox(cwd: string) =
   # suite and by production.
   when defined(providerStub):
     return
-  if not sandbox.ensureDefaultSandbox(cwd):
-    stderr.writeLine "3code: could not create sandbox file at " &
-      sandbox.sandboxPath(cwd)
-    stderr.writeLine "3code: the sandbox is mandatory. Fix the directory " &
-      "permissions or create " & sandbox.sandboxPath(cwd) &
-      " by hand."
-    quit ExitConfig
-  sandbox.reload(cwd)
-  # reload() set `active = true` from the file load. The bash tool re-execs
-  # this binary as `3code box restrict ...`, so resolve our own path once.
-  # The provider stub binary (the tty/visual test harness) skips the box
-  # wrapping entirely: those tests drive REPL rendering, not sandbox
-  # enforcement, and the startup probe's fork shifts the wall-clock timing
-  # the spinner/SIGWINCH assertions depend on. The stub's bash commands run
-  # via the plain setsid path, exactly as they did before the sandbox landed.
-  when not defined(providerStub):
-    sandbox.nimboxExe = sandbox.findNimbox()
-    # Probe: the box subcommand is always compiled in, but the OS-native
-    # restriction can still be nonfunctional (a kernel without Landlock, a CI
-    # runner under a seccomp filter that blocks the syscall). On failure,
-    # clear nimboxExe so the bash tool degrades to the unconfined setsid path
-    # instead of failing every command. The in-process read/write/patch
-    # checks stay in force via `active` regardless. The probe runs silently;
-    # the backend being unavailable is a host limitation, not an error the
-    # user can act on.
-    if not sandbox.backendWorks(sandbox.nimboxExe):
-      sandbox.nimboxExe = ""
+  if not sandboxEnabled:
+    return
+  sandbox.current = sandbox.loadCascaded(cwd)
+  sandbox.active = true
+  # The bash tool re-execs this binary as `3code box restrict ...`, so
+  # resolve our own path once. The box subcommand is always compiled in, but
+  # the OS-native restriction can still be nonfunctional (a kernel without
+  # Landlock, a CI runner under a seccomp filter that blocks the syscall).
+  # On failure, clear nimboxExe so the bash tool degrades to the unconfined
+  # setsid path instead of failing every command. The in-process
+  # read/write/patch checks stay in force via `active` regardless. The
+  # probe runs silently; the backend being unavailable is a host limitation,
+  # not an error the user can act on.
+  sandbox.nimboxExe = sandbox.findNimbox()
+  if not sandbox.backendWorks(sandbox.nimboxExe):
+    sandbox.nimboxExe = ""
 
 proc setupTlsEnv() =
   ## macOS: stock LibreSSL at `/usr/lib/libssl.dylib` fails handshakes
