@@ -263,19 +263,41 @@ proc feedGridChunk(s: TtySession; chunk: string) =
           s.flushFrame()
       i = nextEnd + SyncEnd.len
 
+when defined(windows):
+  proc pipeBytesAvail(h: Handle): int32 =
+    ## Non-blocking check for bytes available on an anonymous pipe read handle.
+    ## WaitForSingleObject is unreliable on anonymous pipe handles (they are
+    ## not waitable for read-readiness the way console/event handles are), so
+    ## we poll with PeekNamedPipe instead — it returns immediately with the
+    ## count of unread bytes, or 0 if nothing is ready.
+    var avail: int32 = 0
+    if peekNamedPipe(h, nil, 0, nil, addr avail, nil):
+      return avail
+    # PeekNamedPipe fails when the write end is closed (child exited) — treat
+    # that as no bytes available; the exit poll picks up the exit separately.
+    0
+
 proc readPtyChunk(s: TtySession; waitMs: int): bool =
   when defined(windows):
-    # Bounded wait: WaitForSingleObject with a timeout (never INFINITE),
-    # mirroring the POSIX poll()+read() path. A dead child that stops
-    # writing must not hang the whole testament category.
-    if waitForSingleObject(s.masterFd, max(0, waitMs).int32) == WAIT_OBJECT_0:
-      var buf: array[4096, char]
-      var got: int32 = 0
-      if readFile(s.masterFd, addr buf[0], buf.len.int32, addr got, nil) != 0 and got > 0:
-        var chunk = newString(got)
-        copyMem(chunk[0].addr, buf[0].addr, got)
-        s.feedGridChunk(chunk)
-        return true
+    # Bounded wait loop: poll PeekNamedPipe for available bytes, sleeping in
+    # small increments, never issuing a blocking readFile on an empty pipe
+    # (which would hang until the write end closes). A dead child that stops
+    # writing drains the poll budget and we return cleanly.
+    let deadline = epochTime() + max(0, waitMs).float / 1000.0
+    while epochTime() < deadline:
+      let avail = pipeBytesAvail(s.masterFd)
+      if avail > 0:
+        var buf: array[4096, char]
+        var got: int32 = 0
+        let toRead = min(avail, buf.len.int32)
+        if readFile(s.masterFd, addr buf[0], toRead, addr got, nil) != 0 and got > 0:
+          var chunk = newString(got)
+          copyMem(chunk[0].addr, buf[0].addr, got)
+          s.feedGridChunk(chunk)
+          return true
+        return false
+      sleep(1)
+    false
   else:
     var pfd: TPollfd
     pfd.fd = s.masterFd
@@ -318,23 +340,25 @@ proc pollOnce(s: TtySession, waitMs: int; recordIdleFrame = true): bool =
     return false
 
   when defined(windows):
-    # WaitForMultipleObjects on the ConPTY read handle and (if present) the
-    # frame-event pipe read handle, with a bounded timeout (never INFINITE).
-    # WAIT_OBJECT_0 signals the first handle (master), WAIT_OBJECT_0+1 the
-    # second (frame event). The frame-event branch mirrors the POSIX path:
-    # drain pending PTY bytes, force a frame commit, ack the child, then
-    # fall through to exit detection.
-    var handles: WOHandleArray
-    handles[0] = s.masterFd
-    var n = 1
-    if s.frameEventFd.int != 0 and s.frameEventFd.int != -1:
-      handles[1] = s.frameEventFd
-      n = 2
-    let wr = waitForMultipleObjects(n.int32, addr handles, 0.WINBOOL,
-                                    max(0, waitMs).int32)
-    if wr == WAIT_OBJECT_0:
+    # Anonymous pipe handles are not waitable for read-readiness, so we poll
+    # both the ConPTY output and the frame-event pipe with PeekNamedPipe,
+    # sleeping in small increments until the waitMs budget is spent. The
+    # frame-event branch mirrors the POSIX path: drain pending PTY bytes,
+    # force a frame commit, ack the child, then fall through to exit check.
+    let deadline = epochTime() + max(0, waitMs).float / 1000.0
+    var sawMaster = false
+    var sawFrame = false
+    while epochTime() < deadline and not (sawMaster or sawFrame):
+      if pipeBytesAvail(s.masterFd) > 0:
+        sawMaster = true
+      elif s.frameEventFd.int != 0 and s.frameEventFd.int != -1 and
+          pipeBytesAvail(s.frameEventFd) > 0:
+        sawFrame = true
+      else:
+        sleep(1)
+    if sawMaster:
       result = s.readPtyChunk(0) or result
-    elif n == 2 and wr == WAIT_OBJECT_0 + 1:
+    if sawFrame:
       var buf: array[256, char]
       var got: int32 = 0
       discard readFile(s.frameEventFd, addr buf[0], buf.len.int32, addr got, nil)
@@ -347,7 +371,7 @@ proc pollOnce(s: TtySession, waitMs: int; recordIdleFrame = true): bool =
           var written: int32 = 0
           discard writeFile(s.frameAckFd, addr ch, 1, addr written, nil)
         result = true
-    elif not result and recordIdleFrame:
+    if not result and recordIdleFrame:
       s.flushFrame()
     discard s.childExited()
   else:
@@ -792,11 +816,16 @@ proc advanceTicker*(s: TtySession) =
     var ch = 't'
     var written: int32 = 0
     discard writeFile(s.tickerCommandFd, addr ch, 1, addr written, nil)
-    # Bounded ack wait: WaitForSingleObject with a timeout, never INFINITE.
-    if waitForSingleObject(s.tickerAckFd, 2000) == WAIT_OBJECT_0:
-      var ack: array[1, char]
-      var got: int32 = 0
-      discard readFile(s.tickerAckFd, addr ack[0], 1, addr got, nil)
+    # Bounded ack wait: poll PeekNamedPipe for the ack byte (anonymous pipe
+    # handles are not waitable), never blocking indefinitely.
+    let ackDeadline = epochTime() + 2.0
+    while epochTime() < ackDeadline:
+      if pipeBytesAvail(s.tickerAckFd) > 0:
+        var ack: array[1, char]
+        var got: int32 = 0
+        discard readFile(s.tickerAckFd, addr ack[0], 1, addr got, nil)
+        break
+      sleep(1)
   else:
     var ch = 't'
     discard posix.write(s.tickerCommandFd, addr ch, 1)
