@@ -30,7 +30,6 @@ proc writeProviderConfig(root, url: string) =
   writeFile(root / "xdg" / "3code" / "config", """
 [settings]
 current = "mock.glm"
-search-url = "http://127.0.0.1:1/?q="
 
 [provider]
 name = "mock"
