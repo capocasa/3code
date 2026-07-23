@@ -83,10 +83,11 @@ proc main() =
   echo "createPseudoConsole rc=", rc, " hpc=", hpc.int
   if rc != 0: quit("createPseudoConsole failed", 1)
 
-  # Wait for the conhost (spawned by CreatePseudoConsole) to connect to both
-  # named pipe server ends. node-pty calls ConnectNamedPipe here.
-  echo "ConnectNamedPipe hIn rc=", connectNamedPipe(hIn, nil), " le=", getLastError()
-  echo "ConnectNamedPipe hOut rc=", connectNamedPipe(hOut, nil), " le=", getLastError()
+  # NOTE: node-pty calls ConnectNamedPipe here, but it blocks until the
+  # conhost connects, and in our context it never returned (timed out). The
+  # connection happens implicitly via the duplicated handle CreatePseudoConsole
+  # holds, so skip ConnectNamedPipe and read/write the server handles directly.
+  echo "skipping ConnectNamedPipe (blocks; conhost connects via dup handle)"
 
   var attrSize: SIZE_T = 0
   discard initializeProcThreadAttributeList(nil, 1, 0, addr attrSize)
