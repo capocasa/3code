@@ -81,22 +81,47 @@ test_history, test_api, test_streamexec). 1 remains precisely disabled:
 test_netthread_blocks (the interrupt-wakes-blocking-recv path is POSIX-only;
 shutdownCachedStreamFd is a no-op on Windows — a real source gap, documented).
 
-Step 4 (ConPTY port of tty_expect.nim) is DONE (commits 91130c4, acff7d9):
-the full POSIX PTY lifecycle is forked on `when defined(windows):` —
-openpty→CreatePseudoConsole, fork+login_tty+execv→ProcThreadAttributeList+
+Step 4 (ConPTY port of tty_expect.nim): harness port DONE and PROVEN
+WORKING. The POSIX PTY lifecycle is forked on `when defined(windows):`
+(openpty→CreatePseudoConsole, fork+execv→ProcThreadAttributeList+
 CreateProcessW, waitpid→GetExitCodeProcess, kill→TerminateProcess,
-TIOCSWINSZ→ResizePseudoConsole. Every Windows blocking call is bounded
-(WaitForSingleObject with timeout, never INFINITE), mirroring the OSX
-hardening. TtySession + expect*/send/resize/close API identical across
-platforms; the 18 test bodies needed no changes (only test_tty_functional's
-POSIX-specific hardKillAndWait/discardClose were gated). All 18
-`disabled: "win"` removed. POSIX branch verified green on linux (8/8 on
-test_quit_signals; tty_expect + all 18 type-check clean under --os:windows).
-Windows runtime correctness is NOT yet verified — CI is the gate. The
-child-side test sync hooks (emitTestFrameEvent etc.) are POSIX-gated in
-src/, so frame-event/ticker waits timeout (bounded) on Windows and tests
-settle via drain() polling; IPC pipes are wired for a later child-side
-enablement with no harness change.
+TIOCSWINSZ→ResizePseudoConsole). KEY FIXES during CI iteration:
+- PeekNamedPipe replaces WaitForSingleObject for pipe read-readiness
+  (anon pipe handles are NOT waitable; the original approach hung the
+  whole harness indefinitely).
+- Child env inherits SystemRoot/windir/PATH/TEMP/etc from parent for DLL
+  resolution (without SystemRoot the child dies STATUS_DLL_INIT_FAILED
+  0xC0000142).
+- windows.yml stages OpenSSL DLLs (libssl/libcrypto/cacert.pem from
+  nim-lang.org/dlls.zip) into root + build/ BEFORE tests, since the tty
+  tests spawn the real 3code binary built -d:ssl.
+- .exe appended to stub/real binary paths (CreateProcessW needs it).
+- cache dir name sanitizes ':' (Windows forbids it in paths).
+
+PROVEN: a diagnostic test spawning cmd.exe /c echo hello under the harness
+PASSED; a diagnostic spawning 3code_stub with bare env PASSED; a diagnostic
+with the EXACT test_quit_signals env (config+responses+XDG+TERM+PATH+cwd)
+also PASSED. So the ConPTY harness lifecycle is sound.
+
+REMAINING BLOCKER (narrow, needs Windows-local debugging): the real
+test_quit_signals.nim (and likely all tty tests that go through
+`ensureStubBinary()`) consistently fails with the child exiting
+0xC0000142 (STATUS_DLL_INIT_FAILED) at startup, producing no output.
+The diag that manually builds the stub and reuses it passes; test_quit_signals
+via `ensureStubBinary()` fails. Same binary path, same env, same cwd — the
+difference is the `ensureStubBinary()` code path (it may rebuild the stub,
+or the testament runner process differs). This needs a Windows box to
+debug efficiently (too many CI round-trips). The harness itself is correct.
+
+`test_broken_stdout_exit.nim` was re-disabled with a precise reason: it
+drives the binary via execCmdEx + bash + python3 (NOT the ConPTY harness)
+and asserts POSIX broken-pipe semantics; python3 isn't guaranteed on the
+Windows runner.
+
+wip commits on branch timing (664ffce..08bf07f) contain the iteration.
+windows.yml currently runs `testament cat tty` with DLL staging; revert to
+`testament all` once the 0xC0000142 blocker is resolved. POSIX branch
+verified green on linux throughout (8/8 test_quit_signals).
 
 ## Steps
 
