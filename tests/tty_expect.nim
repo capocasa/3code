@@ -534,29 +534,28 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       # the intended write end crosses into the child (and vice versa).
       discard setHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0)
 
+    # Create the ConPTY pipes non-inheritable (bInheritHandle=0): the child is
+    # spawned with bInheritHandles=FALSE, and CreatePseudoConsole duplicates
+    # these handles into the conhost itself, so neither end needs to be
+    # inheritable. This matches the proven conpty_smoke and avoids a subtle
+    # failure where inheritable slave ends produce no captured output.
     var pttyInRead, pttyInWrite, pttyOutRead, pttyOutWrite: Handle
     var sa = SECURITY_ATTRIBUTES(nLength: sizeof(SECURITY_ATTRIBUTES).int32,
-                                 bInheritHandle: 1)
+                                 bInheritHandle: 0)
     doAssert createPipe(pttyInRead, pttyInWrite, sa, 0) != 0
     doAssert createPipe(pttyOutRead, pttyOutWrite, sa, 0) != 0
     # The ConPTY master side keeps pttyInWrite (to send input to the child)
     # and pttyOutRead (to read child output); the slave ends (pttyInRead,
-    # pttyOutWrite) are handed to the pseudoconsole and must NOT be inherited
-    # by the child process directly.
-    discard setHandleInformation(pttyInWrite, HANDLE_FLAG_INHERIT, 0)
-    discard setHandleInformation(pttyOutRead, HANDLE_FLAG_INHERIT, 0)
+    # pttyOutWrite) are handed to the pseudoconsole.
 
     var hpc: HPCON
     doAssert createPseudoConsole(
         COORD(x: cols.int16, y: rows.int16),
         pttyInRead, pttyOutWrite, 0, addr hpc) == 0
-    # Close the PTY-slave ends now: CreatePseudoConsole holds its own copy,
-    # and if these inheritable handles stay open they get inherited by the
-    # child (bInheritHandles=TRUE), giving it raw duplicates of the
-    # pseudoconsole pipes alongside the pseudoconsole attachment itself.
-    # That duplicate-attachment fails console init with
-    # STATUS_DLL_INIT_FAILED (0xC0000142) — even for cmd.exe. This matches
-    # the canonical CreatePseudoConsole sample, which closes these here.
+    # Close the PTY-slave ends now: CreatePseudoConsole duplicates them into
+    # the conhost, so our copies are unneeded. Closing them here lets a read
+    # on the master (pttyOutRead) see EOF when the conhost exits, and matches
+    # the canonical CreatePseudoConsole sample.
     discard closeHandle(pttyInRead)
     discard closeHandle(pttyOutWrite)
 
