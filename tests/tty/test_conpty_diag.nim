@@ -2,12 +2,15 @@ import std/[os, unittest]
 import tty_expect
 
 suite "conpty diagnostic":
-  test "cmd.exe produces output under ConPTY":
-    let tty = newTtySession(getEnv("WINDIR") / "System32" / "cmd.exe",
-                            args = ["/c", "echo hello"],
-                            env = [(key: "PATH", val: getEnv("PATH"))])
+  test "stub binary produces prompt under ConPTY":
+    let stub = getCurrentDir() / "build" / "3code_stub" & (when defined(windows): ".exe" else: "")
+    let tty = newTtySession(stub,
+        args = ["-x", "-i"],
+        env = [(key: "PATH", val: getEnv("PATH")),
+               (key: "HOME", val: getCurrentDir())])
     defer: tty.close()
-    let got = tty.expect("hello", timeoutMs = 5000)
-    echo "saw hello: ", got
+    # Give it a moment, then dump whatever we got.
+    discard tty.waitForOutput(3000)
     echo "exited: ", tty.exited, " code: ", tty.exitCode
-    echo "raw: [", tty.cleanRaw(), "]"
+    echo "raw len: ", tty.raw.len
+    echo "raw: [", tty.cleanRaw()[0 ..< min(500, tty.cleanRaw().len)], "]"
