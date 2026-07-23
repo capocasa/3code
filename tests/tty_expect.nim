@@ -694,7 +694,15 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
     if cwd.len > 0:
       cwdW = newWideCString(cwd)
       cwdPtr = cwdW
-    let ok = createProcessW(appW, cmdW, nil, nil, 1,
+    # bInheritHandles MUST be FALSE for a ConPTY child. The canonical
+    # CreatePseudoConsole sample passes FALSE; passing TRUE causes the child
+    # to inherit handles that conflict with the pseudoconsole attachment,
+    # and the child's console/DLL init fails with STATUS_DLL_INIT_FAILED
+    # (0xC0000142) — even cmd.exe, even with a fully inherited env.
+    # This is safe because the child-side IPC hooks (emitTestFrameEvent etc.)
+    # are POSIX-gated in src/, so the Windows child does not use the IPC
+    # pipes set in its env; it settles via drain() polling instead.
+    let ok = createProcessW(appW, cmdW, nil, nil, 0,
         createFlags, envPtr, cwdPtr, si.startupInfo, pi)
     deleteProcThreadAttributeList(attrList)
     dealloc(attrList)
