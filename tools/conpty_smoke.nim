@@ -1,22 +1,11 @@
-## Standalone ConPTY smoke using NAMED pipes (CreateNamedPipeW), mirroring
-## node-pty's approach (which works on GHA windows runners). Anonymous pipes
-## (CreatePipe) cause the child to die with 0xC0000142 (STATUS_DLL_INIT_FAILED)
-## on the GHA runner; named pipes do not.
+## Standalone ConPTY smoke — faithful MS-sample reproduction (anonymous pipes)
+## plus the lpValue=hpc semantic. Run directly to isolate 0xC0000142/0xC0000138.
 when not defined(windows):
   echo "windows-only"
   quit(0)
 
 import std/[os, times]
 import winlean
-
-const
-  PIPE_ACCESS_INBOUND = 0x00000001'i32
-  PIPE_ACCESS_OUTBOUND = 0x00000002'i32
-  FILE_FLAG_FIRST_PIPE_INSTANCE = 0x00080000'i32
-  PIPE_TYPE_BYTE = 0x00000000'i32
-  PIPE_READMODE_BYTE = 0x00000000'i32
-  PIPE_WAIT = 0x00000000'i32
-  INVALID_HANDLE_VALUE_INT = -1
 
 type
   HPCON = distinct Handle
@@ -43,100 +32,82 @@ proc updateProcThreadAttribute(lpAttributeList: pointer; dwFlags: DWORD;
     attribute: uint; lpValue: pointer; cbSize: SIZE_T;
     lpPreviousValue: pointer; lpReturnSize: ptr SIZE_T): WINBOOL {.stdcall,
     dynlib: "kernel32", importc: "UpdateProcThreadAttribute".}
-proc createNamedPipeW(lpName: WideCString; dwOpenMode, dwPipeMode,
-    nMaxInstances, nOutBufferSize, nInBufferSize, nDefaultTimeOut: int32;
-    lpSecurityAttributes: ptr SECURITY_ATTRIBUTES): Handle {.stdcall,
-    dynlib: "kernel32", importc: "CreateNamedPipeW".}
-proc connectNamedPipe(hNamedPipe: Handle; lpOverlapped: pointer): WINBOOL {.
-    stdcall, dynlib: "kernel32", importc: "ConnectNamedPipe".}
 proc peekNamedPipe(hNamedPipe: Handle; lpBuffer: pointer; nBufferSize: DWORD;
     lpBytesRead, lpTotalBytesAvail, lpBytesLeftThisMessage: ptr int32): WINBOOL {.
     stdcall, dynlib: "kernel32", importc: "PeekNamedPipe".}
 
-proc mkPipeName(tag: string): string =
-  "\\\\.\\pipe\\conpty_smoke_" & $getCurrentProcessId() & "_" & tag
-
-proc main() =
-  # Named pipe server ends (node-pty pattern): CreateNamedPipeW with
-  # PIPE_ACCESS_INBOUND | PIPE_ACCESS_OUTBOUND | FILE_FLAG_FIRST_PIPE_INSTANCE.
-  let openMode = PIPE_ACCESS_INBOUND or PIPE_ACCESS_OUTBOUND or
-                 FILE_FLAG_FIRST_PIPE_INSTANCE
+proc attempt(label: string; lpValueByAddr: bool): bool =
+  ## lpValueByAddr: true = &hpc (generic semantic); false = hpc value (MS sample).
+  echo "--- ", label, " (lpValueByAddr=", lpValueByAddr, ")"
   var sa = SECURITY_ATTRIBUTES(nLength: sizeof(SECURITY_ATTRIBUTES).int32,
                                bInheritHandle: 0)
-  let inName = mkPipeName("in")
-  let outName = mkPipeName("out")
-  let inNameW = newWideCString(inName)
-  let outNameW = newWideCString(outName)
-  let hIn = createNamedPipeW(inNameW, openMode,
-      PIPE_TYPE_BYTE or PIPE_READMODE_BYTE or PIPE_WAIT, 1,
-      128 * 1024, 128 * 1024, 30000, addr sa)
-  let hOut = createNamedPipeW(outNameW, openMode,
-      PIPE_TYPE_BYTE or PIPE_READMODE_BYTE or PIPE_WAIT, 1,
-      128 * 1024, 128 * 1024, 30000, addr sa)
-  echo "named pipes: hIn=", hIn.int, " hOut=", hOut.int
-  if hIn.int == INVALID_HANDLE_VALUE_INT or hOut.int == INVALID_HANDLE_VALUE_INT:
-    echo "CreateNamedPipeW failed le=", getLastError(); quit(1)
-
+  # input pipe: parent writes to inWrite, pseudoconsole reads inRead.
+  var inRead, inWrite, outRead, outWrite: Handle
+  doAssert createPipe(inRead, inWrite, sa, 0) != 0
+  doAssert createPipe(outRead, outWrite, sa, 0) != 0
   var hpc: HPCON
   let rc = createPseudoConsole(COORD(x: 80.int16, y: 30.int16),
-                               hIn, hOut, 0, addr hpc)
-  echo "createPseudoConsole rc=", rc, " hpc=", hpc.int
-  if rc != 0: quit("createPseudoConsole failed", 1)
-
-  # NOTE: node-pty calls ConnectNamedPipe here, but it blocks until the
-  # conhost connects, and in our context it never returned (timed out). The
-  # connection happens implicitly via the duplicated handle CreatePseudoConsole
-  # holds, so skip ConnectNamedPipe and read/write the server handles directly.
-  echo "skipping ConnectNamedPipe (blocks; conhost connects via dup handle)"
-
+                               inRead, outWrite, 0, addr hpc)
+  echo "  createPseudoConsole rc=", rc, " hpc=", hpc.int
+  if rc != 0:
+    discard closeHandle(inRead); discard closeHandle(inWrite)
+    discard closeHandle(outRead); discard closeHandle(outWrite)
+    return false
+  # Close PTY-end handles immediately (ConHost holds dup'd copies).
+  discard closeHandle(inRead)
+  discard closeHandle(outWrite)
   var attrSize: SIZE_T = 0
   discard initializeProcThreadAttributeList(nil, 1, 0, addr attrSize)
   var attrList = cast[pointer](alloc0(attrSize))
   doAssert initializeProcThreadAttributeList(attrList, 1, 0, addr attrSize) != 0
-  doAssert updateProcThreadAttribute(attrList, 0,
-      PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE.uint, cast[pointer](hpc.Handle),
-      sizeof(HPCON).SIZE_T, nil, nil) != 0
-
+  let lpVal = if lpValueByAddr: cast[pointer](unsafeAddr hpc)
+              else: cast[pointer](hpc.Handle)
+  let updRc = updateProcThreadAttribute(attrList, 0,
+      PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE.uint, lpVal,
+      sizeof(HPCON).SIZE_T, nil, nil)
+  echo "  updAttr rc=", updRc, " le=", getLastError()
+  doAssert updRc != 0
   var si = STARTUPINFOEX(startupInfo: STARTUPINFO(cb: sizeof(STARTUPINFOEX).int32))
   si.lpAttributeList = attrList
   var pi: PROCESS_INFORMATION
-  let cmd = getEnv("WINDIR") & "\\System32\\cmd.exe /c echo conpty_named_ok"
+  let cmd = getEnv("WINDIR") & "\\System32\\cmd.exe /c echo conpty_ok"
   let cmdW = newWideCString(cmd)
   let appW: WideCString = nil
   let ok = createProcessW(appW, cmdW, nil, nil, 0,
       EXTENDED_STARTUPINFO_PRESENT, nil, nil, si.startupInfo, pi)
-  echo "createProcessW ok=", ok, " le=", getLastError()
-  if ok == 0: quit("createProcessW failed", 1)
-
-  # Drain output for up to 3s.
+  echo "  createProcessW ok=", ok, " le=", getLastError()
+  if ok == 0:
+    closePseudoConsole(hpc)
+    discard closeHandle(inWrite); discard closeHandle(outRead)
+    return false
   var total = 0
   var buf: array[4096, char]
   let deadline = epochTime() + 3.0
   while epochTime() < deadline:
     var avail: int32 = 0
-    if peekNamedPipe(hOut, nil, 0, nil, addr avail, nil) != 0 and avail > 0:
+    if peekNamedPipe(outRead, nil, 0, nil, addr avail, nil) != 0 and avail > 0:
       var got: int32 = 0
-      if readFile(hOut, addr buf[0], avail, addr got, nil) != 0 and got > 0:
+      if readFile(outRead, addr buf[0], avail, addr got, nil) != 0 and got > 0:
         total += got.int
         var s = newString(got)
         copyMem(s[0].addr, buf[0].addr, got)
-        echo "child output: [", s, "]"
+        echo "  child output: [", s, "]"
     else:
       sleep(20)
-  echo "total output bytes: ", total
-
   discard waitForSingleObject(pi.hProcess, 5000)
   var code: int32 = 0
   discard getExitCodeProcess(pi.hProcess, code)
-  echo "child exit code: ", code
-  discard closeHandle(pi.hProcess)
-  discard closeHandle(pi.hThread)
+  echo "  child exit=", code, " outBytes=", total
+  discard closeHandle(pi.hProcess); discard closeHandle(pi.hThread)
   closePseudoConsole(hpc)
-  discard closeHandle(hIn)
-  discard closeHandle(hOut)
-  if code == 0 and total > 0:
-    echo "RESULT: SUCCESS"; quit(0)
-  else:
-    echo "RESULT: FAILURE"; quit(1)
+  discard closeHandle(inWrite); discard closeHandle(outRead)
+  code == 0 and total > 0
+
+proc main() =
+  let r1 = attempt("byAddr (&hpc)", true)
+  echo "RESULT byAddr=", r1
+  let r2 = attempt("byValue (hpc)", false)
+  echo "RESULT byValue=", r2
+  quit(0)
 
 main()
