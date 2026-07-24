@@ -160,6 +160,13 @@ proc toolCallToAction*(family, name: string, args: JsonNode): Action =
 proc previewCmd*(body: string): string =
   body.strip.splitLines[0]
 
+proc bannerPath(act: Action): string =
+  ## The path portion of a path-bearing tool banner, never empty: a
+  ## missing/blank path surfaces as `(no path)` so the banner row is
+  ## never a bare icon with nothing after it (the model/user can see the
+  ## call was malformed rather than a silent `r ` / `w ` / `p `).
+  if act.path.len > 0: act.path else: "(no path)"
+
 proc bannerFor*(act: Action): string =
   ## Returns the parameter portion of the tool banner (no icon/prefix).
   case act.kind
@@ -168,15 +175,15 @@ proc bannerFor*(act: Action): string =
   of akRead:
     if act.offset > 0 or act.limit > 0:
       let endHint = if act.limit > 0: $(act.offset + act.limit - 1) else: "end"
-      &"{act.path} {max(1, act.offset)}-{endHint}"
+      &"{act.bannerPath} {max(1, act.offset)}-{endHint}"
     else:
-      act.path
+      act.bannerPath
   of akWrite:
-    act.path
+    act.bannerPath
   of akPatch:
-    act.path
+    act.bannerPath
   of akApplyPatch:
-    act.path
+    act.bannerPath
   of akPlan:
     "update plan"
   of akWebSearch:

@@ -1878,6 +1878,12 @@ suite "terminal visual contract":
             "output": "read-one\nread-two\nread-three\n",
             "code": 0
           }),
+          toolCall("call_read_big", "read", %*{
+            "path": "bigfile.txt"
+          }, %*{
+            "output": "line01\nline02\nline03\nline04\nline05\nline06\nline07\nline08\nline09\nline10\nline11\nline12\nline13\nline14\nline15\nline16\nline17\nline18\nline19\nline20\n... [file is 20 lines, 200 bytes; showed 20 lines from line 1. Use read(path, offset, limit) for a specific range.] ...",
+            "code": 0
+          }),
           toolCall("call_write", "write", %*{
             "path": "notes.txt",
             "body": "new notes\n"
@@ -1967,6 +1973,13 @@ suite "terminal visual contract":
     tty.expectInHistory "Exercising non-bash tools."
     tty.expectInHistory "r notes.txt"
     tty.expectInHistory "read-three"
+    # Large read (>15 lines) triggers head/tail truncation. The banner
+    # must still carry the filename; the body shows head + hidden marker
+    # + tail. This is the regression guard for the missing-filename bug.
+    tty.expectInHistory "r bigfile.txt"
+    tty.expectInHistory "line01"
+    tty.expectInHistory "lines hidden"
+    tty.expectInHistory "line20"
     tty.expectInHistory "w notes.txt"
     tty.expectInHistory "+new notes"
     tty.expectInHistory "p --- /tmp/notes.txt"
