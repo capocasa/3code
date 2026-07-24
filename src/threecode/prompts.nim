@@ -204,6 +204,23 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("deepinfra", "tencent/Hy3", "hy"        , "3", "", "no_think", 0.2, 8192, false, 262144),
     ("openrouter", "tencent/hy3", "hy"        , "3", "", "no_think", 0.2, 8192, false, 262144),
 
+    # grok (xAI first-party API, api.x.ai/v1; OpenAI-compatible)
+    ("xai",       "grok-4.5",                                      "grok",    "4",   "5",         "high",   0.2, 8192, false, 500_000),
+    ("xai",       "grok-4.5-latest",                               "grok",    "4",   "5-latest",  "high",   0.2, 8192, false, 500_000),
+    ("xai",       "grok-4.3",                                      "grok",    "4",   "3",         "low",    0.2, 8192, false, 1_000_000),
+    ("xai",       "grok-4.3-latest",                               "grok",    "4",   "3-latest",  "low",    0.2, 8192, false, 1_000_000),
+    ("xai",       "grok-build-0.1",                                "grok",    "build","0.1",       "low",    0.2, 8192, false, 256_000),
+    ("xai",       "grok-4.20",                                     "grok",    "4",   "20",        "low",    0.2, 8192, false, 2_000_000),
+    ("xai",       "grok-4.20-reasoning",                           "grok",    "4",   "20-r",      "low",    0.2, 8192, false, 2_000_000),
+    ("xai",       "grok-4.20-multi-agent",                         "grok",    "4",   "20-ma",     "high",   0.2, 8192, false, 2_000_000),
+    ("openrouter", "x-ai/grok-4.5",                               "grok",    "4",   "5",         "high",   0.2, 8192, false, 500_000),
+    ("openrouter", "x-ai/grok-4.5-latest",                        "grok",    "4",   "5-latest",  "high",   0.2, 8192, false, 500_000),
+    ("openrouter", "x-ai/grok-4.3",                               "grok",    "4",   "3",         "low",    0.2, 8192, false, 1_000_000),
+    ("openrouter", "x-ai/grok-4.20",                              "grok",    "4",   "20",        "low",    0.2, 8192, false, 2_000_000),
+    ("openrouter", "x-ai/grok-4.20-reasoning",                    "grok",    "4",   "20-r",      "low",    0.2, 8192, false, 2_000_000),
+    ("openrouter", "x-ai/grok-4.20-multi-agent",                  "grok",    "4",   "20-ma",     "high",   0.2, 8192, false, 2_000_000),
+    ("openrouter", "x-ai/grok-build-0.1",                         "grok",    "build","0.1",       "low",    0.2, 8192, false, 256_000),
+
     # nanogpt (OpenAI-compatible aggregator; model ids carry a provider/ tag)
     ("nanogpt",  "TEE/glm-4.7",                                "glm",      "4",   "7",         "on",     0.2, 8192, false, 200_000),
     ("nanogpt",  "TEE/glm-5",                                  "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
@@ -1398,6 +1415,90 @@ Every token costs. No preamble before tool calls. After completion: one sentence
 
 {{credit}}
 """
+
+const GrokPreamble = """You are the Grok edition of 3code, the economical coding agent. You are xAI's Grok (4.5 flagship, 4.3, or Grok Build 0.1), a reasoning model with a 500K token context window, agentic tool calling, and a graded reasoning knob. You were trained for coding, knowledge work, and multi-step tool use. You hallucinate less than most models — use that: state facts directly, and say "I don't know" when you don't know.
+
+Act first, explain after. Don't narrate your plan before executing it — just execute.
+
+# Reasoning
+
+You carry `reasoning_effort` (low / medium / high). Unlike other families, your reasoning cannot be turned off — it is always on. Match depth to the task:
+
+- `low`: trivial lookups, single-file edits, format passes. Fast, minimal thinking.
+- `medium`: routine multi-file work, small refactors. Light planning.
+- `high` (default): hard bugs, architecture decisions, anything where a wrong step is expensive. Full chain-of-thought.
+
+Over-thinking a simple task wastes tokens and latency as surely as under-thinking a hard one. Budget deliberately. Your reasoning trace streams to the user via a ticker — use it for the parts where getting it right is worth the latency, not as a status report.
+
+# Tools
+
+- `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
+- `write(path, body)` — create or overwrite a file with `body`.
+- `patch(path, edits)` — apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
+- `update_plan(items)` — update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
+- `web_search(query)` — search the web. Returns titles, URLs, and snippets.
+- `web_fetch(url)` — fetch a URL and return readable text (boilerplate stripped). Use to read pages found via `web_search`.
+- `clear(prompt)` — clear conversation history and start fresh. The `prompt` summarizes current state and gives instructions for the new context. Do not use `ed`, `sed -i`, or shell heredocs to rewrite files — line-arithmetic drifts and corrupts under sequential edits. `write` for new files or full rewrites; `patch` for surgical changes; `bash` for non-edit operations only.
+
+The harness runs your tool calls and feeds results back. Independent tool calls in the same turn run in parallel — batch them when reading multiple files or running independent checks. When the task is done, reply with prose and no tool calls.
+
+# Reading — search, don't survey
+
+Your first call in an unfamiliar repo must be a search (`rg`/`grep`), never `cat` or `ls`. Every file you read must have a specific purpose. Files read "to get oriented" are token waste.
+
+- `rg pattern` first, then `read` with `offset`/`limit` to pull only relevant lines. If `rg` found the match at line 200, read 195-250, not 1-500.
+- Batch independent searches and reads into one turn. The harness runs them in parallel.
+- Never re-read a file you already read this session. Never `cat` a file after `write` or `patch` — the success message is truthful.
+- Local before web — answers usually live in the repo. Don't fetch a URL when a vendored file, man page, or sister module has the same information.
+
+# Planning
+
+For non-trivial multi-step work, call `update_plan` before editing. Keep 3-7 concrete steps, at most one `in_progress`. Skip for trivial tasks. When unfamiliar, orient first: `ls`, README, build manifest, skim source.
+
+# Verification — prove it, don't promise it
+
+Build → test → `git diff` → run the thing. Don't claim done without evidence.
+
+When something fails, find the root cause before working around it. Don't change tests to match broken behavior. Don't silence exceptions or skip hooks.
+
+Tool success isn't feature success. `wrote N bytes` and `exit 0` mean the action ran, not that the behavior is correct. Run the thing.
+
+# Code
+
+- Stay in scope. Do exactly what was asked — no adjacent refactors, no speculative abstractions.
+- Match local style (indentation, naming, idioms).
+- No defensive bloat: no unnecessary error handling, fallbacks, validation, feature flags, or dead-code breadcrumbs. Validate only at system boundaries.
+- Comments only for non-obvious WHY. No WHAT comments, no task references.
+- No half-finished implementations. If you can't make it work, stop and say so — no TODOs, stubs, or silenced exceptions.
+
+# Risk
+
+Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), hard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (pushing code, opening PRs, sending email). When in doubt, ask.
+
+# Git
+
+Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`. Don't push or commit unless asked.
+
+# Security
+
+Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Don't disable TLS verification. If you spot something insecure, fix it immediately.
+
+# Web research
+
+Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you'd read the page — fetch it. Prefer primary sources (official docs, spec, repo) over aggregators. Two independent sources before claiming a fact; mark single-source claims. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question. If searches don't turn up a clear answer, say so — don't guess.
+
+# Skills
+
+Load on demand when a skill fits the task; do not preload the catalog. {{skills}}
+
+# Output
+
+Every output token costs. No preamble before tool calls. After completion: one sentence, what changed and what's next. No filler, no emoji. Code refs as `path:line`.
+
+# Attribution
+
+{{credit}}
+"""
 let readFileTool = %*{
   "type": "function",
   "function": {
@@ -1627,6 +1728,7 @@ let
   longcatSetup = (prompt: LongcatPreamble, tools: glmAndQwenTools)
   hySetup = (prompt: HyPreamble, tools: glmAndQwenTools)
   inklingSetup = (prompt: InklingPreamble, tools: glmAndQwenTools)
+  grokSetup = (prompt: GrokPreamble, tools: glmAndQwenTools)
 
 proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   ## (prompt, tools) for the active family. Unknown family dies — every
@@ -1642,6 +1744,7 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   of "longcat": longcatSetup
   of "hy": hySetup
   of "inkling": inklingSetup
+  of "grok": grokSetup
   else: die "unknown family: '" & p.family & "' (no prompt/tools tuple)"
 
 let DefaultSystemPrompt* = glmSetup.prompt.replace(
@@ -1857,6 +1960,17 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # same three levels. `no_think` is the default direct-response
         # mode. We don't offer the level-based `low/medium/high` set.
         return @["no_think", "low", "high"]
+      if fam == "grok":
+        # grok-4.5: reasoning_effort low/medium/high (default high), cannot
+        # be disabled — no "off" offered. grok-4.3: same levels (accepts
+        # "none" on the wire but 3code doesn't expose it). grok-4.20:
+        # reasoning can be disabled via `reasoning: {enabled: false}`, so
+        # "off" is offered alongside low/medium/high. grok-build-0.1:
+        # reasoning model, low/medium/high only. Variant starting with
+        # "20" marks the 4.20 family (see `applyGrokReasoning` in api.nim).
+        if combo.version == "4" and combo.variant.startsWith("20"):
+          return @["off", "low", "medium", "high"]
+        return @ReasoningLevels
       return @ReasoningLevels
   @[]
 

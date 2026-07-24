@@ -1393,6 +1393,32 @@ proc applyLagunaReasoning(p: Profile, body: JsonNode) =
   of "on": body["reasoning"] = %*{"enabled": true}
   else: discard
 
+proc applyGrokReasoning(p: Profile, body: JsonNode) =
+  ## xAI Grok reasoning surface on the OpenAI-compatible /v1/chat/completions
+  ## endpoint. The knob is the top-level `reasoning_effort` string
+  ## (low/medium/high), same shape as gpt-oss. Reasoning streams back on
+  ## `reasoning_content` (parsed generically, DeepSeek-style).
+  ##
+  ## Model-specific behavior:
+  ## - grok-4.5: reasoning_effort low/medium/high (default high). Reasoning
+  ##   cannot be disabled — there is no "off". We never send an empty/off
+  ##   value; the known-good combos default to "high".
+  ## - grok-4.3: reasoning_effort none/low/medium/high (default low). Accepts
+  ##   "none" to disable, but 3code's level set is low/medium/high only.
+  ## - grok-4.20: reasoning can be enabled/disabled via
+  ##   `reasoning: {enabled: bool}` plus reasoning_effort low/medium/high/
+  ##   xhigh. "off" maps to enabled:false; the level values map to
+  ##   reasoning_effort.
+  ## - grok-build-0.1: reasoning model, accepts reasoning_effort.
+  ##
+  ## OpenRouter normalizes the same `reasoning_effort` field for xAI models.
+  if p.reasoning == "": return
+  let is420 = p.family == "grok" and p.version == "4" and p.variant.startsWith("20")
+  if is420 and p.reasoning == "off":
+    body["reasoning"] = %*{"enabled": false}
+  else:
+    body["reasoning_effort"] = %p.reasoning
+
 proc applyReasoning*(p: Profile, body: JsonNode) =
   ## Per-family wire mapping for `Profile.reasoning`. Adding a new
   ## family means: (1) set `reasoning` in the known-good combo table,
@@ -1408,6 +1434,7 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "longcat": applyLongcatReasoning(p, body)
   of "hy": applyHy3Reasoning(p, body)
   of "inkling": applyInklingReasoning(p, body)
+  of "grok": applyGrokReasoning(p, body)
   else: discard
 
 # ---------- network worker thread (Tier 2) ----------
