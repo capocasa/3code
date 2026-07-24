@@ -69,6 +69,12 @@ jobs:
         run: |
           # Smoke-check: the built 3code binary loads its DLLs standalone.
           ./3code.exe -v || { echo "3code.exe failed to start"; exit 1; }
+          # Named-pipe ConPTY smoke WITH ConnectNamedPipe (node-pty pattern),
+          # now that the lpValue=hpc fix is in. Earlier named-pipe attempt
+          # blocked on ConnectNamedPipe because the lpValue bug left the
+          # conhost dead; retest whether it connects and relays child stdout.
+          nim c -o:conpty_smoke.exe tools/conpty_smoke.nim || exit 1
+          ./conpty_smoke.exe; echo "named-pipe conpty exit=$?"
           if command -v testament >/dev/null 2>&1; then
             testament --print --megatest:off r tests/tty/test_conpty_diag.nim
             exit $?
