@@ -146,6 +146,32 @@ suite "api: formatApiDetail":
   test "bare error with no code":
     check formatApiDetail("", "", 0) == "error"
 
+  test "200-anomaly errMsg yields to a JSON error body (code 0)":
+    # A 200 OK that carried an inline error object (e.g. z.ai's overloaded
+    # message) must surface the body's error text on exhaustion, not the
+    # generic transport errMsg. The promoted NetworkHealthError raise uses
+    # formatApiDetail with code 0, so the body wins and no (code N) suffix
+    # is appended.
+    let body = "{\"error\":{\"message\":\"Service overloaded, please retry\"}}"
+    check formatApiDetail(EmptyReplyMsg, body, 0) ==
+      "Service overloaded, please retry"
+    check formatApiDetail("api error in 200 body", body, 0) ==
+      "Service overloaded, please retry"
+    check formatApiDetail("response parse: unexpected token", body, 0) ==
+      "Service overloaded, please retry"
+
+  test "200-anomaly errMsg surfaces when body is empty (code 0)":
+    # When the transport recorded no body (e.g. the empty-reply case where
+    # nothing arrived), fall back to the transport errMsg so the user still
+    # sees what went wrong. When a body IS present, the body text wins,
+    # same contract as HttpError.
+    check formatApiDetail(EmptyReplyMsg, "", 0) == EmptyReplyMsg
+    check formatApiDetail("response parse: unexpected token", "", 0) ==
+      "response parse: unexpected token"
+    # A non-JSON body surfaces as its raw text, matching HttpError behavior.
+    check formatApiDetail(EmptyReplyMsg, "this is not json at all", 0) ==
+      "this is not json at all"
+
 suite "api: applyReasoning — gpt-oss":
   test "sets reasoning_effort for gpt-oss":
     var body = %*{"stream": true}
@@ -384,6 +410,41 @@ suite "api: NetworkHealthError":
     # retryable as "server" under the shared retryCategory helper too, so
     # the class-based path and the legacy string path agree.
     check retryCategory(networkQuietMsg(), nil, 0) == "server"
+
+  test "isEmptyReplyMsg matches the canonical message":
+    check isEmptyReplyMsg(EmptyReplyMsg)
+    check isEmptyReplyMsg("empty reply - no content, no tool calls")
+    check not isEmptyReplyMsg("interrupted by user")
+    check not isEmptyReplyMsg("")
+    check not isEmptyReplyMsg(networkQuietMsg())
+
+  test "EmptyReplyMsg is distinct from the quiet message":
+    check EmptyReplyMsg != networkQuietMsg()
+    check not isNetworkQuietMsg(EmptyReplyMsg)
+    check not isEmptyReplyMsg(networkQuietMsg())
+
+  test "an empty-200 outcome is promoted to NetworkHealthError, not HttpError":
+    # Regression for the dead-end "empty reply ... (code 200)" bug: a 200 OK
+    # with no content/tool_calls/finish_reason used to fall through
+    # retryCategory's `else` branch (status 200 is not retryable), raising an
+    # HttpError on the first attempt with no backoff. callModel now promotes
+    # any 200 that produced no assistant message to NetworkHealthError so the
+    # loop backs off and resends. The class is what the turn loop branches on.
+    let e = newException(NetworkHealthError, EmptyReplyMsg)
+    check e of NetworkHealthError
+    check e of ApiError
+    check isEmptyReplyMsg(e.msg)
+    # Sanity: retryCategory alone would NOT retry a 200 (the old path). The
+    # promotion in callModel happens before retryCategory is consulted.
+    check retryCategory(EmptyReplyMsg, nil, 200) == ""
+    # The same dead-end hit every 200 transport anomaly, not just the empty
+    # reply: an unparseable body, a 200 carrying an inline error object, a
+    # mid-stream read error after the head arrived. retryCategory rejects
+    # them all at status 200; the promotion covers them by shape (200 + nil
+    # assistantMsg + non-empty errMsg), not by string.
+    check retryCategory("response parse: unexpected token", nil, 200) == ""
+    check retryCategory("api error in 200 body", nil, 200) == ""
+    check retryCategory("stream read: connection reset", nil, 200) == ""
 
 suite "api: HttpError":
   test "HttpError is a subclass of ApiError":

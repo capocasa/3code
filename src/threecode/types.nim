@@ -189,12 +189,24 @@ const
     # Marker prefix the transport writes into `StreamOutcome.errMsg` when the
     # network-quiet watchdog fires. `callModel` checks this to raise a
     # `NetworkHealthError` and route it through the server-retry path.
+  EmptyReplyMsg* = "empty reply - no content, no tool calls"
+    # Canonical message the transport writes into `StreamOutcome.errMsg` when
+    # a 200 OK arrives with no content, no tool_calls, and no finish_reason:
+    # a transport anomaly, not a budget-starved empty turn. `callModel`'s
+    # retry loop promotes any 200 OK that produced no assistant message to a
+    # `NetworkHealthError` so it backs off and resends, instead of surfacing
+    # a dead-end `HttpError (code 200)` on the first attempt. This constant
+    # is the string the transport sites write; `isEmptyReplyMsg` identifies
+    # it for display and tests.
 
 proc isInterruptedMsg*(msg: string): bool =
   msg == InterruptedByUserMsg
 
 proc isNetworkQuietMsg*(msg: string): bool =
   msg.startsWith(NetworkQuietPrefix)
+
+proc isEmptyReplyMsg*(msg: string): bool =
+  msg == EmptyReplyMsg
 
 proc die*(msg: string, code = 1) {.noreturn.} =
   stderr.writeLine "3code: " & msg
