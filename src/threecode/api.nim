@@ -1655,7 +1655,12 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
       # promoted cases. Both subclass ApiError, so the turn loop's `except
       # ApiError` catches them.
       if category == "server" and code == 0:
-        raise newException(NetworkHealthError, errMsg)
+        # Format with the body so a 200 anomaly that carried a provider
+        # error object (e.g. z.ai's overloaded message) surfaces its text,
+        # not just the generic transport errMsg. `code` is 0 here, so no
+        # `(code N)` suffix is appended, matching the network-quiet case.
+        raise newException(NetworkHealthError,
+          formatApiDetail(errMsg, outcome.errBody, code))
       raise newHttpError(code, errMsg, outcome.errBody)
     let retryAfter = try: parseInt(outcome.retryAfter) except CatchableError: 0
     let backoff =

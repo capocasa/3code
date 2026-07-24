@@ -146,6 +146,32 @@ suite "api: formatApiDetail":
   test "bare error with no code":
     check formatApiDetail("", "", 0) == "error"
 
+  test "200-anomaly errMsg yields to a JSON error body (code 0)":
+    # A 200 OK that carried an inline error object (e.g. z.ai's overloaded
+    # message) must surface the body's error text on exhaustion, not the
+    # generic transport errMsg. The promoted NetworkHealthError raise uses
+    # formatApiDetail with code 0, so the body wins and no (code N) suffix
+    # is appended.
+    let body = "{\"error\":{\"message\":\"Service overloaded, please retry\"}}"
+    check formatApiDetail(EmptyReplyMsg, body, 0) ==
+      "Service overloaded, please retry"
+    check formatApiDetail("api error in 200 body", body, 0) ==
+      "Service overloaded, please retry"
+    check formatApiDetail("response parse: unexpected token", body, 0) ==
+      "Service overloaded, please retry"
+
+  test "200-anomaly errMsg surfaces when body is empty (code 0)":
+    # When the transport recorded no body (e.g. the empty-reply case where
+    # nothing arrived), fall back to the transport errMsg so the user still
+    # sees what went wrong. When a body IS present, the body text wins,
+    # same contract as HttpError.
+    check formatApiDetail(EmptyReplyMsg, "", 0) == EmptyReplyMsg
+    check formatApiDetail("response parse: unexpected token", "", 0) ==
+      "response parse: unexpected token"
+    # A non-JSON body surfaces as its raw text, matching HttpError behavior.
+    check formatApiDetail(EmptyReplyMsg, "this is not json at all", 0) ==
+      "this is not json at all"
+
 suite "api: applyReasoning — gpt-oss":
   test "sets reasoning_effort for gpt-oss":
     var body = %*{"stream": true}
