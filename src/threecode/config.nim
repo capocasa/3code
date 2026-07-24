@@ -69,20 +69,24 @@ func findModel*(p: ProviderRec, name: string): int =
 var activeCurrent*: string
 var activeProviders*: seq[ProviderRec]
 var activeSearchKey*: string = ""
-  ## Optional search API key resolved at config load. Set via
-  ## `[search] key = "..."`. The env var honored depends on the engine:
-  ## `EXA_API_KEY`, `PARALLEL_API_KEY`, or `BRAVE_API_KEY`. Keyless by
-  ## default (Exa and Parallel both have a free anonymous tier); the key
-  ## is only persisted back to disk when non-empty.
+  ## The key for the *active* search engine, resolved at config load from
+  ## the engine-specific `[search] exa-key` / `brave-key` (or the matching
+  ## env var `EXA_API_KEY` / `BRAVE_API_KEY`). Keyless by default: exa and
+  ## parallel work without a key, brave requires one.
 
-const SearchEngineEnv*: array[3, (string, string)] = [
+var activeSearchKeys*: Table[string, string]
+  ## All configured search keys, keyed by engine name (`exa`, `brave`).
+  ## Mirrors what was read from `[search] exa-key` / `brave-key`. The
+  ## `activeSearchKey` is derived from this for the active engine; this map
+  ## is kept so a future engine switch doesn't require a config re-read.
+
+const SearchEngineEnv*: array[2, (string, string)] = [
   ("exa", "EXA_API_KEY"),
-  ("parallel", "PARALLEL_API_KEY"),
   ("brave", "BRAVE_API_KEY")
 ]
-  ## Maps each engine name to the env var that supplies its key. Used by
-  ## `loadStateOrEmpty` / `loadProfile` to fall back to the environment
-  ## when `[search] key` is unset.
+  ## Engines that take an optional key, mapped to the env var that supplies
+  ## it. `parallel` is keyless in practice, so it has no entry. Used by
+  ## `resolveSearchKey` to fall back to the environment.
 
 var activeSearchEngine*: string = "exa"
   ## Active search engine: "exa" (default), "parallel", or "brave". Set via
@@ -213,16 +217,18 @@ proc expandEnvValue(s: string): string =
     return getEnv(t[1 .. ^1])
   s
 
-proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, string], string, string) =
+proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, string], Table[string, string], string) =
   ## Streaming parse so that repeated [provider] sections accumulate as a list.
-  ## Returns `(current, providers, colors, searchKey, searchEngine)`.
-  ## `searchKey` is the optional `[search] key` value ("" when absent or
-  ## keyless); `searchEngine` is the optional `[search] engine` value
-  ## ("" when absent, meaning the default `exa`). `colors` is the flat
+  ## Returns `(current, providers, colors, searchKeys, searchEngine)`.
+  ## `searchKeys` maps engine name -> key for each `[search] exa-key` /
+  ## `brave-key` set (empty table when none). A legacy bare `[search] key`
+  ## is accepted and filed under the active engine for backward compat.
+  ## `searchEngine` is the optional `[search] engine` value ("" when absent,
+  ## meaning the default `exa`). `colors` is the flat
   ## `[colors]` map (raw keys verbatim, including any `-light` suffix); the
   ## caller routes it through `splitColorOverrides` + `applyColorOverrides`.
   var current = ""
-  var searchKey = ""
+  var searchKeys: Table[string, string]
   var searchEngine = ""
   var providers: seq[ProviderRec]
   var colors: Table[string, string]
@@ -296,7 +302,12 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
         else: discard
       of "search":
         case e.key
-        of "key": searchKey = v
+        of "exa-key": searchKeys["exa"] = v
+        of "brave-key": searchKeys["brave"] = v
+        of "key":
+          # Legacy bare key: file it under the active engine (or exa if no
+          # engine was set yet). Keeps old single-key configs working.
+          searchKeys[if searchEngine != "": searchEngine else: "exa"] = v
         of "engine": searchEngine = v.strip.toLowerAscii
         else: discard
       of "provider":
@@ -314,7 +325,7 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
     of cfgError:
       die &"{path}: {e.msg}", ExitConfig
   p.close
-  (current, providers, colors, searchKey, searchEngine)
+  (current, providers, colors, searchKeys, searchEngine)
 
 func quoteVal(s: string): string =
   result = "\""
@@ -330,12 +341,13 @@ proc writeConfigFile*(path: string, current: string,
   createDir(path.parentDir)
   var buf = "[settings]\n"
   buf.add "current = " & quoteVal(current) & "\n"
-  if activeSearchKey != "" or activeSearchEngine != "exa":
+  if activeSearchKeys.len > 0 or activeSearchEngine != "exa":
     buf.add "\n[search]\n"
     if activeSearchEngine != "exa":
       buf.add "engine = " & quoteVal(activeSearchEngine) & "\n"
-    if activeSearchKey != "":
-      buf.add "key = " & quoteVal(activeSearchKey) & "\n"
+    for engine in ["exa", "brave"]:
+      if activeSearchKeys.hasKey(engine) and activeSearchKeys[engine] != "":
+        buf.add engine & "-key = " & quoteVal(activeSearchKeys[engine]) & "\n"
   # Persist the streaming/notify toggles only when off — on is the default,
   # so a user who never changes them keeps a clean config. This also matches
   # the defaults in types.nim.
@@ -366,12 +378,12 @@ proc writeConfigFile*(path: string, current: string,
 proc configPath*(): string =
   getConfigDir() / "3code" / "config"
 
-proc resolveSearchKey*(engine, configuredKey: string): string =
-  ## `[search] key` wins; otherwise the env var for the active engine is
-  ## consulted (`EXA_API_KEY` / `PARALLEL_API_KEY` / `BRAVE_API_KEY`).
-  ## Returns "" when neither is set, which is fine for the keyless engines
-  ## (exa, parallel) and surfaces as a runtime error for brave.
-  if configuredKey != "": return configuredKey
+proc resolveSearchKey*(engine: string; keys: Table[string, string]): string =
+  ## The engine-specific `[search] exa-key` / `brave-key` wins; otherwise the
+  ## env var for the active engine is consulted (`EXA_API_KEY` /
+  ## `BRAVE_API_KEY`). Returns "" when neither is set, which is fine for the
+  ## keyless engines (exa, parallel) and surfaces as a runtime error for brave.
+  if keys.hasKey(engine) and keys[engine] != "": return keys[engine]
   for (name, envVar) in SearchEngineEnv:
     if name == engine and existsEnv(envVar):
       return getEnv(envVar)
@@ -379,13 +391,14 @@ proc resolveSearchKey*(engine, configuredKey: string): string =
 
 proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec], Table[string, string]) =
   ## Returns `(current, providers, colors)` and updates `activeSearchKey` /
-  ## `activeSearchEngine` as a side effect when the config sets them.
-  ## `colors` is the flat `[colors]` map for the caller to route through the
-  ## cascade. Missing file is benign.
+  ## `activeSearchEngine` / `activeSearchKeys` as a side effect when the config
+  ## sets them. `colors` is the flat `[colors]` map for the caller to route
+  ## through the cascade. Missing file is benign.
   if not fileExists(path): return ("", @[], initTable[string, string]())
-  let (current, providers, colors, searchKey, searchEngine) = parseConfigFile(path)
+  let (current, providers, colors, searchKeys, searchEngine) = parseConfigFile(path)
   if searchEngine != "": activeSearchEngine = searchEngine
-  activeSearchKey = resolveSearchKey(activeSearchEngine, searchKey)
+  activeSearchKeys = searchKeys
+  activeSearchKey = resolveSearchKey(activeSearchEngine, activeSearchKeys)
   (current, providers, colors)
 
 proc resolveFamily*(prov: ProviderRec, prof: Profile): string =
@@ -469,9 +482,10 @@ proc loadProfile*(wanted: string): Profile =
     stderr.writeLine ""
     stderr.writeLine ConfigExample
     quit ExitConfig
-  let (current, providers, _, searchKey, searchEngine) = parseConfigFile(path)
+  let (current, providers, _, searchKeys, searchEngine) = parseConfigFile(path)
   if searchEngine != "": activeSearchEngine = searchEngine
-  activeSearchKey = resolveSearchKey(activeSearchEngine, searchKey)
+  activeSearchKeys = searchKeys
+  activeSearchKey = resolveSearchKey(activeSearchEngine, activeSearchKeys)
   if providers.len == 0:
     die &"no [provider] section in {path}", ExitConfig
   var pick = wanted

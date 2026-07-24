@@ -7,22 +7,35 @@ suite "config: [search]":
   setup:
     tmp = getTempDir() / "3code-test-search.ini"
     activeSearchKey = ""
+    activeSearchKeys = initTable[string, string]()
     activeSearchEngine = "exa"
 
   teardown:
     removeFile(tmp)
     activeSearchKey = ""
+    activeSearchKeys = initTable[string, string]()
     activeSearchEngine = "exa"
 
-  test "parseConfigFile returns the [search] key when set":
-    writeFile(tmp, "[search]\nkey = \"exa-abc123\"\n")
-    let (_, _, _, searchKey, _) = parseConfigFile(tmp)
-    check searchKey == "exa-abc123"
+  test "parseConfigFile collects engine-specific keys":
+    writeFile(tmp, "[search]\nexa-key = \"e1\"\nbrave-key = \"b1\"\n")
+    let (_, _, _, searchKeys, _) = parseConfigFile(tmp)
+    check searchKeys["exa"] == "e1"
+    check searchKeys["brave"] == "b1"
 
-  test "parseConfigFile returns empty string when [search] key is absent":
+  test "parseConfigFile returns empty table when no keys set":
     writeFile(tmp, "[settings]\ncurrent = \"some-provider\"\n")
-    let (_, _, _, searchKey, _) = parseConfigFile(tmp)
-    check searchKey == ""
+    let (_, _, _, searchKeys, _) = parseConfigFile(tmp)
+    check searchKeys.len == 0
+
+  test "legacy bare key is filed under the active engine":
+    writeFile(tmp, "[search]\nengine = \"brave\"\nkey = \"legacy\"\n")
+    let (_, _, _, searchKeys, _) = parseConfigFile(tmp)
+    check searchKeys["brave"] == "legacy"
+
+  test "legacy bare key defaults to exa when no engine set":
+    writeFile(tmp, "[search]\nkey = \"legacy\"\n")
+    let (_, _, _, searchKeys, _) = parseConfigFile(tmp)
+    check searchKeys["exa"] == "legacy"
 
   test "parseConfigFile returns the [search] engine when set":
     writeFile(tmp, "[search]\nengine = \"parallel\"\n")
@@ -39,14 +52,16 @@ suite "config: [search]":
     let (_, _, _, _, searchEngine) = parseConfigFile(tmp)
     check searchEngine == ""
 
-  test "loadStateOrEmpty sets activeSearchKey and engine":
-    writeFile(tmp, "[search]\nengine = \"brave\"\nkey = \"brave-key\"\n")
+  test "loadStateOrEmpty resolves the active engine's key":
+    writeFile(tmp, "[search]\nengine = \"brave\"\nbrave-key = \"bk\"\nexa-key = \"ek\"\n")
     discard loadStateOrEmpty(tmp)
-    check activeSearchKey == "brave-key"
     check activeSearchEngine == "brave"
+    check activeSearchKey == "bk"
+    check activeSearchKeys["exa"] == "ek"
 
-  test "activeSearchKey and activeSearchEngine default to exa/empty":
+  test "activeSearchKey/Keys/Engine default to exa/empty":
     check activeSearchKey == ""
+    check activeSearchKeys.len == 0
     check activeSearchEngine == "exa"
 
 suite "config: streaming toggle":

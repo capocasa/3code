@@ -9,15 +9,16 @@ current = "baseten.glm5"
 ; current = "openai.gpt-4o-mini"
 ; auto_update = "true"    ; on for prebuilt binaries, off for source builds
 ; [search] configures the `web_search` tool. Engine is one of:
-;   exa       (default) keyless MCP endpoint; optional key for a paid tier
-;   parallel  keyless MCP endpoint; optional key for higher rate limits
-;   brave     keyed REST endpoint; requires a key
-; No automatic failover: the chosen engine is used as-is. A key is honored
-; from `[search] key` or the engine's env var (EXA_API_KEY,
-; PARALLEL_API_KEY, BRAVE_API_KEY).
+;   exa       (default) keyless MCP endpoint; exa-key for a paid tier
+;   parallel  keyless MCP endpoint
+;   brave     keyed REST endpoint; requires brave-key
+; No automatic failover: the chosen engine is used as-is. Keys are
+; engine-specific (`exa-key`, `brave-key`) and also read from their env
+; vars (EXA_API_KEY, BRAVE_API_KEY).
 ; [search]
-; engine = "parallel"
-; key = "..."
+; engine = "brave"
+; exa-key = "..."
+; brave-key = "..."
 ; notify = off ; turn off the desktop notification that fires when a turn ends (on by default)
 ; sandbox = off ; disable filesystem sandbox enforcement (on by default: .3code/sandbox policy)
 ; bash_path = "C:\\tools\\msys64\\usr\\bin\\bash.exe"  ; Windows only: override bash detection
