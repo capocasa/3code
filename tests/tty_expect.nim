@@ -596,7 +596,18 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
         PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, cast[pointer](hpc.Handle),
         sizeof(HPCON).SIZE_T, nil, nil) != 0
 
-    var si = STARTUPINFOEX(startupInfo: STARTUPINFO(cb: sizeof(STARTUPINFOEX).int32))
+    # STARTF_USESTDHANDLES with all three std handles set to INVALID_HANDLE_VALUE
+    # is REQUIRED for a ConPTY child. Without it the child inherits the parent's
+    # *console* handles (console handles bypass bInheritHandles=FALSE), so its
+    # stdout writes land on the parent's console instead of the pseudoconsole —
+    # the conhost then only relays its own init bytes, never the child's output.
+    # Setting the std handles invalid forces the child to attach to the
+    # pseudoconsole, and the conhost relays the child's stdout to our pipe.
+    const STARTF_USESTDHANDLES = 0x100'i32
+    var si = STARTUPINFOEX(startupInfo: STARTUPINFO(
+        cb: sizeof(STARTUPINFOEX).int32,
+        dwFlags: STARTF_USESTDHANDLES,
+        hStdInput: Handle(-1), hStdOutput: Handle(-1), hStdError: Handle(-1)))
     si.lpAttributeList = attrList
     # The child's environment: re-seed from `env` (TERM defaulted), plus the
     # IPC pipe handles as integers. The child reads these to find its pipes.

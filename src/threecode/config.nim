@@ -327,7 +327,7 @@ proc writeConfigFile*(path: string, current: string,
   writeFile(path, buf)
 
 proc configPath*(): string =
-  getConfigDir() / "3code" / "config"
+  userConfigRoot() / "config"
 
 proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec], Table[string, string]) =
   ## Returns `(current, providers, colors)` and updates `activeSearchUrl` as a
