@@ -1,34 +1,53 @@
 import std/[os, strutils, tables, unittest]
 import threecode/[config, types, util]
 
-suite "config: [search] key":
+suite "config: [search]":
   var tmp = ""
 
   setup:
     tmp = getTempDir() / "3code-test-search.ini"
     activeSearchKey = ""
+    activeSearchEngine = "exa"
 
   teardown:
     removeFile(tmp)
     activeSearchKey = ""
+    activeSearchEngine = "exa"
 
   test "parseConfigFile returns the [search] key when set":
     writeFile(tmp, "[search]\nkey = \"exa-abc123\"\n")
-    let (_, _, _, searchKey) = parseConfigFile(tmp)
+    let (_, _, _, searchKey, _) = parseConfigFile(tmp)
     check searchKey == "exa-abc123"
 
   test "parseConfigFile returns empty string when [search] key is absent":
     writeFile(tmp, "[settings]\ncurrent = \"some-provider\"\n")
-    let (_, _, _, searchKey) = parseConfigFile(tmp)
+    let (_, _, _, searchKey, _) = parseConfigFile(tmp)
     check searchKey == ""
 
-  test "loadStateOrEmpty sets activeSearchKey from [search] key":
-    writeFile(tmp, "[search]\nkey = \"exa-from-config\"\n")
-    discard loadStateOrEmpty(tmp)
-    check activeSearchKey == "exa-from-config"
+  test "parseConfigFile returns the [search] engine when set":
+    writeFile(tmp, "[search]\nengine = \"parallel\"\n")
+    let (_, _, _, _, searchEngine) = parseConfigFile(tmp)
+    check searchEngine == "parallel"
 
-  test "activeSearchKey defaults to empty":
+  test "parseConfigFile lowercases the engine value":
+    writeFile(tmp, "[search]\nengine = \"Brave\"\n")
+    let (_, _, _, _, searchEngine) = parseConfigFile(tmp)
+    check searchEngine == "brave"
+
+  test "parseConfigFile returns empty engine when absent":
+    writeFile(tmp, "[settings]\ncurrent = \"p.m\"\n")
+    let (_, _, _, _, searchEngine) = parseConfigFile(tmp)
+    check searchEngine == ""
+
+  test "loadStateOrEmpty sets activeSearchKey and engine":
+    writeFile(tmp, "[search]\nengine = \"brave\"\nkey = \"brave-key\"\n")
+    discard loadStateOrEmpty(tmp)
+    check activeSearchKey == "brave-key"
+    check activeSearchEngine == "brave"
+
+  test "activeSearchKey and activeSearchEngine default to exa/empty":
     check activeSearchKey == ""
+    check activeSearchEngine == "exa"
 
 suite "config: streaming toggle":
   var tmp = ""
@@ -167,7 +186,7 @@ suite "config: [colors] section":
 
   test "parseConfigFile collects [colors] keys verbatim (suffix kept)":
     writeFile(tmp, "[colors]\nbright-white = \"\\x1b[37m\"\nbright-white-light = \"\\x1b[90m\"\n")
-    let (_, _, colors, _) = parseConfigFile(tmp)
+    let (_, _, colors, _, _) = parseConfigFile(tmp)
     # parsecfg interprets the backslash escape, so the value is the real
     # ESC byte, not the literal text "\x1b".
     check colors["bright-white"] == "\x1b[37m"
@@ -175,7 +194,7 @@ suite "config: [colors] section":
 
   test "parseConfigFile returns empty table when no [colors] section":
     writeFile(tmp, "[settings]\ncurrent = \"p.m\"\n")
-    let (_, _, colors, _) = parseConfigFile(tmp)
+    let (_, _, colors, _, _) = parseConfigFile(tmp)
     check colors.len == 0
 
   test "loadStateOrEmpty returns the colors map":

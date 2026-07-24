@@ -1,11 +1,19 @@
-## Web helpers: fetch a URL and return readable text, or run an Exa
-## search and return a compact list of hits. Exposed to the agent as native
+## Web helpers: fetch a URL and return readable text, or run a web search
+## and return a compact list of hits. Exposed to the agent as native
 ## `web_search` and `web_fetch` tool calls (dispatched in actions.nim).
 ##
 ## No external binaries, no scripting runtimes, pure Nim httpclient + a
-## hand-rolled HTML-to-text pass. The search backend is Exa's hosted MCP
-## endpoint (keyless by default); it speaks a single stateless JSON-RPC
-## call whose reply is one SSE frame.
+## hand-rolled HTML-to-text pass. Three search backends are wired in, each
+## a single stateless HTTP call:
+##
+## - `exa` (default): keyless MCP endpoint, JSON-RPC `tools/call`, reply is
+##   one SSE frame whose payload is a text blob we parse.
+## - `parallel`: keyless MCP endpoint, same JSON-RPC shape, reply is a JSON
+##   object embedded in the text block.
+## - `brave`: keyed REST endpoint, plain JSON reply.
+##
+## There is no automatic failover: the configured engine is used as-is and a
+## missing key surfaces as a runtime error for engines that need one.
 
 import std/[httpclient, json, strutils, uri, unicode, tables]
 import util
@@ -194,7 +202,7 @@ proc parseExaText*(text: string): seq[SearchHit] =
       hit.snippet = bodyLines.join(" ")
     result.add hit
 
-proc webSearch*(query: string; key = ""): seq[SearchHit] =
+proc webSearchExa(query: string; key: string): seq[SearchHit] =
   ## POST a single JSON-RPC `tools/call` for `web_search_exa` to Exa's hosted
   ## MCP endpoint. Keyless by default; pass `key` to use a paid tier (it goes
   ## on the URL as `exaApiKey`). Raises `IOError` on non-2xx so callers
@@ -233,6 +241,116 @@ proc webSearch*(query: string; key = ""): seq[SearchHit] =
   let txt = j{"result"}{"content"}{0}{"text"}.getStr("")
   if txt.len == 0: return
   parseExaText(txt)
+
+proc parseParallelResults*(text: string): seq[SearchHit] =
+  ## Parallel's MCP returns `result.content[0].text` as a JSON string shaped
+  ## `{"results":[{"url","title","excerpts":["..."]}]}`. Each result's
+  ## `excerpts` array is joined into the snippet. Robust to a missing
+  ## `excerpts` array or `title`.
+  let j = try: parseJson(text) except CatchableError: nil
+  if j == nil: return
+  let arr = j{"results"}
+  if arr == nil or arr.kind != JArray: return
+  for r in arr:
+    if result.len >= SearchResultCap: break
+    var hit: SearchHit
+    hit.title = r{"title"}.getStr("")
+    hit.url = r{"url"}.getStr("")
+    var snips: seq[string]
+    let exc = r{"excerpts"}
+    if exc != nil and exc.kind == JArray:
+      for ex in exc:
+        let s = ex.getStr("").strip
+        if s.len > 0: snips.add s
+    hit.snippet = snips.join(" ")
+    if hit.title.len == 0 and hit.url.len == 0: continue
+    result.add hit
+
+proc webSearchParallel(query: string; key: string): seq[SearchHit] =
+  ## POST a single stateless JSON-RPC `tools/call` for `web_search` to
+  ## Parallel's hosted MCP endpoint. Keyless by default; pass `key` to unlock
+  ## higher rate limits (it goes on the `Authorization` header as a Bearer
+  ## token). Raises `IOError` on non-2xx.
+  let body = $(%*{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "web_search",
+      "arguments": {
+        "objective": query,
+        "search_queries": [query],
+        "count": SearchResultCap
+      }
+    }
+  })
+  let client = newHttpClient(timeout = 30_000, userAgent = UserAgent,
+                             sslContext = bundledSslContext())
+  defer: client.close()
+  var hdrs = @[("Content-Type", "application/json"),
+               ("Accept", "application/json, text/event-stream")]
+  if key.len > 0:
+    hdrs.add ("Authorization", "Bearer " & key)
+  client.headers = newHttpHeaders(hdrs)
+  let resp = client.post("https://search.parallel.ai/mcp", body)
+  if resp.code.int div 100 != 2:
+    raise newException(IOError, "HTTP " & $resp.code & " searching")
+  let data = extractSseData(resp.body)
+  let j = try: parseJson(data) except CatchableError: nil
+  if j == nil: return
+  let txt = j{"result"}{"content"}{0}{"text"}.getStr("")
+  if txt.len == 0: return
+  parseParallelResults(txt)
+
+proc parseBraveResults*(body: string): seq[SearchHit] =
+  ## Brave's web search API returns `{"web":{"results":[{"title","url",
+  ## "description"}]}}`. `description` is optional. Robust to a missing
+  ## `web` object or empty results array.
+  let j = try: parseJson(body) except CatchableError: nil
+  if j == nil: return
+  let arr = j{"web"}{"results"}
+  if arr == nil or arr.kind != JArray: return
+  for r in arr:
+    if result.len >= SearchResultCap: break
+    var hit: SearchHit
+    hit.title = r{"title"}.getStr("")
+    hit.url = r{"url"}.getStr("")
+    hit.snippet = r{"description"}.getStr("").strip
+    if hit.title.len == 0 and hit.url.len == 0: continue
+    result.add hit
+
+proc webSearchBrave(query: string; key: string): seq[SearchHit] =
+  ## GET the Brave Search REST endpoint. Requires a key (the
+  ## `X-Subscription-Token` header); raises `IOError` if none is set. Raises
+  ## `IOError` on non-2xx.
+  if key.len == 0:
+    raise newException(IOError, "brave search requires a key " &
+      "(set [search] key or BRAVE_API_KEY)")
+  let url = "https://api.search.brave.com/res/v1/web/search?q=" &
+            encodeUrl(query) & "&count=" & $SearchResultCap
+  let client = newHttpClient(timeout = 30_000, userAgent = UserAgent,
+                             sslContext = bundledSslContext())
+  defer: client.close()
+  client.headers = newHttpHeaders({
+    "Accept": "application/json",
+    "X-Subscription-Token": key
+  })
+  let resp = client.get(url)
+  if resp.code.int div 100 != 2:
+    raise newException(IOError, "HTTP " & $resp.code & " searching")
+  parseBraveResults(resp.body)
+
+proc webSearch*(query: string; key = ""; engine = "exa"): seq[SearchHit] =
+  ## Dispatch to the configured search backend. `engine` is "exa" (default),
+  ## "parallel", or "brave". There is no automatic failover: the chosen
+  ## engine is used as-is. Raises `IOError` on transport failure or, for
+  ## brave, when no key is configured.
+  case engine.strip.toLowerAscii
+  of "exa": webSearchExa(query, key)
+  of "parallel": webSearchParallel(query, key)
+  of "brave": webSearchBrave(query, key)
+  else: raise newException(IOError, "unknown search engine: " & engine &
+    " (expected exa, parallel, or brave)")
 
 proc formatHits*(hits: seq[SearchHit]): string =
   if hits.len == 0: return "no results"

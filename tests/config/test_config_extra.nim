@@ -18,7 +18,7 @@ suite "config: parseConfigFile round-trip":
                   key: "sk-other", models: @["model-x"])
     ]
     writeConfigFile(tmp, "test.model-a", providers)
-    let (current, readProvs, _, _) = parseConfigFile(tmp)
+    let (current, readProvs, _, _, _) = parseConfigFile(tmp)
     check current == "test.model-a"
     check readProvs.len == 2
     check readProvs[0].name == "test"
@@ -33,11 +33,23 @@ suite "config: parseConfigFile round-trip":
     let raw = readFile(tmp)
     check raw.find("[search]") >= 0
     check raw.find("key = \"exa-roundtrip\"") >= 0
-    let (_, _, _, searchKey) = parseConfigFile(tmp)
+    let (_, _, _, searchKey, _) = parseConfigFile(tmp)
     check searchKey == "exa-roundtrip"
 
-  test "writeConfigFile omits [search] when key is empty":
+  test "[search] engine round-trips through writeConfigFile":
     activeSearchKey = ""
+    activeSearchEngine = "parallel"
+    writeConfigFile(tmp, "test.model-a", @[])
+    activeSearchEngine = "exa"
+    let raw = readFile(tmp)
+    check raw.find("[search]") >= 0
+    check raw.find("engine = \"parallel\"") >= 0
+    let (_, _, _, _, searchEngine) = parseConfigFile(tmp)
+    check searchEngine == "parallel"
+
+  test "writeConfigFile omits [search] when key empty and engine exa":
+    activeSearchKey = ""
+    activeSearchEngine = "exa"
     writeConfigFile(tmp, "test.model-a", @[])
     let raw = readFile(tmp)
     check raw.find("[search]") < 0
@@ -50,7 +62,7 @@ suite "config: parseConfigFile round-trip":
                   reasonings: @["low", "medium", "high"])
     ]
     writeConfigFile(tmp, "test.model-a", providers)
-    let (_, readProvs, _, _) = parseConfigFile(tmp)
+    let (_, readProvs, _, _, _) = parseConfigFile(tmp)
     check readProvs[0].reasoning == "high"
     check readProvs[0].reasonings == @["low", "medium", "high"]
 
@@ -61,7 +73,7 @@ suite "config: parseConfigFile round-trip":
                   family: "glm")
     ]
     writeConfigFile(tmp, "custom.model-c", providers)
-    let (_, readProvs, _, _) = parseConfigFile(tmp)
+    let (_, readProvs, _, _, _) = parseConfigFile(tmp)
     check readProvs[0].family == "glm"
 
 suite "config: parseConfigFile model prefix expansion":
@@ -85,7 +97,7 @@ key = "sk-test"
 model_prefix = "openai/"
 models = "gpt-oss-120b llama-4"
 """)
-    let (_, provs, _, _) = parseConfigFile(tmp)
+    let (_, provs, _, _, _) = parseConfigFile(tmp)
     check provs.len == 1
     check provs[0].models == @["openai/gpt-oss-120b", "openai/llama-4"]
     check provs[0].modelPrefix == ""  # expanded away
@@ -108,7 +120,7 @@ url = "https://api.test.com"
 key = "$THREECODE_TEST_KEY"
 models = "model-a"
 """)
-    let (_, provs, _, _) = parseConfigFile(tmp)
+    let (_, provs, _, _, _) = parseConfigFile(tmp)
     check provs[0].key == "sk-from-env-123"
     delEnv("THREECODE_TEST_KEY")
 

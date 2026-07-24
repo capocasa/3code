@@ -69,9 +69,26 @@ func findModel*(p: ProviderRec, name: string): int =
 var activeCurrent*: string
 var activeProviders*: seq[ProviderRec]
 var activeSearchKey*: string = ""
-  ## Optional Exa API key resolved at config load. Set via `[search] key = "..."`
-  ## or the `EXA_API_KEY` environment variable. Keyless by default; the key
+  ## Optional search API key resolved at config load. Set via
+  ## `[search] key = "..."`. The env var honored depends on the engine:
+  ## `EXA_API_KEY`, `PARALLEL_API_KEY`, or `BRAVE_API_KEY`. Keyless by
+  ## default (Exa and Parallel both have a free anonymous tier); the key
   ## is only persisted back to disk when non-empty.
+
+const SearchEngineEnv*: array[3, (string, string)] = [
+  ("exa", "EXA_API_KEY"),
+  ("parallel", "PARALLEL_API_KEY"),
+  ("brave", "BRAVE_API_KEY")
+]
+  ## Maps each engine name to the env var that supplies its key. Used by
+  ## `loadStateOrEmpty` / `loadProfile` to fall back to the environment
+  ## when `[search] key` is unset.
+
+var activeSearchEngine*: string = "exa"
+  ## Active search engine: "exa" (default), "parallel", or "brave". Set via
+  ## `[search] engine = "..."`. No automatic failover — the chosen engine is
+  ## used as-is, and a missing key is an error only if that engine needs one
+  ## (brave does; exa and parallel are keyless by default).
 
 var bashPathOverride*: string
   ## Windows-only. `[settings]` `bash_path = "..."` overrides MSYS2
@@ -196,15 +213,17 @@ proc expandEnvValue(s: string): string =
     return getEnv(t[1 .. ^1])
   s
 
-proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, string], string) =
+proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, string], string, string) =
   ## Streaming parse so that repeated [provider] sections accumulate as a list.
-  ## Returns `(current, providers, colors, searchKey)`. `searchKey` is the
-  ## optional `[search] key` value ("" when absent or keyless). `colors` is
-  ## the flat `[colors]` map (raw keys verbatim, including any `-light`
-  ## suffix); the caller routes it through `splitColorOverrides` +
-  ## `applyColorOverrides`.
+  ## Returns `(current, providers, colors, searchKey, searchEngine)`.
+  ## `searchKey` is the optional `[search] key` value ("" when absent or
+  ## keyless); `searchEngine` is the optional `[search] engine` value
+  ## ("" when absent, meaning the default `exa`). `colors` is the flat
+  ## `[colors]` map (raw keys verbatim, including any `-light` suffix); the
+  ## caller routes it through `splitColorOverrides` + `applyColorOverrides`.
   var current = ""
   var searchKey = ""
+  var searchEngine = ""
   var providers: seq[ProviderRec]
   var colors: Table[string, string]
   var section = ""
@@ -270,6 +289,7 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
       of "search":
         case e.key
         of "key": searchKey = v
+        of "engine": searchEngine = v.strip.toLowerAscii
         else: discard
       of "provider":
         case e.key
@@ -286,7 +306,7 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
     of cfgError:
       die &"{path}: {e.msg}", ExitConfig
   p.close
-  (current, providers, colors, searchKey)
+  (current, providers, colors, searchKey, searchEngine)
 
 func quoteVal(s: string): string =
   result = "\""
@@ -302,9 +322,12 @@ proc writeConfigFile*(path: string, current: string,
   createDir(path.parentDir)
   var buf = "[settings]\n"
   buf.add "current = " & quoteVal(current) & "\n"
-  if activeSearchKey != "":
+  if activeSearchKey != "" or activeSearchEngine != "exa":
     buf.add "\n[search]\n"
-    buf.add "key = " & quoteVal(activeSearchKey) & "\n"
+    if activeSearchEngine != "exa":
+      buf.add "engine = " & quoteVal(activeSearchEngine) & "\n"
+    if activeSearchKey != "":
+      buf.add "key = " & quoteVal(activeSearchKey) & "\n"
   # Persist the streaming/notify toggles only when off — on is the default,
   # so a user who never changes them keeps a clean config. This also matches
   # the defaults in types.nim.
@@ -333,17 +356,26 @@ proc writeConfigFile*(path: string, current: string,
 proc configPath*(): string =
   getConfigDir() / "3code" / "config"
 
+proc resolveSearchKey*(engine, configuredKey: string): string =
+  ## `[search] key` wins; otherwise the env var for the active engine is
+  ## consulted (`EXA_API_KEY` / `PARALLEL_API_KEY` / `BRAVE_API_KEY`).
+  ## Returns "" when neither is set, which is fine for the keyless engines
+  ## (exa, parallel) and surfaces as a runtime error for brave.
+  if configuredKey != "": return configuredKey
+  for (name, envVar) in SearchEngineEnv:
+    if name == engine and existsEnv(envVar):
+      return getEnv(envVar)
+  ""
+
 proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec], Table[string, string]) =
-  ## Returns `(current, providers, colors)` and updates `activeSearchKey` as a
-  ## side effect when the config sets `[search] key`. `colors` is the flat
-  ## `[colors]` map for the caller to route through the cascade. Missing
-  ## file is benign. Keyless search is the default; a key is honored when
-  ## `[search] key` is set or `EXA_API_KEY` is in the environment.
+  ## Returns `(current, providers, colors)` and updates `activeSearchKey` /
+  ## `activeSearchEngine` as a side effect when the config sets them.
+  ## `colors` is the flat `[colors]` map for the caller to route through the
+  ## cascade. Missing file is benign.
   if not fileExists(path): return ("", @[], initTable[string, string]())
-  let (current, providers, colors, searchKey) = parseConfigFile(path)
-  if searchKey != "": activeSearchKey = searchKey
-  if activeSearchKey == "" and existsEnv("EXA_API_KEY"):
-    activeSearchKey = getEnv("EXA_API_KEY")
+  let (current, providers, colors, searchKey, searchEngine) = parseConfigFile(path)
+  if searchEngine != "": activeSearchEngine = searchEngine
+  activeSearchKey = resolveSearchKey(activeSearchEngine, searchKey)
   (current, providers, colors)
 
 proc resolveFamily*(prov: ProviderRec, prof: Profile): string =
@@ -427,10 +459,9 @@ proc loadProfile*(wanted: string): Profile =
     stderr.writeLine ""
     stderr.writeLine ConfigExample
     quit ExitConfig
-  let (current, providers, _, searchKey) = parseConfigFile(path)
-  if searchKey != "": activeSearchKey = searchKey
-  if activeSearchKey == "" and existsEnv("EXA_API_KEY"):
-    activeSearchKey = getEnv("EXA_API_KEY")
+  let (current, providers, _, searchKey, searchEngine) = parseConfigFile(path)
+  if searchEngine != "": activeSearchEngine = searchEngine
+  activeSearchKey = resolveSearchKey(activeSearchEngine, searchKey)
   if providers.len == 0:
     die &"no [provider] section in {path}", ExitConfig
   var pick = wanted
