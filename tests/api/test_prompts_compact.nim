@@ -72,25 +72,6 @@ suite "prompts: knownGoodReasoning":
   test "returns empty for unknown":
     check knownGoodReasoning("unknown", "model") == ""
 
-suite "prompts: reasoningSupported":
-  test "true for gpt-oss":
-    check reasoningSupported("gpt-oss")
-
-  test "true for glm":
-    check reasoningSupported("glm")
-
-  test "true for deepseek":
-    check reasoningSupported("deepseek")
-
-  test "true for minimax":
-    check reasoningSupported("minimax")
-
-  test "true for kimi":
-    check reasoningSupported("kimi")
-
-  test "false for unknown family":
-    check not reasoningSupported("llama")
-
 suite "prompts: defaultReasoningsFor":
   test "glm 4.7/5/5.1 expose off/on":
     check defaultReasoningsFor("zai", "glm-5.1", "glm") == @["off", "on"]
@@ -157,8 +138,29 @@ suite "prompts: setup — minimax":
         check t{"function"}{"parameters"}{"properties"}.hasKey("command")
     check foundBash
 
-  test "returns empty for unsupported family":
-    check defaultReasoningsFor("x", "y", "llama").len == 0
+  test "falls back to level-based set for unsupported family":
+    check defaultReasoningsFor("x", "y", "llama") == @ReasoningLevels
+
+suite "prompts: setup — kimi":
+  test "returns the Kimi preamble":
+    let p = Profile(name: "opencode.kimi-k2.7-code", url: "x", key: "k",
+                    model: "kimi-k2.7-code", family: "kimi")
+    let s = setup(p)
+    check "Kimi" in s.prompt
+    check "Moonshot" in s.prompt
+
+  test "tools are glmAndQwenTools (bash/read/write/patch)":
+    let p = Profile(name: "opencode.kimi-k2.7-code", url: "x", key: "k",
+                    model: "kimi-k2.7-code", family: "kimi")
+    let s = setup(p)
+    check s.tools.kind == JArray
+    check s.tools.len == 8
+    var foundBash = false
+    for t in s.tools:
+      if t{"function"}{"name"}.getStr == "bash":
+        foundBash = true
+        check t{"function"}{"parameters"}{"properties"}.hasKey("command")
+    check foundBash
 
 suite "prompts: buildCredit":
   test "builds attribution for valid profile":
@@ -273,9 +275,6 @@ suite "prompts: inkling family":
 
   test "default reasoning level is medium":
     check knownGoodReasoning("together", "thinkingmachines/Inkling") == "medium"
-
-  test "reasoningSupported is true":
-    check reasoningSupported("inkling")
 
   test "exposes the level-based low/medium/high set":
     check defaultReasoningsFor("together", "thinkingmachines/Inkling",

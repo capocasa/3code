@@ -209,5 +209,9 @@ proc isEmptyReplyMsg*(msg: string): bool =
   msg == EmptyReplyMsg
 
 proc die*(msg: string, code = 1) {.noreturn.} =
-  stderr.writeLine "3code: " & msg
+  # Leading newline: mid-turn deaths (unknown family, etc.) fire while the
+  # cursor sits at the end of the just-submitted prompt line, which has no
+  # trailing newline. Without this, the error appends to the prompt on the
+  # same row. At startup the cursor is at col 0, so the extra line is inert.
+  stderr.write "\n3code: " & msg & "\n"
   quit code

@@ -100,6 +100,23 @@ suite "actions: toolCallToAction — web_search / web_fetch":
     check act.kind == akWebFetch
     check act.body == "https://example.com"
 
+suite "actions: toolCallToAction — kimi dispatch":
+  test "kimi routes bash through the glm/qwen dispatcher":
+    let act = toolCallToAction("kimi", "bash", %*{"command": "ls"})
+    check act.kind == akBash
+    check act.body == "ls"
+
+  test "kimi routes read through the glm/qwen dispatcher":
+    let act = toolCallToAction("kimi", "read", %*{"path": "a.txt"})
+    check act.kind == akRead
+    check act.path == "a.txt"
+
+  test "kimi routes patch through the glm/qwen dispatcher":
+    let act = toolCallToAction("kimi", "patch",
+                               %*{"path": "f.nim", "edits": []})
+    check act.kind == akPatch
+    check act.path == "f.nim"
+
 suite "actions: computeDiff edge cases":
   test "empty before, non-empty after":
     let d = computeDiff("", "new content\n", "new.txt")
