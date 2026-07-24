@@ -217,6 +217,68 @@ proc expandEnvValue(s: string): string =
     return getEnv(t[1 .. ^1])
   s
 
+type
+  RawEntry* = tuple[section, key, value: string, line: int]
+    ## A key/value pair as written, before env expansion, with the line it
+    ## appeared on. Collected during the streaming parse so `validateConfig`
+    ## can report `path:line:` for a bad section/key/value without re-reading.
+
+const
+  PermittedSections = ["settings", "search", "colors", "provider"]
+  SettingsKeys = ["current", "notify", "streaming", "sandbox",
+                  "sandbox_enabled", "mode", "bash_path", "bash-path",
+                  "auto_update"]
+  SearchKeys = ["exa-key", "brave-key", "key", "engine"]
+  ColorKeys = ["bright-white", "off-white", "dim-white"]
+  ProviderKeys = ["name", "url", "key", "model_prefix", "family",
+                  "models", "reasoning", "reasonings"]
+  SearchEngines = ["exa", "parallel", "brave"]
+  ColorModes = ["auto", "dark", "bright", "light"]
+  BoolValues = ["on", "true", "yes", "1", "off", "false", "no", "0"]
+
+proc permittedKey(section, key: string): bool =
+  case section
+  of "settings": key in SettingsKeys
+  of "search": key in SearchKeys
+  of "colors":
+    # Plain key or a `-light` suffixed variant of a permitted base.
+    let base = if key.endsWith("-light"): key[0 ..< key.len - 6] else: key
+    base in ColorKeys
+  of "provider": key in ProviderKeys
+  else: false
+
+proc validateConfig*(path: string; entries: seq[RawEntry]): string =
+  ## Reject unknown sections, unknown keys, bad enum values, and empty
+  ## values. Returns the first violation as a `path:line:` message, or ""
+  ## when the config is schema-clean. The caller decides how to surface it
+  ## (`parseConfigFile` passes it to `die` with `ExitConfig`). Empty
+  ## `current`/`key`/`url`/`models` are tolerated here — those are
+  ## structural gaps `loadProfile` already diagnoses with its own messages;
+  ## this pass is about the schema, not provider completeness.
+  for ent in entries:
+    if ent.section notin PermittedSections:
+      return &"{path}:{ent.line}: unknown section [{ent.section}]"
+    if not permittedKey(ent.section, ent.key):
+      return &"{path}:{ent.line}: unknown key '{ent.key}' in [{ent.section}]"
+    if ent.value.strip == "":
+      return &"{path}:{ent.line}: empty value for '{ent.key}' in [{ent.section}]"
+    case ent.section
+    of "search":
+      if ent.key == "engine" and
+          ent.value.strip.toLowerAscii notin SearchEngines:
+        return &"{path}:{ent.line}: unknown search engine '{ent.value}' " &
+               "(expected one of: exa, parallel, brave)"
+    of "settings":
+      if ent.key in ["notify", "streaming", "sandbox", "sandbox_enabled"] and
+          ent.value.strip.toLowerAscii notin BoolValues:
+        return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
+               "(expected on/off/true/false/yes/no/1/0)"
+      if ent.key == "mode" and ent.value.strip.toLowerAscii notin ColorModes:
+        return &"{path}:{ent.line}: unknown color mode '{ent.value}' " &
+               "(expected one of: auto, dark, bright)"
+    else: discard
+  ""
+
 proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, string], Table[string, string], string) =
   ## Streaming parse so that repeated [provider] sections accumulate as a list.
   ## Returns `(current, providers, colors, searchKeys, searchEngine)`.
@@ -235,6 +297,7 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
   var section = ""
   var prov: ProviderRec
   var inProvider = false
+  var entries: seq[RawEntry]
   let stream = newFileStream(path, fmRead)
   if stream == nil: die &"cannot open {path}", ExitConfig
   var p: CfgParser
@@ -262,6 +325,7 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
       section = e.section
       if section == "provider": inProvider = true
     of cfgKeyValuePair, cfgOption:
+      entries.add (section, e.key, e.value, p.getLine())
       let v = expandEnvValue(e.value)
       case section
       of "colors":
@@ -325,6 +389,8 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
     of cfgError:
       die &"{path}: {e.msg}", ExitConfig
   p.close
+  let verr = validateConfig(path, entries)
+  if verr != "": die verr, ExitConfig
   (current, providers, colors, searchKeys, searchEngine)
 
 func quoteVal(s: string): string =
