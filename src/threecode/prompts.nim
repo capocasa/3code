@@ -116,6 +116,35 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("ovh",       "gpt-oss-20b", "gpt-oss"   , "", "20b", "medium", 0.2, 4096, false, 131072),
     ("groq",      "openai/gpt-oss-20b", "gpt-oss"   , "", "20b", "medium", 0.2, 4096, false, 131072),
 
+    # openai (first-party; bare model ids on the wire).
+    # gpt-oss-* keep the gpt-oss family (Codex shell/apply_patch surface).
+    # The chat/reasoning lineup uses the `gpt` family: same gpt-oss system
+    # prompt, but the bash/read/write/patch tool surface those models were
+    # trained on, and reasoning_effort as the wire knob.
+    ("openai",    "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
+    ("openai",    "gpt-oss-20b",                                     "gpt-oss",  "",    "20b",       "medium", 0.2, 4096, false, 131_072),
+    ("openai",    "o1",                                              "gpt",      "",    "o1",        "medium", 0.2, 8192, false, 200_000),
+    ("openai",    "o1-mini",                                         "gpt",      "",    "o1-mini",   "medium", 0.2, 8192, false, 200_000),
+    ("openai",    "o3",                                              "gpt",      "",    "o3",        "medium", 0.2, 8192, false, 200_000),
+    ("openai",    "o3-mini",                                         "gpt",      "",    "o3-mini",   "medium", 0.2, 8192, false, 200_000),
+    ("openai",    "o4-mini",                                         "gpt",      "",    "o4-mini",   "medium", 0.2, 4096, false, 200_000),
+    ("openai",    "gpt-4.1",                                         "gpt",      "",    "4.1",       "medium", 0.2, 8192, false, 1_000_000),
+    ("openai",    "gpt-4.1-mini",                                    "gpt",      "",    "4.1-mini",  "medium", 0.2, 4096, false, 1_000_000),
+    ("openai",    "gpt-4.1-nano",                                    "gpt",      "",    "4.1-nano",  "medium", 0.2, 4096, false, 1_000_000),
+    ("openai",    "gpt-4o",                                          "gpt",      "",    "4o",        "medium", 0.2, 8192, false, 128_000),
+    ("openai",    "gpt-4o-mini",                                     "gpt",      "",    "4o-mini",   "medium", 0.2, 4096, false, 128_000),
+    ("openai",    "gpt-5",                                           "gpt",      "",    "5",         "medium", 0.2, 8192, false, 400_000),
+    ("openai",    "gpt-5-mini",                                      "gpt",      "",    "5-mini",    "medium", 0.2, 4096, false, 400_000),
+    ("openai",    "gpt-5-nano",                                      "gpt",      "",    "5-nano",    "medium", 0.2, 4096, false, 400_000),
+    ("openai",    "gpt-5.4",                                         "gpt",      "",    "5.4",       "medium", 0.2, 8192, false, 400_000),
+    ("openai",    "gpt-5.4-mini",                                    "gpt",      "",    "5.4-mini",  "medium", 0.2, 4096, false, 400_000),
+    ("openai",    "gpt-5.5",                                         "gpt",      "",    "5.5",       "medium", 0.2, 8192, false, 400_000),
+    ("openai",    "gpt-5.5-pro",                                     "gpt",      "",    "5.5-pro",   "high",   0.2, 8192, false, 400_000),
+    ("openai",    "gpt-5.6",                                         "gpt",      "",    "5.6",       "medium", 0.2, 8192, false, 400_000),
+    ("openai",    "gpt-5.6-sol",                                     "gpt",      "",    "5.6-sol",   "medium", 0.2, 8192, false, 400_000),
+    ("openai",    "gpt-5.6-terra",                                   "gpt",      "",    "5.6-terra", "medium", 0.2, 4096, false, 400_000),
+    ("openai",    "gpt-5.6-luna",                                    "gpt",      "",    "5.6-luna",  "medium", 0.2, 4096, false, 400_000),
+
     # deepseek
     ("baseten",   "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
     ("deepseek",  "deepseek-chat",                                   "deepseek", "3",   "",          "medium", 0.2, 8192, false, 128_000),
@@ -1623,6 +1652,7 @@ let
   qwenSetup = (prompt: QwenPreamble, tools: glmAndQwenTools)
   deepseekSetup = (prompt: DeepSeekPreamble, tools: glmAndQwenTools)
   gptOssSetup = (prompt: GptOssPreamble, tools: gptOssTools)
+  gptSetup = (prompt: GptOssPreamble, tools: glmAndQwenTools)
   minimaxSetup = (prompt: MiniMaxPreamble, tools: glmAndQwenTools)
   longcatSetup = (prompt: LongcatPreamble, tools: glmAndQwenTools)
   hySetup = (prompt: HyPreamble, tools: glmAndQwenTools)
@@ -1637,6 +1667,7 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   of "glm": glmSetup
   of "qwen": qwenSetup
   of "gpt-oss": gptOssSetup
+  of "gpt": gptSetup
   of "deepseek": deepseekSetup
   of "minimax": minimaxSetup
   of "longcat": longcatSetup

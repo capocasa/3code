@@ -1347,6 +1347,7 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   case p.family
   of "laguna": applyLagunaReasoning(p, body)
   of "gpt-oss": applyGptOssReasoning(p, body)
+  of "gpt": applyGptOssReasoning(p, body)
   of "glm": applyGlmReasoning(p, body)
   of "deepseek": applyDeepseekReasoning(p, body)
   of "minimax": applyMinimaxReasoning(p, body)
