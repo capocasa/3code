@@ -1,7 +1,7 @@
-===== 390 =====
+===== 257 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.6.0-filename-805c0e7e-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,10 +10,10 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ run other tool checks
-===== 183 =====
+===== 786 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.6.0-filename-805c0e7e-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -27,10 +27,10 @@
 
 ⣿ ○0% ↓6 0s
 ❯
-===== 585 =====
+===== 251 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.6.0-filename-805c0e7e-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -44,10 +44,10 @@
 
   ○2%  ↑300  ↓44  0s
 ❯
-===== 774 =====
+===== 526 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.6.0-filename-805c0e7e-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -63,6 +63,16 @@ r notes.txt
   read-one
   read-two
   read-three
+
+r bigfile.txt
+  line01
+  line02
+  … 13 lines hidden · :show 2 for full …
+  line16
+  line17
+  line18
+  line19
+  line20
 
 w notes.txt
   --- /tmp/notes.txt
@@ -102,10 +112,10 @@ p --- /tmp/applied.txt
 
 ⣿ ○0% ↓4 0s
 ❯
-===== 283 =====
+===== 340 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.6.0-filename-805c0e7e-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -121,6 +131,16 @@ r notes.txt
   read-one
   read-two
   read-three
+
+r bigfile.txt
+  line01
+  line02
+  … 13 lines hidden · :show 2 for full …
+  line16
+  line17
+  line18
+  line19
+  line20
 
 w notes.txt
   --- /tmp/notes.txt
@@ -160,10 +180,10 @@ p --- /tmp/applied.txt
 
   ○0%  ↑90  ↓12  0s
 ❯
-===== 675 =====
+===== 964 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.6.0-filename-805c0e7e-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -179,6 +199,16 @@ r notes.txt
   read-one
   read-two
   read-three
+
+r bigfile.txt
+  line01
+  line02
+  … 13 lines hidden · :show 2 for full …
+  line16
+  line17
+  line18
+  line19
+  line20
 
 w notes.txt
   --- /tmp/notes.txt
