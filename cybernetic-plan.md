@@ -113,8 +113,11 @@ lpApplicationName=NULL (cmdline carries the program path).
 OTHER CONFIRMED-NOT-THE-CAUSE (saves future round-trips): env block contents
 (constructed vs NULL inherit — both fail identically), pipe inheritance flags,
 console attach state (FreeConsole/AllocConsole), shell (bash/cmd/pwsh all
-fail), pipe type (anonymous vs named — anonymous is correct), DLL staging
-(smoke `./3code.exe -v` runs fine), alloc0 of the attribute-list buffer.
+fail), DLL staging (smoke `./3code.exe -v` runs fine), alloc0 of the
+attribute-list buffer, NAMED pipes + ConnectNamedPipe (node-pty pattern) —
+ConnectNamedPipe blocks indefinitely even with the lpValue fix; the conhost
+spawned by CreatePseudoConsole on Server 2025 does NOT connect to externally-
+created named pipes. Anonymous pipes are the correct choice here.
 
 REMAINING BLOCKER (precise, needs a Windows box): after the 3 fixes the child
 process RUNS and EXITS CLEANLY (no 0xC0000142), but the ConPTY conhost only
