@@ -1595,27 +1595,31 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
       break
     # The transport signals a dead link by writing a canonical marker into
     # `outcome.errMsg` (it cannot raise: the threaded path crosses a thread
-    # boundary via a serialized `StreamOutcome`). Two such markers:
+    # boundary via a serialized `StreamOutcome`). Three cases to promote to
+    # `NetworkHealthError` so the retry loop backs off and resends, exactly
+    # like a 5xx, instead of relying on the string heuristic in
+    # `retryCategory` (which returns "" for status 200 and would dead-end
+    # on the first attempt with an `HttpError (code 200)`):
     #   - `networkQuietMsg`: the quiet watchdog fired (no data for
     #     `QuietTooLongMs`).
-    #   - `EmptyReplyMsg`: a 200 OK with no content, no tool_calls, and no
-    #     finish_reason, a transport anomaly rather than a budget-starved
-    #     empty turn. Without this, `retryCategory` returns "" for status
-    #     200 and the loop raises a dead-end `HttpError (code 200)` on the
-    #     first attempt, never retrying.
-    # Promote either to a `NetworkHealthError` and catch it below so the
-    # retry loop handles them by class, exactly like a 5xx, instead of
-    # relying on the string heuristic in `retryCategory`.
+    #   - A 200 OK that produced no assistant message: a transport/protocol
+    #     anomaly (empty reply with no finish_reason, unparseable body, 200
+    #     carrying an inline error object, mid-stream read error after the
+    #     head arrived). All share the shape `statusCode == 200`,
+    #     `assistantMsg == nil`, `errMsg != ""`; `retryCategory` would not
+    #     retry any of them.
     try:
-      if isNetworkQuietMsg(outcome.errMsg) or isEmptyReplyMsg(outcome.errMsg):
+      if isNetworkQuietMsg(outcome.errMsg) or
+         (outcome.statusCode == 200 and outcome.assistantMsg == nil and
+          outcome.errMsg.len > 0):
         raise newException(NetworkHealthError, outcome.errMsg)
       code = outcome.statusCode
       category = retryCategory(outcome.errMsg, outcome.assistantMsg, code)
       errMsg = outcome.errMsg
     except NetworkHealthError as e:
-      # Network quiet or empty 200: treat as a retryable server error, same
-      # as a 5xx. Sets the shared decision vars and falls into the single
-      # backoff block below; no second retry loop.
+      # Network quiet or 200 transport anomaly: treat as a retryable server
+      # error, same as a 5xx. Sets the shared decision vars and falls into
+      # the single backoff block below; no second retry loop.
       code = 0
       category = "server"
       errMsg = e.msg
@@ -1644,11 +1648,13 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     if attempt >= MaxAttempts:
       hookStopSpinner()
       # Preserve the error class on exhaustion: NetworkHealthError for a
-      # quiet-network or empty-200 failure, HttpError for a status-code
-      # failure. Both subclass ApiError, so the turn loop's `except ApiError`
-      # catches them.
-      if category == "server" and
-         (isNetworkQuietMsg(errMsg) or isEmptyReplyMsg(errMsg)):
+      # promoted transport anomaly (network quiet or a 200 that produced no
+      # assistant message), HttpError for a status-code failure. The
+      # promotion path sets `code = 0`, while a real 5xx keeps its status in
+      # `code`, so `category == "server" and code == 0` uniquely marks the
+      # promoted cases. Both subclass ApiError, so the turn loop's `except
+      # ApiError` catches them.
+      if category == "server" and code == 0:
         raise newException(NetworkHealthError, errMsg)
       raise newHttpError(code, errMsg, outcome.errBody)
     let retryAfter = try: parseInt(outcome.retryAfter) except CatchableError: 0

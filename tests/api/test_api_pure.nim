@@ -401,15 +401,24 @@ suite "api: NetworkHealthError":
     # Regression for the dead-end "empty reply ... (code 200)" bug: a 200 OK
     # with no content/tool_calls/finish_reason used to fall through
     # retryCategory's `else` branch (status 200 is not retryable), raising an
-    # HttpError on the first attempt with no backoff. callModel now detects
-    # EmptyReplyMsg before retryCategory and raises NetworkHealthError so the
+    # HttpError on the first attempt with no backoff. callModel now promotes
+    # any 200 that produced no assistant message to NetworkHealthError so the
     # loop backs off and resends. The class is what the turn loop branches on.
     let e = newException(NetworkHealthError, EmptyReplyMsg)
     check e of NetworkHealthError
     check e of ApiError
     check isEmptyReplyMsg(e.msg)
-    # Sanity: retryCategory alone would NOT retry a 200 (the old path).
+    # Sanity: retryCategory alone would NOT retry a 200 (the old path). The
+    # promotion in callModel happens before retryCategory is consulted.
     check retryCategory(EmptyReplyMsg, nil, 200) == ""
+    # The same dead-end hit every 200 transport anomaly, not just the empty
+    # reply: an unparseable body, a 200 carrying an inline error object, a
+    # mid-stream read error after the head arrived. retryCategory rejects
+    # them all at status 200; the promotion covers them by shape (200 + nil
+    # assistantMsg + non-empty errMsg), not by string.
+    check retryCategory("response parse: unexpected token", nil, 200) == ""
+    check retryCategory("api error in 200 body", nil, 200) == ""
+    check retryCategory("stream read: connection reset", nil, 200) == ""
 
 suite "api: HttpError":
   test "HttpError is a subclass of ApiError":
