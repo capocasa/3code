@@ -81,6 +81,23 @@ proc makeSseEmptyWithFinish(finishReason, id: string;
       "finish_reason":finishReason}],"id":id} & "\n\n")
   result.add("data: [DONE]\n\n")
 
+proc makeSseMidStreamError(message, id: string; code = 502): string =
+  ## OpenRouter mid-stream error: a `data:` chunk with a top-level `error`
+  ## object and `choices[0].finish_reason` set to "error". The HTTP status
+  ## is 200 (already committed), so the error arrives in-band. No [DONE]
+  ## follows — the stream is terminated by the error event.
+  result = "data: " & $ %*{"id":id,"object":"chat.completion.chunk",
+    "created":1234567890,"model":"test/model","provider":"test",
+    "error":{"code":code,"message":message},
+    "choices":[{"index":0,"delta":{"content":""},"finish_reason":"error"}]} & "\n\n"
+
+proc makeSseMidStreamErrorAfterContent(content, message, id: string; code = 502): string =
+  ## Mid-stream error after some content was already streamed: a content
+  ## delta, then the error chunk. The partial content must NOT be returned
+  ## as a valid assistant turn — the error takes priority.
+  result = "data: " & $ %*{"choices":[{"index":0,"delta":{"content":content}}],"id":id} & "\n\n"
+  result.add(makeSseMidStreamError(message, id, code))
+
 proc makeSseReasoningThenTool(reasoning, cmd, id: string): string =
   ## SSE with reasoning_content first, then a tool_call in many fragments.
   result = ""
@@ -318,6 +335,52 @@ suite "streaming SSE: empty-content with finish_reason":
       %*[{"role": "user", "content": "go"}], usage, 0)
     check result != nil
     check result{"finish_reason"}.getStr == "content_filter"
+    server.socket.close()
+    closeCachedStreamConn()
+
+  syncPool()
+
+suite "streaming SSE: mid-stream error (OpenRouter)":
+  # OpenRouter emits mid-stream provider failures as a `data:` chunk with a
+  # top-level `error` object and finish_reason "error", all under HTTP 200.
+  # Without explicit detection the error is swallowed: finish_reason "error"
+  # builds an empty assistant message that the turn loop retries as a bare
+  # empty reply, never showing the provider's error message. The transport
+  # must surface the error so the user sees it.
+  test "mid-stream error surfaces as ApiError with the provider message":
+    # Use a 400 (non-retryable) so the error surfaces immediately without
+    # callModel's retry backoff (the test server only accepts one conn).
+    let server = newSseServer(
+      makeSseMidStreamError("Provider disconnected unexpectedly", "id-err-1",
+        code = 400))
+    spawn serveThread(server)
+    var usage = Usage()
+    var raised = false
+    try:
+      discard callModel(testProfile(server),
+        %*[{"role": "user", "content": "go"}], usage, 0)
+    except ApiError as e:
+      raised = true
+      check "Provider disconnected unexpectedly" in e.msg
+    check raised
+    server.socket.close()
+    closeCachedStreamConn()
+
+  test "mid-stream error after partial content surfaces the error, not content":
+    # 400 (non-retryable) so it surfaces on the first attempt.
+    let server = newSseServer(
+      makeSseMidStreamErrorAfterContent("partial text...",
+        "Provider overloaded", "id-err-2", code = 400))
+    spawn serveThread(server)
+    var usage = Usage()
+    var raised = false
+    try:
+      discard callModel(testProfile(server),
+        %*[{"role": "user", "content": "go"}], usage, 0)
+    except ApiError as e:
+      raised = true
+      check "Provider overloaded" in e.msg
+    check raised
     server.socket.close()
     closeCachedStreamConn()
 

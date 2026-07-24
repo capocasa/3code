@@ -68,6 +68,24 @@ proc consumeHttpStubCompletion(j: JsonNode; outcome: var StreamOutcome;
       outcome.errMsg = "api error in 200 body"
       outcome.errBody = $j
     return false
+  # OpenRouter non-streaming provider error: error embedded in
+  # choices[0].error with finish_reason "error", or top-level j{"error"}
+  # with finish_reason "error". Mirror callHttp's detection so the stub
+  ## exercises the same surfacing.
+  let choiceErr = choices[0]{"error"}
+  let frNode0 = choices[0]{"finish_reason"}
+  let frIsError = frNode0 != nil and frNode0.kind == JString and
+                  frNode0.getStr == "error"
+  if (choiceErr != nil and choiceErr.kind == JObject) or
+     (frIsError and j{"error"} != nil):
+    let errSrc = if choiceErr != nil and choiceErr.kind == JObject: choiceErr
+                 else: j{"error"}
+    let codeNode = errSrc{"code"}
+    if codeNode != nil and codeNode.kind == JInt:
+      outcome.statusCode = codeNode.getInt
+    outcome.errBody = $j
+    outcome.errMsg = "api error: " & extractErrorMsg($j)
+    return false
   let message = choices[0]{"message"}
   if message == nil or message.kind != JObject:
     outcome.errBody = $j
