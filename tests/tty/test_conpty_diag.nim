@@ -106,7 +106,7 @@ when defined(windows):
       echo "B raw repr: ", repr(tty.raw)
       check tty.raw.len > 0
 
-    test "C: stub interactive with full test_quit_signals env":
+    test "C: stub interactive, send input to prime conhost relay":
       let root = newFixture("diag_full")
       writeConfiguredProvider(root)
       writeStubResponses(root, %*[{"role": "assistant", "content": "ok"}])
@@ -116,9 +116,11 @@ when defined(windows):
           cwd = root / "run",
           env = stubEnv(root, root / "run" / "stub_responses.json"))
       defer: tty.close()
+      discard tty.waitForOutput(2000)
+      echo "C pre-send raw repr: ", repr(tty.raw)
+      tty.send("hi")
       let got = tty.expect("\u276f", timeoutMs = 10000)
       echo "C saw prompt: ", got, " | exited: ", tty.exited, " code: ", tty.exitCode
-      echo "C raw len: ", tty.raw.len
       echo "C raw repr: ", repr(tty.raw)[max(0, repr(tty.raw).len - 800) ..< repr(tty.raw).len]
       check got
 else:
