@@ -188,6 +188,46 @@ suite "non-streaming callModel via httpStub":
       check e.msg.find("unauthorized") >= 0
     check raised
 
+  test "200 with choices[0].error surfaces the provider message":
+    # OpenRouter non-streaming provider error: 200 OK with the error
+    # embedded in choices[0].error and finish_reason "error". Use a 400
+    # (non-retryable) so it surfaces on the first attempt without needing
+    # a second stub response for the retry backoff.
+    writeResponses("tc_http_200_choice_error.json", """[{
+      "choices": [{"index": 0, "message": {"content": ""},
+        "finish_reason": "error",
+        "error": {"code": 400, "message": "Provider disconnected mid-stream"}}],
+      "usage": {"prompt_tokens": 5, "completion_tokens": 0, "total_tokens": 5}
+    }]""")
+    var usage: Usage
+    var raised = false
+    try:
+      discard callModel(glmProfile(),
+        %*[{"role": "user", "content": "go"}], usage, 0)
+    except ApiError as e:
+      raised = true
+      check "Provider disconnected mid-stream" in e.msg
+    check raised
+
+  test "200 with top-level error and finish_reason error surfaces the message":
+    # Variant: the error is at the top level (j.error) with finish_reason
+    # "error" and choices present. Use a 400 (non-retryable) so it surfaces
+    # on the first attempt without needing a second stub response.
+    writeResponses("tc_http_200_toplevel_error.json", """[{
+      "error": {"code": 400, "message": "Rate limit exceeded"},
+      "choices": [{"index": 0, "delta": {"content": ""},
+        "finish_reason": "error"}]
+    }]""")
+    var usage: Usage
+    var raised = false
+    try:
+      discard callModel(glmProfile(),
+        %*[{"role": "user", "content": "go"}], usage, 0)
+    except ApiError as e:
+      raised = true
+      check "Rate limit exceeded" in e.msg
+    check raised
+
 suite "non-streaming xml tool_call promotion":
   # nvidia z-ai/glm4.7 leaks <tool_call> chat-template tags into content
   # instead of the tool_calls field. The shared post-success promotion in

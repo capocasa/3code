@@ -691,6 +691,16 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   var finishReason = ""
   var line = ""
   var streamErr = ""
+  # OpenRouter (and other OpenAI-compatible gateways) emit mid-stream
+  # provider failures as a regular `data:` chunk carrying a top-level
+  # `error` object, with `choices[0].finish_reason` set to "error". The
+  # HTTP status stays 200 (headers were already committed), so without
+  # explicit detection the error is silently swallowed: finish_reason
+  # "error" produces an empty assistant message that the turn loop retries
+  # up to 12 times as a bare empty reply, never showing the provider's
+  # error message. Capture the error here so it surfaces to the user.
+  var sseErrorBody = ""
+  var sseErrorCode = 0
   while true:
     var hasLine = false
     try: hasLine = conn.readLine(line)
@@ -720,6 +730,17 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
                    if payload.strip.len > 0:
                      debugOut "malformed SSE data line: " & e.msg & " — " & payload
                    continue
+      # Mid-stream error check (OpenRouter et al.): a top-level `error`
+      # object on a `data:` chunk signals a provider failure delivered
+      # in-band because the 200 status was already sent. Capture it and
+      # stop processing further chunks — the stream is terminated.
+      let errNode = j{"error"}
+      if errNode != nil and errNode.kind == JObject:
+        sseErrorBody = payload
+        let codeNode = errNode{"code"}
+        if codeNode != nil and codeNode.kind == JInt:
+          sseErrorCode = codeNode.getInt
+        break
       let choices = j{"choices"}
       if choices != nil and choices.kind == JArray and choices.len > 0:
         let fr = choices[0]{"finish_reason"}
@@ -808,6 +829,20 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   if streamErr.len > 0:
     result.errMsg = "stream read: " & streamErr &
       (if nonSSE.len > 0: ": " & nonSSE.join("\n") else: "")
+    return
+  if sseErrorBody.len > 0:
+    # A mid-stream error chunk (OpenRouter et al.) terminated the stream.
+    # Surface the provider's error message so the user sees why the turn
+    # failed, instead of a silent empty-reply retry loop. Promote the
+    # error's HTTP code (429, 502, ...) to the effective status so
+    # callModel's retry classifier can route it (retryable 5xx/429 vs.
+    # terminal 4xx). Drop any partial assistant message: the stream was
+    # terminated by an error, not completed.
+    closeCachedStreamConn()
+    result.errBody = sseErrorBody
+    result.statusCode = if sseErrorCode > 0: sseErrorCode else: result.statusCode
+    result.errMsg = "api error: " & extractErrorMsg(sseErrorBody)
+    result.assistantMsg = nil
     return
 
   # Truncation guard: 200 OK with partial choice deltas but neither `[DONE]`
@@ -1041,6 +1076,24 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
     result.errBody = body
     if j{"error"} != nil:
       result.errMsg = "api error in 200 body"
+    return
+  # OpenRouter non-streaming provider error: the error is embedded in
+  # choices[0].error with finish_reason "error", alongside any partial
+  # content. A top-level j{"error"} with choices present can also occur.
+  # Surface the error rather than returning a partial/empty assistant turn.
+  let choiceErr = choices[0]{"error"}
+  let frNode0 = choices[0]{"finish_reason"}
+  let frIsError = frNode0 != nil and frNode0.kind == JString and
+                  frNode0.getStr == "error"
+  if (choiceErr != nil and choiceErr.kind == JObject) or
+     (frIsError and j{"error"} != nil):
+    let errSrc = if choiceErr != nil and choiceErr.kind == JObject: choiceErr
+                 else: j{"error"}
+    let codeNode = errSrc{"code"}
+    if codeNode != nil and codeNode.kind == JInt:
+      result.statusCode = codeNode.getInt
+    result.errBody = body
+    result.errMsg = "api error: " & extractErrorMsg(body)
     return
   let message = choices[0]{"message"}
   if message == nil or message.kind != JObject:
