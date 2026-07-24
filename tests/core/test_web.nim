@@ -71,6 +71,33 @@ suite "web helpers":
     let body = "event: message\ndata:{\"k\":1}\n"
     check extractSseData(body) == "{\"k\":1}"
 
+  test "parseParallelResults extracts title / url / joined excerpts":
+    let txt = "{\"results\":[{\"url\":\"https://nim-lang.org/\",\"title\":\"Nim\",\"excerpts\":[\"Line one.\",\"Line two.\"]},{\"url\":\"https://example.com/\",\"title\":\"Other\"}]}"
+    let hits = parseParallelResults(txt)
+    check hits.len == 2
+    check hits[0].title == "Nim"
+    check hits[0].url == "https://nim-lang.org/"
+    check hits[0].snippet == "Line one. Line two."
+    check hits[1].title == "Other"
+    check hits[1].url == "https://example.com/"
+    check hits[1].snippet == ""
+
+  test "parseParallelResults tolerates missing results array":
+    check parseParallelResults("{\"error\":\"x\"}").len == 0
+    check parseParallelResults("not json").len == 0
+
+  test "parseBraveResults extracts title / url / description":
+    let body = "{\"web\":{\"results\":[{\"title\":\"Brave\",\"url\":\"https://brave.com/\",\"description\":\"A search engine.\"}]}}"
+    let hits = parseBraveResults(body)
+    check hits.len == 1
+    check hits[0].title == "Brave"
+    check hits[0].url == "https://brave.com/"
+    check hits[0].snippet == "A search engine."
+
+  test "parseBraveResults tolerates missing web object":
+    check parseBraveResults("{\"query\":{}}").len == 0
+    check parseBraveResults("nope").len == 0
+
   test "capText middle-truncates oversize input":
     let s = "a".repeat(30_000)
     let c = capText(s, 1000)
