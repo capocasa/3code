@@ -81,37 +81,55 @@ test_history, test_api, test_streamexec). 1 remains precisely disabled:
 test_netthread_blocks (the interrupt-wakes-blocking-recv path is POSIX-only;
 shutdownCachedStreamFd is a no-op on Windows — a real source gap, documented).
 
-Step 4 (ConPTY port of tty_expect.nim): harness port DONE and PROVEN
-WORKING. The POSIX PTY lifecycle is forked on `when defined(windows):`
-(openpty→CreatePseudoConsole, fork+execv→ProcThreadAttributeList+
-CreateProcessW, waitpid→GetExitCodeProcess, kill→TerminateProcess,
-TIOCSWINSZ→ResizePseudoConsole). KEY FIXES during CI iteration:
-- PeekNamedPipe replaces WaitForSingleObject for pipe read-readiness
-  (anon pipe handles are NOT waitable; the original approach hung the
-  whole harness indefinitely).
-- Child env inherits SystemRoot/windir/PATH/TEMP/etc from parent for DLL
-  resolution (without SystemRoot the child dies STATUS_DLL_INIT_FAILED
-  0xC0000142).
-- windows.yml stages OpenSSL DLLs (libssl/libcrypto/cacert.pem from
-  nim-lang.org/dlls.zip) into root + build/ BEFORE tests, since the tty
-  tests spawn the real 3code binary built -d:ssl.
-- .exe appended to stub/real binary paths (CreateProcessW needs it).
-- cache dir name sanitizes ':' (Windows forbids it in paths).
+Step 4 (ConPTY port of tty_expect.nim): the prior iteration's "PROVEN
+WORKING" claim was WRONG — the diagnostic tests had no `check` assertions,
+so a dead child produced a false PASS. This iteration built a hard-asserting
+diagnostic (`tests/tty/test_conpty_diag.nim`) and a standalone smoke
+(`tools/conpty_smoke.nim`) and drove ~30 CI round-trips to find THREE real
+harness bugs, all now fixed and confirmed on the GHA windows runner
+(Windows Server 2025, 10.0.26100):
 
-PROVEN: a diagnostic test spawning cmd.exe /c echo hello under the harness
-PASSED; a diagnostic spawning 3code_stub with bare env PASSED; a diagnostic
-with the EXACT test_quit_signals env (config+responses+XDG+TERM+PATH+cwd)
-also PASSED. So the ConPTY harness lifecycle is sound.
+1. lpValue for PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE (tty_expect.nim): the
+   attribute was set with `cast[pointer](unsafeAddr hpc)` (generic pointer-
+   to-value semantic). For THIS attribute UpdateProcThreadAttribute treats
+   lpValue as the HPCON value itself (special case, per the MS sample).
+   The wrong form produced a DEAD pseudoconsole attach: every child (even
+   cmd.exe) died 0xC0000142 (STATUS_DLL_INIT_FAILED). Fix:
+   `cast[pointer](hpc.Handle)`. Proven: a standalone smoke spawning cmd.exe
+   `/c echo` with byValue saw 16 bytes exit 0; byAddr saw 0xC0000142.
+2. readPtyChunk(0) never read (tty_expect.nim): `pollOnce` calls
+   `readPtyChunk(0)` after PeekNamedPipe confirms bytes, but the loop
+   `while epochTime() < deadline` with deadline=now was immediately false,
+   so confirmed-available bytes were never read (raw stayed empty).
+   Fix: run the body at least once (do-while).
+3. ensureBash gated behind providerStub (src/threecode.nim): the stub binary
+   hit `ensureBash()` which hard-fails ExitUsage (code 2) when bundled
+   MSYS2 bash is absent (CI has none). Same gate as `initSandbox`.
 
-REMAINING BLOCKER (narrow, needs Windows-local debugging): the real
-test_quit_signals.nim (and likely all tty tests that go through
-`ensureStubBinary()`) consistently fails with the child exiting
-0xC0000142 (STATUS_DLL_INIT_FAILED) at startup, producing no output.
-The diag that manually builds the stub and reuses it passes; test_quit_signals
-via `ensureStubBinary()` fails. Same binary path, same env, same cwd — the
-difference is the `ensureStubBinary()` code path (it may rebuild the stub,
-or the testament runner process differs). This needs a Windows box to
-debug efficiently (too many CI round-trips). The harness itself is correct.
+Also: bInheritHandles=FALSE for the ConPTY child (matches MS sample; IPC
+pipes are POSIX-gated in src/ so the Windows child doesn't use them), and
+lpApplicationName=NULL (cmdline carries the program path).
+
+OTHER CONFIRMED-NOT-THE-CAUSE (saves future round-trips): env block contents
+(constructed vs NULL inherit — both fail identically), pipe inheritance flags,
+console attach state (FreeConsole/AllocConsole), shell (bash/cmd/pwsh all
+fail), pipe type (anonymous vs named — anonymous is correct), DLL staging
+(smoke `./3code.exe -v` runs fine), alloc0 of the attribute-list buffer.
+
+REMAINING BLOCKER (precise, needs a Windows box): after the 3 fixes the child
+process RUNS and EXITS CLEANLY (no 0xC0000142), but the ConPTY conhost only
+relays its OWN init bytes (`\x1b[?9001h\x1b[?1004h` — bracketed-paste +
+focus-reporting mode enables the conhost emits) to the output pipe. The
+child's OWN stdout is never relayed — the harness captures only those 16
+bytes even with a 10s drain after child exit. Confirmed for both `3code_stub
+-v` (should echo version + exit) and `3code_stub -x -i` (should paint the
+❯ prompt). Plain CreateProcessW (no ConPTY) relays stdout fine (the P probe
+captured 10 bytes). So the ConPTY output channel is half-working: conhost→
+pipe works, child-stdout→conhost→pipe does not. This is a Windows Server
+2025 / conhost ConPTY quirk; node-pty ships its own conpty.dll + OpenConsole.exe
+to avoid exactly this class of issue. Likely next steps for a Windows-local
+investigator: try the InheritCursor flag, try CREATE_NEW_CONSOLE combined
+with EXTENDED_STARTUPINFO_PRESENT, or ship a conpty.dll/OpenConsole pair.
 
 `test_broken_stdout_exit.nim` was re-disabled with a precise reason: it
 drives the binary via execCmdEx + bash + python3 (NOT the ConPTY harness)
