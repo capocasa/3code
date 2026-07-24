@@ -839,7 +839,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     # body. Surface as a retryable transport error so callModel handles it
     # via the network retry block, NOT the empty-content auto-handling mode.
     result.errBody = nonSSE.join("\n")
-    result.errMsg = "empty reply - no content, no tool calls"
+    result.errMsg = EmptyReplyMsg
   debugOut &"streamHttp end contentStarted={contentStarted} accTools={accTools.len} finishReason={finishReason}"
 
 proc buildBatchAssistantMsg*(message, reasoning: string;
@@ -1070,7 +1070,7 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
     # retryable transport error so callModel's network retry block handles
     # it. Empty-with-finish_reason is handled above (non-nil msg).
     result.errBody = body
-    result.errMsg = "empty reply - no content, no tool calls"
+    result.errMsg = EmptyReplyMsg
     return
   let u2 = j{"usage"}
   if u2 != nil and u2.kind == JObject:
@@ -1593,22 +1593,29 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
       if outcome.assistantMsg == nil:
         raise newException(ApiError, InterruptedByUserMsg)
       break
-    # The transport signals a dead link by writing the canonical quiet
-    # message into `outcome.errMsg` (it cannot raise: the threaded path
-    # crosses a thread boundary via a serialized `StreamOutcome`). Promote
-    # it to a `NetworkHealthError` and catch it below so the retry loop
-    # handles network-health failures by class, exactly like a 5xx, instead
-    # of relying on the string heuristic in `retryCategory`.
+    # The transport signals a dead link by writing a canonical marker into
+    # `outcome.errMsg` (it cannot raise: the threaded path crosses a thread
+    # boundary via a serialized `StreamOutcome`). Two such markers:
+    #   - `networkQuietMsg`: the quiet watchdog fired (no data for
+    #     `QuietTooLongMs`).
+    #   - `EmptyReplyMsg`: a 200 OK with no content, no tool_calls, and no
+    #     finish_reason, a transport anomaly rather than a budget-starved
+    #     empty turn. Without this, `retryCategory` returns "" for status
+    #     200 and the loop raises a dead-end `HttpError (code 200)` on the
+    #     first attempt, never retrying.
+    # Promote either to a `NetworkHealthError` and catch it below so the
+    # retry loop handles them by class, exactly like a 5xx, instead of
+    # relying on the string heuristic in `retryCategory`.
     try:
-      if isNetworkQuietMsg(outcome.errMsg):
+      if isNetworkQuietMsg(outcome.errMsg) or isEmptyReplyMsg(outcome.errMsg):
         raise newException(NetworkHealthError, outcome.errMsg)
       code = outcome.statusCode
       category = retryCategory(outcome.errMsg, outcome.assistantMsg, code)
       errMsg = outcome.errMsg
     except NetworkHealthError as e:
-      # Network quiet: treat as a retryable server error, same as a 5xx.
-      # Sets the shared decision vars and falls into the single backoff
-      # block below; no second retry loop.
+      # Network quiet or empty 200: treat as a retryable server error, same
+      # as a 5xx. Sets the shared decision vars and falls into the single
+      # backoff block below; no second retry loop.
       code = 0
       category = "server"
       errMsg = e.msg
@@ -1637,9 +1644,11 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     if attempt >= MaxAttempts:
       hookStopSpinner()
       # Preserve the error class on exhaustion: NetworkHealthError for a
-      # quiet-network failure, HttpError for a status-code failure. Both
-      # subclass ApiError, so the turn loop's `except ApiError` catches them.
-      if category == "server" and isNetworkQuietMsg(errMsg):
+      # quiet-network or empty-200 failure, HttpError for a status-code
+      # failure. Both subclass ApiError, so the turn loop's `except ApiError`
+      # catches them.
+      if category == "server" and
+         (isNetworkQuietMsg(errMsg) or isEmptyReplyMsg(errMsg)):
         raise newException(NetworkHealthError, errMsg)
       raise newHttpError(code, errMsg, outcome.errBody)
     let retryAfter = try: parseInt(outcome.retryAfter) except CatchableError: 0

@@ -385,6 +385,32 @@ suite "api: NetworkHealthError":
     # the class-based path and the legacy string path agree.
     check retryCategory(networkQuietMsg(), nil, 0) == "server"
 
+  test "isEmptyReplyMsg matches the canonical message":
+    check isEmptyReplyMsg(EmptyReplyMsg)
+    check isEmptyReplyMsg("empty reply - no content, no tool calls")
+    check not isEmptyReplyMsg("interrupted by user")
+    check not isEmptyReplyMsg("")
+    check not isEmptyReplyMsg(networkQuietMsg())
+
+  test "EmptyReplyMsg is distinct from the quiet message":
+    check EmptyReplyMsg != networkQuietMsg()
+    check not isNetworkQuietMsg(EmptyReplyMsg)
+    check not isEmptyReplyMsg(networkQuietMsg())
+
+  test "an empty-200 outcome is promoted to NetworkHealthError, not HttpError":
+    # Regression for the dead-end "empty reply ... (code 200)" bug: a 200 OK
+    # with no content/tool_calls/finish_reason used to fall through
+    # retryCategory's `else` branch (status 200 is not retryable), raising an
+    # HttpError on the first attempt with no backoff. callModel now detects
+    # EmptyReplyMsg before retryCategory and raises NetworkHealthError so the
+    # loop backs off and resends. The class is what the turn loop branches on.
+    let e = newException(NetworkHealthError, EmptyReplyMsg)
+    check e of NetworkHealthError
+    check e of ApiError
+    check isEmptyReplyMsg(e.msg)
+    # Sanity: retryCategory alone would NOT retry a 200 (the old path).
+    check retryCategory(EmptyReplyMsg, nil, 200) == ""
+
 suite "api: HttpError":
   test "HttpError is a subclass of ApiError":
     let e = newHttpError(502, "upstream error", "")

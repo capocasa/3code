@@ -91,7 +91,7 @@ proc consumeHttpStubCompletion(j: JsonNode; outcome: var StreamOutcome;
   outcome.assistantMsg = buildBatchAssistantMsg(content, reasoning, toolCalls, finishReason)
   if outcome.assistantMsg == nil:
     outcome.errBody = $j
-    outcome.errMsg = "empty reply - no content, no tool calls"
+    outcome.errMsg = EmptyReplyMsg
     return false
   let u2 = j{"usage"}
   if u2 != nil and u2.kind == JObject:

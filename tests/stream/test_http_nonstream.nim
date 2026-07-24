@@ -156,21 +156,55 @@ suite "non-streaming callModel via httpStub":
     check msg{"content"}.getStr == ""
     check msg{"finish_reason"}.getStr == "length"
 
-  test "200 with empty message and no finish_reason surfaces a transport error":
-    # The genuinely-empty case (no content, no finish_reason) stays a
-    # transport-level error so callModel's network retry block handles it,
-    # preserving the layer separation: empty-content auto-handling lives in
-    # the turn loop, transport anomalies live here. A following 401
-    # terminates after the retry.
+  test "200 with empty message and no finish_reason retries, then a 401 terminates":
+    # The genuinely-empty case (no content, no finish_reason) is a transport
+    # anomaly: callModel promotes it to a NetworkHealthError and backs off,
+    # preserving the layer separation (empty-content auto-handling lives in
+    # the turn loop, transport anomalies live here). A following 401 is not
+    # retryable, so it terminates after the retry. The raised error must be
+    # the 401 HttpError, proving the empty 200 was retried rather than
+    # surfaced immediately as a dead-end "empty reply ... (code 200)".
     writeResponses("tc_http_empty_noFR.json", """[
       {"choices": [{"index": 0, "message": {"content": "", "reasoning_content": ""}}],
        "usage": {"prompt_tokens": 5, "completion_tokens": 0, "total_tokens": 5}},
       {"status": 401, "body": "{\"error\":\"unauthorized\"}"}
     ]""")
     var usage: Usage
-    expect(ApiError):
+    var raisedCode = 0
+    var raisedMsg = ""
+    var isHttpErr = false
+    try:
       discard callModel(glmProfile(),
         %*[{"role": "user", "content": "go"}], usage, 0)
+    except HttpError as e:
+      isHttpErr = true
+      raisedCode = e.code
+      raisedMsg = e.msg
+    except ApiError:
+      discard
+    # The empty 200 was retried, so the terminating error is the 401, not a
+    # 200 HttpError carrying the empty-reply message.
+    check isHttpErr
+    check raisedCode == 401
+    check "unauthorized" in raisedMsg
+
+  test "empty 200 retries with backoff then recovers when content arrives":
+    # The fix in action: an empty 200 (no content, no finish_reason) is
+    # promoted to a NetworkHealthError and retried with backoff. When a
+    # later response carries real content, callModel returns it instead of
+    # dead-ending on the first empty reply.
+    writeResponses("tc_http_empty_recover.json", """[
+      {"choices": [{"index": 0, "message": {"content": "", "reasoning_content": ""}}],
+       "usage": {"prompt_tokens": 5, "completion_tokens": 0, "total_tokens": 5}},
+      {"choices": [{"index": 0, "message": {"content": "RECOVERED", "reasoning_content": ""},
+        "finish_reason": "stop"}],
+       "usage": {"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6}}
+    ]""")
+    var usage: Usage
+    let msg = callModel(glmProfile(),
+      %*[{"role": "user", "content": "go"}], usage, 0)
+    check msg != nil
+    check msg{"content"}.getStr == "RECOVERED"
 
   test "non-retryable status surfaces its error body immediately":
     # 401 is not retryable, so it surfaces on the first attempt — fast, and
