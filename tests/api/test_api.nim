@@ -143,6 +143,60 @@ suite "api request shaping":
     check "chat_template_kwargs" notin body
     check "reasoning" notin body
 
+  test "mimo on xiaomi sends thinking.type enabled/disabled":
+    block onn:
+      var body = %*{"stream": true}
+      let p = Profile(name: "xiaomi.mimo-v2.5-pro", family: "mimo",
+                      model: "mimo-v2.5-pro", reasoning: "on")
+      applyReasoning(p, body)
+      check body{"thinking"}{"type"}.getStr == "enabled"
+    block offn:
+      var body = %*{"stream": true}
+      let p = Profile(name: "xiaomi.mimo-v2.5-pro", family: "mimo",
+                      model: "mimo-v2.5-pro", reasoning: "off")
+      applyReasoning(p, body)
+      check body{"thinking"}{"type"}.getStr == "disabled"
+
+  test "mimo on openrouter sends reasoning.enabled bool":
+    block onn:
+      var body = %*{"stream": true}
+      let p = Profile(name: "openrouter.xiaomi/mimo-v2.5-pro", family: "mimo",
+                      model: "xiaomi/mimo-v2.5-pro", reasoning: "on")
+      applyReasoning(p, body)
+      check body{"reasoning"}{"enabled"}.getBool == true
+    block offn:
+      var body = %*{"stream": true}
+      let p = Profile(name: "openrouter.xiaomi/mimo-v2.5-pro", family: "mimo",
+                      model: "xiaomi/mimo-v2.5-pro", reasoning: "off")
+      applyReasoning(p, body)
+      check body{"reasoning"}{"enabled"}.getBool == false
+
+  test "mimo on vllm stack sends chat_template_kwargs.enable_thinking only when off":
+    block onn:
+      var body = %*{"stream": true}
+      let p = Profile(name: "novita.xiaomi/mimo-v2.5-pro", family: "mimo",
+                      model: "xiaomi/mimo-v2.5-pro", reasoning: "on")
+      applyReasoning(p, body)
+      check "chat_template_kwargs" notin body
+    block offn:
+      var body = %*{"stream": true}
+      let p = Profile(name: "novita.xiaomi/mimo-v2.5-pro", family: "mimo",
+                      model: "xiaomi/mimo-v2.5-pro", reasoning: "off")
+      applyReasoning(p, body)
+      check body{"chat_template_kwargs"}{"enable_thinking"}.getBool == false
+
+  test "mimo knownGoodReasonings offers off/on":
+    check knownGoodReasonings("xiaomi", "mimo-v2.5-pro") == @["off", "on"]
+    check knownGoodReasonings("xiaomi", "mimo-v2.5") == @["off", "on"]
+    check knownGoodReasonings("openrouter", "xiaomi/mimo-v2.5-pro") == @["off", "on"]
+
+  test "mimo setup resolves to MimoPreamble and glmAndQwenTools":
+    let p = Profile(name: "xiaomi.mimo-v2.5-pro", family: "mimo",
+                    model: "mimo-v2.5-pro")
+    let s = setup(p)
+    check s.prompt.startsWith "You are the MiMo edition of 3code"
+    check s.tools.len == 8
+
   test "provider stub returns before next API call when autosend is queued during tool":
     let pid = $getCurrentProcessId()
     let probeDir = getTempDir() / ("tc_autosend_probe_" & pid)
