@@ -143,6 +143,75 @@ suite "api request shaping":
     check "chat_template_kwargs" notin body
     check "reasoning" notin body
 
+  test "grok-4.5 sends reasoning_effort, cannot disable":
+    block high:
+      var body = %*{"stream": true}
+      let p = Profile(name: "xai.grok-4.5", family: "grok",
+                      version: "4", variant: "5",
+                      model: "grok-4.5", reasoning: "high")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "high"
+      check "reasoning" notin body
+    block low:
+      var body = %*{"stream": true}
+      let p = Profile(name: "xai.grok-4.5", family: "grok",
+                      version: "4", variant: "5",
+                      model: "grok-4.5", reasoning: "low")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "low"
+
+  test "grok-4.20 off disables reasoning, levels send reasoning_effort":
+    block offn:
+      var body = %*{"stream": true}
+      let p = Profile(name: "xai.grok-4.20", family: "grok",
+                      version: "4", variant: "20",
+                      model: "grok-4.20", reasoning: "off")
+      applyReasoning(p, body)
+      check body{"reasoning"}{"enabled"}.getBool == false
+      check "reasoning_effort" notin body
+    block high:
+      var body = %*{"stream": true}
+      let p = Profile(name: "xai.grok-4.20", family: "grok",
+                      version: "4", variant: "20",
+                      model: "grok-4.20", reasoning: "high")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "high"
+
+  test "grok with empty reasoning sends no wire knob":
+    var body = %*{"stream": true}
+    let p = Profile(name: "xai.grok-4.5", family: "grok",
+                    version: "4", variant: "5",
+                    model: "grok-4.5", reasoning: "")
+    applyReasoning(p, body)
+    check "reasoning_effort" notin body
+    check "reasoning" notin body
+
+  test "knownGoodReasonings for grok: 4.5 levels, 4.20 adds off":
+    check knownGoodReasonings("xai", "grok-4.5") == @["low", "medium", "high"]
+    check knownGoodReasonings("xai", "grok-4.3") == @["low", "medium", "high"]
+    check knownGoodReasonings("xai", "grok-4.20") == @["off", "low", "medium", "high"]
+    check knownGoodReasonings("xai", "grok-build-0.1") == @["low", "medium", "high"]
+    check knownGoodReasonings("openrouter", "x-ai/grok-4.5") == @["low", "medium", "high"]
+
+  test "grok known-good: isKnownGood + context windows":
+    check isKnownGood(Profile(name: "xai.grok-4.5", model: "grok-4.5"))
+    check isKnownGood(Profile(name: "openrouter.x-ai/grok-4.5", model: "x-ai/grok-4.5"))
+    check knownGoodContextWindow("xai", "grok-4.5") == 500_000
+    check knownGoodContextWindow("xai", "grok-4.3") == 1_000_000
+    check knownGoodContextWindow("xai", "grok-4.20") == 2_000_000
+    check knownGoodContextWindow("xai", "grok-build-0.1") == 256_000
+
+  test "grok setup resolves to GrokPreamble + bash/patch tools":
+    let p = Profile(name: "xai.grok-4.5", family: "grok", model: "grok-4.5")
+    let s = setup(p)
+    check s.prompt.startsWith("You are the Grok edition of 3code")
+    var names: seq[string]
+    for t in s.tools:
+      names.add t{"function"}{"name"}.getStr
+    check "bash" in names
+    check "patch" in names
+    check "apply_patch" notin names
+
   test "provider stub returns before next API call when autosend is queued during tool":
     let pid = $getCurrentProcessId()
     let probeDir = getTempDir() / ("tc_autosend_probe_" & pid)
