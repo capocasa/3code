@@ -1,4 +1,4 @@
-import std/[os, strutils, unittest]
+import std/[os, strutils, tables, unittest]
 import threecode/config
 
 suite "config: parseConfigFile round-trip":
@@ -26,18 +26,29 @@ suite "config: parseConfigFile round-trip":
     check readProvs[1].name == "other"
     check readProvs[1].models == @["model-x"]
 
-  test "[search] key round-trips through writeConfigFile":
-    activeSearchKey = "exa-roundtrip"
+  test "[search] exa-key round-trips through writeConfigFile":
+    activeSearchKeys = initTable[string, string]()
+    activeSearchKeys["exa"] = "exa-roundtrip"
     writeConfigFile(tmp, "test.model-a", @[])
-    activeSearchKey = ""
+    activeSearchKeys = initTable[string, string]()
     let raw = readFile(tmp)
     check raw.find("[search]") >= 0
-    check raw.find("key = \"exa-roundtrip\"") >= 0
-    let (_, _, _, searchKey, _) = parseConfigFile(tmp)
-    check searchKey == "exa-roundtrip"
+    check raw.find("exa-key = \"exa-roundtrip\"") >= 0
+    let (_, _, _, searchKeys, _) = parseConfigFile(tmp)
+    check searchKeys["exa"] == "exa-roundtrip"
+
+  test "[search] brave-key round-trips alongside exa-key":
+    activeSearchKeys = initTable[string, string]()
+    activeSearchKeys["exa"] = "e"
+    activeSearchKeys["brave"] = "b"
+    writeConfigFile(tmp, "test.model-a", @[])
+    activeSearchKeys = initTable[string, string]()
+    let raw = readFile(tmp)
+    check raw.find("exa-key = \"e\"") >= 0
+    check raw.find("brave-key = \"b\"") >= 0
 
   test "[search] engine round-trips through writeConfigFile":
-    activeSearchKey = ""
+    activeSearchKeys = initTable[string, string]()
     activeSearchEngine = "parallel"
     writeConfigFile(tmp, "test.model-a", @[])
     activeSearchEngine = "exa"
@@ -47,8 +58,8 @@ suite "config: parseConfigFile round-trip":
     let (_, _, _, _, searchEngine) = parseConfigFile(tmp)
     check searchEngine == "parallel"
 
-  test "writeConfigFile omits [search] when key empty and engine exa":
-    activeSearchKey = ""
+  test "writeConfigFile omits [search] when no keys and engine exa":
+    activeSearchKeys = initTable[string, string]()
     activeSearchEngine = "exa"
     writeConfigFile(tmp, "test.model-a", @[])
     let raw = readFile(tmp)
