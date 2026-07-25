@@ -1,4 +1,9 @@
 /3code
+3code.exe
+0.5/
+bin/
+.cache/
+timing/
 build/
 testdata/output/
 # Compiled probe binaries next to their .nim sources. Sources are tracked
@@ -30,3 +35,7 @@ src/threecode.exe
 
 # stress runner binary
 tools/stress
+
+# compiled test binaries at tests/ root level
+tests/megatest
+knowngood_table
