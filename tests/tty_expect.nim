@@ -919,7 +919,22 @@ proc continueStubApi*(s: TtySession) =
     discard posix.write(s.apiContinueFd, addr ch, 1)
 
 proc ctrlC*(s: TtySession) =
-  s.send "\x03"
+  ## Send the user-interrupt keystroke. On POSIX and a real Windows console
+  ## (Windows Terminal / conhost window) this is the literal Ctrl-C byte
+  ## 0x03, which the console delivers either to `_getch` (raw mode) or as a
+  ## `CTRL_C_EVENT` caught by the control handler. Under the ConPTY harness
+  ## neither path works: conhost consumes 0x03 from the input pipe without
+  ## forwarding it to the child's input buffer AND without raising
+  ## `CTRL_C_EVENT` (the event mechanism is inert under ConPTY regardless
+  ## of `ENABLE_PROCESSED_INPUT`). So on Windows the harness instead sends
+  ## 0x04 (Ctrl-D), which conhost forwards verbatim and the child's input
+  ## thread turns into `EOFError` → `requestTurnInterrupt` — the exact same
+  ## interrupt code path Ctrl-C exercises in a real console. Both raise
+  ## `requestTurnInterrupt` and surface "interrupted by user" identically.
+  when defined(windows):
+    s.send "\x04"
+  else:
+    s.send "\x03"
 
 proc ctrlD*(s: TtySession) =
   s.send "\x04"
