@@ -43,6 +43,7 @@
 
 <h4 id="the-zdotai-coding-plan">The z.ai coding plan</h4><p>To do proper work, nothing beats GLM 5.2, in my experience. I think it's in the same league as the more well known models- it can work a bit slower but the results are right there. 3code makes sure to be very agentic keep everything hands off- so that tradeoff usually really doesn't matter much!</p>
 <p>The best way to use 3code is the <a class="reference external" href="https://z.ai/subscribe">z.ai coding plan</a> ! This is the combination that really replaced Claude Code for me.</p>
+<p>Note: While z.ai coding plan doesn't publically list 3code as a supported agent yet because it's in alpha, its use is officially permitted by z.ai- many thanks!</p>
 
 <h4 id="eu-jurisdiction">EU jurisdiction</h4><p>I work with sensitive data that sometimes that I like to keep within EU jurisdiction- I like <tt class="docutils literal"><span class="pre">tensorx &lt;https://tensorx.ai&gt;</span></tt> a lot for this.</p>
 
@@ -167,8 +168,12 @@ Task: add comprehensive test coverage to the parser module.</pre></p>
 
 <h2 id="no-subminusagents">No sub-agents</h2><p>Sub-agents are not supported because both research and user feedback says they are very expensive and bring unclear or negative benefits, so I consider it a feature that 3code doesn't have them. Use Cybernetic mode with worktrees instead.</p>
 
-<h2 id="sandbox">Sandbox</h2><p>3code confines every tool call to a filesystem sandbox you define. The sandbox is a plain text file at <tt class="docutils literal"><span class="pre">.3code/sandbox</span></tt> in your project directory, and it is mandatory: 3code refuses to run if it cannot create the file. Yolo mode (everything writable) is fine but you have to ask for it explicitly.</p>
-<p>The sandbox is enforced two ways. Bash commands run through <tt class="docutils literal"><span class="pre">nimbox</span></tt>, a kernel-enforced sandbox (Landlock on Linux, Seatbelt on macOS). The in-process read/write/patch tools check paths against the same policy in the 3code process. Both layers consult the same file, so the rules you write apply uniformly.</p>
+<h2 id="sandbox">Sandbox</h2><p>3code confines every tool call to a filesystem sandbox you define. The sandbox is a plain text policy built from a cascade of files, each filling in for the ones below it:</p>
+<ol class="simple"><li><strong>system</strong> - <tt class="docutils literal"><span class="pre">~/.config/3code/sandbox</span></tt>, next to your config.</li>
+<li><strong>repo</strong> - <tt class="docutils literal"><span class="pre">.3code/sandbox</span></tt> in your project directory.</li>
+</ol>
+<p>A missing level is not empty: it contributes the built-in default (<tt class="docutils literal"><span class="pre">.</span></tt> deny <tt class="docutils literal"><span class="pre">/</span></tt>, then <tt class="docutils literal"><span class="pre">O</span></tt> writable cwd), so the sandbox is always on. The effective policy is the two texts concatenated (system then repo) and parsed once, so a repo-level <tt class="docutils literal"><span class="pre">.</span></tt> on <tt class="docutils literal"><span class="pre">/</span></tt> cleanly resets anything a system file opened above it. 3code never writes a sandbox file into your project on first run; the default lives in memory until you create one (explicitly, or via the <tt class="docutils literal"><span class="pre">:sandbox</span></tt> edit commands, which seed the repo file on first use). Yolo mode (everything writable) is fine but you have to ask for it explicitly.</p>
+<p>The sandbox is enforced two ways. Bash commands run through <tt class="docutils literal"><span class="pre">3code box</span></tt>, the built-in nimbox sandbox (Landlock on Linux, Seatbelt on macOS), which 3code re-execs itself as. The in-process read/write/patch tools check paths against the same policy in the 3code process. Both layers consult the same file, so the rules you write apply uniformly.</p>
 
 <h3 id="the-sandbox-file">The sandbox file</h3><p>Each line is a one-character access code, a space, and a path. Lines run top to bottom; each line supersedes the ones above it for the path it names. Later rules win, so you can open a broad path then narrow parts of it.</p>
 <table border="1" class="docutils"><tr><th>Code</th><th>Meaning</th></tr>
@@ -197,10 +202,16 @@ o /tmp
 <p><pre class="listing">:sandbox show
 :sandbox allow /opt
 :sandbox readonly /var
-:sandbox deny ./secrets</pre></p>
+:sandbox deny ./secrets
+:sandbox on
+:sandbox off</pre></p>
+<p>The first <tt class="docutils literal"><span class="pre">allow</span></tt>/<tt class="docutils literal"><span class="pre">readonly</span></tt>/<tt class="docutils literal"><span class="pre">deny</span></tt> in a project creates the <tt class="docutils literal"><span class="pre">.3code/sandbox</span></tt> file (seeded with the built-in default, then your appended rule) so you have something concrete to version and share. <tt class="docutils literal"><span class="pre">:sandbox off</span></tt> disables enforcement entirely for the session (bash runs unconfined, in-process checks pass through); it persists in <tt class="docutils literal"><span class="pre">[settings]</span></tt> as <tt class="docutils literal"><span class="pre">sandbox = off</span></tt>. This is the only way to run without a sandbox short of editing the file.</p>
 <p>The agent never writes the sandbox file. If the model proposes a policy change, it edits a copy and you move it into place. This keeps the trust boundary entirely on your side: the sandbox is defined at prompt time, by you, and the agent cannot weaken it.</p>
 
-<h3 id="what-gets-sandboxed">What gets sandboxed</h3><p>Bash commands, file reads, writes, and patches all consult the sandbox. When <tt class="docutils literal"><span class="pre">nimbox</span></tt> is on your <tt class="docutils literal"><span class="pre">PATH</span></tt> (<tt class="docutils literal"><span class="pre">nimble install nimbox</span></tt>), bash gets full kernel enforcement: a write outside the allowed paths fails with <tt class="docutils literal"><span class="pre">Permission denied</span></tt> at the syscall level, and no child process can escape. Without nimbox, bash runs unconfined but the read/write/patch tools still check paths in-process, so the higher-risk operations (mutating your files directly) stay guarded.</p>
+<h3 id="what-gets-sandboxed">What gets sandboxed</h3><p>Bash commands, file reads, writes, and patches all consult the sandbox. Bash gets full kernel enforcement: the sandbox backend is compiled into 3code (the <tt class="docutils literal"><span class="pre">box</span></tt> subcommand), so every bash command is re-execed as <tt class="docutils literal"><span class="pre">3code box restrict ...</span></tt> and a write outside the allowed paths fails with <tt class="docutils literal"><span class="pre">Permission denied</span></tt> at the syscall level. No child process can escape. The read/write/patch tools also check paths in-process, so the higher-risk operations (mutating your files directly) stay guarded.</p>
+
+<h3 id="platform-behavior-and-fallback">Platform behavior and fallback</h3><p>The bash backend is OS-native: <strong>Landlock</strong> on Linux, <strong>Seatbelt</strong> on macOS, and a restricted-token <strong>ACL</strong> scheme on Windows. At startup 3code probes whether the backend can actually restrict on this host, then applies it. The probe can fail on a kernel built without Landlock, or in a container/CI runner whose seccomp filter blocks the syscall.</p>
+<p>When the probe fails, bash degrades gracefully: commands run unconfined (via the plain <tt class="docutils literal"><span class="pre">setsid</span></tt>+<tt class="docutils literal"><span class="pre">sh</span></tt> path) instead of failing outright. The in-process read/write/patch path checks stay in force regardless, so the highest-risk operations (directly mutating your files through the write/patch tools) remain guarded even when the kernel backend is unavailable. There is no way for the agent to bypass this layer.</p>
 
 <h2 id="developments">Developments</h2><p>3code will keep up with the &quot;works right now&quot; approach as agentic coding develops.</p>
 <p>We will continue to support more models and providers as they come out.</p>
@@ -220,7 +231,7 @@ o /tmp
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-07-20 13:49:32 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-07-23 14:04:39 UTC</small>
       </div>
     </div>
   </div>
