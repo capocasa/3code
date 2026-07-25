@@ -1419,6 +1419,27 @@ proc applyGrokReasoning(p: Profile, body: JsonNode) =
   else:
     body["reasoning_effort"] = %p.reasoning
 
+proc applyLingReasoning(p: Profile, body: JsonNode) =
+  ## Ling (InclusionAI Ling-3.0-flash) toggles reasoning via a textual
+  ## directive in the system message — `detailed thinking on` /
+  ## `detailed thinking off` — not a body field (the chat template scans
+  ## the system content for the phrase, defaulting to off). The directive
+  ## is baked into LingPreamble as `detailed thinking off`; this proc
+  ## rewrites it to match the active `:reasoning` level. Tool calls follow
+  ## the DeepSeek tool-call block format (no xmlToolCalls recovery needed
+  ## on OpenRouter-normalized routes).
+  let target = if p.reasoning == "off": "detailed thinking off"
+               else: "detailed thinking on"
+  if body{"messages"}.kind == JArray and body{"messages"}.len > 0:
+    var sys = body["messages"][0]
+    if sys{"role"}.getStr == "system":
+      var content = sys{"content"}.getStr
+      if "detailed thinking off" in content:
+        content = content.replace("detailed thinking off", target)
+      elif "detailed thinking on" in content:
+        content = content.replace("detailed thinking on", target)
+      sys["content"] = %content
+
 proc applyReasoning*(p: Profile, body: JsonNode) =
   ## Per-family wire mapping for `Profile.reasoning`. Adding a new
   ## family means: (1) set `reasoning` in the known-good combo table,
@@ -1431,6 +1452,7 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "deepseek": applyDeepseekReasoning(p, body)
   of "minimax": applyMinimaxReasoning(p, body)
   of "kimi": applyKimiReasoning(p, body)
+  of "ling": applyLingReasoning(p, body)
   of "qwen": applyQwenReasoning(p, body)
   of "longcat": applyLongcatReasoning(p, body)
   of "hy": applyHy3Reasoning(p, body)
