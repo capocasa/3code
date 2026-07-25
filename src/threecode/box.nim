@@ -27,9 +27,9 @@ Usage:
   nothing else, then exec()s CMD. CMD and its children are confined: writes
   outside the writable paths fail with EACCES.
 
-  System dirs (/usr, /bin, /lib, /etc) are always read-only so the command's
-  binaries and libs stay runnable; --ro adds to that set, it does not replace
-  it.
+  System dirs (/usr, /bin, /lib, /dev/*, etc.) are always read-only so the
+  command's binaries, libs, and device nodes stay runnable; --ro adds to that
+  set, it does not replace it.
 
 Examples:
   3code box restrict /tmp /home/me/work -- ls -la
@@ -80,11 +80,10 @@ proc boxRestrict(args: seq[string]): int =
     stderr.writeLine("\nError: no command given (use -- before the command)")
     return 2
 
-  # System dirs (/usr, /bin, /lib, etc.) must be readable so the
-  # command's own binary and shared libs stay executable. The macOS
-  # seatbelt backend auto-adds its baselineRead set inside restrictImpl,
-  # but the Linux landlock backend only grants what is passed in, so on
-  # Linux we still list them explicitly.
+  # System dirs (/usr, /bin, /lib, /dev/*, etc.) are auto-added as
+  # read-only inside each nimbox backend's restrictImpl (baseline.nim),
+  # so the command's binaries, libs, and device nodes stay accessible
+  # without listing them here.
   when defined(windows):
     # Windows cannot confine the current process; restrict() only prepares
     # the token and stamps ACLs. runSandboxed spawns the child with that
@@ -101,10 +100,6 @@ proc boxRestrict(args: seq[string]): int =
     # setsid() runs before restrict+exec so CMD lands in its own session
     # and process group. The bash tool signals the whole group on
     # cancel/timeout; without setsid those signals would miss CMD's children.
-    when defined(macosx):
-      discard
-    else:
-      readOnly.add(["/usr", "/bin", "/lib", "/lib64", "/etc"])
     discard setsid()
     restrict(writable, read = readOnly)
     try:
