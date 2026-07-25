@@ -97,9 +97,14 @@ const
   SandboxFile* = "sandbox"
 
 proc defaultSandboxText*(): string =
-  ## The two-line default policy: deny everything under root, then open
-  ## the working directory for read+write. Written verbatim on first run.
-  ". /\nO\n"
+  ## The default policy: deny everything under root, then open the system
+  ## temp dir and the working directory for read+write. The system prompts
+  ## direct the agent to write throwaway scripts under /tmp, so it must be
+  ## writable by default. Written verbatim on first run.
+  when defined(windows):
+    ". /\nO\n"
+  else:
+    ". /\nO /tmp\nO\n"
 
 proc sandboxPath*(dir: string): string =
   dir / SandboxDir / SandboxFile
@@ -175,7 +180,7 @@ proc loadCascaded*(projectDir: string): Sandbox =
   ##   2. repo    -> `sandboxPath(projectDir)` (`.3code/sandbox`)
   ##
   ## Each level's text is the file contents when present, or the built-in
-  ## `defaultSandboxText()` (`. /\nO\n`) when the file is absent, so the
+  ## `defaultSandboxText()` when the file is absent, so the
   ## sandbox is "always on" even on a fresh checkout. The spec names three
   ## levels (system -> configdir -> repo), but in this codebase the config
   ## and the system sandbox file live in the same `~/.config/3code/`

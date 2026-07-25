@@ -23,13 +23,17 @@ else:
 
 suite "sandbox cascade (parseCascaded)":
   test "both levels at default -> deny /, writable cwd":
-    # Two default texts concatenate to four raw rules (two deny /, two
-    # cwd-O); the effective access is decided by last-wins, so assert via
-    # checkPath, not raw rule count.
+    # Two default texts concatenate (deny /, O /tmp, O each); the effective
+    # access is decided by last-wins, so assert via checkPath, not raw rule
+    # count.
     let s = parseCascaded(defaultSandboxText(), defaultSandboxText(), proj)
     check s.checkPath("/") == akDeny
     check s.checkPath(proj) == akWritable
     check s.checkPath(proj / "sub") == akWritable
+    when not defined(windows):
+      # POSIX default opens /tmp so the agent's throwaway scripts (directed
+      # there by the system prompt) are writable out of the box.
+      check s.checkPath("/tmp") == akWritable
 
   test "repo file only -> repo rules win for the paths it names":
     let s = parseCascaded(defaultSandboxText(), "O " & opt & "\n", proj)
