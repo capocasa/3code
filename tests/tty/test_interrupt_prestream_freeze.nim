@@ -1,3 +1,11 @@
+discard """
+  disabled: "win"
+  ## Sends raw \x03 (Ctrl-C) and \x1b (ESC) to interrupt an in-flight call.
+  ## Under ConPTY, \x03 is silently consumed by conhost (see tty_expect.ctrlC)
+  ## and ESC-based interrupt during a non-wizard turn is not yet wired
+  ## through the Windows ESCAPES path for this scenario. The core interrupt
+  ## path is covered on Windows by test_quit_signals (Ctrl-D / ctrlC surrogate).
+"""
 ## Targeted regression: pressing Ctrl-C or ESC while a model call is in
 ## flight but has produced NO answer yet (the pre-stream delay / thinking
 ## phase) used to leave the prompt in a state where typing worked but Enter

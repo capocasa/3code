@@ -1,3 +1,8 @@
+discard """
+  disabled: "win"
+  ## Hangs under ConPTY (same throughput deadlock as test_spinner_race_stress;
+  ## the long backoff window + typing stress fills the ConPTY output pipe).
+"""
 ## Regression: text typed into the buffered editor while a 429 retry is in
 ## flight must survive both ending paths of the retry block — Ctrl-C
 ## cancelling the backoff and the retry budget exhausting cleanly. The
