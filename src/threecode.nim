@@ -112,14 +112,14 @@ proc initSandbox(cwd: string) =
   # resolve our own path once. The box subcommand is always compiled in, but
   # the OS-native restriction can still be nonfunctional (a kernel without
   # Landlock, a CI runner under a seccomp filter that blocks the syscall).
-  # On failure, clear confineExe so the bash tool degrades to the unconfined
+  # On failure, clear procboxExe so the bash tool degrades to the unconfined
   # setsid path instead of failing every command. The in-process
   # read/write/patch checks stay in force via `active` regardless. The
   # probe runs silently; the backend being unavailable is a host limitation,
   # not an error the user can act on.
-  sandbox.confineExe = sandbox.findConfine()
-  if not sandbox.backendWorks(sandbox.confineExe):
-    sandbox.confineExe = ""
+  sandbox.procboxExe = sandbox.findProcbox()
+  if not sandbox.backendWorks(sandbox.procboxExe):
+    sandbox.procboxExe = ""
 
 proc setupTlsEnv() =
   ## macOS: stock LibreSSL at `/usr/lib/libssl.dylib` fails handshakes
@@ -190,7 +190,7 @@ proc cleanup() {.noconv.} =
   releaseActiveDirLock()
 
 proc main() =
-  # `box` is the built-in confine: the bash tool re-execs this binary as
+  # `box` is the built-in procbox: the bash tool re-execs this binary as
   # `3code box restrict ...`. Dispatch before any other startup so the
   # sandboxed command isn't weighed down by 3code's TLS/config/session init
   # and so refuseRoot etc. don't run inside the confined child.

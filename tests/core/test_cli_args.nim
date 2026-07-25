@@ -191,7 +191,7 @@ suite "cli syntax errors do no startup work":
     check "requires a value" in r.o
     check not skillsDirExists()
 
-suite "box subcommand (built-in confine)":
+suite "box subcommand (built-in procbox)":
   # `3code box` is the sandbox backend the bash tool re-execs. It must
   # dispatch before any other startup (no TLS, no config, no sandbox file)
   # and confine the command via the OS-native backend.

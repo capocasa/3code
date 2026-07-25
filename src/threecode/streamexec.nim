@@ -332,10 +332,10 @@ export DEBIAN_FRONTEND=noninteractive
       # setsid() itself before exec, so the sh process is its own
       # session/group leader and the cancel/timeout signal-the-pgroup path
       # still works: we signal box's pid (== sh's pid after exec), the group
-      # leader. The backend is compiled in, so `confineExe` is just our own
+      # leader. The backend is compiled in, so `procboxExe` is just our own
       # path and is always set when `active`; the unconfined setsid fallback
       # below only runs when the sandbox is off entirely.
-      if sandboxEnabled and sandbox.active and sandbox.confineExe.len > 0:
+      if sandboxEnabled and sandbox.active and sandbox.procboxExe.len > 0:
         let (writable, readonly0) = sandbox.current.resolve()
         # The script + stdin live in a temp dir under getTempDir(); the
         # sandboxed sh must be able to read them. Expose that temp dir as
@@ -359,7 +359,7 @@ export DEBIAN_FRONTEND=noninteractive
         args.add "/bin/sh"
         args.add "-c"
         args.add wrapped
-        startProcess(sandbox.confineExe, args = args,
+        startProcess(sandbox.procboxExe, args = args,
                      options = {poStdErrToStdOut, poUsePath})
       else:
         let setsidExe = findExe("setsid")
