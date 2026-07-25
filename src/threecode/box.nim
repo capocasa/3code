@@ -80,8 +80,11 @@ proc boxRestrict(args: seq[string]): int =
     stderr.writeLine("\nError: no command given (use -- before the command)")
     return 2
 
-  # System dirs are read-only so the command's binaries and libs are
-  # executable but not modifiable. Writable paths come from the user.
+  # System dirs (/usr, /bin, /lib, etc.) must be readable so the
+  # command's own binary and shared libs stay executable. The macOS
+  # seatbelt backend auto-adds its baselineRead set inside restrictImpl,
+  # but the Linux landlock backend only grants what is passed in, so on
+  # Linux we still list them explicitly.
   when defined(windows):
     # Windows cannot confine the current process; restrict() only prepares
     # the token and stamps ACLs. runSandboxed spawns the child with that
@@ -99,10 +102,7 @@ proc boxRestrict(args: seq[string]): int =
     # and process group. The bash tool signals the whole group on
     # cancel/timeout; without setsid those signals would miss CMD's children.
     when defined(macosx):
-      # macOS has no /lib or /lib64; the seatbelt backend already adds the
-      # baseline (/usr/lib, /System, /Library, /dev/*) so the dynamic linker
-      # works. Just expose the user-facing binary dirs as read-only.
-      readOnly.add(["/usr", "/bin", "/sbin", "/etc"])
+      discard
     else:
       readOnly.add(["/usr", "/bin", "/lib", "/lib64", "/etc"])
     discard setsid()
