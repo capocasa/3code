@@ -1774,6 +1774,13 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     if isInterrupted():
       raise newException(ApiError, "interrupted by user during retry backoff")
     clearNetworkQuiet()
+    # Reset the quiet watchdog's activity timer so the next attempt gets a
+    # fresh QuietTooLongMs window. Without this, the watchdog's idle clock is
+    # still 45s+ stale (it only fires on provider activity, and a backoff has
+    # none), so it re-fires on the next tick and instantly kills attempt N+1
+    # before any provider data can arrive. This was why network-quiet errors
+    # burned through all retries with no backoff taken.
+    hookProviderActivity()
     if category == "rate":
       inc rateRetryLevel
       rateLastTs = epochTime()
