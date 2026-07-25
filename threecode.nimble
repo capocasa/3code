@@ -10,7 +10,7 @@ requires "streamhttp >= 0.4.5"
 requires "ttty >= 0.2.0"
 requires "unicodedb >= 0.13.0"
 requires "tinotify >= 0.1.3"
-requires "nimbox >= 0.1.0"
+requires "confine >= 0.1.0"
 
 task test, "Run the test suite via testament (all, or named files)":
   # testament ships with Nim: it runs each test in its own process with
