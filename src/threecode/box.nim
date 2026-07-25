@@ -1,20 +1,20 @@
 ## `3code box` - the filesystem sandbox subcommand.
 ##
-## This is the nimbox CLI (`nimbox restrict ...`) folded into 3code so we
+## This is the confine CLI (`confine restrict ...`) folded into 3code so we
 ## ship one binary instead of two. The bash tool wraps each command as
 ## `3code box restrict <writable> [--ro <readonly>] -- sh -c <script>`: it
 ## re-execs *itself* (via `getAppFilename`), so there is no PATH lookup and
-## no separate nimbox binary to find or bundle. The box process forks,
+## no separate confine binary to find or bundle. The box process forks,
 ## setsid()s, applies the OS-native restriction (Landlock/Seatbelt/ACL via
-## the `nimbox` library) and exec()s the target; children inherit the
+## the `confine` library) and exec()s the target; children inherit the
 ## domain.
 ##
-## Arg parsing mirrors nimbox's CLI verbatim. The only divergence is the
-## subcommand name: nimbox's is `restrict`, here `restrict` follows `box`.
+## Arg parsing mirrors confine's CLI verbatim. The only divergence is the
+## subcommand name: confine's is `restrict`, here `restrict` follows `box`.
 
 when defined(posix):
   import std/posix except Time
-import nimbox
+import confine
 
 const usage = """
 3code box - filesystem sandbox (Landlock/Seatbelt/ACL)
@@ -81,7 +81,7 @@ proc boxRestrict(args: seq[string]): int =
     return 2
 
   # System dirs (/usr, /bin, /lib, /dev/*, etc.) are auto-added as
-  # read-only inside each nimbox backend's restrictImpl (baseline.nim),
+  # read-only inside each confine backend's restrictImpl (baseline.nim),
   # so the command's binaries, libs, and device nodes stay accessible
   # without listing them here.
   when defined(windows):

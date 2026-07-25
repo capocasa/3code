@@ -58,11 +58,11 @@ type
 var
   current*: Sandbox
   active*: bool = false
-  nimboxExe*: string = ""  ## path to the binary to exec for `box restrict` (this one)
+  confineExe*: string = ""  ## path to the binary to exec for `box restrict` (this one)
 
-proc findNimbox*(): string =
-  ## The nimbox CLI is built into 3code as the `box` subcommand, so the
-  ## "nimbox binary" the bash tool re-execs is just this process. Return
+proc findConfine*(): string =
+  ## The confine CLI is built into 3code as the `box` subcommand, so the
+  ## "confine binary" the bash tool re-execs is just this process. Return
   ## its own path; empty only if it can't be resolved (shouldn't happen).
   try:
     result = getAppFilename()
@@ -74,7 +74,7 @@ proc backendWorks*(exe: string): bool =
   ## can actually restrict on this host. Re-execs this binary as
   ## `box restrict <tmpdir> -- true`; success means the kernel applies the
   ## domain. Fails on kernels built without Landlock, runners under a
-  ## seccomp filter that blocks the syscall, etc. Callers clear `nimboxExe`
+  ## seccomp filter that blocks the syscall, etc. Callers clear `confineExe`
   ## when this returns false so the bash tool falls back to the unconfined
   ## setsid path rather than failing every bash command.
   if exe.len == 0: return false
