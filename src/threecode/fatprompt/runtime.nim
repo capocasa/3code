@@ -8,6 +8,16 @@ import std/[atomics, json, locks, os, strformat, strutils, terminal, times, unic
 when defined(posix):
   import std/posix except SocketHandle
   import posix/termios
+when defined(windows):
+  import std/winlean
+  const
+    ENABLE_PROCESSED_INPUT = 0x0001'i32
+    ENABLE_LINE_INPUT = 0x0002'i32
+    ENABLE_ECHO_INPUT = 0x0004'i32
+  proc getConsoleMode(h: Handle; mode: ptr int32): int32 {.stdcall,
+      dynlib: "kernel32", importc: "GetConsoleMode".}
+  proc setConsoleMode(h: Handle; mode: int32): int32 {.stdcall,
+      dynlib: "kernel32", importc: "SetConsoleMode".}
 import ../types, ../util, ../compact, ../display, ../minline,
   ../signals, ../terminal as termui, ../session
 import ../engine as termengine
@@ -233,6 +243,9 @@ var inputThreadRunning* = false
 when defined(posix):
   var inputOrigTermios: Termios
   var inputOrigTermiosValid = false
+when defined(windows):
+  var inputOrigConsoleMode: int32 = 0
+  var inputOrigConsoleModeValid = false
 
 proc restoreInputTermios*() {.noconv.} =
   ## Restore stdin's termios to the snapshot the input thread captured
@@ -242,6 +255,11 @@ proc restoreInputTermios*() {.noconv.} =
     if inputOrigTermiosValid:
       discard tcSetAttr(STDIN_FILENO.cint, TCSADRAIN, addr inputOrigTermios)
       inputOrigTermiosValid = false
+  when defined(windows):
+    if inputOrigConsoleModeValid:
+      let h = getStdHandle(STD_INPUT_HANDLE)
+      discard setConsoleMode(h, inputOrigConsoleMode)
+      inputOrigConsoleModeValid = false
 var inputEditor*: ptr minline.LineEditor
 var inputProfile*: ptr Profile
 var inputSession*: ptr Session
@@ -1931,6 +1949,23 @@ proc inputThreadProc() {.thread.} =
         # bracketed paste (older `xterm`, some `screen` configs)
         # ignore the sequence silently.
         termui.writeRaw("\x1b[?2004h")
+
+    when defined(windows):
+      # Put the console input handle into raw mode so Ctrl-C (0x03) and
+      # Ctrl-D (0x04) are delivered to `_getch` as ordinary key events
+      # instead of being intercepted by the console subsystem. With the
+      # default `ENABLE_PROCESSED_INPUT`, Ctrl-C raises `CTRL_C_EVENT` and
+      # never reaches `_getch`, so the input thread can't route it to the
+      # turn-interrupt path. Clearing processed/line/echo input mirrors
+      # the POSIX `ISIG`/`ICANON`/`ECHO` disable. Restore on exit via
+      # `restoreInputTermios`.
+      let h = getStdHandle(STD_INPUT_HANDLE)
+      var mode: int32 = 0
+      if getConsoleMode(h, addr mode) != 0:
+        inputOrigConsoleMode = mode
+        inputOrigConsoleModeValid = true
+        discard setConsoleMode(h, mode and not
+          (ENABLE_PROCESSED_INPUT or ENABLE_LINE_INPUT or ENABLE_ECHO_INPUT))
 
     edPtr[].deferSubmit = true
     edPtr[].submitIcon = DeferredSubmitMarker
