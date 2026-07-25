@@ -47,6 +47,11 @@ Requires [Nim](https://nim-lang.org) >= 2.0 and `curl` on `PATH`.
 
 ## Changelog
 
+**0.5.2** - search engine overhaul: Exa, Brave, and Parallel backends
+
+- **Search backends replaced.** The dead Startpage HTML scraper is gone. `web_search` now speaks Exa's hosted MCP endpoint (keyless by default, one stateless JSON-RPC call), with Brave and Parallel added as alternative REST engines. Engine is configurable via `[settings] engine`, with no failover between them.
+- **Per-engine keys.** The single `[search] key` is split into engine-specific `exa-key` and `brave-key`; each is also read from its environment variable. Exa runs keyless without one.
+
 **0.5.1** - new providers, GLM-5.2 reasoning fixes, Qwen family
 
 - **New providers and models.** OpenCode Zen + Go gateways, Kimi API Platform, Kimi Code subscription, nano-gpt, and `zaicode` (Z.ai coding endpoint). GLM-5.2, GLM-5.1, GLM-5, DeepSeek-V4 Pro/Flash, MiniMax-M3, Kimi K3/K2.7-code/K2.6, Qwen3.6/3.7, and Tencent Hy3 across these aggregators.
