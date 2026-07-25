@@ -52,9 +52,18 @@ jobs:
         # converts the OSError into a logged exception but still exits 0),
         # so a failing test reports green. Call testament directly and
         # propagate $? so a test failure actually fails the step.
+        #
+        # Run categories sequentially rather than via `all` (which fan-outs
+        # every category in parallel). The tty PTY tests spawn real
+        # subprocesses whose render threads are scheduler-sensitive; under
+        # load the parallel fan-out starves those threads and produces
+        # load-induced frame mismatches. Sequential `cat` runs the identical
+        # tests without that contention.
         run: |
           if command -v testament >/dev/null 2>&1; then
-            testament --print --megatest:off all
+            for c in core config shell stream api tty; do
+              testament --print --megatest:off cat "$c" || exit 1
+            done
           else
             for d in tests/*/; do
               for f in "$d"*.nim; do
@@ -62,7 +71,7 @@ jobs:
               done
             done
           fi
-        timeout-minutes: 20
+        timeout-minutes: 25
 
       - name: Package
         run: |
