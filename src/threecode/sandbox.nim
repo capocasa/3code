@@ -211,7 +211,8 @@ proc isPathUnder*(path, root: string): bool =
   ## `/a/b` covers `/a/b/sub`. An empty `root` matches nothing.
   if root.len == 0: return false
   if path == root: return true
-  let r = if root.endsWith("/"): root else: root & "/"
+  let sep = when defined(windows): "\\" else: "/"
+  let r = if root.endsWith(sep): root else: root & sep
   path.startsWith(r)
 
 proc checkPath*(s: Sandbox; path: string): AccessKind =
