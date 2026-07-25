@@ -25,15 +25,33 @@ task test, "Run the test suite via testament (all, or named files)":
   # just that file, matching nimble's default runner UX. Nimscript has no
   # PATH lookup or filesystem walk, so the testament-or-fallback choice and
   # the named-files dispatch live in one shell command.
+  #
+  # testament's `r` command runs a single file — extra files would be
+  # forwarded to the compiler and abort with "arguments can only be given
+  # if the '--run' option is selected". So invoke `r` once per named
+  # file (or `all` when none are given). The no-testament fallback honours
+  # the same file list instead of walking every test.
   var files: seq[string] = @[]
   for p in commandLineParams:
     if p.len > 0 and p[0] notin {'-'}:
       files.add p
+  let topt = "testament --print --megatest:off "
+  var tcmds: seq[string] = @[]
+  if files.len == 0:
+    tcmds.add(topt & "all")
+  else:
+    for f in files:
+      tcmds.add(topt & "r " & f)
+  var fcmds: seq[string] = @[]
+  if files.len == 0:
+    fcmds.add("for d in tests/*/; do for f in \"$d\"*.nim; do nim c -r --path:src --path:tests \"$f\"; done; done")
+  else:
+    for f in files:
+      fcmds.add("nim c -r --path:src --path:tests " & f)
   exec "sh -c 'if command -v testament >/dev/null 2>&1; then " &
-    "testament --print --megatest:off " &
-    (if files.len == 0: "all" else: "r " & files.join(" ")) & "; " &
+    tcmds.join("; ") & "; " &
     "else echo \"Warning: testament not found, falling back to sequential run\" >&2; " &
-    "for d in tests/*/; do for f in \"$d\"*.nim; do nim c -r --path:src --path:tests \"$f\"; done; done; fi'"
+    fcmds.join("; ") & "; fi'"
 
 task docs, "Build HTML manual from docs/manual.md":
   # nim md2html regenerates nimdoc.out.css from nimdoc's built-in default
