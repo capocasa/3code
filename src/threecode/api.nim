@@ -1381,6 +1381,41 @@ proc applyInklingReasoning(p: Profile, body: JsonNode) =
   ## serverless endpoint, all accept this field.
   body["reasoning_effort"] = %p.reasoning
 
+proc applyMimoReasoning(p: Profile, body: JsonNode) =
+  ## Xiaomi MiMo-V2.5-Pro reasoning toggle. Binary on/off, three wire
+  ## surfaces:
+  ## - First-party API (provider `xiaomi`): `thinking.type`
+  ##   ("enabled"/"disabled"). Default is enabled; `off` sends
+  ##   `disabled`, `on` sends `enabled`. In thinking mode the server
+  ##   forces temperature=1.0 / top_p=0.95 regardless of what we send, so
+  ##   we don't fight it. Reasoning streams back on `reasoning_content`
+  ##   (parsed generically, DeepSeek-style).
+  ## - vLLM stacks: `chat_template_kwargs.enable_thinking` (bool), same
+  ##   shape as Kimi/MiniMax/Qwen. Omitting the kwarg defaults to
+  ##   thinking-on; `off` sends false.
+  ## - OpenRouter: normalized `reasoning.effort` — but MiMo's native knob
+  ##   is binary, so we map `on`->`high` and `off`->`disabled` via
+  ##   `reasoning: {enabled: bool}` (the OpenRouter thinking-toggle shape,
+  ##   same as Laguna/GLM-5.2-off).
+  case providerOf(p)
+  of "xiaomi":
+    case p.reasoning
+    of "off": body["thinking"] = %*{"type": "disabled"}
+    of "on": body["thinking"] = %*{"type": "enabled"}
+    else: discard
+  of "openrouter":
+    case p.reasoning
+    of "off": body["reasoning"] = %*{"enabled": false}
+    of "on": body["reasoning"] = %*{"enabled": true}
+    else: discard
+  else:
+    # vLLM stacks (and any other OpenAI-compatible host): the
+    # chat_template_kwargs.enable_thinking boolean. Default is on; only
+    # send the kwarg when explicitly disabling.
+    case p.reasoning
+    of "off": body["chat_template_kwargs"] = %*{"enable_thinking": false}
+    else: discard
+
 proc applyLagunaReasoning(p: Profile, body: JsonNode) =
   ## Laguna models (S 2.1, XS 2.1, M.1) toggle reasoning via
   ## the OpenAI-compatible `reasoning: {enabled: bool}` field, the same
@@ -1458,6 +1493,7 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "hy": applyHy3Reasoning(p, body)
   of "inkling": applyInklingReasoning(p, body)
   of "grok": applyGrokReasoning(p, body)
+  of "mimo": applyMimoReasoning(p, body)
   else: discard
 
 # ---------- network worker thread (Tier 2) ----------
