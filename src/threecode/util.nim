@@ -282,7 +282,14 @@ proc userConfigRoot*(): string =
   ## XDG config root for 3code: `~/.config/3code/` on Linux,
   ## `~/Library/Application Support/3code/` on macOS, `%APPDATA%/3code/`
   ## on Windows. Holds user-edited config and skill overrides only.
-  getConfigDir() / "3code"
+  ##
+  ## `XDG_CONFIG_HOME` overrides the platform default on every platform
+  ## (on Linux `getConfigDir` already honors it; on Windows/macOS it is
+  ## read explicitly). This makes the config root redirectable for tests;
+  ## the platform default is unchanged when the variable is unset.
+  let xdg = getEnv("XDG_CONFIG_HOME")
+  let base = if xdg.len > 0: xdg else: getConfigDir()
+  base / "3code"
 
 proc userDataRoot*(): string =
   ## XDG data root for 3code: `~/.local/share/3code/` on Linux,
@@ -294,15 +301,17 @@ proc userDataRoot*(): string =
   ## Honoring it on macOS (not just Linux) matches the spec and makes the
   ## data root redirectable for tests; the platform default is unchanged
   ## when the variable is unset.
+  let xdg = getEnv("XDG_DATA_HOME")
   when defined(windows):
-    getConfigDir() / "3code"
+    # Windows default is %APPDATA% (collapses with config-root there —
+    # fine, the split is a Linux convention). XDG_DATA_HOME overrides it
+    # for the same test-redirectability reason as the POSIX branches.
+    let base = if xdg.len > 0: xdg else: getConfigDir()
+  elif defined(macosx):
+    let base = if xdg.len > 0: xdg else: getConfigDir()
   else:
-    let xdg = getEnv("XDG_DATA_HOME")
-    when defined(macosx):
-      let base = if xdg.len > 0: xdg else: getConfigDir()
-    else:
-      let base = if xdg.len > 0: xdg else: getHomeDir() / ".local" / "share"
-    base / "3code"
+    let base = if xdg.len > 0: xdg else: getHomeDir() / ".local" / "share"
+  base / "3code"
 
 proc resolvePath*(path: string): string =
   if path.len == 0: return ""

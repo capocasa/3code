@@ -232,7 +232,7 @@ const
     ## it sees this; -1 keeps its existing EOFError meaning.
 when defined(windows):
   const
-    ESCAPES* = {0, 22, 224}
+    ESCAPES* = {0, 22, 224, 27}
 else:
   const
     ESCAPES* = {27}

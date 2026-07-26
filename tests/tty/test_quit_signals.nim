@@ -1,8 +1,3 @@
-discard """
-  # See docs/windows-testing.md. The tty_expect harness uses openpty/fork/
-  # execv (POSIX only). A ConPTY port is the path to re-enable on Windows.
-  disabled: "win"
-"""
 ## Quit-signalling behaviour at the prompt and during a turn.
 ##
 ## The fat prompt honours several ways out, and each must do *only* what its

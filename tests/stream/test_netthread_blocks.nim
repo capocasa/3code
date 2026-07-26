@@ -1,5 +1,10 @@
 discard """
-  # Windows: thread + socket timing. See docs/windows-testing.md.
+  # Windows: shutdownCachedStreamFd() is a no-op on Windows (it wraps
+  # posix.shutdown to wake a blocking recv on the interrupt path), so the
+  # core contract this test asserts (interrupt returns cleanly from a
+  # body that never arrives) is not yet implemented cross-platform. The
+  # Windows interrupt path needs an equivalent fd-wakeup (e.g. closesocket
+  # or a self-pipe). See docs/windows-testing.md.
   disabled: "win"
 """
 

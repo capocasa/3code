@@ -1,6 +1,9 @@
 discard """
-  # Same POSIX/PTY constraints as the other tty tests.
   disabled: "win"
+  ## Flaky under ConPTY: the braille-spinner frame capture is timing-
+  ## sensitive and intermittently misses the spinner frame under ConPTY's
+  ## output latency, especially when run in the full testament suite (other
+  ## tests warm the ConPTY output pipe). Passes in isolation.
 """
 ## Reproduction for the "pause" problem: during long phases of a turn, no
 ## activity indicator is visible. The expected indicator depends on the phase:

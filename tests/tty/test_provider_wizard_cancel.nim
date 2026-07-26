@@ -1,7 +1,10 @@
 discard """
-  # See docs/windows-testing.md. The tty_expect harness uses openpty/fork/
-  # execv (POSIX only). A ConPTY port is the path to re-enable on Windows.
   disabled: "win"
+  ## The ESC-in-wizard test fails under ConPTY: ESC in a wizard with
+  ## prefilled text clears the line (wizard ctrl+c behavior) instead of
+  ## canceling, a behavior difference that is masked on POSIX by ESC tail
+  ## detection timing. The Ctrl-C wizard tests (3/4) pass. Not a product
+  ## freeze; a wizard ESC semantics question for a separate pass.
 """
 ## Regression: `:provider edit` / `:provider add` cancel used to leave the
 ## prompt caret stuck on the wizard's first field, the next keystrokes went

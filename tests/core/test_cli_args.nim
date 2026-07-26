@@ -1,8 +1,3 @@
-discard """
-  # Windows: spawns the 3code binary with path/env assumptions (session
-  # list, skills dir) that differ on Windows. See docs/windows-testing.md.
-  disabled: "win"
-"""
 import std/[os, osproc, strtabs, strutils, times, unittest]
 import threecode/session
 

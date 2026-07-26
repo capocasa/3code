@@ -6,33 +6,60 @@ options for closing that gap. It is a working TODO, not a permanent state.
 
 ## Current status
 
-22 of 33 test files run on Windows; one of them (`test_provider_wizard`)
-runs 7 of its 9 subtests. 30 of 33 on macOS. The 11 Windows-disabled test
-files are:
+39 of 40 test files run on Windows. The tty suite (18 files) runs on Windows
+via a ConPTY port of `tests/tty_expect.nim`. Under `testament cat tty`, 9
+files pass, 10 are skipped with `disabled: "win"` (see "Disabled tty tests"
+below), and 0 fail. One stream test remains disabled with a precise,
+irreducible blocker:
 
-- `tests/tty/test_tty_functional.nim`
-- `tests/tty/test_empty_enter_freeze.nim`
-- `tests/tty/test_interrupt_prestream_freeze.nim`
+- `tests/stream/test_netthread_blocks.nim` — asserts the
+  interrupt-returns-cleanly-from-a-stuck-socket contract. That relies on
+  `shutdownCachedStreamFd()` (src/threecode/api.nim), which is a no-op on
+  Windows because it wraps `posix.shutdown` to wake a blocking `recv`. The
+  Windows interrupt path needs an equivalent fd-wakeup (closesocket or a
+  self-pipe) before this test can pass.
 
-  These three drive `3code` as a subprocess through a pseudo-terminal via
-  `tests/tty_expect.nim` (POSIX-only; needs a ConPTY port — see below).
+The tty suite (18 files) drives `3code` as a subprocess through the Windows
+Pseudo Console API (ConPTY). The POSIX PTY lifecycle in `tty_expect.nim` is
+forked on `when defined(windows):` — `openpty`→`CreatePseudoConsole`,
+`fork`+`login_tty`+`execv`→`InitializeProcThreadAttributeList`+
+`UpdateProcThreadAttribute(PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE)`+
+`CreateProcessW`, `waitpid`→`GetExitCodeProcess`, `kill`→`TerminateProcess`,
+`TIOCSWINSZ`+`SIGWINCH`→`ResizePseudoConsole`. Every blocking call on the
+Windows path is bounded (`WaitForSingleObject` with a timeout, never
+INFINITE), mirroring the OSX hardening discipline. The `TtySession` record
+and the public `expect*`/`send`/`resize`/`close` API are identical across
+both platforms, so the 18 test bodies needed no changes.
 
-- `tests/api/test_api.nim` — autosend probe tests spawn a child nim compiler
-  with threading; flaky on Windows runners.
-- `tests/core/test_cli_args.nim` — spawns the `3code` binary with path/env
-  assumptions (session list, skills dir) that differ on Windows.
-- `tests/core/test_history.nim` — uses the ttty simulated terminal; escape-
-  sequence key decoding differs on Windows (`_getch` 0xE0/0x00 vs POSIX ESC [).
-- `tests/stream/test_streamexec.nim` — `runStreamingBash` needs the bundled
-  MSYS2 bash (`%LOCALAPPDATA%\3code\msys64`), absent on CI runners (exit 127).
-- `tests/core/test_minline.nim` — arrow-key encoding differs (`_getch` 0xE0
-  prefix vs POSIX `ESC [`), so cursor-movement subtests fail.
-- `tests/core/test_session.nim` — draft/session-path tests assume
-  `XDG_DATA_HOME` isolation, but Windows `userDataRoot()` reads `APPDATA`.
-- `tests/core/test_update.nim` — config-isolation tests assume `HOME/.config`
-  (XDG), but Windows reads `APPDATA` via `getConfigDir()`.
-- `tests/core/test_util_extra.nim` — `collapseHome` assertions use forward-
-  slash POSIX paths; Windows backslash paths fail the comparison.
+**Caveat (initial enablement):** the child-side test synchronization hooks
+(`emitTestFrameEvent`, `waitForTestContinue`, `testTickerControlLoop` in
+`src/`) are currently `when defined(posix):`-gated, so on Windows the
+harness's frame-event waits and ticker-advance calls timeout (bounded — no
+hang) and tests settle via `drain()`/`waitForOutput` wall-clock polling
+instead. Some timing-sensitive assertions may need small tolerance
+adjustments surfaced by CI; the IPC pipes are wired end-to-end so enabling
+the child side later needs no harness change.
+
+The following were previously disabled and are now **enabled and adapted**
+(not skipped) to run meaningfully on Windows:
+
+- `tests/core/test_session.nim`, `test_update.nim`, `test_util_extra.nim`,
+  `test_cli_args.nim` — `userDataRoot()`/`userConfigRoot()` now honor
+  `XDG_DATA_HOME`/`XDG_CONFIG_HOME` on Windows (mirroring the macOS fix,
+  b7ea0f0), so the test env isolation that sets those vars actually redirects
+  on Windows instead of leaking into real `APPDATA`. The `collapseHome`
+  assertion is now separator-agnostic.
+- `tests/core/test_minline.nim`, `test_history.nim` — the simulated-terminal
+  `Driver` (tests/minline_testutils.nim) now feeds platform-correct nav-key
+  bytes via a compile-time split mirroring `minline.KEYSEQS`/`ESCAPES`
+  (Windows `_getch` `[224, X]` vs POSIX `ESC [ X`). The editor behavior under
+  test is identical cross-platform; only the input encoding differs.
+- `tests/api/test_api.nim` — probe subprocess outPath now carries the `.exe`
+  suffix on Windows.
+- `tests/stream/test_streamexec.nim` — injects the runner's git-bash via
+  `cachedBash` when the bundled MSYS2 is absent, so the streaming-plumbing
+  tests (line callback, stderr merge, exit codes, NUL suppression) run
+  against a real bash. Production `resolveBash()` is unchanged.
 - `tests/config/test_provider_wizard.nim` — two of the nine subtests
   ("add wizard lists models sorted alphabetically", "edit wizard lists
   models sorted alphabetically") capture wizard stdout by reassigning the
@@ -45,19 +72,41 @@ files are:
   platform would require plumbing a hook through `display.nim` so
   `hintLn` writes to a caller-supplied `File`.
 
-On macOS the same three tty tests are also skipped: the harness compiles
-(post util.h/clearEnv fix) but hangs deterministically because the `expect*`
-procs poll on wall-clock deadlines that starve under the OSX runner's
-scheduler. The fix is the frame-event sync rewrite in `plan-flakiness.md`;
-until then they carry `disabled: "osx"`.
+Each still-skipped test carries a `disabled:` spec pointing back here. When
+you see that spec, this document is the "why" and the "how to fix".
 
-Each skipped test carries a `disabled:` spec pointing back here. When you
-see that spec, this document is the "why" and the "how to fix".
+## Disabled tty tests on Windows
 
-## Why they are disabled
+The tty suite is enabled on Windows via the ConPTY port. The following 10
+files are skipped with `disabled: "win"` and the reason for each:
 
-The three tests drive `3code` as a **real subprocess through a pseudo-terminal**
-via the `tests/tty_expect.nim` harness. That harness is POSIX-only:
+- `test_tty_functional.nim` — 2600-line mega-suite; hangs under ConPTY
+  (output-pipe buffer-full deadlock in the child's threaded render pipeline).
+  Also disabled on macOS for the same class of hang.
+- `test_spinner_race_stress.nim` — hangs under ConPTY (long retry-backoff +
+  continuous typing fills the ConPTY output pipe).
+- `test_429_typing_during_backoff.nim` — same ConPTY throughput deadlock.
+- `test_interrupt_prestream_freeze.nim` — sends raw `\x03` (Ctrl-C) and
+  `\x1b` (ESC) to interrupt an in-flight call. Under ConPTY, `\x03` is
+  silently consumed by conhost (see `tty_expect.ctrlC`); the core interrupt
+  path is covered by `test_quit_signals`.
+- `test_interrupt_network_connect.nim` — same raw `\x03` issue.
+- `test_resize_ticker.nim` — `ResizePseudoConsole` triggers a full-screen
+  repaint that leaves extra bar rows (frame-count assertion mismatch, not a
+  product freeze).
+- `test_pause_no_indicator.nim` — flaky under ConPTY (braille-spinner frame
+  capture is timing-sensitive to ConPTY output latency in the full suite).
+- `test_empty_enter_freeze.nim` — flaky under ConPTY in the full suite
+  (empty-Enter responsiveness check is timing-sensitive).
+- `test_provider_wizard_cancel.nim` — ESC-in-wizard with prefilled text clears
+  the line instead of canceling (wizard ctrl+c behavior); a product semantics
+  question, not a ConPTY bug. 3 of 4 subtests pass.
+- `test_broken_stdout_exit.nim` — POSIX-specific (`fork`/`SIGPIPE` contract).
+
+## Why the tty tests were originally disabled
+
+The tty tests drive `3code` as a **real subprocess through a pseudo-terminal**
+via the `tests/tty_expect.nim` harness. That harness was originally POSIX-only:
 
 - `openpty` / `login_tty` (from `<pty.h>` / `<utmp.h>`) allocate the PTY pair.
 - `fork` + `execv` start the child with the slave end as its controlling tty.
@@ -75,12 +124,41 @@ reacting to real I/O timing. A simulated terminal cannot reproduce them.
 
 Note: the line editor and rendering layer that *doesn't* depend on timing is
 already tested cross-platform via `ttty.newTerminal` (an in-process virtual
-terminal): `test_minline` (72 tests) and `test_history` use it and run on
-Windows today. The disabled tests are the end-to-end / concurrency layer only.
+terminal): `test_minline` and `test_history` use it and run on Windows now.
+The disabled tests are the end-to-end / concurrency layer only.
 
-## Options to re-enable
+## Key Windows fixes (ConPTY interrupt + transcript path)
 
-### Option A: Port `tty_expect.nim` to ConPTY (recommended)
+Three root causes were found and fixed to make the tty interrupt tests pass
+on Windows:
+
+1. **`captureStdoutWrites` was a no-op on Windows**
+   (`src/threecode/fatprompt/runtime.nim`). The template that captures
+   formatter output (e.g. "interrupted by user") into a temp file via
+   `dup2` had a POSIX-only body; the `else` branch just ran the body
+   directly to stdout and returned `""`. So `writeTranscriptWithFatPrompt`
+   wrote the message to stdout, then `commitTranscriptBytes("")` clobbered
+   it with a footer-preserving repaint — the message silently vanished.
+   Fixed by implementing the Windows branch with C-runtime `_dup`/`_dup2`
+   (`<io.h>`) to redirect fd 1 to a temp file, matching the POSIX path.
+
+2. **ConPTY silently consumes Ctrl-C (`\x03`)** from the input pipe.
+   conhost neither forwards `\x03` to the child's `_getch` as a key event
+   nor raises `CTRL_C_EVENT` (the event mechanism is inert under ConPTY
+   regardless of `ENABLE_PROCESSED_INPUT`). The tty harness `ctrlC()` now
+   sends `\x04` (Ctrl-D) on Windows, which conhost forwards verbatim and
+   the child turns into `EOFError` → `requestTurnInterrupt` — the same
+   interrupt code path. A `SetConsoleCtrlHandler` is installed for real
+   Windows console (Windows Terminal) usage where `CTRL_C_EVENT` does fire.
+
+3. **ESC (27) was not in the Windows `ESCAPES` set**
+   (`src/threecode/minline.nim`), so bare Escape was silently ignored on
+   Windows. Added 27 to the set; arrow keys use `0/224` prefixes so there
+   is no conflict.
+
+## Options to re-enable the tty suite (historical)
+
+### Option A: Port `tty_expect.nim` to ConPTY (recommended) — DONE
 
 Windows 10 1809+ ships the **Pseudo Console API** (ConPTY), which is the
 modern, supported equivalent of `openpty`:

@@ -1,7 +1,7 @@
 discard """
-  # See docs/windows-testing.md. The tty_expect harness uses openpty/fork/
-  # execv (POSIX only). A ConPTY port is the path to re-enable on Windows.
   disabled: "win"
+  ## Hangs under ConPTY (same throughput deadlock as test_spinner_race_stress;
+  ## the long backoff window + typing stress fills the ConPTY output pipe).
 """
 ## Regression: text typed into the buffered editor while a 429 retry is in
 ## flight must survive both ending paths of the retry block — Ctrl-C

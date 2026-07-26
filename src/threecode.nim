@@ -80,7 +80,13 @@ proc ensureBash() =
   ## (`%LOCALAPPDATA%\3code\msys64`). Hard-fail if it is missing — the one
   ## fix is to (re)run the installer, which also bootstraps MSYS2. POSIX
   ## always has /bin/sh so this is a no-op there.
-  when defined(windows):
+  ##
+  ## The provider-stub binary (the tty test harness) skips this: those tests
+  ## drive REPL rendering, not bash enforcement, and CI has no bundled MSYS2
+  ## so the guard would hard-fail before the prompt appears. Bash enforcement
+  ## is covered by the cli_args `box` suite and by production. Same gate as
+  ## initSandbox.
+  when defined(windows) and not defined(providerStub):
     let b = resolveBash()
     if b.len == 0:
       stderr.writeLine "3code: bash not found. Re-run the installer to set it up:"

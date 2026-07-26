@@ -1,9 +1,3 @@
-discard """
-  # Windows: draft/session-path tests assume XDG_DATA_HOME isolation, but
-  # Windows userDataRoot() reads APPDATA via getConfigDir(). See
-  # docs/windows-testing.md.
-  disabled: "win"
-"""
 import std/[json, os, osproc, sequtils, strutils, times, unittest]
 import threecode/[session, types]
 

@@ -442,7 +442,7 @@ proc writeConfigFile*(path: string, current: string,
   writeFile(path, buf)
 
 proc configPath*(): string =
-  getConfigDir() / "3code" / "config"
+  userConfigRoot() / "config"
 
 proc resolveSearchKey*(engine: string; keys: Table[string, string]): string =
   ## The engine-specific `[search] exa-key` / `brave-key` wins; otherwise the

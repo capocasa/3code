@@ -1,7 +1,8 @@
 discard """
-  # See docs/windows-testing.md. The tty_expect harness uses openpty/fork/
-  # execv (POSIX only). A ConPTY port is the path to re-enable on Windows.
   disabled: "win"
+  ## Flaky under ConPTY in the full testament suite: the empty-Enter
+  ## responsiveness check is timing-sensitive to ConPTY output latency.
+  ## Passes in isolation.
 """
 ## Targeted regression: empty Enter at the idle prompt must not freeze the
 ## input thread. Before the fix, onSubmit parked the thread on

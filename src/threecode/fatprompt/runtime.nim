@@ -8,6 +8,21 @@ import std/[atomics, json, locks, os, strformat, strutils, terminal, times, unic
 when defined(posix):
   import std/posix except SocketHandle
   import posix/termios
+when defined(windows):
+  import std/winlean
+  const
+    ENABLE_PROCESSED_INPUT = 0x0001'i32
+    ENABLE_LINE_INPUT = 0x0002'i32
+    ENABLE_ECHO_INPUT = 0x0004'i32
+    CTRL_C_EVENT = 0'i32
+    CTRL_BREAK_EVENT = 1'i32
+  proc getConsoleMode(h: Handle; mode: ptr int32): int32 {.stdcall,
+      dynlib: "kernel32", importc: "GetConsoleMode".}
+  proc setConsoleMode(h: Handle; mode: int32): int32 {.stdcall,
+      dynlib: "kernel32", importc: "SetConsoleMode".}
+  proc setConsoleCtrlHandler(handlerRoutine: pointer; add: WinBool):
+      WinBool {.stdcall, dynlib: "kernel32",
+      importc: "SetConsoleCtrlHandler".}
 import ../types, ../util, ../compact, ../display, ../minline,
   ../signals, ../terminal as termui, ../session
 import ../engine as termengine
@@ -17,6 +32,14 @@ from ../toolstream import StreamMaxLines, initStreamingView, addLine,
 from ../api import ApiStreamHooks, requestTurnInterrupt, requestQuietShutdown,
   setApiStreamHooks, setInterrupted, QuietTooLongMs, clearNetworkQuiet
 
+
+when defined(windows):
+  proc consoleCtrlHandler(ctrlType: int32): WinBool {.stdcall, gcsafe.} =
+    if ctrlType == CTRL_C_EVENT or ctrlType == CTRL_BREAK_EVENT:
+      try: requestTurnInterrupt()
+      except CatchableError: discard
+      return 1.WinBool
+    0.WinBool
 
 var contentStreamedLive*: bool = false
   ## Set by `callModel` when the assistant's text content has been streamed
@@ -233,6 +256,9 @@ var inputThreadRunning* = false
 when defined(posix):
   var inputOrigTermios: Termios
   var inputOrigTermiosValid = false
+when defined(windows):
+  var inputOrigConsoleMode: int32 = 0
+  var inputOrigConsoleModeValid = false
 
 proc restoreInputTermios*() {.noconv.} =
   ## Restore stdin's termios to the snapshot the input thread captured
@@ -242,6 +268,11 @@ proc restoreInputTermios*() {.noconv.} =
     if inputOrigTermiosValid:
       discard tcSetAttr(STDIN_FILENO.cint, TCSADRAIN, addr inputOrigTermios)
       inputOrigTermiosValid = false
+  when defined(windows):
+    if inputOrigConsoleModeValid:
+      let h = getStdHandle(STD_INPUT_HANDLE)
+      discard setConsoleMode(h, inputOrigConsoleMode)
+      inputOrigConsoleModeValid = false
 var inputEditor*: ptr minline.LineEditor
 var inputProfile*: ptr Profile
 var inputSession*: ptr Session
@@ -643,7 +674,42 @@ template captureStdoutWrites*(body: untyped): string =
           except OSError:
             discard
     else:
-      body
+      # Windows: redirect fd 1 to a temp file via the C runtime (_dup/_dup2),
+      # run the body, restore. Without this the formatter bytes are written
+      # directly to the real stdout and then clobbered by the footer-
+      # preserving `commitTranscriptBytes` that consumes `captured` — so the
+      # "interrupted by user" notice (and any other transcript line routed
+      # through `writeTranscriptWithFatPrompt`) silently vanished on Windows.
+      proc crtdup(fd: cint): cint {.header: "<io.h>", importc: "_dup".}
+      proc crtdup2(fd1, fd2: cint): cint {.header: "<io.h>", importc: "_dup2".}
+      proc crtclose(fd: cint): cint {.header: "<io.h>", importc: "_close".}
+      proc crtopen(path: cstring; oflag, pmode: cint): cint
+          {.header: "<io.h>", importc: "_open".}
+      let path = getTempDir() / "3code_transcript_" & $getCurrentProcessId() &
+                 "_" & $(epochTime() * 1000.0).int
+      flushFile(stdout)
+      let saved = crtdup(1.cint)
+      if saved < 0:
+        body
+      else:
+        let fd = crtopen(path.cstring, 0x0100.cint or 0x0001.cint, 0x0080.cint)
+        if fd < 0:
+          discard crtclose(saved)
+          body
+        else:
+          discard crtdup2(fd, 1.cint)
+          discard crtclose(fd)
+          try:
+            body
+            flushFile(stdout)
+          finally:
+            discard crtdup2(saved, 1.cint)
+            discard crtclose(saved)
+          try:
+            captured = readFile(path)
+            removeFile(path)
+          except OSError:
+            discard
     captured
 
 # ---------- Bar+prompt runtime helpers ----------
@@ -1931,6 +1997,26 @@ proc inputThreadProc() {.thread.} =
         # bracketed paste (older `xterm`, some `screen` configs)
         # ignore the sequence silently.
         termui.writeRaw("\x1b[?2004h")
+
+    when defined(windows):
+      # Raw input: clear line/echo so keystrokes (including Ctrl-D 0x04)
+      # are delivered to `_getch` unedited/unechoed. `ENABLE_PROCESSED_INPUT`
+      # is kept so that in a real Windows console Ctrl-C raises
+      # `CTRL_C_EVENT`, caught by `consoleCtrlHandler` below. Under the
+      # ConPTY test harness conhost consumes 0x03 without forwarding it and
+      # without raising the event, so the tty harness sends 0x04 instead
+      # (see `tty_expect.ctrlC`). Restore on exit via `restoreInputTermios`.
+      let h = getStdHandle(STD_INPUT_HANDLE)
+      var mode: int32 = 0
+      if getConsoleMode(h, addr mode) != 0:
+        inputOrigConsoleMode = mode
+        inputOrigConsoleModeValid = true
+        discard setConsoleMode(h, mode and not
+          (ENABLE_LINE_INPUT or ENABLE_ECHO_INPUT))
+      # Route Ctrl-C / Ctrl-Break (real console) straight to the turn-
+      # interrupt path via the console control handler.
+      discard setConsoleCtrlHandler(
+        cast[pointer](consoleCtrlHandler), 1.WinBool)
 
     edPtr[].deferSubmit = true
     edPtr[].submitIcon = DeferredSubmitMarker

@@ -1,7 +1,4 @@
 discard """
-  # See docs/windows-testing.md. The tty_expect harness uses openpty/fork/
-  # execv (POSIX only). A ConPTY port is the path to re-enable on Windows.
-  disabled: "win"
   # This is the only tty test still disabled on macOS: it deterministically
   # hangs on the OSX runner (verified across 7 CI runs on branch `timing`).
   # Unlike the other 16 tty tests — which now pass on OSX after the harness
@@ -12,9 +9,16 @@ discard """
   # harness blocking path is now bounded, yet the child stops rendering and
   # the test never returns. Root-causing it needs local macOS debugging.
   disabled: "osx"
+  # Also hangs under Windows ConPTY: the 2600-line suite's heavy terminal
+  # output volume fills the ConPTY output pipe and deadlocks the child's
+  # render threads. Same class of throughput limitation as
+  # test_spinner_race_stress. The individual tty tests cover the same
+  # product paths on Windows without the throughput issue.
+  disabled: "win"
 """
 import std/[json, os, strutils, times, unicode, unittest]
-import posix except SocketHandle
+when defined(posix):
+  import posix except SocketHandle
 import tty_expect
 import stub_helpers
 
@@ -111,37 +115,47 @@ proc draftPathForDir(root: string): string =
         return path
   pendingDir / "missing.prompt"
 
-proc hardKillAndWait(tty: TtySession) =
-  ## SIGTERM then SIGKILL the child and block until reaped. The harness's own
-  ## exit polling can miss a signal death when the editor holds unsubmitted
-  ## text, so this reaps directly via waitpid rather than relying on s.exited.
-  if tty.pid <= 0: return
-  discard kill(tty.pid, SIGTERM)
-  var waited = 0
-  var status: cint = 0
-  while waitpid(tty.pid, status, WNOHANG) != tty.pid and waited < 30:
-    sleep 50; inc waited
-  if waitpid(tty.pid, status, WNOHANG) != tty.pid:
-    discard kill(tty.pid, SIGKILL)
-    discard waitpid(tty.pid, status, 0)
-  tty.exited = true
-  tty.exitCode = -1
+when defined(posix):
+  proc hardKillAndWait(tty: TtySession) =
+    ## SIGTERM then SIGKILL the child and block until reaped. The harness's own
+    ## exit polling can miss a signal death when the editor holds unsubmitted
+    ## text, so this reaps directly via waitpid rather than relying on s.exited.
+    if tty.pid <= 0: return
+    discard kill(tty.pid, SIGTERM)
+    var waited = 0
+    var status: cint = 0
+    while waitpid(tty.pid, status, WNOHANG) != tty.pid and waited < 30:
+      sleep 50; inc waited
+    if waitpid(tty.pid, status, WNOHANG) != tty.pid:
+      discard kill(tty.pid, SIGKILL)
+      discard waitpid(tty.pid, status, 0)
+    tty.exited = true
+    tty.exitCode = -1
 
-proc discardClose(tty: TtySession) =
-  ## Close the harness's file descriptors without the wait-for-exit logic in
-  ## `close()`. Use after `hardKillAndWait`, which has already reaped the
-  ## child, so there is nothing left to wait on.
-  if tty.closed: return
-  discard close(tty.masterFd)
-  for fd in [tty.frameEventFd, tty.frameAckFd, tty.tickerCommandFd,
-             tty.tickerAckFd, tty.apiContinueFd]:
-    if fd > 0: discard close(fd)
-  tty.frameEventFd = 0
-  tty.frameAckFd = 0
-  tty.tickerCommandFd = 0
-  tty.tickerAckFd = 0
-  tty.apiContinueFd = 0
-  tty.closed = true
+  proc discardClose(tty: TtySession) =
+    ## Close the harness's file descriptors without the wait-for-exit logic in
+    ## `close()`. Use after `hardKillAndWait`, which has already reaped the
+    ## child, so there is nothing left to wait on.
+    if tty.closed: return
+    discard close(tty.masterFd)
+    for fd in [tty.frameEventFd, tty.frameAckFd, tty.tickerCommandFd,
+               tty.tickerAckFd, tty.apiContinueFd]:
+      if fd > 0: discard close(fd)
+    tty.frameEventFd = 0
+    tty.frameAckFd = 0
+    tty.tickerCommandFd = 0
+    tty.tickerAckFd = 0
+    tty.apiContinueFd = 0
+    tty.closed = true
+else:
+  # Windows: the harness close() already does TerminateProcess + bounded
+  # reap, so the POSIX signal-death workaround has no analog. Provide stubs
+  # so call sites compile unchanged; the deferred `close()` does the work.
+  proc hardKillAndWait(tty: TtySession) =
+    if not tty.exited and tty.hProcess.int != 0:
+      tty.close()
+  proc discardClose(tty: TtySession) =
+    tty.close()
 
 proc stubEnv(root, responsesPath: string): seq[EnvVar] =
   # Isolate TMPDIR per fixture so session lock files (TMPDIR/3code/lock,

@@ -1,11 +1,11 @@
-discard """
-  # Windows: autosend probe tests spawn a child nim compiler + threads;
-  # flaky on Windows runners. See docs/windows-testing.md.
-  disabled: "win"
-"""
 import std/[json, os, osproc, strutils, unittest]
 import threecode/[api, prompts, types]
 import stub_helpers
+
+# Subprocess probes compile a small `probe.nim` and exec it. On Windows the
+# nim compiler appends `.exe` to `-o:probe`, so the run path must include it
+# or execCmdEx gets a file-not-found.
+const Exe = when defined(windows): ".exe" else: ""
 
 suite "api request shaping":
   test "z.ai glm sets tool_stream (streamhttp TLS truncation fixed)":
@@ -270,7 +270,7 @@ suite "api request shaping":
     let pid = $getCurrentProcessId()
     let probeDir = getTempDir() / ("tc_autosend_probe_" & pid)
     let probePath = probeDir / "probe.nim"
-    let outPath = probeDir / "probe"
+    let outPath = probeDir / ("probe" & Exe)
     let cacheDir = probeDir / "nimcache"
     createDir(probeDir)
     createDir(cacheDir)
@@ -338,7 +338,7 @@ doAssert "SHOULD_NOT_BE_CALLED" notin $messages
     let pid = $getCurrentProcessId()
     let probeDir = getTempDir() / ("tc_autosend_api_probe_" & pid)
     let probePath = probeDir / "probe.nim"
-    let outPath = probeDir / "probe"
+    let outPath = probeDir / ("probe" & Exe)
     let cacheDir = probeDir / "nimcache"
     createDir(probeDir)
     createDir(cacheDir)
@@ -409,7 +409,7 @@ doAssert "SHOULD_NOT_BE_CALLED" notin $messages
     let pid = $getCurrentProcessId()
     let probeDir = getTempDir() / ("tc_autosend_batch_probe_" & pid)
     let probePath = probeDir / "probe.nim"
-    let outPath = probeDir / "probe"
+    let outPath = probeDir / ("probe" & Exe)
     let cacheDir = probeDir / "nimcache"
     createDir(probeDir)
     createDir(cacheDir)
@@ -487,7 +487,7 @@ doAssert "SHOULD_NOT_BE_CALLED" notin $messages
   test "provider stub covers common network failure aliases":
     let pid = $getCurrentProcessId()
     let probePath = getTempDir() / ("tc_stub_failures_" & pid & ".nim")
-    let outPath = getTempDir() / ("tc_stub_failures_" & pid)
+    let outPath = getTempDir() / ("tc_stub_failures_" & pid & Exe)
     let cacheDir = getTempDir() / ("tc_stub_failures_cache_" & pid)
     createDir(cacheDir)
     defer:
@@ -600,7 +600,7 @@ suite "runTurns empty-content auto-handling":
     let pid = $getCurrentProcessId()
     let probeDir = getTempDir() / ("tc_empty_esc_" & pid)
     let probePath = probeDir / "probe.nim"
-    let outPath = probeDir / "probe"
+    let outPath = probeDir / ("probe" & Exe)
     let cacheDir = probeDir / "nimcache"
     createDir(probeDir)
     createDir(cacheDir)
@@ -675,7 +675,7 @@ echo "OK"
     let pid = $getCurrentProcessId()
     let probeDir = getTempDir() / ("tc_empty_resend_" & pid)
     let probePath = probeDir / "probe.nim"
-    let outPath = probeDir / "probe"
+    let outPath = probeDir / ("probe" & Exe)
     let cacheDir = probeDir / "nimcache"
     createDir(probeDir)
     createDir(cacheDir)

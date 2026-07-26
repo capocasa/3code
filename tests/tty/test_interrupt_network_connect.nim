@@ -1,6 +1,8 @@
 discard """
-  # The tty_expect harness uses openpty/fork/execv (POSIX only).
   disabled: "win"
+  ## Sends raw \x03 (Ctrl-C) to interrupt a network connect. Under ConPTY
+  ## \x03 is silently consumed by conhost (see tty_expect.ctrlC). The core
+  ## interrupt path is covered on Windows by test_quit_signals.
 """
 ## Regression: Ctrl-C / ESC during the network connect or streaming-body
 ## phase must return to the prompt promptly, not wait for the network call

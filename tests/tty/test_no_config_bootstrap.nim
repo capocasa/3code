@@ -1,8 +1,3 @@
-discard """
-  # See docs/windows-testing.md. The tty_expect harness uses openpty/fork/
-  # execv (POSIX only). A ConPTY port is the path to re-enable on Windows.
-  disabled: "win"
-"""
 ## Regression: a first run with no config file crashes with
 ## `Error: unhandled exception: input thread stopped [IOError]` the
 ## moment the bootstrap provider wizard tries to read the api key.
