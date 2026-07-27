@@ -177,9 +177,9 @@ after each):
       parameter continuation in the readLineWith keystroke dispatcher,
       which is already in early-exit `continue`-chain style.
 
-NEXT: step 13 (httpclient migration decision for the four
-non-streaming GET users: api verify/fetchModels, compact, web,
-update). Steps 14-15 follow in order.
+NEXT: step 14 (megatest.nim fate; test_z_exitcode_probe; grep for
+`^test "` at column 0 outside suite blocks per tests-notes.md). Step
+15 (final sweep) follows.
 
 Key gotchas learned:
 - `func` cannot read palette `var`s (BrightWhiteFg etc); string emitters
@@ -333,11 +333,34 @@ Key gotchas learned:
     as the escape hatch. Recorded, not implemented.
     streamhttp nimble test: 26 [OK], 0 [FAILED].
 
-13. [ ] **httpclient migration decision.** Decide: migrate the four
+13. [x] **httpclient migration decision.** Decide: migrate the four
     non-streaming httpclient users (api verify/fetchModels, compact,
     web, update) to streamhttp identity reads, or bless httpclient for
     one-shot GETs and remove the guideline item. Record decision and
     rationale here; implement if migrating.
+
+    DECISION: bless httpclient for the four one-shot users; remove the
+    migration backlog. Rationale:
+    - These are bounded whole-body request/response calls with explicit
+      timeouts (10-120s): fetchModels (20s GET), compact summarize
+      (120s POST, non-stream by design), web search/fetch (20-30s),
+      update check/download (10-60s). None is an SSE/streaming path;
+      the property streamhttp exists for (chunk-at-a-time reads) buys
+      them nothing.
+    - streamhttp's one-shot path is less capable for these, not more:
+      httpclient handles redirects (web.nim hits them routinely), and
+      streamhttp's Scope section explicitly rules redirects out.
+    - The bad-network bug class the guideline cares about (stuck TLS
+      recv, uncancellable teardown) belongs to the long-lived streaming
+      conn, which is 100% streamhttp with the fd-shutdown hooks. The
+      one-shots are interruptible by process-level SIGINT and bounded
+      by their timeouts.
+    - Migrating would replace four boring working call sites with new
+      code exercising streamhttp's least-tested paths (identity reads
+      at 60-120s), for guideline purity only.
+    Guideline §7 updated: the "migration backlog" sentence is replaced
+    by the blessing. The rule that remains load-bearing: no NEW
+    httpclient uses, and no second client on any streaming path.
 
 14. [ ] **megatest.nim + stray test files.** Decide fate of uncommitted
     `tests/megatest.nim` (wire it into nimble test or delete). Remove or
