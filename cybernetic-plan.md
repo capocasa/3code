@@ -177,9 +177,10 @@ after each):
       parameter continuation in the readLineWith keystroke dispatcher,
       which is already in early-exit `continue`-chain style.
 
-NEXT: step 11 (Nim idiom pass: func conversion for side-effect-free
-formatters; decide split seams for session.nim/minline.nim or record
-why not). Steps 12-15 follow in order.
+NEXT: step 12 (streamhttp: document shutdown-then-close ordering on
+close + verify 3code call sites; bounded resolver thread for first DNS
+resolve or record deferral; run streamhttp nimble test). Steps 13-15
+follow in order.
 
 Key gotchas learned:
 - `func` cannot read palette `var`s (BrightWhiteFg etc); string emitters
@@ -271,11 +272,39 @@ Key gotchas learned:
     `minline.nim` (:1538). One module per commit. No behavior change;
     run full tests after each.
 
-11. [ ] **Nim idiom pass.** Convert side-effect-free procs to `func`
+11. [~] **Nim idiom pass.** Convert side-effect-free procs to `func`
     where trivially eligible (formatters in display.nim,
     fatprompt/rendering.nim, util.nim). Split `session.nim` (1240 lines)
     and `minline.nim` (1695) if natural seams exist; record the seam or
     the reason not to split.
+
+    DONE (fb3199a): 26 procs in util.nim (utf8ByteCut/End,
+    sanitizeUtf8, clipMiddle, humanBytes/Tokens, detectMdHeader,
+    isMdFenceLine, isAtBoundary, applyInlineMd, visibleWidth, wrapAnsi,
+    charWrapAnsi, bannerWrapRows, isMdTableRow, parseMdRow, isMdSepRow,
+    renderMdTable, tokenSlot, stripPreamble, replaceFirst,
+    isBinaryContent, looksLikePath, levenshtein(+Capped)) and 14 in
+    fatprompt/rendering.nim (markerText, splitLogicalLines, wrapPlain,
+    cellWidth, wrapMarked, hasNonNewlineBytes, hasElapsedSuffix,
+    labelCells, barWrapRows, clampToWidth, editorRows/Height,
+    bashVisibleRows, frameRows/Text) converted. Left as proc:
+    palette-reading byte emitters (spinnerBarBytes, liveBarBytes,
+    *FooterBytes — func cannot read the palette `var`s), display.nim's
+    string emitters (same palette reason, already recorded in
+    gotchas), addUserEcho/formatUserPromptItem (mutate var params /
+    call hook chains the compiler flags as side-effectful).
+    Split decision: NOT SPLIT. session.nim's sections (paths, index,
+    drafts, locks, record parser, writer, save/load, listing) are
+    interdependent — the writer and parser share the Record format and
+    emitRecord/parseRecords twins; the lock procs share the
+    activeLockPath module state. A mechanical split would move
+    privates to exports across modules with no encapsulation gain.
+    minline.nim's marker sections (pure helpers, render, edit ops,
+    history, keymap, completion, driver) are dense closures over the
+    LineEditor object; `handleEscape`/`readLineWith` reference nearly
+    every section. Both files read top-to-bottom in dependency order;
+    the 1200/1700-line size is a symptom of one-editor/one-format,
+    not of mixed concerns.
 
 12. [ ] **streamhttp documentation + DNS step.** In ~/p/streamhttp:
     document the shutdown-then-close ordering requirement on `close` at
