@@ -428,20 +428,19 @@ proc bootstrapProvider*(editor: var minline.LineEditor): Profile =
 
 # ---------- Provider / model commands ----------
 
-proc cmdProviderList(prof: Profile) =
+proc cmdProviderList(prof: Profile): string =
   if activeProviders.len == 0:
-    hintLn "no providers", resetStyle
-    return
+    return hintLnS("no providers")
   let curName = if prof.name == "": "" else: prof.name.split('.')[0]
   for pr in activeProviders:
     let current = pr.name == curName
     let tail = if current: &"  [{shortModel(prof.model)}]" else: ""
     if not experimentalEnabled and not hasKnownGoodModel(pr):
-      subtleWriteLn(stdout, pr.name & tail)
+      result.add GreyFg & pr.name & tail & Reset & "\r\n"
     else:
-      hintLn pr.name, tail, resetStyle
+      result.add hintLnS(pr.name & tail)
 
-proc cmdProviderSelect(target: string, prof: var Profile) =
+proc cmdProviderSelect(target: string, prof: var Profile): string =
   var prov: ProviderRec
   var found = false
   for pr in activeProviders:
@@ -450,21 +449,19 @@ proc cmdProviderSelect(target: string, prof: var Profile) =
       found = true
       break
   if not found:
-    errLn &"unknown provider: {target}"
-    return
+    return errLnS(&"unknown provider: {target}")
   if prov.models.len == 0:
-    errLn &"provider {target} has no models"
-    return
+    return errLnS(&"provider {target} has no models")
   let newCurrent = prov.name & "." & firstModel(prov)
   let candidate = buildProfile(newCurrent, activeProviders, "")
   activeCurrent = newCurrent
   prof = candidate
   writeConfigFile(configPath(), activeCurrent, activeProviders)
-  showProfile(prof)
+  result = profileLinesS(prof)
   if not gateExperimental(candidate):
-    explainExperimentalGate(candidate)
+    result.add errLnS(experimentalGateText(candidate))
 
-proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
+proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile): string =
   # Cancel propagates from `wizardReadLine` through `promptNewProvider`
   # back to `handleCommandResult`, which turns it into an empty
   # `cdModal` return. No message, no state change — the prompt is
@@ -477,17 +474,15 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile) =
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   if prof.name == "":
     prof = buildProfile(activeCurrent, activeProviders, "")
-  hintLn &"added {prov.name}", resetStyle
-  showProfile(prof)
+  hintLnS(&"added {prov.name}") & profileLinesS(prof)
 
 proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
-                     prof: var Profile) =
+                     prof: var Profile): string =
   var idx = -1
   for i, pr in activeProviders:
     if pr.name == target: idx = i; break
   if idx < 0:
-    errLn &"unknown provider: {target}"
-    return
+    return errLnS(&"unknown provider: {target}")
   let updated = promptEditProvider(editor, activeProviders[idx])
   activeProviders[idx] = updated
   let curName = if activeCurrent == "": "" else: activeCurrent.split('.')[0]
@@ -499,15 +494,14 @@ proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
     activeCurrent = updated.name & "." & model
     prof = buildProfile(activeCurrent, activeProviders, "")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
-  hintLn &"updated {target}", resetStyle
+  hintLnS(&"updated {target}")
 
-proc cmdProviderRm(target: string, prof: var Profile) =
+proc cmdProviderRm(target: string, prof: var Profile): string =
   var idx = -1
   for i, pr in activeProviders:
     if pr.name == target: idx = i; break
   if idx < 0:
-    errLn &"unknown provider: {target}"
-    return
+    return errLnS(&"unknown provider: {target}")
   activeProviders.delete(idx)
   let curName = if activeCurrent == "": "" else: activeCurrent.split('.')[0]
   if curName == target:
@@ -519,209 +513,187 @@ proc cmdProviderRm(target: string, prof: var Profile) =
       activeCurrent = ""
       prof = Profile()
   writeConfigFile(configPath(), activeCurrent, activeProviders)
-  hintLn &"removed {target}", resetStyle
+  hintLnS(&"removed {target}")
 
 proc cmdProvider(arg: string, editor: var minline.LineEditor,
-                 prof: var Profile) =
+                 prof: var Profile): string =
   let parts = arg.splitWhitespace()
   if parts.len == 0 or (parts.len == 1 and parts[0] == "list"):
-    cmdProviderList(prof)
-    return
+    return cmdProviderList(prof)
   case parts[0]
   of "add":
     if parts.len != 1:
-      errLn "usage: :provider add"
-    else:
-      cmdProviderAdd(editor, prof)
+      return errLnS("usage: :provider add")
+    cmdProviderAdd(editor, prof)
   of "edit":
     if parts.len != 2:
-      errLn "usage: :provider edit <name>"
-    else:
-      cmdProviderEdit(parts[1], editor, prof)
+      return errLnS("usage: :provider edit <name>")
+    cmdProviderEdit(parts[1], editor, prof)
   of "rm", "remove":
     if parts.len != 2:
-      errLn &"usage: :provider {parts[0]} <name>"
-    else:
-      cmdProviderRm(parts[1], prof)
+      return errLnS(&"usage: :provider {parts[0]} <name>")
+    cmdProviderRm(parts[1], prof)
   else:
     if parts.len != 1:
-      errLn "usage: :provider [<name> | add | rm <name>]"
-    else:
-      cmdProviderSelect(parts[0], prof)
+      return errLnS("usage: :provider [<name> | add | rm <name>]")
+    cmdProviderSelect(parts[0], prof)
 
-proc cmdModelList(prof: Profile) =
+proc cmdModelList(prof: Profile): string =
   let prov = currentProvider()
   if prov.name == "":
-    hintLn "no provider selected", resetStyle
-    return
+    return hintLnS("no provider selected")
   if prov.models.len == 0:
-    hintLn &"{prov.name}: no models", resetStyle
-    return
+    return hintLnS(&"{prov.name}: no models")
   for m in orderedModels(prov):
     let short = shortModel(m)
     let kg = knownGoodFamily(prov.name, m)
     if kg == "" and not experimentalEnabled:
-      subtleWriteLn(stdout, short)
+      result.add GreyFg & short & Reset & "\r\n"
     else:
       let kgSuffix = if experimentalEnabled and kg != "": "*" else: ""
-      hintLn short & kgSuffix, resetStyle
+      result.add hintLnS(short & kgSuffix)
 
-proc cmdModelSelect(target: string, prof: var Profile) =
+proc cmdModelSelect(target: string, prof: var Profile): string =
   let prov = currentProvider()
   if prov.name == "":
-    errLn "no provider selected"
-    return
+    return errLnS("no provider selected")
   let idx = prov.findModel(target)
   if idx < 0:
-    errLn &"unknown model: {target}"
-    return
+    return errLnS(&"unknown model: {target}")
   let fullModel = prov.models[idx]
   let newCurrent = prov.name & "." & fullModel
   let candidate = buildProfile(newCurrent, activeProviders, "")
   if not gateExperimental(candidate):
-    explainExperimentalGate(candidate)
-    return
+    return errLnS(experimentalGateText(candidate))
   activeCurrent = newCurrent
   prof = candidate
   writeConfigFile(configPath(), activeCurrent, activeProviders)
-  showProfile(prof)
+  profileLinesS(prof)
 
-proc cmdModel(arg: string, prof: var Profile) =
+proc cmdModel(arg: string, prof: var Profile): string =
   let parts = arg.splitWhitespace()
   case parts.len
   of 0:
-    cmdModelList(prof)
+    return cmdModelList(prof)
   of 1:
     if parts[0] == "list":
-      cmdModelList(prof)
-    else:
-      cmdModelSelect(parts[0], prof)
+      return cmdModelList(prof)
+    return cmdModelSelect(parts[0], prof)
   else:
-    errLn "usage: :model [<name>]"
+    return errLnS("usage: :model [<name>]")
 
-proc cmdReasoningList(prof: Profile) =
+proc cmdReasoningList(prof: Profile): string =
   let prov = providerForProfile(prof)
   if prov.name == "":
-    hintLn "no provider selected", resetStyle
-    return
+    return hintLnS("no provider selected")
   if experimentalEnabled:
     let cur = if prof.reasoning == "": "(none)" else: prof.reasoning
-    hintLn "reasoning: ", resetStyle, cur
-    hintLn "experimental: level is free-form, type any value", resetStyle
+    result.add hintLnS("reasoning: " & cur)
+    result.add hintLnS("experimental: level is free-form, type any value")
     return
   let levels = availableReasonings(prov, prof.family, prof.model)
   if levels.len == 0:
-    hintLn &"{prof.family}: no reasoning knob", resetStyle
-    return
+    return hintLnS(&"{prof.family}: no reasoning knob")
   for r in levels:
     let mark = if r == prof.reasoning: "*" else: " "
-    hintLn mark, " ", resetStyle, r
+    result.add hintLnS(mark & " " & r)
 
-proc cmdReasoningSelect(target: string, prof: var Profile) =
+proc cmdReasoningSelect(target: string, prof: var Profile): string =
   let prov = providerForProfile(prof)
   if prov.name == "":
-    errLn "no provider selected"
-    return
+    return errLnS("no provider selected")
   let value = target.toLowerAscii
   if not experimentalEnabled:
     let levels = availableReasonings(prov, prof.family, prof.model)
     if value notin levels:
-      errLn &"unknown reasoning level: {target} (choose from {levels.join(\" \")})"
-      return
+      return errLnS(&"unknown reasoning level: {target} (choose from {levels.join(\" \")})")
   prof.reasoning = value
   for i, pr in activeProviders:
     if pr.name == prov.name:
       activeProviders[i].reasoning = value
       break
   writeConfigFile(configPath(), activeCurrent, activeProviders)
-  showProfile(prof)
+  profileLinesS(prof)
 
-proc cmdReasoning(arg: string, prof: var Profile) =
+proc cmdReasoning(arg: string, prof: var Profile): string =
   let parts = arg.splitWhitespace()
   case parts.len
   of 0:
-    cmdReasoningList(prof)
+    return cmdReasoningList(prof)
   of 1:
     if parts[0] == "list":
-      cmdReasoningList(prof)
-    else:
-      cmdReasoningSelect(parts[0], prof)
+      return cmdReasoningList(prof)
+    return cmdReasoningSelect(parts[0], prof)
   else:
-    errLn "usage: :reasoning [<level>]"
+    return errLnS("usage: :reasoning [<level>]")
 
-proc cmdStreamingList() =
+proc cmdStreamingList(): string =
   let mark = if streamingEnabled: "on" else: "off"
-  hintLn "streaming: ", mark,
-    "  (on = live SSE output, off = single request/response)", resetStyle
+  hintLnS("streaming: " & mark &
+    "  (on = live SSE output, off = single request/response)")
 
-proc cmdStreamingSelect(target: string) =
+proc cmdStreamingSelect(target: string): string =
   case target.toLowerAscii
   of "on":
     streamingEnabled = true
   of "off":
     streamingEnabled = false
   else:
-    errLn &"unknown value: {target} (choose on or off)"
-    return
+    return errLnS(&"unknown value: {target} (choose on or off)")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   cmdStreamingList()
 
-proc cmdStreaming(arg: string) =
+proc cmdStreaming(arg: string): string =
   let parts = arg.splitWhitespace()
   case parts.len
   of 0:
-    cmdStreamingList()
+    return cmdStreamingList()
   of 1:
     if parts[0] == "list":
-      cmdStreamingList()
-    else:
-      cmdStreamingSelect(parts[0])
+      return cmdStreamingList()
+    return cmdStreamingSelect(parts[0])
   else:
-    errLn "usage: :streaming [on|off]"
+    return errLnS("usage: :streaming [on|off]")
 
-proc cmdNotifyList() =
+proc cmdNotifyList(): string =
   let mark = if notifyEnabled: "on" else: "off"
-  hintLn "notify: ", mark,
-    "  (on = desktop notification when a turn ends, off = silent)", resetStyle
+  hintLnS("notify: " & mark &
+    "  (on = desktop notification when a turn ends, off = silent)")
 
-proc cmdNotifySelect(target: string) =
+proc cmdNotifySelect(target: string): string =
   case target.toLowerAscii
   of "on":
     notifyEnabled = true
   of "off":
     notifyEnabled = false
   else:
-    errLn &"unknown value: {target} (choose on or off)"
-    return
+    return errLnS(&"unknown value: {target} (choose on or off)")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   cmdNotifyList()
 
-proc cmdNotify(arg: string) =
+proc cmdNotify(arg: string): string =
   let parts = arg.splitWhitespace()
   case parts.len
   of 0:
-    cmdNotifyList()
+    return cmdNotifyList()
   of 1:
     if parts[0] == "list":
-      cmdNotifyList()
-    else:
-      cmdNotifySelect(parts[0])
+      return cmdNotifyList()
+    return cmdNotifySelect(parts[0])
   else:
-    errLn "usage: :notify [on|off]"
+    return errLnS("usage: :notify [on|off]")
 
-proc cmdSandboxSettingSelect(target: string) =
+proc cmdSandboxSettingSelect(target: string): string =
   case target.toLowerAscii
   of "on":
     sandboxEnabled = true
   of "off":
     sandboxEnabled = false
   else:
-    errLn &"unknown value: {target} (choose on or off)"
-    return
+    return errLnS(&"unknown value: {target} (choose on or off)")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
-  hintLn "sandbox: ", if sandboxEnabled: "on" else: "off",
-    "  (on = enforce the .3code/sandbox policy, off = run unconfined)",
-    resetStyle
+  hintLnS("sandbox: " & (if sandboxEnabled: "on" else: "off") &
+    "  (on = enforce the .3code/sandbox policy, off = run unconfined)")
 
 proc nearestCommand(name: string): string =
   var bestDist = high(int)
@@ -953,33 +925,46 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
     # propagate up to the outer `try` in `handleCommandResult` and
     # turn it into an empty `cdModal` return so the main loop
     # restores its idle state.
+    var wizardBody = ""
     try:
       case name
       of ":provider":
-        cmdProvider(arg, editor, prof)
+        wizardBody = cmdProvider(arg, editor, prof)
         session.profileName = prof.name
+        # Usage errors (`:provider add <extra>`) never enter the wizard;
+        # they come back as an error body. Surface those through the
+        # normal transcript path instead of swallowing them.
+        if wizardBody.len > 0 and wizardBody.contains("usage:"):
+          return CommandResult(recognized: true, ok: false,
+                               name: commandTitle(name, arg, false),
+                               body: wizardBody, plainBody: false,
+                               disposition: cdTranscriptResult)
       else:
         discard
     except minline.InputCancelled:
       discard
     return CommandResult(recognized: true, ok: true,
                          name: commandTitle(name, arg, true),
+                         body: wizardBody,
                          disposition: cdModal)
   var ok = true
-  let body = captureStdoutWrites:
+  var body = ""
+  template resp(b: string) = body.add cmdResponseS(b)
+  template respErr(b: string) = body.add cmdErrorS(b)
+  block dispatch:
     case name
     of ":help", ":?":
-      renderHelp()
+      body.add renderHelpS()
     of ":tokens":
       if session.usage.totalTokens == 0:
-        cmdResponse "no tokens used yet"
+        resp "no tokens used yet"
       else:
         let fresh = max(0, session.usage.promptTokens - session.usage.cachedTokens)
         let line = tokenSlot("↑", fresh) &
           "  " & tokenSlot("↻", session.usage.cachedTokens) &
           "  " & tokenSlot("↓", session.usage.completionTokens) &
           "  total " & humanTokens(session.usage.totalTokens)
-        cmdResponse line
+        resp line
     of ":clear":
       messages = %* [{"role": "system", "content": buildSystemPrompt(prof)}]
       session.toolLog.setLen 0
@@ -996,23 +981,23 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         session.created = $now()
         session.cwd = safeCwd()
         acquireSessionLock(session.savePath)
-      cmdResponse "════════════════════════════════════════"
+      resp "════════════════════════════════════════"
     of ":model":
-      cmdModel(arg, prof)
+      body.add cmdModel(arg, prof)
       session.profileName = prof.name
     of ":provider":
-      cmdProvider(arg, editor, prof)
+      body.add cmdProvider(arg, editor, prof)
       session.profileName = prof.name
     of ":reasoning":
-      cmdReasoning(arg, prof)
+      body.add cmdReasoning(arg, prof)
     of ":streaming":
-      cmdStreaming(arg)
+      body.add cmdStreaming(arg)
     of ":notify":
-      cmdNotify(arg)
+      body.add cmdNotify(arg)
     of ":prompt":
-      cmdResponse buildSystemPrompt(prof)
+      resp buildSystemPrompt(prof)
     of ":version":
-      cmdResponse "3code v" & Version
+      resp "3code v" & Version
     of ":sandbox":
       # `:sandbox show` (or bare) dumps the rules; allow/readonly/deny
       # append a line and reload. The path arg is written verbatim so
@@ -1021,15 +1006,15 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       case verb
       of "show":
         if sandbox.active:
-          cmdResponse sandbox.renderSandbox(sandbox.current)
+          resp sandbox.renderSandbox(sandbox.current)
         else:
-          cmdResponse "sandbox not active"
+          resp "sandbox not active"
       of "on", "off":
-        cmdSandboxSettingSelect(verb)
+        body.add cmdSandboxSettingSelect(verb)
       of "allow", "readonly", "deny":
         if parts.len < 2:
           ok = false
-          cmdError ":sandbox " & verb & " needs a path"
+          respErr ":sandbox " & verb & " needs a path"
         else:
           let argPath = parts[1 .. ^1].join(" ")
           let access =
@@ -1040,18 +1025,18 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
           let sf = sandbox.sandboxPathInCwd()
           if sandbox.appendRule(sf, argPath, access):
             sandbox.current = sandbox.loadCascaded(getCurrentDir())
-            cmdResponse "sandbox updated: " & verb & " " & argPath
+            resp "sandbox updated: " & verb & " " & argPath
           else:
             ok = false
-            cmdError "could not write sandbox file at " & sf
+            respErr "could not write sandbox file at " & sf
       else:
         ok = false
-        cmdError "unknown :sandbox verb: " & verb &
+        respErr "unknown :sandbox verb: " & verb &
           "  (show, on, off, allow, readonly, deny)"
     of ":show":
-      showTool(arg, session.toolLog)
+      body.add showToolS(arg, session.toolLog)
     of ":log":
-      listTools(session.toolLog)
+      body.add listToolsS(session.toolLog)
     of ":sessions":
       # Listing is directory-scoped by design; the full set lives under
       # `sessionDir()`. `showCwd` is threaded through as false to keep
@@ -1060,24 +1045,24 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       let askedAll = arg.strip.toLowerAscii in ["all", "-a", "--all"]
       let paths = listSessionPathsForCwd(safeCwd())
       if paths.len == 0:
-        cmdResponse "no saved sessions for this directory"
+        resp "no saved sessions for this directory"
       else:
-        printSessionList(paths, session.savePath, showCwd)
+        body.add printSessionListS(paths, session.savePath, showCwd)
       if askedAll:
         let dir = collapseHome(sessionDir())
-        cmdResponse "listing is scoped to this directory — run from " & dir &
+        resp "listing is scoped to this directory — run from " & dir &
                     " for all"
     of ":summarize":
       if prof.name == "":
         ok = false
-        cmdError "no provider configured. use :provider add"
+        respErr "no provider configured. use :provider add"
       else:
         let n = summarizeHistory(messages, prof)
         if n == 0:
           ok = false
-          cmdResponse "failed or not worth it"
+          resp "failed or not worth it"
         else:
-          cmdResponse &"collapsed {n} message" &
+          resp &"collapsed {n} message" &
             (if n == 1: "" else: "s") &
             " into a synthetic recap"
           saveSession(session, messages)
@@ -1085,9 +1070,9 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       ok = false
       let suggestion = nearestCommand(name)
       if suggestion != "":
-        cmdError "unknown command: " & c & "  did you mean " & suggestion & "?"
+        respErr "unknown command: " & c & "  did you mean " & suggestion & "?"
       else:
-        cmdError "unknown command: " & c & "  (try :help)"
+        respErr "unknown command: " & c & "  (try :help)"
   let title = commandTitle(name, arg, ok)
   let disposition =
     case kind

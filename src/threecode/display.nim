@@ -63,6 +63,43 @@ template errLn*(args: varargs[untyped]) =
   stdout.styledWrite(fgMagenta, args, resetStyle)
   stdout.write "\r\n"
 
+## String-returning counterparts of the write templates above. Command
+## emitters build their transcript body with these and return it; the
+## controller commits the body via the single history path. `styledWrite`
+## resolves the same globals (`BrightWhiteFg` and friends) at expansion
+## time, so a string built here carries the mode-resolved palette exactly
+## like a direct write.
+proc styleText*(args: varargs[string, `$`]): string =
+  for a in args: result.add a
+
+proc hintS*(args: varargs[string, `$`]): string =
+  styleText(args)
+
+proc hintLnS*(args: varargs[string, `$`]): string =
+  styleText(args) & "\r\n"
+
+proc noteLnS*(args: varargs[string, `$`]): string =
+  styleText(args) & "\r\n"
+
+proc errS*(args: varargs[string, `$`]): string =
+  "\x1b[35m" & styleText(args) & ansiResetCode
+
+proc errLnS*(args: varargs[string, `$`]): string =
+  errS(args) & "\r\n"
+
+func cmdResponseS*(body: string): string =
+  ## String form of `cmdResponse`: blank line above and below, default
+  ## color, flush left.
+  result = "\n" & body
+  if not body.endsWith("\n"): result.add "\n"
+  result.add "\n"
+
+func cmdErrorS*(body: string): string =
+  ## String form of `cmdError`: non-bold magenta, blank lines above/below.
+  result = "\n\x1b[35m" & body & ansiResetCode
+  if not body.endsWith("\n"): result.add "\n"
+  result.add "\n"
+
 proc cmdResponse*(body: string) =
   ## System-command response. One blank line above and below, no
   ## indentation, default terminal color (matching LLM output).
@@ -82,15 +119,15 @@ proc cmdError*(body: string) =
   stdout.write "\n"
   stdout.flushFile
 
-proc renderHelp*() =
+proc renderHelpS*(): string =
   ## :help body in default terminal color. `3code` highlighted bright
   ## white; `:command` tokens highlighted bright white.
-  stdout.write "\n"
+  result = "\n"
   for line in HelpText.splitLines:
     var i = 0
     while i < line.len:
       if i + 5 <= line.len and line[i ..< i + 5] == "3code":
-        stdout.styledWrite(BrightWhiteFg, "3code", resetStyle)
+        result.add BrightWhiteFg & "3code" & ansiResetCode
         i += 5
       elif line[i] == ':' and i + 1 < line.len and
            line[i + 1] in {'a'..'z', 'A'..'Z', '?'}:
@@ -100,13 +137,16 @@ proc renderHelp*() =
         # `:command` tokens in the white family: `BrightWhiteFg` so they
         # participate in light/dark mode switching (plain white is
         # invisible on a light background).
-        stdout.styledWrite(BrightWhiteFg, line[i ..< j], Reset)
+        result.add BrightWhiteFg & line[i ..< j] & Reset
         i = j
       else:
-        stdout.write line[i]
+        result.add line[i]
         inc i
-    stdout.write "\n"
-  stdout.write "\n"
+    result.add "\n"
+  result.add "\n"
+
+proc renderHelp*() =
+  stdout.write renderHelpS()
   stdout.flushFile
 
 proc subtleWrite*(outFile: File, body: string) =
@@ -616,31 +656,27 @@ proc renderTokenLine*(usage: Usage, window: int, elapsedS = -1) =
   if bytes.len > 0:
     stdout.write bytes
 
-proc showProfile*(p: Profile; bold = false) =
+proc profileLinesS*(p: Profile; bold = false): string =
+  ## String form of `showProfile`: provider/model/reasoning rows with
+  ## bright-white values and default (or bold cyan) labels.
   if p.name == "": return
   let dot = p.name.find('.')
   let provider = if dot < 0: p.name else: p.name[0 ..< dot]
-  # The provider/model/reasoning *values* are bright white so the active
-  # selection reads as the foreground subject; the labels stay in the
-  # mode-resolved default tier. `Bold` (welcome screen) keeps the cyan
-  # brand labels; the interactive `:model`/`:provider` path uses the
-  # plain default labels.
-  if bold:
-    stdout.styledWriteLine fgCyan, styleBright, "  provider  ", resetStyle,
-      BrightWhiteFg, provider, resetStyle
-    stdout.styledWriteLine fgCyan, styleBright, "  model     ", resetStyle,
-      BrightWhiteFg, shortModel(p.model), resetStyle
-    if p.reasoning != "":
-      stdout.styledWriteLine fgCyan, styleBright, "  reasoning ", resetStyle,
-        BrightWhiteFg, p.reasoning, resetStyle
-  else:
-    stdout.styledWriteLine fgDefault, "provider  ", resetStyle,
-      BrightWhiteFg, provider, resetStyle
-    stdout.styledWriteLine fgDefault, "model     ", resetStyle,
-      BrightWhiteFg, shortModel(p.model), resetStyle
-    if p.reasoning != "":
-      stdout.styledWriteLine fgDefault, "reasoning ", resetStyle,
-        BrightWhiteFg, p.reasoning, resetStyle
+  let labelOn = if bold: "\x1b[36m\x1b[1m" else: ""
+  let pad = if bold: "  " else: ""
+  result.add labelOn & pad & "provider  " & ansiResetCode &
+    BrightWhiteFg & provider & ansiResetCode & "\r\n"
+  result.add labelOn & pad & "model     " & ansiResetCode &
+    BrightWhiteFg & shortModel(p.model) & ansiResetCode & "\r\n"
+  if p.reasoning != "":
+    result.add labelOn & pad & "reasoning " & ansiResetCode &
+      BrightWhiteFg & p.reasoning & ansiResetCode & "\r\n"
+
+proc showProfile*(p: Profile; bold = false) =
+  let s = profileLinesS(p, bold)
+  if s.len > 0:
+    stdout.write s
+    stdout.flushFile
 
 # Track up-navigation so "down past last" can return to blank line.
 var navigatedUp*: bool = false
@@ -709,7 +745,9 @@ const SessionListCap* = 20
   ## simple slice. Listing is directory-scoped by design; the full set
   ## lives under `sessionDir()` for anyone who needs it.
 
-proc printSessionList*(paths: seq[string], currentPath: string, showCwd: bool) =
+proc printSessionListS*(paths: seq[string], currentPath: string,
+                        showCwd: bool): string =
+  ## String form of the `:sessions` / `-l` listing.
   let shown = paths[0 ..< min(paths.len, SessionListCap)]
   for p in shown:
     let id = sessionIdFromPath(p)
@@ -722,12 +760,16 @@ proc printSessionList*(paths: seq[string], currentPath: string, showCwd: bool) =
     let cwdStr =
       if showCwd and preview.cwd != "": "  " & collapseHome(preview.cwd)
       else: ""
-    hint &"  {mark} ", resetStyle, id, fgDefault,
-      &"   ({preview.msgCount} msg" & (if preview.msgCount == 1: "" else: "s") & ")",
-      resetStyle, cwdStr, snip, "\n"
+    result.add &"  {mark} " & id &
+      &"   ({preview.msgCount} msg" & (if preview.msgCount == 1: "" else: "s") & ")" &
+      cwdStr & snip & "\r\n"
   if paths.len > shown.len:
     let dir = collapseHome(sessionDir())
-    noteLn &"  …  {shown.len} of {paths.len}  (more in {dir})"
+    result.add &"  …  {shown.len} of {paths.len}  (more in {dir})\r\n"
+
+proc printSessionList*(paths: seq[string], currentPath: string, showCwd: bool) =
+  stdout.write printSessionListS(paths, currentPath, showCwd)
+  stdout.flushFile
 
 proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
                        window: int, family: string): Usage =
@@ -822,42 +864,41 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
     else: discard
   stdout.flushFile
 
-proc showTool*(arg: string, toolLog: seq[ToolRecord]) =
+proc showToolS*(arg: string, toolLog: seq[ToolRecord]): string =
+  ## String form of the `:show` body (same byte builders as the live path).
   if toolLog.len == 0:
-    hintLn "no tool calls yet", resetStyle
-    return
+    return hintLnS("no tool calls yet")
   var n = toolLog.len
   if arg != "":
     try: n = parseInt(arg)
     except ValueError:
-      stdout.styledWriteLine fgMagenta, "show: not a number: ", arg, resetStyle
-      return
+      return errLnS("show: not a number: " & arg)
   if n < 1 or n > toolLog.len:
-    stdout.styledWriteLine fgMagenta,
-      &"show: T{n} out of range (1..{toolLog.len})", resetStyle
-    return
+    return errLnS(&"show: T{n} out of range (1..{toolLog.len})")
   let rec = toolLog[n-1]
-  stdout.styledWriteLine fgDefault, &"── T{n}  ", rec.banner, resetStyle
-  # Body comes from the SAME byte builder the live path uses so a `:show`
-  # tool matches the live transcript. Plans render glyphs; every other kind
-  # routes through `toolResultBytes` (head/tail-truncated + wrapped subtle
-  # for bash/read/web, summary line for write/patch/error).
+  result = &"── T{n}  " & rec.banner & "\r\n"
   if rec.kind == akPlan and rec.plan.len > 0:
-    stdout.write planResultBytes(rec.plan)
+    result.add planResultBytes(rec.plan)
   else:
-    stdout.write toolResultBytes(rec.kind, rec.output, rec.code, n)
+    result.add toolResultBytes(rec.kind, rec.output, rec.code, n)
 
-proc listTools*(toolLog: seq[ToolRecord]) =
+proc showTool*(arg: string, toolLog: seq[ToolRecord]) =
+  stdout.write showToolS(arg, toolLog)
+  stdout.flushFile
+
+proc listToolsS*(toolLog: seq[ToolRecord]): string =
+  ## String form of the `:log` body.
   if toolLog.len == 0:
-    hintLn "no tool calls yet", resetStyle
-    return
+    return hintLnS("no tool calls yet")
   for i, rec in toolLog:
     let tag = &"T{i+1}"
     let lines = rec.output.splitLines.len
     let mark = if rec.code == 0: "✓" else: "✗"
-    let color = if rec.code == 0: fgGreen else: fgDefault
-    hint &"  {tag:>4}  ", resetStyle,
-      color, mark, resetStyle, " ",
-      rec.banner,
-      fgDefault, &"   ({lines} line" & (if lines == 1: "" else: "s") & ")",
-      resetStyle, "\n"
+    let colorOn = if rec.code == 0: "\x1b[32m" else: ""
+    result.add &"  {tag:>4}  " & colorOn & mark & ansiResetCode & " " &
+      rec.banner &
+      &"   ({lines} line" & (if lines == 1: "" else: "s") & ")" & "\r\n"
+
+proc listTools*(toolLog: seq[ToolRecord]) =
+  stdout.write listToolsS(toolLog)
+  stdout.flushFile

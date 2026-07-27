@@ -589,6 +589,14 @@ proc main() =
           # on the row directly below whatever the wizard's caller wrote
           # — instead of overlapping `❯ ` with `verifying... ok`.
           wizardFinish()
+          # The wizard's status lines (`added <name>`, the resulting
+          # profile) are ordinary transcript items, committed through the
+          # same single history path as every other command result.
+          if commandResult.body.len > 0:
+            commitTranscriptBytes(
+              plainCommandBodyBytes(commandResult.body),
+              restoreEditor = true,
+              reserveFooter = true)
           continue
         # This path bundles two distinct items (prompt echo + command
         # output) into a single transcript commit. `appendTranscript`

@@ -125,14 +125,18 @@ proc emitTestFrameEvent*() =
       except CatchableError:
         discard
 
-proc explainExperimentalGate*(p: Profile) =
+proc experimentalGateText*(p: Profile): string =
+  ## The experimental-gate notice as a string (magenta styling applied
+  ## by the caller's err path). Empty when the profile is not gated.
   let dot = p.name.find('.')
   let display =
     if dot < 0: p.name
     else: p.name[0 ..< dot] & " " & p.name[dot+1 .. ^1]
+  display & " is experimental (start 3code with --experimental to use anyway, not recommended)"
+
+proc explainExperimentalGate*(p: Profile) =
   stdout.styledWriteLine fgMagenta,
-    display,
-    " is experimental (start 3code with --experimental to use anyway, not recommended)",
+    experimentalGateText(p),
     resetStyle
   emitTestFrameEvent()
 
