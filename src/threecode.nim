@@ -460,11 +460,8 @@ proc main() =
       refreshSystemPrompt(messages, prof)
       editor.echoRows = queuedRows
       commitUserPromptTranscript(queued)
-      editor.line = minline.Line(text: "", position: 0)
-      editor.renderSuffix = ""
+      resetEditorRowModel(addr editor)
       editor.prefillText = ""
-      editor.renderRow = 0
-      editor.echoRows = 0
       clearDraft(session)
       discard runTurnsInteractive(prof, messages, session)
       return handleBufferedAfterTurn()
@@ -516,11 +513,7 @@ proc main() =
     messages.add %*{"role": "user", "content": buildUserMessage(messages, text)}
     refreshSystemPrompt(messages, prof)
     emitUserSubmit(text)
-    editor.line = minline.Line(text: "", position: 0)
-    editor.renderSuffix = ""
-    editor.renderSuffixCursor = false
-    editor.renderRow = 0
-    editor.echoRows = 0
+    resetEditorRowModel(addr editor)
     clearDraft(session)
     result = runTurnWithSafetyNet()
 
@@ -605,11 +598,7 @@ proc main() =
         let commandBytes = plainCommandBodyBytes(commandResult.body)
         let bytes = echoBytes & "\r\n\r\n" & commandBytes
         proc clearSubmittedCommandEditor() =
-          editor.line = minline.Line(text: "", position: 0)
-          editor.renderSuffix = ""
-          editor.renderSuffixCursor = false
-          editor.renderRow = 0
-          editor.echoRows = 0
+          resetEditorRowModel(addr editor)
           if commandResult.clearFooter:
             emitFatPromptEvent clearPendingHintEvent()
             emitFatPromptEvent clearBarEvent()
@@ -633,11 +622,7 @@ proc main() =
       # on the row directly after the last echo line, where callModel's
       # leading `\n` will set up the new spinner-footer scratch row.
       emitUserSubmit(line)
-      editor.line = minline.Line(text: "", position: 0)
-      editor.renderSuffix = ""
-      editor.renderSuffixCursor = false
-      editor.renderRow = 0
-      editor.echoRows = 0
+      resetEditorRowModel(addr editor)
       # The prompt is now a committed user turn: drop the draft sidecar so a
       # clean exit doesn't restore text the user already sent.
       clearDraft(session)

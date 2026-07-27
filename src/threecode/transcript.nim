@@ -20,7 +20,7 @@ type
     body*: string
     attachSeparator*: bool
 
-proc trimTranscriptTail(bytes: var string) =
+proc trimTranscriptTail*(bytes: var string) =
   while bytes.len > 0 and bytes[^1] in {'\r', '\n'}:
     bytes.setLen(bytes.len - 1)
 

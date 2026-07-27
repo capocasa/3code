@@ -13,10 +13,6 @@ import types, util, prompts, session, compact, config, actions, api,
   display, fatprompt, streamexec, toolstream, transcript
 import engine as termengine
 
-proc trimTranscriptTail(bytes: var string) =
-  while bytes.len > 0 and bytes[^1] in {'\r', '\n'}:
-    bytes.setLen(bytes.len - 1)
-
 proc emitTestFrameEvent() =
   when defined(posix):
     let fdText = getEnv("THREECODE_TEST_FRAME_FD")

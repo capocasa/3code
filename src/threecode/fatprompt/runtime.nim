@@ -838,7 +838,7 @@ proc resetPromptInputAfterEmpty*(echoRows: int) =
       hideRealCaretBytes() &
         barFooterBytes(currentBarLabel, currentTermW()))
 
-proc resetEditorRowModel(ed: ptr minline.LineEditor) =
+proc resetEditorRowModel*(ed: ptr minline.LineEditor) =
   ## Clear the live editor's text and row geometry so it presents as a single
   ## empty row. The submit path calls this inside the terminal-write lock,
   ## atomically with the transcript append, so background repainters cannot
