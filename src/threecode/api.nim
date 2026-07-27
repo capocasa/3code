@@ -608,9 +608,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       result.errMsg = InterruptedByUserMsg
       return
     inc attempt
-    if cachedStreamConn != nil and cachedStreamHostKey == hostKey:
-      conn = cachedStreamConn
-    else:
+    if not (cachedStreamConn != nil and cachedStreamHostKey == hostKey):
       closeCachedStreamConn()
       try:
         if plainHttp:
@@ -636,6 +634,8 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       cachedStreamConn = conn
       cachedStreamHostKey = hostKey
       cachedStreamFd = conn.getFd
+    else:
+      conn = cachedStreamConn
     conn.setReadTimeoutMs(QuietRecvWakeMs)
     try:
       conn.sendRequest("POST", pathQuery, host,
