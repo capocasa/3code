@@ -10,6 +10,7 @@
 
 import std/[os, strutils, unittest]
 import threecode/[fatprompt, terminal as termui]
+import ttty/grid
 
 suite "ticker cleanup":
   # This test captures the spinner's stdout by redirecting the global
@@ -41,15 +42,21 @@ suite "ticker cleanup":
 
       let raw = readFile(outPath)
       removeFile(outPath)
-      # The cleanup is the final erase-to-end (`\x1b[J`) the spinner emits as
-      # it exits. It must be preceded by a cursor-up of exactly one row — the
-      # gap/ticker row directly above the bar. Two or more reaches committed
-      # scrollback.
-      let cleanupIdx = raw.rfind("\x1b[J\n")
-      check cleanupIdx >= 0
-      let before = raw[0 ..< cleanupIdx]
-      let upIdx = before.rfind("\x1b[")
-      check upIdx >= 0
-      let esc = before[upIdx ..< before.len]
-      check "1A" in esc
-      check "2A" notin esc
+      # Assert the visible end state on a rendered grid, not the raw byte
+      # stream: seed one committed scrollback line above the cursor (what a
+      # real screen looks like when the spinner runs), replay the captured
+      # spinner session, and verify cleanup leaves the committed line
+      # intact and no spinner/ticker remnant behind. The over-erase
+      # regression walked one row too far up and blanked the committed
+      # line; a surviving line plus a clean grid is the effect-level
+      # invariant.
+      let g = newGrid()
+      g.feed "committed scrollback line\r\n"
+      g.feed raw
+      var committedSeen = false
+      for r in 0 ..< g.rows.len:
+        let text = g.rowText(r)
+        if "committed scrollback line" in text:
+          committedSeen = true
+        check "test" notin text
+      check committedSeen

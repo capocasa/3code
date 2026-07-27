@@ -20,6 +20,7 @@ import std/[json, os, strutils, times, unicode, unittest]
 when defined(posix):
   import posix except SocketHandle
 import tty_expect
+import ttty/grid
 import stub_helpers
 
 const VisualOutputRoot = "testdata" / "output" / "tty"
@@ -809,10 +810,29 @@ suite "terminal visual contract":
       check idx > 0
       check hist[idx - 1].strip.len == 0
       check hist[idx + 1].strip.len == 0
-      # Color contract: alert lines (429 retry notice) are non-bold magenta.
-      check "\x1b[35mrate limit (code 429)" in tty.raw
-      # The startup profile shows model values in bright white.
-      check "\x1b[97mstub-model" in tty.raw
+      # Color contract, asserted on the rendered grid (what the user
+      # sees), not on raw bytes: alert lines (429 retry notice) are
+      # non-bold magenta, and the startup profile's model value is bright
+      # white. The grid retains scrolled-off rows, so both still-committed
+      # lines are found in the final grid state.
+      var noticeRow = -1
+      var modelRow = -1
+      var modelCol = -1
+      for r in 0 ..< tty.grid.rows.len:
+        let text = tty.grid.rowText(r)
+        if noticeRow < 0 and "rate limit (code 429)" in text:
+          noticeRow = r
+        if modelRow < 0 and "stub-model" in text:
+          modelRow = r
+          # Each grid cell holds one rune; the row text is the
+          # concatenation of cell texts, so the char offset of the
+          # value equals its cell index (ASCII here).
+          modelCol = text.find("stub-model")
+      require noticeRow >= 0
+      require modelRow >= 0 and modelCol >= 0
+      check tty.grid.cellFg(noticeRow, 0) == colMagenta
+      check not tty.grid.cellAttr(noticeRow, 0).hasAttr(saBold)
+      check tty.grid.cellFg(modelRow, modelCol) == colBrightWhite
 
   test "submitting a prompt survives the working directory being removed":
     # Regression: the process's cwd can be deleted out from under it (tmpfs
@@ -1720,44 +1740,47 @@ suite "terminal visual contract":
     tty.expectInHistory "flicker-marker"
     tty.expectInHistory "Done."
     tty.drain(100)
-    # Split the raw byte stream into synchronized-frame payloads (between
-    # SyncBegin and SyncEnd). The flicker is an erase-then-redraw: a sync
-    # frame that clears the viewport region (cursor-up + erase) without the
-    # streamed text, immediately followed by a frame that rewrites that text
-    # as committed scrollback. Assert no such erased-then-redrawn pair exists
-    # for the streamed marker.
-    const SyncBegin = "\x1b[?2026h"
-    const SyncEnd = "\x1b[?2026l"
-    var syncPayloads: seq[string]
-    var pos = 0
-    while true:
-      let start = tty.raw.find(SyncBegin, pos)
-      if start < 0: break
-      let stop = tty.raw.find(SyncEnd, start + SyncBegin.len)
-      if stop < 0: break
-      syncPayloads.add tty.raw[start + SyncBegin.len ..< stop]
-      pos = stop + SyncEnd.len
+    # The flicker is an erase-then-redraw pair, visible at the grid level:
+    # a frame where the streamed marker vanished from its row while the
+    # rows around it stayed put, followed by a frame where it reappeared
+    # on the same row. Assert no such vanish-then-return pair exists in
+    # the recorded frame stream (what the user actually sees), rather than
+    # scanning raw sync payloads for ESC[J.
     var firstMarkerFrame = -1
-    for i, p in syncPayloads:
-      if "flicker-marker" in p:
-        firstMarkerFrame = i
-        break
+    for i, frame in tty.frames:
+      for row in frame.rows:
+        if "flicker-marker" in row:
+          firstMarkerFrame = i
+          break
+      if firstMarkerFrame >= 0: break
     require firstMarkerFrame >= 0
-    # The flicker regression is an erase-then-redraw pair: a sync frame
-    # clears the viewport (`\x1b[J`) without the marker, and the next frame
-    # rewrites the marker as committed scrollback. Report the offending pair
-    # so a regression points straight at the erase.
+    proc markerRow(rows: seq[string]): int =
+      for r, row in rows:
+        if "flicker-marker" in row: return r
+      -1
     var flickerAt = -1
-    for i in firstMarkerFrame ..< syncPayloads.len - 1:
-      if "\x1b[J" in syncPayloads[i] and
-          "flicker-marker" notin syncPayloads[i] and
-          "flicker-marker" in syncPayloads[i + 1]:
-        flickerAt = i
-        break
-    doAssert flickerAt < 0, "bash tool viewport flickered blank: sync frame " &
-      $flickerAt & " erases the viewport (ESC[J) while flicker-marker is " &
-      "absent, then frame " & $(flickerAt + 1) &
-      " redraws it — an erase-then-redraw pair.\n" &
+    var flickerRow = -1
+    for i in firstMarkerFrame + 1 ..< tty.frames.len - 1:
+      let prevRow = markerRow(tty.frames[i - 1].rows)
+      if prevRow < 0: continue
+      let cur = tty.frames[i]
+      let curRow = markerRow(cur.rows)
+      if curRow >= 0: continue
+      # The marker vanished in this frame. It flickers only if it comes
+      # back on the same row in the next frame with the row above
+      # unchanged (a scroll-off would shift the row above too).
+      let nextRow = markerRow(tty.frames[i + 1].rows)
+      if nextRow != prevRow: continue
+      if prevRow > 0 and prevRow - 1 < cur.rows.len and
+          tty.frames[i - 1].rows[prevRow - 1] != cur.rows[prevRow - 1]:
+        continue
+      flickerAt = i
+      flickerRow = prevRow
+      break
+    doAssert flickerAt < 0, "bash tool viewport flickered blank: frame " &
+      $flickerAt & " lost flicker-marker from row " & $flickerRow &
+      " (neighbours unchanged) and frame " & $(flickerAt + 1) &
+      " redrew it — an erase-then-redraw pair.\n" &
       tty.dumpFramesAround("flicker-marker")
 
   test "streaming bash viewport never wipes scrollback lines above it":
