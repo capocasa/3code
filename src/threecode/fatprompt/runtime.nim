@@ -75,8 +75,8 @@ template currentBarHasGap*(): untyped = fatPromptState.footer.hasGap
   ## Whether there's a one-row blank "gap" between the bar and the
   ## row above it. Set by `endTurn` (typing-ready state — the gap
   ## sits between the last LLM line and the bar, breathing room
-  ## while the user reads). Cleared by every `paintBarPrompt` /
-  ## `paintBarBelow` (during streaming, the bar slides flush with
+  ## while the user reads). Cleared by every bar repaint
+  ## (during streaming, the bar slides flush with
   ## content — no gap mid-turn). Read by `emitUserSubmit` so the
   ## receipt repaints the gap row in place — overwriting the blank,
   ## leaving the receipt flush below the LLM content with no
@@ -640,18 +640,12 @@ proc finishForegroundEditorRedraw*() =
     else:
       termui.finishEditorRedraw()
 
-# ---------- Bar+prompt runtime helpers ----------
-#
-# The bar and prompt are *always visible*. These helpers hide them
-# just long enough for a content write that would otherwise advance
-# into them, and repaint them immediately below. Each helper also
-# updates `currentBarLabel` so subsequent repaints (after a tool
-# write, after an iteration end, etc.) use the same content.
+# ---------- Bar+prompt state helpers ----------
 
-proc paintBarPrompt*(label: string) =
-  ## Write bar + prompt at the cursor's current row, parking cursor
-  ## at col 0 of the bar row. Caches `label` so a later
-  ## `repaintBarPrompt` knows what to draw. Clears `currentBarHasGap`
+proc paintBarPrompt(label: string) =
+  ## Paint bar + prompt at the cursor's current row, parking cursor
+  ## at col 0 of the bar row. Caches `label` in the frame model so
+  ## later repaints draw the same content. Clears `currentBarHasGap`
   ## — during streaming the bar slides flush with content; only
   ## `endTurn` paints a gap.
   debugOut "paintBarPrompt label=" & label[0..min(30, label.len-1)]
@@ -663,24 +657,12 @@ proc paintBarPrompt*(label: string) =
   else:
     termengine.syncWrite(hideRealCaretBytes() & barFooterBytes(label, currentTermW()))
 
+
 proc setBarPromptState*(label: string) =
   ## Update the logical bar label without painting immediately. Used when a
   ## completed response still needs to be committed to scrollback first; the
   ## subsequent transcript append repaints the footer with this final label.
   emitFatPromptEvent setBarEvent(label)
-
-proc paintBarBelow*(label: string) =
-  ## Paint bar + prompt one and two rows below the cursor, restoring
-  ## the cursor to its original (likely mid-line) position. Used
-  ## during streaming to keep the bar visible while content is being
-  ## accumulated in memory and the cursor stays put.
-  emitFatPromptEvent setBarEvent(label)
-  if liveEditorFooterAnchored():
-    termengine.renderFooter(footerFrame(fatPromptState),
-                             inputThreadRunning, inputEditor,
-                             currentTermW())
-  else:
-    termengine.syncWrite(barFooterBelowBytes(label, currentTermW()))
 
 proc paintBarBelowAtCol(label: string; col: int) =
   emitFatPromptEvent setBarEvent(label)
@@ -698,73 +680,16 @@ proc clearBarBelowAtCol(col: int) =
   else:
     termengine.syncWrite(clearBarBelowAtColBytes(col))
 
-proc repaintBarPrompt*() =
-  ## Re-emit the bar+prompt at the cursor's current row using the
-  ## cached `currentBarLabel`. Used by `writeTranscriptWithFatPrompt` to put the bar
-  ## back after a content write.
-  if currentBarLabel.len == 0: return
-  if liveEditorFooterAnchored():
-    termengine.renderFooter(footerFrame(fatPromptState),
-                             inputThreadRunning, inputEditor,
-                             currentTermW())
-  else:
-    termengine.syncWrite(hideRealCaretBytes() &
-      barFooterBytes(currentBarLabel, currentTermW()))
-
-proc clearBarPrompt*() =
+proc clearBarPrompt() =
   ## Erase the bar + prompt rows in place. Cursor parks at col 0 of
   ## the bar row so the caller can write content there (which then
-  ## pushes the next `repaintBarPrompt` one row down).
+  ## pushes the next bar repaint one row down).
   if liveEditorFooterAnchored():
     termengine.renderFooter(clearFooterFrame(), inputThreadRunning,
                              inputEditor,
                              currentTermW())
   else:
     termengine.syncWrite(ClearBarPromptBytes)
-
-proc paintPromptOnly*()
-
-proc enterPromptInput*() =
-  ## Prepare the physical cursor for either immediate input or buffered
-  ## input during a running turn. In bar mode, repaint the shared
-  ## bar+prompt footer and park on the prompt row. In prompt-only mode,
-  ## clear the prompt row in place. The line editor writes its own prompt
-  ## glyph after this, so the prepainted glyph is only a stable visual
-  ## placeholder.
-  if currentBarLabel.len > 0:
-    if currentBarHasGap and pendingHint.active:
-      termengine.syncWrite(clearPromptAfterPendingReceiptBytes())
-    else:
-      clearBarPrompt()
-    termui.enterPromptInput(
-      true,
-      barFooterBytes(currentBarLabel, currentTermW()),
-      "")
-  else:
-    termui.enterPromptInput(
-      false,
-      "",
-      promptOnlyBytes())
-
-proc resetPromptInputAfterEmpty*(echoRows: int) =
-  ## Empty submission should leave the prompt/footer at the same visual
-  ## floor instead of drifting downward. `echoRows` is the editor's visual
-  ## input height, including wraps.
-  let n = max(1, echoRows)
-  if currentBarLabel.len == 0:
-    termui.resetPromptInputAfterEmpty(
-      false,
-      n,
-      promptOnlyResetBytes(),
-      "")
-    emitFatPromptEvent clearBarEvent()
-  else:
-    termui.resetPromptInputAfterEmpty(
-      true,
-      n,
-      "",
-      hideRealCaretBytes() &
-        barFooterBytes(currentBarLabel, currentTermW()))
 
 proc resetEditorRowModel*(ed: ptr minline.LineEditor) =
   ## Clear the live editor's text and row geometry so it presents as a single
@@ -968,41 +893,25 @@ proc liveLabel*(base: string, slurped: int): string =
   else:
     parts.join("  ")
 
-proc paintInitialBar*(p: Profile) =
-  ## Welcome-time paint: one blank gap row, then bar+prompt at zero
-  ## values *with* a `○ 0%` context indicator (the empty-circle glyph
-  ## is the same one a populated bar carries — at startup we just
-  ## haven't sent a request yet, so promptTokens is 0). Bright cyan
-  ## prompt — typing-ready. Sets `currentBarHasGap = true` to match
-  ## `endTurn`'s shape between turns.
-  termengine.writeRaw("\n")
-  let window = contextWindowFor(p)
-  let baseLabel = contextLabel(0, window)
-  paintBarPrompt(liveLabel(baseLabel, 0))
-  emitFatPromptEvent setBarEvent(currentBarLabel, hasGap = true)
-
-proc paintPromptOnly*() =
-  ## Paint just the prompt ❯ at the cursor's current row, no token
-  ## bar above. Used in the pre-first-turn startup state where we have
-  ## no real token values yet — the bar stays hidden until the first
-  ## model response brings them. Cursor parks at col 0 of the prompt
-  ## row.
-  ##
-  ## Leaves `currentBarLabel = ""` and `currentBarHasGap = false` —
-  ## the signals `readInput`, `emitUserSubmit`, and the slash-command
-  ## repaint use to detect prompt-only mode.
-  # Drop to a fresh row below whatever content precedes us (the welcome
-  # screen, or resumed scrollback) so the prompt never sits flush against
-  # it, then hide the caret like the bar path does. The entry `❯ ` paints
-  # on the new row; the bar repaint that follows restores the caret.
-  termengine.writeRaw("\n\x1b[?25l" & promptOnlyResetBytes())
-  emitFatPromptEvent clearBarEvent()
-
 proc paintInitialPrompt*(p: Profile) =
   ## Welcome-time paint when starting fresh. The first prompt is intentionally
   ## prompt-only; the token bar appears after the first response has real usage
   ## to display.
-  paintPromptOnly()
+  ##
+  ## Leaves `currentBarLabel = ""` and `currentBarHasGap = false` —
+  ## the signals `readInput`, `emitUserSubmit`, and the slash-command
+  ## repaint use to detect prompt-only mode. Paints through the engine's
+  ## frame model when the live editor is anchored so `paintedFooterRows`
+  ## tracks the prompt row; the pre-input-thread path (no editor yet)
+  ## falls back to a raw paint, cleared later by the walk-up's erase.
+  discard p
+  emitFatPromptEvent clearBarEvent()
+  if liveEditorFooterAnchored():
+    termengine.renderFooter(footerFrame(fatPromptState),
+                             inputThreadRunning, inputEditor,
+                             currentTermW())
+  else:
+    termengine.writeRaw("\n\x1b[?25l" & promptOnlyResetBytes())
 
 
 # --- Bar tick: repaints the token bar with an incrementing elapsed counter
@@ -1290,7 +1199,11 @@ proc advanceLiveCol(s: var LiveMarkdownStream, text: string) =
 proc writeLiveSegment(s: var LiveMarkdownStream, text: string) =
   if text.len == 0: return
   if s.liveBarAtCursor:
-    clearBarPrompt()
+    if liveEditorFooterAnchored():
+      termengine.renderFooter(clearFooterFrame(), inputThreadRunning,
+                              inputEditor, currentTermW())
+    else:
+      termengine.syncWrite(ClearBarPromptBytes)
     s.liveBarAtCursor = false
   elif s.liveBarBelow:
     clearBarBelowAtCol(s.liveCol)
@@ -2095,11 +2008,12 @@ proc inputThreadProc() {.thread.} =
         # prompt there. The cursor lands on that single row, so the next
         # readLineWith's resetForRead + fullRedraw (renderRow = 0) repaints at
         # the same spot. Do NOT fake an empty ieLine: the controller would
-        # then run resetPromptInputAfterEmpty, whose walk-up assumes the
-        # cursor sits at the bottom of the just-cleared region; after this
-        # in-place repaint the cursor is at the top, so the walk-up would
-        # erase real scrollback above the prompt. Push ieInterrupt so the
-        # controller drains and continues with no walk-back of its own.
+        # then run an empty-submit footer repaint whose walk-up assumes
+        # the cursor sits at the bottom of the just-cleared region; after
+        # this in-place repaint the cursor is at the top, so the walk-up
+        # would erase real scrollback above the prompt. Push ieInterrupt
+        # so the controller drains and continues with no walk-back of its
+        # own.
         edPtr[].line = minline.Line(text: "", position: 0)
         edPtr[].renderSuffix = ""
         edPtr[].renderSuffixCursor = false

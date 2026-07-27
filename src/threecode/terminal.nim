@@ -146,6 +146,7 @@ proc beginEditorRedraw*(ed: var minline.LineEditor; ready: bool;
   # paint the editor is already on the current row — a bare newline would
   # strand the `❯ ` that `paintInitialPrompt`/a finished wizard just
   # wrote on a blank line. Redraw in place instead.
+  #
   stdout.write "\x1b[J"
   if footerBarBytes.len > 0:
     stdout.write footerBarBytes
@@ -164,27 +165,3 @@ proc finishEditorRedraw*(showCaret = true) =
     stdout.flushFile()
   finally:
     releaseTerminalWrite()
-
-proc enterPromptInput*(hasBar: bool; barFooterBytes, promptOnlyBytes: string) =
-  ## Prepare the cursor for the line editor. In bar mode, the caller has
-  ## already cleared the reserved prompt region and supplies the repaint bytes.
-  withTerminalWriteLock:
-    if hasBar:
-      stdout.write barFooterBytes
-      stdout.write "\x1b[1B"
-    else:
-      stdout.write promptOnlyBytes
-    stdout.flushFile
-
-proc resetPromptInputAfterEmpty*(hasBar: bool; rows: int;
-                                 promptOnlyBytes, repaintBytes: string) =
-  ## Empty submission should keep the prompt/footer on the same floor.
-  withTerminalWriteLock:
-    let n = max(1, rows)
-    if hasBar:
-      stdout.write "\x1b[" & $(n + 1) & "A\r\x1b[J"
-      stdout.write repaintBytes
-    else:
-      stdout.write "\x1b[" & $n & "A\r\x1b[J"
-      stdout.write promptOnlyBytes
-    stdout.flushFile

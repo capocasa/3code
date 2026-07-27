@@ -11,7 +11,7 @@
 
 import std/[algorithm, atomics, json, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline,
-  fatprompt, streamexec, sandbox
+  fatprompt, streamexec, sandbox, engine as termengine
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":prompt", ":show",
@@ -870,7 +870,14 @@ proc readInput*(editor: var minline.LineEditor, done: var bool): string =
       navigatedUp = false
       editor.echoRows = echoRows
       if line.strip == "":
-        resetPromptInputAfterEmpty(editor.echoRows)
+        # Empty submission must leave the prompt/footer on the same visual
+        # floor instead of drifting downward. The input thread's editor
+        # already repainted itself after Enter, so its row model is live;
+        # repainting the current footer frame walks up from it and redraws
+        # everything at the same anchor.
+        if liveEditorFooterAnchored():
+          termengine.renderFooter(footerFrame(fatPromptState),
+                                  inputThreadRunning, inputEditor)
         releaseIdleSubmittedInput()
         return ""
       return line
