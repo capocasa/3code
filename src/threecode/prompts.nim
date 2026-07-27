@@ -306,7 +306,9 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("kimi",     "kimi-k2.6",            "kimi",     "2",   "6",         "on",     0.2, 8192, false, 262_144),
 
     # kimicode (Kimi Code subscription, api.kimi.com/coding; 3 model ids only)
-    ("kimicode", "k3",                   "kimi",     "3",   "",          "on",     0.2, 8192, false, 1_000_000),
+    # k3 rejects any temperature != 1.0 (HTTP 400); omit the field so the
+    # server default (1.0) applies. temperature < 0 means "omit".
+    ("kimicode", "k3",                   "kimi",     "3",   "",          "on",     -1.0, 8192, false, 1_000_000),
     ("kimicode", "kimi-for-coding",      "kimi",     "2",   "7-code",    "on",     0.2, 8192, false, 262_144),
     ("kimicode", "kimi-for-coding-highspeed","kimi",  "2",   "7-code-hs", "on",     0.2, 4096, false, 262_144),
 
