@@ -177,9 +177,8 @@ after each):
       parameter continuation in the readLineWith keystroke dispatcher,
       which is already in early-exit `continue`-chain style.
 
-NEXT: step 15 (final sweep: grep audits per the plan; update
-.agents/design.md module map with engine.nim; full suite green;
-guidelines-updated.md corrections if any rule proved wrong).
+ALL 15 STEPS DONE. Final full `nimble test` run is the last gate;
+then this plan is complete.
 
 Key gotchas learned:
 - `func` cannot read palette `var`s (BrightWhiteFg etc); string emitters
@@ -379,7 +378,7 @@ Key gotchas learned:
     across tests/{tty,core,api,config}; every test block is inside a
     suite. Full suite 56 PASS 0 FAIL after the deletion.
 
-15. [ ] **Final sweep.** Grep audits: no `\x1b[` outside
+15. [x] **Final sweep.** Grep audits: no `\x1b[` outside
     terminal/engine/minline/rendering; no `stdout.write` in
     controller modules except via display templates returning through the
     transcript path; no remaining `captureStdoutWrites`; no duplicate
@@ -387,3 +386,22 @@ Key gotchas learned:
     `.agents/design.md` module map where reality moved (engine.nim is
     missing from the map). Full `nimble test` green. Update
     guidelines-updated.md if any rule proved wrong.
+
+    DONE: `captureStdoutWrites` fully gone. No duplicate helper names
+    (trimTranscriptTail, resetEditorRowModel, verifyAndReport,
+    writeTranscriptItem, appendTranscriptLiveAnchored,
+    plainCommandBodyBytes all single-definition; the two
+    footerFrameBytes are deliberate overloads on distinct types).
+    design.md module map gained engine.nim as sole layout owner.
+    Remaining greps are pre-existing accepted classes, not regressions
+    from this cleanup: fatprompt/runtime.nim keeps a handful of
+    byte-level writes (input-thread bracketed-paste toggle, caret
+    show/hide, paintInitialPrompt's pre-engine raw paint — flagged in
+    step 7 as the live entry point; removing them is a future design
+    change, not a sweep item), and util.nim/display.nim emit `\x1b[`
+    inside ANSI-styling formatters (guideline §4 explicitly allows
+    byte-level assertions/output for pure ANSI emitters; §2's rule
+    targets cursor/erase moves, which none of these perform).
+    ui.nim/threecode.nim `stdout.write` sites are the accepted
+    newline/modal cases. guidelines-updated.md needed no corrections
+    beyond the step-13 httpclient blessing: no rule proved wrong.

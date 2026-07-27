@@ -527,6 +527,18 @@ Thin serialized terminal mechanics layer. It owns terminal locks, synchronized
 writes, cursor movement primitives, footer clearing/restoring, and scroll-region
 mechanics. It must not know semantic item types.
 
+`src/threecode/engine.nim` - **V**
+
+Sole owner of terminal layout. It tracks the volatile region below committed
+scrollback (footer rows, tool viewport rows, live streaming content rows) and
+computes every walk-up/erase from that live model
+(`editorRowsAboveCursor + paintedFooterRows + viewport/live rows`). All footer
+repaints (`renderFooter`, `renderToolViewport`, `renderLiveContent`,
+`repaintLiveContent`), transcript commits (`appendTranscript`), and turn
+transitions (`prepareAssistantContentStart`, `endTurn`) go through it, each as
+one synchronized frame under the terminal write lock. `terminal.nim` is its
+byte-serialization helper; no other module moves the cursor or erases rows.
+
 `src/threecode/toolstream.nim` - **V**
 
 Live bounded viewport for streaming bash output. It is volatile view state, not
