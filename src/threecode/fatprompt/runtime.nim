@@ -640,78 +640,6 @@ proc finishForegroundEditorRedraw*() =
     else:
       termui.finishEditorRedraw()
 
-template captureStdoutWrites*(body: untyped): string =
-  ## Run a transcript formatter against a temporary stdout target and return
-  ## the produced bytes. `writeTranscriptWithFatPrompt` uses this to make formatter
-  ## flushes invisible until the footer can be restored in the same render
-  ## tick.
-  block:
-    var captured = ""
-    when defined(posix):
-      let path = getTempDir() / "3code_transcript_" & $getCurrentProcessId() &
-                 "_" & $(epochTime() * 1000.0).int
-      flushFile(stdout)
-      let saved = dup(1)
-      if saved < 0:
-        body
-      else:
-        let fd = posix.open(path.cstring, O_WRONLY or O_CREAT or O_TRUNC, 0o600)
-        if fd < 0:
-          discard close(saved)
-          body
-        else:
-          doAssert dup2(fd, 1) >= 0
-          discard close(fd)
-          try:
-            body
-            flushFile(stdout)
-          finally:
-            discard dup2(saved, 1)
-            discard close(saved)
-          try:
-            captured = readFile(path)
-            removeFile(path)
-          except OSError:
-            discard
-    else:
-      # Windows: redirect fd 1 to a temp file via the C runtime (_dup/_dup2),
-      # run the body, restore. Without this the formatter bytes are written
-      # directly to the real stdout and then clobbered by the footer-
-      # preserving `commitTranscriptBytes` that consumes `captured` — so the
-      # "interrupted by user" notice (and any other transcript line routed
-      # through `writeTranscriptWithFatPrompt`) silently vanished on Windows.
-      proc crtdup(fd: cint): cint {.header: "<io.h>", importc: "_dup".}
-      proc crtdup2(fd1, fd2: cint): cint {.header: "<io.h>", importc: "_dup2".}
-      proc crtclose(fd: cint): cint {.header: "<io.h>", importc: "_close".}
-      proc crtopen(path: cstring; oflag, pmode: cint): cint
-          {.header: "<io.h>", importc: "_open".}
-      let path = getTempDir() / "3code_transcript_" & $getCurrentProcessId() &
-                 "_" & $(epochTime() * 1000.0).int
-      flushFile(stdout)
-      let saved = crtdup(1.cint)
-      if saved < 0:
-        body
-      else:
-        let fd = crtopen(path.cstring, 0x0100.cint or 0x0001.cint, 0x0080.cint)
-        if fd < 0:
-          discard crtclose(saved)
-          body
-        else:
-          discard crtdup2(fd, 1.cint)
-          discard crtclose(fd)
-          try:
-            body
-            flushFile(stdout)
-          finally:
-            discard crtdup2(saved, 1.cint)
-            discard crtclose(saved)
-          try:
-            captured = readFile(path)
-            removeFile(path)
-          except OSError:
-            discard
-    captured
-
 # ---------- Bar+prompt runtime helpers ----------
 #
 # The bar and prompt are *always visible*. These helpers hide them
@@ -901,18 +829,6 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
   if reserveFooter and transcriptBytes.hasNonNewlineBytes and currentBarLabel.len > 0:
     emitFatPromptEvent setBarEvent(currentBarLabel, hasGap = true)
   debugOut "writeTranscriptWithFatPrompt exit"
-
-template writeTranscriptWithFatPromptRestore*(restoreEditor: bool; body: untyped) =
-  ## Capture formatter writes and commit them through the fat-prompt terminal
-  ## preservation primitive. This is compatibility glue for older call sites;
-  ## controller-owned transcript paths should prefer ``commitTranscriptBytes``.
-  let transcriptBytes = captureStdoutWrites:
-    body
-  commitTranscriptBytes(transcriptBytes, restoreEditor)
-
-template writeTranscriptWithFatPrompt*(body: untyped) =
-  writeTranscriptWithFatPromptRestore(true):
-    body
 
 proc guiLoop(unused: string) {.thread.} =
   ## The single background painter of `renderFooter`. Replaces the two-
@@ -1731,20 +1647,19 @@ proc apiFinalUsage*(usage: Usage; window, elapsed: int;
   emitFatPromptEvent setPendingHintEvent(usage, window, elapsed)
   if window > 0 and usage.promptTokens.float > 0.7 * window.float and
      usage.promptTokens.float <= SummarizeThresholdFrac * window.float:
-    writeTranscriptWithFatPrompt:
-      subtleWriteLn(stdout,
-        &"  · context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} — auto-summarization will fire near {humanTokens(int(SummarizeThresholdFrac * window.float))}; :summarize to act now")
+    commitTranscriptBytes(
+      GreyFg &
+        &"  · context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} — auto-summarization will fire near {humanTokens(int(SummarizeThresholdFrac * window.float))}; :summarize to act now" &
+        Reset & "\r\n", true)
 
 proc apiNoUsage*(elapsed: int) =
-  writeTranscriptWithFatPrompt:
-    hint &"  · {elapsed}s", resetStyle, "\n"
+  commitTranscriptBytes(&"  · {elapsed}s\r\n", true)
 
 proc apiRetryNotice*(msg: string) =
   ## Controller-side retry notice committed as a harness line: non-bold
   ## magenta, no indent, no bullet, one line separated from surrounding
   ## items by exactly one blank row like every other transcript item.
-  writeTranscriptWithFatPrompt:
-    stdout.styledWrite(fgMagenta, msg, resetStyle)
+  commitTranscriptBytes(errS(msg), true)
 
 proc installApiStreamHooks*() =
   setApiStreamHooks(ApiStreamHooks(

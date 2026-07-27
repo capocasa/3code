@@ -216,10 +216,17 @@ proc skillNameFromAct*(act: Action): string =
   else: discard
   if fname.endsWith(".md"): fname[0 ..< fname.len - 3] else: fname
 
-proc printSkillLoaded*(act: Action) =
+proc skillLoadedBytes*(act: Action): string =
+  ## String form of the skill-loaded marker (subtle grey).
   let name = skillNameFromAct(act)
   if name.len == 0: return
-  subtleWriteLn(stdout, "· loaded skill: " & name)
+  GreyFg & "· loaded skill: " & name & Reset & "\r\n"
+
+proc printSkillLoaded*(act: Action) =
+  let bytes = skillLoadedBytes(act)
+  if bytes.len > 0:
+    stdout.write bytes
+    stdout.flushFile
 
 proc trimBoundaryBlank(lines: var seq[string]) =
   ## Strip blank rows from both ends of a tool-output line list so an item
@@ -497,8 +504,23 @@ proc captureMarkdownBytes(s: MarkdownState; line = ""; finish = false): string =
     try: removeFile(path) except OSError: discard
   result = readFile(path)
 
+proc assistantBulletBytes*(): string =
+  AssistantTextStyle & "● " & Reset
+
 proc writeAssistantBullet*(outFile: File = stdout) =
-  outFile.write AssistantTextStyle & "● " & Reset
+  outFile.write assistantBulletBytes()
+
+proc renderAssistantContentBytes*(content: string): string =
+  ## String form of `renderAssistantContent`: the assistant item body
+  ## (bullet + styled markdown) without touching a File. Used by the
+  ## controller's transcript path, which owns when the bytes hit the
+  ## terminal.
+  if content.strip.len == 0: return
+  var st = initMarkdownState()
+  result = assistantBulletBytes()
+  for line in content.splitLines:
+    result.add assistantTextBytes(captureMarkdownBytes(st, line))
+  result.add assistantTextBytes(captureMarkdownBytes(st, finish = true))
 
 proc renderAssistantContent*(content: string, outFile: File = stdout) =
   ## Bullet `● ` + bright-white content with full markdown
@@ -507,13 +529,10 @@ proc renderAssistantContent*(content: string, outFile: File = stdout) =
   ## streaming bypasses this and feeds the same handlers chunk by chunk).
   ## `outFile` lets tests capture output to a temp file; default is
   ## stdout.
-  if content.strip.len == 0: return
-  writeAssistantBullet(outFile)
-  var st = initMarkdownState()
-  for line in content.splitLines:
-    outFile.write assistantTextBytes(captureMarkdownBytes(st, line))
-  outFile.write assistantTextBytes(captureMarkdownBytes(st, finish = true))
-  outFile.flushFile
+  let bytes = renderAssistantContentBytes(content)
+  if bytes.len > 0:
+    outFile.write bytes
+    outFile.flushFile
 
 proc toolIcon*(kind: ActionKind): string =
   case kind

@@ -75,8 +75,7 @@ proc formatItem*(item: TranscriptItem): string =
     if item.body.strip.len == 0:
       result = emptyAssistantBytes(false)
     else:
-      result = captureStdoutWrites:
-        renderAssistantContent(item.body)
+      result = renderAssistantContentBytes(item.body)
   of tiTool:
     result = item.body
   result.finishItem(item.attachSeparator)

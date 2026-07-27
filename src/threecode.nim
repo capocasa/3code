@@ -618,8 +618,8 @@ proc main() =
         releaseIdleSubmittedInput()
         continue
       if prof.name == "":
-        writeTranscriptWithFatPrompt:
-          errLn "no provider configured. use :provider add", resetStyle
+        commitTranscriptBytes(
+          errLnS("no provider configured. use :provider add"), true)
         releaseIdleSubmittedInput()
         continue
       messages.add %*{"role": "user", "content": buildUserMessage(messages, line)}

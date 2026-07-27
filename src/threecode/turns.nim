@@ -55,8 +55,7 @@ proc onTurnInterrupted*() =
   stopTurnInputForFinalRender()
   stopSpinner(clearLiveFooter = false)
   discard stopBarTick()
-  writeTranscriptWithFatPrompt:
-    stdout.styledWriteLine(fgMagenta, InterruptedByUserMsg, resetStyle)
+  commitTranscriptBytes(errLnS(InterruptedByUserMsg), true)
   emitTestFrameEvent()
   clearInterrupted()
 
@@ -190,8 +189,7 @@ proc commitAssistantItem(content: string; restoreEditor = true;
     bytes.finishTranscriptItem()
     commitTranscriptBytes(bytes, restoreEditor, afterCommit)
     return
-  var bytes = captureStdoutWrites:
-    renderAssistantContent(content)
+  var bytes = renderAssistantContentBytes(content)
   bytes.trimTranscriptTail()
   let receipt = if attachReceipt: pendingReceiptBytes() else: ""
   if attachReceipt and receipt.len > 0:
@@ -209,10 +207,9 @@ proc commitPendingReceiptAfterStream(restoreEditor = true) =
   bytes.finishTranscriptItem()
   commitTranscriptBytes(bytes, restoreEditor, clearSubmittedReceiptState)
 
-proc commitTranscriptItem(formatBody: proc(); restoreEditor = true;
+proc commitTranscriptItem(formatBody: proc(): string; restoreEditor = true;
                           receipt = "") =
-  var bytes = captureStdoutWrites:
-    formatBody()
+  var bytes = formatBody()
   if receipt.len > 0:
     bytes.trimTranscriptTail()
     bytes.add "\r\n"
@@ -283,8 +280,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       # turn. `endTurnAfterTranscriptAppend` finalizes the turn without
       # rewriting the prompt.
       saveSession(session, messages)
-      writeTranscriptWithFatPrompt:
-        errLn e.msg, resetStyle
+      commitTranscriptBytes(errLnS(e.msg), true)
       endTurnAfterTranscriptAppend()
       turnEnded = true
       return false
@@ -326,8 +322,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         let window = contextWindowFor(p)
         let bumped = min(cur * 2, window)
         maxTokensOverride = max(maxTokensOverride, bumped)
-        writeTranscriptWithFatPrompt:
-          errLn "finished by length, retrying with ", humanTokens(maxTokensOverride), " token budget", resetStyle
+        commitTranscriptBytes(
+          errLnS("finished by length, retrying with " &
+            humanTokens(maxTokensOverride) & " token budget"), true)
         debugOut &"runTurns: empty length-retry {lengthEscalations}/{MaxLengthEscalations} max_tokens={maxTokensOverride}"
         continue
       if steerAttempts < MaxSteerAttempts:
@@ -339,8 +336,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         messages.add %*{"role": "user",
           "content": "Please provide your final answer now."}
         saveSession(session, messages)
-        writeTranscriptWithFatPrompt:
-          errLn "empty reply; re-prompting for a final answer", resetStyle
+        commitTranscriptBytes(
+          errLnS("empty reply; re-prompting for a final answer"), true)
         debugOut &"runTurns: empty steer-retry {steerAttempts}/{MaxSteerAttempts}"
         continue
       # Smart-handling exhausted (or never applicable). Retry the bare call,
@@ -352,16 +349,18 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           if finishReason.len > 0: finishReason
           elif usage.reasoningTokens > 0: "reasoning only"
           else: "no content, no tool calls"
-        writeTranscriptWithFatPrompt:
-          errLn "empty reply: ", reason, ". retrying ", $emptyRetries, "/", $MaxEmptyRetries, resetStyle
+        commitTranscriptBytes(
+          errLnS("empty reply: " & reason & ". retrying " &
+            $emptyRetries & "/" & $MaxEmptyRetries), true)
         debugOut &"runTurns: empty resend {emptyRetries}/{MaxEmptyRetries} finishReason={finishReason}"
         continue
       # All retries exhausted. Persist the empty turn and surface a final
       # notice so the user knows the model gave nothing back.
       messages.add msg
       saveSession(session, messages)
-      writeTranscriptWithFatPrompt:
-        errLn "empty reply - giving up after ", $MaxEmptyRetries, " retries", resetStyle
+      commitTranscriptBytes(
+        errLnS("empty reply - giving up after " & $MaxEmptyRetries &
+          " retries"), true)
       endTurnAfterTranscriptAppend()
       turnEnded = true
       break
@@ -372,11 +371,10 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     of caSummarize:
       let summarized = summarizeHistory(messages, p)
       if summarized > 0:
-        writeTranscriptWithFatPrompt:
-          hintLn &"· summarized {summarized} message" &
+        commitTranscriptBytes(
+          hintLnS(&"· summarized {summarized} message" &
             (if summarized == 1: "" else: "s") &
-            &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)",
-            resetStyle
+            &" (context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} tokens)"), true)
         saveSession(session, messages)
     of caNone: discard
     if toolCalls.len > 0:
@@ -498,8 +496,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
             toolItem(act, r, code, idx, diff, toolElapsed.int),
             receipt = if isReceiptCap: deferredReceipt else: "")
         else:
-          commitTranscriptItem(proc() =
-            printSkillLoaded(act)
+          commitTranscriptItem(proc(): string =
+            skillLoadedBytes(act)
           , receipt = if isReceiptCap: deferredReceipt else: "")
         if isReceiptCap:
           deferredReceipt = ""
@@ -641,8 +639,7 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
     # to keep doing, so save what we have and exit cleanly. `quit`
     # runs the registered exit procs, which restore terminal state.
     try: saveSession(session, messages) except CatchableError: discard
-    writeTranscriptWithFatPrompt:
-      errLn "working directory gone: ", e.msg, resetStyle
+    commitTranscriptBytes(errLnS("working directory gone: " & e.msg), true)
     quit()
   except CatchableError as e:
     # Last-resort safety net: anything else that escapes `runTurns`
