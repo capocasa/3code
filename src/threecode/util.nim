@@ -331,7 +331,7 @@ proc safeCwd*(): string =
   try: getCurrentDir()
   except OSError: "/"
 
-proc utf8ByteCut*(s: string, n: int): string =
+func utf8ByteCut*(s: string, n: int): string =
   ## Slice `s` to at most `n` bytes, backing up to a UTF-8 codepoint
   ## boundary so the result is valid UTF-8. Strings in JSON request bodies
   ## must be valid UTF-8 — Pydantic-backed providers (deepinfra) reject
@@ -343,7 +343,7 @@ proc utf8ByteCut*(s: string, n: int): string =
     dec cut
   s[0 ..< cut]
 
-proc utf8ByteCutEnd*(s: string, n: int): string =
+func utf8ByteCutEnd*(s: string, n: int): string =
   ## Take the last up-to-`n` bytes of `s`, advancing past any leading UTF-8
   ## continuation byte so the result is valid UTF-8. Mirror of `utf8ByteCut`
   ## for tail slices (used by `clipMiddle`).
@@ -353,7 +353,7 @@ proc utf8ByteCutEnd*(s: string, n: int): string =
     inc start
   s[start .. ^1]
 
-proc sanitizeUtf8*(s: string): string =
+func sanitizeUtf8*(s: string): string =
   ## Return a copy of `s` that is valid UTF-8: every invalid byte or
   ## malformed sequence is replaced with a single U+FFFD, and every valid
   ## codepoint (including multibyte) passes through untouched.
@@ -413,20 +413,20 @@ proc sanitizeUtf8*(s: string): string =
       # replacement char per maximal subpart of an ill-formed sequence).
       result.add "\uFFFD"; inc i
 
-proc clipMiddle*(s: string, head, tail: int): string =
+func clipMiddle*(s: string, head, tail: int): string =
   if s.len <= head + tail: s
   else: utf8ByteCut(s, head) & "\n... [truncated] ...\n" & utf8ByteCutEnd(s, tail)
 
-proc humanBytes*(n: int): string =
+func humanBytes*(n: int): string =
   if n < 1024: &"{n}B"
   elif n < 1024 * 1024: &"{n.float/1024:.1f}KB"
   else: &"{n.float/1024/1024:.2f}MB"
 
-proc humanTokens*(n: int): string =
+func humanTokens*(n: int): string =
   if n < 1000: $n
   else: &"{n.float/1000:.1f}k"
 
-proc detectMdHeader*(line: string): (bool, string) =
+func detectMdHeader*(line: string): (bool, string) =
   ## A line of `###...` followed by a space and at least one non-space
   ## char. Returns (true, body) on match, (false, "") otherwise.
   var i = 0
@@ -437,7 +437,7 @@ proc detectMdHeader*(line: string): (bool, string) =
   if body.len == 0: return (false, "")
   (true, body)
 
-proc isMdFenceLine*(line: string): bool =
+func isMdFenceLine*(line: string): bool =
   ## ```` ``` ```` (3+ backticks, optional language label after).
   let s = line.strip
   s.len >= 3 and s.startsWith("```")
@@ -451,7 +451,7 @@ proc isAtBoundary(line: string, i: int): bool =
   ## `snake_case` and `5*5` don't accidentally italicize.
   i < 0 or i >= line.len or line[i] in MarkBoundary
 
-proc applyInlineMd*(line: string): string =
+func applyInlineMd*(line: string): string =
   ## Strict in-line replacements for `***bold-italic***`, `**bold**`,
   ## `*italic*` / `_italic_`, and backtick-code. Body text rides the
   ## terminal's default foreground (no envelope SGR), so the reverts
@@ -550,7 +550,7 @@ proc applyInlineMd*(line: string): string =
     result.add line[i]
     inc i
 
-proc visibleWidth*(s: string): int =
+func visibleWidth*(s: string): int =
   ## Count visible columns in a string that may contain ANSI CSI escape
   ## sequences (`\e[...<letter>`). Each rune is weighted by its East
   ## Asian Width: CJK / emoji count as 2, combining marks as 0.
@@ -567,7 +567,7 @@ proc visibleWidth*(s: string): int =
       inc result, runeCellWidth(s.runeAt(i))
     inc i, rl
 
-proc wrapAnsi*(s: string, width: int): seq[string] =
+func wrapAnsi*(s: string, width: int): seq[string] =
   ## Greedy word-wrap on whitespace; each chunk's visible width is at
   ## most `width`. ANSI CSI escape sequences pass through without
   ## counting toward width. Words longer than `width` overflow on their
@@ -598,7 +598,7 @@ proc wrapAnsi*(s: string, width: int): seq[string] =
   if line.len > 0:
     result.add line
 
-proc charWrapAnsi*(s: string, width: int): seq[string] =
+func charWrapAnsi*(s: string, width: int): seq[string] =
   ## Character-wrap: break at exactly `width` visible columns, even
   ## mid-word. ANSI CSI escapes pass through without counting toward
   ## width. Lines that fit are returned as-is.
@@ -637,7 +637,7 @@ proc charWrapAnsi*(s: string, width: int): seq[string] =
 
 const BannerMaxRows* = 3
 
-proc bannerWrapRows*(prefix, body: string; termW: int): seq[string] =
+func bannerWrapRows*(prefix, body: string; termW: int): seq[string] =
   ## Wrap a tool banner (icon + command/path) across the terminal width,
   ## mirroring how output lines wrap. The `prefix` (e.g. "$ ") occupies
   ## the first row; continuation rows align under the body with a 2-space
@@ -654,7 +654,7 @@ proc bannerWrapRows*(prefix, body: string; termW: int): seq[string] =
     result.add (if first: prefix else: "  ") & chunk
     first = false
 
-proc isMdTableRow*(line: string): bool =
+func isMdTableRow*(line: string): bool =
   ## A markdown-table row both opens and closes with a `|`. Rejects
   ## bare prose that happens to contain a pipe.
   let s = line.strip
@@ -667,7 +667,7 @@ proc parseMdRow(line: string): seq[string] =
   if s.len > 0 and s[^1] == '|': s = s[0 ..< ^1]
   s.split('|').mapIt(it.strip)
 
-proc isMdSepRow*(line: string): bool =
+func isMdSepRow*(line: string): bool =
   ## Detect the `|---|:---:|---:|` alignment-separator row between
   ## header and body — its cells contain only `-`, `:`, and spaces.
   let cells = parseMdRow(line)
@@ -678,7 +678,7 @@ proc isMdSepRow*(line: string): bool =
       if ch notin {'-', ':', ' '}: return false
   true
 
-proc renderMdTable*(rows: seq[string], indent = "  ", maxWidth = 0): string =
+func renderMdTable*(rows: seq[string], indent = "  ", maxWidth = 0): string =
   ## Render a buffered markdown table as an aligned, box-drawn block.
   ## Each output line is prefixed with `indent` so the table sits in
   ## the harness's col-2 content area. Skips the alignment-separator
@@ -785,7 +785,7 @@ proc renderMdTable*(rows: seq[string], indent = "  ", maxWidth = 0): string =
     result.add rowStr(r) & "\n"
   result.add sepStr("└", "┴", "┘") & "\n"
 
-proc tokenSlot*(icon: string, n: int): string =
+func tokenSlot*(icon: string, n: int): string =
   ## "iconvalue" — no space between glyph and number. Slots are joined
   ## with two spaces for visual separation. When the value is 0 the
   ## slot is omitted entirely (returns ""); the caller strips the
@@ -793,7 +793,7 @@ proc tokenSlot*(icon: string, n: int): string =
   if n == 0: ""
   else: icon & humanTokens(n)
 
-proc stripPreamble*(s: string): string =
+func stripPreamble*(s: string): string =
   ## Strip `<session_context>...</session_context>` and
   ## `<project_notes>...</project_notes>` blocks from a stored user
   ## message so the replay UI shows the prompt the user typed, not the
@@ -824,12 +824,12 @@ proc collapseHome*(path: string): string =
   while rel.startsWith("/"): rel = rel[1 .. ^1]
   if rel.len == 0: "~" else: "~/" & rel
 
-proc replaceFirst*(s, needle, repl: string): (string, bool) =
+func replaceFirst*(s, needle, repl: string): (string, bool) =
   let idx = s.find(needle)
   if idx < 0: return (s, false)
   (s[0 ..< idx] & repl & s[idx + needle.len .. ^1], true)
 
-proc isBinaryContent*(s: string): bool =
+func isBinaryContent*(s: string): bool =
   ## Scan the first 512 bytes for binary indicators: any NUL byte, or
   ## >5% non-printable control chars (excluding \t \n \r and ANSI escape
   ## sequences). CSI, OSC, and short-form ANSI escapes are skipped so that
@@ -869,7 +869,7 @@ proc isBinaryContent*(s: string): bool =
     inc k
   bad * 20 > scan
 
-proc looksLikePath*(s: string): bool =
+func looksLikePath*(s: string): bool =
   ## Heuristic for the path-on-its-own-line preceding a write/patch fence in
   ## text mode. Rejects prose (whitespace inside, fence markers, headings).
   ## Accepts anything containing `/` or `.` — paths typically have one.
@@ -879,7 +879,7 @@ proc looksLikePath*(s: string): bool =
   if t.startsWith("```") or t.startsWith("#"): return false
   '/' in t or '.' in t
 
-proc levenshtein*(a, b: string): int =
+func levenshtein*(a, b: string): int =
   if a.len == 0: return b.len
   if b.len == 0: return a.len
   var prev = newSeq[int](b.len + 1)
@@ -893,7 +893,7 @@ proc levenshtein*(a, b: string): int =
     swap(prev, curr)
   prev[b.len]
 
-proc levenshteinCapped*(a, b: string, cap: int): int =
+func levenshteinCapped*(a, b: string, cap: int): int =
   ## Standard edit distance with an early cutoff: returns `cap+1` once the
   ## minimum row value exceeds `cap`. Cap keeps the cost linear-ish for the
   ## "compare against every file line" use case.

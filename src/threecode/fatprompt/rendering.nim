@@ -205,7 +205,7 @@ proc initFatPrompt*(width = DefaultWidth, height = DefaultHeight,
     tokenBar: TokenBarState(window: window, elapsedS: -1),
     bash: BashViewport(maxLines: DefaultBashMaxLines))
 
-proc markerText(marker: PromptMarker): string =
+func markerText(marker: PromptMarker): string =
   case marker
   of pmUser: "❯"
   of pmAssistant: "●"
@@ -215,14 +215,14 @@ proc markerText(marker: PromptMarker): string =
   of pmPatch: "p"
   of pmOther: "·"
 
-proc splitLogicalLines(s: string): seq[string] =
+func splitLogicalLines(s: string): seq[string] =
   result = s.splitLines()
   if s.len > 0 and s[^1] == '\n':
     result.add ""
   if result.len == 0:
     result.add ""
 
-proc wrapPlain*(line: string, width: int): seq[string] =
+func wrapPlain*(line: string, width: int): seq[string] =
   ## Word-wrap on whitespace; char-wrap words longer than the width. Shares
   ## the single wrap algorithm in ``minline.lineSpans`` (called with no
   ## prompt/continuation indent) so the transcript display wraps identically
@@ -231,13 +231,13 @@ proc wrapPlain*(line: string, width: int): seq[string] =
   for sp in lineSpans(line, 0, 0, max(1, width)):
     result.add line[sp.start ..< sp.stop]
 
-proc cellWidth(s: string): int =
+func cellWidth(s: string): int =
   var i = 0
   while i < s.len:
     inc result, runeCellWidth(s.runeAt(i))
     i += max(1, runeLenAt(s, i))
 
-proc wrapMarked(marker, body: string, width: int): seq[string] =
+func wrapMarked(marker, body: string, width: int): seq[string] =
   let firstPrefix = marker & " "
   let contPrefix = repeat(" ", cellWidth(firstPrefix))
   let firstWidth = max(1, width - cellWidth(firstPrefix))
@@ -318,12 +318,12 @@ proc tokenBarText*(state: TokenBarState): string =
     parts.add $state.elapsedS & "s"
   parts.join("  ")
 
-proc hasNonNewlineBytes*(s: string): bool =
+func hasNonNewlineBytes*(s: string): bool =
   for ch in s:
     if ch notin {'\r', '\n'}:
       return true
 
-proc hasElapsedSuffix*(label: string): bool =
+func hasElapsedSuffix*(label: string): bool =
   var i = label.len - 1
   if i < 0 or label[i] != 's':
     return false
@@ -344,14 +344,14 @@ proc spinnerBarBytes*(frame, label: string, elapsed: int): string =
 proc liveBarBytes*(label: string): string =
   CyanFg & BoldOn & "  " & label & Reset
 
-proc labelCells*(label: string): int =
+func labelCells(label: string): int =
   var i = 0
   while i < label.len:
     let rl = max(1, runeLenAt(label, i))
     inc result
     i += rl
 
-proc barWrapRows*(visibleCells, termW: int): int =
+func barWrapRows(visibleCells, termW: int): int =
   if termW <= 0 or visibleCells <= 0: return 1
   result = (visibleCells + termW - 1) div termW
   if result < 1: result = 1
@@ -437,7 +437,7 @@ proc clearBarBelowAtColBytes*(col: int): string =
 
 const ClearBarBelowBytes* = "\n\r\x1b[J\x1b[1A\x1b[3G"
 
-proc clampToWidth*(s: string; width: int): string =
+func clampToWidth*(s: string; width: int): string =
   ## Truncate `s` (which may contain ANSI CSI escapes) so its visible
   ## width fits in `width` cells. Escapes are preserved; once the
   ## accumulated visible width reaches `width` the remainder is dropped.
@@ -588,10 +588,10 @@ proc absoluteBarTickFrame*(row: int; label: string; activeEditor: bool;
 proc moveToBarBelowBytes*(): string =
   "\x1b[1B"
 
-proc editorRows*(p: FatPrompt): seq[string] =
+func editorRows*(p: FatPrompt): seq[string] =
   wrapMarked("❯", p.editorText, p.width)
 
-proc editorHeight*(p: FatPrompt): int =
+func editorHeight*(p: FatPrompt): int =
   p.editorRows.len
 
 proc beginBash*(p: var FatPrompt; idx = 0; maxLines = DefaultBashMaxLines) =
@@ -602,7 +602,7 @@ proc pushBashOutput*(p: var FatPrompt; line: string) =
     p.beginBash()
   p.bash.lines.add line
 
-proc bashVisibleRows*(p: FatPrompt): seq[string] =
+func bashVisibleRows*(p: FatPrompt): seq[string] =
   if not p.bash.active:
     return @[]
   let maxLines = max(1, p.bash.maxLines)
@@ -631,7 +631,7 @@ proc finishBash*(p: var FatPrompt; code = 0; elapsedS = -1) =
   p.addTranscriptItem(pmBash, body & suffix)
   p.bash = BashViewport(maxLines: DefaultBashMaxLines)
 
-proc frameRows*(p: FatPrompt): seq[string] =
+func frameRows*(p: FatPrompt): seq[string] =
   ## Return the complete visible screen for one render tick.
   let editor = p.editorRows()
   let bar = tokenBarText(p.tokenBar)
@@ -662,5 +662,5 @@ proc frameRows*(p: FatPrompt): seq[string] =
   if result.len > p.height:
     result = result[result.len - p.height ..< result.len]
 
-proc frameText*(p: FatPrompt): string =
+func frameText*(p: FatPrompt): string =
   p.frameRows().join("\n")
