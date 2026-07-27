@@ -206,35 +206,36 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
         try: terminalWidth() except CatchableError: 0
       let bytes = frame.footerFrameBytes(width)
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
-      if inputRunning and editor != nil:
-        let edPtr = editor
-        stdout.write termio.SyncBegin
-        stdout.write "\x1b[?25l"
-        refreshEditorWidth(edPtr[])
-        let up = eraseUp(e, edPtr[], width, footerRowsAboveEditor)
-        stdout.write "\r"
-        if up > 0:
-          stdout.write "\x1b[" & $up & "A"
-        stdout.write "\x1b[J"
-        e.writeToolViewportRows()
-        stdout.write bytes
-        stdout.write "\r\n"
-        edPtr[].renderRow = 0
-        stdout.write edPtr[].redrawBytes(synchronized = false)
-        if not edPtr[].pendingCaret:
-          stdout.write "\x1b[?25h"
-        if frame.kind == ffClear:
-          e.noteNoFooter()
-        else:
-          e.noteFooterPainted(footerRowsAboveEditor)
-        stdout.write termio.SyncEnd
-        stdout.flushFile
-      else:
+      if not (inputRunning and editor != nil):
         stdout.write termio.SyncBegin
         stdout.write bytes
         e.noteNoFooter()
         stdout.write termio.SyncEnd
         stdout.flushFile
+        e.lastPaintedWidth = width
+        return
+      let edPtr = editor
+      stdout.write termio.SyncBegin
+      stdout.write "\x1b[?25l"
+      refreshEditorWidth(edPtr[])
+      let up = eraseUp(e, edPtr[], width, footerRowsAboveEditor)
+      stdout.write "\r"
+      if up > 0:
+        stdout.write "\x1b[" & $up & "A"
+      stdout.write "\x1b[J"
+      e.writeToolViewportRows()
+      stdout.write bytes
+      stdout.write "\r\n"
+      edPtr[].renderRow = 0
+      stdout.write edPtr[].redrawBytes(synchronized = false)
+      if not edPtr[].pendingCaret:
+        stdout.write "\x1b[?25h"
+      if frame.kind == ffClear:
+        e.noteNoFooter()
+      else:
+        e.noteFooterPainted(footerRowsAboveEditor)
+      stdout.write termio.SyncEnd
+      stdout.flushFile
       e.lastPaintedWidth = width
 
 proc renderFooter*(frame: FooterFrame; inputRunning: bool;
@@ -260,43 +261,9 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
       let reflowed = e.lastPaintedWidth > 0 and width > 0 and
         width != e.lastPaintedWidth
-      stdout.write termio.SyncBegin
-      stdout.write "\x1b[?25l"
-      if inputRunning and editor != nil:
-        refreshEditorWidth(editor[])
-        # A width change reflowed the already-painted volatile rows: a wide
-        # banner/output wraps to more rows (or fewer) on screen, but the
-        # stored `toolViewportRows.len` still holds the pre-reflow count, so a
-        # plain walkUp would fall short and leave stale fragments. Inflate the
-        # erase to clear the whole volatile region — bounded by the terminal
-        # height, which always covers the reflowed stale content.
-        let up = if reflowed:
-            max(0, editorRowsAboveCursor(editor[]) +
-              e.paintedFooterRows + e.viewportGapRows + e.liveContentRows.len +
-              e.liveContentGapRows +
-              (try: terminalHeight() except CatchableError: 24))
-          else:
-            max(0, e.walkUp(editor[]))
-        stdout.write "\r"
-        if up > 0:
-          stdout.write "\x1b[" & $up & "A"
-        stdout.write "\x1b[J"
-        e.toolViewportHasGap = e.hasScrollback
-        e.toolViewportRows = @rows
-        e.toolViewportBannerRows = bannerRows
-        e.writeToolViewportRows()
-        if bytes.len > 0:
-          stdout.write bytes
-          stdout.write "\r\n"
-        editor[].renderRow = 0
-        stdout.write editor[].redrawBytes(synchronized = false)
-        if not editor[].pendingCaret:
-          stdout.write "\x1b[?25h"
-        if frame.kind == ffClear:
-          e.noteNoFooter()
-        else:
-          e.noteFooterPainted(footerRowsAboveEditor)
-      else:
+      if not (inputRunning and editor != nil):
+        stdout.write termio.SyncBegin
+        stdout.write "\x1b[?25l"
         e.toolViewportHasGap = e.hasScrollback
         e.toolViewportRows = @rows
         e.toolViewportBannerRows = bannerRows
@@ -304,6 +271,45 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         if bytes.len > 0:
           stdout.write bytes
         e.noteNoFooter()
+        e.lastPaintedWidth = width
+        stdout.write termio.SyncEnd
+        stdout.flushFile
+        return
+      stdout.write termio.SyncBegin
+      stdout.write "\x1b[?25l"
+      refreshEditorWidth(editor[])
+      # A width change reflowed the already-painted volatile rows: a wide
+      # banner/output wraps to more rows (or fewer) on screen, but the
+      # stored `toolViewportRows.len` still holds the pre-reflow count, so a
+      # plain walkUp would fall short and leave stale fragments. Inflate the
+      # erase to clear the whole volatile region — bounded by the terminal
+      # height, which always covers the reflowed stale content.
+      let up = if reflowed:
+          max(0, editorRowsAboveCursor(editor[]) +
+            e.paintedFooterRows + e.viewportGapRows + e.liveContentRows.len +
+            e.liveContentGapRows +
+            (try: terminalHeight() except CatchableError: 24))
+        else:
+          max(0, e.walkUp(editor[]))
+      stdout.write "\r"
+      if up > 0:
+        stdout.write "\x1b[" & $up & "A"
+      stdout.write "\x1b[J"
+      e.toolViewportHasGap = e.hasScrollback
+      e.toolViewportRows = @rows
+      e.toolViewportBannerRows = bannerRows
+      e.writeToolViewportRows()
+      if bytes.len > 0:
+        stdout.write bytes
+        stdout.write "\r\n"
+      editor[].renderRow = 0
+      stdout.write editor[].redrawBytes(synchronized = false)
+      if not editor[].pendingCaret:
+        stdout.write "\x1b[?25h"
+      if frame.kind == ffClear:
+        e.noteNoFooter()
+      else:
+        e.noteFooterPainted(footerRowsAboveEditor)
       e.lastPaintedWidth = width
       stdout.write termio.SyncEnd
       stdout.flushFile
@@ -344,42 +350,47 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
         try: terminalWidth() except CatchableError: 0
       let bytes = frame.footerFrameBytes(width)
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
-      stdout.write termio.SyncBegin
-      stdout.write "\x1b[?25l"
-      if inputRunning and editor != nil:
-        refreshEditorWidth(editor[])
-        let up = eraseUp(e, editor[], width, footerRowsAboveEditor)
-        stdout.write "\r"
-        if up > 0:
-          stdout.write "\x1b[" & $up & "A"
-        stdout.write "\x1b[J"
-        e.liveContentHasGap = e.hasScrollback
-        e.liveContentRows = @rows
-        e.writeLiveContentRows()
-        if bytes.len > 0:
-          stdout.write bytes
-          stdout.write "\r\n"
-        editor[].renderRow = 0
-        stdout.write editor[].redrawBytes(synchronized = false)
-        # Restore the caret to whatever the editor's pendingCaret dictates,
-        # matching `renderFooter` and the input thread's postRedraw. During
-        # buffered typing (pendingCaret == false) the caret must stay visible
-        # so the GUI thread's 80ms streaming repaint does not fight the
-        # input thread's keystroke redraw and flicker it on and off. Only a
-        # deferred-submit hourglass (pendingCaret == true) keeps it hidden.
-        if not editor[].pendingCaret:
-          stdout.write "\x1b[?25h"
-        if frame.kind == ffClear:
-          e.noteNoFooter()
-        else:
-          e.noteFooterPainted(footerRowsAboveEditor)
-      else:
+      if not (inputRunning and editor != nil):
+        stdout.write termio.SyncBegin
+        stdout.write "\x1b[?25l"
         e.liveContentHasGap = e.hasScrollback
         e.liveContentRows = @rows
         e.writeLiveContentRows()
         if bytes.len > 0:
           stdout.write bytes
         e.noteNoFooter()
+        e.lastPaintedWidth = width
+        stdout.write termio.SyncEnd
+        stdout.flushFile
+        return
+      stdout.write termio.SyncBegin
+      stdout.write "\x1b[?25l"
+      refreshEditorWidth(editor[])
+      let up = eraseUp(e, editor[], width, footerRowsAboveEditor)
+      stdout.write "\r"
+      if up > 0:
+        stdout.write "\x1b[" & $up & "A"
+      stdout.write "\x1b[J"
+      e.liveContentHasGap = e.hasScrollback
+      e.liveContentRows = @rows
+      e.writeLiveContentRows()
+      if bytes.len > 0:
+        stdout.write bytes
+        stdout.write "\r\n"
+      editor[].renderRow = 0
+      stdout.write editor[].redrawBytes(synchronized = false)
+      # Restore the caret to whatever the editor's pendingCaret dictates,
+      # matching `renderFooter` and the input thread's postRedraw. During
+      # buffered typing (pendingCaret == false) the caret must stay visible
+      # so the GUI thread's 80ms streaming repaint does not fight the
+      # input thread's keystroke redraw and flicker it on and off. Only a
+      # deferred-submit hourglass (pendingCaret == true) keeps it hidden.
+      if not editor[].pendingCaret:
+        stdout.write "\x1b[?25h"
+      if frame.kind == ffClear:
+        e.noteNoFooter()
+      else:
+        e.noteFooterPainted(footerRowsAboveEditor)
       e.lastPaintedWidth = width
       stdout.write termio.SyncEnd
       stdout.flushFile
@@ -424,32 +435,37 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
         try: terminalWidth() except CatchableError: 0
       let bytes = frame.footerFrameBytes(width)
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
-      stdout.write termio.SyncBegin
-      stdout.write "\x1b[?25l"
-      if inputRunning and editor != nil:
-        refreshEditorWidth(editor[])
-        let up = eraseUp(e, editor[], width, footerRowsAboveEditor)
-        stdout.write "\r"
-        if up > 0:
-          stdout.write "\x1b[" & $up & "A"
-        stdout.write "\x1b[J"
-        e.writeLiveContentRows()
-        if bytes.len > 0:
-          stdout.write bytes
-          stdout.write "\r\n"
-        editor[].renderRow = 0
-        stdout.write editor[].redrawBytes(synchronized = false)
-        if not editor[].pendingCaret:
-          stdout.write "\x1b[?25h"
-        if frame.kind == ffClear:
-          e.noteNoFooter()
-        else:
-          e.noteFooterPainted(footerRowsAboveEditor)
-      else:
+      if not (inputRunning and editor != nil):
+        stdout.write termio.SyncBegin
+        stdout.write "\x1b[?25l"
         e.writeLiveContentRows()
         if bytes.len > 0:
           stdout.write bytes
         e.noteNoFooter()
+        e.lastPaintedWidth = width
+        stdout.write termio.SyncEnd
+        stdout.flushFile
+        return
+      stdout.write termio.SyncBegin
+      stdout.write "\x1b[?25l"
+      refreshEditorWidth(editor[])
+      let up = eraseUp(e, editor[], width, footerRowsAboveEditor)
+      stdout.write "\r"
+      if up > 0:
+        stdout.write "\x1b[" & $up & "A"
+      stdout.write "\x1b[J"
+      e.writeLiveContentRows()
+      if bytes.len > 0:
+        stdout.write bytes
+        stdout.write "\r\n"
+      editor[].renderRow = 0
+      stdout.write editor[].redrawBytes(synchronized = false)
+      if not editor[].pendingCaret:
+        stdout.write "\x1b[?25h"
+      if frame.kind == ffClear:
+        e.noteNoFooter()
+      else:
+        e.noteFooterPainted(footerRowsAboveEditor)
       e.lastPaintedWidth = width
       stdout.write termio.SyncEnd
       stdout.flushFile
@@ -469,6 +485,93 @@ proc liveContentRowCount*(): int {.gcsafe.} =
 
 proc paintedFooterRowCount*(e: TerminalEngine): int {.gcsafe.} =
   e.paintedFooterRows
+
+# Commit the transcript blob as real scrollback, with the one blank
+# separator row owned here (see `appendTranscript` for the contract).
+proc writeTranscriptItem(e: var TerminalEngine; transcript: string) =
+  if transcript.len == 0: return
+  if e.hasScrollback:
+    stdout.write "\r\n"
+  stdout.write transcript
+  stdout.write "\r\n"
+  e.hasScrollback = true
+
+proc appendTranscriptLiveAnchored(e: var TerminalEngine; transcript: string;
+                                  edPtr: ptr minline.LineEditor;
+                                  footerBytes: string;
+                                  footerRowsAboveEditor: int;
+                                  compactRowsAboveFooter: int;
+                                  restoreEditor: bool;
+                                  reserveFooter: bool) =
+  refreshEditorWidth(edPtr[])
+  stdout.write termio.SyncBegin
+  stdout.write "\x1b[?25l\r"
+  let up = max(0, e.walkUp(edPtr[]) + max(0, compactRowsAboveFooter))
+  if up > 0:
+    stdout.write "\x1b[" & $up & "A"
+  stdout.write "\x1b[J"
+  e.toolViewportRows = @[]
+  e.writeTranscriptItem(transcript)
+  if not reserveFooter:
+    e.noteNoFooter()
+  else:
+    if footerBytes.len > 0:
+      stdout.write footerBytes
+      stdout.write "\r\n"
+    if restoreEditor:
+      edPtr[].renderRow = 0
+      stdout.write edPtr[].redrawBytes()
+      if not edPtr[].pendingCaret:
+        stdout.write "\x1b[?25h"
+      e.noteFooterPainted(footerRowsAboveEditor)
+    elif footerBytes.len > 0:
+      e.noteFooterPainted(max(1, footerRowsAboveEditor))
+    else:
+      e.noteNoFooter()
+  stdout.write termio.SyncEnd
+  stdout.flushFile
+
+proc appendTranscriptFloating(e: var TerminalEngine; transcript: string;
+                              inputRunning: bool;
+                              editor: ptr minline.LineEditor;
+                              footerBytes: string;
+                              footerRowsAboveEditor: int;
+                              compactRowsAboveFooter: int;
+                              restoreEditor: bool;
+                              reserveFooter: bool) =
+  let editing = inputRunning and editor != nil
+  stdout.write termio.SyncBegin
+  if editing:
+    let up = max(0, e.walkUp(editor[]))
+    stdout.write "\r"
+    if up > 0:
+      stdout.write "\x1b[" & $up & "A"
+  if e.toolViewportRows.len > 0:
+    stdout.write "\x1b[" & $e.toolViewportRows.len & "A"
+  if compactRowsAboveFooter > 0:
+    stdout.write "\x1b[" & $compactRowsAboveFooter & "A"
+  stdout.write "\r\x1b[J"
+  e.toolViewportRows = @[]
+  e.writeTranscriptItem(transcript)
+  if not reserveFooter:
+    e.noteNoFooter()
+  else:
+    if footerBytes.len > 0:
+      stdout.write footerBytes
+      if editing and restoreEditor:
+        stdout.write "\x1b[1B"
+    if editing and restoreEditor:
+      editor[].renderRow = 0
+      stdout.write editor[].redrawBytes()
+      if not editor[].pendingCaret:
+        stdout.write "\x1b[?25h"
+      e.noteFooterPainted(footerRowsAboveEditor)
+    elif footerBytes.len > 0:
+      e.noteFooterPainted(max(1, footerRowsAboveEditor))
+    else:
+      e.noteNoFooter()
+  stdout.write termio.SyncEnd
+  stdout.flushFile
 
 proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
                        liveAnchored: bool;
@@ -491,81 +594,16 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
     let footerRowsAboveEditor = newFooter.rowsAboveEditor(termW)
     let transcript = trimTrailingNewlines(transcriptBytes)
     if liveAnchored:
-      let edPtr = editor
-      if edPtr == nil:
-        return
-      refreshEditorWidth(edPtr[])
-      stdout.write termio.SyncBegin
-      stdout.write "\x1b[?25l\r"
-      let up = max(0, e.walkUp(edPtr[]) + max(0, compactRowsAboveFooter))
-      if up > 0:
-        stdout.write "\x1b[" & $up & "A"
-      stdout.write "\x1b[J"
-      e.toolViewportRows = @[]
-      if transcript.len > 0:
-        if e.hasScrollback:
-          stdout.write "\r\n"
-        stdout.write transcript
-        stdout.write "\r\n"
-        e.hasScrollback = true
-      if reserveFooter:
-        if footerBytes.len > 0:
-          stdout.write footerBytes
-          stdout.write "\r\n"
-        if restoreEditor:
-          edPtr[].renderRow = 0
-          stdout.write edPtr[].redrawBytes()
-          if not edPtr[].pendingCaret:
-            stdout.write "\x1b[?25h"
-          e.noteFooterPainted(footerRowsAboveEditor)
-        else:
-          if footerBytes.len > 0:
-            e.noteFooterPainted(max(1, footerRowsAboveEditor))
-          else:
-            e.noteNoFooter()
-      else:
-        e.noteNoFooter()
-      stdout.write termio.SyncEnd
-      stdout.flushFile
+      if editor == nil: return
+      e.appendTranscriptLiveAnchored(transcript, editor, footerBytes,
+                                     footerRowsAboveEditor,
+                                     compactRowsAboveFooter,
+                                     restoreEditor, reserveFooter)
     else:
-      stdout.write termio.SyncBegin
-      if inputRunning and editor != nil:
-        let up = max(0, e.walkUp(editor[]))
-        stdout.write "\r"
-        if up > 0:
-          stdout.write "\x1b[" & $up & "A"
-      if e.toolViewportRows.len > 0:
-        stdout.write "\x1b[" & $e.toolViewportRows.len & "A"
-      if compactRowsAboveFooter > 0:
-        stdout.write "\x1b[" & $compactRowsAboveFooter & "A"
-      stdout.write "\r\x1b[J"
-      e.toolViewportRows = @[]
-      if transcript.len > 0:
-        if e.hasScrollback:
-          stdout.write "\r\n"
-        stdout.write transcript
-        stdout.write "\r\n"
-        e.hasScrollback = true
-      if reserveFooter:
-        if footerBytes.len > 0:
-          stdout.write footerBytes
-          if inputRunning and editor != nil and restoreEditor:
-            stdout.write "\x1b[1B"
-        if inputRunning and editor != nil and restoreEditor:
-          editor[].renderRow = 0
-          stdout.write editor[].redrawBytes()
-          if not editor[].pendingCaret:
-            stdout.write "\x1b[?25h"
-          e.noteFooterPainted(footerRowsAboveEditor)
-        else:
-          if footerBytes.len > 0:
-            e.noteFooterPainted(max(1, footerRowsAboveEditor))
-          else:
-            e.noteNoFooter()
-      else:
-        e.noteNoFooter()
-      stdout.write termio.SyncEnd
-      stdout.flushFile
+      e.appendTranscriptFloating(transcript, inputRunning, editor,
+                                 footerBytes, footerRowsAboveEditor,
+                                 compactRowsAboveFooter,
+                                 restoreEditor, reserveFooter)
 
 proc prepareAssistantContentStart*(e: var TerminalEngine;
                                    inputRunning: bool;
