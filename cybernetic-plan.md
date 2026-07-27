@@ -145,9 +145,41 @@ after each):
    is timing-driven (polls isInterrupted), and the connect/recv-stall
    variants of cancel are already covered by the four mock scenarios.
 
-NEXT: step 10 (early-exit nesting pass, one module per commit:
-threecode.nim, engine.nim, api.nim, ui.nim, session.nim, minline.nim).
-Steps 11-15 follow in order.
+10. DONE, one module per commit, full suite 56 PASS after each:
+    - 6693699 threecode.nim: resume-banner pyramid flattened
+      (restoredDraft hoisted before resume branch, single
+      `runInitialPrompt` guard), handleBufferedAfterTurn early-exits on
+      empty queue.
+    - e4ebfbc engine.nim: renderFooter/renderToolViewport/
+      renderLiveContent/repaintLiveContent no-editor branch early-exits
+      (byte order preserved: SyncBegin/hide-cursor/bytes/note/SyncEnd/
+      flush/lastPaintedWidth identical per branch); appendTranscript's
+      two anchored branches extracted to appendTranscriptLiveAnchored/
+      appendTranscriptFloating + shared writeTranscriptItem. Watch out:
+      writeTranscriptItem needs `e: var TerminalEngine` (mutates
+      hasScrollback); nimble build on the main binary did NOT surface
+      that because engine is compiled per-test too — always run a test
+      file before the full suite.
+    - 05e1a15 api.nim: streamConnect conn-cache branch inverted to
+      guard form. Remaining deep indents in api.nim are signature
+      continuations (buildStreamAssistantMsg) and already-early-exit
+      parseUsage/extractErrorMsg — left alone.
+    - 2ad8ca6 ui.nim: verifyAndReport helper extracted from the three
+      wizard verify blocks; model loops now read error/error/verify-
+      return with bad cases falling through to the retry prompt;
+      inferred-provider branch inverted. Output bytes identical.
+    - session.nim: NO CHANGE. tryCreateLockFile (posix branch cited in
+      the review) already uses early-exit; its :281 indent is a
+      winlean parameter continuation, and :402 likewise. Nothing to
+      flatten without churning byte-identical code for cosmetics.
+    - ce6c228 minline.nim: insertText insert-mode fast path
+      early-returns; replace-mode body flush left. The :1538 cite is a
+      parameter continuation in the readLineWith keystroke dispatcher,
+      which is already in early-exit `continue`-chain style.
+
+NEXT: step 11 (Nim idiom pass: func conversion for side-effect-free
+formatters; decide split seams for session.nim/minline.nim or record
+why not). Steps 12-15 follow in order.
 
 Key gotchas learned:
 - `func` cannot read palette `var`s (BrightWhiteFg etc); string emitters
