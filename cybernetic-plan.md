@@ -115,9 +115,39 @@ after each):
    dropped the `\x1b[J` rfind + cursor-up byte checks. ttty hasAttr
    exists in ~/p/ttty grid.nim (SgrAttr distinct uint16).
 
-NEXT: step 9 (audit interrupt tests for stub-induced blindness; port
-blocking-mid-recv cases to mock_server with induced latency). Steps
-10-15 follow in order.
+9. Interrupt/cancel test audit (no code change; decisions recorded).
+   tests/tty/test_interrupt_network_connect.nim already drives the real
+   non-stub transport against tests/mock_server.nim with induced stalls:
+   msSilentAfterAccept (connect-phase Ctrl-C), msSlowStream (mid-body
+   Ctrl-C), msSlowStreamNoUsage (interrupt before usage event),
+   msStallAfterDone (teardown close hang), plus the quiet-watch
+   (QuietTooLongMs) case. The blocking-mid-recv class the hall-of-fame
+   rule targets is covered there.
+   Remaining stub-based interrupt tests were checked against the stub
+   source (testdata/stub/provider.nim): preStreamDelayMs and
+   contentChunkDelayMs sleep loops poll isInterrupted() every 50-100ms
+   and raise "interrupted by user", so these tests DO exercise the
+   interrupt handshake; what they cannot exercise is a stuck syscall,
+   which the mock server cases own. Per-test verdicts:
+   - test_interrupt_prestream_freeze (ESC/Ctrl-C, preStreamDelayMs):
+     KEEP. Subject is the input-thread/editor prompt contract after
+     cancel (caret col 2, glyph on caret row, follow-up accepted).
+   - test_429_typing_during_backoff (Ctrl-C mid-backoff, typed text):
+     KEEP. Subject is buffered-editor text preservation, a pure
+     input-side contract; network is irrelevant.
+   - test_tty_functional quiet_cancel ESC/Ctrl-C (waitForTestContinue):
+     KEEP. Same prompt-contract class as prestream_freeze.
+   - test_resize_ticker / test_slurp_resize_reasoning /
+     test_spinner_race_stress Ctrl-Cs: KEEP. Cleanup/stress triggers,
+     not blocking-recv assertions.
+   - test_quit_signals: KEEP. Input-thread Ctrl-D/Ctrl-C flag lifecycle.
+   No mock_server 429-retry scenario added: the retry-cancel handshake
+   is timing-driven (polls isInterrupted), and the connect/recv-stall
+   variants of cancel are already covered by the four mock scenarios.
+
+NEXT: step 10 (early-exit nesting pass, one module per commit:
+threecode.nim, engine.nim, api.nim, ui.nim, session.nim, minline.nim).
+Steps 11-15 follow in order.
 
 Key gotchas learned:
 - `func` cannot read palette `var`s (BrightWhiteFg etc); string emitters
@@ -195,7 +225,7 @@ Key gotchas learned:
    If ttty's Grid lacks needed accessors, add them to ~/p/ttty (it has
    `cellFg` already; verify color mapping).
 
-9. [ ] **Audit interrupt tests for stub-induced blindness.** List
+9. [x] **Audit interrupt tests for stub-induced blindness.** List
    tests/tty interrupt/cancel tests; for each, determine whether it can
    still pass when the provider blocks mid-recv. Where the in-process
    stub makes blocking impossible, port the test to `mock_server.nim`
