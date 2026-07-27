@@ -177,9 +177,9 @@ after each):
       parameter continuation in the readLineWith keystroke dispatcher,
       which is already in early-exit `continue`-chain style.
 
-NEXT: step 14 (megatest.nim fate; test_z_exitcode_probe; grep for
-`^test "` at column 0 outside suite blocks per tests-notes.md). Step
-15 (final sweep) follows.
+NEXT: step 15 (final sweep: grep audits per the plan; update
+.agents/design.md module map with engine.nim; full suite green;
+guidelines-updated.md corrections if any rule proved wrong).
 
 Key gotchas learned:
 - `func` cannot read palette `var`s (BrightWhiteFg etc); string emitters
@@ -362,11 +362,22 @@ Key gotchas learned:
     by the blessing. The rule that remains load-bearing: no NEW
     httpclient uses, and no second client on any streaming path.
 
-14. [ ] **megatest.nim + stray test files.** Decide fate of uncommitted
+14. [x] **megatest.nim + stray test files.** Decide fate of uncommitted
     `tests/megatest.nim` (wire it into nimble test or delete). Remove or
     restore `tests/tty/test_z_exitcode_probe` (present without .nim?).
     Verify every test block lives inside a `suite` block (tests-notes.md
     silent-skip trap): grep for `^test "` at column 0 in tests/tty.
+
+    DONE: tests/megatest.nim DELETED. It was testament's stale
+    megatest-mode artifact (hardcoded nimcache import paths, referenced
+    the long-deleted test_bufprompt.nim); the nimble test task pins
+    `--megatest:off` (unittest stdout would interleave into garbage
+    under megatest), so it can never be wired in without a harness
+    change nobody wants. tests/tty/test_z_exitcode_probe (and ~20
+    sibling directories without .nim) are compiled-test artifacts, left
+    untracked as before. Silent-skip audit: zero `^test "` at column 0
+    across tests/{tty,core,api,config}; every test block is inside a
+    suite. Full suite 56 PASS 0 FAIL after the deletion.
 
 15. [ ] **Final sweep.** Grep audits: no `\x1b[` outside
     terminal/engine/minline/rendering; no `stdout.write` in
