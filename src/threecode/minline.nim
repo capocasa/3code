@@ -680,21 +680,24 @@ proc insertText*(ed: var LineEditor, s: string) =
     ed.line.text = ed.line.text[0 ..< ed.line.position] & s &
                    ed.line.text[ed.line.position .. ^1]
     ed.line.position += s.len
-  else:
-    var p = ed.line.position
-    var i = 0
-    while i < s.len:
-      let rl = runeLenSafe(s, i)
-      if p < ed.line.text.len and ed.line.text[p] != '\n':
-        let oldRl = runeLenSafe(ed.line.text, p)
-        ed.line.text = ed.line.text[0 ..< p] & s[i ..< i + rl] &
-                       ed.line.text[p + oldRl .. ^1]
-      else:
-        ed.line.text = ed.line.text[0 ..< p] & s[i ..< i + rl] &
-                       ed.line.text[p .. ^1]
-      p += rl
-      i += rl
-    ed.line.position = p
+    callHook(ed.onMutate, ed)
+    fullRedraw(ed)
+    return
+  # Replace mode: overwrite runes within the current logical line.
+  var p = ed.line.position
+  var i = 0
+  while i < s.len:
+    let rl = runeLenSafe(s, i)
+    if p < ed.line.text.len and ed.line.text[p] != '\n':
+      let oldRl = runeLenSafe(ed.line.text, p)
+      ed.line.text = ed.line.text[0 ..< p] & s[i ..< i + rl] &
+                     ed.line.text[p + oldRl .. ^1]
+    else:
+      ed.line.text = ed.line.text[0 ..< p] & s[i ..< i + rl] &
+                     ed.line.text[p .. ^1]
+    p += rl
+    i += rl
+  ed.line.position = p
   callHook(ed.onMutate, ed)
   fullRedraw(ed)
 
