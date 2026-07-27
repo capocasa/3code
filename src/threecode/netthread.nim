@@ -8,9 +8,9 @@
 ## unchanged hook layer.
 ##
 ## Why no channels: the user explicitly forbade `Channel[T]`. We use a
-## plain `seq[NetDelta]` under a `Lock`, matching `bufprompt.nim`'s
-## pattern. The worker only ever appends; the main thread drains and
-## clears the consumed prefix under the same lock.
+## plain `seq[NetDelta]` under a `Lock`, matching the atomics + lock idiom
+## used across the codebase. The worker only ever appends; the main
+## thread drains and clears the consumed prefix under the same lock.
 ##
 ## ORC constraint (from threecode.nim:140): the worker must hold no
 ## closures and no refs that the main thread also mutates. The
