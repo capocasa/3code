@@ -177,10 +177,9 @@ after each):
       parameter continuation in the readLineWith keystroke dispatcher,
       which is already in early-exit `continue`-chain style.
 
-NEXT: step 12 (streamhttp: document shutdown-then-close ordering on
-close + verify 3code call sites; bounded resolver thread for first DNS
-resolve or record deferral; run streamhttp nimble test). Steps 13-15
-follow in order.
+NEXT: step 13 (httpclient migration decision for the four
+non-streaming GET users: api verify/fetchModels, compact, web,
+update). Steps 14-15 follow in order.
 
 Key gotchas learned:
 - `func` cannot read palette `var`s (BrightWhiteFg etc); string emitters
@@ -306,12 +305,33 @@ Key gotchas learned:
     the 1200/1700-line size is a symptom of one-editor/one-format,
     not of mixed concerns.
 
-12. [ ] **streamhttp documentation + DNS step.** In ~/p/streamhttp:
+12. [x] **streamhttp documentation + DNS step.** In ~/p/streamhttp:
     document the shutdown-then-close ordering requirement on `close` at
     the proc and in README. Add a bounded resolver thread for the
     blocking first DNS resolve (or record the decision to defer with
     rationale). In 3code, verify every `close` call site follows the
     ordering. Run streamhttp's nimble test.
+
+    DONE (streamhttp 95126b6): close doc comment now states the
+    ordering requirement (shutdown(fd) first so a concurrent recv
+    unwinds, then close; single-threaded owners need nothing); README
+    gained "Closing a connection" and "DNS" sections saying the same.
+    3code call-site audit: all StreamConn closes are safe —
+    closeCachedStreamConn is only called after shutdownCachedStreamFd
+    (Ctrl-C/quiet-watch) or from the owning network worker itself
+    (stale-conn retry, interrupt observed in the read loop), and
+    api.nim:1947's verify defer closes a conn only its own thread ever
+    touched. The `client.close()` sites in api/compact/web/update are
+    std/httpclient, not streamhttp (step 13 owns them).
+    DNS decision: DEFER the bounded resolver thread. streamhttp's own
+    comment already marks one blocking first-resolve-per-host as the
+    documented floor; a resolver thread + completion channel would be
+    the first new synchronization pattern in the transport (violates
+    guideline §6's "no new handshakes"), and the real-world exposure is
+    a hang during the FIRST connect to a host with black-holed DNS —
+    rare, and the user still has SIGINT-at-process-level (signalCleanup)
+    as the escape hatch. Recorded, not implemented.
+    streamhttp nimble test: 26 [OK], 0 [FAILED].
 
 13. [ ] **httpclient migration decision.** Decide: migrate the four
     non-streaming httpclient users (api verify/fetchModels, compact,
