@@ -151,6 +151,21 @@ proc readOptional*(editor: var minline.LineEditor, prompt: string,
 
 # ---------- Provider wizard ----------
 
+proc verifyAndReport(name, url, key: string; models: seq[string]): bool =
+  ## Verify the first model of the candidate provider and paint the
+  ## `verifying... ok/failed` status. Returns true when the provider
+  ## verified.
+  let prof = Profile(name: name & "." & models[0], url: url,
+                     key: key, model: models[0])
+  hint "  verifying... ", resetStyle
+  stdout.flushFile
+  let (ok, err) = verifyProfile(prof)
+  if ok:
+    stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
+    return true
+  errLn "failed: " & err
+  false
+
 proc printSupported() =
   var seen: seq[string]
   for combo in KnownGoodCombos:
@@ -211,17 +226,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
   if not experimentalEnabled and inferred != "" and
      curatedFor(inferred).len == 0:
     inferred = ""  # not in whitelist; fall through to manual entry
-  if inferred != "":
-    name = inferred
-    url = catalogUrl(inferred)
-    # duplicate name? abort the add — a key alone is fine, but two
-    # providers can't share a name (it's the config selector).
-    for pr in activeProviders:
-      if pr.name == name:
-        errLn &"already configured as {name}"
-        raise newException(minline.InputCancelled, "duplicate name")
-    hintLn "  detected: ", resetStyle, name, GreyFg, " -> ", url, Reset
-  else:
+  if inferred == "":
     while true:
       let (n, u) = promptNameAndUrl(editor)
       if n == "":
@@ -234,6 +239,16 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
       name = n
       url = u
       break
+  else:
+    name = inferred
+    url = catalogUrl(inferred)
+    # duplicate name? abort the add — a key alone is fine, but two
+    # providers can't share a name (it's the config selector).
+    for pr in activeProviders:
+      if pr.name == name:
+        errLn &"already configured as {name}"
+        raise newException(minline.InputCancelled, "duplicate name")
+    hintLn "  detected: ", resetStyle, name, GreyFg, " -> ", url, Reset
   if not experimentalEnabled:
     let curated = curatedFor(name)
     for m in curated:
@@ -265,17 +280,9 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
       elif unknown.len > 0:
         errLn "unknown known-good model: " & unknown.join(", ")
         prev = models.mapIt(shortModel(it)).join(" ")
+      elif verifyAndReport(name, url, key, models):
+        return ProviderRec(name: name, url: url, key: key, models: models)
       else:
-        let prov = ProviderRec(name: name, url: url, key: key, models: models)
-        let prof = Profile(name: name & "." & models[0], url: url,
-                           key: key, model: models[0])
-        hint "  verifying... ", resetStyle
-        stdout.flushFile
-        let (ok, err) = verifyProfile(prof)
-        if ok:
-          stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
-          return prov
-        errLn "failed: " & err
         prev = models.mapIt(shortModel(it)).join(" ")
       let choice = readOptional(editor,
         "  [enter]=retry models, k=re-enter key, c=cancel : ").toLowerAscii
@@ -328,16 +335,8 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
     if models.len == 0:
       errLn "need at least one model"
       continue
-    let prov = ProviderRec(name: name, url: url, key: key, models: models)
-    let prof = Profile(name: name & "." & models[0], url: url,
-                       key: key, model: models[0])
-    hint "  verifying... ", resetStyle
-    stdout.flushFile
-    let (ok, err) = verifyProfile(prof)
-    if ok:
-      stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
-      return prov
-    errLn "failed: " & err
+    if verifyAndReport(name, url, key, models):
+      return ProviderRec(name: name, url: url, key: key, models: models)
     prev = models.mapIt(shortModel(it)).join(" ")
     let choice = readOptional(editor,
       "  [enter]=retry models, k=re-enter key, c=cancel : ").toLowerAscii
@@ -398,15 +397,8 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     if models.len == 0:
       errLn "need at least one model"
       continue
-    let prof = Profile(name: name & "." & models[0], url: url,
-                       key: key, model: models[0])
-    hint "  verifying... ", resetStyle
-    stdout.flushFile
-    let (ok, err) = verifyProfile(prof)
-    if ok:
-      stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
+    if verifyAndReport(name, url, key, models):
       return ProviderRec(name: name, url: url, key: key, models: models)
-    errLn "failed: " & err
 
 proc bootstrapProvider*(editor: var minline.LineEditor): Profile =
   stdout.styledWriteLine fgMagenta,
