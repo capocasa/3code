@@ -1,0 +1,230 @@
+# Cybernetic Plan: Code Review Cleanup
+
+## Context
+
+Full code review of 3code (2026) found the codebase largely healthy but
+carrying unfinished migrations, rule violations, and test-design debt.
+The review findings are in `guidelines-updated.md` (read it first); this
+plan is the ordered work to bring the tree into compliance.
+
+Key facts a fresh context needs:
+
+- **Terminal ownership:** `src/threecode/engine.nim` is the sole layout
+  owner (walk-up model: `editorRowsAboveCursor + paintedFooterRows +
+  viewport/live rows`). `src/threecode/terminal.nim` is its byte layer.
+  `src/threecode/fatprompt/runtime.nim` still contains pre-engine paint
+  helpers that bypass this model (lines ~723-852, 1055-1096:
+  `paintBarPrompt`, `paintBarBelow`, `clearBarPrompt`, `repaintBarPrompt`,
+  `paintPromptOnly` x2, `paintInitialBar`, `paintInitialPrompt`,
+  `enterPromptInput`, `resetPromptInputAfterEmpty`). They are called from
+  runtime.nim itself and `threecode.nim`.
+- **History appends:** `transcript.nim` builds `TranscriptItem`s;
+  `engine.appendTranscript` / `runtime.commitTranscriptBytes` commit them.
+  Direct scrollback writers remain: `ui.nim` (wizard status lines,
+  `hintLn`/`errLn` from display.nim templates), `display.nim`
+  (`cmdResponse`, `cmdError`, `renderHelp`, replay emitters),
+  `turns.nim:648-650` (cwd-gone message), `threecode.nim:536-552,624`
+  (resume banner, replay bar, no-provider line).
+- **Wizard modal protocol:** `wizardReadLine` in runtime.nim routes modal
+  prompts through the input thread; `inputModalActive` freezes renderer
+  hooks. Wizard post-writes (`verifying... ok`, `added <name>`) are plain
+  stdout writes that are safe only because of this flag. Design target:
+  wizard emits status via transcript items after `wizardFinish`.
+- **Duplicated helpers:** `trimTranscriptTail` exists in both
+  `transcript.nim` and `turns.nim:17-19`. `resetSubmittedEditor` logic is
+  duplicated between `threecode.nim:600-611` (clearSubmittedCommandEditor)
+  and `runtime.resetEditorRowModel`.
+- **Test violations:** raw-byte assertions in
+  `tests/tty/test_tty_functional.nim:813-815` (color), ~1729-1790
+  (sync-payload `\x1b[J` scan), `tests/core/test_ticker_cleanup.nim:44-51`
+  (`\x1b[J` rfind). Also: several PTY tests in tests/tty use the
+  in-process stub which cannot reproduce blocking-network behavior (hall
+  of fame rule); audit which interrupt tests need mock_server latency.
+- **Test harness quirk:** test blocks not inside the `suite` block
+  silently never run (tests-notes.md). `tests/megatest.nim` is
+  uncommitted/unused; decide its fate.
+- **Dead code:** `bufprompt.nim` is tested but not wired into the REPL.
+- **streamhttp:** sound overall; remaining risks are blocking first DNS
+  resolve, and close-vs-concurrent-recv ordering being undocumented at
+  call sites. `httpclient` still imported by api.nim, compact.nim,
+  web.nim, update.nim for non-streaming GETs.
+- **Build/test:** `nimble test` runs testament over tests/*/; run a single
+  file with `nimble test tests/tty/test_tty_functional.nim` (testament `r`
+  per file). Build: `nimble build` puts the binary in place (project
+  convention says also `nimble install` after builds, but not after every
+  commit). Fixture-driven workflow per `.agents/development-guide.md`.
+
+## Current state
+
+Steps 1-6 DONE and committed (each commit is on main, tests 100% green
+after each):
+
+1. f9611cf dedup trimTranscriptTail (now in transcript.nim only) and
+   editor row reset (now `resetEditorRowModel` exported from runtime.nim,
+   used in threecode.nim 3 sites + runtime submit path).
+2. 024b9f0 deleted bufprompt.nim + tests/api/test_bufprompt.nim (input
+   thread's autosend queue is the live mechanism; bufprompt was unwired).
+   Also updated a stale comment in netthread.nim.
+3. d4221a7 cwd-gone (turns.nim) and no-provider (threecode.nim) now go
+   through the transcript path.
+4+5. 821a55f command emitters return strings. NEW string emitters in
+   display.nim: `hintS/hintLnS/noteLnS/errS/errLnS/cmdResponseS/cmdErrorS/
+   styleText`, `profileLinesS`, `renderHelpS`, `showToolS`, `listToolsS`,
+   `printSessionListS`, `skillLoadedBytes`, `renderAssistantContentBytes`,
+   `assistantBulletBytes`. config.nim: `experimentalGateText`. All `cmd*`
+   procs in ui.nim now return `string`. The handleCommandResult dispatch
+   accumulates `body` (templates `resp`/`respErr`), no captureStdoutWrites.
+   Modal path (ckModal) returns `wizardBody` in CommandResult; threecode.nim
+   cdModal branch commits it via commitTranscriptBytes after wizardFinish.
+   Usage-error case (`:provider add <extra>`) returns cdTranscriptResult.
+   profileLinesS: non-bold has NO leading pad, bold has 2-space pad (this
+   was a fixture-visible bug during the work; keep it).
+6. 91e3da5 captureStdoutWrites + writeTranscriptWithFatPrompt* templates
+   DELETED from runtime.nim. All former callers now build strings and call
+   commitTranscriptBytes(bytes, true) directly.
+
+7. e6fb386 legacy fatprompt paint helpers deleted from runtime.nim
+   (`paintBarPrompt`, `paintBarBelow`, `clearBarPrompt`,
+   `repaintBarPrompt`, `paintPromptOnly` x2, `paintInitialBar`,
+   `paintInitialPrompt`, `enterPromptInput`,
+   `resetPromptInputAfterEmpty` plus terminal.nim's
+   `enterPromptInput`/`resetPromptInputAfterEmpty` byte-layer procs).
+   Replacements: ui.nim empty-submit now repaints the current
+   `footerFrame(fatPromptState)` via `termengine.renderFooter` (ui.nim
+   imports `engine as termengine`); `paintInitialPrompt` keeps one live
+   exported entry — anchored path renders the frame through the engine,
+   pre-input-thread path keeps the raw `\n\x1b[?25l` +
+   `promptOnlyResetBytes` paint. `paintBarPrompt`/`clearBarPrompt` are
+   now module-private (writeRendered legacy branch still uses them);
+   `writeLiveSegment`'s liveBarAtCursor clear calls renderFooter
+   directly. NO fixture churn: the anchored renderFooter clears are
+   byte-identical to the old ClearBarPromptBytes when
+   paintedFooterRows==0 (already covered by engine.renderLiveContent).
+   Full suite 56 PASS 0 FAIL.
+
+NEXT: step 8 (fix measure-not-effect tests: grid-cell fg assertions
+instead of raw-byte scans). Steps 9-15 follow in order.
+
+Key gotchas learned:
+- `func` cannot read palette `var`s (BrightWhiteFg etc); string emitters
+  that use them must be `proc`.
+- `nimble build 2>&1 | grep -icE error` miscounts; use exit code of
+  nimble build itself.
+- `nimble test` full suite takes ~7 min (tty stress tests are slow);
+  run targeted files with `nimble test tests/tty/test_x.nim`.
+- testament `r` needs a .nim FILE not a dir: `nimble test tests/core/`
+  fails; use `nimble test` (all) or a specific file.
+- Pre-existing untracked files in working tree: leave alone.
+
+## Steps
+
+1. [x] **Delete duplicated helpers.** Remove `trimTranscriptTail` from
+   `turns.nim` (import from transcript.nim). Unify the two
+   reset-submitted-editor implementations into one exported helper in
+   `runtime.nim` used by both `threecode.nim` and the runtime submit path.
+   Build + run tests/core + tests/tty quick pass.
+
+2. [x] **Decide bufprompt.nim fate.** Either wire the buffered-input API
+   into the REPL (check git history for why it was unwired) or delete the
+   module and `tests/api/test_bufprompt.nim`. Record the decision here.
+
+3. [x] **Route cwd-gone and no-provider messages through the transcript
+   path.** `turns.nim:644-651` and `threecode.nim:622-626` write directly;
+   convert to harness items via `writeTranscriptWithFatPrompt` (the
+   `onTurnInterrupted` pattern). Note the cwd-gone path calls `quit()`
+   right after, so ordering matters: write first, then quit.
+
+4. [x] **Convert command results to controller-committed items.** In
+   `ui.nim`, `handleCommandResult` currently captures stdout from
+   `cmdProvider*`/`cmdResponse`-style emitters via `captureStdoutWrites`
+   (ui.nim:969). Refactor command emitters to return body strings
+   (view-style) instead of writing; keep `captureStdoutWrites` only for
+   the replay emitters in display.nim until step 6. `threecode.nim`'s
+   command branch then commits echo+body via one `commitTranscriptBytes`
+   call (it already does; only the producers change).
+
+5. [x] **Wizard status via transcript items.** Change the provider wizard
+   (`ui.nim` `promptNewProvider`/`promptEditProvider`/`bootstrapProvider`)
+   so status lines (`verifying... ok`, `added <name>`, model lists,
+   `saved to ...`) are returned in the `CommandResult` body (or appended
+   by the controller after `wizardFinish`) instead of written mid-modal.
+   This removes the load-bearing dependence on `inputModalActive` for
+   stdout correctness. Reproduce with
+   `tests/tty/test_provider_wizard_cancel.nim` and the add/edit PTY
+   tests; update fixtures deliberately.
+
+6. [x] **Retire captureStdoutWrites.** Convert remaining wrapped
+   formatters (transcript.nim:78, turns.nim:197,218, runtime.nim:909,
+   display.nim replay paths) to return strings. Delete the template and
+   its Windows fd-dup implementation. Update tests that depended on
+   capture behavior.
+
+7. [x] **Delete legacy fatprompt paint helpers.** Move all callers of
+   `paintBarPrompt`/`paintBarBelow`/`clearBarPrompt`/`repaintBarPrompt`/
+   `paintPromptOnly`/`paintInitialBar`/`paintInitialPrompt`/
+   `enterPromptInput`/`resetPromptInputAfterEmpty` onto
+   `FooterFrame`+`renderFooter` (or `commitTranscriptBytes`), then delete
+   the helpers from runtime.nim. This is the biggest step; expect fixture
+   churn in tests/tty. Follow the development-guide loop: describe each
+   visual change, reproduce in the shakedown, then edit fixtures
+   deliberately.
+
+8. [ ] **Fix measure-not-effect tests.** Replace raw-byte assertions:
+   - test_tty_functional.nim:813-815: assert grid cell fg colors
+     (ttty `cellFg`) for the 429 notice (colMagenta) and stub-model
+     (colBrightWhite).
+   - test_tty_functional.nim:~1729-1790 sync-payload scan: assert via
+     frame diffs that no frame shows the viewport blanked-then-redrawn
+     (grid-level invariant).
+   - test_ticker_cleanup.nim: assert final grid state has no ticker
+     remnant and caret in editor, drop the `\x1b[J` rfind.
+   If ttty's Grid lacks needed accessors, add them to ~/p/ttty (it has
+   `cellFg` already; verify color mapping).
+
+9. [ ] **Audit interrupt tests for stub-induced blindness.** List
+   tests/tty interrupt/cancel tests; for each, determine whether it can
+   still pass when the provider blocks mid-recv. Where the in-process
+   stub makes blocking impossible, port the test to `mock_server.nim`
+   with induced latency (see tests/stream tests for latency patterns).
+   Record per-test decisions here.
+
+10. [ ] **Reduce nesting in the worst offenders.** Apply early-exit
+    style to: `threecode.nim` main REPL loop (~20 levels at :542),
+    `engine.nim` renderFooter/appendTranscript, `api.nim` request-build
+    region (:152), `ui.nim` wizard loops, `session.nim` (:281),
+    `minline.nim` (:1538). One module per commit. No behavior change;
+    run full tests after each.
+
+11. [ ] **Nim idiom pass.** Convert side-effect-free procs to `func`
+    where trivially eligible (formatters in display.nim,
+    fatprompt/rendering.nim, util.nim). Split `session.nim` (1240 lines)
+    and `minline.nim` (1695) if natural seams exist; record the seam or
+    the reason not to split.
+
+12. [ ] **streamhttp documentation + DNS step.** In ~/p/streamhttp:
+    document the shutdown-then-close ordering requirement on `close` at
+    the proc and in README. Add a bounded resolver thread for the
+    blocking first DNS resolve (or record the decision to defer with
+    rationale). In 3code, verify every `close` call site follows the
+    ordering. Run streamhttp's nimble test.
+
+13. [ ] **httpclient migration decision.** Decide: migrate the four
+    non-streaming httpclient users (api verify/fetchModels, compact,
+    web, update) to streamhttp identity reads, or bless httpclient for
+    one-shot GETs and remove the guideline item. Record decision and
+    rationale here; implement if migrating.
+
+14. [ ] **megatest.nim + stray test files.** Decide fate of uncommitted
+    `tests/megatest.nim` (wire it into nimble test or delete). Remove or
+    restore `tests/tty/test_z_exitcode_probe` (present without .nim?).
+    Verify every test block lives inside a `suite` block (tests-notes.md
+    silent-skip trap): grep for `^test "` at column 0 in tests/tty.
+
+15. [ ] **Final sweep.** Grep audits: no `\x1b[` outside
+    terminal/engine/minline/rendering; no `stdout.write` in
+    controller modules except via display templates returning through the
+    transcript path; no remaining `captureStdoutWrites`; no duplicate
+    helper names across modules (`grep -rn "proc <name>"`). Update
+    `.agents/design.md` module map where reality moved (engine.nim is
+    missing from the map). Full `nimble test` green. Update
+    guidelines-updated.md if any rule proved wrong.
