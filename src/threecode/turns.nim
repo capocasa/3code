@@ -641,9 +641,8 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
     # to keep doing, so save what we have and exit cleanly. `quit`
     # runs the registered exit procs, which restore terminal state.
     try: saveSession(session, messages) except CatchableError: discard
-    stdout.write "\n\n"
-    stdout.styledWriteLine fgMagenta, "working directory gone: ", e.msg, resetStyle
-    stdout.write "\n"
+    writeTranscriptWithFatPrompt:
+      errLn "working directory gone: ", e.msg, resetStyle
     quit()
   except CatchableError as e:
     # Last-resort safety net: anything else that escapes `runTurns`

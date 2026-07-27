@@ -610,8 +610,8 @@ proc main() =
         releaseIdleSubmittedInput()
         continue
       if prof.name == "":
-        stdout.styledWriteLine fgMagenta,
-          "  no provider configured. use :provider add", resetStyle
+        writeTranscriptWithFatPrompt:
+          errLn "no provider configured. use :provider add", resetStyle
         releaseIdleSubmittedInput()
         continue
       messages.add %*{"role": "user", "content": buildUserMessage(messages, line)}
