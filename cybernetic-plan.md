@@ -102,8 +102,22 @@ after each):
    paintedFooterRows==0 (already covered by engine.renderLiveContent).
    Full suite 56 PASS 0 FAIL.
 
-NEXT: step 8 (fix measure-not-effect tests: grid-cell fg assertions
-instead of raw-byte scans). Steps 9-15 follow in order.
+8. d048c47 measure-not-effect tests fixed. test_tty_functional.nim:
+   429 notice + stub-model color contract now asserts `cellFg ==
+   colMagenta` (+ not bold via `hasAttr`) and `cellFg ==
+   colBrightWhite` on the ttty grid (imports `ttty/grid`; grid retains
+   scrolled-off rows). The bash-viewport flicker scan now works on
+   recorded frames: marker vanish-then-return on the same row with
+   neighbours unchanged = flicker; raw sync-payload ESC[J scan deleted.
+   test_ticker_cleanup.nim: replays the captured spinner session onto a
+   ttty grid seeded with one committed scrollback line; asserts the
+   committed line survives and no ticker remnant (`test`) remains;
+   dropped the `\x1b[J` rfind + cursor-up byte checks. ttty hasAttr
+   exists in ~/p/ttty grid.nim (SgrAttr distinct uint16).
+
+NEXT: step 9 (audit interrupt tests for stub-induced blindness; port
+blocking-mid-recv cases to mock_server with induced latency). Steps
+10-15 follow in order.
 
 Key gotchas learned:
 - `func` cannot read palette `var`s (BrightWhiteFg etc); string emitters
@@ -169,7 +183,7 @@ Key gotchas learned:
    visual change, reproduce in the shakedown, then edit fixtures
    deliberately.
 
-8. [ ] **Fix measure-not-effect tests.** Replace raw-byte assertions:
+8. [x] **Fix measure-not-effect tests.** Replace raw-byte assertions:
    - test_tty_functional.nim:813-815: assert grid cell fg colors
      (ttty `cellFg`) for the 429 notice (colMagenta) and stub-model
      (colBrightWhite).
