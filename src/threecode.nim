@@ -451,21 +451,21 @@ proc main() =
         discard  # already handled
       of ieNone:
         break
-    if queued.len > 0:
-      if prof.name == "":
-        editor.prefillText = queued
-        return false
-      messages.add %*{"role": "user",
-                      "content": buildUserMessage(messages, queued)}
-      refreshSystemPrompt(messages, prof)
-      editor.echoRows = queuedRows
-      commitUserPromptTranscript(queued)
-      resetEditorRowModel(addr editor)
-      editor.prefillText = ""
-      clearDraft(session)
-      discard runTurnsInteractive(prof, messages, session)
-      return handleBufferedAfterTurn()
-    false
+    if queued.len == 0:
+      return false
+    if prof.name == "":
+      editor.prefillText = queued
+      return false
+    messages.add %*{"role": "user",
+                    "content": buildUserMessage(messages, queued)}
+    refreshSystemPrompt(messages, prof)
+    editor.echoRows = queuedRows
+    commitUserPromptTranscript(queued)
+    resetEditorRowModel(addr editor)
+    editor.prefillText = ""
+    clearDraft(session)
+    discard runTurnsInteractive(prof, messages, session)
+    handleBufferedAfterTurn()
 
   # Run one turn + its post-turn cleanup under a single safety net.
   # `runTurnsInteractive` catches ApiError/OSError/IOError/CatchableError
@@ -525,11 +525,11 @@ proc main() =
     # we paint *just* the prompt — the bar stays hidden until the first
     # model response brings real values to put in it. From the first
     # `paintBarPrompt` onward the bar+prompt are always visible.
+    if restoredDraft.len > 0:
+      editor.prefillText = restoredDraft
     if resume:
       stdout.write "\n"
       stdout.styledWriteLine styleDim, &"● resumed {sessionIdFromPath(session.savePath)}", resetStyle
-      if restoredDraft.len > 0:
-        editor.prefillText = restoredDraft
       let window = contextWindowFor(prof)
       let lastUsage = replaySessionTail(messages, session.toolLog,
                                         window, prof.family)
@@ -548,14 +548,9 @@ proc main() =
         emitFatPromptEvent setPendingHintEvent(lastUsage, window, -1)
       else:
         paintInitialPrompt(prof)
-      if prompt != "":
-        if runInitialPrompt(prompt): return
     else:
-      if restoredDraft.len > 0:
-        editor.prefillText = restoredDraft
       paintInitialPrompt(prof)
-      if prompt != "":
-        if runInitialPrompt(prompt): return
+    if prompt != "" and runInitialPrompt(prompt): return
     # Oneshot: a prompt given on the command line runs once and exits. Only
     # -i/--interactive keeps the REPL open afterward (and no prompt at all
     # means a fresh interactive session). The idle prompt painted by endTurn
