@@ -1682,11 +1682,12 @@ proc inputThreadProc() {.thread.} =
             continue
         -1
       let hasPendingInput: minline.HasPendingInputProc = proc(): bool =
-        # Peek-aware: only report a pending tail when the next buffered byte
-        # is a valid escape-sequence continuation. A printable byte (the
-        # user's next keystroke right after pressing Escape) stays in the
-        # buffer for normal processing, so ESC + typing cancels instead of
-        # swallowing the first typed character.
+        # Peek-aware: report a pending tail when the next buffered byte is
+        # a valid escape-sequence continuation. Printable letters count as
+        # tails (Alt-chord halves, e.g. ESC f = Alt+F); a bare Escape has
+        # no tail within the EscapeTailPollMs window, so it cancels.
+        # `handleEscape` dispatches bound Alt chords and cancels+putbacks
+        # unbound ones, so ESC-then-typing still interrupts cleanly.
         if pendingInput.len == 0:
           discard fillPending(minline.EscapeTailPollMs.cint)
         pendingInput.len > 0 and minline.isEscapeTailByte(pendingInput[0])

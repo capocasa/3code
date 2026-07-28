@@ -207,6 +207,7 @@ type
     canceled*: bool
     eof*: bool
     hidechars*: bool
+    escPutback*: int           ## byte stashed by `handleEscape` when an Alt chord's letter has no KEYMAP binding; drained by the readLine loop so it prints as normal input after the cancel.
     wizardMode*: bool         ## true while a modal provider wizard owns the editor; alters ctrl+c/ctrl+d/esc
     complPrefix*: string       ## original prefix before first completion
     complMatches*: seq[string] ## current match list
@@ -272,15 +273,19 @@ template callHook*(hook, ed: untyped) =
 
 proc isEscapeTailByte*(b: int): bool =
   ## True when `b` can validly be the second byte of a terminal escape
-  ## sequence (the byte immediately following a leading ESC). Printable
-  ## letters are never valid continuations, so an ESC immediately
-  ## followed by the user's next typed character is correctly classified
-  ## as a bare Escape rather than swallowing that character as a tail.
+  ## sequence (the byte immediately following a leading ESC). This
+  ## includes Alt+<key> chords, which terminals send as ``ESC <byte>``
+  ## bursts: a printable letter is a valid tail because it is the letter
+  ## half of an Alt chord (e.g. Alt+F = ``ESC f``). A bare Escape (user
+  ## pressed Escape, then started typing) has no tail byte within the
+  ## ``EscapeTailPollMs`` poll window, so it cancels before we ever peek.
   ##
   ## CSI (ESC [), SS3 (ESC O), Alt+Enter (ESC CR), and the digit/~
-  ## continuations used by xterm/kitty function keys are the real tails.
-  b == 91 or b == 79 or b == 13 or (b >= 48 and b <= 57) or b == 126 or
-    b == 92 or b == 93 or b == 94 or b == 95
+  ## continuations used by xterm/kitty function keys are the other tails.
+  ## ``handleEscape`` decides what to do with an Alt chord whose letter
+  ## has no KEYMAP binding: it cancels like a bare Escape and puts the
+  ## letter back so it is not swallowed.
+  b == 13 or b == 8 or (b >= 32 and b <= 126)
 
 # ---------- Pure helpers (testable without IO) ----------
 
@@ -777,6 +782,29 @@ proc deleteWordLeft*(ed: var LineEditor) =
   callHook(ed.onMutate, ed)
   fullRedraw(ed)
 
+proc deleteToBoundaryLeft*(ed: var LineEditor) =
+  ## Delete back to the most recent non-alphanumeric boundary. Like
+  ## readline's ``backward-kill-word``: first skip any non-word chars
+  ## (``/``, ``.``, etc.) immediately to the left, then delete the
+  ## alphanumeric run. This peels one path segment per press
+  ## (``/usr/local/bin`` -> ``/usr/local/`` -> ``/usr/``) instead of
+  ## stalling when the cursor lands right after a delimiter.
+  var p = ed.line.position
+  let stop = ed.line.position
+  while p > 0:
+    let c = ed.line.text[p - 1]
+    if c.isAlphanumeric or c == '_': break
+    dec p
+  while p > 0:
+    let c = ed.line.text[p - 1]
+    if not (c.isAlphanumeric or c == '_'): break
+    dec p
+  if p == stop: return
+  ed.line.text = ed.line.text[0 ..< p] & ed.line.text[stop .. ^1]
+  ed.line.position = p
+  callHook(ed.onMutate, ed)
+  fullRedraw(ed)
+
 proc visualUp*(ed: var LineEditor) =
   ## Move up by one visual row, preserving the visual column as best as
   ## possible. If already on the top visual row of the buffer, fall back
@@ -975,6 +1003,9 @@ KEYMAP["ctrl+e"]    = proc(ed: var LineEditor) = ed.goToEnd()
 KEYMAP["home"]      = proc(ed: var LineEditor) = ed.goToStart()
 KEYMAP["end"]       = proc(ed: var LineEditor) = ed.goToEnd()
 KEYMAP["ctrl+w"]    = proc(ed: var LineEditor) = ed.deleteWordLeft()
+KEYMAP["alt+b"]     = proc(ed: var LineEditor) = ed.wordLeft()
+KEYMAP["alt+f"]     = proc(ed: var LineEditor) = ed.wordRight()
+KEYMAP["alt+h"]     = proc(ed: var LineEditor) = ed.deleteToBoundaryLeft()
 KEYMAP["ctrl+c"]    = proc(ed: var LineEditor) =
   ed.canceled = true
   raise newException(InputCancelled, "")
@@ -1081,6 +1112,9 @@ proc initKeyTables*() =
   KEYMAP["home"]      = proc(ed: var LineEditor) = ed.goToStart()
   KEYMAP["end"]       = proc(ed: var LineEditor) = ed.goToEnd()
   KEYMAP["ctrl+w"]    = proc(ed: var LineEditor) = ed.deleteWordLeft()
+  KEYMAP["alt+b"]     = proc(ed: var LineEditor) = ed.wordLeft()
+  KEYMAP["alt+f"]     = proc(ed: var LineEditor) = ed.wordRight()
+  KEYMAP["alt+h"]     = proc(ed: var LineEditor) = ed.deleteToBoundaryLeft()
   KEYMAP["ctrl+c"]    = proc(ed: var LineEditor) =
     if ed.wizardMode:
       # In the provider wizard, Ctrl-C clears the line if text is
@@ -1205,10 +1239,10 @@ proc stdinHasByteNow*(): bool =
 proc terminalHasPendingInput*(): bool =
   ## Return whether stdin has a pending byte that could be the tail of an
   ## ESC-prefixed escape sequence. Polls briefly for burst-delivered
-  ## sequences, then peeks at the actual byte: a printable character is
-  ## never a valid escape continuation, so it is stashed for `getchr` to
-  ## return normally and this reports no tail (bare Escape). Only genuine
-  ## continuation bytes (CSI `[`, SS3 `O`, etc.) report a tail.
+  ## sequences (Alt chords, CSI/SS3 function keys), then peeks at the
+  ## byte. A bare Escape (no byte within the poll window) reports no
+  ## tail so `handleEscape` cancels; any byte that arrives — including
+  ## printable Alt-chord letters — is stashed and reported as a tail.
   when defined(posix):
     if isatty(0.cint) != 0:
       var pfd: TPollfd
@@ -1218,11 +1252,8 @@ proc terminalHasPendingInput*(): bool =
       if r > 0 and (pfd.revents and POLLIN) != 0:
         var ch: char
         if posix.read(0.cint, addr ch, 1) == 1:
-          if isEscapeTailByte(ch.ord.int):
-            termPeeked = ch.ord.int
-            return true
           termPeeked = ch.ord.int
-          return false
+          return isEscapeTailByte(ch.ord.int)
       return false
   true
 
@@ -1242,6 +1273,7 @@ proc initEditor*(mode = mdInsert, historySize = 256, historyFile: string = ""): 
   result.history = historyInit(historySize, historyFile)
   result.width = 80
   result.contPrompt = "  "
+  result.escPutback = -1
 
 proc resetForRead(ed: var LineEditor, prompt: string, hidechars: bool) =
   if ed.prefillText.len > 0:
@@ -1309,6 +1341,30 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
   if c1 != 27: return false
   if c2 == 13:
     ed.insertNewline()
+    return false
+  # Alt+<key> two-byte sequences: ESC followed by the key's byte.
+  # A real Alt chord arrives as a burst so `hasPendingEscapeTail` saw
+  # the letter as a tail and routed us here; a bare Escape (human-paced)
+  # already canceled at the top of this proc.
+  const StructuralTail = {91, 79, 48..57, 126, 92, 93, 94, 95}
+    ## Second bytes that introduce a longer structural escape sequence
+    ## (CSI ``[``, SS3 ``O``, xterm/kitty digit-``~`` tails, etc.). These
+    ## have explicit handlers below and must NOT be treated as Alt-chord
+    ## letters even though they fall in the printable range.
+  var altName: string
+  if c2 == 8: altName = "alt+h"        # Ctrl+Alt+H = ESC + backspace byte
+  elif c2 in 32..126 and c2 notin StructuralTail:
+    altName = "alt+" & c2.char.toLowerAscii
+  if altName.len > 0 and KEYMAP.hasKey(altName):
+    KEYMAP[altName](ed)
+    return false
+  # ESC + printable letter with no KEYMAP binding: treat the ESC as a bare
+  # cancel and put the letter back so the readLine loop prints it instead
+  # of swallowing it. Structural tails (CSI, SS3, digit/~) fall through to
+  # their own handlers below.
+  if altName.len > 0:
+    ed.escPutback = c2
+    KEYMAP["ctrl+c"](ed)
     return false
   if c2 == 91:  # CSI
     let c3 = escCh(25)
@@ -1460,7 +1516,10 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
       ed.write "\x1b[?25h"
   while true:
     var suffixJustCleared = false
-    if putback >= 0:
+    if ed.escPutback >= 0:
+      c1 = ed.escPutback
+      ed.escPutback = -1
+    elif putback >= 0:
       c1 = putback
       putback = -1
     else:

@@ -192,6 +192,12 @@ suite "interrupt during pre-stream freeze regression":
     tty.drain(200)
     # ESC then immediately type the follow-up, before the turn ends.
     tty.send "\x1b"
+    # Wait for the interrupt to land before typing the follow-up. ESC is
+    # the prefix of Alt chords (Alt+F, Alt+B, ...) which arrive as a burst
+    # within the escape-tail poll; a human pressing ESC to interrupt then
+    # typing has a gap well past it. Synchronizing on the interrupt notice
+    # (rather than a fixed delay) keeps the race realistic and CI-stable.
+    tty.expectInHistory "interrupted by user"
     tty.send "hello model"
     tty.send "\n"
     # Whatever path it took (queued-then-sent, or sent after interrupt), the
