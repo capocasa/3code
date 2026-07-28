@@ -40,21 +40,33 @@ Key locations:
 
 ## Current state
 
-- A0 DONE (commit 069ff11): production reply filter in minline
+- A0 DONE (3code 069ff11): production reply filter in minline
   (consumeTerminalReplyImpl template, shape-validated CSI [?] nums R|c so
   CSI 1;5R modified arrows pass through); wired into readLine getCh +
   terminalHasPendingInput. terminaldbg slimmed to replyCaptureHook.
-  minline_testutils Driver.run mirrors the filter (peek ttty Input queue,
-  drop shaped replies). 3 new tests in test_minline (suite "terminal reply
-  filtering"). All 18 core + 21 tty suites green.
-- Note: filter is ASCII-burst based; a reply arriving byte-by-byte with
-  gaps (poll misses mid-sequence) still leaks — accepted residual,
-  terminals answer in one burst.
-- Old code-review plan from main preserved at
-  /tmp/old-cybernetic-plan-code-review.md (session-local!).
-- Pre-existing: test_cli_args needs `3code` binary in cwd; skipped in
-  suite runs, unrelated.
-- NEXT: B1 ttty pairing validator.
+  minline_testutils Driver.run mirrors the filter. 3 new test_minline
+  tests. Residual: byte-by-byte reply arrival with gaps still leaks
+  (accepted; terminals answer in one burst).
+- B1 DONE (ttty fefd15b): grid validates DEC 2026 pairing; violations in
+  g.violations + checkStreamClosed. 5 unit tests.
+- B2+B3 DONE (ttty e55be8b): 8 edge-case conformance streams; exposed and
+  fixed 3 xterm divergences (ED clears pending-wrap + overwrite last
+  cell; ED0 blanks not truncates; deferred-wrap re-arm). 14/14 conform.
+- B4 DONE: ttty 0.5.0 tagged/pushed/nimble-installed (0.3.0 and 0.5.0
+  coexist; nimble path returns 0.5.0 first — use `head -1` not `tail -1`).
+  3code requires ttty >= 0.5.0 (ca79b29).
+- C1 DONE (3code ca79b29): tty_expect.close asserts grid violations==0.
+  Gate red-checked (nested stream flags 2 violations); all 21 tty tests
+  green with gate armed.
+- C2 PARTIAL: user's xterm symptom NOT reproduced by any instrument. The
+  fixed bugs were 2026-specific (xterm ignores 2026) so an xterm sighting
+  is likely a DIFFERENT bug. Capture path: tty_expect `s.raw` holds the
+  exact stream; replay via ttty compareToOracle. NEEDS USER: re-check
+  with build/3code_real (has 97b9dba + A0 filter), and if reproducible
+  on xterm describe exact trigger.
+- Old code-review plan preserved at /tmp/old-cybernetic-plan-code-review.md.
+- test_cli_args needs `3code` binary in cwd; pre-existing, skipped.
+- NEXT: C3 handover, C4 final review.
 
 ## Steps
 
@@ -76,24 +88,24 @@ Key locations:
 
 ### B. ttty
 
-- [ ] B1. Sync/pairing validator in grid.nim `feed`: generic paired-mode
+- [x] B1. Sync/pairing validator in grid.nim `feed`: generic paired-mode
   tracker (2026 now; table-driven for 2004/1049/25 later). Records
   violations: nested open, end-without-open, unclosed-at-EOF. Surfaced as
   `g.violations: seq[string]` (no behavior change to the grid itself).
   Unit test in ttty: crafted nested/unmatched 2026 streams produce
   violations; well-formed streams produce none.
-- [ ] B2. xterm edge-case corpus: synthetic streams exercising
+- [x] B2. xterm edge-case corpus: synthetic streams exercising
   wrap-at-last-column (print to col N-1, then CR/LF/ED variants),
   wide-char at right edge (CJK/emoji straddling), scroll-region bottom
   LF. Compare ttty vs xterm via compareToOracle; record divergences.
-- [ ] B3. Fix ttty grid divergences found by B2 (expected: pending-wrap
+- [x] B3. Fix ttty grid divergences found by B2 (expected: pending-wrap
   timing, wide-char edge). Each fix red→green against its corpus stream.
-- [ ] B4. Release ttty 0.5.0 (tag, push, nimble install) so 3code picks
+- [x] B4. Release ttty 0.5.0 (tag, push, nimble install) so 3code picks
   it up.
 
 ### C. 3code wiring + closeout
 
-- [ ] C1. Wire validator into tty_expect/ttty usage in 3code tests:
+- [x] C1. Wire validator into tty_expect/ttty usage in 3code tests:
   after each tty test's frames, assert `violations.len == 0`. Catches
   malformed 2026 by proxy in every existing tty test.
 - [ ] C2. Run full core+tty suites on xterm oracle path; if the user's
