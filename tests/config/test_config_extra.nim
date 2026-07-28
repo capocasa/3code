@@ -65,17 +65,17 @@ suite "config: parseConfigFile round-trip":
     let raw = readFile(tmp)
     check raw.find("[search]") < 0
 
-  test "autoresume off persists and round-trips":
-    autoresumeEnabled = false
+  test "patient_retry off persists and round-trips":
+    patientRetryEnabled = false
     writeConfigFile(tmp, "test.model-a", @[])
     let raw = readFile(tmp)
-    check raw.find("autoresume = \"off\"") >= 0
+    check raw.find("patient_retry = \"off\"") >= 0
     discard parseConfigFile(tmp)
-    check autoresumeEnabled == false
+    check patientRetryEnabled == false
     # default-on state is omitted from the config (clean config invariant)
-    autoresumeEnabled = true
+    patientRetryEnabled = true
     writeConfigFile(tmp, "test.model-a", @[])
-    check readFile(tmp).find("autoresume") < 0
+    check readFile(tmp).find("patient_retry") < 0
 
   test "write then read preserves reasoning":
     let providers = @[

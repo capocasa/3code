@@ -1693,15 +1693,15 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
   # cause a flicker between callModel iterations within a turn.
   defer:
     hookAfterCall()
-  # `autoresumeEnabled` widens the probe window from a short blip-recovery
-  # (~1min, 7 attempts) to a long patient hold (~36h, 64 attempts) so an
-  # agentic session rides out usage-window limits and network dropouts
-  # without surfacing to the prompt. One probe count, not a separate mode:
+  # `patientRetryEnabled` widens the probe window from a short blip-recovery
+  # (~1min, 7 attempts) to a long patient hold (~36h, 64 attempts) so a
+  # session rides out usage-window limits and network dropouts without
+  # surfacing to the prompt. One probe count, not a separate mode:
   # the backoff curve below is the same either way, only its length changes.
   const
-    ShortAttempts = 7      # autoresume off: blip recovery, ~1min total
-    LongAttempts = 64      # autoresume on: ~36h hold for the train ride
-  let MaxAttempts = if autoresumeEnabled: LongAttempts else: ShortAttempts
+    ShortAttempts = 7      # patient retry off: blip recovery, ~1min total
+    LongAttempts = 64      # patient retry on: ~36h hold for the train ride
+  let MaxAttempts = if patientRetryEnabled: LongAttempts else: ShortAttempts
   const networkSync {.booldefine.} = false
     ## Fallback switch for the streaming transport. Default (false) runs
     ## the blocking recv loop on a worker thread so the UI stays

@@ -91,10 +91,10 @@ suite "config validation: schema (in-process)":
     let m = validateConfig(P, entries)
     check "bad value 'sometimes' for 'sandbox'" in m
 
-  test "bad boolean value for autoresume is reported":
-    let entries = @[("settings", "autoresume", "maybe", 3)]
+  test "bad boolean value for patient_retry is reported":
+    let entries = @[("settings", "patient_retry", "maybe", 3)]
     let m = validateConfig(P, entries)
-    check "bad value 'maybe' for 'autoresume'" in m
+    check "bad value 'maybe' for 'patient_retry'" in m
 
   test "permitted boolean values are accepted":
     for b in ["on", "off", "true", "false", "yes", "no", "1", "0",
@@ -128,10 +128,10 @@ suite "config validation: schema (in-process)":
     let entries = @[("settings", "sandbox_enabled", "off", 3)]
     check validateConfig(P, entries) == ""
 
-  test "autoresume and autoresume_enabled are permitted settings keys":
+  test "patient_retry and patient-retry are permitted settings keys":
     let entries = @[
-      ("settings", "autoresume", "off", 3),
-      ("settings", "autoresume_enabled", "on", 4)
+      ("settings", "patient_retry", "off", 3),
+      ("settings", "patient-retry", "on", 4)
     ]
     check validateConfig(P, entries) == ""
 

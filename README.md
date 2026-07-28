@@ -47,6 +47,10 @@ Requires [Nim](https://nim-lang.org) >= 2.0 and `curl` on `PATH`.
 
 ## Changelog
 
+**unreleased** - patient retry
+
+- **Patient retry.** Retryable API failures (429 usage limits, 5xx, network errors) now keep retrying on one shared exponential backoff capped at 2048s, for up to ~64 attempts (~36h), instead of surfacing after a short probe. A long-running session rides out a provider's rolling usage window or a network dropout (the train ride) without dropping back to the prompt. The underlying error message and attempt counter keep scrolling by as transcript lines so you can see what is being waited out. `:retry on|off` toggles it (default on; `off` keeps the ~1-minute initial ramp-up so transient blips still self-heal); persisted in `[settings]` as `patient_retry`. Ctrl-C cancels a running hold at any time.
+
 **0.6.0** - filesystem sandbox backed by nimbox, folded into the `box` subcommand
 
 - **Filesystem sandbox.** Every tool call is now confined to a one-line-per-rule policy (deny, read-only, writable). The effective policy is a cascade: a system file at `~/.config/3code/sandbox` then a repo file at `.3code/sandbox`, each filling in for the one below with a safe built-in default (root denied, working directory writable) when absent, so the sandbox is always on without 3code ever writing a file into your project on first run. Bash commands get full kernel enforcement via `3code box`, the nimbox sandbox (Landlock on Linux, Seatbelt on macOS, a restricted-token ACL scheme on Windows) compiled in and re-execed in-process, so a write outside the allowed paths fails with `EACCES` at the syscall level. The read/write/patch tools check paths against the same policy in-process. On a host where the kernel backend can't restrict (a kernel without Landlock, a seccomp-filtered CI runner), bash degrades gracefully to unconfined while the in-process checks stay in force. `:sandbox show|on|off|allow|readonly|deny` edit and reload the policy live (`off` disables enforcement entirely); the agent never writes the file itself except to seed it on your first explicit `:sandbox` edit.

@@ -178,6 +178,47 @@ During streaming, the same line updates live so you can watch the numbers tick
 up in real time. If a glyph is absent it just means the provider did not stream
 that information.
 
+## Patient retry
+
+Many providers enforce a rolling usage window, often five hours, after which
+they return `429` until the window slides forward. Hitting one mid-task used to
+mean dropping back to the prompt and re-submitting by hand once the window
+reset. Patient retry removes that.
+
+When patient retry is on (the default), any retryable failure, a `429` usage
+limit, a `5xx`, or a network dropout, keeps retrying instead of surfacing. The
+backoff is one shared exponential curve (power-of-2 off the category's own
+level) capped at 2048 seconds, so the loop re-probes roughly every 34 minutes
+at worst rather than napping for hours. After the initial ramp-up (~1 minute)
+the attempt counter and the real error message keep scrolling by as transcript
+lines, e.g.:
+
+```
+Usage limit reached for the past 5 hours. (code 429). retry 42/64 in 2048s
+```
+
+So you can glance over, see the underlying reason, and know the session is
+holding. A network dropout on a train ride recovers the moment the cell comes
+back, without you at the keyboard.
+
+Turn it off if you would rather failures surface quickly:
+
+```
+:retry off
+```
+
+With it off, the initial ramp-up still runs (~1 minute, 7 attempts) before the
+error reaches the prompt, so transient blips still self-heal. The toggle is
+persisted in `[settings]` as `patient_retry` (written only when off, since on
+is the default):
+
+```
+[settings]
+patient_retry = "off"
+```
+
+You can cancel a running patient-retry hold at any time with Ctrl-C.
+
 ## Thinking
 
 When a model reasons before replying, its thinking is shown as a one-line

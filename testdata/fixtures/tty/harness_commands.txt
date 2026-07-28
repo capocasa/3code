@@ -1,7 +1,7 @@
-===== 437 =====
+===== 267 =====
 
   ╭─╮
-   ─┤  3code v0.6.0-5hour-d21ef8f2-unstaged   the economical coding agent
+   ─┤  3code v0.6.0-5hour-ac779642-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,215 +10,215 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ :help
+===== 230 =====
+  :provider         list configured providers (current marked with *)
+  :provider X       switch to provider X (model defaults to first in its list)
+  :provider add     add a new provider (interactive, verified)
+  :provider edit X  edit provider X (url, key, models)
+  :provider rm X    remove provider X
+  :reasoning        list reasoning levels for current model (* marks active)
+  :reasoning X      switch reasoning level (low / medium / high)
+  :streaming        show streaming mode (on = live output, off = request/response)
+  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
+  :notify           show notify mode (on = desktop notification when a turn ends)
+  :notify on|off    toggle turn-end desktop notification
+  :retry            show patient-retry mode (on = ~36h hold for outages/limits)
+  :retry on|off     toggle patient retry of 429/5xx/network errors
+  :prompt           show the active system prompt
+  :show [N]         show full output of tool call N (default: last)
+  :log              list all tool calls this session
+  :sessions         list recent sessions saved in this directory (max 20)
+  :summarize        collapse old turns into a synthetic recap (meta model call)
+  :version          show the running 3code version
+  :sandbox          show the active filesystem sandbox rules
+  :sandbox show     (same)
+  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
+  :sandbox allow P  add a writable rule for path P
+  :sandbox readonly P  add a read-only rule for path P
+  :sandbox deny P   add a deny rule for path P
+  :q :quit          exit (also Ctrl-D)
+
+input:
+  single-line   just type and press Enter
+  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  arrows        full cursor navigation across lines and visual wraps
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+❯
+===== 124 =====
+  :provider         list configured providers (current marked with *)
+  :provider X       switch to provider X (model defaults to first in its list)
+  :provider add     add a new provider (interactive, verified)
+  :provider edit X  edit provider X (url, key, models)
+  :provider rm X    remove provider X
+  :reasoning        list reasoning levels for current model (* marks active)
+  :reasoning X      switch reasoning level (low / medium / high)
+  :streaming        show streaming mode (on = live output, off = request/response)
+  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
+  :notify           show notify mode (on = desktop notification when a turn ends)
+  :notify on|off    toggle turn-end desktop notification
+  :retry            show patient-retry mode (on = ~36h hold for outages/limits)
+  :retry on|off     toggle patient retry of 429/5xx/network errors
+  :prompt           show the active system prompt
+  :show [N]         show full output of tool call N (default: last)
+  :log              list all tool calls this session
+  :sessions         list recent sessions saved in this directory (max 20)
+  :summarize        collapse old turns into a synthetic recap (meta model call)
+  :version          show the running 3code version
+  :sandbox          show the active filesystem sandbox rules
+  :sandbox show     (same)
+  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
+  :sandbox allow P  add a writable rule for path P
+  :sandbox readonly P  add a read-only rule for path P
+  :sandbox deny P   add a deny rule for path P
+  :q :quit          exit (also Ctrl-D)
+
+input:
+  single-line   just type and press Enter
+  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  arrows        full cursor navigation across lines and visual wraps
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+❯ :provider
+===== 521 =====
+  :reasoning        list reasoning levels for current model (* marks active)
+  :reasoning X      switch reasoning level (low / medium / high)
+  :streaming        show streaming mode (on = live output, off = request/response)
+  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
+  :notify           show notify mode (on = desktop notification when a turn ends)
+  :notify on|off    toggle turn-end desktop notification
+  :retry            show patient-retry mode (on = ~36h hold for outages/limits)
+  :retry on|off     toggle patient retry of 429/5xx/network errors
+  :prompt           show the active system prompt
+  :show [N]         show full output of tool call N (default: last)
+  :log              list all tool calls this session
+  :sessions         list recent sessions saved in this directory (max 20)
+  :summarize        collapse old turns into a synthetic recap (meta model call)
+  :version          show the running 3code version
+  :sandbox          show the active filesystem sandbox rules
+  :sandbox show     (same)
+  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
+  :sandbox allow P  add a writable rule for path P
+  :sandbox readonly P  add a read-only rule for path P
+  :sandbox deny P   add a deny rule for path P
+  :q :quit          exit (also Ctrl-D)
+
+input:
+  single-line   just type and press Enter
+  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  arrows        full cursor navigation across lines and visual wraps
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+stub  [stub-model]
+alt
+❯
+===== 868 =====
+  :reasoning        list reasoning levels for current model (* marks active)
+  :reasoning X      switch reasoning level (low / medium / high)
+  :streaming        show streaming mode (on = live output, off = request/response)
+  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
+  :notify           show notify mode (on = desktop notification when a turn ends)
+  :notify on|off    toggle turn-end desktop notification
+  :retry            show patient-retry mode (on = ~36h hold for outages/limits)
+  :retry on|off     toggle patient retry of 429/5xx/network errors
+  :prompt           show the active system prompt
+  :show [N]         show full output of tool call N (default: last)
+  :log              list all tool calls this session
+  :sessions         list recent sessions saved in this directory (max 20)
+  :summarize        collapse old turns into a synthetic recap (meta model call)
+  :version          show the running 3code version
+  :sandbox          show the active filesystem sandbox rules
+  :sandbox show     (same)
+  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
+  :sandbox allow P  add a writable rule for path P
+  :sandbox readonly P  add a read-only rule for path P
+  :sandbox deny P   add a deny rule for path P
+  :q :quit          exit (also Ctrl-D)
+
+input:
+  single-line   just type and press Enter
+  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  arrows        full cursor navigation across lines and visual wraps
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+stub  [stub-model]
+alt
+❯ :model
+===== 944 =====
+  :notify on|off    toggle turn-end desktop notification
+  :retry            show patient-retry mode (on = ~36h hold for outages/limits)
+  :retry on|off     toggle patient retry of 429/5xx/network errors
+  :prompt           show the active system prompt
+  :show [N]         show full output of tool call N (default: last)
+  :log              list all tool calls this session
+  :sessions         list recent sessions saved in this directory (max 20)
+  :summarize        collapse old turns into a synthetic recap (meta model call)
+  :version          show the running 3code version
+  :sandbox          show the active filesystem sandbox rules
+  :sandbox show     (same)
+  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
+  :sandbox allow P  add a writable rule for path P
+  :sandbox readonly P  add a read-only rule for path P
+  :sandbox deny P   add a deny rule for path P
+  :q :quit          exit (also Ctrl-D)
+
+input:
+  single-line   just type and press Enter
+  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
+  arrows        full cursor navigation across lines and visual wraps
+  ctrl+arrow    word-by-word jumps (also crosses logical lines)
+  home / end    jump to start / end of the current logical line
+  ctrl+u        clear the buffer
+  ctrl+w        delete the word before the cursor
+  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
+  tab           complete :commands, provider names, model names
+  ctrl+l        clear the screen
+  @path         inline file contents (e.g. @src/foo.nim)
+
+❯ :provider
+
+stub  [stub-model]
+alt
+
+❯ :model
+
+stub-model
+stub-large
+❯
 ===== 982 =====
-  :provider         list configured providers (current marked with *)
-  :provider X       switch to provider X (model defaults to first in its list)
-  :provider add     add a new provider (interactive, verified)
-  :provider edit X  edit provider X (url, key, models)
-  :provider rm X    remove provider X
-  :reasoning        list reasoning levels for current model (* marks active)
-  :reasoning X      switch reasoning level (low / medium / high)
-  :streaming        show streaming mode (on = live output, off = request/response)
-  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
-  :notify           show notify mode (on = desktop notification when a turn ends)
   :notify on|off    toggle turn-end desktop notification
-  :autoresume       show patient-retry mode (on = ~36h hold for outages/limits)
-  :autoresume on|off toggle patient retry of 429/5xx/network errors
-  :prompt           show the active system prompt
-  :show [N]         show full output of tool call N (default: last)
-  :log              list all tool calls this session
-  :sessions         list recent sessions saved in this directory (max 20)
-  :summarize        collapse old turns into a synthetic recap (meta model call)
-  :version          show the running 3code version
-  :sandbox          show the active filesystem sandbox rules
-  :sandbox show     (same)
-  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow P  add a writable rule for path P
-  :sandbox readonly P  add a read-only rule for path P
-  :sandbox deny P   add a deny rule for path P
-  :q :quit          exit (also Ctrl-D)
-
-input:
-  single-line   just type and press Enter
-  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
-  arrows        full cursor navigation across lines and visual wraps
-  ctrl+arrow    word-by-word jumps (also crosses logical lines)
-  home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
-  ctrl+w        delete the word before the cursor
-  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
-  tab           complete :commands, provider names, model names
-  ctrl+l        clear the screen
-  @path         inline file contents (e.g. @src/foo.nim)
-❯
-===== 709 =====
-  :provider         list configured providers (current marked with *)
-  :provider X       switch to provider X (model defaults to first in its list)
-  :provider add     add a new provider (interactive, verified)
-  :provider edit X  edit provider X (url, key, models)
-  :provider rm X    remove provider X
-  :reasoning        list reasoning levels for current model (* marks active)
-  :reasoning X      switch reasoning level (low / medium / high)
-  :streaming        show streaming mode (on = live output, off = request/response)
-  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
-  :notify           show notify mode (on = desktop notification when a turn ends)
-  :notify on|off    toggle turn-end desktop notification
-  :autoresume       show patient-retry mode (on = ~36h hold for outages/limits)
-  :autoresume on|off toggle patient retry of 429/5xx/network errors
-  :prompt           show the active system prompt
-  :show [N]         show full output of tool call N (default: last)
-  :log              list all tool calls this session
-  :sessions         list recent sessions saved in this directory (max 20)
-  :summarize        collapse old turns into a synthetic recap (meta model call)
-  :version          show the running 3code version
-  :sandbox          show the active filesystem sandbox rules
-  :sandbox show     (same)
-  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow P  add a writable rule for path P
-  :sandbox readonly P  add a read-only rule for path P
-  :sandbox deny P   add a deny rule for path P
-  :q :quit          exit (also Ctrl-D)
-
-input:
-  single-line   just type and press Enter
-  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
-  arrows        full cursor navigation across lines and visual wraps
-  ctrl+arrow    word-by-word jumps (also crosses logical lines)
-  home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
-  ctrl+w        delete the word before the cursor
-  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
-  tab           complete :commands, provider names, model names
-  ctrl+l        clear the screen
-  @path         inline file contents (e.g. @src/foo.nim)
-❯ :provider
-===== 122 =====
-  :reasoning        list reasoning levels for current model (* marks active)
-  :reasoning X      switch reasoning level (low / medium / high)
-  :streaming        show streaming mode (on = live output, off = request/response)
-  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
-  :notify           show notify mode (on = desktop notification when a turn ends)
-  :notify on|off    toggle turn-end desktop notification
-  :autoresume       show patient-retry mode (on = ~36h hold for outages/limits)
-  :autoresume on|off toggle patient retry of 429/5xx/network errors
-  :prompt           show the active system prompt
-  :show [N]         show full output of tool call N (default: last)
-  :log              list all tool calls this session
-  :sessions         list recent sessions saved in this directory (max 20)
-  :summarize        collapse old turns into a synthetic recap (meta model call)
-  :version          show the running 3code version
-  :sandbox          show the active filesystem sandbox rules
-  :sandbox show     (same)
-  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow P  add a writable rule for path P
-  :sandbox readonly P  add a read-only rule for path P
-  :sandbox deny P   add a deny rule for path P
-  :q :quit          exit (also Ctrl-D)
-
-input:
-  single-line   just type and press Enter
-  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
-  arrows        full cursor navigation across lines and visual wraps
-  ctrl+arrow    word-by-word jumps (also crosses logical lines)
-  home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
-  ctrl+w        delete the word before the cursor
-  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
-  tab           complete :commands, provider names, model names
-  ctrl+l        clear the screen
-  @path         inline file contents (e.g. @src/foo.nim)
-
-❯ :provider
-
-stub  [stub-model]
-alt
-❯
-===== 182 =====
-  :reasoning        list reasoning levels for current model (* marks active)
-  :reasoning X      switch reasoning level (low / medium / high)
-  :streaming        show streaming mode (on = live output, off = request/response)
-  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
-  :notify           show notify mode (on = desktop notification when a turn ends)
-  :notify on|off    toggle turn-end desktop notification
-  :autoresume       show patient-retry mode (on = ~36h hold for outages/limits)
-  :autoresume on|off toggle patient retry of 429/5xx/network errors
-  :prompt           show the active system prompt
-  :show [N]         show full output of tool call N (default: last)
-  :log              list all tool calls this session
-  :sessions         list recent sessions saved in this directory (max 20)
-  :summarize        collapse old turns into a synthetic recap (meta model call)
-  :version          show the running 3code version
-  :sandbox          show the active filesystem sandbox rules
-  :sandbox show     (same)
-  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow P  add a writable rule for path P
-  :sandbox readonly P  add a read-only rule for path P
-  :sandbox deny P   add a deny rule for path P
-  :q :quit          exit (also Ctrl-D)
-
-input:
-  single-line   just type and press Enter
-  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
-  arrows        full cursor navigation across lines and visual wraps
-  ctrl+arrow    word-by-word jumps (also crosses logical lines)
-  home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
-  ctrl+w        delete the word before the cursor
-  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
-  tab           complete :commands, provider names, model names
-  ctrl+l        clear the screen
-  @path         inline file contents (e.g. @src/foo.nim)
-
-❯ :provider
-
-stub  [stub-model]
-alt
-❯ :model
-===== 902 =====
-  :notify on|off    toggle turn-end desktop notification
-  :autoresume       show patient-retry mode (on = ~36h hold for outages/limits)
-  :autoresume on|off toggle patient retry of 429/5xx/network errors
-  :prompt           show the active system prompt
-  :show [N]         show full output of tool call N (default: last)
-  :log              list all tool calls this session
-  :sessions         list recent sessions saved in this directory (max 20)
-  :summarize        collapse old turns into a synthetic recap (meta model call)
-  :version          show the running 3code version
-  :sandbox          show the active filesystem sandbox rules
-  :sandbox show     (same)
-  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow P  add a writable rule for path P
-  :sandbox readonly P  add a read-only rule for path P
-  :sandbox deny P   add a deny rule for path P
-  :q :quit          exit (also Ctrl-D)
-
-input:
-  single-line   just type and press Enter
-  multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
-  arrows        full cursor navigation across lines and visual wraps
-  ctrl+arrow    word-by-word jumps (also crosses logical lines)
-  home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
-  ctrl+w        delete the word before the cursor
-  up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
-  tab           complete :commands, provider names, model names
-  ctrl+l        clear the screen
-  @path         inline file contents (e.g. @src/foo.nim)
-
-❯ :provider
-
-stub  [stub-model]
-alt
-
-❯ :model
-
-stub-model
-stub-large
-❯
-===== 648 =====
-  :notify on|off    toggle turn-end desktop notification
-  :autoresume       show patient-retry mode (on = ~36h hold for outages/limits)
-  :autoresume on|off toggle patient retry of 429/5xx/network errors
+  :retry            show patient-retry mode (on = ~36h hold for outages/limits)
+  :retry on|off     toggle patient retry of 429/5xx/network errors
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
@@ -256,7 +256,7 @@ alt
 stub-model
 stub-large
 ❯ :reasoning
-===== 608 =====
+===== 906 =====
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
@@ -297,7 +297,7 @@ stub-large
 reasoning: (none)
 experimental: level is free-form, type any value
 ❯
-===== 551 =====
+===== 991 =====
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
@@ -338,7 +338,7 @@ stub-large
 reasoning: (none)
 experimental: level is free-form, type any value
 ❯ :model stub-large
-===== 854 =====
+===== 740 =====
   :sandbox show     (same)
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow P  add a writable rule for path P
@@ -379,7 +379,7 @@ experimental: level is free-form, type any value
 provider  stub
 model     stub-large
 ❯
-===== 217 =====
+===== 349 =====
   :sandbox show     (same)
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow P  add a writable rule for path P
@@ -420,7 +420,7 @@ experimental: level is free-form, type any value
 provider  stub
 model     stub-large
 ❯ :reasoning high
-===== 145 =====
+===== 810 =====
 
 input:
   single-line   just type and press Enter
@@ -461,7 +461,7 @@ provider  stub
 model     stub-large
 reasoning high
 ❯
-===== 645 =====
+===== 819 =====
 
 input:
   single-line   just type and press Enter
@@ -502,7 +502,7 @@ provider  stub
 model     stub-large
 reasoning high
 ❯ :provider alt
-===== 582 =====
+===== 690 =====
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
   ctrl+u        clear the buffer
@@ -543,7 +543,7 @@ reasoning high
 provider  alt
 model     alt-model
 ❯
-===== 475 =====
+===== 500 =====
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
   ctrl+u        clear the buffer
@@ -584,7 +584,7 @@ reasoning high
 provider  alt
 model     alt-model
 ❯ :tokens
-===== 805 =====
+===== 741 =====
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
@@ -625,7 +625,7 @@ model     alt-model
 
 no tokens used yet
 ❯
-===== 136 =====
+===== 462 =====
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
@@ -666,7 +666,7 @@ model     alt-model
 
 no tokens used yet
 ❯ :clear
-===== 663 =====
+===== 338 =====
 
 ❯ :provider
 
@@ -707,7 +707,7 @@ no tokens used yet
 
 ════════════════════════════════════════
 ❯
-===== 384 =====
+===== 392 =====
 
 ❯ :provider
 
@@ -748,7 +748,7 @@ no tokens used yet
 
 ════════════════════════════════════════
 ❯ :sessions
-===== 760 =====
+===== 219 =====
 alt
 
 ❯ :model
@@ -789,7 +789,7 @@ no tokens used yet
 
 no saved sessions for this directory
 ❯
-===== 730 =====
+===== 393 =====
 alt
 
 ❯ :model
@@ -830,7 +830,7 @@ no tokens used yet
 
 no saved sessions for this directory
 ❯ :sessions all
-===== 479 =====
+===== 446 =====
 ❯ :reasoning
 
 reasoning: (none)
@@ -871,7 +871,7 @@ no saved sessions for this directory
 
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 ❯
-===== 543 =====
+===== 550 =====
 ❯ :reasoning
 
 reasoning: (none)
@@ -912,7 +912,7 @@ no saved sessions for this directory
 
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 ❯ :log
-===== 949 =====
+===== 509 =====
 
 ❯ :model stub-large
 
@@ -953,7 +953,7 @@ listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 no tool calls yet
 ❯
-===== 278 =====
+===== 443 =====
 
 ❯ :model stub-large
 
@@ -994,7 +994,7 @@ listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 no tool calls yet
 ❯ :show
-===== 210 =====
+===== 450 =====
 model     stub-large
 
 ❯ :reasoning high
@@ -1035,7 +1035,7 @@ no tool calls yet
 
 no tool calls yet
 ❯
-===== 131 =====
+===== 380 =====
 model     stub-large
 
 ❯ :reasoning high
@@ -1076,7 +1076,7 @@ no tool calls yet
 
 no tool calls yet
 ❯ :compact
-===== 827 =====
+===== 158 =====
 provider  stub
 model     stub-large
 reasoning high
@@ -1117,7 +1117,7 @@ no tool calls yet
 
 unknown command: :compact  (try :help)
 ❯
-===== 717 =====
+===== 448 =====
 provider  stub
 model     stub-large
 reasoning high
@@ -1158,7 +1158,7 @@ no tool calls yet
 
 unknown command: :compact  (try :help)
 ❯ :summarize
-===== 305 =====
+===== 616 =====
 ❯ :provider alt
 
 provider  alt
@@ -1199,7 +1199,7 @@ unknown command: :compact  (try :help)
 
 failed or not worth it
 ❯
-===== 303 =====
+===== 649 =====
 ❯ :provider alt
 
 provider  alt
@@ -1240,7 +1240,7 @@ unknown command: :compact  (try :help)
 
 failed or not worth it
 ❯ :prompt
-===== 391 =====
+===== 435 =====
 # Risk
 
 Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), har
@@ -1281,7 +1281,7 @@ Available:
 Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one on what's n
 ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 ❯
-===== 729 =====
+===== 241 =====
 # Risk
 
 Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), har
@@ -1322,7 +1322,7 @@ Available:
 Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one on what's n
 ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 ❯ :toknes
-===== 392 =====
+===== 182 =====
 ing PRs, sending email). When in doubt, ask.
 
 # Git
@@ -1363,7 +1363,7 @@ ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was alread
 
 unknown command: :toknes  did you mean :tokens?
 ❯
-===== 275 =====
+===== 761 =====
 ing PRs, sending email). When in doubt, ask.
 
 # Git
