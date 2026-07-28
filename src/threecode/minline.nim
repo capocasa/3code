@@ -1281,9 +1281,9 @@ template consumeTerminalReplyImpl*(readByteExpr: untyped): string =
         break
       if not (c.chr in {'0'..'9'} or c.chr in {';', '?'}):
         break  # some other CSI final byte: not a reply we own
-    # A reply is `CSI [?] digits[;digits...] R|c`. Arrows reuse final
-    # 'R' with a LETTER body (CSI 1;5R = Ctrl+Right), so validate the
-    # body shape, not just the final byte.
+    # A reply is `CSI [?] digits[;digits...] R|c`. Modified arrows
+    # share final 'R' (CSI 1;5R = Ctrl+Right), so validate the body
+    # shape, not just the final byte.
     if isReply:
       let body = replyAcc[2 ..< ^1]
       for i, ch in body:
