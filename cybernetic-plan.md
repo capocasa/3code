@@ -66,7 +66,9 @@ Key locations:
   on xterm describe exact trigger.
 - Old code-review plan preserved at /tmp/old-cybernetic-plan-code-review.md.
 - test_cli_args needs `3code` binary in cwd; pre-existing, skipped.
-- NEXT: C3 handover, C4 final review.
+- C3 DONE (c6bb211). C4 DONE: full diff reviewed (one stale comment
+  fixed, 58502f1); all suites green. Remaining open item: user xterm
+  re-check (C2). Plan complete pending that.
 
 ## Steps
 
@@ -111,5 +113,5 @@ Key locations:
 - [ ] C2. Run full core+tty suites on xterm oracle path; if the user's
   xterm symptom reproduces as a conformance/validator failure, diagnose
   from there; else report to user for a live re-check.
-- [ ] C3. Update HANDOVER.md (closed bug + new instruments); commit.
-- [ ] C4. Final review: full diff vs plan, full test matrix, clean tree.
+- [x] C3. Update HANDOVER.md (closed bug + new instruments); commit.
+- [x] C4. Final review: full diff vs plan, full test matrix, clean tree.
