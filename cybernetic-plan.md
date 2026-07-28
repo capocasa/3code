@@ -40,26 +40,37 @@ Key locations:
 
 ## Current state
 
-- A0a minline reply-drop: not begun.
-- Everything else: not begun.
-- Pre-existing baseline: all core+tty suites green on linebugs @ 1ad1087
-  (test_cli_args needs `3code` binary in cwd — pre-existing, unrelated).
+- A0 DONE (commit 069ff11): production reply filter in minline
+  (consumeTerminalReplyImpl template, shape-validated CSI [?] nums R|c so
+  CSI 1;5R modified arrows pass through); wired into readLine getCh +
+  terminalHasPendingInput. terminaldbg slimmed to replyCaptureHook.
+  minline_testutils Driver.run mirrors the filter (peek ttty Input queue,
+  drop shaped replies). 3 new tests in test_minline (suite "terminal reply
+  filtering"). All 18 core + 21 tty suites green.
+- Note: filter is ASCII-burst based; a reply arriving byte-by-byte with
+  gaps (poll misses mid-sequence) still leaks — accepted residual,
+  terminals answer in one burst.
+- Old code-review plan from main preserved at
+  /tmp/old-cybernetic-plan-code-review.md (session-local!).
+- Pre-existing: test_cli_args needs `3code` binary in cwd; skipped in
+  suite runs, unrelated.
+- NEXT: B1 ttty pairing validator.
 
 ## Steps
 
 ### A. 3code (linebugs branch)
 
-- [ ] A0a. Reply-drop hardening in minline: move DSR-reply recognition from
+- [x] A0a. Reply-drop hardening in minline: move DSR-reply recognition from
   terminaldbg's debug hook into a production filter. Concretely: in the
   posix readLine getCh and in `terminalHasPendingInput`, when ESC '['
   starts a sequence whose final byte is 'R' (cursor-position reply) or
   'c' (DA reply), drop the whole sequence instead of feeding it to the
   editor. Keep `inputInterceptHook` as the pre-filter so the probe still
   stashes replies. Verify: core+tty suites green.
-- [ ] A0b. Simplify terminaldbg to a thin stash/log layer on the production
+- [x] A0b. Simplify terminaldbg to a thin stash/log layer on the production
   filter (remove duplicated parsing in dsrIntercept). Verify: build +
   suites green.
-- [ ] A0c. Regression test: tests/core/test_minline.nim style — feeding a
+- [x] A0c. Regression test: tests/core/test_minline.nim style — feeding a
   DSR reply byte stream into readLineWith yields no phantom input and the
   reply is consumed. Red→green against pre-A0a code if feasible.
 
