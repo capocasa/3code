@@ -185,3 +185,24 @@ Remaining housekeeping: merge linebugs → main when convenient. ttty
 oracle (xterm) never saw this bug class — by design, xterm ignores 2026.
 A foot/ghostty headless oracle (weston) would catch 2026-semantics
 regressions; not built, noted as future work if 2026-adjacent bugs recur.
+
+## UPDATE 2026-07-29 — terminal-fidelity hardening (plan: cybernetic-plan.md)
+
+Shipped on linebugs (3code) and ttty 0.5.0:
+
+- 3code 069ff11: minline drops unsolicited terminal replies (DSR `CSI
+  row;col R`, DECXCPR `CSI ?..R`, DA `CSI..c`) in production read paths —
+  shape-validated so modified arrows (CSI 1;5R) pass. terminaldbg slimmed
+  to a replyCaptureHook. Class-2 (reply-leak) closed at the root.
+- ttty 0.5.0 (tagged/pushed/installed): grid validates DEC 2026 pairing
+  (g.violations + checkStreamClosed); 8-stream xterm edge-case corpus
+  found+fixed 3 real ttty divergences from xterm (ED-at-pending-wrap
+  clears wrap and next print overwrites the last cell; ED0 blanks rather
+  than truncates; deferred-wrap re-arm). 14/14 streams conform.
+- 3code ca79b29: every tty test now asserts zero stream violations on
+  session close — malformed-sync net by construction (class 1 by proxy).
+
+OPEN — user's xterm sighting of "that bug": the 2026 fixes can't explain
+it (xterm ignores 2026). If reproducible on xterm with build/3code_real,
+capture the stream (tty_expect s.raw) and replay through ttty's xterm
+conformance oracle; a cursor/row divergence there is the bug made visible.
