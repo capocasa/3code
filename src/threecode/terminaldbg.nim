@@ -14,21 +14,27 @@
 ## the smoking gun the harness can never show.
 ##
 ## Safety: probing reads stdin, which the persistent input thread also
-## reads. We therefore only probe when the input thread is parked — the
-## submit / transcript-commit transitions, where the controller owns the
-## editor and both reported bugs (line above the prompt vanishing, prompt
-## jumping on submit) live. Live-typing repaints are never probed. The
-## whole thing is opt-in via `THREECODE_TERMDBG=<path>` and a no-op
+## reads. The reply race is handled two ways:
+## - `inputInterceptHook` (installed here when armed) runs in the input
+##   thread and captures DSR replies as they stream past the reader, so
+##   they never reach the editor as phantom input.
+## - `queryCursorPos` prefers a stashed reply over issuing a new query.
+## The whole thing is opt-in via `THREECODE_TERMDBG=<path>` and a no-op
 ## otherwise, and dark under the PTY test harness.
 
-import std/[os, posix, strutils, times]
+import std/[os, posix, strutils, times, deques]
 import std/termios
 import ./types
+import ./minline
 import ./terminal as termio
 
 var
   dbgPath {.threadvar.}: string
   dbgInit {.threadvar.}: bool
+  dbgArmed: bool
+  dsrStashedRow: int
+  dsrStashedCol: int
+  dsrStashed: bool
 
 proc dbgLog(line: string) =
   ## Append-only, never to the terminal: the probe must not disturb the
@@ -40,6 +46,40 @@ proc dbgLog(line: string) =
     f.close()
   except IOError:
     discard
+
+proc dsrIntercept(b: int): bool =
+  ## inputInterceptHook: capture a DSR reply (`CSI row ; col R`) streaming
+  ## through the input thread. Returns true when `b` was consumed (either
+  ## stashed as a reply, or replayed into `pushedBack` because it was not a
+  ## reply after all — either way the caller must re-read).
+  if b != 27: return false
+  if not stdinHasByteNow(): return false
+  var seq = "\x1b"
+  while seq.len < 16:
+    let ch = getchr()
+    if ch < 0: break
+    seq.add ch.chr
+    if seq.len >= 4 and ch.chr == 'R':
+      if seq[1] == '[':
+        let body = seq[2 ..< ^1]
+        let semi = body.find(';')
+        if semi > 0:
+          try:
+            dsrStashedRow = parseInt(body[0 ..< semi])
+            dsrStashedCol = parseInt(body[semi + 1 .. ^1])
+            dsrStashed = true
+            dbgLog("stashed DSR reply row=" & $dsrStashedRow &
+                   " col=" & $dsrStashedCol)
+            return true
+          except CatchableError:
+            discard
+      break
+    if ch.chr in {'A'..'Z', 'a'..'z', '@', '`', '~'}:
+      break
+  # Not a DSR reply (or malformed): replay everything after the ESC.
+  for i in countdown(seq.high, 1):
+    pushedBack.addFirst(seq[i].ord.int)
+  return true
 
 proc termDbgEnabled*(): bool =
   ## True when probing is armed: env var set with a writable path, running
@@ -59,13 +99,22 @@ proc termDbgEnabled*(): bool =
       dbgLog("DISARMED: not a tty (stdin=" & $inTty & " stdout=" & $outTty & ")")
       return false
   dbgLog("ARMED")
+  if not dbgArmed:
+    dbgArmed = true
+    minline.inputInterceptHook = dsrIntercept
   result = true
 
 proc queryCursorPos*(timeoutMs = 120): tuple[row, col: int] =
   ## Ask the terminal for its absolute cursor position via DSR (`CSI 6 n`,
   ## answered `CSI <row> ; <col> R`, 1-based). Returns (0, 0) on any
-  ## failure. Temporarily drops stdin to raw non-blocking so the reply can
-  ## be read without line buffering, then restores the prior termios.
+  ## failure. Prefers a reply already stashed by the input-thread
+  ## interceptor over issuing a new query. Temporarily drops stdin to raw
+  ## non-blocking so the reply can be read without line buffering, then
+  ## restores the prior termios.
+  if dsrStashed:
+    dsrStashed = false
+    dbgLog("consuming stashed DSR row=" & $dsrStashedRow)
+    return (dsrStashedRow, dsrStashedCol)
   result = (0, 0)
   when defined(posix):
     const FdIn = 0.cint

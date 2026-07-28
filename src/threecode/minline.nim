@@ -65,6 +65,17 @@ if isatty(stdin):
 # peek never loses user input.
 var termPeeked*: int = -1
 
+# Generic push-back buffer, drained before termPeeked by every read path
+# below. `inputInterceptHook` uses it to replay bytes it consumed that
+# turned out not to be its own.
+var pushedBack*: Deque[int]
+
+# Opt-in byte interceptor (installed by terminaldbg when armed): sees each
+# byte before the editor, may consume bytes belonging to a terminal
+# response (a DSR reply to the probe), and must replay anything else via
+# `pushedBack`. Nil in production: zero cost.
+var inputInterceptHook*: proc(b: int): bool {.closure.}
+
 var pollStdinNowHook*: proc(): bool {.closure.}
   ## Override for tests; nil means use real pollStdinNow().
 
@@ -1252,6 +1263,8 @@ proc terminalHasPendingInput*(): bool =
       if r > 0 and (pfd.revents and POLLIN) != 0:
         var ch: char
         if posix.read(0.cint, addr ch, 1) == 1:
+          if inputInterceptHook != nil and inputInterceptHook(ch.ord.int):
+            return false
           termPeeked = ch.ord.int
           return isEscapeTailByte(ch.ord.int)
       return false
@@ -1719,6 +1732,8 @@ proc readLine*(ed: var LineEditor, prompt = "", hidechars = false,
       clearRawMode()
     let getCh: GetChProc = proc(): int =
       stdout.flushFile()
+      if pushedBack.len > 0:
+        return pushedBack.popFirst()
       if termPeeked >= 0:
         result = termPeeked.int
         termPeeked = -1
@@ -1726,7 +1741,12 @@ proc readLine*(ed: var LineEditor, prompt = "", hidechars = false,
       while true:
         var ch: char
         let n = posix.read(fd.cint, addr ch, 1)
-        if n == 1: return ch.ord.int
+        if n == 1:
+          if inputInterceptHook != nil and inputInterceptHook(ch.ord.int):
+            if pushedBack.len > 0:
+              return pushedBack.popFirst()
+            continue
+          return ch.ord.int
         # EINTR from SIGWINCH (and friends): retry. The outer driver
         # uses `resizePending` to redraw on the next iteration; we
         # surface EINTR as IOError so it can do that.
