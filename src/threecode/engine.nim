@@ -33,6 +33,7 @@ import std/terminal
 import minline
 import ./terminal as termio
 import ./fatprompt/rendering
+import ./terminaldbg
 import ./util
 
 type
@@ -504,6 +505,15 @@ proc appendTranscriptLiveAnchored(e: var TerminalEngine; transcript: string;
                                   restoreEditor: bool;
                                   reserveFooter: bool) =
   refreshEditorWidth(edPtr[])
+  # Probe BEFORE SyncBegin: the DSR reply must not be swallowed by a
+  # terminal that buffers synchronized-output frames. The input thread is
+  # parked across this commit (restoreEditor=false on submit), so stdin is
+  # the controller's to query.
+  terminaldbg.probeDetail("commit.liveAnchored",
+    max(0, e.walkUp(edPtr[]) + max(0, compactRowsAboveFooter)),
+    editorRowsAboveCursor(edPtr[]), e.paintedFooterRows,
+    e.toolViewportRows.len + e.viewportGapRows,
+    e.liveContentRows.len + e.liveContentGapRows)
   stdout.write termio.SyncBegin
   stdout.write "\x1b[?25l\r"
   let up = max(0, e.walkUp(edPtr[]) + max(0, compactRowsAboveFooter))
@@ -540,6 +550,8 @@ proc appendTranscriptFloating(e: var TerminalEngine; transcript: string;
                               restoreEditor: bool;
                               reserveFooter: bool) =
   let editing = inputRunning and editor != nil
+  if editing:
+    terminaldbg.probeErase("commit.floating", max(0, e.walkUp(editor[])))
   stdout.write termio.SyncBegin
   if editing:
     let up = max(0, e.walkUp(editor[]))
@@ -617,6 +629,7 @@ proc prepareAssistantContentStart*(e: var TerminalEngine;
     let termW = try: terminalWidth() except CatchableError: 0
     if inputRunning and editor != nil:
       refreshEditorWidth(editor[])
+      terminaldbg.probeErase("assistantContentStart", max(0, e.walkUp(editor[])))
       let up = max(0, e.walkUp(editor[]))
       stdout.write termio.SyncBegin
       stdout.write "\r"
