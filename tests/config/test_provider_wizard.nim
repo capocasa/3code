@@ -134,7 +134,7 @@ suite "provider wizard configuration":
                   key: "nvapi-old", models: @["z-ai/glm4.7"])
     ]
     activeCurrent = "nvidia.z-ai/glm4.7"
-    inputs = @["", "", "", "gpt-oss-120b"]
+    inputs = @["", "", "gpt-oss-120b"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -291,7 +291,7 @@ suite "provider wizard configuration":
                     key: "nvapi-old", models: @["z-ai/glm4.7"])
       ]
       activeCurrent = "nvidia.z-ai/glm4.7"
-      inputs = @["", "", "", "gpt-oss-120b"]
+      inputs = @["", "", "gpt-oss-120b"]
       var editor: LineEditor
       var prof = buildProfile(activeCurrent, activeProviders, "")
       var messages = newJArray()
