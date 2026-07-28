@@ -30,7 +30,8 @@ import types
 export procbox.AccessKind, procbox.Policy, procbox.Rule,
        procbox.RuleKind, procbox.parseCascaded, procbox.defaultPolicyText,
        procbox.repoPolicyPath, procbox.cascadedFiles, procbox.checkPath,
-       procbox.renderPolicy, procbox.PolicyDir
+       procbox.renderPolicy, procbox.PolicyDir, procbox.resolve,
+       procbox.Resolved
 
 var
   current*: Policy
@@ -97,28 +98,13 @@ proc reloadIfChanged*(projectDir: string): bool =
   lastMtimes = now
   true
 
-proc sandboxPromptSection*(): string =
-  ## A compact agent-facing summary of the sandbox boundaries, spliced
-  ## into the system prompt via the {{sandbox}} placeholder. Empty when
-  ## the sandbox is off, so prompts stay byte-identical to before.
-  ## Reloads on policy mtime change so a mid-session edit reaches the
-  ## model on the next turn.
-  if not active or not sandboxEnabled: return ""
-  discard reloadIfChanged(getCurrentDir())
+proc policyHint*(): string =
+  ## Where the agent can inspect the rules that bound it. Appended to
+  ## sandbox denial messages so a blocked tool call points at the
+  ## unrendered policy instead of dumping a (possibly long) rule list
+  ## into the conversation.
   let paths = cascadedFiles(getCurrentDir())
-  var body = renderPolicy(current).strip
-  const maxLines = 40
-  var lines = body.splitLines
-  if lines.len > maxLines:
-    body = lines[0 ..< maxLines].join("\n") &
-      "\n... (" & $(lines.len - maxLines) & " more rules in the policy file)"
-  "\n\n# Sandbox\n\n" &
-    "Your bash commands run kernel-confined (Landlock/Seatbelt/ACL) and " &
-    "your file tools are checked against the same policy. Effective rules " &
-    "(last match wins; anything unmentioned is denied):\n\n" & body & "\n\n" &
-    "Policy files: " & paths.repo & " (project), " & paths.system &
-    " (system). Propose changes to the user; never try to edit or bypass " &
-    "them. Denied operations fail with EACCES or a sandbox error."
+  "policy: " & paths.repo & " (project), " & paths.system & " (system)"
 
 proc sandboxPathInCwd*(): string =
   ## The repo-level policy file for the current working directory.
@@ -152,8 +138,10 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
   let access = current.checkPath(resolved)
   case access
   of akWritable: (true, "")
-  of akReadOnly: (not needsWrite, "sandbox: " & resolved & " is read-only")
-  of akDeny: (false, "sandbox: " & resolved & " is outside the allowed paths")
+  of akReadOnly: (not needsWrite,
+    "sandbox: " & resolved & " is read-only (" & policyHint() & ")")
+  of akDeny: (false,
+    "sandbox: " & resolved & " is denied by the policy (" & policyHint() & ")")
 
 proc ensureDefaultSandbox*(dir: string): bool =
   ## Create the default policy file at `dir/.3code/sandbox` if none

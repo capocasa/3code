@@ -91,3 +91,12 @@ suite "policy reload (reloadIfChanged)":
       sandbox.active = wasActive
       sandbox.current = saved
       removeDir(dir)
+
+  test "resolve surfaces narrowing denies (deny under an allow)":
+    let s = parseCascaded("+ " & opt & "\n", "- " & opt / "locked" & "\n", proj)
+    let r = s.resolve()
+    check r.writable == @[opt]
+    check r.denied == @[opt / "locked"]
+    # A deny for a path under no surviving allow is not carried.
+    let s2 = parseCascaded("- /\n", "- " & opt & "\n", proj)
+    check s2.resolve().denied.len == 0

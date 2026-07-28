@@ -97,11 +97,15 @@ proc parseBoxArgs(args: seq[string]): tuple[a: BoxArgs, err: string] =
     inc i
   (a, "")
 
-proc resolvePolicy(a: BoxArgs): tuple[writable, readonly: seq[string]] =
+proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string]] =
   ## Resolve the cascaded policy files plus explicit args into the
-  ## (writable, readonly) pair. Policy files are force-added read-only.
+  ## (writable, readonly, denied) triple. Policy files are force-added
+  ## read-only. `denied` carries the policy's last-wins narrowing (a deny
+  ## under an allowed root); the backend enforces it on top of the root
+  ## lists.
   var writable = a.writable
   var readonly = a.readOnly
+  var denied: seq[string]
   if a.policies.len > 0:
     var texts: seq[string]
     for f in a.policies:
@@ -118,6 +122,7 @@ proc resolvePolicy(a: BoxArgs): tuple[writable, readonly: seq[string]] =
     let r = pol.resolve()
     writable.add r.writable
     readonly.add r.readonly
+    denied.add r.denied
     # The sandboxed command may read its policy but never change it.
     for f in a.policies:
       if fileExists(f): readonly.add f
@@ -136,7 +141,7 @@ proc resolvePolicy(a: BoxArgs): tuple[writable, readonly: seq[string]] =
               " can modify it. Put hard boundaries in the system policy" &
               " (outside any writable root).")
             break
-  (writable, readonly)
+  (writable, readonly, denied)
 
 proc boxRestrict(args: seq[string]): int =
   ## Parse the `box restrict` args and confine-then-exec. Returns the
@@ -146,7 +151,7 @@ proc boxRestrict(args: seq[string]): int =
     stderr.writeLine(usage)
     stderr.writeLine("\nError: " & err)
     return 2
-  let (writable, readOnly) = resolvePolicy(a)
+  let (writable, readOnly, denied) = resolvePolicy(a)
   if writable.len == 0 and a.policies.len == 0:
     stderr.writeLine(usage)
     stderr.writeLine("\nError: no writable paths given")
@@ -165,7 +170,8 @@ proc boxRestrict(args: seq[string]): int =
     # the token and stamps ACLs. runSandboxed spawns the child with that
     # token and rolls the ACLs back in a defer.
     try:
-      return int(runSandboxed(writable, a.cmd, read = readOnly))
+      return int(runSandboxed(writable, a.cmd, read = readOnly,
+                              denied = denied))
     except CatchableError as e:
       stderr.writeLine("3code box: " & e.msg)
       return 127
@@ -177,7 +183,7 @@ proc boxRestrict(args: seq[string]): int =
     # and process group. The bash tool signals the whole group on
     # cancel/timeout; without setsid those signals would miss CMD's children.
     discard setsid()
-    restrict(writable, read = readOnly)
+    restrict(writable, read = readOnly, denied = denied)
     try:
       exec(a.cmd)
     except CatchableError as e:

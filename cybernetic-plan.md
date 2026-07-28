@@ -182,7 +182,7 @@ writable, so git works under the default policy. procbox dependency link
 11. [x] **Docs.** (manual.md sandbox section rewritten to new syntax; procbox README policy section + Landlock caveat; CHANGELOG 0.2.0) procbox README policy section (format, cascade, host
     rules parsed-not-enforced, Landlock policy-writability caveat).
     3code docs/manual.md sandbox section. CHANGELOGs both repos.
-12. [ ] **Full verification + review.** (in progress: both suites green, manual smoke found Landlock deny-under-writable limitation, documented) Both suites green. Manual smoke:
+12. [x] **Full verification + review.** (done: both suites green; smoke verified policy confinement, deny EACCES, reload, /etc baseline reads, relative-cwd reads; Landlock deny-under-writable limitation documented; all work committed in both repos) Both suites green. Manual smoke:
     deny a path, read tool refuses, bash `cat` EACCES, edit policy
     mid-session, next call picks it up. Review full diffs vs this plan.
     Commit per step group (procbox steps 2-5, then 3code steps 6-12).

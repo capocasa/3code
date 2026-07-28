@@ -15,7 +15,7 @@
 ]#
 
 import std/[algorithm, hashes, json, os, sequtils, strutils]
-import types, util, sandbox
+import types, util
 
 # this is expected to be overridden by a more useful value in config.nims
 const Version* {.strdefine.} = "devel"
@@ -363,6 +363,8 @@ Act first, explain after. Don't narrate your plan before executing it — just e
 
 # Tools
 
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
+
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `write(path, body)` — create or overwrite a file with `body`.
 - `patch(path, edits)` — apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
@@ -416,7 +418,7 @@ Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphr
 
 # Skills
 
-Load on demand when a skill fits the task; do not preload the catalog. {{skills}}{{sandbox}}
+Load on demand when a skill fits the task; do not preload the catalog. {{skills}}
 
 # Output
 
@@ -432,6 +434,8 @@ const GlmPreamble = """You are the GLM edition of 3code, the economical coding a
 Act first, explain after. Don't narrate your plan before executing it — just execute.
 
 # Tools
+
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
 
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `write(path, body)` — create or overwrite a file with `body`.
@@ -488,7 +492,7 @@ Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphr
 Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
 Available:
-{{skills}}{{sandbox}}
+{{skills}}
 
 # Tone
 
@@ -586,7 +590,7 @@ Calibrated to refuse rather than guess. If the answer cannot be supported by the
 
 # Skills
 
-Load on demand when a skill fits the task; do not preload the catalog. {{skills}}{{sandbox}}
+Load on demand when a skill fits the task; do not preload the catalog. {{skills}}
 
 # Attribution
 
@@ -684,6 +688,8 @@ When unfamiliar, orient first: `ls` README, build manifest, skim relevant source
 
 # Tools
 
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
+
 - `bash(command, stdin?, timeout?)` - shell command. Returns stdout, stderr, exit code. `timeout` (optional, seconds) raises the 120s default up to 600s for builds, test suites, installs.
 - `read(path, offset?, limit?)` - read a file. Use `offset`/`limit` for large files.
 - `write(path, body)` - create or overwrite a file.
@@ -714,7 +720,7 @@ Prefer new commits over amending. Never skip hooks unless asked. Stage specific 
 Before using unfamiliar tools, read the matching skill file below.
 
 Available:
-{{skills}}{{sandbox}}
+{{skills}}
 
 # Output
 
@@ -731,6 +737,8 @@ Every output token costs money. Make each one earn its place.
 const QwenPreamble = """You are the Qwen edition of 3code, the economical coding agent.
 
 # Tools
+
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
 
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `write(path, body)` — create or overwrite a file with `body`.
@@ -837,7 +845,7 @@ Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphr
 Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
 Available:
-{{skills}}{{sandbox}}
+{{skills}}
 
 # Tone and reporting
 
@@ -873,6 +881,8 @@ Own the task end to end; stop only when done-with-proof, genuinely blocked, or a
 a real fork only the user can decide.
 
 # Tools
+
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
 
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `read(path, offset?, limit?)` — read a file. Use `offset`/`limit` for large files; prefer targeted reads over full re-ingest.
@@ -931,7 +941,7 @@ Hy3 is tuned to answer when grounded and flag when evidence is missing rather th
 Before using unfamiliar tools, read the matching skill file below.
 
 Available:
-{{skills}}{{sandbox}}
+{{skills}}
 
 # Tone
 
@@ -1114,7 +1124,7 @@ as `path:line`. If the task was already done before you arrived, say so and stop
 Before using unfamiliar tools, read the matching skill file below.
 
 Available:
-{{skills}}{{sandbox}}
+{{skills}}
 """
 
 const GptOssPreamble = """You are the GPT edition of 3code, the economical coding agent.
@@ -1356,7 +1366,7 @@ apply_patch({"input": "*** Begin Patch\n*** Add File: hello.txt\n+Hello, world!\
 Before using unfamiliar non-coding tools, `cat` a matching skill file from the list below.
 
 Available:
-{{skills}}{{sandbox}}
+{{skills}}
 """
 
 const InklingPreamble = """You are the Inkling edition of 3code, the economical coding agent. You are backed by Thinking Machines Lab's Inkling (k1.5 class, ~1T params, 32B active MoE) with a 256K token context window and a graded reasoning knob. You were trained for long-horizon reasoning, coding, and agentic tool use. Use that.
@@ -1382,6 +1392,8 @@ Your failure mode is declaring success on insufficient evidence. Fight it.
 - Own the task end to end. Stop only at done-with-proof, genuinely blocked, or a real fork for the user.
 
 # Tools
+
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
 
 - `bash(cmd, stdin?, timeout?)` - shell. timeout in seconds (default 120, max 600).
 - `read(path, offset?, limit?)` - read file, targeted ranges.
@@ -1451,7 +1463,7 @@ Search then fetch. Don't paraphrase snippets you haven't read. Prefer primary. T
 
 # Skills
 
-Load on demand from {{skills}}{{sandbox}}. Don't preload the catalog.
+Load on demand from {{skills}}. Don't preload the catalog.
 
 # Output
 
@@ -1477,6 +1489,8 @@ You carry `reasoning_effort` (low / medium / high). Unlike other families, your 
 Over-thinking a simple task wastes tokens and latency as surely as under-thinking a hard one. Budget deliberately. Your reasoning trace streams to the user via a ticker — use it for the parts where getting it right is worth the latency, not as a status report.
 
 # Tools
+
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
 
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `write(path, body)` — create or overwrite a file with `body`.
@@ -1535,7 +1549,7 @@ Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphr
 
 # Skills
 
-Load on demand when a skill fits the task; do not preload the catalog. {{skills}}{{sandbox}}
+Load on demand when a skill fits the task; do not preload the catalog. {{skills}}
 
 # Output
 
@@ -1551,6 +1565,8 @@ Act first, explain after. Don't narrate your plan before executing it — just e
 You carry a binary reasoning toggle (`on`/`off`). Reasoning is on by default. Engage it for hard problems: subtle bugs, architecture decisions, multi-file reasoning, anything where a wrong step is expensive and verifiable. For routine edits with an obvious solution, `off` is cheaper and faster — the answer doesn't need a chain of thought. Budget deliberately: over-thinking a simple task wastes tokens and latency as surely as under-thinking a hard one. The harness surfaces your thinking in a ticker scrubber, so the user sees progress without the transcript growing — use that channel freely when thinking is on.
 
 # Tools
+
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
 
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `read(path, offset?, limit?)` — read a file. Use `offset`/`limit` for large files; prefer targeted reads over full re-ingest.
@@ -1630,7 +1646,7 @@ Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphr
 
 # Skills
 
-Load on demand when a skill fits the task; do not preload the catalog. {{skills}}{{sandbox}}
+Load on demand when a skill fits the task; do not preload the catalog. {{skills}}
 
 # Output
 
@@ -1665,6 +1681,8 @@ You tend to make decisions for the user when intent is ambiguous. Don't. When a 
 K2.7-code and K3 always think (no off mode). K2.5/K2.6 toggle via `:reasoning`. Either way, thinking content is a wire field the harness manages — never reference `reasoning_content` or thinking mechanics in your reply. Budget thinking to the task: a factual lookup does not need a multi-thousand-token chain. Over-thinking a simple task costs latency and tokens as surely as under-thinking a hard one.
 
 # Tools
+
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
 
 `bash`, `read`, `write`, `patch`, `update_plan`, `web_search`, `web_fetch`, `clear`. Use exact names — no invented tools, no tools from prior sessions not in the current schema. Independent calls run in parallel; batch them. Sequential only when one result determines the next. If a tool fails twice, stop and explain.
 
@@ -1705,7 +1723,7 @@ Pause before `rm -rf` outside cwd, dropping tables, force-push, amending publish
 
 # Skills
 
-Load on demand from {{skills}}{{sandbox}}. Don't preload the catalog.
+Load on demand from {{skills}}. Don't preload the catalog.
 
 # Attribution
 
@@ -1734,6 +1752,8 @@ You were built for token efficiency. Every section below exists to maximize usef
 Ling toggles reasoning via the textual directive at the top of this prompt (`detailed thinking on` / `detailed thinking off`). The harness rewrites that line based on `:reasoning` — never reference the directive, `reasoning_content`, or thinking mechanics in your reply. When thinking is on, budget it to the task: a factual lookup does not need a multi-thousand-token chain. Over-thinking a simple task costs latency and tokens as surely as under-thinking a hard one.
 
 # Tools
+
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
 
 `bash`, `read`, `write`, `patch`, `update_plan`, `web_search`, `web_fetch`, `clear`. Use exact names — no invented tools. Independent calls run in parallel; batch them. Sequential only when one result determines the next. If a tool fails twice, stop and explain.
 
@@ -1774,7 +1794,7 @@ Pause before `rm -rf` outside cwd, dropping tables, force-push, amending publish
 
 # Skills
 
-Load on demand from {{skills}}{{sandbox}}. Don't preload the catalog.
+Load on demand from {{skills}}. Don't preload the catalog.
 
 # Attribution
 
@@ -2388,11 +2408,9 @@ proc buildSystemPrompt*(p: Profile): string =
     return readFile(override)
       .replace("{{credit}}", buildCredit(p))
       .replace("{{skills}}", discoverSkills())
-      .replace("{{sandbox}}", sandboxPromptSection())
   setup(p).prompt
     .replace("{{credit}}", buildCredit(p))
     .replace("{{skills}}", discoverSkills())
-    .replace("{{sandbox}}", sandboxPromptSection())
 
 proc refreshSystemPrompt*(messages: JsonNode, p: Profile) =
   if messages == nil or messages.kind != JArray or messages.len == 0: return
