@@ -26,6 +26,13 @@ var sandboxEnabled*: bool = true
   ## unconfined and the in-process read/write/patch checks pass through.
   ## Default on, preserving the historical sandboxed behavior. Toggled
   ## at runtime via `:sandbox on/off`, persisted in `[settings]`.
+var autoresumeEnabled*: bool = true
+  ## When true, retryable API failures (429, 5xx, network errors) back off
+  ## on one shared exponential curve capped at 2048s, for up to `MaxAttempts`
+  ## tries (~36h), so a long-running agentic session rides out a usage-window
+  ## limit or a network dropout (the train ride) without dropping to the
+  ## prompt. When false, failures surface after a short probe. Default on.
+  ## Toggled at runtime via `:autoresume on/off`, persisted in `[settings]`.
 
 type
   ColorMode* = enum

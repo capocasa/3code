@@ -91,6 +91,11 @@ suite "config validation: schema (in-process)":
     let m = validateConfig(P, entries)
     check "bad value 'sometimes' for 'sandbox'" in m
 
+  test "bad boolean value for autoresume is reported":
+    let entries = @[("settings", "autoresume", "maybe", 3)]
+    let m = validateConfig(P, entries)
+    check "bad value 'maybe' for 'autoresume'" in m
+
   test "permitted boolean values are accepted":
     for b in ["on", "off", "true", "false", "yes", "no", "1", "0",
               "ON", "Off", "True"]:
@@ -121,6 +126,13 @@ suite "config validation: schema (in-process)":
 
   test "sandbox_enabled is a permitted settings key":
     let entries = @[("settings", "sandbox_enabled", "off", 3)]
+    check validateConfig(P, entries) == ""
+
+  test "autoresume and autoresume_enabled are permitted settings keys":
+    let entries = @[
+      ("settings", "autoresume", "off", 3),
+      ("settings", "autoresume_enabled", "on", 4)
+    ]
     check validateConfig(P, entries) == ""
 
   test "bash_path and bash-path are permitted settings keys":

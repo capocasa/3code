@@ -16,6 +16,7 @@ import types, util, prompts, session, config, api, compact, display, minline,
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":prompt", ":show",
                       ":log", ":sessions", ":summarize", ":version", ":sandbox",
+                      ":autoresume",
                       ":q", ":quit", ":exit"]
 
 type WizardReadLineHook* = proc(prompt: string, hidden,
@@ -52,7 +53,7 @@ proc classifyCommand*(cmd: string): CommandKind =
   case name
   of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":prompt", ":version":
     ckSafeImmediate
-  of ":streaming", ":notify":
+  of ":streaming", ":notify", ":autoresume":
     if parts.len == 0 or (parts.len == 1 and parts[0] == "list"): ckSafeImmediate
     else: ckMutating
   of ":provider":
@@ -141,6 +142,10 @@ proc completionFor*(line: string): seq[string] =
     result.add "off"
     return
   if words[0] == ":notify" and words.len == 2:
+    result.add "on"
+    result.add "off"
+    return
+  if words[0] == ":autoresume" and words.len == 2:
     result.add "on"
     result.add "off"
     return
@@ -704,6 +709,35 @@ proc cmdNotify(arg: string): string =
   else:
     return errLnS("usage: :notify [on|off]")
 
+proc cmdAutoresumeList(): string =
+  let mark = if autoresumeEnabled: "on" else: "off"
+  hintLnS("autoresume: " & mark &
+    "  (on = patient retry of 429/5xx/network errors, ~36h; " &
+    "off = surface the error after a short probe)")
+
+proc cmdAutoresumeSelect(target: string): string =
+  case target.toLowerAscii
+  of "on":
+    autoresumeEnabled = true
+  of "off":
+    autoresumeEnabled = false
+  else:
+    return errLnS(&"unknown value: {target} (choose on or off)")
+  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  cmdAutoresumeList()
+
+proc cmdAutoresume(arg: string): string =
+  let parts = arg.splitWhitespace()
+  case parts.len
+  of 0:
+    return cmdAutoresumeList()
+  of 1:
+    if parts[0] == "list":
+      return cmdAutoresumeList()
+    return cmdAutoresumeSelect(parts[0])
+  else:
+    return errLnS("usage: :autoresume [on|off]")
+
 proc cmdSandboxSettingSelect(target: string): string =
   case target.toLowerAscii
   of "on":
@@ -747,6 +781,8 @@ proc commandTitle(name, arg: string; ok: bool): string =
     "streaming"
   of ":notify":
     "notify"
+  of ":autoresume":
+    "autoresume"
   else:
     name.strip(chars = {':'})
 
@@ -1022,6 +1058,8 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       body.add cmdStreaming(arg)
     of ":notify":
       body.add cmdNotify(arg)
+    of ":autoresume":
+      body.add cmdAutoresume(arg)
     of ":prompt":
       resp buildSystemPrompt(prof)
     of ":version":

@@ -1,5 +1,5 @@
 import std/[os, strutils, tables, unittest]
-import threecode/config
+import threecode/[config, types]
 
 suite "config: parseConfigFile round-trip":
   var tmp = ""
@@ -64,6 +64,18 @@ suite "config: parseConfigFile round-trip":
     writeConfigFile(tmp, "test.model-a", @[])
     let raw = readFile(tmp)
     check raw.find("[search]") < 0
+
+  test "autoresume off persists and round-trips":
+    autoresumeEnabled = false
+    writeConfigFile(tmp, "test.model-a", @[])
+    let raw = readFile(tmp)
+    check raw.find("autoresume = \"off\"") >= 0
+    discard parseConfigFile(tmp)
+    check autoresumeEnabled == false
+    # default-on state is omitted from the config (clean config invariant)
+    autoresumeEnabled = true
+    writeConfigFile(tmp, "test.model-a", @[])
+    check readFile(tmp).find("autoresume") < 0
 
   test "write then read preserves reasoning":
     let providers = @[
