@@ -161,3 +161,27 @@ Bug 2 gone. If either persists, /tmp/t.log names the stale row-model field
 (ed/ft/vp/lv components vs real cursor row) — continue from step 1 of the
 original next-steps. If clean: close out, write the regression test
 (step 4), decide on mainlining terminaldbg (step 5).
+
+## CLOSED 2026-07-28 — fixed, verified on ghostty, regression-guarded
+
+User confirmed on ghostty: both bugs gone with 97b9dba (nested DEC 2026
+frames in appendTranscriptLiveAnchored/Floating). Probe log post-fix shows
+walkUp == physical reality on every commit (no stale ed/ft/vp/lv field) —
+the model was always right; the doubled ?2026l made 2026-honoring
+terminals render a different frame than the model assumed.
+
+Shipped on the linebugs branch:
+- 97b9dba  the fix (synchronized=false at the two nested redrawBytes sites)
+- 273499b  probe hardening: inputInterceptHook in minline captures DSR
+           replies in the input thread; queryCursorPos prefers the stash.
+           Kills the self-inflicted "DSR no-reply" readings. Hook is nil
+           in production (zero cost); terminaldbg stays opt-in and is
+           mainlined as a permanent diagnostic (handover step 5: yes).
+- 1ad1087  regression test tests/core/test_sync_frames.nim — asserts
+           exactly one ?2026h/?2026l per commit path; verified red against
+           pre-fix engine.nim, green after.
+
+Remaining housekeeping: merge linebugs → main when convenient. ttty
+oracle (xterm) never saw this bug class — by design, xterm ignores 2026.
+A foot/ghostty headless oracle (weston) would catch 2026-semantics
+regressions; not built, noted as future work if 2026-adjacent bugs recur.
