@@ -22,7 +22,7 @@
 ## The whole thing is opt-in via `THREECODE_TERMDBG=<path>` and a no-op
 ## otherwise, and dark under the PTY test harness.
 
-import std/[os, posix, strutils, times, deques]
+import std/[os, posix, strutils, times]
 import std/termios
 import ./types
 import ./minline
@@ -47,39 +47,23 @@ proc dbgLog(line: string) =
   except IOError:
     discard
 
-proc dsrIntercept(b: int): bool =
-  ## inputInterceptHook: capture a DSR reply (`CSI row ; col R`) streaming
-  ## through the input thread. Returns true when `b` was consumed (either
-  ## stashed as a reply, or replayed into `pushedBack` because it was not a
-  ## reply after all — either way the caller must re-read).
-  if b != 27: return false
-  if not stdinHasByteNow(): return false
-  var seq = "\x1b"
-  while seq.len < 16:
-    let ch = getchr()
-    if ch < 0: break
-    seq.add ch.chr
-    if seq.len >= 4 and ch.chr == 'R':
-      if seq[1] == '[':
-        let body = seq[2 ..< ^1]
-        let semi = body.find(';')
-        if semi > 0:
-          try:
-            dsrStashedRow = parseInt(body[0 ..< semi])
-            dsrStashedCol = parseInt(body[semi + 1 .. ^1])
-            dsrStashed = true
-            dbgLog("stashed DSR reply row=" & $dsrStashedRow &
-                   " col=" & $dsrStashedCol)
-            return true
-          except CatchableError:
-            discard
-      break
-    if ch.chr in {'A'..'Z', 'a'..'z', '@', '`', '~'}:
-      break
-  # Not a DSR reply (or malformed): replay everything after the ESC.
-  for i in countdown(seq.high, 1):
-    pushedBack.addFirst(seq[i].ord.int)
-  return true
+proc captureReply(bytes: string) =
+  ## replyCaptureHook: minline's production filter dropped a terminal
+  ## reply streaming through the input thread; stash a DSR cursor report
+  ## so `queryCursorPos` can answer from it instead of re-querying.
+  if bytes.len < 4 or bytes[0] != '\x1b' or bytes[1] != '[' or
+     bytes[^1] != 'R': return
+  let body = bytes[2 ..< ^1]
+  let semi = body.find(';')
+  if semi <= 0: return
+  try:
+    dsrStashedRow = parseInt(body[0 ..< semi])
+    dsrStashedCol = parseInt(body[semi + 1 .. ^1])
+    dsrStashed = true
+    dbgLog("stashed DSR reply row=" & $dsrStashedRow &
+           " col=" & $dsrStashedCol)
+  except CatchableError:
+    discard
 
 proc termDbgEnabled*(): bool =
   ## True when probing is armed: env var set with a writable path, running
@@ -101,7 +85,7 @@ proc termDbgEnabled*(): bool =
   dbgLog("ARMED")
   if not dbgArmed:
     dbgArmed = true
-    minline.inputInterceptHook = dsrIntercept
+    minline.replyCaptureHook = captureReply
   result = true
 
 proc queryCursorPos*(timeoutMs = 120): tuple[row, col: int] =

@@ -101,12 +101,60 @@ proc testPollStdinNow(): bool =
 
 proc run*(d: Driver, ed: var LineEditor, prompt = "> ",
           hidechars = false): string =
+  # Mirror the production readLine getCh's reply filter, with test
+  # byte sources. On ESC: if the terminal input queue holds a plausible
+  # reply prefix (`[` or `?`), scan the queue directly for a reply
+  # (`CSI [?] nums R|c`) and drop it; anything else passes through to
+  # the editor untouched. This mirrors production semantics (drop
+  # unsolicited replies) without the replay machinery tests don't need.
   let getCh: GetChProc = proc(): int =
+    if pushedBack.len > 0:
+      return pushedBack.popFirst()
     if termPeeked >= 0:
       result = termPeeked
       termPeeked = -1
       return result
-    d.terminal.read()
+    let b = d.terminal.read()
+    if b != 27: return b
+    let inp = d.terminal.input
+    if not inp.hasPendingInput(): return b
+    let avail = inp.bytes.len - inp.pos
+    if avail >= 3 and inp.bytes[inp.pos] == '['.ord and
+       chr(inp.bytes[inp.pos + 1]) in {'0'..'9', '?'}:
+      # Find the final byte within reply-charset reach.
+      var j = 1
+      var isReply = false
+      while j < avail and j < 22:
+        let c = inp.bytes[inp.pos + j]
+        if c == 'R'.ord or c == 'c'.ord:
+          isReply = j >= 2
+          break
+        if not (chr(c) in {'0'..'9', ';', '?'}):
+          break
+        inc j
+      if isReply:
+        var bytes = "\x1b"
+        for k in 0 .. j:
+          bytes.add chr(inp.bytes[inp.pos + k])
+        # Validate body shape (digits/;/optional leading ?) like the
+        # production filter, so modified arrows (CSI 1;5R) pass through.
+        let body = bytes[2 ..< ^1]
+        var shaped = true
+        for i, ch in body:
+          let okDigit = ch in {'0'..'9'}
+          let okSep = ch == ';' and i > 0
+          let okPriv = ch == '?' and i == 0
+          if not (okDigit or okSep or okPriv):
+            shaped = false
+            break
+        if shaped:
+          for _ in 0 .. j: discard inp.read()
+          noteReplyCaptured(bytes)
+          # Reply dropped; return the next real byte.
+          if pushedBack.len > 0:
+            return pushedBack.popFirst()
+          return d.terminal.read()
+    return b
   let write: WriteProc = proc(s: string) =
     d.terminal.write s
   let widthProc: WidthProc = proc(): int = d.width
