@@ -1,12 +1,12 @@
 ## `3code box` - the filesystem sandbox subcommand.
 ##
-## This is the procbox CLI (`procbox restrict ...`) folded into 3code so we
+## This is the sandwall CLI (`sandwall restrict ...`) folded into 3code so we
 ## ship one binary instead of two. The bash tool wraps each command as
 ## `3code box --policy SYS --policy REPO restrict [--ro TMPDIR] -- sh -c
 ## <script>`: it re-execs *itself* (via `getAppFilename`), so there is no
-## PATH lookup and no separate procbox binary to find or bundle. The box
+## PATH lookup and no separate sandwall binary to find or bundle. The box
 ## process loads the policy files itself, forks, setsid()s, applies the
-## OS-native restriction (Landlock/Seatbelt/ACL via the `procbox` library)
+## OS-native restriction (Landlock/Seatbelt/ACL via the `sandwall` library)
 ## and exec()s the target; children inherit the domain.
 ##
 ## Loading the policy in the box process (rather than receiving resolved
@@ -25,7 +25,7 @@
 when defined(posix):
   import std/posix except Time
 import std/os
-import procbox
+import sandwall
 
 const usage = """
 3code box - filesystem sandbox (Landlock/Seatbelt/ACL)
@@ -162,7 +162,7 @@ proc boxRestrict(args: seq[string]): int =
     return 2
 
   # System dirs (/usr, /bin, /lib, /dev/*, etc.) are auto-added as
-  # read-only inside each procbox backend's restrictImpl (baseline.nim),
+  # read-only inside each sandwall backend's restrictImpl (baseline.nim),
   # so the command's binaries, libs, and device nodes stay accessible
   # without listing them here.
   when defined(windows):

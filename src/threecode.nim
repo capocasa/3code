@@ -31,7 +31,7 @@ when defined(posix):
   import std/posix
 import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
-                  toolstream, turns, transcript, sandbox, box]
+                  toolstream, turns, transcript, sandbox, box, wall]
 when defined(windows):
   import threecode/streamexec  # for resolveBash, used by ensureBash
 import tinotify
@@ -196,13 +196,17 @@ proc cleanup() {.noconv.} =
   releaseActiveDirLock()
 
 proc main() =
-  # `box` is the built-in procbox: the bash tool re-execs this binary as
+  # `box` is the built-in sandwall CLI: the bash tool re-execs this binary as
   # `3code box restrict ...`. Dispatch before any other startup so the
   # sandboxed command isn't weighed down by 3code's TLS/config/session init
   # and so refuseRoot etc. don't run inside the confined child.
   let rawParams = commandLineParams()
   if rawParams.len > 0 and rawParams[0] == "box":
     quit(boxMain(rawParams[1 .. ^1]))
+  # `wall` is the network half of sandwall, same early-dispatch
+  # rationale: proxy/connect children skip all of 3code's startup.
+  if rawParams.len > 0 and rawParams[0] == "wall":
+    quit(wallMain(rawParams[1 .. ^1]))
 
   setupTlsEnv()
   cleanupStaleBinaries()

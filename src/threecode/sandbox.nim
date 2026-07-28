@@ -1,7 +1,7 @@
 ## Filesystem sandbox: policy loading, mtime reload, `3code box` driver.
 ##
-## The policy file format, parser, and rule model live in procbox
-## (`procbox/rules`); this module is the 3code-specific wrapper: which
+## The policy file format, parser, and rule model live in sandwall
+## (`sandwall/rules`); this module is the 3code-specific wrapper: which
 ## files form the cascade, when to reload them, and whether the OS
 ## backend actually works on this host.
 ##
@@ -9,7 +9,7 @@
 ## `-` deny, `*` read-only) plus a target: an absolute path, `~/` home
 ## path, `./` project-relative path (bare `+` = the project dir), or a
 ## host/IP with optional `:port`. Host rules are parsed for the future
-## network milestone but not enforced yet. See procbox's rules module
+## network milestone but not enforced yet. See sandwall's rules module
 ## for the full grammar.
 ##
 ## The effective policy is the cascade of the system file
@@ -24,14 +24,14 @@
 ## file contents even between parent reloads.
 
 import std/[os, osproc, strutils, times]
-import procbox
+import sandwall
 import types
 
-export procbox.AccessKind, procbox.Policy, procbox.Rule,
-       procbox.RuleKind, procbox.parseCascaded, procbox.defaultPolicyText,
-       procbox.repoPolicyPath, procbox.cascadedFiles, procbox.checkPath,
-       procbox.renderPolicy, procbox.PolicyDir, procbox.resolve,
-       procbox.Resolved
+export sandwall.AccessKind, sandwall.Policy, sandwall.Rule,
+       sandwall.RuleKind, sandwall.parseCascaded, sandwall.defaultPolicyText,
+       sandwall.repoPolicyPath, sandwall.cascadedFiles, sandwall.checkPath,
+       sandwall.renderPolicy, sandwall.PolicyDir, sandwall.resolve,
+       sandwall.Resolved
 
 var
   current*: Policy
@@ -44,8 +44,8 @@ var
   lastMtimes: tuple[system, repo: Time]
 
 proc findProcbox*(): string =
-  ## The procbox CLI is built into 3code as the `box` subcommand, so the
-  ## "procbox binary" the bash tool re-execs is just this process. Return
+  ## The sandwall CLI is built into 3code as the `box` subcommand, so the
+  ## "sandbox binary" the bash tool re-execs is just this process. Return
   ## its own path; empty only if it can't be resolved (shouldn't happen).
   try:
     result = getAppFilename()
@@ -83,7 +83,7 @@ proc loadCascaded*(projectDir: string): Policy =
   ## Load the cascade and remember the file mtimes for reloadIfChanged.
   let files = cascadedFiles(projectDir)
   lastMtimes = (mtimeOf(files.system), mtimeOf(files.repo))
-  procbox.loadCascaded(projectDir)
+  sandwall.loadCascaded(projectDir)
 
 proc reloadIfChanged*(projectDir: string): bool =
   ## Re-load the cascade when either policy file changed on disk since
@@ -94,7 +94,7 @@ proc reloadIfChanged*(projectDir: string): bool =
   let files = cascadedFiles(projectDir)
   let now = (mtimeOf(files.system), mtimeOf(files.repo))
   if now == lastMtimes: return false
-  current = procbox.loadCascaded(projectDir)
+  current = sandwall.loadCascaded(projectDir)
   lastMtimes = now
   true
 
@@ -128,7 +128,7 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
   ## Check a raw (possibly relative) path against the current policy,
   ## reloading the cascade first when a policy file changed. This is the
   ## in-process gate for the read/write/patch tools; it calls the same
-  ## procbox `checkPath` the sandboxed box subprocess enforces at the
+  ## sandwall `checkPath` the sandboxed box subprocess enforces at the
   ## kernel level for bash. `needsWrite = false` allows read-only and
   ## writable; `true` requires writable.
   if not active or not sandboxEnabled: return (true, "")
@@ -170,6 +170,6 @@ proc appendRule*(sandboxFile, argPath: string; access: AccessKind): bool =
   if not fileExists(sandboxFile):
     let projectDir = sandboxFile.parentDir.parentDir
     if not ensureDefaultSandbox(projectDir): return false
-  result = procbox.appendRule(sandboxFile, argPath, access)
+  result = sandwall.appendRule(sandboxFile, argPath, access)
   if result:
     current = loadCascaded(getCurrentDir())

@@ -321,12 +321,17 @@ file on first use). Yolo mode (everything writable) is fine but you have
 to ask for it explicitly.
 
 The sandbox is enforced two ways. Bash commands run through `3code box`,
-the built-in procbox sandbox (Landlock on Linux, Seatbelt on macOS), which
+the built-in sandwall sandbox (Landlock on Linux, Seatbelt on macOS), which
 3code re-execs itself as; the box process loads the policy files itself,
 so every command launches on the freshest policy. The in-process
 read/write/patch tools check paths against the same policy (reloaded when
-the file changes) in the 3code process. Both layers run the same procbox
+the file changes) in the 3code process. Both layers run the same sandwall
 parser and rule model, so the rules you write apply uniformly.
+
+Host rules additionally drive the network wall: the first host rule in
+the effective policy switches on egress fencing for bash commands, which
+then reach the network only through a per-run allowlist proxy (``3code
+wall proxy``); see the policy grammar for the host rule forms.
 
 ### The sandbox file
 
@@ -355,9 +360,9 @@ letter/digit  host rule: hostname, IPv4, or IPv6, optional ``:port``
 ==========  ==============================================
 
 A bare code with no target means the project dir itself (``+`` = writable
-project). Host rules (``+ api.example.com``, ``+ 1.2.3.4:8080``,
-``+*`` for no network restrictions) are parsed and stored for the
-upcoming network sandbox but not enforced yet.
+project). Host rules (``+ api.example.com``, ``+ 1.2.3.4:8080``, ``+ *`` for no
+network restrictions) fence the network egress of sandboxed bash
+commands through the wall proxy.
 
 On first run in a new directory, 3code uses this default:
 
