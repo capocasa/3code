@@ -1,5 +1,5 @@
 import std/[os, strutils, tables, unittest]
-import threecode/config
+import threecode/[config, types]
 
 suite "config: parseConfigFile round-trip":
   var tmp = ""
@@ -64,6 +64,18 @@ suite "config: parseConfigFile round-trip":
     writeConfigFile(tmp, "test.model-a", @[])
     let raw = readFile(tmp)
     check raw.find("[search]") < 0
+
+  test "patient_retry off persists and round-trips":
+    patientRetryEnabled = false
+    writeConfigFile(tmp, "test.model-a", @[])
+    let raw = readFile(tmp)
+    check raw.find("patient_retry = \"off\"") >= 0
+    discard parseConfigFile(tmp)
+    check patientRetryEnabled == false
+    # default-on state is omitted from the config (clean config invariant)
+    patientRetryEnabled = true
+    writeConfigFile(tmp, "test.model-a", @[])
+    check readFile(tmp).find("patient_retry") < 0
 
   test "write then read preserves reasoning":
     let providers = @[

@@ -230,7 +230,8 @@ type
 const
   PermittedSections = ["settings", "search", "colors", "provider"]
   SettingsKeys = ["current", "notify", "streaming", "sandbox",
-                  "sandbox_enabled", "mode", "bash_path", "bash-path",
+                  "sandbox_enabled", "patient_retry", "patient-retry",
+                  "mode", "bash_path", "bash-path",
                   "auto_update"]
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
   ColorKeys = ["bright-white", "off-white", "dim-white"]
@@ -273,7 +274,8 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
         return &"{path}:{ent.line}: unknown search engine '{ent.value}' " &
                "(expected one of: exa, parallel, brave)"
     of "settings":
-      if ent.key in ["notify", "streaming", "sandbox", "sandbox_enabled"] and
+      if ent.key in ["notify", "streaming", "sandbox", "sandbox_enabled",
+                      "patient_retry", "patient-retry"] and
           ent.value.strip.toLowerAscii notin BoolValues:
         return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
                "(expected on/off/true/false/yes/no/1/0)"
@@ -357,6 +359,14 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           of "on", "true", "yes", "1": sandboxEnabled = true
           of "off", "false", "no", "0": sandboxEnabled = false
           else: discard
+        of "patient_retry", "patient-retry":
+          # Same boolean dialect. Default on; an explicit `off` makes
+          # retryable failures surface after the initial ramp-up (~1min)
+          # instead of entering the long patient hold.
+          case v.toLowerAscii
+          of "on", "true", "yes", "1": patientRetryEnabled = true
+          of "off", "false", "no", "0": patientRetryEnabled = false
+          else: discard
         of "mode":
           # `auto` detects the background (default); `dark`/`bright` force a
           # palette. `light` is accepted as an alias for `bright`.
@@ -427,6 +437,8 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "notify = \"off\"\n"
   if not sandboxEnabled:
     buf.add "sandbox = \"off\"\n"
+  if not patientRetryEnabled:
+    buf.add "patient_retry = \"off\"\n"
   # Persist the colour mode only when it differs from `auto` (the default).
   if colorModePref != cmAuto:
     let label = if colorModePref == cmDark: "dark" else: "bright"

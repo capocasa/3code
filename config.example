@@ -21,6 +21,7 @@ current = "baseten.glm5"
 ; brave-key = "..."
 ; notify = off ; turn off the desktop notification that fires when a turn ends (on by default)
 ; sandbox = off ; disable filesystem sandbox enforcement (on by default: .3code/sandbox policy)
+; patient_retry = off ; disable patient retry of 429/5xx/network errors (on by default: ~36h hold so a long-running session rides out a usage limit or network dropout without dropping to the prompt)
 ; bash_path = "C:\\tools\\msys64\\usr\\bin\\bash.exe"  ; Windows only: override bash detection
 
 # Colour mode. 3code detects dark vs bright-background automatically by

@@ -16,6 +16,7 @@ import types, util, prompts, session, config, api, compact, display, minline,
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":prompt", ":show",
                       ":log", ":sessions", ":summarize", ":version", ":sandbox",
+                      ":retry",
                       ":q", ":quit", ":exit"]
 
 type WizardReadLineHook* = proc(prompt: string, hidden,
@@ -52,7 +53,7 @@ proc classifyCommand*(cmd: string): CommandKind =
   case name
   of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":prompt", ":version":
     ckSafeImmediate
-  of ":streaming", ":notify":
+  of ":streaming", ":notify", ":retry":
     if parts.len == 0 or (parts.len == 1 and parts[0] == "list"): ckSafeImmediate
     else: ckMutating
   of ":provider":
@@ -141,6 +142,10 @@ proc completionFor*(line: string): seq[string] =
     result.add "off"
     return
   if words[0] == ":notify" and words.len == 2:
+    result.add "on"
+    result.add "off"
+    return
+  if words[0] == ":retry" and words.len == 2:
     result.add "on"
     result.add "off"
     return
@@ -704,6 +709,35 @@ proc cmdNotify(arg: string): string =
   else:
     return errLnS("usage: :notify [on|off]")
 
+proc cmdRetryList(): string =
+  let mark = if patientRetryEnabled: "on" else: "off"
+  hintLnS("patient retry: " & mark &
+    "  (on = keep retrying 429/5xx/network errors, ~36h; " &
+    "off = surface the error after the initial ramp-up)")
+
+proc cmdRetrySelect(target: string): string =
+  case target.toLowerAscii
+  of "on":
+    patientRetryEnabled = true
+  of "off":
+    patientRetryEnabled = false
+  else:
+    return errLnS(&"unknown value: {target} (choose on or off)")
+  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  cmdRetryList()
+
+proc cmdRetry(arg: string): string =
+  let parts = arg.splitWhitespace()
+  case parts.len
+  of 0:
+    return cmdRetryList()
+  of 1:
+    if parts[0] == "list":
+      return cmdRetryList()
+    return cmdRetrySelect(parts[0])
+  else:
+    return errLnS("usage: :retry [on|off]")
+
 proc cmdSandboxSettingSelect(target: string): string =
   case target.toLowerAscii
   of "on":
@@ -747,6 +781,8 @@ proc commandTitle(name, arg: string; ok: bool): string =
     "streaming"
   of ":notify":
     "notify"
+  of ":retry":
+    "retry"
   else:
     name.strip(chars = {':'})
 
@@ -1022,6 +1058,8 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       body.add cmdStreaming(arg)
     of ":notify":
       body.add cmdNotify(arg)
+    of ":retry":
+      body.add cmdRetry(arg)
     of ":prompt":
       resp buildSystemPrompt(prof)
     of ":version":

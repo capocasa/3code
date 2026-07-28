@@ -2095,6 +2095,8 @@ commands:
   :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
   :notify           show notify mode (on = desktop notification when a turn ends)
   :notify on|off    toggle turn-end desktop notification
+  :retry            show patient-retry mode (on = ~36h hold for outages/limits)
+  :retry on|off     toggle patient retry of 429/5xx/network errors
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session

@@ -1693,7 +1693,15 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
   # cause a flicker between callModel iterations within a turn.
   defer:
     hookAfterCall()
-  const MaxAttempts = 12
+  # `patientRetryEnabled` widens the probe window from a short blip-recovery
+  # (~1min, 7 attempts) to a long patient hold (~36h, 64 attempts) so a
+  # session rides out usage-window limits and network dropouts without
+  # surfacing to the prompt. One probe count, not a separate mode:
+  # the backoff curve below is the same either way, only its length changes.
+  const
+    ShortAttempts = 7      # patient retry off: blip recovery, ~1min total
+    LongAttempts = 64      # patient retry on: ~36h hold for the train ride
+  let MaxAttempts = if patientRetryEnabled: LongAttempts else: ShortAttempts
   const networkSync {.booldefine.} = false
     ## Fallback switch for the streaming transport. Default (false) runs
     ## the blocking recv loop on a worker thread so the UI stays
@@ -1802,6 +1810,12 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
           formatApiDetail(errMsg, outcome.errBody, code))
       raise newHttpError(code, errMsg, outcome.errBody)
     let retryAfter = try: parseInt(outcome.retryAfter) except CatchableError: 0
+    # One shared backoff curve for every retryable category (429, 5xx,
+    # network-health). Power-of-2 off the category's own level, capped at
+    # 2048s (2^11) so the loop stays responsive to recovery: even at the cap
+    # it re-probes every ~34min instead of napping for hours. An explicit
+    # `Retry-After` header wins when present (the provider's own guidance).
+    const BackoffCap = 2048
     let backoff =
       if retryAfter > 0:
         retryAfter
@@ -1810,9 +1824,9 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
                      "capacity" in outcome.errBody or
                      "overloaded" in outcome.errBody
         let base = if isBusy: max(rateRetryLevel, 4) else: rateRetryLevel
-        min(1 shl base, 90)
+        min(1 shl base, BackoffCap)
       else:
-        min(1 shl serverRetryLevel, 16)
+        min(1 shl serverRetryLevel, BackoffCap)
     # Keep the spinner twirling across the backoff. Stopping it before the
     # sleep and restarting it after left the whole retry window with a frozen
     # bar and no animation, so a slow provider looked like the turn had
