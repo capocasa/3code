@@ -397,9 +397,13 @@ proc promptEditProvider*(editor: var minline.LineEditor,
       if clash:
         errLn &"name already used: {name}"
         continue
-    let newUrl = readOptional(editor,
-      &"  url [{existing.url}]  : ").strip(chars = {'/', ' '})
-    let url = if newUrl == "": existing.url else: newUrl
+    let url =
+      if not experimentalEnabled:
+        existing.url
+      else:
+        let newUrl = readOptional(editor,
+          &"  url [{existing.url}]  : ").strip(chars = {'/', ' '})
+        if newUrl == "": existing.url else: newUrl
     let newKey = readOptional(editor,
       "  api key [keep existing] : ", hidden = true)
     let key = if newKey == "": existing.key else: newKey
