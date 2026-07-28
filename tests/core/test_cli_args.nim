@@ -241,3 +241,48 @@ suite "box subcommand (built-in procbox)":
       check not fileExists(outside)
     else:
       skip()
+
+  test "box --policy confines per the policy file":
+    # The bash tool launches box with --policy instead of resolved paths;
+    # the box process must load the policy itself. Policy: writable cwd
+    # (bare +), deny everything else. A write inside the project works,
+    # a write outside fails.
+    if backendWorks:
+      let proj = boxTmp / "proj"
+      createDir(proj / ".3code")
+      writeFile(proj / ".3code" / "sandbox", "- /\n+\n")
+      let inside = proj / "ok.txt"
+      let rIn = run(["box", "--policy", proj / ".3code" / "sandbox",
+                     "restrict", "--", "touch", inside])
+      check rIn.code == 0
+      check fileExists(inside)
+      let outside = getTempDir() / ("3code-box-poleak-" & $epochTime().int64)
+      let rOut = run(["box", "--policy", proj / ".3code" / "sandbox",
+                      "restrict", "--", "touch", outside])
+      check rOut.code != 0
+      check not fileExists(outside)
+      # A fully locked policy (no writable root) is accepted: the touch
+      # simply has nowhere legal to land.
+      writeFile(proj / ".3code" / "sandbox", "- /\n")
+      let rLock = run(["box", "--policy", proj / ".3code" / "sandbox",
+                       "restrict", "--", "true"])
+      check rLock.code == 0
+    else:
+      skip()
+
+  test "box --policy reloads edits between launches":
+    # Two launches, policy tightened in between: the second launch must
+    # enforce the new file contents without any parent-side reload.
+    if backendWorks:
+      let proj = boxTmp / "proj2"
+      createDir(proj / ".3code")
+      let pol = proj / ".3code" / "sandbox"
+      let target = proj / "t.txt"
+      writeFile(pol, "- /\n+\n")
+      check run(["box", "--policy", pol, "restrict", "--", "touch", target]).code == 0
+      removeFile(target)
+      writeFile(pol, "- /\n")
+      check run(["box", "--policy", pol, "restrict", "--", "touch", target]).code != 0
+      check not fileExists(target)
+    else:
+      skip()

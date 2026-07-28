@@ -336,25 +336,23 @@ export DEBIAN_FRONTEND=noninteractive
       # path and is always set when `active`; the unconfined setsid fallback
       # below only runs when the sandbox is off entirely.
       if sandboxEnabled and sandbox.active and sandbox.procboxExe.len > 0:
-        let (writable, readonly0) = sandbox.current.resolve()
-        # The script + stdin live in a temp dir under getTempDir(); the
-        # sandboxed sh must be able to read them. Expose that temp dir as
-        # read-only (sh only reads the script, it never writes there).
-        var readonly = readonly0
-        readonly.add tmp
-        var args = @["box", "restrict"]
-        if writable.len > 0:
-          args.add writable
-        else:
-          # box requires at least one writable path. Deny-everything is
-          # expressed as writable=/dev/null-equivalent: we pass the script
-          # temp dir (already created and writable) as the single writable
-          # root so box starts, and the deny rules ensure nothing real
-          # is touched. This is an edge case (a fully-locked policy).
-          args.add tmp
-        if readonly.len > 0:
-          args.add "--ro"
-          args.add readonly
+        # The box subprocess loads the policy files itself (--policy), so
+        # every launch enforces the freshest file contents; no mtime
+        # plumbing needed here. The script + stdin live in a temp dir
+        # under getTempDir(); expose it read-only (sh only reads the
+        # script, it never writes there). The policy force-read-only and
+        # Landlock writability warning live in box.nim.
+        discard sandbox.reloadIfChanged(getCurrentDir())
+        let paths = sandbox.policyPaths()
+        var args = @["box"]
+        args.add ["--policy", paths.system]
+        args.add ["--policy", paths.repo]
+        args.add "restrict"
+        # No explicit writable paths: those come from the policy
+        # inside box (a fully-locked policy simply yields none, which
+        # box accepts). The script temp dir is read-only; sh only reads
+        # the script, never writes there.
+        args.add ["--ro", tmp]
         args.add "--"
         args.add "/bin/sh"
         args.add "-c"

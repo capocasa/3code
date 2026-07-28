@@ -310,7 +310,8 @@ in for the ones below it:
 2. **repo** - `.3code/sandbox` in your project directory.
 
 A missing level is not empty: it contributes the built-in default
-(`.` deny `/`, then `O` writable cwd), so the sandbox is always on. The
+(`-` deny `/`, `+` writable `/tmp`, then `+` writable cwd), so the
+sandbox is always on. The
 effective policy is the two texts concatenated (system then repo) and
 parsed once, so a repo-level `.` on `/` cleanly resets anything a
 system file opened above it. 3code never writes a sandbox file into your
@@ -320,39 +321,55 @@ file on first use). Yolo mode (everything writable) is fine but you have
 to ask for it explicitly.
 
 The sandbox is enforced two ways. Bash commands run through `3code box`,
-the built-in nimbox sandbox (Landlock on Linux, Seatbelt on macOS), which
-3code re-execs itself as. The in-process read/write/patch tools check
-paths against the same policy in the 3code process. Both layers consult
-the same file, so the rules you write apply uniformly.
+the built-in procbox sandbox (Landlock on Linux, Seatbelt on macOS), which
+3code re-execs itself as; the box process loads the policy files itself,
+so every command launches on the freshest policy. The in-process
+read/write/patch tools check paths against the same policy (reloaded when
+the file changes) in the 3code process. Both layers run the same procbox
+parser and rule model, so the rules you write apply uniformly.
 
 ### The sandbox file
 
-Each line is a one-character access code, a space, and a path. Lines run
-top to bottom; each line supersedes the ones above it for the path it
+Each line is a one-character access code, a space, and a target. Lines run
+top to bottom; each line supersedes the ones above it for the target it
 names. Later rules win, so you can open a broad path then narrow parts of
 it.
 
 ==========  ==============================================
 Code        Meaning
 ==========  ==============================================
-``.``       deny: no read, no write
-``o``       read-only: read and execute
-``O``       writable: read, write, create, delete, rename
-``0``       writable: alias for ``O`` (the digit zero)
+``-``       deny: no read, no write, no connect
+``*``       read-only: read and execute (paths only)
+``+``       writable path / connectable host
 ==========  ==============================================
 
-A blank path means the working directory itself. Relative paths resolve
-against the working directory; absolute paths are used as-is.
+The target's first character decides what it names:
 
-On first run in a new directory, 3code creates this default:
+==========  ==============================================
+Start       Target
+==========  ==============================================
+``/``       absolute path (``C:\`` drive roots on Windows)
+``~``       home-dir path
+``.``       path relative to the project dir
+letter/digit  host rule: hostname, IPv4, or IPv6, optional ``:port``
+==========  ==============================================
+
+A bare code with no target means the project dir itself (``+`` = writable
+project). Host rules (``+ api.example.com``, ``+ 1.2.3.4:8080``,
+``+*`` for no network restrictions) are parsed and stored for the
+upcoming network sandbox but not enforced yet.
+
+On first run in a new directory, 3code uses this default:
 
 ```
-. /
-O
+- /
++ /tmp
++
 ```
 
-The root is denied, the working directory is writable. This is the safe
-default: the agent can read and write your project, nothing else.
+The root is denied, the system temp dir and the project directory are
+writable. This is the safe default: the agent can read and write your
+project and scratch files, nothing else.
 
 ### Yolo mode
 
@@ -360,7 +377,7 @@ If you want the agent to have free rein over the whole filesystem, replace
 the file with one line:
 
 ```
-0 /
++ /
 ```
 
 This is the explicit opt-in the spec requires. 3code never writes yolo for
@@ -369,14 +386,14 @@ you; you type it.
 ### Nesting and overrides
 
 Because each line supersedes the ones above, you can layer rules. This
-makes the working directory writable, opens ``/tmp`` read-only, then locks
+makes the working directory writable, opens ``/var`` read-only, then locks
 down a secrets directory inside the project:
 
 ```
-. /
-O
-o /tmp
-. ./secrets
+- /
++
+* /var
+- ./secrets
 ```
 
 The last matching rule for a path wins. ``./secrets`` is covered by the

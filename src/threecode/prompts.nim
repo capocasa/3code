@@ -363,6 +363,8 @@ Act first, explain after. Don't narrate your plan before executing it — just e
 
 # Tools
 
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
+
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `write(path, body)` — create or overwrite a file with `body`.
 - `patch(path, edits)` — apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
@@ -432,6 +434,8 @@ const GlmPreamble = """You are the GLM edition of 3code, the economical coding a
 Act first, explain after. Don't narrate your plan before executing it — just execute.
 
 # Tools
+
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
 
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `write(path, body)` — create or overwrite a file with `body`.
@@ -684,6 +688,8 @@ When unfamiliar, orient first: `ls` README, build manifest, skim relevant source
 
 # Tools
 
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
+
 - `bash(command, stdin?, timeout?)` - shell command. Returns stdout, stderr, exit code. `timeout` (optional, seconds) raises the 120s default up to 600s for builds, test suites, installs.
 - `read(path, offset?, limit?)` - read a file. Use `offset`/`limit` for large files.
 - `write(path, body)` - create or overwrite a file.
@@ -731,6 +737,8 @@ Every output token costs money. Make each one earn its place.
 const QwenPreamble = """You are the Qwen edition of 3code, the economical coding agent.
 
 # Tools
+
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
 
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `write(path, body)` — create or overwrite a file with `body`.
@@ -873,6 +881,8 @@ Own the task end to end; stop only when done-with-proof, genuinely blocked, or a
 a real fork only the user can decide.
 
 # Tools
+
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
 
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `read(path, offset?, limit?)` — read a file. Use `offset`/`limit` for large files; prefer targeted reads over full re-ingest.
@@ -1383,6 +1393,8 @@ Your failure mode is declaring success on insufficient evidence. Fight it.
 
 # Tools
 
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
+
 - `bash(cmd, stdin?, timeout?)` - shell. timeout in seconds (default 120, max 600).
 - `read(path, offset?, limit?)` - read file, targeted ranges.
 - `write(path, body)` - create / overwrite.
@@ -1478,6 +1490,8 @@ Over-thinking a simple task wastes tokens and latency as surely as under-thinkin
 
 # Tools
 
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
+
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `write(path, body)` — create or overwrite a file with `body`.
 - `patch(path, edits)` — apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
@@ -1551,6 +1565,8 @@ Act first, explain after. Don't narrate your plan before executing it — just e
 You carry a binary reasoning toggle (`on`/`off`). Reasoning is on by default. Engage it for hard problems: subtle bugs, architecture decisions, multi-file reasoning, anything where a wrong step is expensive and verifiable. For routine edits with an obvious solution, `off` is cheaper and faster — the answer doesn't need a chain of thought. Budget deliberately: over-thinking a simple task wastes tokens and latency as surely as under-thinking a hard one. The harness surfaces your thinking in a ticker scrubber, so the user sees progress without the transcript growing — use that channel freely when thinking is on.
 
 # Tools
+
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
 
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `read(path, offset?, limit?)` — read a file. Use `offset`/`limit` for large files; prefer targeted reads over full re-ingest.
@@ -1666,6 +1682,8 @@ K2.7-code and K3 always think (no off mode). K2.5/K2.6 toggle via `:reasoning`. 
 
 # Tools
 
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
+
 `bash`, `read`, `write`, `patch`, `update_plan`, `web_search`, `web_fetch`, `clear`. Use exact names — no invented tools, no tools from prior sessions not in the current schema. Independent calls run in parallel; batch them. Sequential only when one result determines the next. If a tool fails twice, stop and explain.
 
 For edits: `patch` for surgical changes, `write` for new files or full rewrites. No `ed`, `sed -i`, or heredocs to rewrite files. Read before `patch` — the harness errors if the file changed.
@@ -1734,6 +1752,8 @@ You were built for token efficiency. Every section below exists to maximize usef
 Ling toggles reasoning via the textual directive at the top of this prompt (`detailed thinking on` / `detailed thinking off`). The harness rewrites that line based on `:reasoning` — never reference the directive, `reasoning_content`, or thinking mechanics in your reply. When thinking is on, budget it to the task: a factual lookup does not need a multi-thousand-token chain. Over-thinking a simple task costs latency and tokens as surely as under-thinking a hard one.
 
 # Tools
+
+Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
 
 `bash`, `read`, `write`, `patch`, `update_plan`, `web_search`, `web_fetch`, `clear`. Use exact names — no invented tools. Independent calls run in parallel; batch them. Sequential only when one result determines the next. If a tool fails twice, stop and explain.
 
@@ -2084,9 +2104,11 @@ commands:
   :sandbox          show the active filesystem sandbox rules
   :sandbox show     (same)
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow P  add a writable rule for path P
-  :sandbox readonly P  add a read-only rule for path P
-  :sandbox deny P   add a deny rule for path P
+  :sandbox allow T  add a writable/connectable rule (+ T)
+  :sandbox readonly P  add a read-only rule (* P)
+  :sandbox deny T   add a deny rule (- T)
+  (T is a path or a host; P a path. Policy syntax: + allow, - deny,
+  * read-only; see .3code/sandbox)
   :q :quit          exit (also Ctrl-D)
 
 input:
