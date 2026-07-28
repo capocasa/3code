@@ -530,7 +530,10 @@ proc appendTranscriptLiveAnchored(e: var TerminalEngine; transcript: string;
       stdout.write "\r\n"
     if restoreEditor:
       edPtr[].renderRow = 0
-      stdout.write edPtr[].redrawBytes()
+      # Already inside SyncBegin: a nested 2026 frame would emit a
+      # doubled ?2026l, which 2026-honoring terminals (foot, ghostty)
+      # can batch/drop differently than the row model expects.
+      stdout.write edPtr[].redrawBytes(synchronized = false)
       if not edPtr[].pendingCaret:
         stdout.write "\x1b[?25h"
       e.noteFooterPainted(footerRowsAboveEditor)
@@ -574,7 +577,7 @@ proc appendTranscriptFloating(e: var TerminalEngine; transcript: string;
         stdout.write "\x1b[1B"
     if editing and restoreEditor:
       editor[].renderRow = 0
-      stdout.write editor[].redrawBytes()
+      stdout.write editor[].redrawBytes(synchronized = false)
       if not editor[].pendingCaret:
         stdout.write "\x1b[?25h"
       e.noteFooterPainted(footerRowsAboveEditor)
