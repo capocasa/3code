@@ -1578,6 +1578,13 @@ proc close*(s: TtySession) =
   if s.closed:
     return
   s.drain(20, recordFrame = false)
+  # Stream well-formedness gate: the grid's DEC 2026 validator flags
+  # nested/unmatched sync frames (the foot/ghostty line-math bug class).
+  # Everything the session fed the grid is checked, so every tty test is
+  # a malformed-sync net by construction.
+  s.grid.checkStreamClosed()
+  doAssert s.grid.violations.len == 0,
+    "terminal stream violations: " & s.grid.violations.join("; ")
   when defined(windows):
     if not s.exited:
       # TerminateProcess replaces kill(SIGTERM). Bounded wait on the process
