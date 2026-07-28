@@ -82,10 +82,39 @@ proc classifyCommand*(cmd: string): CommandKind =
   else:
     ckUnknown
 
+proc pathCompletions*(frag: string): seq[string] =
+  let base = safeCwd()
+  var dir = base
+  var prefix = frag
+  var dirPart = ""
+  let slash = frag.rfind('/')
+  if slash >= 0:
+    dirPart = frag[0 ..< slash]
+    prefix = frag[slash + 1 ..< frag.len]
+    dir = resolvePath(dirPart)
+  if not dirExists(dir): return
+  type Entry = tuple[name: string, isDir: bool]
+  var entries: seq[Entry]
+  for k, e in walkDir(dir):
+    let name = extractFilename(e)
+    if name.len == 0: continue
+    if not name.startsWith(prefix): continue
+    entries.add (name, k in {pcDir, pcLinkToDir})
+  entries.sort(proc(a, b: Entry): int = cmp(a.name, b.name))
+  let relPrefix = if slash >= 0: frag[0 .. slash] else: ""
+  for e in entries:
+    let full = if e.isDir: e.name & "/" else: e.name
+    result.add relPrefix & full
+
 proc completionFor*(line: string): seq[string] =
   let words = line.split(' ')
   if words.len == 0: return
   let last = words[^1]
+  if last.startsWith('@'):
+    let frag = last[1 ..< last.len]
+    for p in pathCompletions(frag):
+      result.add '@' & p
+    return
   if words.len == 1:
     if last == "" or last.startsWith(":"):
       return @CommandNames
