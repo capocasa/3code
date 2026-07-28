@@ -136,3 +136,28 @@ Strongest hypothesis for "xterm clean, foot/ghostty broken":
 
 cybernetic-plan skill updated: when updating a plan, fold newly discovered
 sensible tasks into the Steps list rather than asking the user.
+
+## RESUMED 2026-07-26 — nested 2026 frames found and fixed (97b9dba)
+
+Audit of DEC 2026 pairing found the imbalance WITHOUT needing the ghostty
+repro: `appendTranscriptLiveAnchored` (engine.nim:533) and
+`appendTranscriptFloating` (engine.nim:577) called
+`redrawBytes()` (default `synchronized=true`) while already inside an outer
+`SyncBegin` — emitting a nested `?2026h..?2026l` plus the outer `?2026l`.
+This is exactly the doubled sync-end seen in the very first real-terminal
+run. Fixed by passing `synchronized = false` at both sites (matches the 4
+other in-frame callers). ttty suites pass; stub + real builds rebuilt.
+
+### Next: verify on ghostty (user-driven)
+
+Built `build/3code_real` (full providers) and `build/3code_stub` on the
+linebugs branch WITH the fix. In a ghostty window:
+
+    cd ~/p/3code/linebugs
+    THREECODE_TERMDBG=/tmp/t.log ./build/3code_real
+
+Do `:provider kimicode`, type a few chars, submit. Expected: Bug 1 and
+Bug 2 gone. If either persists, /tmp/t.log names the stale row-model field
+(ed/ft/vp/lv components vs real cursor row) — continue from step 1 of the
+original next-steps. If clean: close out, write the regression test
+(step 4), decide on mainlining terminaldbg (step 5).
