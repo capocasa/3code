@@ -1,17 +1,19 @@
 discard """
   # The cascade concatenates a system level and a repo level (each falling
-  # back to the built-in default when absent) and parses once. These tests
-  # exercise `parseCascaded`, the pure file-free core, so they don't depend
-  # on `~/.config/3code/sandbox` or write repo files.
+  # back to the built-in default when absent) and parses once. The parser
+  # itself is exhaustively tested in procbox's test_rules; these tests
+  # cover the 3code-facing surface: the cascade semantics via
+  # `parseCascaded` (re-exported from procbox) and the mtime-driven
+  # `reloadIfChanged` that picks up mid-session policy edits.
 """
-import std/[unittest, os]
+import std/[unittest, os, times]
 import threecode/sandbox
 import threecode/types
 
 # Use platform-appropriate absolute paths so the test is meaningful on
 # both Unix and Windows. On Windows a bare "/opt" is not absolute (no
-# drive letter), so normalizeSandboxPath would resolve it relative to
-# cwd and the path assertions would fail.
+# drive letter), so policy path normalization would resolve it relative
+# to cwd and the path assertions would fail.
 when defined(windows):
   const opt = "C:\\opt"
   const varDir = "C:\\var"
@@ -23,10 +25,10 @@ else:
 
 suite "sandbox cascade (parseCascaded)":
   test "both levels at default -> deny /, writable cwd":
-    # Two default texts concatenate (deny /, O /tmp, O each); the effective
+    # Two default texts concatenate (- /, + /tmp, + each); the effective
     # access is decided by last-wins, so assert via checkPath, not raw rule
     # count.
-    let s = parseCascaded(defaultSandboxText(), defaultSandboxText(), proj)
+    let s = parseCascaded(defaultPolicyText(), defaultPolicyText(), proj)
     check s.checkPath("/") == akDeny
     check s.checkPath(proj) == akWritable
     check s.checkPath(proj / "sub") == akWritable
@@ -36,23 +38,23 @@ suite "sandbox cascade (parseCascaded)":
       check s.checkPath("/tmp") == akWritable
 
   test "repo file only -> repo rules win for the paths it names":
-    let s = parseCascaded(defaultSandboxText(), "O " & opt & "\n", proj)
+    let s = parseCascaded(defaultPolicyText(), "+ " & opt & "\n", proj)
     check s.rules[^1].access == akWritable
     check s.rules[^1].path == opt
     # cwd stays writable (from the default).
     check s.checkPath(proj) == akWritable
 
   test "system file only -> system rules apply":
-    let s = parseCascaded("o " & varDir & "\n", defaultSandboxText(), proj)
+    let s = parseCascaded("* " & varDir & "\n", defaultPolicyText(), proj)
     check s.rules[0].access == akReadOnly
     check s.rules[0].path == varDir
 
   test "both -> system then repo concatenated; repo deny resets a system allow":
-    let s = parseCascaded("O " & opt & "\n", ". " & opt & "\n", proj)
+    let s = parseCascaded("+ " & opt & "\n", "- " & opt & "\n", proj)
     check s.checkPath(opt) == akDeny
 
   test "repo can broaden beyond the system default":
-    let s = parseCascaded(defaultSandboxText(), "O " & opt & "\no " & varDir & "\n", proj)
+    let s = parseCascaded(defaultPolicyText(), "+ " & opt & "\n* " & varDir & "\n", proj)
     check s.checkPath(opt) == akWritable
     check s.checkPath(varDir) == akReadOnly
 
@@ -60,3 +62,32 @@ suite "sandbox cascade (parseCascaded)":
     # The gate lives in types.nim; assert the default so a future change
     # to the declaration is caught here, not in production.
     check sandboxEnabled == true
+
+suite "policy reload (reloadIfChanged)":
+  test "mtime change reloads the cascade":
+    # Drive a real repo policy file: load, tighten it on disk, expect the
+    # next reloadIfChanged to pick up the new rule. The system file is
+    # global, so the repo rule is the one asserted (last-wins).
+    let dir = getTempDir() / ("3code-reload-" & $getCurrentProcessId())
+    createDir(dir / ".3code")
+    let repoFile = dir / ".3code" / "sandbox"
+    let target = (dir / "locked").normalizedPath
+    writeFile(repoFile, "+ ./\n")
+    let wasActive = sandbox.active
+    let saved = sandbox.current
+    sandbox.active = true
+    try:
+      sandbox.current = sandbox.loadCascaded(dir)
+      check sandbox.current.checkPath(target) == akWritable
+      check sandbox.reloadIfChanged(dir) == false
+      # Tighten the policy and force a detectably newer mtime (filesystem
+      # mtime granularity can exceed the test's runtime).
+      writeFile(repoFile, "+ ./\n- ./locked\n")
+      setLastModificationTime(repoFile, getTime() + 3.seconds)
+      check sandbox.reloadIfChanged(dir) == true
+      check sandbox.current.checkPath(target) == akDeny
+      check sandbox.reloadIfChanged(dir) == false
+    finally:
+      sandbox.active = wasActive
+      sandbox.current = saved
+      removeDir(dir)

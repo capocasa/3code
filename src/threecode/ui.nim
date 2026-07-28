@@ -1052,7 +1052,6 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
             else: akDeny
           let sf = sandbox.sandboxPathInCwd()
           if sandbox.appendRule(sf, argPath, access):
-            sandbox.current = sandbox.loadCascaded(getCurrentDir())
             resp "sandbox updated: " & verb & " " & argPath
           else:
             ok = false

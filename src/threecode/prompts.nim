@@ -15,7 +15,7 @@
 ]#
 
 import std/[algorithm, hashes, json, os, sequtils, strutils]
-import types, util
+import types, util, sandbox
 
 # this is expected to be overridden by a more useful value in config.nims
 const Version* {.strdefine.} = "devel"
@@ -416,7 +416,7 @@ Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphr
 
 # Skills
 
-Load on demand when a skill fits the task; do not preload the catalog. {{skills}}
+Load on demand when a skill fits the task; do not preload the catalog. {{skills}}{{sandbox}}
 
 # Output
 
@@ -488,7 +488,7 @@ Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphr
 Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
 Available:
-{{skills}}
+{{skills}}{{sandbox}}
 
 # Tone
 
@@ -586,7 +586,7 @@ Calibrated to refuse rather than guess. If the answer cannot be supported by the
 
 # Skills
 
-Load on demand when a skill fits the task; do not preload the catalog. {{skills}}
+Load on demand when a skill fits the task; do not preload the catalog. {{skills}}{{sandbox}}
 
 # Attribution
 
@@ -714,7 +714,7 @@ Prefer new commits over amending. Never skip hooks unless asked. Stage specific 
 Before using unfamiliar tools, read the matching skill file below.
 
 Available:
-{{skills}}
+{{skills}}{{sandbox}}
 
 # Output
 
@@ -837,7 +837,7 @@ Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphr
 Before using unfamiliar tools, `cat` a matching skill file from the list below.
 
 Available:
-{{skills}}
+{{skills}}{{sandbox}}
 
 # Tone and reporting
 
@@ -931,7 +931,7 @@ Hy3 is tuned to answer when grounded and flag when evidence is missing rather th
 Before using unfamiliar tools, read the matching skill file below.
 
 Available:
-{{skills}}
+{{skills}}{{sandbox}}
 
 # Tone
 
@@ -1114,7 +1114,7 @@ as `path:line`. If the task was already done before you arrived, say so and stop
 Before using unfamiliar tools, read the matching skill file below.
 
 Available:
-{{skills}}
+{{skills}}{{sandbox}}
 """
 
 const GptOssPreamble = """You are the GPT edition of 3code, the economical coding agent.
@@ -1356,7 +1356,7 @@ apply_patch({"input": "*** Begin Patch\n*** Add File: hello.txt\n+Hello, world!\
 Before using unfamiliar non-coding tools, `cat` a matching skill file from the list below.
 
 Available:
-{{skills}}
+{{skills}}{{sandbox}}
 """
 
 const InklingPreamble = """You are the Inkling edition of 3code, the economical coding agent. You are backed by Thinking Machines Lab's Inkling (k1.5 class, ~1T params, 32B active MoE) with a 256K token context window and a graded reasoning knob. You were trained for long-horizon reasoning, coding, and agentic tool use. Use that.
@@ -1451,7 +1451,7 @@ Search then fetch. Don't paraphrase snippets you haven't read. Prefer primary. T
 
 # Skills
 
-Load on demand from {{skills}}. Don't preload the catalog.
+Load on demand from {{skills}}{{sandbox}}. Don't preload the catalog.
 
 # Output
 
@@ -1535,7 +1535,7 @@ Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphr
 
 # Skills
 
-Load on demand when a skill fits the task; do not preload the catalog. {{skills}}
+Load on demand when a skill fits the task; do not preload the catalog. {{skills}}{{sandbox}}
 
 # Output
 
@@ -1630,7 +1630,7 @@ Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphr
 
 # Skills
 
-Load on demand when a skill fits the task; do not preload the catalog. {{skills}}
+Load on demand when a skill fits the task; do not preload the catalog. {{skills}}{{sandbox}}
 
 # Output
 
@@ -1705,7 +1705,7 @@ Pause before `rm -rf` outside cwd, dropping tables, force-push, amending publish
 
 # Skills
 
-Load on demand from {{skills}}. Don't preload the catalog.
+Load on demand from {{skills}}{{sandbox}}. Don't preload the catalog.
 
 # Attribution
 
@@ -1774,7 +1774,7 @@ Pause before `rm -rf` outside cwd, dropping tables, force-push, amending publish
 
 # Skills
 
-Load on demand from {{skills}}. Don't preload the catalog.
+Load on demand from {{skills}}{{sandbox}}. Don't preload the catalog.
 
 # Attribution
 
@@ -2084,9 +2084,11 @@ commands:
   :sandbox          show the active filesystem sandbox rules
   :sandbox show     (same)
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow P  add a writable rule for path P
-  :sandbox readonly P  add a read-only rule for path P
-  :sandbox deny P   add a deny rule for path P
+  :sandbox allow T  add a writable/connectable rule (+ T)
+  :sandbox readonly P  add a read-only rule (* P)
+  :sandbox deny T   add a deny rule (- T)
+  (T is a path or a host; P a path. Policy syntax: + allow, - deny,
+  * read-only; see .3code/sandbox)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -2386,9 +2388,11 @@ proc buildSystemPrompt*(p: Profile): string =
     return readFile(override)
       .replace("{{credit}}", buildCredit(p))
       .replace("{{skills}}", discoverSkills())
+      .replace("{{sandbox}}", sandboxPromptSection())
   setup(p).prompt
     .replace("{{credit}}", buildCredit(p))
     .replace("{{skills}}", discoverSkills())
+    .replace("{{sandbox}}", sandboxPromptSection())
 
 proc refreshSystemPrompt*(messages: JsonNode, p: Profile) =
   if messages == nil or messages.kind != JArray or messages.len == 0: return

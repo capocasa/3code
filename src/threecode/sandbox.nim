@@ -1,64 +1,46 @@
-## Filesystem sandbox: parse `.3code/sandbox`, check paths, drive `3code box`.
+## Filesystem sandbox: policy loading, mtime reload, `3code box` driver.
 ##
-## The sandbox file is a tiny ordered DSL. Each line is a one-char access
-## code, a single space, and a path. Lines run top-to-bottom; each
-## supersedes the ones above it for the path it names. The access codes:
+## The policy file format, parser, and rule model live in procbox
+## (`procbox/rules`); this module is the 3code-specific wrapper: which
+## files form the cascade, when to reload them, and whether the OS
+## backend actually works on this host.
 ##
-##   .  deny        - no read, no write
-##   o  read-only   - read + execute
-##   O  writable    - read + write + create + delete + rename
-##   0  writable    - (alias: the digit zero, hard to misread)
+## Each line of `.3code/sandbox` is an access code (`+` writable,
+## `-` deny, `*` read-only) plus a target: an absolute path, `~/` home
+## path, `./` project-relative path (bare `+` = the project dir), or a
+## host/IP with optional `:port`. Host rules are parsed for the future
+## network milestone but not enforced yet. See procbox's rules module
+## for the full grammar.
 ##
-## A blank path means the working directory itself. Relative paths resolve
-## against the working directory; absolute paths are used as-is.
+## The effective policy is the cascade of the system file
+## (`~/.config/3code/sandbox`) and the repo file (`.3code/sandbox`),
+## default text when absent, so the sandbox is always on.
 ##
-## The default file created on first run:
-##
-##   . /
-##   O
-##
-## root is denied, cwd is writable. "Yolo" mode (everything writable) is a
-## one-line file: `0 /`. The file is never written by the agent; if the
-## agent wants to propose a change it edits a copy the user moves into place.
-##
-## `loadSandbox` parses the file into a `Sandbox` (an ordered list of
-## rules). `resolve` walks the rules into the `(writable, readonly)` pair
-## `3code box` consumes, honouring last-wins nesting. `checkPath` answers
-## the access for a concrete path for the in-process read/write/patch
-## tools.
+## `reloadIfChanged` re-reads the cascade when either file's mtime
+## changed since the last load; it runs before every restricted
+## operation (in-process read/write/patch checks and bash launches).
+## The bash subprocess additionally loads the policy files itself
+## (`3code box --policy`), so a launch always enforces the freshest
+## file contents even between parent reloads.
 
-import std/[os, osproc, strutils, tables]
+import std/[os, osproc, strutils, times]
+import procbox
 import types
 
-proc resolveRawPath(p: string): string =
-  ## Absolute cleaned form of `p`, ~-expanded. Mirrors util.resolvePath
-  ## without pulling util (which would create a cycle via types). Empty
-  ## for an empty input.
-  if p.len == 0: return ""
-  var q = p
-  if q.startsWith("~"): q = expandTilde(q)
-  try: absolutePath(q) except CatchableError: q
+export procbox.AccessKind, procbox.Policy, procbox.Rule,
+       procbox.RuleKind, procbox.parseCascaded, procbox.defaultPolicyText,
+       procbox.repoPolicyPath, procbox.cascadedFiles, procbox.checkPath,
+       procbox.renderPolicy, procbox.PolicyDir
 
-type
-  AccessKind* = enum
-    akDeny = ".", akReadOnly = "o", akWritable = "O"
-
-  Rule* = object
-    access*: AccessKind
-    path*: string        ## canonical absolute path; "" means cwd
-
-  Sandbox* = object
-    rules*: seq[Rule]
-
-## Global sandbox state, loaded once at startup. `active = false` means no
-## sandbox file was found/created and bash runs unrestricted (the in-process
-## read/write/patch tools still consult `current`, which is empty so they
-## allow everything). When `active = true`, bash is wrapped in `3code box`
-## and read/write/patch check `current`.
 var
-  current*: Sandbox
+  current*: Policy
+    ## The effective cascaded policy. When `active` is false, this is
+    ## empty and every check allows.
   active*: bool = false
-  procboxExe*: string = ""  ## path to the binary to exec for `box restrict` (this one)
+    ## False means no policy was loaded and bash runs unrestricted.
+  procboxExe*: string = ""
+    ## Path to the binary to exec for `box restrict` (this one).
+  lastMtimes: tuple[system, repo: Time]
 
 proc findProcbox*(): string =
   ## The procbox CLI is built into 3code as the `box` subcommand, so the
@@ -92,154 +74,79 @@ proc backendWorks*(exe: string): bool =
   except CatchableError:
     result = false
 
-const
-  SandboxDir* = ".3code"
-  SandboxFile* = "sandbox"
+proc mtimeOf(path: string): Time =
+  try: getLastModificationTime(path)
+  except OSError: fromUnix(0)
 
-proc defaultSandboxText*(): string =
-  ## The default policy: deny everything under root, then open the system
-  ## temp dir and the working directory for read+write. The system prompts
-  ## direct the agent to write throwaway scripts under /tmp, so it must be
-  ## writable by default. Written verbatim on first run.
-  when defined(windows):
-    ". /\nO\n"
-  else:
-    ". /\nO /tmp\nO\n"
+proc loadCascaded*(projectDir: string): Policy =
+  ## Load the cascade and remember the file mtimes for reloadIfChanged.
+  let files = cascadedFiles(projectDir)
+  lastMtimes = (mtimeOf(files.system), mtimeOf(files.repo))
+  procbox.loadCascaded(projectDir)
 
-proc sandboxPath*(dir: string): string =
-  dir / SandboxDir / SandboxFile
+proc reloadIfChanged*(projectDir: string): bool =
+  ## Re-load the cascade when either policy file changed on disk since
+  ## the last load. Returns true when a reload happened. Called before
+  ## every restricted operation so a mid-session policy edit takes effect
+  ## on the next tool call.
+  if not active: return false
+  let files = cascadedFiles(projectDir)
+  let now = (mtimeOf(files.system), mtimeOf(files.repo))
+  if now == lastMtimes: return false
+  current = procbox.loadCascaded(projectDir)
+  lastMtimes = now
+  true
+
+proc sandboxPromptSection*(): string =
+  ## A compact agent-facing summary of the sandbox boundaries, spliced
+  ## into the system prompt via the {{sandbox}} placeholder. Empty when
+  ## the sandbox is off, so prompts stay byte-identical to before.
+  ## Reloads on policy mtime change so a mid-session edit reaches the
+  ## model on the next turn.
+  if not active or not sandboxEnabled: return ""
+  discard reloadIfChanged(getCurrentDir())
+  let paths = cascadedFiles(getCurrentDir())
+  var body = renderPolicy(current).strip
+  const maxLines = 40
+  var lines = body.splitLines
+  if lines.len > maxLines:
+    body = lines[0 ..< maxLines].join("\n") &
+      "\n... (" & $(lines.len - maxLines) & " more rules in the policy file)"
+  "\n\n# Sandbox\n\n" &
+    "Your bash commands run kernel-confined (Landlock/Seatbelt/ACL) and " &
+    "your file tools are checked against the same policy. Effective rules " &
+    "(last match wins; anything unmentioned is denied):\n\n" & body & "\n\n" &
+    "Policy files: " & paths.repo & " (project), " & paths.system &
+    " (system). Propose changes to the user; never try to edit or bypass " &
+    "them. Denied operations fail with EACCES or a sandbox error."
 
 proc sandboxPathInCwd*(): string =
-  sandboxPath(getCurrentDir())
+  ## The repo-level policy file for the current working directory.
+  repoPolicyPath(getCurrentDir())
 
-proc systemSandboxPath*(): string =
-  ## The system-level sandbox file: next to `~/.config/3code/config`
-  ## (or the platform equivalent under `getConfigDir() / "3code"`).
-  ## Inlined to mirror `config.configPath` without importing config (which
-  ## would form a module cycle).
-  getConfigDir() / "3code" / SandboxFile
+proc policyPaths*(): tuple[system, repo: string] =
+  ## The cascade files for the current working directory, for display
+  ## and for passing to `box --policy`.
+  cascadedFiles(getCurrentDir())
 
-proc normalizeSandboxPath*(p: string; cwd: string): string =
-  ## Resolve a sandbox path to an absolute, cleaned form. An empty path
-  ## (the bare-cwd shorthand) becomes `cwd` itself. Tilde is expanded.
-  ## No symlink resolution: the sandbox file is hand-written and the
-  ## literal cleaned form is what the user expects to match.
-  var q = p.strip
-  if q.len == 0: return cwd
+proc resolveRawPath(p: string): string =
+  ## Absolute cleaned form of `p`, ~-expanded. Mirrors util.resolvePath
+  ## without pulling util (which would create a cycle via types). Empty
+  ## for an empty input.
+  if p.len == 0: return ""
+  var q = p
   if q.startsWith("~"): q = expandTilde(q)
-  try:
-    if isAbsolute(q): q.normalizedPath else: (cwd / q).normalizedPath
-  except CatchableError:
-    q
-
-proc parseSandbox*(text: string; cwd: string): Sandbox =
-  ## Parse sandbox DSL text into ordered rules. Blank lines and `#`
-  ## comments are skipped. Unrecognised prefixes are skipped with no
-  ## error so a half-edited file still loads its valid lines (the
-  ## user owns this file and can see what they wrote).
-  for raw in text.splitLines:
-    let line = raw.strip(leading = true, trailing = false)
-    if line.len == 0 or line[0] == '#': continue
-    let prefix = line[0]
-    let access =
-      case prefix
-      of '.': akDeny
-      of 'o': akReadOnly
-      of 'O', '0': akWritable
-      else: continue
-    # Everything after the prefix and exactly one separating space is the
-    # path. Allow no-space (bare `O` for cwd) and tolerate extra spaces.
-    var rest = if line.len > 1: line[1 .. ^1] else: ""
-    rest = rest.strip(leading = true, trailing = false)
-    if rest.len > 0 and rest[0] == ' ':
-      rest = rest[1 .. ^1].strip(leading = true, trailing = false)
-    result.rules.add Rule(access: access,
-                          path: normalizeSandboxPath(rest, cwd))
-
-proc loadSandbox*(path: string): Sandbox =
-  ## Read and parse the sandbox file at `path`. Paths in the file resolve
-  ## relative to the project dir: the parent of `.3code`. Missing file
-  ## yields an empty sandbox (callers decide what that means).
-  if not fileExists(path): return Sandbox()
-  let projectDir = path.parentDir.parentDir
-  let cwd = if projectDir.len > 0: projectDir else: getCurrentDir()
-  parseSandbox(readFile(path), cwd)
-
-proc parseCascaded*(sysText, repoText, projectDir: string): Sandbox =
-  ## The pure, file-free core of `loadCascaded`: concatenate the two level
-  ## texts and parse once against `projectDir`. Factored out so the
-  ## last-wins concatenation semantics can be unit-tested without touching
-  ## the real `~/.config/3code/sandbox` or writing repo files.
-  parseSandbox(sysText & "\n" & repoText, projectDir)
-
-proc loadCascaded*(projectDir: string): Sandbox =
-  ## Build the effective sandbox by concatenating two levels and parsing
-  ## once:
-  ##
-  ##   1. system  -> `systemSandboxPath()` (next to `~/.config/3code/config`)
-  ##   2. repo    -> `sandboxPath(projectDir)` (`.3code/sandbox`)
-  ##
-  ## Each level's text is the file contents when present, or the built-in
-  ## `defaultSandboxText()` when the file is absent, so the
-  ## sandbox is "always on" even on a fresh checkout. The spec names three
-  ## levels (system -> configdir -> repo), but in this codebase the config
-  ## and the system sandbox file live in the same `~/.config/3code/`
-  ## directory, so the first two collapse into the single "system" level
-  ## above. A repo-level `.` on `/` cleanly resets everything above it,
-  ## matching the per-file last-wins semantics.
-  let sysPath = systemSandboxPath()
-  let sysText = if fileExists(sysPath): readFile(sysPath) else: defaultSandboxText()
-  let repoPath = sandboxPath(projectDir)
-  let repoText = if fileExists(repoPath): readFile(repoPath) else: defaultSandboxText()
-  parseCascaded(sysText, repoText, projectDir)
-
-proc resolve*(s: Sandbox): tuple[writable, readonly: seq[string]] =
-  ## Walk the ordered rules into the (writable, readonly) pair `3code box`
-  ## consumes. Last-wins per canonical path: a later rule for a path
-  ## supersedes every earlier one for that same path. Deny is the
-  ## default for anything unmentioned, so deny rules only matter as
-  ## overrides of earlier allows; they drop the path from both lists.
-  var latest: Table[string, AccessKind]
-  var order: seq[string]
-  for r in s.rules:
-    if r.path notin latest: order.add r.path
-    latest[r.path] = r.access
-  for p in order:
-    case latest[p]
-    of akWritable: result.writable.add p
-    of akReadOnly: result.readonly.add p
-    of akDeny: discard
-
-proc isPathUnder*(path, root: string): bool =
-  ## True when `path` equals or is nested under `root` (both expected
-  ## cleaned absolute paths). Trailing separators are normalised so
-  ## `/a/b` covers `/a/b/sub`. An empty `root` matches nothing.
-  if root.len == 0: return false
-  if path == root: return true
-  let sep = when defined(windows): "\\" else: "/"
-  let r = if root.endsWith(sep): root else: root & sep
-  path.startsWith(r)
-
-proc checkPath*(s: Sandbox; path: string): AccessKind =
-  ## Resolve the effective access for a concrete absolute `path` against
-  ## the sandbox policy. Walks the rules in order, so the most specific
-  ## applicable rule (the last one whose root covers the path) wins,
-  ## matching the top-to-bottom / last-wins semantics of the file.
-  ##
-  ## Returns `akDeny` when nothing covers the path, which is the safe
-  ## default.
-  result = akDeny
-  for r in s.rules:
-    if isPathUnder(path, r.path):
-      result = r.access
+  try: absolutePath(q) except CatchableError: q
 
 proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason: string] =
-  ## Check a raw (possibly relative) path against the global sandbox.
-  ## `needsWrite = false` allows read-only and writable; `true` requires
-  ## writable. Returns `(true, "")` when the path is allowed (or when the
-  ## sandbox is inactive / the path escapes resolution). Used by the
-  ## in-process read/write/patch tools.
+  ## Check a raw (possibly relative) path against the current policy,
+  ## reloading the cascade first when a policy file changed. This is the
+  ## in-process gate for the read/write/patch tools; it calls the same
+  ## procbox `checkPath` the sandboxed box subprocess enforces at the
+  ## kernel level for bash. `needsWrite = false` allows read-only and
+  ## writable; `true` requires writable.
   if not active or not sandboxEnabled: return (true, "")
+  discard reloadIfChanged(getCurrentDir())
   let resolved = resolveRawPath(path)
   if resolved.len == 0: return (true, "")
   let access = current.checkPath(resolved)
@@ -249,51 +156,32 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
   of akDeny: (false, "sandbox: " & resolved & " is outside the allowed paths")
 
 proc ensureDefaultSandbox*(dir: string): bool =
-  ## Create the default sandbox file at `dir/.3code/sandbox` if no file
-  ## exists there yet, seeding it with the built-in default policy.
-  ## Returns true if a usable sandbox file now exists (either pre-existing
-  ## or just created); false if creation failed (unreadable dir, permission
-  ## denied, etc.). Used only by `appendRule` to seed the repo file on the
-  ## first explicit `:sandbox allow|readonly|deny` edit, so the user has a
-  ## concrete file to version and share. Not part of startup: the cascade
-  ## loads the default in-memory when no file is present.
-  let path = sandboxPath(dir)
+  ## Create the default policy file at `dir/.3code/sandbox` if none
+  ## exists, seeding it with the built-in default policy. Used only by
+  ## `appendRule` to seed the repo file on the first explicit
+  ## `:sandbox allow|readonly|deny` edit. Not part of startup: the
+  ## cascade loads the default in-memory when no file is present.
+  let path = repoPolicyPath(dir)
   if fileExists(path): return true
-  let sandboxDir = dir / SandboxDir
+  let sandboxDir = dir / PolicyDir
   try:
     if not dirExists(sandboxDir): createDir(sandboxDir)
-    writeFile(path, defaultSandboxText())
+    writeFile(path, defaultPolicyText())
   except CatchableError:
     return false
   fileExists(path)
 
-proc renderSandbox*(s: Sandbox): string =
-  ## Human-readable dump of the effective rules, newest last (matching
-  ## file order). Used by `:sandbox show`.
-  if s.rules.len == 0:
-    return "(no sandbox rules)"
-  for r in s.rules:
-    let label =
-      case r.access
-      of akDeny: "deny   "
-      of akReadOnly: "read   "
-      of akWritable: "write  "
-    let p = if r.path.len == 0: "(cwd)" else: r.path
-    result.add label & "  " & p & "\n"
+proc renderSandbox*(p: Policy): string =
+  renderPolicy(p)
 
 proc appendRule*(sandboxFile, argPath: string; access: AccessKind): bool =
-  ## Append a single rule to `sandboxFile`, creating it with the default
-  ## contents first if it does not exist. The literal `argPath` is
-  ## written as-is so relative paths stay relative and the file stays
-  ## portable and human-readable. Returns false on write failure.
-  ## Used by `:sandbox allow|deny|readonly`.
+  ## Append a rule to the repo policy file, creating it with the default
+  ## contents first if it does not exist. Used by `:sandbox
+  ## allow|deny|readonly`. After appending, reload so the change is live
+  ## for the next check.
   if not fileExists(sandboxFile):
     let projectDir = sandboxFile.parentDir.parentDir
     if not ensureDefaultSandbox(projectDir): return false
-  let line = $access & (if argPath.len > 0: " " & argPath else: "") & "\n"
-  try:
-    var f = open(sandboxFile, fmAppend)
-    try: f.write(line) finally: f.close()
-  except CatchableError:
-    return false
-  true
+  result = procbox.appendRule(sandboxFile, argPath, access)
+  if result:
+    current = loadCascaded(getCurrentDir())
