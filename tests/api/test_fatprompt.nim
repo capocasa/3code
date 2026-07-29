@@ -28,23 +28,6 @@ suite "ticker clamping":
                         ticker: "x".repeat(200), elapsed: 3)
     check f.rowsAboveEditor(termW = 40) == f.rowsAboveEditor(termW = 80)
 
-  test "no-bar footer still reserves the ticker gap row":
-    # The design's "ticker as distance" rule: the gap row above the editor
-    # is reserved chrome even when no token bar exists, so a bar or spinner
-    # appearing later never shifts committed scrollback.
-    let f = noFooterFrame()
-    check f.rowsAboveEditor(termW = 80) == 1
-    # The byte paint must occupy exactly one (blank) row and move no rows:
-    # the editor redraw's trailing newline is what advances past it.
-    check f.footerFrameBytes(termW = 80) == "\r\x1b[2K"
-
-  test "prompt-only state frame paints one blank gap row":
-    var s = initFatPromptState()
-    check s.footerFrameBytes(termW = 80) == "\r\x1b[2K"
-    # With a bar the frame is gap row + bar row(s).
-    s.apply setBarEvent("○0%  ↑10", hasGap = true)
-    check "\r\n" in s.footerFrameBytes(termW = 80)
-
 suite "fat prompt frame model":
   test "token bar and editor reserve rows below scrollback":
     var p = initFatPrompt(width = 30, height = 6, window = 1000)

@@ -73,8 +73,7 @@ proc termDbgEnabled*(): bool =
     dbgInit = true
     dbgPath = getEnv("THREECODE_TERMDBG")
   if dbgPath.len == 0: return false
-  if getEnv("THREECODE_TEST_FRAME_FD").len > 0 and
-     getEnv("THREECODE_TERMDBG_FORCE").len == 0:
+  if getEnv("THREECODE_TEST_FRAME_FD").len > 0:
     dbgLog("DISARMED: under PTY test harness")
     return false
   when defined(posix):
