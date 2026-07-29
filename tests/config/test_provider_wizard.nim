@@ -1,4 +1,4 @@
-import std/[json, os, sequtils, strutils, unittest]
+import std/[json, monotimes, os, sequtils, strutils, times, unittest]
 import threecode/[api, config, minline, types, ui]
 
 proc stripAnsiCsi(line: string): string =
@@ -65,6 +65,7 @@ suite "provider wizard configuration":
 
   teardown:
     wizardReadLineHook = nil
+    wizardVerifyCancelHook = nil
     verifyProfileHook = nil
     fetchModelsHook = nil
     activeCurrent = savedCurrent
@@ -147,6 +148,109 @@ suite "provider wizard configuration":
     check activeProviders[0].models == @["openai/gpt-oss-120b"]
     check activeCurrent == "nvidia.openai/gpt-oss-120b"
     check verifiedModels == @["openai/gpt-oss-120b"]
+
+  test "add verifies every entered model and keeps only the ones that pass":
+    # A failed model is a warning, not a blocker: the provider is saved
+    # with the models that verified.
+    inputs = @["nvapi-add", "gpt-oss-120b gpt-oss-20b"]
+    verifyProfileHook = proc(p: Profile): (bool, string) =
+      verifiedModels.add p.model
+      if p.model == "openai/gpt-oss-20b": (false, "HTTP 404")
+      else: (true, "")
+    var editor: LineEditor
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider add", messages, session, prof, editor)
+
+    check activeProviders.len == 1
+    check activeProviders[0].models == @["openai/gpt-oss-120b"]
+    check verifiedModels == @["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+
+  test "add re-prompts when every model fails verification":
+    inputs = @["nvapi-add", "gpt-oss-120b", "", "gpt-oss-120b"]
+    var attempts = 0
+    verifyProfileHook = proc(p: Profile): (bool, string) =
+      verifiedModels.add p.model
+      inc attempts
+      if attempts == 1: (false, "HTTP 401")
+      else: (true, "")
+    var editor: LineEditor
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider add", messages, session, prof, editor)
+
+    check activeProviders.len == 1
+    check attempts == 2
+
+  test "edit verifies every entered model and keeps only the ones that pass":
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["z-ai/glm4.7"])
+    ]
+    activeCurrent = "nvidia.z-ai/glm4.7"
+    inputs = @["", "", "gpt-oss-120b gpt-oss-20b"]
+    verifyProfileHook = proc(p: Profile): (bool, string) =
+      verifiedModels.add p.model
+      if p.model == "openai/gpt-oss-20b": (false, "HTTP 404")
+      else: (true, "")
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider edit nvidia", messages, session, prof,
+                          editor)
+
+    check activeProviders[0].models == @["openai/gpt-oss-120b"]
+    check activeCurrent == "nvidia.openai/gpt-oss-120b"
+
+  test "verification cancel hook aborts the add":
+    inputs = @["nvapi-add", "gpt-oss-120b"]
+    wizardVerifyCancelHook = proc(jobDone: proc(): bool {.closure.};
+                                  cancelJob: proc() {.closure.}): bool =
+      check not jobDone()
+      cancelJob()
+      true
+    verifyProfileHook = proc(p: Profile): (bool, string) =
+      (true, "")
+    var editor: LineEditor
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider add", messages, session, prof, editor)
+
+    check activeProviders.len == 0
+
+  test "verification workers run in parallel":
+    # Two slow probes, each ~400ms: sequential would take ~800ms,
+    # parallel lands well under that. Uses the threaded path (cancel
+    # hook installed) since that is where parallelism matters.
+    inputs = @["nvapi-add", "gpt-oss-120b gpt-oss-20b"]
+    wizardVerifyCancelHook = proc(jobDone: proc(): bool {.closure.};
+                                  cancelJob: proc() {.closure.}): bool =
+      while not jobDone(): sleep 5
+      false
+    verifyProfileHook = proc(p: Profile): (bool, string) =
+      sleep 400
+      (true, "")
+    var editor: LineEditor
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+
+    let t0 = getMonoTime()
+    discard handleCommand(":provider add", messages, session, prof, editor)
+    let elapsed = (getMonoTime() - t0).inMilliseconds
+
+    check activeProviders.len == 1
+    check activeProviders[0].models == @["openai/gpt-oss-120b",
+                                         "openai/gpt-oss-20b"]
+    check elapsed < 700
 
   test "add wizard lists models sorted alphabetically":
     activeProviders = @[
