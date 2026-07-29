@@ -33,6 +33,7 @@ import std/terminal
 import minline
 import ./terminal as termio
 import ./fatprompt/rendering
+import ./terminaldbg
 import ./util
 
 type
@@ -504,6 +505,15 @@ proc appendTranscriptLiveAnchored(e: var TerminalEngine; transcript: string;
                                   restoreEditor: bool;
                                   reserveFooter: bool) =
   refreshEditorWidth(edPtr[])
+  # Probe BEFORE SyncBegin: the DSR reply must not be swallowed by a
+  # terminal that buffers synchronized-output frames. The input thread is
+  # parked across this commit (restoreEditor=false on submit), so stdin is
+  # the controller's to query.
+  terminaldbg.probeDetail("commit.liveAnchored",
+    max(0, e.walkUp(edPtr[]) + max(0, compactRowsAboveFooter)),
+    editorRowsAboveCursor(edPtr[]), e.paintedFooterRows,
+    e.toolViewportRows.len + e.viewportGapRows,
+    e.liveContentRows.len + e.liveContentGapRows)
   stdout.write termio.SyncBegin
   stdout.write "\x1b[?25l\r"
   let up = max(0, e.walkUp(edPtr[]) + max(0, compactRowsAboveFooter))
@@ -520,7 +530,10 @@ proc appendTranscriptLiveAnchored(e: var TerminalEngine; transcript: string;
       stdout.write "\r\n"
     if restoreEditor:
       edPtr[].renderRow = 0
-      stdout.write edPtr[].redrawBytes()
+      # Already inside SyncBegin: a nested 2026 frame would emit a
+      # doubled ?2026l, which 2026-honoring terminals (foot, ghostty)
+      # can batch/drop differently than the row model expects.
+      stdout.write edPtr[].redrawBytes(synchronized = false)
       if not edPtr[].pendingCaret:
         stdout.write "\x1b[?25h"
       e.noteFooterPainted(footerRowsAboveEditor)
@@ -540,6 +553,8 @@ proc appendTranscriptFloating(e: var TerminalEngine; transcript: string;
                               restoreEditor: bool;
                               reserveFooter: bool) =
   let editing = inputRunning and editor != nil
+  if editing:
+    terminaldbg.probeErase("commit.floating", max(0, e.walkUp(editor[])))
   stdout.write termio.SyncBegin
   if editing:
     let up = max(0, e.walkUp(editor[]))
@@ -562,7 +577,7 @@ proc appendTranscriptFloating(e: var TerminalEngine; transcript: string;
         stdout.write "\x1b[1B"
     if editing and restoreEditor:
       editor[].renderRow = 0
-      stdout.write editor[].redrawBytes()
+      stdout.write editor[].redrawBytes(synchronized = false)
       if not editor[].pendingCaret:
         stdout.write "\x1b[?25h"
       e.noteFooterPainted(footerRowsAboveEditor)
@@ -617,6 +632,7 @@ proc prepareAssistantContentStart*(e: var TerminalEngine;
     let termW = try: terminalWidth() except CatchableError: 0
     if inputRunning and editor != nil:
       refreshEditorWidth(editor[])
+      terminaldbg.probeErase("assistantContentStart", max(0, e.walkUp(editor[])))
       let up = max(0, e.walkUp(editor[]))
       stdout.write termio.SyncBegin
       stdout.write "\r"

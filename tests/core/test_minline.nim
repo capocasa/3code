@@ -968,3 +968,48 @@ suite "minline editor: termPeeked drain":
     # Cursor moved left before 'X', so X is inserted between 'b' and 'c'.
     check got == "abXc"
     check termPeeked == -1
+
+suite "minline editor: terminal reply filtering":
+  test "unsolicited DSR reply is dropped, not fed to the editor":
+    # A cursor-position report (`CSI row ; col R`) arriving mid-input —
+    # e.g. something queried the terminal while the reader owns stdin —
+    # must not surface as phantom keystrokes. The terminaldbg probe hit
+    # this live: its own DSR answer raced the reader.
+    termPeeked = -1
+    pushedBack.clear()
+    var captured: seq[string] = @[]
+    let prevHook = replyCaptureHook
+    replyCaptureHook = proc(bytes: string) = captured.add bytes
+    defer: replyCaptureHook = prevHook
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "hi"
+    d.pushString "\x1b[12;3R"
+    d.push Enter
+    let got = d.run(ed, prompt = "> ")
+    check got == "hi"
+    check captured == @["\x1b[12;3R"]
+
+  test "DSR reply between typed chars leaves input intact":
+    termPeeked = -1
+    pushedBack.clear()
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "ab"
+    d.pushString "\x1b[1;1R"
+    d.pushString "cd"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "abcd"
+
+  test "arrow keys and Alt chords still work past the filter":
+    # The filter must replay non-reply escape sequences: CSI finals other
+    # than R/c (arrows) and Alt chords (ESC + printable) reach the editor.
+    termPeeked = -1
+    pushedBack.clear()
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "abc"
+    d.push Left
+    d.pushString "X"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "abXc"

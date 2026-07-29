@@ -65,6 +65,17 @@ if isatty(stdin):
 # peek never loses user input.
 var termPeeked*: int = -1
 
+# Generic push-back buffer, drained before termPeeked by every read path
+# below. `inputInterceptHook` uses it to replay bytes it consumed that
+# turned out not to be its own.
+var pushedBack*: Deque[int]
+
+# Opt-in byte interceptor (installed by terminaldbg when armed): sees each
+# byte before the editor, may consume bytes belonging to a terminal
+# response (a DSR reply to the probe), and must replay anything else via
+# `pushedBack`. Nil in production: zero cost.
+var inputInterceptHook*: proc(b: int): bool {.closure.}
+
 var pollStdinNowHook*: proc(): bool {.closure.}
   ## Override for tests; nil means use real pollStdinNow().
 
@@ -1236,6 +1247,62 @@ proc stdinHasByteNow*(): bool =
       return r > 0 and (pfd.revents and POLLIN) != 0
   false
 
+# Terminal reply sequences (`CSI ... final`) the editor must never see:
+# DSR cursor reports (final 'R', both `CSI row;col R` and the DECXCPR
+# `CSI ? row;col R` form) and primary/secondary DA replies (final 'c').
+# They arrive unsolicited whenever anything queries the terminal while the
+# persistent reader owns stdin; without filtering they surface as phantom
+# keystrokes (the terminaldbg probe hit this live).
+var replyCaptureHook*: proc(bytes: string) {.closure.}
+
+template consumeTerminalReplyImpl*(readByteExpr: untyped): string =
+  ## With the leading ESC already read, consume a terminal reply sequence
+  ## if one follows. Returns the reply bytes, or "" when the input is
+  ## anything else — consumed bytes are replayed via `pushedBack`, and the
+  ## leading ESC is left for the caller to return. `readByteExpr` is an
+  ## expression yielding the next byte (int, -1 on none); callers gate on
+  ## `stdinHasByteNow()` before each read so it never blocks mid-burst.
+  var replyAcc {.gensym.} = ""
+  block scan:
+    if not stdinHasByteNow(): break scan
+    let b1 = readByteExpr
+    if b1 < 0: break scan
+    if b1 != '['.ord:
+      pushedBack.addFirst(b1)  # Alt chord / SS3: replay, not ours
+      break scan
+    replyAcc = "\x1b["
+    var isReply {.gensym.} = false
+    while replyAcc.len < 24 and stdinHasByteNow():
+      let c = readByteExpr
+      if c < 0: break
+      replyAcc.add c.chr
+      if c.chr in {'R', 'c'}:
+        isReply = true
+        break
+      if not (c.chr in {'0'..'9'} or c.chr in {';', '?'}):
+        break  # some other CSI final byte: not a reply we own
+    # A reply is `CSI [?] digits[;digits...] R|c`. Modified arrows
+    # share final 'R' (CSI 1;5R = Ctrl+Right), so validate the body
+    # shape, not just the final byte.
+    if isReply:
+      let body = replyAcc[2 ..< ^1]
+      for i, ch in body:
+        let okDigit = ch in {'0'..'9'}
+        let okSep = ch == ';' and i > 0
+        let okPriv = ch == '?' and i == 0
+        if not (okDigit or okSep or okPriv):
+          isReply = false
+          break
+    if not isReply:
+      for i in countdown(replyAcc.high, 1):
+        pushedBack.addFirst(replyAcc[i].ord.int)
+      replyAcc = ""
+  replyAcc
+
+template noteReplyCaptured*(reply: string) =
+  if replyCaptureHook != nil:
+    replyCaptureHook(reply)
+
 proc terminalHasPendingInput*(): bool =
   ## Return whether stdin has a pending byte that could be the tail of an
   ## ESC-prefixed escape sequence. Polls briefly for burst-delivered
@@ -1252,6 +1319,15 @@ proc terminalHasPendingInput*(): bool =
       if r > 0 and (pfd.revents and POLLIN) != 0:
         var ch: char
         if posix.read(0.cint, addr ch, 1) == 1:
+          if inputInterceptHook != nil and inputInterceptHook(ch.ord.int):
+            return false
+          if ch == '\x1b':
+            let reply = consumeTerminalReplyImpl:
+              var b2: char
+              if posix.read(0.cint, addr b2, 1) == 1: b2.ord.int else: -1
+            if reply.len > 0:
+              noteReplyCaptured(reply)
+              return false
           termPeeked = ch.ord.int
           return isEscapeTailByte(ch.ord.int)
       return false
@@ -1719,6 +1795,8 @@ proc readLine*(ed: var LineEditor, prompt = "", hidechars = false,
       clearRawMode()
     let getCh: GetChProc = proc(): int =
       stdout.flushFile()
+      if pushedBack.len > 0:
+        return pushedBack.popFirst()
       if termPeeked >= 0:
         result = termPeeked.int
         termPeeked = -1
@@ -1726,7 +1804,26 @@ proc readLine*(ed: var LineEditor, prompt = "", hidechars = false,
       while true:
         var ch: char
         let n = posix.read(fd.cint, addr ch, 1)
-        if n == 1: return ch.ord.int
+        if n == 1:
+          if inputInterceptHook != nil and inputInterceptHook(ch.ord.int):
+            if pushedBack.len > 0:
+              return pushedBack.popFirst()
+            continue
+          if ch == '\x1b':
+            let reply = consumeTerminalReplyImpl:
+              var b2: char
+              if posix.read(fd.cint, addr b2, 1) == 1: b2.ord.int else: -1
+            if reply.len > 0:
+              noteReplyCaptured(reply)
+              if pushedBack.len > 0:
+                return pushedBack.popFirst()
+              continue
+            # Not a reply: replay any bytes the scan consumed, then let the
+            # editor's escape handling see the leading ESC.
+            if pushedBack.len > 0:
+              pushedBack.addLast(27)
+              return pushedBack.popFirst()
+          return ch.ord.int
         # EINTR from SIGWINCH (and friends): retry. The outer driver
         # uses `resizePending` to redraw on the next iteration; we
         # surface EINTR as IOError so it can do that.
