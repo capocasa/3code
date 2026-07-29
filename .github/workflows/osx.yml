@@ -33,10 +33,10 @@ jobs:
         run: echo "$HOME/nim-toolchain/bin" >> $GITHUB_PATH
 
       - name: Install dependencies
-        # procbox is not on the public package registry; install it from
+        # sandwall is not on the public package registry; install it from
         # its git URL first so --depsOnly can resolve it from the local store.
         run: |
-          nimble install -y https://github.com/capocasa/procbox
+          nimble install -y https://github.com/capocasa/sandwall
           nimble install -y --depsOnly
 
       - name: Compute build flags
