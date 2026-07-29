@@ -214,7 +214,12 @@ const
     # it for display and tests.
 
 proc isInterruptedMsg*(msg: string): bool =
-  msg == InterruptedByUserMsg
+  ## Matches the bare `InterruptedByUserMsg` and variants that append
+  ## context (e.g. "... during retry backoff"). Every raise of this class
+  ## must route through the turn loop's `onTurnInterrupted` path so the
+  ## turn-state reset (`inputTurnActive`) always runs; a suffix must not
+  ## reclassify it as a generic error.
+  msg == InterruptedByUserMsg or msg.startsWith(InterruptedByUserMsg & " ")
 
 proc isNetworkQuietMsg*(msg: string): bool =
   msg.startsWith(NetworkQuietPrefix)

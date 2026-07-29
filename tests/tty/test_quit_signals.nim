@@ -181,6 +181,52 @@ suite "quit signals":
     assertNoTrace(tty)
     echo "  PASS: :q queued during a turn exited cleanly after the turn"
 
+  test "Ctrl-C during retry backoff then Ctrl-D quits (inputTurnActive reset)":
+    # Regression: an interrupt raised while the transport is sleeping off a
+    # retry backoff surfaces as `ApiError "interrupted by user during retry
+    # backoff"`. `runTurns` matched only the bare `"interrupted by user"`
+    # string, so the suffixed message fell through to the generic-error path
+    # (`endTurnAfterTranscriptAppend`), which skips `onTurnInterrupted`'s
+    # `stopTurnInputForFinalRender`. `inputTurnActive` stayed true, so every
+    # later Ctrl-D was misrouted to the turn-interrupt branch (a no-op at
+    # idle) and the prompt could not be quit via the keyboard.
+    let root = newFixture("interrupt_backoff_then_ctrl_d")
+    writeConfiguredProvider(root)
+    # 2x 429 (StubMaxAttempts=2 via -d:fastStubRetries) then a reply. We
+    # Ctrl-C during the first 429's backoff to take the
+    # "interrupted by user during retry backoff" raise.
+    writeStubResponses(root, %*[
+      {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
+      {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
+      {"role": "assistant", "preStreamDelayMs": 50, "content": "recovered",
+       "contentChunks": ["recovered"],
+       "usage": {"promptTokens": 5, "completionTokens": 1,
+                  "totalTokens": 6, "cachedTokens": 0}}
+    ])
+    let stub = ensureStubBinary(extraDefines = "-d:fastStubRetries")
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer: tty.close()
+    tty.expect "\u276f"
+    for ch in "go":
+      tty.send($ch); tty.drain(10)
+    tty.send "\n"
+    # Wait for the first retry notice so the transport is mid-backoff.
+    tty.expectInHistory "429"
+    tty.drain(50)
+    tty.send "\x03"               # Ctrl-C during the retry backoff
+    tty.expectInHistory "interrupted by user"
+    tty.expectIdleCaret()         # prompt returns after the interrupt
+    tty.expectAlive()             # interrupt did not exit the process
+    # Now at an idle, empty prompt: Ctrl-D must quit like `:q` would. Before
+    # the fix this did nothing because inputTurnActive was still true.
+    tty.send "\x04"
+    tty.expectExit(0, timeoutMs = 5000)
+    assertNoTrace(tty)
+    echo "  PASS: Ctrl-C during retry backoff then Ctrl-D quit cleanly"
+
   test "Ctrl-C interrupt then Ctrl-D quits (inputTurnActive must reset)":
     # Regression: a user interrupt (Ctrl-C/ESC) during an active turn left
     # `inputTurnActive` stuck true because `runTurns` skips its deferred

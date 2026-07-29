@@ -77,6 +77,13 @@ suite "provider add bad-args freeze regression":
     tty.send "again"
     tty.expectTypedAtPrompt "again"
 
+    # Idle Ctrl-C must clear the draft (not quit, not wedge). The
+    # interrupt path owns the in-place repaint on the same live editor.
+    tty.send "\x03"
+    tty.drain(300)
+    tty.expectAlive()
+    tty.expectIdleCaret()
+
     # Process must still be alive (not exited, not hung in a sleep loop).
     tty.expectAlive()
 

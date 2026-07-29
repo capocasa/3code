@@ -1845,7 +1845,14 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
         sleep(step)
         remaining -= step
     if isInterrupted():
-      raise newException(ApiError, "interrupted by user during retry backoff")
+      # Same interrupt class as `InterruptedByUserMsg` (matched by
+      # `isInterruptedMsg`), with the backoff context appended. The turn
+      # loop treats every `isInterruptedMsg` raise identically via
+      # `onTurnInterrupted`; a literal match on the bare message would route
+      # this through the generic-error path, which skips the turn-state
+      # reset and leaves Ctrl-D/Ctrl-C misrouted to a dead turn.
+      raise newException(ApiError,
+        InterruptedByUserMsg & " during retry backoff")
     clearNetworkQuiet()
     # Reset the quiet watchdog's activity timer so the next attempt gets a
     # fresh QuietTooLongMs window. Without this, the watchdog's idle clock is
