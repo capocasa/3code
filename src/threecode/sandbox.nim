@@ -8,9 +8,9 @@
 ## Each line of `.3code/sandbox` is an access code (`+` writable,
 ## `-` deny, `*` read-only) plus a target: an absolute path, `~/` home
 ## path, `./` project-relative path (bare `+` = the project dir), or a
-## host/IP with optional `:port`. Host rules are parsed for the future
-## network milestone but not enforced yet. See sandwall's rules module
-## for the full grammar.
+## host/IP with optional `:port`. Host rules fence bash network egress
+## through the per-run wall proxy (see the wall-proxy section below).
+## See sandwall's rules module for the full grammar.
 ##
 ## The effective policy is the cascade of the system file
 ## (`~/.config/3code/sandbox`) and the repo file (`.3code/sandbox`),
