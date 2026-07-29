@@ -24,7 +24,10 @@
 ## file contents even between parent reloads.
 
 import std/[os, osproc, strutils, times]
+from std/posix import kill, Pid
 import sandwall
+when defined(posix):
+  import sandwall/wall as sandwallWall
 import types
 
 export sandwall.AccessKind, sandwall.Policy, sandwall.Rule,
@@ -42,6 +45,128 @@ var
   procboxExe*: string = ""
     ## Path to the binary to exec for `box restrict` (this one).
   lastMtimes: tuple[system, repo: Time]
+
+# ------------------------------------------------------------- wall proxy
+#
+# One wall proxy per 3code run, started lazily when the effective
+# policy first shows host rules and shared by every fenced bash launch
+# (the sandwall accept loop is sequential and fork-safe; per-launch
+# proxies are both wasteful and wrong - see sandwall wall/proxy.nim).
+
+when defined(posix):
+  var
+    wallProxy: sandwallWall.WallProxy
+      ## .sock == nil means not running.
+    wallProxyDir*: string = ""
+      ## Per-run temp dir holding the merged policy file + unix socket.
+
+proc wallProxyNeeded*(pol: Policy): bool =
+  ## Fencing is off until the effective policy names its first host.
+  pol.resolve().hosts.len > 0
+
+when defined(posix):
+
+  proc wallPolicyText*(projectDir: string): string =
+    ## The effective policy text the proxy enforces: the cascade's two
+    ## files (or defaults) concatenated, matching loadCascaded.
+    let files = cascadedFiles(projectDir)
+    let sysText = if fileExists(files.system): readFile(files.system)
+                  else: defaultPolicyText()
+    let repoText = if fileExists(files.repo): readFile(files.repo)
+                   else: defaultPolicyText()
+    sysText & "\n" & repoText & "\n"
+
+  proc proxySockPath*(): string =
+    ## The proxy's AF_UNIX listener (Linux bridge target); "" on macOS,
+    ## where the sandbox reaches host loopback directly.
+    when defined(linux):
+      if wallProxyDir.len > 0: wallProxyDir / "proxy.sock" else: ""
+    else:
+      ""
+
+  proc moveWallSock*(dir: string) =
+    ## Repoint the unix listener path at `dir` (the bash tmp dir, which
+    ## the fenced policy leaves writable). Must run before
+    ## ensureWallProxy; the proxy binds lazily there.
+    wallProxyDir = dir
+
+  proc ensureWallProxy*(projectDir: string): bool =
+    ## Start the per-run proxy when the policy needs it and it is not
+    ## running yet. True when fenced bash may launch.
+    if not wallProxyNeeded(current): return false
+    if wallProxy.port != 0: return true
+    if wallProxyDir.len == 0:
+      wallProxyDir = getTempDir() / ("3code-wall-" & $getCurrentProcessId())
+      createDir(wallProxyDir)
+    let polFile = wallProxyDir / "policy"
+    writeFile(polFile, wallPolicyText(projectDir))
+    try:
+      wallProxy = sandwallWall.startWallProxy(polFile, projectDir,
+        port = 0, unixSockPath = proxySockPath())
+    except CatchableError as e:
+      raise newException(IOError, "wall proxy: " & e.msg)
+    true
+
+  proc wallProxyPort*(): uint16 =
+    ## The proxy's loopback port; 0 when not running.
+    wallProxy.port
+
+  proc syncWallProxyPolicy*(projectDir: string) =
+    ## Rewrite the proxy's merged policy file after a cascade reload;
+    ## the proxy hot-reloads on mtime.
+    if wallProxy.port == 0 or wallProxyDir.len == 0: return
+    writeFile(wallProxyDir / "policy", wallPolicyText(projectDir))
+
+  proc stopWall*() =
+    ## Proxy + temp dir teardown, called from 3code's cleanup exit proc.
+    if wallProxy.port != 0:
+      sandwallWall.stopWallProxy(wallProxy)
+      wallProxy.port = 0
+    if wallProxyDir.len > 0:
+      try: removeDir(wallProxyDir)
+      except CatchableError: discard
+      wallProxyDir = ""
+
+  proc wallEnv*(selfExe, port, sockPath: string;
+                existingGitSsh: string): seq[(string, string)] =
+    ## Environment additions for a fenced bash launch: the WALL_* vars
+    ## box reads, the standard proxy vars pointing at the loopback
+    ## proxy (socks5h = remote DNS), and a ProxyCommand GIT_SSH_COMMAND
+    ## unless the user already set one. Pure helper; streamexec merges
+    ## the result into the child's env table.
+    result.add ("WALL_PROXY_PORT", port)
+    if sockPath.len > 0:
+      result.add ("WALL_PROXY_SOCK", sockPath)
+    let hp = "http://127.0.0.1:" & port
+    let sp = "socks5h://127.0.0.1:" & port
+    result.add ("http_proxy", hp)
+    result.add ("https_proxy", hp)
+    result.add ("HTTP_PROXY", hp)
+    result.add ("HTTPS_PROXY", hp)
+    result.add ("ALL_PROXY", sp)
+    result.add ("all_proxy", sp)
+    result.add ("NO_PROXY", "127.0.0.1,localhost")
+    result.add ("no_proxy", "127.0.0.1,localhost")
+    if existingGitSsh.len == 0:
+      result.add ("GIT_SSH_COMMAND",
+        "ssh -o ProxyCommand=\"" & selfExe & " wall connect %h %p\"")
+
+  proc sweepStaleWallDirs*() =
+    ## Best-effort removal of proxy dirs from dead 3code processes,
+    ## mirroring cleanupStaleBinaries. Runs at startup.
+    let tmp = getTempDir()
+    for kind, path in walkDir(tmp):
+      if kind != pcDir: continue
+      let name = path.lastPathPart
+      if not name.startsWith("3code-wall-"): continue
+      let pid = try: parseInt(name["3code-wall-".len .. ^1])
+                except ValueError: continue
+      if pid == getCurrentProcessId(): continue
+      # A live pid means a live owner; check via kill(pid, 0).
+      when defined(posix):
+        if posix.kill(pid.Pid, 0) == 0: continue
+      try: removeDir(path)
+      except CatchableError: discard
 
 proc findProcbox*(): string =
   ## The sandwall CLI is built into 3code as the `box` subcommand, so the
@@ -96,6 +221,8 @@ proc reloadIfChanged*(projectDir: string): bool =
   if now == lastMtimes: return false
   current = sandwall.loadCascaded(projectDir)
   lastMtimes = now
+  when defined(posix):
+    syncWallProxyPolicy(projectDir)
   true
 
 proc policyHint*(): string =

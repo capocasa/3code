@@ -331,7 +331,15 @@ parser and rule model, so the rules you write apply uniformly.
 Host rules additionally drive the network wall: the first host rule in
 the effective policy switches on egress fencing for bash commands, which
 then reach the network only through a per-run allowlist proxy (``3code
-wall proxy``); see the policy grammar for the host rule forms.
+wall proxy``). Linux fences with a kernel network namespace (the proxy is
+reached through a unix-socket bridge), macOS with Seatbelt loopback-only
+rules; a fenced command sees ``http_proxy``/``HTTPS_PROXY``/``ALL_PROXY``
+pointed at the proxy and a ``GIT_SSH_COMMAND`` ProxyCommand unless you set
+one yourself. Denied connections fail with a proxy 403. On Windows the
+fence is keyed on a dedicated ``sandwall`` user and needs a one-time
+elevated ``3code wall setup-windows``; without it, host-rule policies
+print a warning and run unfenced (silence with
+``[settings] sandbox_wall_warn = off``).
 
 ### The sandbox file
 

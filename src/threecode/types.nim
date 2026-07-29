@@ -26,6 +26,11 @@ var sandboxEnabled*: bool = true
   ## unconfined and the in-process read/write/patch checks pass through.
   ## Default on, preserving the historical sandboxed behavior. Toggled
   ## at runtime via `:sandbox on/off`, persisted in `[settings]`.
+var sandboxWallWarn*: bool = true
+  ## When true, a policy with host rules on Windows without the wall
+  ## setup (`3code wall setup-windows`) prints a one-time warning that
+  ## bash runs unfenced. Default on; `[settings] sandbox_wall_warn =
+  ## off` silences it.
 
 type
   ColorMode* = enum

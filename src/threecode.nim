@@ -184,6 +184,8 @@ proc cleanup() {.noconv.} =
   fatprompt.restoreInputTermios()
   minline.restoreTerminal()
   restoreCancelTermios()
+  when defined(posix):
+    sandbox.stopWall()
   # Final best-effort save of the prompt draft so a kill/power-off/SIGTERM
   # never loses a half-typed prompt. flushDraftNow uses tryAcquire inside so it
   # is safe to call from a signal handler on any thread. The flusher thread is
@@ -210,6 +212,8 @@ proc main() =
 
   setupTlsEnv()
   cleanupStaleBinaries()
+  when defined(posix):
+    sandbox.sweepStaleWallDirs()
   refuseRoot()
   # Internal flag for the detached background worker. Run silently and
   # exit before any other startup work (skill extraction, config load).
