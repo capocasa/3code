@@ -1,10 +1,11 @@
-# Network plan (future): the "wall" half of sandwall
+# Network plan: the "wall" half of sandwall - DONE
 
-Status: **research captured, plan deliberately unrefined. Do not implement.**
-The full research lives in `~/p/procbox/firewall-research.md`; this file is
-the decision record. Filesystem work happens first (see
-`cybernetic-plan.md`); when it lands, this plan gets refined into its own
-cybernetic plan and the procbox repo is renamed sandwall at that point.
+Status: **implemented** (sandwall repo chunks 1-4 through commit
+fb94a26; 3code integration chunks 5-6, commits 26444e7 + 4861571).
+The refined plan that drove the work lives in the sandwall repo:
+`~/p/sandwall/impl-plan.md`. This file remains as the original
+decision record. The full research lives in
+`~/p/procbox/firewall-research.md`.
 
 ## Locked decisions (from the user)
 

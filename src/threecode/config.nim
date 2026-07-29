@@ -231,6 +231,7 @@ const
   PermittedSections = ["settings", "search", "colors", "provider"]
   SettingsKeys = ["current", "notify", "streaming", "sandbox",
                   "sandbox_enabled", "patient_retry", "patient-retry",
+                  "sandbox_wall_warn",
                   "mode", "bash_path", "bash-path",
                   "auto_update"]
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
@@ -275,7 +276,8 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
                "(expected one of: exa, parallel, brave)"
     of "settings":
       if ent.key in ["notify", "streaming", "sandbox", "sandbox_enabled",
-                      "patient_retry", "patient-retry"] and
+                      "patient_retry", "patient-retry",
+          "sandbox_wall_warn"] and
           ent.value.strip.toLowerAscii notin BoolValues:
         return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
                "(expected on/off/true/false/yes/no/1/0)"
@@ -367,6 +369,13 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           of "on", "true", "yes", "1": patientRetryEnabled = true
           of "off", "false", "no", "0": patientRetryEnabled = false
           else: discard
+        of "sandbox_wall_warn":
+          # Silences only the Windows "wall not set up" warning; the
+          # fence itself is unaffected.
+          case v.toLowerAscii
+          of "on", "true", "yes", "1": sandboxWallWarn = true
+          of "off", "false", "no", "0": sandboxWallWarn = false
+          else: discard
         of "mode":
           # `auto` detects the background (default); `dark`/`bright` force a
           # palette. `light` is accepted as an alias for `bright`.
@@ -439,6 +448,8 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "sandbox = \"off\"\n"
   if not patientRetryEnabled:
     buf.add "patient_retry = \"off\"\n"
+  if not sandboxWallWarn:
+    buf.add "sandbox_wall_warn = \"off\"\n"
   # Persist the colour mode only when it differs from `auto` (the default).
   if colorModePref != cmAuto:
     let label = if colorModePref == cmDark: "dark" else: "bright"

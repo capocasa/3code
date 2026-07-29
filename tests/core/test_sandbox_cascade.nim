@@ -1,9 +1,9 @@
 discard """
   # The cascade concatenates a system level and a repo level (each falling
   # back to the built-in default when absent) and parses once. The parser
-  # itself is exhaustively tested in procbox's test_rules; these tests
+  # itself is exhaustively tested in sandwall's test_rules; these tests
   # cover the 3code-facing surface: the cascade semantics via
-  # `parseCascaded` (re-exported from procbox) and the mtime-driven
+  # `parseCascaded` (re-exported from sandwall) and the mtime-driven
   # `reloadIfChanged` that picks up mid-session policy edits.
 """
 import std/[unittest, os, times]

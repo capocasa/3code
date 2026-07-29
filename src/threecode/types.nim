@@ -35,6 +35,11 @@ var patientRetryEnabled*: bool = true
   ## ramp-up (~1min) instead of entering the long patient hold. Default on.
   ## Toggled at runtime via `:retry on/off`, persisted in `[settings]` as
   ## `patient_retry`.
+var sandboxWallWarn*: bool = true
+  ## When true, a policy with host rules on Windows without the wall
+  ## setup (`3code wall setup-windows`) prints a one-time warning that
+  ## bash runs unfenced. Default on; `[settings] sandbox_wall_warn =
+  ## off` silences it.
 
 type
   ColorMode* = enum

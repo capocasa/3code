@@ -6,13 +6,17 @@
 ## callback for live display. Returns the raw merged output and the
 ## exit code — clipping and post-processing live in `actions.nim`.
 
-import std/[atomics, os, osproc, strformat, strutils, tables, terminal, times]
+import std/[atomics, os, osproc, strformat, strtabs, strutils, tables, terminal, times]
 when defined(posix):
   import std/posix except Time
   import std/termios
 else:
   import std/streams
 import types, util, shell, sandbox
+when defined(windows):
+  import sandwall/wall as sandwallWall
+
+var wallWarnShown = false  ## one Windows wall warning per run
 
 when defined(windows):
   var cachedBash* {.threadvar.}: string
@@ -357,7 +361,35 @@ export DEBIAN_FRONTEND=noninteractive
         args.add "/bin/sh"
         args.add "-c"
         args.add wrapped
-        startProcess(sandbox.procboxExe, args = args,
+        # Network wall: host rules in the policy mean the box child is
+        # fenced; route its traffic through the per-run proxy. The
+        # script temp dir also holds the proxy's unix socket, which
+        # must sit under a writable rule: the bare `+` of the default
+        # policy is the project dir, NOT tmp, so add tmp writable when
+        # fencing (only then - the read-only default stands otherwise).
+        var env: StringTableRef = nil
+        when defined(posix):
+          sandbox.moveWallSock(tmp)
+          if sandbox.ensureWallProxy(getCurrentDir()):
+            # box args: swap the --ro tmp for a writable tmp so the
+            # bridge can connect() the unix socket inside the netns.
+            args = @[]
+            args.add "box"
+            args.add ["--policy", paths.system]
+            args.add ["--policy", paths.repo]
+            args.add "restrict"
+            args.add tmp
+            args.add "--"
+            args.add "/bin/sh"
+            args.add "-c"
+            args.add wrapped
+            env = newStringTable()  # case-sensitive on posix; env names differ by case
+            for k, v in envPairs(): env[k] = v
+            for (k, v) in sandbox.wallEnv(sandbox.procboxExe,
+                $int(sandbox.wallProxyPort()), sandbox.proxySockPath(),
+                getEnv("GIT_SSH_COMMAND", "")):
+              env[k] = v
+        startProcess(sandbox.procboxExe, args = args, env = env,
                      options = {poStdErrToStdOut, poUsePath})
       else:
         let setsidExe = findExe("setsid")
@@ -371,6 +403,19 @@ export DEBIAN_FRONTEND=noninteractive
       let b = resolveBash()
       if b == "":
         return ("bash not found", 127, cap)
+      # Windows wall: fencing is keyed on the sandwall user (sandwall
+      # wall/wfp.nim), set up once via `3code wall setup-windows`. With
+      # host rules but no setup, bash runs unfenced - warn once per run
+      # unless `[settings] sandbox_wall_warn = off`.
+      if sandboxWallWarn and not wallWarnShown and
+          sandbox.active and sandbox.wallProxyNeeded(sandbox.current):
+        wallWarnShown = true
+        when defined(windows):
+          if sandwallWall.sidString() == "":
+            stderr.writeLine("3code: policy has host rules but the " &
+              "Windows wall is not set up; bash runs unfenced. Run " &
+              "`3code wall setup-windows` once as admin. " &
+              "(disable this warning: [settings] sandbox_wall_warn = off)")
       # On Windows, we use bash -c with the script file path.
       # We set MSYSTEM, HOME, and PATH using putenv so that bash
       # can find its tools and the user's home directory.
