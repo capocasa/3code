@@ -380,9 +380,13 @@ proc rowsAboveEditor*(frame: FooterFrame; termW = 0): int =
   ## always a gap (blank unless a thinking ticker fills it): this makes the
   ## footer height invariant to the ticker appearing or clearing, so the
   ## engine's walk-up to the footer top never lands on committed scrollback.
+  ## The gap row is reserved even with no token bar at all (ffNone): the
+  ## frame model's `frameRows`/`footerGeometry` always keep it, and the
+  ## live chrome must match so a turn start or a bar appearing never shifts
+  ## committed scrollback.
   case frame.kind
   of ffNone:
-    result = 0
+    result = 1
   of ffClear:
     result = max(1, frame.clearRows)
   of ffTokenBar:
@@ -480,7 +484,11 @@ proc clearSpinnerFooterBytes*(hadTicker: bool): string =
 proc footerFrameBytes*(frame: FooterFrame; termW = 0): string =
   case frame.kind
   of ffNone:
-    result = ""
+    # No bar: still paint the reserved gap row (blank) so the row model
+    # (`rowsAboveEditor` = 1) matches what is on screen. Paints must be
+    # row-neutral — the editor redraw's trailing newline already advances
+    # past this row, so no cursor movement is owed here.
+    result = "\r\x1b[2K"
   of ffClear:
     result = "\r\x1b[2K"
     for _ in 1 ..< max(1, frame.clearRows):
@@ -556,7 +564,10 @@ proc footerGeometry*(s: FatPromptState; editorRows: int; termW = 0): FatPromptGe
 
 proc footerFrameBytes*(s: FatPromptState; termW = 0): string =
   ## Complete token-bar + prompt placeholder frame for the current state.
-  if s.footer.barLabel.len == 0: ""
+  ## With no bar the reserved ticker gap row is still painted (blank), so
+  ## the prompt-only footer occupies the same one row the frame model
+  ## reserves and a bar appearing later does not shift scrollback.
+  if s.footer.barLabel.len == 0: "\r\x1b[2K"
   else: barFooterBytes(s.footer.barLabel, termW)
 
 proc hideRealCaretBytes*(): string =

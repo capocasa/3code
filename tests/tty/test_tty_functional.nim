@@ -2362,8 +2362,29 @@ suite "terminal visual contract":
     # --- Turn 1: plain prompt and reply (not duplicated, not dropped). ---
     tty.expect "❯"
     tty.expectAlive()
+    # The ticker gap row is reserved chrome even with no bar ("ticker as
+    # distance"): the idle prompt sits one blank row below the last
+    # scrollback line, and sending the first prompt (which grows the
+    # footer by the spinner bar) must not shift committed scrollback.
+    let hintRow = tty.rowContaining("type a prompt")
+    doAssert hintRow >= 0
+    let idleGap = tty.rowContaining("❯") - hintRow
+    doAssert idleGap == 2,
+      "REGRESSION (scrollback-overwrite): idle prompt must sit one gap " &
+      "row below scrollback, got " & $idleGap & " rows\n" & tty.screenText()
     tty.send "turn one"
     tty.send "\n"
+    tty.expectTokenBar(["○", "↑10", "↓3"])
+    tty.drain(200)
+    # The user's bug: sending the first prompt shifted every committed
+    # scrollback row up by one as the spinner footer appeared. Assert the
+    # anchor line (the welcome hint) is still on its original row after
+    # the full turn; a footer that failed to reserve the ticker gap row
+    # would have pushed it up.
+    doAssert tty.rowContaining("type a prompt") == hintRow,
+      "REGRESSION (scrollback-overwrite): committed scrollback shifted " &
+      "when the turn-1 spinner footer appeared (hint row " & $hintRow &
+      " -> " & $tty.rowContaining("type a prompt") & ")\n" & tty.screenText()
     tty.expectInHistory "turn one"
     tty.expectCount("turn one reply", 1, where = "screen")
     # Wait for turn 1 to fully end before sending turn 2. Under eager

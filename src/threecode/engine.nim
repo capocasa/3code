@@ -101,6 +101,15 @@ proc noteFooterPainted(e: var TerminalEngine; footerRowsAboveEditor: int) =
 proc noteNoFooter(e: var TerminalEngine) =
   e.paintedFooterRows = 0
 
+proc noteNoFooterPublic*() =
+  ## Reset the engine's painted-footer count when the terminal's volatile
+  ## region is no longer owned by the fat prompt. A modal wizard paints its
+  ## own prompts below the footer and leaves the cursor directly under its
+  ## output; the fat-prompt's reserved gap row is not part of that region,
+  ## so the next walk-up must not count it (or it erases the wizard's last
+  ## line). Called when a wizard takes the terminal.
+  defaultEngine.noteNoFooter()
+
 proc eraseUp(e: var TerminalEngine; ed: var minline.LineEditor;
              width, footerRowsAboveEditor: int): int =
   ## Rows to move up before erasing the volatile region. Normally this is the

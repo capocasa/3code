@@ -614,6 +614,10 @@ proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
       tokenBarFrame(label)
     of amIdle:
       footerFrame(fatPromptState)
+  # Route through the engine wrapper (not termio directly) so the engine's
+  # paintedFooterRows tracks the reserved footer height this redraw paints.
+  # The ffNone frame still occupies one row (the ticker gap), and the
+  # submit path's walk-up relies on that count to land on the prompt row.
   termengine.beginEditorRedraw(ed, inputEditorReady.load(moAcquire),
                                frameModel)
 
@@ -911,7 +915,13 @@ proc paintInitialPrompt*(p: Profile) =
                              inputThreadRunning, inputEditor,
                              currentTermW())
   else:
-    termengine.writeRaw("\n\x1b[?25l" & promptOnlyResetBytes())
+    # Raw fallback (no live editor yet): the ticker gap row is reserved
+    # chrome even in prompt-only mode, so advance exactly one row past the
+    # caller's fresh row (that row becomes the gap) and leave the cursor on
+    # the prompt row below it. One newline: the caller left the cursor on a
+    # fresh row, a second would scroll the terminal near the bottom and
+    # break the row model (`rowsAboveEditor(ffNone) = 1`).
+    termengine.writeRaw("\x1b[?25l\n" & promptOnlyResetBytes())
 
 
 # --- Bar tick: repaints the token bar with an incrementing elapsed counter
@@ -1867,6 +1877,13 @@ proc inputThreadProc() {.thread.} =
         # returns.
         wizardRequestPosted.store(false, moRelease)
         inputModalActive.store(true, moRelease)
+        # The wizard owns the terminal from here: its prompts paint below
+        # whatever footer was live, and the cursor ends up directly under
+        # the wizard's output. The fat-prompt's reserved gap row is not
+        # part of that region, so drop the stale painted-footer count —
+        # the controller's next commit walk-up must land on the wizard's
+        # last line, not one row above it.
+        termengine.noteNoFooterPublic()
         var req: WizardReadRequest
         var resp = WizardReadResponse(kind: wrSubmitted, text: "")
         acquire wizardRequestLock

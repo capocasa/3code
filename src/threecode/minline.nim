@@ -632,16 +632,21 @@ proc fullRedraw*(ed: var LineEditor) =
   callHook(ed.postRedraw, ed)
 
 proc parkAtEnd(ed: var LineEditor) =
-  ## After submit, leave the cursor at column 0 of the row directly
-  ## below the rendered input — the contract every external transition
-  ## is written against.
+  ## After submit, park the cursor at the prompt's own row: the reserved
+  ## ticker gap row sits directly below the prompt, so the row below the
+  ## rendered input is chrome, not free space. The controller's submit
+  ## commit walks up from this row and writes the prompt echo in place,
+  ## keeping committed scrollback visually stable across the turn start.
+  ##
+  ## (Previously this moved below the rendered input; that was correct
+  ## only while the footer reserved no gap row. With the gap row always
+  ## reserved, the walk-up overshoots by one if the cursor parks below.)
   let width = max(2, ed.width)
   let total = totalRows(ed.line.text, ed.promptW, ed.contPromptW, width)
-  let endRow = total - 1
-  if ed.renderRow < endRow:
-    emitMoveDown(ed, endRow - ed.renderRow)
   if ed.submitIcon.len > 0:
     ed.write ed.submitIcon
+  # Park one row below the input: that row is the reserved ticker gap,
+  # and the controller's submit commit expects the cursor there.
   ed.write "\r\n"
   ed.echoRows = total
   ed.renderRow = 0
