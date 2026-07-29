@@ -1,7 +1,7 @@
-===== 757 =====
+===== 989 =====
 
   ╭─╮
-   ─┤  3code v0.6.0-main-152ec857-unstaged   the economical coding agent
+   ─┤  3code v0.6.0-sysmodel-5df6f76d   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,7 +10,7 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ :help
-===== 482 =====
+===== 351 =====
   :provider add     add a new provider (interactive, verified)
   :provider edit X  edit provider X (url, key, models)
   :provider rm X    remove provider X
@@ -51,7 +51,7 @@ input:
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
 ❯
-===== 690 =====
+===== 323 =====
   :provider add     add a new provider (interactive, verified)
   :provider edit X  edit provider X (url, key, models)
   :provider rm X    remove provider X
@@ -92,7 +92,7 @@ input:
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
 ❯ :provider
-===== 814 =====
+===== 937 =====
   :streaming        show streaming mode (on = live output, off = request/response)
   :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
   :notify           show notify mode (on = desktop notification when a turn ends)
@@ -127,13 +127,13 @@ input:
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
-
+           
 ❯ :provider
 
 stub  [stub-model]
 alt
 ❯
-===== 822 =====
+===== 111 =====
   :streaming        show streaming mode (on = live output, off = request/response)
   :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
   :notify           show notify mode (on = desktop notification when a turn ends)
@@ -168,13 +168,13 @@ input:
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
-
+           
 ❯ :provider
 
 stub  [stub-model]
 alt
 ❯ :model
-===== 333 =====
+===== 752 =====
   :retry on|off     toggle patient retry of 429/5xx/network errors
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
@@ -204,18 +204,18 @@ input:
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
-
+           
 ❯ :provider
 
 stub  [stub-model]
 alt
-
+        
 ❯ :model
 
-stub-model
+stub-model  [stub]
 stub-large
 ❯
-===== 524 =====
+===== 890 =====
   :retry on|off     toggle patient retry of 429/5xx/network errors
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
@@ -245,18 +245,18 @@ input:
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
-
+           
 ❯ :provider
 
 stub  [stub-model]
 alt
-
+        
 ❯ :model
 
-stub-model
+stub-model  [stub]
 stub-large
 ❯ :reasoning
-===== 979 =====
+===== 229 =====
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :version          show the running 3code version
   :sandbox          show the active filesystem sandbox rules
@@ -281,23 +281,23 @@ input:
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
-
+           
 ❯ :provider
 
 stub  [stub-model]
 alt
-
+        
 ❯ :model
 
-stub-model
+stub-model  [stub]
 stub-large
-
+            
 ❯ :reasoning
 
 reasoning: (none)
 experimental: level is free-form, type any value
 ❯
-===== 676 =====
+===== 240 =====
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :version          show the running 3code version
   :sandbox          show the active filesystem sandbox rules
@@ -322,23 +322,23 @@ input:
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
-
+           
 ❯ :provider
 
 stub  [stub-model]
 alt
-
+        
 ❯ :model
 
-stub-model
+stub-model  [stub]
 stub-large
-
+            
 ❯ :reasoning
 
 reasoning: (none)
 experimental: level is free-form, type any value
 ❯ :model stub-large
-===== 346 =====
+===== 844 =====
   :sandbox allow T  add a writable/connectable rule (+ T)
   :sandbox readonly P  add a read-only rule (* P)
   :sandbox deny T   add a deny rule (- T)
@@ -358,28 +358,28 @@ input:
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
-
+           
 ❯ :provider
 
 stub  [stub-model]
 alt
-
+        
 ❯ :model
 
-stub-model
+stub-model  [stub]
 stub-large
-
+            
 ❯ :reasoning
 
 reasoning: (none)
 experimental: level is free-form, type any value
-
+                   
 ❯ :model stub-large
 
 provider  stub
 model     stub-large
 ❯
-===== 677 =====
+===== 321 =====
   :sandbox allow T  add a writable/connectable rule (+ T)
   :sandbox readonly P  add a read-only rule (* P)
   :sandbox deny T   add a deny rule (- T)
@@ -399,28 +399,28 @@ input:
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
-
+           
 ❯ :provider
 
 stub  [stub-model]
 alt
-
+        
 ❯ :model
 
-stub-model
+stub-model  [stub]
 stub-large
-
+            
 ❯ :reasoning
 
 reasoning: (none)
 experimental: level is free-form, type any value
-
+                   
 ❯ :model stub-large
 
 provider  stub
 model     stub-large
 ❯ :reasoning high
-===== 910 =====
+===== 662 =====
 
 input:
   single-line   just type and press Enter
@@ -434,34 +434,34 @@ input:
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
-
+           
 ❯ :provider
 
 stub  [stub-model]
 alt
-
+        
 ❯ :model
 
-stub-model
+stub-model  [stub]
 stub-large
-
+            
 ❯ :reasoning
 
 reasoning: (none)
 experimental: level is free-form, type any value
-
+                   
 ❯ :model stub-large
 
 provider  stub
 model     stub-large
-
+                 
 ❯ :reasoning high
 
 provider  stub
 model     stub-large
 reasoning high
 ❯
-===== 919 =====
+===== 691 =====
 
 input:
   single-line   just type and press Enter
@@ -475,34 +475,34 @@ input:
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
-
+           
 ❯ :provider
 
 stub  [stub-model]
 alt
-
+        
 ❯ :model
 
-stub-model
+stub-model  [stub]
 stub-large
-
+            
 ❯ :reasoning
 
 reasoning: (none)
 experimental: level is free-form, type any value
-
+                   
 ❯ :model stub-large
 
 provider  stub
 model     stub-large
-
+                 
 ❯ :reasoning high
 
 provider  stub
 model     stub-large
 reasoning high
 ❯ :provider alt
-===== 191 =====
+===== 195 =====
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
   ctrl+u        clear the buffer
@@ -511,39 +511,39 @@ reasoning high
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
-
+           
 ❯ :provider
 
 stub  [stub-model]
 alt
-
+        
 ❯ :model
 
-stub-model
+stub-model  [stub]
 stub-large
-
+            
 ❯ :reasoning
 
 reasoning: (none)
 experimental: level is free-form, type any value
-
+                   
 ❯ :model stub-large
 
 provider  stub
 model     stub-large
-
+                 
 ❯ :reasoning high
 
 provider  stub
 model     stub-large
 reasoning high
-
+               
 ❯ :provider alt
 
 provider  alt
 model     alt-model
 ❯
-===== 673 =====
+===== 648 =====
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
   home / end    jump to start / end of the current logical line
   ctrl+u        clear the buffer
@@ -552,318 +552,318 @@ model     alt-model
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
-
+           
 ❯ :provider
 
 stub  [stub-model]
 alt
-
+        
 ❯ :model
 
-stub-model
+stub-model  [stub]
 stub-large
-
+            
 ❯ :reasoning
 
 reasoning: (none)
 experimental: level is free-form, type any value
-
+                   
 ❯ :model stub-large
 
 provider  stub
 model     stub-large
-
+                 
 ❯ :reasoning high
 
 provider  stub
 model     stub-large
 reasoning high
-
+               
 ❯ :provider alt
 
 provider  alt
 model     alt-model
 ❯ :tokens
-===== 762 =====
+===== 223 =====
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
-
+           
 ❯ :provider
 
 stub  [stub-model]
 alt
-
+        
 ❯ :model
 
-stub-model
+stub-model  [stub]
 stub-large
-
+            
 ❯ :reasoning
 
 reasoning: (none)
 experimental: level is free-form, type any value
-
+                   
 ❯ :model stub-large
 
 provider  stub
 model     stub-large
-
+                 
 ❯ :reasoning high
 
 provider  stub
 model     stub-large
 reasoning high
-
+               
 ❯ :provider alt
 
 provider  alt
 model     alt-model
-
+         
 ❯ :tokens
 
 no tokens used yet
 ❯
-===== 980 =====
+===== 376 =====
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
-
+           
 ❯ :provider
 
 stub  [stub-model]
 alt
-
+        
 ❯ :model
 
-stub-model
+stub-model  [stub]
 stub-large
-
+            
 ❯ :reasoning
 
 reasoning: (none)
 experimental: level is free-form, type any value
-
+                   
 ❯ :model stub-large
 
 provider  stub
 model     stub-large
-
+                 
 ❯ :reasoning high
 
 provider  stub
 model     stub-large
 reasoning high
-
+               
 ❯ :provider alt
 
 provider  alt
 model     alt-model
-
+         
 ❯ :tokens
 
 no tokens used yet
 ❯ :clear
-===== 344 =====
-
+===== 271 =====
+           
 ❯ :provider
 
 stub  [stub-model]
 alt
-
+        
 ❯ :model
 
-stub-model
+stub-model  [stub]
 stub-large
-
+            
 ❯ :reasoning
 
 reasoning: (none)
 experimental: level is free-form, type any value
-
+                   
 ❯ :model stub-large
 
 provider  stub
 model     stub-large
-
+                 
 ❯ :reasoning high
 
 provider  stub
 model     stub-large
 reasoning high
-
+               
 ❯ :provider alt
 
 provider  alt
 model     alt-model
-
+         
 ❯ :tokens
 
 no tokens used yet
-
+        
 ❯ :clear
 
 ════════════════════════════════════════
 ❯
-===== 524 =====
-
+===== 703 =====
+           
 ❯ :provider
 
 stub  [stub-model]
 alt
-
+        
 ❯ :model
 
-stub-model
+stub-model  [stub]
 stub-large
-
+            
 ❯ :reasoning
 
 reasoning: (none)
 experimental: level is free-form, type any value
-
+                   
 ❯ :model stub-large
 
 provider  stub
 model     stub-large
-
+                 
 ❯ :reasoning high
 
 provider  stub
 model     stub-large
 reasoning high
-
+               
 ❯ :provider alt
 
 provider  alt
 model     alt-model
-
+         
 ❯ :tokens
 
 no tokens used yet
-
+        
 ❯ :clear
 
 ════════════════════════════════════════
 ❯ :sessions
-===== 790 =====
+===== 731 =====
 alt
-
+        
 ❯ :model
 
-stub-model
+stub-model  [stub]
 stub-large
-
+            
 ❯ :reasoning
 
 reasoning: (none)
 experimental: level is free-form, type any value
-
+                   
 ❯ :model stub-large
 
 provider  stub
 model     stub-large
-
+                 
 ❯ :reasoning high
 
 provider  stub
 model     stub-large
 reasoning high
-
+               
 ❯ :provider alt
 
 provider  alt
 model     alt-model
-
+         
 ❯ :tokens
 
 no tokens used yet
-
+        
 ❯ :clear
 
 ════════════════════════════════════════
-
+           
 ❯ :sessions
 
 no saved sessions for this directory
 ❯
-===== 545 =====
+===== 753 =====
 alt
-
+        
 ❯ :model
 
-stub-model
+stub-model  [stub]
 stub-large
-
+            
 ❯ :reasoning
 
 reasoning: (none)
 experimental: level is free-form, type any value
-
+                   
 ❯ :model stub-large
 
 provider  stub
 model     stub-large
-
+                 
 ❯ :reasoning high
 
 provider  stub
 model     stub-large
 reasoning high
-
+               
 ❯ :provider alt
 
 provider  alt
 model     alt-model
-
+         
 ❯ :tokens
 
 no tokens used yet
-
+        
 ❯ :clear
 
 ════════════════════════════════════════
-
+           
 ❯ :sessions
 
 no saved sessions for this directory
 ❯ :sessions all
-===== 725 =====
+===== 589 =====
 ❯ :reasoning
 
 reasoning: (none)
 experimental: level is free-form, type any value
-
+                   
 ❯ :model stub-large
 
 provider  stub
 model     stub-large
-
+                 
 ❯ :reasoning high
 
 provider  stub
 model     stub-large
 reasoning high
-
+               
 ❯ :provider alt
 
 provider  alt
 model     alt-model
-
+         
 ❯ :tokens
 
 no tokens used yet
-
+        
 ❯ :clear
 
 ════════════════════════════════════════
-
+           
 ❯ :sessions
 
 no saved sessions for this directory
-
+               
 ❯ :sessions all
 
 no saved sessions for this directory
@@ -871,40 +871,40 @@ no saved sessions for this directory
 
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 ❯
-===== 760 =====
+===== 580 =====
 ❯ :reasoning
 
 reasoning: (none)
 experimental: level is free-form, type any value
-
+                   
 ❯ :model stub-large
 
 provider  stub
 model     stub-large
-
+                 
 ❯ :reasoning high
 
 provider  stub
 model     stub-large
 reasoning high
-
+               
 ❯ :provider alt
 
 provider  alt
 model     alt-model
-
+         
 ❯ :tokens
 
 no tokens used yet
-
+        
 ❯ :clear
 
 ════════════════════════════════════════
-
+           
 ❯ :sessions
 
 no saved sessions for this directory
-
+               
 ❯ :sessions all
 
 no saved sessions for this directory
@@ -912,335 +912,335 @@ no saved sessions for this directory
 
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 ❯ :log
-===== 586 =====
-
+===== 918 =====
+                   
 ❯ :model stub-large
 
 provider  stub
 model     stub-large
-
+                 
 ❯ :reasoning high
 
 provider  stub
 model     stub-large
 reasoning high
-
+               
 ❯ :provider alt
 
 provider  alt
 model     alt-model
-
+         
 ❯ :tokens
 
 no tokens used yet
-
+        
 ❯ :clear
 
 ════════════════════════════════════════
-
+           
 ❯ :sessions
 
 no saved sessions for this directory
-
+               
 ❯ :sessions all
 
 no saved sessions for this directory
 
 
 listing is scoped to this directory — run from ~/data/3code/sessions for all
-
+      
 ❯ :log
 
 no tool calls yet
 ❯
-===== 141 =====
-
+===== 369 =====
+                   
 ❯ :model stub-large
 
 provider  stub
 model     stub-large
-
+                 
 ❯ :reasoning high
 
 provider  stub
 model     stub-large
 reasoning high
-
+               
 ❯ :provider alt
 
 provider  alt
 model     alt-model
-
+         
 ❯ :tokens
 
 no tokens used yet
-
+        
 ❯ :clear
 
 ════════════════════════════════════════
-
+           
 ❯ :sessions
 
 no saved sessions for this directory
-
+               
 ❯ :sessions all
 
 no saved sessions for this directory
 
 
 listing is scoped to this directory — run from ~/data/3code/sessions for all
-
+      
 ❯ :log
 
 no tool calls yet
 ❯ :show
-===== 290 =====
+===== 421 =====
 model     stub-large
-
+                 
 ❯ :reasoning high
 
 provider  stub
 model     stub-large
 reasoning high
-
+               
 ❯ :provider alt
 
 provider  alt
 model     alt-model
-
+         
 ❯ :tokens
 
 no tokens used yet
-
+        
 ❯ :clear
 
 ════════════════════════════════════════
-
+           
 ❯ :sessions
 
 no saved sessions for this directory
-
+               
 ❯ :sessions all
 
 no saved sessions for this directory
 
 
 listing is scoped to this directory — run from ~/data/3code/sessions for all
-
+      
 ❯ :log
 
 no tool calls yet
-
+       
 ❯ :show
 
 no tool calls yet
 ❯
-===== 441 =====
+===== 501 =====
 model     stub-large
-
+                 
 ❯ :reasoning high
 
 provider  stub
 model     stub-large
 reasoning high
-
+               
 ❯ :provider alt
 
 provider  alt
 model     alt-model
-
+         
 ❯ :tokens
 
 no tokens used yet
-
+        
 ❯ :clear
 
 ════════════════════════════════════════
-
+           
 ❯ :sessions
 
 no saved sessions for this directory
-
+               
 ❯ :sessions all
 
 no saved sessions for this directory
 
 
 listing is scoped to this directory — run from ~/data/3code/sessions for all
-
+      
 ❯ :log
 
 no tool calls yet
-
+       
 ❯ :show
 
 no tool calls yet
 ❯ :compact
-===== 836 =====
+===== 747 =====
 provider  stub
 model     stub-large
 reasoning high
-
+               
 ❯ :provider alt
 
 provider  alt
 model     alt-model
-
+         
 ❯ :tokens
 
 no tokens used yet
-
+        
 ❯ :clear
 
 ════════════════════════════════════════
-
+           
 ❯ :sessions
 
 no saved sessions for this directory
-
+               
 ❯ :sessions all
 
 no saved sessions for this directory
 
 
 listing is scoped to this directory — run from ~/data/3code/sessions for all
-
+      
 ❯ :log
 
 no tool calls yet
-
+       
 ❯ :show
 
 no tool calls yet
-
+          
 ❯ :compact
 
 unknown command: :compact  (try :help)
 ❯
-===== 350 =====
+===== 629 =====
 provider  stub
 model     stub-large
 reasoning high
-
+               
 ❯ :provider alt
 
 provider  alt
 model     alt-model
-
+         
 ❯ :tokens
 
 no tokens used yet
-
+        
 ❯ :clear
 
 ════════════════════════════════════════
-
+           
 ❯ :sessions
 
 no saved sessions for this directory
-
+               
 ❯ :sessions all
 
 no saved sessions for this directory
 
 
 listing is scoped to this directory — run from ~/data/3code/sessions for all
-
+      
 ❯ :log
 
 no tool calls yet
-
+       
 ❯ :show
 
 no tool calls yet
-
+          
 ❯ :compact
 
 unknown command: :compact  (try :help)
 ❯ :summarize
-===== 801 =====
+===== 257 =====
 ❯ :provider alt
 
 provider  alt
 model     alt-model
-
+         
 ❯ :tokens
 
 no tokens used yet
-
+        
 ❯ :clear
 
 ════════════════════════════════════════
-
+           
 ❯ :sessions
 
 no saved sessions for this directory
-
+               
 ❯ :sessions all
 
 no saved sessions for this directory
 
 
 listing is scoped to this directory — run from ~/data/3code/sessions for all
-
+      
 ❯ :log
 
 no tool calls yet
-
+       
 ❯ :show
 
 no tool calls yet
-
+          
 ❯ :compact
 
 unknown command: :compact  (try :help)
-
+            
 ❯ :summarize
 
 failed or not worth it
 ❯
-===== 227 =====
+===== 534 =====
 ❯ :provider alt
 
 provider  alt
 model     alt-model
-
+         
 ❯ :tokens
 
 no tokens used yet
-
+        
 ❯ :clear
 
 ════════════════════════════════════════
-
+           
 ❯ :sessions
 
 no saved sessions for this directory
-
+               
 ❯ :sessions all
 
 no saved sessions for this directory
 
 
 listing is scoped to this directory — run from ~/data/3code/sessions for all
-
+      
 ❯ :log
 
 no tool calls yet
-
+       
 ❯ :show
 
 no tool calls yet
-
+          
 ❯ :compact
 
 unknown command: :compact  (try :help)
-
+            
 ❯ :summarize
 
 failed or not worth it
 ❯ :prompt
-===== 776 =====
+===== 132 =====
 # Risk
 
 Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), har
@@ -1281,7 +1281,7 @@ Available:
 Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one on what's n
 ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 ❯
-===== 447 =====
+===== 558 =====
 # Risk
 
 Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), har
@@ -1322,7 +1322,7 @@ Available:
 Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one on what's n
 ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 ❯ :toknes
-===== 747 =====
+===== 918 =====
 ing PRs, sending email). When in doubt, ask.
 
 # Git
@@ -1358,12 +1358,12 @@ Available:
 
 Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one on what's n
 ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
-
+         
 ❯ :toknes
 
 unknown command: :toknes  did you mean :tokens?
 ❯
-===== 501 =====
+===== 489 =====
 ing PRs, sending email). When in doubt, ask.
 
 # Git
@@ -1399,7 +1399,7 @@ Available:
 
 Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one on what's n
 ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
-
+         
 ❯ :toknes
 
 unknown command: :toknes  did you mean :tokens?
