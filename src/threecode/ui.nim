@@ -22,6 +22,19 @@ const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
 type WizardReadLineHook* = proc(prompt: string, hidden,
                                 noHistory: bool): string {.closure.}
 
+type WizardVerifyCancelHook* = proc(jobDone: proc(): bool {.closure.};
+                                    cancelJob: proc() {.closure.}): bool {.closure.}
+  ## Watches for Ctrl-C / ESC while the provider-verification pool runs
+  ## and calls `cancelJob` when one lands. Returns true when cancelled.
+  ## The fat prompt installs `installWizardVerifyCancel`; tests install
+  ## their own or leave nil (no cancellation).
+
+type VerifyResult* = object
+  ## Outcome of the wizard's per-model verification pool.
+  kept*: seq[string]           ## models that verified (input order)
+  failed*: seq[(string, string)] ## (model, error) pairs to warn about
+  cancelled*: bool
+
 type
   CommandKind* = enum
     ckUnknown, ckSafeImmediate, ckMutating, ckModal, ckQuit
@@ -37,6 +50,7 @@ type
     disposition*: CommandDisposition
 
 var wizardReadLineHook*: WizardReadLineHook
+var wizardVerifyCancelHook*: WizardVerifyCancelHook
 
 proc handleCommandResult*(cmd: string, messages: var JsonNode,
                           session: var Session, prof: var Profile,
@@ -185,20 +199,78 @@ proc readOptional*(editor: var minline.LineEditor, prompt: string,
 
 # ---------- Provider wizard ----------
 
-proc verifyAndReport(name, url, key: string; models: seq[string]): bool =
-  ## Verify the first model of the candidate provider and paint the
-  ## `verifying... ok/failed` status. Returns true when the provider
-  ## verified.
-  let prof = Profile(name: name & "." & models[0], url: url,
-                     key: key, model: models[0])
+proc verifyModels(name, url, key: string; models: seq[string]): VerifyResult =
+  ## Verify every candidate model in parallel — one thread per model —
+  ## and paint the `verifying... ok/warnings/cancelled` status. Keeps
+  ## the models that pass, warns about the ones that fail. A failed
+  ## model is a warning, not a blocker: only an empty kept list (all
+  ## failed, or the user cancelled before any result) fails the
+  ## provider. Ctrl-C / ESC cancels via `wizardVerifyCancelHook`.
   hint "  verifying... ", resetStyle
   stdout.flushFile
-  let (ok, err) = verifyProfile(prof)
-  if ok:
+  let n = models.len
+  var oks: seq[bool] = newSeq[bool](n)
+  var errs: seq[string] = newSeq[string](n)
+  if wizardVerifyCancelHook == nil:
+    # No cancel watcher (unit tests, non-tty): run inline.
+    for i, m in models:
+      let prof = Profile(name: name & "." & m, url: url, key: key, model: m)
+      let (ok, err) = verifyProfile(prof)
+      oks[i] = ok
+      errs[i] = err
+  else:
+    # Worker threads can't capture locals; pass pointers to the shared
+    # result arrays plus the per-model payload through the arg. The main
+    # thread joins every worker before reading the arrays, so no lock is
+    # needed beyond the `remaining` countdown the cancel watcher polls.
+    type VerifyWorkerArg = object
+      i: int
+      m, name, url, key: string
+      oks: ptr seq[bool]
+      errs: ptr seq[string]
+      remaining: ptr Atomic[int]
+    var cancelled: Atomic[bool]
+    var remaining: Atomic[int]
+    remaining.store(n, moRelease)
+    # NOTE: the Thread[T] var must sit at a stable address when
+    # createThread is called — a `var th` whose value is then `add`ed to
+    # a growable seq crashes the worker at startup (threadimpl reads the
+    # handle by pointer). Pre-sized slots work.
+    var waiters = newSeq[Thread[VerifyWorkerArg]](n)
+    for i, m in models:
+      createThread(waiters[i], proc(arg: VerifyWorkerArg) {.thread, nimcall.} =
+        {.cast(gcsafe).}:
+          let prof = Profile(name: arg.name & "." & arg.m, url: arg.url,
+                             key: arg.key, model: arg.m)
+          let (ok, err) = verifyProfile(prof)
+          arg.oks[][arg.i] = ok
+          arg.errs[][arg.i] = err
+          discard arg.remaining[].fetchSub(1, moAcquireRelease)
+      , VerifyWorkerArg(i: i, m: m, name: name, url: url, key: key,
+                        oks: addr oks, errs: addr errs,
+                        remaining: addr remaining))
+    let jobDone = proc(): bool {.closure.} =
+      remaining.load(moAcquire) == 0
+    let cancelJob = proc() {.closure.} =
+      cancelled.store(true, moRelease)
+    let wasCancelled = wizardVerifyCancelHook(jobDone, cancelJob)
+    for th in waiters.mitems: joinThread(th)
+    if wasCancelled or cancelled.load(moAcquire):
+      errLn "cancelled"
+      return VerifyResult(cancelled: true)
+  var kept: seq[string]
+  var failed: seq[(string, string)]
+  for i, m in models:
+    if oks[i]: kept.add m
+    else: failed.add (m, errs[i])
+  if kept.len == n:
     stdout.styledWriteLine fgGreen, styleBright, "ok", resetStyle
-    return true
-  errLn "failed: " & err
-  false
+  else:
+    stdout.styledWriteLine fgYellow, styleBright,
+      $kept.len & "/" & $n & " ok", resetStyle
+    for (m, err) in failed:
+      errLn "  warning: " & shortModel(m) & " failed: " & err
+  VerifyResult(kept: kept, failed: failed)
 
 proc printSupported() =
   var seen: seq[string]
@@ -314,9 +386,13 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
       elif unknown.len > 0:
         errLn "unknown known-good model: " & unknown.join(", ")
         prev = models.mapIt(shortModel(it)).join(" ")
-      elif verifyAndReport(name, url, key, models):
-        return ProviderRec(name: name, url: url, key: key, models: models)
       else:
+        let res = verifyModels(name, url, key, models)
+        if res.cancelled:
+          raise newException(minline.InputCancelled, "cancelled by user")
+        if res.kept.len > 0:
+          return ProviderRec(name: name, url: url, key: key,
+                             models: res.kept)
         prev = models.mapIt(shortModel(it)).join(" ")
       let choice = readOptional(editor,
         "  [enter]=retry models, k=re-enter key, c=cancel : ").toLowerAscii
@@ -369,8 +445,11 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
     if models.len == 0:
       errLn "need at least one model"
       continue
-    if verifyAndReport(name, url, key, models):
-      return ProviderRec(name: name, url: url, key: key, models: models)
+    let res = verifyModels(name, url, key, models)
+    if res.cancelled:
+      raise newException(minline.InputCancelled, "cancelled by user")
+    if res.kept.len > 0:
+      return ProviderRec(name: name, url: url, key: key, models: res.kept)
     prev = models.mapIt(shortModel(it)).join(" ")
     let choice = readOptional(editor,
       "  [enter]=retry models, k=re-enter key, c=cancel : ").toLowerAscii
@@ -435,8 +514,11 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     if models.len == 0:
       errLn "need at least one model"
       continue
-    if verifyAndReport(name, url, key, models):
-      return ProviderRec(name: name, url: url, key: key, models: models)
+    let res = verifyModels(name, url, key, models)
+    if res.cancelled:
+      raise newException(minline.InputCancelled, "cancelled by user")
+    if res.kept.len > 0:
+      return ProviderRec(name: name, url: url, key: key, models: res.kept)
 
 proc bootstrapProvider*(editor: var minline.LineEditor): Profile =
   stdout.styledWriteLine fgMagenta,

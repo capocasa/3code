@@ -1923,6 +1923,11 @@ proc verifyProfile*(p: Profile): (bool, string) =
     return verifyProfileHook(p)
   when providerStub:
     if isStubUrl(p.url):
+      # Test hook: THREECODE_STUB_VERIFY_DELAY_MS stretches the probe so
+      # tty tests can drive the wizard's cancel path mid-verification.
+      let delayMs = try: parseInt(getEnv("THREECODE_STUB_VERIFY_DELAY_MS"))
+                    except ValueError: 0
+      if delayMs > 0: sleep(delayMs)
       return (true, "")
   let body = verifyBody(p)
   # Use the same bounded streaming path as `callModel` (streamhttp) instead

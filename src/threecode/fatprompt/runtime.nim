@@ -1466,6 +1466,42 @@ else:
   proc stopCancelWatcher() = discard
   proc restoreCancelTermios*() {.noconv.} = discard
 
+proc installWizardVerifyCancel*(jobDone: proc(): bool {.closure.};
+                                cancelJob: proc() {.closure.}): bool =
+  ## Watch stdin for Ctrl-C / ESC while a wizard runs a background job
+  ## (provider verification). Between a wizard's `wizardReadLine` calls
+  ## the input thread is parked on the wizard protocol, so without this
+  ## watcher a blocking network probe swallows cancel keys (and echoes
+  ## them into the next prompt). Mirrors `startCancelWatcher`: raw
+  ## stdin, poll for 0x03/0x1b, cancel via `cancelJob`, drain + restore
+  ## on the way out. Returns true when cancelled.
+  when defined(posix):
+    if isatty(0.cint) != 0:
+      var orig, raw: Termios
+      if tcGetAttr(0.cint, addr raw) == 0:
+        orig = raw
+        raw.c_lflag = raw.c_lflag and not Cflag(ICANON or ECHO or ISIG)
+        raw.c_cc[VMIN] = 0.char
+        raw.c_cc[VTIME] = 0.char
+        if tcSetAttr(0.cint, TCSANOW, addr raw) == 0:
+          defer:
+            drainCancelInput()
+            discard tcSetAttr(0.cint, TCSANOW, addr orig)
+          while not jobDone():
+            var pfd: TPollfd
+            pfd.fd = 0.cint
+            pfd.events = POLLIN
+            let r = poll(addr pfd, 1.Tnfds, 50.cint)
+            if r > 0 and (pfd.revents and POLLIN) != 0:
+              var buf: array[64, char]
+              let n = posix.read(0.cint, addr buf[0], buf.len)
+              if n > 0:
+                for i in 0 ..< n.int:
+                  let b = buf[i].uint8
+                  if b == 0x03 or b == 0x1b:
+                    cancelJob()
+                    return true
+          return false
 proc apiBeforeCall*(lastPromptTokens, window: int): string =
   let baseLabel = contextLabel(lastPromptTokens, window)
   result = baseLabel

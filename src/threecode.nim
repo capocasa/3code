@@ -408,6 +408,9 @@ proc main() =
   inputMessages = addr(messages)
   inputSession = addr(session)
   inputProfile = addr(prof)
+  # The wizard's verification pool cancels via stdin polling on the main
+  # thread while the input thread is parked between wizard prompts.
+  wizardVerifyCancelHook = installWizardVerifyCancel
   if prof.name == "":
     prof = bootstrapProvider(editor)
   session.profileName = prof.name
