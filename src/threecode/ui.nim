@@ -577,11 +577,12 @@ proc cmdModelList(prof: Profile): string =
   for m in orderedModels(prov):
     let short = shortModel(m)
     let kg = knownGoodFamily(prov.name, m)
+    let tail = if m == prof.model: &"  [{prov.name}]" else: ""
     if kg == "" and not experimentalEnabled:
-      result.add GreyFg & short & Reset & "\r\n"
+      result.add GreyFg & short & tail & Reset & "\r\n"
     else:
       let kgSuffix = if experimentalEnabled and kg != "": "*" else: ""
-      result.add hintLnS(short & kgSuffix)
+      result.add hintLnS(short & kgSuffix & tail)
 
 proc cmdModelSelect(target: string, prof: var Profile): string =
   let prov = currentProvider()
