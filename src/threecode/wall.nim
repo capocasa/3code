@@ -42,61 +42,58 @@ Usage:
       behavioral fence check. Exits 0 iff egress is blocked.
 """
 
-proc proxyMain(args: seq[string]): int =
-  var policy, projectDir, unixSock = ""
-  var port = 0'u16
-  var verbose = false
-  var i = 0
-  while i < args.len:
-    case args[i]
-    of "--policy":
+when defined(posix):
+  # sandwall's proxy/connect modules are POSIX-only (gated in sandwall's
+  # wall.nim), so these mains are too.
+  proc proxyMain(args: seq[string]): int =
+    var policy, projectDir, unixSock = ""
+    var port = 0'u16
+    var verbose = false
+    var i = 0
+    while i < args.len:
+      case args[i]
+      of "--policy":
+        inc i
+        if i >= args.len: stderr.writeLine("Error: --policy needs a file"); return 2
+        policy = args[i]
+      of "--project":
+        inc i
+        if i >= args.len: stderr.writeLine("Error: --project needs a dir"); return 2
+        projectDir = args[i]
+      of "--port":
+        inc i
+        if i >= args.len: stderr.writeLine("Error: --port needs a number"); return 2
+        try: port = uint16(parseInt(args[i]))
+        except ValueError: stderr.writeLine("Error: bad port"); return 2
+      of "--unix":
+        inc i
+        if i >= args.len: stderr.writeLine("Error: --unix needs a path"); return 2
+        unixSock = args[i]
+      of "-v":
+        verbose = true
+      else:
+        stderr.writeLine("Error: unknown proxy option " & args[i]); return 2
       inc i
-      if i >= args.len: stderr.writeLine("Error: --policy needs a file"); return 2
-      policy = args[i]
-    of "--project":
-      inc i
-      if i >= args.len: stderr.writeLine("Error: --project needs a dir"); return 2
-      projectDir = args[i]
-    of "--port":
-      inc i
-      if i >= args.len: stderr.writeLine("Error: --port needs a number"); return 2
-      try: port = uint16(parseInt(args[i]))
-      except ValueError: stderr.writeLine("Error: bad port"); return 2
-    of "--unix":
-      inc i
-      if i >= args.len: stderr.writeLine("Error: --unix needs a path"); return 2
-      unixSock = args[i]
-    of "-v":
-      verbose = true
-    else:
-      stderr.writeLine("Error: unknown proxy option " & args[i]); return 2
-    inc i
-  if policy.len == 0:
-    # Default to the repo cascade's repo file; the system file's host
-    # rules are only honored when the caller passes a merged policy.
-    policy = sb.policyPaths().repo
-  if projectDir.len == 0:
-    projectDir = getCurrentDir()
-  let p = when defined(posix):
-    startWallProxy(policy, projectDir, unixSockPath = unixSock,
-                   port = port, verbose = verbose)
-  else:
-    startWallProxy(policy, projectDir, port = port, verbose = verbose)
-  echo "port: ", p.port
-  # Park forever; SIGTERM/SIGINT default-kill, listeners die with us.
-  when defined(posix):
+    if policy.len == 0:
+      # Default to the repo cascade's repo file; the system file's host
+      # rules are only honored when the caller passes a merged policy.
+      policy = sb.policyPaths().repo
+    if projectDir.len == 0:
+      projectDir = getCurrentDir()
+    let p = startWallProxy(policy, projectDir, unixSockPath = unixSock,
+                           port = port, verbose = verbose)
+    echo "port: ", p.port
+    # Park forever; SIGTERM/SIGINT default-kill, listeners die with us.
     while true: discard posix.pause()
-  else:
-    while true: sleep(3600_000)
 
-proc connectMain(args: seq[string]): int =
-  if args.len != 2:
-    stderr.writeLine("Error: connect needs HOST PORT"); return 2
-  let port = try: uint16(parseInt(args[1]))
-             except ValueError: stderr.writeLine("Error: bad port"); return 2
-  let proxyPort = try: uint16(parseInt(getEnv("WALL_PROXY_PORT", "1080")))
-                  except ValueError: 1080'u16
-  socksConnect(proxyPort, args[0], port)
+  proc connectMain(args: seq[string]): int =
+    if args.len != 2:
+      stderr.writeLine("Error: connect needs HOST PORT"); return 2
+    let port = try: uint16(parseInt(args[1]))
+               except ValueError: stderr.writeLine("Error: bad port"); return 2
+    let proxyPort = try: uint16(parseInt(getEnv("WALL_PROXY_PORT", "1080")))
+                    except ValueError: 1080'u16
+    socksConnect(proxyPort, args[0], port)
 
 proc wallMain*(args: seq[string]): int =
   ## Entry for the `3code wall` subcommand. `args` is the full argv
@@ -106,9 +103,15 @@ proc wallMain*(args: seq[string]): int =
     return 0
   case args[0]
   of "proxy":
-    proxyMain(args[1 .. ^1])
+    when defined(posix):
+      proxyMain(args[1 .. ^1])
+    else:
+      stderr.writeLine("Error: wall proxy is POSIX-only"); return 2
   of "connect":
-    connectMain(args[1 .. ^1])
+    when defined(posix):
+      connectMain(args[1 .. ^1])
+    else:
+      stderr.writeLine("Error: wall connect is POSIX-only"); return 2
   of "setup-windows":
     when defined(windows):
       if "--status" in args:
