@@ -528,6 +528,13 @@ proc appendTranscriptLiveAnchored(e: var TerminalEngine; transcript: string;
     if footerBytes.len > 0:
       stdout.write footerBytes
       stdout.write "\r\n"
+    elif restoreEditor:
+      # No footer to preserve (ffNone): the gap row the editor normally
+      # sits below is the previous footer's volatile ticker row, and the
+      # erase just consumed it. Paint one blank row so the prompt keeps
+      # its one-row distance from the last committed item, matching the
+      # bar+prompt `endTurn` gap.
+      stdout.write "\r\n"
     if restoreEditor:
       edPtr[].renderRow = 0
       # Already inside SyncBegin: a nested 2026 frame would emit a
@@ -575,6 +582,11 @@ proc appendTranscriptFloating(e: var TerminalEngine; transcript: string;
       stdout.write footerBytes
       if editing and restoreEditor:
         stdout.write "\x1b[1B"
+    elif editing and restoreEditor:
+      # No footer to preserve (ffNone): keep the one blank gap row between
+      # the last committed item and the repainted prompt (see
+      # appendTranscriptLiveAnchored).
+      stdout.write "\r\n"
     if editing and restoreEditor:
       editor[].renderRow = 0
       stdout.write editor[].redrawBytes(synchronized = false)

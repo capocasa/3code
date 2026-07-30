@@ -728,6 +728,47 @@ suite "terminal visual contract":
       "expected exactly one blank gap row above prompt-only prompt, found " &
         $blankRowsBetween
 
+  test "repeated system commands keep the gap row above the idle prompt":
+    # Regression: with no token bar the idle footer owns the ticker gap row
+    # below the last committed scrollback item. The first `:provider` gets it
+    # right, but the second system command committed its transcript item with
+    # no footer to preserve: the volatile gap row was absorbed into
+    # scrollback, leaving the next prompt flush against the command body.
+    # Every command in a row of profile switches must leave exactly one
+    # blank row between its last body line and the new `❯`.
+    let root = newFixture("system_cmd_gap")
+    writeHarnessProviders(root)
+    writeStubResponses(root, %*[])
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    for i in 1 .. 3:
+      let cmd = if i mod 2 == 1: ":provider alt" else: ":provider stub"
+      tty.send cmd
+      tty.send "\n"
+      tty.expectInHistory "provider  "
+      tty.drain(200)
+      let rows = tty.rows()
+      var promptRow = -1
+      for ri, r in rows:
+        if r.strip(leading = true).startsWith("❯"):
+          promptRow = ri
+      doAssert promptRow > 0, "idle prompt not visible after command " & $i
+      var bodyRow = -1
+      for r in countdown(promptRow - 1, 0):
+        if rows[r].strip.len > 0:
+          bodyRow = r
+          break
+      doAssert bodyRow >= 0, "no command body above the prompt after command " & $i
+      let blanks = promptRow - bodyRow - 1
+      doAssert blanks == 1,
+        "after system command " & $i & " (" & cmd & ") expected exactly one " &
+        "blank gap row between command body and the idle prompt, found " &
+        $blanks & "\n" & tty.screenText()
+
   test "word-level content chunks stream eagerly, not buffered to newline":
     # Eager streaming: when content arrives in word-level chunks with no
     # intermediate newline, each chunk must paint the partial line on screen
