@@ -45,6 +45,35 @@ nimble install https://github.com/capocasa/3code
 
 Requires [Nim](https://nim-lang.org) >= 2.0 and `curl` on `PATH`.
 
+## Library
+
+3code is also a Nim library: the same agent the CLI runs, embeddable in your own program with the terminal replaced by return values and callbacks. Sandbox, tool calls, session persistence, all of it.
+
+```nim
+import threecode
+
+let s = initAgentSession(AgentOptions(model: "deepinfra.deepseek-v3.2"))
+
+# blocking: run a full turn (model calls + tool calls) and get the reply
+let reply = s.prompt("what does this project do?")
+
+# streaming: same call, events as they happen
+s.onEvent = proc(ev: AgentEvent) =
+  case ev.kind
+  of aevDelta: stdout.write ev.text        # assistant text chunks
+  of aevTool: stderr.writeLine ev.text     # tool results, notices
+  of aevDone: echo ev.usage                # per-call token usage
+  else: discard
+discard s.prompt("run the tests and fix what breaks")
+
+# colon commands work too
+echo s.command(":tokens")
+
+s.close()
+```
+
+`AgentOptions` mirrors the CLI flags: `model`, `cwd`, `resume`/`resumeId`, `sessionPath`, `experimental`, `debug`. `promptAsync` runs a turn on a library-managed thread if you'd rather not block your own. One live session per process; no async.
+
 ## Changelog
 
 **unreleased** - patient retry

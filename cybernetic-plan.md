@@ -139,34 +139,58 @@ discovers tests/api/*.nim automatically — verify).
 
 ## Current state
 
-Plan written. No code changed yet. Next: step 1 (engine output gate).
+Steps 1-6 done and committed. What exists now:
+
+- `src/threecode/library.nim`: AgentOptions/AgentSession/AgentEvent,
+  initAgentSession, close, prompt (blocking), promptAsync (threaded),
+  command, interrupt, profileLabel, usage, resolveSessionProfile.
+- engine.nim: `engineOutputEnabled` gates every global paint wrapper;
+  `headlessTranscriptHook` receives committed transcript bytes.
+- fatprompt/runtime.nim: `HeadlessStreamHooks` + `installApiHeadlessHooks`;
+  `beginTurn` and `ensureGuiStarted` skip threads when output disabled.
+- turns.nim `runTurns`: only re-installs terminal hooks when output enabled
+  (headless hooks survive across turns).
+- threecode.nim main(): profile resolution goes through the shared
+  `resolveSessionProfile` (incl. activeCurrent sync on known-good fallback).
+- tests/api/test_library.nim: matrix plain + `-d:providerStub`; covers
+  blocking prompt with a bash tool call, deltas/done/tool events, :tokens,
+  modal refusal, close+resume, unknown-model error. Both variants PASS.
+
+Key discoveries recorded for later steps:
+- The stub provider's response index is process-global; tests pad files.
+- With a nil onEvent, the final reply arrives via the transcript hook and
+  `prompt` returns it (contentFinished returns "not streamed" in that case).
+- The GUI spinner thread is a pure animation in headless mode and is gated
+  off; embedders get tool lines as aevTool events instead of a live viewport.
+
+Remaining: step 7 (README done; full suite + final diff review).
 
 ## Steps
 
-- [ ] 1. Engine output gate: add `engineOutputEnabled*` to engine.nim,
+- [x] 1. Engine output gate: add `engineOutputEnabled*` to engine.nim,
   guard every global wrapper + `defaultEngine` stdout paths (or guard
   inside the object procs' write sites). Build; run tests/core/test_sync_frames
   + test_display to confirm terminal path unchanged.
-- [ ] 2. Headless hooks in fatprompt/runtime.nim: `installApiHeadlessHooks`
+- [x] 2. Headless hooks in fatprompt/runtime.nim: `installApiHeadlessHooks`
   (deltas, usage, retry -> callback), headless transcript capture hook in
   `commitTranscriptBytes`, gate `ensureInputThreadStarted` + caret hide in
   `beginTurn` on `engineOutputEnabled`. Build + full quick test pass.
-- [ ] 3. library.nim: types (AgentOptions, AgentSession, AgentEvent),
+- [x] 3. library.nim: types (AgentOptions, AgentSession, AgentEvent),
   `initAgentSession` (config load, profile resolve, sandbox init, locks,
   session create/resume — reusing config/session/sandbox procs, mirroring
   main() lines ~330-400 without terminal calls), `close`.
-- [ ] 4. library.nim: `prompt` (blocking; appends user msg, refreshes
+- [x] 4. library.nim: `prompt` (blocking; appends user msg, refreshes
   system prompt, runTurns, returns last assistant text) + `command`
   (classify via `classifyCommand`; reject ckModal/ckQuit with message;
   run `handleCommandResult` with dummy editor; return plainBody) +
   `interrupt`.
-- [ ] 5. tests/api/test_library.nim: stub-provider test covering init,
+- [x] 5. tests/api/test_library.nim: stub-provider test covering init,
   blocking prompt with a tool call, callback events, command, resume,
   close. Green locally.
-- [ ] 6. CLI dedup: extract shared setup (sandbox init, config+profile
+- [x] 6. CLI dedup: extract shared setup (sandbox init, config+profile
   resolution incl. known-good fallback) from threecode.nim main into
   library.nim; main calls it. Behavior identical; build + run cli_args
   tests.
-- [ ] 7. Docs: README section on library use with a minimal Nim example
+- [x] 7. Docs: README section on library use with a minimal Nim example
   (web-server-shaped). `nimble test` full suite green. Final review of
   complete diff.
