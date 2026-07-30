@@ -163,7 +163,10 @@ Key discoveries recorded for later steps:
 - The GUI spinner thread is a pure animation in headless mode and is gated
   off; embedders get tool lines as aevTool events instead of a live viewport.
 
-Remaining: step 7 (README done; full suite + final diff review).
+Step 7 done: README library section committed; full `nimble test`
+suite run clean (62 PASS, 0 failures, exit 0) covering tty, stream, api,
+config, shell, core. Final diff reviewed: 6 focused commits, +766/-120.
+All steps [x]; the library API is complete and the CLI is unbroken.
 
 ## Steps
 
