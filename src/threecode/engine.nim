@@ -497,106 +497,87 @@ proc writeTranscriptItem(e: var TerminalEngine; transcript: string) =
   stdout.write "\r\n"
   e.hasScrollback = true
 
-proc appendTranscriptLiveAnchored(e: var TerminalEngine; transcript: string;
-                                  edPtr: ptr minline.LineEditor;
-                                  footerBytes: string;
-                                  footerRowsAboveEditor: int;
-                                  compactRowsAboveFooter: int;
-                                  restoreEditor: bool;
-                                  reserveFooter: bool) =
-  refreshEditorWidth(edPtr[])
-  # Probe BEFORE SyncBegin: the DSR reply must not be swallowed by a
-  # terminal that buffers synchronized-output frames. The input thread is
-  # parked across this commit (restoreEditor=false on submit), so stdin is
-  # the controller's to query.
-  terminaldbg.probeDetail("commit.liveAnchored",
-    max(0, e.walkUp(edPtr[]) + max(0, compactRowsAboveFooter)),
-    editorRowsAboveCursor(edPtr[]), e.paintedFooterRows,
-    e.toolViewportRows.len + e.viewportGapRows,
-    e.liveContentRows.len + e.liveContentGapRows)
-  stdout.write termio.SyncBegin
-  stdout.write "\x1b[?25l\r"
-  let up = max(0, e.walkUp(edPtr[]) + max(0, compactRowsAboveFooter))
-  if up > 0:
-    stdout.write "\x1b[" & $up & "A"
-  stdout.write "\x1b[J"
-  e.toolViewportRows = @[]
-  e.writeTranscriptItem(transcript)
+proc repaintVolatileAfterCommit(e: var TerminalEngine;
+                                edPtr: ptr minline.LineEditor;
+                                footerBytes: string;
+                                footerRowsAboveEditor: int;
+                                restoreEditor: bool;
+                                reserveFooter: bool) =
+  ## Second half of a transcript commit: the erase consumed the volatile
+  ## region, the item is committed scrollback; now rebuild the live chrome
+  ## below it. `edPtr` is nil (or restoreEditor false) when no editor is
+  ## being restored (submit path, wizard).
   if not reserveFooter:
     e.noteNoFooter()
-  else:
-    if footerBytes.len > 0:
-      stdout.write footerBytes
-      stdout.write "\r\n"
-    elif restoreEditor:
-      # No footer to preserve (ffNone): the gap row the editor normally
-      # sits below is the previous footer's volatile ticker row, and the
-      # erase just consumed it. Paint one blank row so the prompt keeps
-      # its one-row distance from the last committed item, matching the
-      # bar+prompt `endTurn` gap.
-      stdout.write "\r\n"
-    if restoreEditor:
-      edPtr[].renderRow = 0
-      # Already inside SyncBegin: a nested 2026 frame would emit a
-      # doubled ?2026l, which 2026-honoring terminals (foot, ghostty)
-      # can batch/drop differently than the row model expects.
-      stdout.write edPtr[].redrawBytes(synchronized = false)
-      if not edPtr[].pendingCaret:
-        stdout.write "\x1b[?25h"
-      e.noteFooterPainted(footerRowsAboveEditor)
-    elif footerBytes.len > 0:
-      e.noteFooterPainted(max(1, footerRowsAboveEditor))
-    else:
-      e.noteNoFooter()
-  stdout.write termio.SyncEnd
-  stdout.flushFile
-
-proc appendTranscriptFloating(e: var TerminalEngine; transcript: string;
-                              inputRunning: bool;
-                              editor: ptr minline.LineEditor;
-                              footerBytes: string;
-                              footerRowsAboveEditor: int;
-                              compactRowsAboveFooter: int;
-                              restoreEditor: bool;
-                              reserveFooter: bool) =
-  let editing = inputRunning and editor != nil
+    return
+  let editing = edPtr != nil and restoreEditor
+  if footerBytes.len > 0:
+    stdout.write footerBytes
+    # One trailing advance past the footer's last row: the editor paints
+    # on the row below it.
+    stdout.write "\r\n"
+  elif editing:
+    # No footer to preserve (ffNone): the gap row the editor normally
+    # sits below is the previous footer's volatile ticker row, and the
+    # erase just consumed it. Paint one blank row so the prompt keeps
+    # its one-row distance from the last committed item, matching the
+    # bar+prompt `endTurn` gap.
+    stdout.write "\r\n"
   if editing:
-    terminaldbg.probeErase("commit.floating", max(0, e.walkUp(editor[])))
+    edPtr[].renderRow = 0
+    # Already inside SyncBegin at every call site: a nested 2026 frame
+    # would emit a doubled ?2026l, which 2026-honoring terminals (foot,
+    # ghostty) can batch/drop differently than the row model expects.
+    stdout.write edPtr[].redrawBytes(synchronized = false)
+    if not edPtr[].pendingCaret:
+      stdout.write "\x1b[?25h"
+    e.noteFooterPainted(footerRowsAboveEditor)
+  elif footerBytes.len > 0:
+    e.noteFooterPainted(max(1, footerRowsAboveEditor))
+  else:
+    e.noteNoFooter()
+
+proc commitTranscriptItem(e: var TerminalEngine; transcript: string;
+                          inputRunning: bool;
+                          edPtr: ptr minline.LineEditor;
+                          footerBytes: string;
+                          footerRowsAboveEditor: int;
+                          compactRowsAboveFooter: int;
+                          restoreEditor: bool;
+                          reserveFooter: bool) =
+  ## The single commit-repaint path for both anchored and floating state:
+  ## walk from the cursor to the top of the volatile region, erase it,
+  ## commit the item as scrollback, rebuild the chrome. One proc owns the
+  ## geometry rules (full-region walk-up, no-footer gap row) so a rule
+  ## change cannot land in only one of two near-identical copies.
+  let editing = inputRunning and edPtr != nil
+  if editing:
+    # Probe BEFORE SyncBegin: the DSR reply must not be swallowed by a
+    # terminal that buffers synchronized-output frames. The input thread
+    # is parked across this commit (restoreEditor=false on submit), so
+    # stdin is the controller's to query.
+    terminaldbg.probeDetail("commit",
+      max(0, e.walkUp(edPtr[]) + max(0, compactRowsAboveFooter)),
+      editorRowsAboveCursor(edPtr[]), e.paintedFooterRows,
+      e.toolViewportRows.len + e.viewportGapRows,
+      e.liveContentRows.len + e.liveContentGapRows)
   stdout.write termio.SyncBegin
   if editing:
-    let up = max(0, e.walkUp(editor[]))
-    stdout.write "\r"
-    if up > 0:
-      stdout.write "\x1b[" & $up & "A"
-  if e.toolViewportRows.len > 0:
-    stdout.write "\x1b[" & $e.toolViewportRows.len & "A"
-  if compactRowsAboveFooter > 0:
-    stdout.write "\x1b[" & $compactRowsAboveFooter & "A"
+    stdout.write "\x1b[?25l\r"
+  let up =
+    if editing:
+      max(0, e.walkUp(edPtr[]) + max(0, compactRowsAboveFooter))
+    else:
+      max(0, e.toolViewportRows.len + max(0, compactRowsAboveFooter))
+  if up > 0:
+    stdout.write "\x1b[" & $up & "A"
   stdout.write "\r\x1b[J"
   e.toolViewportRows = @[]
   e.writeTranscriptItem(transcript)
-  if not reserveFooter:
-    e.noteNoFooter()
-  else:
-    if footerBytes.len > 0:
-      stdout.write footerBytes
-      if editing and restoreEditor:
-        stdout.write "\x1b[1B"
-    elif editing and restoreEditor:
-      # No footer to preserve (ffNone): keep the one blank gap row between
-      # the last committed item and the repainted prompt (see
-      # appendTranscriptLiveAnchored).
-      stdout.write "\r\n"
-    if editing and restoreEditor:
-      editor[].renderRow = 0
-      stdout.write editor[].redrawBytes(synchronized = false)
-      if not editor[].pendingCaret:
-        stdout.write "\x1b[?25h"
-      e.noteFooterPainted(footerRowsAboveEditor)
-    elif footerBytes.len > 0:
-      e.noteFooterPainted(max(1, footerRowsAboveEditor))
-    else:
-      e.noteNoFooter()
+  let restoreTo = if editing: edPtr else: nil
+  e.repaintVolatileAfterCommit(restoreTo, footerBytes,
+                               footerRowsAboveEditor,
+                               restoreEditor, reserveFooter)
   stdout.write termio.SyncEnd
   stdout.flushFile
 
@@ -620,17 +601,11 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
     let footerBytes = newFooter.footerFrameBytes(termW)
     let footerRowsAboveEditor = newFooter.rowsAboveEditor(termW)
     let transcript = trimTrailingNewlines(transcriptBytes)
-    if liveAnchored:
-      if editor == nil: return
-      e.appendTranscriptLiveAnchored(transcript, editor, footerBytes,
-                                     footerRowsAboveEditor,
-                                     compactRowsAboveFooter,
-                                     restoreEditor, reserveFooter)
-    else:
-      e.appendTranscriptFloating(transcript, inputRunning, editor,
-                                 footerBytes, footerRowsAboveEditor,
-                                 compactRowsAboveFooter,
-                                 restoreEditor, reserveFooter)
+    if liveAnchored and editor == nil: return
+    e.commitTranscriptItem(transcript, inputRunning, editor,
+                           footerBytes, footerRowsAboveEditor,
+                           compactRowsAboveFooter,
+                           restoreEditor, reserveFooter)
 
 proc prepareAssistantContentStart*(e: var TerminalEngine;
                                    inputRunning: bool;
