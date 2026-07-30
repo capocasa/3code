@@ -378,15 +378,7 @@ proc main() =
     if model != "": model
     elif resume and session.profileName != "": session.profileName
     else: ""
-  var prof = buildProfile(activeCurrent, activeProviders, wantedProfile)
-  if wantedProfile == "" and not experimentalEnabled and prof.name != "" and
-     not isKnownGood(prof):
-    let fallback = firstKnownGoodCombo(activeProviders)
-    if fallback != "":
-      let alt = buildProfile(fallback, activeProviders, "")
-      if alt.name != "":
-        activeCurrent = alt.name
-        prof = alt
+  var prof = resolveSessionProfile(wantedProfile, session.profileName)
   var editor = welcome(prof)
   # Terminal, session lock, and thread cleanup all funnel through a single
   # exit proc so every exit path restores the same state. SIGTERM/SIGHUP get

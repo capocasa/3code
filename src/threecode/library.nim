@@ -116,6 +116,25 @@ proc emit(s: AgentSession; ev: AgentEvent) =
 
 # ---------- init / close ----------
 
+proc resolveSessionProfile*(wanted, resumeProfile: string): Profile =
+  ## Resolve the effective profile the same way the CLI does: explicit
+  ## model > resumed session's profile > config current, with the
+  ## known-good fallback when the resolved combo isn't curated and
+  ## `--experimental` wasn't given. A fallback also updates `activeCurrent`
+  ## so later lookups (`:provider`, status lines) agree with the session.
+  ## Empty Profile when nothing resolves (first run, unknown model);
+  ## callers decide how to surface that (CLI: provider wizard; library:
+  ## AgentError).
+  result = buildProfile(activeCurrent, activeProviders, wanted)
+  if wanted.len == 0 and not experimentalEnabled and result.name.len > 0 and
+     not isKnownGood(result):
+    let fallback = firstKnownGoodCombo(activeProviders)
+    if fallback.len > 0:
+      let alt = buildProfile(fallback, activeProviders, "")
+      if alt.name.len > 0:
+        activeCurrent = alt.name
+        result = alt
+
 proc initAgentSession*(opts: AgentOptions): AgentSession =
   ## Create or resume a session and install the headless plumbing.
   ## Raises `AgentError` when no usable provider is configured, the model
@@ -127,12 +146,11 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
 
   materializeBuiltinSkills()
 
-  # Sandbox: same cascaded policy as the CLI. Paths resolve against the
-  # session cwd so the policy follows the project. `sandboxEnabled` reads
-  # the `[settings] sandbox = off` switch during config load below; the
-  # load runs before config parse, so mirror main()'s order: sandbox after
-  # config.
-  let (current, providers, _) = loadStateOrEmpty(configPath())
+  # Config first (it reads `[settings] sandbox = off`), then the
+  # sandbox: same cascaded policy and order as the CLI. Paths resolve
+  # against the session cwd so the policy follows the project.
+  var colorKeys: Table[string, string]
+  (activeCurrent, activeProviders, colorKeys) = loadStateOrEmpty(configPath())
   if sandboxEnabled:
     sandbox.current = sandbox.loadCascaded(cwd)
     sandbox.active = true
@@ -161,14 +179,7 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
     elif (opts.resume or opts.resumeId.len > 0) and
          s.state.profileName.len > 0: s.state.profileName
     else: ""
-  var prof = buildProfile(current, providers, wanted)
-  if wanted.len == 0 and not opts.experimental and prof.name.len > 0 and
-     not isKnownGood(prof):
-    let fallback = firstKnownGoodCombo(providers)
-    if fallback.len > 0:
-      let alt = buildProfile(fallback, providers, "")
-      if alt.name.len > 0:
-        prof = alt
+  let prof = resolveSessionProfile(wanted, s.state.profileName)
   if prof.name.len == 0:
     raise newException(AgentError,
       "no provider configured. Create one with the 3code CLI (:provider add) " &
