@@ -222,7 +222,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
   ## Callers use this to skip end-of-turn side effects like desktop
   ## notifications: the user was at the keyboard to cancel, so alerting
   ## them that the turn finished would be noise.
-  installApiStreamHooks()
+  ## Headless (library) sessions installed their own hooks at session init;
+  ## reinstalling the terminal set would clobber them (and paint on a tty
+  ## that isn't there), so only the terminal path re-installs here.
+  if termengine.engineOutputEnabled:
+    installApiStreamHooks()
   clearInterrupted()
   # `beginTurn` hides the terminal cursor for the duration of the
   # turn (streaming + tool exec); the `❯ ` glyph remains on screen as
