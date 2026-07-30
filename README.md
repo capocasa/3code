@@ -47,7 +47,7 @@ Requires [Nim](https://nim-lang.org) >= 2.0 and `curl` on `PATH`.
 
 ## Library
 
-3code is also a Nim library: the same agent the CLI runs, embeddable in your own program with the terminal replaced by return values and callbacks. Sandbox, tool calls, session persistence, all of it.
+3code is also a Nim library: the same agent the CLI runs, embeddable in your own program with the terminal replaced by return values and callbacks. Sandbox, tool calls, session persistence, all of it. This is the foundation for building other coding agents or agents of any kind on top of 3code: a web frontend, a chat bot, a CI runner that fixes its own failures, an IDE plugin. The agent loop, tool use, and sandboxing are done; you bring the interface.
 
 ```nim
 import threecode
@@ -73,6 +73,8 @@ s.close()
 ```
 
 `AgentOptions` mirrors the CLI flags: `model`, `cwd`, `resume`/`resumeId`, `sessionPath`, `experimental`, `debug`. `promptAsync` runs a turn on a library-managed thread if you'd rather not block your own. One live session per process; no async.
+
+A working example lives in [`example/webserve.nim`](example/webserve.nim): a web frontend that serves a chat page, runs turns on a session thread, and streams replies to the browser over SSE. `nim c -r example/webserve.nim` and open http://localhost:8501.
 
 ## Changelog
 

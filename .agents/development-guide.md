@@ -90,6 +90,91 @@ or tool rendering must be captured as visual frames. Prefer tests that send
 real keystrokes and verify the frame stream over tests that infer behavior from
 internal state.
 
+## Building a frontend on the library API
+
+The library API (`src/threecode/library.nim`) lets another program drive the
+same agent the CLI runs. `example/webserve.nim` is the reference frontend: a
+web server with a chat page, streaming over SSE. This section records how it
+is put together so a new frontend (web, GUI, bot) can follow the same shape.
+
+### The three constraints
+
+1. **One AgentSession per process.** Stream hooks, the interrupt flag, and
+   the config/sandbox globals are process-wide. `initAgentSession` installs
+   headless plumbing; `close` restores it. Sequential sessions are fine,
+   concurrent ones are not.
+2. **The API is blocking + callback, never async.** `prompt` blocks for a
+   full turn; `onEvent` fires `AgentEvent`s from the turn thread. A
+   frontend that is itself async (a web server) must not call `prompt` on
+   its dispatcher thread, or a long turn stalls every request.
+3. **Don't share sockets/threads across the turn thread and your
+   frontend's thread.** The turn thread has no async dispatcher and its
+   ORC teardown is not synchronized with your event loop. Crossing them
+   (calling async socket sends from `onEvent`, polling a dispatcher while
+   a turn runs) crashes intermittently, always with a useless backtrace.
+
+### The shape that works
+
+Keep the `AgentSession` on its own worker thread for its entire life. The
+frontend thread and the session thread communicate through lock-protected
+queues, the same lock+seq idiom the codebase uses for its own worker
+threads (`netthread.nim`; `Channel[T]` is avoided by convention here).
+
+- **Frontend -> session:** a `seq[string]` prompt queue under a `Lock`.
+  The session thread pops a prompt, runs `session.prompt(prompt)`, loops.
+- **Session -> frontend:** `onEvent` serializes each `AgentEvent` to a
+  JSON string and appends to a `seq[string]` event queue under a second
+  `Lock`. The frontend drains it on its own thread.
+- **Colon commands** (`:tokens`, `:model`) read session state, so they
+  also run on the session thread. A web request that needs the body
+  synchronously uses a `Cond` to wait for the one outstanding command's
+  result.
+
+This is exactly `example/webserve.nim`:
+
+```
+browser <-SSE- [dispatcher thread: asynchttpserver + flushEvents]
+                     |  promptQueue ->  |  <- eventQueue
+                 [session thread: AgentSession + runTurns + tools]
+```
+
+`flushEvents` is an async loop on the dispatcher that drains `eventQueue`
+and fan-outs to every connected SSE socket with fire-and-forget sends.
+Only the `/events` handler that owns a socket ever removes it from the
+broadcast list, so sends never race a removal.
+
+### Testing a frontend
+
+A frontend must be driven end-to-end by a test, like every other feature.
+`tests/core/test_example_webserve.nim` is the pattern: build the example
+with `-d:providerStub`, start it with XDG roots and a stub-responses file
+redirected into a fixture (same XDG/`THREECODE_STUB_RESPONSES` env as the
+tty tests), then drive the HTTP endpoints and assert on the streamed
+events. Two stub-specific gotchas:
+
+- The stub provider is not a known-good combo, so the example needs
+  `-x`/`--experimental` (passed through to `AgentOptions.experimental`).
+- The stub's response index is process-global. If a test process runs
+  several turns, pad `stub_responses.json` with an entry per turn.
+
+Reading SSE from a test: `std/httpclient` waits for a complete body and
+will time out on an event stream, so read the socket directly
+(`std/net`), parse the headers, then accumulate `data:` frames.
+
+### Gotchas that cost real time
+
+- A raw-socket server sharing threads with the library crashed with
+  "Socket operation on non-socket" and nil SIGSEGVs: the accept loop's
+  `var client` was being reset by ORC at iteration end while a connection
+  thread still used the ref. `std/asynchttpserver` sidesteps the whole
+  class; use it unless you enjoy debugging ORC teardown.
+- Anything awaited inside a broadcast loop yields the dispatcher, letting
+  a disconnect handler close a socket mid-batch. Send fire-and-forget
+  (`asyncCheck`) and let the owning handler prune dead sockets.
+- Register an SSE client before sending its headers; the header send
+  awaits, and a turn landing in that window would otherwise broadcast to
+  zero clients.
+
 ## Development rules
 
 1. Be religious about the dry rule- never add seperate codepaths for same or similar features, make sure there is a lot of resuse.
