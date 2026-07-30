@@ -375,35 +375,16 @@ proc spinnerFooterFrame*(spinner, label, ticker: string; elapsed: int): FooterFr
 proc footerFrame*(s: FatPromptState): FooterFrame =
   tokenBarFrame(s.footer.barLabel, s.footer.ticker)
 
-proc rowsAboveEditor*(frame: FooterFrame; termW = 0): int =
-  ## Rows from the top of the fat prompt to the editor. The first row is
-  ## always a gap (blank unless a thinking ticker fills it): this makes the
-  ## footer height invariant to the ticker appearing or clearing, so the
-  ## engine's walk-up to the footer top never lands on committed scrollback.
-  case frame.kind
-  of ffNone:
-    result = 0
-  of ffClear:
-    result = max(1, frame.clearRows)
-  of ffTokenBar:
-    result = 1 + barWrapRows(2 + labelCells(frame.label), termW)
-  of ffSpinner:
-    let elapsedTextLen = if frame.elapsed >= 0: ($frame.elapsed).len else: 1
-    result = 1 + barWrapRows(labelCells(frame.label) + 4 + elapsedTextLen, termW)
-
-proc spinnerFooterBytes*(frame, label, ticker: string, elapsed: int,
-                         termW = 0): string =
-  let barCells = labelCells(label) + 4 + ($elapsed).len
-  let barRows = barWrapRows(barCells, termW)
-  result = "\x1b[?25l\r\x1b[2K"
-  if ticker.len > 0:
-    result.add GreyFg
-    result.add ticker
-    result.add Reset
-  result.add "\r\n\x1b[2K"
-  result.add spinnerBarBytes(frame, label, elapsed)
-  result.add "\r\n\x1b[2K" & EditorPromptBytes
-  result.add "\r\x1b[" & $barRows & "A"
+type
+  FooterLayout* = object
+    ## A frame's geometry and paint bytes derived in one pass, so the
+    ## volatile-row count the engine's walk-up trusts and the bytes that
+    ## occupy those rows can never drift. `rowsAboveEditor` counts the
+    ## rows from the footer's top to the editor; `bytes` paints exactly
+    ## that many rows and (for bar/spinner) leaves the cursor on the
+    ## bar's first row.
+    rowsAboveEditor*: int
+    bytes*: string
 
 proc liveEditorSpinnerBarBytes*(frame, label: string, elapsed: int): string =
   "\r\x1b[2K" & spinnerBarBytes(frame, label, elapsed)
@@ -462,6 +443,48 @@ func clampToWidth*(s: string; width: int): string =
     inc vis, cw
     inc i, rl
 
+
+proc footerLayout*(frame: FooterFrame; termW = 0): FooterLayout =
+  ## The first row is always a gap (blank unless a thinking ticker fills
+  ## it): this makes the footer height invariant to the ticker appearing
+  ## or clearing, so the engine's walk-up to the footer top never lands
+  ## on committed scrollback.
+  case frame.kind
+  of ffNone:
+    discard
+  of ffClear:
+    result.rowsAboveEditor = max(1, frame.clearRows)
+    result.bytes = "\r\x1b[2K"
+    for _ in 1 ..< result.rowsAboveEditor:
+      result.bytes.add "\r\n\x1b[2K"
+  of ffTokenBar:
+    result.rowsAboveEditor = 1 + barWrapRows(2 + labelCells(frame.label), termW)
+    result.bytes = "\r\x1b[2K"
+    if frame.ticker.len > 0:
+      let shown = if termW > 0: clampToWidth(frame.ticker, termW) else: frame.ticker
+      result.bytes.add GreyFg & shown & Reset
+    result.bytes.add "\r\n" & paintBarBytes(frame.label)
+  of ffSpinner:
+    let elapsedTextLen = if frame.elapsed >= 0: ($frame.elapsed).len else: 1
+    let barRows = barWrapRows(labelCells(frame.label) + 4 + elapsedTextLen, termW)
+    result.rowsAboveEditor = 1 + barRows
+    result.bytes = "\x1b[?25l\r\x1b[2K"
+    if frame.ticker.len > 0:
+      result.bytes.add GreyFg
+      result.bytes.add frame.ticker
+      result.bytes.add Reset
+    result.bytes.add "\r\n\x1b[2K"
+    result.bytes.add spinnerBarBytes(frame.spinner, frame.label, frame.elapsed)
+    result.bytes.add "\r\n\x1b[2K" & EditorPromptBytes
+    result.bytes.add "\r\x1b[" & $barRows & "A"
+
+proc rowsAboveEditor*(frame: FooterFrame; termW = 0): int =
+  frame.footerLayout(termW).rowsAboveEditor
+
+proc spinnerFooterBytes*(frame, label, ticker: string; elapsed: int,
+                         termW = 0): string =
+  spinnerFooterFrame(frame, label, ticker, elapsed).footerLayout(termW).bytes
+
 proc liveEditorSpinnerFooterBytes*(frame, label, ticker: string;
                                    elapsed: int; termW = 0): string =
   result.add "\r\x1b[2K"
@@ -479,21 +502,15 @@ proc clearSpinnerFooterBytes*(hadTicker: bool): string =
 
 proc footerFrameBytes*(frame: FooterFrame; termW = 0): string =
   case frame.kind
-  of ffNone:
-    result = ""
-  of ffClear:
-    result = "\r\x1b[2K"
-    for _ in 1 ..< max(1, frame.clearRows):
-      result.add "\r\n\x1b[2K"
-  of ffTokenBar:
-    result = "\r\x1b[2K"
-    if frame.ticker.len > 0:
-      let shown = if termW > 0: clampToWidth(frame.ticker, termW) else: frame.ticker
-      result.add GreyFg & shown & Reset
-    result.add "\r\n" & paintBarBytes(frame.label)
   of ffSpinner:
+    # Live-editor variant: the editor is already on screen, so only the
+    # ticker+bar rows paint (see liveEditorSpinnerFooterBytes). This is
+    # not the standalone layout's full footer, which includes the editor
+    # prompt and a cursor park.
     result = liveEditorSpinnerFooterBytes(frame.spinner, frame.label,
                                           frame.ticker, frame.elapsed, termW)
+  else:
+    result = frame.footerLayout(termW).bytes
 
 proc addUserEcho(result: var string, line: string; trailingNewline = true) =
   let termW = try: terminalWidth() except CatchableError: 0
