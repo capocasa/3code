@@ -5,7 +5,7 @@
 ## file is the policy source, when to reload it, and whether the OS
 ## backend actually works on this host.
 ##
-## Each line of `.3code/sandbox` is an access code (`+` writable,
+## Each line of `sandbox` is an access code (`+` writable,
 ## `-` deny, `*` read-only) plus a target: an absolute path, `~/` home
 ## path, `./` project-relative path (bare `+` = the project dir), or a
 ## host/IP with optional `:port`. Host rules fence bash network egress
@@ -13,8 +13,8 @@
 ## See sandwall's rules module for the full grammar.
 ##
 ## The policy has exactly one source of truth: the repo file
-## `.3code/sandbox`. It is always materialized at launch (see
-## `ensureDefaultSandbox`): when absent, it is created from
+## `sandbox` in the project dir. It is always materialized at launch
+## (see `ensureDefaultSandbox`): when absent, it is created from
 ## `~/.3code/sandbox`, which in turn is created from the built-in
 ## default text when absent. `~/.3code/sandbox` is only ever a
 ## template for new project files; it is never loaded directly.
@@ -38,9 +38,14 @@ import types
 
 export sandwall.AccessKind, sandwall.Policy, sandwall.Rule,
        sandwall.RuleKind, sandwall.parsePolicy, sandwall.defaultPolicyText,
-       sandwall.repoPolicyPath, sandwall.checkPath,
+       sandwall.checkPath,
        sandwall.renderPolicy, sandwall.PolicyDir, sandwall.resolve,
        sandwall.Resolved
+
+proc repoPolicyPath*(projectDir: string): string =
+  ## The project policy file: `sandbox` at the project root (no
+  ## enclosing dot dir - one less thing to copy around).
+  projectDir / "sandbox"
 
 var
   current*: Policy
@@ -303,7 +308,7 @@ proc ensureUserSandbox*(): bool =
   fileExists(path)
 
 proc ensureDefaultSandbox*(dir: string): bool =
-  ## Create the policy file at `dir/.3code/sandbox` if none exists,
+  ## Create the policy file at `dir/sandbox` if none exists,
   ## seeding it from `~/.3code/sandbox` (created from the built-in
   ## default first when absent). Runs at every 3code launch so the
   ## repo file is the always-present single policy source, and also
@@ -312,9 +317,7 @@ proc ensureDefaultSandbox*(dir: string): bool =
   let path = repoPolicyPath(dir)
   if fileExists(path): return true
   if not ensureUserSandbox(): return false
-  let sandboxDir = dir / PolicyDir
   try:
-    if not dirExists(sandboxDir): createDir(sandboxDir)
     copyFile(userSandboxPath(), path)
   except CatchableError:
     return false
@@ -323,14 +326,40 @@ proc ensureDefaultSandbox*(dir: string): bool =
 proc renderSandbox*(p: Policy): string =
   renderPolicy(p)
 
+proc relativizeRulePath*(argPath, projectDir: string): string =
+  ## The most portable spelling of `argPath` for the policy file: a
+  ## path inside the project dir becomes project-relative (bare ""
+  ## for the project dir itself, which sandwall parses as the project
+  ## dir), one inside home becomes `~/...`, anything else stays
+  ## absolute. Non-path targets (host rules) pass through untouched.
+  if argPath.len == 0: return argPath
+  if argPath[0] notin {'/', '~', '.'} and not sandwall.isAbsTarget(argPath):
+    return argPath  # host rule
+  let abs = resolveRawPath(argPath)
+  if abs.len == 0: return argPath
+  let home = getHomeDir()
+  let proj =
+    try: projectDir.normalizedPath
+    except CatchableError: projectDir
+  if abs == proj: return ""
+  if sandwall.isPathUnder(abs, proj):
+    let rel = abs[proj.len .. ^1].strip(leading = true, chars = {'/', '\\'})
+    return "./" & rel
+  if sandwall.isPathUnder(abs, home):
+    let rel = abs[home.len .. ^1].strip(leading = true, chars = {'/', '\\'})
+    return (if rel.len > 0: "~/" & rel else: "~")
+  abs
+
 proc appendRule*(sandboxFile, argPath: string; access: AccessKind): bool =
   ## Append a rule to the repo policy file, creating it from the
   ## default first if it does not exist. Used by `:sandbox
-  ## allow|deny|readonly`. After appending, reload so the change is live
-  ## for the next check.
+  ## allow|deny|readonly`. The path is stored as relative as possible
+  ## (project-relative or `~/`) so the file stays portable. After
+  ## appending, reload so the change is live for the next check.
+  let projectDir = sandboxFile.parentDir
   if not fileExists(sandboxFile):
-    let projectDir = sandboxFile.parentDir.parentDir
     if not ensureDefaultSandbox(projectDir): return false
-  result = sandwall.appendRule(sandboxFile, argPath, access)
+  result = sandwall.appendRule(sandboxFile,
+    relativizeRulePath(argPath, projectDir), access)
   if result:
     current = loadPolicy(getCurrentDir())

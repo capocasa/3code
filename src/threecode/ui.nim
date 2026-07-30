@@ -1153,8 +1153,9 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       resp "3code v" & Version
     of ":sandbox":
       # `:sandbox show` (or bare) dumps the rules; allow/readonly/deny
-      # append a line and reload. The path arg is written verbatim so
-      # relative paths stay portable in the file.
+      # append a line and reload. appendRule stores the path as
+      # relative as possible (project-relative or `~/`) so the file
+      # stays portable.
       let verb = if parts.len == 0: "show" else: parts[0]
       case verb
       of "show":

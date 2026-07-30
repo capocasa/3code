@@ -97,7 +97,7 @@ proc ensureBash() =
 proc initSandbox(cwd: string) =
   ## Materialize the single policy source and load it into the global
   ## state, then resolve this binary's own path for bash wrapping. The
-  ## policy file is always `.3code/sandbox` in the project dir; when
+  ## policy file is always `sandbox` in the project dir; when
   ## absent it is created from `~/.3code/sandbox`, which in turn is
   ## created from the built-in default text when absent, so the sandbox
   ## is always on and the user can customize what new projects get by
