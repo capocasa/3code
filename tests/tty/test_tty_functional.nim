@@ -191,7 +191,16 @@ proc sendAltChord(s: TtySession; letter: char) =
   s.drain(30)
 
 proc requireVisibleEditorCaret(s: TtySession; needle: string) =
-  s.drain(20)
+  # Drain until the child goes quiet so the checked frame is the settled
+  # repaint, not a transient mid-paint state captured between two sync
+  # bursts. Under CI load a bare drain(20) can land on a frame where the
+  # editor repaint is in flight (cursor on the wrong row, row text empty).
+  let settleDeadline = epochTime() + 1.0
+  while epochTime() < settleDeadline and not s.exited:
+    if not s.pollOnce(20, recordIdleFrame = false):
+      discard s.pollOnce(0, recordIdleFrame = false)
+      break
+  s.flushFrame(force = true)
   require s.frames.len > 0
   let frame = s.frames[^1]
   check not frame.cursorHidden

@@ -88,41 +88,33 @@ proc errLnS*(args: varargs[string, `$`]): string =
   errS(args) & "\r\n"
 
 func cmdResponseS*(body: string): string =
-  ## String form of `cmdResponse`: blank line above and below, default
-  ## color, flush left.
-  result = "\n" & body
+  ## String form of `cmdResponse`: default color, flush left, content only.
+  result = body
   if not body.endsWith("\n"): result.add "\n"
-  result.add "\n"
 
 func cmdErrorS*(body: string): string =
-  ## String form of `cmdError`: non-bold magenta, blank lines above/below.
-  result = "\n\x1b[35m" & body & ansiResetCode
+  ## String form of `cmdError`: non-bold magenta, content only.
+  result = "\x1b[35m" & body & ansiResetCode
   if not body.endsWith("\n"): result.add "\n"
-  result.add "\n"
 
 proc cmdResponse*(body: string) =
-  ## System-command response. One blank line above and below, no
-  ## indentation, default terminal color (matching LLM output).
-  ## Distinguishes system feedback from model replies.
-  stdout.write "\n"
+  ## System-command response body: default terminal color, no indent, content
+  ## lines only. Inter-item spacing is owned by the scrollback engine.
   stdout.write body
   if not body.endsWith("\n"): stdout.write "\n"
-  stdout.write "\n"
   stdout.flushFile
 
 proc cmdError*(body: string) =
-  ## Actionable error from a system command — non-bold magenta, no
-  ## indent, blank lines above and below.
-  stdout.write "\n"
+  ## Actionable error body from a system command: non-bold magenta, no indent,
+  ## content lines only. Spacing is owned by the scrollback engine.
   stdout.styledWrite(fgMagenta, body, resetStyle)
   if not body.endsWith("\n"): stdout.write "\n"
-  stdout.write "\n"
   stdout.flushFile
 
 proc renderHelpS*(): string =
-  ## :help body in default terminal color. `3code` highlighted bright
-  ## white; `:command` tokens highlighted bright white.
-  result = "\n"
+  ## :help body in default terminal color: content lines only, no spacing.
+  ## `3code` highlighted bright white; `:command` tokens highlighted
+  ## bright white. Inter-item spacing is owned by the scrollback engine.
   for line in HelpText.splitLines:
     var i = 0
     while i < line.len:
@@ -143,7 +135,6 @@ proc renderHelpS*(): string =
         result.add line[i]
         inc i
     result.add "\n"
-  result.add "\n"
 
 proc renderHelp*() =
   stdout.write renderHelpS()

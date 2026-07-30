@@ -1,7 +1,7 @@
-===== 239 =====
+===== 666 =====
 
   ╭─╮
-   ─┤  3code v0.6.0-linebugs-5c6d23ab-unstaged   the economical coding agent
+   ─┤  3code v0.6.0-main-8332eacf-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,7 +10,7 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ :help
-===== 683 =====
+===== 979 =====
   :provider edit X  edit provider X (url, key, models)
   :provider rm X    remove provider X
   :reasoning        list reasoning levels for current model (* marks active)
@@ -51,7 +51,7 @@ input:
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯
-===== 763 =====
+===== 309 =====
   :provider edit X  edit provider X (url, key, models)
   :provider rm X    remove provider X
   :reasoning        list reasoning levels for current model (* marks active)
@@ -92,7 +92,7 @@ input:
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
-===== 459 =====
+===== 707 =====
   :notify           show notify mode (on = desktop notification when a turn ends)
   :notify on|off    toggle turn-end desktop notification
   :retry            show patient-retry mode (on = ~36h hold for outages/limits)
@@ -133,7 +133,7 @@ stub  [stub-model]
 alt
 
 ❯
-===== 392 =====
+===== 718 =====
   :notify           show notify mode (on = desktop notification when a turn ends)
   :notify on|off    toggle turn-end desktop notification
   :retry            show patient-retry mode (on = ~36h hold for outages/limits)
@@ -174,7 +174,7 @@ stub  [stub-model]
 alt
 
 ❯ :model
-===== 203 =====
+===== 306 =====
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
@@ -215,7 +215,7 @@ stub-model  [stub]
 stub-large
 
 ❯
-===== 400 =====
+===== 534 =====
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
@@ -256,7 +256,7 @@ stub-model  [stub]
 stub-large
 
 ❯ :reasoning
-===== 815 =====
+===== 212 =====
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow T  add a writable/connectable rule (+ T)
   :sandbox readonly P  add a read-only rule (* P)
@@ -297,7 +297,7 @@ reasoning: (none)
 experimental: level is free-form, type any value
 
 ❯
-===== 863 =====
+===== 717 =====
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow T  add a writable/connectable rule (+ T)
   :sandbox readonly P  add a read-only rule (* P)
@@ -338,7 +338,7 @@ reasoning: (none)
 experimental: level is free-form, type any value
 
 ❯ :model stub-large
-===== 570 =====
+===== 829 =====
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -379,7 +379,7 @@ provider  stub
 model     stub-large
 
 ❯
-===== 849 =====
+===== 347 =====
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -420,7 +420,7 @@ provider  stub
 model     stub-large
 
 ❯ :reasoning high
-===== 651 =====
+===== 379 =====
   home / end    jump to start / end of the current logical line
   ctrl+u        clear the buffer
   ctrl+w        delete the word before the cursor
@@ -461,7 +461,7 @@ model     stub-large
 reasoning high
 
 ❯
-===== 574 =====
+===== 540 =====
   home / end    jump to start / end of the current logical line
   ctrl+u        clear the buffer
   ctrl+w        delete the word before the cursor
@@ -502,7 +502,7 @@ model     stub-large
 reasoning high
 
 ❯ :provider alt
-===== 966 =====
+===== 326 =====
   @path         inline file contents (e.g. @src/foo.nim)
 
            
@@ -543,7 +543,7 @@ provider  alt
 model     alt-model
 
 ❯
-===== 808 =====
+===== 520 =====
   @path         inline file contents (e.g. @src/foo.nim)
 
            
@@ -584,7 +584,7 @@ provider  alt
 model     alt-model
 
 ❯ :tokens
-===== 712 =====
+===== 884 =====
 stub  [stub-model]
 alt
 
@@ -625,7 +625,7 @@ model     alt-model
 no tokens used yet
 
 ❯
-===== 904 =====
+===== 519 =====
 stub  [stub-model]
 alt
 
@@ -666,7 +666,7 @@ model     alt-model
 no tokens used yet
 
 ❯ :clear
-===== 774 =====
+===== 922 =====
 
 stub-model  [stub]
 stub-large
@@ -707,7 +707,7 @@ no tokens used yet
 ════════════════════════════════════════
 
 ❯
-===== 122 =====
+===== 777 =====
 
 stub-model  [stub]
 stub-large
@@ -748,7 +748,7 @@ no tokens used yet
 ════════════════════════════════════════
 
 ❯ :sessions
-===== 504 =====
+===== 655 =====
 ❯ :reasoning
 
 reasoning: (none)
@@ -789,7 +789,7 @@ no tokens used yet
 no saved sessions for this directory
 
 ❯
-===== 139 =====
+===== 117 =====
 ❯ :reasoning
 
 reasoning: (none)
@@ -830,7 +830,9 @@ no tokens used yet
 no saved sessions for this directory
 
 ❯ :sessions all
-===== 545 =====
+===== 502 =====
+❯ :model stub-large
+
 provider  stub
 model     stub-large
 
@@ -866,12 +868,12 @@ no saved sessions for this directory
 ❯ :sessions all
 
 no saved sessions for this directory
-
-
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯
-===== 748 =====
+===== 303 =====
+❯ :model stub-large
+
 provider  stub
 model     stub-large
 
@@ -907,12 +909,12 @@ no saved sessions for this directory
 ❯ :sessions all
 
 no saved sessions for this directory
-
-
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯ :log
-===== 934 =====
+===== 253 =====
+                 
+❯ :reasoning high
 
 provider  stub
 model     stub-large
@@ -943,8 +945,6 @@ no saved sessions for this directory
 ❯ :sessions all
 
 no saved sessions for this directory
-
-
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 
       
@@ -953,7 +953,9 @@ listing is scoped to this directory — run from ~/data/3code/sessions for all
 no tool calls yet
 
 ❯
-===== 550 =====
+===== 297 =====
+                 
+❯ :reasoning high
 
 provider  stub
 model     stub-large
@@ -984,8 +986,6 @@ no saved sessions for this directory
 ❯ :sessions all
 
 no saved sessions for this directory
-
-
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 
       
@@ -994,7 +994,9 @@ listing is scoped to this directory — run from ~/data/3code/sessions for all
 no tool calls yet
 
 ❯ :show
-===== 726 =====
+===== 160 =====
+reasoning high
+
                
 ❯ :provider alt
 
@@ -1020,8 +1022,6 @@ no saved sessions for this directory
 ❯ :sessions all
 
 no saved sessions for this directory
-
-
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 
       
@@ -1035,7 +1035,9 @@ no tool calls yet
 no tool calls yet
 
 ❯
-===== 790 =====
+===== 828 =====
+reasoning high
+
                
 ❯ :provider alt
 
@@ -1061,8 +1063,6 @@ no saved sessions for this directory
 ❯ :sessions all
 
 no saved sessions for this directory
-
-
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 
       
@@ -1076,7 +1076,9 @@ no tool calls yet
 no tool calls yet
 
 ❯ :compact
-===== 376 =====
+===== 478 =====
+provider  alt
+model     alt-model
 
          
 ❯ :tokens
@@ -1097,8 +1099,6 @@ no saved sessions for this directory
 ❯ :sessions all
 
 no saved sessions for this directory
-
-
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 
       
@@ -1117,7 +1117,9 @@ no tool calls yet
 unknown command: :compact  (try :help)
 
 ❯
-===== 959 =====
+===== 364 =====
+provider  alt
+model     alt-model
 
          
 ❯ :tokens
@@ -1138,8 +1140,6 @@ no saved sessions for this directory
 ❯ :sessions all
 
 no saved sessions for this directory
-
-
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 
       
@@ -1158,7 +1158,9 @@ no tool calls yet
 unknown command: :compact  (try :help)
 
 ❯ :summarize
-===== 841 =====
+===== 573 =====
+
+no tokens used yet
 
         
 ❯ :clear
@@ -1174,8 +1176,6 @@ no saved sessions for this directory
 ❯ :sessions all
 
 no saved sessions for this directory
-
-
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 
       
@@ -1199,7 +1199,9 @@ unknown command: :compact  (try :help)
 failed or not worth it
 
 ❯
-===== 945 =====
+===== 422 =====
+
+no tokens used yet
 
         
 ❯ :clear
@@ -1215,8 +1217,6 @@ no saved sessions for this directory
 ❯ :sessions all
 
 no saved sessions for this directory
-
-
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 
       
@@ -1240,7 +1240,7 @@ unknown command: :compact  (try :help)
 failed or not worth it
 
 ❯ :prompt
-===== 285 =====
+===== 361 =====
 
 Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), har
 d-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (pushing code, open
@@ -1281,7 +1281,7 @@ Brief. State results, not deliberation. Match response shape to task. End-of-tur
 ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯
-===== 990 =====
+===== 457 =====
 
 Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), har
 d-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (pushing code, open
@@ -1322,7 +1322,7 @@ Brief. State results, not deliberation. Match response shape to task. End-of-tur
 ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯ :toknes
-===== 999 =====
+===== 406 =====
 # Git
 
 Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`. Don't push
@@ -1363,7 +1363,7 @@ ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was alread
 unknown command: :toknes  did you mean :tokens?
 
 ❯
-===== 281 =====
+===== 178 =====
 # Git
 
 Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`. Don't push

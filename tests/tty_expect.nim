@@ -339,7 +339,7 @@ proc childExited(s: TtySession): bool =
     else:
       false
 
-proc pollOnce(s: TtySession, waitMs: int; recordIdleFrame = true): bool =
+proc pollOnce*(s: TtySession, waitMs: int; recordIdleFrame = true): bool =
   if s.closed:
     return false
 
