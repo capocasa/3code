@@ -1,115 +1,172 @@
-# Cybernetic Plan: wall verification - Windows setup, macOS Seatbelt fix, smoke tests
+# Cybernetic plan: 3code as a library API
 
 ## Context
 
-The sandwall/wall milestone (impl-1..7) is code-complete: Linux netns
-fence + per-run proxy work; commits `26444e7`, `4861571`, `844f6db` in
-this repo, sandwall (`~/p/sandwall`) through `fb94a26`. What remains is
-platform verification and two defects found while smoke-testing.
+3code (`~/p/3code/lib`) is a Nim coding-agent CLI. Goal: make it usable as
+an embeddable API so other frontends (web server, GUI) can drive the same
+agent. Requirements from the user:
 
-### Defect 1: macOS Seatbelt breaks exec (blocker)
+- Easy-to-initialize session object; CLI config passed as convenient params
+  (or param tuples).
+- Two reply interfaces: **blocking** and **callback**. No async.
+- Library may manage its own threads (it already does). No
+  bring-your-own-thread needed unless trivially free.
+- Prompts and colon-commands are procs taking the session as first param.
+- Full functionality retained: sandbox, tool calls, filesystem, resume.
+- CLI refactored to call the same API; behavior unchanged ("don't break
+  anything").
 
-`sandbox_init_with_parameters` succeeds and in-sandbox file ops enforce
-correctly, but the subsequent `execv` of ANY binary aborts with
-SIGABRT. Reproduced minimally on stefani (macOS 14.8.7 arm64 VM, x86_64
-Rosetta toolchain): forked or not, `(version 1)`, kitchen-sink allows
-(`mach-lookup`, `/dev` rw, `sysctl-read`) - always aborts at exec time.
-sandwall CI on `macos-26` fails `test_sandbox` identically (rc 134) but
-the job reports green because the workflow doesn't gate on test
-failure (`.github/workflows/ci.yml` "Run tests" has no failure
-propagation - verify). So the Seatbelt backend has been unverified
-since it was written; `3code box` on macOS is a hard abort.
+### Architecture map (verified by reading)
 
-Test scaffolding on stefani: `~/sandwall` (HEAD tarball), `~/3code`
-(HEAD tarball), deps `~/streamhttp ~/ttty ~/tinotify` + unicodedb in
-pkgs2, `~/3code/nimble.paths` points at them. Build:
-`nim c -d:ssl -d:testPlainHttp --path:src --path:tests --path:$HOME/sandwall/src ... -o:build/3code src/threecode.nim`
-(see shell history; PATH needs `$HOME/.nimble/bin:$HOME/.local/bin`).
-Minimal repros at `/tmp/sbtest*.nim` on stefani; `/tmp/sbtest16.nim`
-locally is the raw-FFI version.
+- `src/threecode.nim` (659 lines): `main()` does CLI parse, session
+  create/resume, sandbox init, locks, config load, profile resolve, welcome,
+  then the REPL loop calling `runTurnsInteractive` and `handleCommandResult`.
+  Heavily terminal-coupled via global pointers `inputEditor/inputMessages/
+  inputSession/inputProfile`, `addExitProc(cleanup)`, signal handlers.
+- `src/threecode/turns.nim`: `runTurns(p, messages, session)` is the
+  headless-safe turn driver. All visuals flow through two seams:
+  (a) `apiStreamHooks` (api.nim) and (b) fatprompt procs.
+- `src/threecode/fatprompt/runtime.nim` (2341 lines): owns the input
+  thread, GUI spinner/bar-tick thread, and transcript commits.
+  `installApiStreamHooks()` wires api.nim to terminal rendering.
+  `beginTurn()` calls `ensureInputThreadStarted()` — terminal-coupled.
+- `src/threecode/engine.nim` (704 lines): every byte to stdout goes through
+  `defaultEngine` + global wrapper procs (`syncWrite`, `writeRaw`,
+  `renderFooter`, `renderToolViewport`, `renderLiveContent`,
+  `appendTranscript`, `endTurn`, `prepareAssistantContentStart`,
+  `repaintLiveContent`, `clearToolViewport`, `clearLiveContent`,
+  `beginEditorRedraw`, `finishEditorRedraw`). Global wrappers delegate to
+  `defaultEngine` methods. **Single choke point for all terminal output.**
+- `src/threecode/ui.nim`: `handleCommandResult(cmd, messages, session,
+  prof, editor: var minline.LineEditor)` — editor only touched for
+  completion callbacks (provider wizard) and `echoRows` (line 1015).
+  Modal commands (`:provider add/edit`) need the input thread.
+- `src/threecode/session.nim`: `Session` object (usage, toolLog, savePath,
+  profileName, created, cwd, plan, readCache) + `.3log` persistence
+  (`saveSession`, `loadSessionFile`, `resolveSessionPath`, `newSessionPath`).
+- Config: `loadStateOrEmpty(configPath())` -> (current, providers,
+  colorKeys); `buildProfile(current, providers, wanted)`.
+- Tests: `tests/stub_helpers.nim` builds a `providerStub` binary with a
+  stub provider (`testdata/stub/provider.nim`) + stub http
+  (`testdata/stub/http.nim`). Full REPL can run against stubs with no
+  network. `tests/api/*` run callModel/turns paths already.
 
-Known facts: `restrict` in-process works (sbtest2); fork+restrict+exec
-where restrict happens in the fork child ALSO aborts (sbtest12); v0
-profile rejected; `(allow network*)` no help; `file-map` op unknown to
-the macOS 14 parser. Hypotheses to try, most promising first:
-  1. The exec'd image's dyld needs `(allow file-read* (subpath
-     "/private/var/db/dyld") ... )` - already in baseline via
-     baselineRead (check it's in the emitted profile; sbtest16 lacked
-     it). Try full baseline profile text from buildProfile.
-  2. process-exec must be paired with `file-map-executable` or
-     `process-exec*` with `file-read*` on the exact literal of the
-     target binary, not just subpaths.
-  3. Signal/exception ports: add `(allow signal (target self))` or
-     mach exception-port allows.
-  4. Ask what changed in macOS 14/26: sandbox_init deprecation may now
-     hard-abort on first violation instead of logging - get the abort
-     reason via `log show --predicate 'process == "sandboxd"' --last 1m`
-     on stefani right after a repro.
-Get the sandboxd log FIRST (step 1) - blind profile permutations
-already burned effort.
+### Design (chosen)
 
-### Defect 2: sandwall Windows build red (blocker for Windows work)
+New module `src/threecode/library.nim` (name avoids clash with existing
+`api.nim` = HTTP transport; `session.nim` = .3log persistence).
 
-`src/sandwall/wall/proxy.nim` imports `std/posix` unconditionally;
-windows-latest CI build fails (`ambiguous identifier: SocketHandle -
-winlean vs posix`). proxy.nim / connect.nim / netns.nim are POSIX-only
-modules (sandwall.nimble comment says wall.nim as a whole doesn't
-cross-compile for that reason). Fix: gate imports + bodies behind
-`when defined(posix)` so windows-latest builds the main binary, and
-make the CI "Run tests" step actually fail the job on test failure
-(it currently swallows it - see how the macOS job passed with FAILED
-tests; probably nimble exit code is lost; check and fix).
+```nim
+type
+  AgentEventKind* = enum
+    aevDelta, aevReasoning, aevToolStart, aevToolLine, aevToolDone,
+    aevRetry, aevNotice, aevDone, aevError
+  AgentEvent* = object
+    kind*: AgentEventKind
+    text*: string          # delta chunk / tool banner / notice / error msg
+    usage*: Usage          # aevDone only
+    toolCode*: int         # aevToolDone only
+  AgentSession* = ref object
+    profile*: Profile
+    messages*: JsonNode
+    state*: Session        # existing .3log session record
+    onEvent*: proc(ev: AgentEvent) {.closure.}   # callback interface
+    # internal: previous hook state for save/restore
+  AgentOptions* = object
+    model*, cwd*, resumeId*, sessionPath*: string
+    experimental*, debug*: bool
+```
 
-### Windows wall: never run on hardware
+Procs (session first param):
 
-wfp.nim + winuser.nim are compile-only (`a03a76a`). `3code wall
-setup-windows` is wired in `src/threecode/wall.nim`. `ssh beck` =
-Windows 10.0.26200, repo at `C:\Users\Quickemu\p\3code` (tarball push
-via scp; see HANDOFF-windows-completion.md for the push/build loop).
-Needs: build 3code.exe with the sandwall wall modules, run elevated
-`3code wall setup-windows`, verify `wfp-probe` + behavioral check.
+- `initAgentSession(opts: AgentOptions): AgentSession` — load config,
+  resolve profile, create/resume .3log, init sandbox, acquire locks,
+  install headless hooks. No terminal, no input thread, no wizard.
+- `prompt*(s: AgentSession, text: string): string` — blocking: run turn(s),
+  return final assistant text. Events also fire to `onEvent` if set.
+- `command*(s: AgentSession, cmd: string): string` — run `:cmd`, return
+  plain body. Modal commands return an error string.
+- `close*(s: AgentSession)` — save session, release locks, restore hooks.
+
+Headless plumbing:
+
+1. `engine.nim`: add `var engineOutputEnabled* = true`; global wrappers
+   no-op when false. Terminal state vars stay consistent because mutations
+   still run; only stdout writes are skipped. Cheap alternative: keep
+   engine untouched and install hooks that never paint. Decision: gate in
+   the thin global wrappers of engine.nim + termio.syncWrite/writeRaw.
+2. `fatprompt/runtime.nim`: add `installApiHeadlessHooks(cb)` exporting a
+   proc that wires `apiStreamHooks` to an `onEvent` callback; and a
+   `headlessTranscriptHook` capturing `commitTranscriptBytes` text
+   (ANSI-stripped) into events/notices. Save/restore around each
+   `runTurns` call since hooks are global and CLI may share the process
+   (tests). Actually: AgentSession supports multiple sessions sequentially
+   in one process; hooks installed at init, restored at close. Concurrency
+   of multiple live sessions is explicitly out of scope (documented).
+3. `beginTurn` coupling: headless path must not start the input thread.
+   `ensureInputThreadStarted` is called inside `beginTurn`. Gate:
+   `if engineOutputEnabled: ensureInputThreadStarted()` — or better,
+   headless runTurns never calls fatprompt beginTurn? No — beginTurn also
+   sets input state flags. Simplest: gate the thread start and caret hide
+   on `engineOutputEnabled`.
+4. Commands: dummy editor. `handleCommandResult` needs
+   `var minline.LineEditor`; AgentSession holds a private dummy
+   (`minline.initEditor(historyFile = "")`) used only for the signature.
+   Modal commands (`:provider add/edit`) return "requires interactive
+   terminal". `:quit` family returns recognized quit signal.
+5. Interrupt: `requestTurnInterrupt()` already exists (global flag);
+   expose `interrupt*(s)` proc that sets it — works because the flag is
+   global, documented as process-wide for now.
+6. CLI refactor: `threecode.nim main()` keeps its existing terminal path
+   (it IS the terminal frontend). It does NOT have to route through
+   library.nim for rendering (that would be a rewrite of the fat prompt).
+   What the CLI shares: session/config/profile/bootstrap logic. Extract
+   the reusable setup from main into library.nim procs used by both:
+   `setupSandbox(cwd)`, `loadConfigAndProfile(model, resumeProfile)`.
+   This satisfies "the command line calls the API" at the session level
+   without destabilizing the terminal rendering. (Documented decision;
+   full REPL-through-API is a later, riskier step the user did not ask
+   to force.)
+
+### Testing
+
+New `tests/api/test_library.nim`: build against providerStub defines,
+init a session with stub provider, run `prompt` (blocking) and assert
+reply text + tool execution happened; run `command(":tokens")` and assert
+body; resume a saved session. Also callback interface: collect events,
+assert aevDone arrives with usage. Wire into nimble test (testament
+discovers tests/api/*.nim automatically — verify).
 
 ## Current state
 
-- Defect 2 (windows build): NOT STARTED.
-- Defect 1 (seatbelt exec): reproduced minimally; sandboxd log not yet
-  captured; no fix.
-- beck: VM booting, ssh still timing out as of last check. Retry loop:
-  `ssh -o ConnectTimeout=10 beck 'echo BECK_UP'`.
-- stefani proxy smoke (POSIX half) PASSED on 2026-07-29: `3code wall
-  proxy --port 61080` on stefani, allowed CONNECT to 127.0.0.1
-  negotiated, denied host got `HTTP/1.1 403 Forbidden`. Only the
-  seatbelt fence is broken.
+Plan written. No code changed yet. Next: step 1 (engine output gate).
 
 ## Steps
 
-- [ ] 1. Fix sandwall Windows build: `when defined(posix)` gate
-  proxy/connect/netns imports and wall.nim re-exports so windows-latest
-  builds. Also fix CI "Run tests" so a failing suite fails the job
-  (macOS job passed with FAILED tests - find why, likely nimble
-  task exit code or missing `--error` propagation). Verify with
-  `nim c --os:windows -d:mingw --cpu:amd64 --compileOnly` locally if
-  mingw exists, else push and watch CI. Commit in sandwall.
-- [ ] 2. Capture the sandboxd abort reason on stefani: run
-  /tmp/sbtest16.nim (raw sandbox_init + execv), then immediately
-  `log show --last 2m` filtered for sandboxd/kernel denial messages.
-  The violation name tells exactly which allow is missing.
-- [ ] 3. Fix the seatbelt profile (seatbelt.nim buildProfile/baseline)
-  from step 2's evidence; verify: sbtest-style exec of /usr/bin/true
-  exits 0, then `cd ~/sandwall/tests && nim c --path:../src -r
-  test_sandbox.nim` green on stefani. Commit in sandwall.
-- [ ] 4. Full macOS smoke on stefani: rebuild sandwall + 3code there,
-  `3code box --policy <host-rule policy> restrict /tmp -- curl ...`:
-  direct connect fails, via-proxy succeeds, denied host 403. Record
-  results. If stefani remains a hopeless environment for seatbelt
-  (VM/Rosetta quirk), verify via sandwall CI macos-latest after step
-  1 makes tests gate, and note it.
-- [ ] 5. Windows on beck: push 3code tarball, build 3code.exe,
-  `3code wall setup-windows` elevated, `--status` behavioral verify,
-  wfp-probe. Then fenced-launch smoke: policy with host rules spawns
-  the bash tool path (streamexec currently warns-only on Windows per
-  impl-6; confirm warning text appears; full spawnAsSandwall wiring is
-  UNPLANNED). Record results.
-- [ ] 6. Docs + sweep: docs/manual.md platform verification matrix
-  updated with what was actually verified where; plan-network-firewall.md
-  notes; commits in both repos.
+- [ ] 1. Engine output gate: add `engineOutputEnabled*` to engine.nim,
+  guard every global wrapper + `defaultEngine` stdout paths (or guard
+  inside the object procs' write sites). Build; run tests/core/test_sync_frames
+  + test_display to confirm terminal path unchanged.
+- [ ] 2. Headless hooks in fatprompt/runtime.nim: `installApiHeadlessHooks`
+  (deltas, usage, retry -> callback), headless transcript capture hook in
+  `commitTranscriptBytes`, gate `ensureInputThreadStarted` + caret hide in
+  `beginTurn` on `engineOutputEnabled`. Build + full quick test pass.
+- [ ] 3. library.nim: types (AgentOptions, AgentSession, AgentEvent),
+  `initAgentSession` (config load, profile resolve, sandbox init, locks,
+  session create/resume — reusing config/session/sandbox procs, mirroring
+  main() lines ~330-400 without terminal calls), `close`.
+- [ ] 4. library.nim: `prompt` (blocking; appends user msg, refreshes
+  system prompt, runTurns, returns last assistant text) + `command`
+  (classify via `classifyCommand`; reject ckModal/ckQuit with message;
+  run `handleCommandResult` with dummy editor; return plainBody) +
+  `interrupt`.
+- [ ] 5. tests/api/test_library.nim: stub-provider test covering init,
+  blocking prompt with a tool call, callback events, command, resume,
+  close. Green locally.
+- [ ] 6. CLI dedup: extract shared setup (sandbox init, config+profile
+  resolution incl. known-good fallback) from threecode.nim main into
+  library.nim; main calls it. Behavior identical; build + run cli_args
+  tests.
+- [ ] 7. Docs: README section on library use with a minimal Nim example
+  (web-server-shaped). `nimble test` full suite green. Final review of
+  complete diff.

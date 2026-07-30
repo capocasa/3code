@@ -67,6 +67,18 @@ type
 
 var defaultEngine*: TerminalEngine
 
+var engineOutputEnabled* = true
+  ## Master gate for terminal painting. When false (library/headless use),
+  ## every global wrapper in this module becomes a no-op on stdout while
+  ## still mutating `defaultEngine` state so the geometry model stays
+  ## consistent if output is re-enabled. Set once at session start; not
+  ## meant to be toggled mid-frame.
+
+var headlessTranscriptHook*: proc(bytes: string) {.closure.}
+  ## When set (library mode), `appendTranscript` forwards the committed
+  ## transcript bytes here instead of painting them. Bytes carry ANSI
+  ## styling; stripping is the consumer's job (library.nim owns that).
+
 proc refreshEditorWidth(ed: var minline.LineEditor) =
   let w = try: terminalWidth() except CatchableError: 0
   if w > 0:
@@ -157,6 +169,7 @@ proc syncWrite*(e: var TerminalEngine; bytes: string) =
   termio.syncWrite(bytes)
 
 proc syncWrite*(bytes: string) {.gcsafe.} =
+  if not engineOutputEnabled: return
   {.cast(gcsafe).}:
     defaultEngine.syncWrite(bytes)
 
@@ -164,6 +177,7 @@ proc writeRaw*(e: var TerminalEngine; bytes: string) =
   termio.writeRaw(bytes)
 
 proc writeRaw*(bytes: string) {.gcsafe.} =
+  if not engineOutputEnabled: return
   {.cast(gcsafe).}:
     defaultEngine.writeRaw(bytes)
 
@@ -178,6 +192,7 @@ proc beginEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor;
 
 proc beginEditorRedraw*(ed: var minline.LineEditor; ready: bool;
                         frame: FooterFrame) =
+  if not engineOutputEnabled: return
   defaultEngine.beginEditorRedraw(ed, ready, frame)
 
 proc finishEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor;
@@ -192,6 +207,7 @@ proc finishEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor;
   termio.finishEditorRedraw(showCaret)
 
 proc finishEditorRedraw*(ed: var minline.LineEditor; showCaret = true) =
+  if not engineOutputEnabled: return
   defaultEngine.finishEditorRedraw(ed, showCaret)
 
 proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool;
@@ -242,6 +258,7 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
 proc renderFooter*(frame: FooterFrame; inputRunning: bool;
                    editor: ptr minline.LineEditor;
                    termW = 0) {.gcsafe.} =
+  if not engineOutputEnabled: return
   {.cast(gcsafe).}:
     defaultEngine.renderFooter(frame, inputRunning, editor, termW)
 
@@ -318,6 +335,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
 proc renderToolViewport*(rows: openArray[string]; frame: FooterFrame;
                          inputRunning: bool; editor: ptr minline.LineEditor;
                          termW = 0; bannerRows = 1) {.gcsafe.} =
+  if not engineOutputEnabled: return
   {.cast(gcsafe).}:
     defaultEngine.renderToolViewport(rows, frame, inputRunning, editor, termW,
                                      bannerRows)
@@ -333,6 +351,7 @@ proc clearToolViewport*(e: var TerminalEngine; frame: FooterFrame;
 proc clearToolViewport*(frame: FooterFrame; inputRunning: bool;
                         editor: ptr minline.LineEditor; termW = 0)
     {.gcsafe.} =
+  if not engineOutputEnabled: return
   {.cast(gcsafe).}:
     defaultEngine.clearToolViewport(frame, inputRunning, editor, termW)
 
@@ -399,6 +418,7 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
 proc renderLiveContent*(rows: openArray[string]; frame: FooterFrame;
                         inputRunning: bool; editor: ptr minline.LineEditor;
                         termW = 0) {.gcsafe.} =
+  if not engineOutputEnabled: return
   {.cast(gcsafe).}:
     defaultEngine.renderLiveContent(rows, frame, inputRunning, editor, termW)
 
@@ -474,6 +494,7 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
 proc repaintLiveContent*(frame: FooterFrame; inputRunning: bool;
                          editor: ptr minline.LineEditor;
                          termW = 0) {.gcsafe.} =
+  if not engineOutputEnabled: return
   {.cast(gcsafe).}:
     defaultEngine.repaintLiveContent(frame, inputRunning, editor, termW)
 
@@ -658,6 +679,7 @@ proc prepareAssistantContentStart*(inputRunning: bool;
                                    oldFooter: FooterFrame;
                                    hadBufferedSubmit: bool;
                                    flush = true) =
+  if not engineOutputEnabled: return
   defaultEngine.prepareAssistantContentStart(
     inputRunning, editor, oldFooter, hadBufferedSubmit, flush)
 
@@ -682,6 +704,7 @@ proc endTurn*(e: var TerminalEngine; inputRunning: bool;
 
 proc endTurn*(inputRunning: bool; editor: ptr minline.LineEditor;
               oldFooter: FooterFrame; bytes: string) =
+  if not engineOutputEnabled: return
   defaultEngine.endTurn(inputRunning, editor, oldFooter, bytes)
 
 proc appendTranscript*(transcriptBytes: string;
@@ -692,6 +715,10 @@ proc appendTranscript*(transcriptBytes: string;
                        compactRowsAboveFooter = 0;
                        restoreEditor = true;
                        reserveFooter = true) =
+  if not engineOutputEnabled:
+    if headlessTranscriptHook != nil and transcriptBytes.len > 0:
+      headlessTranscriptHook(transcriptBytes)
+    return
   defaultEngine.appendTranscript(
     transcriptBytes,
     liveAnchored,
