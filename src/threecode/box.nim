@@ -2,7 +2,7 @@
 ##
 ## This is the sandwall CLI (`sandwall restrict ...`) folded into 3code so we
 ## ship one binary instead of two. The bash tool wraps each command as
-## `3code box --policy SYS --policy REPO restrict [--ro TMPDIR] -- sh -c
+## `3code box --policy FILE restrict [--ro TMPDIR] -- sh -c
 ## <script>`: it re-execs *itself* (via `getAppFilename`), so there is no
 ## PATH lookup and no separate sandwall binary to find or bundle. The box
 ## process loads the policy files itself, forks, setsid()s, applies the
@@ -18,9 +18,10 @@
 ## command can read its own policy but not change it. On Landlock a
 ## read-only rule under a writable root does not subtract write (rules
 ## union within a layer), so on Linux a policy file inside a writable
-## tree is still writable from inside the sandbox; box warns on stderr
-## in that case. Hard boundaries belong in the system policy, which sits
-## under `- /` and is read-only by default.
+## tree is still writable from inside the sandbox. That is accepted:
+## the single policy file is re-loaded by the parent on every check,
+## and an implicit read-only guard for the file is appended last on
+## every load so no file rule can weaken it.
 
 when defined(posix):
   import std/posix except Time
@@ -39,11 +40,11 @@ Usage:
   children are confined: writes outside the writable paths fail with
   EACCES.
 
-  With --policy, the writable/read-only sets come from the given policy
-  files (cascaded in order, system first, relative targets resolved
-  against the parent of the last file's `.3code` directory). Explicit
-  RWPATH/ROPATH args union with the policy sets. Policy files themselves
-  are forced read-only inside the sandbox.
+  With --policy, the writable/read-only sets come from the given
+  policy file (relative targets resolve against the parent of the
+  file's `.3code` directory). Explicit RWPATH/ROPATH args union with
+  the policy sets. The policy file itself is forced read-only inside
+  the sandbox.
 
   System dirs (/usr, /bin, /lib, /dev/*, etc.) are always read-only so the
   command's binaries, libs, and device nodes stay runnable; --ro adds to
@@ -51,8 +52,7 @@ Usage:
 
 Examples:
   3code box restrict /tmp /home/me/work -- ls -la
-  3code box --policy ~/.config/3code/sandbox --policy .3code/sandbox \
-    restrict -- make test
+  3code box --policy .3code/sandbox restrict -- make test
   3code box restrict . -- make test
 
 Landlock is monotonic: the restriction is permanent for this process and all
@@ -99,7 +99,7 @@ proc parseBoxArgs(args: seq[string]): tuple[a: BoxArgs, err: string] =
 
 proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
                    fence: bool] =
-  ## Resolve the cascaded policy files plus explicit args into the
+  ## Resolve the policy file(s) plus explicit args into the
   ## (writable, readonly, denied) triple. Policy files are force-added
   ## read-only. `denied` carries the policy's last-wins narrowing (a deny
   ## under an allowed root); the backend enforces it on top of the root
@@ -129,21 +129,6 @@ proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
     # The sandboxed command may read its policy but never change it.
     for f in a.policies:
       if fileExists(f): readonly.add f
-    when defined(linux):
-      # Landlock unions rules within a layer, so the read-only force-add
-      # above does not subtract write when the file sits under a writable
-      # root. Warn so the user knows to move hard boundaries to the
-      # system policy.
-      for f in a.policies:
-        let abs = try: absolutePath(f).normalizedPath
-                  except CatchableError: f
-        for w in writable:
-          if isPathUnder(abs, w):
-            stderr.writeLine("3code box: warning: policy file " & abs &
-              " is under a writable rule; on Linux the sandboxed command" &
-              " can modify it. Put hard boundaries in the system policy" &
-              " (outside any writable root).")
-            break
   (writable, readonly, denied, hostRules > 0)
 
 proc boxRestrict(args: seq[string]): int =
@@ -218,7 +203,7 @@ proc boxMain*(args: seq[string]): int =
     stdout.writeLine(usage)
     return 0
   var rest = args
-  # hoist leading global options; keep order for the cascade
+  # hoist leading global options
   var policies: seq[string]
   var i = 0
   while i < rest.len:

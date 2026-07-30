@@ -344,26 +344,25 @@ Sub-agents are not supported because both research and user feedback says they a
 ## Sandbox
 
 3code confines every tool call to a filesystem sandbox you define. The
-sandbox is a plain text policy built from a cascade of files, each filling
-in for the ones below it:
+sandbox policy lives in exactly one file per project: `.3code/sandbox`
+in the project directory. There is no cascade and no merging.
 
-1. **system** - `~/.config/3code/sandbox`, next to your config.
-2. **repo** - `.3code/sandbox` in your project directory.
+The file is always present. When it is missing at launch, 3code creates
+it from `~/.3code/sandbox`; when that file is also missing, 3code
+creates it from the built-in default (`-` deny `/`, `+` writable
+`/tmp`, then `+` writable cwd), so the sandbox is always on.
+`~/.3code/sandbox` is only ever a template for new project files, it is
+never loaded as policy directly. Edit it to change what every new
+project starts with. Yolo mode (everything writable) is fine but you
+have to ask for it explicitly.
 
-A missing level is not empty: it contributes the built-in default
-(`-` deny `/`, `+` writable `/tmp`, then `+` writable cwd), so the
-sandbox is always on. The
-effective policy is the two texts concatenated (system then repo) and
-parsed once, so a repo-level `.` on `/` cleanly resets anything a
-system file opened above it. 3code never writes a sandbox file into your
-project on first run; the default lives in memory until you create one
-(explicitly, or via the `:sandbox` edit commands, which seed the repo
-file on first use). Yolo mode (everything writable) is fine but you have
-to ask for it explicitly.
+One rule is always added implicitly after every rule in the file:
+`.3code/sandbox` itself is read-only. No rule in the file can weaken
+it, so the agent cannot widen its own sandbox by editing the policy.
 
 The sandbox is enforced two ways. Bash commands run through `3code box`,
 the built-in sandwall sandbox (Landlock on Linux, Seatbelt on macOS), which
-3code re-execs itself as; the box process loads the policy files itself,
+3code re-execs itself as; the box process loads the policy file itself,
 so every command launches on the freshest policy. The in-process
 read/write/patch tools check paths against the same policy (reloaded when
 the file changes) in the 3code process. Both layers run the same sandwall
@@ -469,17 +468,20 @@ REPL commands which append a rule and reload immediately:
 :sandbox off
 ```
 
-The first `allow`/`readonly`/`deny` in a project creates the `.3code/sandbox`
-file (seeded with the built-in default, then your appended rule) so you
-have something concrete to version and share. `:sandbox off` disables
-enforcement entirely for the session (bash runs unconfined, in-process
-checks pass through); it persists in `[settings]` as `sandbox = off`. This
-is the only way to run without a sandbox short of editing the file.
+The `allow`/`readonly`/`deny` verbs append to `.3code/sandbox` (the
+file always exists; it is created at launch from `~/.3code/sandbox`
+when missing, so the append never starts from nothing). `:sandbox off`
+disables enforcement entirely for the session (bash runs unconfined,
+in-process checks pass through); it persists in `[settings]` as
+`sandbox = off`. This is the only way to run without a sandbox short
+of editing the file.
 
-The agent never writes the sandbox file. If the model proposes a policy
-change, it edits a copy and you move it into place. This keeps the trust
-boundary entirely on your side: the sandbox is defined at prompt time, by
-you, and the agent cannot weaken it.
+The agent never writes the sandbox file, and cannot: the implicit
+last rule pins `.3code/sandbox` read-only, so even a `bash` command
+that tries to append to it fails. If the model proposes a policy
+change, it edits a copy and you move it into place. This keeps the
+trust boundary entirely on your side: the sandbox is defined at prompt
+time, by you, and the agent cannot weaken it.
 
 ### What gets sandboxed
 

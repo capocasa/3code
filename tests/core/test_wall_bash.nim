@@ -38,10 +38,7 @@ suite "wall proxy lifecycle":
       sb.stopWall()
       removeDir(dir)
     writeFile(dir / ".3code" / "sandbox", "- /\n+\n+127.0.0.1\n")
-    let polCopy = dir / "policy-copy"
-    copyFile(dir / ".3code" / "sandbox", polCopy)
-    sb.current = parseCascaded(readFile(polCopy),
-      readFile(dir / ".3code" / "sandbox"), dir)
+    sb.current = sb.loadPolicy(dir)
     check sb.wallProxyNeeded(sb.current)
     sb.active = true
     sb.moveWallSock(dir)  # writable, mirrors streamexec's tmp

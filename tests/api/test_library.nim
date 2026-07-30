@@ -40,6 +40,11 @@ models = "stub-model"
 proc isolateEnv(root: string) =
   putEnv("XDG_CONFIG_HOME", root / "xdg")
   putEnv("XDG_DATA_HOME", root / "data")
+  # HOME redirect keeps `~/.3code/sandbox` (the policy template
+  # materialized at session init) inside the fixture instead of the
+  # developer's real home.
+  createDir(root / "home")
+  putEnv("HOME", root / "home")
 
 suite "library: AgentSession":
   when not stubbed:
@@ -97,6 +102,12 @@ suite "library: AgentSession":
 
       # Modal commands are refused, not deadlocked.
       check s.command(":provider add").contains("interactive")
+
+      # The single sandbox policy file was materialized at init (from
+      # the built-in default; no ~/.3code/sandbox existed in the
+      # fixture) and `:sandbox show` reflects it.
+      check fileExists(root / "run" / ".3code" / "sandbox")
+      check s.command(":sandbox show").contains("/tmp")
 
       s.close()
 

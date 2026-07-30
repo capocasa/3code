@@ -75,9 +75,8 @@ when defined(posix):
         stderr.writeLine("Error: unknown proxy option " & args[i]); return 2
       inc i
     if policy.len == 0:
-      # Default to the repo cascade's repo file; the system file's host
-      # rules are only honored when the caller passes a merged policy.
-      policy = sb.policyPaths().repo
+      # Default to the single repo policy file.
+      policy = sb.policyPath()
     if projectDir.len == 0:
       projectDir = getCurrentDir()
     let p = startWallProxy(policy, projectDir, unixSockPath = unixSock,
