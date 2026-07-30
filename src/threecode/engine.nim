@@ -30,6 +30,7 @@
 ## committed scrollback.
 
 import std/terminal
+import std/os
 import minline
 import ./terminal as termio
 import ./fatprompt/rendering
@@ -67,6 +68,29 @@ type
 
 var defaultEngine*: TerminalEngine
 
+# Test-mode geometry audit. Under the PTY harness (frame fd set), every
+# footer paint/clear logs the model's footer-row count so a test can fail
+# loudly when painted rows and the frame model drift, instead of a later
+# walk-up silently erasing into (or stranding rows above) scrollback.
+var geometryAuditPath {.threadvar.}: string
+var geometryAuditInit {.threadvar.}: bool
+
+proc geometryAuditActive(): bool =
+  if not geometryAuditInit:
+    geometryAuditInit = true
+    if getEnv("THREECODE_TEST_FRAME_FD").len > 0:
+      geometryAuditPath = getEnv("THREECODE_GEOMETRY_AUDIT")
+  geometryAuditPath.len > 0
+
+proc geometryAudit(tag: string; rows: int) =
+  if not geometryAuditActive(): return
+  try:
+    let f = open(geometryAuditPath, fmAppend)
+    f.writeLine tag & " rows=" & $rows
+    f.close()
+  except IOError:
+    discard
+
 proc refreshEditorWidth(ed: var minline.LineEditor) =
   let w = try: terminalWidth() except CatchableError: 0
   if w > 0:
@@ -97,9 +121,11 @@ proc walkUp(e: var TerminalEngine; ed: var minline.LineEditor): int =
 
 proc noteFooterPainted(e: var TerminalEngine; footerRowsAboveEditor: int) =
   e.paintedFooterRows = max(0, footerRowsAboveEditor)
+  geometryAudit("footerPainted", e.paintedFooterRows)
 
 proc noteNoFooter(e: var TerminalEngine) =
   e.paintedFooterRows = 0
+  geometryAudit("footerCleared", 0)
 
 proc eraseUp(e: var TerminalEngine; ed: var minline.LineEditor;
              width, footerRowsAboveEditor: int): int =
@@ -512,6 +538,11 @@ proc repaintVolatileAfterCommit(e: var TerminalEngine;
     return
   let editing = edPtr != nil and restoreEditor
   if footerBytes.len > 0:
+    # The row model and the emitted bytes must agree on the footer's
+    # height: the bar+ticker bytes are exactly footerRowsAboveEditor rows
+    # by construction (see `rowsAboveEditor`). If that invariant ever
+    # breaks the walk-up lands on committed scrollback, so say so here
+    # where the two numbers meet rather than at the erase.
     stdout.write footerBytes
     # One trailing advance past the footer's last row: the editor paints
     # on the row below it.
