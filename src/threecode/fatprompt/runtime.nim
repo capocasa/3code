@@ -1627,6 +1627,70 @@ proc installApiStreamHooks*() =
     finalUsage: apiFinalUsage,
     noUsage: apiNoUsage,
     retryNotice: apiRetryNotice))
+
+# ---------- Headless (library) stream hooks ----------
+#
+# A library session drives `runTurns` with no terminal: engine output is
+# gated off (termengine.engineOutputEnabled = false) and these hooks replace
+# the terminal rendering with plain callbacks. Lifecycle rendering still
+# flows through `commitTranscriptBytes`, which termengine forwards to
+# `headlessTranscriptHook` when output is disabled, so tool results and
+# notices reach the embedder through one channel.
+
+type
+  HeadlessStreamHooks* = object
+    ## Callbacks a library frontend provides. All optional; nil means the
+    ## event is dropped. `contentFinished` returns the full assistant text
+    ## of the model call; `finalUsage` carries per-call token usage.
+    contentDelta*: proc(chunk: string) {.closure.}
+    reasoningDelta*: proc(text: string) {.closure.}
+    contentFinished*: proc(fullContent: string) {.closure.}
+    finalUsage*: proc(usage: Usage; elapsed: int) {.closure.}
+    retryNotice*: proc(msg: string) {.closure.}
+
+var headlessStreamHooks*: HeadlessStreamHooks
+
+proc installApiHeadlessHooks*(hooks: HeadlessStreamHooks) =
+  ## Swap the terminal-bound api stream hooks for headless callbacks.
+  ## Pair with `termengine.engineOutputEnabled = false`. Restoring the
+  ## terminal path is `installApiStreamHooks()` + re-enabling output.
+  headlessStreamHooks = hooks
+  setApiStreamHooks(ApiStreamHooks(
+    beforeCall: proc(lastPromptTokens, window: int): string =
+      contextLabel(lastPromptTokens, window),
+    afterCall: nil,
+    progress: nil,
+    setStatusLabel: nil,
+    startSpinner: nil,
+    stopSpinner: nil,
+    providerActivity: markProviderActivity,
+    reasoningDelta: proc(reasoning, baseLabel: string; slurped: int;
+                         contentStarted: bool) =
+      (if headlessStreamHooks.reasoningDelta != nil:
+        headlessStreamHooks.reasoningDelta(reasoning)),
+    contentDelta: proc(chunk, baseLabel: string; slurped: int): bool =
+      (if headlessStreamHooks.contentDelta != nil:
+        headlessStreamHooks.contentDelta(chunk)
+       true),
+    contentFinished: proc(fullContent, baseLabel: string;
+                          slurped: int): bool =
+      (if headlessStreamHooks.contentFinished != nil:
+        headlessStreamHooks.contentFinished(fullContent)
+       # Report "not streamed live" so runTurns commits the final text
+       # through the transcript hook (the terminal path returns true here
+       # only when its live renderer already painted every byte; a nil
+       # contentDelta consumer would otherwise lose the reply entirely).
+       headlessStreamHooks.contentDelta != nil),
+    trimTrailingContent: nil,
+    afterLiveContent: nil,
+    finalUsage: proc(usage: Usage; window, elapsed: int;
+                     assistantContent: string; streamedLive: bool) =
+      (if headlessStreamHooks.finalUsage != nil:
+        headlessStreamHooks.finalUsage(usage, elapsed)),
+    noUsage: nil,
+    retryNotice: proc(msg: string) =
+      (if headlessStreamHooks.retryNotice != nil:
+        headlessStreamHooks.retryNotice(msg))))
 proc inputThreadProc() {.thread.} =
   ## Runs readline for the UI lifetime. Completed text is queued for the
   ## controller; during active turns the same editor keeps accepting buffered
@@ -2230,8 +2294,11 @@ proc wizardFinish*() =
 proc beginTurn*() =
   ## Hide the physical terminal caret for the duration of the turn. The
   ## prompt glyph stays visible as the stable visual anchor.
-  ensureInputThreadStarted()
-  termui.hideCaret()
+  ## Headless (library) sessions skip the input thread and caret: there is
+  ## no tty to read from or paint on.
+  if termengine.engineOutputEnabled:
+    ensureInputThreadStarted()
+    termui.hideCaret()
   emitFatPromptEvent setPromptModeEvent(pmTurnRunning)
   acquire inputStateLock
   try:
