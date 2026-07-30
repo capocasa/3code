@@ -922,8 +922,10 @@ proc ensureGuiStarted() =
   ## Start the single GUI animation thread if it isn't running. Idempotent.
   ## The thread paints whatever `frameModelShared.mode` says; the controller
   ## switches modes via `startSpinner`/`startBarTick` without touching the
-  ## thread itself.
+  ## thread itself. Headless (library) sessions never paint: the thread
+  ## stays down and all rendering calls are engine-gated no-ops.
   if guiRunning: return
+  if not termengine.engineOutputEnabled: return
   ensureTestTickerControlStarted()
   guiStop.store(false, moRelaxed)
   testSpinnerRequested.store(0, moRelease)

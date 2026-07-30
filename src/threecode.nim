@@ -37,9 +37,10 @@ when defined(windows):
 import tinotify
 import threecode/minline
 import threecode/engine as termengine
+import threecode/library
 export types, util, prompts, shell, session, compact,
        config, actions, api, display, ui, fatprompt, toolstream, turns,
-       transcript
+       transcript, library
 
 
 
