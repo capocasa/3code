@@ -347,10 +347,9 @@ export DEBIAN_FRONTEND=noninteractive
         # script, it never writes there). The policy force-read-only and
         # Landlock writability warning live in box.nim.
         discard sandbox.reloadIfChanged(getCurrentDir())
-        let paths = sandbox.policyPaths()
+        let policyFile = sandbox.policyPath()
         var args = @["box"]
-        args.add ["--policy", paths.system]
-        args.add ["--policy", paths.repo]
+        args.add ["--policy", policyFile]
         args.add "restrict"
         # No explicit writable paths: those come from the policy
         # inside box (a fully-locked policy simply yields none, which
@@ -375,8 +374,7 @@ export DEBIAN_FRONTEND=noninteractive
             # bridge can connect() the unix socket inside the netns.
             args = @[]
             args.add "box"
-            args.add ["--policy", paths.system]
-            args.add ["--policy", paths.repo]
+            args.add ["--policy", policyFile]
             args.add "restrict"
             args.add tmp
             args.add "--"

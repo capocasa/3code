@@ -95,14 +95,16 @@ proc ensureBash() =
       quit ExitUsage
 
 proc initSandbox(cwd: string) =
-  ## Load the cascaded sandbox policy into the global state and resolve
-  ## this binary's own path for bash wrapping. The policy is built from the
-  ## system file (next to `~/.config/3code/config`) and the repo file
-  ## (`.3code/sandbox`), each falling back to the built-in default when
-  ## absent, so no file is ever written into the project on first run. When
-  ## `sandboxEnabled` is false (the `[settings] sandbox = off` switch), this
-  ## does nothing: bash runs unconfined and the in-process checks pass
-  ## through (`active` stays false).
+  ## Materialize the single policy source and load it into the global
+  ## state, then resolve this binary's own path for bash wrapping. The
+  ## policy file is always `.3code/sandbox` in the project dir; when
+  ## absent it is created from `~/.3code/sandbox`, which in turn is
+  ## created from the built-in default text when absent, so the sandbox
+  ## is always on and the user can customize what new projects get by
+  ## editing the home file. When `sandboxEnabled` is false (the
+  ## `[settings] sandbox = off` switch), this does nothing: bash runs
+  ## unconfined and the in-process checks pass through (`active` stays
+  ## false).
   # The provider stub binary (the tty/visual test harness) skips sandbox
   # setup entirely so its behaviour matches the pre-sandbox binary. Those
   # tests drive REPL rendering, not enforcement, and `active=true` plus the
@@ -113,7 +115,8 @@ proc initSandbox(cwd: string) =
     return
   if not sandboxEnabled:
     return
-  sandbox.current = sandbox.loadCascaded(cwd)
+  discard sandbox.ensureDefaultSandbox(cwd)
+  sandbox.current = sandbox.loadPolicy(cwd)
   sandbox.active = true
   # The bash tool re-execs this binary as `3code box restrict ...`, so
   # resolve our own path once. The box subcommand is always compiled in, but
@@ -348,9 +351,10 @@ proc main() =
     if prompt == "":
       restoredDraft = loadPendingDraft(session.cwd)
 
-  # Sandbox is mandatory: create the default policy if absent (refuses to
-  # run if the file can't be created), then load it. Paths resolve relative
-  # to the session cwd so the policy follows the project, not the binary.
+  # Sandbox is mandatory: the single policy file is materialized
+  # (seeded from ~/.3code/sandbox, itself seeded from the built-in
+  # default) and loaded. Paths resolve relative to the session cwd so
+  # the policy follows the project, not the binary.
   initSandbox(session.cwd)
 
   try:

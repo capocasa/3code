@@ -78,8 +78,9 @@ A working example lives in [`example/webserve.nim`](example/webserve.nim): a web
 
 ## Changelog
 
-**unreleased** - patient retry
+**unreleased** - patient retry, single-file sandbox policy
 
+- **Single-file sandbox policy.** The sandbox policy now lives in exactly one file, `.3code/sandbox` in the project directory; the old two-level cascade (`~/.config/3code/sandbox` then the repo file) is gone. When the project file is missing at launch it is created from `~/.3code/sandbox`, which itself is created from the built-in default when missing, so the sandbox is still always on and you can now customize what every new project starts with by editing the home file. One implicit rule is appended after every rule in the file: the policy file itself is read-only, so the agent cannot widen its own sandbox by editing the policy (the `is under a writable rule` warning this replaces is gone).
 - **Patient retry.** Retryable API failures (429 usage limits, 5xx, network errors) now keep retrying on one shared exponential backoff capped at 2048s, for up to ~64 attempts (~36h), instead of surfacing after a short probe. A long-running session rides out a provider's rolling usage window or a network dropout (the train ride) without dropping back to the prompt. The underlying error message and attempt counter keep scrolling by as transcript lines so you can see what is being waited out. `:retry on|off` toggles it (default on; `off` keeps the ~1-minute initial ramp-up so transient blips still self-heal); persisted in `[settings]` as `patient_retry`. Ctrl-C cancels a running hold at any time.
 
 **0.6.0** - filesystem sandbox backed by nimbox, folded into the `box` subcommand

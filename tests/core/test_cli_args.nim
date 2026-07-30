@@ -287,6 +287,21 @@ suite "box subcommand (built-in sandwall)":
     else:
       skip()
 
+  test "box --policy never warns about a writable policy file":
+    # The single policy file always sits under the writable project dir;
+    # the old `is under a writable rule` warning was removed because the
+    # implicit read-only guard (parent side) covers the file instead.
+    if backendWorks:
+      let proj = boxTmp / "proj3"
+      createDir(proj / ".3code")
+      writeFile(proj / ".3code" / "sandbox", "- /\n+\n")
+      let r = run(["box", "--policy", proj / ".3code" / "sandbox",
+                   "restrict", "--", "true"])
+      check r.code == 0
+      check "writable rule" notin r.o
+    else:
+      skip()
+
 suite "wall subcommand (built-in sandwall wall)":
   # `3code wall` exposes the network firewall: proxy, connect, and the
   # Windows setup entry points. POSIX runs test dispatch and the proxy
