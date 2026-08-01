@@ -340,7 +340,7 @@ export DEBIAN_FRONTEND=noninteractive
       # path and is always set when `active`; the unconfined setsid fallback
       # below only runs when the sandbox is off entirely.
       if sandboxEnabled and sandbox.active and sandbox.procboxExe.len > 0 and
-          not sandbox.gatherMode(getCurrentDir()):
+          not sandbox.gathering:
         # The box subprocess loads the policy files itself (--policy), so
         # every launch enforces the freshest file contents; no mtime
         # plumbing needed here. The script + stdin live in a temp dir
@@ -398,7 +398,7 @@ export DEBIAN_FRONTEND=noninteractive
         # `allow` rule: inside the project that is already allowed (a
         # no-op rule), outside it opens the dir the command ran in.
         if sandboxEnabled and sandbox.active and
-            sandbox.gatherMode(getCurrentDir()):
+            sandbox.gathering:
           sandbox.gatherRecordBash(getCurrentDir())
         let setsidExe = findExe("setsid")
         if setsidExe.len > 0:
@@ -490,12 +490,10 @@ export DEBIAN_FRONTEND=noninteractive
   # append a pointer at the policy file. OSError messages are appended
   # after the command's own output, so the hint lands at the end.
   if code != 0 and sandboxEnabled and sandbox.active and
-      not sandbox.gatherMode(getCurrentDir()) and
+      not sandbox.gathering and
       ("Permission denied" in rawOut or "Operation not permitted" in rawOut):
     if rawOut.len > 0 and not rawOut.endsWith("\n"):
       rawOut.add "\n"
-    rawOut.add "sandbox: a permission error above may be the filesystem " &
-      "sandbox denying access (" & sandbox.policyHint() & "); " &
-      "ask the user to allow it or to run `:sandbox gather on`\n"
+    rawOut.add "sandbox deny, see " & sandbox.sandboxPathInCwd() & "\n"
 
   return (rawOut, code, cap)

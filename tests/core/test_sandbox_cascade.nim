@@ -104,6 +104,7 @@ suite "policy reload (reloadIfChanged)":
     let wasActive = sandbox.active
     let saved = sandbox.current
     let savedEnabled = sandboxEnabled
+    let savedGathering = sandbox.gathering
     sandbox.active = true
     sandboxEnabled = true
     try:
@@ -116,15 +117,13 @@ suite "policy reload (reloadIfChanged)":
         check not okNo
         check outside notin readFile(repoFile)
         # Gather on: allowed, rule appended live.
-        sandbox.setGatherMode(dir, true)
-        check sandbox.gatherMode(dir)
+        sandbox.gathering = true
         let (okG, _) = sandbox.checkRawPath(outside, needsWrite = true)
         check okG
         check ("allow " & outside) in readFile(repoFile)
         # Gather off: enforcement resumes; the gathered rule now covers
         # the path so it stays allowed.
-        sandbox.setGatherMode(dir, false)
-        check not sandbox.gatherMode(dir)
+        sandbox.gathering = false
         sandbox.current = sandbox.loadCascaded(dir)
         let (okAfter, _) = sandbox.checkRawPath(outside, needsWrite = true)
         check okAfter
@@ -134,6 +133,7 @@ suite "policy reload (reloadIfChanged)":
       sandbox.active = wasActive
       sandbox.current = saved
       sandboxEnabled = savedEnabled
+      sandbox.gathering = savedGathering
       removeDir(dir)
 
   test "resolve surfaces narrowing denies (deny under an allow)":

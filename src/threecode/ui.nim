@@ -1169,10 +1169,9 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         let gOn = parts.len >= 2 and parts[1] == "on"
         let gOff = parts.len >= 2 and parts[1] == "off"
         if not gOn and not gOff:
-          resp "gather mode: " &
-            (if sandbox.gatherMode(safeCwd()): "on" else: "off")
+          resp "gather mode: " & (if sandbox.gathering: "on" else: "off")
         else:
-          sandbox.setGatherMode(safeCwd(), gOn)
+          sandbox.gathering = gOn
           resp "gather mode " & (if gOn:
             "on: would-be sandbox denials are allowed and appended as " &
             "allow rules to " & sandbox.sandboxPathInCwd()

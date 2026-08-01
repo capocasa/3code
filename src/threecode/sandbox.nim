@@ -46,6 +46,12 @@ var
     ## Path to the binary to exec for `box restrict` (this one).
   lastMtimes: tuple[system, repo: Time]
 
+var gathering*: bool = false
+  ## Gather mode (`:sandbox gather on|off`): would-be denials are
+  ## allowed and recorded as `allow` rules in the repo policy file
+  ## instead. In-memory only: the toggle is a REPL command, so it does
+  ## not need to survive a restart or be visible to subprocesses.
+
 # ------------------------------------------------------------- wall proxy
 #
 # One wall proxy per 3code run, started lazily when the effective
@@ -251,7 +257,7 @@ proc resolveRawPath(p: string): string =
   if q.startsWith("~"): q = expandTilde(q)
   try: absolutePath(q) except CatchableError: q
 
-proc gatherMode*(dir: string): bool
+
 proc gatherRecord(path: string)
 
 proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason: string] =
@@ -271,13 +277,13 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
   of akWritable: (true, "")
   of akReadOnly:
     if not needsWrite: (true, "")
-    elif gatherMode(getCurrentDir()):
+    elif gathering:
       gatherRecord(resolved)
       (true, "")
     else:
       (false, "sandbox: " & resolved & " is read-only (" & policyHint() & ")")
   of akDeny:
-    if gatherMode(getCurrentDir()):
+    if gathering:
       gatherRecord(resolved)
       (true, "")
     else:
@@ -313,28 +319,6 @@ proc appendRule*(sandboxFile, argPath: string; access: AccessKind): bool =
   result = sandwall.appendRule(sandboxFile, argPath, access)
   if result:
     current = loadCascaded(getCurrentDir())
-
-proc gatherFlagPath*(dir: string): string =
-  ## The gather-mode toggle file. It lives in the policy dir but is not
-  ## a policy file: the box subprocess checks for its existence before
-  ## every bash launch, so `sandbox gather off` inside a sandboxed
-  ## command works even on Landlock (existence checks are unrestricted).
-  dir / PolicyDir / "gather"
-
-proc gatherMode*(dir: string): bool =
-  ## True while gather mode is on: would-be denials are allowed and
-  ## recorded as `allow` rules in the repo policy file instead.
-  fileExists(gatherFlagPath(dir))
-
-proc setGatherMode*(dir: string; on: bool) =
-  ## Toggle gather mode by creating/removing the flag file.
-  let flag = gatherFlagPath(dir)
-  if on:
-    let sandboxDir = dir / PolicyDir
-    if not dirExists(sandboxDir): createDir(sandboxDir)
-    writeFile(flag, "")
-  else:
-    removeFile(flag)
 
 proc gatherRecord(path: string) =
   ## Live-append an `allow` rule for a path gather mode just permitted.

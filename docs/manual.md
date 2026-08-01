@@ -495,9 +495,8 @@ rule to `.3code/sandbox`. Run a normal working session, then
 actually needed. While gather mode is on, bash commands run unconfined
 (the kernel backends cannot observe-and-allow) and the working directory
 of each bash call is recorded. Denials are appended verbatim and
-un-deduped; review the file after a gather session. The toggle lives in
-a flag file at `.3code/gather`, so it works regardless of policy
-contents and persists across reloads.
+un-deduped; review the file after a gather session. The toggle is
+in-memory: it resets when 3code exits.
 
 When enforcement is on and a sandboxed bash command fails with
 ``Permission denied``, 3code appends a hint to the tool output pointing
