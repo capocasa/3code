@@ -351,10 +351,10 @@ in for the ones below it:
 2. **repo** - `.3code/sandbox` in your project directory.
 
 A missing level is not empty: it contributes the built-in default
-(`-` deny `/`, `+` writable `/tmp`, then `+` writable cwd), so the
+(`deny /`, `write /tmp`, then `write` for the cwd), so the
 sandbox is always on. The
 effective policy is the two texts concatenated (system then repo) and
-parsed once, so a repo-level `.` on `/` cleanly resets anything a
+parsed once, so a repo-level `deny /` cleanly resets anything a
 system file opened above it. 3code never writes a sandbox file into your
 project on first run; the default lives in memory until you create one
 (explicitly, or via the `:sandbox` edit commands, which seed the repo
@@ -384,18 +384,22 @@ print a warning and run unfenced (silence with
 
 ### The sandbox file
 
-Each line is a one-character access code, a space, and a target. Lines run
+Each line is an access word, arbitrary whitespace, and a target. Lines run
 top to bottom; each line supersedes the ones above it for the target it
 names. Later rules win, so you can open a broad path then narrow parts of
 it.
 
 ==========  ==============================================
-Code        Meaning
+Word        Meaning
 ==========  ==============================================
-``-``       deny: no read, no write, no connect
-``*``       read-only: read and execute (paths only)
-``+``       writable path / connectable host
+``deny``    deny: no read, no write, no connect
+``read``    read-only: read and execute (paths only)
+``write``   writable path / connectable host
 ==========  ==============================================
+
+A word only counts as an access word when it stands alone (whitespace
+or end of line after it); a line starting with anything else is treated
+as a host rule, so hostnames like ``deny.corp.internal`` still parse.
 
 The target's first character decides what it names:
 
@@ -408,17 +412,17 @@ Start       Target
 letter/digit  host rule: hostname, IPv4, or IPv6, optional ``:port``
 ==========  ==============================================
 
-A bare code with no target means the project dir itself (``+`` = writable
-project). Host rules (``+ api.example.com``, ``+ 1.2.3.4:8080``, ``+ *`` for no
-network restrictions) fence the network egress of sandboxed bash
-commands through the wall proxy.
+A bare word with no target means the project dir itself (``write`` =
+writable project). Host rules (``write api.example.com``,
+``write 1.2.3.4:8080``, ``write *`` for no network restrictions) fence
+the network egress of sandboxed bash commands through the wall proxy.
 
 On first run in a new directory, 3code uses this default:
 
 ```
-- /
-+ /tmp
-+
+deny /
+write /tmp
+write
 ```
 
 The root is denied, the system temp dir and the project directory are
@@ -431,7 +435,7 @@ If you want the agent to have free rein over the whole filesystem, replace
 the file with one line:
 
 ```
-+ /
+write /
 ```
 
 This is the explicit opt-in the spec requires. 3code never writes yolo for

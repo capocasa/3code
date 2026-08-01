@@ -5,12 +5,12 @@
 ## files form the cascade, when to reload them, and whether the OS
 ## backend actually works on this host.
 ##
-## Each line of `.3code/sandbox` is an access code (`+` writable,
-## `-` deny, `*` read-only) plus a target: an absolute path, `~/` home
-## path, `./` project-relative path (bare `+` = the project dir), or a
-## host/IP with optional `:port`. Host rules fence bash network egress
-## through the per-run wall proxy (see the wall-proxy section below).
-## See sandwall's rules module for the full grammar.
+## Each line of `.3code/sandbox` is an access word (`write` writable,
+## `deny` deny, `read` read-only) plus a target: an absolute path, `~/`
+## home path, `./` project-relative path (bare `write` = the project
+## dir), or a host/IP with optional `:port`. Host rules fence bash
+## network egress through the per-run wall proxy (see the wall-proxy
+## section below). See sandwall's rules module for the full grammar.
 ##
 ## The effective policy is the cascade of the system file
 ## (`~/.config/3code/sandbox`) and the repo file (`.3code/sandbox`),

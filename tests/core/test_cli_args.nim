@@ -33,7 +33,7 @@ suite "cli argument validation":
     # no longer a usage error. With an isolated XDG (no config) and EOF on
     # stdin, it reaches the provider wizard and aborts cleanly. We assert
     # only that it is accepted, not rejected as a usage error (exit 2).
-    var tmp = getTempDir() / ("3code-cli-i-" & $getCurrentProcessId() & "-" &
+    var tmp = getTempDir() / ("3code-cli-i-" & $getCurrentProcessId() & "deny" &
                               $epochTime().int64)
     createDir(tmp)
     let env = newStringTable({"XDG_DATA_HOME": tmp, "XDG_CONFIG_HOME": tmp})
@@ -53,7 +53,7 @@ suite "cli --list cap and short-flag stacking":
   var tmp: string
 
   setup:
-    tmp = getTempDir() / ("3code-cli-list-" & $getCurrentProcessId() & "-" &
+    tmp = getTempDir() / ("3code-cli-list-" & $getCurrentProcessId() & "deny" &
                           $epochTime().int64)
     createDir(tmp)
     # Resolve symlinks so the cwd key the test seeds under matches the cwd
@@ -138,7 +138,7 @@ suite "cli syntax errors do no startup work":
   var tmp: string
 
   setup:
-    tmp = getTempDir() / ("3code-cli-noop-" & $getCurrentProcessId() & "-" &
+    tmp = getTempDir() / ("3code-cli-noop-" & $getCurrentProcessId() & "deny" &
                           $epochTime().int64)
     createDir(tmp)
 
@@ -194,7 +194,7 @@ suite "box subcommand (built-in sandwall)":
   var backendWorks: bool  # does this kernel/OS actually support confinement?
 
   setup:
-    boxTmp = getTempDir() / ("3code-box-" & $getCurrentProcessId() & "-" &
+    boxTmp = getTempDir() / ("3code-box-" & $getCurrentProcessId() & "deny" &
                               $epochTime().int64)
     createDir(boxTmp)
     # Probe once: run a trivial confined command. If the OS-native backend
@@ -250,7 +250,7 @@ suite "box subcommand (built-in sandwall)":
     if backendWorks:
       let proj = boxTmp / "proj"
       createDir(proj / ".3code")
-      writeFile(proj / ".3code" / "sandbox", "- /\n+\n")
+      writeFile(proj / ".3code" / "sandbox", "deny /\nwrite\n")
       let inside = proj / "ok.txt"
       let rIn = run(["box", "--policy", proj / ".3code" / "sandbox",
                      "restrict", "--", "touch", inside])
@@ -263,7 +263,7 @@ suite "box subcommand (built-in sandwall)":
       check not fileExists(outside)
       # A fully locked policy (no writable root) is accepted: the touch
       # simply has nowhere legal to land.
-      writeFile(proj / ".3code" / "sandbox", "- /\n")
+      writeFile(proj / ".3code" / "sandbox", "deny /\n")
       let rLock = run(["box", "--policy", proj / ".3code" / "sandbox",
                        "restrict", "--", "true"])
       check rLock.code == 0
@@ -278,10 +278,10 @@ suite "box subcommand (built-in sandwall)":
       createDir(proj / ".3code")
       let pol = proj / ".3code" / "sandbox"
       let target = proj / "t.txt"
-      writeFile(pol, "- /\n+\n")
+      writeFile(pol, "deny /\nwrite\n")
       check run(["box", "--policy", pol, "restrict", "--", "touch", target]).code == 0
       removeFile(target)
-      writeFile(pol, "- /\n")
+      writeFile(pol, "deny /\n")
       check run(["box", "--policy", pol, "restrict", "--", "touch", target]).code != 0
       check not fileExists(target)
     else:
@@ -318,12 +318,12 @@ suite "wall subcommand (built-in sandwall wall)":
       # Loopback-only end-to-end: spawn `3code wall proxy` with a temp
       # policy, then CONNECT through it with a raw socket. Allowed
       # 127.0.0.1:<echo> tunnels; denied.example is refused.
-      let dir = getTempDir() / ("3code-wall-" & $getCurrentProcessId() & "-" &
+      let dir = getTempDir() / ("3code-wall-" & $getCurrentProcessId() & "deny" &
                                 $epochTime().int64)
       createDir(dir)
       defer: removeDir(dir)
       let pol = dir / "policy"
-      writeFile(pol, "- /\n+ " & dir & "\n+127.0.0.1\n")
+      writeFile(pol, "deny /\nwrite " & dir & "\nwrite 127.0.0.1\n")
       # pick a free proxy port
       let probe = newSocket(buffered = false)
       probe.bindAddr(Port(0), "127.0.0.1")

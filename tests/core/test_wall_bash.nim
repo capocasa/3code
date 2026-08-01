@@ -37,7 +37,7 @@ suite "wall proxy lifecycle":
     defer:
       sb.stopWall()
       removeDir(dir)
-    writeFile(dir / ".3code" / "sandbox", "- /\n+\n+127.0.0.1\n")
+    writeFile(dir / ".3code" / "sandbox", "deny /\nwrite\nwrite 127.0.0.1\n")
     let polCopy = dir / "policy-copy"
     copyFile(dir / ".3code" / "sandbox", polCopy)
     sb.current = parseCascaded(readFile(polCopy),
@@ -58,7 +58,7 @@ suite "wall proxy lifecycle":
     # reload propagation: rewrite the repo policy, sync, proxy file changes
     let polFile = sb.wallProxyDir / "policy"
     let before = readFile(polFile)
-    writeFile(dir / ".3code" / "sandbox", "- /\n+\n+127.0.0.1\n+example.com\n")
+    writeFile(dir / ".3code" / "sandbox", "deny /\nwrite\nwrite 127.0.0.1\nwrite example.com\n")
     sb.syncWallProxyPolicy(dir)
     let after = readFile(polFile)
     check after != before
@@ -75,7 +75,7 @@ when defined(linux):
       createDir(dir)
       defer: removeDir(dir)
       let pol = dir / "policy"
-      writeFile(pol, "- /\n+ " & dir & "\n+ " & getTempDir() & "\n+127.0.0.1\n")
+      writeFile(pol, "deny /\nwrite " & dir & "\nwrite " & getTempDir() & "\nwrite 127.0.0.1\n")
       # echo server on host loopback
       let echoSock = newSocket(buffered = false)
       echoSock.setSockOpt(OptReuseAddr, true)

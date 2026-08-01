@@ -38,23 +38,23 @@ suite "sandbox cascade (parseCascaded)":
       check s.checkPath("/tmp") == akWritable
 
   test "repo file only -> repo rules win for the paths it names":
-    let s = parseCascaded(defaultPolicyText(), "+ " & opt & "\n", proj)
+    let s = parseCascaded(defaultPolicyText(), "write " & opt & "\n", proj)
     check s.rules[^1].access == akWritable
     check s.rules[^1].path == opt
     # cwd stays writable (from the default).
     check s.checkPath(proj) == akWritable
 
   test "system file only -> system rules apply":
-    let s = parseCascaded("* " & varDir & "\n", defaultPolicyText(), proj)
+    let s = parseCascaded("read " & varDir & "\n", defaultPolicyText(), proj)
     check s.rules[0].access == akReadOnly
     check s.rules[0].path == varDir
 
   test "both -> system then repo concatenated; repo deny resets a system allow":
-    let s = parseCascaded("+ " & opt & "\n", "- " & opt & "\n", proj)
+    let s = parseCascaded("write " & opt & "\n", "deny " & opt & "\n", proj)
     check s.checkPath(opt) == akDeny
 
   test "repo can broaden beyond the system default":
-    let s = parseCascaded(defaultPolicyText(), "+ " & opt & "\n* " & varDir & "\n", proj)
+    let s = parseCascaded(defaultPolicyText(), "write " & opt & "\nread " & varDir & "\n", proj)
     check s.checkPath(opt) == akWritable
     check s.checkPath(varDir) == akReadOnly
 
@@ -72,7 +72,7 @@ suite "policy reload (reloadIfChanged)":
     createDir(dir / ".3code")
     let repoFile = dir / ".3code" / "sandbox"
     let target = (dir / "locked").normalizedPath
-    writeFile(repoFile, "+ ./\n")
+    writeFile(repoFile, "write ./\n")
     let wasActive = sandbox.active
     let saved = sandbox.current
     sandbox.active = true
@@ -82,7 +82,7 @@ suite "policy reload (reloadIfChanged)":
       check sandbox.reloadIfChanged(dir) == false
       # Tighten the policy and force a detectably newer mtime (filesystem
       # mtime granularity can exceed the test's runtime).
-      writeFile(repoFile, "+ ./\n- ./locked\n")
+      writeFile(repoFile, "write ./\ndeny ./locked\n")
       setLastModificationTime(repoFile, getTime() + 3.seconds)
       check sandbox.reloadIfChanged(dir) == true
       check sandbox.current.checkPath(target) == akDeny
@@ -93,10 +93,10 @@ suite "policy reload (reloadIfChanged)":
       removeDir(dir)
 
   test "resolve surfaces narrowing denies (deny under an allow)":
-    let s = parseCascaded("+ " & opt & "\n", "- " & opt / "locked" & "\n", proj)
+    let s = parseCascaded("write " & opt & "\n", "deny " & opt / "locked" & "\n", proj)
     let r = s.resolve()
     check r.writable == @[opt]
     check r.denied == @[opt / "locked"]
     # A deny for a path under no surviving allow is not carried.
-    let s2 = parseCascaded("- /\n", "- " & opt & "\n", proj)
+    let s2 = parseCascaded("deny /\n", "deny " & opt & "\n", proj)
     check s2.resolve().denied.len == 0
