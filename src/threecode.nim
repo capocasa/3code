@@ -98,7 +98,7 @@ proc initSandbox(cwd: string) =
   ## Load the cascaded sandbox policy into the global state and resolve
   ## this binary's own path for bash wrapping. The policy is built from the
   ## system file (next to `~/.config/3code/config`) and the repo file
-  ## (`.3code/sandbox`), each falling back to the built-in default when
+  ## (`.sandboxrc`), each falling back to the built-in default when
   ## absent, so no file is ever written into the project on first run. When
   ## `sandboxEnabled` is false (the `[settings] sandbox = off` switch), this
   ## does nothing: bash runs unconfined and the in-process checks pass

@@ -348,7 +348,7 @@ sandbox is a plain text policy built from a cascade of files, each filling
 in for the ones below it:
 
 1. **system** - `~/.config/3code/sandbox`, next to your config.
-2. **repo** - `.3code/sandbox` in your project directory.
+2. **repo** - `.sandboxrc` in your project directory.
 
 A missing level is not empty: it contributes the built-in default
 (`deny /`, `allow /tmp`, then `allow` for the cwd), so the
@@ -473,7 +473,7 @@ REPL commands which append a rule and reload immediately:
 :sandbox off
 ```
 
-The first `allow`/`readonly`/`deny` in a project creates the `.3code/sandbox`
+The first `allow`/`readonly`/`deny` in a project creates the `.sandboxrc`
 file (seeded with the built-in default, then your appended rule) so you
 have something concrete to version and share. `:sandbox off` disables
 enforcement entirely for the session (bash runs unconfined, in-process
@@ -490,7 +490,7 @@ exception, and you switch it on explicitly.
 
 `:sandbox gather on` flips the sandbox into record mode: every would-be
 denial is allowed instead, and the path is appended live as an ``allow``
-rule to `.3code/sandbox`. Run a normal working session, then
+rule to `.sandboxrc`. Run a normal working session, then
 `:sandbox gather off` - the policy file now covers everything the agent
 actually needed. While gather mode is on, bash commands run unconfined
 (the kernel backends cannot observe-and-allow) and the working directory

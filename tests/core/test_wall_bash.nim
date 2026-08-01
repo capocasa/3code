@@ -33,15 +33,15 @@ suite "wall env helper":
 suite "wall proxy lifecycle":
   test "proxy starts on host rules, reloads on policy rewrite":
     let dir = getTempDir() / ("3code-wallcycle-" & $getCurrentProcessId())
-    createDir(dir / ".3code")
+    createDir(dir)
     defer:
       sb.stopWall()
       removeDir(dir)
-    writeFile(dir / ".3code" / "sandbox", "deny /\nallow\nallow 127.0.0.1\n")
+    writeFile(dir / ".sandboxrc", "deny /\nallow\nallow 127.0.0.1\n")
     let polCopy = dir / "policy-copy"
-    copyFile(dir / ".3code" / "sandbox", polCopy)
+    copyFile(dir / ".sandboxrc", polCopy)
     sb.current = parseCascaded(readFile(polCopy),
-      readFile(dir / ".3code" / "sandbox"), dir)
+      readFile(dir / ".sandboxrc"), dir)
     check sb.wallProxyNeeded(sb.current)
     sb.active = true
     sb.moveWallSock(dir)  # writable, mirrors streamexec's tmp
@@ -58,7 +58,7 @@ suite "wall proxy lifecycle":
     # reload propagation: rewrite the repo policy, sync, proxy file changes
     let polFile = sb.wallProxyDir / "policy"
     let before = readFile(polFile)
-    writeFile(dir / ".3code" / "sandbox", "deny /\nallow\nallow 127.0.0.1\nallow example.com\n")
+    writeFile(dir / ".sandboxrc", "deny /\nallow\nallow 127.0.0.1\nallow example.com\n")
     sb.syncWallProxyPolicy(dir)
     let after = readFile(polFile)
     check after != before

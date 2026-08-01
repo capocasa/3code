@@ -363,7 +363,7 @@ Act first, explain after. Don't narrate your plan before executing it — just e
 
 # Tools
 
-Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
+Your bash and file tools are sandboxed to a policy in `.sandboxrc`; a blocked operation fails with an error that names the policy file.
 
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `write(path, body)` — create or overwrite a file with `body`.
@@ -435,7 +435,7 @@ Act first, explain after. Don't narrate your plan before executing it — just e
 
 # Tools
 
-Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
+Your bash and file tools are sandboxed to a policy in `.sandboxrc`; a blocked operation fails with an error that names the policy file.
 
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `write(path, body)` — create or overwrite a file with `body`.
@@ -688,7 +688,7 @@ When unfamiliar, orient first: `ls` README, build manifest, skim relevant source
 
 # Tools
 
-Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
+Your bash and file tools are sandboxed to a policy in `.sandboxrc`; a blocked operation fails with an error that names the policy file.
 
 - `bash(command, stdin?, timeout?)` - shell command. Returns stdout, stderr, exit code. `timeout` (optional, seconds) raises the 120s default up to 600s for builds, test suites, installs.
 - `read(path, offset?, limit?)` - read a file. Use `offset`/`limit` for large files.
@@ -738,7 +738,7 @@ const QwenPreamble = """You are the Qwen edition of 3code, the economical coding
 
 # Tools
 
-Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
+Your bash and file tools are sandboxed to a policy in `.sandboxrc`; a blocked operation fails with an error that names the policy file.
 
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `write(path, body)` — create or overwrite a file with `body`.
@@ -882,7 +882,7 @@ a real fork only the user can decide.
 
 # Tools
 
-Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
+Your bash and file tools are sandboxed to a policy in `.sandboxrc`; a blocked operation fails with an error that names the policy file.
 
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `read(path, offset?, limit?)` — read a file. Use `offset`/`limit` for large files; prefer targeted reads over full re-ingest.
@@ -1393,7 +1393,7 @@ Your failure mode is declaring success on insufficient evidence. Fight it.
 
 # Tools
 
-Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
+Your bash and file tools are sandboxed to a policy in `.sandboxrc`; a blocked operation fails with an error that names the policy file.
 
 - `bash(cmd, stdin?, timeout?)` - shell. timeout in seconds (default 120, max 600).
 - `read(path, offset?, limit?)` - read file, targeted ranges.
@@ -1490,7 +1490,7 @@ Over-thinking a simple task wastes tokens and latency as surely as under-thinkin
 
 # Tools
 
-Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
+Your bash and file tools are sandboxed to a policy in `.sandboxrc`; a blocked operation fails with an error that names the policy file.
 
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `write(path, body)` — create or overwrite a file with `body`.
@@ -1566,7 +1566,7 @@ You carry a binary reasoning toggle (`on`/`off`). Reasoning is on by default. En
 
 # Tools
 
-Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
+Your bash and file tools are sandboxed to a policy in `.sandboxrc`; a blocked operation fails with an error that names the policy file.
 
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
 - `read(path, offset?, limit?)` — read a file. Use `offset`/`limit` for large files; prefer targeted reads over full re-ingest.
@@ -1682,7 +1682,7 @@ K2.7-code and K3 always think (no off mode). K2.5/K2.6 toggle via `:reasoning`. 
 
 # Tools
 
-Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
+Your bash and file tools are sandboxed to a policy in `.sandboxrc`; a blocked operation fails with an error that names the policy file.
 
 `bash`, `read`, `write`, `patch`, `update_plan`, `web_search`, `web_fetch`, `clear`. Use exact names — no invented tools, no tools from prior sessions not in the current schema. Independent calls run in parallel; batch them. Sequential only when one result determines the next. If a tool fails twice, stop and explain.
 
@@ -1753,7 +1753,7 @@ Ling toggles reasoning via the textual directive at the top of this prompt (`det
 
 # Tools
 
-Your bash and file tools are sandboxed to a policy in `.3code/sandbox`; a blocked operation fails with an error that names the policy file.
+Your bash and file tools are sandboxed to a policy in `.sandboxrc`; a blocked operation fails with an error that names the policy file.
 
 `bash`, `read`, `write`, `patch`, `update_plan`, `web_search`, `web_fetch`, `clear`. Use exact names — no invented tools. Independent calls run in parallel; batch them. Sequential only when one result determines the next. If a tool fails twice, stop and explain.
 
@@ -2112,7 +2112,7 @@ commands:
   :sandbox gather on|off  gather mode: allow everything, appending each
                     would-be denial as an allow rule to the policy file
   (T is a path or a host; P a path. Policy words: allow, readonly,
-  deny; see .3code/sandbox)
+  deny; see .sandboxrc)
   :q :quit          exit (also Ctrl-D)
 
 input:

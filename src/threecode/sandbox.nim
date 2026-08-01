@@ -5,7 +5,7 @@
 ## files form the cascade, when to reload them, and whether the OS
 ## backend actually works on this host.
 ##
-## Each line of `.3code/sandbox` is an access word (`allow` writable,
+## Each line of `.sandboxrc` is an access word (`allow` writable,
 ## `deny` deny, `readonly` read-only) plus a target: an absolute path, `~/`
 ## home path, `./` project-relative path (bare `allow` = the project
 ## dir), or a host/IP with optional `:port`. Host rules fence bash
@@ -13,7 +13,7 @@
 ## section below). See sandwall's rules module for the full grammar.
 ##
 ## The effective policy is the cascade of the system file
-## (`~/.config/3code/sandbox`) and the repo file (`.3code/sandbox`),
+## (`~/.config/3code/sandbox`) and the repo file (`.sandboxrc`),
 ## default text when absent, so the sandbox is always on.
 ##
 ## `reloadIfChanged` re-reads the cascade when either file's mtime
@@ -33,7 +33,7 @@ import types
 export sandwall.AccessKind, sandwall.Policy, sandwall.Rule,
        sandwall.RuleKind, sandwall.parseCascaded, sandwall.defaultPolicyText,
        sandwall.repoPolicyPath, sandwall.cascadedFiles, sandwall.checkPath,
-       sandwall.renderPolicy, sandwall.PolicyDir, sandwall.resolve,
+       sandwall.renderPolicy, sandwall.resolve,
        sandwall.Resolved
 
 var
@@ -290,16 +290,14 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
       (false, "sandbox: " & resolved & " is denied by the policy (" & policyHint() & ")")
 
 proc ensureDefaultSandbox*(dir: string): bool =
-  ## Create the default policy file at `dir/.3code/sandbox` if none
+  ## Create the default policy file at `dir/.sandboxrc` if none
   ## exists, seeding it with the built-in default policy. Used only by
   ## `appendRule` to seed the repo file on the first explicit
   ## `:sandbox allow|readonly|deny` edit. Not part of startup: the
   ## cascade loads the default in-memory when no file is present.
   let path = repoPolicyPath(dir)
   if fileExists(path): return true
-  let sandboxDir = dir / PolicyDir
   try:
-    if not dirExists(sandboxDir): createDir(sandboxDir)
     writeFile(path, defaultPolicyText())
   except CatchableError:
     return false

@@ -69,8 +69,8 @@ suite "policy reload (reloadIfChanged)":
     # next reloadIfChanged to pick up the new rule. The system file is
     # global, so the repo rule is the one asserted (last-wins).
     let dir = getTempDir() / ("3code-reload-" & $getCurrentProcessId())
-    createDir(dir / ".3code")
-    let repoFile = dir / ".3code" / "sandbox"
+    createDir(dir)
+    let repoFile = dir / ".sandboxrc"
     let target = (dir / "locked").normalizedPath
     writeFile(repoFile, "allow ./\n")
     let wasActive = sandbox.active
@@ -97,8 +97,8 @@ suite "policy reload (reloadIfChanged)":
     # appended live to the repo policy as an `allow` rule. Toggling
     # gather off restores enforcement.
     let dir = getTempDir() / ("3code-gather-" & $getCurrentProcessId())
-    createDir(dir / ".3code")
-    let repoFile = dir / ".3code" / "sandbox"
+    createDir(dir)
+    let repoFile = dir / ".sandboxrc"
     writeFile(repoFile, "deny /\nallow ./\n")
     let outside = (dir / ".." / "outside-gather").normalizedPath
     let wasActive = sandbox.active

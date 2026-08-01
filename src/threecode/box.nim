@@ -41,7 +41,8 @@ Usage:
 
   With --policy, the writable/read-only sets come from the given policy
   files (cascaded in order, system first, relative targets resolved
-  against the parent of the last file's `.3code` directory). Explicit
+  against the project dir: the parent of a `.sandboxrc` file, else cwd).
+  Explicit
   RWPATH/ROPATH args union with the policy sets. Policy files themselves
   are forced read-only inside the sandbox.
 
@@ -51,7 +52,7 @@ Usage:
 
 Examples:
   3code box restrict /tmp /home/me/work -- ls -la
-  3code box --policy ~/.config/3code/sandbox --policy .3code/sandbox \
+  3code box --policy ~/.config/3code/sandbox --policy .sandboxrc \
     restrict -- make test
   3code box restrict . -- make test
 
@@ -112,12 +113,12 @@ proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
     var texts: seq[string]
     for f in a.policies:
       texts.add(if fileExists(f): readFile(f) else: "")
-    # Relative targets resolve against the project dir: the parent of the
-    # last policy file's `.3code` directory, falling back to cwd.
+    # Relative targets resolve against the project dir: the parent of
+    # the last `.sandboxrc` policy file, falling back to cwd.
     let last = a.policies[^1]
     var projectDir = getCurrentDir()
-    if last.parentDir.splitPath.tail == PolicyDir:
-      projectDir = last.parentDir.parentDir
+    if last.extractFilename == PolicyFile:
+      projectDir = last.parentDir
     var combined = ""
     for t in texts: combined.add t & "\n"
     let pol = parsePolicy(combined, projectDir)

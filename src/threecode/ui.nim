@@ -836,7 +836,7 @@ proc cmdSandboxSettingSelect(target: string): string =
     return errLnS(&"unknown value: {target} (choose on or off)")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   hintLnS("sandbox: " & (if sandboxEnabled: "on" else: "off") &
-    "  (on = enforce the .3code/sandbox policy, off = run unconfined)")
+    "  (on = enforce the .sandboxrc policy, off = run unconfined)")
 
 proc nearestCommand(name: string): string =
   var bestDist = high(int)
