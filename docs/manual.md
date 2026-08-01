@@ -351,7 +351,7 @@ in for the ones below it:
 2. **repo** - `.3code/sandbox` in your project directory.
 
 A missing level is not empty: it contributes the built-in default
-(`deny /`, `write /tmp`, then `write` for the cwd), so the
+(`deny /`, `allow /tmp`, then `allow` for the cwd), so the
 sandbox is always on. The
 effective policy is the two texts concatenated (system then repo) and
 parsed once, so a repo-level `deny /` cleanly resets anything a
@@ -393,8 +393,8 @@ it.
 Word        Meaning
 ==========  ==============================================
 ``deny``    deny: no read, no write, no connect
-``read``    read-only: read and execute (paths only)
-``write``   writable path / connectable host
+``readonly``  read-only: read and execute (paths only)
+``allow``   writable path / connectable host
 ==========  ==============================================
 
 A word only counts as an access word when it stands alone (whitespace
@@ -412,17 +412,17 @@ Start       Target
 letter/digit  host rule: hostname, IPv4, or IPv6, optional ``:port``
 ==========  ==============================================
 
-A bare word with no target means the project dir itself (``write`` =
-writable project). Host rules (``write api.example.com``,
-``write 1.2.3.4:8080``, ``write *`` for no network restrictions) fence
+A bare word with no target means the project dir itself (``allow`` =
+writable project). Host rules (``allow api.example.com``,
+``allow 1.2.3.4:8080``, ``allow *`` for no network restrictions) fence
 the network egress of sandboxed bash commands through the wall proxy.
 
 On first run in a new directory, 3code uses this default:
 
 ```
 deny /
-write /tmp
-write
+allow /tmp
+allow
 ```
 
 The root is denied, the system temp dir and the project directory are
@@ -435,7 +435,7 @@ If you want the agent to have free rein over the whole filesystem, replace
 the file with one line:
 
 ```
-write /
+allow /
 ```
 
 This is the explicit opt-in the spec requires. 3code never writes yolo for
@@ -448,10 +448,10 @@ makes the working directory writable, opens ``/var`` read-only, then locks
 down a secrets directory inside the project:
 
 ```
-- /
-+
-* /var
-- ./secrets
+deny /
+allow
+readonly /var
+deny ./secrets
 ```
 
 The last matching rule for a path wins. ``./secrets`` is covered by the
@@ -483,7 +483,26 @@ is the only way to run without a sandbox short of editing the file.
 The agent never writes the sandbox file. If the model proposes a policy
 change, it edits a copy and you move it into place. This keeps the trust
 boundary entirely on your side: the sandbox is defined at prompt time, by
-you, and the agent cannot weaken it.
+you, and the agent cannot weaken it. Gather mode (below) is the one
+exception, and you switch it on explicitly.
+
+### Gather mode
+
+`:sandbox gather on` flips the sandbox into record mode: every would-be
+denial is allowed instead, and the path is appended live as an ``allow``
+rule to `.3code/sandbox`. Run a normal working session, then
+`:sandbox gather off` - the policy file now covers everything the agent
+actually needed. While gather mode is on, bash commands run unconfined
+(the kernel backends cannot observe-and-allow) and the working directory
+of each bash call is recorded. Denials are appended verbatim and
+un-deduped; review the file after a gather session. The toggle lives in
+a flag file at `.3code/gather`, so it works regardless of policy
+contents and persists across reloads.
+
+When enforcement is on and a sandboxed bash command fails with
+``Permission denied``, 3code appends a hint to the tool output pointing
+at the policy files, so the agent knows the sandbox (not the OS) denied
+it and asks you instead of retrying blindly.
 
 ### What gets sandboxed
 

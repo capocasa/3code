@@ -2106,11 +2106,13 @@ commands:
   :sandbox          show the active filesystem sandbox rules
   :sandbox show     (same)
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow T  add a writable/connectable rule (+ T)
-  :sandbox readonly P  add a read-only rule (* P)
-  :sandbox deny T   add a deny rule (- T)
-  (T is a path or a host; P a path. Policy syntax: + allow, - deny,
-  * read-only; see .3code/sandbox)
+  :sandbox allow T  add a writable/connectable rule (allow T)
+  :sandbox readonly P  add a read-only rule (readonly P)
+  :sandbox deny T   add a deny rule (deny T)
+  :sandbox gather on|off  gather mode: allow everything, appending each
+                    would-be denial as an allow rule to the policy file
+  (T is a path or a host; P a path. Policy words: allow, readonly,
+  deny; see .3code/sandbox)
   :q :quit          exit (also Ctrl-D)
 
 input:

@@ -339,7 +339,8 @@ export DEBIAN_FRONTEND=noninteractive
       # leader. The backend is compiled in, so `procboxExe` is just our own
       # path and is always set when `active`; the unconfined setsid fallback
       # below only runs when the sandbox is off entirely.
-      if sandboxEnabled and sandbox.active and sandbox.procboxExe.len > 0:
+      if sandboxEnabled and sandbox.active and sandbox.procboxExe.len > 0 and
+          not sandbox.gatherMode(getCurrentDir()):
         # The box subprocess loads the policy files itself (--policy), so
         # every launch enforces the freshest file contents; no mtime
         # plumbing needed here. The script + stdin live in a temp dir
@@ -392,6 +393,13 @@ export DEBIAN_FRONTEND=noninteractive
         startProcess(sandbox.procboxExe, args = args, env = env,
                      options = {poStdErrToStdOut, poUsePath})
       else:
+        # Unconfined path: sandbox off, no backend, or gather mode.
+        # Gather mode additionally records the bash working dir as an
+        # `allow` rule: inside the project that is already allowed (a
+        # no-op rule), outside it opens the dir the command ran in.
+        if sandboxEnabled and sandbox.active and
+            sandbox.gatherMode(getCurrentDir()):
+          sandbox.gatherRecordBash(getCurrentDir())
         let setsidExe = findExe("setsid")
         if setsidExe.len > 0:
           startProcess(setsidExe, args = ["/bin/sh", "-c", wrapped],
@@ -474,5 +482,20 @@ export DEBIAN_FRONTEND=noninteractive
     if rawOut.len > 0 and not rawOut.endsWith("\n"):
       rawOut.add "\n"
     return (rawOut, 124, cap)
+
+  # Sandbox denial hint: a sandboxed command cannot tell EPERM from the
+  # kernel sandbox apart from a plain filesystem permission problem, so
+  # a bare "Permission denied" would send the agent retrying blindly.
+  # When the policy is enforced and the output smells like EACCES,
+  # append a pointer at the policy file. OSError messages are appended
+  # after the command's own output, so the hint lands at the end.
+  if code != 0 and sandboxEnabled and sandbox.active and
+      not sandbox.gatherMode(getCurrentDir()) and
+      ("Permission denied" in rawOut or "Operation not permitted" in rawOut):
+    if rawOut.len > 0 and not rawOut.endsWith("\n"):
+      rawOut.add "\n"
+    rawOut.add "sandbox: a permission error above may be the filesystem " &
+      "sandbox denying access (" & sandbox.policyHint() & "); " &
+      "ask the user to allow it or to run `:sandbox gather on`\n"
 
   return (rawOut, code, cap)

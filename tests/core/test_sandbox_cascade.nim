@@ -6,7 +6,7 @@ discard """
   # `parseCascaded` (re-exported from sandwall) and the mtime-driven
   # `reloadIfChanged` that picks up mid-session policy edits.
 """
-import std/[unittest, os, times]
+import std/[unittest, os, times, strutils]
 import threecode/sandbox
 import threecode/types
 
@@ -38,23 +38,23 @@ suite "sandbox cascade (parseCascaded)":
       check s.checkPath("/tmp") == akWritable
 
   test "repo file only -> repo rules win for the paths it names":
-    let s = parseCascaded(defaultPolicyText(), "write " & opt & "\n", proj)
+    let s = parseCascaded(defaultPolicyText(), "allow " & opt & "\n", proj)
     check s.rules[^1].access == akWritable
     check s.rules[^1].path == opt
     # cwd stays writable (from the default).
     check s.checkPath(proj) == akWritable
 
   test "system file only -> system rules apply":
-    let s = parseCascaded("read " & varDir & "\n", defaultPolicyText(), proj)
+    let s = parseCascaded("readonly " & varDir & "\n", defaultPolicyText(), proj)
     check s.rules[0].access == akReadOnly
     check s.rules[0].path == varDir
 
   test "both -> system then repo concatenated; repo deny resets a system allow":
-    let s = parseCascaded("write " & opt & "\n", "deny " & opt & "\n", proj)
+    let s = parseCascaded("allow " & opt & "\n", "deny " & opt & "\n", proj)
     check s.checkPath(opt) == akDeny
 
   test "repo can broaden beyond the system default":
-    let s = parseCascaded(defaultPolicyText(), "write " & opt & "\nread " & varDir & "\n", proj)
+    let s = parseCascaded(defaultPolicyText(), "allow " & opt & "\nreadonly " & varDir & "\n", proj)
     check s.checkPath(opt) == akWritable
     check s.checkPath(varDir) == akReadOnly
 
@@ -72,7 +72,7 @@ suite "policy reload (reloadIfChanged)":
     createDir(dir / ".3code")
     let repoFile = dir / ".3code" / "sandbox"
     let target = (dir / "locked").normalizedPath
-    writeFile(repoFile, "write ./\n")
+    writeFile(repoFile, "allow ./\n")
     let wasActive = sandbox.active
     let saved = sandbox.current
     sandbox.active = true
@@ -82,7 +82,7 @@ suite "policy reload (reloadIfChanged)":
       check sandbox.reloadIfChanged(dir) == false
       # Tighten the policy and force a detectably newer mtime (filesystem
       # mtime granularity can exceed the test's runtime).
-      writeFile(repoFile, "write ./\ndeny ./locked\n")
+      writeFile(repoFile, "allow ./\ndeny ./locked\n")
       setLastModificationTime(repoFile, getTime() + 3.seconds)
       check sandbox.reloadIfChanged(dir) == true
       check sandbox.current.checkPath(target) == akDeny
@@ -92,8 +92,52 @@ suite "policy reload (reloadIfChanged)":
       sandbox.current = saved
       removeDir(dir)
 
+  test "gather mode appends allow rules for would-be denials":
+    # checkRawPath with gather mode on: a denied path is permitted and
+    # appended live to the repo policy as an `allow` rule. Toggling
+    # gather off restores enforcement.
+    let dir = getTempDir() / ("3code-gather-" & $getCurrentProcessId())
+    createDir(dir / ".3code")
+    let repoFile = dir / ".3code" / "sandbox"
+    writeFile(repoFile, "deny /\nallow ./\n")
+    let outside = (dir / ".." / "outside-gather").normalizedPath
+    let wasActive = sandbox.active
+    let saved = sandbox.current
+    let savedEnabled = sandboxEnabled
+    sandbox.active = true
+    sandboxEnabled = true
+    try:
+      sandbox.current = sandbox.loadCascaded(dir)
+      let oldCwd = getCurrentDir()
+      setCurrentDir(dir)
+      try:
+        # Enforcement on: denied.
+        let (okNo, _) = sandbox.checkRawPath(outside, needsWrite = true)
+        check not okNo
+        check outside notin readFile(repoFile)
+        # Gather on: allowed, rule appended live.
+        sandbox.setGatherMode(dir, true)
+        check sandbox.gatherMode(dir)
+        let (okG, _) = sandbox.checkRawPath(outside, needsWrite = true)
+        check okG
+        check ("allow " & outside) in readFile(repoFile)
+        # Gather off: enforcement resumes; the gathered rule now covers
+        # the path so it stays allowed.
+        sandbox.setGatherMode(dir, false)
+        check not sandbox.gatherMode(dir)
+        sandbox.current = sandbox.loadCascaded(dir)
+        let (okAfter, _) = sandbox.checkRawPath(outside, needsWrite = true)
+        check okAfter
+      finally:
+        setCurrentDir(oldCwd)
+    finally:
+      sandbox.active = wasActive
+      sandbox.current = saved
+      sandboxEnabled = savedEnabled
+      removeDir(dir)
+
   test "resolve surfaces narrowing denies (deny under an allow)":
-    let s = parseCascaded("write " & opt & "\n", "deny " & opt / "locked" & "\n", proj)
+    let s = parseCascaded("allow " & opt & "\n", "deny " & opt / "locked" & "\n", proj)
     let r = s.resolve()
     check r.writable == @[opt]
     check r.denied == @[opt / "locked"]

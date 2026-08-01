@@ -250,7 +250,7 @@ suite "box subcommand (built-in sandwall)":
     if backendWorks:
       let proj = boxTmp / "proj"
       createDir(proj / ".3code")
-      writeFile(proj / ".3code" / "sandbox", "deny /\nwrite\n")
+      writeFile(proj / ".3code" / "sandbox", "deny /\nallow\n")
       let inside = proj / "ok.txt"
       let rIn = run(["box", "--policy", proj / ".3code" / "sandbox",
                      "restrict", "--", "touch", inside])
@@ -278,7 +278,7 @@ suite "box subcommand (built-in sandwall)":
       createDir(proj / ".3code")
       let pol = proj / ".3code" / "sandbox"
       let target = proj / "t.txt"
-      writeFile(pol, "deny /\nwrite\n")
+      writeFile(pol, "deny /\nallow\n")
       check run(["box", "--policy", pol, "restrict", "--", "touch", target]).code == 0
       removeFile(target)
       writeFile(pol, "deny /\n")
@@ -323,7 +323,7 @@ suite "wall subcommand (built-in sandwall wall)":
       createDir(dir)
       defer: removeDir(dir)
       let pol = dir / "policy"
-      writeFile(pol, "deny /\nwrite " & dir & "\nwrite 127.0.0.1\n")
+      writeFile(pol, "deny /\nallow " & dir & "\nallow 127.0.0.1\n")
       # pick a free proxy port
       let probe = newSocket(buffered = false)
       probe.bindAddr(Port(0), "127.0.0.1")
