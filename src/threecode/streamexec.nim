@@ -18,6 +18,14 @@ when defined(windows):
 
 var wallWarnShown = false  ## one Windows wall warning per run
 
+proc shPath(): string =
+  ## POSIX shell path. Android/Termux has no /bin/sh; $PREFIX/bin/sh is
+  ## the same dash/bash the interactive shell uses.
+  when defined(android):
+    getEnv("PREFIX", "/data/data/com.termux/files/usr") & "/bin/sh"
+  else:
+    "/bin/sh"
+
 when defined(windows):
   var cachedBash* {.threadvar.}: string
 
@@ -359,7 +367,7 @@ export DEBIAN_FRONTEND=noninteractive
         # the script, never writes there.
         args.add ["--ro", tmp]
         args.add "--"
-        args.add "/bin/sh"
+        args.add shPath()
         args.add "-c"
         args.add wrapped
         # Network wall: host rules in the policy mean the box child is
@@ -381,7 +389,7 @@ export DEBIAN_FRONTEND=noninteractive
             args.add "restrict"
             args.add tmp
             args.add "--"
-            args.add "/bin/sh"
+            args.add shPath()
             args.add "-c"
             args.add wrapped
             env = newStringTable()  # case-sensitive on posix; env names differ by case
@@ -402,10 +410,10 @@ export DEBIAN_FRONTEND=noninteractive
           sandbox.gatherRecordBash(getCurrentDir())
         let setsidExe = findExe("setsid")
         if setsidExe.len > 0:
-          startProcess(setsidExe, args = ["/bin/sh", "-c", wrapped],
+          startProcess(setsidExe, args = [shPath(), "-c", wrapped],
                        options = {poStdErrToStdOut, poUsePath})
         else:
-          startProcess("/bin/sh", args = ["-c", wrapped],
+          startProcess(shPath(), args = ["-c", wrapped],
                        options = {poStdErrToStdOut, poUsePath})
     else:
       let b = resolveBash()

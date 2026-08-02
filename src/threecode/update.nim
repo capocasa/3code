@@ -24,7 +24,10 @@ const
   ThrottleSecs = 4 * 60 * 60
 
 const Tarball =
-  when defined(linux) and (defined(amd64) or defined(x86_64)):
+  when defined(android):
+    ""  # Termux builds from source (nimble install); the glibc linux
+        # arm64 tarball wouldn't run under Android's bionic anyway.
+  elif defined(linux) and (defined(amd64) or defined(x86_64)):
     "3code-linux-amd64.tar.gz"
   elif defined(linux) and (defined(arm64) or defined(aarch64)):
     "3code-linux-arm64.tar.gz"

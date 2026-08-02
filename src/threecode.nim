@@ -34,7 +34,12 @@ import threecode/[types, util, prompts, shell, session, compact,
                   toolstream, turns, transcript, sandbox, box, wall]
 when defined(windows):
   import threecode/streamexec  # for resolveBash, used by ensureBash
-import tinotify
+when not defined(android):
+  import tinotify
+else:
+  # Termux/Android has no desktop notification service; tinotify
+  # hard-errors on the OS family, so notifications no-op there.
+  proc notify(app, title, body: string) = discard
 import threecode/minline
 import threecode/engine as termengine
 import threecode/library
