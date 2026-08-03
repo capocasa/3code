@@ -237,7 +237,9 @@ suite "box subcommand (built-in sandwall)":
       let outside = getTempDir() / ("3code-box-leak-" & $epochTime().int64)
       let r = run(["box", "restrict", boxTmp, "--", "touch", outside])
       check r.code != 0
-      check "Permission denied" in r.o
+      # macOS Seatbelt reports the blocked syscall as EPERM ("Operation
+      # not permitted") where Linux Landlock reports EACCES.
+      check "Permission denied" in r.o or "Operation not permitted" in r.o
       check not fileExists(outside)
     else:
       skip()
