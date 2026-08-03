@@ -1,7 +1,7 @@
-===== 666 =====
+===== 347 =====
 
   ╭─╮
-   ─┤  3code v0.6.0-main-8332eacf-unstaged   the economical coding agent
+   ─┤  3code v0.6.0-main-fee869bd-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -10,9 +10,7 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ :help
-===== 979 =====
-  :provider edit X  edit provider X (url, key, models)
-  :provider rm X    remove provider X
+===== 146 =====
   :reasoning        list reasoning levels for current model (* marks active)
   :reasoning X      switch reasoning level (low / medium / high)
   :streaming        show streaming mode (on = live output, off = request/response)
@@ -30,11 +28,13 @@
   :sandbox          show the active filesystem sandbox rules
   :sandbox show     (same)
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow T  add a writable/connectable rule (+ T)
-  :sandbox readonly P  add a read-only rule (* P)
-  :sandbox deny T   add a deny rule (- T)
-  (T is a path or a host; P a path. Policy syntax: + allow, - deny,
-  * read-only; see .3code/sandbox)
+  :sandbox allow T  add a writable/connectable rule (allow T)
+  :sandbox readonly P  add a read-only rule (readonly P)
+  :sandbox deny T   add a deny rule (deny T)
+  :sandbox gather on|off  gather mode: allow everything, appending each
+                    would-be denial as an allow rule to the policy file
+  (T is a path or a host; P a path. Policy words: allow, readonly,
+  deny; see .sandboxrc)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -51,9 +51,7 @@ input:
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯
-===== 309 =====
-  :provider edit X  edit provider X (url, key, models)
-  :provider rm X    remove provider X
+===== 189 =====
   :reasoning        list reasoning levels for current model (* marks active)
   :reasoning X      switch reasoning level (low / medium / high)
   :streaming        show streaming mode (on = live output, off = request/response)
@@ -71,11 +69,13 @@ input:
   :sandbox          show the active filesystem sandbox rules
   :sandbox show     (same)
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow T  add a writable/connectable rule (+ T)
-  :sandbox readonly P  add a read-only rule (* P)
-  :sandbox deny T   add a deny rule (- T)
-  (T is a path or a host; P a path. Policy syntax: + allow, - deny,
-  * read-only; see .3code/sandbox)
+  :sandbox allow T  add a writable/connectable rule (allow T)
+  :sandbox readonly P  add a read-only rule (readonly P)
+  :sandbox deny T   add a deny rule (deny T)
+  :sandbox gather on|off  gather mode: allow everything, appending each
+                    would-be denial as an allow rule to the policy file
+  (T is a path or a host; P a path. Policy words: allow, readonly,
+  deny; see .sandboxrc)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -92,9 +92,7 @@ input:
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
-===== 707 =====
-  :notify           show notify mode (on = desktop notification when a turn ends)
-  :notify on|off    toggle turn-end desktop notification
+===== 264 =====
   :retry            show patient-retry mode (on = ~36h hold for outages/limits)
   :retry on|off     toggle patient retry of 429/5xx/network errors
   :prompt           show the active system prompt
@@ -106,11 +104,13 @@ input:
   :sandbox          show the active filesystem sandbox rules
   :sandbox show     (same)
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow T  add a writable/connectable rule (+ T)
-  :sandbox readonly P  add a read-only rule (* P)
-  :sandbox deny T   add a deny rule (- T)
-  (T is a path or a host; P a path. Policy syntax: + allow, - deny,
-  * read-only; see .3code/sandbox)
+  :sandbox allow T  add a writable/connectable rule (allow T)
+  :sandbox readonly P  add a read-only rule (readonly P)
+  :sandbox deny T   add a deny rule (deny T)
+  :sandbox gather on|off  gather mode: allow everything, appending each
+                    would-be denial as an allow rule to the policy file
+  (T is a path or a host; P a path. Policy words: allow, readonly,
+  deny; see .sandboxrc)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -133,9 +133,7 @@ stub  [stub-model]
 alt
 
 ❯
-===== 718 =====
-  :notify           show notify mode (on = desktop notification when a turn ends)
-  :notify on|off    toggle turn-end desktop notification
+===== 514 =====
   :retry            show patient-retry mode (on = ~36h hold for outages/limits)
   :retry on|off     toggle patient retry of 429/5xx/network errors
   :prompt           show the active system prompt
@@ -147,11 +145,13 @@ alt
   :sandbox          show the active filesystem sandbox rules
   :sandbox show     (same)
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow T  add a writable/connectable rule (+ T)
-  :sandbox readonly P  add a read-only rule (* P)
-  :sandbox deny T   add a deny rule (- T)
-  (T is a path or a host; P a path. Policy syntax: + allow, - deny,
-  * read-only; see .3code/sandbox)
+  :sandbox allow T  add a writable/connectable rule (allow T)
+  :sandbox readonly P  add a read-only rule (readonly P)
+  :sandbox deny T   add a deny rule (deny T)
+  :sandbox gather on|off  gather mode: allow everything, appending each
+                    would-be denial as an allow rule to the policy file
+  (T is a path or a host; P a path. Policy words: allow, readonly,
+  deny; see .sandboxrc)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -174,19 +174,19 @@ stub  [stub-model]
 alt
 
 ❯ :model
-===== 306 =====
-  :log              list all tool calls this session
-  :sessions         list recent sessions saved in this directory (max 20)
+===== 703 =====
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :version          show the running 3code version
   :sandbox          show the active filesystem sandbox rules
   :sandbox show     (same)
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow T  add a writable/connectable rule (+ T)
-  :sandbox readonly P  add a read-only rule (* P)
-  :sandbox deny T   add a deny rule (- T)
-  (T is a path or a host; P a path. Policy syntax: + allow, - deny,
-  * read-only; see .3code/sandbox)
+  :sandbox allow T  add a writable/connectable rule (allow T)
+  :sandbox readonly P  add a read-only rule (readonly P)
+  :sandbox deny T   add a deny rule (deny T)
+  :sandbox gather on|off  gather mode: allow everything, appending each
+                    would-be denial as an allow rule to the policy file
+  (T is a path or a host; P a path. Policy words: allow, readonly,
+  deny; see .sandboxrc)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -215,19 +215,19 @@ stub-model  [stub]
 stub-large
 
 ❯
-===== 534 =====
-  :log              list all tool calls this session
-  :sessions         list recent sessions saved in this directory (max 20)
+===== 845 =====
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :version          show the running 3code version
   :sandbox          show the active filesystem sandbox rules
   :sandbox show     (same)
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow T  add a writable/connectable rule (+ T)
-  :sandbox readonly P  add a read-only rule (* P)
-  :sandbox deny T   add a deny rule (- T)
-  (T is a path or a host; P a path. Policy syntax: + allow, - deny,
-  * read-only; see .3code/sandbox)
+  :sandbox allow T  add a writable/connectable rule (allow T)
+  :sandbox readonly P  add a read-only rule (readonly P)
+  :sandbox deny T   add a deny rule (deny T)
+  :sandbox gather on|off  gather mode: allow everything, appending each
+                    would-be denial as an allow rule to the policy file
+  (T is a path or a host; P a path. Policy words: allow, readonly,
+  deny; see .sandboxrc)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -256,13 +256,13 @@ stub-model  [stub]
 stub-large
 
 ❯ :reasoning
-===== 212 =====
-  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow T  add a writable/connectable rule (+ T)
-  :sandbox readonly P  add a read-only rule (* P)
-  :sandbox deny T   add a deny rule (- T)
-  (T is a path or a host; P a path. Policy syntax: + allow, - deny,
-  * read-only; see .3code/sandbox)
+===== 114 =====
+  :sandbox readonly P  add a read-only rule (readonly P)
+  :sandbox deny T   add a deny rule (deny T)
+  :sandbox gather on|off  gather mode: allow everything, appending each
+                    would-be denial as an allow rule to the policy file
+  (T is a path or a host; P a path. Policy words: allow, readonly,
+  deny; see .sandboxrc)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -297,13 +297,13 @@ reasoning: (none)
 experimental: level is free-form, type any value
 
 ❯
-===== 717 =====
-  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow T  add a writable/connectable rule (+ T)
-  :sandbox readonly P  add a read-only rule (* P)
-  :sandbox deny T   add a deny rule (- T)
-  (T is a path or a host; P a path. Policy syntax: + allow, - deny,
-  * read-only; see .3code/sandbox)
+===== 153 =====
+  :sandbox readonly P  add a read-only rule (readonly P)
+  :sandbox deny T   add a deny rule (deny T)
+  :sandbox gather on|off  gather mode: allow everything, appending each
+                    would-be denial as an allow rule to the policy file
+  (T is a path or a host; P a path. Policy words: allow, readonly,
+  deny; see .sandboxrc)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -338,7 +338,7 @@ reasoning: (none)
 experimental: level is free-form, type any value
 
 ❯ :model stub-large
-===== 829 =====
+===== 571 =====
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -379,7 +379,7 @@ provider  stub
 model     stub-large
 
 ❯
-===== 347 =====
+===== 129 =====
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -420,7 +420,7 @@ provider  stub
 model     stub-large
 
 ❯ :reasoning high
-===== 379 =====
+===== 383 =====
   home / end    jump to start / end of the current logical line
   ctrl+u        clear the buffer
   ctrl+w        delete the word before the cursor
@@ -461,7 +461,7 @@ model     stub-large
 reasoning high
 
 ❯
-===== 540 =====
+===== 398 =====
   home / end    jump to start / end of the current logical line
   ctrl+u        clear the buffer
   ctrl+w        delete the word before the cursor
@@ -502,7 +502,7 @@ model     stub-large
 reasoning high
 
 ❯ :provider alt
-===== 326 =====
+===== 188 =====
   @path         inline file contents (e.g. @src/foo.nim)
 
            
@@ -543,7 +543,7 @@ provider  alt
 model     alt-model
 
 ❯
-===== 520 =====
+===== 118 =====
   @path         inline file contents (e.g. @src/foo.nim)
 
            
@@ -584,7 +584,7 @@ provider  alt
 model     alt-model
 
 ❯ :tokens
-===== 884 =====
+===== 917 =====
 stub  [stub-model]
 alt
 
@@ -625,7 +625,7 @@ model     alt-model
 no tokens used yet
 
 ❯
-===== 519 =====
+===== 145 =====
 stub  [stub-model]
 alt
 
@@ -666,7 +666,7 @@ model     alt-model
 no tokens used yet
 
 ❯ :clear
-===== 922 =====
+===== 990 =====
 
 stub-model  [stub]
 stub-large
@@ -707,7 +707,7 @@ no tokens used yet
 ════════════════════════════════════════
 
 ❯
-===== 777 =====
+===== 529 =====
 
 stub-model  [stub]
 stub-large
@@ -748,7 +748,7 @@ no tokens used yet
 ════════════════════════════════════════
 
 ❯ :sessions
-===== 655 =====
+===== 101 =====
 ❯ :reasoning
 
 reasoning: (none)
@@ -789,7 +789,7 @@ no tokens used yet
 no saved sessions for this directory
 
 ❯
-===== 117 =====
+===== 311 =====
 ❯ :reasoning
 
 reasoning: (none)
@@ -830,7 +830,7 @@ no tokens used yet
 no saved sessions for this directory
 
 ❯ :sessions all
-===== 502 =====
+===== 833 =====
 ❯ :model stub-large
 
 provider  stub
@@ -871,7 +871,7 @@ no saved sessions for this directory
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯
-===== 303 =====
+===== 511 =====
 ❯ :model stub-large
 
 provider  stub
@@ -912,7 +912,7 @@ no saved sessions for this directory
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯ :log
-===== 253 =====
+===== 446 =====
                  
 ❯ :reasoning high
 
@@ -953,7 +953,7 @@ listing is scoped to this directory — run from ~/data/3code/sessions for all
 no tool calls yet
 
 ❯
-===== 297 =====
+===== 368 =====
                  
 ❯ :reasoning high
 
@@ -994,7 +994,7 @@ listing is scoped to this directory — run from ~/data/3code/sessions for all
 no tool calls yet
 
 ❯ :show
-===== 160 =====
+===== 162 =====
 reasoning high
 
                
@@ -1035,7 +1035,7 @@ no tool calls yet
 no tool calls yet
 
 ❯
-===== 828 =====
+===== 922 =====
 reasoning high
 
                
@@ -1076,7 +1076,7 @@ no tool calls yet
 no tool calls yet
 
 ❯ :compact
-===== 478 =====
+===== 253 =====
 provider  alt
 model     alt-model
 
@@ -1117,7 +1117,7 @@ no tool calls yet
 unknown command: :compact  (try :help)
 
 ❯
-===== 364 =====
+===== 669 =====
 provider  alt
 model     alt-model
 
@@ -1158,7 +1158,7 @@ no tool calls yet
 unknown command: :compact  (try :help)
 
 ❯ :summarize
-===== 573 =====
+===== 931 =====
 
 no tokens used yet
 
@@ -1199,7 +1199,7 @@ unknown command: :compact  (try :help)
 failed or not worth it
 
 ❯
-===== 422 =====
+===== 215 =====
 
 no tokens used yet
 
@@ -1240,7 +1240,7 @@ unknown command: :compact  (try :help)
 failed or not worth it
 
 ❯ :prompt
-===== 361 =====
+===== 606 =====
 
 Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), har
 d-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (pushing code, open
@@ -1281,7 +1281,7 @@ Brief. State results, not deliberation. Match response shape to task. End-of-tur
 ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯
-===== 457 =====
+===== 578 =====
 
 Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), har
 d-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (pushing code, open
@@ -1322,7 +1322,7 @@ Brief. State results, not deliberation. Match response shape to task. End-of-tur
 ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯ :toknes
-===== 406 =====
+===== 792 =====
 # Git
 
 Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`. Don't push
@@ -1363,7 +1363,7 @@ ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was alread
 unknown command: :toknes  did you mean :tokens?
 
 ❯
-===== 178 =====
+===== 423 =====
 # Git
 
 Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`. Don't push
