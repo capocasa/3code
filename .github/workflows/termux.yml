@@ -1,0 +1,64 @@
+name: Termux (Android arm64)
+
+on:
+  push:
+    branches: [main]
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: stable
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          parent-nim-install-directory: $HOME
+          nim-install-directory: nim-toolchain
+
+      - name: Install dependencies
+        run: |
+          nimble install -y https://github.com/capocasa/sandwall
+          nimble install -y --depsOnly
+
+      - name: Download Android NDK
+        # The main binary builds for Termux via NDK cross-compile. No
+        # -d:termux: that links -landroid-glob (a Termux package for
+        # pre-API-28 devices); targeting API 28+ gets glob natively.
+        # OpenSSL is dlopen'ed at runtime (Termux's openssl package
+        # provides libssl.so.3), so no TLS libs are linked here.
+        run: |
+          curl -fsSL -o ndk.zip https://dl.google.com/android/repository/android-ndk-r26c-linux.zip
+          unzip -q ndk.zip
+          echo "NDK_CLANG=$PWD/android-ndk-r26c/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang" >> "$GITHUB_ENV"
+
+      - name: Build (cross, --os:android --cpu:arm64)
+        run: |
+          nim c -d:release --os:android --cpu:arm64 -d:ssl -d:testPlainHttp \
+            --clang.exe:"$NDK_CLANG" --clang.linkerexe:"$NDK_CLANG" \
+            -o:3code-android src/threecode.nim
+          file 3code-android
+
+      - name: Package
+        run: |
+          mkdir -p 3code-termux-arm64
+          cp 3code-android 3code-termux-arm64/3code
+          ./3code -v > 3code-termux-arm64/VERSION
+          cp README.md LICENSE 3code-termux-arm64/
+          tar czf 3code-termux-arm64.tar.gz 3code-termux-arm64
+
+      - name: Upload artifact (GitHub Actions)
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3code-termux-arm64
+          path: 3code-termux-arm64.tar.gz
+
+      - name: Upload artifact to 3code.capocasa.dev
+        if: github.ref == 'refs/heads/main'
+        run: |
+          curl -f -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-termux-arm64.tar.gz" \
+            https://3code.capocasa.dev/main/builds/upload.nim
