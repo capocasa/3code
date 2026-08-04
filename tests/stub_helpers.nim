@@ -8,6 +8,19 @@
 
 import std/[os, osproc, strutils, times]
 
+proc linkedPkgSrcDir(pkg: string): string =
+  ## Resolves the src dir for a linked (develop-mode) package from the
+  ## nimble links directory. Returns "" if not found.
+  let linksDir = getHomeDir() / ".nimble" / "links"
+  if not dirExists(linksDir): return
+  for kind, path in walkDir(linksDir):
+    if kind == pcDir and path.extractFilename.startsWith(pkg & "-"):
+      let linkFile = path / (pkg & ".nimble-link")
+      if fileExists(linkFile):
+        let lines = readFile(linkFile).splitLines()
+        if lines.len >= 2 and lines[1].len > 0:
+          return lines[1] / "src"
+
 proc nimbleDepPaths(): seq[string] =
   ## The dep include paths nimble injects, resolved the same way nimble does.
   ## The bare `nim c` the stub build uses needs these to find streamhttp,
@@ -15,10 +28,19 @@ proc nimbleDepPaths(): seq[string] =
   ## default path.
   for pkg in ["unicodedb", "streamhttp", "ttty", "tinotify", "sandwall"]:
     let (outp, code) = execCmdEx("nimble path " & pkg)
+    var path = ""
     if code == 0:
       let first = outp.splitLines()[0]
-      if first.len > 0:
-        result.add("--path:" & first)
+      # nimble path can print an error to stdout while still exiting 0
+      # (e.g. for a linked package like sandwall); only accept a real path.
+      if first.len > 0 and first[0] == '/':
+        path = first
+    if path.len == 0:
+      # nimble path failed or printed an error; fall back to the nimble
+      # links for linked (develop-mode) packages.
+      path = linkedPkgSrcDir(pkg)
+    if path.len > 0:
+      result.add("--path:" & path)
 
 proc nimbleDepFlags*(): string =
   ## Space-joined `--path:` flags for the nimble deps, suitable for splicing

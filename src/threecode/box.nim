@@ -40,12 +40,12 @@ Usage:
   children are confined: writes outside the writable paths fail with
   EACCES.
 
-  With --policy, the writable/read-only sets come from the given
-  policy file (relative targets resolve against the project dir:
-  the file's parent directory, or its parent's parent for a legacy
-  `.3code/sandbox` file). Explicit RWPATH/ROPATH args union with
-  the policy sets. The policy file itself is forced read-only inside
-  the sandbox.
+  With --policy, the writable/read-only sets come from the given policy
+  files (cascaded in order, system first, relative targets resolved
+  against the project dir: the parent of a `.sandboxrc` file, else cwd).
+  Explicit
+  RWPATH/ROPATH args union with the policy sets. Policy files themselves
+  are forced read-only inside the sandbox.
 
   System dirs (/usr, /bin, /lib, /dev/*, etc.) are always read-only so the
   command's binaries, libs, and device nodes stay runnable; --ro adds to
@@ -53,7 +53,8 @@ Usage:
 
 Examples:
   3code box restrict /tmp /home/me/work -- ls -la
-  3code box --policy sandbox restrict -- make test
+  3code box --policy ~/.config/3code/sandbox --policy .sandboxrc \
+    restrict -- make test
   3code box restrict . -- make test
 
 Landlock is monotonic: the restriction is permanent for this process and all
@@ -113,16 +114,12 @@ proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
     var texts: seq[string]
     for f in a.policies:
       texts.add(if fileExists(f): readFile(f) else: "")
-    # Relative targets resolve against the project dir: the policy
-    # file's parent directory (a bare `sandbox` file at the project
-    # root), or the parent of its `.3code` directory for a legacy
-    # `.3code/sandbox` file, falling back to cwd.
+    # Relative targets resolve against the project dir: the parent of
+    # the last `.sandboxrc` policy file, falling back to cwd.
     let last = a.policies[^1]
-    var projectDir = last.parentDir
-    if projectDir.splitPath.tail == PolicyDir:
-      projectDir = projectDir.parentDir
-    if projectDir.len == 0:
-      projectDir = getCurrentDir()
+    var projectDir = getCurrentDir()
+    if last.extractFilename == PolicyFile:
+      projectDir = last.parentDir
     var combined = ""
     for t in texts: combined.add t & "\n"
     let pol = parsePolicy(combined, projectDir)

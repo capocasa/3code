@@ -1,14 +1,12 @@
 discard """
-  # The policy has a single source of truth: the repo file
-  # `.3code/sandbox`, always materialized at launch (seeded from
-  # `~/.3code/sandbox`, itself seeded from the built-in default), with an
-  # implicit read-only guard for the file itself appended last. The
-  # parser itself is exhaustively tested in sandwall's test_rules; these
-  # tests cover the 3code-facing surface: `loadPolicy` semantics and the
-  # mtime-driven `reloadIfChanged` that picks up mid-session policy
-  # edits.
+  # The cascade concatenates a system level and a repo level (each falling
+  # back to the built-in default when absent) and parses once. The parser
+  # itself is exhaustively tested in sandwall's test_rules; these tests
+  # cover the 3code-facing surface: the cascade semantics via
+  # `parseCascaded` (re-exported from sandwall) and the mtime-driven
+  # `reloadIfChanged` that picks up mid-session policy edits.
 """
-import std/[unittest, os, times]
+import std/[unittest, os, times, strutils]
 import threecode/sandbox
 import threecode/types
 
@@ -25,9 +23,12 @@ else:
   const varDir = "/var"
   const proj = "/proj"
 
-suite "sandbox policy file (parsePolicy)":
-  test "default text -> deny /, writable cwd":
-    let s = parsePolicy(defaultPolicyText(), proj)
+suite "sandbox cascade (parseCascaded)":
+  test "both levels at default -> deny /, writable cwd":
+    # Two default texts concatenate (- /, + /tmp, + each); the effective
+    # access is decided by last-wins, so assert via checkPath, not raw rule
+    # count.
+    let s = parseCascaded(defaultPolicyText(), defaultPolicyText(), proj)
     check s.checkPath("/") == akDeny
     check s.checkPath(proj) == akWritable
     check s.checkPath(proj / "sub") == akWritable
@@ -36,17 +37,24 @@ suite "sandbox policy file (parsePolicy)":
       # there by the system prompt) are writable out of the box.
       check s.checkPath("/tmp") == akWritable
 
-  test "repo rules win by order":
-    let s = parsePolicy("+ " & opt & "\n", proj)
+  test "repo file only -> repo rules win for the paths it names":
+    let s = parseCascaded(defaultPolicyText(), "allow " & opt & "\n", proj)
     check s.rules[^1].access == akWritable
     check s.rules[^1].path == opt
+    # cwd stays writable (from the default).
+    check s.checkPath(proj) == akWritable
 
-  test "later deny resets an earlier allow":
-    let s = parsePolicy("+ " & opt & "\n- " & opt & "\n", proj)
+  test "system file only -> system rules apply":
+    let s = parseCascaded("readonly " & varDir & "\n", defaultPolicyText(), proj)
+    check s.rules[0].access == akReadOnly
+    check s.rules[0].path == varDir
+
+  test "both -> system then repo concatenated; repo deny resets a system allow":
+    let s = parseCascaded("allow " & opt & "\n", "deny " & opt & "\n", proj)
     check s.checkPath(opt) == akDeny
 
-  test "broad allow with read-only narrowing":
-    let s = parsePolicy("+ " & opt & "\n* " & varDir & "\n", proj)
+  test "repo can broaden beyond the system default":
+    let s = parseCascaded(defaultPolicyText(), "allow " & opt & "\nreadonly " & varDir & "\n", proj)
     check s.checkPath(opt) == akWritable
     check s.checkPath(varDir) == akReadOnly
 
@@ -56,24 +64,25 @@ suite "sandbox policy file (parsePolicy)":
     check sandboxEnabled == true
 
 suite "policy reload (reloadIfChanged)":
-  test "mtime change reloads the policy file":
+  test "mtime change reloads the cascade":
     # Drive a real repo policy file: load, tighten it on disk, expect the
-    # next reloadIfChanged to pick up the new rule.
+    # next reloadIfChanged to pick up the new rule. The system file is
+    # global, so the repo rule is the one asserted (last-wins).
     let dir = getTempDir() / ("3code-reload-" & $getCurrentProcessId())
-    createDir(dir / ".3code")
-    let repoFile = dir / ".3code" / "sandbox"
+    createDir(dir)
+    let repoFile = dir / ".sandboxrc"
     let target = (dir / "locked").normalizedPath
-    writeFile(repoFile, "+ ./\n")
+    writeFile(repoFile, "allow ./\n")
     let wasActive = sandbox.active
     let saved = sandbox.current
     sandbox.active = true
     try:
-      sandbox.current = sandbox.loadPolicy(dir)
+      sandbox.current = sandbox.loadCascaded(dir)
       check sandbox.current.checkPath(target) == akWritable
       check sandbox.reloadIfChanged(dir) == false
       # Tighten the policy and force a detectably newer mtime (filesystem
       # mtime granularity can exceed the test's runtime).
-      writeFile(repoFile, "+ ./\n- ./locked\n")
+      writeFile(repoFile, "allow ./\ndeny ./locked\n")
       setLastModificationTime(repoFile, getTime() + 3.seconds)
       check sandbox.reloadIfChanged(dir) == true
       check sandbox.current.checkPath(target) == akDeny
@@ -83,22 +92,55 @@ suite "policy reload (reloadIfChanged)":
       sandbox.current = saved
       removeDir(dir)
 
+  test "gather mode appends allow rules for would-be denials":
+    # checkRawPath with gather mode on: a denied path is permitted and
+    # appended live to the repo policy as an `allow` rule. Toggling
+    # gather off restores enforcement.
+    let dir = getTempDir() / ("3code-gather-" & $getCurrentProcessId())
+    createDir(dir)
+    let repoFile = dir / ".sandboxrc"
+    writeFile(repoFile, "deny /\nallow ./\n")
+    let outside = (dir / ".." / "outside-gather").normalizedPath
+    let wasActive = sandbox.active
+    let saved = sandbox.current
+    let savedEnabled = sandboxEnabled
+    let savedGathering = sandbox.gathering
+    sandbox.active = true
+    sandboxEnabled = true
+    try:
+      sandbox.current = sandbox.loadCascaded(dir)
+      let oldCwd = getCurrentDir()
+      setCurrentDir(dir)
+      try:
+        # Enforcement on: denied.
+        let (okNo, _) = sandbox.checkRawPath(outside, needsWrite = true)
+        check not okNo
+        check outside notin readFile(repoFile)
+        # Gather on: allowed, rule appended live.
+        sandbox.gathering = true
+        let (okG, _) = sandbox.checkRawPath(outside, needsWrite = true)
+        check okG
+        check ("allow " & outside) in readFile(repoFile)
+        # Gather off: enforcement resumes; the gathered rule now covers
+        # the path so it stays allowed.
+        sandbox.gathering = false
+        sandbox.current = sandbox.loadCascaded(dir)
+        let (okAfter, _) = sandbox.checkRawPath(outside, needsWrite = true)
+        check okAfter
+      finally:
+        setCurrentDir(oldCwd)
+    finally:
+      sandbox.active = wasActive
+      sandbox.current = saved
+      sandboxEnabled = savedEnabled
+      sandbox.gathering = savedGathering
+      removeDir(dir)
+
   test "resolve surfaces narrowing denies (deny under an allow)":
-    let s = parsePolicy("+ " & opt & "\n- " & opt / "locked" & "\n", proj)
+    let s = parseCascaded("allow " & opt & "\n", "deny " & opt / "locked" & "\n", proj)
     let r = s.resolve()
     check r.writable == @[opt]
     check r.denied == @[opt / "locked"]
     # A deny for a path under no surviving allow is not carried.
-    let s2 = parsePolicy("- /\n- " & opt & "\n", proj)
+    let s2 = parseCascaded("deny /\n", "deny " & opt & "\n", proj)
     check s2.resolve().denied.len == 0
-
-  test "guard pins the policy file read-only inside the loaded policy":
-    # The implicit last rule keeps `.3code/sandbox` read-only even when
-    # the file itself opens the whole project writable.
-    let dir = getTempDir() / ("3code-guard-" & $getCurrentProcessId())
-    createDir(dir / ".3code")
-    writeFile(dir / ".3code" / "sandbox", "+ ./\n")
-    let pol = sandbox.loadPolicy(dir)
-    check pol.checkPath(dir / "x") == akWritable
-    check pol.checkPath(dir / ".3code" / "sandbox") == akReadOnly
-    removeDir(dir)

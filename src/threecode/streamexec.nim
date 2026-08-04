@@ -18,6 +18,14 @@ when defined(windows):
 
 var wallWarnShown = false  ## one Windows wall warning per run
 
+proc shPath(): string =
+  ## POSIX shell path. Android/Termux has no /bin/sh; $PREFIX/bin/sh is
+  ## the same dash/bash the interactive shell uses.
+  when defined(android):
+    getEnv("PREFIX", "/data/data/com.termux/files/usr") & "/bin/sh"
+  else:
+    "/bin/sh"
+
 when defined(windows):
   var cachedBash* {.threadvar.}: string
 
@@ -339,7 +347,8 @@ export DEBIAN_FRONTEND=noninteractive
       # leader. The backend is compiled in, so `procboxExe` is just our own
       # path and is always set when `active`; the unconfined setsid fallback
       # below only runs when the sandbox is off entirely.
-      if sandboxEnabled and sandbox.active and sandbox.procboxExe.len > 0:
+      if sandboxEnabled and sandbox.active and sandbox.procboxExe.len > 0 and
+          not sandbox.gathering:
         # The box subprocess loads the policy files itself (--policy), so
         # every launch enforces the freshest file contents; no mtime
         # plumbing needed here. The script + stdin live in a temp dir
@@ -347,9 +356,10 @@ export DEBIAN_FRONTEND=noninteractive
         # script, it never writes there). The policy force-read-only and
         # Landlock writability warning live in box.nim.
         discard sandbox.reloadIfChanged(getCurrentDir())
-        let policyFile = sandbox.policyPath()
+        let paths = sandbox.policyPaths()
         var args = @["box"]
-        args.add ["--policy", policyFile]
+        args.add ["--policy", paths.system]
+        args.add ["--policy", paths.repo]
         args.add "restrict"
         # No explicit writable paths: those come from the policy
         # inside box (a fully-locked policy simply yields none, which
@@ -357,7 +367,7 @@ export DEBIAN_FRONTEND=noninteractive
         # the script, never writes there.
         args.add ["--ro", tmp]
         args.add "--"
-        args.add "/bin/sh"
+        args.add shPath()
         args.add "-c"
         args.add wrapped
         # Network wall: host rules in the policy mean the box child is
@@ -374,11 +384,12 @@ export DEBIAN_FRONTEND=noninteractive
             # bridge can connect() the unix socket inside the netns.
             args = @[]
             args.add "box"
-            args.add ["--policy", policyFile]
+            args.add ["--policy", paths.system]
+            args.add ["--policy", paths.repo]
             args.add "restrict"
             args.add tmp
             args.add "--"
-            args.add "/bin/sh"
+            args.add shPath()
             args.add "-c"
             args.add wrapped
             env = newStringTable()  # case-sensitive on posix; env names differ by case
@@ -390,12 +401,19 @@ export DEBIAN_FRONTEND=noninteractive
         startProcess(sandbox.procboxExe, args = args, env = env,
                      options = {poStdErrToStdOut, poUsePath})
       else:
+        # Unconfined path: sandbox off, no backend, or gather mode.
+        # Gather mode additionally records the bash working dir as an
+        # `allow` rule: inside the project that is already allowed (a
+        # no-op rule), outside it opens the dir the command ran in.
+        if sandboxEnabled and sandbox.active and
+            sandbox.gathering:
+          sandbox.gatherRecordBash(getCurrentDir())
         let setsidExe = findExe("setsid")
         if setsidExe.len > 0:
-          startProcess(setsidExe, args = ["/bin/sh", "-c", wrapped],
+          startProcess(setsidExe, args = [shPath(), "-c", wrapped],
                        options = {poStdErrToStdOut, poUsePath})
         else:
-          startProcess("/bin/sh", args = ["-c", wrapped],
+          startProcess(shPath(), args = ["-c", wrapped],
                        options = {poStdErrToStdOut, poUsePath})
     else:
       let b = resolveBash()
@@ -472,5 +490,18 @@ export DEBIAN_FRONTEND=noninteractive
     if rawOut.len > 0 and not rawOut.endsWith("\n"):
       rawOut.add "\n"
     return (rawOut, 124, cap)
+
+  # Sandbox denial hint: a sandboxed command cannot tell EPERM from the
+  # kernel sandbox apart from a plain filesystem permission problem, so
+  # a bare "Permission denied" would send the agent retrying blindly.
+  # When the policy is enforced and the output smells like EACCES,
+  # append a pointer at the policy file. OSError messages are appended
+  # after the command's own output, so the hint lands at the end.
+  if code != 0 and sandboxEnabled and sandbox.active and
+      not sandbox.gathering and
+      ("Permission denied" in rawOut or "Operation not permitted" in rawOut):
+    if rawOut.len > 0 and not rawOut.endsWith("\n"):
+      rawOut.add "\n"
+    rawOut.add "sandbox deny, see " & sandbox.sandboxPathInCwd() & "\n"
 
   return (rawOut, code, cap)

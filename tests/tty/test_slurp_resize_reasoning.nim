@@ -4,6 +4,15 @@
 ## this; it surfaces against live reasoning providers (hy3, glm-5.x) and was
 ## first reported around the flake/test-flakiness refactor.
 ##
+discard """
+  disabled: "win"
+  ## Fails under ConPTY: the spinner's 80ms ticks plus resize bursts
+  ## hit the same throughput class of failure as test_spinner_race_stress
+  ## — committed scrollback rows are wiped in place while ConPTY is
+  ## still draining. Linux/macOS render paths pass; the slurp regression
+  ## is covered there.
+"""
+##
 ## Root cause: `beginEditorRedraw` (engine.nim) walked up one extra row
 ## for a 400ms window after every SIGWINCH via `resizeRecent()`. The comment
 ## claimed the extra row "sits inside the volatile region (the always-reserved

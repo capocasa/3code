@@ -147,13 +147,12 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
   materializeBuiltinSkills()
 
   # Config first (it reads `[settings] sandbox = off`), then the
-  # sandbox: same single-file policy as the CLI. Paths resolve
+  # sandbox: same cascaded policy and order as the CLI. Paths resolve
   # against the session cwd so the policy follows the project.
   var colorKeys: Table[string, string]
   (activeCurrent, activeProviders, colorKeys) = loadStateOrEmpty(configPath())
   if sandboxEnabled:
-    discard sandbox.ensureDefaultSandbox(cwd)
-    sandbox.current = sandbox.loadPolicy(cwd)
+    sandbox.current = sandbox.loadCascaded(cwd)
     sandbox.active = true
     sandbox.procboxExe = sandbox.findProcbox()
     if not sandbox.backendWorks(sandbox.procboxExe):
