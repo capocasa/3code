@@ -33,11 +33,11 @@ suite "wall env helper":
 suite "wall proxy lifecycle":
   test "proxy starts on host rules, reloads on policy rewrite":
     let dir = getTempDir() / ("3code-wallcycle-" & $getCurrentProcessId())
-    createDir(dir / ".3code")
+    createDir(dir)
     defer:
       sb.stopWall()
       removeDir(dir)
-    writeFile(dir / ".3code" / "sandbox", "- /\n+\n+127.0.0.1\n")
+    writeFile(dir / ".sandboxrc", "deny /\nallow\nallow 127.0.0.1\n")
     sb.current = sb.loadPolicy(dir)
     check sb.wallProxyNeeded(sb.current)
     sb.active = true
@@ -55,7 +55,7 @@ suite "wall proxy lifecycle":
     # reload propagation: rewrite the repo policy, sync, proxy file changes
     let polFile = sb.wallProxyDir / "policy"
     let before = readFile(polFile)
-    writeFile(dir / ".3code" / "sandbox", "- /\n+\n+127.0.0.1\n+example.com\n")
+    writeFile(dir / ".sandboxrc", "deny /\nallow\nallow 127.0.0.1\nallow example.com\n")
     sb.syncWallProxyPolicy(dir)
     let after = readFile(polFile)
     check after != before
@@ -72,7 +72,7 @@ when defined(linux):
       createDir(dir)
       defer: removeDir(dir)
       let pol = dir / "policy"
-      writeFile(pol, "- /\n+ " & dir & "\n+ " & getTempDir() & "\n+127.0.0.1\n")
+      writeFile(pol, "deny /\nallow " & dir & "\nallow " & getTempDir() & "\nallow 127.0.0.1\n")
       # echo server on host loopback
       let echoSock = newSocket(buffered = false)
       echoSock.setSockOpt(OptReuseAddr, true)

@@ -2,24 +2,29 @@
 ##
 ## The policy file format, parser, and rule model live in sandwall
 ## (`sandwall/rules`); this module is the 3code-specific wrapper: which
-## files form the cascade, when to reload them, and whether the OS
+## file is the policy source, when to reload it, and whether the OS
 ## backend actually works on this host.
 ##
-## Each line of `.sandboxrc` is an access word (`allow` writable,
-## `deny` deny, `readonly` read-only) plus a target: an absolute path, `~/`
-## home path, `./` project-relative path (bare `allow` = the project
-## dir), or a host/IP with optional `:port`. Host rules fence bash
-## network egress through the per-run wall proxy (see the wall-proxy
-## section below). See sandwall's rules module for the full grammar.
+## Each line of the policy file is an access word (`allow` writable,
+## `deny` deny, `readonly` read-only) plus a target: an absolute path,
+## `~/` home path, `./` project-relative path (bare `allow` = the
+## project dir), or a host/IP with optional `:port`. Host rules fence
+## bash network egress through the per-run wall proxy (see the
+## wall-proxy section below). See sandwall's rules module for the full
+## grammar.
 ##
-## The effective policy is the cascade of the system file
-## (`~/.config/3code/sandbox`) and the repo file (`.sandboxrc`),
-## default text when absent, so the sandbox is always on.
+## There is exactly one active policy file, never a cascade: the repo
+## file `.sandboxrc` when it exists, else the user file
+## `~/.config/3code/sandboxrc`. The user file is initialized from the
+## built-in default on first run, so the sandbox is always on. A
+## `:sandbox allow|readonly|deny` edit materializes the repo file by
+## copying the user file first, so project rules start from the user's
+## baseline instead of from scratch.
 ##
-## `reloadIfChanged` re-reads the cascade when either file's mtime
-## changed since the last load; it runs before every restricted
-## operation (in-process read/write/patch checks and bash launches).
-## The bash subprocess additionally loads the policy files itself
+## `reloadIfChanged` re-reads the active file when its mtime changed
+## since the last load; it runs before every restricted operation
+## (in-process read/write/patch checks and bash launches). The bash
+## subprocess additionally loads the policy file itself
 ## (`3code box --policy`), so a launch always enforces the freshest
 ## file contents even between parent reloads.
 
@@ -31,26 +36,52 @@ when defined(posix):
 import types
 
 export sandwall.AccessKind, sandwall.Policy, sandwall.Rule,
-       sandwall.RuleKind, sandwall.parseCascaded, sandwall.defaultPolicyText,
-       sandwall.repoPolicyPath, sandwall.cascadedFiles, sandwall.checkPath,
+       sandwall.RuleKind, sandwall.parsePolicy, sandwall.defaultPolicyText,
+       sandwall.repoPolicyPath, sandwall.systemPolicyPath, sandwall.checkPath,
        sandwall.renderPolicy, sandwall.resolve,
        sandwall.Resolved
 
 var
   current*: Policy
-    ## The effective cascaded policy. When `active` is false, this is
+    ## The effective policy. When `active` is false, this is
     ## empty and every check allows.
   active*: bool = false
     ## False means no policy was loaded and bash runs unrestricted.
   procboxExe*: string = ""
     ## Path to the binary to exec for `box restrict` (this one).
-  lastMtimes: tuple[system, repo: Time]
+  lastMtime: Time
 
 var gathering*: bool = false
   ## Gather mode (`:sandbox gather on|off`): would-be denials are
   ## allowed and recorded as `allow` rules in the repo policy file
   ## instead. In-memory only: the toggle is a REPL command, so it does
   ## not need to survive a restart or be visible to subprocesses.
+
+proc ensureUserPolicy*(): bool =
+  ## Create `~/.config/3code/sandboxrc` from the built-in default when
+  ## absent. Runs at every launch so the user file is always there to
+  ## fall back to (and to copy from on the first `:sandbox` edit).
+  let path = systemPolicyPath()
+  if fileExists(path): return true
+  try:
+    createDir(path.parentDir)
+    writeFile(path, defaultPolicyText())
+  except CatchableError:
+    return false
+  fileExists(path)
+
+proc activePolicyPath*(projectDir: string): string =
+  ## The one policy file in effect: the repo `.sandboxrc` when it
+  ## exists, else the user file. Never both.
+  let repo = repoPolicyPath(projectDir)
+  if fileExists(repo): repo else: systemPolicyPath()
+
+proc readPolicyText*(projectDir: string): string =
+  ## The active file's contents, or the built-in default when the user
+  ## file could not be initialized (read-only home): the sandbox stays
+  ## on either way.
+  let f = activePolicyPath(projectDir)
+  if fileExists(f): readFile(f) else: defaultPolicyText()
 
 # ------------------------------------------------------------- wall proxy
 #
@@ -73,14 +104,10 @@ proc wallProxyNeeded*(pol: Policy): bool =
 when defined(posix):
 
   proc wallPolicyText*(projectDir: string): string =
-    ## The effective policy text the proxy enforces: the cascade's two
-    ## files (or defaults) concatenated, matching loadCascaded.
-    let files = cascadedFiles(projectDir)
-    let sysText = if fileExists(files.system): readFile(files.system)
-                  else: defaultPolicyText()
-    let repoText = if fileExists(files.repo): readFile(files.repo)
-                   else: defaultPolicyText()
-    sysText & "\n" & repoText & "\n"
+    ## The effective policy text the proxy enforces: the active policy
+    ## file's contents, matching loadPolicy.
+    let f = activePolicyPath(projectDir)
+    (if fileExists(f): readFile(f) else: "") & "\n"
 
   proc proxySockPath*(): string =
     ## The proxy's AF_UNIX listener (Linux bridge target); "" on macOS,
@@ -118,8 +145,8 @@ when defined(posix):
     wallProxy.port
 
   proc syncWallProxyPolicy*(projectDir: string) =
-    ## Rewrite the proxy's merged policy file after a cascade reload;
-    ## the proxy hot-reloads on mtime.
+    ## Rewrite the proxy's policy file after a reload; the proxy
+    ## hot-reloads on mtime.
     if wallProxy.port == 0 or wallProxyDir.len == 0: return
     writeFile(wallProxyDir / "policy", wallPolicyText(projectDir))
 
@@ -210,23 +237,21 @@ proc mtimeOf(path: string): Time =
   try: getLastModificationTime(path)
   except OSError: fromUnix(0)
 
-proc loadCascaded*(projectDir: string): Policy =
-  ## Load the cascade and remember the file mtimes for reloadIfChanged.
-  let files = cascadedFiles(projectDir)
-  lastMtimes = (mtimeOf(files.system), mtimeOf(files.repo))
-  sandwall.loadCascaded(projectDir)
+proc loadPolicy*(projectDir: string): Policy =
+  ## Load the active policy file and remember its mtime for
+  ## reloadIfChanged.
+  lastMtime = mtimeOf(activePolicyPath(projectDir))
+  sandwall.parsePolicy(readPolicyText(projectDir), projectDir)
 
 proc reloadIfChanged*(projectDir: string): bool =
-  ## Re-load the cascade when either policy file changed on disk since
-  ## the last load. Returns true when a reload happened. Called before
-  ## every restricted operation so a mid-session policy edit takes effect
-  ## on the next tool call.
+  ## Re-load the policy when the active file changed on disk since the
+  ## last load. Returns true when a reload happened. Called before
+  ## every restricted operation so a mid-session policy edit takes
+  ## effect on the next tool call.
   if not active: return false
-  let files = cascadedFiles(projectDir)
-  let now = (mtimeOf(files.system), mtimeOf(files.repo))
-  if now == lastMtimes: return false
-  current = sandwall.loadCascaded(projectDir)
-  lastMtimes = now
+  let now = mtimeOf(activePolicyPath(projectDir))
+  if now == lastMtime: return false
+  current = loadPolicy(projectDir)
   when defined(posix):
     syncWallProxyPolicy(projectDir)
   true
@@ -236,17 +261,11 @@ proc policyHint*(): string =
   ## sandbox denial messages so a blocked tool call points at the
   ## unrendered policy instead of dumping a (possibly long) rule list
   ## into the conversation.
-  let paths = cascadedFiles(getCurrentDir())
-  "policy: " & paths.repo & " (project), " & paths.system & " (system)"
+  "policy: " & activePolicyPath(getCurrentDir())
 
 proc sandboxPathInCwd*(): string =
   ## The repo-level policy file for the current working directory.
   repoPolicyPath(getCurrentDir())
-
-proc policyPaths*(): tuple[system, repo: string] =
-  ## The cascade files for the current working directory, for display
-  ## and for passing to `box --policy`.
-  cascadedFiles(getCurrentDir())
 
 proc resolveRawPath(p: string): string =
   ## Absolute cleaned form of `p`, ~-expanded. Mirrors util.resolvePath
@@ -262,7 +281,7 @@ proc gatherRecord(path: string)
 
 proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason: string] =
   ## Check a raw (possibly relative) path against the current policy,
-  ## reloading the cascade first when a policy file changed. This is the
+  ## reloading the policy first when the file changed. This is the
   ## in-process gate for the read/write/patch tools; it calls the same
   ## sandwall `checkPath` the sandboxed box subprocess enforces at the
   ## kernel level for bash. `needsWrite = false` allows read-only and
@@ -289,16 +308,17 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
     else:
       (false, "sandbox: " & resolved & " is denied by the policy (" & policyHint() & ")")
 
-proc ensureDefaultSandbox*(dir: string): bool =
-  ## Create the default policy file at `dir/.sandboxrc` if none
-  ## exists, seeding it with the built-in default policy. Used only by
-  ## `appendRule` to seed the repo file on the first explicit
-  ## `:sandbox allow|readonly|deny` edit. Not part of startup: the
-  ## cascade loads the default in-memory when no file is present.
+proc ensureRepoPolicy*(dir: string): bool =
+  ## Materialize `dir/.sandboxrc` by copying the user file
+  ## (`~/.config/3code/sandboxrc`, itself initialized from the built-in
+  ## default when absent). Runs before the first `:sandbox
+  ## allow|readonly|deny` edit (and gather-mode append) so project
+  ## rules start from the user's baseline, not from scratch.
   let path = repoPolicyPath(dir)
   if fileExists(path): return true
+  if not ensureUserPolicy(): return false
   try:
-    writeFile(path, defaultPolicyText())
+    copyFile(systemPolicyPath(), path)
   except CatchableError:
     return false
   fileExists(path)
@@ -307,21 +327,19 @@ proc renderSandbox*(p: Policy): string =
   renderPolicy(p)
 
 proc appendRule*(sandboxFile, argPath: string; access: AccessKind): bool =
-  ## Append a rule to the repo policy file, creating it with the default
-  ## contents first if it does not exist. Used by `:sandbox
-  ## allow|deny|readonly`. After appending, reload so the change is live
-  ## for the next check.
+  ## Append a rule to the repo policy file, materializing it from the
+  ## user file first when absent. Used by `:sandbox allow|deny|readonly`.
+  ## After appending, reload so the change is live for the next check.
   if not fileExists(sandboxFile):
-    let projectDir = sandboxFile.parentDir.parentDir
-    if not ensureDefaultSandbox(projectDir): return false
+    if not ensureRepoPolicy(sandboxFile.parentDir): return false
   result = sandwall.appendRule(sandboxFile, argPath, access)
   if result:
-    current = loadCascaded(getCurrentDir())
+    current = loadPolicy(getCurrentDir())
 
 proc gatherRecord(path: string) =
   ## Live-append an `allow` rule for a path gather mode just permitted.
   ## Failures are silent: gather mode never breaks a tool call.
-  if not ensureDefaultSandbox(getCurrentDir()): return
+  if not ensureRepoPolicy(getCurrentDir()): return
   discard sandwall.appendRule(sandboxPathInCwd(), path, akWritable)
 
 proc gatherRecordBash*(dir: string) =

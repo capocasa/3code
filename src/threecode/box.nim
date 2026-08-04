@@ -40,12 +40,11 @@ Usage:
   children are confined: writes outside the writable paths fail with
   EACCES.
 
-  With --policy, the writable/read-only sets come from the given policy
-  files (cascaded in order, system first, relative targets resolved
-  against the project dir: the parent of a `.sandboxrc` file, else cwd).
-  Explicit
-  RWPATH/ROPATH args union with the policy sets. Policy files themselves
-  are forced read-only inside the sandbox.
+  With --policy, the writable/read-only sets come from the given
+  policy file (relative targets resolve against the project dir: the
+  parent of a `.sandboxrc` file, else cwd). Explicit RWPATH/ROPATH
+  args union with the policy sets. The policy file itself is forced
+  read-only inside the sandbox.
 
   System dirs (/usr, /bin, /lib, /dev/*, etc.) are always read-only so the
   command's binaries, libs, and device nodes stay runnable; --ro adds to
@@ -53,8 +52,7 @@ Usage:
 
 Examples:
   3code box restrict /tmp /home/me/work -- ls -la
-  3code box --policy ~/.config/3code/sandbox --policy .sandboxrc \
-    restrict -- make test
+  3code box --policy .sandboxrc restrict -- make test
   3code box restrict . -- make test
 
 Landlock is monotonic: the restriction is permanent for this process and all
@@ -111,6 +109,9 @@ proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
   var denied: seq[string]
   var hostRules = 0
   if a.policies.len > 0:
+    # Exactly one active policy file: 3code passes the repo `.sandboxrc`
+    # when it exists, else the user file. Multiple --policy args are
+    # still accepted (concatenated) for standalone box use.
     var texts: seq[string]
     for f in a.policies:
       texts.add(if fileExists(f): readFile(f) else: "")

@@ -360,26 +360,22 @@ Sub-agents are not supported because both research and user feedback says they a
 ## Sandbox
 
 3code confines every tool call to a filesystem sandbox you define. The
-sandbox is a plain text policy built from a cascade of files, each filling
-in for the ones below it:
+sandbox is a plain text policy living in exactly one file at a time:
 
-1. **system** - `~/.config/3code/sandbox`, next to your config.
-2. **repo** - `.sandboxrc` in your project directory.
+1. **repo** - `.sandboxrc` in your project directory, when it exists.
+2. **user** - `~/.config/3code/sandboxrc`, next to your config,
+   otherwise.
 
-A missing level is not empty: it contributes the built-in default
-(`deny /`, `allow /tmp`, then `allow` for the cwd), so the
-sandbox is always on. The
-effective policy is the two texts concatenated (system then repo) and
-parsed once, so a repo-level `deny /` cleanly resets anything a
-system file opened above it. 3code never writes a sandbox file into your
-project on first run; the default lives in memory until you create one
-(explicitly, or via the `:sandbox` edit commands, which seed the repo
-file on first use). Yolo mode (everything writable) is fine but you have
-to ask for it explicitly.
+There is no cascade and no merging: the repo file wins outright, the
+user file is the fallback. The user file is created from the built-in
+default on first run, so the sandbox is always on and you can change
+what every project without its own `.sandboxrc` gets by editing that
+one file. Yolo mode (everything writable) is fine but you have to ask
+for it explicitly.
 
 The sandbox is enforced two ways. Bash commands run through `3code box`,
 the built-in sandwall sandbox (Landlock on Linux, Seatbelt on macOS), which
-3code re-execs itself as; the box process loads the policy files itself,
+3code re-execs itself as; the box process loads the policy file itself,
 so every command launches on the freshest policy. The in-process
 read/write/patch tools check paths against the same policy (reloaded when
 the file changes) in the 3code process. Both layers run the same sandwall
@@ -433,7 +429,8 @@ writable project). Host rules (``allow api.example.com``,
 ``allow 1.2.3.4:8080``, ``allow *`` for no network restrictions) fence
 the network egress of sandboxed bash commands through the wall proxy.
 
-On first run in a new directory, 3code uses this default:
+On first run, 3code initializes `~/.config/3code/sandboxrc` with this
+default:
 
 ```
 deny /
@@ -490,8 +487,9 @@ REPL commands which append a rule and reload immediately:
 ```
 
 The first `allow`/`readonly`/`deny` in a project creates the `.sandboxrc`
-file (seeded with the built-in default, then your appended rule) so you
-have something concrete to version and share. `:sandbox off` disables
+file by copying your user file, then appends the rule, so project rules
+start from your baseline and you have something concrete to version and
+share. `:sandbox off` disables
 enforcement entirely for the session (bash runs unconfined, in-process
 checks pass through); it persists in `[settings]` as `sandbox = off`. This
 is the only way to run without a sandbox short of editing the file.
