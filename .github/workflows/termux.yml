@@ -43,6 +43,16 @@ jobs:
             -o:3code-android src/threecode.nim
           file 3code-android
 
+      - name: Verify Termux RUNPATH
+        # Nim's openssl wrapper dlopens libssl.so.3/libcrypto.so.3 at
+        # module init; Android's linker only finds them via the binary's
+        # DT_RUNPATH (config.nims bakes in the Termux prefix). The android
+        # binary can't run on this x86 host, so guard the runpath here;
+        # without it the binary dies on startup with "could not import:
+        # SSL_CTX_ctrl".
+        run: |
+          readelf -d 3code-android | grep -q 'RUNPATH.*\[/data/data/com.termux/files/usr/lib\]'
+
       - name: Package
         run: |
           mkdir -p 3code-termux-arm64

@@ -27,6 +27,16 @@ switch("path", "tests")  # test helpers (tty_expect, stub_helpers, minline_testu
 switch("d", "ssl")
 switch("d", "testPlainHttp")
 
+when defined(android):
+  # Termux: Nim's openssl wrapper dlopens libssl.so.3/libcrypto.so.3 at
+  # module init, but Android's linker only searches the system lib dirs
+  # and the binary's own DT_RUNPATH for dlopen'd libs, never Termux's
+  # $PREFIX/lib (Termux packages get a runpath from their clang; the
+  # NDK cross toolchain doesn't add one). Bake the Termux lib dir in as
+  # RUNPATH so dlopen finds the openssl package's libs. The path is a
+  # link-time constant; the linker doesn't check it exists.
+  switch("passL", "-Wl,-rpath,/data/data/com.termux/files/usr/lib")
+
 switch("d", "version=" & getVersionString())
 
 when withDir(thisDir(), system.fileExists("config.local.nims")):

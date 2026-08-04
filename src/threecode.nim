@@ -152,6 +152,9 @@ proc setupTlsEnv() =
   ## opens a TLS context calls `bundledCaFile()` (in util.nim) to feed
   ## the bundled `cacert.pem` directly to `newContext(caFile = ...)`.
   ## Linux uses the system trust store and needs nothing here.
+  ## Termux's openssl libs are found via DT_RUNPATH baked in at link
+  ## time (see config.nims); LD_LIBRARY_PATH can't help because the
+  ## openssl wrapper dlopens at module init, before main runs.
   when defined(macosx):
     let dir = parentDir(getAppFilename())
     let cur = getEnv("DYLD_LIBRARY_PATH")
