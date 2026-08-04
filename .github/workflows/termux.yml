@@ -47,7 +47,10 @@ jobs:
         run: |
           mkdir -p 3code-termux-arm64
           cp 3code-android 3code-termux-arm64/3code
-          ./3code -v > 3code-termux-arm64/VERSION
+          # Can't run the android binary on the x86 host; version comes
+          # from the nimble file (tag releases) or the short SHA.
+          grep -m1 '^version' threecode.nimble | cut -d'"' -f2 > 3code-termux-arm64/VERSION
+          git rev-parse --short=8 HEAD >> 3code-termux-arm64/VERSION
           cp README.md LICENSE 3code-termux-arm64/
           tar czf 3code-termux-arm64.tar.gz 3code-termux-arm64
 
