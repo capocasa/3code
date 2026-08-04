@@ -83,17 +83,19 @@ irm https://3code.capocasa.dev/install.ps1 | iex
 
 ### Termux (Android arm64)
 
-No prebuilt binary for Android; build from source inside Termux:
+The CI ships a prebuilt Termux binary (`3code-termux-arm64.tar.gz`), or
+build from source inside Termux:
 
 ```
 pkg install nim git openssl
 nimble install https://github.com/capocasa/3code
 ```
 
+The binary needs Termux's OpenSSL for TLS (`pkg install openssl`).
 Notes: the Landlock sandbox and desktop notifications are not available
 on Android; both degrade gracefully (in-process path checks still
 apply, notifications no-op). Auto-update is disabled — update with
-`nimble install` again.
+`nimble install` again or re-download the tarball.
 
 ### Enter your API key
 
