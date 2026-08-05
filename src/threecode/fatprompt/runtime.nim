@@ -1144,7 +1144,7 @@ proc utf8LenAt(s: string, i: int): int =
 
 proc captureMd(s: var LiveMarkdownStream, line: string,
                finish = false): string =
-  let path = getTempDir() / "3code_live_md_" & $getCurrentProcessId()
+  let path = tempDir() / "3code_live_md_" & $getCurrentProcessId()
   let f = open(path, fmWrite)
   defer:
     try: removeFile(path) except OSError: discard

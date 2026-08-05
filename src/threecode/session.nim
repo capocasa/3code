@@ -208,7 +208,7 @@ proc currentDraftPath*(session: Session): string =
 var activeLockPath* = ""
 
 proc sessionLockDir*(): string =
-  getTempDir() / "3code" / "lock"
+  tempDir() / "3code" / "lock"
 
 proc sessionLockPathFor*(path: string): string =
   sessionLockDir() / (sessionIdFromPath(path) & ".lock")
@@ -364,7 +364,7 @@ proc releaseActiveSessionLock*() =
 var activeDirLockPath* = ""
 
 proc dirLockDir*(): string =
-  getTempDir() / "3code" / "dirlock"
+  tempDir() / "3code" / "dirlock"
 
 proc dirLockPathFor*(cwd: string): string =
   dirLockDir() / (mangleCwd(cwd) & ".lock")

@@ -483,7 +483,7 @@ proc assistantTextBytes*(bytes: string): string =
   AssistantTextStyle & styled & Reset & tail
 
 proc captureMarkdownBytes(s: MarkdownState; line = ""; finish = false): string =
-  let path = getTempDir() / "3code_assistant_md_" & $getCurrentProcessId()
+  let path = tempDir() / "3code_assistant_md_" & $getCurrentProcessId()
   let f = open(path, fmWrite)
   defer: close(f)
   if finish:

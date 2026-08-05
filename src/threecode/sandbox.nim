@@ -34,6 +34,7 @@ import sandwall
 when defined(posix):
   import sandwall/wall as sandwallWall
 import types
+import util
 
 export sandwall.AccessKind, sandwall.Policy, sandwall.Rule,
        sandwall.RuleKind, sandwall.parsePolicy, sandwall.defaultPolicyText,
@@ -129,7 +130,7 @@ when defined(posix):
     if not wallProxyNeeded(current): return false
     if wallProxy.port != 0: return true
     if wallProxyDir.len == 0:
-      wallProxyDir = getTempDir() / ("3code-wall-" & $getCurrentProcessId())
+      wallProxyDir = tempDir() / ("3code-wall-" & $getCurrentProcessId())
       createDir(wallProxyDir)
     let polFile = wallProxyDir / "policy"
     writeFile(polFile, wallPolicyText(projectDir))
@@ -187,7 +188,7 @@ when defined(posix):
   proc sweepStaleWallDirs*() =
     ## Best-effort removal of proxy dirs from dead 3code processes,
     ## mirroring cleanupStaleBinaries. Runs at startup.
-    let tmp = getTempDir()
+    let tmp = tempDir()
     for kind, path in walkDir(tmp):
       if kind != pcDir: continue
       let name = path.lastPathPart
@@ -219,7 +220,7 @@ proc backendWorks*(exe: string): bool =
   ## when this returns false so the bash tool falls back to the unconfined
   ## setsid path rather than failing every bash command.
   if exe.len == 0: return false
-  let tmp = getTempDir() / ("3code-probe-" & $getCurrentProcessId())
+  let tmp = tempDir() / ("3code-probe-" & $getCurrentProcessId())
   try:
     if not dirExists(tmp): createDir(tmp)
     # Capture (discard) stdout+stderr so a failing backend's OSError

@@ -5,6 +5,18 @@ when defined(posix):
   import std/posix except Time
   import std/termios
 
+proc tempDir*(): string =
+  ## `getTempDir` that honors `$TMPDIR` on Android. Nim's stdlib
+  ## hardcodes `/data/local/tmp` under `defined(android)`, which is the
+  ## shell user's dir; an app UID (Termux) cannot write there, so every
+  ## lock/scratch file failed with ENOENT/EACCES. Termux always sets
+  ## TMPDIR to `$PREFIX/tmp`; fall back to the stdlib answer otherwise.
+  when defined(android):
+    let t = getEnv("TMPDIR")
+    if t.len > 0: t else: getTempDir()
+  else:
+    getTempDir()
+
 # ---------- Color palette ----------
 #
 # Three-tier palette designed to read on both light and dark terminal

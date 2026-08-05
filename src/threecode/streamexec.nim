@@ -322,7 +322,7 @@ proc runStreamingBash*(act: Action, cache: ReadCache,
     if fileExists(p) and cache.state.hasKey(p) and localFileSig(p) == cache.state[p]:
       return (&"[unchanged since prior read of {p}; see earlier read in this session]", 0, DefaultBashTimeout)
 
-  let tmp = getTempDir() / ("3code_bash_" & $getCurrentProcessId() & "_" & $epochTime().int64)
+  let tmp = tempDir() / ("3code_bash_" & $getCurrentProcessId() & "_" & $epochTime().int64)
   createDir(tmp)
   let scriptPath = tmp / "cmd.sh"
   let stdinPath = tmp / "stdin"

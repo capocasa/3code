@@ -902,7 +902,7 @@ proc shellCapture(cmd: string, timeoutS = 3): string =
   ## Empty on failure — used purely to gather context, so failures are silent.
   ## `cmd` must be a literal, never user-controlled input; no shell escaping
   ## is performed.
-  let tmp = getTempDir() / ("3code_ctx_" & $getCurrentProcessId() & "_" & $epochTime().int64)
+  let tmp = tempDir() / ("3code_ctx_" & $getCurrentProcessId() & "_" & $epochTime().int64)
   createDir(tmp)
   let outPath = tmp / "out"
   let wrapped = when defined(windows):
