@@ -133,8 +133,11 @@ suite "quit signals":
     tty.expectNo "interrupted by user"
     tty.expectNo "done."         # the turn is still open
     tty.expectAlive()            # ...and no quit either
-    # Ctrl-C on the empty buffered editor interrupts the turn...
-    tty.send "\x03"
+    # Ctrl-C on the empty buffered editor interrupts the turn. Via
+    # `ctrlC()` because raw \x03 is swallowed by conhost under the
+    # Windows ConPTY harness; there it sends ESC (the always-interrupt
+    # key), which exercises the same code path.
+    tty.ctrlC()
     tty.expectInHistory "interrupted by user"
     # Under CI load the first prompt repaint after the interrupt can land
     # between grid polls, leaving the caret row glyph-less in the snapshot
