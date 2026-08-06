@@ -1592,16 +1592,12 @@ proc callModelThreaded*(p: Profile, bodyStr, baseLabel: string;
     sleep(NetWorkerPollMs)
   if isInterrupted():
     shutdownCachedStreamFd()
-  if isNetworkQuiet():
-    # The quiet-watch thread marked the link dead (no provider data for
-    # `QuietTooLongMs`) and shut down the cached fd. Drop the cached conn
-    # so a wedged worker's stale socket is not reused, then surface a
-    # network error so callModel's retry loop reconnects on a fresh socket
-    # — exactly like a 503. streamhttp now bounds the send via SO_SNDTIMEO
-    # too, but this check is the backstop for any worker stall the socket
-    # timeouts do not cover (and for the recv-side quiet path, which wakes
-    # here rather than spinning on a worker that has already returned).
-    closeCachedStreamConn()
+  # Do NOT call closeCachedStreamConn() here on the quiet path (or on the
+  # interrupt path). The worker may still be inside SSL_write on the cached
+  # conn; StreamConn.close() frees the OpenSSL handle, and main freeing it
+  # out from under the worker segfaults. The fd shutdown above (quiet-watch
+  # already did it on the quiet path) wakes the worker's syscall; the worker
+  # observes the flag, unwinds, and closes the conn itself in networkWorker.
   # Bounded join: every worker syscall is bounded (connect by
   # ConnectTimeoutMs, recv by QuietRecvWakeMs, TLS handshake internally),
   # so the worker returns within a known worst case. The one exception is
@@ -1613,6 +1609,9 @@ proc callModelThreaded*(p: Profile, bodyStr, baseLabel: string;
     sleep(NetWorkerPollMs)
     waited += NetWorkerPollMs
   if t.running():
+    # Detached (getAddrInfo wedge): leave the cached conn alone. The worker
+    # owns it and closes it whenever it eventually wakes; main touching it
+    # here would race the worker's SSL handle use.
     discard
   else:
     joinThread(t)
