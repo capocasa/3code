@@ -70,6 +70,48 @@ jobs:
           name: 3code-termux-arm64
           path: 3code-termux-arm64.tar.gz
 
+  smoke:
+    # Run the cross-built binary inside an emulated Termux (qemu-aarch64
+    # + bionic, provided by termux/termux-docker). The x86 runner can't
+    # execute the binary natively, so this container is the only way to
+    # catch startup failures (dlopen paths, tmpdir, TLS) without a phone.
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: 3code-termux-arm64
+
+      - name: Smoke test in emulated Termux
+        run: |
+          set -e
+          tar xzf 3code-termux-arm64.tar.gz
+          # The image's Termux tree is owned by uid/gid 1000 (system); run
+          # the container as that user so pkg and $HOME behave.
+          CID=$(docker create -t --platform linux/arm64 --user 1000:1000 \
+            termux/termux-docker:latest sleep 900)
+          docker start $CID >/dev/null
+          trap 'docker rm -f $CID >/dev/null 2>&1 || true' EXIT
+          docker exec $CID mkdir -p /data/data/com.termux/files/usr/tmp
+          docker cp 3code-termux-arm64/3code $CID:/data/data/com.termux/files/usr/tmp/3code
+          docker exec -t -e THREECODE_ALLOW_ROOT=1 $CID \
+            /data/data/com.termux/files/usr/tmp/3code --version
+          # --help exits 2 (ExitUsage) by design; assert it runs at all.
+          docker exec -t -e THREECODE_ALLOW_ROOT=1 $CID sh -c \
+            '/data/data/com.termux/files/usr/tmp/3code --help > /dev/null; \
+             test $? -eq 2'
+          # TLS init is the fragile part on Termux: the openssl wrapper
+          # dlopens libssl.so.3/libcrypto.so.3 at module init, and it only
+          # works when DT_RUNPATH (asserted in the build job) points at the
+          # Termux lib dir. A bare --version doesn't touch TLS; this tiny
+          # program does a verified handshake the same way api.nim does.
+          docker cp tests/android_tlscheck.nim $CID:/data/data/com.termux/files/usr/tmp/
+          docker exec -t $CID sh -lc \
+            'command -v nim >/dev/null || pkg install -y nim >/dev/null 2>&1; \
+             nim c -r -d:ssl /data/data/com.termux/files/usr/tmp/android_tlscheck.nim' \
+            | grep -q 'tls handshake ok'
+
       - name: Upload artifact to 3code.capocasa.dev
         if: github.ref == 'refs/heads/main'
         run: |
