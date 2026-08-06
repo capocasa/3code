@@ -4,7 +4,9 @@ import minline_testutils
 import ttty/grid
 
 proc runUntilCancel(d: Driver, ed: var LineEditor, prompt = "> ") =
-  d.push CtrlC
+  # ESC always cancels (Ctrl-C would clear the text instead of cancelling
+  # when the line is non-empty).
+  d.push Esc
   try: discard d.run(ed, prompt) except InputCancelled: discard
 
 # ---------- History navigation ----------
