@@ -114,7 +114,13 @@ suite "quit signals":
   test "Ctrl-D during an active turn does NOT interrupt; Ctrl-C then quits":
     let root = newFixture("ctrl_d_during_turn_noop")
     writeConfiguredProvider(root)
-    writeStubResponses(root, slowResponses())
+    # The response never arrives on its own (30s pre-stream delay), so the
+    # turn stays open across the whole assertion sequence regardless of
+    # CI latency; only the interrupt can end it.
+    writeStubResponses(root, %*[{"role": "assistant", "preStreamDelayMs": 30000,
+        "content": "done.", "contentChunks": ["done."],
+        "usage": {"promptTokens": 5, "completionTokens": 2,
+                  "totalTokens": 7, "cachedTokens": 0}}])
     let tty = startStub(root)
     defer: tty.close()
     tty.expect "\u276f"
@@ -125,6 +131,7 @@ suite "quit signals":
     tty.send "\x04"              # Ctrl-D during a turn: inert, no interrupt
     tty.drain(300)
     tty.expectNo "interrupted by user"
+    tty.expectNo "done."         # the turn is still open
     tty.expectAlive()            # ...and no quit either
     # Ctrl-C on the empty buffered editor interrupts the turn...
     tty.send "\x03"
