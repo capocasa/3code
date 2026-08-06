@@ -164,7 +164,7 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
   # fixtures that happen to start in the same wall-clock second. The data
   # dirs are already isolated via XDG_DATA_HOME; the lock dir was the hole.
   createDir(root / "tmp")
-  @[
+  result = @[
     (key: "TERM", val: "xterm-256color"),
     (key: "PATH", val: getEnv("PATH")),
     (key: "HOME", val: root),
@@ -1209,7 +1209,20 @@ suite "terminal visual contract":
     tty.drain(300)
     tty.send "\x03"
     tty.expectInHistory "interrupted by user"
+    tty.drain 300  # let the post-interrupt prompt frame settle
     tty.expectOnScreen "❯"  # prompt painted on the grid after Ctrl-C, not just raw bytes
+    # Regression: interrupting a bash tool left the caret parked at col 0
+    # of the prompt row instead of col 2 after the ❯ glyph. Lock the same
+    # interrupted-by-user prompt contract as the network-quiet cancel
+    # tests: glyph on the caret row, caret at col 2, caret visible.
+    let f = tty.frames[^1]
+    doAssert not f.cursorHidden,
+      "REGRESSION (interrupt-during-bash): caret hidden after Ctrl-C; expected col 2 on prompt row"
+    doAssert f.cursorCol == 2,
+      "REGRESSION (interrupt-during-bash): expected caret at col 2 after ❯, got " & $f.cursorCol
+    doAssert "❯" in f.rows[f.cursorRow],
+      "REGRESSION (interrupt-during-bash): prompt glyph ❯ missing from caret row " &
+        $f.cursorRow & ", got: '" & f.rows[f.cursorRow] & "'"
     tty.expectAlive()
     # The regression: after interrupt the prompt must accept typing.
     tty.send "hello"

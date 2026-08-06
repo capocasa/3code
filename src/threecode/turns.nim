@@ -555,6 +555,11 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       saveSession(session, messages)
       if isInterrupted():
         onTurnInterrupted()
+        # Same contract as the callModel interrupt paths above:
+        # onTurnInterrupted already stopped the spinner/bar-tick and
+        # repainted the editor via the transcript commit; the deferred
+        # endTurn would erase that repaint and park the caret at col 0.
+        turnEnded = true
         return true
       if queuedUser:
         endTurn(repaintPrompt = false)
