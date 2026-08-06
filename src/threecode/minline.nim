@@ -33,7 +33,8 @@ import
   strutils,
   tables,
   std/exitprocs,
-  os
+  os,
+  times
 
 import signals
 import threecode/unicodewidth as ucwidth
@@ -84,6 +85,9 @@ when defined(windows):
     ## Prints an ASCII character to stdout.
   proc rawGetch(): cint {.header: "<conio.h>", importc: "_getch".}
     ## Raw blocking key read; wrapped by `getchr` below.
+  proc kbhit(): cint {.header: "<conio.h>", importc: "_kbhit".}
+    ## Non-blocking "is a key waiting" probe; lets a bare ESC cancel
+    ## without `_getch` blocking on a second byte that never comes.
 
   proc getchr*(): cint =
     ## Retrieves an ASCII character from stdin. Drains `termPeeked` first
@@ -1312,6 +1316,17 @@ proc terminalHasPendingInput*(): bool =
   ## byte. A bare Escape (no byte within the poll window) reports no
   ## tail so `handleEscape` cancels; any byte that arrives — including
   ## printable Alt-chord letters — is stashed and reported as a tail.
+  when defined(windows):
+    # Poll `_kbhit` for the same burst window the POSIX branch gives
+    # poll(). A bare ESC (no second byte in time) reports no tail.
+    if termPeeked >= 0:
+      return true
+    let deadline = epochTime() + EscapeTailPollMs.float / 1000.0
+    while epochTime() < deadline:
+      if kbhit() != 0:
+        return true
+      sleep 1
+    return kbhit() != 0
   when defined(posix):
     if isatty(0.cint) != 0:
       var pfd: TPollfd
