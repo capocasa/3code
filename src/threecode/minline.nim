@@ -1354,10 +1354,19 @@ proc hasPendingEscapeTail(ed: LineEditor): bool =
   ## POSIX terminals send a bare Escape with the same leading byte used
   ## by arrow-key CSI sequences. Wait briefly for a tail byte; if none
   ## arrives, treat it as a standalone cancel key.
-  if ed.hasPendingInput != nil:
-    ed.hasPendingInput()
-  else:
+  when defined(windows):
+    # The fat prompt passes no `hasPendingInput` on Windows, and the
+    # fallback used to be `true` (a phantom tail) because
+    # `terminalHasPendingInput` had no Windows peek: ESC then fell
+    # through to a blocking `_getch` for a second byte that never comes,
+    # freezing the input thread until the next keystroke. The `_kbhit`
+    # Windows branch makes the fallback honest.
     terminalHasPendingInput()
+  else:
+    if ed.hasPendingInput != nil:
+      ed.hasPendingInput()
+    else:
+      terminalHasPendingInput()
 
 # ---------- readLine driver ----------
 
