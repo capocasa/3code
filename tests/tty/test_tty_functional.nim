@@ -2218,6 +2218,56 @@ suite "terminal visual contract":
       $(maxRunStart + maxRun - 1) & " (the extra-line bug):\n" &
       tty.dumpFramesAround("")
 
+  test "consecutive colon commands never accumulate extra blank separator lines":
+    # Regression: back-to-back system commands (`:provider alt`, then
+    # `:tokens`) used to strand one blank row per command before the next
+    # command's echo. The ffNone commit painted a one-row gap below the
+    # committed item but left the engine's painted-footer row count at 0,
+    # so the next commit's erase walked up 0 rows and left the previous
+    # gap row behind in scrollback (two blank rows before the next `❯`).
+    let root = newFixture("command_separators")
+    writeHarnessProviders(root)
+    writeStubResponses(root, %*[])
+    let tty = startStub(root)
+    defer: tty.close()
+    tty.expect "❯"
+    tty.send ":provider alt"; tty.expect ":provider alt"; tty.send "\n"
+    tty.expectInHistory "provider  alt"
+    tty.drain(200)
+    tty.send ":tokens"; tty.expect ":tokens"; tty.send "\n"
+    tty.expectInHistory "no tokens used yet"
+    tty.drain(200)
+    # Sample the stable idle frame so caret/caret-row checks are settled.
+    # The settle must terminate on a quiet child (no output in the last
+    # poll window), not only on the first caret-bearing frame: the commit
+    # repaint produces a burst of intermediate frames whose earliest
+    # caret-on-`❯` state still shows the pre-erase grid, so peeking at
+    # frames[^1] immediately would read a torn state.
+    let idleDeadline = epochTime() + 5.0
+    block waitForIdle:
+      while epochTime() < idleDeadline:
+        if not tty.pollOnce(20, recordIdleFrame = false):
+          discard tty.pollOnce(0, recordIdleFrame = false)
+          break waitForIdle
+      tty.flushFrame(force = true)
+    let rows = if tty.frames.len > 0: tty.frames[^1].rows else: @[]
+    var maxRun = 0
+    var maxRunStart = -1
+    var curRun = 0
+    var curRunStart = -1
+    for idx, r in rows:
+      if r.strip.len == 0:
+        if curRun == 0: curRunStart = idx
+        inc curRun
+        if curRun > maxRun:
+          maxRun = curRun; maxRunStart = curRunStart
+      else:
+        curRun = 0
+    doAssert maxRun <= 1, "scrollback has " & $maxRun &
+      " consecutive blank rows at rows " & $maxRunStart & ".." &
+      $(maxRunStart + maxRun - 1) & " (the colon-command extra-line bug):\n" &
+      tty.dumpFramesAround("")
+
   test "every prompt first line survives a reasoning-ticker to content transition":
     # Regression: when a thinking ticker clears at the start of streamed
     # content, a concurrent footer repaint could walk its erase one row too
