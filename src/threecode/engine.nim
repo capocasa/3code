@@ -303,9 +303,13 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         try: terminalWidth() except CatchableError: 0
       let bytes = frame.footerFrameBytes(width)
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
-      let reflowed = e.lastPaintedWidth > 0 and width > 0 and
-        width != e.lastPaintedWidth
       if not (inputRunning and editor != nil):
+        # No editor below: paint without a walk-up. Do NOT touch
+        # `lastPaintedWidth` here — a resize must stay pending for the
+        # full repaint path below, whose inflated one-shot erase is the
+        # only thing that clears the reflowed stale rows. Consuming the
+        # width change here made the next full repaint fall short and
+        # left stale banner fragments stacking in scrollback.
         stdout.write termio.SyncBegin
         stdout.write "\x1b[?25l"
         e.toolViewportHasGap = e.hasScrollback
@@ -315,24 +319,30 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         if bytes.len > 0:
           stdout.write bytes
         e.noteNoFooter()
-        e.lastPaintedWidth = width
         stdout.write termio.SyncEnd
         stdout.flushFile
         return
       stdout.write termio.SyncBegin
       stdout.write "\x1b[?25l"
       refreshEditorWidth(editor[])
-      # A width change reflowed the already-painted volatile rows: a wide
-      # banner/output wraps to more rows (or fewer) on screen, but the
-      # stored `toolViewportRows.len` still holds the pre-reflow count, so a
-      # plain walkUp would fall short and leave stale fragments. Inflate the
-      # erase to clear the whole volatile region — bounded by the terminal
-      # height, which always covers the reflowed stale content.
+      # A width change reflowed the already-painted volatile rows: a
+      # wide banner/output wraps to more rows (or fewer) on screen, but
+      # the stored `toolViewportRows.len` holds the new-width count, so a
+      # plain walkUp falls short of (or overshoots) the reflowed stale
+      # content. Erase once using the larger of the pre/post-reflow
+      # region heights: the stale rows occupy at most the pre-reflow
+      # count, the fresh paint the post-reflow count. Walking further up
+      # (e.g. a full terminalHeight) would erase committed scrollback,
+      # which is what made the stacked banner fragments visible.
+      let reflowed = e.lastPaintedWidth > 0 and width > 0 and
+        width != e.lastPaintedWidth
       let up = if reflowed:
           max(0, editorRowsAboveCursor(editor[]) +
-            e.paintedFooterRows + e.viewportGapRows + e.liveContentRows.len +
-            e.liveContentGapRows +
-            (try: terminalHeight() except CatchableError: 24))
+            max(e.paintedFooterRows, footerRowsAboveEditor) +
+            max(e.viewportGapRows + e.toolViewportRows.len +
+                e.liveContentGapRows + e.liveContentRows.len,
+                (if e.toolViewportHasGap and rows.len > 0: 1 else: 0) +
+                rows.len))
         else:
           max(0, e.walkUp(editor[]))
       stdout.write "\r"
