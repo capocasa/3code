@@ -226,6 +226,12 @@ proc finishEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor;
   if e.editorRedrawPending:
     if e.editorRedrawFooterRows > 0:
       e.noteFooterPainted(e.editorRedrawFooterRows)
+    elif e.paintedFooterRows > 0:
+      # A bare editor redraw (no footer bytes) must not wipe a nonzero
+      # painted-footer count left by the ffNone commit path: that path
+      # reserves the one-row gap below the last item as live chrome, and
+      # the count is what makes the next commit's walk-up erase it.
+      discard
     else:
       e.noteNoFooter()
     e.editorRedrawPending = false
@@ -557,7 +563,7 @@ proc writeTranscriptItem(e: var TerminalEngine; transcript: string) =
 proc repaintVolatileAfterCommit(e: var TerminalEngine;
                                 edPtr: ptr minline.LineEditor;
                                 footerBytes: string;
-                                footerRowsAboveEditor: int;
+                                footerRowsAboveEditor: var int;
                                 restoreEditor: bool;
                                 reserveFooter: bool) =
   ## Second half of a transcript commit: the erase consumed the volatile
@@ -568,6 +574,17 @@ proc repaintVolatileAfterCommit(e: var TerminalEngine;
     e.noteNoFooter()
     return
   let editing = edPtr != nil and restoreEditor
+  if editing and footerRowsAboveEditor == 0 and footerBytes.len == 0:
+    # ffNone keeps the reserved gap row between the last committed item
+    # and the editor. It is live chrome, so the row model must count it:
+    # otherwise the next commit walks up 0 rows, erases only the editor
+    # row, and leaves this gap row behind as a stray blank scrollback row
+    # (the extra-line bug). Leave the cursor on the gap row: stepping the
+    # erased editor row down to it is exactly one row's move, and the
+    # editor redraw below restores the caret into the editor.
+    stdout.write "\r\n"
+    stdout.write "\x1b[1A"
+    footerRowsAboveEditor = 1
   if footerBytes.len > 0:
     # The row model and the emitted bytes must agree on the footer's
     # height: the bar+ticker bytes are exactly footerRowsAboveEditor rows
@@ -637,8 +654,9 @@ proc commitTranscriptItem(e: var TerminalEngine; transcript: string;
   e.toolViewportRows = @[]
   e.writeTranscriptItem(transcript)
   let restoreTo = if editing: edPtr else: nil
+  var newFooterRows = footerRowsAboveEditor
   e.repaintVolatileAfterCommit(restoreTo, footerBytes,
-                               footerRowsAboveEditor,
+                               newFooterRows,
                                restoreEditor, reserveFooter)
   stdout.write termio.SyncEnd
   stdout.flushFile
