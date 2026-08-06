@@ -1018,13 +1018,17 @@ KEYMAP["alt+b"]     = proc(ed: var LineEditor) = ed.wordLeft()
 KEYMAP["alt+f"]     = proc(ed: var LineEditor) = ed.wordRight()
 KEYMAP["alt+h"]     = proc(ed: var LineEditor) = ed.deleteToBoundaryLeft()
 KEYMAP["ctrl+c"]    = proc(ed: var LineEditor) =
-  ed.canceled = true
-  raise newException(InputCancelled, "")
+  if ed.line.text.len > 0:
+    ed.clearLine()
+  else:
+    ed.canceled = true
+    raise newException(InputCancelled, "")
 KEYMAP["ctrl+d"]    = proc(ed: var LineEditor) =
+  ## Ctrl-D on an empty line asks to exit (EOFError). With text present
+  ## it is a no-op: it never edits and never cancels a turn.
   if ed.line.text.len == 0:
     ed.eof = true
     raise newException(EOFError, "")
-  ed.deleteNext()
 KEYMAP["ctrl+l"]    = proc(ed: var LineEditor) =
   ed.write "\x1b[H\x1b[2J"
   ed.renderRow = 0
@@ -1127,14 +1131,11 @@ proc initKeyTables*() =
   KEYMAP["alt+f"]     = proc(ed: var LineEditor) = ed.wordRight()
   KEYMAP["alt+h"]     = proc(ed: var LineEditor) = ed.deleteToBoundaryLeft()
   KEYMAP["ctrl+c"]    = proc(ed: var LineEditor) =
-    if ed.wizardMode:
-      # In the provider wizard, Ctrl-C clears the line if text is
-      # present, otherwise aborts the wizard (returns to prompt).
-      if ed.line.text.len > 0:
-        ed.clearLine()
-      else:
-        ed.canceled = true
-        raise newException(InputCancelled, "")
+    # Ctrl-C clears the line if text is present, otherwise cancels
+    # (at idle: nothing to cancel; during a turn / in the wizard:
+    # aborts the turn / wizard).
+    if ed.line.text.len > 0:
+      ed.clearLine()
     else:
       ed.canceled = true
       raise newException(InputCancelled, "")
@@ -1144,10 +1145,11 @@ proc initKeyTables*() =
       # char nor aborts. The user aborts with Ctrl-C or ESC on an empty
       # line.
       return
+    # Ctrl-D on an empty line asks to exit (EOFError). With text
+    # present it is a no-op: it never edits and never cancels a turn.
     if ed.line.text.len == 0:
       ed.eof = true
       raise newException(EOFError, "")
-    ed.deleteNext()
   KEYMAP["ctrl+l"]    = proc(ed: var LineEditor) =
     ed.write "\x1b[H\x1b[2J"
     ed.renderRow = 0
@@ -1382,8 +1384,10 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
   ## (Shift+Enter / Alt+Enter — these now insert a real newline rather
   ## than backslash-continuation).
   if c1 == 27 and not ed.hasPendingEscapeTail():
-    KEYMAP["ctrl+c"](ed)
-    return false
+    # Bare ESC always cancels (interrupts an ongoing turn), and never
+    # touches the line's characters.
+    ed.canceled = true
+    raise newException(InputCancelled, "")
 
   template escCh(retries: int = 3): int =
     block:
@@ -1440,8 +1444,8 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
   # their own handlers below.
   if altName.len > 0:
     ed.escPutback = c2
-    KEYMAP["ctrl+c"](ed)
-    return false
+    ed.canceled = true
+    raise newException(InputCancelled, "")
   if c2 == 91:  # CSI
     let c3 = escCh(25)
     if c3 < 0: return false

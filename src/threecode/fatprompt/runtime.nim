@@ -2134,15 +2134,18 @@ proc inputThreadProc() {.thread.} =
         pushInputEvent(InputEvent(kind: ieInterrupt))
         continue
       except EOFError:
-        if inputTurnActive.load(moAcquire) and edPtr[].line.text.len == 0:
-          requestTurnInterrupt()
-          continue
+        # EOFError means the user asked to quit (Ctrl-D on an empty
+        # line, or real stdin EOF). It never interrupts a turn; that is
+        # Ctrl-C / ESC's job.
         # A pending idle line means the controller hasn't consumed the
         # submit yet; getCh returned -1 for backpressure, not because
         # stdin closed. Don't push ieQuit—wait for the controller.
         if not inputTurnActive.load(moAcquire) and
            inputIdleLinePending.load(moAcquire):
           continue
+        # Clear the idle-park flag so the quit path doesn't wait on a
+        # parked getCh that will never be released.
+        inputIdleLinePending.store(false, moRelease)
         pushInputEvent(InputEvent(kind: ieQuit))
         break
       except CatchableError:
