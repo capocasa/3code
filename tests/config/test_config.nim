@@ -200,35 +200,37 @@ suite "config: [settings] mode":
     removeFile(tmp)
     colorModePref = cmAuto
 
-  test "parseConfigFile reads mode = bright as cmLight":
-    writeFile(tmp, "[settings]\nmode = \"bright\"\n")
+  test "parseConfigFile reads tone = light as cmLight":
+    writeFile(tmp, "[settings]\ntone = \"light\"\n")
     discard parseConfigFile(tmp)
     check colorModePref == cmLight
 
-  test "parseConfigFile accepts light as an alias for bright":
-    writeFile(tmp, "[settings]\nmode = \"light\"\n")
-    discard parseConfigFile(tmp)
-    check colorModePref == cmLight
+  test "parseConfigFile accepts legacy mode/bright spellings":
+    for kv in ["mode = \"bright\"", "mode = \"light\"", "tone = \"bright\""]:
+      writeFile(tmp, "[settings]\n" & kv & "\n")
+      discard parseConfigFile(tmp)
+      check colorModePref == cmLight
+      colorModePref = cmAuto
 
-  test "parseConfigFile reads mode = dark as cmDark":
-    writeFile(tmp, "[settings]\nmode = \"dark\"\n")
+  test "parseConfigFile reads tone = dark as cmDark":
+    writeFile(tmp, "[settings]\ntone = \"dark\"\n")
     discard parseConfigFile(tmp)
     check colorModePref == cmDark
 
-  test "parseConfigFile leaves the default cmAuto when mode is absent":
+  test "parseConfigFile leaves the default cmAuto when tone is absent":
     writeFile(tmp, "[settings]\ncurrent = \"p.m\"\n")
     discard parseConfigFile(tmp)
     check colorModePref == cmAuto
 
-  test "writeConfigFile persists mode only when forced (auto is the default)":
+  test "writeConfigFile persists tone only when forced (auto is the default)":
     colorModePref = cmLight
     writeConfigFile(tmp, "p.m", @[])
     let raw = readFile(tmp)
-    check raw.find("mode = \"bright\"") >= 0
+    check raw.find("tone = \"light\"") >= 0
     colorModePref = cmAuto
     writeConfigFile(tmp, "p.m", @[])
     let raw2 = readFile(tmp)
-    check raw2.find("mode") < 0  # auto is the default — clean config
+    check raw2.find("tone") < 0  # auto is the default — clean config
 
 suite "config: [colors] section":
   var tmp = ""

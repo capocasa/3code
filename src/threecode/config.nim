@@ -232,14 +232,16 @@ const
   SettingsKeys = ["current", "notify", "streaming", "sandbox",
                   "sandbox_enabled", "patient_retry", "patient-retry",
                   "sandbox_wall_warn",
-                  "mode", "bash_path", "bash-path",
+                  "tone", "mode", "bash_path", "bash-path",
                   "auto_update"]
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
   ColorKeys = ["bright-white", "off-white", "dim-white"]
   ProviderKeys = ["name", "url", "key", "model_prefix", "family",
                   "models", "reasoning", "reasonings"]
   SearchEngines = ["exa", "parallel", "brave"]
-  ColorModes = ["auto", "dark", "bright", "light"]
+  # `light` is the canonical light-background value; `bright` is the
+  # legacy spelling and stays accepted so existing configs keep working.
+  ColorModes = ["auto", "dark", "light", "bright"]
   BoolValues = ["on", "true", "yes", "1", "off", "false", "no", "0"]
 
 proc permittedKey(section, key: string): bool =
@@ -281,9 +283,10 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
           ent.value.strip.toLowerAscii notin BoolValues:
         return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
                "(expected on/off/true/false/yes/no/1/0)"
-      if ent.key == "mode" and ent.value.strip.toLowerAscii notin ColorModes:
-        return &"{path}:{ent.line}: unknown color mode '{ent.value}' " &
-               "(expected one of: auto, dark, bright)"
+      if ent.key in ["tone", "mode"] and
+          ent.value.strip.toLowerAscii notin ColorModes:
+        return &"{path}:{ent.line}: unknown tone '{ent.value}' " &
+               "(expected one of: auto, dark, light)"
     else: discard
   ""
 
@@ -376,13 +379,14 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           of "on", "true", "yes", "1": sandboxWallWarn = true
           of "off", "false", "no", "0": sandboxWallWarn = false
           else: discard
-        of "mode":
-          # `auto` detects the background (default); `dark`/`bright` force a
-          # palette. `light` is accepted as an alias for `bright`.
+        of "tone", "mode":
+          # `auto` detects the background (default); `dark`/`light` force a
+          # palette. `mode`/`bright` are the legacy spellings and stay
+          # accepted so existing configs keep working.
           case v.strip.toLowerAscii
           of "auto": colorModePref = cmAuto
           of "dark": colorModePref = cmDark
-          of "bright", "light": colorModePref = cmLight
+          of "light", "bright": colorModePref = cmLight
           else: discard
         of "bash_path", "bash-path":
           bashPathOverride = v
@@ -450,10 +454,10 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "patient_retry = \"off\"\n"
   if not sandboxWallWarn:
     buf.add "sandbox_wall_warn = \"off\"\n"
-  # Persist the colour mode only when it differs from `auto` (the default).
+  # Persist the colour tone only when it differs from `auto` (the default).
   if colorModePref != cmAuto:
-    let label = if colorModePref == cmDark: "dark" else: "bright"
-    buf.add "mode = " & quoteVal(label) & "\n"
+    let label = if colorModePref == cmDark: "dark" else: "light"
+    buf.add "tone = " & quoteVal(label) & "\n"
   for pr in providers:
     buf.add "\n[provider]\n"
     buf.add "name = " & quoteVal(pr.name) & "\n"

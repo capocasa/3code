@@ -4,6 +4,16 @@ import threecode/unicodewidth
 when defined(posix):
   import std/posix except Time
   import std/termios
+when defined(windows):
+  import std/winlean
+  const
+    ENABLE_LINE_INPUT = 0x0002'i32
+    ENABLE_ECHO_INPUT = 0x0004'i32
+    WAIT_FAILED = -1'i32
+  proc getConsoleMode(h: Handle; mode: ptr int32): int32 {.stdcall,
+      dynlib: "kernel32", importc: "GetConsoleMode".}
+  proc setConsoleMode(h: Handle; mode: int32): int32 {.stdcall,
+      dynlib: "kernel32", importc: "SetConsoleMode".}
 
 proc tempDir*(): string =
   ## `getTempDir` that honors `$TMPDIR` on Android. Nim's stdlib
@@ -159,13 +169,62 @@ func luminance*(r, g, b: int): float =
   ## Perceptual luminance (ITU-R BT.601 weights). 0..255 -> 0..1.
   (0.299 * r.float + 0.587 * g.float + 0.114 * b.float) / 255.0
 
+when defined(windows):
+  proc detectColorModeWindows(): ColorMode =
+    ## Windows branch of `detectColorMode`: the same OSC 11 query, but
+    ## through the console API. Windows Terminal (>=1.22) answers the
+    ## query; the reply arrives on the console input buffer. The input
+    ## handle is also waitable, so `WaitForSingleObject` gives the same
+    ## poll-with-deadline shape as the POSIX branch. Any failure (no
+    ## console, redirected stdin, terminal never answers) falls back to
+    ## dark. `WaitForSingleObject` on a pipe returns WAIT_FAILED, so a
+    ## piped stdin is rejected by the first wait.
+    let h = getStdHandle(STD_INPUT_HANDLE)
+    var orig: int32 = 0
+    if getConsoleMode(h, addr orig) == 0: return cmDark
+    if setConsoleMode(h, orig and not (ENABLE_LINE_INPUT or ENABLE_ECHO_INPUT)) == 0:
+      return cmDark
+    try:
+      stdout.write "\x1b]11;?\x07"
+      stdout.flushFile()
+      var buf: array[256, char]
+      var total = 0
+      const DeadlineMs = 150
+      var elapsedMs = 0
+      const StepMs = 25
+      while elapsedMs < DeadlineMs and total < buf.len:
+        let w = waitForSingleObject(h, StepMs)
+        elapsedMs += StepMs
+        if w == WAIT_OBJECT_0:
+          var got: int32 = 0
+          if readFile(h, addr buf[total], int32(buf.len - total),
+                      addr got, nil) == 0 or got == 0:
+            break
+          total += got.int
+          if '\x07' in buf.toOpenArray(0, total - 1) or
+             (total >= 2 and buf[total - 2] == '\x1b' and buf[total - 1] == '\\'):
+            break
+        elif w == WAIT_FAILED:
+          # A pipe/redirected stdin is not waitable; this is not a console.
+          return cmDark
+      let reply = cast[string](buf.toOpenArray(0, total - 1))
+      let (r, g, b) = parseOscBg(reply)
+      if r >= 0:
+        if luminance(r, g, b) > 0.5: return cmLight
+        return cmDark
+      return cmDark
+    finally:
+      discard setConsoleMode(h, orig)
+
 proc detectColorMode*(force: ColorMode = cmAuto): ColorMode =
   ## Resolve the active colour mode. A forced `cmDark`/`cmLight` wins
   ## directly. `cmAuto` queries the terminal for its background colour via
   ## OSC 11 (`ESC ] 11 ; ? BEL`), parses the `rgb:...` reply, and picks
   ## light when the background luminance is high. On any failure (not a
   ## tty, the terminal doesn't answer within the poll deadline, an
-  ## unparseable reply) it defaults to dark.
+  ## unparseable reply) it defaults to dark. On Windows the query goes
+  ## through the console API (`detectColorModeWindows`); Windows Terminal
+  ## (>=1.22) answers it.
   ##
   ## Under the tty test harness the PTY doesn't answer OSC queries, so the
   ## query bytes would pollute captured frames; detection skips the query
@@ -221,6 +280,8 @@ proc detectColorMode*(force: ColorMode = cmAuto): ColorMode =
       return cmDark
     finally:
       discard tcSetAttr(FdStdin, TCSANOW, addr orig)
+  elif defined(windows):
+    detectColorModeWindows()
   else:
     cmDark
 

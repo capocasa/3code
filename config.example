@@ -25,22 +25,23 @@ current = "baseten.glm5"
 ; sandbox_wall_warn = off ; silence the Windows "wall not set up" warning (host rules in policy, no `3code wall setup-windows` yet)
 ; bash_path = "C:\\tools\\msys64\\usr\\bin\\bash.exe"  ; Windows only: override bash detection
 
-# Colour mode. 3code detects dark vs bright-background automatically by
-# querying the terminal background (OSC 11). Set `mode` to pin it instead:
-#   mode = "auto"    detect from the terminal (the default)
-#   mode = "dark"    force the dark palette
-#   mode = "bright"  force the bright-background palette
-; mode = "bright"
+# Colour tone. 3code detects dark vs light background automatically by
+# querying the terminal background (OSC 11). Set `tone` to pin it instead
+# (the legacy key `mode` and value "bright" still work):
+#   tone = "auto"    detect from the terminal (the default)
+#   tone = "dark"    force the dark palette
+#   tone = "light"   force the light-background palette
+; tone = "light"
 #
-# The white-family colours can be overridden per mode. A plain key sets
-# BOTH modes; a "-light" key sets bright mode only and wins there. Keys
+# The white-family colours can be overridden per tone. A plain key sets
+# BOTH tones; a "-light" key sets light tone only and wins there. Keys
 # are bright-white, off-white, dim-white. Values are quoted ANSI escape
 # sequences (parsecfg interprets backslash escapes, so "\x1b[30m" becomes
 # a real ESC byte). Defaults:
-#   bright-white = "\x1b[97m"   (dark)  / "\x1b[30m"   (bright, black)
+#   bright-white = "\x1b[97m"   (dark)  / "\x1b[30m"   (light, black)
 #   off-white    = "\x1b[38;5;252m" / "\x1b[38;5;238m"
 #   dim-white    = "\x1b[38;5;244m" / "\x1b[38;5;250m"
-# The colourful colours (cyan/green/red/magenta) are fixed in both modes.
+# The colourful colours (cyan/green/red/magenta) are fixed in both tones.
 ;
 ; [colors]
 ; bright-white = "\x1b[37m"

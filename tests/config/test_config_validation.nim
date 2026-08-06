@@ -66,15 +66,17 @@ suite "config validation: schema (in-process)":
       let entries = @[("search", "engine", eng, 3)]
       check validateConfig(P, entries) == ""
 
-  test "unknown color mode value is reported":
-    let entries = @[("settings", "mode", "purple", 3)]
-    let m = validateConfig(P, entries)
-    check m == P & ":3: unknown color mode 'purple' (expected one of: auto, dark, bright)"
+  test "unknown tone value is reported":
+    for key in ["tone", "mode"]:
+      let entries = @[("settings", key, "purple", 3)]
+      let m = validateConfig(P, entries)
+      check m == P & ":3: unknown tone 'purple' (expected one of: auto, dark, light)"
 
-  test "permitted color modes are accepted":
-    for md in ["auto", "dark", "bright", "light", "Bright"]:
-      let entries = @[("settings", "mode", md, 3)]
-      check validateConfig(P, entries) == ""
+  test "permitted tone values are accepted":
+    for md in ["auto", "dark", "light", "bright", "Light"]:
+      for key in ["tone", "mode"]:
+        let entries = @[("settings", key, md, 3)]
+        check validateConfig(P, entries) == ""
 
   test "bad boolean value for notify is reported":
     let entries = @[("settings", "notify", "maybe", 3)]
