@@ -245,17 +245,16 @@ suite "minline editor: cursor navigation":
     expect InputCancelled:
       discard d.run(ed, prompt = "> ")
 
-  test "Ctrl+C at idle does not erase the row above the prompt":
-    # The editor owns only its own rendered rows; the row above the prompt
-    # is scrollback it must never touch. Cancel raises InputCancelled before
-    # clearing the draft, so the contract to lock here is that the row above
-    # survives. (Clearing the draft in place is the controller/input-thread
-    # job, covered by the PTY regression test.)
+  test "Ctrl+C with text clears the line and erases nothing above it":
+    # Ctrl-C on a non-empty line clears the draft in place (it does NOT
+    # cancel). The editor owns only its own rendered rows; the row above
+    # the prompt is scrollback it must never touch.
     var ed = initEditor()
     let d = newDriver()
     d.terminal.write "previous line\r\n"
     d.pushString "hello"
     d.push CtrlC
+    d.push Esc        # line is now empty; ESC cancels and ends the read
     expect InputCancelled:
       discard d.run(ed, prompt = "> ")
     check rowText(d.grid, 0) == "previous line"
@@ -486,7 +485,7 @@ suite "minline editor: newline insertion (multiline)":
     d.push Enter
     d.pushString " edited"
     d.push Enter
-    d.push CtrlC
+    d.push Esc
 
     expect InputCancelled:
       discard d.run(ed, prompt = "> ")
@@ -517,7 +516,7 @@ suite "minline editor: newline insertion (multiline)":
     d.pushString "hello"
     d.push Enter      # queue; pendingCaret on, suffix shown, caret hidden
     d.pushString " world"  # cancels the queue, edits in place
-    d.push CtrlC
+    d.push Esc
     expect InputCancelled:
       discard d.run(ed, prompt = "> ")
     check cancelled == 1
@@ -542,7 +541,7 @@ suite "minline editor: newline insertion (multiline)":
     d.push Enter      # queue; caret parked at end
     d.push Backspace  # cancels queue, deletes trailing 'o'
     d.pushString "o!"
-    d.push CtrlC
+    d.push Esc
     expect InputCancelled:
       discard d.run(ed, prompt = "> ")
     check cancelled == 1
@@ -567,7 +566,7 @@ suite "minline editor: newline insertion (multiline)":
     d.pushString "hi"
     d.push Enter       # queue; pendingCaret on
     d.pushString " "   # first keystroke after queue: cancels + inserts
-    d.push CtrlC
+    d.push Esc
     var clearsAfterCancel = 0
     var suffixPainted = false
     let write: WriteProc = proc(s: string) =

@@ -4,7 +4,7 @@ discard """
   ## the long backoff window + typing stress fills the ConPTY output pipe).
 """
 ## Regression: text typed into the buffered editor while a 429 retry is in
-## flight must survive both ending paths of the retry block — Ctrl-C
+## flight must survive both ending paths of the retry block — ESC
 ## cancelling the backoff and the retry budget exhausting cleanly. The
 ## earlier behavior wiped `ed.line.text` on the InputCancelled path so the
 ## prompt came back empty (`❯ `) and the user had to retype the whole
@@ -56,8 +56,8 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
   ]
 
 suite "429 backoff with buffered typing":
-  test "Ctrl-C during 429 backoff preserves the typed follow-up prompt":
-    let root = newFixture("429_typed_ctrlc")
+  test "ESC during 429 backoff preserves the typed follow-up prompt":
+    let root = newFixture("429_typed_esc")
     writeConfiguredProvider(root)
     # 2x 429 (StubMaxAttempts=2 with -d:fastStubRetries) then a normal
     # reply. The 2nd 429 is the one that would exhaust the budget if we
@@ -94,9 +94,10 @@ suite "429 backoff with buffered typing":
     tty.send "next prompt"
     tty.expect "next prompt"
     tty.drain(100)
-    # Ctrl-C. The interrupt should preserve the buffered text and leave
-    # the caret at the end of the typed string.
-    tty.send "\x03"
+    # ESC. The interrupt should preserve the buffered text and leave
+    # the caret at the end of the typed string (ESC never edits; a
+    # Ctrl-C here would clear the draft instead of interrupting).
+    tty.send "\x1b"
     tty.expectInHistory "interrupted by user"
     tty.drain(500)
     tty.expectAlive()
@@ -105,7 +106,7 @@ suite "429 backoff with buffered typing":
     # (so the user can hit Enter to send it as the next prompt).
     let f = tty.frames[^1]
     doAssert not f.cursorHidden,
-      "REGRESSION: caret hidden after 429+Ctrl-C with buffered text"
+      "REGRESSION: caret hidden after 429+ESC with buffered text"
     let caretRow = f.rows[f.cursorRow]
     doAssert caretRow.contains("next prompt"),
       "REGRESSION: buffered 'next prompt' not on caret row " &
@@ -124,7 +125,7 @@ suite "429 backoff with buffered typing":
     # The preserved follow-up must actually be sent on Enter.
     tty.send "\n"
     tty.expectInHistory "recovered"
-    echo "  PASS: 429+Ctrl-C kept the buffered follow-up on the prompt row"
+    echo "  PASS: 429+ESC kept the buffered follow-up on the prompt row"
 
   test "429 budget exhaustion preserves the typed follow-up prompt":
     let root = newFixture("429_typed_exhaust")

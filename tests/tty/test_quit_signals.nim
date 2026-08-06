@@ -4,11 +4,13 @@
 ## readline contract promises — nothing more, nothing less:
 ##
 ##   * Ctrl-D on an *empty* prompt line quits (exactly like `:q`).
-##   * Ctrl-D with text present is a *no-op* at line end (it is delete-char,
-##     so at the end of the line there is nothing to delete); it never quits.
+##   * Ctrl-D with text present is a *no-op*: the text stays, it never
+##     quits and never edits.
+##   * Ctrl-D never interrupts an ongoing turn.
+##   * Ctrl-C with text on the prompt clears the text and does NOT
+##     interrupt; Ctrl-C on an empty prompt interrupts an ongoing turn.
+##   * ESC always interrupts an ongoing turn and never touches the text.
 ##   * `:q`, `:quit` and `:exit` quit from an idle prompt.
-##   * Ctrl-D during an *active* turn (empty buffered editor) interrupts the
-##     turn; the process stays alive and the prompt returns.
 ##   * No quit path leaves a stack trace or internal-error notice behind.
 ##
 ## The "traceback after Ctrl-D" report was the trigger for this file: a quit
@@ -102,12 +104,66 @@ suite "quit signals":
     for ch in "hello":
       tty.send($ch); tty.drain(10)
     tty.expect "\u276f hello"
-    tty.send "\x04"               # at line end: delete-char does nothing
+    tty.send "\x04"               # no-op mid-text
     tty.drain(300)
     tty.expectAlive()             # must NOT have quit
     tty.expect "\u276f hello"     # text still intact
     assertNoTrace(tty)
     echo "  PASS: Ctrl-D with text present was a no-op"
+
+  test "Ctrl-D during an active turn does NOT interrupt; Ctrl-C then quits":
+    let root = newFixture("ctrl_d_during_turn_noop")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, slowResponses())
+    let tty = startStub(root)
+    defer: tty.close()
+    tty.expect "\u276f"
+    for ch in "go":
+      tty.send($ch); tty.drain(10)
+    tty.send "\n"
+    tty.drain(400)               # let the turn start (spinner up)
+    tty.send "\x04"              # Ctrl-D during a turn: inert, no interrupt
+    tty.drain(300)
+    tty.expectNo "interrupted by user"
+    tty.expectAlive()            # ...and no quit either
+    # Ctrl-C on the empty buffered editor interrupts the turn...
+    tty.send "\x03"
+    tty.expectInHistory "interrupted by user"
+    tty.expectIdleCaret()
+    tty.expectAlive()
+    # ...and now that the prompt is idle and empty, Ctrl-D quits.
+    tty.send "\x04"
+    tty.expectExit(0, timeoutMs = 5000)
+    assertNoTrace(tty)
+    echo "  PASS: Ctrl-D during a turn was inert; Ctrl-C interrupted; Ctrl-D quit"
+
+  test "Ctrl-C with text clears the prompt without interrupting the turn":
+    let root = newFixture("ctrl_c_clears_during_turn")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, slowResponses())
+    let tty = startStub(root)
+    defer: tty.close()
+    tty.expect "\u276f"
+    for ch in "go":
+      tty.send($ch); tty.drain(10)
+    tty.send "\n"
+    tty.drain(400)               # turn running
+    for ch in "draft":           # type into the buffered editor mid-turn
+      tty.send($ch); tty.drain(10)
+    tty.send "\x03"              # Ctrl-C with text: clear only, no interrupt
+    tty.drain(300)
+    tty.expectNo "interrupted by user"
+    # The typed draft must be gone from the live prompt row (it remains in
+    # the raw byte history from when it was echoed while typing, so check
+    # the settled screen, not the byte stream).
+    check "draft" notin tty.screenText()
+    # The turn is still running: a bare ESC interrupts it (ESC never edits).
+    tty.send "\x1b"
+    tty.expectInHistory "interrupted by user"
+    tty.expectIdleCaret()
+    tty.expectAlive()
+    assertNoTrace(tty)
+    echo "  PASS: Ctrl-C cleared the draft without interrupting; ESC interrupted"
 
   test ":q quits from an idle prompt":
     let root = newFixture("colon_q_quits")
@@ -145,8 +201,8 @@ suite "quit signals":
     assertNoTrace(tty)
     echo "  PASS: :exit quit cleanly (exit 0)"
 
-  test "Ctrl-D during an active turn interrupts and stays alive":
-    let root = newFixture("ctrl_d_interrupts_turn")
+  test "Ctrl-C during an active turn interrupts and stays alive":
+    let root = newFixture("ctrl_c_interrupts_turn")
     writeConfiguredProvider(root)
     writeStubResponses(root, slowResponses())
     let tty = startStub(root)
@@ -156,12 +212,12 @@ suite "quit signals":
       tty.send($ch); tty.drain(10)
     tty.send "\n"
     tty.drain(400)               # let the turn start (spinner up)
-    tty.send "\x04"              # Ctrl-D on the empty buffered editor
+    tty.send "\x03"              # Ctrl-C on the empty buffered editor
     tty.expectInHistory "interrupted by user"
     tty.expectIdleCaret()        # prompt returns after the interrupt
     tty.expectAlive()            # the process did NOT exit
     assertNoTrace(tty)
-    echo "  PASS: Ctrl-D during a turn interrupted it and the prompt returned"
+    echo "  PASS: Ctrl-C during a turn interrupted it and the prompt returned"
 
   test ":q queued during an active turn is honoured after it ends":
     let root = newFixture("colon_q_queued_during_turn")
