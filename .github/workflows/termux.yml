@@ -87,6 +87,9 @@ jobs:
         run: |
           set -e
           tar xzf 3code-termux-arm64.tar.gz
+          # Register qemu binfmt handlers; runner docker can't exec arm64
+          # images without this (locally docker-desktop does it for you).
+          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes > /dev/null
           # The image's Termux tree is owned by uid/gid 1000 (system); run
           # the container as that user so pkg and $HOME behave.
           CID=$(docker create -t --platform linux/arm64 --user 1000:1000 \
