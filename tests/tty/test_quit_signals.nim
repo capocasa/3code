@@ -112,7 +112,7 @@ suite "quit signals":
     echo "  PASS: Ctrl-D with text present was a no-op"
 
   test "Ctrl-D during an active turn does NOT interrupt; Ctrl-C then quits":
-    when defined(windows):
+    if defined(windows):
       # Under the ConPTY harness the buffered-editor mid-turn path wedges
       # on the inert \x04: the Windows getCh has no poll, so the input
       # thread cannot tell a mid-turn keystroke from stdin EOF the way the
