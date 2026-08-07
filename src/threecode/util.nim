@@ -4,6 +4,8 @@ import threecode/unicodewidth
 when defined(posix):
   import std/posix except Time
   import std/termios
+when defined(windows):
+  import std/winlean
 
 proc tempDir*(): string =
   ## `getTempDir` that honors `$TMPDIR` on Android. Nim's stdlib
@@ -159,6 +161,9 @@ func luminance*(r, g, b: int): float =
   ## Perceptual luminance (ITU-R BT.601 weights). 0..255 -> 0..1.
   (0.299 * r.float + 0.587 * g.float + 0.114 * b.float) / 255.0
 
+when defined(windows):
+  proc detectColorModeWindows(): ColorMode
+
 proc detectColorMode*(force: ColorMode = cmAuto): ColorMode =
   ## Resolve the active colour mode. A forced `cmDark`/`cmLight` wins
   ## directly. `cmAuto` queries the terminal for its background colour via
@@ -222,6 +227,60 @@ proc detectColorMode*(force: ColorMode = cmAuto): ColorMode =
     finally:
       discard tcSetAttr(FdStdin, TCSANOW, addr orig)
   else:
+    detectColorModeWindows()
+
+when defined(windows):
+  proc c_isatty(fd: cint): cint {.header: "<io.h>", importc: "_isatty".}
+
+  proc detectColorModeWindows(): ColorMode =
+    ## Query the terminal background via OSC 11 on Windows. Windows
+    ## Terminal answers the query; legacy conhost does not. Returns
+    ## `cmLight` when the background luminance is high, else `cmDark`.
+    ## On any failure (not a console, no reply within the deadline, an
+    ## unparseable reply) it defaults to dark.
+    const
+      STD_INPUT_HANDLE = -10'i32
+      STD_OUTPUT_HANDLE = -11'i32
+      WAIT_OBJECT_0 = 0'i32
+    # Only query when stdin is a real console; under a redirected stdin
+    # (test harness, ssh) there is no terminal to answer and the query
+    # bytes would leak to stdout.
+    if c_isatty(0) == 0: return cmDark
+    let hIn = getStdHandle(STD_INPUT_HANDLE)
+    let hOut = getStdHandle(STD_OUTPUT_HANDLE)
+    if hIn == 0 or hOut == 0: return cmDark
+    # Write the OSC 11 query (`ESC ] 11 ; ? BEL`).
+    let query = "\x1b]11;?\x07"
+    var written: int32 = 0
+    if writeFile(hOut, unsafeAddr query[0], query.len.int32, addr written, nil) == 0:
+      return cmDark
+    # Read the reply with a deadline. `WaitForSingleObject` on the console
+    # input handle signals when input is available, so we poll instead of
+    # blocking on `ReadFile` (which would hang forever if the terminal
+    # never answers).
+    var buf: array[256, char]
+    var total = 0
+    let deadlineMs = 150'i32
+    var elapsedMs = 0'i32
+    const StepMs = 25'i32
+    while elapsedMs < deadlineMs:
+      if waitForSingleObject(hIn, StepMs) == WAIT_OBJECT_0:
+        var got: int32 = 0
+        if readFile(hIn, addr buf[total], (buf.len - total).int32,
+                    addr got, nil) != 0 and got > 0:
+          total += got.int
+          if total >= buf.len: break
+          # The reply is terminated by BEL (0x07) or ST (ESC \). Stop once
+          # a terminator lands so we don't wait out the full window.
+          if '\x07' in buf.toOpenArray(0, total - 1) or
+             (total >= 2 and buf[total - 2] == '\x1b' and buf[total - 1] == '\\'):
+            break
+      elapsedMs += StepMs
+    if total == 0: return cmDark
+    var reply = newString(total)
+    copyMem(reply[0].addr, buf[0].addr, total)
+    let (r, g, b) = parseOscBg(reply)
+    if r >= 0 and luminance(r, g, b) > 0.5: return cmLight
     cmDark
 
 proc splitColorOverrides*(flat: Table[string, string]):
