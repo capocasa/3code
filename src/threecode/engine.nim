@@ -226,6 +226,12 @@ proc finishEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor;
   if e.editorRedrawPending:
     if e.editorRedrawFooterRows > 0:
       e.noteFooterPainted(e.editorRedrawFooterRows)
+    elif e.paintedFooterRows > 0:
+      # A bare editor redraw (no footer bytes) must not wipe a nonzero
+      # painted-footer count left by the ffNone commit path: that path
+      # reserves the one-row gap below the last item as live chrome, and
+      # the count is what makes the next commit's walk-up erase it.
+      discard
     else:
       e.noteNoFooter()
     e.editorRedrawPending = false
@@ -303,9 +309,13 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         try: terminalWidth() except CatchableError: 0
       let bytes = frame.footerFrameBytes(width)
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
-      let reflowed = e.lastPaintedWidth > 0 and width > 0 and
-        width != e.lastPaintedWidth
       if not (inputRunning and editor != nil):
+        # No editor below: paint without a walk-up. Do NOT touch
+        # `lastPaintedWidth` here — a resize must stay pending for the
+        # full repaint path below, whose inflated one-shot erase is the
+        # only thing that clears the reflowed stale rows. Consuming the
+        # width change here made the next full repaint fall short and
+        # left stale banner fragments stacking in scrollback.
         stdout.write termio.SyncBegin
         stdout.write "\x1b[?25l"
         e.toolViewportHasGap = e.hasScrollback
@@ -315,24 +325,30 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         if bytes.len > 0:
           stdout.write bytes
         e.noteNoFooter()
-        e.lastPaintedWidth = width
         stdout.write termio.SyncEnd
         stdout.flushFile
         return
       stdout.write termio.SyncBegin
       stdout.write "\x1b[?25l"
       refreshEditorWidth(editor[])
-      # A width change reflowed the already-painted volatile rows: a wide
-      # banner/output wraps to more rows (or fewer) on screen, but the
-      # stored `toolViewportRows.len` still holds the pre-reflow count, so a
-      # plain walkUp would fall short and leave stale fragments. Inflate the
-      # erase to clear the whole volatile region — bounded by the terminal
-      # height, which always covers the reflowed stale content.
+      # A width change reflowed the already-painted volatile rows: a
+      # wide banner/output wraps to more rows (or fewer) on screen, but
+      # the stored `toolViewportRows.len` holds the new-width count, so a
+      # plain walkUp falls short of (or overshoots) the reflowed stale
+      # content. Erase once using the larger of the pre/post-reflow
+      # region heights: the stale rows occupy at most the pre-reflow
+      # count, the fresh paint the post-reflow count. Walking further up
+      # (e.g. a full terminalHeight) would erase committed scrollback,
+      # which is what made the stacked banner fragments visible.
+      let reflowed = e.lastPaintedWidth > 0 and width > 0 and
+        width != e.lastPaintedWidth
       let up = if reflowed:
           max(0, editorRowsAboveCursor(editor[]) +
-            e.paintedFooterRows + e.viewportGapRows + e.liveContentRows.len +
-            e.liveContentGapRows +
-            (try: terminalHeight() except CatchableError: 24))
+            max(e.paintedFooterRows, footerRowsAboveEditor) +
+            max(e.viewportGapRows + e.toolViewportRows.len +
+                e.liveContentGapRows + e.liveContentRows.len,
+                (if e.toolViewportHasGap and rows.len > 0: 1 else: 0) +
+                rows.len))
         else:
           max(0, e.walkUp(editor[]))
       stdout.write "\r"
@@ -547,7 +563,7 @@ proc writeTranscriptItem(e: var TerminalEngine; transcript: string) =
 proc repaintVolatileAfterCommit(e: var TerminalEngine;
                                 edPtr: ptr minline.LineEditor;
                                 footerBytes: string;
-                                footerRowsAboveEditor: int;
+                                footerRowsAboveEditor: var int;
                                 restoreEditor: bool;
                                 reserveFooter: bool) =
   ## Second half of a transcript commit: the erase consumed the volatile
@@ -558,6 +574,17 @@ proc repaintVolatileAfterCommit(e: var TerminalEngine;
     e.noteNoFooter()
     return
   let editing = edPtr != nil and restoreEditor
+  if editing and footerRowsAboveEditor == 0 and footerBytes.len == 0:
+    # ffNone keeps the reserved gap row between the last committed item
+    # and the editor. It is live chrome, so the row model must count it:
+    # otherwise the next commit walks up 0 rows, erases only the editor
+    # row, and leaves this gap row behind as a stray blank scrollback row
+    # (the extra-line bug). Leave the cursor on the gap row: stepping the
+    # erased editor row down to it is exactly one row's move, and the
+    # editor redraw below restores the caret into the editor.
+    stdout.write "\r\n"
+    stdout.write "\x1b[1A"
+    footerRowsAboveEditor = 1
   if footerBytes.len > 0:
     # The row model and the emitted bytes must agree on the footer's
     # height: the bar+ticker bytes are exactly footerRowsAboveEditor rows
@@ -627,8 +654,9 @@ proc commitTranscriptItem(e: var TerminalEngine; transcript: string;
   e.toolViewportRows = @[]
   e.writeTranscriptItem(transcript)
   let restoreTo = if editing: edPtr else: nil
+  var newFooterRows = footerRowsAboveEditor
   e.repaintVolatileAfterCommit(restoreTo, footerBytes,
-                               footerRowsAboveEditor,
+                               newFooterRows,
                                restoreEditor, reserveFooter)
   stdout.write termio.SyncEnd
   stdout.flushFile

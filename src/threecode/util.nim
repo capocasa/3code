@@ -6,14 +6,6 @@ when defined(posix):
   import std/termios
 when defined(windows):
   import std/winlean
-  const
-    ENABLE_LINE_INPUT = 0x0002'i32
-    ENABLE_ECHO_INPUT = 0x0004'i32
-    WAIT_FAILED = -1'i32
-  proc getConsoleMode(h: Handle; mode: ptr int32): int32 {.stdcall,
-      dynlib: "kernel32", importc: "GetConsoleMode".}
-  proc setConsoleMode(h: Handle; mode: int32): int32 {.stdcall,
-      dynlib: "kernel32", importc: "SetConsoleMode".}
 
 proc tempDir*(): string =
   ## `getTempDir` that honors `$TMPDIR` on Android. Nim's stdlib
@@ -170,51 +162,7 @@ func luminance*(r, g, b: int): float =
   (0.299 * r.float + 0.587 * g.float + 0.114 * b.float) / 255.0
 
 when defined(windows):
-  proc detectColorModeWindows(): ColorMode =
-    ## Windows branch of `detectColorMode`: the same OSC 11 query, but
-    ## through the console API. Windows Terminal (>=1.22) answers the
-    ## query; the reply arrives on the console input buffer. The input
-    ## handle is also waitable, so `WaitForSingleObject` gives the same
-    ## poll-with-deadline shape as the POSIX branch. Any failure (no
-    ## console, redirected stdin, terminal never answers) falls back to
-    ## dark. `WaitForSingleObject` on a pipe returns WAIT_FAILED, so a
-    ## piped stdin is rejected by the first wait.
-    let h = getStdHandle(STD_INPUT_HANDLE)
-    var orig: int32 = 0
-    if getConsoleMode(h, addr orig) == 0: return cmDark
-    if setConsoleMode(h, orig and not (ENABLE_LINE_INPUT or ENABLE_ECHO_INPUT)) == 0:
-      return cmDark
-    try:
-      stdout.write "\x1b]11;?\x07"
-      stdout.flushFile()
-      var buf: array[256, char]
-      var total = 0
-      const DeadlineMs = 150
-      var elapsedMs = 0
-      const StepMs = 25
-      while elapsedMs < DeadlineMs and total < buf.len:
-        let w = waitForSingleObject(h, StepMs)
-        elapsedMs += StepMs
-        if w == WAIT_OBJECT_0:
-          var got: int32 = 0
-          if readFile(h, addr buf[total], int32(buf.len - total),
-                      addr got, nil) == 0 or got == 0:
-            break
-          total += got.int
-          if '\x07' in buf.toOpenArray(0, total - 1) or
-             (total >= 2 and buf[total - 2] == '\x1b' and buf[total - 1] == '\\'):
-            break
-        elif w == WAIT_FAILED:
-          # A pipe/redirected stdin is not waitable; this is not a console.
-          return cmDark
-      let reply = cast[string](buf.toOpenArray(0, total - 1))
-      let (r, g, b) = parseOscBg(reply)
-      if r >= 0:
-        if luminance(r, g, b) > 0.5: return cmLight
-        return cmDark
-      return cmDark
-    finally:
-      discard setConsoleMode(h, orig)
+  proc detectColorModeWindows(): ColorMode
 
 proc detectColorMode*(force: ColorMode = cmAuto): ColorMode =
   ## Resolve the active colour mode. A forced `cmDark`/`cmLight` wins
@@ -283,6 +231,72 @@ proc detectColorMode*(force: ColorMode = cmAuto): ColorMode =
   elif defined(windows):
     detectColorModeWindows()
   else:
+    cmDark
+
+when defined(windows):
+  proc c_isatty(fd: cint): cint {.header: "<io.h>", importc: "_isatty".}
+  proc getConsoleMode(hConsole: Handle, lpMode: ptr int32): int32 {.stdcall,
+      dynlib: "kernel32", importc: "GetConsoleMode".}
+  proc setConsoleMode(hConsole: Handle, dwMode: int32): int32 {.stdcall,
+      dynlib: "kernel32", importc: "SetConsoleMode".}
+
+  proc detectColorModeWindows(): ColorMode =
+    ## Query the terminal background via OSC 11 on Windows. Windows
+    ## Terminal answers the query; legacy conhost does not. Returns
+    ## `cmLight` when the background luminance is high, else `cmDark`.
+    ## On any failure (not a console, no reply within the deadline, an
+    ## unparseable reply) it defaults to dark.
+    const
+      STD_INPUT_HANDLE = -10'i32
+      STD_OUTPUT_HANDLE = -11'i32
+      WAIT_OBJECT_0 = 0'i32
+      ENABLE_LINE_INPUT = 0x0002'i32
+      ENABLE_ECHO_INPUT = 0x0004'i32
+    # Only query when stdin is a real console; under a redirected stdin
+    # (test harness, ssh) there is no terminal to answer and the query
+    # bytes would leak to stdout.
+    if c_isatty(0) == 0: return cmDark
+    let hIn = getStdHandle(STD_INPUT_HANDLE)
+    let hOut = getStdHandle(STD_OUTPUT_HANDLE)
+    if hIn == 0 or hOut == 0: return cmDark
+    # Write the OSC 11 query (`ESC ] 11 ; ? BEL`).
+    let query = "\x1b]11;?\x07"
+    var written: int32 = 0
+    if writeFile(hOut, unsafeAddr query[0], query.len.int32, addr written, nil) == 0:
+      return cmDark
+    # Read the reply with a deadline. `ReadFile` on a console input handle
+    # blocks in line-input mode until a CR arrives, so clear line/echo input
+    # for the duration of the read and restore afterwards. `WaitForSingleObject`
+    # polls the handle so we don't block forever if the terminal never answers.
+    var oldMode: int32 = 0
+    let haveMode = getConsoleMode(hIn, addr oldMode) != 0
+    if haveMode:
+      discard setConsoleMode(hIn, oldMode and not (ENABLE_LINE_INPUT or ENABLE_ECHO_INPUT))
+    var buf: array[256, char]
+    var total = 0
+    let deadlineMs = 150'i32
+    var elapsedMs = 0'i32
+    const StepMs = 25'i32
+    while elapsedMs < deadlineMs:
+      if waitForSingleObject(hIn, StepMs) == WAIT_OBJECT_0:
+        var got: int32 = 0
+        if readFile(hIn, addr buf[total], (buf.len - total).int32,
+                    addr got, nil) != 0 and got > 0:
+          total += got.int
+          if total >= buf.len: break
+          # The reply is terminated by BEL (0x07) or ST (ESC \). Stop once
+          # a terminator lands so we don't wait out the full window.
+          if '\x07' in buf.toOpenArray(0, total - 1) or
+             (total >= 2 and buf[total - 2] == '\x1b' and buf[total - 1] == '\\'):
+            break
+      elapsedMs += StepMs
+    if haveMode:
+      discard setConsoleMode(hIn, oldMode)
+    if total == 0: return cmDark
+    var reply = newString(total)
+    copyMem(reply[0].addr, buf[0].addr, total)
+    let (r, g, b) = parseOscBg(reply)
+    if r >= 0 and luminance(r, g, b) > 0.5: return cmLight
     cmDark
 
 proc splitColorOverrides*(flat: Table[string, string]):

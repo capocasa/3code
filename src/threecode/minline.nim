@@ -33,7 +33,8 @@ import
   strutils,
   tables,
   std/exitprocs,
-  os
+  os,
+  times
 
 import signals
 import threecode/unicodewidth as ucwidth
@@ -84,6 +85,9 @@ when defined(windows):
     ## Prints an ASCII character to stdout.
   proc rawGetch(): cint {.header: "<conio.h>", importc: "_getch".}
     ## Raw blocking key read; wrapped by `getchr` below.
+  proc kbhit(): cint {.header: "<conio.h>", importc: "_kbhit".}
+    ## Non-blocking "is a key waiting" probe; lets a bare ESC cancel
+    ## without `_getch` blocking on a second byte that never comes.
 
   proc getchr*(): cint =
     ## Retrieves an ASCII character from stdin. Drains `termPeeked` first
@@ -1018,13 +1022,17 @@ KEYMAP["alt+b"]     = proc(ed: var LineEditor) = ed.wordLeft()
 KEYMAP["alt+f"]     = proc(ed: var LineEditor) = ed.wordRight()
 KEYMAP["alt+h"]     = proc(ed: var LineEditor) = ed.deleteToBoundaryLeft()
 KEYMAP["ctrl+c"]    = proc(ed: var LineEditor) =
-  ed.canceled = true
-  raise newException(InputCancelled, "")
+  if ed.line.text.len > 0:
+    ed.clearLine()
+  else:
+    ed.canceled = true
+    raise newException(InputCancelled, "")
 KEYMAP["ctrl+d"]    = proc(ed: var LineEditor) =
+  ## Ctrl-D on an empty line asks to exit (EOFError). With text present
+  ## it is a no-op: it never edits and never cancels a turn.
   if ed.line.text.len == 0:
     ed.eof = true
     raise newException(EOFError, "")
-  ed.deleteNext()
 KEYMAP["ctrl+l"]    = proc(ed: var LineEditor) =
   ed.write "\x1b[H\x1b[2J"
   ed.renderRow = 0
@@ -1127,14 +1135,11 @@ proc initKeyTables*() =
   KEYMAP["alt+f"]     = proc(ed: var LineEditor) = ed.wordRight()
   KEYMAP["alt+h"]     = proc(ed: var LineEditor) = ed.deleteToBoundaryLeft()
   KEYMAP["ctrl+c"]    = proc(ed: var LineEditor) =
-    if ed.wizardMode:
-      # In the provider wizard, Ctrl-C clears the line if text is
-      # present, otherwise aborts the wizard (returns to prompt).
-      if ed.line.text.len > 0:
-        ed.clearLine()
-      else:
-        ed.canceled = true
-        raise newException(InputCancelled, "")
+    # Ctrl-C clears the line if text is present, otherwise cancels
+    # (at idle: nothing to cancel; during a turn / in the wizard:
+    # aborts the turn / wizard).
+    if ed.line.text.len > 0:
+      ed.clearLine()
     else:
       ed.canceled = true
       raise newException(InputCancelled, "")
@@ -1144,10 +1149,11 @@ proc initKeyTables*() =
       # char nor aborts. The user aborts with Ctrl-C or ESC on an empty
       # line.
       return
+    # Ctrl-D on an empty line asks to exit (EOFError). With text
+    # present it is a no-op: it never edits and never cancels a turn.
     if ed.line.text.len == 0:
       ed.eof = true
       raise newException(EOFError, "")
-    ed.deleteNext()
   KEYMAP["ctrl+l"]    = proc(ed: var LineEditor) =
     ed.write "\x1b[H\x1b[2J"
     ed.renderRow = 0
@@ -1310,6 +1316,17 @@ proc terminalHasPendingInput*(): bool =
   ## byte. A bare Escape (no byte within the poll window) reports no
   ## tail so `handleEscape` cancels; any byte that arrives — including
   ## printable Alt-chord letters — is stashed and reported as a tail.
+  when defined(windows):
+    # Poll `_kbhit` for the same burst window the POSIX branch gives
+    # poll(). A bare ESC (no second byte in time) reports no tail.
+    if termPeeked >= 0:
+      return true
+    let deadline = epochTime() + EscapeTailPollMs.float / 1000.0
+    while epochTime() < deadline:
+      if kbhit() != 0:
+        return true
+      sleep 1
+    return kbhit() != 0
   when defined(posix):
     if isatty(0.cint) != 0:
       var pfd: TPollfd
@@ -1337,10 +1354,19 @@ proc hasPendingEscapeTail(ed: LineEditor): bool =
   ## POSIX terminals send a bare Escape with the same leading byte used
   ## by arrow-key CSI sequences. Wait briefly for a tail byte; if none
   ## arrives, treat it as a standalone cancel key.
-  if ed.hasPendingInput != nil:
-    ed.hasPendingInput()
-  else:
+  when defined(windows):
+    # The fat prompt passes no `hasPendingInput` on Windows, and the
+    # fallback used to be `true` (a phantom tail) because
+    # `terminalHasPendingInput` had no Windows peek: ESC then fell
+    # through to a blocking `_getch` for a second byte that never comes,
+    # freezing the input thread until the next keystroke. The `_kbhit`
+    # Windows branch makes the fallback honest.
     terminalHasPendingInput()
+  else:
+    if ed.hasPendingInput != nil:
+      ed.hasPendingInput()
+    else:
+      terminalHasPendingInput()
 
 # ---------- readLine driver ----------
 
@@ -1382,8 +1408,10 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
   ## (Shift+Enter / Alt+Enter — these now insert a real newline rather
   ## than backslash-continuation).
   if c1 == 27 and not ed.hasPendingEscapeTail():
-    KEYMAP["ctrl+c"](ed)
-    return false
+    # Bare ESC always cancels (interrupts an ongoing turn), and never
+    # touches the line's characters.
+    ed.canceled = true
+    raise newException(InputCancelled, "")
 
   template escCh(retries: int = 3): int =
     block:
@@ -1440,8 +1468,8 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
   # their own handlers below.
   if altName.len > 0:
     ed.escPutback = c2
-    KEYMAP["ctrl+c"](ed)
-    return false
+    ed.canceled = true
+    raise newException(InputCancelled, "")
   if c2 == 91:  # CSI
     let c3 = escCh(25)
     if c3 < 0: return false

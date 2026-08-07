@@ -164,7 +164,7 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
   # fixtures that happen to start in the same wall-clock second. The data
   # dirs are already isolated via XDG_DATA_HOME; the lock dir was the hole.
   createDir(root / "tmp")
-  @[
+  result = @[
     (key: "TERM", val: "xterm-256color"),
     (key: "PATH", val: getEnv("PATH")),
     (key: "HOME", val: root),
@@ -1209,7 +1209,20 @@ suite "terminal visual contract":
     tty.drain(300)
     tty.send "\x03"
     tty.expectInHistory "interrupted by user"
+    tty.drain 300  # let the post-interrupt prompt frame settle
     tty.expectOnScreen "❯"  # prompt painted on the grid after Ctrl-C, not just raw bytes
+    # Regression: interrupting a bash tool left the caret parked at col 0
+    # of the prompt row instead of col 2 after the ❯ glyph. Lock the same
+    # interrupted-by-user prompt contract as the network-quiet cancel
+    # tests: glyph on the caret row, caret at col 2, caret visible.
+    let f = tty.frames[^1]
+    doAssert not f.cursorHidden,
+      "REGRESSION (interrupt-during-bash): caret hidden after Ctrl-C; expected col 2 on prompt row"
+    doAssert f.cursorCol == 2,
+      "REGRESSION (interrupt-during-bash): expected caret at col 2 after ❯, got " & $f.cursorCol
+    doAssert "❯" in f.rows[f.cursorRow],
+      "REGRESSION (interrupt-during-bash): prompt glyph ❯ missing from caret row " &
+        $f.cursorRow & ", got: '" & f.rows[f.cursorRow] & "'"
     tty.expectAlive()
     # The regression: after interrupt the prompt must accept typing.
     tty.send "hello"
@@ -2203,6 +2216,56 @@ suite "terminal visual contract":
     doAssert maxRun <= 1, "scrollback has " & $maxRun &
       " consecutive blank rows at rows " & $maxRunStart & ".." &
       $(maxRunStart + maxRun - 1) & " (the extra-line bug):\n" &
+      tty.dumpFramesAround("")
+
+  test "consecutive colon commands never accumulate extra blank separator lines":
+    # Regression: back-to-back system commands (`:provider alt`, then
+    # `:tokens`) used to strand one blank row per command before the next
+    # command's echo. The ffNone commit painted a one-row gap below the
+    # committed item but left the engine's painted-footer row count at 0,
+    # so the next commit's erase walked up 0 rows and left the previous
+    # gap row behind in scrollback (two blank rows before the next `❯`).
+    let root = newFixture("command_separators")
+    writeHarnessProviders(root)
+    writeStubResponses(root, %*[])
+    let tty = startStub(root)
+    defer: tty.close()
+    tty.expect "❯"
+    tty.send ":provider alt"; tty.expect ":provider alt"; tty.send "\n"
+    tty.expectInHistory "provider  alt"
+    tty.drain(200)
+    tty.send ":tokens"; tty.expect ":tokens"; tty.send "\n"
+    tty.expectInHistory "no tokens used yet"
+    tty.drain(200)
+    # Sample the stable idle frame so caret/caret-row checks are settled.
+    # The settle must terminate on a quiet child (no output in the last
+    # poll window), not only on the first caret-bearing frame: the commit
+    # repaint produces a burst of intermediate frames whose earliest
+    # caret-on-`❯` state still shows the pre-erase grid, so peeking at
+    # frames[^1] immediately would read a torn state.
+    let idleDeadline = epochTime() + 5.0
+    block waitForIdle:
+      while epochTime() < idleDeadline:
+        if not tty.pollOnce(20, recordIdleFrame = false):
+          discard tty.pollOnce(0, recordIdleFrame = false)
+          break waitForIdle
+      tty.flushFrame(force = true)
+    let rows = if tty.frames.len > 0: tty.frames[^1].rows else: @[]
+    var maxRun = 0
+    var maxRunStart = -1
+    var curRun = 0
+    var curRunStart = -1
+    for idx, r in rows:
+      if r.strip.len == 0:
+        if curRun == 0: curRunStart = idx
+        inc curRun
+        if curRun > maxRun:
+          maxRun = curRun; maxRunStart = curRunStart
+      else:
+        curRun = 0
+    doAssert maxRun <= 1, "scrollback has " & $maxRun &
+      " consecutive blank rows at rows " & $maxRunStart & ".." &
+      $(maxRunStart + maxRun - 1) & " (the colon-command extra-line bug):\n" &
       tty.dumpFramesAround("")
 
   test "every prompt first line survives a reasoning-ticker to content transition":
