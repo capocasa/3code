@@ -231,6 +231,10 @@ proc detectColorMode*(force: ColorMode = cmAuto): ColorMode =
 
 when defined(windows):
   proc c_isatty(fd: cint): cint {.header: "<io.h>", importc: "_isatty".}
+  proc getConsoleMode(hConsole: Handle, lpMode: ptr int32): int32 {.stdcall,
+      dynlib: "kernel32", importc: "GetConsoleMode".}
+  proc setConsoleMode(hConsole: Handle, dwMode: int32): int32 {.stdcall,
+      dynlib: "kernel32", importc: "SetConsoleMode".}
 
   proc detectColorModeWindows(): ColorMode =
     ## Query the terminal background via OSC 11 on Windows. Windows
@@ -242,6 +246,8 @@ when defined(windows):
       STD_INPUT_HANDLE = -10'i32
       STD_OUTPUT_HANDLE = -11'i32
       WAIT_OBJECT_0 = 0'i32
+      ENABLE_LINE_INPUT = 0x0002'i32
+      ENABLE_ECHO_INPUT = 0x0004'i32
     # Only query when stdin is a real console; under a redirected stdin
     # (test harness, ssh) there is no terminal to answer and the query
     # bytes would leak to stdout.
@@ -254,10 +260,14 @@ when defined(windows):
     var written: int32 = 0
     if writeFile(hOut, unsafeAddr query[0], query.len.int32, addr written, nil) == 0:
       return cmDark
-    # Read the reply with a deadline. `WaitForSingleObject` on the console
-    # input handle signals when input is available, so we poll instead of
-    # blocking on `ReadFile` (which would hang forever if the terminal
-    # never answers).
+    # Read the reply with a deadline. `ReadFile` on a console input handle
+    # blocks in line-input mode until a CR arrives, so clear line/echo input
+    # for the duration of the read and restore afterwards. `WaitForSingleObject`
+    # polls the handle so we don't block forever if the terminal never answers.
+    var oldMode: int32 = 0
+    let haveMode = getConsoleMode(hIn, addr oldMode) != 0
+    if haveMode:
+      discard setConsoleMode(hIn, oldMode and not (ENABLE_LINE_INPUT or ENABLE_ECHO_INPUT))
     var buf: array[256, char]
     var total = 0
     let deadlineMs = 150'i32
@@ -276,6 +286,8 @@ when defined(windows):
              (total >= 2 and buf[total - 2] == '\x1b' and buf[total - 1] == '\\'):
             break
       elapsedMs += StepMs
+    if haveMode:
+      discard setConsoleMode(hIn, oldMode)
     if total == 0: return cmDark
     var reply = newString(total)
     copyMem(reply[0].addr, buf[0].addr, total)
