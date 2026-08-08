@@ -116,17 +116,25 @@ proc wallMain*(args: seq[string]): int =
     when defined(windows):
       if "--status" in args:
         let st = fenceStatus()
-        echo "installed: ", st.installed, " filters: ", st.filters
-        if st.hint.len > 0: echo st.hint
-        else: echo "behavioral verify: ", verifyFenceBehavioral()
+        let ast = acFenceStatus()
+        echo "user fence: installed=", st.installed, " filters=", st.filters
+        echo "ac fence:   installed=", ast.installed, " filters=", ast.filters
+        if st.hint.len > 0: echo "  ", st.hint
+        if ast.hint.len > 0: echo "  ", ast.hint
         return 0
       if "--uninstall" in args:
         uninstallFence()
+        uninstallAcFence()
         echo "wall filters removed"
         return 0
       try:
         let sid = setupSandwallUser()
         installFence(sid, FirstProxyPort, LastProxyPort)
+        try:
+          installAcFence()
+          echo "ac fence installed"
+        except OSError as e:
+          stderr.writeLine("3code wall: AC fence install failed: " & e.msg)
         echo "wall setup complete; sandwall user SID ", sid
         return 0
       except OSError as e:

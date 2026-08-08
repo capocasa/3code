@@ -425,7 +425,9 @@ export DEBIAN_FRONTEND=noninteractive
           sandbox.active and sandbox.wallProxyNeeded(sandbox.current):
         wallWarnShown = true
         when defined(windows):
-          if sandwallWall.sidString() == "":
+          let fenceInstalled = try: sandwallWall.acFenceStatus().installed
+                               except CatchableError: false
+          if not fenceInstalled:
             stderr.writeLine("3code: policy has host rules but the " &
               "Windows wall is not set up; bash runs unfenced. Run " &
               "`3code wall setup-windows` once as admin. " &

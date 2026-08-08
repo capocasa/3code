@@ -36,11 +36,37 @@ when defined(posix):
 import types
 import util
 
-export sandwall.AccessKind, sandwall.Policy, sandwall.Rule,
-       sandwall.RuleKind, sandwall.parsePolicy, sandwall.defaultPolicyText,
-       sandwall.repoPolicyPath, sandwall.systemPolicyPath, sandwall.checkPath,
+export sandwall.AccessKind, sandwall.Rule,
+       sandwall.RuleKind, sandwall.parsePolicy, sandwall.checkPath,
        sandwall.renderPolicy, sandwall.resolve,
        sandwall.Resolved
+
+const
+  PolicyFile* = ".sandboxrc"
+    ## The repo-level policy file, directly in the project root.
+  UserPolicyFile* = "sandboxrc"
+    ## The user-level policy file, next to the user config dir.
+
+type Policy* = seq[Rule]
+  ## The effective rule set. Sandwall 0.2.4 dropped the wrapper object
+  ## in favour of a bare seq[Rule]; 3code keeps the alias so the rest
+  ## of the codebase reads `Policy`.
+
+proc defaultPolicyText*(): string =
+  ## Deny root, keep the system temp dir writable, open the project dir.
+  when defined(windows):
+    "deny /\nallow\n"
+  else:
+    "deny /\nallow /tmp\nallow\n"
+
+proc repoPolicyPath*(projectDir: string): string =
+  projectDir / PolicyFile
+
+proc systemPolicyPath*(): string =
+  getConfigDir() / "3code" / UserPolicyFile
+
+export Policy, defaultPolicyText, repoPolicyPath, systemPolicyPath,
+       PolicyFile, UserPolicyFile
 
 var
   current*: Policy

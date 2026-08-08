@@ -27,6 +27,7 @@ when defined(posix):
   import std/posix except Time
 import std/[os, strutils]
 import sandwall
+import sandbox
 
 const usage = """
 3code box - filesystem sandbox (Landlock/Seatbelt/ACL)
@@ -174,7 +175,7 @@ proc boxRestrict(args: seq[string]): int =
     # spawn path (see sandwall wall/winuser.nim).
     try:
       return int(runSandboxed(writable, a.cmd, read = readOnly,
-                              denied = denied))
+                              denied = denied, inetOk = fence))
     except CatchableError as e:
       stderr.writeLine("3code box: " & e.msg)
       return 127
