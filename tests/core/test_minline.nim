@@ -740,6 +740,29 @@ suite "minline editor: bracketed paste":
     check d.run(ed, prompt = "> ") == "line1\nline2"
     check ed.echoRows == 2
 
+  test "paste with CRLF line endings keeps one break per line":
+    var ed = initEditor()
+    let d = newDriver()
+    d.push @[27, 91, 50, 48, 48, 126]
+    d.pushString "line1\r\nline2\r\nline3"
+    d.push @[27, 91, 50, 48, 49, 126]
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "line1\nline2\nline3"
+    check ed.echoRows == 3
+
+  test "paste with bare-CR line endings keeps breaks (not collapsed)":
+    # Regression: a bracketed paste whose content uses bare CR (0x0D) as
+    # the line separator — classic Mac, some terminals/clipboards — used
+    # to collapse to one line because the clean step stripped every CR.
+    var ed = initEditor()
+    let d = newDriver()
+    d.push @[27, 91, 50, 48, 48, 126]
+    d.pushString "line1\rline2\rline3"
+    d.push @[27, 91, 50, 48, 49, 126]
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "line1\nline2\nline3"
+    check ed.echoRows == 3
+
   test "hidechars: bracketed paste captures key, screen shows only `*`s":
     # Regression for the Ghostty-on-macOS auth-failure report. Pasting an
     # api key in hidden mode must:
