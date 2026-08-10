@@ -168,6 +168,7 @@ proc completionFor*(line: string): seq[string] =
     result.add "allow"
     result.add "readonly"
     result.add "deny"
+    result.add "edit"
     result.add "gather"
     return
 
@@ -1176,6 +1177,13 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
             "on: would-be sandbox denials are allowed and appended as " &
             "allow rules to " & sandbox.sandboxPathInCwd()
           else: "off")
+      of "edit":
+        let msg = sandbox.editPolicy(sandbox.sandboxPathInCwd())
+        if msg.startsWith("error:"):
+          ok = false
+          respErr msg
+        else:
+          resp msg
       of "allow", "readonly", "deny":
         if parts.len < 2:
           ok = false
@@ -1196,7 +1204,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       else:
         ok = false
         respErr "unknown :sandbox verb: " & verb &
-          "  (show, on, off, allow, readonly, deny, gather on|off)"
+          "  (show, on, off, allow, readonly, deny, edit, gather on|off)"
     of ":show":
       body.add showToolS(arg, session.toolLog)
     of ":log":

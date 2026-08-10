@@ -2109,6 +2109,7 @@ commands:
   :sandbox allow T  add a writable/connectable rule (allow T)
   :sandbox readonly P  add a read-only rule (readonly P)
   :sandbox deny T   add a deny rule (deny T)
+  :sandbox edit     open the policy file in $VISUAL/$EDITOR, reload on quit
   :sandbox gather on|off  gather mode: allow everything, appending each
                     would-be denial as an allow rule to the policy file
   (T is a path or a host; P a path. Policy words: allow, readonly,

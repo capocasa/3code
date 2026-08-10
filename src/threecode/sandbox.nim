@@ -363,6 +363,23 @@ proc appendRule*(sandboxFile, argPath: string; access: AccessKind): bool =
   if result:
     current = loadPolicy(getCurrentDir())
 
+proc editPolicy*(sandboxFile: string): string =
+  ## Open the repo policy file in $VISUAL/$EDITOR (falling back to vi
+  ## on POSIX, notepad on Windows), materializing it from the user file
+  ## first when absent. Blocks until the editor quits, then reloads so
+  ## the edit is live for the next check. Returns a user-facing status
+  ## line; a leading "error:" marks failure.
+  if not fileExists(sandboxFile):
+    if not ensureRepoPolicy(sandboxFile.parentDir):
+      return "error: could not create sandbox file at " & sandboxFile
+  let editor = getEnv("VISUAL", getEnv("EDITOR",
+    when defined(windows): "notepad" else: "vi"))
+  let code = execShellCmd(editor & " " & quoteShell(sandboxFile))
+  if code != 0:
+    return "error: editor exited with status " & $code
+  current = loadPolicy(getCurrentDir())
+  "sandbox updated: edited " & sandboxFile
+
 proc gatherRecord(path: string) =
   ## Live-append an `allow` rule for a path gather mode just permitted.
   ## Failures are silent: gather mode never breaks a tool call.
