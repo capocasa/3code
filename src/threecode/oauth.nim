@@ -14,10 +14,13 @@
 ## the user is shown a URL. Provider specifics live in `auth_xai.nim`,
 ## persistence in the caller, presentation in `ui.nim`.
 
-import std/[asyncdispatch, asynchttpserver, base64, httpclient, json,
-            net, random, strutils, times, uri]
+import std/[base64, httpclient, json, nativesockets, net, random,
+            strutils, times, uri]
 import libsha/sha256
 import util
+
+# PKCE verifiers need entropy; seed once at module load.
+randomize()
 
 type
   OAuthEndpoints* = object
@@ -147,30 +150,59 @@ proc pendingError*(e: ref OAuthError): string =
   elif "slow_down" in m: "slow_down"
   else: ""
 
+proc remainingMs(deadline: float): int =
+  max(int((deadline - epochTime()) * 1000), 0)
+
 proc awaitLoopbackCode*(listenPort: int, expectState: string,
                         timeoutSec = 300): string =
-  ## Run a one-shot HTTP server on 127.0.0.1:listenPort until the OAuth
-  ## redirect arrives. Returns the authorization code; raises OAuthError
-  ## on state mismatch, explicit error param, or timeout.
-  let server = newAsyncHttpServer()
-  var code, state, err: string
-  proc cb(req: Request) {.async.} =
-    let q = parseUri(req.url.path & (if req.url.query.len > 0: "?" & req.url.query else: "")).query
-    for (k, v) in decodeQuery(q):
-      case k
-      of "code": code = v
-      of "state": state = v
-      of "error": err = v
-      else: discard
-    await req.respond(Http200,
-      "Authorization received. You can close this tab and return to the terminal.")
+  ## One-shot blocking TCP listener on 127.0.0.1:listenPort. Reads a single
+  ## HTTP request line (the OAuth redirect), replies 200, returns the code.
+  ## No async: select + accept + recvLine with a hard deadline.
+  let server = newSocket()  # buffered: recvLine needs the buffer
+  defer: server.close()
+  server.setSockOpt(OptReuseAddr, true)
+  server.bindAddr(Port(listenPort), "127.0.0.1")
+  server.listen()
   let deadline = epochTime() + timeoutSec.float
-  server.listen(Port(listenPort), "127.0.0.1")
-  while code == "" and err == "" and epochTime() < deadline:
-    # Poll with a 1s tick so the deadline is honored even when no
-    # connection ever arrives.
-    discard server.acceptRequest(cb).withTimeout(1000).waitFor()
-  server.close()
+
+  var client: Socket
+  while client.isNil:
+    let ms = remainingMs(deadline)
+    if ms == 0:
+      raise newException(OAuthError, "timed out waiting for browser callback")
+    var fds = @[server.getFd()]
+    if selectRead(fds, min(ms, 1000)) <= 0:
+      continue
+    var address = ""
+    server.acceptAddr(client, address)
+  defer: client.close()
+
+  # Request line only: GET /callback?code=...&state=... HTTP/1.1
+  # (headers/body are irrelevant for the OAuth redirect).
+  let firstLine = try:
+    client.recvLine(timeout = remainingMs(deadline))
+  except TimeoutError:
+    raise newException(OAuthError, "timed out reading browser callback")
+  var path = ""
+  let parts = firstLine.split(' ')
+  if parts.len >= 2: path = parts[1]
+  var code, state, err: string
+  for (k, v) in decodeQuery(parseUri(path).query):
+    case k
+    of "code": code = v
+    of "state": state = v
+    of "error": err = v
+    else: discard
+
+  const body =
+    "Authorization received. You can close this tab and return to the terminal."
+  let resp = "HTTP/1.1 200 OK\r\n" &
+    "Content-Type: text/plain; charset=utf-8\r\n" &
+    "Content-Length: " & $body.len & "\r\n" &
+    "Connection: close\r\n\r\n" & body
+  try: client.send(resp)
+  except CatchableError: discard
+
   if err != "":
     raise newException(OAuthError, "authorization failed: " & err)
   if code == "":

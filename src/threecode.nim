@@ -208,6 +208,16 @@ proc cleanup() {.noconv.} =
   releaseActiveSessionLock()
   releaseActiveDirLock()
 
+# Unhandled exceptions (including Defects like AssertionDefect) go through
+# reportUnhandledError then rawQuit, which skips exit procs. Restore the
+# terminal here so a crash never leaves stdin in raw mode. Full cleanup is
+# too raise-heavy for this hook; termios restore is the part the user feels.
+unhandledExceptionHook = proc(e: ref Exception) {.nimcall, gcsafe, raises: [], tags: [].} =
+  {.cast(raises: []), cast(tags: []).}:
+    fatprompt.restoreInputTermios()
+    minline.restoreTerminal()
+    restoreCancelTermios()
+
 proc main() =
   # `box` is the built-in sandwall CLI: the bash tool re-execs this binary as
   # `3code box restrict ...`. Dispatch before any other startup so the
