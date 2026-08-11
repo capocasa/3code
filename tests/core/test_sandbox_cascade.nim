@@ -163,6 +163,11 @@ suite "policy reload (reloadIfChanged)":
     let r = s.resolve()
     check r.writable == @[opt]
     check r.denied == @[opt / "locked"]
-    # A deny for a path under no surviving allow is not carried.
+    # A deny for a path under no surviving allow is not carried...
+    # unless it narrows a backend baseline root (macOS baselineRead
+    # includes /opt, so there it must be carried through).
     let s2 = parsePolicy("deny /\ndeny " & opt & "\n", proj)
-    check s2.resolve().denied.len == 0
+    when defined(macosx):
+      check s2.resolve().denied == @[opt]
+    else:
+      check s2.resolve().denied.len == 0
