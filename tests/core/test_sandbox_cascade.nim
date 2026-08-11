@@ -35,13 +35,22 @@ proc newFixture(name: string): tuple[home, proj: string] =
   putEnv("XDG_CONFIG_HOME", result.home)
 
 suite "single active policy file":
-  test "default text denies root, keeps /tmp and cwd writable":
+  test "default text denies root, keeps tmp and cwd writable":
     let s = parsePolicy(defaultPolicyText(), proj)
     check s.checkPath("/") == akDeny
-    when not defined(windows):
+    when defined(windows):
+      check s.checkPath(getHomeDir() / "AppData" / "Local" / "Temp") == akWritable
+      # No host rules: the AppContainer child gets its internet
+      # capability only when the policy carries none.
+      check s.resolve().hosts.len == 0
+    else:
       # bash needs /tmp for heredocs (and the model drops scratch files
       # there by the system prompt) are writable out of the box.
       check s.checkPath("/tmp") == akWritable
+      check s.checkPath("/var/tmp") == akWritable
+      # Open network: the wildcard host rule passes all traffic
+      # through the wall proxy.
+      check s.resolve().hosts.len == 1
 
   test "repo file wins over the user file; never both":
     let (home, projDir) = newFixture("sel")

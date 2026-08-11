@@ -53,11 +53,23 @@ type Policy* = seq[Rule]
   ## of the codebase reads `Policy`.
 
 proc defaultPolicyText*(): string =
-  ## Deny root, keep the system temp dir writable, open the project dir.
+  ## Deny root, keep temp dirs and the project dir writable, network
+  ## open. System dirs (/usr, /bin, /etc, ...) are read-only via the
+  ## sandwall baseline; deny / fences the rest, home included. The
+  ## POSIX `allow *` passes all traffic through the wall proxy; Windows
+  ## has no host rules because there they would airgap the AppContainer
+  ## (the net fence is a separate backend), while no rules grants it
+  ## the internet capability.
   when defined(windows):
-    "deny /\nallow\n"
+    "deny /\n" &
+    "allow ~/AppData/Local/Temp\n" &
+    "allow\n"
   else:
-    "deny /\nallow /tmp\nallow\n"
+    "deny /\n" &
+    "allow /tmp\n" &
+    "allow /var/tmp\n" &
+    "allow\n" &
+    "allow *\n"
 
 proc repoPolicyPath*(projectDir: string): string =
   projectDir / PolicyFile
