@@ -27,6 +27,8 @@ type
     ## stored a separate `model_prefix` key; it is expanded into the model
     ## ids on load and never written back out.
     name*, url*, key*, modelPrefix*, family*: string
+    auth*: string  ## "oauth" = subscription login (tokens in the auth
+                   ## store, `key` stays empty); anything else = static key.
     models*: seq[string]
     reasoning*: string  ## persisted current reasoning level for this
                         ## provider ("low" / "medium" / "high"), empty if
@@ -177,7 +179,7 @@ proc firstKnownGoodCombo*(providers: seq[ProviderRec]): string =
   ## ranking drives the fallback, not config-file order.
   for combo in KnownGoodCombos:
     for pr in providers:
-      if pr.url == "" or pr.key == "": continue
+      if pr.url == "" or (pr.key == "" and pr.auth != "oauth"): continue
       if pr.name.toLowerAscii != combo.provider.toLowerAscii: continue
       for m in pr.models:
         if m == combo.model:
@@ -201,6 +203,21 @@ proc providerForProfile*(prof: Profile): ProviderRec =
     for pr in activeProviders:
       if pr.name == name: return pr
   return currentProvider()
+
+var subscriptionTokenForImpl*: proc(provider: string): string {.closure.}
+  ## Indirection so config.nim stays free of the OAuth stack: startup
+  ## installs auth_xai's resolver here. Nil means no subscription auth in
+  ## this binary (tests, minimal builds) — oauth providers then fail
+  ## closed (empty bearer).
+
+proc subscriptionBearer*(p: Profile): string =
+  ## Bearer resolver installed as `api.bearerHook` at startup. Returns ""
+  ## for key-based providers (hook result falls back to `p.key`); for
+  ## `auth = "oauth"` providers it vends the stored subscription token,
+  ## refreshing when near expiry.
+  let pr = providerForProfile(p)
+  if pr.auth != "oauth" or subscriptionTokenForImpl == nil: return ""
+  subscriptionTokenForImpl(pr.name)
 
 proc splitModels*(s: string): seq[string] =
   ## Whitespace- (and comma-) separated list of bare model names. Family
@@ -237,7 +254,7 @@ const
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
   ColorKeys = ["bright-white", "off-white", "dim-white"]
   ProviderKeys = ["name", "url", "key", "model_prefix", "family",
-                  "models", "reasoning", "reasonings"]
+                  "models", "reasoning", "reasonings", "auth"]
   SearchEngines = ["exa", "parallel", "brave"]
   # `light` is the canonical light-background value; `bright` is the
   # legacy spelling and stays accepted so existing configs keep working.
@@ -411,6 +428,7 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
         of "models": prov.models = splitModels(v)
         of "reasoning": prov.reasoning = v.strip.toLowerAscii
         of "reasonings": prov.reasonings = splitModels(v).mapIt(it.toLowerAscii)
+        of "auth": prov.auth = v.strip.toLowerAscii
         else: discard
       else: discard
     of cfgError:
@@ -463,6 +481,8 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "name = " & quoteVal(pr.name) & "\n"
     buf.add "url = " & quoteVal(pr.url) & "\n"
     buf.add "key = " & quoteVal(pr.key) & "\n"
+    if pr.auth != "":
+      buf.add "auth = " & quoteVal(pr.auth) & "\n"
     if pr.family != "":
       buf.add "family = " & quoteVal(pr.family) & "\n"
     buf.add "models = " & quoteVal(formatModels(pr.models)) & "\n"
@@ -551,7 +571,8 @@ proc buildProfile*(current: string, providers: seq[ProviderRec],
   var model = if dot < 0: "" else: pick[dot + 1 .. ^1]
   for pr in providers:
     if pr.name == name:
-      if pr.url == "" or pr.key == "" or pr.models.len == 0:
+      if pr.url == "" or (pr.key == "" and pr.auth != "oauth") or
+         pr.models.len == 0:
         return Profile()
       let fullModel =
         if model == "": firstModel(pr)
@@ -603,7 +624,8 @@ proc loadProfile*(wanted: string): Profile =
   if not found:
     die &"provider '{name}' not found in {path}", ExitConfig
   if prov.url == "": die &"provider '{name}': url not set in {path}", ExitConfig
-  if prov.key == "": die &"provider '{name}': key not set in {path}", ExitConfig
+  if prov.key == "" and prov.auth != "oauth":
+    die &"provider '{name}': key not set in {path}", ExitConfig
   if prov.models.len == 0: die &"provider '{name}': models not set in {path}", ExitConfig
   let fullModel =
     if model == "": firstModel(prov)

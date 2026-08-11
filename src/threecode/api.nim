@@ -20,10 +20,21 @@ import types, util, prompts, compact, streamexec, netthread
 type
   VerifyProfileHook* = proc(p: Profile): (bool, string) {.closure.}
   FetchModelsHook* = proc(url, key: string): (seq[string], string) {.closure.}
+  BearerHook* = proc(p: Profile): string {.closure.}
+    ## Resolves the Authorization bearer for a request. Default nil means
+    ## "use p.key as-is". OAuth-backed providers install a hook that
+    ## refreshes and returns a subscription token (see auth_xai).
 
 var
   verifyProfileHook*: VerifyProfileHook
   fetchModelsHook*: FetchModelsHook
+  bearerHook*: BearerHook
+
+proc bearerFor*(p: Profile): string =
+  if bearerHook != nil:
+    let t = bearerHook(p)
+    if t != "": return t
+  p.key
 
 const providerStub {.booldefine.} = false
 const httpStub {.booldefine.} = false
@@ -1582,7 +1593,7 @@ proc callModelThreaded*(p: Profile, bodyStr, baseLabel: string;
   let args = NetWorkerArgs(
     job: addr job,
     url: p.url & "/chat/completions",
-    key: p.key,
+    key: bearerFor(p),
     bodyStr: bodyStr,
     baseLabel: baseLabel,
     suppressXml: suppressXml)
@@ -1707,6 +1718,9 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     ## responsive. Set `-d:networkSync=true` to run it inline on the main
     ## thread (the old behavior) for debugging.
   var outcome: StreamOutcome
+  # Resolve the bearer once per call, not once per retry attempt: a
+  # refresh inside the retry loop would stamp a new token mid-flight.
+  let bearer = bearerFor(p)
   var attempt = 0
   # Retry-decision state, hoisted out of the loop body so the
   # `NetworkHealthError` handler can set it and fall through into the
@@ -1724,7 +1738,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
           var syncJob: NetJobState
           syncJob.lock.initLock()
           defer: syncJob.lock.deinitLock()
-          let o = streamHttp(p.url & "/chat/completions", p.key, bodyStr,
+          let o = streamHttp(p.url & "/chat/completions", bearer, bodyStr,
                              baseLabel, slurped, xmlToolCallsFallback(p),
                              addr syncJob)
           drainAndDispatch(addr syncJob, baseLabel)
@@ -1732,7 +1746,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
         else:
           callModelThreaded(p, bodyStr, baseLabel, xmlToolCallsFallback(p))
       else:
-        callHttp(p.url & "/chat/completions", p.key, bodyStr,
+        callHttp(p.url & "/chat/completions", bearer, bodyStr,
                  baseLabel, slurped)
     if isInterruptedMsg(outcome.errMsg):
       hookStopSpinner()
@@ -1973,7 +1987,7 @@ proc verifyProfile*(p: Profile): (bool, string) =
   conn.setReadTimeoutMs(QuietRecvWakeMs)
   try:
     conn.sendRequest("POST", pathQuery, host,
-      headers = [("Authorization", "Bearer " & p.key),
+      headers = [("Authorization", "Bearer " & bearerFor(p)),
                  ("Content-Type", "application/json"),
                  ("Accept", "text/event-stream")],
       body = body)

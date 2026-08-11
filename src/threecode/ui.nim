@@ -11,7 +11,7 @@
 
 import std/[algorithm, atomics, json, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline,
-  fatprompt, streamexec, sandbox, engine as termengine
+  fatprompt, streamexec, sandbox, engine as termengine, auth_xai, oauth
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":prompt", ":show",
@@ -321,20 +321,68 @@ proc promptNameAndUrl(editor: var minline.LineEditor): (string, string) =
       url = cu
   (name, url)
 
+proc xaiOauthLogin(editor: var minline.LineEditor): string =
+  ## Interactive SuperGrok login for the xai provider. Returns "oauth" on
+  ## success (tokens now in the store; the ProviderRec gets auth="oauth"
+  ## and an empty key). Raises InputCancelled on failure or abort.
+  hintLn "  sign in with your SuperGrok / X Premium+ account", resetStyle
+  let mode = readOptional(editor,
+    "  [enter]=browser login, d=device code (headless), c=cancel : ").toLowerAscii
+  if mode == "c":
+    raise newException(minline.InputCancelled, "cancelled by user")
+  try:
+    let ts =
+      if mode == "d":
+        auth_xai.loginDevice(proc(url, userCode: string) =
+          hintLn &"  open {url}", resetStyle
+          hintLn &"  code: {userCode}", resetStyle
+          hintLn "  waiting for approval...", resetStyle)
+      else:
+        auth_xai.loginBrowser(
+          openUrl = proc(url: string) =
+            when defined(macosx): discard execShellCmd("open " & quoteShell(url))
+            elif defined(windows): discard execShellCmd("start " & url)
+            else: discard execShellCmd("xdg-open " & quoteShell(url) & " &"),
+          showUrl = proc(url: string) =
+            hintLn &"  open {url}", resetStyle)
+    auth_xai.storeTokens(ts)
+    hintLn "  signed in", resetStyle
+    "oauth"
+  except oauth.OAuthError as e:
+    errLn "  login failed: ", e.msg
+    raise newException(minline.InputCancelled, "oauth failed")
+
 proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
   printSupported()
   stdout.write "\n"
-  var key = readRequired(editor, "  api key              : ", hidden = true)
+  var key = readRequired(editor, "  api key (or 'xai' for SuperGrok login): ", hidden = true)
+  var auth = ""
+  var name, url: string
+  if key.toLowerAscii == "xai":
+    # Subscription login path: OAuth against auth.x.ai, tokens in the
+    # auth store, and the provider rec carries auth="oauth" instead of
+    # a key. Name/url are fixed; only the model list remains.
+    for pr in activeProviders:
+      if pr.name == "xai":
+        errLn "already configured as xai"
+        raise newException(minline.InputCancelled, "duplicate name")
+    auth = xaiOauthLogin(editor)
+    key = ""
+    name = "xai"
+    url = catalogUrl("xai")
+    # Verification below probes the API with the fresh token; install
+    # the bearer pipeline now (startup normally does this).
+    subscriptionTokenForImpl = auth_xai.subscriptionTokenFor
+    api.bearerHook = subscriptionBearer
   # API keys are not unique: the same key may legitimately back several
   # providers (e.g. an aggregator offering the same model under different
   # names, or separate provider entries for different model sets). So a
   # matching key is never a blocker; only a duplicate *name* is.
-  var name, url: string
   var inferred = inferProvider(key)
   if not experimentalEnabled and inferred != "" and
      curatedFor(inferred).len == 0:
     inferred = ""  # not in whitelist; fall through to manual entry
-  if inferred == "":
+  if inferred == "" and auth == "":
     while true:
       let (n, u) = promptNameAndUrl(editor)
       if n == "":
@@ -347,7 +395,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
       name = n
       url = u
       break
-  else:
+  elif auth == "":
     name = inferred
     url = catalogUrl(inferred)
     # duplicate name? abort the add — a key alone is fine, but two
@@ -393,12 +441,14 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
         if res.cancelled:
           raise newException(minline.InputCancelled, "cancelled by user")
         if res.kept.len > 0:
-          return ProviderRec(name: name, url: url, key: key,
+          return ProviderRec(name: name, url: url, key: key, auth: auth,
                              models: res.kept)
         prev = models.mapIt(shortModel(it)).join(" ")
-      let choice = readOptional(editor,
-        "  [enter]=retry models, k=re-enter key, c=cancel : ").toLowerAscii
-      if choice == "k":
+      let retryPrompt =
+        if auth == "": "  [enter]=retry models, k=re-enter key, c=cancel : "
+        else: "  [enter]=retry models, c=cancel : "
+      let choice = readOptional(editor, retryPrompt).toLowerAscii
+      if choice == "k" and auth == "":
         key = readRequired(editor,
           "  api key              : ", hidden = true)
       elif choice == "c":
