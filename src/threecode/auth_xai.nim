@@ -123,8 +123,10 @@ proc accessToken*(): string {.gcsafe.} =
 
 proc subscriptionTokenFor*(provider: string): string =
   ## Resolver installed as `config.subscriptionTokenForImpl` at startup.
-  ## Only the first-party xai provider is eligible; the token is only
+  ## Eligible names: `xai` (legacy oauth-as-xai configs) and `supergrok`
+  ## (subscription twin alongside an API-key `xai`). The token is only
   ## ever sent to api.x.ai (config resolves the provider url separately,
   ## and api.nim pins https), but belt-and-braces: refuse anything else.
-  if provider.toLowerAscii != "xai": return ""
-  accessToken()
+  case provider.toLowerAscii
+  of "xai", "supergrok": accessToken()
+  else: ""

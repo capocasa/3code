@@ -2358,6 +2358,13 @@ input:
   @path         inline file contents (e.g. @src/foo.nim)
 """
 
+proc canonicalKnownGoodProvider*(provider: string): string =
+  ## Map config provider names onto the KnownGoodCombos provider key.
+  ## `supergrok` is the SuperGrok/OAuth twin of first-party `xai` (same
+  ## models, same api.x.ai host); everything else is identity.
+  let p = provider.toLowerAscii
+  if p == "supergrok": "xai" else: p
+
 proc knownGoodFamily*(p: Profile): string =
   ## Returns the family label ("glm", ...) for a known-good combo, or ""
   ## if (provider, model) isn't on the list. Match is case-insensitive on
@@ -2365,7 +2372,7 @@ proc knownGoodFamily*(p: Profile): string =
   if p.name == "": return ""
   let dot = p.name.find('.')
   if dot < 0: return ""
-  let provider = p.name[0 ..< dot].toLowerAscii
+  let provider = canonicalKnownGoodProvider(p.name[0 ..< dot])
   let model = p.model.toLowerAscii
   for combo in KnownGoodCombos:
     if combo.provider.toLowerAscii == provider and
@@ -2381,7 +2388,7 @@ proc isKnownGood*(p: Profile): bool =
 proc knownGoodFamily*(provider, model: string): string =
   ## Convenience overload for the wizard, where we have a candidate
   ## (provider name, full model id) but no Profile.
-  let p = provider.toLowerAscii
+  let p = canonicalKnownGoodProvider(provider)
   let m = model.toLowerAscii
   for combo in KnownGoodCombos:
     if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
@@ -2392,7 +2399,7 @@ proc knownGoodTags*(provider, model: string): (string, string, string) =
   ## Returns (family, version, variant) for a known-good combo, or empty
   ## strings when no match. Used at profile-build time to populate the
   ## informational tags on `Profile`.
-  let p = provider.toLowerAscii
+  let p = canonicalKnownGoodProvider(provider)
   let m = model.toLowerAscii
   for combo in KnownGoodCombos:
     if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
@@ -2401,7 +2408,7 @@ proc knownGoodTags*(provider, model: string): (string, string, string) =
 
 proc knownGoodReasoning*(provider, model: string): string =
   ## Default reasoning level for a known-good combo, "" if not on the list.
-  let p = provider.toLowerAscii
+  let p = canonicalKnownGoodProvider(provider)
   let m = model.toLowerAscii
   for combo in KnownGoodCombos:
     if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
@@ -2411,7 +2418,7 @@ proc knownGoodReasoning*(provider, model: string): string =
 proc knownGoodGeneration*(provider, model: string): GenerationDefaults =
   ## Hardcoded generation defaults for a known-good combo. Experimental
   ## combos return the zero object, which callers treat as "omit".
-  let p = provider.toLowerAscii
+  let p = canonicalKnownGoodProvider(provider)
   let m = model.toLowerAscii
   for combo in KnownGoodCombos:
     if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
@@ -2434,7 +2441,7 @@ proc xmlToolCallsFallback*(p: Profile): bool =
   if p.name == "": return false
   let dot = p.name.find('.')
   if dot < 0: return false
-  let provider = p.name[0 ..< dot].toLowerAscii
+  let provider = canonicalKnownGoodProvider(p.name[0 ..< dot])
   let model = p.model.toLowerAscii
   for combo in KnownGoodCombos:
     if combo.provider.toLowerAscii == provider and combo.model.toLowerAscii == model:
@@ -2458,7 +2465,7 @@ proc knownGoodContextWindow*(provider, model: string): int =
   ## Returns 0 when the pair is off the table (caller falls back to the
   ## substring heuristic). The value comes straight from the
   ## `contextWindow` field of the matching entry in `KnownGoodCombos`.
-  let p = provider.toLowerAscii
+  let p = canonicalKnownGoodProvider(provider)
   let m = model.toLowerAscii
   for combo in KnownGoodCombos:
     if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
@@ -2479,7 +2486,7 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
   ## `thinking.effort` with `high` (default) and `max`. Falls back to
   ## `@ReasoningLevels` for the level-based families (gpt-oss, deepseek),
   ## and `@[]` when the pair is off the table.
-  let p = provider.toLowerAscii
+  let p = canonicalKnownGoodProvider(provider)
   let m = model.toLowerAscii
   for combo in KnownGoodCombos:
     if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:

@@ -99,6 +99,19 @@ suite "config: parseConfigFile round-trip":
     let (_, readProvs, _, _, _) = parseConfigFile(tmp)
     check readProvs[0].family == "glm"
 
+  test "write then read preserves auth=oauth":
+    let providers = @[
+      ProviderRec(name: "supergrok", url: "https://api.x.ai/v1",
+                  key: "", auth: "oauth", models: @["grok-4.5"])
+    ]
+    writeConfigFile(tmp, "supergrok.grok-4.5", providers)
+    let raw = readFile(tmp)
+    check raw.find("auth = \"oauth\"") >= 0
+    let (_, readProvs, _, _, _) = parseConfigFile(tmp)
+    check readProvs[0].name == "supergrok"
+    check readProvs[0].auth == "oauth"
+    check readProvs[0].key == ""
+
 suite "config: parseConfigFile model prefix expansion":
   var tmp = ""
 

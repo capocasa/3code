@@ -111,6 +111,22 @@ suite "provider wizard configuration":
     check activeCurrent == "groq.openai/gpt-oss-20b"
     check verifiedModels == @["openai/gpt-oss-20b"]
 
+  test "add accepts provider name then api key":
+    inputs = @["nvidia", "nvapi-named", "gpt-oss-120b"]
+    var editor: LineEditor
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider add", messages, session, prof, editor)
+
+    check activeProviders.len == 1
+    check activeProviders[0].name == "nvidia"
+    check activeProviders[0].key == "nvapi-named"
+    check activeProviders[0].models == @["openai/gpt-oss-120b"]
+    check prompts.anyIt(it.startsWith("  provider, url, or api key:"))
+    check prompts.anyIt(it.startsWith("  api key"))
+
   test "add rejects duplicate provider name":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",

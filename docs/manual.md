@@ -110,11 +110,16 @@ config it walks you through setup:
   no provider configured. let's add one. (ctrl+d to quit)
   supported: deepinfra, ovh, nvidia, nebius, fireworks
 
-  api key              : ************************
-  provider name or url : nvidia
+  provider, url, or api key: nvapi-...
+  detected: nvidia -> https://integrate.api.nvidia.com/v1
+  models [gpt-oss-120b ...]:
   verifying... ok
   saved to ~/.config/3code/config
 ```
+
+The first field accepts a catalog name (`nvidia`, `xai`, …), a URL
+(`--experimental`), an API key (prefix-detected), or `supergrok` for
+SuperGrok subscription login.
 
 ### Run your first prompt
 
@@ -152,11 +157,16 @@ wizard recognizes. The API is OpenAI-compatible and exposes a graded
 accepting off. Prompt caching is server-side; 3code benefits automatically on
 repeat turns.
 
-Two ways to authenticate: paste an `xai-` API key in the provider wizard, or
-type `xai` at the key prompt to sign in with your SuperGrok / X Premium+
-subscription (browser OAuth, or device code on headless hosts). Subscription
-tokens live in `$XDG_DATA_HOME/3code/auth/xai.json` (mode 0600) and refresh
-automatically; the provider is saved with `auth = "oauth"` and no key.
+Two ways to authenticate, and they can sit side by side:
+
+- Paste an `xai-` API key (or type `xai` then the key) → provider `xai`.
+- Type `supergrok` → browser OAuth against your SuperGrok / X Premium+
+  subscription. The authorize URL is printed and opened immediately.
+  Tokens live in `$XDG_DATA_HOME/3code/auth/xai.json` (mode 0600) and
+  refresh automatically; the provider is saved as `supergrok` with
+  `auth = "oauth"` and no key.
+
+Switch with `:provider xai` / `:provider supergrok`.
 
 Add a provider inside the REPL:
 

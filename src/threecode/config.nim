@@ -154,7 +154,7 @@ proc orderedModels*(prov: ProviderRec): seq[string] =
   ##   2. Experimental models in config-file order, appended after.
   ## This way the best-tested model is always first regardless of how the
   ## config was written or the API listed them.
-  let p = prov.name.toLowerAscii
+  let p = canonicalKnownGoodProvider(prov.name)
   for combo in KnownGoodCombos:
     if combo.provider.toLowerAscii == p:
       for m in prov.models:
@@ -180,7 +180,7 @@ proc firstKnownGoodCombo*(providers: seq[ProviderRec]): string =
   for combo in KnownGoodCombos:
     for pr in providers:
       if pr.url == "" or (pr.key == "" and pr.auth != "oauth"): continue
-      if pr.name.toLowerAscii != combo.provider.toLowerAscii: continue
+      if canonicalKnownGoodProvider(pr.name) != combo.provider.toLowerAscii: continue
       for m in pr.models:
         if m == combo.model:
           return pr.name & "." & m
@@ -214,10 +214,19 @@ proc subscriptionBearer*(p: Profile): string =
   ## Bearer resolver installed as `api.bearerHook` at startup. Returns ""
   ## for key-based providers (hook result falls back to `p.key`); for
   ## `auth = "oauth"` providers it vends the stored subscription token,
-  ## refreshing when near expiry.
-  let pr = providerForProfile(p)
-  if pr.auth != "oauth" or subscriptionTokenForImpl == nil: return ""
-  subscriptionTokenForImpl(pr.name)
+  ## refreshing when near expiry. During wizard verify the provider is not
+  ## in `activeProviders` yet, so empty-key profiles whose name is a known
+  ## subscription target also resolve.
+  if subscriptionTokenForImpl == nil: return ""
+  let dot = p.name.find('.')
+  let name = if dot >= 0: p.name[0 ..< dot] else: ""
+  for pr in activeProviders:
+    if pr.name == name:
+      if pr.auth != "oauth": return ""
+      return subscriptionTokenForImpl(pr.name)
+  if p.key == "" and name != "":
+    return subscriptionTokenForImpl(name)
+  ""
 
 proc splitModels*(s: string): seq[string] =
   ## Whitespace- (and comma-) separated list of bare model names. Family
@@ -286,7 +295,11 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
     if not permittedKey(ent.section, ent.key):
       return &"{path}:{ent.line}: unknown key '{ent.key}' in [{ent.section}]"
     if ent.value.strip == "":
-      return &"{path}:{ent.line}: empty value for '{ent.key}' in [{ent.section}]"
+      # Empty key is fine for auth=oauth providers (and is also a structural
+      # gap loadProfile diagnoses). Empty current/url/models likewise.
+      if not (ent.section == "provider" and ent.key == "key") and
+         not (ent.section == "settings" and ent.key == "current"):
+        return &"{path}:{ent.line}: empty value for '{ent.key}' in [{ent.section}]"
     case ent.section
     of "search":
       if ent.key == "engine" and
@@ -480,7 +493,8 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "\n[provider]\n"
     buf.add "name = " & quoteVal(pr.name) & "\n"
     buf.add "url = " & quoteVal(pr.url) & "\n"
-    buf.add "key = " & quoteVal(pr.key) & "\n"
+    if pr.key != "" or pr.auth != "oauth":
+      buf.add "key = " & quoteVal(pr.key) & "\n"
     if pr.auth != "":
       buf.add "auth = " & quoteVal(pr.auth) & "\n"
     if pr.family != "":
@@ -741,6 +755,6 @@ proc defaultNameFromUrl*(url: string): string =
 
 proc curatedFor*(provider: string): seq[string] =
   ## Full model ids from KnownGoodCombos for the given provider name.
-  let p = provider.toLowerAscii
+  let p = canonicalKnownGoodProvider(provider)
   for c in KnownGoodCombos:
     if c[0].toLowerAscii == p: result.add c[1]

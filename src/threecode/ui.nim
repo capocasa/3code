@@ -280,71 +280,36 @@ proc printSupported() =
     if combo.provider notin seen: seen.add combo.provider
   subtleWriteLn(stdout, "  supported: " & seen.join(", "))
 
-proc readProviderEntry(editor: var minline.LineEditor): string =
-  let prevCb = editor.completionCallback
-  editor.completionCallback = proc(ed: LineEditor): seq[string] =
-    if experimentalEnabled:
-      for (n, _) in ProviderCatalog: result.add n
-    else:
-      for combo in KnownGoodCombos:
-        if combo.provider notin result: result.add combo.provider
-  let label =
-    if experimentalEnabled: "  provider name or url : "
-    else: "  provider name        : "
-  result = readRequired(editor, label)
-  editor.completionCallback = prevCb
+proc openBrowserUrl(url: string) =
+  when defined(macosx): discard execShellCmd("open " & quoteShell(url))
+  elif defined(windows): discard execShellCmd("start " & url)
+  else: discard execShellCmd("xdg-open " & quoteShell(url) & " &")
 
-proc promptNameAndUrl(editor: var minline.LineEditor): (string, string) =
-  let entry = readProviderEntry(editor)
-  var name, url: string
-  if experimentalEnabled and
-     (entry.startsWith("http://") or entry.startsWith("https://")):
-    url = entry.strip(chars = {'/', ' '})
-    let suggested = defaultNameFromUrl(url)
-    let namePrompt =
-      if suggested == "": "  name                 : "
-      else: &"  name [{suggested}]     : "
-    name = readOptional(editor, namePrompt)
-    if name == "": name = suggested
-  else:
-    name = entry
-    let cu = catalogUrl(name)
-    if experimentalEnabled:
-      if cu != "":
-        let urlEntry = readOptional(editor, &"  url [{cu}]     : ")
-          .strip(chars = {'/', ' '})
-        url = if urlEntry == "": cu else: urlEntry
-      else:
-        url = readRequired(editor, "  api base url         : ")
-          .strip(chars = {'/', ' '})
-    else:
-      url = cu
-  (name, url)
+proc fetchKeyFor(name, key: string): string =
+  ## Key used for /models and verify. Empty-key oauth providers resolve
+  ## through the subscription token store.
+  if key != "": return key
+  if subscriptionTokenForImpl != nil:
+    let t = subscriptionTokenForImpl(name)
+    if t != "": return t
+  key
 
-proc xaiOauthLogin(editor: var minline.LineEditor): string =
-  ## Interactive SuperGrok login for the xai provider. Returns "oauth" on
-  ## success (tokens now in the store; the ProviderRec gets auth="oauth"
-  ## and an empty key). Raises InputCancelled on failure or abort.
+proc ensureUniqueName(name: string) =
+  for pr in activeProviders:
+    if pr.name == name:
+      errLn &"already configured as {name}"
+      raise newException(minline.InputCancelled, "duplicate name")
+
+proc xaiOauthLogin(): string =
+  ## SuperGrok browser OAuth. Prints the authorize URL, opens the default
+  ## browser, waits on the loopback callback. Returns "oauth" on success
+  ## (tokens in the store). Raises InputCancelled on failure.
   hintLn "  sign in with your SuperGrok / X Premium+ account", resetStyle
-  let mode = readOptional(editor,
-    "  [enter]=browser login, d=device code (headless), c=cancel : ").toLowerAscii
-  if mode == "c":
-    raise newException(minline.InputCancelled, "cancelled by user")
   try:
-    let ts =
-      if mode == "d":
-        auth_xai.loginDevice(proc(url, userCode: string) =
-          hintLn &"  open {url}", resetStyle
-          hintLn &"  code: {userCode}", resetStyle
-          hintLn "  waiting for approval...", resetStyle)
-      else:
-        auth_xai.loginBrowser(
-          openUrl = proc(url: string) =
-            when defined(macosx): discard execShellCmd("open " & quoteShell(url))
-            elif defined(windows): discard execShellCmd("start " & url)
-            else: discard execShellCmd("xdg-open " & quoteShell(url) & " &"),
-          showUrl = proc(url: string) =
-            hintLn &"  open {url}", resetStyle)
+    let ts = auth_xai.loginBrowser(
+      openUrl = openBrowserUrl,
+      showUrl = proc(url: string) =
+        hintLn &"  open {url}", resetStyle)
     auth_xai.storeTokens(ts)
     hintLn "  signed in", resetStyle
     "oauth"
@@ -352,59 +317,87 @@ proc xaiOauthLogin(editor: var minline.LineEditor): string =
     errLn "  login failed: ", e.msg
     raise newException(minline.InputCancelled, "oauth failed")
 
+proc readFirstProviderField(editor: var minline.LineEditor): string =
+  ## First wizard field: catalog name, URL, API key, or `supergrok`.
+  let prevCb = editor.completionCallback
+  editor.completionCallback = proc(ed: LineEditor): seq[string] =
+    result.add "supergrok"
+    if experimentalEnabled:
+      for (n, _) in ProviderCatalog:
+        if n notin result: result.add n
+    else:
+      for combo in KnownGoodCombos:
+        if combo.provider notin result: result.add combo.provider
+  result = readRequired(editor, "  provider, url, or api key: ")
+  editor.completionCallback = prevCb
+
 proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
   printSupported()
   stdout.write "\n"
-  var key = readRequired(editor, "  api key (or 'xai' for SuperGrok login): ", hidden = true)
+  let entry = readFirstProviderField(editor)
+  var key = ""
   var auth = ""
   var name, url: string
-  if key.toLowerAscii == "xai":
-    # Subscription login path: OAuth against auth.x.ai, tokens in the
-    # auth store, and the provider rec carries auth="oauth" instead of
-    # a key. Name/url are fixed; only the model list remains.
-    for pr in activeProviders:
-      if pr.name == "xai":
-        errLn "already configured as xai"
-        raise newException(minline.InputCancelled, "duplicate name")
-    auth = xaiOauthLogin(editor)
+  let entryLower = entry.toLowerAscii
+  let isUrl = entry.startsWith("http://") or entry.startsWith("https://")
+  let inferredFromKey = inferProvider(entry)
+
+  if entryLower == "supergrok":
+    # Subscription login: browser OAuth against auth.x.ai. Named
+    # `supergrok` so an API-key `xai` can sit beside it.
+    ensureUniqueName("supergrok")
+    auth = xaiOauthLogin()
     key = ""
-    name = "xai"
+    name = "supergrok"
     url = catalogUrl("xai")
-    # Verification below probes the API with the fresh token; install
-    # the bearer pipeline now (startup normally does this).
     subscriptionTokenForImpl = auth_xai.subscriptionTokenFor
     api.bearerHook = subscriptionBearer
-  # API keys are not unique: the same key may legitimately back several
-  # providers (e.g. an aggregator offering the same model under different
-  # names, or separate provider entries for different model sets). So a
-  # matching key is never a blocker; only a duplicate *name* is.
-  var inferred = inferProvider(key)
-  if not experimentalEnabled and inferred != "" and
-     curatedFor(inferred).len == 0:
-    inferred = ""  # not in whitelist; fall through to manual entry
-  if inferred == "" and auth == "":
-    while true:
-      let (n, u) = promptNameAndUrl(editor)
-      if n == "":
-        errLn "name required"
-        continue
-      for pr in activeProviders:
-        if pr.name == n:
-          errLn &"already configured as {n}"
-          raise newException(minline.InputCancelled, "duplicate name")
-      name = n
-      url = u
-      break
-  elif auth == "":
-    name = inferred
-    url = catalogUrl(inferred)
-    # duplicate name? abort the add — a key alone is fine, but two
-    # providers can't share a name (it's the config selector).
-    for pr in activeProviders:
-      if pr.name == name:
-        errLn &"already configured as {name}"
-        raise newException(minline.InputCancelled, "duplicate name")
+  elif isUrl:
+    if not experimentalEnabled:
+      hintLn "  custom urls need --experimental", resetStyle
+      raise newException(minline.InputCancelled, "")
+    url = entry.strip(chars = {'/', ' '})
+    let suggested = defaultNameFromUrl(url)
+    let namePrompt =
+      if suggested == "": "  name                 : "
+      else: &"  name [{suggested}]     : "
+    name = readOptional(editor, namePrompt)
+    if name == "": name = suggested
+    if name == "":
+      errLn "name required"
+      raise newException(minline.InputCancelled, "name required")
+    ensureUniqueName(name)
+    key = readRequired(editor, "  api key              : ", hidden = true)
+  elif inferredFromKey != "":
+    # API keys are not unique across providers; only the name is.
+    if not experimentalEnabled and curatedFor(inferredFromKey).len == 0:
+      errLn "key prefix not recognized; enter a provider name or url"
+      raise newException(minline.InputCancelled, "unknown key")
+    name = inferredFromKey
+    url = catalogUrl(inferredFromKey)
+    key = entry
+    ensureUniqueName(name)
     hintLn "  detected: ", resetStyle, name, GreyFg, " -> ", url, Reset
+  else:
+    # Catalog / known-good provider name. Ask for the key next.
+    name = entryLower
+    url = catalogUrl(name)
+    if not experimentalEnabled and curatedFor(name).len == 0:
+      hintLn &"  unknown provider '{entry}'; enable --experimental for custom",
+        resetStyle
+      raise newException(minline.InputCancelled, "")
+    ensureUniqueName(name)
+    if experimentalEnabled and url == "":
+      url = readRequired(editor, "  api base url         : ")
+        .strip(chars = {'/', ' '})
+    elif experimentalEnabled:
+      let urlEntry = readOptional(editor, &"  url [{url}]     : ")
+        .strip(chars = {'/', ' '})
+      if urlEntry != "": url = urlEntry
+    if name == "xai":
+      hintLn "  for subscription login, enter supergrok", resetStyle
+    key = readRequired(editor, "  api key              : ", hidden = true)
+
   if not experimentalEnabled:
     let curated = curatedFor(name)
     for m in curated:
@@ -456,7 +449,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
         raise newException(minline.InputCancelled, "cancelled by user")
   hint "  fetching models...   ", resetStyle
   stdout.flushFile
-  let (available, fetchErr) = fetchModels(url, key)
+  let (available, fetchErr) = fetchModels(url, fetchKeyFor(name, key))
   let sortedAvailable = available.sorted
   let lookup = shortToFull(sortedAvailable)
   if fetchErr.len > 0:
@@ -473,8 +466,9 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
   defer: editor.completionCallback = prevCb
   # Pre-populate with known-good models for this provider (KnownGoodCombos order).
   var knownGoodInit: seq[string]
+  let kgName = canonicalKnownGoodProvider(name)
   for combo in KnownGoodCombos:
-    if combo.provider.toLowerAscii == name.toLowerAscii:
+    if combo.provider.toLowerAscii == kgName:
       for avail in sortedAvailable:
         if avail == combo.model:
           knownGoodInit.add shortModel(combo.model)
@@ -501,7 +495,8 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
     if res.cancelled:
       raise newException(minline.InputCancelled, "cancelled by user")
     if res.kept.len > 0:
-      return ProviderRec(name: name, url: url, key: key, models: res.kept)
+      return ProviderRec(name: name, url: url, key: key, auth: auth,
+                         models: res.kept)
     prev = models.mapIt(shortModel(it)).join(" ")
     let choice = readOptional(editor,
       "  [enter]=retry models, k=re-enter key, c=cancel : ").toLowerAscii
@@ -540,7 +535,7 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     let key = if newKey == "": existing.key else: newKey
     hint "  fetching models...   ", resetStyle
     stdout.flushFile
-    let (available, fetchErr) = fetchModels(url, key)
+    let (available, fetchErr) = fetchModels(url, fetchKeyFor(name, key))
     let sortedAvailable = available.sorted
     let prevCb = editor.completionCallback
     editor.completionCallback = proc(ed: LineEditor): seq[string] =
@@ -570,7 +565,11 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     if res.cancelled:
       raise newException(minline.InputCancelled, "cancelled by user")
     if res.kept.len > 0:
-      return ProviderRec(name: name, url: url, key: key, models: res.kept)
+      return ProviderRec(name: name, url: url, key: key, auth: existing.auth,
+                         models: res.kept,
+                         family: existing.family,
+                         reasoning: existing.reasoning,
+                         reasonings: existing.reasonings)
 
 proc bootstrapProvider*(editor: var minline.LineEditor): Profile =
   stdout.styledWriteLine fgMagenta,

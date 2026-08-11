@@ -1,5 +1,5 @@
 import std/[json, os, osproc, strutils, unittest]
-import threecode/[api, prompts, types]
+import threecode/[api, config, prompts, types]
 import stub_helpers
 
 # Subprocess probes compile a small `probe.nim` and exec it. On Windows the
@@ -219,6 +219,14 @@ suite "api request shaping":
     check knownGoodContextWindow("xai", "grok-4.3") == 1_000_000
     check knownGoodContextWindow("xai", "grok-4.20") == 2_000_000
     check knownGoodContextWindow("xai", "grok-build-0.1") == 256_000
+
+  test "supergrok aliases xai known-good entries":
+    check canonicalKnownGoodProvider("supergrok") == "xai"
+    check isKnownGood(Profile(name: "supergrok.grok-4.5", model: "grok-4.5"))
+    check knownGoodFamily("supergrok", "grok-4.5") == "grok"
+    check knownGoodContextWindow("supergrok", "grok-4.5") == 500_000
+    check knownGoodReasonings("supergrok", "grok-4.5") == @["low", "medium", "high"]
+    check curatedFor("supergrok") == curatedFor("xai")
 
   test "grok setup resolves to GrokPreamble + bash/patch tools":
     let p = Profile(name: "xai.grok-4.5", family: "grok", model: "grok-4.5")
