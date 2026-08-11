@@ -146,13 +146,14 @@ sambanova, and deepinfra as a hosted alternative.
 `nebius <https://tokenfactory.nebius.com/>`_ - The EU-resident runner up. Only has GLM 5.1, not 5.2, but still a great choice if if tensorx isn't available.
 
 `xAI <https://console.x.ai>`_ - First-party API for the Grok family (grok-4.5,
-grok-4.3, grok-4.20, grok-build-0.1). SuperGrok and X Premium subscriptions do
-not include API access: billing is fully separate, and there is no OAuth flow,
-so you mint an API key at console.x.ai (keys start with `xai-`, which the
-setup wizard recognizes). The API is OpenAI-compatible and exposes a graded
+grok-4.3, grok-4.20, grok-build-0.1). Keys start with `xai-`, which the setup
+wizard recognizes. The API is OpenAI-compatible and exposes a graded
 `reasoning_effort` knob: low/medium/high on all models, with 4.20 also
 accepting off. Prompt caching is server-side; 3code benefits automatically on
-repeat turns.
+repeat turns. Note: 3code talks to the metered API, not your SuperGrok
+subscription. SuperGrok does work in some other harnesses via xAI's OAuth
+login (OpenCode, Kilo Code, Grok Build itself), but 3code's xai provider is
+API-key only.
 
 Add a provider inside the REPL:
 
