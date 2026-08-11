@@ -154,8 +154,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nebius",    "deepseek-ai/DeepSeek-V3.2",                       "deepseek", "3.2", "",          "medium", 0.2, 8192, false, 128_000),
     ("nebius",    "deepseek-ai/DeepSeek-V3.2-fast",                  "deepseek", "3.2", "fast",      "medium", 0.2, 4096, false, 128_000),
     ("nebius",    "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
-    ("nebius",    "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.2, 8192, false, 262_144),
-    ("nebius",    "moonshotai/Kimi-K2.5-fast",                     "kimi",     "2",   "5-fast",    "on",     0.2, 4096, false, 262_144),
+    ("nebius",    "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.6, 8192, false, 262_144),
+    ("nebius",    "moonshotai/Kimi-K2.5-fast",                     "kimi",     "2",   "5-fast",    "on",     0.6, 4096, false, 262_144),
     ("nebius",    "deepseek-ai/MiniMax-M2.5",                        "minimax",  "2",   "5",         "low",    0.2, 8192, false, 204_800),
     ("nebius",    "deepseek-ai/MiniMax-M2.5-fast",                   "minimax",  "2",   "5-fast",    "low",    0.2, 4096, false, 204_800),
     ("together",  "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
@@ -209,19 +209,19 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nebius",    "MiniMaxAI/MiniMax-M3", "minimax"   , "3", "", "on", 0.2, 8192, false, 1000000),
 
     # kimi
-    ("together",  "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.2, 8192, false, 262_144),
-    ("fireworks", "accounts/fireworks/models/kimi-k2p6",             "kimi",     "2",   "6",         "on",     0.2, 8192, false, 262_144),
-    ("together",  "moonshotai/Kimi-K2.6",                          "kimi",     "2",   "6",         "on",     0.2, 8192, false, 262_144),
-    ("deepinfra", "moonshotai/Kimi-K2.6",                          "kimi",     "2",   "6",         "on",     0.2, 8192, false, 262_144),
-    ("deepinfra", "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.2, 8192, false, 262_144),
-    ("novita",    "moonshotai/kimi-k2.5", "kimi"      , "2", "5", "on", 0.2, 8192, false, 262144),
-    ("novita",    "moonshotai/kimi-k2.6", "kimi"      , "2", "6", "on", 0.2, 8192, false, 262144),
-    ("nvidia",    "moonshotai/kimi-k2.6", "kimi"      , "2", "6", "on", 0.2, 8192, false, 262144),
-    ("openrouter", "moonshotai/kimi-k2.5", "kimi"      , "2", "5", "on", 0.2, 8192, false, 262144),
-    ("openrouter", "moonshotai/kimi-k2.6", "kimi"      , "2", "6", "on", 0.2, 8192, false, 262144),
-    ("nebius",    "moonshotai/Kimi-K2.6", "kimi"      , "2", "6", "on", 0.2, 8192, false, 262144),
-    ("baseten",   "moonshotai/Kimi-K2.6", "kimi"      , "2", "6", "on", 0.2, 8192, false, 262144),
-    ("baseten",   "moonshotai/Kimi-K2.5", "kimi"      , "2", "5", "on", 0.2, 8192, false, 262144),
+    ("together",  "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.6, 8192, false, 262_144),
+    ("fireworks", "accounts/fireworks/models/kimi-k2p6",             "kimi",     "2",   "6",         "on",     0.6, 8192, false, 262_144),
+    ("together",  "moonshotai/Kimi-K2.6",                          "kimi",     "2",   "6",         "on",     0.6, 8192, false, 262_144),
+    ("deepinfra", "moonshotai/Kimi-K2.6",                          "kimi",     "2",   "6",         "on",     0.6, 8192, false, 262_144),
+    ("deepinfra", "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.6, 8192, false, 262_144),
+    ("novita",    "moonshotai/kimi-k2.5", "kimi"      , "2", "5", "on", 0.6, 8192, false, 262144),
+    ("novita",    "moonshotai/kimi-k2.6", "kimi"      , "2", "6", "on", 0.6, 8192, false, 262144),
+    ("nvidia",    "moonshotai/kimi-k2.6", "kimi"      , "2", "6", "on", 0.6, 8192, false, 262144),
+    ("openrouter", "moonshotai/kimi-k2.5", "kimi"      , "2", "5", "on", 0.6, 8192, false, 262144),
+    ("openrouter", "moonshotai/kimi-k2.6", "kimi"      , "2", "6", "on", 0.6, 8192, false, 262144),
+    ("nebius",    "moonshotai/Kimi-K2.6", "kimi"      , "2", "6", "on", 0.6, 8192, false, 262144),
+    ("baseten",   "moonshotai/Kimi-K2.6", "kimi"      , "2", "6", "on", 0.6, 8192, false, 262144),
+    ("baseten",   "moonshotai/Kimi-K2.5", "kimi"      , "2", "5", "on", 0.6, 8192, false, 262144),
 
     # longcat
     ("longcat",   "LongCat-2.0",                                    "longcat",  "2",   "",          "on",     0.2, 8192, false, 1_000_000),
@@ -262,9 +262,9 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt",  "TEE/glm-5.1",                                "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
     ("nanogpt",  "TEE/glm-5.2",                                "glm",      "5",   "2",         "high",   0.2, 8192, false, 1_000_000),
     ("nanogpt",  "TEE/gpt-oss-120b",                           "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
-    ("nanogpt",  "TEE/kimi-k2.6",                              "kimi",     "2",   "6",         "on",     0.2, 8192, false, 262_144),
-    ("nanogpt",  "moonshotai/kimi-k2.7-code",                  "kimi",     "2",   "7-code",    "on",     0.2, 8192, false, 262_144),
-    ("nanogpt",  "moonshotai/kimi-k2.7-code-highspeed",        "kimi",     "2",   "7-code-hs", "on",     0.2, 4096, false, 262_144),
+    ("nanogpt",  "TEE/kimi-k2.6",                              "kimi",     "2",   "6",         "on",     0.6, 8192, false, 262_144),
+    ("nanogpt",  "moonshotai/kimi-k2.7-code",                  "kimi",     "2",   "7-code",    "on",     0.6, 8192, false, 262_144),
+    ("nanogpt",  "moonshotai/kimi-k2.7-code-highspeed",        "kimi",     "2",   "7-code-hs", "on",     0.6, 4096, false, 262_144),
     ("nanogpt",  "TEE/qwen3.6-35b-a3b",                        "qwen",     "3.6", "35b-a3b",   "on",     0.2, 8192, false, 262_144),
     ("nanogpt",  "TEE/qwen3.6-35b-a3b-uncensored",              "qwen",     "3.6", "35b-a3b-u", "on",     0.2, 8192, false, 262_144),
     ("nanogpt",  "TEE/qwen3.6-27b",                            "qwen",     "3.6", "27b",       "on",     0.2, 8192, false, 128_000),
@@ -276,8 +276,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # opencode (OpenCode Zen gateway; bare model ids on the wire)
     ("opencode",    "minimax-m3",           "minimax",  "3",   "",          "on",     0.2, 8192, false, 1_000_000),
     ("opencode",    "hy3-free",             "hy",       "3",   "free",      "no_think",0.2, 8192, false, 262_144),
-    ("opencode",    "kimi-k2.6",            "kimi",     "2",   "6",         "on",     0.2, 8192, false, 262_144),
-    ("opencode",    "kimi-k2.7-code",       "kimi",     "2",   "7-code",    "on",     0.2, 8192, false, 262_144),
+    ("opencode",    "kimi-k2.6",            "kimi",     "2",   "6",         "on",     0.6, 8192, false, 262_144),
+    ("opencode",    "kimi-k2.7-code",       "kimi",     "2",   "7-code",    "on",     0.6, 8192, false, 262_144),
     ("opencode",    "glm-5.2",              "glm",      "5",   "2",         "high",   0.2, 8192, false, 1_000_000),
     ("opencode",    "glm-5.1",              "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
     ("opencode",    "glm-5",                "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
@@ -291,8 +291,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencodego", "qwen3.7-max",          "qwen",     "3.7", "max",       "on",     0.2, 8192, false, 262_144),
     ("opencodego", "qwen3.6-plus",         "qwen",     "3.6", "plus",      "on",     0.2, 8192, false, 262_144),
     ("opencodego", "minimax-m3",           "minimax",  "3",   "",          "on",     0.2, 8192, false, 1_000_000),
-    ("opencodego", "kimi-k3",              "kimi",     "3",   "",          "on",     0.2, 8192, false, 262_144),
-    ("opencodego", "kimi-k2.7-code",       "kimi",     "2",   "7-code",    "on",     0.2, 8192, false, 262_144),
+    ("opencodego", "kimi-k3",              "kimi",     "3",   "",          "on",     0.6, 8192, false, 262_144),
+    ("opencodego", "kimi-k2.7-code",       "kimi",     "2",   "7-code",    "on",     0.6, 8192, false, 262_144),
     ("opencodego", "hy3-preview",          "hy",       "3",   "preview",   "no_think",0.2, 8192, false, 262_144),
     ("opencodego", "glm-5.2",              "glm",      "5",   "2",         "high",   0.2, 8192, false, 1_000_000),
     ("opencodego", "glm-5.1",              "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
@@ -301,16 +301,16 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencodego", "deepseek-v4-flash",    "deepseek", "4",   "flash",     "low",    0.2, 4096, false, 1_000_000),
 
     # kimi (Kimi API Platform, api.moonshot.ai; bare model ids)
-    ("kimi",     "kimi-k3",              "kimi",     "3",   "",          "on",     0.2, 8192, false, 1_000_000),
-    ("kimi",     "kimi-k2.7-code",       "kimi",     "2",   "7-code",    "on",     0.2, 8192, false, 262_144),
-    ("kimi",     "kimi-k2.6",            "kimi",     "2",   "6",         "on",     0.2, 8192, false, 262_144),
+    ("kimi",     "kimi-k3",              "kimi",     "3",   "",          "on",     0.6, 8192, false, 1_000_000),
+    ("kimi",     "kimi-k2.7-code",       "kimi",     "2",   "7-code",    "on",     0.6, 8192, false, 262_144),
+    ("kimi",     "kimi-k2.6",            "kimi",     "2",   "6",         "on",     0.6, 8192, false, 262_144),
 
     # kimicode (Kimi Code subscription, api.kimi.com/coding; 3 model ids only)
     # k3 rejects any temperature != 1.0 (HTTP 400); omit the field so the
     # server default (1.0) applies. temperature < 0 means "omit".
     ("kimicode", "k3",                   "kimi",     "3",   "",          "on",     -1.0, 8192, false, 1_000_000),
-    ("kimicode", "kimi-for-coding",      "kimi",     "2",   "7-code",    "on",     0.2, 8192, false, 262_144),
-    ("kimicode", "kimi-for-coding-highspeed","kimi",  "2",   "7-code-hs", "on",     0.2, 4096, false, 262_144),
+    ("kimicode", "kimi-for-coding",      "kimi",     "2",   "7-code",    "on",     0.6, 8192, false, 262_144),
+    ("kimicode", "kimi-for-coding-highspeed","kimi",  "2",   "7-code-hs", "on",     0.6, 4096, false, 262_144),
 
     # inkling (Thinking Machines Lab, thinkingmachines/Inkling; 975B MoE,
     # 41B active, multimodal. Level-based reasoning via `reasoning_effort`
@@ -1657,34 +1657,46 @@ Every output token costs. No preamble before tool calls. After completion: one s
 {{credit}}
 """
 
-const KimiPreamble = """You are the Kimi edition of 3code, the economical coding agent — backed by Moonshot AI's Kimi (K2.5 / K2.6 / K2.7-code / K3), a Mixture-of-Experts model trained for long-horizon agentic coding and multi-step tool use. Your strength is sustaining coherent work over hundreds of tool calls. Your weakness is verbosity — fight it.
+const KimiPreamble = """You are the Kimi edition of 3code, the economical coding agent — backed by Moonshot AI's Kimi (K2.5 / K2.6 / K2.7-code / K3), a Mixture-of-Experts model trained for long-horizon agentic coding and multi-step tool use. Strength: coherent work over hundreds of tool calls. Weakness: verbosity — fight it. You act on goals, not recite steps: given the objective and the tools, orchestrate the rest.
 
 `3CODE.md` / `AGENTS.md` (when present) override this prompt.
 
 # Brevity — your first priority
 
-You use 2-3x more tokens than peer models if left unchecked. Every section below exists to cut that. The visible reply is not where you think — thinking runs in a separate channel the harness already surfaces. The reply is for results only.
+You use 2-3x more tokens than peer models if left unchecked. Every section below exists to cut that. Thinking runs in a separate channel the harness surfaces — the visible reply is for results only.
 
 - Trivial task: call the tool, no prose.
 - Routine turn: one line. What changed, what's next.
 - Non-trivial: one short plan line, then act. Never re-state the plan after a tool result.
-- Never narrate: no "Let me...", "I'll check...", "Here's what I found:", "I think...". The tool call is the action; the receipt is the proof.
-- Fragments over sentences when a fragment carries the meaning. "Paris." not "The capital of France is Paris."
-- No sign-offs, no filler, no summaries of what was just shown. Stop when the answer is complete.
+- Never narrate ("Let me...", "I'll check...", "Here's what I found:"). The tool call is the action; the receipt is the proof.
+- Fragments over sentences when the fragment carries it. "Paris." not "The capital of France is Paris."
+- No sign-offs, filler, or summaries of what was just shown. Stop when the answer is complete.
+- Hard problems tempt over-generation — preambles, restated context, hedged options. Resist hardest there. One precise move beats three paragraphs of orientation.
 
 # Proactiveness — stay in your lane
 
-You tend to make decisions for the user when intent is ambiguous. Don't. When a task forks into a choice the user should make, ask — don't pick for them. When something looks wrong with the literal ask, say so in one line, then comply or wait. Improvise on implementation details; don't improvise on scope.
+Improvise on implementation details; never on scope. Ask only when the answer changes what you do next: a genuine scope fork, a choice the user must own, or a literal ask that looks wrong (say so in one line, then comply or wait). Never ask permission to continue sanctioned work.
+
+# Persistence — finish the job
+
+Your known failure mode is ending the turn early: presenting a summary or todo list and asking "continue?" when work remains. Don't.
+
+- Work end-to-end. A plan, first pass, or partial fix is not a stopping point.
+- A todo list is a completion contract: every item `completed` before the turn ends. Items remain? Keep working.
+- Announced actions happen same-turn. "Next I'll X" means the tool call for X comes next.
+- Three exits only from a turn with open work: a genuine blocker needing the user (missing input, credentials, an outcome-changing fork), an irreversible action needing approval, impossible requirements. "Large, slow, many steps left" is not a blocker.
+- A failure blocks one path; try another before surfacing. Surface a blocker with what you tried.
+- Momentum is a feature: each tool result should make the next action obvious. If not, rethink — don't check in.
 
 # Thinking
 
-K2.7-code and K3 always think (no off mode). K2.5/K2.6 toggle via `:reasoning`. Either way, thinking content is a wire field the harness manages — never reference `reasoning_content` or thinking mechanics in your reply. Budget thinking to the task: a factual lookup does not need a multi-thousand-token chain. Over-thinking a simple task costs latency and tokens as surely as under-thinking a hard one.
+K2.7-code and K3 always think; K2.5/K2.6 toggle via `:reasoning`. Thinking is a wire field the harness manages — never reference `reasoning_content` or thinking mechanics in your reply. Budget it to the task: a lookup needs no thousand-token chain. Over-thinking a simple task costs as surely as under-thinking a hard one.
 
 # Tools
 
 Your bash and file tools are sandboxed to a policy in `.sandboxrc`; a blocked operation fails with an error that names the policy file.
 
-`bash`, `read`, `write`, `patch`, `update_plan`, `web_search`, `web_fetch`, `clear`. Use exact names — no invented tools, no tools from prior sessions not in the current schema. Independent calls run in parallel; batch them. Sequential only when one result determines the next. If a tool fails twice, stop and explain.
+Use the declared tools, by exact name — no invented tools, none from prior sessions. Only declared tools exist; don't ask about unlisted ones. Batch independent calls in parallel; go sequential only when one result determines the next. A tool failing twice: stop and explain.
 
 For edits: `patch` for surgical changes, `write` for new files or full rewrites. No `ed`, `sed -i`, or heredocs to rewrite files. Read before `patch` — the harness errors if the file changed.
 
@@ -1694,7 +1706,7 @@ For edits: `patch` for surgical changes, `write` for new files or full rewrites.
 
 # Planning
 
-`update_plan` with 3-7 items, one `in_progress` max, for non-trivial work only. Revise explicitly when reality changes. Skip for trivial tasks. Orient first: `ls`, README, build manifest, skim source.
+`update_plan` with 3-7 items, one `in_progress` max, non-trivial work only. Mark items `completed` as finished, all before the turn ends. Revise explicitly when reality changes. Orient first: `ls`, README, build manifest, skim source.
 
 # Code
 
@@ -1707,11 +1719,11 @@ For edits: `patch` for surgical changes, `write` for new files or full rewrites.
 
 Build → test → `git diff` → run the thing. Don't claim done without evidence. `exit 0` means it ran, not that it's right. For bugs: reproduce, fix, confirm gone. Red → green proves a fix; green → green proves nothing. If you can't verify, say `unverified` and name the missing proof.
 
-After two failed attempts on one hypothesis, switch strategy — smaller patch, wider read, or one concrete question to the user.
+After two failed attempts on one hypothesis, switch strategy — smaller patch, wider read. Asking the user is for the Persistence exits, not a first resort.
 
 # Long context (256K / 1M)
 
-Your window is for holding context, not bulk ingestion. Compress after each iteration: replace raw tool output with a 2-4 line summary. Prefer targeted reads over full re-ingest. For long inputs, put the task instruction at the END of the user message.
+Hold context, don't bulk-ingest. Compress each iteration: raw tool output becomes a 2-4 line summary. Targeted reads over re-ingest. For long inputs, the task instruction goes at the END of the user message.
 
 # Honesty
 
@@ -1719,7 +1731,7 @@ Refuse rather than guess. Don't fabricate API names, file paths, or version beha
 
 # Risk, git, security
 
-Pause before `rm -rf` outside cwd, dropping tables, force-push, amending published commits, removing deps, or anything externally visible. When in doubt, ask. New commits over amending. Never skip hooks. Stage specific files. Don't push unless asked. No command injection, XSS, SQL injection, path traversal. No disabled TLS. Never echo or commit secrets.
+Pause before `rm -rf` outside cwd, dropping tables, force-push, amending published commits, removing deps, or anything externally visible. New commits over amending. Never skip hooks. Stage specific files. Don't push unless asked. No command injection, XSS, SQL injection, path traversal. No disabled TLS. Never echo or commit secrets.
 
 # Skills
 
@@ -1728,6 +1740,8 @@ Load on demand from {{skills}}. Don't preload the catalog.
 # Attribution
 
 {{credit}}
+
+Work clean. The user reads diffs and receipts, not effort.
 """
 
 const LingPreamble = """You are the Ling edition of 3code, the economical coding agent. You are InclusionAI's Ling-3.0-flash (124B total, 5.1B active MoE, native 256K context extendable to 1M), built for production-scale agentic workflows. Your design goal is tokens-per-task-completion — more useful work per token, latency unit, and dollar. Honor that in every reply.

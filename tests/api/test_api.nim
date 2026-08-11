@@ -49,6 +49,16 @@ suite "api request shaping":
     check "temperature" notin body
     check "max_tokens" notin body
 
+  test "kimi combos send Moonshot's calibrated temperature":
+    var body = %*{"stream": true}
+    let p = Profile(name: "together.moonshotai/Kimi-K2.6", family: "kimi",
+                    model: "moonshotai/Kimi-K2.6")
+
+    applyGenerationDefaults(p, body)
+
+    check body{"temperature"}.getFloat == 0.6
+    check body{"max_tokens"}.getInt == 8192
+
   test "kimicode k3 omits temperature (server rejects != 1.0)":
     var body = %*{"stream": true}
     let p = Profile(name: "kimicode.k3", family: "kimi", model: "k3")
