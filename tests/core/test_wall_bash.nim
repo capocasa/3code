@@ -99,8 +99,9 @@ when defined(linux):
       else:
         # 1. direct TCP from inside the netns to the host echo server
         # must fail: the netns loopback has no echo server.
+        # bash, not sh: /dev/tcp is a bashism (dash on CI lacks it).
         let r1 = execCmdEx(binPath() & " box --policy " & pol.quoteShell &
-          " restrict -- sh -c " &
+          " restrict -- bash -c " &
           "'exec 3<>/dev/tcp/127.0.0.1/" & $int(echoPort) & "' </dev/null",
           env = probeEnv, options = {poDaemon})
         check r1.exitCode != 0
@@ -116,7 +117,7 @@ when defined(linux):
         # execCmdEx would wait for pipe EOF (bridge exit) after sh is
         # done; poDaemon detaches the grandchildren instead.
         let p2 = startProcess(binPath(), args = ["box", "--policy", pol,
-          "restrict", "--", "sh", "-c",
+          "restrict", "--", "bash", "-c",
           "exec 3<>/dev/tcp/127.0.0.1/" & port &
           "; printf \"CONNECT 127.0.0.1:" & $int(echoPort) &
           " HTTP/1.1\\r\\n\\r\\n\" >&3; head -c 20 <&3"],
@@ -163,6 +164,6 @@ when defined(linux):
           "; printf \"CONNECT denied.example:443 HTTP/1.1\\r\\n\\r\\n\" >&3" &
           "; head -c 20 <&3'"
         let r3 = execCmdEx(binPath() & " box --policy " & pol.quoteShell &
-          " restrict -- sh -c " & script3 & " </dev/null", env = probeEnv,
+          " restrict -- bash -c " & script3 & " </dev/null", env = probeEnv,
           options = {poDaemon})
         check "403" in r3.output
