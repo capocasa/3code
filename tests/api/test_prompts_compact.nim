@@ -30,6 +30,15 @@ suite "prompts: knownGoodFamily":
   test "Hetzner Qwen3.6-35B-A3B-FP8 is known-good":
     check knownGoodFamily("hetzner", "Qwen/Qwen3.6-35B-A3B-FP8") == "qwen"
 
+  test "Hetzner GLM-5.2-NVFP4 is known-good":
+    check knownGoodFamily("hetzner", "GLM-5.2-NVFP4") == "glm"
+
+  test "Hetzner DeepSeek-V4-Flash-0731 is known-good":
+    check knownGoodFamily("hetzner", "DeepSeek-V4-Flash-0731") == "deepseek"
+
+  test "Hetzner Kimi-K2.7-Code is known-good":
+    check knownGoodFamily("hetzner", "Kimi-K2.7-Code") == "kimi"
+
 suite "prompts: isKnownGood":
   test "true for known-good profile":
     let p = Profile(name: "zai.glm-5.1", model: "glm-5.1")
