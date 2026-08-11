@@ -71,6 +71,16 @@ url = "https://openrouter.ai/api/v1"
 key = "sk-or-..."
 models = "openai/gpt-oss-120b"
 
+; xAI with a SuperGrok subscription instead of an API key: auth = "oauth"
+; and no key. Tokens live in $XDG_DATA_HOME/3code/auth/xai.json (created
+; by the provider wizard's browser/device login) and refresh automatically.
+; [provider]
+; name = "xai"
+; url = "https://api.x.ai/v1"
+; key = ""
+; auth = "oauth"
+; models = "grok-4.5 grok-4.20"
+
 [provider]
 name = "together"
 url = "https://api.together.xyz/v1"

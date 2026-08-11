@@ -150,10 +150,13 @@ grok-4.3, grok-4.20, grok-build-0.1). Keys start with `xai-`, which the setup
 wizard recognizes. The API is OpenAI-compatible and exposes a graded
 `reasoning_effort` knob: low/medium/high on all models, with 4.20 also
 accepting off. Prompt caching is server-side; 3code benefits automatically on
-repeat turns. Note: 3code talks to the metered API, not your SuperGrok
-subscription. SuperGrok does work in some other harnesses via xAI's OAuth
-login (OpenCode, Kilo Code, Grok Build itself), but 3code's xai provider is
-API-key only.
+repeat turns.
+
+Two ways to authenticate: paste an `xai-` API key in the provider wizard, or
+type `xai` at the key prompt to sign in with your SuperGrok / X Premium+
+subscription (browser OAuth, or device code on headless hosts). Subscription
+tokens live in `$XDG_DATA_HOME/3code/auth/xai.json` (mode 0600) and refresh
+automatically; the provider is saved with `auth = "oauth"` and no key.
 
 Add a provider inside the REPL:
 

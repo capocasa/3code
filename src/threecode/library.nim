@@ -32,7 +32,7 @@
 
 import std/[json, os, strutils, tables, times]
 import types, util, prompts, session, config, actions, api, display, ui,
-       sandbox, minline, transcript, turns
+       auth_xai, sandbox, minline, transcript, turns
 import fatprompt as fatruntime
 import engine as termengine
 
@@ -149,6 +149,9 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
   # Config first (it reads `[settings] sandbox = off`), then the
   # sandbox: same single-file policy as the CLI. Paths resolve
   # against the session cwd so the policy follows the project.
+  subscriptionTokenForImpl = auth_xai.subscriptionTokenFor
+  api.bearerHook = subscriptionBearer
+
   var colorKeys: Table[string, string]
   (activeCurrent, activeProviders, colorKeys) = loadStateOrEmpty(configPath())
   if sandboxEnabled:

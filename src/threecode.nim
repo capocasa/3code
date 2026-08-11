@@ -31,7 +31,8 @@ when defined(posix):
   import std/posix
 import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
-                  toolstream, turns, transcript, sandbox, box, wall]
+                  toolstream, turns, transcript, sandbox, box, wall,
+                  auth_xai]
 when defined(windows):
   import threecode/streamexec  # for resolveBash, used by ensureBash
 when not defined(android):
@@ -374,6 +375,11 @@ proc main() =
   except SessionLocked as e:
     releaseDirLock(session.cwd)
     die(e.msg, ExitConfig)
+
+  # Subscription auth: oauth-marked providers resolve their bearer
+  # through the token store (auto-refresh) instead of a static key.
+  subscriptionTokenForImpl = auth_xai.subscriptionTokenFor
+  api.bearerHook = subscriptionBearer
 
   var activeColorKeys: Table[string, string]
   (activeCurrent, activeProviders, activeColorKeys) = loadStateOrEmpty(configPath())
