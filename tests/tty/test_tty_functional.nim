@@ -360,13 +360,21 @@ suite "terminal visual contract":
     tty.expect "❯"
     tty.send ":provider add\n"
     tty.drain(200)
-    check "api key" in tty.screenText()
+    # First field is name|url|key and is NOT masked (keys typed there are
+    # detected by prefix). Drive a catalog name so the next field is the
+    # hidden api-key prompt — that is what this test covers.
+    tty.expect "provider, url, or api key"
+    tty.send "nvidia\n"
+    tty.drain(200)
+    # -x: optional url override before the key.
+    tty.expect "url"
+    tty.send "\n"
+    tty.expect "api key"
     check "********************" notin tty.screenText()
     tty.send "nvapi-visible-secret"
     tty.expect "********************"
     tty.expectNo "nvapi-visible-secret"
     tty.send "\n"
-    tty.expect "detected:"
     tty.expect "models"
     tty.expectNo "nvapi-visible-secret"
     tty.send "\x1b"
@@ -398,14 +406,16 @@ suite "terminal visual contract":
     tty.expect "❯"
     tty.send ":provider add\n"
     tty.drain(200)
-    tty.expect "api key"
-    tty.send "stub-test-key-xyz\n"
-    tty.drain(300)
-    tty.expect "provider name"
+    # First field is name|url|key. Custom name under -x asks base url
+    # + key, then fetches models and verifies.
+    tty.expect "provider, url, or api key"
     tty.send "myprov\n"
     tty.drain(300)
-    tty.expect "url"
+    tty.expect "api base url"
     tty.send "stub://myprov\n"
+    tty.drain(300)
+    tty.expect "api key"
+    tty.send "stub-test-key-xyz\n"
     tty.drain(500)
     tty.expect "fetching models"
     tty.expect "available"

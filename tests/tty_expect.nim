@@ -449,6 +449,31 @@ proc waitForOutput*(s: TtySession; timeoutMs = 5000; recordFrame = true): bool =
     s.frameRecordingPaused = wasPaused
   false
 
+proc waitForQuiet*(s: TtySession; quietMs = 120; capMs = 3000;
+                     recordFrame = false) =
+  ## Block until the child has emitted no PTY bytes for a full `quietMs`
+  ## window (or `capMs` elapses as a dead-child safety net). This is the
+  ## send-safety primitive: `expect` can match a prompt in the raw stream
+  ## while the child's redraw of that same prompt is still in flight, so a
+  ## fixed short drain is not enough to guarantee the terminal is settled.
+  ## Waiting for a quiet window means a following `send` never types into
+  ## an in-flight repaint (which would echo keys at the wrong row, or
+  ## before a hidden-input field engaged its mask). Frame commits stay
+  ## suppressed like `expect`'s own polling.
+  let wasPaused = s.frameRecordingPaused
+  if not recordFrame:
+    s.frameRecordingPaused = true
+  let cap = epochTime() + capMs.float / 1000.0
+  var quietStart = epochTime()
+  while epochTime() < cap and not s.exited:
+    if s.pollOnce(10, recordIdleFrame = false):
+      quietStart = epochTime()  # output arrived; restart the quiet window
+    elif (epochTime() - quietStart) * 1000.0 >= quietMs.float:
+      break
+  s.frameRecordingPaused = wasPaused
+  if recordFrame:
+    s.flushFrame(force = true)
+
 proc drain*(s: TtySession; settleMs = 20; recordFrame = true) =
   ## Capture any bytes currently ready on the PTY. When `recordFrame` is true,
   ## every SyncEnd-wrapped render is committed as its own frame as it arrives,
@@ -1318,14 +1343,14 @@ proc expect*(s: TtySession; text: string; timeoutMs = 5000): bool {.discardable.
     s.drain(0, recordFrame = false)
     if text in s.screenText() or text in cleanRaw(s.freshRaw()):
       s.advanceRawMark()
-      # Drain any output that arrived while searching (e.g. the initial
-      # editor redraw's SyncEnd) so the grid is fully settled before the
-      # caller's next action. Without this, a `send` immediately after
-      # `expect` can race the child's first redraw: the typing echo may
-      # arrive before the redraw commits, leaving the cursor on the wrong
-      # row and causing the first keystroke's editor move-up to clear a
-      # row it shouldn't (the idle hint).
-      s.drain(20, recordFrame = false)
+      # Settle before returning so the caller's next action (usually a
+      # `send`) never types into an in-flight redraw. A fixed drain is
+      # not enough: `expect` can match the prompt text in the raw stream
+      # while the child's repaint of that same prompt is still being
+      # written, and a keystroke landing mid-repaint echoes at the wrong
+      # row (or, for a hidden field, before the mask engages, leaking the
+      # secret onto the screen). Wait for a genuinely quiet terminal.
+      s.waitForQuiet(recordFrame = false)
       return true
     if s.exited:
       # The child process has exited, but on Windows the ConPTY conhost is a

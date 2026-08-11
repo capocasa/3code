@@ -70,12 +70,14 @@ suite "provider verification cancel":
     tty.send ":provider add"
     tty.send "\r"
     tty.drain(200)
+    # First field is name|url|key. Custom name under -x asks for base
+    # url + key, then models, then the verifying probe we cancel.
+    tty.expect "provider, url, or api key"
+    tty.send "second\r"
+    tty.expect "api base url"
+    tty.send "stub://second\r"
     tty.expect "api key"
     tty.send "another-stub-key\r"
-    tty.expect "provider name"
-    tty.send "second\r"
-    tty.expect "url"
-    tty.send "stub://second\r"
     tty.expect "models"
     tty.send "stub-model\r"
     tty.expect "verifying"
