@@ -101,6 +101,29 @@ suite "oauth loopback":
       check s.got == ""
       check "cancelled" in s.err
 
+  test "awaitLoopbackCode cancels after hung browser connect":
+    ## Browser opens TCP (local-network permission / stalled tab) but never
+    ## sends the request line. Cancel must still unwind promptly; a long
+    ## post-accept recvLine would pin the worker until timeout.
+    let port = freePort()
+    let s = Shared(port: port, expectState: "s", timeoutSec: 30)
+    initLock(s.lock)
+    var t: Thread[Shared]
+    createThread(t, worker, s)
+    waitListening(s)
+    let hung = newSocket()
+    hung.connect("127.0.0.1", Port(port))
+    # Give accept a moment to complete so the worker is inside request read.
+    sleep(100)
+    let t0 = epochTime()
+    s.cancel.store(true, moRelease)
+    joinThread(t)
+    hung.close()
+    check epochTime() - t0 < 2.0
+    withLock s.lock:
+      check s.got == ""
+      check "cancelled" in s.err
+
   test "onListening fires before accept":
     let port = freePort()
     var heard: Atomic[bool]

@@ -153,17 +153,54 @@ proc pendingError*(e: ref OAuthError): string =
 proc remainingMs(deadline: float): int =
   max(int((deadline - epochTime()) * 1000), 0)
 
+proc cancelledOrTimedOut(deadline: float; cancelFlag: ptr Atomic[bool];
+                         waitingFor: string) =
+  ## Raise when the caller cancelled or the overall deadline elapsed.
+  if cancelFlag != nil and cancelFlag[].load(moRelaxed):
+    raise newException(OAuthError, "cancelled")
+  if remainingMs(deadline) == 0:
+    raise newException(OAuthError, "timed out " & waitingFor)
+
+proc recvRequestLine(client: Socket, deadline: float;
+                     cancelFlag: ptr Atomic[bool] = nil): string =
+  ## Read one HTTP request line in short `recvLine` ticks so `cancelFlag` is
+  ## noticed even when a browser has connected but not yet sent the redirect
+  ## (local-network permission prompt, hung tab, etc.). A single long
+  ## `recvLine(timeout=remaining)` would pin the worker until the deadline
+  ## and freeze `joinThread` after the UI cancel path had already fired.
+  ##
+  ## Must use the socket's buffered `recvLine` path (not select+recv(1)):
+  ## buffered `recv` fills a 4k kernel read without a timeout and can hang
+  ## after select reports readiness for only part of a line.
+  while true:
+    cancelledOrTimedOut(deadline, cancelFlag, "reading browser callback")
+    try:
+      result = client.recvLine(timeout = min(remainingMs(deadline), 200))
+    except TimeoutError:
+      continue
+    except CatchableError:
+      raise newException(OAuthError, "browser callback closed before request")
+    if result == "":
+      raise newException(OAuthError, "browser callback closed before request")
+    # Sole \r\n is an empty request line; treat as closed/invalid.
+    if result == "\r\n":
+      raise newException(OAuthError, "browser callback closed before request")
+    return
+
 proc awaitLoopbackCode*(listenPort: int, expectState: string,
                         timeoutSec = 300;
                         cancelFlag: ptr Atomic[bool] = nil;
                         onListening: proc() {.gcsafe.} = nil): string =
   ## One-shot blocking TCP listener on 127.0.0.1:listenPort. Reads a single
   ## HTTP request line (the OAuth redirect), replies 200, returns the code.
-  ## No async: select + accept + recvLine with a hard deadline.
+  ## No async: select + accept + short recvLine ticks with a hard deadline.
   ##
   ## `onListening` fires after bind/listen and before accept, so the caller
   ## can open the browser only once the loopback port is actually ready.
-  ## `cancelFlag` is polled each select tick; when set, raises OAuthError.
+  ## `cancelFlag` is polled each select tick (accept and request-line read);
+  ## when set, raises OAuthError. This matters when the browser opens a TCP
+  ## connection to the loopback port but stalls before sending the redirect
+  ## (e.g. a local-network permission prompt the user dismisses).
   let server = newSocket()  # buffered: recvLine needs the buffer
   defer: server.close()
   server.setSockOpt(OptReuseAddr, true)
@@ -175,14 +212,10 @@ proc awaitLoopbackCode*(listenPort: int, expectState: string,
 
   var client: Socket
   while client.isNil:
-    if cancelFlag != nil and cancelFlag[].load(moRelaxed):
-      raise newException(OAuthError, "cancelled")
-    let ms = remainingMs(deadline)
-    if ms == 0:
-      raise newException(OAuthError, "timed out waiting for browser callback")
+    cancelledOrTimedOut(deadline, cancelFlag, "waiting for browser callback")
     var fds = @[server.getFd()]
     # 200ms ticks so cancelFlag is noticed promptly without busy-spinning.
-    if selectRead(fds, min(ms, 200)) <= 0:
+    if selectRead(fds, min(remainingMs(deadline), 200)) <= 0:
       continue
     var address = ""
     server.acceptAddr(client, address)
@@ -190,10 +223,7 @@ proc awaitLoopbackCode*(listenPort: int, expectState: string,
 
   # Request line only: GET /callback?code=...&state=... HTTP/1.1
   # (headers/body are irrelevant for the OAuth redirect).
-  let firstLine = try:
-    client.recvLine(timeout = remainingMs(deadline))
-  except TimeoutError:
-    raise newException(OAuthError, "timed out reading browser callback")
+  let firstLine = recvRequestLine(client, deadline, cancelFlag)
   var path = ""
   let parts = firstLine.split(' ')
   if parts.len >= 2: path = parts[1]
