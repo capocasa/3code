@@ -186,10 +186,10 @@ suite "cli syntax errors do no startup work":
     check "requires a value" in r.o
     check not skillsDirExists()
 
-suite "box subcommand (built-in sandwall)":
-  # `3code box` is the sandbox backend the bash tool re-execs. It must
-  # dispatch before any other startup (no TLS, no config, no sandbox file)
-  # and confine the command via the OS-native backend.
+suite "wall restrict subcommand (built-in sandwall)":
+  # `3code wall restrict` is the wall backend the bash tool re-execs.
+  # It must dispatch before any other startup (no TLS, no config, no wall
+  # file) and confine the command via the OS-native backend.
   var boxTmp: string
   var backendWorks: bool  # does this kernel/OS actually support confinement?
 
@@ -199,35 +199,35 @@ suite "box subcommand (built-in sandwall)":
     createDir(boxTmp)
     # Probe once: run a trivial confined command. If the OS-native backend
     # (Landlock/Seatbelt/ACL) can't restrict on this host (e.g. a kernel
-    # built without Landlock, or a CI container lacking the syscall), box
+    # built without Landlock, or a CI container lacking the syscall), wall
     # exits nonzero and the confinement assertions below are skipped rather
     # than reported as failures. The dispatch/arg-parsing assertions stay
     # unconditional since they don't depend on the backend.
-    backendWorks = run(["box", "restrict", boxTmp, "--", "true"]).code == 0
+    backendWorks = run(["wall", "restrict", boxTmp, "--", "true"]).code == 0
 
   teardown:
     removeDir(boxTmp)
 
-  test "box with no args prints usage":
-    let r = run(["box"])
+  test "wall with no args prints usage":
+    let r = run(["wall"])
     check r.code == 0
-    check "3code box" in r.o
+    check "3code wall" in r.o
     check "restrict" in r.o
 
-  test "box unknown subcommand errors":
-    let r = run(["box", "nope"])
+  test "wall unknown subcommand errors":
+    let r = run(["wall", "nope"])
     check r.code == 2
     check "unknown subcommand" in r.o
 
-  test "box restrict runs a command":
+  test "wall restrict runs a command":
     if backendWorks:
-      let r = run(["box", "restrict", boxTmp, "--", "echo", "confined-ok"])
+      let r = run(["wall", "restrict", boxTmp, "--", "echo", "confined-ok"])
       check r.code == 0
       check "confined-ok" in r.o
     else:
       skip()
 
-  test "box restrict blocks writes outside the writable path":
+  test "wall restrict blocks writes outside the writable path":
     # Writable path is boxTmp; a write to its sibling must fail with
     # EACCES (Permission denied) at the syscall level, proving the
     # kernel backend is actually applied, not just parsed. We use `touch`
@@ -235,7 +235,7 @@ suite "box subcommand (built-in sandwall)":
     # be reinterpreted by execCmdEx's shell.
     if backendWorks:
       let outside = getTempDir() / ("3code-box-leak-" & $epochTime().int64)
-      let r = run(["box", "restrict", boxTmp, "--", "touch", outside])
+      let r = run(["wall", "restrict", boxTmp, "--", "touch", outside])
       check r.code != 0
       # macOS Seatbelt reports the blocked syscall as EPERM ("Operation
       # not permitted") where Linux Landlock reports EACCES.
@@ -252,52 +252,52 @@ suite "box subcommand (built-in sandwall)":
     if backendWorks:
       let proj = boxTmp / "proj"
       createDir(proj)
-      writeFile(proj / ".sandboxrc", "deny /\nallow\n")
+      writeFile(proj / ".wallrc", "deny /\nallow\n")
       let inside = proj / "ok.txt"
-      let rIn = run(["box", "--policy", proj / ".sandboxrc",
+      let rIn = run(["wall", "--policy", proj / ".wallrc",
                      "restrict", "--", "touch", inside])
       check rIn.code == 0
       check fileExists(inside)
       let outside = getTempDir() / ("3code-box-poleak-" & $epochTime().int64)
-      let rOut = run(["box", "--policy", proj / ".sandboxrc",
+      let rOut = run(["wall", "--policy", proj / ".wallrc",
                       "restrict", "--", "touch", outside])
       check rOut.code != 0
       check not fileExists(outside)
       # A fully locked policy (no writable root) is accepted: the touch
       # simply has nowhere legal to land.
-      writeFile(proj / ".sandboxrc", "deny /\n")
-      let rLock = run(["box", "--policy", proj / ".sandboxrc",
+      writeFile(proj / ".wallrc", "deny /\n")
+      let rLock = run(["wall", "--policy", proj / ".wallrc",
                        "restrict", "--", "true"])
       check rLock.code == 0
     else:
       skip()
 
-  test "box --policy reloads edits between launches":
+  test "wall --policy reloads edits between launches":
     # Two launches, policy tightened in between: the second launch must
     # enforce the new file contents without any parent-side reload.
     if backendWorks:
       let proj = boxTmp / "proj2"
       createDir(proj)
-      let pol = proj / ".sandboxrc"
+      let pol = proj / ".wallrc"
       let target = proj / "t.txt"
       writeFile(pol, "deny /\nallow\n")
-      check run(["box", "--policy", pol, "restrict", "--", "touch", target]).code == 0
+      check run(["wall", "--policy", pol, "restrict", "--", "touch", target]).code == 0
       removeFile(target)
       writeFile(pol, "deny /\n")
-      check run(["box", "--policy", pol, "restrict", "--", "touch", target]).code != 0
+      check run(["wall", "--policy", pol, "restrict", "--", "touch", target]).code != 0
       check not fileExists(target)
     else:
       skip()
 
-  test "box --policy never warns about a writable policy file":
+  test "wall --policy never warns about a writable policy file":
     # The single policy file always sits under the writable project dir;
     # the old `is under a writable rule` warning was removed because the
     # implicit read-only guard (parent side) covers the file instead.
     if backendWorks:
       let proj = boxTmp / "proj3"
       createDir(proj / ".3code")
-      writeFile(proj / ".3code" / "sandbox", "- /\n+\n")
-      let r = run(["box", "--policy", proj / ".3code" / "sandbox",
+      writeFile(proj / ".3code" / "wall", "- /\n+\n")
+      let r = run(["wall", "--policy", proj / ".3code" / "wall",
                    "restrict", "--", "true"])
       check r.code == 0
       check "writable rule" notin r.o

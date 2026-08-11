@@ -1,6 +1,6 @@
 discard """
-  # Exactly one policy file is active: the repo `.sandboxrc` when it
-  # exists, else the user file `~/.config/3code/sandboxrc` (initialized
+  # Exactly one policy file is active: the repo `.wallrc` when it
+  # exists, else the user file `~/.config/3code/wallrc` (initialized
   # from the built-in default on first run). Never a cascade. The parser
   # itself is exhaustively tested in sandwall's test_rules; these tests
   # cover the 3code-facing surface: file selection via `activePolicyPath`,
@@ -58,7 +58,7 @@ suite "single active policy file":
       putEnv("XDG_CONFIG_HOME", "")
       removeDir(home.parentDir)
     check ensureUserPolicy()
-    let userFile = home / "3code" / "sandboxrc"
+    let userFile = home / "3code" / "wallrc"
     check fileExists(userFile)
     check readFile(userFile) == defaultPolicyText()
     # No repo file -> user file is active.
@@ -73,7 +73,7 @@ suite "single active policy file":
       putEnv("XDG_CONFIG_HOME", "")
       removeDir(home.parentDir)
     check ensureUserPolicy()
-    let userFile = home / "3code" / "sandboxrc"
+    let userFile = home / "3code" / "wallrc"
     writeFile(userFile, "deny /\nallow " & opt & "\n")
     let repoFile = repoPolicyPath(projDir)
     check not fileExists(repoFile)
@@ -90,10 +90,10 @@ suite "single active policy file":
     # The user file is untouched by the repo edit.
     check readFile(userFile) == "deny /\nallow " & opt & "\n"
 
-  test "sandboxEnabled default is on (types.nim contract)":
+  test "wallEnabled default is on (types.nim contract)":
     # The gate lives in types.nim; assert the default so a future change
     # to the declaration is caught here, not in production.
-    check sandboxEnabled == true
+    check wallEnabled == true
 
 suite "policy reload (reloadIfChanged)":
   test "mtime change reloads the policy":
@@ -135,10 +135,10 @@ suite "policy reload (reloadIfChanged)":
     let outside = (projDir / ".." / "outside-gather").normalizedPath
     let wasActive = sandbox.active
     let saved = sandbox.current
-    let savedEnabled = sandboxEnabled
+    let savedEnabled = wallEnabled
     let savedGathering = sandbox.gathering
     sandbox.active = true
-    sandboxEnabled = true
+    wallEnabled = true
     try:
       sandbox.current = sandbox.loadPolicy(projDir)
       let oldCwd = getCurrentDir()
@@ -164,7 +164,7 @@ suite "policy reload (reloadIfChanged)":
     finally:
       sandbox.active = wasActive
       sandbox.current = saved
-      sandboxEnabled = savedEnabled
+      wallEnabled = savedEnabled
       sandbox.gathering = savedGathering
 
   test "resolve surfaces narrowing denies (deny under an allow)":

@@ -88,10 +88,10 @@ suite "config validation: schema (in-process)":
     let m = validateConfig(P, entries)
     check "bad value 'perhaps' for 'streaming'" in m
 
-  test "bad boolean value for sandbox is reported":
-    let entries = @[("settings", "sandbox", "sometimes", 3)]
+  test "bad boolean value for wall is reported":
+    let entries = @[("settings", "wall", "sometimes", 3)]
     let m = validateConfig(P, entries)
-    check "bad value 'sometimes' for 'sandbox'" in m
+    check "bad value 'sometimes' for 'wall'" in m
 
   test "bad boolean value for patient_retry is reported":
     let entries = @[("settings", "patient_retry", "maybe", 3)]
@@ -126,8 +126,8 @@ suite "config validation: schema (in-process)":
     let entries = @[("settings", "auto_update", "true", 3)]
     check validateConfig(P, entries) == ""
 
-  test "sandbox_enabled is a permitted settings key":
-    let entries = @[("settings", "sandbox_enabled", "off", 3)]
+  test "wall_enabled is a permitted settings key":
+    let entries = @[("settings", "wall_enabled", "off", 3)]
     check validateConfig(P, entries) == ""
 
   test "patient_retry and patient-retry are permitted settings keys":

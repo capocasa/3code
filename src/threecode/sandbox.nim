@@ -1,4 +1,4 @@
-## Filesystem sandbox: policy loading, mtime reload, `3code box` driver.
+## Filesystem sandbox: policy loading, mtime reload, `3code wall` driver.
 ##
 ## The policy file format, parser, and rule model live in sandwall
 ## (`sandwall/rules`); this module is the 3code-specific wrapper: which
@@ -14,10 +14,10 @@
 ## grammar.
 ##
 ## There is exactly one active policy file, never a cascade: the repo
-## file `.sandboxrc` when it exists, else the user file
-## `~/.config/3code/sandboxrc`. The user file is initialized from the
-## built-in default on first run, so the sandbox is always on. A
-## `:sandbox allow|readonly|deny` edit materializes the repo file by
+## file `.wallrc` when it exists, else the user file
+## `~/.config/3code/wallrc`. The user file is initialized from the
+## built-in default on first run, so the wall is always on. A
+## `:wall allow|readonly|deny` edit materializes the repo file by
 ## copying the user file first, so project rules start from the user's
 ## baseline instead of from scratch.
 ##
@@ -25,7 +25,7 @@
 ## since the last load; it runs before every restricted operation
 ## (in-process read/write/patch checks and bash launches). The bash
 ## subprocess additionally loads the policy file itself
-## (`3code box --policy`), so a launch always enforces the freshest
+## (`3code wall --policy`), so a launch always enforces the freshest
 ## file contents even between parent reloads.
 
 import std/[os, osproc, strutils, times]
@@ -42,9 +42,9 @@ export sandwall.AccessKind, sandwall.Rule,
        sandwall.Resolved
 
 const
-  PolicyFile* = ".sandboxrc"
+  PolicyFile* = ".wallrc"
     ## The repo-level policy file, directly in the project root.
-  UserPolicyFile* = "sandboxrc"
+  UserPolicyFile* = "wallrc"
     ## The user-level policy file, next to the user config dir.
 
 type Policy* = seq[Rule]
@@ -86,20 +86,20 @@ var
     ## empty and every check allows.
   active*: bool = false
     ## False means no policy was loaded and bash runs unrestricted.
-  procboxExe*: string = ""
-    ## Path to the binary to exec for `box restrict` (this one).
+  wallExe*: string = ""
+    ## Path to the binary to exec for `wall restrict` (this one).
   lastMtime: Time
 
 var gathering*: bool = false
-  ## Gather mode (`:sandbox gather on|off`): would-be denials are
+  ## Gather mode (`:wall gather on|off`): would-be denials are
   ## allowed and recorded as `allow` rules in the repo policy file
   ## instead. In-memory only: the toggle is a REPL command, so it does
   ## not need to survive a restart or be visible to subprocesses.
 
 proc ensureUserPolicy*(): bool =
-  ## Create `~/.config/3code/sandboxrc` from the built-in default when
+  ## Create `~/.config/3code/wallrc` from the built-in default when
   ## absent. Runs at every launch so the user file is always there to
-  ## fall back to (and to copy from on the first `:sandbox` edit).
+  ## fall back to (and to copy from on the first `:wall` edit).
   let path = systemPolicyPath()
   if fileExists(path): return true
   try:
@@ -110,7 +110,7 @@ proc ensureUserPolicy*(): bool =
   fileExists(path)
 
 proc activePolicyPath*(projectDir: string): string =
-  ## The one policy file in effect: the repo `.sandboxrc` when it
+  ## The one policy file in effect: the repo `.wallrc` when it
   ## exists, else the user file. Never both.
   let repo = repoPolicyPath(projectDir)
   if fileExists(repo): repo else: systemPolicyPath()
@@ -240,7 +240,7 @@ when defined(posix):
       try: removeDir(path)
       except CatchableError: discard
 
-proc findProcbox*(): string =
+proc findWallExe*(): string =
   ## The sandwall CLI is built into 3code as the `box` subcommand, so the
   ## "sandbox binary" the bash tool re-execs is just this process. Return
   ## its own path; empty only if it can't be resolved (shouldn't happen).
@@ -252,9 +252,9 @@ proc findProcbox*(): string =
 proc backendWorks*(exe: string): bool =
   ## Probe whether the OS-native sandbox backend (Landlock/Seatbelt/ACL)
   ## can actually restrict on this host. Re-execs this binary as
-  ## `box restrict <tmpdir> -- true`; success means the kernel applies the
+  ## `wall restrict <tmpdir> -- true`; success means the kernel applies the
   ## domain. Fails on kernels built without Landlock, runners under a
-  ## seccomp filter that blocks the syscall, etc. Callers clear `procboxExe`
+  ## seccomp filter that blocks the syscall, etc. Callers clear `wallExe`
   ## when this returns false so the bash tool falls back to the unconfined
   ## setsid path rather than failing every bash command.
   if exe.len == 0: return false
@@ -265,7 +265,7 @@ proc backendWorks*(exe: string): bool =
     # traceback never leaks into the parent's output, which would trip
     # tests that assert no "unhandled exception" appears.
     let (outp, code) = execCmdEx(
-      quoteShell(exe) & " box restrict " & quoteShell(tmp) &
+      quoteShell(exe) & " wall restrict " & quoteShell(tmp) &
         " -- true </dev/null >/dev/null 2>&1")
     discard outp
     result = code == 0
@@ -326,7 +326,7 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
   ## kernel level for bash. `needsWrite = false` allows read-only and
   ## writable; `true` requires writable. In gather mode a denial
   ## appends an `allow` rule to the repo policy and permits instead.
-  if not active or not sandboxEnabled: return (true, "")
+  if not active or not wallEnabled: return (true, "")
   discard reloadIfChanged(getCurrentDir())
   let resolved = resolveRawPath(path)
   if resolved.len == 0: return (true, "")
@@ -348,9 +348,9 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
       (false, "sandbox: " & resolved & " is denied by the policy (" & policyHint() & ")")
 
 proc ensureRepoPolicy*(dir: string): bool =
-  ## Materialize `dir/.sandboxrc` by copying the user file
-  ## (`~/.config/3code/sandboxrc`, itself initialized from the built-in
-  ## default when absent). Runs before the first `:sandbox
+  ## Materialize `dir/.wallrc` by copying the user file
+  ## (`~/.config/3code/wallrc`, itself initialized from the built-in
+  ## default when absent). Runs before the first `:wall
   ## allow|readonly|deny` edit (and gather-mode append) so project
   ## rules start from the user's baseline, not from scratch.
   let path = repoPolicyPath(dir)
@@ -367,7 +367,7 @@ proc renderSandbox*(p: Policy): string =
 
 proc appendRule*(sandboxFile, argPath: string; access: AccessKind): bool =
   ## Append a rule to the repo policy file, materializing it from the
-  ## user file first when absent. Used by `:sandbox allow|deny|readonly`.
+  ## user file first when absent. Used by `:wall allow|deny|readonly`.
   ## After appending, reload so the change is live for the next check.
   if not fileExists(sandboxFile):
     if not ensureRepoPolicy(sandboxFile.parentDir): return false

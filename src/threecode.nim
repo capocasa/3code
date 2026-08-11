@@ -31,7 +31,7 @@ when defined(posix):
   import std/posix
 import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
-                  toolstream, turns, transcript, sandbox, box, wall,
+                  toolstream, turns, transcript, sandbox, wall,
                   auth_xai]
 when defined(windows):
   import threecode/streamexec  # for resolveBash, used by ensureBash
@@ -91,8 +91,8 @@ proc ensureBash() =
   ## The provider-stub binary (the tty test harness) skips this: those tests
   ## drive REPL rendering, not bash enforcement, and CI has no bundled MSYS2
   ## so the guard would hard-fail before the prompt appears. Bash enforcement
-  ## is covered by the cli_args `box` suite and by production. Same gate as
-  ## initSandbox.
+  ## is covered by the cli_args `wall` suite and by production. Same gate as
+  ## initWall.
   when defined(windows) and not defined(providerStub):
     let b = resolveBash()
     if b.len == 0:
@@ -100,40 +100,40 @@ proc ensureBash() =
       stderr.writeLine "  irm https://3code.capocasa.dev/install.ps1 | iex"
       quit ExitUsage
 
-proc initSandbox(cwd: string) =
-  ## Load the sandbox policy into the global state and resolve this
+proc initWall(cwd: string) =
+  ## Load the wall policy into the global state and resolve this
   ## binary's own path for bash wrapping. Exactly one file is active:
-  ## the repo `.sandboxrc` when it exists, else the user file
-  ## `~/.config/3code/sandboxrc`, which is initialized from the
-  ## built-in default on first run so the sandbox is always on. When
-  ## `sandboxEnabled` is false (the `[settings] sandbox = off` switch),
+  ## the repo `.wallrc` when it exists, else the user file
+  ## `~/.config/3code/wallrc`, which is initialized from the
+  ## built-in default on first run so the wall is always on. When
+  ## `wallEnabled` is false (the `[settings] wall = off` switch),
   ## this does nothing: bash runs unconfined and the in-process checks
   ## pass through (`active` stays false).
-  # The provider stub binary (the tty/visual test harness) skips sandbox
-  # setup entirely so its behaviour matches the pre-sandbox binary. Those
+  # The provider stub binary (the tty/visual test harness) skips wall
+  # setup entirely so its behaviour matches the pre-wall binary. Those
   # tests drive REPL rendering, not enforcement, and `active=true` plus the
   # startup probe shift the wall-clock timing the spinner/SIGWINCH
-  # assertions depend on. Enforcement is covered by the cli_args `box`
+  # assertions depend on. Enforcement is covered by the cli_args `wall`
   # suite and by production.
   when defined(providerStub):
     return
-  if not sandboxEnabled:
+  if not wallEnabled:
     return
   discard sandbox.ensureUserPolicy()
   sandbox.current = sandbox.loadPolicy(cwd)
   sandbox.active = true
-  # The bash tool re-execs this binary as `3code box restrict ...`, so
-  # resolve our own path once. The box subcommand is always compiled in, but
+  # The bash tool re-execs this binary as `3code wall restrict ...`, so
+  # resolve our own path once. The wall subcommand is always compiled in, but
   # the OS-native restriction can still be nonfunctional (a kernel without
   # Landlock, a CI runner under a seccomp filter that blocks the syscall).
-  # On failure, clear procboxExe so the bash tool degrades to the unconfined
+  # On failure, clear wallExe so the bash tool degrades to the unconfined
   # setsid path instead of failing every command. The in-process
   # read/write/patch checks stay in force via `active` regardless. The
   # probe runs silently; the backend being unavailable is a host limitation,
   # not an error the user can act on.
-  sandbox.procboxExe = sandbox.findProcbox()
-  if not sandbox.backendWorks(sandbox.procboxExe):
-    sandbox.procboxExe = ""
+  sandbox.wallExe = sandbox.findWallExe()
+  if not sandbox.backendWorks(sandbox.wallExe):
+    sandbox.wallExe = ""
 
 proc setupTlsEnv() =
   ## macOS: stock LibreSSL at `/usr/lib/libssl.dylib` fails handshakes
@@ -219,15 +219,12 @@ unhandledExceptionHook = proc(e: ref Exception) {.nimcall, gcsafe, raises: [], t
     restoreCancelTermios()
 
 proc main() =
-  # `box` is the built-in sandwall CLI: the bash tool re-execs this binary as
-  # `3code box restrict ...`. Dispatch before any other startup so the
-  # sandboxed command isn't weighed down by 3code's TLS/config/session init
-  # and so refuseRoot etc. don't run inside the confined child.
+  # `wall` is the built-in sandwall CLI: the bash tool re-execs this
+  # binary as `3code wall restrict ...`, and the proxy/connect/setup
+  # children run under it too. Dispatch before any other startup so the
+  # confined command isn't weighed down by 3code's TLS/config/session
+  # init and so refuseRoot etc. don't run inside the confined child.
   let rawParams = commandLineParams()
-  if rawParams.len > 0 and rawParams[0] == "box":
-    quit(boxMain(rawParams[1 .. ^1]))
-  # `wall` is the network half of sandwall, same early-dispatch
-  # rationale: proxy/connect children skip all of 3code's startup.
   if rawParams.len > 0 and rawParams[0] == "wall":
     quit(wallMain(rawParams[1 .. ^1]))
 
@@ -368,12 +365,12 @@ proc main() =
     if prompt == "":
       restoredDraft = loadPendingDraft(session.cwd)
 
-  # Sandbox is mandatory: the user policy file is initialized from
+  # The wall is mandatory: the user policy file is initialized from
   # the built-in default when absent, then the single active file
-  # (repo `.sandboxrc` or the user file) is loaded. Paths resolve
+  # (repo `.wallrc` or the user file) is loaded. Paths resolve
   # relative to the session cwd so the policy follows the project,
   # not the binary.
-  initSandbox(session.cwd)
+  initWall(session.cwd)
 
   try:
     acquireDirLock(session.cwd)

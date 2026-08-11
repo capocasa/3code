@@ -149,45 +149,45 @@ suite "config: notify toggle":
     let raw2 = readFile(tmp)
     check raw2.find("notify") < 0  # on is the default — clean config
 
-suite "config: sandbox toggle":
+suite "config: wall toggle":
   var tmp = ""
 
   setup:
-    tmp = getTempDir() / "3code-test-sandbox.ini"
-    sandboxEnabled = true  # reset to default between tests
+    tmp = getTempDir() / "3code-test-wall.ini"
+    wallEnabled = true  # reset to default between tests
 
   teardown:
     removeFile(tmp)
-    sandboxEnabled = true
+    wallEnabled = true
 
-  test "sandboxEnabled defaults on":
-    check sandboxEnabled == true
+  test "wallEnabled defaults on":
+    check wallEnabled == true
 
-  test "sandboxEnabled stays on when [settings] omits the key":
+  test "wallEnabled stays on when [settings] omits the key":
     writeFile(tmp, "[settings]\ncurrent = \"p.m\"\n")
     discard parseConfigFile(tmp)
-    check sandboxEnabled == true
+    check wallEnabled == true
 
-  test "parseConfigFile sets sandbox off when [settings] sandbox = off":
-    writeFile(tmp, "[settings]\nsandbox = \"off\"\n")
+  test "parseConfigFile sets wall off when [settings] wall = off":
+    writeFile(tmp, "[settings]\nwall = \"off\"\n")
     discard parseConfigFile(tmp)
-    check sandboxEnabled == false
+    check wallEnabled == false
 
-  test "parseConfigFile keeps sandbox on when [settings] sandbox = on":
-    sandboxEnabled = false
-    writeFile(tmp, "[settings]\nsandbox = \"on\"\n")
+  test "parseConfigFile keeps wall on when [settings] wall = on":
+    wallEnabled = false
+    writeFile(tmp, "[settings]\nwall = \"on\"\n")
     discard parseConfigFile(tmp)
-    check sandboxEnabled == true
+    check wallEnabled == true
 
-  test "writeConfigFile persists sandbox off and not when on":
-    sandboxEnabled = false
+  test "writeConfigFile persists wall off and not when on":
+    wallEnabled = false
     writeConfigFile(tmp, "p.m", @[])
     let raw = readFile(tmp)
-    check raw.find("sandbox = \"off\"") >= 0
-    sandboxEnabled = true
+    check raw.find("wall = \"off\"") >= 0
+    wallEnabled = true
     writeConfigFile(tmp, "p.m", @[])
     let raw2 = readFile(tmp)
-    check raw2.find("sandbox") < 0  # on is the default — clean config
+    check raw2.find("wall") < 0  # on is the default — clean config
 
 suite "config: [settings] mode":
   var tmp = ""

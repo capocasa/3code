@@ -78,9 +78,10 @@ A working example lives in [`example/webserve.nim`](example/webserve.nim): a web
 
 ## Changelog
 
-**unreleased** - patient retry, single-file sandbox policy
+**unreleased** - patient retry, single-file wall policy
 
-- **Single-file sandbox policy.** The old two-level cascade is gone: exactly one policy file is active at a time, the repo `.sandboxrc` when it exists, else the user file `~/.config/3code/sandboxrc`. The user file is created from the built-in default on first run, so the sandbox stays always on and you can change what every project without its own `.sandboxrc` gets by editing that one file. The first `:sandbox allow|readonly|deny` in a project materializes `.sandboxrc` by copying your user file, so project rules start from your baseline.
+- **Single-file wall policy.** The old two-level cascade is gone: exactly one policy file is active at a time, the repo `.wallrc` when it exists, else the user file `~/.config/3code/wallrc`. The user file is created from the built-in default on first run, so the wall stays always on and you can change what every project without its own `.wallrc` gets by editing that one file. The first `:wall allow|readonly|deny` in a project materializes `.wallrc` by copying your user file, so project rules start from your baseline.
+- **sandbox is now wall.** The sandbox commands, files and settings are renamed to match the sandwall library they wrap: `:sandbox` is `:wall`, `.sandboxrc` is `.wallrc`, `sandbox = off` is `wall = off`, and `3code box` folds into `3code wall restrict`. The default policy opens the network (`allow *`), keeps `/tmp` and `/var/tmp` writable, and on Windows grants your user temp dir.
 - **Patient retry.** Retryable API failures (429 usage limits, 5xx, network errors) now keep retrying on one shared exponential backoff capped at 2048s, for up to ~64 attempts (~36h), instead of surfacing after a short probe. A long-running session rides out a provider's rolling usage window or a network dropout (the train ride) without dropping back to the prompt. The underlying error message and attempt counter keep scrolling by as transcript lines so you can see what is being waited out. `:retry on|off` toggles it (default on; `off` keeps the ~1-minute initial ramp-up so transient blips still self-heal); persisted in `[settings]` as `patient_retry`. Ctrl-C cancels a running hold at any time.
 
 **0.6.0** - filesystem sandbox backed by nimbox, folded into the `box` subcommand

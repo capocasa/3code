@@ -15,7 +15,7 @@ import types, util, prompts, session, config, api, compact, display, minline,
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":prompt", ":show",
-                      ":log", ":sessions", ":summarize", ":version", ":sandbox",
+                      ":log", ":sessions", ":summarize", ":version", ":wall",
                       ":retry",
                       ":q", ":quit", ":exit"]
 
@@ -85,9 +85,9 @@ proc classifyCommand*(cmd: string): CommandKind =
   of ":reasoning":
     if parts.len == 0 or (parts.len == 1 and parts[0] == "list"): ckSafeImmediate
     else: ckMutating
-  of ":sandbox":
-    # `:sandbox` and `:sandbox show` are safe; the allow/deny/readonly
-    # verbs append to the sandbox file and reload, so they mutate.
+  of ":wall":
+    # `:wall` and `:wall show` are safe; the allow/deny/readonly
+    # verbs append to the wall file and reload, so they mutate.
     if parts.len == 0 or (parts.len == 1 and parts[0] == "show"): ckSafeImmediate
     else: ckMutating
   of ":clear", ":summarize":
@@ -163,7 +163,7 @@ proc completionFor*(line: string): seq[string] =
     result.add "on"
     result.add "off"
     return
-  if words[0] == ":sandbox" and words.len == 2:
+  if words[0] == ":wall" and words.len == 2:
     result.add "show"
     result.add "allow"
     result.add "readonly"
@@ -917,17 +917,17 @@ proc cmdRetry(arg: string): string =
   else:
     return errLnS("usage: :retry [on|off]")
 
-proc cmdSandboxSettingSelect(target: string): string =
+proc cmdWallSettingSelect(target: string): string =
   case target.toLowerAscii
   of "on":
-    sandboxEnabled = true
+    wallEnabled = true
   of "off":
-    sandboxEnabled = false
+    wallEnabled = false
   else:
     return errLnS(&"unknown value: {target} (choose on or off)")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
-  hintLnS("sandbox: " & (if sandboxEnabled: "on" else: "off") &
-    "  (on = enforce the .sandboxrc policy, off = run unconfined)")
+  hintLnS("wall: " & (if wallEnabled: "on" else: "off") &
+    "  (on = enforce the .wallrc policy, off = run unconfined)")
 
 proc nearestCommand(name: string): string =
   var bestDist = high(int)
@@ -1243,8 +1243,8 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       resp buildSystemPrompt(prof)
     of ":version":
       resp "3code v" & Version
-    of ":sandbox":
-      # `:sandbox show` (or bare) dumps the rules; allow/readonly/deny
+    of ":wall":
+      # `:wall show` (or bare) dumps the rules; allow/readonly/deny
       # append a line and reload. The path arg is written verbatim so
       # relative paths stay portable in the file.
       let verb = if parts.len == 0: "show" else: parts[0]
@@ -1253,9 +1253,9 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         if sandbox.active:
           resp sandbox.renderSandbox(sandbox.current)
         else:
-          resp "sandbox not active"
+          resp "wall not active"
       of "on", "off":
-        body.add cmdSandboxSettingSelect(verb)
+        body.add cmdWallSettingSelect(verb)
       of "gather":
         let gOn = parts.len >= 2 and parts[1] == "on"
         let gOff = parts.len >= 2 and parts[1] == "off"
@@ -1264,7 +1264,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         else:
           sandbox.gathering = gOn
           resp "gather mode " & (if gOn:
-            "on: would-be sandbox denials are allowed and appended as " &
+            "on: would-be wall denials are allowed and appended as " &
             "allow rules to " & sandbox.sandboxPathInCwd()
           else: "off")
       of "edit":
@@ -1277,7 +1277,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       of "allow", "readonly", "deny":
         if parts.len < 2:
           ok = false
-          respErr ":sandbox " & verb & " needs a path"
+          respErr ":wall " & verb & " needs a path"
         else:
           let argPath = parts[1 .. ^1].join(" ")
           let access =
@@ -1287,13 +1287,13 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
             else: akDeny
           let sf = sandbox.sandboxPathInCwd()
           if sandbox.appendRule(sf, argPath, access):
-            resp "sandbox updated: " & verb & " " & argPath
+            resp "wall updated: " & verb & " " & argPath
           else:
             ok = false
-            respErr "could not write sandbox file at " & sf
+            respErr "could not write wall file at " & sf
       else:
         ok = false
-        respErr "unknown :sandbox verb: " & verb &
+        respErr "unknown :wall verb: " & verb &
           "  (show, on, off, allow, readonly, deny, edit, gather on|off)"
     of ":show":
       body.add showToolS(arg, session.toolLog)

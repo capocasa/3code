@@ -3,7 +3,7 @@ import threecode/sandbox as sb
 import sandwall/wall as sw
 
 ## Fenced-bash wiring: proxy env helper, per-run proxy lifecycle, and
-## an end-to-end netns launch through `3code box`. POSIX only; the e2e
+## an end-to-end netns launch through `3code wall`. POSIX only; the e2e
 ## self-skips when the kernel can't unshare a netns.
 
 const binName = when defined(windows): "3code.exe" else: "3code"
@@ -37,7 +37,7 @@ suite "wall proxy lifecycle":
     defer:
       sb.stopWall()
       removeDir(dir)
-    writeFile(dir / ".sandboxrc", "deny /\nallow\nallow 127.0.0.1\n")
+    writeFile(dir / ".wallrc", "deny /\nallow\nallow 127.0.0.1\n")
     sb.current = sb.loadPolicy(dir)
     check sb.wallProxyNeeded(sb.current)
     sb.active = true
@@ -55,7 +55,7 @@ suite "wall proxy lifecycle":
     # reload propagation: rewrite the repo policy, sync, proxy file changes
     let polFile = sb.wallProxyDir / "policy"
     let before = readFile(polFile)
-    writeFile(dir / ".sandboxrc", "deny /\nallow\nallow 127.0.0.1\nallow example.com\n")
+    writeFile(dir / ".wallrc", "deny /\nallow\nallow 127.0.0.1\nallow example.com\n")
     sb.syncWallProxyPolicy(dir)
     let after = readFile(polFile)
     check after != before
