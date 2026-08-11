@@ -1288,9 +1288,21 @@ proc applyDeepseekReasoning(p: Profile, body: JsonNode) =
     else: discard
   else:
     ## Hosted stacks (nebius, baseten, together, deepinfra, fireworks,
-    ## sambanova) ignore thinking.type and expose only reasoning_effort
-    ## (low/medium/high), vLLM-style. Behaves like gpt-oss.
-    body["reasoning_effort"] = %p.reasoning
+    ## sambanova, hetzner) ignore thinking.type and expose only
+    ## `reasoning_effort`, vLLM-style. But the meaning of "low" is not
+    ## uniform across them: on fireworks `low` is genuinely minimal (no
+    ## reasoning emitted), while hetzner's vLLM still thinks on `low`.
+    ## The only universally honored no-think value on vLLM DeepSeek is
+    ## `reasoning_effort: "none"` (hetzner returns 0 reasoning tokens).
+    ## Our `low` tier is the no-thinking tier for DeepSeek, so map it to
+    ## `none` on vLLM stacks; medium/high pass through. Without this a
+    ## `low` turn on hetzner deepseek-v4-flash burns its whole 4096
+    ## budget on reasoning and starves into an empty reply.
+    case p.reasoning
+    of "low", "off":
+      body["reasoning_effort"] = %"none"
+    else:
+      body["reasoning_effort"] = %p.reasoning
 
 proc applyMinimaxReasoning(p: Profile, body: JsonNode) =
   ## MiniMax M-series reasoning toggle on the OpenAI-compatible endpoint
