@@ -444,7 +444,7 @@ proc parseXmlToolCalls*(content: string): tuple[cleaned: string, calls: seq[Json
   ## promote them to OpenAI-style `tool_calls` entries. Returns the
   ## content with those blocks removed and the synthesized calls.
   ##
-  ## Some endpoints (e.g. nvidia z-ai/glm4.7 mid-turn) leak the model's
+  ## Some endpoints (e.g. nvidia z-ai/glm-5.2 mid-turn) leak the model's
   ## chat-template tokens into the SSE content stream instead of parsing
   ## them into `tool_calls` deltas. This parser is the fallback.
   const
@@ -1776,7 +1776,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
         raise newHttpError(code, errMsg, outcome.errBody)
       # Promote any leaked GLM/Qwen native `<tool_call>...</tool_call>`
       # blocks in the assistant content to synthetic OpenAI tool_calls.
-      # Some endpoints (notably nvidia z-ai/glm4.7) don't reliably
+      # Some endpoints (notably nvidia z-ai/glm-5.2) don't reliably
       # translate the model's chat template into OpenAI deltas mid-turn.
       if xmlToolCallsFallback(p):
         let msg = outcome.assistantMsg

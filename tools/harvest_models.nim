@@ -75,20 +75,31 @@ proc readProviders(path: string): seq[ProviderConf] =
   if inProvider and cur.name != "": result.add cur
 
 proc fetchModels(url, key: string): seq[string] =
+  ## Model ids from GET /models. Unreachable or erroring endpoints return
+  ## an empty seq with a note on stderr, so --all keeps going past dead
+  ## local providers.
   let client = newHttpClient(timeout = 30_000, userAgent = "3code-harvest",
                              sslContext = bundledSslContext())
   defer: client.close()
   if key != "":
     client.headers["Authorization"] = "Bearer " & key
   let resp = try: client.get(url & "/models")
-             except CatchableError as e: die "GET /models failed: " & e.msg
+             except CatchableError as e:
+               stderr.writeLine "#   GET /models failed: " & e.msg
+               return @[]
   if resp.code.int != 200:
-    die "GET /models: HTTP " & $resp.code.int & " — " &
+    stderr.writeLine "#   GET /models: HTTP " & $resp.code.int & " — " &
         resp.body[0 ..< min(160, resp.body.len)]
-  let j = parseJson(resp.body)
+    return @[]
+  let j = try: parseJson(resp.body)
+          except CatchableError:
+            stderr.writeLine "#   /models returned non-JSON"
+            return @[]
   let arr = if j.kind == JArray: j
             elif "data" in j and j["data"].kind == JArray: j["data"]
-            else: die "unexpected /models response shape"
+            else:
+              stderr.writeLine "#   unexpected /models response shape"
+              return @[]
   for item in arr:
     if item.kind == JString: result.add item.getStr
     elif item.kind == JObject and "id" in item: result.add item["id"].getStr
@@ -176,6 +187,110 @@ proc renderEntry(prov, id: string, src: KnownGoodCombo): string =
     fmtFloat(src.temperature), $src.maxTokens, $src.xmlToolCalls,
     fmtTokens(src.contextWindow)]
 
+proc syncRegistry(path: string, live: Table[string, seq[string]]): string =
+  ## Returns the registry const block rewritten against the live model
+  ## lists. Entries whose provider was queried keep only models the
+  ## provider still lists (matched case-insensitively); models the
+  ## provider lists but the registry lacks are appended using params
+  ## from the same model on another provider. Entries for providers
+  ## that weren't queried are kept verbatim. Duplicate (provider,
+  ## model) rows collapse to the first occurrence. Comment lines
+  ## between entries are kept only when at least one following entry
+  ## survives.
+  let text = readFile(path)
+  let head = "const KnownGoodCombos*: seq[KnownGoodCombo] = @["
+  let start = text.find(head)
+  if start < 0: die "registry const not found in " & path
+  let tail = "\n  ]"
+  let close = text.find(tail, start)
+  if close < 0: die "registry closing bracket not found"
+  let body = text[start + head.len ..< close]
+  var liveNorm: Table[string, HashSet[string]]
+  for prov, ids in live:
+    var s: HashSet[string]
+    for id in ids: s.incl id.toLowerAscii
+    liveNorm[prov] = s
+  var kept: seq[string]  # rendered lines, comments included
+  var seenKey: HashSet[string]
+  var pendingComments: seq[string]
+  var dropped, added = 0
+  template flushComments() =
+    for c in pendingComments: kept.add c
+    pendingComments.setLen 0
+  for raw in body.splitLines():
+    let line = raw.strip()
+    if line == "" or line.startsWith("#"):
+      pendingComments.add raw
+      continue
+    if not line.startsWith("("):
+      pendingComments.add raw
+      continue
+    # parse the tuple back into fields; ids can contain any char but '"'
+    var fields: seq[string]
+    var cur = ""
+    var inStr = false
+    var i = 1  # skip '('
+    let src = line
+    while i < src.len and (src[i] != ')' or inStr):
+      let c = src[i]
+      if c == '"': inStr = not inStr; cur.add c
+      elif c == ',' and not inStr: fields.add cur.strip(); cur = ""
+      else: cur.add c
+      inc i
+    if cur.strip() != "": fields.add cur.strip()
+    if fields.len != 10:
+      pendingComments.add raw  # unparseable: keep verbatim
+      continue
+    proc unq(s: string): string =
+      if s.len >= 2 and s[0] == '"': s[1 .. ^2] else: s
+    let e: KnownGoodCombo = (provider: unq(fields[0]), model: unq(fields[1]),
+      family: unq(fields[2]), version: unq(fields[3]), variant: unq(fields[4]),
+      reasoning: unq(fields[5]), temperature: parseFloat(fields[6]),
+      maxTokens: parseInt(fields[7].replace("_", "")),
+      xmlToolCalls: fields[8] == "true",
+      contextWindow: parseInt(fields[9].replace("_", "")))
+    let key = e.provider.toLowerAscii & "\0" & e.model.toLowerAscii
+    if key in seenKey:
+      inc dropped
+      continue
+    seenKey.incl key
+    if e.provider in liveNorm and
+       e.model.toLowerAscii notin liveNorm[e.provider]:
+      stderr.writeLine "# drop " & e.provider & " " & e.model & " (no longer listed)"
+      inc dropped
+      continue
+    flushComments()
+    kept.add "    " & renderEntry(e.provider, e.model, e)
+  # additions: live models of queried providers with no surviving entry.
+  # Param source prefers a provider that wasn't itself just queried
+  # (its entry might be slated for removal); falls back to any hit.
+  let index = buildRegistryIndex()
+  for prov, ids in live:
+    for id in ids.sorted():
+      let key = prov.toLowerAscii & "\0" & id.toLowerAscii
+      if key in seenKey: continue
+      let hits = findExisting(index, id, prov)
+      var params: KnownGoodCombo
+      var found = false
+      for h in hits:
+        if KnownGoodCombos[h].provider in live: continue
+        params = KnownGoodCombos[h]; found = true; break
+      if not found and hits.len > 0:
+        params = KnownGoodCombos[hits[0]]; found = true
+      if not found: continue
+      seenKey.incl key
+      inc added
+      stderr.writeLine "# add " & prov & " " & id
+      kept.add "    " & renderEntry(prov, id, params)
+  var res = text[0 ..< start + head.len]
+  for line in kept:
+    res.add (if line.strip().startsWith("("): "\n" & line
+             else: "\n" & line)
+  res.add "\n  ]" & text[close + tail.len .. ^1]
+  stderr.writeLine "# registry: " & $seenKey.len & " combos (" & $added &
+                   " added, " & $dropped & " dropped)"
+  res
+
 proc updateModelsLine(path, provName: string, models: seq[string]) =
   ## Rewrites the `models` key of the matching [provider] section in the
   ## config. Name-only match (first section wins).
@@ -214,7 +329,9 @@ var targetName = ""
 var adhocUrl, adhocKey = ""
 var all = false
 var doUpdate = false
+var doSync = false
 var cfgFile = configPath()
+const PromptsPath = "src/threecode/prompts.nim"
 
 for kind, key, val in getopt():
   case kind
@@ -223,12 +340,16 @@ for kind, key, val in getopt():
     case key
     of "all": all = true
     of "update-models": doUpdate = true
+    of "sync": doSync = true
     of "url": adhocUrl = val
     of "key": adhocKey = val
     of "name": discard  # targetName from argument
     of "config": cfgFile = val
     else: die "unknown option --" & key
   of cmdEnd: discard
+
+if doSync and adhocUrl != "":
+  die "--sync requires providers from config (use --all or a name)"
 
 if not all and targetName == "" and adhocUrl == "":
   die "usage: harvest_models <provider> | --all | --url:U --key:K [--update-models]"
@@ -255,7 +376,9 @@ else:
 let index = buildRegistryIndex()
 
 var seen: HashSet[string]
+var seenProv: HashSet[string]
 var entries: seq[string]
+var liveModels: Table[string, seq[string]]
 for t in targets:
   if t.key == "" and adhocUrl == "":
     stderr.writeLine "# " & t.name & ": no key in config, skipped"
@@ -263,9 +386,17 @@ for t in targets:
   if t.url == "":
     stderr.writeLine "# " & t.name & ": no url, skipped"
     continue
+  if t.name in seenProv:
+    stderr.writeLine "# " & t.name & ": duplicate config section, skipped"
+    continue
+  seenProv.incl t.name
   let models = fetchModels(t.url, t.key)
+  if models.len == 0:
+    stderr.writeLine "# " & t.name & ": no models, skipped"
+    continue
+  liveModels[t.name] = models
   stderr.writeLine "# " & t.name & ": " & $models.len & " models listed"
-  if doUpdate:
+  if doUpdate or doSync:
     updateModelsLine(cfgFile, t.name, models)
     stderr.writeLine "# " & t.name & ": models line updated in " & cfgFile
   var matched, skipped = 0
@@ -289,6 +420,10 @@ for t in targets:
   stderr.writeLine "# " & t.name & ": " & $matched & " matched, " &
                    $skipped & " without known-good counterpart"
 
-for e in entries:
-  echo e
-stderr.writeLine "# " & $entries.len & " candidate entries"
+if doSync:
+  writeFile(PromptsPath, syncRegistry(PromptsPath, liveModels))
+  stderr.writeLine "# " & PromptsPath & " rewritten"
+else:
+  for e in entries:
+    echo e
+  stderr.writeLine "# " & $entries.len & " candidate entries"

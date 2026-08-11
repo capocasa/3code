@@ -60,8 +60,8 @@ suite "api request shaping":
 
   test "nvidia glm sends chat_template_kwargs.enable_thinking":
     var body = %*{"stream": true}
-    let p = Profile(name: "nvidia.z-ai/glm4.7", family: "glm",
-                    model: "z-ai/glm4.7", reasoning: "low")
+    let p = Profile(name: "nvidia.z-ai/glm-5.2", family: "glm",
+                    model: "z-ai/glm-5.2", reasoning: "low")
     applyReasoning(p, body)
     check body{"chat_template_kwargs"}{"enable_thinking"}.getBool == false
 
@@ -74,8 +74,8 @@ suite "api request shaping":
 
   test "hy on openrouter normalizes to reasoning.effort":
     var body = %*{"stream": true}
-    let p = Profile(name: "openrouter.tencent/hy3:free", family: "hy",
-                    model: "tencent/hy3:free", reasoning: "low")
+    let p = Profile(name: "openrouter.tencent/hy3", family: "hy",
+                    model: "tencent/hy3", reasoning: "low")
     applyReasoning(p, body)
     check body{"reasoning"}{"effort"}.getStr == "low"
 
@@ -252,14 +252,14 @@ suite "api request shaping":
   test "mimo on vllm stack sends chat_template_kwargs.enable_thinking only when off":
     block onn:
       var body = %*{"stream": true}
-      let p = Profile(name: "novita.xiaomi/mimo-v2.5-pro", family: "mimo",
-                      model: "xiaomi/mimo-v2.5-pro", reasoning: "on")
+      let p = Profile(name: "novita.xiaomimimo/mimo-v2.5-pro", family: "mimo",
+                      model: "xiaomimimo/mimo-v2.5-pro", reasoning: "on")
       applyReasoning(p, body)
       check "chat_template_kwargs" notin body
     block offn:
       var body = %*{"stream": true}
-      let p = Profile(name: "novita.xiaomi/mimo-v2.5-pro", family: "mimo",
-                      model: "xiaomi/mimo-v2.5-pro", reasoning: "off")
+      let p = Profile(name: "novita.xiaomimimo/mimo-v2.5-pro", family: "mimo",
+                      model: "xiaomimimo/mimo-v2.5-pro", reasoning: "off")
       applyReasoning(p, body)
       check body{"chat_template_kwargs"}{"enable_thinking"}.getBool == false
 
@@ -591,8 +591,8 @@ suite "xml tool_call fallback":
     check body{"messages"}[0]{"role"}.getStr == "user"
 
   test "fallback flag is per-known-good entry":
-    check xmlToolCallsFallback(Profile(name: "nvidia.z-ai/glm4.7",
-      model: "z-ai/glm4.7", family: "glm")) == true
+    check xmlToolCallsFallback(Profile(name: "nvidia.z-ai/glm-5.2",
+      model: "z-ai/glm-5.2", family: "glm")) == true
     check xmlToolCallsFallback(Profile(name: "zai.glm-5.1",
       model: "glm-5.1", family: "glm")) == false
     check xmlToolCallsFallback(Profile(name: "nvidia.openai/gpt-oss-120b",
@@ -641,8 +641,8 @@ session.savePath = ""
 session.readCache = newReadCache()
 # Known-good combo so knownGoodGeneration returns a real budget (8192) for
 # the escalation math; runTurnsInteractive's gateExperimental requires it.
-let profile = Profile(name: "nebius.glm-5.1", url: "stub://", key: "k",
-  family: "glm", model: "zai-org/GLM-5.1")
+let profile = Profile(name: "nebius.zai-org/GLM-5.2", url: "stub://", key: "k",
+  family: "glm", model: "zai-org/GLM-5.2")
 
 discard runTurnsInteractive(profile, messages, session)
 
@@ -718,8 +718,8 @@ var messages = %*[
 var session: Session
 session.savePath = ""
 session.readCache = newReadCache()
-let profile = Profile(name: "nebius.glm-5.1", url: "stub://", key: "k",
-  family: "glm", model: "zai-org/GLM-5.1")
+let profile = Profile(name: "nebius.zai-org/GLM-5.2", url: "stub://", key: "k",
+  family: "glm", model: "zai-org/GLM-5.2")
 
 discard runTurnsInteractive(profile, messages, session)
 

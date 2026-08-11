@@ -83,7 +83,7 @@ suite "prompts: defaultReasoningsFor":
     check defaultReasoningsFor("zai", "glm-5.2", "glm") == @["off", "high", "max"]
 
   test "kimi exposes off/on":
-    check defaultReasoningsFor("nebius", "moonshotai/Kimi-K2.5", "kimi") ==
+    check defaultReasoningsFor("nvidia", "moonshotai/kimi-k2.6", "kimi") ==
       @["off", "on"]
     check defaultReasoningsFor("together", "moonshotai/Kimi-K2.6", "kimi") ==
       @["off", "on"]

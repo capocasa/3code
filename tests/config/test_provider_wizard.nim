@@ -16,7 +16,7 @@ proc stripAnsiCsi(line: string): string =
 
 proc nvidiaModels(): seq[string] =
   @[
-    "z-ai/glm4.7",
+    "z-ai/glm-5.2",
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
     "minimaxai/minimax-m2.5",
@@ -132,9 +132,9 @@ suite "provider wizard configuration":
   test "edit prompts for model before verifying updated provider":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
-                  key: "nvapi-old", models: @["z-ai/glm4.7"])
+                  key: "nvapi-old", models: @["z-ai/glm-5.2"])
     ]
-    activeCurrent = "nvidia.z-ai/glm4.7"
+    activeCurrent = "nvidia.z-ai/glm-5.2"
     inputs = @["", "", "gpt-oss-120b"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
@@ -189,9 +189,9 @@ suite "provider wizard configuration":
   test "edit verifies every entered model and keeps only the ones that pass":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
-                  key: "nvapi-old", models: @["z-ai/glm4.7"])
+                  key: "nvapi-old", models: @["z-ai/glm-5.2"])
     ]
-    activeCurrent = "nvidia.z-ai/glm4.7"
+    activeCurrent = "nvidia.z-ai/glm-5.2"
     inputs = @["", "", "gpt-oss-120b gpt-oss-20b"]
     verifyProfileHook = proc(p: Profile): (bool, string) =
       verifiedModels.add p.model
@@ -318,7 +318,7 @@ suite "provider wizard configuration":
            stripped[4..^1] != "detected: nvidia -> https://integrate.api.nvidia.com/v1":
           listedModels.add stripped[4..^1].shortModel()
       check listedModels == @["minimax-m2.5", "minimax-m2.7", "gpt-oss-120b",
-                             "gpt-oss-20b", "glm4.7"]
+                             "gpt-oss-20b", "glm-5.2"]
 
   test "wizard inputs are not added to history":
     # Bug 2: wizard inputs must not pollute history. readRequired/readOptional
@@ -392,9 +392,9 @@ suite "provider wizard configuration":
     test "edit wizard lists models sorted alphabetically":
       activeProviders = @[
         ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
-                    key: "nvapi-old", models: @["z-ai/glm4.7"])
+                    key: "nvapi-old", models: @["z-ai/glm-5.2"])
       ]
-      activeCurrent = "nvidia.z-ai/glm4.7"
+      activeCurrent = "nvidia.z-ai/glm-5.2"
       inputs = @["", "", "gpt-oss-120b"]
       var editor: LineEditor
       var prof = buildProfile(activeCurrent, activeProviders, "")
@@ -431,4 +431,4 @@ suite "provider wizard configuration":
            stripped[4..^1] != "editing 'nvidia' (enter to keep, ctrl+c to abort)":
           listedModels.add stripped[4..^1].shortModel()
       check listedModels == @["minimax-m2.5", "minimax-m2.7", "gpt-oss-120b",
-                             "gpt-oss-20b", "glm4.7"]
+                             "gpt-oss-20b", "glm-5.2"]

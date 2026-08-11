@@ -55,8 +55,8 @@ suite "non-streaming callModel via httpStub":
     putEnv("THREECODE_HTTP_STUB_RESPONSES", path)
 
   proc glmProfile(): Profile =
-    Profile(name: "zai.glm-4.7-flash", url: "https://api.z.ai/api/paas/v4",
-            key: "stub-key", model: "glm-4.7-flash", family: "glm",
+    Profile(name: "zai.glm-4.7", url: "https://api.z.ai/api/paas/v4",
+            key: "stub-key", model: "glm-4.7", family: "glm",
             reasoning: "on")
 
   test "content round-trips through the non-streaming path":
@@ -297,7 +297,7 @@ suite "non-streaming callModel via httpStub":
     check raised
 
 suite "non-streaming xml tool_call promotion":
-  # nvidia z-ai/glm4.7 leaks <tool_call> chat-template tags into content
+  # nvidia z-ai/glm-5.2 leaks <tool_call> chat-template tags into content
   # instead of the tool_calls field. The shared post-success promotion in
   # callModel lifts them to synthetic tool_calls for BOTH transports.
   var savedStreaming: bool
@@ -323,9 +323,9 @@ suite "non-streaming xml tool_call promotion":
         "finish_reason": "stop"}],
       "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
     }]""")
-    # nvidia.z-ai/glm4.7 is the known-good combo with xmlToolCalls=true.
-    let p = Profile(name: "nvidia.z-ai/glm4.7", url: "https://x/v1",
-                    key: "stub-key", model: "z-ai/glm4.7", family: "glm",
+    # nvidia.z-ai/glm-5.2 is the known-good combo with xmlToolCalls=true.
+    let p = Profile(name: "nvidia.z-ai/glm-5.2", url: "https://x/v1",
+                    key: "stub-key", model: "z-ai/glm-5.2", family: "glm",
                     reasoning: "on")
     var usage: Usage
     let msg = callModel(p,
