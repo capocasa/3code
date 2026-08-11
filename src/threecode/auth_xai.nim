@@ -14,7 +14,7 @@
 ## bearer it vends must only ever go to api.x.ai; `accessToken` enforces
 ## that by refusing any other host.
 
-import std/[json, os, posix, strutils, times]
+import std/[atomics, json, os, posix, strutils, times]
 import oauth, util
 
 const
@@ -69,17 +69,24 @@ proc clearTokens*() =
 proc hasTokens*(): bool =
   loadTokens().refreshToken != ""
 
-proc loginBrowser*(openUrl: proc(url: string), showUrl: proc(url: string)): TokenSet =
+proc loginBrowser*(openUrl: proc(url: string) {.gcsafe.},
+                   showUrl: proc(url: string) {.gcsafe.};
+                   cancelFlag: ptr Atomic[bool] = nil): TokenSet =
   ## PKCE browser flow. `openUrl` tries to launch a browser; `showUrl`
-  ## prints the URL for manual copy. Raises OAuthError on failure.
+  ## prints the URL for manual copy. Listen starts before either runs so
+  ## a fast redirect cannot race an unbound port. Raises OAuthError on
+  ## failure or when `cancelFlag` is set.
   let ep = xaiEndpoints()
   let verifier = newPkceVerifier()
   let state = newPkceVerifier()[0 ..< 24]
   let redirectUri = "http://127.0.0.1:" & $LoopbackPort & "/callback"
   let url = browserAuthUrl(ep, redirectUri, state, pkceChallenge(verifier))
-  showUrl(url)
-  openUrl(url)
-  let code = awaitLoopbackCode(LoopbackPort, state)
+  let code = awaitLoopbackCode(LoopbackPort, state, cancelFlag = cancelFlag,
+    onListening = proc() {.gcsafe.} =
+      showUrl(url)
+      openUrl(url))
+  if cancelFlag != nil and cancelFlag[].load(moRelaxed):
+    raise newException(OAuthError, "cancelled")
   exchangeCode(ep, code, redirectUri, verifier)
 
 proc loginDevice*(showCode: proc(url, userCode: string)): TokenSet =

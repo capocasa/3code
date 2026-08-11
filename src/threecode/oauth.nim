@@ -14,7 +14,7 @@
 ## the user is shown a URL. Provider specifics live in `auth_xai.nim`,
 ## persistence in the caller, presentation in `ui.nim`.
 
-import std/[base64, httpclient, json, nativesockets, net, random,
+import std/[atomics, base64, httpclient, json, nativesockets, net, random,
             strutils, times, uri]
 import libsha/sha256
 import util
@@ -154,24 +154,35 @@ proc remainingMs(deadline: float): int =
   max(int((deadline - epochTime()) * 1000), 0)
 
 proc awaitLoopbackCode*(listenPort: int, expectState: string,
-                        timeoutSec = 300): string =
+                        timeoutSec = 300;
+                        cancelFlag: ptr Atomic[bool] = nil;
+                        onListening: proc() {.gcsafe.} = nil): string =
   ## One-shot blocking TCP listener on 127.0.0.1:listenPort. Reads a single
   ## HTTP request line (the OAuth redirect), replies 200, returns the code.
   ## No async: select + accept + recvLine with a hard deadline.
+  ##
+  ## `onListening` fires after bind/listen and before accept, so the caller
+  ## can open the browser only once the loopback port is actually ready.
+  ## `cancelFlag` is polled each select tick; when set, raises OAuthError.
   let server = newSocket()  # buffered: recvLine needs the buffer
   defer: server.close()
   server.setSockOpt(OptReuseAddr, true)
   server.bindAddr(Port(listenPort), "127.0.0.1")
   server.listen()
+  if onListening != nil:
+    onListening()
   let deadline = epochTime() + timeoutSec.float
 
   var client: Socket
   while client.isNil:
+    if cancelFlag != nil and cancelFlag[].load(moRelaxed):
+      raise newException(OAuthError, "cancelled")
     let ms = remainingMs(deadline)
     if ms == 0:
       raise newException(OAuthError, "timed out waiting for browser callback")
     var fds = @[server.getFd()]
-    if selectRead(fds, min(ms, 1000)) <= 0:
+    # 200ms ticks so cancelFlag is noticed promptly without busy-spinning.
+    if selectRead(fds, min(ms, 200)) <= 0:
       continue
     var address = ""
     server.acceptAddr(client, address)

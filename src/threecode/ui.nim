@@ -280,7 +280,7 @@ proc printSupported() =
     if combo.provider notin seen: seen.add combo.provider
   subtleWriteLn(stdout, "  supported: " & seen.join(", "))
 
-proc openBrowserUrl(url: string) =
+proc openBrowserUrl(url: string) {.gcsafe.} =
   when defined(macosx): discard execShellCmd("open " & quoteShell(url))
   elif defined(windows): discard execShellCmd("start " & url)
   else: discard execShellCmd("xdg-open " & quoteShell(url) & " &")
@@ -302,20 +302,61 @@ proc ensureUniqueName(name: string) =
 
 proc xaiOauthLogin(): string =
   ## SuperGrok browser OAuth. Prints the authorize URL, opens the default
-  ## browser, waits on the loopback callback. Returns "oauth" on success
-  ## (tokens in the store). Raises InputCancelled on failure.
+  ## browser, waits on the loopback callback on a worker thread so the main
+  ## thread can still poll Ctrl-C / ESC via `wizardVerifyCancelHook` (the
+  ## input thread is parked between wizard prompts). Returns "oauth" on
+  ## success (tokens in the store). Raises InputCancelled on failure/cancel.
   hintLn "  sign in with your SuperGrok / X Premium+ account", resetStyle
-  try:
-    let ts = auth_xai.loginBrowser(
-      openUrl = openBrowserUrl,
-      showUrl = proc(url: string) =
-        hintLn &"  open {url}", resetStyle)
-    auth_xai.storeTokens(ts)
-    hintLn "  signed in", resetStyle
-    "oauth"
-  except oauth.OAuthError as e:
-    errLn "  login failed: ", e.msg
+  hintLn "  waiting for browser callback (ctrl+c / esc to cancel)", resetStyle
+  type OauthWorkerArg = object
+    cancel: ptr Atomic[bool]
+    ts: ptr TokenSet
+    err: ptr string
+    done: ptr Atomic[bool]
+  var cancel: Atomic[bool]
+  var done: Atomic[bool]
+  var ts: TokenSet
+  var err = ""
+  var th: Thread[OauthWorkerArg]
+  createThread(th, proc(arg: OauthWorkerArg) {.thread, nimcall.} =
+    {.cast(gcsafe).}:
+      try:
+        arg.ts[] = auth_xai.loginBrowser(
+          openUrl = openBrowserUrl,
+          showUrl = proc(url: string) {.gcsafe.} =
+            # Worker prints once listen is up; one-shot line, no lock needed.
+            hintLn &"  open {url}", resetStyle
+            stdout.flushFile,
+          cancelFlag = arg.cancel)
+      except oauth.OAuthError as e:
+        arg.err[] = e.msg
+      except CatchableError as e:
+        arg.err[] = e.msg
+      arg.done[].store(true, moRelease)
+  , OauthWorkerArg(cancel: addr cancel, ts: addr ts, err: addr err,
+                   done: addr done))
+  let jobDone = proc(): bool {.closure.} =
+    done.load(moAcquire)
+  let cancelJob = proc() {.closure.} =
+    cancel.store(true, moRelease)
+  var wasCancelled = false
+  if wizardVerifyCancelHook != nil:
+    wasCancelled = wizardVerifyCancelHook(jobDone, cancelJob)
+  else:
+    while not done.load(moAcquire):
+      sleep(50)
+  if wasCancelled:
+    cancel.store(true, moRelease)
+  joinThread(th)
+  if wasCancelled or cancel.load(moAcquire):
+    errLn "  login cancelled"
+    raise newException(minline.InputCancelled, "oauth cancelled")
+  if err != "":
+    errLn "  login failed: ", err
     raise newException(minline.InputCancelled, "oauth failed")
+  auth_xai.storeTokens(ts)
+  hintLn "  signed in", resetStyle
+  "oauth"
 
 proc readFirstProviderField(editor: var minline.LineEditor): string =
   ## First wizard field: catalog name, URL, API key, or `supergrok`.
