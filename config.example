@@ -107,6 +107,12 @@ url = "https://api.longcat.chat/openai"
 key = "..."
 models = "LongCat-2.0"
 
+[provider]
+name = "hetzner"
+url = "https://inference.hetzner.com/api/v1"
+key = "$HETZNER_VLLM_API_KEY"
+models = "Qwen/Qwen3.6-35B-A3B-FP8"
+
 # `family` is an experimental-only override (only honored under
 # `--experimental`) that picks the system-prompt branch by family
 # name, when the (provider, model) combo isn't on the known-good
