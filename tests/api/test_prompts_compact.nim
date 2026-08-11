@@ -27,6 +27,9 @@ suite "prompts: knownGoodFamily":
   test "MiniMax M2.7-highspeed is known-good":
     check knownGoodFamily("minimax", "MiniMax-M2.7-highspeed") == "minimax"
 
+  test "Hetzner Qwen3.6-35B-A3B-FP8 is known-good":
+    check knownGoodFamily("hetzner", "Qwen/Qwen3.6-35B-A3B-FP8") == "qwen"
+
 suite "prompts: isKnownGood":
   test "true for known-good profile":
     let p = Profile(name: "zai.glm-5.1", model: "glm-5.1")
@@ -62,6 +65,12 @@ suite "prompts: knownGoodTags":
     check family == "minimax"
     check ver == "2"
     check vrt == "7"
+
+  test "Hetzner Qwen3.6-35B-A3B tags are version=3.6, variant=35b-a3b":
+    let (family, ver, vrt) = knownGoodTags("hetzner", "Qwen/Qwen3.6-35B-A3B-FP8")
+    check family == "qwen"
+    check ver == "3.6"
+    check vrt == "35b-a3b"
 
 suite "prompts: knownGoodReasoning":
   test "returns reasoning level for known-good combo":

@@ -676,6 +676,7 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("friendli",    "https://api.friendli.ai/serverless/v1"),
   ("google",      "https://generativelanguage.googleapis.com/v1beta/openai"),
   ("groq",        "https://api.groq.com/openai/v1"),
+  ("hetzner",     "https://inference.hetzner.com/api/v1"),
   ("huggingface", "https://router.huggingface.co/v1"),
   ("hyperbolic",  "https://api.hyperbolic.xyz/v1"),
   ("inceptron",   "https://api.inceptron.io/v1"),

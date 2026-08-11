@@ -412,6 +412,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("together", "Qwen/Qwen3.6-Plus", "qwen", "3.6", "plus", "on", 0.2, 8192, false, 262_144),
     ("together", "Qwen/Qwen3.7-Max", "qwen", "3.7", "max", "on", 0.2, 8192, false, 262_144),
     ("together", "Qwen/Qwen3.7-Plus", "qwen", "3.7", "plus", "on", 0.2, 8192, false, 262_144),
+    # hetzner (Hetzner Inference Experiments; vLLM, 262K context, vision-capable MoE)
+    ("hetzner", "Qwen/Qwen3.6-35B-A3B-FP8", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, false, 262_144),
     ("together", "moonshotai/Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
     ("together", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.6, 8192, false, 1_000_000),
     ("opencode", "gpt-5", "gpt", "", "5", "medium", 0.2, 8192, false, 400_000),
