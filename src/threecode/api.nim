@@ -1195,9 +1195,9 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
   ##   GLM (which think whenever the parameter is absent).
   ## - `reasoning: {effort: ...}` on OpenRouter for GLM-5.2; OpenRouter maps
   ##   `high` to high and `max` to its native `xhigh`.
-  ## - `chat_template_kwargs.enable_thinking` (bool) on vLLM stacks (nvidia);
-  ##   other vLLM GLM providers (nebius, deepinfra, fireworks) accept the
-  ##   same knob but always think when it's omitted.
+  ## - `chat_template_kwargs.enable_thinking` (bool) on vLLM stacks (nvidia,
+  ##   hetzner); other vLLM GLM providers (nebius, deepinfra, fireworks)
+  ##   accept the same knob but always think when it's omitted.
   ## Inert stacks (baseten, cerebras) accept nothing and always think, so
   ## `off` is silently a no-op there.
   # GLM-5.2 is the only GLM with a graded effort knob (variant "2");
@@ -1224,7 +1224,7 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
       of "off": body["reasoning"] = %*{"enabled": false}
       of "max": body["reasoning"] = %*{"effort": "xhigh"}
       else: body["reasoning"] = %*{"effort": "high"}
-  of "nvidia":
+  of "nvidia", "hetzner":
     case p.reasoning
     of "off": body["chat_template_kwargs"] = %*{"enable_thinking": false}
     else: discard
