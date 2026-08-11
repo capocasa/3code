@@ -43,290 +43,476 @@ type
 
 const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # glm
-    ("baseten",   "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
-    ("baseten",   "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "on",     0.2, 8192, false, 200_000),
-    ("cerebras",  "zai-glm-4.7",                                     "glm",      "4",   "7",         "on",     0.2, 8192, false, 200_000),
-    ("fireworks", "accounts/fireworks/models/glm-5p1",               "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
-    ("fireworks", "accounts/fireworks/models/glm-5",                 "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
-    ("nebius",    "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
-    ("nebius",    "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
-    ("nvidia",    "z-ai/glm4.7",                                     "glm",      "4",   "7",         "on",     0.2, 8192, true,  200_000),
-    ("together",  "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
-    ("together",  "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
-    ("zai",       "glm-4.7",                                         "glm",      "4",   "7",         "on",     0.2, 8192, false, 200_000),
-    ("zai",       "glm-4.7-flash",                                   "glm",      "4",   "flash",     "on",     0.2, 8192, false, 200_000),
-    ("zai",       "glm-5",                                           "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
-    ("zai",       "glm-5-turbo",                                     "glm",      "5",   "turbo",     "on",     0.2, 8192, false, 200_000),
-    ("zai",       "glm-5.1",                                         "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
-    ("zai",       "glm-5.2",                                         "glm",      "5",   "2",         "high",   0.2, 8192, false, 1_000_000),
-    ("zaicode",  "glm-4.7",                                         "glm",      "4",   "7",         "on",     0.2, 8192, false, 200_000),
-    ("zaicode",  "glm-4.7-flash",                                   "glm",      "4",   "flash",     "on",     0.2, 8192, false, 200_000),
-    ("zaicode",  "glm-5",                                           "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
-    ("zaicode",  "glm-5-turbo",                                     "glm",      "5",   "turbo",     "on",     0.2, 8192, false, 200_000),
-    ("zaicode",  "glm-5.1",                                         "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
-    ("zaicode",  "glm-5.2",                                         "glm",      "5",   "2",         "high",   0.2, 8192, false, 1_000_000),
+    ("baseten", "zai-org/GLM-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
+    ("cerebras", "zai-glm-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
+    ("nebius", "zai-org/GLM-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
+    ("together", "zai-org/GLM-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
+    ("together", "zai-org/GLM-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
+    ("zai", "glm-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
+    ("zai", "glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
+    ("zai", "glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
+    ("zai", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
+    ("zai", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("zaicode", "glm-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
+    ("zaicode", "glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
+    ("zaicode", "glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
+    ("zaicode", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
+    ("zaicode", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
     # qwen is out
-    ("deepinfra", "zai-org/GLM-5.1",                                 "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
-    ("deepinfra", "zai-org/GLM-5",                                   "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
-    ("deepinfra", "zai-org/GLM-4.7",                                 "glm",      "4",   "7",         "on",     0.2, 8192, false, 200_000),
-    ("novita",    "zai-org/glm-4.7", "glm"       , "4", "7", "on", 0.2, 8192, false, 200000),
-    ("novita",    "zai-org/glm-4.7-flash", "glm"       , "4", "flash", "on", 0.2, 8192, false, 200000),
-    ("novita",    "zai-org/glm-5", "glm"       , "5", "", "on", 0.2, 8192, false, 200000),
-    ("novita",    "zai-org/glm-5-turbo", "glm"       , "5", "turbo", "on", 0.2, 8192, false, 200000),
-    ("novita",    "zai-org/glm-5.1", "glm"       , "5", "1", "on", 0.2, 8192, false, 200000),
-    ("novita",    "zai-org/glm-5.2", "glm"       , "5", "2", "high", 0.2, 8192, false, 1000000),
-    ("nvidia",    "z-ai/glm-5.2", "glm"       , "5", "2", "high", 0.2, 8192, false, 1000000),
-    ("deepinfra", "zai-org/GLM-4.7-Flash", "glm"       , "4", "flash", "on", 0.2, 8192, false, 200000),
-    ("deepinfra", "zai-org/GLM-5.2", "glm"       , "5", "2", "high", 0.2, 8192, false, 1000000),
-    ("deepinfra", "zai-org/GLM-5.2", "glm"       , "5", "2", "high", 0.2, 8192, false, 1000000),
-    ("deepinfra", "zai-org/GLM-4.7-Flash", "glm"       , "4", "flash", "on", 0.2, 8192, false, 200000),
-    ("openrouter", "z-ai/glm-4.7", "glm"       , "4", "7", "on", 0.2, 8192, false, 200000),
-    ("openrouter", "z-ai/glm-4.7-flash", "glm"       , "4", "flash", "on", 0.2, 8192, false, 200000),
-    ("openrouter", "z-ai/glm-5", "glm"       , "5", "", "on", 0.2, 8192, false, 200000),
-    ("openrouter", "z-ai/glm-5-turbo", "glm"       , "5", "turbo", "on", 0.2, 8192, false, 200000),
-    ("openrouter", "z-ai/glm-5.1", "glm"       , "5", "1", "on", 0.2, 8192, false, 200000),
-    ("openrouter", "z-ai/glm-5.2", "glm"       , "5", "2", "high", 0.2, 8192, false, 1000000),
-    ("together",  "zai-org/GLM-4.7", "glm"       , "4", "7", "on", 0.2, 8192, false, 200000),
-    ("together",  "zai-org/GLM-5.2", "glm"       , "5", "2", "high", 0.2, 8192, false, 1000000),
-    ("nebius",    "zai-org/GLM-5.2", "glm"       , "5", "2", "high", 0.2, 8192, false, 1000000),
-    ("baseten",   "zai-org/GLM-5.2", "glm"       , "5", "2", "high", 0.2, 8192, false, 1000000),
-    ("baseten",   "zai-org/GLM-5.1", "glm"       , "5", "1", "on", 0.2, 8192, false, 200000),
+    ("deepinfra", "zai-org/GLM-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
+    ("deepinfra", "zai-org/GLM-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
+    ("deepinfra", "zai-org/GLM-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
+    ("novita", "zai-org/glm-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
+    ("novita", "zai-org/glm-4.7-flash", "glm", "4", "flash", "on", 0.2, 8192, false, 200_000),
+    ("novita", "zai-org/glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
+    ("novita", "zai-org/glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
+    ("novita", "zai-org/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
+    ("novita", "zai-org/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    # nvidia's GLM endpoint leaks <tool_call> tags into content; keep the
+    # xmlToolCalls fallback that the retired z-ai/glm4.7 entry carried
+    ("nvidia", "z-ai/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, true, 1_000_000),
+    ("deepinfra", "zai-org/GLM-4.7-Flash", "glm", "4", "flash", "on", 0.2, 8192, false, 200_000),
+    ("deepinfra", "zai-org/GLM-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("openrouter", "z-ai/glm-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
+    ("openrouter", "z-ai/glm-4.7-flash", "glm", "4", "flash", "on", 0.2, 8192, false, 200_000),
+    ("openrouter", "z-ai/glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
+    ("openrouter", "z-ai/glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
+    ("openrouter", "z-ai/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
+    ("openrouter", "z-ai/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("together", "zai-org/GLM-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
+    ("together", "zai-org/GLM-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("nebius", "zai-org/GLM-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("baseten", "zai-org/GLM-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
 
     # gpt-oss
-    ("baseten",   "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
-    ("cerebras",  "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
-    ("groq",      "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
-    ("nebius",    "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
-    ("nebius",    "openai/gpt-oss-120b-fast",                        "gpt-oss",  "",    "120b-fast", "medium", 0.2, 4096, false, 131_072),
-    ("nvidia",    "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
-    ("nvidia",    "openai/gpt-oss-20b",                              "gpt-oss",  "",    "20b",       "medium", 0.2, 4096, false, 131_072),
-    ("ovh",       "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
-    ("sambanova", "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
-    ("deepinfra", "openai/gpt-oss-120b",                             "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
-    ("openrouter", "openai/gpt-oss-120b",                           "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
-    ("novita",    "openai/gpt-oss-20b", "gpt-oss"   , "", "20b", "medium", 0.2, 4096, false, 131072),
-    ("novita",    "openai/gpt-oss-120b", "gpt-oss"   , "", "120b", "medium", 0.2, 8192, false, 131072),
-    ("groq",      "openai/gpt-oss-20b", "gpt-oss"   , "", "20b", "medium", 0.2, 4096, false, 131072),
-    ("deepinfra", "openai/gpt-oss-20b", "gpt-oss"   , "", "20b", "medium", 0.2, 4096, false, 131072),
-    ("deepinfra", "openai/gpt-oss-20b", "gpt-oss"   , "", "20b", "medium", 0.2, 4096, false, 131072),
-    ("openrouter", "openai/gpt-oss-20b", "gpt-oss"   , "", "20b", "medium", 0.2, 4096, false, 131072),
-    ("fireworks", "accounts/fireworks/models/gpt-oss-120b", "gpt-oss"   , "", "120b", "medium", 0.2, 8192, false, 131072),
-    ("together",  "openai/gpt-oss-20b", "gpt-oss"   , "", "20b", "medium", 0.2, 4096, false, 131072),
-    ("together",  "openai/gpt-oss-120b", "gpt-oss"   , "", "120b", "medium", 0.2, 8192, false, 131072),
-    ("ovh",       "gpt-oss-20b", "gpt-oss"   , "", "20b", "medium", 0.2, 4096, false, 131072),
-    ("groq",      "openai/gpt-oss-20b", "gpt-oss"   , "", "20b", "medium", 0.2, 4096, false, 131072),
+    ("baseten", "openai/gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("cerebras", "gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("groq", "openai/gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("nebius", "openai/gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("nvidia", "openai/gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("nvidia", "openai/gpt-oss-20b", "gpt-oss", "", "20b", "medium", 0.2, 4096, false, 131_072),
+    ("ovh", "gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("sambanova", "gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("deepinfra", "openai/gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("openrouter", "openai/gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("novita", "openai/gpt-oss-20b", "gpt-oss", "", "20b", "medium", 0.2, 4096, false, 131_072),
+    ("novita", "openai/gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("groq", "openai/gpt-oss-20b", "gpt-oss", "", "20b", "medium", 0.2, 4096, false, 131_072),
+    ("deepinfra", "openai/gpt-oss-20b", "gpt-oss", "", "20b", "medium", 0.2, 4096, false, 131_072),
+    ("openrouter", "openai/gpt-oss-20b", "gpt-oss", "", "20b", "medium", 0.2, 4096, false, 131_072),
+    ("fireworks", "accounts/fireworks/models/gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("together", "openai/gpt-oss-20b", "gpt-oss", "", "20b", "medium", 0.2, 4096, false, 131_072),
+    ("together", "openai/gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("ovh", "gpt-oss-20b", "gpt-oss", "", "20b", "medium", 0.2, 4096, false, 131_072),
 
     # openai (first-party; bare model ids on the wire).
     # gpt-oss-* keep the gpt-oss family (Codex shell/apply_patch surface).
     # The chat/reasoning lineup uses the `gpt` family: same gpt-oss system
     # prompt, but the bash/read/write/patch tool surface those models were
     # trained on, and reasoning_effort as the wire knob.
-    ("openai",    "gpt-oss-120b",                                    "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
-    ("openai",    "gpt-oss-20b",                                     "gpt-oss",  "",    "20b",       "medium", 0.2, 4096, false, 131_072),
-    ("openai",    "o1",                                              "gpt",      "",    "o1",        "medium", 0.2, 8192, false, 200_000),
-    ("openai",    "o1-mini",                                         "gpt",      "",    "o1-mini",   "medium", 0.2, 8192, false, 200_000),
-    ("openai",    "o3",                                              "gpt",      "",    "o3",        "medium", 0.2, 8192, false, 200_000),
-    ("openai",    "o3-mini",                                         "gpt",      "",    "o3-mini",   "medium", 0.2, 8192, false, 200_000),
-    ("openai",    "o4-mini",                                         "gpt",      "",    "o4-mini",   "medium", 0.2, 4096, false, 200_000),
-    ("openai",    "gpt-4.1",                                         "gpt",      "",    "4.1",       "medium", 0.2, 8192, false, 1_000_000),
-    ("openai",    "gpt-4.1-mini",                                    "gpt",      "",    "4.1-mini",  "medium", 0.2, 4096, false, 1_000_000),
-    ("openai",    "gpt-4.1-nano",                                    "gpt",      "",    "4.1-nano",  "medium", 0.2, 4096, false, 1_000_000),
-    ("openai",    "gpt-4o",                                          "gpt",      "",    "4o",        "medium", 0.2, 8192, false, 128_000),
-    ("openai",    "gpt-4o-mini",                                     "gpt",      "",    "4o-mini",   "medium", 0.2, 4096, false, 128_000),
-    ("openai",    "gpt-5",                                           "gpt",      "",    "5",         "medium", 0.2, 8192, false, 400_000),
-    ("openai",    "gpt-5-mini",                                      "gpt",      "",    "5-mini",    "medium", 0.2, 4096, false, 400_000),
-    ("openai",    "gpt-5-nano",                                      "gpt",      "",    "5-nano",    "medium", 0.2, 4096, false, 400_000),
-    ("openai",    "gpt-5.4",                                         "gpt",      "",    "5.4",       "medium", 0.2, 8192, false, 400_000),
-    ("openai",    "gpt-5.4-mini",                                    "gpt",      "",    "5.4-mini",  "medium", 0.2, 4096, false, 400_000),
-    ("openai",    "gpt-5.5",                                         "gpt",      "",    "5.5",       "medium", 0.2, 8192, false, 400_000),
-    ("openai",    "gpt-5.5-pro",                                     "gpt",      "",    "5.5-pro",   "high",   0.2, 8192, false, 400_000),
-    ("openai",    "gpt-5.6",                                         "gpt",      "",    "5.6",       "medium", 0.2, 8192, false, 400_000),
-    ("openai",    "gpt-5.6-sol",                                     "gpt",      "",    "5.6-sol",   "medium", 0.2, 8192, false, 400_000),
-    ("openai",    "gpt-5.6-terra",                                   "gpt",      "",    "5.6-terra", "medium", 0.2, 4096, false, 400_000),
-    ("openai",    "gpt-5.6-luna",                                    "gpt",      "",    "5.6-luna",  "medium", 0.2, 4096, false, 400_000),
+    ("openai", "gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("openai", "gpt-oss-20b", "gpt-oss", "", "20b", "medium", 0.2, 4096, false, 131_072),
+    ("openai", "o1", "gpt", "", "o1", "medium", 0.2, 8192, false, 200_000),
+    ("openai", "o1-mini", "gpt", "", "o1-mini", "medium", 0.2, 8192, false, 200_000),
+    ("openai", "o3", "gpt", "", "o3", "medium", 0.2, 8192, false, 200_000),
+    ("openai", "o3-mini", "gpt", "", "o3-mini", "medium", 0.2, 8192, false, 200_000),
+    ("openai", "o4-mini", "gpt", "", "o4-mini", "medium", 0.2, 4096, false, 200_000),
+    ("openai", "gpt-4.1", "gpt", "", "4.1", "medium", 0.2, 8192, false, 1_000_000),
+    ("openai", "gpt-4.1-mini", "gpt", "", "4.1-mini", "medium", 0.2, 4096, false, 1_000_000),
+    ("openai", "gpt-4.1-nano", "gpt", "", "4.1-nano", "medium", 0.2, 4096, false, 1_000_000),
+    ("openai", "gpt-4o", "gpt", "", "4o", "medium", 0.2, 8192, false, 128_000),
+    ("openai", "gpt-4o-mini", "gpt", "", "4o-mini", "medium", 0.2, 4096, false, 128_000),
+    ("openai", "gpt-5", "gpt", "", "5", "medium", 0.2, 8192, false, 400_000),
+    ("openai", "gpt-5-mini", "gpt", "", "5-mini", "medium", 0.2, 4096, false, 400_000),
+    ("openai", "gpt-5-nano", "gpt", "", "5-nano", "medium", 0.2, 4096, false, 400_000),
+    ("openai", "gpt-5.4", "gpt", "", "5.4", "medium", 0.2, 8192, false, 400_000),
+    ("openai", "gpt-5.4-mini", "gpt", "", "5.4-mini", "medium", 0.2, 4096, false, 400_000),
+    ("openai", "gpt-5.5", "gpt", "", "5.5", "medium", 0.2, 8192, false, 400_000),
+    ("openai", "gpt-5.5-pro", "gpt", "", "5.5-pro", "high", 0.2, 8192, false, 400_000),
+    ("openai", "gpt-5.6", "gpt", "", "5.6", "medium", 0.2, 8192, false, 400_000),
+    ("openai", "gpt-5.6-sol", "gpt", "", "5.6-sol", "medium", 0.2, 8192, false, 400_000),
+    ("openai", "gpt-5.6-terra", "gpt", "", "5.6-terra", "medium", 0.2, 4096, false, 400_000),
+    ("openai", "gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, false, 400_000),
 
     # deepseek
-    ("baseten",   "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
-    ("deepseek",  "deepseek-chat",                                   "deepseek", "3",   "",          "medium", 0.2, 8192, false, 128_000),
-    ("deepseek",  "deepseek-reasoner",                               "deepseek", "r1",  "",          "medium", 0.2, 8192, false, 128_000),
-    ("deepseek",  "deepseek-v4-flash",                               "deepseek", "4",   "flash",     "low",    0.2, 4096, false, 1_000_000),
-    ("deepseek",  "deepseek-v4-pro",                                 "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
-    ("nebius",    "deepseek-ai/DeepSeek-V3.2",                       "deepseek", "3.2", "",          "medium", 0.2, 8192, false, 128_000),
-    ("nebius",    "deepseek-ai/DeepSeek-V3.2-fast",                  "deepseek", "3.2", "fast",      "medium", 0.2, 4096, false, 128_000),
-    ("nebius",    "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
-    ("nebius",    "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.6, 8192, false, 262_144),
-    ("nebius",    "moonshotai/Kimi-K2.5-fast",                     "kimi",     "2",   "5-fast",    "on",     0.6, 4096, false, 262_144),
-    ("nebius",    "deepseek-ai/MiniMax-M2.5",                        "minimax",  "2",   "5",         "low",    0.2, 8192, false, 204_800),
-    ("nebius",    "deepseek-ai/MiniMax-M2.5-fast",                   "minimax",  "2",   "5-fast",    "low",    0.2, 4096, false, 204_800),
-    ("together",  "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
-    ("fireworks", "accounts/fireworks/models/deepseek-v4-pro",       "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
-    ("deepinfra", "deepseek-ai/DeepSeek-V4-Pro",                     "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
-    ("sambanova", "deepseek-ai/DeepSeek-V3.2",                       "deepseek", "3.2", "",          "medium", 0.2, 8192, false, 128_000),
-    ("novita",    "deepseek/deepseek-v3.2", "deepseek"  , "3.2", "", "medium", 0.2, 8192, false, 128000),
-    ("novita",    "deepseek/deepseek-v4-flash", "deepseek"  , "4", "flash", "low", 0.2, 4096, false, 1000000),
-    ("novita",    "deepseek/deepseek-v4-pro", "deepseek"  , "4", "pro", "low", 0.2, 8192, false, 1000000),
-    ("nvidia",    "deepseek-ai/deepseek-v4-pro", "deepseek"  , "4", "pro", "low", 0.2, 8192, false, 1000000),
-    ("nvidia",    "deepseek-ai/deepseek-v4-flash", "deepseek"  , "4", "flash", "low", 0.2, 4096, false, 1000000),
-    ("deepinfra", "deepseek-ai/DeepSeek-V4-Flash", "deepseek"  , "4", "flash", "low", 0.2, 4096, false, 1000000),
-    ("deepinfra", "deepseek-ai/DeepSeek-V3.2", "deepseek"  , "3.2", "", "medium", 0.2, 8192, false, 128000),
-    ("deepinfra", "deepseek-ai/DeepSeek-V3.2", "deepseek"  , "3.2", "", "medium", 0.2, 8192, false, 128000),
-    ("deepinfra", "deepseek-ai/DeepSeek-V4-Flash", "deepseek"  , "4", "flash", "low", 0.2, 4096, false, 1000000),
-    ("openrouter", "deepseek/deepseek-chat", "deepseek"  , "3", "", "medium", 0.2, 8192, false, 128000),
-    ("openrouter", "deepseek/deepseek-v3.2", "deepseek"  , "3.2", "", "medium", 0.2, 8192, false, 128000),
-    ("openrouter", "deepseek/deepseek-v4-flash", "deepseek"  , "4", "flash", "low", 0.2, 4096, false, 1000000),
-    ("openrouter", "deepseek/deepseek-v4-pro", "deepseek"  , "4", "pro", "low", 0.2, 8192, false, 1000000),
+    ("baseten", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("deepseek", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("deepseek", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("nebius", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("together", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("fireworks", "accounts/fireworks/models/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("deepinfra", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("novita", "deepseek/deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
+    ("novita", "deepseek/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("novita", "deepseek/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("deepinfra", "deepseek-ai/DeepSeek-V4-Flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("deepinfra", "deepseek-ai/DeepSeek-V3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
+    ("openrouter", "deepseek/deepseek-chat", "deepseek", "3", "", "medium", 0.2, 8192, false, 128_000),
+    ("openrouter", "deepseek/deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
+    ("openrouter", "deepseek/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("openrouter", "deepseek/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
 
     # laguna (served via poolside's OpenAI-compatible API)
-    ("poolside",   "poolside/laguna-s-2.1",                           "laguna",   "2",   "s",         "on",     0.2, 8192, false, 1_000_000),
-    ("poolside",   "poolside/laguna-xs-2.1",                          "laguna",   "2",   "xs",        "on",     0.2, 8192, false, 262_144),
-    ("poolside",   "poolside/laguna-m.1",                             "laguna",   "2",   "m",         "on",     0.2, 8192, false, 262_144),
+    ("poolside", "poolside/laguna-s-2.1", "laguna", "2", "s", "on", 0.2, 8192, false, 1_000_000),
+    ("poolside", "poolside/laguna-xs-2.1", "laguna", "2", "xs", "on", 0.2, 8192, false, 262_144),
 
     # minimax
-    ("minimax",   "MiniMax-M3",                                      "minimax",  "3",   "",          "on",     0.2, 8192, false, 1_000_000),
-    ("minimax",   "MiniMax-M2.7",                                    "minimax",  "2",   "7",         "on",     0.2, 8192, false, 204_800),
-    ("minimax",   "MiniMax-M2.7-highspeed",                          "minimax",  "2",   "7-high",    "on",     0.2, 4096, false, 204_800),
-    ("nvidia",    "minimaxai/minimax-m2.5",                          "minimax",  "2",   "5",         "on",     0.2, 8192, false, 204_800),
-    ("nvidia",    "minimaxai/minimax-m2.7",                          "minimax",  "2",   "7",         "on",     0.2, 8192, false, 204_800),
-    ("fireworks", "accounts/fireworks/models/minimax-m2p7",          "minimax",  "2",   "7",         "on",     0.2, 8192, false, 204_800),
-    ("deepinfra", "minimaxai/MiniMax-M2.5",                          "minimax",  "2",   "5",         "on",     0.2, 8192, false, 204_800),
-    ("together",  "minimaxai/MiniMax-M2.7",                          "minimax",  "2",   "7",         "on",     0.2, 8192, false, 204_800),
-    ("sambanova", "minimaxai/MiniMax-M2.7",                          "minimax",  "2",   "7",         "on",     0.2, 8192, false, 204_800),
-    ("sambanova", "minimaxai/MiniMax-M2.5",                          "minimax",  "2",   "5",         "on",     0.2, 8192, false, 204_800),
-    ("novita",    "minimax/minimax-m2.5", "minimax"   , "2", "5", "low", 0.2, 8192, false, 204800),
-    ("novita",    "minimax/minimax-m2.7", "minimax"   , "2", "7", "on", 0.2, 8192, false, 204800),
-    ("novita",    "minimax/minimax-m2.7-highspeed", "minimax"   , "2", "7-high", "on", 0.2, 4096, false, 204800),
-    ("novita",    "minimax/minimax-m3", "minimax"   , "3", "", "on", 0.2, 8192, false, 1000000),
-    ("minimax",   "MiniMax-M2.5", "minimax"   , "2", "5", "low", 0.2, 8192, false, 204800),
-    ("nvidia",    "minimaxai/minimax-m3", "minimax"   , "3", "", "on", 0.2, 8192, false, 1000000),
-    ("deepinfra", "MiniMaxAI/MiniMax-M2.7", "minimax"   , "2", "7", "on", 0.2, 8192, false, 204800),
-    ("deepinfra", "MiniMaxAI/MiniMax-M3", "minimax"   , "3", "", "on", 0.2, 8192, false, 1000000),
-    ("deepinfra", "MiniMaxAI/MiniMax-M3", "minimax"   , "3", "", "on", 0.2, 8192, false, 1000000),
-    ("deepinfra", "MiniMaxAI/MiniMax-M2.7", "minimax"   , "2", "7", "on", 0.2, 8192, false, 204800),
-    ("openrouter", "minimax/minimax-m2.5", "minimax"   , "2", "5", "low", 0.2, 8192, false, 204800),
-    ("openrouter", "minimax/minimax-m2.7", "minimax"   , "2", "7", "on", 0.2, 8192, false, 204800),
-    ("openrouter", "minimax/minimax-m3", "minimax"   , "3", "", "on", 0.2, 8192, false, 1000000),
-    ("together",  "MiniMaxAI/MiniMax-M3", "minimax"   , "3", "", "on", 0.2, 8192, false, 1000000),
-    ("nebius",    "MiniMaxAI/MiniMax-M3", "minimax"   , "3", "", "on", 0.2, 8192, false, 1000000),
+    ("minimax", "MiniMax-M3", "minimax", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("minimax", "MiniMax-M2.7", "minimax", "2", "7", "on", 0.2, 8192, false, 204_800),
+    ("minimax", "MiniMax-M2.7-highspeed", "minimax", "2", "7-high", "on", 0.2, 4096, false, 204_800),
+    ("fireworks", "accounts/fireworks/models/minimax-m2p7", "minimax", "2", "7", "on", 0.2, 8192, false, 204_800),
+    ("together", "minimaxai/MiniMax-M2.7", "minimax", "2", "7", "on", 0.2, 8192, false, 204_800),
+    ("novita", "minimax/minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, false, 204_800),
+    ("novita", "minimax/minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, false, 204_800),
+    ("novita", "minimax/minimax-m2.7-highspeed", "minimax", "2", "7-high", "on", 0.2, 4096, false, 204_800),
+    ("novita", "minimax/minimax-m3", "minimax", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("minimax", "MiniMax-M2.5", "minimax", "2", "5", "low", 0.2, 8192, false, 204_800),
+    ("nvidia", "minimaxai/minimax-m3", "minimax", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("deepinfra", "MiniMaxAI/MiniMax-M2.7", "minimax", "2", "7", "on", 0.2, 8192, false, 204_800),
+    ("deepinfra", "MiniMaxAI/MiniMax-M3", "minimax", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("openrouter", "minimax/minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, false, 204_800),
+    ("openrouter", "minimax/minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, false, 204_800),
+    ("openrouter", "minimax/minimax-m3", "minimax", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("together", "MiniMaxAI/MiniMax-M3", "minimax", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("nebius", "MiniMaxAI/MiniMax-M3", "minimax", "3", "", "on", 0.2, 8192, false, 1_000_000),
 
     # kimi
-    ("together",  "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.6, 8192, false, 262_144),
-    ("fireworks", "accounts/fireworks/models/kimi-k2p6",             "kimi",     "2",   "6",         "on",     0.6, 8192, false, 262_144),
-    ("together",  "moonshotai/Kimi-K2.6",                          "kimi",     "2",   "6",         "on",     0.6, 8192, false, 262_144),
-    ("deepinfra", "moonshotai/Kimi-K2.6",                          "kimi",     "2",   "6",         "on",     0.6, 8192, false, 262_144),
-    ("deepinfra", "moonshotai/Kimi-K2.5",                          "kimi",     "2",   "5",         "on",     0.6, 8192, false, 262_144),
-    ("novita",    "moonshotai/kimi-k2.5", "kimi"      , "2", "5", "on", 0.6, 8192, false, 262144),
-    ("novita",    "moonshotai/kimi-k2.6", "kimi"      , "2", "6", "on", 0.6, 8192, false, 262144),
-    ("nvidia",    "moonshotai/kimi-k2.6", "kimi"      , "2", "6", "on", 0.6, 8192, false, 262144),
-    ("openrouter", "moonshotai/kimi-k2.5", "kimi"      , "2", "5", "on", 0.6, 8192, false, 262144),
-    ("openrouter", "moonshotai/kimi-k2.6", "kimi"      , "2", "6", "on", 0.6, 8192, false, 262144),
-    ("nebius",    "moonshotai/Kimi-K2.6", "kimi"      , "2", "6", "on", 0.6, 8192, false, 262144),
-    ("baseten",   "moonshotai/Kimi-K2.6", "kimi"      , "2", "6", "on", 0.6, 8192, false, 262144),
-    ("baseten",   "moonshotai/Kimi-K2.5", "kimi"      , "2", "5", "on", 0.6, 8192, false, 262144),
+    ("fireworks", "accounts/fireworks/models/kimi-k2p6", "kimi", "2", "6", "on", 0.2, 8192, false, 262_144),
+    ("together", "moonshotai/Kimi-K2.6", "kimi", "2", "6", "on", 0.2, 8192, false, 262_144),
+    ("deepinfra", "moonshotai/Kimi-K2.6", "kimi", "2", "6", "on", 0.2, 8192, false, 262_144),
+    ("deepinfra", "moonshotai/Kimi-K2.5", "kimi", "2", "5", "on", 0.2, 8192, false, 262_144),
+    ("novita", "moonshotai/kimi-k2.5", "kimi", "2", "5", "on", 0.2, 8192, false, 262_144),
+    ("novita", "moonshotai/kimi-k2.6", "kimi", "2", "6", "on", 0.2, 8192, false, 262_144),
+    ("nvidia", "moonshotai/kimi-k2.6", "kimi", "2", "6", "on", 0.2, 8192, false, 262_144),
+    ("openrouter", "moonshotai/kimi-k2.5", "kimi", "2", "5", "on", 0.2, 8192, false, 262_144),
+    ("openrouter", "moonshotai/kimi-k2.6", "kimi", "2", "6", "on", 0.2, 8192, false, 262_144),
+    ("nebius", "moonshotai/Kimi-K2.6", "kimi", "2", "6", "on", 0.2, 8192, false, 262_144),
+    ("baseten", "moonshotai/Kimi-K2.6", "kimi", "2", "6", "on", 0.2, 8192, false, 262_144),
 
     # longcat
-    ("longcat",   "LongCat-2.0",                                    "longcat",  "2",   "",          "on",     0.2, 8192, false, 1_000_000),
+    ("longcat", "LongCat-2.0", "longcat", "2", "", "on", 0.2, 8192, false, 1_000_000),
 
     # hy (Tencent Hunyuan v3)
-    ("novita",     "tencent/hy3",                                    "hy",       "3",   "",          "no_think",0.2, 8192, false, 262_144),
-    ("openrouter", "tencent/hy3:free",                               "hy",       "3",   "free",      "no_think",0.2, 8192, false, 262_144),
-    ("deepinfra", "tencent/Hy3", "hy"        , "3", "", "no_think", 0.2, 8192, false, 262144),
-    ("deepinfra", "tencent/Hy3", "hy"        , "3", "", "no_think", 0.2, 8192, false, 262144),
-    ("openrouter", "tencent/hy3", "hy"        , "3", "", "no_think", 0.2, 8192, false, 262144),
+    ("novita", "tencent/hy3", "hy", "3", "", "no_think", 0.2, 8192, false, 262_144),
+    ("deepinfra", "tencent/Hy3", "hy", "3", "", "no_think", 0.2, 8192, false, 262_144),
+    ("openrouter", "tencent/hy3", "hy", "3", "", "no_think", 0.2, 8192, false, 262_144),
 
     # grok (xAI first-party API, api.x.ai/v1; OpenAI-compatible)
-    ("xai",       "grok-4.5",                                      "grok",    "4",   "5",         "high",   0.2, 8192, false, 500_000),
-    ("xai",       "grok-4.5-latest",                               "grok",    "4",   "5-latest",  "high",   0.2, 8192, false, 500_000),
-    ("xai",       "grok-4.3",                                      "grok",    "4",   "3",         "low",    0.2, 8192, false, 1_000_000),
-    ("xai",       "grok-4.3-latest",                               "grok",    "4",   "3-latest",  "low",    0.2, 8192, false, 1_000_000),
-    ("xai",       "grok-build-0.1",                                "grok",    "build","0.1",       "low",    0.2, 8192, false, 256_000),
-    ("xai",       "grok-4.20",                                     "grok",    "4",   "20",        "low",    0.2, 8192, false, 2_000_000),
-    ("xai",       "grok-4.20-reasoning",                           "grok",    "4",   "20-r",      "low",    0.2, 8192, false, 2_000_000),
-    ("xai",       "grok-4.20-multi-agent",                         "grok",    "4",   "20-ma",     "high",   0.2, 8192, false, 2_000_000),
-    ("openrouter", "x-ai/grok-4.5",                               "grok",    "4",   "5",         "high",   0.2, 8192, false, 500_000),
-    ("openrouter", "x-ai/grok-4.5-latest",                        "grok",    "4",   "5-latest",  "high",   0.2, 8192, false, 500_000),
-    ("openrouter", "x-ai/grok-4.3",                               "grok",    "4",   "3",         "low",    0.2, 8192, false, 1_000_000),
-    ("openrouter", "x-ai/grok-4.20",                              "grok",    "4",   "20",        "low",    0.2, 8192, false, 2_000_000),
-    ("openrouter", "x-ai/grok-4.20-reasoning",                    "grok",    "4",   "20-r",      "low",    0.2, 8192, false, 2_000_000),
-    ("openrouter", "x-ai/grok-4.20-multi-agent",                  "grok",    "4",   "20-ma",     "high",   0.2, 8192, false, 2_000_000),
-    ("openrouter", "x-ai/grok-build-0.1",                         "grok",    "build","0.1",       "low",    0.2, 8192, false, 256_000),
+    ("xai", "grok-4.5", "grok", "4", "5", "high", 0.2, 8192, false, 500_000),
+    ("xai", "grok-4.5-latest", "grok", "4", "5-latest", "high", 0.2, 8192, false, 500_000),
+    ("xai", "grok-4.3", "grok", "4", "3", "low", 0.2, 8192, false, 1_000_000),
+    ("xai", "grok-4.3-latest", "grok", "4", "3-latest", "low", 0.2, 8192, false, 1_000_000),
+    ("xai", "grok-build-0.1", "grok", "build", "0.1", "low", 0.2, 8192, false, 256_000),
+    ("xai", "grok-4.20", "grok", "4", "20", "low", 0.2, 8192, false, 2_000_000),
+    ("xai", "grok-4.20-reasoning", "grok", "4", "20-r", "low", 0.2, 8192, false, 2_000_000),
+    ("xai", "grok-4.20-multi-agent", "grok", "4", "20-ma", "high", 0.2, 8192, false, 2_000_000),
+    ("openrouter", "x-ai/grok-4.5", "grok", "4", "5", "high", 0.2, 8192, false, 500_000),
+    ("openrouter", "x-ai/grok-4.3", "grok", "4", "3", "low", 0.2, 8192, false, 1_000_000),
+    ("openrouter", "x-ai/grok-4.20", "grok", "4", "20", "low", 0.2, 8192, false, 2_000_000),
+    ("openrouter", "x-ai/grok-4.20-multi-agent", "grok", "4", "20-ma", "high", 0.2, 8192, false, 2_000_000),
+    ("openrouter", "x-ai/grok-build-0.1", "grok", "build", "0.1", "low", 0.2, 8192, false, 256_000),
 
     # ling (InclusionAI / Ant Group; OpenRouter, Novita, Kilo at launch)
-    ("openrouter", "inclusionai/ling-3.0-flash",       "ling",     "3",   "0-flash",   "off",    0.2, 8192, false, 262_144),
-    ("openrouter", "inclusionai/ling-3.0-flash:free",  "ling",     "3",   "0-flash-f", "off",    0.2, 8192, false, 262_144),
-    ("novita",     "inclusionai/ling-3.0-flash",       "ling",     "3",   "0-flash",   "off",    0.2, 8192, false, 262_144),
-    ("kilo",       "inclusionai/ling-3.0-flash",       "ling",     "3",   "0-flash",   "off",    0.2, 8192, false, 262_144),
+    ("openrouter", "inclusionai/ling-3.0-flash", "ling", "3", "0-flash", "off", 0.2, 8192, false, 262_144),
+    ("novita", "inclusionai/ling-3.0-flash", "ling", "3", "0-flash", "off", 0.2, 8192, false, 262_144),
+    ("kilo", "inclusionai/ling-3.0-flash", "ling", "3", "0-flash", "off", 0.2, 8192, false, 262_144),
 
     # nanogpt (OpenAI-compatible aggregator; model ids carry a provider/ tag)
-    ("nanogpt",  "TEE/glm-4.7",                                "glm",      "4",   "7",         "on",     0.2, 8192, false, 200_000),
-    ("nanogpt",  "TEE/glm-5",                                  "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
-    ("nanogpt",  "TEE/glm-5.1",                                "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
-    ("nanogpt",  "TEE/glm-5.2",                                "glm",      "5",   "2",         "high",   0.2, 8192, false, 1_000_000),
-    ("nanogpt",  "TEE/gpt-oss-120b",                           "gpt-oss",  "",    "120b",      "medium", 0.2, 8192, false, 131_072),
-    ("nanogpt",  "TEE/kimi-k2.6",                              "kimi",     "2",   "6",         "on",     0.6, 8192, false, 262_144),
-    ("nanogpt",  "moonshotai/kimi-k2.7-code",                  "kimi",     "2",   "7-code",    "on",     0.6, 8192, false, 262_144),
-    ("nanogpt",  "moonshotai/kimi-k2.7-code-highspeed",        "kimi",     "2",   "7-code-hs", "on",     0.6, 4096, false, 262_144),
-    ("nanogpt",  "TEE/qwen3.6-35b-a3b",                        "qwen",     "3.6", "35b-a3b",   "on",     0.2, 8192, false, 262_144),
-    ("nanogpt",  "TEE/qwen3.6-35b-a3b-uncensored",              "qwen",     "3.6", "35b-a3b-u", "on",     0.2, 8192, false, 262_144),
-    ("nanogpt",  "TEE/qwen3.6-27b",                            "qwen",     "3.6", "27b",       "on",     0.2, 8192, false, 128_000),
-    ("nanogpt",  "alibaba/qwen3.6-flash",                     "qwen",     "3.6", "flash",     "on",     0.2, 4096, false, 128_000),
-    ("nanogpt",  "TEE/deepseek-v4-flash",                      "deepseek", "4",   "flash",     "low",    0.2, 4096, false, 1_000_000),
-    ("nanogpt",  "deepseek/deepseek-v4-pro",                   "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
-    ("nanogpt",  "minimax/minimax-m3",                         "minimax",  "3",   "",          "on",     0.2, 8192, false, 1_000_000),
+    ("nanogpt", "TEE/glm-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
+    ("nanogpt", "TEE/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
+    ("nanogpt", "TEE/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("nanogpt", "TEE/gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("nanogpt", "TEE/kimi-k2.6", "kimi", "2", "6", "on", 0.2, 8192, false, 262_144),
+    ("nanogpt", "moonshotai/kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.2, 8192, false, 262_144),
+    ("nanogpt", "moonshotai/kimi-k2.7-code-highspeed", "kimi", "2", "7-code-hs", "on", 0.2, 4096, false, 262_144),
+    ("nanogpt", "TEE/qwen3.6-35b-a3b", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, false, 262_144),
+    ("nanogpt", "TEE/qwen3.6-35b-a3b-uncensored", "qwen", "3.6", "35b-a3b-u", "on", 0.2, 8192, false, 262_144),
+    ("nanogpt", "TEE/qwen3.6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, false, 128_000),
+    ("nanogpt", "alibaba/qwen3.6-flash", "qwen", "3.6", "flash", "on", 0.2, 4096, false, 128_000),
+    ("nanogpt", "TEE/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("nanogpt", "deepseek/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("nanogpt", "minimax/minimax-m3", "minimax", "3", "", "on", 0.2, 8192, false, 1_000_000),
 
     # opencode (OpenCode Zen gateway; bare model ids on the wire)
-    ("opencode",    "minimax-m3",           "minimax",  "3",   "",          "on",     0.2, 8192, false, 1_000_000),
-    ("opencode",    "hy3-free",             "hy",       "3",   "free",      "no_think",0.2, 8192, false, 262_144),
-    ("opencode",    "kimi-k2.6",            "kimi",     "2",   "6",         "on",     0.6, 8192, false, 262_144),
-    ("opencode",    "kimi-k2.7-code",       "kimi",     "2",   "7-code",    "on",     0.6, 8192, false, 262_144),
-    ("opencode",    "glm-5.2",              "glm",      "5",   "2",         "high",   0.2, 8192, false, 1_000_000),
-    ("opencode",    "glm-5.1",              "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
-    ("opencode",    "glm-5",                "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
-    ("opencode",    "deepseek-v4-pro",      "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
-    ("opencode",    "deepseek-v4-flash",    "deepseek", "4",   "flash",     "low",    0.2, 4096, false, 1_000_000),
-    ("opencode",    "deepseek-v4-flash-free","deepseek","4",   "flash-free","low",    0.2, 4096, false, 1_000_000),
-    ("opencode",    "qwen3.6-plus",         "qwen",     "3.6", "plus",      "on",     0.2, 8192, false, 262_144),
+    ("opencode", "minimax-m3", "minimax", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("opencode", "kimi-k2.6", "kimi", "2", "6", "on", 0.2, 8192, false, 262_144),
+    ("opencode", "kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.2, 8192, false, 262_144),
+    ("opencode", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("opencode", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
+    ("opencode", "glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
+    ("opencode", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("opencode", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("opencode", "deepseek-v4-flash-free", "deepseek", "4", "flash-free", "low", 0.2, 4096, false, 1_000_000),
+    ("opencode", "qwen3.6-plus", "qwen", "3.6", "plus", "on", 0.2, 8192, false, 262_144),
 
     # opencodego (OpenCode Go subscription gateway; bare model ids)
-    ("opencodego", "qwen3.7-plus",         "qwen",     "3.7", "plus",      "on",     0.2, 8192, false, 262_144),
-    ("opencodego", "qwen3.7-max",          "qwen",     "3.7", "max",       "on",     0.2, 8192, false, 262_144),
-    ("opencodego", "qwen3.6-plus",         "qwen",     "3.6", "plus",      "on",     0.2, 8192, false, 262_144),
-    ("opencodego", "minimax-m3",           "minimax",  "3",   "",          "on",     0.2, 8192, false, 1_000_000),
-    ("opencodego", "kimi-k3",              "kimi",     "3",   "",          "on",     0.6, 8192, false, 262_144),
-    ("opencodego", "kimi-k2.7-code",       "kimi",     "2",   "7-code",    "on",     0.6, 8192, false, 262_144),
-    ("opencodego", "hy3-preview",          "hy",       "3",   "preview",   "no_think",0.2, 8192, false, 262_144),
-    ("opencodego", "glm-5.2",              "glm",      "5",   "2",         "high",   0.2, 8192, false, 1_000_000),
-    ("opencodego", "glm-5.1",              "glm",      "5",   "1",         "on",     0.2, 8192, false, 200_000),
-    ("opencodego", "glm-5",                "glm",      "5",   "",          "on",     0.2, 8192, false, 200_000),
-    ("opencodego", "deepseek-v4-pro",      "deepseek", "4",   "pro",       "low",    0.2, 8192, false, 1_000_000),
-    ("opencodego", "deepseek-v4-flash",    "deepseek", "4",   "flash",     "low",    0.2, 4096, false, 1_000_000),
+    ("opencodego", "qwen3.7-plus", "qwen", "3.7", "plus", "on", 0.2, 8192, false, 262_144),
+    ("opencodego", "qwen3.7-max", "qwen", "3.7", "max", "on", 0.2, 8192, false, 262_144),
+    ("opencodego", "qwen3.6-plus", "qwen", "3.6", "plus", "on", 0.2, 8192, false, 262_144),
+    ("opencodego", "minimax-m3", "minimax", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("opencodego", "kimi-k3", "kimi", "3", "", "on", 0.2, 8192, false, 262_144),
+    ("opencodego", "kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.2, 8192, false, 262_144),
+    ("opencodego", "hy3-preview", "hy", "3", "preview", "no_think", 0.2, 8192, false, 262_144),
+    ("opencodego", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("opencodego", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
+    ("opencodego", "glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
+    ("opencodego", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("opencodego", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
 
     # kimi (Kimi API Platform, api.moonshot.ai; bare model ids)
-    ("kimi",     "kimi-k3",              "kimi",     "3",   "",          "on",     0.6, 8192, false, 1_000_000),
-    ("kimi",     "kimi-k2.7-code",       "kimi",     "2",   "7-code",    "on",     0.6, 8192, false, 262_144),
-    ("kimi",     "kimi-k2.6",            "kimi",     "2",   "6",         "on",     0.6, 8192, false, 262_144),
+    ("kimi", "kimi-k3", "kimi", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("kimi", "kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.2, 8192, false, 262_144),
+    ("kimi", "kimi-k2.6", "kimi", "2", "6", "on", 0.2, 8192, false, 262_144),
 
     # kimicode (Kimi Code subscription, api.kimi.com/coding; 3 model ids only)
     # k3 rejects any temperature != 1.0 (HTTP 400); omit the field so the
     # server default (1.0) applies. temperature < 0 means "omit".
-    ("kimicode", "k3",                   "kimi",     "3",   "",          "on",     -1.0, 8192, false, 1_000_000),
-    ("kimicode", "kimi-for-coding",      "kimi",     "2",   "7-code",    "on",     0.6, 8192, false, 262_144),
-    ("kimicode", "kimi-for-coding-highspeed","kimi",  "2",   "7-code-hs", "on",     0.6, 4096, false, 262_144),
+    ("kimicode", "k3", "kimi", "3", "", "on", -1.0, 8192, false, 1_000_000),
+    ("kimicode", "kimi-for-coding", "kimi", "2", "7-code", "on", 0.2, 8192, false, 262_144),
+    ("kimicode", "kimi-for-coding-highspeed", "kimi", "2", "7-code-hs", "on", 0.2, 4096, false, 262_144),
 
     # inkling (Thinking Machines Lab, thinkingmachines/Inkling; 975B MoE,
     # 41B active, multimodal. Level-based reasoning via `reasoning_effort`
     # on the OpenAI-compatible surface; returns `reasoning_content`.)
-    ("baseten",   "thinkingmachines/inkling", "inkling", "1", "",     "medium", 0.2, 8192, false, 256_000),
-    ("together",  "thinkingmachines/Inkling", "inkling", "1", "",     "medium", 0.2, 8192, false, 1_000_000),
+    ("baseten", "thinkingmachines/inkling", "inkling", "1", "", "medium", 0.2, 8192, false, 256_000),
+    ("together", "thinkingmachines/Inkling", "inkling", "1", "", "medium", 0.2, 8192, false, 1_000_000),
     ("fireworks", "accounts/fireworks/models/inkling", "inkling", "1", "", "medium", 0.2, 8192, false, 1_040_000),
 
     # mimo (Xiaomi MiMo-V2.5-Pro: 1.02T MoE, 42B active, 1M context.
     # Binary reasoning via `thinking.type` on the first-party API,
     # `chat_template_kwargs.enable_thinking` on vLLM stacks, and
     # `reasoning.effort` on OpenRouter. Returns `reasoning_content`.)
-    ("xiaomi",    "mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, false, 1_000_000),
-    ("xiaomi",    "mimo-v2.5",     "mimo", "2.5", "",    "on", 0.2, 8192, false, 1_000_000),
+    ("xiaomi", "mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, false, 1_000_000),
+    ("xiaomi", "mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, false, 1_000_000),
     ("openrouter", "xiaomi/mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, false, 1_000_000),
-    ("openrouter", "xiaomi/mimo-v2.5",     "mimo", "2.5", "",    "on", 0.2, 8192, false, 1_000_000),
+    ("openrouter", "xiaomi/mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, false, 1_000_000),
+
+    # venice (api.venice.ai; flattened ids like `zai-org-glm-5-2`,
+    # params harvested by tools/harvest_models.nim from sibling entries)
+    ("venice", "deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
+    ("venice", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("venice", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("venice", "grok-4-20", "grok", "4", "20", "low", 0.2, 8192, false, 2_000_000),
+    ("venice", "grok-4-20-multi-agent", "grok", "4", "20-ma", "high", 0.2, 8192, false, 2_000_000),
+    ("venice", "grok-4-3", "grok", "4", "3", "low", 0.2, 8192, false, 1_000_000),
+    ("venice", "grok-4-5", "grok", "4", "5", "high", 0.2, 8192, false, 500_000),
+    ("venice", "grok-build-0-1", "grok", "build", "0.1", "low", 0.2, 8192, false, 256_000),
+    ("venice", "inkling", "inkling", "1", "", "medium", 0.2, 8192, false, 256_000),
+    ("venice", "kimi-k2-5", "kimi", "2", "5", "on", 0.2, 8192, false, 262_144),
+    ("venice", "kimi-k2-6", "kimi", "2", "6", "on", 0.2, 8192, false, 262_144),
+    ("venice", "kimi-k2-7-code", "kimi", "2", "7-code", "on", 0.2, 8192, false, 262_144),
+    ("venice", "kimi-k3", "kimi", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("venice", "minimax-m25", "minimax", "2", "5", "low", 0.2, 8192, false, 204_800),
+    ("venice", "minimax-m27", "minimax", "2", "7", "on", 0.2, 8192, false, 204_800),
+    ("venice", "openai-gpt-54", "gpt", "", "5.4", "medium", 0.2, 8192, false, 400_000),
+    ("venice", "openai-gpt-54-mini", "gpt", "", "5.4-mini", "medium", 0.2, 4096, false, 400_000),
+    ("venice", "openai-gpt-55", "gpt", "", "5.5", "medium", 0.2, 8192, false, 400_000),
+    ("venice", "openai-gpt-55-pro", "gpt", "", "5.5-pro", "high", 0.2, 8192, false, 400_000),
+    ("venice", "openai-gpt-56-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, false, 400_000),
+    ("venice", "openai-gpt-56-sol", "gpt", "", "5.6-sol", "medium", 0.2, 8192, false, 400_000),
+    ("venice", "openai-gpt-56-terra", "gpt", "", "5.6-terra", "medium", 0.2, 4096, false, 400_000),
+    ("venice", "openai-gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("venice", "qwen-3-6-plus", "qwen", "3.6", "plus", "on", 0.2, 8192, false, 262_144),
+    ("venice", "qwen-3-7-max", "qwen", "3.7", "max", "on", 0.2, 8192, false, 262_144),
+    ("venice", "qwen-3-7-plus", "qwen", "3.7", "plus", "on", 0.2, 8192, false, 262_144),
+    ("venice", "qwen3-6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, false, 128_000),
+    ("venice", "qwen3-6-35b-a3b", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, false, 262_144),
+    ("venice", "xiaomi-mimo-v2-5", "mimo", "2.5", "", "on", 0.2, 8192, false, 1_000_000),
+    ("venice", "z-ai-glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
+    ("venice", "zai-org-glm-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
+    ("venice", "zai-org-glm-4.7-flash", "glm", "4", "flash", "on", 0.2, 8192, false, 200_000),
+    ("venice", "zai-org-glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
+    ("venice", "zai-org-glm-5-1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
+    ("venice", "zai-org-glm-5-2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+
+    # cheaperinference (api.cheaperinference.com; bare first-party ids,
+    # params harvested by tools/harvest_models.nim)
+    ("cheaperinference", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("cheaperinference", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("cheaperinference", "glm-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
+    ("cheaperinference", "glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
+    ("cheaperinference", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
+    ("cheaperinference", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("cheaperinference", "gpt-4.1-nano", "gpt", "", "4.1-nano", "medium", 0.2, 4096, false, 1_000_000),
+    ("cheaperinference", "gpt-5-nano", "gpt", "", "5-nano", "medium", 0.2, 4096, false, 400_000),
+    ("cheaperinference", "gpt-5.4", "gpt", "", "5.4", "medium", 0.2, 8192, false, 400_000),
+    ("cheaperinference", "gpt-5.4-mini", "gpt", "", "5.4-mini", "medium", 0.2, 4096, false, 400_000),
+    ("cheaperinference", "gpt-5.5", "gpt", "", "5.5", "medium", 0.2, 8192, false, 400_000),
+    ("cheaperinference", "gpt-5.5-pro", "gpt", "", "5.5-pro", "high", 0.2, 8192, false, 400_000),
+    ("cheaperinference", "gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, false, 400_000),
+    ("cheaperinference", "gpt-5.6-sol", "gpt", "", "5.6-sol", "medium", 0.2, 8192, false, 400_000),
+    ("cheaperinference", "gpt-5.6-terra", "gpt", "", "5.6-terra", "medium", 0.2, 4096, false, 400_000),
+    ("cheaperinference", "gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("cheaperinference", "grok-4.5", "grok", "4", "5", "high", 0.2, 8192, false, 500_000),
+    ("cheaperinference", "kimi-k3", "kimi", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("cheaperinference", "minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, false, 204_800),
+    ("cheaperinference", "qwen3-6-35b-a3b", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, false, 262_144),
+    ("cheaperinference", "qwen3.6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, false, 128_000),
+    ("nvidia", "poolside/laguna-xs-2.1", "laguna", "2", "xs", "on", 0.2, 8192, false, 262_144),
+    ("nvidia", "thinkingmachines/inkling", "inkling", "1", "", "medium", 0.2, 8192, false, 256_000),
+    ("novita", "moonshotai/kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.2, 8192, false, 262_144),
+    ("novita", "moonshotai/kimi-k3", "kimi", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("novita", "qwen/qwen3.6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, false, 128_000),
+    ("novita", "qwen/qwen3.6-35b-a3b", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, false, 262_144),
+    ("novita", "qwen/qwen3.6-plus", "qwen", "3.6", "plus", "on", 0.2, 8192, false, 262_144),
+    ("novita", "qwen/qwen3.7-max", "qwen", "3.7", "max", "on", 0.2, 8192, false, 262_144),
+    ("novita", "xiaomimimo/mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, false, 1_000_000),
+    ("novita", "xiaomimimo/mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, false, 1_000_000),
+    ("openrouter", "meituan/longcat-2.0", "longcat", "2", "", "on", 0.2, 8192, false, 1_000_000),
+    ("openrouter", "moonshotai/kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.2, 8192, false, 262_144),
+    ("openrouter", "moonshotai/kimi-k3", "kimi", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("openrouter", "openai/gpt-4.1", "gpt", "", "4.1", "medium", 0.2, 8192, false, 1_000_000),
+    ("openrouter", "openai/gpt-4.1-mini", "gpt", "", "4.1-mini", "medium", 0.2, 4096, false, 1_000_000),
+    ("openrouter", "openai/gpt-4.1-nano", "gpt", "", "4.1-nano", "medium", 0.2, 4096, false, 1_000_000),
+    ("openrouter", "openai/gpt-4o", "gpt", "", "4o", "medium", 0.2, 8192, false, 128_000),
+    ("openrouter", "openai/gpt-4o-mini", "gpt", "", "4o-mini", "medium", 0.2, 4096, false, 128_000),
+    ("openrouter", "openai/gpt-5", "gpt", "", "5", "medium", 0.2, 8192, false, 400_000),
+    ("openrouter", "openai/gpt-5-mini", "gpt", "", "5-mini", "medium", 0.2, 4096, false, 400_000),
+    ("openrouter", "openai/gpt-5-nano", "gpt", "", "5-nano", "medium", 0.2, 4096, false, 400_000),
+    ("openrouter", "openai/gpt-5.4", "gpt", "", "5.4", "medium", 0.2, 8192, false, 400_000),
+    ("openrouter", "openai/gpt-5.4-mini", "gpt", "", "5.4-mini", "medium", 0.2, 4096, false, 400_000),
+    ("openrouter", "openai/gpt-5.5", "gpt", "", "5.5", "medium", 0.2, 8192, false, 400_000),
+    ("openrouter", "openai/gpt-5.5-pro", "gpt", "", "5.5-pro", "high", 0.2, 8192, false, 400_000),
+    ("openrouter", "openai/gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, false, 400_000),
+    ("openrouter", "openai/gpt-5.6-sol", "gpt", "", "5.6-sol", "medium", 0.2, 8192, false, 400_000),
+    ("openrouter", "openai/gpt-5.6-terra", "gpt", "", "5.6-terra", "medium", 0.2, 4096, false, 400_000),
+    ("openrouter", "openai/o1", "gpt", "", "o1", "medium", 0.2, 8192, false, 200_000),
+    ("openrouter", "openai/o3", "gpt", "", "o3", "medium", 0.2, 8192, false, 200_000),
+    ("openrouter", "openai/o3-mini", "gpt", "", "o3-mini", "medium", 0.2, 8192, false, 200_000),
+    ("openrouter", "openai/o4-mini", "gpt", "", "o4-mini", "medium", 0.2, 4096, false, 200_000),
+    ("openrouter", "poolside/laguna-s-2.1", "laguna", "2", "s", "on", 0.2, 8192, false, 1_000_000),
+    ("openrouter", "poolside/laguna-xs-2.1", "laguna", "2", "xs", "on", 0.2, 8192, false, 262_144),
+    ("openrouter", "qwen/qwen3.6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, false, 128_000),
+    ("openrouter", "qwen/qwen3.6-35b-a3b", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, false, 262_144),
+    ("openrouter", "qwen/qwen3.6-flash", "qwen", "3.6", "flash", "on", 0.2, 4096, false, 128_000),
+    ("openrouter", "qwen/qwen3.6-plus", "qwen", "3.6", "plus", "on", 0.2, 8192, false, 262_144),
+    ("openrouter", "qwen/qwen3.7-max", "qwen", "3.7", "max", "on", 0.2, 8192, false, 262_144),
+    ("openrouter", "qwen/qwen3.7-plus", "qwen", "3.7", "plus", "on", 0.2, 8192, false, 262_144),
+    ("openrouter", "tencent/hy3-preview", "hy", "3", "preview", "no_think", 0.2, 8192, false, 262_144),
+    ("openrouter", "thinkingmachines/inkling", "inkling", "1", "", "medium", 0.2, 8192, false, 256_000),
+    ("fireworks", "accounts/fireworks/models/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("fireworks", "accounts/fireworks/models/gpt-oss-20b", "gpt-oss", "", "20b", "medium", 0.2, 4096, false, 131_072),
+    ("fireworks", "accounts/fireworks/models/kimi-k3", "kimi", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("fireworks", "accounts/fireworks/models/minimax-m3", "minimax", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("tensorx", "deepseek/deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
+    ("tensorx", "deepseek/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("tensorx", "minimax/minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, false, 204_800),
+    ("tensorx", "minimax/minimax-m3", "minimax", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("tensorx", "moonshotai/kimi-k2.5", "kimi", "2", "5", "on", 0.2, 8192, false, 262_144),
+    ("tensorx", "moonshotai/kimi-k2.6", "kimi", "2", "6", "on", 0.2, 8192, false, 262_144),
+    ("tensorx", "moonshotai/kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.2, 8192, false, 262_144),
+    ("tensorx", "moonshotai/kimi-k3", "kimi", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("tensorx", "z-ai/glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
+    ("tensorx", "z-ai/glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
+    ("tensorx", "z-ai/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
+    ("tensorx", "z-ai/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("groq", "qwen/qwen3.6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, false, 128_000),
+    ("sambanova", "DeepSeek-V3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
+    ("sambanova", "MiniMax-M2.7", "minimax", "2", "7", "on", 0.2, 8192, false, 204_800),
+    ("together", "Qwen/Qwen3.6-Plus", "qwen", "3.6", "plus", "on", 0.2, 8192, false, 262_144),
+    ("together", "Qwen/Qwen3.7-Max", "qwen", "3.7", "max", "on", 0.2, 8192, false, 262_144),
+    ("together", "Qwen/Qwen3.7-Plus", "qwen", "3.7", "plus", "on", 0.2, 8192, false, 262_144),
+    ("together", "moonshotai/Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.2, 8192, false, 262_144),
+    ("together", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("opencode", "gpt-5", "gpt", "", "5", "medium", 0.2, 8192, false, 400_000),
+    ("opencode", "gpt-5-nano", "gpt", "", "5-nano", "medium", 0.2, 4096, false, 400_000),
+    ("opencode", "gpt-5.4", "gpt", "", "5.4", "medium", 0.2, 8192, false, 400_000),
+    ("opencode", "gpt-5.4-mini", "gpt", "", "5.4-mini", "medium", 0.2, 4096, false, 400_000),
+    ("opencode", "gpt-5.5", "gpt", "", "5.5", "medium", 0.2, 8192, false, 400_000),
+    ("opencode", "gpt-5.5-pro", "gpt", "", "5.5-pro", "high", 0.2, 8192, false, 400_000),
+    ("opencode", "gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, false, 400_000),
+    ("opencode", "gpt-5.6-sol", "gpt", "", "5.6-sol", "medium", 0.2, 8192, false, 400_000),
+    ("opencode", "gpt-5.6-terra", "gpt", "", "5.6-terra", "medium", 0.2, 4096, false, 400_000),
+    ("opencode", "grok-4.5", "grok", "4", "5", "high", 0.2, 8192, false, 500_000),
+    ("opencode", "grok-build-0.1", "grok", "build", "0.1", "low", 0.2, 8192, false, 256_000),
+    ("opencode", "kimi-k2.5", "kimi", "2", "5", "on", 0.2, 8192, false, 262_144),
+    ("opencode", "kimi-k3", "kimi", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("opencode", "ling-3.0-flash-free", "ling", "3", "0-flash-f", "off", 0.2, 8192, false, 262_144),
+    ("opencode", "minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, false, 204_800),
+    ("opencode", "minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, false, 204_800),
+    ("nanogpt", "Qwen/Qwen3.6-35B-A3B", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, false, 262_144),
+    ("nanogpt", "TEE/deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
+    ("nanogpt", "TEE/gpt-oss-20b", "gpt-oss", "", "20b", "medium", 0.2, 4096, false, 131_072),
+    ("nanogpt", "TEE/kimi-k3", "kimi", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("nanogpt", "TEE/minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, false, 204_800),
+    ("nanogpt", "alibaba/qwen3.6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, false, 128_000),
+    ("nanogpt", "deepseek-chat", "deepseek", "3", "", "medium", 0.2, 8192, false, 128_000),
+    ("nanogpt", "deepseek-reasoner", "deepseek", "r1", "", "medium", 0.2, 8192, false, 128_000),
+    ("nanogpt", "deepseek/deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
+    ("nanogpt", "deepseek/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("nanogpt", "inclusionai/ling-3.0-flash", "ling", "3", "0-flash", "off", 0.2, 8192, false, 262_144),
+    ("nanogpt", "longcat-2.0", "longcat", "2", "", "on", 0.2, 8192, false, 1_000_000),
+    ("nanogpt", "minimax/minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, false, 204_800),
+    ("nanogpt", "minimax/minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, false, 204_800),
+    ("nanogpt", "moonshotai/kimi-k2.5", "kimi", "2", "5", "on", 0.2, 8192, false, 262_144),
+    ("nanogpt", "moonshotai/kimi-k2.6", "kimi", "2", "6", "on", 0.2, 8192, false, 262_144),
+    ("nanogpt", "moonshotai/kimi-k3", "kimi", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("nanogpt", "openai/gpt-4.1", "gpt", "", "4.1", "medium", 0.2, 8192, false, 1_000_000),
+    ("nanogpt", "openai/gpt-4.1-mini", "gpt", "", "4.1-mini", "medium", 0.2, 4096, false, 1_000_000),
+    ("nanogpt", "openai/gpt-4.1-nano", "gpt", "", "4.1-nano", "medium", 0.2, 4096, false, 1_000_000),
+    ("nanogpt", "openai/gpt-4o", "gpt", "", "4o", "medium", 0.2, 8192, false, 128_000),
+    ("nanogpt", "openai/gpt-4o-mini", "gpt", "", "4o-mini", "medium", 0.2, 4096, false, 128_000),
+    ("nanogpt", "openai/gpt-5", "gpt", "", "5", "medium", 0.2, 8192, false, 400_000),
+    ("nanogpt", "openai/gpt-5-mini", "gpt", "", "5-mini", "medium", 0.2, 4096, false, 400_000),
+    ("nanogpt", "openai/gpt-5-nano", "gpt", "", "5-nano", "medium", 0.2, 4096, false, 400_000),
+    ("nanogpt", "openai/gpt-5.4", "gpt", "", "5.4", "medium", 0.2, 8192, false, 400_000),
+    ("nanogpt", "openai/gpt-5.4-mini", "gpt", "", "5.4-mini", "medium", 0.2, 4096, false, 400_000),
+    ("nanogpt", "openai/gpt-5.5", "gpt", "", "5.5", "medium", 0.2, 8192, false, 400_000),
+    ("nanogpt", "openai/gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, false, 400_000),
+    ("nanogpt", "openai/gpt-5.6-sol", "gpt", "", "5.6-sol", "medium", 0.2, 8192, false, 400_000),
+    ("nanogpt", "openai/gpt-5.6-terra", "gpt", "", "5.6-terra", "medium", 0.2, 4096, false, 400_000),
+    ("nanogpt", "openai/gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("nanogpt", "openai/gpt-oss-20b", "gpt-oss", "", "20b", "medium", 0.2, 4096, false, 131_072),
+    ("nanogpt", "openai/o1", "gpt", "", "o1", "medium", 0.2, 8192, false, 200_000),
+    ("nanogpt", "openai/o3", "gpt", "", "o3", "medium", 0.2, 8192, false, 200_000),
+    ("nanogpt", "openai/o3-mini", "gpt", "", "o3-mini", "medium", 0.2, 8192, false, 200_000),
+    ("nanogpt", "openai/o4-mini", "gpt", "", "o4-mini", "medium", 0.2, 4096, false, 200_000),
+    ("nanogpt", "poolside/laguna-m.1", "laguna", "2", "m", "on", 0.2, 8192, false, 262_144),
+    ("nanogpt", "poolside/laguna-s-2.1", "laguna", "2", "s", "on", 0.2, 8192, false, 1_000_000),
+    ("nanogpt", "qwen-3.6-plus", "qwen", "3.6", "plus", "on", 0.2, 8192, false, 262_144),
+    ("nanogpt", "qwen3.7-max", "qwen", "3.7", "max", "on", 0.2, 8192, false, 262_144),
+    ("nanogpt", "qwen3.7-plus", "qwen", "3.7", "plus", "on", 0.2, 8192, false, 262_144),
+    ("nanogpt", "tencent/hy3", "hy", "3", "", "no_think", 0.2, 8192, false, 262_144),
+    ("nanogpt", "thinkingmachines/inkling", "inkling", "1", "", "medium", 0.2, 8192, false, 256_000),
+    ("nanogpt", "x-ai/grok-4.20", "grok", "4", "20", "low", 0.2, 8192, false, 2_000_000),
+    ("nanogpt", "x-ai/grok-4.20-multi-agent", "grok", "4", "20-ma", "high", 0.2, 8192, false, 2_000_000),
+    ("nanogpt", "x-ai/grok-4.3", "grok", "4", "3", "low", 0.2, 8192, false, 1_000_000),
+    ("nanogpt", "x-ai/grok-4.5", "grok", "4", "5", "high", 0.2, 8192, false, 500_000),
+    ("nanogpt", "x-ai/grok-build-0.1", "grok", "build", "0.1", "low", 0.2, 8192, false, 256_000),
+    ("nanogpt", "xiaomi/mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, false, 1_000_000),
+    ("nanogpt", "xiaomi/mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, false, 1_000_000),
+    ("nanogpt", "z-ai/glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
+    ("nanogpt", "zai-org/glm-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
+    ("nanogpt", "zai-org/glm-4.7-flash", "glm", "4", "flash", "on", 0.2, 8192, false, 200_000),
+    ("nanogpt", "zai-org/glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
+    ("nanogpt", "zai-org/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
+    ("nanogpt", "zai-org/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("opencodego", "gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, false, 400_000),
+    ("opencodego", "grok-4.5", "grok", "4", "5", "high", 0.2, 8192, false, 500_000),
+    ("opencodego", "hy3", "hy", "3", "", "no_think", 0.2, 8192, false, 262_144),
+    ("opencodego", "kimi-k2.5", "kimi", "2", "5", "on", 0.2, 8192, false, 262_144),
+    ("opencodego", "kimi-k2.6", "kimi", "2", "6", "on", 0.2, 8192, false, 262_144),
+    ("opencodego", "mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, false, 1_000_000),
+    ("opencodego", "mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, false, 1_000_000),
+    ("opencodego", "minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, false, 204_800),
+    ("opencodego", "minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, false, 204_800),
+    ("baseten", "moonshotai/Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.2, 8192, false, 262_144),
+    ("baseten", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("aki", "gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("nebius", "MiniMaxAI/MiniMax-M2.5", "minimax", "2", "5", "on", 0.2, 8192, false, 204_800),
+    ("nebius", "deepseek-ai/DeepSeek-V4-Flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("nebius", "moonshotai/Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.2, 8192, false, 262_144),
+    ("nebius", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("deepinfra", "Qwen/Qwen3.6-27B", "qwen", "3.6", "27b", "on", 0.2, 8192, false, 128_000),
+    ("deepinfra", "Qwen/Qwen3.6-35B-A3B", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, false, 262_144),
+    ("deepinfra", "Qwen/Qwen3.7-Max", "qwen", "3.7", "max", "on", 0.2, 8192, false, 262_144),
+    ("deepinfra", "XiaomiMiMo/MiMo-V2.5", "mimo", "2.5", "", "on", 0.2, 8192, false, 1_000_000),
+    ("deepinfra", "XiaomiMiMo/MiMo-V2.5-Pro", "mimo", "2.5", "pro", "on", 0.2, 8192, false, 1_000_000),
+    ("deepinfra", "inclusionAI/Ling-3.0-flash", "ling", "3", "0-flash", "off", 0.2, 8192, false, 262_144),
+    ("deepinfra", "moonshotai/Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.2, 8192, false, 262_144),
+    ("deepinfra", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("deepinfra", "thinkingmachines/Inkling", "inkling", "1", "", "medium", 0.2, 8192, false, 256_000),
+    ("ovh", "Qwen3.6-27B", "qwen", "3.6", "27b", "on", 0.2, 8192, false, 128_000),
   ]
     ## (provider, model, family, version, variant, reasoning, temperature,
     ## maxTokens, contextWindow) tuples.
@@ -1474,45 +1660,42 @@ Every token costs. No preamble before tool calls. After completion: one sentence
 {{credit}}
 """
 
-const GrokPreamble = """You are the Grok edition of 3code, the economical coding agent, backed by xAI's Grok (4.5, 4.3, 4.20, or Grok Build 0.1), a reasoning model with a large context window, agentic tool calling, and a graded reasoning knob. You were trained for coding, knowledge work, and multi-step tool use.
+const GrokPreamble = """You are the Grok edition of 3code, the economical coding agent. You are xAI's Grok (4.5 flagship, 4.3, or Grok Build 0.1), a reasoning model with a 500K token context window, agentic tool calling, and a graded reasoning knob. You were trained for coding, knowledge work, and multi-step tool use. You hallucinate less than most models — use that: state facts directly, and say "I don't know" when you don't know.
 
-Bluntness is your strong suit. Give your actual assessment, not a diplomatic non-answer. If the approach is wrong, the code is bad, or the premise is flawed, say so plainly and say why, then propose the better path. Don't soften bad news and don't pad good news. You hallucinate less than most models, so trade on that: state facts plainly, commit to a recommendation, and say "I don't know" when you don't know instead of hedging.
-
-You iterate fast and cheap. Don't agonize over the perfect plan, take a first shot, run it, and refine from real output. Three quick loops beat one careful guess.
-
-Act first, explain after. Don't narrate your plan before executing it, just execute.
+Act first, explain after. Don't narrate your plan before executing it — just execute.
 
 # Reasoning
 
-You carry `reasoning_effort` (low / medium / high). On most Grok models reasoning cannot be turned off, so the cost is choosing the wrong level. Match depth to the task:
+You carry `reasoning_effort` (low / medium / high). Unlike other families, your reasoning cannot be turned off — it is always on. Match depth to the task:
 
-- `low`: trivial lookups, single-file edits, format passes.
-- `medium`: routine multi-file work, small refactors.
-- `high` (default): hard bugs, architecture decisions, anything where a wrong step is expensive.
+- `low`: trivial lookups, single-file edits, format passes. Fast, minimal thinking.
+- `medium`: routine multi-file work, small refactors. Light planning.
+- `high` (default): hard bugs, architecture decisions, anything where a wrong step is expensive. Full chain-of-thought.
 
-Over-thinking a simple task wastes tokens and latency as surely as under-thinking a hard one. Your reasoning trace streams to the user via a ticker, so keep it substantive.
+Over-thinking a simple task wastes tokens and latency as surely as under-thinking a hard one. Budget deliberately. Your reasoning trace streams to the user via a ticker — use it for the parts where getting it right is worth the latency, not as a status report.
 
 # Tools
 
 Your bash and file tools are sandboxed to a policy in `.sandboxrc`; a blocked operation fails with an error that names the policy file.
 
-- `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `timeout` (seconds) raises the 120s default up to 600 for builds, test suites, installs.
-- `read(path, offset?, limit?)` — read a file, targeted with `offset`/`limit`.
-- `write(path, body)` — create or overwrite a file.
-- `patch(path, edits)` — targeted search-and-replace edits. Each `search` must match exactly once.
-- `update_plan(items)` — todo plan for non-trivial work; `{text, status}` items, one `in_progress` max.
-- `web_search(query)` / `web_fetch(url)` — search, then fetch pages to read them.
-- `clear(prompt)` — wipe history and start fresh; `prompt` carries state and instructions to the new context.
+- `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
+- `write(path, body)` — create or overwrite a file with `body`.
+- `patch(path, edits)` — apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
+- `update_plan(items)` — update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
+- `web_search(query)` — search the web. Returns titles, URLs, and snippets.
+- `web_fetch(url)` — fetch a URL and return readable text (boilerplate stripped). Use to read pages found via `web_search`.
+- `clear(prompt)` — clear conversation history and start fresh. The `prompt` summarizes current state and gives instructions for the new context. Do not use `ed`, `sed -i`, or shell heredocs to rewrite files — line-arithmetic drifts and corrupts under sequential edits. `write` for new files or full rewrites; `patch` for surgical changes; `bash` for non-edit operations only.
 
-Never use `ed`, `sed -i`, or heredocs to rewrite files: `write` for full files, `patch` for surgical changes, `bash` for everything else. Independent tool calls in one turn run in parallel, so batch reads and searches. When the task is done, reply with prose and no tool calls.
+The harness runs your tool calls and feeds results back. Independent tool calls in the same turn run in parallel — batch them when reading multiple files or running independent checks. When the task is done, reply with prose and no tool calls.
 
 # Reading — search, don't survey
 
-First call in an unfamiliar repo is a search (`rg`/`grep`), never `cat` or `ls`. Every file read needs a specific purpose; reading "to get oriented" is token waste.
+Your first call in an unfamiliar repo must be a search (`rg`/`grep`), never `cat` or `ls`. Every file you read must have a specific purpose. Files read "to get oriented" are token waste.
 
-- `rg` first, then `read` around the match. Hit at line 200 means read 195-250, not 1-500.
-- Never re-read a file you already read this session. Never `cat` after `write` or `patch`; the success message is truthful.
-- Local before web: answers usually live in the repo, in a vendored file or sister module.
+- `rg pattern` first, then `read` with `offset`/`limit` to pull only relevant lines. If `rg` found the match at line 200, read 195-250, not 1-500.
+- Batch independent searches and reads into one turn. The harness runs them in parallel.
+- Never re-read a file you already read this session. Never `cat` a file after `write` or `patch` — the success message is truthful.
+- Local before web — answers usually live in the repo. Don't fetch a URL when a vendored file, man page, or sister module has the same information.
 
 # Planning
 
@@ -1660,46 +1843,34 @@ Every output token costs. No preamble before tool calls. After completion: one s
 {{credit}}
 """
 
-const KimiPreamble = """You are the Kimi edition of 3code, the economical coding agent — backed by Moonshot AI's Kimi (K2.5 / K2.6 / K2.7-code / K3), a Mixture-of-Experts model trained for long-horizon agentic coding and multi-step tool use. Strength: coherent work over hundreds of tool calls. Weakness: verbosity — fight it. You act on goals, not recite steps: given the objective and the tools, orchestrate the rest.
+const KimiPreamble = """You are the Kimi edition of 3code, the economical coding agent — backed by Moonshot AI's Kimi (K2.5 / K2.6 / K2.7-code / K3), a Mixture-of-Experts model trained for long-horizon agentic coding and multi-step tool use. Your strength is sustaining coherent work over hundreds of tool calls. Your weakness is verbosity — fight it.
 
 `3CODE.md` / `AGENTS.md` (when present) override this prompt.
 
 # Brevity — your first priority
 
-You use 2-3x more tokens than peer models if left unchecked. Every section below exists to cut that. Thinking runs in a separate channel the harness surfaces — the visible reply is for results only.
+You use 2-3x more tokens than peer models if left unchecked. Every section below exists to cut that. The visible reply is not where you think — thinking runs in a separate channel the harness already surfaces. The reply is for results only.
 
 - Trivial task: call the tool, no prose.
 - Routine turn: one line. What changed, what's next.
 - Non-trivial: one short plan line, then act. Never re-state the plan after a tool result.
-- Never narrate ("Let me...", "I'll check...", "Here's what I found:"). The tool call is the action; the receipt is the proof.
-- Fragments over sentences when the fragment carries it. "Paris." not "The capital of France is Paris."
-- No sign-offs, filler, or summaries of what was just shown. Stop when the answer is complete.
-- Hard problems tempt over-generation — preambles, restated context, hedged options. Resist hardest there. One precise move beats three paragraphs of orientation.
+- Never narrate: no "Let me...", "I'll check...", "Here's what I found:", "I think...". The tool call is the action; the receipt is the proof.
+- Fragments over sentences when a fragment carries the meaning. "Paris." not "The capital of France is Paris."
+- No sign-offs, no filler, no summaries of what was just shown. Stop when the answer is complete.
 
 # Proactiveness — stay in your lane
 
-Improvise on implementation details; never on scope. Ask only when the answer changes what you do next: a genuine scope fork, a choice the user must own, or a literal ask that looks wrong (say so in one line, then comply or wait). Never ask permission to continue sanctioned work.
-
-# Persistence — finish the job
-
-Your known failure mode is ending the turn early: presenting a summary or todo list and asking "continue?" when work remains. Don't.
-
-- Work end-to-end. A plan, first pass, or partial fix is not a stopping point.
-- A todo list is a completion contract: every item `completed` before the turn ends. Items remain? Keep working.
-- Announced actions happen same-turn. "Next I'll X" means the tool call for X comes next.
-- Three exits only from a turn with open work: a genuine blocker needing the user (missing input, credentials, an outcome-changing fork), an irreversible action needing approval, impossible requirements. "Large, slow, many steps left" is not a blocker.
-- A failure blocks one path; try another before surfacing. Surface a blocker with what you tried.
-- Momentum is a feature: each tool result should make the next action obvious. If not, rethink — don't check in.
+You tend to make decisions for the user when intent is ambiguous. Don't. When a task forks into a choice the user should make, ask — don't pick for them. When something looks wrong with the literal ask, say so in one line, then comply or wait. Improvise on implementation details; don't improvise on scope.
 
 # Thinking
 
-K2.7-code and K3 always think; K2.5/K2.6 toggle via `:reasoning`. Thinking is a wire field the harness manages — never reference `reasoning_content` or thinking mechanics in your reply. Budget it to the task: a lookup needs no thousand-token chain. Over-thinking a simple task costs as surely as under-thinking a hard one.
+K2.7-code and K3 always think (no off mode). K2.5/K2.6 toggle via `:reasoning`. Either way, thinking content is a wire field the harness manages — never reference `reasoning_content` or thinking mechanics in your reply. Budget thinking to the task: a factual lookup does not need a multi-thousand-token chain. Over-thinking a simple task costs latency and tokens as surely as under-thinking a hard one.
 
 # Tools
 
 Your bash and file tools are sandboxed to a policy in `.sandboxrc`; a blocked operation fails with an error that names the policy file.
 
-Use the declared tools, by exact name — no invented tools, none from prior sessions. Only declared tools exist; don't ask about unlisted ones. Batch independent calls in parallel; go sequential only when one result determines the next. A tool failing twice: stop and explain.
+`bash`, `read`, `write`, `patch`, `update_plan`, `web_search`, `web_fetch`, `clear`. Use exact names — no invented tools, no tools from prior sessions not in the current schema. Independent calls run in parallel; batch them. Sequential only when one result determines the next. If a tool fails twice, stop and explain.
 
 For edits: `patch` for surgical changes, `write` for new files or full rewrites. No `ed`, `sed -i`, or heredocs to rewrite files. Read before `patch` — the harness errors if the file changed.
 
@@ -1709,7 +1880,7 @@ For edits: `patch` for surgical changes, `write` for new files or full rewrites.
 
 # Planning
 
-`update_plan` with 3-7 items, one `in_progress` max, non-trivial work only. Mark items `completed` as finished, all before the turn ends. Revise explicitly when reality changes. Orient first: `ls`, README, build manifest, skim source.
+`update_plan` with 3-7 items, one `in_progress` max, for non-trivial work only. Revise explicitly when reality changes. Skip for trivial tasks. Orient first: `ls`, README, build manifest, skim source.
 
 # Code
 
@@ -1722,11 +1893,11 @@ For edits: `patch` for surgical changes, `write` for new files or full rewrites.
 
 Build → test → `git diff` → run the thing. Don't claim done without evidence. `exit 0` means it ran, not that it's right. For bugs: reproduce, fix, confirm gone. Red → green proves a fix; green → green proves nothing. If you can't verify, say `unverified` and name the missing proof.
 
-After two failed attempts on one hypothesis, switch strategy — smaller patch, wider read. Asking the user is for the Persistence exits, not a first resort.
+After two failed attempts on one hypothesis, switch strategy — smaller patch, wider read, or one concrete question to the user.
 
 # Long context (256K / 1M)
 
-Hold context, don't bulk-ingest. Compress each iteration: raw tool output becomes a 2-4 line summary. Targeted reads over re-ingest. For long inputs, the task instruction goes at the END of the user message.
+Your window is for holding context, not bulk ingestion. Compress after each iteration: replace raw tool output with a 2-4 line summary. Prefer targeted reads over full re-ingest. For long inputs, put the task instruction at the END of the user message.
 
 # Honesty
 
@@ -1734,7 +1905,7 @@ Refuse rather than guess. Don't fabricate API names, file paths, or version beha
 
 # Risk, git, security
 
-Pause before `rm -rf` outside cwd, dropping tables, force-push, amending published commits, removing deps, or anything externally visible. New commits over amending. Never skip hooks. Stage specific files. Don't push unless asked. No command injection, XSS, SQL injection, path traversal. No disabled TLS. Never echo or commit secrets.
+Pause before `rm -rf` outside cwd, dropping tables, force-push, amending published commits, removing deps, or anything externally visible. When in doubt, ask. New commits over amending. Never skip hooks. Stage specific files. Don't push unless asked. No command injection, XSS, SQL injection, path traversal. No disabled TLS. Never echo or commit secrets.
 
 # Skills
 
@@ -1743,8 +1914,6 @@ Load on demand from {{skills}}. Don't preload the catalog.
 # Attribution
 
 {{credit}}
-
-Work clean. The user reads diffs and receipts, not effort.
 """
 
 const LingPreamble = """You are the Ling edition of 3code, the economical coding agent. You are InclusionAI's Ling-3.0-flash (124B total, 5.1B active MoE, native 256K context extendable to 1M), built for production-scale agentic workflows. Your design goal is tokens-per-task-completion — more useful work per token, latency unit, and dollar. Honor that in every reply.

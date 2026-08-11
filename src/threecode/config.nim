@@ -633,6 +633,7 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("arcee",       "https://conductor.arcee.ai/v1"),
   ("baseten",     "https://inference.baseten.co/v1"),
   ("cerebras",    "https://api.cerebras.ai/v1"),
+  ("cheaperinference", "https://api.cheaperinference.com/v1"),
   ("deepinfra",   "https://api.deepinfra.com/v1/openai"),
   ("deepseek",    "https://api.deepseek.com/v1"),
   ("fireworks",   "https://api.fireworks.ai/inference/v1"),
@@ -666,6 +667,7 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("scaleway",    "https://api.scaleway.ai/v1"),
   ("together",    "https://api.together.xyz/v1"),
   ("together-eu", "https://eu.api.together.xyz/v1"),
+  ("venice",      "https://api.venice.ai/api/v1"),
   ("xai",         "https://api.x.ai/v1"),
   ("zai",         "https://api.z.ai/api/paas/v4"),
   ("zaicode",     "https://api.z.ai/api/coding/paas/v4"),
@@ -693,8 +695,10 @@ const KeyPrefixCatalog*: seq[(string, string)] = @[
   ("nvapi-",   "nvidia"),
   ("fw_",      "fireworks"),
   ("csk-",     "cerebras"),
+  ("ir_live_", "cheaperinference"),
   ("tgp_",     "together"),
   ("AIza",     "google"),
+  ("VENICE_",  "venice"),
 ]
 
 proc inferProvider*(key: string): string =
