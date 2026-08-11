@@ -145,6 +145,14 @@ sambanova, and deepinfra as a hosted alternative.
 
 `nebius <https://tokenfactory.nebius.com/>`_ - The EU-resident runner up. Only has GLM 5.1, not 5.2, but still a great choice if if tensorx isn't available.
 
+`xAI <https://console.x.ai>`_ - First-party API for the Grok family (grok-4.5,
+grok-4.3, grok-4.20, grok-build-0.1). SuperGrok and X Premium subscriptions do
+not include API access: billing is fully separate, and there is no OAuth flow,
+so you mint an API key at console.x.ai (keys start with `xai-`, which the
+setup wizard recognizes). The API is OpenAI-compatible and exposes a graded
+`reasoning_effort` knob: low/medium/high on all models, with 4.20 also
+accepting off. Prompt caching is server-side; 3code benefits automatically on
+repeat turns.
 
 Add a provider inside the REPL:
 
@@ -271,13 +279,14 @@ At the time of writing that's these
 | zai | glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2 |
 | deepinfra | GLM-5.1 GLM-5 GLM-4.7 GLM-4.7-Flash GLM-5.2 gpt-oss-120b gpt-oss-20b DeepSeek-V4-Pro DeepSeek-V4-Flash DeepSeek-V3.2 MiniMax-M2.5 MiniMax-M2.7 MiniMax-M3 Kimi-K2.6 Kimi-K2.5 Hy3 |
 | novita | glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2 gpt-oss-20b gpt-oss-120b deepseek-v3.2 deepseek-v4-flash deepseek-v4-pro minimax-m2.5 minimax-m2.7 minimax-m2.7-highspeed minimax-m3 kimi-k2.5 kimi-k2.6 hy3 |
-| openrouter | glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2 gpt-oss-120b gpt-oss-20b deepseek-chat deepseek-v3.2 deepseek-v4-flash deepseek-v4-pro minimax-m2.5 minimax-m2.7 minimax-m3 kimi-k2.5 kimi-k2.6 hy3:free hy3 |
+| openrouter | glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2 gpt-oss-120b gpt-oss-20b deepseek-chat deepseek-v3.2 deepseek-v4-flash deepseek-v4-pro minimax-m2.5 minimax-m2.7 minimax-m3 kimi-k2.5 kimi-k2.6 hy3:free hy3 grok-4.5 grok-4.5-latest grok-4.3 grok-4.20 grok-4.20-reasoning grok-4.20-multi-agent grok-build-0.1 |
 | groq | gpt-oss-120b gpt-oss-20b |
 | ovh | gpt-oss-120b gpt-oss-20b |
 | sambanova | gpt-oss-120b DeepSeek-V3.2 MiniMax-M2.7 MiniMax-M2.5 |
 | deepseek | deepseek-chat deepseek-reasoner deepseek-v4-flash deepseek-v4-pro |
 | minimax | MiniMax-M3 MiniMax-M2.7 MiniMax-M2.7-highspeed MiniMax-M2.5 |
 | longcat | LongCat-2.0 |
+| xai | grok-4.5 grok-4.5-latest grok-4.3 grok-4.3-latest grok-build-0.1 grok-4.20 grok-4.20-reasoning grok-4.20-multi-agent |
 
 ## Sessions
 
