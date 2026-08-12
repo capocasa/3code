@@ -3,7 +3,7 @@ import threecode/sandbox as sb
 import sandwall/wall as sw
 
 ## Fenced-bash wiring: proxy env helper, per-run proxy lifecycle, and
-## an end-to-end netns launch through `3code wall`. POSIX only; the e2e
+## an end-to-end netns launch through `3code sandbox`. POSIX only; the e2e
 ## self-skips when the kernel can't unshare a netns.
 
 const binName = when defined(windows): "3code.exe" else: "3code"
@@ -37,7 +37,7 @@ suite "wall proxy lifecycle":
     defer:
       sb.stopWall()
       removeDir(dir)
-    writeFile(dir / ".wallrc", "deny /\nallow\nallow 127.0.0.1\n")
+    writeFile(dir / ".sandboxrc", "deny /\nallow\nallow 127.0.0.1\n")
     sb.current = sb.loadPolicy(dir)
     check sb.wallProxyNeeded(sb.current)
     sb.active = true
@@ -55,7 +55,7 @@ suite "wall proxy lifecycle":
     # reload propagation: rewrite the repo policy, sync, proxy file changes
     let polFile = sb.wallProxyDir / "policy"
     let before = readFile(polFile)
-    writeFile(dir / ".wallrc", "deny /\nallow\nallow 127.0.0.1\nallow example.com\n")
+    writeFile(dir / ".sandboxrc", "deny /\nallow\nallow 127.0.0.1\nallow example.com\n")
     sb.syncWallProxyPolicy(dir)
     let after = readFile(polFile)
     check after != before
@@ -88,7 +88,7 @@ when defined(linux):
       # probe: fenced `true` succeeds only when netns works
       let probeEnv = {"WALL_PROXY_PORT": port,
         "WALL_PROXY_SOCK": dir / "proxy.sock"}.newStringTable
-      let probe = startProcess(binPath(), args = ["box", "--policy", pol,
+      let probe = startProcess(binPath(), args = ["sandbox", "--policy", pol,
         "restrict", "--", "true"], env = probeEnv,
         options = {poStdErrToStdOut})
       let probeOk = probe.waitForExit(15_000) == 0
@@ -100,7 +100,7 @@ when defined(linux):
         # 1. direct TCP from inside the netns to the host echo server
         # must fail: the netns loopback has no echo server.
         # bash, not sh: /dev/tcp is a bashism (dash on CI lacks it).
-        let r1 = execCmdEx(binPath() & " box --policy " & pol.quoteShell &
+        let r1 = execCmdEx(binPath() & " sandbox --policy " & pol.quoteShell &
           " restrict -- bash -c " &
           "'exec 3<>/dev/tcp/127.0.0.1/" & $int(echoPort) & "' </dev/null",
           env = probeEnv, options = {poDaemon})
@@ -116,7 +116,7 @@ when defined(linux):
         # poDaemon: the bridge inherits the box stdout pipe, so
         # execCmdEx would wait for pipe EOF (bridge exit) after sh is
         # done; poDaemon detaches the grandchildren instead.
-        let p2 = startProcess(binPath(), args = ["box", "--policy", pol,
+        let p2 = startProcess(binPath(), args = ["sandbox", "--policy", pol,
           "restrict", "--", "bash", "-c",
           "exec 3<>/dev/tcp/127.0.0.1/" & port &
           "; printf \"CONNECT 127.0.0.1:" & $int(echoPort) &
@@ -163,7 +163,7 @@ when defined(linux):
         let script3 = "'exec 3<>/dev/tcp/127.0.0.1/" & port &
           "; printf \"CONNECT denied.example:443 HTTP/1.1\\r\\n\\r\\n\" >&3" &
           "; head -c 20 <&3'"
-        let r3 = execCmdEx(binPath() & " box --policy " & pol.quoteShell &
+        let r3 = execCmdEx(binPath() & " sandbox --policy " & pol.quoteShell &
           " restrict -- bash -c " & script3 & " </dev/null", env = probeEnv,
           options = {poDaemon})
         check "403" in r3.output

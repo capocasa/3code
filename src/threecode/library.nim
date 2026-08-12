@@ -1,7 +1,7 @@
 ## Library API: embed 3code in another program.
 ##
 ## This module is the headless frontend. It runs the same agent loop the
-## CLI runs (same `runTurns`, same tools, same wall, same `.3log`
+## CLI runs (same `runTurns`, same tools, same sandbox, same `.3log`
 ## sessions) with the terminal replaced by plain return values and
 ## callbacks. A web server, GUI, or batch script drives a session with
 ## three procs:
@@ -26,7 +26,7 @@
 ##
 ## Everything is blocking; the library manages its own threads internally.
 ## One live `AgentSession` per process: stream hooks, the interrupt flag,
-## and the config/wall globals are process-wide, and `close` restores
+## and the config/sandbox globals are process-wide, and `close` restores
 ## them. `prompt`/`command` on one session are not thread-safe; serialize
 ## calls (one worker thread per session is the intended shape).
 
@@ -60,7 +60,7 @@ type
     ## cwd; empty `sessionPath` picks a fresh timestamped path (or the
     ## resolved resume target).
     model*: string        ## PROVIDER[.MODEL], overrides config default
-    cwd*: string          ## working dir for tools and the wall policy
+    cwd*: string          ## working dir for tools and the sandbox policy
     resumeId*: string     ## session id (or "" with `resume` for latest)
     resume*: bool         ## resume the latest session for `cwd`
     sessionPath*: string  ## explicit .3log path for a new session
@@ -146,21 +146,21 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
 
   materializeBuiltinSkills()
 
-  # Config first (it reads `[settings] wall = off`), then the
-  # wall: same single-file policy as the CLI. Paths resolve
+  # Config first (it reads `[settings] sandbox = off`), then the
+  # sandbox: same single-file policy as the CLI. Paths resolve
   # against the session cwd so the policy follows the project.
   subscriptionTokenForImpl = auth_xai.subscriptionTokenFor
   api.bearerHook = subscriptionBearer
 
   var colorKeys: Table[string, string]
   (activeCurrent, activeProviders, colorKeys) = loadStateOrEmpty(configPath())
-  if wallEnabled:
+  if sandboxEnabled:
     discard sandbox.ensureUserPolicy()
     sandbox.current = sandbox.loadPolicy(cwd)
     sandbox.active = true
-    sandbox.wallExe = sandbox.findWallExe()
-    if not sandbox.backendWorks(sandbox.wallExe):
-      sandbox.wallExe = ""
+    sandbox.procboxExe = sandbox.findProcbox()
+    if not sandbox.backendWorks(sandbox.procboxExe):
+      sandbox.procboxExe = ""
 
   var s = AgentSession()
   s.editor = minline.initEditor(historyFile = "")
@@ -274,7 +274,7 @@ proc promptAsync*(s: AgentSession; text: string): Thread[TurnJob] =
   createThread(result, promptThread, TurnJob(s: s, text: text))
 
 proc command*(s: AgentSession; cmd: string): string =
-  ## Run a colon command (`:tokens`, `:model ...`, `:wall show`, ...)
+  ## Run a colon command (`:tokens`, `:model ...`, `:sandbox show`, ...)
   ## exactly as the REPL would and return its plain-text body. Modal
   ## commands that need an interactive terminal (`:provider add/edit`)
   ## return an error string. `:quit` raises `AgentError` — quitting is

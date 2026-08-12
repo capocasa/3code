@@ -338,31 +338,31 @@ export DEBIAN_FRONTEND=noninteractive
   var p =
     when defined(posix):
       let wrapped = &"exec sh \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
-      # Wall: when the global wall is active, re-exec *this* binary
-      # as `3code wall restrict ...` so it forks, setsid()s, applies the
-      # OS-native restriction (Landlock/Seatbelt), and exec()s sh. wall
-      # calls setsid() itself before exec, so the sh process is its own
+      # Sandbox: when the global sandbox is active, re-exec *this* binary
+      # as `3code sandbox restrict ...` so it forks, setsid()s, applies the
+      # OS-native restriction (Landlock/Seatbelt), and exec()s sh. box calls
+      # setsid() itself before exec, so the sh process is its own
       # session/group leader and the cancel/timeout signal-the-pgroup path
-      # still works: we signal wall's pid (== sh's pid after exec), the
-      # group leader. The backend is compiled in, so `wallExe` is just
-      # our own path and is always set when `active`; the unconfined setsid
-      # fallback below only runs when the wall is off entirely.
-      if wallEnabled and sandbox.active and sandbox.wallExe.len > 0 and
+      # still works: we signal box's pid (== sh's pid after exec), the group
+      # leader. The backend is compiled in, so `procboxExe` is just our own
+      # path and is always set when `active`; the unconfined setsid fallback
+      # below only runs when the sandbox is off entirely.
+      if sandboxEnabled and sandbox.active and sandbox.procboxExe.len > 0 and
           not sandbox.gathering:
-        # The wall subprocess loads the policy files itself (--policy), so
+        # The box subprocess loads the policy files itself (--policy), so
         # every launch enforces the freshest file contents; no mtime
         # plumbing needed here. The script + stdin live in a temp dir
         # under getTempDir(); expose it read-only (sh only reads the
         # script, it never writes there). The policy force-read-only and
-        # Landlock writability warning live in wall.nim.
+        # Landlock writability warning live in box.nim.
         discard sandbox.reloadIfChanged(getCurrentDir())
         let policy = sandbox.activePolicyPath(getCurrentDir())
-        var args = @["wall"]
+        var args = @["sandbox"]
         args.add ["--policy", policy]
         args.add "restrict"
         # No explicit writable paths: those come from the policy
-        # inside wall (a fully-locked policy simply yields none, which
-        # wall accepts). The script temp dir is read-only; sh only reads
+        # inside box (a fully-locked policy simply yields none, which
+        # box accepts). The script temp dir is read-only; sh only reads
         # the script, never writes there.
         args.add ["--ro", tmp]
         args.add "--"
@@ -379,10 +379,10 @@ export DEBIAN_FRONTEND=noninteractive
         when defined(posix):
           sandbox.moveWallSock(tmp)
           if sandbox.ensureWallProxy(getCurrentDir()):
-            # wall args: swap the --ro tmp for a writable tmp so the
+            # box args: swap the --ro tmp for a writable tmp so the
             # bridge can connect() the unix socket inside the netns.
             args = @[]
-            args.add "wall"
+            args.add "sandbox"
             args.add ["--policy", policy]
             args.add "restrict"
             args.add tmp
@@ -392,18 +392,18 @@ export DEBIAN_FRONTEND=noninteractive
             args.add wrapped
             env = newStringTable()  # case-sensitive on posix; env names differ by case
             for k, v in envPairs(): env[k] = v
-            for (k, v) in sandbox.wallEnv(sandbox.wallExe,
+            for (k, v) in sandbox.wallEnv(sandbox.procboxExe,
                 $int(sandbox.wallProxyPort()), sandbox.proxySockPath(),
                 getEnv("GIT_SSH_COMMAND", "")):
               env[k] = v
-        startProcess(sandbox.wallExe, args = args, env = env,
+        startProcess(sandbox.procboxExe, args = args, env = env,
                      options = {poStdErrToStdOut, poUsePath})
       else:
         # Unconfined path: sandbox off, no backend, or gather mode.
         # Gather mode additionally records the bash working dir as an
         # `allow` rule: inside the project that is already allowed (a
         # no-op rule), outside it opens the dir the command ran in.
-        if wallEnabled and sandbox.active and
+        if sandboxEnabled and sandbox.active and
             sandbox.gathering:
           sandbox.gatherRecordBash(getCurrentDir())
         let setsidExe = findExe("setsid")
@@ -421,7 +421,7 @@ export DEBIAN_FRONTEND=noninteractive
       # wall/wfp.nim), set up once via `3code wall setup-windows`. With
       # host rules but no setup, bash runs unfenced - warn once per run
       # unless `[settings] sandbox_wall_warn = off`.
-      if wallWarn and not wallWarnShown and
+      if sandboxWallWarn and not wallWarnShown and
           sandbox.active and sandbox.wallProxyNeeded(sandbox.current):
         wallWarnShown = true
         when defined(windows):
@@ -491,17 +491,23 @@ export DEBIAN_FRONTEND=noninteractive
       rawOut.add "\n"
     return (rawOut, 124, cap)
 
+  # Gather mode ran bash unconfined: scan the output for tool-reported
+  # denials (a path in an EACCES message, a host in a connect failure)
+  # and append a targeted allow rule per hit. Never a broad grant.
+  if sandboxEnabled and sandbox.active and sandbox.gathering:
+    sandbox.gatherScanBashOutput(rawOut)
+
   # Sandbox denial hint: a sandboxed command cannot tell EPERM from the
   # kernel sandbox apart from a plain filesystem permission problem, so
   # a bare "Permission denied" would send the agent retrying blindly.
   # When the policy is enforced and the output smells like EACCES,
   # append a pointer at the policy file. OSError messages are appended
   # after the command's own output, so the hint lands at the end.
-  if code != 0 and wallEnabled and sandbox.active and
+  if code != 0 and sandboxEnabled and sandbox.active and
       not sandbox.gathering and
       ("Permission denied" in rawOut or "Operation not permitted" in rawOut):
     if rawOut.len > 0 and not rawOut.endsWith("\n"):
       rawOut.add "\n"
-    rawOut.add "wall deny, see " & sandbox.sandboxPathInCwd() & "\n"
+    rawOut.add "sandbox deny, see " & sandbox.sandboxPathInCwd() & "\n"
 
   return (rawOut, code, cap)

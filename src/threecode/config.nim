@@ -255,9 +255,9 @@ type
 
 const
   PermittedSections = ["settings", "search", "colors", "provider"]
-  SettingsKeys = ["current", "notify", "streaming", "wall",
-                  "wall_enabled", "patient_retry", "patient-retry",
-                  "wall_warn",
+  SettingsKeys = ["current", "notify", "streaming", "sandbox",
+                  "sandbox_enabled", "patient_retry", "patient-retry",
+                  "sandbox_wall_warn",
                   "tone", "mode", "bash_path", "bash-path",
                   "auto_update"]
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
@@ -307,9 +307,9 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
         return &"{path}:{ent.line}: unknown search engine '{ent.value}' " &
                "(expected one of: exa, parallel, brave)"
     of "settings":
-      if ent.key in ["notify", "streaming", "wall", "wall_enabled",
+      if ent.key in ["notify", "streaming", "sandbox", "sandbox_enabled",
                       "patient_retry", "patient-retry",
-          "wall_warn"] and
+          "sandbox_wall_warn"] and
           ent.value.strip.toLowerAscii notin BoolValues:
         return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
                "(expected on/off/true/false/yes/no/1/0)"
@@ -386,13 +386,13 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           of "on", "true", "yes", "1": streamingEnabled = true
           of "off", "false", "no", "0": streamingEnabled = false
           else: discard
-        of "wall", "wall_enabled":
+        of "sandbox", "sandbox_enabled":
           # Same boolean dialect as `notify`/`streaming`. Default on; an
-          # explicit `off` disables wall enforcement entirely (bash runs
+          # explicit `off` disables sandbox enforcement entirely (bash runs
           # unconfined, in-process checks pass through).
           case v.toLowerAscii
-          of "on", "true", "yes", "1": wallEnabled = true
-          of "off", "false", "no", "0": wallEnabled = false
+          of "on", "true", "yes", "1": sandboxEnabled = true
+          of "off", "false", "no", "0": sandboxEnabled = false
           else: discard
         of "patient_retry", "patient-retry":
           # Same boolean dialect. Default on; an explicit `off` makes
@@ -402,12 +402,12 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           of "on", "true", "yes", "1": patientRetryEnabled = true
           of "off", "false", "no", "0": patientRetryEnabled = false
           else: discard
-        of "wall_warn":
+        of "sandbox_wall_warn":
           # Silences only the Windows "wall not set up" warning; the
           # fence itself is unaffected.
           case v.toLowerAscii
-          of "on", "true", "yes", "1": wallWarn = true
-          of "off", "false", "no", "0": wallWarn = false
+          of "on", "true", "yes", "1": sandboxWallWarn = true
+          of "off", "false", "no", "0": sandboxWallWarn = false
           else: discard
         of "tone", "mode":
           # `auto` detects the background (default); `dark`/`light` force a
@@ -479,12 +479,12 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "streaming = \"off\"\n"
   if not notifyEnabled:
     buf.add "notify = \"off\"\n"
-  if not wallEnabled:
-    buf.add "wall = \"off\"\n"
+  if not sandboxEnabled:
+    buf.add "sandbox = \"off\"\n"
   if not patientRetryEnabled:
     buf.add "patient_retry = \"off\"\n"
-  if not wallWarn:
-    buf.add "wall_warn = \"off\"\n"
+  if not sandboxWallWarn:
+    buf.add "sandbox_wall_warn = \"off\"\n"
   # Persist the colour tone only when it differs from `auto` (the default).
   if colorModePref != cmAuto:
     let label = if colorModePref == cmDark: "dark" else: "light"

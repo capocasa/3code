@@ -20,13 +20,13 @@ var notifyEnabled*: bool = true
   ## When true, a native desktop notification fires when a turn ends.
   ## Default on. Toggled at runtime via `:notify on/off`, persisted in
   ## `[settings]`; an explicit `off` opts out.
-var wallEnabled*: bool = true
-  ## When true, every tool call is confined to the wall
-  ## (the single active policy: repo `.wallrc`, else
-  ## `~/.config/3code/wallrc`). When false, bash runs
+var sandboxEnabled*: bool = true
+  ## When true, every tool call is confined to the filesystem sandbox
+  ## (the single active policy: repo `.sandboxrc`, else
+  ## `~/.config/3code/sandboxrc`). When false, bash runs
   ## unconfined and the in-process read/write/patch checks pass through.
-  ## Default on, preserving the historical walled behavior. Toggled
-  ## at runtime via `:wall on/off`, persisted in `[settings]`.
+  ## Default on, preserving the historical sandboxed behavior. Toggled
+  ## at runtime via `:sandbox on/off`, persisted in `[settings]`.
 var patientRetryEnabled*: bool = true
   ## Patient retry. When true, retryable API failures (429, 5xx, network
   ## errors) keep retrying on one shared exponential curve capped at 2048s,
@@ -36,10 +36,10 @@ var patientRetryEnabled*: bool = true
   ## ramp-up (~1min) instead of entering the long patient hold. Default on.
   ## Toggled at runtime via `:retry on/off`, persisted in `[settings]` as
   ## `patient_retry`.
-var wallWarn*: bool = true
+var sandboxWallWarn*: bool = true
   ## When true, a policy with host rules on Windows without the wall
   ## setup (`3code wall setup-windows`) prints a one-time warning that
-  ## bash runs unfenced. Default on; `[settings] wall_warn =
+  ## bash runs unfenced. Default on; `[settings] sandbox_wall_warn =
   ## off` silences it.
 
 type

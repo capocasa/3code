@@ -1,4 +1,4 @@
-## Filesystem sandbox: policy loading, mtime reload, `3code wall` driver.
+## Filesystem sandbox: policy loading, mtime reload, `3code sandbox` driver.
 ##
 ## The policy file format, parser, and rule model live in sandwall
 ## (`sandwall/rules`); this module is the 3code-specific wrapper: which
@@ -14,10 +14,10 @@
 ## grammar.
 ##
 ## There is exactly one active policy file, never a cascade: the repo
-## file `.wallrc` when it exists, else the user file
-## `~/.config/3code/wallrc`. The user file is initialized from the
-## built-in default on first run, so the wall is always on. A
-## `:wall allow|readonly|deny` edit materializes the repo file by
+## file `.sandboxrc` when it exists, else the user file
+## `~/.config/3code/sandboxrc`. The user file is initialized from the
+## built-in default on first run, so the sandbox is always on. A
+## `:sandbox allow|readonly|deny` edit materializes the repo file by
 ## copying the user file first, so project rules start from the user's
 ## baseline instead of from scratch.
 ##
@@ -25,10 +25,10 @@
 ## since the last load; it runs before every restricted operation
 ## (in-process read/write/patch checks and bash launches). The bash
 ## subprocess additionally loads the policy file itself
-## (`3code wall --policy`), so a launch always enforces the freshest
+## (`3code sandbox --policy`), so a launch always enforces the freshest
 ## file contents even between parent reloads.
 
-import std/[os, osproc, strutils, times]
+import std/[os, osproc, re, strutils, times]
 from std/posix import kill, Pid
 import sandwall
 when defined(posix):
@@ -42,9 +42,9 @@ export sandwall.AccessKind, sandwall.Rule,
        sandwall.Resolved
 
 const
-  PolicyFile* = ".wallrc"
+  PolicyFile* = ".sandboxrc"
     ## The repo-level policy file, directly in the project root.
-  UserPolicyFile* = "wallrc"
+  UserPolicyFile* = "sandboxrc"
     ## The user-level policy file, next to the user config dir.
 
 type Policy* = seq[Rule]
@@ -86,20 +86,20 @@ var
     ## empty and every check allows.
   active*: bool = false
     ## False means no policy was loaded and bash runs unrestricted.
-  wallExe*: string = ""
-    ## Path to the binary to exec for `wall restrict` (this one).
+  procboxExe*: string = ""
+    ## Path to the binary to exec for `sandbox restrict` (this one).
   lastMtime: Time
 
 var gathering*: bool = false
-  ## Gather mode (`:wall gather on|off`): would-be denials are
+  ## Gather mode (`:sandbox gather on|off`): would-be denials are
   ## allowed and recorded as `allow` rules in the repo policy file
   ## instead. In-memory only: the toggle is a REPL command, so it does
   ## not need to survive a restart or be visible to subprocesses.
 
 proc ensureUserPolicy*(): bool =
-  ## Create `~/.config/3code/wallrc` from the built-in default when
+  ## Create `~/.config/3code/sandboxrc` from the built-in default when
   ## absent. Runs at every launch so the user file is always there to
-  ## fall back to (and to copy from on the first `:wall` edit).
+  ## fall back to (and to copy from on the first `:sandbox` edit).
   let path = systemPolicyPath()
   if fileExists(path): return true
   try:
@@ -110,7 +110,7 @@ proc ensureUserPolicy*(): bool =
   fileExists(path)
 
 proc activePolicyPath*(projectDir: string): string =
-  ## The one policy file in effect: the repo `.wallrc` when it
+  ## The one policy file in effect: the repo `.sandboxrc` when it
   ## exists, else the user file. Never both.
   let repo = repoPolicyPath(projectDir)
   if fileExists(repo): repo else: systemPolicyPath()
@@ -240,7 +240,7 @@ when defined(posix):
       try: removeDir(path)
       except CatchableError: discard
 
-proc findWallExe*(): string =
+proc findProcbox*(): string =
   ## The sandwall CLI is built into 3code as the `box` subcommand, so the
   ## "sandbox binary" the bash tool re-execs is just this process. Return
   ## its own path; empty only if it can't be resolved (shouldn't happen).
@@ -252,9 +252,9 @@ proc findWallExe*(): string =
 proc backendWorks*(exe: string): bool =
   ## Probe whether the OS-native sandbox backend (Landlock/Seatbelt/ACL)
   ## can actually restrict on this host. Re-execs this binary as
-  ## `wall restrict <tmpdir> -- true`; success means the kernel applies the
+  ## `sandbox restrict <tmpdir> -- true`; success means the kernel applies the
   ## domain. Fails on kernels built without Landlock, runners under a
-  ## seccomp filter that blocks the syscall, etc. Callers clear `wallExe`
+  ## seccomp filter that blocks the syscall, etc. Callers clear `procboxExe`
   ## when this returns false so the bash tool falls back to the unconfined
   ## setsid path rather than failing every bash command.
   if exe.len == 0: return false
@@ -265,7 +265,7 @@ proc backendWorks*(exe: string): bool =
     # traceback never leaks into the parent's output, which would trip
     # tests that assert no "unhandled exception" appears.
     let (outp, code) = execCmdEx(
-      quoteShell(exe) & " wall restrict " & quoteShell(tmp) &
+      quoteShell(exe) & " sandbox restrict " & quoteShell(tmp) &
         " -- true </dev/null >/dev/null 2>&1")
     discard outp
     result = code == 0
@@ -316,7 +316,7 @@ proc resolveRawPath(p: string): string =
   try: absolutePath(q) except CatchableError: q
 
 
-proc gatherRecord(path: string)
+proc gatherRecord*(target: string; access: AccessKind = akWritable)
 
 proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason: string] =
   ## Check a raw (possibly relative) path against the current policy,
@@ -326,7 +326,7 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
   ## kernel level for bash. `needsWrite = false` allows read-only and
   ## writable; `true` requires writable. In gather mode a denial
   ## appends an `allow` rule to the repo policy and permits instead.
-  if not active or not wallEnabled: return (true, "")
+  if not active or not sandboxEnabled: return (true, "")
   discard reloadIfChanged(getCurrentDir())
   let resolved = resolveRawPath(path)
   if resolved.len == 0: return (true, "")
@@ -348,9 +348,9 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
       (false, "sandbox: " & resolved & " is denied by the policy (" & policyHint() & ")")
 
 proc ensureRepoPolicy*(dir: string): bool =
-  ## Materialize `dir/.wallrc` by copying the user file
-  ## (`~/.config/3code/wallrc`, itself initialized from the built-in
-  ## default when absent). Runs before the first `:wall
+  ## Materialize `dir/.sandboxrc` by copying the user file
+  ## (`~/.config/3code/sandboxrc`, itself initialized from the built-in
+  ## default when absent). Runs before the first `:sandbox
   ## allow|readonly|deny` edit (and gather-mode append) so project
   ## rules start from the user's baseline, not from scratch.
   let path = repoPolicyPath(dir)
@@ -367,7 +367,7 @@ proc renderSandbox*(p: Policy): string =
 
 proc appendRule*(sandboxFile, argPath: string; access: AccessKind): bool =
   ## Append a rule to the repo policy file, materializing it from the
-  ## user file first when absent. Used by `:wall allow|deny|readonly`.
+  ## user file first when absent. Used by `:sandbox allow|deny|readonly`.
   ## After appending, reload so the change is live for the next check.
   if not fileExists(sandboxFile):
     if not ensureRepoPolicy(sandboxFile.parentDir): return false
@@ -392,14 +392,89 @@ proc editPolicy*(sandboxFile: string): string =
   current = loadPolicy(getCurrentDir())
   "sandbox updated: edited " & sandboxFile
 
-proc gatherRecord(path: string) =
-  ## Live-append an `allow` rule for a path gather mode just permitted.
-  ## Failures are silent: gather mode never breaks a tool call.
+proc gatherRuleTarget(path: string): string =
+  ## The rule text for an absolute path: project-relative (`./...`)
+  ## when the path sits under the project dir, a `~/` home path when
+  ## under home, else the absolute path. The `./` prefix matters: a
+  ## bare relative target parses as a host, not a path.
+  let proj = try: absolutePath(getCurrentDir()).normalizedPath
+             except CatchableError: getCurrentDir()
+  let sep = when defined(windows): '\\' else: '/'
+  if sandwall.isPathUnder(path, proj):
+    let rel = path[proj.len .. ^1].strip(leading = true, trailing = false,
+                                         chars = {sep, '/'})
+    return if rel.len == 0: "." else: "./" & rel.replace(sep, '/')
+  let home = getHomeDir().normalizedPath
+  if home.len > 0 and sandwall.isPathUnder(path, home):
+    let rel = path[home.len .. ^1].strip(leading = true, trailing = false,
+                                         chars = {sep, '/'})
+    return "~/" & rel.replace(sep, '/')
+  path
+
+proc gatherRecord*(target: string; access: AccessKind = akWritable) =
+  ## Live-append a rule for a target gather mode just permitted: a path
+  ## (relativized by gatherRuleTarget) or a host[:port]. Failures are
+  ## silent: gather mode never breaks a tool call. A rule that already
+  ## covers the target (whatever its spelling) is left alone instead of
+  ## stacking a duplicate.
   if not ensureRepoPolicy(getCurrentDir()): return
-  discard sandwall.appendRule(sandboxPathInCwd(), path, akWritable)
+  let sf = sandboxPathInCwd()
+  if sandwall.classifyTarget(target) == rkHost:
+    let pol = loadPolicy(getCurrentDir())
+    try:
+      let (h, p) = sandwall.parseHost(target)
+      # Dedup against explicit host allow rules only. HostList.allows
+      # would report "allowed" for a policy with no allow rules at all
+      # (its deny-only default), which is the wall's shape, not ours.
+      for r in pol.resolve().hosts:
+        if r.access == akWritable and
+           (r.host == "*" or r.host == h or
+            (r.host.startsWith("*.") and h.endsWith(r.host[1 .. ^1]))) and
+           (r.port == 0 or r.port == p):
+          return
+    except ValueError: discard
+    discard sandwall.appendRule(sf, target, access)
+  else:
+    let pol = loadPolicy(getCurrentDir())
+    if pol.checkPath(target) == access: return
+    discard sandwall.appendRule(sf, gatherRuleTarget(target), access)
+  current = loadPolicy(getCurrentDir())
+  when defined(posix):
+    syncWallProxyPolicy(getCurrentDir())
 
 proc gatherRecordBash*(dir: string) =
   ## Bash runs unconfined in gather mode; record the directory the
   ## command runs in so an out-of-project bash cwd still gets a rule.
   ## Inside the project this is a no-op rule (already allowed).
   gatherRecord(dir)
+
+proc gatherScanBashOutput*(output: string) =
+  ## Intercept-based gather for bash: the command runs unconfined, so
+  ## the kernel reports nothing. Scan the output for the sandbox-shaped
+  ## denials a confined run would have produced - EACCES-style tool
+  ## errors naming a path (git reading ~/.gitconfig is the canonical
+  ## case) and network errors naming a host - and record an allow rule
+  ## per concrete target. Never a broad grant: each rule names exactly
+  ## the path or host the tool complained about.
+  for line in output.splitLines:
+    if "Permission denied" notin line and
+       "Operation not permitted" notin line and
+       "EACCES" notin line and
+       "Could not resolve host" notin line and
+       "Connection refused" notin line and
+       "Temporary failure in name resolution" notin line:
+      continue
+    for m in line.findAll(re"""([/~][^ '\"`:;,()]{2,})"""):
+      let p = resolveRawPath(m)
+      if p.len > 1 and p != "/" and
+         not p.startsWith("/dev") and not p.startsWith("/proc") and
+         not p.startsWith("/sys"):
+        if current.checkPath(p) != akWritable:
+          gatherRecord(p, akReadOnly)
+    # Any dotted token on an error line is a host candidate; the
+    # isValidHost filter drops lookalikes (filenames with dots are
+    # already handled by the path branch above and rarely match the
+    # hostname grammar).
+    for m in line.findAll(re"""[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+"""):
+      if sandwall.isValidHost(m):
+        gatherRecord(m)

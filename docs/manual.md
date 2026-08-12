@@ -92,7 +92,7 @@ nimble install https://github.com/capocasa/3code
 ```
 
 The binary needs Termux's OpenSSL for TLS (`pkg install openssl`).
-Notes: the Landlock wall and desktop notifications are not available
+Notes: the Landlock sandbox and desktop notifications are not available
 on Android; both degrade gracefully (in-process path checks still
 apply, notifications no-op). Auto-update is disabled — update with
 `nimble install` again or re-download the tarball.
@@ -380,30 +380,29 @@ This allows for long-running task completion of large chunks of work while prese
 
 Sub-agents are not supported because both research and user feedback says they are very expensive and bring unclear or negative benefits, so I consider it a feature that 3code doesn't have them. Use Cybernetic mode with worktrees instead.
 
-## Wall
+## Sandbox
 
-3code confines every tool call behind a filesystem wall you define. The
-wall is a plain text policy living in exactly one file at a time:
+3code confines every tool call to a filesystem sandbox you define. The
+sandbox is a plain text policy living in exactly one file at a time:
 
-1. **repo** - `.wallrc` in your project directory, when it exists.
-2. **user** - `~/.config/3code/wallrc`, next to your config,
+1. **repo** - `.sandboxrc` in your project directory, when it exists.
+2. **user** - `~/.config/3code/sandboxrc`, next to your config,
    otherwise.
 
 There is no cascade and no merging: the repo file wins outright, the
 user file is the fallback. The user file is created from the built-in
-default on first run, so the wall is always on and you can change
-what every project without its own `.wallrc` gets by editing that
+default on first run, so the sandbox is always on and you can change
+what every project without its own `.sandboxrc` gets by editing that
 one file. Yolo mode (everything writable) is fine but you have to ask
 for it explicitly.
 
-The wall is enforced two ways. Bash commands run through `3code wall
-restrict`, the built-in sandwall backend (Landlock on Linux, Seatbelt on
-macOS), which 3code re-execs itself as; the wall process loads the policy
-file itself, so every command launches on the freshest policy. The
-in-process read/write/patch tools check paths against the same policy
-(reloaded when the file changes) in the 3code process. Both layers run
-the same sandwall parser and rule model, so the rules you write apply
-uniformly.
+The sandbox is enforced two ways. Bash commands run through `3code sandbox`,
+the built-in sandwall sandbox (Landlock on Linux, Seatbelt on macOS), which
+3code re-execs itself as; the sandbox process loads the policy file itself,
+so every command launches on the freshest policy. The in-process
+read/write/patch tools check paths against the same policy (reloaded when
+the file changes) in the 3code process. Both layers run the same sandwall
+parser and rule model, so the rules you write apply uniformly.
 
 Host rules additionally drive the network wall: the first host rule in
 the effective policy switches on egress fencing for bash commands, which
@@ -416,9 +415,9 @@ one yourself. Denied connections fail with a proxy 403. On Windows the
 fence is keyed on a dedicated ``sandwall`` user and needs a one-time
 elevated ``3code wall setup-windows``; without it, host-rule policies
 print a warning and run unfenced (silence with
-``[settings] wall_warn = off``).
+``[settings] sandbox_wall_warn = off``).
 
-### The wall file
+### The sandbox file
 
 Each line is an access word, arbitrary whitespace, and a target. Lines run
 top to bottom; each line supersedes the ones above it for the target it
@@ -451,26 +450,20 @@ letter/digit  host rule: hostname, IPv4, or IPv6, optional ``:port``
 A bare word with no target means the project dir itself (``allow`` =
 writable project). Host rules (``allow api.example.com``,
 ``allow 1.2.3.4:8080``, ``allow *`` for no network restrictions) fence
-the network egress of walled bash commands through the wall proxy.
+the network egress of sandboxed bash commands through the wall proxy.
 
-On first run, 3code initializes `~/.config/3code/wallrc` with this
+On first run, 3code initializes `~/.config/3code/sandboxrc` with this
 default:
 
 ```
 deny /
 allow /tmp
-allow /var/tmp
 allow
-allow *
 ```
 
-The root is denied, the temp dirs and the project directory are
-writable, the network is open. System directories (`/usr`, `/bin`,
-`/etc`, ...) are read-only via the backend baseline. This is the safe
-default: the agent can read and write your project and scratch files,
-use `git` and `curl`, nothing else. On Windows the default grants the
-project dir and your user temp dir, with no host rules (which is what
-opens the network there).
+The root is denied, the system temp dir and the project directory are
+writable. This is the safe default: the agent can read and write your
+project and scratch files, nothing else.
 
 ### Yolo mode
 
@@ -502,57 +495,57 @@ root deny, the working-directory writable, and its own deny line - in that
 order - so the deny wins. Read the file bottom-up for the effective policy
 on any given path.
 
-### Editing the wall
+### Editing the sandbox
 
-The wall file is yours. Edit it directly in your editor, or use the
+The sandbox file is yours. Edit it directly in your editor, or use the
 REPL commands which append a rule and reload immediately:
 
 ```
-:wall show
-:wall allow /opt
-:wall readonly /var
-:wall deny ./secrets
-:wall on
-:wall off
+:sandbox show
+:sandbox allow /opt
+:sandbox readonly /var
+:sandbox deny ./secrets
+:sandbox on
+:sandbox off
 ```
 
-The first `allow`/`readonly`/`deny` in a project creates the `.wallrc`
+The first `allow`/`readonly`/`deny` in a project creates the `.sandboxrc`
 file by copying your user file, then appends the rule, so project rules
 start from your baseline and you have something concrete to version and
-share. `:wall off` disables
+share. `:sandbox off` disables
 enforcement entirely for the session (bash runs unconfined, in-process
-checks pass through); it persists in `[settings]` as `wall = off`. This
-is the only way to run without the wall short of editing the file.
+checks pass through); it persists in `[settings]` as `sandbox = off`. This
+is the only way to run without a sandbox short of editing the file.
 
-The agent never writes the wall file. If the model proposes a policy
+The agent never writes the sandbox file. If the model proposes a policy
 change, it edits a copy and you move it into place. This keeps the trust
-boundary entirely on your side: the wall is defined at prompt time, by
+boundary entirely on your side: the sandbox is defined at prompt time, by
 you, and the agent cannot weaken it. Gather mode (below) is the one
 exception, and you switch it on explicitly.
 
 ### Gather mode
 
-`:wall gather on` flips the wall into record mode: every would-be
+`:sandbox gather on` flips the sandbox into record mode: every would-be
 denial is allowed instead, and the path is appended live as an ``allow``
-rule to `.wallrc`. Run a normal working session, then
-`:wall gather off` - the policy file now covers everything the agent
+rule to `.sandboxrc`. Run a normal working session, then
+`:sandbox gather off` - the policy file now covers everything the agent
 actually needed. While gather mode is on, bash commands run unconfined
 (the kernel backends cannot observe-and-allow) and the working directory
 of each bash call is recorded. Denials are appended verbatim and
 un-deduped; review the file after a gather session. The toggle is
 in-memory: it resets when 3code exits.
 
-When enforcement is on and a walled bash command fails with
+When enforcement is on and a sandboxed bash command fails with
 ``Permission denied``, 3code appends a hint to the tool output pointing
-at the policy files, so the agent knows the wall (not the OS) denied
+at the policy files, so the agent knows the sandbox (not the OS) denied
 it and asks you instead of retrying blindly.
 
-### What gets walled
+### What gets sandboxed
 
-Bash commands, file reads, writes, and patches all consult the wall.
-Bash gets full kernel enforcement: the wall backend is compiled into
-3code (the `wall` subcommand), so every bash command is re-execed as
-`3code wall restrict ...` and a write outside the allowed paths fails with
+Bash commands, file reads, writes, and patches all consult the sandbox.
+Bash gets full kernel enforcement: the sandbox backend is compiled into
+3code (the `box` subcommand), so every bash command is re-execed as
+`3code sandbox restrict ...` and a write outside the allowed paths fails with
 ``Permission denied`` at the syscall level. No child process can escape.
 The read/write/patch tools also check paths in-process, so the
 higher-risk operations (mutating your files directly) stay guarded.
