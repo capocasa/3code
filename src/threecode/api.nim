@@ -1254,7 +1254,7 @@ proc applyGenerationDefaults*(p: Profile, body: JsonNode) =
   if d.temperature >= 0.0:
     body["temperature"] = %d.temperature
   if d.maxTokens > 0:
-    body["max_tokens"] = %d.maxTokens
+    body[maxTokensField(p)] = %d.maxTokens
 
 proc applyDeepseekReasoning(p: Profile, body: JsonNode) =
   ## DeepSeek's reasoning surface differs by serving stack. The
@@ -1669,6 +1669,12 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
   when providerStub:
     return callModelStub(p, messages, usage, lastPromptTokens, maxTokensOverride)
   debugOut "callModel start"
+  # gpt-family `pro` variants (gpt-5.5-pro, ...) are completions-only
+  # models; chat/completions 404s with "not a chat model". Fail fast so
+  # the picker surfaces a clear message instead of a retry storm.
+  if p.family == "gpt" and p.variant == "pro":
+    raise newHttpError(404, "", p.model & " is not a chat model; " &
+      "chat/completions rejects it, use a chat variant instead")
   if p.family == "deepseek":
     ensureReasoningField(messages)
   let wireMessages = stripInternalFields(messages)
@@ -1691,7 +1697,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
   applyStreamingOptions(p, body)
   applyGenerationDefaults(p, body)
   if maxTokensOverride > 0:
-    body["max_tokens"] = %maxTokensOverride
+    body[maxTokensField(p)] = %maxTokensOverride
   if p.reasoning.len > 0:
     applyReasoning(p, body)
   let bodyStr = sanitizeUtf8($body)
@@ -1939,7 +1945,7 @@ proc verifyBody*(p: Profile): string =
   $(%*{
     "model": p.model,
     "messages": [%*{"role": "user", "content": "ping"}],
-    "max_tokens": 1,
+    maxTokensField(p): 1,
     "stream": true
   })
 

@@ -49,6 +49,44 @@ suite "api request shaping":
     check "temperature" notin body
     check "max_tokens" notin body
 
+  test "gpt family sends max_completion_tokens, not max_tokens":
+    # OpenAI's post-4o chat lineup (o-series, gpt-5.x) rejects max_tokens
+    # outright; the budget field is max_completion_tokens.
+    var body = %*{"stream": true}
+    let p = Profile(name: "openai.gpt-5.6", family: "gpt", model: "gpt-5.6")
+
+    applyGenerationDefaults(p, body)
+
+    check body{"max_completion_tokens"}.getInt == 8192
+    check "max_tokens" notin body
+
+  test "family-less gpt model still sends max_completion_tokens":
+    # The wizard's verify ping builds a bare Profile (no family) for models
+    # the known-good table doesn't list yet; the budget field must still be
+    # derived from the model id so the ping doesn't 400 on max_tokens.
+    var body = %*{"stream": true}
+    let p = Profile(name: "openai.gpt-9.9", family: "", model: "gpt-9.9")
+
+    applyGenerationDefaults(p, body)
+
+    # No known-good row, so no budget at all; the field name choice is what
+    # verifyBody exercises. Check it directly there.
+    check "max_tokens" notin body
+    check "max_completion_tokens" notin body
+    let vb = parseJson(verifyBody(p))
+    check vb{"max_completion_tokens"}.getInt == 1
+    check "max_tokens" notin vb
+
+  test "gpt-oss family keeps plain max_tokens":
+    var body = %*{"stream": true}
+    let p = Profile(name: "openai.gpt-oss-120b", family: "gpt-oss",
+                    model: "gpt-oss-120b")
+
+    applyGenerationDefaults(p, body)
+
+    check body{"max_tokens"}.getInt == 8192
+    check "max_completion_tokens" notin body
+
   test "kimi combos send Moonshot's calibrated temperature":
     var body = %*{"stream": true}
     let p = Profile(name: "together.moonshotai/Kimi-K2.6", family: "kimi",

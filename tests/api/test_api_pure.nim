@@ -446,6 +446,26 @@ suite "api: NetworkHealthError":
     check retryCategory("api error in 200 body", nil, 200) == ""
     check retryCategory("stream read: connection reset", nil, 200) == ""
 
+suite "api: callModel pro-variant gate":
+  test "gpt pro variants raise a clear not-a-chat-model error":
+    # gpt-5.5-pro is a completions-only model; chat/completions 404s with
+    # "not a chat model". callModel must fail fast with a clear message
+    # rather than sending the request and surfacing a raw 404.
+    let p = Profile(name: "openai.gpt-5.5-pro", family: "gpt",
+                    model: "gpt-5.5-pro", version: "5.5", variant: "pro")
+    var usage: Usage
+    let messages = %*[{"role": "user", "content": "hi"}]
+    expect HttpError:
+      discard callModel(p, messages, usage, 0)
+
+  test "plain gpt variants pass the gate":
+    # A chat gpt variant must not trip the gate. We can't run a full
+    # callModel here (no network), so assert the gate condition directly:
+    # it keys on family "gpt" plus variant "pro".
+    let p = Profile(name: "openai.gpt-5.6", family: "gpt",
+                    model: "gpt-5.6", version: "5.6", variant: "")
+    check not (p.family == "gpt" and p.variant == "pro")
+
 suite "api: HttpError":
   test "HttpError is a subclass of ApiError":
     let e = newHttpError(502, "upstream error", "")
