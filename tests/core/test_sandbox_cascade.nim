@@ -167,6 +167,87 @@ suite "policy reload (reloadIfChanged)":
       sandboxEnabled = savedEnabled
       sandbox.gathering = savedGathering
 
+  test "gather records project paths relative, home paths as ~/":
+    # Gather never writes a bare absolute path when a portable spelling
+    # exists: under the project dir becomes ./..., under $HOME ~/...
+    let (home, projDir) = newFixture("relat")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    let repoFile = repoPolicyPath(projDir)
+    writeFile(repoFile, "deny /\nallow ./\ndeny ./sub\n")
+    let wasActive = sandbox.active
+    let saved = sandbox.current
+    let savedEnabled = sandboxEnabled
+    let savedGathering = sandbox.gathering
+    let savedHome = getEnv("HOME")
+    sandbox.active = true
+    sandboxEnabled = true
+    try:
+      sandbox.current = sandbox.loadPolicy(projDir)
+      let oldCwd = getCurrentDir()
+      setCurrentDir(projDir)
+      putEnv("HOME", home)
+      try:
+        sandbox.gathering = true
+        # In-project denial (under a narrowing deny): recorded relative.
+        let inProj = (projDir / "sub" / "f.txt").normalizedPath
+        discard sandbox.checkRawPath(inProj, needsWrite = true)
+        check "allow ./sub/f.txt" in readFile(repoFile)
+        check inProj notin readFile(repoFile)
+        # Home path outside the project: recorded as ~/...
+        let inHome = (home / ".gitconfig").normalizedPath
+        discard sandbox.checkRawPath(inHome, needsWrite = true)
+        check "allow ~/.gitconfig" in readFile(repoFile)
+        check inHome notin readFile(repoFile)
+      finally:
+        setCurrentDir(oldCwd)
+        putEnv("HOME", savedHome)
+    finally:
+      sandbox.active = wasActive
+      sandbox.current = saved
+      sandboxEnabled = savedEnabled
+      sandbox.gathering = savedGathering
+
+  test "gather scan records denied paths and hosts from bash output":
+    # The bash intercept: an unconfined run's tool errors name exactly
+    # the targets a confined run would have been denied. Each becomes
+    # its own rule, never a broad grant.
+    let (home, projDir) = newFixture("scan")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    let repoFile = repoPolicyPath(projDir)
+    writeFile(repoFile, "deny /\nallow ./\n")
+    let wasActive = sandbox.active
+    let saved = sandbox.current
+    let savedEnabled = sandboxEnabled
+    sandbox.active = true
+    sandboxEnabled = true
+    try:
+      sandbox.current = sandbox.loadPolicy(projDir)
+      let oldCwd = getCurrentDir()
+      setCurrentDir(projDir)
+      try:
+        let fake = (home / ".gitconfig").normalizedPath
+        sandbox.gatherScanBashOutput(
+          "fatal: unable to read config file '" & fake & "': Permission denied\n" &
+          "ssh: Could not resolve hostname git.corp.example: Temporary failure in name resolution\n")
+        let text = readFile(repoFile)
+        check "readonly ~/.gitconfig" in text or ("readonly " & fake) in text
+        check "allow git.corp.example" in text
+        # Second scan of the same output appends nothing new.
+        let before = text
+        sandbox.gatherScanBashOutput(
+          "fatal: unable to read config file '" & fake & "': Permission denied\n")
+        check readFile(repoFile) == before
+      finally:
+        setCurrentDir(oldCwd)
+    finally:
+      sandbox.active = wasActive
+      sandbox.current = saved
+      sandboxEnabled = savedEnabled
+
   test "resolve surfaces narrowing denies (deny under an allow)":
     let s = parsePolicy("allow " & opt & "\ndeny " & opt / "locked" & "\n", proj)
     let r = s.resolve()

@@ -491,6 +491,12 @@ export DEBIAN_FRONTEND=noninteractive
       rawOut.add "\n"
     return (rawOut, 124, cap)
 
+  # Gather mode ran bash unconfined: scan the output for tool-reported
+  # denials (a path in an EACCES message, a host in a connect failure)
+  # and append a targeted allow rule per hit. Never a broad grant.
+  if sandboxEnabled and sandbox.active and sandbox.gathering:
+    sandbox.gatherScanBashOutput(rawOut)
+
   # Sandbox denial hint: a sandboxed command cannot tell EPERM from the
   # kernel sandbox apart from a plain filesystem permission problem, so
   # a bare "Permission denied" would send the agent retrying blindly.

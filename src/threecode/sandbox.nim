@@ -28,7 +28,7 @@
 ## (`3code sandbox --policy`), so a launch always enforces the freshest
 ## file contents even between parent reloads.
 
-import std/[os, osproc, strutils, times]
+import std/[os, osproc, re, strutils, times]
 from std/posix import kill, Pid
 import sandwall
 when defined(posix):
@@ -316,7 +316,7 @@ proc resolveRawPath(p: string): string =
   try: absolutePath(q) except CatchableError: q
 
 
-proc gatherRecord(path: string)
+proc gatherRecord*(target: string; access: AccessKind = akWritable)
 
 proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason: string] =
   ## Check a raw (possibly relative) path against the current policy,
@@ -392,14 +392,89 @@ proc editPolicy*(sandboxFile: string): string =
   current = loadPolicy(getCurrentDir())
   "sandbox updated: edited " & sandboxFile
 
-proc gatherRecord(path: string) =
-  ## Live-append an `allow` rule for a path gather mode just permitted.
-  ## Failures are silent: gather mode never breaks a tool call.
+proc gatherRuleTarget(path: string): string =
+  ## The rule text for an absolute path: project-relative (`./...`)
+  ## when the path sits under the project dir, a `~/` home path when
+  ## under home, else the absolute path. The `./` prefix matters: a
+  ## bare relative target parses as a host, not a path.
+  let proj = try: absolutePath(getCurrentDir()).normalizedPath
+             except CatchableError: getCurrentDir()
+  let sep = when defined(windows): '\\' else: '/'
+  if sandwall.isPathUnder(path, proj):
+    let rel = path[proj.len .. ^1].strip(leading = true, trailing = false,
+                                         chars = {sep, '/'})
+    return if rel.len == 0: "." else: "./" & rel.replace(sep, '/')
+  let home = getHomeDir().normalizedPath
+  if home.len > 0 and sandwall.isPathUnder(path, home):
+    let rel = path[home.len .. ^1].strip(leading = true, trailing = false,
+                                         chars = {sep, '/'})
+    return "~/" & rel.replace(sep, '/')
+  path
+
+proc gatherRecord*(target: string; access: AccessKind = akWritable) =
+  ## Live-append a rule for a target gather mode just permitted: a path
+  ## (relativized by gatherRuleTarget) or a host[:port]. Failures are
+  ## silent: gather mode never breaks a tool call. A rule that already
+  ## covers the target (whatever its spelling) is left alone instead of
+  ## stacking a duplicate.
   if not ensureRepoPolicy(getCurrentDir()): return
-  discard sandwall.appendRule(sandboxPathInCwd(), path, akWritable)
+  let sf = sandboxPathInCwd()
+  if sandwall.classifyTarget(target) == rkHost:
+    let pol = loadPolicy(getCurrentDir())
+    try:
+      let (h, p) = sandwall.parseHost(target)
+      # Dedup against explicit host allow rules only. HostList.allows
+      # would report "allowed" for a policy with no allow rules at all
+      # (its deny-only default), which is the wall's shape, not ours.
+      for r in pol.resolve().hosts:
+        if r.access == akWritable and
+           (r.host == "*" or r.host == h or
+            (r.host.startsWith("*.") and h.endsWith(r.host[1 .. ^1]))) and
+           (r.port == 0 or r.port == p):
+          return
+    except ValueError: discard
+    discard sandwall.appendRule(sf, target, access)
+  else:
+    let pol = loadPolicy(getCurrentDir())
+    if pol.checkPath(target) == access: return
+    discard sandwall.appendRule(sf, gatherRuleTarget(target), access)
+  current = loadPolicy(getCurrentDir())
+  when defined(posix):
+    syncWallProxyPolicy(getCurrentDir())
 
 proc gatherRecordBash*(dir: string) =
   ## Bash runs unconfined in gather mode; record the directory the
   ## command runs in so an out-of-project bash cwd still gets a rule.
   ## Inside the project this is a no-op rule (already allowed).
   gatherRecord(dir)
+
+proc gatherScanBashOutput*(output: string) =
+  ## Intercept-based gather for bash: the command runs unconfined, so
+  ## the kernel reports nothing. Scan the output for the sandbox-shaped
+  ## denials a confined run would have produced - EACCES-style tool
+  ## errors naming a path (git reading ~/.gitconfig is the canonical
+  ## case) and network errors naming a host - and record an allow rule
+  ## per concrete target. Never a broad grant: each rule names exactly
+  ## the path or host the tool complained about.
+  for line in output.splitLines:
+    if "Permission denied" notin line and
+       "Operation not permitted" notin line and
+       "EACCES" notin line and
+       "Could not resolve host" notin line and
+       "Connection refused" notin line and
+       "Temporary failure in name resolution" notin line:
+      continue
+    for m in line.findAll(re"""([/~][^ '\"`:;,()]{2,})"""):
+      let p = resolveRawPath(m)
+      if p.len > 1 and p != "/" and
+         not p.startsWith("/dev") and not p.startsWith("/proc") and
+         not p.startsWith("/sys"):
+        if current.checkPath(p) != akWritable:
+          gatherRecord(p, akReadOnly)
+    # Any dotted token on an error line is a host candidate; the
+    # isValidHost filter drops lookalikes (filenames with dots are
+    # already handled by the path branch above and rarely match the
+    # hostname grammar).
+    for m in line.findAll(re"""[a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+"""):
+      if sandwall.isValidHost(m):
+        gatherRecord(m)
