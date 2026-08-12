@@ -136,10 +136,12 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
 
     # deepseek
     ("baseten", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("baseten", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
     ("deepseek", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
     ("deepseek", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
     ("nebius", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
     ("together", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("together", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
     ("fireworks", "accounts/fireworks/models/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
     ("deepinfra", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
     ("novita", "deepseek/deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
@@ -396,6 +398,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("fireworks", "accounts/fireworks/models/minimax-m3", "minimax", "3", "", "on", 0.2, 8192, false, 1_000_000),
     ("tensorx", "deepseek/deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
     ("tensorx", "deepseek/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("tensorx", "deepseek/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
     ("tensorx", "minimax/minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, false, 204_800),
     ("tensorx", "minimax/minimax-m3", "minimax", "3", "", "on", 0.2, 8192, false, 1_000_000),
     ("tensorx", "moonshotai/kimi-k2.5", "kimi", "2", "5", "on", 0.6, 8192, false, 262_144),
