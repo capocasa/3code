@@ -127,6 +127,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openai", "gpt-5-nano", "gpt", "", "5-nano", "medium", 0.2, 4096, false, 400_000),
     ("openai", "gpt-5.4", "gpt", "", "5.4", "medium", 0.2, 8192, false, 400_000),
     ("openai", "gpt-5.4-mini", "gpt", "", "5.4-mini", "medium", 0.2, 4096, false, 400_000),
+    ("openai", "gpt-5.4-nano", "gpt", "", "5.4-nano", "medium", 0.2, 4096, false, 400_000),
     ("openai", "gpt-5.5", "gpt", "", "5.5", "medium", 0.2, 8192, false, 400_000),
     ("openai", "gpt-5.5-pro", "gpt", "", "5.5-pro", "high", 0.2, 8192, false, 400_000),
     ("openai", "gpt-5.6", "gpt", "", "5.6", "medium", 0.2, 8192, false, 400_000),
@@ -2417,6 +2418,28 @@ proc knownGoodReasoning*(provider, model: string): string =
     if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
       return combo.reasoning
   ""
+
+proc guessFamily*(model: string): string =
+  ## Heuristic family from a bare model id, for profiles built outside
+  ## `buildProfile` (the provider wizard's verification ping) where the
+  ## known-good table may not cover the model. The wizard lists ids it
+  ## fetched from `/models`; anything matching the gpt chat/reasoning
+  ## slug needs the `gpt` wire surface (max_completion_tokens, reasoning
+  ## effort) even when the exact version isn't curated yet.
+  let m = model.toLowerAscii
+  if m.startsWith("gpt-oss"): "gpt-oss"
+  elif m.startsWith("gpt-") or m.startsWith("o1") or m.startsWith("o3") or
+       m.startsWith("o4"):
+    "gpt"
+  else: ""
+
+proc maxTokensField*(p: Profile): string =
+  ## Name of the completion-budget field on the wire. OpenAI's post-4o
+  ## chat lineup (the `gpt` family: o-series, gpt-5.x) rejects `max_tokens`
+  ## outright and requires `max_completion_tokens`; every other family
+  ## (and the gpt-oss Codex models) takes plain `max_tokens`.
+  let fam = if p.family != "": p.family else: guessFamily(p.model)
+  if fam == "gpt": "max_completion_tokens" else: "max_tokens"
 
 proc knownGoodGeneration*(provider, model: string): GenerationDefaults =
   ## Hardcoded generation defaults for a known-good combo. Experimental

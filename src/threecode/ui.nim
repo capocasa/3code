@@ -215,7 +215,10 @@ proc verifyModels(name, url, key: string; models: seq[string]): VerifyResult =
   if wizardVerifyCancelHook == nil:
     # No cancel watcher (unit tests, non-tty): run inline.
     for i, m in models:
-      let prof = Profile(name: name & "." & m, url: url, key: key, model: m)
+      var (family, version, variant) = knownGoodTags(name, m)
+      if family == "": family = guessFamily(m)
+      let prof = Profile(name: name & "." & m, url: url, key: key, model: m,
+                         family: family, version: version, variant: variant)
       let (ok, err) = verifyProfile(prof)
       oks[i] = ok
       errs[i] = err
@@ -241,8 +244,11 @@ proc verifyModels(name, url, key: string; models: seq[string]): VerifyResult =
     for i, m in models:
       createThread(waiters[i], proc(arg: VerifyWorkerArg) {.thread, nimcall.} =
         {.cast(gcsafe).}:
+          var (family, version, variant) = knownGoodTags(arg.name, arg.m)
+          if family == "": family = guessFamily(arg.m)
           let prof = Profile(name: arg.name & "." & arg.m, url: arg.url,
-                             key: arg.key, model: arg.m)
+                             key: arg.key, model: arg.m, family: family,
+                             version: version, variant: variant)
           let (ok, err) = verifyProfile(prof)
           arg.oks[][arg.i] = ok
           arg.errs[][arg.i] = err

@@ -105,7 +105,7 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
   let body = %*{
     "model": p.model,
     "messages": payload,
-    "max_tokens": SummarizeMaxTokens,
+    maxTokensField(p): SummarizeMaxTokens,
     "stream": false
   }
   var status = 0
