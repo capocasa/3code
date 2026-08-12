@@ -339,7 +339,7 @@ export DEBIAN_FRONTEND=noninteractive
     when defined(posix):
       let wrapped = &"exec sh \"{scriptPath}\" <\"{stdinPath}\" 2>&1"
       # Sandbox: when the global sandbox is active, re-exec *this* binary
-      # as `3code box restrict ...` so it forks, setsid()s, applies the
+      # as `3code sandbox restrict ...` so it forks, setsid()s, applies the
       # OS-native restriction (Landlock/Seatbelt), and exec()s sh. box calls
       # setsid() itself before exec, so the sh process is its own
       # session/group leader and the cancel/timeout signal-the-pgroup path
@@ -357,7 +357,7 @@ export DEBIAN_FRONTEND=noninteractive
         # Landlock writability warning live in box.nim.
         discard sandbox.reloadIfChanged(getCurrentDir())
         let policy = sandbox.activePolicyPath(getCurrentDir())
-        var args = @["box"]
+        var args = @["sandbox"]
         args.add ["--policy", policy]
         args.add "restrict"
         # No explicit writable paths: those come from the policy
@@ -382,7 +382,7 @@ export DEBIAN_FRONTEND=noninteractive
             # box args: swap the --ro tmp for a writable tmp so the
             # bridge can connect() the unix socket inside the netns.
             args = @[]
-            args.add "box"
+            args.add "sandbox"
             args.add ["--policy", policy]
             args.add "restrict"
             args.add tmp

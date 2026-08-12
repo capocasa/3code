@@ -1,7 +1,7 @@
 ## `3code wall` - the network firewall subcommands.
 ##
 ## The wall half of sandwall ships as library code only; like `3code
-## box` for the filesystem, these are the trivial mains folded into the
+## sandbox` for the filesystem, these are the trivial mains folded into the
 ## 3code binary so nothing separate needs bundling. Dispatched before
 ## any other startup (threecode.nim): the proxy and connect children
 ## must not pay for TLS/config/session init.

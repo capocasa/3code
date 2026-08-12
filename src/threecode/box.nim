@@ -1,8 +1,8 @@
-## `3code box` - the filesystem sandbox subcommand.
+## `3code sandbox` (alias `3code sb`) - the filesystem sandbox subcommand.
 ##
 ## This is the sandwall CLI (`sandwall restrict ...`) folded into 3code so we
 ## ship one binary instead of two. The bash tool wraps each command as
-## `3code box --policy FILE restrict [--ro TMPDIR] -- sh -c
+## `3code sandbox --policy FILE restrict [--ro TMPDIR] -- sh -c
 ## <script>`: it re-execs *itself* (via `getAppFilename`), so there is no
 ## PATH lookup and no separate sandwall binary to find or bundle. The box
 ## process loads the policy files itself, forks, setsid()s, applies the
@@ -30,10 +30,12 @@ import sandwall
 import sandbox
 
 const usage = """
-3code box - filesystem sandbox (Landlock/Seatbelt/ACL)
+3code sandbox - filesystem sandbox (Landlock/Seatbelt/ACL)
 
 Usage:
-  3code box [--policy FILE ...] restrict [RWPATH ...] [--ro ROPATH ...] -- CMD [ARGS ...]
+  3code sandbox [--policy FILE ...] restrict [RWPATH ...] [--ro ROPATH ...] -- CMD [ARGS ...]
+
+  `3code sb` is a short alias for `3code sandbox`.
 
   Applies a sandbox allowing full access (read, write, create, delete,
   rename, execute) to the writable paths, read+execute access to the
@@ -52,9 +54,9 @@ Usage:
   that set, it does not replace it.
 
 Examples:
-  3code box restrict /tmp /home/me/work -- ls -la
-  3code box --policy .sandboxrc restrict -- make test
-  3code box restrict . -- make test
+  3code sandbox restrict /tmp /home/me/work -- ls -la
+  3code sandbox --policy .sandboxrc restrict -- make test
+  3code sandbox restrict . -- make test
 
 Landlock is monotonic: the restriction is permanent for this process and all
 descendants. There is no "unrestrict".
@@ -177,7 +179,7 @@ proc boxRestrict(args: seq[string]): int =
       return int(runSandboxed(writable, a.cmd, read = readOnly,
                               denied = denied, inetOk = fence))
     except CatchableError as e:
-      stderr.writeLine("3code box: " & e.msg)
+      stderr.writeLine("3code sandbox: " & e.msg)
       return 127
   else:
     # posix: confine this process, then exec into CMD. Children inherit
@@ -197,12 +199,13 @@ proc boxRestrict(args: seq[string]): int =
     try:
       exec(a.cmd)
     except CatchableError as e:
-      stderr.writeLine("3code box: " & e.msg)
+      stderr.writeLine("3code sandbox: " & e.msg)
       return 127
 
 proc boxMain*(args: seq[string]): int =
-  ## Entry for the `3code box` subcommand. `args` is the full argv after
-  ## `box`. Global options (--policy) may precede the subcommand.
+  ## Entry for the `3code sandbox` subcommand (alias `sb`). `args` is
+  ## the full argv after the subcommand name. Global options (--policy)
+  ## may precede the verb.
   if args.len == 0 or args[0] == "-h" or args[0] == "--help":
     stdout.writeLine(usage)
     return 0

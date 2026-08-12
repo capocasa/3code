@@ -91,7 +91,7 @@ proc ensureBash() =
   ## The provider-stub binary (the tty test harness) skips this: those tests
   ## drive REPL rendering, not bash enforcement, and CI has no bundled MSYS2
   ## so the guard would hard-fail before the prompt appears. Bash enforcement
-  ## is covered by the cli_args `box` suite and by production. Same gate as
+  ## is covered by the cli_args `sandbox` suite and by production. Same gate as
   ## initSandbox.
   when defined(windows) and not defined(providerStub):
     let b = resolveBash()
@@ -122,8 +122,8 @@ proc initSandbox(cwd: string) =
   discard sandbox.ensureUserPolicy()
   sandbox.current = sandbox.loadPolicy(cwd)
   sandbox.active = true
-  # The bash tool re-execs this binary as `3code box restrict ...`, so
-  # resolve our own path once. The box subcommand is always compiled in, but
+  # The bash tool re-execs this binary as `3code sandbox restrict ...`, so
+  # resolve our own path once. The sandbox subcommand is always compiled in, but
   # the OS-native restriction can still be nonfunctional (a kernel without
   # Landlock, a CI runner under a seccomp filter that blocks the syscall).
   # On failure, clear procboxExe so the bash tool degrades to the unconfined
@@ -219,12 +219,14 @@ unhandledExceptionHook = proc(e: ref Exception) {.nimcall, gcsafe, raises: [], t
     restoreCancelTermios()
 
 proc main() =
-  # `box` is the built-in sandwall CLI: the bash tool re-execs this binary as
-  # `3code box restrict ...`. Dispatch before any other startup so the
-  # sandboxed command isn't weighed down by 3code's TLS/config/session init
-  # and so refuseRoot etc. don't run inside the confined child.
+  # `sandbox` is the built-in sandwall CLI: the bash tool re-execs this
+  # binary as `3code sandbox restrict ...`. Dispatch before any other
+  # startup so the sandboxed command isn't weighed down by 3code's
+  # TLS/config/session init and so refuseRoot etc. don't run inside the
+  # confined child. `box` stays as a hidden alias for binaries already
+  # running under the old name.
   let rawParams = commandLineParams()
-  if rawParams.len > 0 and rawParams[0] == "box":
+  if rawParams.len > 0 and rawParams[0] in ["sandbox", "sb", "box"]:
     quit(boxMain(rawParams[1 .. ^1]))
   # `wall` is the network half of sandwall, same early-dispatch
   # rationale: proxy/connect children skip all of 3code's startup.

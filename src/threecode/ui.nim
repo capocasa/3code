@@ -16,7 +16,7 @@ import types, util, prompts, session, config, api, compact, display, minline,
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":prompt", ":show",
                       ":log", ":sessions", ":summarize", ":version", ":sandbox",
-                      ":retry",
+                      ":sb", ":retry",
                       ":q", ":quit", ":exit"]
 
 type WizardReadLineHook* = proc(prompt: string, hidden,
@@ -85,7 +85,7 @@ proc classifyCommand*(cmd: string): CommandKind =
   of ":reasoning":
     if parts.len == 0 or (parts.len == 1 and parts[0] == "list"): ckSafeImmediate
     else: ckMutating
-  of ":sandbox":
+  of ":sandbox", ":sb":
     # `:sandbox` and `:sandbox show` are safe; the allow/deny/readonly
     # verbs append to the sandbox file and reload, so they mutate.
     if parts.len == 0 or (parts.len == 1 and parts[0] == "show"): ckSafeImmediate
@@ -163,7 +163,7 @@ proc completionFor*(line: string): seq[string] =
     result.add "on"
     result.add "off"
     return
-  if words[0] == ":sandbox" and words.len == 2:
+  if words[0] in [":sandbox", ":sb"] and words.len == 2:
     result.add "show"
     result.add "allow"
     result.add "readonly"
@@ -1243,7 +1243,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       resp buildSystemPrompt(prof)
     of ":version":
       resp "3code v" & Version
-    of ":sandbox":
+    of ":sandbox", ":sb":
       # `:sandbox show` (or bare) dumps the rules; allow/readonly/deny
       # append a line and reload. The path arg is written verbatim so
       # relative paths stay portable in the file.

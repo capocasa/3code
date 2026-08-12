@@ -1,4 +1,4 @@
-## Filesystem sandbox: policy loading, mtime reload, `3code box` driver.
+## Filesystem sandbox: policy loading, mtime reload, `3code sandbox` driver.
 ##
 ## The policy file format, parser, and rule model live in sandwall
 ## (`sandwall/rules`); this module is the 3code-specific wrapper: which
@@ -25,7 +25,7 @@
 ## since the last load; it runs before every restricted operation
 ## (in-process read/write/patch checks and bash launches). The bash
 ## subprocess additionally loads the policy file itself
-## (`3code box --policy`), so a launch always enforces the freshest
+## (`3code sandbox --policy`), so a launch always enforces the freshest
 ## file contents even between parent reloads.
 
 import std/[os, osproc, strutils, times]
@@ -87,7 +87,7 @@ var
   active*: bool = false
     ## False means no policy was loaded and bash runs unrestricted.
   procboxExe*: string = ""
-    ## Path to the binary to exec for `box restrict` (this one).
+    ## Path to the binary to exec for `sandbox restrict` (this one).
   lastMtime: Time
 
 var gathering*: bool = false
@@ -252,7 +252,7 @@ proc findProcbox*(): string =
 proc backendWorks*(exe: string): bool =
   ## Probe whether the OS-native sandbox backend (Landlock/Seatbelt/ACL)
   ## can actually restrict on this host. Re-execs this binary as
-  ## `box restrict <tmpdir> -- true`; success means the kernel applies the
+  ## `sandbox restrict <tmpdir> -- true`; success means the kernel applies the
   ## domain. Fails on kernels built without Landlock, runners under a
   ## seccomp filter that blocks the syscall, etc. Callers clear `procboxExe`
   ## when this returns false so the bash tool falls back to the unconfined
@@ -265,7 +265,7 @@ proc backendWorks*(exe: string): bool =
     # traceback never leaks into the parent's output, which would trip
     # tests that assert no "unhandled exception" appears.
     let (outp, code) = execCmdEx(
-      quoteShell(exe) & " box restrict " & quoteShell(tmp) &
+      quoteShell(exe) & " sandbox restrict " & quoteShell(tmp) &
         " -- true </dev/null >/dev/null 2>&1")
     discard outp
     result = code == 0

@@ -396,9 +396,9 @@ what every project without its own `.sandboxrc` gets by editing that
 one file. Yolo mode (everything writable) is fine but you have to ask
 for it explicitly.
 
-The sandbox is enforced two ways. Bash commands run through `3code box`,
+The sandbox is enforced two ways. Bash commands run through `3code sandbox`,
 the built-in sandwall sandbox (Landlock on Linux, Seatbelt on macOS), which
-3code re-execs itself as; the box process loads the policy file itself,
+3code re-execs itself as; the sandbox process loads the policy file itself,
 so every command launches on the freshest policy. The in-process
 read/write/patch tools check paths against the same policy (reloaded when
 the file changes) in the 3code process. Both layers run the same sandwall
@@ -545,7 +545,7 @@ it and asks you instead of retrying blindly.
 Bash commands, file reads, writes, and patches all consult the sandbox.
 Bash gets full kernel enforcement: the sandbox backend is compiled into
 3code (the `box` subcommand), so every bash command is re-execed as
-`3code box restrict ...` and a write outside the allowed paths fails with
+`3code sandbox restrict ...` and a write outside the allowed paths fails with
 ``Permission denied`` at the syscall level. No child process can escape.
 The read/write/patch tools also check paths in-process, so the
 higher-risk operations (mutating your files directly) stay guarded.

@@ -186,8 +186,8 @@ suite "cli syntax errors do no startup work":
     check "requires a value" in r.o
     check not skillsDirExists()
 
-suite "box subcommand (built-in sandwall)":
-  # `3code box` is the sandbox backend the bash tool re-execs. It must
+suite "sandbox subcommand (built-in sandwall)":
+  # `3code sandbox` is the sandbox backend the bash tool re-execs. It must
   # dispatch before any other startup (no TLS, no config, no sandbox file)
   # and confine the command via the OS-native backend.
   var boxTmp: string
@@ -203,31 +203,31 @@ suite "box subcommand (built-in sandwall)":
     # exits nonzero and the confinement assertions below are skipped rather
     # than reported as failures. The dispatch/arg-parsing assertions stay
     # unconditional since they don't depend on the backend.
-    backendWorks = run(["box", "restrict", boxTmp, "--", "true"]).code == 0
+    backendWorks = run(["sandbox", "restrict", boxTmp, "--", "true"]).code == 0
 
   teardown:
     removeDir(boxTmp)
 
-  test "box with no args prints usage":
-    let r = run(["box"])
+  test "sandbox with no args prints usage":
+    let r = run(["sandbox"])
     check r.code == 0
-    check "3code box" in r.o
+    check "3code sandbox" in r.o
     check "restrict" in r.o
 
-  test "box unknown subcommand errors":
-    let r = run(["box", "nope"])
+  test "sandbox unknown subcommand errors":
+    let r = run(["sandbox", "nope"])
     check r.code == 2
     check "unknown subcommand" in r.o
 
-  test "box restrict runs a command":
+  test "sandbox restrict runs a command":
     if backendWorks:
-      let r = run(["box", "restrict", boxTmp, "--", "echo", "confined-ok"])
+      let r = run(["sandbox", "restrict", boxTmp, "--", "echo", "confined-ok"])
       check r.code == 0
       check "confined-ok" in r.o
     else:
       skip()
 
-  test "box restrict blocks writes outside the writable path":
+  test "sandbox restrict blocks writes outside the writable path":
     # Writable path is boxTmp; a write to its sibling must fail with
     # EACCES (Permission denied) at the syscall level, proving the
     # kernel backend is actually applied, not just parsed. We use `touch`
@@ -235,7 +235,7 @@ suite "box subcommand (built-in sandwall)":
     # be reinterpreted by execCmdEx's shell.
     if backendWorks:
       let outside = getTempDir() / ("3code-box-leak-" & $epochTime().int64)
-      let r = run(["box", "restrict", boxTmp, "--", "touch", outside])
+      let r = run(["sandbox", "restrict", boxTmp, "--", "touch", outside])
       check r.code != 0
       # macOS Seatbelt reports the blocked syscall as EPERM ("Operation
       # not permitted") where Linux Landlock reports EACCES.
@@ -244,7 +244,7 @@ suite "box subcommand (built-in sandwall)":
     else:
       skip()
 
-  test "box --policy confines per the policy file":
+  test "sandbox --policy confines per the policy file":
     # The bash tool launches box with --policy instead of resolved paths;
     # the box process must load the policy itself. Policy: writable cwd
     # (bare +), deny everything else. A write inside the project works,
@@ -254,25 +254,25 @@ suite "box subcommand (built-in sandwall)":
       createDir(proj)
       writeFile(proj / ".sandboxrc", "deny /\nallow\n")
       let inside = proj / "ok.txt"
-      let rIn = run(["box", "--policy", proj / ".sandboxrc",
+      let rIn = run(["sandbox", "--policy", proj / ".sandboxrc",
                      "restrict", "--", "touch", inside])
       check rIn.code == 0
       check fileExists(inside)
       let outside = getTempDir() / ("3code-box-poleak-" & $epochTime().int64)
-      let rOut = run(["box", "--policy", proj / ".sandboxrc",
+      let rOut = run(["sandbox", "--policy", proj / ".sandboxrc",
                       "restrict", "--", "touch", outside])
       check rOut.code != 0
       check not fileExists(outside)
       # A fully locked policy (no writable root) is accepted: the touch
       # simply has nowhere legal to land.
       writeFile(proj / ".sandboxrc", "deny /\n")
-      let rLock = run(["box", "--policy", proj / ".sandboxrc",
+      let rLock = run(["sandbox", "--policy", proj / ".sandboxrc",
                        "restrict", "--", "true"])
       check rLock.code == 0
     else:
       skip()
 
-  test "box --policy reloads edits between launches":
+  test "sandbox --policy reloads edits between launches":
     # Two launches, policy tightened in between: the second launch must
     # enforce the new file contents without any parent-side reload.
     if backendWorks:
@@ -281,15 +281,15 @@ suite "box subcommand (built-in sandwall)":
       let pol = proj / ".sandboxrc"
       let target = proj / "t.txt"
       writeFile(pol, "deny /\nallow\n")
-      check run(["box", "--policy", pol, "restrict", "--", "touch", target]).code == 0
+      check run(["sandbox", "--policy", pol, "restrict", "--", "touch", target]).code == 0
       removeFile(target)
       writeFile(pol, "deny /\n")
-      check run(["box", "--policy", pol, "restrict", "--", "touch", target]).code != 0
+      check run(["sandbox", "--policy", pol, "restrict", "--", "touch", target]).code != 0
       check not fileExists(target)
     else:
       skip()
 
-  test "box --policy never warns about a writable policy file":
+  test "sandbox --policy never warns about a writable policy file":
     # The single policy file always sits under the writable project dir;
     # the old `is under a writable rule` warning was removed because the
     # implicit read-only guard (parent side) covers the file instead.
@@ -297,7 +297,7 @@ suite "box subcommand (built-in sandwall)":
       let proj = boxTmp / "proj3"
       createDir(proj / ".3code")
       writeFile(proj / ".3code" / "sandbox", "- /\n+\n")
-      let r = run(["box", "--policy", proj / ".3code" / "sandbox",
+      let r = run(["sandbox", "--policy", proj / ".3code" / "sandbox",
                    "restrict", "--", "true"])
       check r.code == 0
       check "writable rule" notin r.o
