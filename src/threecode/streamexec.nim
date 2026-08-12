@@ -347,8 +347,7 @@ export DEBIAN_FRONTEND=noninteractive
       # leader. The backend is compiled in, so `procboxExe` is just our own
       # path and is always set when `active`; the unconfined setsid fallback
       # below only runs when the sandbox is off entirely.
-      if sandboxEnabled and sandbox.active and sandbox.procboxExe.len > 0 and
-          not sandbox.gathering:
+      if sandboxEnabled and sandbox.active and sandbox.procboxExe.len > 0:
         # The box subprocess loads the policy files itself (--policy), so
         # every launch enforces the freshest file contents; no mtime
         # plumbing needed here. The script + stdin live in a temp dir
@@ -399,13 +398,7 @@ export DEBIAN_FRONTEND=noninteractive
         startProcess(sandbox.procboxExe, args = args, env = env,
                      options = {poStdErrToStdOut, poUsePath})
       else:
-        # Unconfined path: sandbox off, no backend, or gather mode.
-        # Gather mode additionally records the bash working dir as an
-        # `allow` rule: inside the project that is already allowed (a
-        # no-op rule), outside it opens the dir the command ran in.
-        if sandboxEnabled and sandbox.active and
-            sandbox.gathering:
-          sandbox.gatherRecordBash(getCurrentDir())
+        # Unconfined path: sandbox off or no working backend.
         let setsidExe = findExe("setsid")
         if setsidExe.len > 0:
           startProcess(setsidExe, args = [shPath(), "-c", wrapped],
@@ -491,12 +484,6 @@ export DEBIAN_FRONTEND=noninteractive
       rawOut.add "\n"
     return (rawOut, 124, cap)
 
-  # Gather mode ran bash unconfined: scan the output for tool-reported
-  # denials (a path in an EACCES message, a host in a connect failure)
-  # and append a targeted allow rule per hit. Never a broad grant.
-  if sandboxEnabled and sandbox.active and sandbox.gathering:
-    sandbox.gatherScanBashOutput(rawOut)
-
   # Sandbox denial hint: a sandboxed command cannot tell EPERM from the
   # kernel sandbox apart from a plain filesystem permission problem, so
   # a bare "Permission denied" would send the agent retrying blindly.
@@ -504,7 +491,6 @@ export DEBIAN_FRONTEND=noninteractive
   # append a pointer at the policy file. OSError messages are appended
   # after the command's own output, so the hint lands at the end.
   if code != 0 and sandboxEnabled and sandbox.active and
-      not sandbox.gathering and
       ("Permission denied" in rawOut or "Operation not permitted" in rawOut):
     if rawOut.len > 0 and not rawOut.endsWith("\n"):
       rawOut.add "\n"

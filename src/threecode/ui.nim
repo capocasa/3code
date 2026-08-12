@@ -169,7 +169,6 @@ proc completionFor*(line: string): seq[string] =
     result.add "readonly"
     result.add "deny"
     result.add "edit"
-    result.add "gather"
     return
 
 proc readRequired*(editor: var minline.LineEditor, prompt: string,
@@ -1256,17 +1255,6 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
           resp "sandbox not active"
       of "on", "off":
         body.add cmdSandboxSettingSelect(verb)
-      of "gather":
-        let gOn = parts.len >= 2 and parts[1] == "on"
-        let gOff = parts.len >= 2 and parts[1] == "off"
-        if not gOn and not gOff:
-          resp "gather mode: " & (if sandbox.gathering: "on" else: "off")
-        else:
-          sandbox.gathering = gOn
-          resp "gather mode " & (if gOn:
-            "on: would-be sandbox denials are allowed and appended as " &
-            "allow rules to " & sandbox.sandboxPathInCwd()
-          else: "off")
       of "edit":
         let msg = sandbox.editPolicy(sandbox.sandboxPathInCwd())
         if msg.startsWith("error:"):
@@ -1294,7 +1282,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       else:
         ok = false
         respErr "unknown :sandbox verb: " & verb &
-          "  (show, on, off, allow, readonly, deny, edit, gather on|off)"
+          "  (show, on, off, allow, readonly, deny, edit)"
     of ":show":
       body.add showToolS(arg, session.toolLog)
     of ":log":

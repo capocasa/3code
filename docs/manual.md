@@ -520,20 +520,7 @@ is the only way to run without a sandbox short of editing the file.
 The agent never writes the sandbox file. If the model proposes a policy
 change, it edits a copy and you move it into place. This keeps the trust
 boundary entirely on your side: the sandbox is defined at prompt time, by
-you, and the agent cannot weaken it. Gather mode (below) is the one
-exception, and you switch it on explicitly.
-
-### Gather mode
-
-`:sandbox gather on` flips the sandbox into record mode: every would-be
-denial is allowed instead, and the path is appended live as an ``allow``
-rule to `.sandboxrc`. Run a normal working session, then
-`:sandbox gather off` - the policy file now covers everything the agent
-actually needed. While gather mode is on, bash commands run unconfined
-(the kernel backends cannot observe-and-allow) and the working directory
-of each bash call is recorded. Denials are appended verbatim and
-un-deduped; review the file after a gather session. The toggle is
-in-memory: it resets when 3code exits.
+you, and the agent cannot weaken it.
 
 When enforcement is on and a sandboxed bash command fails with
 ``Permission denied``, 3code appends a hint to the tool output pointing
