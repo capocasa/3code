@@ -237,7 +237,19 @@ proc stubStringChunks(node: JsonNode; key, fallback: string): seq[string] =
 proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
                    lastPromptTokens: int, maxTokensOverride = 0): JsonNode =
   let stubT0 = epochTime()
-  let stubWindow = contextWindowFor(p)
+  # Same window policy as callModel: known-good table, then a small
+  # inline heuristic (api no longer imports compact).
+  let stubWindow =
+    block:
+      let kg = knownGoodContextWindow(p)
+      if kg > 0: kg
+      else:
+        let m = p.model.toLowerAscii
+        if m == "stub-model": 12_000
+        elif "gpt-5" in m: 400_000
+        elif "gpt-4" in m: 128_000
+        elif "o1" in m or "o3" in m or "o4" in m: 200_000
+        else: 128_000
   let stubBaseLabel = hookBeforeCall(lastPromptTokens, stubWindow)
   stubMaxTokensOverride = maxTokensOverride
   defer:

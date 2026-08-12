@@ -94,7 +94,7 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
   # most OpenAI-compatible providers accept them in chat completions even
   # without a tools parameter as long as the tool/assistant pairing is
   # intact.
-  let payload = newJArray()
+  var payload = newJArray()
   payload.add %*{"role": "system", "content": SummarizerSystemPrompt}
   if messages != nil and messages.kind == JArray:
     for i in 0 ..< messages.len:
@@ -102,12 +102,47 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
       if i == 0 and m.kind == JObject and m{"role"}.getStr == "system":
         continue
       payload.add m
-  let body = %*{
-    "model": p.model,
-    "messages": payload,
-    maxTokensField(p): SummarizeMaxTokens,
-    "stream": false
-  }
+  # Copy before mutation: `messages` is the live history; payload entries
+  # share its JsonNode refs, so deleting fields below must not hit it.
+  var payload2 = newJArray()
+  for m in payload:
+    if m.kind == JObject:
+      var c = newJObject()
+      for k, v in m.pairs: c[k] = v
+      payload2.add c
+    else:
+      payload2.add m
+  payload = payload2
+  let useResponses = responsesApi(p)
+  if p.family != "deepseek" or useResponses:
+    # Same wire-safety as callModel: strict providers reject unknown
+    # fields on replayed assistant messages (fireworks et al.); Responses
+    # (first-party openai) rejects `reasoning_content` outright.
+    for m in payload:
+      if m.kind == JObject and m{"role"}.getStr == "assistant" and
+         m.contains("reasoning_content"):
+        m.delete("reasoning_content")
+  var body: JsonNode
+  var endpoint: string
+  if useResponses:
+    # Responses API (first-party openai): same role/content messages in
+    # `input` (system is accepted), `max_output_tokens` budget, summary
+    # text extracted from output[] below.
+    body = %*{
+      "model": p.model,
+      "input": payload,
+      "max_output_tokens": SummarizeMaxTokens,
+      "stream": false
+    }
+    endpoint = p.url & "/responses"
+  else:
+    body = %*{
+      "model": p.model,
+      "messages": payload,
+      maxTokensField(p): SummarizeMaxTokens,
+      "stream": false
+    }
+    endpoint = p.url & "/chat/completions"
   var status = 0
   var respBody = ""
   try:
@@ -116,7 +151,7 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
     defer: client.close()
     client.headers["Authorization"] = "Bearer " & p.key
     client.headers["Content-Type"] = "application/json"
-    let resp = client.request(p.url & "/chat/completions",
+    let resp = client.request(endpoint,
                               httpMethod = HttpPost, body = sanitizeUtf8($body))
     status = resp.code.int
     respBody = resp.body
@@ -133,6 +168,17 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
   if "error" in j:
     stderr.writeLine "3code: summarize: " & $j["error"]
     return ""
+  if useResponses:
+    let output = j{"output"}
+    if output == nil or output.kind != JArray: return ""
+    for item in output:
+      if item{"type"}.getStr != "message": continue
+      let parts = item{"content"}
+      if parts == nil or parts.kind != JArray: continue
+      for c in parts:
+        if c{"type"}.getStr == "output_text":
+          result &= c{"text"}.getStr("")
+    return
   let choices = j{"choices"}
   if choices == nil or choices.kind != JArray or choices.len == 0: return ""
   let msg = choices[0]{"message"}
