@@ -23,13 +23,12 @@
 ## the effective policy text, so project rules start from the user's
 ## baseline instead of from scratch.
 ##
-## The one policy file path the project can activate (the repo
-## `.sandbox`) is always denied, no matter what the file says: the deny
-## rule is appended after parsing (so the user's own rules can neither
-## weaken nor strengthen it) and the box subprocess carries it through
-## to the kernel backends. The user file itself needs no guard: it is
-## the user editing their own config, and any cwd that resolves to it
-## denies it via the same mechanism.
+## The two policy file paths 3code can activate (the repo `.sandbox`
+## and `~/.config/3code/sandbox`) are always read-only, no matter what
+## the file says: they ride every load as hidden guard rules
+## (`hiddenRules`), appended last so no file rule can weaken them,
+## enforced by the in-process checks and carried through to the box
+## subprocess, but never shown in `:sandbox show`.
 ##
 ## `reloadIfChanged` re-reads the active file when its mtime changed
 ## since the last load; it runs before every restricted operation
@@ -99,6 +98,11 @@ var
   procboxExe*: string = ""
     ## Path to the binary to exec for `sandbox restrict` (this one).
   lastMtime: Time
+  hiddenRules*: seq[Rule] = @[]
+    ## Implicit guard rules appended after every parse: enforced by
+    ## checkPath and the box backends, hidden from renderPolicy.
+    ## initSandbox seeds it with the two policy file paths as
+    ## read-only.
 
 proc activePolicyPath*(projectDir: string): string =
   ## The one policy file in effect: the repo `.sandbox` when it
@@ -280,23 +284,27 @@ proc mtimeOf(path: string): Time =
   try: getLastModificationTime(path)
   except OSError: fromUnix(0)
 
-proc denyPolicyPathsRules*(projectDir: string): seq[Rule] =
-  ## Deny rule covering the repo policy file, so neither the in-process
-  ## tools nor the sandboxed command can touch it no matter what the
-  ## policy says. Appended last after every load. The user file is not
-  ## guarded: it is the user editing their own config, not project
-  ## content, and a cwd inside the XDG config dir guards it via the
-  ## same repo-path rule.
-  @[Rule(access: akDeny, kind: rkPath, path: repoPolicyPath(projectDir))]
+proc guardRules*(projectDir: string): seq[Rule] =
+  ## Hidden read-only rules covering the two policy file paths 3code
+  ## can make active (the repo `.sandbox` and the user file), so
+  ## neither the in-process tools nor the sandboxed command can change
+  ## the policy out from under 3code, no matter what the file says.
+  ## Appended last after every load; a repo file that is also the user
+  ## file collapses to one rule.
+  let user = systemPolicyPath()
+  result = @[Rule(access: akReadOnly, kind: rkPath, hidden: true,
+                  path: repoPolicyPath(projectDir))]
+  if user != result[0].path:
+    result.add Rule(access: akReadOnly, kind: rkPath, hidden: true,
+                    path: user)
 
 proc loadPolicy*(projectDir: string): Policy =
   ## Load the active policy file and remember its mtime for
-  ## reloadIfChanged. The repo policy path is always denied: the
-  ## guard rule is appended last so no rule in the file can weaken
-  ## it.
+  ## reloadIfChanged. Guard rules (`hiddenRules`) are appended last so
+  ## no rule in the file can weaken them.
   lastMtime = mtimeOf(activePolicyPath(projectDir))
   result = sandwall.parsePolicy(readPolicyText(projectDir), projectDir)
-  result.add denyPolicyPathsRules(projectDir)
+  result.add hiddenRules
 
 proc reloadIfChanged*(projectDir: string): bool =
   ## Re-load the policy when the active file changed on disk since the

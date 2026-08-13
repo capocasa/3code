@@ -120,6 +120,7 @@ proc initSandbox(cwd: string) =
     return
   if not sandboxEnabled:
     return
+  sandbox.hiddenRules = sandbox.guardRules(cwd)
   sandbox.current = sandbox.loadPolicy(cwd)
   sandbox.active = true
   # The bash tool re-execs this binary as `3code sandbox restrict ...`, so

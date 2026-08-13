@@ -14,15 +14,16 @@
 ## contents: a policy edit between the parent's last check and the exec
 ## can only tighten what box applies.
 ##
-## Policy files are denied outright so the sandboxed command can
-## neither read nor change the policy it runs under: a 3code policy
-## path (the repo `.sandbox`) carries an explicit deny appended on
-## every load, and a foreign --policy file gets one in resolvePolicy.
-## The deny lands in the backends' denied set, which Seatbelt and
-## Windows subtract natively and Landlock bind-masks, so no file rule
-## can weaken it - closing the old gap where a policy file under a
-## writable tree stayed writable on Linux (Landlock unions rules within
-## a layer, so read-only could not subtract write).
+## The policy files 3code can activate (the repo `.sandbox` and the
+## user file) are read-only inside the sandbox: the parent seeds
+## `hiddenRules` with them at startup and resolvePolicy appends the
+## same guards to whatever --policy it loads, so no file rule can
+## weaken them and they never render in the rule dump. A foreign
+## --policy file (standalone box use) is force-added read-only.
+## On Landlock a read-only rule under a writable root does not
+## subtract write (rules union within a layer), so on Linux a policy
+## file inside a writable tree is still writable from inside the
+## sandbox; that is accepted.
 
 when defined(posix):
   import std/posix except Time
@@ -47,8 +48,8 @@ Usage:
   With --policy, the writable/read-only sets come from the given
   policy file (relative targets resolve against the project dir: the
   parent of a `.sandbox` file, else cwd). Explicit RWPATH/ROPATH
-  args union with the policy sets. The policy file itself is denied
-  inside the sandbox.
+  args union with the policy sets. The policy file itself is
+  read-only inside the sandbox.
 
   System dirs (/usr, /bin, /lib, /dev/*, etc.) are always read-only so the
   command's binaries, libs, and device nodes stay runnable; --ro adds to
@@ -104,10 +105,11 @@ proc parseBoxArgs(args: seq[string]): tuple[a: BoxArgs, err: string] =
 proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
                    fence: bool] =
   ## Resolve the policy file(s) plus explicit args into the
-  ## (writable, readonly, denied) triple. Policy files are force-added
-  ## read-only. `denied` carries the policy's last-wins narrowing (a deny
-  ## under an allowed root); the backend enforces it on top of the root
-  ## lists.
+  ## (writable, readonly, denied) triple. The 3code policy paths ride
+  ## the parse as hidden read-only guards; any other --policy file is
+  ## force-added read-only. `denied` carries the policy's last-wins
+  ## narrowing (a deny under an allowed root); the backend enforces it
+  ## on top of the root lists.
   var writable = a.writable
   var readonly = a.readOnly
   var denied: seq[string]
@@ -128,18 +130,16 @@ proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
     var combined = ""
     for t in texts: combined.add t & "\n"
     let pol = parsePolicy(combined, projectDir) &
-                denyPolicyPathsRules(projectDir)
+                (if hiddenRules.len > 0: hiddenRules
+                 else: guardRules(projectDir))
     let r = pol.resolve()
     writable.add r.writable
     readonly.add r.readonly
     denied.add r.denied
     hostRules = r.hosts.len
-    # The sandboxed command cannot touch the policy file it runs under.
-    # A 3code policy path is already covered by the appended deny; a
-    # foreign --policy file gets one here (no read either: its contents
-    # are merged in-process, and box already holds them).
+    # The sandboxed command may read its policy but never change it.
     for f in a.policies:
-      if f.normalizedPath notin denied: denied.add f
+      if fileExists(f): readonly.add f
   (writable, readonly, denied, hostRules > 0)
 
 proc boxRestrict(args: seq[string]): int =

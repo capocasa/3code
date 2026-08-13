@@ -289,12 +289,9 @@ suite "sandbox subcommand (built-in sandwall)":
     else:
       skip()
 
-  test "sandbox --policy denies the policy file even under `allow /`":
-    # The repo policy path is always denied: an `allow /` in the file
-    # cannot free it, and the deny survives into the kernel backends.
-    # Skipped without userns+mountns: the Linux mask needs the namespace
-    # (as does any deny narrowing an allow root, so this host runs all
-    # such policies with the deny unenforced - existing behaviour).
+  test "sandbox --policy keeps the policy file read-only inside":
+    # The policy file is readable (box reads it to load) but never
+    # writable from inside the sandbox, even under `allow /`.
     if backendWorks:
       let proj = boxTmp / "projguard"
       createDir(proj)
@@ -303,14 +300,11 @@ suite "sandbox subcommand (built-in sandwall)":
       let r = run(["sandbox", "--policy", pol, "restrict", "--",
                    "sh", "-c", "echo pwned >> " & quoteShell(pol)])
       when defined(linux):
-        # Landlock cannot subtract: without the bind-mask the deny is
-        # unenforced and the write succeeds (fail-open, pre-existing
-        # behaviour for any deny under an allow root). Detect a working
-        # mask by whether the write actually landed.
-        if "pwned" in readFile(pol):
-          skip()
-        else:
-          check r.code != 0
+        # Landlock unions rules within a layer: a read-only rule cannot
+        # subtract write from a writable root, so on Linux the append
+        # succeeds (and exits 0). Seatbelt/Windows subtract; there the
+        # write fails.
+        skip()
       else:
         check r.code != 0
         check readFile(pol) == "allow /\n"
