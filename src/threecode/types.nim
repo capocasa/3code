@@ -224,9 +224,11 @@ proc providerOf*(p: Profile): string =
 
 proc responsesApi*(p: Profile): bool =
   ## True when this profile speaks the OpenAI Responses API (/responses
-  ## instead of /chat/completions). Currently only first-party openai;
+  ## instead of /chat/completions). First-party openai, plus `chatgpt`
+  ## (the ChatGPT-subscription twin that posts to the Codex backend);
   ## anthropic may join the same dispatch later.
-  providerOf(p) == "openai"
+  let prov = providerOf(p)
+  prov == "openai" or prov == "chatgpt"
 
 proc isInterruptedMsg*(msg: string): bool =
   ## Matches the bare `InterruptedByUserMsg` and variants that append

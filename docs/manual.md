@@ -118,8 +118,9 @@ config it walks you through setup:
 ```
 
 The first field accepts a catalog name (`nvidia`, `xai`, …), a URL
-(`--experimental`), an API key (prefix-detected), or `supergrok` for
-SuperGrok subscription login.
+(`--experimental`), an API key (prefix-detected), or a subscription
+login: `supergrok` for SuperGrok / X Premium+, `chatgpt` for ChatGPT
+Plus/Pro.
 
 ### Run your first prompt
 
@@ -167,6 +168,18 @@ Two ways to authenticate, and they can sit side by side:
   `auth = "oauth"` and no key.
 
 Switch with `:provider xai` / `:provider supergrok`.
+
+`ChatGPT <https://chatgpt.com>`_ - OpenAI first-party models on a ChatGPT
+Plus/Pro subscription instead of a metered API key. Type `chatgpt` in the
+wizard: browser OAuth against auth.openai.com (the same public client the
+Codex CLI uses), tokens in `$XDG_DATA_HOME/3code/auth/openai.json` (mode
+0600), refreshed automatically. Requests go to the ChatGPT Codex backend
+(`chatgpt.com/backend-api/codex`), which speaks the Responses API with a
+few extra gates (stream-only, no server-side storage) that 3code handles
+for you. Sits beside an API-key `openai` provider; switch with
+`:provider openai` / `:provider chatgpt`. Note the Codex backend is an
+internal, unversioned surface meant for first-party clients; using it
+with 3code is your responsibility.
 
 Add a provider inside the REPL:
 

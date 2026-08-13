@@ -14,7 +14,7 @@
 import std/[os, parsecfg, sequtils, streams, strformat, strutils, tables, terminal, uri]
 when defined(posix):
   import std/posix except SocketHandle
-import types, prompts, util
+import types, prompts, util, auth_openai
 
 type
   ProviderRec* = object
@@ -227,6 +227,29 @@ proc subscriptionBearer*(p: Profile): string =
   if p.key == "" and name != "":
     return subscriptionTokenForImpl(name)
   ""
+
+var extraHeadersImpl*: proc(provider: string): seq[(string, string)] {.closure.}
+  ## Same indirection as `subscriptionTokenForImpl`: config stays free of
+  ## the auth modules. Startup installs `chatgptExtraHeaders` below.
+
+proc extraHeadersFor*(p: Profile): seq[(string, string)] =
+  ## Extra request headers for `p`, resolved by provider prefix
+  ## ("chatgpt.gpt-5.4" -> chatgpt). Installed as `api.extraHeadersHook`.
+  if extraHeadersImpl == nil: return
+  let dot = p.name.find('.')
+  if dot < 0: return
+  extraHeadersImpl(p.name[0 ..< dot])
+
+proc chatgptExtraHeaders*(provider: string): seq[(string, string)] =
+  ## Headers the ChatGPT Codex backend requires on every request, keyed
+  ## to the stored subscription token's account id. Empty seq for any
+  ## other provider (and when logged out: the bearer fails first).
+  if provider.toLowerAscii != "chatgpt": return
+  result = @[("OpenAI-Beta", "responses=experimental"),
+             ("originator", "3code")]
+  let acc = auth_openai.accountId()
+  if acc != "":
+    result.add ("chatgpt-account-id", acc)
 
 proc splitModels*(s: string): seq[string] =
   ## Whitespace- (and comma-) separated list of bare model names. Family

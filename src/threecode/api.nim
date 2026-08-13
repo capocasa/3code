@@ -15,12 +15,16 @@ import std/[algorithm, atomics, hashes, httpclient, json, locks, monotimes, nati
 when defined(posix):
   import std/posix except SocketHandle
 import streamhttp
-import types, util, prompts, streamexec, netthread
+import types, util, prompts, streamexec, netthread, auth_openai
 
 type
   VerifyProfileHook* = proc(p: Profile): (bool, string) {.closure.}
   FetchModelsHook* = proc(url, key: string): (seq[string], string) {.closure.}
   BearerHook* = proc(p: Profile): string {.closure.}
+  ExtraHeadersHook* = proc(p: Profile): seq[(string, string)] {.closure.}
+    ## Extra request headers for a profile (ChatGPT Codex backend needs
+    ## `chatgpt-account-id` and friends). Nil-safe; called on the
+    ## streaming worker thread, so implementations must be gcsafe.
     ## Resolves the Authorization bearer for a request. Default nil means
     ## "use p.key as-is". OAuth-backed providers install a hook that
     ## refreshes and returns a subscription token (see auth_xai).
@@ -29,6 +33,12 @@ var
   verifyProfileHook*: VerifyProfileHook
   fetchModelsHook*: FetchModelsHook
   bearerHook*: BearerHook
+  extraHeadersHook*: ExtraHeadersHook
+  extraHeadersProfile*: Profile
+    ## Set by `callModel` before dispatching the transport so
+    ## `requestHeaders` can resolve per-profile headers on the worker
+    ## thread, which receives no Profile. Written and read under the
+    ## `callModel` entry contract (one active turn at a time).
 
 proc bearerFor*(p: Profile): string =
   if bearerHook != nil:
@@ -571,6 +581,40 @@ proc flushTail(f: var XmlToolFilter): string =
   result = f.pending
   f.pending = ""
 
+proc chatgptProvider*(name: string): bool =
+  ## Profile/provider name that routes to the ChatGPT Codex backend
+  ## (subscription OAuth). Matches `chatgpt` itself plus any prefixed
+  ## spelling (e.g. a legacy `openai.chatgpt` profile name), so it takes
+  ## the full dotted name rather than the leading label.
+  let n = name.toLowerAscii
+  if n == "chatgpt": return true
+  for label in n.split('.'):
+    if label == "chatgpt": return true
+  false
+
+proc chatgptProfile*(p: Profile): bool =
+  chatgptProvider(p.name)
+
+proc requestUrl*(p: Profile): string =
+  ## Full request URL (scheme://host/path, no endpoint suffix). The
+  ## ChatGPT subscription token is not valid against api.openai.com, so
+  ## `chatgpt` profiles always post to the Codex backend regardless of
+  ## the configured url.
+  if chatgptProfile(p): auth_openai.CodexApiUrl
+  else: p.url
+
+proc requestHeaders(p: Profile, key: string;
+                    accept: string): seq[(string, string)] =
+  ## Base headers every model request sends, plus whatever
+  ## `extraHeadersHook` adds for this profile (ChatGPT Codex wants
+  ## `chatgpt-account-id`, `OpenAI-Beta`, `originator`).
+  result = @[("Authorization", "Bearer " & key),
+             ("Content-Type", "application/json"),
+             ("Accept", accept)]
+  if extraHeadersHook != nil:
+    for kv in extraHeadersHook(p):
+      result.add kv
+
 proc streamHttp(url, key, bodyStr: string, baseLabel: string,
                 slurped: var int, suppressXml: bool,
                 job: NetJob): StreamOutcome =
@@ -650,9 +694,8 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     conn.setReadTimeoutMs(QuietRecvWakeMs)
     try:
       conn.sendRequest("POST", pathQuery, host,
-                       headers = [("Authorization", "Bearer " & key),
-                                  ("Content-Type", "application/json"),
-                                  ("Accept", "text/event-stream")],
+                       headers = requestHeaders(
+                         extraHeadersProfile, key, "text/event-stream"),
                        body = bodyStr)
       fireActivity(job)
       while true:
@@ -996,6 +1039,27 @@ proc buildResponsesBody*(p: Profile, wireMessages: JsonNode): JsonNode =
     result["temperature"] = %d.temperature
   if p.reasoning.len > 0:
     result["reasoning"] = %*{"effort": %p.reasoning}
+  if chatgptProfile(p):
+    # The ChatGPT Codex backend (subscription OAuth) only serves this
+    # exact shape: SSE-only, no server-side storage, and a top-level
+    # `instructions` string (it rejects a system/developer input item as
+    # a substitute).
+    result["stream"] = %true
+    result["store"] = %false
+    let input = result["input"]
+    var instructions = ""
+    if input != nil and input.kind == JArray:
+      var kept = newJArray()
+      for item in input:
+        if instructions == "" and item.kind == JObject and
+           item{"role"}.getStr in ["system", "developer"]:
+          instructions = item{"content"}.getStr("")
+        else:
+          kept.add item
+      result["input"] = kept
+    result["instructions"] =
+      %(if instructions == "": "You are a helpful assistant."
+        else: instructions)
 
 proc responsesAssistantMsg(r: JsonNode; wasInterrupted: bool): JsonNode =
   ## Build a chat-style assistant message from a completed response's
@@ -1116,9 +1180,8 @@ proc streamResponses(url, key, bodyStr: string, baseLabel: string,
     conn.setReadTimeoutMs(QuietRecvWakeMs)
     try:
       conn.sendRequest("POST", pathQuery, host,
-                       headers = [("Authorization", "Bearer " & key),
-                                  ("Content-Type", "application/json"),
-                                  ("Accept", "text/event-stream")],
+                       headers = requestHeaders(
+                         extraHeadersProfile, key, "text/event-stream"),
                        body = bodyStr)
       fireActivity(job)
       while true:
@@ -1396,9 +1459,8 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
     conn.setReadTimeoutMs(QuietRecvWakeMs)
     try:
       conn.sendRequest("POST", pathQuery, host,
-                       headers = [("Authorization", "Bearer " & key),
-                                  ("Content-Type", "application/json"),
-                                  ("Accept", "application/json")],
+                       headers = requestHeaders(
+                         extraHeadersProfile, key, "application/json"),
                        body = bodyStr)
       hookProviderActivity()
       while true:
@@ -1595,9 +1657,8 @@ proc callResponses(url, key, bodyStr: string; baseLabel: string;
     conn.setReadTimeoutMs(QuietRecvWakeMs)
     try:
       conn.sendRequest("POST", pathQuery, host,
-                       headers = [("Authorization", "Bearer " & key),
-                                  ("Content-Type", "application/json"),
-                                  ("Accept", "application/json")],
+                       headers = requestHeaders(
+                         extraHeadersProfile, key, "application/json"),
                        body = bodyStr)
       hookProviderActivity()
       while true:
@@ -2146,7 +2207,7 @@ proc callModelThreaded*(p: Profile, bodyStr, baseLabel: string;
   var t: Thread[NetWorkerArgs]
   let args = NetWorkerArgs(
     job: addr job,
-    url: p.url & (if responses: "/responses" else: "/chat/completions"),
+    url: requestUrl(p) & (if responses: "/responses" else: "/chat/completions"),
     key: bearerFor(p),
     bodyStr: bodyStr,
     baseLabel: baseLabel,
@@ -2308,6 +2369,9 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
   # Resolve the bearer once per call, not once per retry attempt: a
   # refresh inside the retry loop would stamp a new token mid-flight.
   let bearer = bearerFor(p)
+  # Publish the profile for the transport's per-profile header lookup
+  # (`requestHeaders`); the threaded path hands the worker no Profile.
+  extraHeadersProfile = p
   var attempt = 0
   # Retry-decision state, hoisted out of the loop body so the
   # `NetworkHealthError` handler can set it and fall through into the
@@ -2319,18 +2383,22 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
   while true:
     inc attempt
     var slurped = 0
+    # The Codex backend answers stream:false with a 400, so `chatgpt`
+    # profiles ride the streaming transport even when the user turned
+    # streaming off (the body pins "stream": true the same way).
+    let streamTransport = streamingEnabled or chatgptProfile(p)
     outcome =
-      if streamingEnabled:
+      if streamTransport:
         when networkSync:
           var syncJob: NetJobState
           syncJob.lock.initLock()
           defer: syncJob.lock.deinitLock()
           let o =
             if useResponses:
-              streamResponses(p.url & "/responses", bearer, bodyStr,
+              streamResponses(requestUrl(p) & "/responses", bearer, bodyStr,
                               baseLabel, slurped, addr syncJob)
             else:
-              streamHttp(p.url & "/chat/completions", bearer, bodyStr,
+              streamHttp(requestUrl(p) & "/chat/completions", bearer, bodyStr,
                          baseLabel, slurped, xmlToolCallsFallback(p),
                          addr syncJob)
           drainAndDispatch(addr syncJob, baseLabel)
@@ -2340,10 +2408,10 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
                             useResponses)
       else:
         if useResponses:
-          callResponses(p.url & "/responses", bearer, bodyStr,
+          callResponses(requestUrl(p) & "/responses", bearer, bodyStr,
                         baseLabel, slurped)
         else:
-          callHttp(p.url & "/chat/completions", bearer, bodyStr,
+          callHttp(requestUrl(p) & "/chat/completions", bearer, bodyStr,
                    baseLabel, slurped)
     if isInterruptedMsg(outcome.errMsg):
       hookStopSpinner()
@@ -2521,7 +2589,18 @@ proc verifyBody*(p: Profile): string =
   ## JSON body for the provider-verification ping.  Kept as a named proc
   ## so the test suite can assert it matches the streaming convention used
   ## by `callModel` (both must send `"stream": true`).
-  $(if responsesApi(p):
+  $(if chatgptProfile(p):
+    # Codex backend: SSE-only, server-side storage off, top-level
+    # `instructions` mandatory.
+    %*{
+      "model": p.model,
+      "instructions": "You are a helpful assistant.",
+      "input": [%*{"role": "user", "content": "ping"}],
+      "max_output_tokens": 16,
+      "store": false,
+      "stream": true
+    }
+  elif responsesApi(p):
     %*{
       "model": p.model,
       "input": [%*{"role": "user", "content": "ping"}],
@@ -2556,7 +2635,7 @@ proc verifyProfile*(p: Profile): (bool, string) =
   # `setReadTimeoutMs` mirrors the deadline onto the socket as
   # `SO_RCVTIMEO`, hard-bounding every `recv`; we retry each bounded window
   # until `VerifyTimeoutMs` then fail cleanly.
-  let endpoint = p.url &
+  let endpoint = requestUrl(p) &
     (if responsesApi(p): "/responses" else: "/chat/completions")
   let u = try: parseUri(endpoint) except CatchableError as e:
     return (false, "bad url: " & e.msg)
@@ -2594,9 +2673,7 @@ proc verifyProfile*(p: Profile): (bool, string) =
   conn.setReadTimeoutMs(QuietRecvWakeMs)
   try:
     conn.sendRequest("POST", pathQuery, host,
-      headers = [("Authorization", "Bearer " & bearerFor(p)),
-                 ("Content-Type", "application/json"),
-                 ("Accept", "text/event-stream")],
+      headers = requestHeaders(p, bearerFor(p), "text/event-stream"),
       body = body)
   except CatchableError as e:
     return (false, "send failed: " & e.msg)

@@ -696,6 +696,45 @@ suite "xml tool_call fallback":
     check responsesApi(Profile(name: "nvidia.openai/gpt-oss-120b",
       family: "gpt-oss", model: "openai/gpt-oss-120b")) == false
 
+  test "chatgpt speaks Responses at the Codex backend with codex body gates":
+    # The ChatGPT subscription twin: same models as first-party openai,
+    # but the token only works against chatgpt.com/backend-api/codex,
+    # which demands stream:true, store:false, and a top-level
+    # `instructions` string (hoisted out of the system/developer item).
+    let p = Profile(name: "chatgpt.gpt-5.4", family: "gpt",
+                    model: "gpt-5.4", url: "https://api.openai.com/v1")
+    check responsesApi(p) == true
+    check requestUrl(p) == "https://chatgpt.com/backend-api/codex"
+    check requestUrl(Profile(name: "openai.chatgpt.gpt-5.4",
+      model: "gpt-5.4", url: "https://api.openai.com/v1")) ==
+      "https://chatgpt.com/backend-api/codex"
+    check requestUrl(Profile(name: "openai.gpt-5.4", model: "gpt-5.4",
+      url: "https://api.openai.com/v1")) == "https://api.openai.com/v1"
+    let msgs = %*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "go"},
+    ]
+    let body = buildResponsesBody(p, msgs)
+    check body{"stream"}.getBool == true
+    check body{"store"}.getBool == false
+    check body{"instructions"}.getStr == "sys"
+    check body{"input"}.len == 1
+    check body{"input"}[0]{"role"}.getStr == "user"
+    # No system prompt in history: a placeholder keeps the field non-empty.
+    let noSys = buildResponsesBody(p, %*[{"role": "user", "content": "go"}])
+    check noSys{"instructions"}.getStr.len > 0
+    # First-party openai keeps its body untouched.
+    let first = buildResponsesBody(
+      Profile(name: "openai.gpt-5.4", family: "gpt", model: "gpt-5.4"), msgs)
+    check "store" notin first
+    check "instructions" notin first
+    check first{"input"}[0]{"role"}.getStr == "developer"
+    # Verify ping obeys the same gates.
+    let vb = parseJson(verifyBody(p))
+    check vb{"stream"}.getBool == true
+    check vb{"store"}.getBool == false
+    check vb{"instructions"}.getStr.len > 0
+
   test "fallback flag is per-known-good entry":
     check xmlToolCallsFallback(Profile(name: "nvidia.z-ai/glm-5.2",
       model: "z-ai/glm-5.2", family: "glm")) == true

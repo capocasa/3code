@@ -11,7 +11,8 @@
 
 import std/[algorithm, atomics, json, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline,
-  fatprompt, streamexec, sandbox, engine as termengine, auth_xai, oauth
+  fatprompt, streamexec, sandbox, engine as termengine, auth_xai, auth_openai,
+  oauth
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":prompt", ":show",
@@ -305,19 +306,31 @@ proc ensureUniqueName(name: string) =
       errLn &"already configured as {name}"
       raise newException(minline.InputCancelled, "duplicate name")
 
-proc xaiOauthLogin(): string =
-  ## SuperGrok browser OAuth. Prints the authorize URL, opens the default
-  ## browser, waits on the loopback callback on a worker thread so the main
-  ## thread can still poll Ctrl-C / ESC via `wizardVerifyCancelHook` (the
-  ## input thread is parked between wizard prompts). Returns "oauth" on
-  ## success (tokens in the store). Raises InputCancelled on failure/cancel.
-  hintLn "  sign in with your SuperGrok / X Premium+ account", resetStyle
+proc runOauthLogin(
+    signInHint: string,
+    login: proc(openUrl: proc(url: string) {.gcsafe.},
+                showUrl: proc(url: string) {.gcsafe.},
+                cancelFlag: ptr Atomic[bool]): TokenSet,
+    saveTokens: proc(ts: TokenSet)): string =
+  ## Browser-OAuth runner shared by the subscription logins (SuperGrok,
+  ## ChatGPT). Prints the authorize URL, opens the default browser, waits
+  ## on the loopback callback on a worker thread so the main thread can
+  ## still poll Ctrl-C / ESC via `wizardVerifyCancelHook` (the input
+  ## thread is parked between wizard prompts). Returns "oauth" on success
+  ## (tokens stored via `saveTokens`). Raises InputCancelled on
+  ## failure/cancel.
+  hintLn signInHint, resetStyle
   hintLn "  waiting for browser callback (ctrl+c / esc to cancel)", resetStyle
+  # `login` rides into the worker through the arg record: a thread proc
+  # cannot capture the enclosing proc's params.
   type OauthWorkerArg = object
     cancel: ptr Atomic[bool]
     ts: ptr TokenSet
     err: ptr string
     done: ptr Atomic[bool]
+    login: proc(openUrl: proc(url: string) {.gcsafe.},
+                showUrl: proc(url: string) {.gcsafe.},
+                cancelFlag: ptr Atomic[bool]): TokenSet
   var cancel: Atomic[bool]
   var done: Atomic[bool]
   var ts: TokenSet
@@ -326,7 +339,7 @@ proc xaiOauthLogin(): string =
   createThread(th, proc(arg: OauthWorkerArg) {.thread, nimcall.} =
     {.cast(gcsafe).}:
       try:
-        arg.ts[] = auth_xai.loginBrowser(
+        arg.ts[] = arg.login(
           openUrl = openBrowserUrl,
           showUrl = proc(url: string) {.gcsafe.} =
             # Worker prints once listen is up; one-shot line, no lock needed.
@@ -339,7 +352,7 @@ proc xaiOauthLogin(): string =
         arg.err[] = e.msg
       arg.done[].store(true, moRelease)
   , OauthWorkerArg(cancel: addr cancel, ts: addr ts, err: addr err,
-                   done: addr done))
+                   done: addr done, login: login))
   let jobDone = proc(): bool {.closure.} =
     done.load(moAcquire)
   let cancelJob = proc() {.closure.} =
@@ -359,15 +372,27 @@ proc xaiOauthLogin(): string =
   if err != "":
     errLn "  login failed: ", err
     raise newException(minline.InputCancelled, "oauth failed")
-  auth_xai.storeTokens(ts)
+  saveTokens(ts)
   hintLn "  signed in", resetStyle
   "oauth"
 
+proc xaiOauthLogin(): string =
+  ## SuperGrok browser login against auth.x.ai.
+  runOauthLogin("  sign in with your SuperGrok / X Premium+ account",
+    auth_xai.loginBrowser, auth_xai.storeTokens)
+
+proc chatgptOauthLogin(): string =
+  ## ChatGPT Plus/Pro browser login against auth.openai.com (the Codex
+  ## CLI public client).
+  runOauthLogin("  sign in with your ChatGPT Plus/Pro account",
+    auth_openai.loginBrowser, auth_openai.storeTokens)
+
 proc readFirstProviderField(editor: var minline.LineEditor): string =
-  ## First wizard field: catalog name, URL, API key, or `supergrok`.
+  ## First wizard field: catalog name, URL, API key, or a subscription
+  ## login (`supergrok`, `chatgpt`).
   let prevCb = editor.completionCallback
   editor.completionCallback = proc(ed: LineEditor): seq[string] =
-    result.add "supergrok"
+    result.add ["supergrok", "chatgpt"]
     if experimentalEnabled:
       for (n, _) in ProviderCatalog:
         if n notin result: result.add n
@@ -388,16 +413,22 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
   let isUrl = entry.startsWith("http://") or entry.startsWith("https://")
   let inferredFromKey = inferProvider(entry)
 
-  if entryLower == "supergrok":
-    # Subscription login: browser OAuth against auth.x.ai. Named
-    # `supergrok` so an API-key `xai` can sit beside it.
-    ensureUniqueName("supergrok")
-    auth = xaiOauthLogin()
+  if entryLower == "supergrok" or entryLower == "chatgpt":
+    # Subscription login: browser OAuth against the provider's auth
+    # host. Named `supergrok`/`chatgpt` so an API-key `xai`/`openai` can
+    # sit beside it.
+    ensureUniqueName(entryLower)
+    auth = if entryLower == "supergrok": xaiOauthLogin()
+           else: chatgptOauthLogin()
     key = ""
-    name = "supergrok"
-    url = catalogUrl("xai")
-    subscriptionTokenForImpl = auth_xai.subscriptionTokenFor
+    name = entryLower
+    url = catalogUrl(canonicalKnownGoodProvider(name))
+    if subscriptionTokenForImpl == nil:
+      # Library startup normally installs the combined resolver; cover
+      # bare-UI entry points with the xai default.
+      subscriptionTokenForImpl = auth_xai.subscriptionTokenFor
     api.bearerHook = subscriptionBearer
+    api.extraHeadersHook = extraHeadersFor
   elif isUrl:
     if not experimentalEnabled:
       hintLn "  custom urls need --experimental", resetStyle
@@ -442,6 +473,8 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
       if urlEntry != "": url = urlEntry
     if name == "xai":
       hintLn "  for subscription login, enter supergrok", resetStyle
+    elif name == "openai":
+      hintLn "  for subscription login, enter chatgpt", resetStyle
     key = readRequired(editor, "  api key              : ", hidden = true)
 
   if not experimentalEnabled:
