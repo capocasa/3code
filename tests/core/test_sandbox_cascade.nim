@@ -1,11 +1,15 @@
 discard """
   # Exactly one policy file is active: the repo `.sandboxrc` when it
-  # exists, else the user file `~/.config/3code/sandboxrc` (initialized
-  # from the built-in default on first run). Never a cascade. The parser
-  # itself is exhaustively tested in sandwall's test_rules; these tests
-  # cover the 3code-facing surface: file selection via `activePolicyPath`,
-  # the copy-on-edit materialization in `appendRule`, and the mtime-driven
-  # `reloadIfChanged` that picks up mid-session policy edits.
+  # exists, else the user file `~/.config/3code/sandboxrc` when the
+  # user wrote one, else the built-in default in memory. 3code never
+  # creates the user file: a user who never configured anything always
+  # gets the current shipped default, not the default a long-ago first
+  # run froze to disk. Never a cascade. The parser itself is
+  # exhaustively tested in sandwall's test_rules; these tests cover
+  # the 3code-facing surface: file selection via `activePolicyPath`,
+  # the default fallback, the materialization in `appendRule`, and
+  # the mtime-driven `reloadIfChanged` that picks up mid-session
+  # policy edits.
 """
 import std/[unittest, os, times, strutils]
 import threecode/sandbox
@@ -57,11 +61,24 @@ suite "single active policy file":
     defer:
       putEnv("XDG_CONFIG_HOME", "")
       removeDir(home.parentDir)
-    check ensureUserPolicy()
     let userFile = home / "3code" / "sandboxrc"
-    check fileExists(userFile)
-    check readFile(userFile) == defaultPolicyText()
-    # No repo file -> user file is active.
+    check not fileExists(userFile)
+    # No file at all -> the built-in default is the policy text, and
+    # nothing is written into the user config dir.
+    check readPolicyText(projDir) == defaultPolicyText()
+    check not fileExists(userFile)
+    # The bash box child needs a file; the default materializes in the
+    # per-run temp area, never in the user config.
+    let mat = defaultPolicyFilePath(projDir)
+    check mat != userFile
+    check fileExists(mat)
+    check readFile(mat) == defaultPolicyText()
+    check not fileExists(userFile)
+    # A user file the user wrote is respected and never overwritten.
+    createDir(userFile.parentDir)
+    writeFile(userFile, "deny /\nallow " & opt & "\n")
+    check readPolicyText(projDir) == "deny /\nallow " & opt & "\n"
+    check defaultPolicyFilePath(projDir) == userFile
     check activePolicyPath(projDir) == userFile
     # Repo file appears -> it alone is active.
     writeFile(repoPolicyPath(projDir), "allow /\n")
@@ -72,8 +89,8 @@ suite "single active policy file":
     defer:
       putEnv("XDG_CONFIG_HOME", "")
       removeDir(home.parentDir)
-    check ensureUserPolicy()
     let userFile = home / "3code" / "sandboxrc"
+    createDir(userFile.parentDir)
     writeFile(userFile, "deny /\nallow " & opt & "\n")
     let repoFile = repoPolicyPath(projDir)
     check not fileExists(repoFile)

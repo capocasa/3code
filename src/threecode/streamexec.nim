@@ -355,7 +355,10 @@ export DEBIAN_FRONTEND=noninteractive
         # script, it never writes there). The policy force-read-only and
         # Landlock writability warning live in box.nim.
         discard sandbox.reloadIfChanged(getCurrentDir())
-        let policy = sandbox.activePolicyPath(getCurrentDir())
+        # A file only: when neither repo nor user policy exists, the
+        # built-in default is materialized under tempDir() (which the
+        # default itself leaves writable), never into the user config.
+        let policy = sandbox.defaultPolicyFilePath(getCurrentDir())
         var args = @["sandbox"]
         args.add ["--policy", policy]
         args.add "restrict"

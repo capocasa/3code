@@ -155,7 +155,6 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
   var colorKeys: Table[string, string]
   (activeCurrent, activeProviders, colorKeys) = loadStateOrEmpty(configPath())
   if sandboxEnabled:
-    discard sandbox.ensureUserPolicy()
     sandbox.current = sandbox.loadPolicy(cwd)
     sandbox.active = true
     sandbox.procboxExe = sandbox.findProcbox()

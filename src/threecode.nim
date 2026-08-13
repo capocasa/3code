@@ -104,11 +104,12 @@ proc initSandbox(cwd: string) =
   ## Load the sandbox policy into the global state and resolve this
   ## binary's own path for bash wrapping. Exactly one file is active:
   ## the repo `.sandboxrc` when it exists, else the user file
-  ## `~/.config/3code/sandboxrc`, which is initialized from the
-  ## built-in default on first run so the sandbox is always on. When
-  ## `sandboxEnabled` is false (the `[settings] sandbox = off` switch),
-  ## this does nothing: bash runs unconfined and the in-process checks
-  ## pass through (`active` stays false).
+  ## `~/.config/3code/sandboxrc` when the user wrote one, else the
+  ## built-in default in memory, so the sandbox is always on without
+  ## 3code ever creating the user file. When `sandboxEnabled` is false
+  ## (the `[settings] sandbox = off` switch), this does nothing: bash
+  ## runs unconfined and the in-process checks pass through (`active`
+  ## stays false).
   # The provider stub binary (the tty/visual test harness) skips sandbox
   # setup entirely so its behaviour matches the pre-sandbox binary. Those
   # tests drive REPL rendering, not enforcement, and `active=true` plus the
@@ -119,7 +120,6 @@ proc initSandbox(cwd: string) =
     return
   if not sandboxEnabled:
     return
-  discard sandbox.ensureUserPolicy()
   sandbox.current = sandbox.loadPolicy(cwd)
   sandbox.active = true
   # The bash tool re-execs this binary as `3code sandbox restrict ...`, so
@@ -370,11 +370,10 @@ proc main() =
     if prompt == "":
       restoredDraft = loadPendingDraft(session.cwd)
 
-  # Sandbox is mandatory: the user policy file is initialized from
-  # the built-in default when absent, then the single active file
-  # (repo `.sandboxrc` or the user file) is loaded. Paths resolve
-  # relative to the session cwd so the policy follows the project,
-  # not the binary.
+  # Sandbox is mandatory: the single active policy (repo
+  # `.sandboxrc`, user file, else the built-in default) is loaded.
+  # Paths resolve relative to the session cwd so the policy follows
+  # the project, not the binary.
   initSandbox(session.cwd)
 
   try:

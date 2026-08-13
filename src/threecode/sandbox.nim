@@ -15,10 +15,12 @@
 ##
 ## There is exactly one active policy file, never a cascade: the repo
 ## file `.sandboxrc` when it exists, else the user file
-## `~/.config/3code/sandboxrc`. The user file is initialized from the
-## built-in default on first run, so the sandbox is always on. A
-## `:sandbox allow|readonly|deny` edit materializes the repo file by
-## copying the user file first, so project rules start from the user's
+## `~/.config/3code/sandboxrc` when the user wrote one, else the
+## built-in default in memory. 3code never creates the user file, so a
+## user who never configured anything always gets the current shipped
+## default, not whatever default a long-ago first run froze to disk. A
+## `:sandbox allow|readonly|deny` edit materializes the repo file from
+## the effective policy text, so project rules start from the user's
 ## baseline instead of from scratch.
 ##
 ## `reloadIfChanged` re-reads the active file when its mtime changed
@@ -90,19 +92,6 @@ var
     ## Path to the binary to exec for `sandbox restrict` (this one).
   lastMtime: Time
 
-proc ensureUserPolicy*(): bool =
-  ## Create `~/.config/3code/sandboxrc` from the built-in default when
-  ## absent. Runs at every launch so the user file is always there to
-  ## fall back to (and to copy from on the first `:sandbox` edit).
-  let path = systemPolicyPath()
-  if fileExists(path): return true
-  try:
-    createDir(path.parentDir)
-    writeFile(path, defaultPolicyText())
-  except CatchableError:
-    return false
-  fileExists(path)
-
 proc activePolicyPath*(projectDir: string): string =
   ## The one policy file in effect: the repo `.sandboxrc` when it
   ## exists, else the user file. Never both.
@@ -110,11 +99,24 @@ proc activePolicyPath*(projectDir: string): string =
   if fileExists(repo): repo else: systemPolicyPath()
 
 proc readPolicyText*(projectDir: string): string =
-  ## The active file's contents, or the built-in default when the user
-  ## file could not be initialized (read-only home): the sandbox stays
-  ## on either way.
+  ## The active file's contents, or the built-in default when no
+  ## policy file exists at all: the sandbox stays on either way.
   let f = activePolicyPath(projectDir)
   if fileExists(f): readFile(f) else: defaultPolicyText()
+
+proc defaultPolicyFilePath*(projectDir: string): string =
+  ## Path to a file holding the effective policy text for
+  ## `projectDir`, creating one in the per-run temp area when no repo
+  ## or user policy file exists. The bash box child only accepts a
+  ## file (`3code sandbox --policy`), so the in-memory default needs
+  ## this materialization; the user file is never written.
+  let f = activePolicyPath(projectDir)
+  if fileExists(f): return f
+  let dir = tempDir() / ("3code-default-policy-" & $getCurrentProcessId())
+  createDir(dir)
+  let p = dir / PolicyFile
+  writeFile(p, defaultPolicyText())
+  p
 
 # ------------------------------------------------------------- wall proxy
 #
@@ -332,16 +334,14 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
     (false, "sandbox: " & resolved & " is denied by the policy (" & policyHint() & ")")
 
 proc ensureRepoPolicy*(dir: string): bool =
-  ## Materialize `dir/.sandboxrc` by copying the user file
-  ## (`~/.config/3code/sandboxrc`, itself initialized from the built-in
-  ## default when absent). Runs before the first `:sandbox
-  ## allow|readonly|deny` edit so project rules start from the
-  ## user's baseline, not from scratch.
+  ## Materialize `dir/.sandboxrc` from the effective policy text (the
+  ## user file when one exists, else the built-in default). Runs
+  ## before the first `:sandbox allow|readonly|deny` edit so project
+  ## rules start from the user's baseline, not from scratch.
   let path = repoPolicyPath(dir)
   if fileExists(path): return true
-  if not ensureUserPolicy(): return false
   try:
-    copyFile(systemPolicyPath(), path)
+    writeFile(path, readPolicyText(dir))
   except CatchableError:
     return false
   fileExists(path)

@@ -76,8 +76,9 @@ when defined(posix):
       inc i
     if policy.len == 0:
       # Default to the active policy file (repo `.sandboxrc` when
-      # present, else the user file).
-      policy = sb.activePolicyPath(getCurrentDir())
+      # present, else the user file, else a temp materialization of
+      # the built-in default).
+      policy = sb.defaultPolicyFilePath(getCurrentDir())
     if projectDir.len == 0:
       projectDir = getCurrentDir()
     let p = startWallProxy(policy, projectDir, unixSockPath = unixSock,
