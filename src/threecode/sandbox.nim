@@ -143,6 +143,11 @@ when defined(posix):
       ## .sock == nil means not running.
     wallProxyDir*: string = ""
       ## Per-run temp dir holding the merged policy file + unix socket.
+    wallProxyBoundDir: string = ""
+      ## The dir the running proxy's unix socket was bound in. The
+      ## per-launch bash tmp dir changes every fenced call and is
+      ## deleted right after; when it differs from the bound dir the
+      ## proxy must rebind, or the bridge connects to a dead socket.
 
 proc wallProxyNeeded*(pol: Policy): bool =
   ## Fencing is off until the effective policy names its first host.
@@ -171,18 +176,26 @@ when defined(posix):
     wallProxyDir = dir
 
   proc ensureWallProxy*(projectDir: string): bool =
-    ## Start the per-run proxy when the policy needs it and it is not
-    ## running yet. True when fenced bash may launch.
+    ## Start the per-run proxy when the policy needs it. When it is
+    ## already running but bound in a different (since-deleted) bash
+    ## tmp dir, restart it so the unix socket lives in the current
+    ## launch's writable dir; the bridge connects there. True when
+    ## fenced bash may launch.
     if not wallProxyNeeded(current): return false
-    if wallProxy.port != 0: return true
     if wallProxyDir.len == 0:
       wallProxyDir = tempDir() / ("3code-wall-" & $getCurrentProcessId())
       createDir(wallProxyDir)
+    if wallProxy.port != 0 and wallProxyBoundDir == wallProxyDir:
+      return true
+    if wallProxy.port != 0:
+      sandwallWall.stopWallProxy(wallProxy)
+      wallProxy.port = 0
     let polFile = wallProxyDir / "policy"
     writeFile(polFile, wallPolicyText(projectDir))
     try:
       wallProxy = sandwallWall.startWallProxy(polFile, projectDir,
         port = 0, unixSockPath = proxySockPath())
+      wallProxyBoundDir = wallProxyDir
     except CatchableError as e:
       raise newException(IOError, "wall proxy: " & e.msg)
     true
@@ -202,6 +215,7 @@ when defined(posix):
     if wallProxy.port != 0:
       sandwallWall.stopWallProxy(wallProxy)
       wallProxy.port = 0
+      wallProxyBoundDir = ""
     if wallProxyDir.len > 0:
       try: removeDir(wallProxyDir)
       except CatchableError: discard
