@@ -717,6 +717,9 @@ suite "xml tool_call fallback":
     let body = buildResponsesBody(p, msgs)
     check body{"stream"}.getBool == true
     check body{"store"}.getBool == false
+    # The Codex backend 400s on max_output_tokens even though known-good
+    # gpt-5.4 carries a cap; chatgpt profiles must omit it.
+    check "max_output_tokens" notin body
     check body{"instructions"}.getStr == "sys"
     check body{"input"}.len == 1
     check body{"input"}[0]{"role"}.getStr == "user"
@@ -733,6 +736,7 @@ suite "xml tool_call fallback":
     let vb = parseJson(verifyBody(p))
     check vb{"stream"}.getBool == true
     check vb{"store"}.getBool == false
+    check "max_output_tokens" notin vb
     check vb{"instructions"}.getStr.len > 0
 
   test "fallback flag is per-known-good entry":
