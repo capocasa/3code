@@ -81,6 +81,18 @@ models = "openai/gpt-oss-120b"
 ; auth = "oauth"
 ; models = "grok-4.5 grok-4.20"
 ;
+; ChatGPT Plus/Pro subscription (browser OAuth via `:provider add` → chatgpt).
+; Tokens live in $XDG_DATA_HOME/3code/auth/openai.json and refresh
+; automatically. Requests go to the ChatGPT Codex backend
+; (chatgpt.com/backend-api/codex), not api.openai.com. Can sit beside an
+; API-key `openai` provider.
+; [provider]
+; name = "chatgpt"
+; url = "https://api.openai.com/v1"
+; key = ""
+; auth = "oauth"
+; models = "gpt-5.4 gpt-5.5"
+;
 ; [provider]
 ; name = "xai"
 ; url = "https://api.x.ai/v1"

@@ -2368,9 +2368,12 @@ input:
 proc canonicalKnownGoodProvider*(provider: string): string =
   ## Map config provider names onto the KnownGoodCombos provider key.
   ## `supergrok` is the SuperGrok/OAuth twin of first-party `xai` (same
-  ## models, same api.x.ai host); everything else is identity.
+  ## models, same api.x.ai host); `chatgpt` is the ChatGPT-subscription
+  ## twin of first-party `openai`. Everything else is identity.
   let p = provider.toLowerAscii
-  if p == "supergrok": "xai" else: p
+  if p == "supergrok": "xai"
+  elif p == "chatgpt": "openai"
+  else: p
 
 proc knownGoodFamily*(p: Profile): string =
   ## Returns the family label ("glm", ...) for a known-good combo, or ""
