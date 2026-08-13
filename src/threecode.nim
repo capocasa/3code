@@ -32,7 +32,7 @@ when defined(posix):
 import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
                   toolstream, turns, transcript, sandbox, box, wall,
-                  auth_xai]
+                  auth_xai, auth_openai]
 when defined(windows):
   import threecode/streamexec  # for resolveBash, used by ensureBash
 when not defined(android):
@@ -390,8 +390,14 @@ proc main() =
 
   # Subscription auth: oauth-marked providers resolve their bearer
   # through the token store (auto-refresh) instead of a static key.
-  subscriptionTokenForImpl = auth_xai.subscriptionTokenFor
+  # ChatGPT additionally needs its Codex-backend headers on every call.
+  subscriptionTokenForImpl = proc(provider: string): string {.closure.} =
+    result = auth_xai.subscriptionTokenFor(provider)
+    if result == "":
+      result = auth_openai.subscriptionTokenFor(provider)
+  extraHeadersImpl = chatgptExtraHeaders
   api.bearerHook = subscriptionBearer
+  api.extraHeadersHook = extraHeadersFor
 
   var activeColorKeys: Table[string, string]
   (activeCurrent, activeProviders, activeColorKeys) = loadStateOrEmpty(configPath())

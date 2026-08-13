@@ -1031,7 +1031,9 @@ proc buildResponsesBody*(p: Profile, wireMessages: JsonNode): JsonNode =
   result["tools"] = responsesTools(setup(p).tools)
   result["tool_choice"] = %"auto"
   let d = knownGoodGeneration(p)
-  if d.maxTokens > 0:
+  # The Codex backend rejects `max_output_tokens` outright (400
+  # "Unsupported parameter"); first-party codex never sends it.
+  if d.maxTokens > 0 and not chatgptProfile(p):
     result["max_output_tokens"] = %d.maxTokens
   # The known-good `gpt` temperature is the completions-era default;
   # gpt-5.x on /responses rejects any temperature but 1, so omit it.
@@ -2293,7 +2295,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     if useResponses:
       block:
         let body = buildResponsesBody(p, wireMessages)
-        if maxTokensOverride > 0:
+        if maxTokensOverride > 0 and not chatgptProfile(p):
           body["max_output_tokens"] = %maxTokensOverride
         sanitizeUtf8($body)
     else:
@@ -2596,7 +2598,7 @@ proc verifyBody*(p: Profile): string =
       "model": p.model,
       "instructions": "You are a helpful assistant.",
       "input": [%*{"role": "user", "content": "ping"}],
-      "max_output_tokens": 16,
+      # No max_output_tokens: the Codex backend 400s on it.
       "store": false,
       "stream": true
     }
@@ -2700,8 +2702,10 @@ proc verifyProfile*(p: Profile): (bool, string) =
         break
       snip.add line
     return (false, $resp.status & ": " & snip)
-  # 200 — scan the streamed body for an in-band error object. The ping asks
-  # for max_tokens=1 so this is at most a couple of SSE lines.
+  # 200 — scan the streamed body for an in-band error. The Codex
+  # backend's `response.created` JSON carries `"error":null`, so a dumb
+  # substring match false-positives; only a `"error":{...}` object or an
+  # SSE `event: error` frame means failure.
   var sse = ""
   while getMonoTime() < deadline and sse.len < 2048:
     var line: string
@@ -2712,7 +2716,7 @@ proc verifyProfile*(p: Profile): (bool, string) =
     except CatchableError:
       break
     sse.add line
-  if sse.contains("\"error\""):
+  if sse.contains("event: error") or sse.contains("\"error\":{"):
     let start = max(0, sse.find("{"))
     return (false, sse[start ..< min(start + 200, sse.len)])
   (true, "")

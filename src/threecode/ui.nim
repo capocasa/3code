@@ -424,9 +424,14 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
     name = entryLower
     url = catalogUrl(canonicalKnownGoodProvider(name))
     if subscriptionTokenForImpl == nil:
-      # Library startup normally installs the combined resolver; cover
-      # bare-UI entry points with the xai default.
-      subscriptionTokenForImpl = auth_xai.subscriptionTokenFor
+      # Startup normally installs the combined xai+openai resolver; cover
+      # bare-UI entry points with the same pair.
+      subscriptionTokenForImpl = proc(provider: string): string {.closure.} =
+        result = auth_xai.subscriptionTokenFor(provider)
+        if result == "":
+          result = auth_openai.subscriptionTokenFor(provider)
+    if extraHeadersImpl == nil:
+      extraHeadersImpl = chatgptExtraHeaders
     api.bearerHook = subscriptionBearer
     api.extraHeadersHook = extraHeadersFor
   elif isUrl:
