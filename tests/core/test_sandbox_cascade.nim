@@ -129,8 +129,8 @@ suite "single active policy file":
     finally:
       setCurrentDir(oldCwd)
     let text = readFile(repoFile)
-    check text.contains("allow src/foo.nim\n")
-    check text.contains("allow build/out\n")
+    check text.contains("allow ./src/foo.nim\n")
+    check text.contains("allow ./build/out\n")
     check text.contains("deny ~/dl\n")
     check text.contains("readonly " & varDir & "\n")
     check projDir notin text.splitLines[^4..^1].join("\n")
@@ -147,7 +147,7 @@ suite "single active policy file":
     setCurrentDir(projDir)
     try:
       let s = renderSandbox(loadPolicy(projDir))
-      check s.contains(".git")
+      check s.contains("./.git")
       check not s.contains(projDir)
       check s.contains("~/x")
       check s.contains(varDir)
