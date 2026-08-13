@@ -2347,8 +2347,9 @@ commands:
   :sandbox readonly P  add a read-only rule (readonly P)
   :sandbox deny T   add a deny rule (deny T)
   :sandbox edit     open the policy file in $VISUAL/$EDITOR, reload on quit
-  (T is a path or a host; P a path. Policy words: allow, readonly,
-  deny; see .sandbox)
+  (T is a path or a host; P a path. Paths under the project dir
+  write as relative (foo, ./foo), home paths as ~/foo. Policy words:
+  allow, readonly, deny; see .sandbox)
   :q :quit          exit (also Ctrl-D)
 
 input:

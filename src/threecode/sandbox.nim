@@ -340,6 +340,12 @@ proc resolveRawPath(p: string): string =
   try: absolutePath(q) except CatchableError: q
 
 
+proc contractPolicyPath*(resolved: string): string =
+  ## The user-facing form of an absolute cleaned path in sandbox
+  ## messages: under the cwd as the portable relative form (`foo`,
+  ## `./x`), under home as `~/...`, else absolute. Display only.
+  sandwall.contractPath(resolved, getCurrentDir())
+
 proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason: string] =
   ## Check a raw (possibly relative) path against the current policy,
   ## reloading the policy first when the file changed. This is the
@@ -352,14 +358,15 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
   let resolved = resolveRawPath(path)
   if resolved.len == 0: return (true, "")
   let access = current.checkPath(resolved)
+  let shown = contractPolicyPath(resolved)
   case access
   of akWritable: (true, "")
   of akReadOnly:
     if not needsWrite: (true, "")
     else:
-      (false, "sandbox: " & resolved & " is read-only (" & policyHint() & ")")
+      (false, "sandbox: " & shown & " is read-only (" & policyHint() & ")")
   of akDeny:
-    (false, "sandbox: " & resolved & " is denied by the policy (" & policyHint() & ")")
+    (false, "sandbox: " & shown & " is denied by the policy (" & policyHint() & ")")
 
 proc ensureRepoPolicy*(dir: string): bool =
   ## Materialize `dir/.sandbox` from the effective policy text (the
@@ -375,7 +382,7 @@ proc ensureRepoPolicy*(dir: string): bool =
   fileExists(path)
 
 proc renderSandbox*(p: Policy): string =
-  renderPolicy(p)
+  renderPolicy(p, getCurrentDir())
 
 proc appendRule*(sandboxFile, argPath: string; access: AccessKind): bool =
   ## Append a rule to the repo policy file, materializing it from the
@@ -383,7 +390,8 @@ proc appendRule*(sandboxFile, argPath: string; access: AccessKind): bool =
   ## After appending, reload so the change is live for the next check.
   if not fileExists(sandboxFile):
     if not ensureRepoPolicy(sandboxFile.parentDir): return false
-  result = sandwall.appendRule(sandboxFile, argPath, access)
+  result = sandwall.appendRule(sandboxFile, argPath, access,
+    getCurrentDir())
   if result:
     current = loadPolicy(getCurrentDir())
 
