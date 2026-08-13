@@ -1335,6 +1335,15 @@ proc streamResponses(url, key, bodyStr: string, baseLabel: string,
     result.finishReason = status
     result.assistantMsg = responsesAssistantMsg(completedResp,
                                                 isInterrupted())
+    let msg = result.assistantMsg
+    let hollow = msg != nil and
+      msg{"content"}.getStr("").len == 0 and
+      msg{"tool_calls"} == nil
+    if (msg == nil or hollow) and (accContent.len > 0 or accTools.len > 0):
+      # The Codex backend completes with `"output": []` — the reply only
+      # ever exists as streamed deltas. Rebuild from the accumulator.
+      result.assistantMsg = buildStreamAssistantMsg(accContent, "",
+        accTools, result.usage, isInterrupted())
   elif accTools.len > 0 or accContent.len > 0:
     # EOF before response.completed: interrupted-stream fallback.
     result.assistantMsg = buildStreamAssistantMsg(accContent, "",
