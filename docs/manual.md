@@ -385,14 +385,14 @@ Sub-agents are not supported because both research and user feedback says they a
 3code confines every tool call to a filesystem sandbox you define. The
 sandbox is a plain text policy living in exactly one file at a time:
 
-1. **repo** - `.sandboxrc` in your project directory, when it exists.
-2. **user** - `~/.config/3code/sandboxrc`, next to your config,
+1. **repo** - `.sandbox` in your project directory, when it exists.
+2. **user** - `~/.config/3code/sandbox`, next to your config,
    otherwise.
 
 There is no cascade and no merging: the repo file wins outright, the
 user file is the fallback. The user file is created from the built-in
 default on first run, so the sandbox is always on and you can change
-what every project without its own `.sandboxrc` gets by editing that
+what every project without its own `.sandbox` gets by editing that
 one file. Yolo mode (everything writable) is fine but you have to ask
 for it explicitly.
 
@@ -452,7 +452,7 @@ writable project). Host rules (``allow api.example.com``,
 ``allow 1.2.3.4:8080``, ``allow *`` for no network restrictions) fence
 the network egress of sandboxed bash commands through the wall proxy.
 
-On first run, 3code initializes `~/.config/3code/sandboxrc` with this
+On first run, 3code initializes `~/.config/3code/sandbox` with this
 default:
 
 ```
@@ -509,7 +509,7 @@ REPL commands which append a rule and reload immediately:
 :sandbox off
 ```
 
-The first `allow`/`readonly`/`deny` in a project creates the `.sandboxrc`
+The first `allow`/`readonly`/`deny` in a project creates the `.sandbox`
 file by copying your user file, then appends the rule, so project rules
 start from your baseline and you have something concrete to version and
 share. `:sandbox off` disables
@@ -521,6 +521,18 @@ The agent never writes the sandbox file. If the model proposes a policy
 change, it edits a copy and you move it into place. This keeps the trust
 boundary entirely on your side: the sandbox is defined at prompt time, by
 you, and the agent cannot weaken it.
+
+Both policy files are protected directly: `.sandbox` and
+`~/.config/3code/sandbox` are always read-only to the agent and to
+sandboxed commands, whatever the policy says. 3code appends them to
+every load as hidden guard rules that no rule in the file can
+override, so even ``allow /`` cannot make them writable. The guards do
+not appear in `:sandbox show` - they are not yours to edit, and
+listing them would only invite prompt-injection games. On Linux the
+kernel backend (Landlock) cannot subtract a read-only rule from a
+writable root, so there the guard limits the in-process tools; bash
+commands confined with ``allow /`` could still write the file. macOS
+and Windows enforce the guard fully.
 
 When enforcement is on and a sandboxed bash command fails with
 ``Permission denied``, 3code appends a hint to the tool output pointing

@@ -252,21 +252,21 @@ suite "sandbox subcommand (built-in sandwall)":
     if backendWorks:
       let proj = boxTmp / "proj"
       createDir(proj)
-      writeFile(proj / ".sandboxrc", "deny /\nallow\n")
+      writeFile(proj / ".sandbox", "deny /\nallow\n")
       let inside = proj / "ok.txt"
-      let rIn = run(["sandbox", "--policy", proj / ".sandboxrc",
+      let rIn = run(["sandbox", "--policy", proj / ".sandbox",
                      "restrict", "--", "touch", inside])
       check rIn.code == 0
       check fileExists(inside)
       let outside = getTempDir() / ("3code-box-poleak-" & $epochTime().int64)
-      let rOut = run(["sandbox", "--policy", proj / ".sandboxrc",
+      let rOut = run(["sandbox", "--policy", proj / ".sandbox",
                       "restrict", "--", "touch", outside])
       check rOut.code != 0
       check not fileExists(outside)
       # A fully locked policy (no writable root) is accepted: the touch
       # simply has nowhere legal to land.
-      writeFile(proj / ".sandboxrc", "deny /\n")
-      let rLock = run(["sandbox", "--policy", proj / ".sandboxrc",
+      writeFile(proj / ".sandbox", "deny /\n")
+      let rLock = run(["sandbox", "--policy", proj / ".sandbox",
                        "restrict", "--", "true"])
       check rLock.code == 0
     else:
@@ -278,7 +278,7 @@ suite "sandbox subcommand (built-in sandwall)":
     if backendWorks:
       let proj = boxTmp / "proj2"
       createDir(proj)
-      let pol = proj / ".sandboxrc"
+      let pol = proj / ".sandbox"
       let target = proj / "t.txt"
       writeFile(pol, "deny /\nallow\n")
       check run(["sandbox", "--policy", pol, "restrict", "--", "touch", target]).code == 0
@@ -289,10 +289,33 @@ suite "sandbox subcommand (built-in sandwall)":
     else:
       skip()
 
+  test "sandbox --policy keeps the policy file read-only inside":
+    # The policy file is readable (box reads it to load) but never
+    # writable from inside the sandbox, even under `allow /`.
+    if backendWorks:
+      let proj = boxTmp / "projguard"
+      createDir(proj)
+      let pol = proj / ".sandbox"
+      writeFile(pol, "allow /\n")
+      let r = run(["sandbox", "--policy", pol, "restrict", "--",
+                   "sh", "-c", "echo pwned >> " & quoteShell(pol)])
+      when defined(linux):
+        # Landlock unions rules within a layer: a read-only rule cannot
+        # subtract write from a writable root, so on Linux the append
+        # succeeds (and exits 0). Seatbelt/Windows subtract; there the
+        # write fails.
+        skip()
+      else:
+        check r.code != 0
+        check readFile(pol) == "allow /\n"
+    else:
+      skip()
+
   test "sandbox --policy never warns about a writable policy file":
     # The single policy file always sits under the writable project dir;
     # the old `is under a writable rule` warning was removed because the
-    # implicit read-only guard (parent side) covers the file instead.
+    # implicit guard (the parent always denies the two policy file
+    # paths, and box carries that deny into the kernel backends).
     if backendWorks:
       let proj = boxTmp / "proj3"
       createDir(proj / ".3code")

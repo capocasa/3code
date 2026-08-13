@@ -14,14 +14,16 @@
 ## contents: a policy edit between the parent's last check and the exec
 ## can only tighten what box applies.
 ##
-## Policy files are force-added to the read-only set so the sandboxed
-## command can read its own policy but not change it. On Landlock a
-## read-only rule under a writable root does not subtract write (rules
-## union within a layer), so on Linux a policy file inside a writable
-## tree is still writable from inside the sandbox. That is accepted:
-## the single policy file is re-loaded by the parent on every check,
-## and an implicit read-only guard for the file is appended last on
-## every load so no file rule can weaken it.
+## The policy files 3code can activate (the repo `.sandbox` and the
+## user file) are read-only inside the sandbox: the parent seeds
+## `hiddenRules` with them at startup and resolvePolicy appends the
+## same guards to whatever --policy it loads, so no file rule can
+## weaken them and they never render in the rule dump. A foreign
+## --policy file (standalone box use) is force-added read-only.
+## On Landlock a read-only rule under a writable root does not
+## subtract write (rules union within a layer), so on Linux a policy
+## file inside a writable tree is still writable from inside the
+## sandbox; that is accepted.
 
 when defined(posix):
   import std/posix except Time
@@ -45,8 +47,8 @@ Usage:
 
   With --policy, the writable/read-only sets come from the given
   policy file (relative targets resolve against the project dir: the
-  parent of a `.sandboxrc` file, else cwd). Explicit RWPATH/ROPATH
-  args union with the policy sets. The policy file itself is forced
+  parent of a `.sandbox` file, else cwd). Explicit RWPATH/ROPATH
+  args union with the policy sets. The policy file itself is
   read-only inside the sandbox.
 
   System dirs (/usr, /bin, /lib, /dev/*, etc.) are always read-only so the
@@ -55,7 +57,7 @@ Usage:
 
 Examples:
   3code sandbox restrict /tmp /home/me/work -- ls -la
-  3code sandbox --policy .sandboxrc restrict -- make test
+  3code sandbox --policy .sandbox restrict -- make test
   3code sandbox restrict . -- make test
 
 Landlock is monotonic: the restriction is permanent for this process and all
@@ -103,30 +105,33 @@ proc parseBoxArgs(args: seq[string]): tuple[a: BoxArgs, err: string] =
 proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
                    fence: bool] =
   ## Resolve the policy file(s) plus explicit args into the
-  ## (writable, readonly, denied) triple. Policy files are force-added
-  ## read-only. `denied` carries the policy's last-wins narrowing (a deny
-  ## under an allowed root); the backend enforces it on top of the root
-  ## lists.
+  ## (writable, readonly, denied) triple. The 3code policy paths ride
+  ## the parse as hidden read-only guards; any other --policy file is
+  ## force-added read-only. `denied` carries the policy's last-wins
+  ## narrowing (a deny under an allowed root); the backend enforces it
+  ## on top of the root lists.
   var writable = a.writable
   var readonly = a.readOnly
   var denied: seq[string]
   var hostRules = 0
   if a.policies.len > 0:
-    # Exactly one active policy file: 3code passes the repo `.sandboxrc`
+    # Exactly one active policy file: 3code passes the repo `.sandbox`
     # when it exists, else the user file. Multiple --policy args are
     # still accepted (concatenated) for standalone box use.
     var texts: seq[string]
     for f in a.policies:
       texts.add(if fileExists(f): readFile(f) else: "")
     # Relative targets resolve against the project dir: the parent of
-    # the last `.sandboxrc` policy file, falling back to cwd.
+    # the last `.sandbox` policy file, falling back to cwd.
     let last = a.policies[^1]
     var projectDir = getCurrentDir()
     if last.extractFilename == PolicyFile:
       projectDir = last.parentDir
     var combined = ""
     for t in texts: combined.add t & "\n"
-    let pol = parsePolicy(combined, projectDir)
+    let pol = parsePolicy(combined, projectDir) &
+                (if hiddenRules.len > 0: hiddenRules
+                 else: guardRules(projectDir))
     let r = pol.resolve()
     writable.add r.writable
     readonly.add r.readonly

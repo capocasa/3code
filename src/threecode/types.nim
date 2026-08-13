@@ -22,8 +22,8 @@ var notifyEnabled*: bool = true
   ## `[settings]`; an explicit `off` opts out.
 var sandboxEnabled*: bool = true
   ## When true, every tool call is confined to the filesystem sandbox
-  ## (the single active policy: repo `.sandboxrc`, else
-  ## `~/.config/3code/sandboxrc`, else the built-in default). When
+  ## (the single active policy: repo `.sandbox`, else
+  ## `~/.config/3code/sandbox`, else the built-in default). When
   ## false, bash runs unconfined and the in-process read/write/patch
   ## checks pass through.
   ## Default on, preserving the historical sandboxed behavior. Toggled

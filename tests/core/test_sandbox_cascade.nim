@@ -1,6 +1,6 @@
 discard """
-  # Exactly one policy file is active: the repo `.sandboxrc` when it
-  # exists, else the user file `~/.config/3code/sandboxrc` when the
+  # Exactly one policy file is active: the repo `.sandbox` when it
+  # exists, else the user file `~/.config/3code/sandbox` when the
   # user wrote one, else the built-in default in memory. 3code never
   # creates the user file: a user who never configured anything always
   # gets the current shipped default, not the default a long-ago first
@@ -61,7 +61,7 @@ suite "single active policy file":
     defer:
       putEnv("XDG_CONFIG_HOME", "")
       removeDir(home.parentDir)
-    let userFile = home / "3code" / "sandboxrc"
+    let userFile = home / "3code" / "sandbox"
     check not fileExists(userFile)
     # No file at all -> the built-in default is the policy text, and
     # nothing is written into the user config dir.
@@ -89,7 +89,7 @@ suite "single active policy file":
     defer:
       putEnv("XDG_CONFIG_HOME", "")
       removeDir(home.parentDir)
-    let userFile = home / "3code" / "sandboxrc"
+    let userFile = home / "3code" / "sandbox"
     createDir(userFile.parentDir)
     writeFile(userFile, "deny /\nallow " & opt & "\n")
     let repoFile = repoPolicyPath(projDir)
@@ -106,6 +106,55 @@ suite "single active policy file":
     check text.contains("readonly " & varDir)
     # The user file is untouched by the repo edit.
     check readFile(userFile) == "deny /\nallow " & opt & "\n"
+
+  test "policy file paths are always read-only, hidden from the dump":
+    # loadPolicy appends hiddenRules last; seeded with the two policy
+    # paths as read-only guards, they survive any rule in the file and
+    # never show in renderSandbox.
+    let (home, projDir) = newFixture("guard")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    sandbox.hiddenRules = sandbox.guardRules(projDir)
+    defer: sandbox.hiddenRules = @[]
+    let userFile = (home / "3code" / "sandbox").normalizedPath
+    createDir(userFile.parentDir)
+    writeFile(userFile, "allow /\n")
+    let repoFile = repoPolicyPath(projDir)
+    # No repo file: the user file is active; both paths stay read-only.
+    var p = loadPolicy(projDir)
+    check p.checkPath(repoFile) == akReadOnly
+    check p.checkPath(userFile) == akReadOnly
+    # A repo file that explicitly allows the policy paths loses to the
+    # appended guards (it alone is active, and it cannot free itself).
+    writeFile(repoFile, "allow /\nallow ./.sandbox\nallow " & userFile & "\n")
+    p = loadPolicy(projDir)
+    check p.checkPath(repoFile) == akReadOnly
+    check p.checkPath(userFile) == akReadOnly
+    # A cwd == the XDG config dir collapses the two paths into one rule.
+    let confDir = home / "3code"
+    sandbox.hiddenRules = sandbox.guardRules(confDir)
+    writeFile(confDir / ".sandbox", "allow /\n")
+    p = loadPolicy(confDir)
+    check p.checkPath(confDir / ".sandbox") == akReadOnly
+    # The guards are enforced but never rendered.
+    check ".sandbox" notin renderSandbox(p)
+    check userFile notin renderSandbox(p)
+
+  test "box policy resolution keeps the policy file read-only":
+    # The bash subprocess re-loads the policy itself; the hidden guards
+    # must land in the backend's read-only set there too.
+    let (home, projDir) = newFixture("guardbox")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    sandbox.hiddenRules = sandbox.guardRules(projDir)
+    defer: sandbox.hiddenRules = @[]
+    let repoFile = repoPolicyPath(projDir)
+    writeFile(repoFile, "allow /\n")
+    let pol = parsePolicy(readFile(repoFile), projDir) & sandbox.hiddenRules
+    let r = pol.resolve()
+    check (repoFile.normalizedPath) in r.readonly
 
   test "sandboxEnabled default is on (types.nim contract)":
     # The gate lives in types.nim; assert the default so a future change
