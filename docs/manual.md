@@ -522,6 +522,18 @@ change, it edits a copy and you move it into place. This keeps the trust
 boundary entirely on your side: the sandbox is defined at prompt time, by
 you, and the agent cannot weaken it.
 
+Both policy files are protected directly: `.sandbox` and
+`~/.config/3code/sandbox` are always read-only to the agent and to
+sandboxed commands, whatever the policy says. 3code appends them to
+every load as hidden guard rules that no rule in the file can
+override, so even ``allow /`` cannot make them writable. The guards do
+not appear in `:sandbox show` - they are not yours to edit, and
+listing them would only invite prompt-injection games. On Linux the
+kernel backend (Landlock) cannot subtract a read-only rule from a
+writable root, so there the guard limits the in-process tools; bash
+commands confined with ``allow /`` could still write the file. macOS
+and Windows enforce the guard fully.
+
 When enforcement is on and a sandboxed bash command fails with
 ``Permission denied``, 3code appends a hint to the tool output pointing
 at the policy files, so the agent knows the sandbox (not the OS) denied
