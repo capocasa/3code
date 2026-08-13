@@ -37,7 +37,7 @@ suite "wall proxy lifecycle":
     defer:
       sb.stopWall()
       removeDir(dir)
-    writeFile(dir / ".sandboxrc", "deny /\nallow\nallow 127.0.0.1\n")
+    writeFile(dir / ".sandbox", "deny /\nallow\nallow 127.0.0.1\n")
     sb.current = sb.loadPolicy(dir)
     check sb.wallProxyNeeded(sb.current)
     sb.active = true
@@ -55,7 +55,7 @@ suite "wall proxy lifecycle":
     # reload propagation: rewrite the repo policy, sync, proxy file changes
     let polFile = sb.wallProxyDir / "policy"
     let before = readFile(polFile)
-    writeFile(dir / ".sandboxrc", "deny /\nallow\nallow 127.0.0.1\nallow example.com\n")
+    writeFile(dir / ".sandbox", "deny /\nallow\nallow 127.0.0.1\nallow example.com\n")
     sb.syncWallProxyPolicy(dir)
     let after = readFile(polFile)
     check after != before

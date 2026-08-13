@@ -14,14 +14,22 @@
 ## grammar.
 ##
 ## There is exactly one active policy file, never a cascade: the repo
-## file `.sandboxrc` when it exists, else the user file
-## `~/.config/3code/sandboxrc` when the user wrote one, else the
+## file `.sandbox` when it exists, else the user file
+## `~/.config/3code/sandbox` when the user wrote one, else the
 ## built-in default in memory. 3code never creates the user file, so a
 ## user who never configured anything always gets the current shipped
 ## default, not whatever default a long-ago first run froze to disk. A
 ## `:sandbox allow|readonly|deny` edit materializes the repo file from
 ## the effective policy text, so project rules start from the user's
 ## baseline instead of from scratch.
+##
+## The one policy file path the project can activate (the repo
+## `.sandbox`) is always denied, no matter what the file says: the deny
+## rule is appended after parsing (so the user's own rules can neither
+## weaken nor strengthen it) and the box subprocess carries it through
+## to the kernel backends. The user file itself needs no guard: it is
+## the user editing their own config, and any cwd that resolves to it
+## denies it via the same mechanism.
 ##
 ## `reloadIfChanged` re-reads the active file when its mtime changed
 ## since the last load; it runs before every restricted operation
@@ -44,9 +52,9 @@ export sandwall.AccessKind, sandwall.Rule,
        sandwall.Resolved
 
 const
-  PolicyFile* = ".sandboxrc"
+  PolicyFile* = ".sandbox"
     ## The repo-level policy file, directly in the project root.
-  UserPolicyFile* = "sandboxrc"
+  UserPolicyFile* = "sandbox"
     ## The user-level policy file, next to the user config dir.
 
 type Policy* = seq[Rule]
@@ -93,7 +101,7 @@ var
   lastMtime: Time
 
 proc activePolicyPath*(projectDir: string): string =
-  ## The one policy file in effect: the repo `.sandboxrc` when it
+  ## The one policy file in effect: the repo `.sandbox` when it
   ## exists, else the user file. Never both.
   let repo = repoPolicyPath(projectDir)
   if fileExists(repo): repo else: systemPolicyPath()
@@ -272,11 +280,23 @@ proc mtimeOf(path: string): Time =
   try: getLastModificationTime(path)
   except OSError: fromUnix(0)
 
+proc denyPolicyPathsRules*(projectDir: string): seq[Rule] =
+  ## Deny rule covering the repo policy file, so neither the in-process
+  ## tools nor the sandboxed command can touch it no matter what the
+  ## policy says. Appended last after every load. The user file is not
+  ## guarded: it is the user editing their own config, not project
+  ## content, and a cwd inside the XDG config dir guards it via the
+  ## same repo-path rule.
+  @[Rule(access: akDeny, kind: rkPath, path: repoPolicyPath(projectDir))]
+
 proc loadPolicy*(projectDir: string): Policy =
   ## Load the active policy file and remember its mtime for
-  ## reloadIfChanged.
+  ## reloadIfChanged. The repo policy path is always denied: the
+  ## guard rule is appended last so no rule in the file can weaken
+  ## it.
   lastMtime = mtimeOf(activePolicyPath(projectDir))
-  sandwall.parsePolicy(readPolicyText(projectDir), projectDir)
+  result = sandwall.parsePolicy(readPolicyText(projectDir), projectDir)
+  result.add denyPolicyPathsRules(projectDir)
 
 proc reloadIfChanged*(projectDir: string): bool =
   ## Re-load the policy when the active file changed on disk since the
@@ -334,7 +354,7 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
     (false, "sandbox: " & resolved & " is denied by the policy (" & policyHint() & ")")
 
 proc ensureRepoPolicy*(dir: string): bool =
-  ## Materialize `dir/.sandboxrc` from the effective policy text (the
+  ## Materialize `dir/.sandbox` from the effective policy text (the
   ## user file when one exists, else the built-in default). Runs
   ## before the first `:sandbox allow|readonly|deny` edit so project
   ## rules start from the user's baseline, not from scratch.

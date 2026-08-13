@@ -385,14 +385,14 @@ Sub-agents are not supported because both research and user feedback says they a
 3code confines every tool call to a filesystem sandbox you define. The
 sandbox is a plain text policy living in exactly one file at a time:
 
-1. **repo** - `.sandboxrc` in your project directory, when it exists.
-2. **user** - `~/.config/3code/sandboxrc`, next to your config,
+1. **repo** - `.sandbox` in your project directory, when it exists.
+2. **user** - `~/.config/3code/sandbox`, next to your config,
    otherwise.
 
 There is no cascade and no merging: the repo file wins outright, the
 user file is the fallback. The user file is created from the built-in
 default on first run, so the sandbox is always on and you can change
-what every project without its own `.sandboxrc` gets by editing that
+what every project without its own `.sandbox` gets by editing that
 one file. Yolo mode (everything writable) is fine but you have to ask
 for it explicitly.
 
@@ -452,7 +452,7 @@ writable project). Host rules (``allow api.example.com``,
 ``allow 1.2.3.4:8080``, ``allow *`` for no network restrictions) fence
 the network egress of sandboxed bash commands through the wall proxy.
 
-On first run, 3code initializes `~/.config/3code/sandboxrc` with this
+On first run, 3code initializes `~/.config/3code/sandbox` with this
 default:
 
 ```
@@ -509,7 +509,7 @@ REPL commands which append a rule and reload immediately:
 :sandbox off
 ```
 
-The first `allow`/`readonly`/`deny` in a project creates the `.sandboxrc`
+The first `allow`/`readonly`/`deny` in a project creates the `.sandbox`
 file by copying your user file, then appends the rule, so project rules
 start from your baseline and you have something concrete to version and
 share. `:sandbox off` disables

@@ -103,8 +103,8 @@ proc ensureBash() =
 proc initSandbox(cwd: string) =
   ## Load the sandbox policy into the global state and resolve this
   ## binary's own path for bash wrapping. Exactly one file is active:
-  ## the repo `.sandboxrc` when it exists, else the user file
-  ## `~/.config/3code/sandboxrc` when the user wrote one, else the
+  ## the repo `.sandbox` when it exists, else the user file
+  ## `~/.config/3code/sandbox` when the user wrote one, else the
   ## built-in default in memory, so the sandbox is always on without
   ## 3code ever creating the user file. When `sandboxEnabled` is false
   ## (the `[settings] sandbox = off` switch), this does nothing: bash
@@ -371,7 +371,7 @@ proc main() =
       restoredDraft = loadPendingDraft(session.cwd)
 
   # Sandbox is mandatory: the single active policy (repo
-  # `.sandboxrc`, user file, else the built-in default) is loaded.
+  # `.sandbox`, user file, else the built-in default) is loaded.
   # Paths resolve relative to the session cwd so the policy follows
   # the project, not the binary.
   initSandbox(session.cwd)

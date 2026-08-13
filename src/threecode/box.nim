@@ -14,14 +14,15 @@
 ## contents: a policy edit between the parent's last check and the exec
 ## can only tighten what box applies.
 ##
-## Policy files are force-added to the read-only set so the sandboxed
-## command can read its own policy but not change it. On Landlock a
-## read-only rule under a writable root does not subtract write (rules
-## union within a layer), so on Linux a policy file inside a writable
-## tree is still writable from inside the sandbox. That is accepted:
-## the single policy file is re-loaded by the parent on every check,
-## and an implicit read-only guard for the file is appended last on
-## every load so no file rule can weaken it.
+## Policy files are denied outright so the sandboxed command can
+## neither read nor change the policy it runs under: a 3code policy
+## path (the repo `.sandbox`) carries an explicit deny appended on
+## every load, and a foreign --policy file gets one in resolvePolicy.
+## The deny lands in the backends' denied set, which Seatbelt and
+## Windows subtract natively and Landlock bind-masks, so no file rule
+## can weaken it - closing the old gap where a policy file under a
+## writable tree stayed writable on Linux (Landlock unions rules within
+## a layer, so read-only could not subtract write).
 
 when defined(posix):
   import std/posix except Time
@@ -45,9 +46,9 @@ Usage:
 
   With --policy, the writable/read-only sets come from the given
   policy file (relative targets resolve against the project dir: the
-  parent of a `.sandboxrc` file, else cwd). Explicit RWPATH/ROPATH
-  args union with the policy sets. The policy file itself is forced
-  read-only inside the sandbox.
+  parent of a `.sandbox` file, else cwd). Explicit RWPATH/ROPATH
+  args union with the policy sets. The policy file itself is denied
+  inside the sandbox.
 
   System dirs (/usr, /bin, /lib, /dev/*, etc.) are always read-only so the
   command's binaries, libs, and device nodes stay runnable; --ro adds to
@@ -55,7 +56,7 @@ Usage:
 
 Examples:
   3code sandbox restrict /tmp /home/me/work -- ls -la
-  3code sandbox --policy .sandboxrc restrict -- make test
+  3code sandbox --policy .sandbox restrict -- make test
   3code sandbox restrict . -- make test
 
 Landlock is monotonic: the restriction is permanent for this process and all
@@ -112,29 +113,33 @@ proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
   var denied: seq[string]
   var hostRules = 0
   if a.policies.len > 0:
-    # Exactly one active policy file: 3code passes the repo `.sandboxrc`
+    # Exactly one active policy file: 3code passes the repo `.sandbox`
     # when it exists, else the user file. Multiple --policy args are
     # still accepted (concatenated) for standalone box use.
     var texts: seq[string]
     for f in a.policies:
       texts.add(if fileExists(f): readFile(f) else: "")
     # Relative targets resolve against the project dir: the parent of
-    # the last `.sandboxrc` policy file, falling back to cwd.
+    # the last `.sandbox` policy file, falling back to cwd.
     let last = a.policies[^1]
     var projectDir = getCurrentDir()
     if last.extractFilename == PolicyFile:
       projectDir = last.parentDir
     var combined = ""
     for t in texts: combined.add t & "\n"
-    let pol = parsePolicy(combined, projectDir)
+    let pol = parsePolicy(combined, projectDir) &
+                denyPolicyPathsRules(projectDir)
     let r = pol.resolve()
     writable.add r.writable
     readonly.add r.readonly
     denied.add r.denied
     hostRules = r.hosts.len
-    # The sandboxed command may read its policy but never change it.
+    # The sandboxed command cannot touch the policy file it runs under.
+    # A 3code policy path is already covered by the appended deny; a
+    # foreign --policy file gets one here (no read either: its contents
+    # are merged in-process, and box already holds them).
     for f in a.policies:
-      if fileExists(f): readonly.add f
+      if f.normalizedPath notin denied: denied.add f
   (writable, readonly, denied, hostRules > 0)
 
 proc boxRestrict(args: seq[string]): int =

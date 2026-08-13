@@ -34,7 +34,7 @@
   :sandbox deny T   add a deny rule (deny T)
   :sandbox edit     open the policy file in $VISUAL/$EDITOR, reload on quit
   (T is a path or a host; P a path. Policy words: allow, readonly,
-  deny; see .sandboxrc)
+  deny; see .sandbox)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -75,7 +75,7 @@ input:
   :sandbox deny T   add a deny rule (deny T)
   :sandbox edit     open the policy file in $VISUAL/$EDITOR, reload on quit
   (T is a path or a host; P a path. Policy words: allow, readonly,
-  deny; see .sandboxrc)
+  deny; see .sandbox)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -111,7 +111,7 @@ input:
   :sandbox deny T   add a deny rule (deny T)
   :sandbox edit     open the policy file in $VISUAL/$EDITOR, reload on quit
   (T is a path or a host; P a path. Policy words: allow, readonly,
-  deny; see .sandboxrc)
+  deny; see .sandbox)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -152,7 +152,7 @@ alt
   :sandbox deny T   add a deny rule (deny T)
   :sandbox edit     open the policy file in $VISUAL/$EDITOR, reload on quit
   (T is a path or a host; P a path. Policy words: allow, readonly,
-  deny; see .sandboxrc)
+  deny; see .sandbox)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -188,7 +188,7 @@ alt
   :sandbox deny T   add a deny rule (deny T)
   :sandbox edit     open the policy file in $VISUAL/$EDITOR, reload on quit
   (T is a path or a host; P a path. Policy words: allow, readonly,
-  deny; see .sandboxrc)
+  deny; see .sandbox)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -229,7 +229,7 @@ stub-large
   :sandbox deny T   add a deny rule (deny T)
   :sandbox edit     open the policy file in $VISUAL/$EDITOR, reload on quit
   (T is a path or a host; P a path. Policy words: allow, readonly,
-  deny; see .sandboxrc)
+  deny; see .sandbox)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -265,7 +265,7 @@ stub-large
   :sandbox deny T   add a deny rule (deny T)
   :sandbox edit     open the policy file in $VISUAL/$EDITOR, reload on quit
   (T is a path or a host; P a path. Policy words: allow, readonly,
-  deny; see .sandboxrc)
+  deny; see .sandbox)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -306,7 +306,7 @@ experimental: level is free-form, type any value
   :sandbox deny T   add a deny rule (deny T)
   :sandbox edit     open the policy file in $VISUAL/$EDITOR, reload on quit
   (T is a path or a host; P a path. Policy words: allow, readonly,
-  deny; see .sandboxrc)
+  deny; see .sandbox)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -342,7 +342,7 @@ experimental: level is free-form, type any value
   :sandbox deny T   add a deny rule (deny T)
   :sandbox edit     open the policy file in $VISUAL/$EDITOR, reload on quit
   (T is a path or a host; P a path. Policy words: allow, readonly,
-  deny; see .sandboxrc)
+  deny; see .sandbox)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -383,7 +383,7 @@ model     stub-large
   :sandbox deny T   add a deny rule (deny T)
   :sandbox edit     open the policy file in $VISUAL/$EDITOR, reload on quit
   (T is a path or a host; P a path. Policy words: allow, readonly,
-  deny; see .sandboxrc)
+  deny; see .sandbox)
   :q :quit          exit (also Ctrl-D)
 
 input:

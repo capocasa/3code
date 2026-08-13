@@ -1,6 +1,6 @@
 discard """
-  # Exactly one policy file is active: the repo `.sandboxrc` when it
-  # exists, else the user file `~/.config/3code/sandboxrc` when the
+  # Exactly one policy file is active: the repo `.sandbox` when it
+  # exists, else the user file `~/.config/3code/sandbox` when the
   # user wrote one, else the built-in default in memory. 3code never
   # creates the user file: a user who never configured anything always
   # gets the current shipped default, not the default a long-ago first
@@ -61,7 +61,7 @@ suite "single active policy file":
     defer:
       putEnv("XDG_CONFIG_HOME", "")
       removeDir(home.parentDir)
-    let userFile = home / "3code" / "sandboxrc"
+    let userFile = home / "3code" / "sandbox"
     check not fileExists(userFile)
     # No file at all -> the built-in default is the policy text, and
     # nothing is written into the user config dir.
@@ -89,7 +89,7 @@ suite "single active policy file":
     defer:
       putEnv("XDG_CONFIG_HOME", "")
       removeDir(home.parentDir)
-    let userFile = home / "3code" / "sandboxrc"
+    let userFile = home / "3code" / "sandbox"
     createDir(userFile.parentDir)
     writeFile(userFile, "deny /\nallow " & opt & "\n")
     let repoFile = repoPolicyPath(projDir)
@@ -106,6 +106,47 @@ suite "single active policy file":
     check text.contains("readonly " & varDir)
     # The user file is untouched by the repo edit.
     check readFile(userFile) == "deny /\nallow " & opt & "\n"
+
+  test "repo policy path is always denied, whatever the file says":
+    # loadPolicy appends a deny rule for the repo policy path, last, so
+    # no rule in the file itself can weaken it. The user file is not
+    # guarded: it is the user's own config, not project content.
+    let (home, projDir) = newFixture("guard")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    let userFile = home / "3code" / "sandbox"
+    createDir(userFile.parentDir)
+    writeFile(userFile, "allow /\n")
+    let repoFile = repoPolicyPath(projDir)
+    # No repo file: the user file is active; the repo path is denied.
+    var p = loadPolicy(projDir)
+    check p.checkPath(repoFile) == akDeny
+    # A repo file that explicitly allows itself loses to the appended
+    # deny (it alone is active, and it cannot free itself).
+    writeFile(repoFile, "allow /\nallow ./.sandbox\n")
+    p = loadPolicy(projDir)
+    check p.checkPath(repoFile) == akDeny
+    # A cwd == the XDG config dir guards the same file via the repo
+    # path rule.
+    let confDir = home / "3code"
+    writeFile(confDir / ".sandbox", "allow /\n")
+    p = loadPolicy(confDir)
+    check p.checkPath(confDir / ".sandbox") == akDeny
+
+  test "box policy resolution denies the policy file path":
+    # The bash subprocess re-loads the policy itself; the same appended
+    # denies must land in the backend's denied set there.
+    let (home, projDir) = newFixture("guardbox")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    let repoFile = repoPolicyPath(projDir)
+    writeFile(repoFile, "allow /\n")
+    let pol = parsePolicy(readFile(repoFile), projDir) &
+                denyPolicyPathsRules(projDir)
+    let r = pol.resolve()
+    check (repoFile.normalizedPath) in r.denied
 
   test "sandboxEnabled default is on (types.nim contract)":
     # The gate lives in types.nim; assert the default so a future change

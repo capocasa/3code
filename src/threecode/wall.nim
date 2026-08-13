@@ -75,7 +75,7 @@ when defined(posix):
         stderr.writeLine("Error: unknown proxy option " & args[i]); return 2
       inc i
     if policy.len == 0:
-      # Default to the active policy file (repo `.sandboxrc` when
+      # Default to the active policy file (repo `.sandbox` when
       # present, else the user file, else a temp materialization of
       # the built-in default).
       policy = sb.defaultPolicyFilePath(getCurrentDir())
