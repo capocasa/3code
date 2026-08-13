@@ -670,7 +670,16 @@ suite "xml tool_call fallback":
     check "max_completion_tokens" notin body
     check body{"max_output_tokens"}.getInt == 8192
     check body{"input"}[0]{"role"}.getStr == "developer"
-    check body{"input"}[3]{"tool_call_id"}.getStr == "fc_1"
+    # The assistant tool_call is a standalone function_call item, answered
+    # by a function_call_output item paired via call_id.
+    check body{"input"}[2]{"type"}.getStr == "function_call"
+    check body{"input"}[2]{"call_id"}.getStr == "fc_1"
+    check body{"input"}[2]{"name"}.getStr == "bash"
+    check body{"input"}[2]{"arguments"}.getStr == "{}"
+    check "tool_calls" notin body{"input"}[2]
+    check body{"input"}[3]{"type"}.getStr == "function_call_output"
+    check body{"input"}[3]{"call_id"}.getStr == "fc_1"
+    check body{"input"}[3]{"output"}.getStr == "ok"
     let tools = body{"tools"}
     check tools.kind == JArray and tools.len > 0
     check tools[0]{"type"}.getStr == "function"

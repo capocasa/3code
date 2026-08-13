@@ -901,26 +901,50 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
 #     `response.completed`, ...) instead of `choices[0].delta` chunks.
 #   - reply: `output[]` items (message / function_call / reasoning)
 #     instead of `choices[0].message`.
-# Assistant history is echoed back in chat shape (assistant message with
-# tool_calls + role:tool replies); the Responses API accepts that
-# message/tool-call pairing in `input`, and OpenAI drops unknown fields
-# like `reasoning_content` on replay.
+# Assistant history is translated to Responses items on the wire
+# (function_call / function_call_output); OpenAI drops unknown fields
+# like `reasoning_content` on replayed message items.
 
 proc responsesInput(messages: JsonNode): JsonNode =
   ## Translate the chat-style history into Responses `input` items.
-  ## Roles and the assistant tool_calls / role:tool pairing carry over
-  ## unchanged; only `system` becomes the v1 `developer` role.
+  ## `system` becomes the v1 `developer` role; an assistant message with
+  ## `tool_calls` is split into standalone `function_call` items, each
+  ## answered (in subsequent history) by the `function_call_output` item
+  ## translated from the chat-style role:tool message. `call_id` is the
+  ## tool_call id, which OpenAI already issues as `call_...`.
   if messages == nil or messages.kind != JArray: return newJArray()
   result = newJArray()
   for m in messages:
     if m.kind != JObject:
       result.add m
       continue
-    if m{"role"}.getStr == "system":
+    case m{"role"}.getStr
+    of "system":
       var dev = newJObject()
       for k, v in m.pairs:
         dev[k] = if k == "role": %"developer" else: v
       result.add dev
+    of "assistant":
+      let tcs = m{"tool_calls"}
+      if tcs == nil or tcs.kind != JArray or tcs.len == 0:
+        result.add m
+        continue
+      let content = m{"content"}.getStr("")
+      if content.len > 0:
+        result.add %*{"role": "assistant", "content": content}
+      for tc in tcs:
+        result.add %*{
+          "type": "function_call",
+          "call_id": tc{"id"}.getStr(""),
+          "name": tc{"function"}{"name"}.getStr(""),
+          "arguments": tc{"function"}{"arguments"}.getStr(""),
+        }
+    of "tool":
+      result.add %*{
+        "type": "function_call_output",
+        "call_id": m{"tool_call_id"}.getStr(""),
+        "output": m{"content"}.getStr(""),
+      }
     else:
       result.add m
 
