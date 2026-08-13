@@ -63,6 +63,46 @@ suite "wall proxy lifecycle":
     sb.stopWall()
     check sb.wallProxyPort() == 0
 
+  test "proxy rebinds when the launch tmp dir changes":
+    # streamexec points the unix socket at the per-launch bash tmp
+    # dir, which is deleted right after the command. The next launch
+    # must rebind the proxy into its own tmp dir; without the rebind
+    # the bridge connects to a dead socket (connection reset).
+    let dirA = getTempDir() / ("3code-wallre-a-" & $getCurrentProcessId())
+    let dirB = getTempDir() / ("3code-wallre-b-" & $getCurrentProcessId())
+    createDir(dirA)
+    createDir(dirB)
+    defer:
+      sb.stopWall()
+      removeDir(dirA)
+      removeDir(dirB)
+    writeFile(dirA / ".sandbox", "deny /\nallow\nallow 127.0.0.1\n")
+    sb.current = sb.loadPolicy(dirA)
+    sb.active = true
+    # first launch: bind in dirA
+    sb.moveWallSock(dirA)
+    check sb.ensureWallProxy(dirA)
+    let portA = sb.wallProxyPort()
+    check portA != 0
+    when defined(linux):
+      var st: Stat
+      check posix.stat(sb.proxySockPath().cstring, st) == 0
+    # streamexec deletes the launch dir after the command
+    removeDir(dirA)
+    createDir(dirA)  # policy file still lives here for loadPolicy
+    writeFile(dirA / ".sandbox", "deny /\nallow\nallow 127.0.0.1\n")
+    # second launch: new tmp dirB; the proxy must rebind there
+    sb.moveWallSock(dirB)
+    check sb.ensureWallProxy(dirA)
+    check sb.proxySockPath() == dirB / "proxy.sock"
+    when defined(linux):
+      check posix.stat(sb.proxySockPath().cstring, st) == 0
+    # same dir again: no rebind, same port
+    let portB = sb.wallProxyPort()
+    sb.moveWallSock(dirB)
+    check sb.ensureWallProxy(dirA)
+    check sb.wallProxyPort() == portB
+
 when defined(linux):
   suite "fenced bash end to end":
     test "netns: direct egress dies, proxy tunnel works":

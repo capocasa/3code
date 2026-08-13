@@ -107,6 +107,76 @@ suite "single active policy file":
     # The user file is untouched by the repo edit.
     check readFile(userFile) == "deny /\nallow " & opt & "\n"
 
+  test "appendRule writes portable targets (relative, ~, absolute)":
+    let (home, projDir) = newFixture("portable")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    let userFile = home / "3code" / "sandbox"
+    createDir(userFile.parentDir)
+    writeFile(userFile, "deny /\n")
+    let repoFile = repoPolicyPath(projDir)
+    let oldCwd = getCurrentDir()
+    setCurrentDir(projDir)
+    try:
+      # absolute path under the project dir writes relative
+      check appendRule(repoFile, projDir / "src" / "foo.nim", akWritable)
+      # ./ form stays, home contracts to ~
+      check appendRule(repoFile, "./build/out", akWritable)
+      check appendRule(repoFile, getHomeDir() / "dl", akDeny)
+      # absolute path outside project/home stays absolute
+      check appendRule(repoFile, varDir, akReadOnly)
+    finally:
+      setCurrentDir(oldCwd)
+    let text = readFile(repoFile)
+    check text.contains("allow ./src/foo.nim\n")
+    check text.contains("allow ./build/out\n")
+    check text.contains("deny ~/dl\n")
+    check text.contains("readonly " & varDir & "\n")
+    check projDir notin text.splitLines[^4..^1].join("\n")
+
+  test "renderSandbox contracts project and home paths":
+    let (home, projDir) = newFixture("contract")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    writeFile(repoPolicyPath(projDir),
+      "allow\ndeny ./.git\nreadonly " & getHomeDir() / "x" & "\n" &
+      "allow " & varDir & "\n")
+    let oldCwd = getCurrentDir()
+    setCurrentDir(projDir)
+    try:
+      let s = renderSandbox(loadPolicy(projDir))
+      check s.contains("./.git")
+      check not s.contains(projDir)
+      check s.contains("~/x")
+      check s.contains(varDir)
+    finally:
+      setCurrentDir(oldCwd)
+
+  test "checkRawPath messages show the contracted path":
+    let (home, projDir) = newFixture("msg")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    let target = (projDir / "locked").normalizedPath
+    writeFile(repoPolicyPath(projDir), "allow ./\ndeny " & target & "\n")
+    let wasActive = sandbox.active
+    let saved = sandbox.current
+    let oldCwd = getCurrentDir()
+    setCurrentDir(projDir)
+    sandbox.active = true
+    try:
+      sandbox.current = sandbox.loadPolicy(projDir)
+      let (ok, reason) = checkRawPath(target, needsWrite = true)
+      check not ok
+      check "./locked" in reason
+      check (projDir / "locked") notin reason
+    finally:
+      sandbox.active = wasActive
+      sandbox.current = saved
+      setCurrentDir(oldCwd)
+
   test "policy file paths are always read-only, hidden from the dump":
     # loadPolicy appends hiddenRules last; seeded with the two policy
     # paths as read-only guards, they survive any rule in the file and

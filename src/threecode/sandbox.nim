@@ -143,6 +143,11 @@ when defined(posix):
       ## .sock == nil means not running.
     wallProxyDir*: string = ""
       ## Per-run temp dir holding the merged policy file + unix socket.
+    wallProxyBoundDir: string = ""
+      ## The dir the running proxy's unix socket was bound in. The
+      ## per-launch bash tmp dir changes every fenced call and is
+      ## deleted right after; when it differs from the bound dir the
+      ## proxy must rebind, or the bridge connects to a dead socket.
 
 proc wallProxyNeeded*(pol: Policy): bool =
   ## Fencing is off until the effective policy names its first host.
@@ -171,18 +176,26 @@ when defined(posix):
     wallProxyDir = dir
 
   proc ensureWallProxy*(projectDir: string): bool =
-    ## Start the per-run proxy when the policy needs it and it is not
-    ## running yet. True when fenced bash may launch.
+    ## Start the per-run proxy when the policy needs it. When it is
+    ## already running but bound in a different (since-deleted) bash
+    ## tmp dir, restart it so the unix socket lives in the current
+    ## launch's writable dir; the bridge connects there. True when
+    ## fenced bash may launch.
     if not wallProxyNeeded(current): return false
-    if wallProxy.port != 0: return true
     if wallProxyDir.len == 0:
       wallProxyDir = tempDir() / ("3code-wall-" & $getCurrentProcessId())
       createDir(wallProxyDir)
+    if wallProxy.port != 0 and wallProxyBoundDir == wallProxyDir:
+      return true
+    if wallProxy.port != 0:
+      sandwallWall.stopWallProxy(wallProxy)
+      wallProxy.port = 0
     let polFile = wallProxyDir / "policy"
     writeFile(polFile, wallPolicyText(projectDir))
     try:
       wallProxy = sandwallWall.startWallProxy(polFile, projectDir,
         port = 0, unixSockPath = proxySockPath())
+      wallProxyBoundDir = wallProxyDir
     except CatchableError as e:
       raise newException(IOError, "wall proxy: " & e.msg)
     true
@@ -202,6 +215,7 @@ when defined(posix):
     if wallProxy.port != 0:
       sandwallWall.stopWallProxy(wallProxy)
       wallProxy.port = 0
+      wallProxyBoundDir = ""
     if wallProxyDir.len > 0:
       try: removeDir(wallProxyDir)
       except CatchableError: discard
@@ -340,6 +354,12 @@ proc resolveRawPath(p: string): string =
   try: absolutePath(q) except CatchableError: q
 
 
+proc contractPolicyPath*(resolved: string): string =
+  ## The user-facing form of an absolute cleaned path in sandbox
+  ## messages: under the cwd as the portable relative form (`foo`,
+  ## `./x`), under home as `~/...`, else absolute. Display only.
+  sandwall.contractPath(resolved, getCurrentDir())
+
 proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason: string] =
   ## Check a raw (possibly relative) path against the current policy,
   ## reloading the policy first when the file changed. This is the
@@ -352,14 +372,15 @@ proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason:
   let resolved = resolveRawPath(path)
   if resolved.len == 0: return (true, "")
   let access = current.checkPath(resolved)
+  let shown = contractPolicyPath(resolved)
   case access
   of akWritable: (true, "")
   of akReadOnly:
     if not needsWrite: (true, "")
     else:
-      (false, "sandbox: " & resolved & " is read-only (" & policyHint() & ")")
+      (false, "sandbox: " & shown & " is read-only (" & policyHint() & ")")
   of akDeny:
-    (false, "sandbox: " & resolved & " is denied by the policy (" & policyHint() & ")")
+    (false, "sandbox: " & shown & " is denied by the policy (" & policyHint() & ")")
 
 proc ensureRepoPolicy*(dir: string): bool =
   ## Materialize `dir/.sandbox` from the effective policy text (the
@@ -375,7 +396,7 @@ proc ensureRepoPolicy*(dir: string): bool =
   fileExists(path)
 
 proc renderSandbox*(p: Policy): string =
-  renderPolicy(p)
+  renderPolicy(p, getCurrentDir())
 
 proc appendRule*(sandboxFile, argPath: string; access: AccessKind): bool =
   ## Append a rule to the repo policy file, materializing it from the
@@ -383,7 +404,8 @@ proc appendRule*(sandboxFile, argPath: string; access: AccessKind): bool =
   ## After appending, reload so the change is live for the next check.
   if not fileExists(sandboxFile):
     if not ensureRepoPolicy(sandboxFile.parentDir): return false
-  result = sandwall.appendRule(sandboxFile, argPath, access)
+  result = sandwall.appendRule(sandboxFile, argPath, access,
+    getCurrentDir())
   if result:
     current = loadPolicy(getCurrentDir())
 
