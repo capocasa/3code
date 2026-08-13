@@ -448,15 +448,26 @@ suite "api: NetworkHealthError":
 
 suite "api: callModel pro-variant gate":
   test "gpt pro variants raise a clear not-a-chat-model error":
-    # gpt-5.5-pro is a completions-only model; chat/completions 404s with
+    # gpt-5.5-pro is a Responses-only model; chat/completions 404s with
     # "not a chat model". callModel must fail fast with a clear message
-    # rather than sending the request and surfacing a raw 404.
-    let p = Profile(name: "openai.gpt-5.5-pro", family: "gpt",
+    # rather than sending the request and surfacing a raw 404. (A
+    # non-openai profile is used so the test doesn't need network: the
+    # gate only fires on the completions path.)
+    let p = Profile(name: "thirdparty.gpt-5.5-pro", family: "gpt",
                     model: "gpt-5.5-pro", version: "5.5", variant: "pro")
     var usage: Usage
     let messages = %*[{"role": "user", "content": "hi"}]
     expect HttpError:
       discard callModel(p, messages, usage, 0)
+
+  test "openai pro variants bypass the gate (Responses API serves them)":
+    # First-party openai speaks /responses, where the pro variants are
+    # served, so the completions-only gate must not fire. Asserting the
+    # gate condition directly (no network in this suite).
+    let p = Profile(name: "openai.gpt-5.5-pro", family: "gpt",
+                    model: "gpt-5.5-pro", version: "5.5", variant: "pro")
+    check responsesApi(p)
+    check not (not responsesApi(p) and p.family == "gpt" and p.variant == "pro")
 
   test "plain gpt variants pass the gate":
     # A chat gpt variant must not trip the gate. We can't run a full

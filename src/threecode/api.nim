@@ -15,7 +15,7 @@ import std/[algorithm, atomics, hashes, httpclient, json, locks, monotimes, nati
 when defined(posix):
   import std/posix except SocketHandle
 import streamhttp
-import types, util, prompts, compact, streamexec, netthread
+import types, util, prompts, streamexec, netthread
 
 type
   VerifyProfileHook* = proc(p: Profile): (bool, string) {.closure.}
@@ -888,6 +888,373 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     result.errMsg = EmptyReplyMsg
   debugOut &"streamHttp end contentStarted={contentStarted} accTools={accTools.len} finishReason={finishReason}"
 
+# ---------- OpenAI Responses API (/responses) ----------
+#
+# First-party openai profiles use the Responses API instead of chat
+# completions. The wire shape differs in three places, all translated
+# here so the rest of the pipeline (history, turn loop, tool dispatch)
+# still sees chat-style messages:
+#   - request: `input` items instead of `messages`, flat tool schemas
+#     ({type:"function", name, ...} instead of {function:{...}}),
+#     `max_output_tokens` instead of `max_completion_tokens`.
+#   - stream: semantic SSE events (`response.output_text.delta`,
+#     `response.completed`, ...) instead of `choices[0].delta` chunks.
+#   - reply: `output[]` items (message / function_call / reasoning)
+#     instead of `choices[0].message`.
+# Assistant history is echoed back in chat shape (assistant message with
+# tool_calls + role:tool replies); the Responses API accepts that
+# message/tool-call pairing in `input`, and OpenAI drops unknown fields
+# like `reasoning_content` on replay.
+
+proc responsesInput(messages: JsonNode): JsonNode =
+  ## Translate the chat-style history into Responses `input` items.
+  ## Roles and the assistant tool_calls / role:tool pairing carry over
+  ## unchanged; only `system` becomes the v1 `developer` role.
+  if messages == nil or messages.kind != JArray: return newJArray()
+  result = newJArray()
+  for m in messages:
+    if m.kind != JObject:
+      result.add m
+      continue
+    if m{"role"}.getStr == "system":
+      var dev = newJObject()
+      for k, v in m.pairs:
+        dev[k] = if k == "role": %"developer" else: v
+      result.add dev
+    else:
+      result.add m
+
+proc responsesTools(tools: JsonNode): JsonNode =
+  ## Flatten chat tool schemas ({type, function:{name, ...}}) into the
+  ## Responses shape ({type:"function", name, description, parameters}).
+  if tools == nil or tools.kind != JArray: return tools
+  result = newJArray()
+  for t in tools:
+    let fn = t{"function"}
+    if t.kind != JObject or fn == nil or fn.kind != JObject:
+      result.add t
+      continue
+    var flat = %*{"type": t{"type"}.getStr("function")}
+    for k, v in fn.pairs: flat[k] = v
+    result.add flat
+
+proc responsesUsage*(u: JsonNode): Usage =
+  ## Parses a Responses `usage` object (input/output naming) into the
+  ## completions-style `Usage` the rest of the pipeline consumes.
+  if u == nil or u.kind != JObject: return
+  result.promptTokens = u{"input_tokens"}.getInt(0)
+  result.completionTokens = u{"output_tokens"}.getInt(0)
+  result.totalTokens = u{"total_tokens"}.getInt(0)
+  let inDetails = u{"input_tokens_details"}
+  if inDetails != nil and inDetails.kind == JObject:
+    result.cachedTokens = inDetails{"cached_tokens"}.getInt(0)
+  let outDetails = u{"output_tokens_details"}
+  if outDetails != nil and outDetails.kind == JObject:
+    result.reasoningTokens = outDetails{"reasoning_tokens"}.getInt(0)
+
+proc buildResponsesBody*(p: Profile, wireMessages: JsonNode): JsonNode =
+  ## Request body for POST /responses. Mirrors the completions body built
+  ## in `callModel` (same generation defaults, same tools) with the
+  ## Responses field naming.
+  result = %*{
+    "model": p.model,
+    "input": responsesInput(wireMessages),
+    "stream": streamingEnabled,
+  }
+  result["tools"] = responsesTools(setup(p).tools)
+  result["tool_choice"] = %"auto"
+  let d = knownGoodGeneration(p)
+  if d.maxTokens > 0:
+    result["max_output_tokens"] = %d.maxTokens
+  # The known-good `gpt` temperature is the completions-era default;
+  # gpt-5.x on /responses rejects any temperature but 1, so omit it.
+  if p.family != "gpt" and d.temperature >= 0.0:
+    result["temperature"] = %d.temperature
+  if p.reasoning.len > 0:
+    result["reasoning"] = %*{"effort": %p.reasoning}
+
+proc responsesAssistantMsg(r: JsonNode; wasInterrupted: bool): JsonNode =
+  ## Build a chat-style assistant message from a completed response's
+  ## `output[]` items (message / function_call / reasoning). Tool calls
+  ## keep the Responses item id so tool results can be paired; the items
+  ## themselves are NOT echoed into history (the chat-shape echo above
+  ## suffices), so no `item_reference` input is ever sent. Returns nil
+  ## for a genuinely empty output with no status, the same transport
+  ## anomaly contract as `buildStreamAssistantMsg`.
+  var content = ""
+  var toolCalls = newJArray()
+  let output = r{"output"}
+  if output != nil and output.kind == JArray:
+    for item in output:
+      if item.kind != JObject: continue
+      case item{"type"}.getStr
+      of "message":
+        let parts = item{"content"}
+        if parts != nil and parts.kind == JArray:
+          for c in parts:
+            if c{"type"}.getStr == "output_text":
+              content &= c{"text"}.getStr("")
+      of "function_call":
+        toolCalls.add %*{
+          "id": item{"id"}.getStr(""),
+          "type": "function",
+          "function": {
+            "name": item{"name"}.getStr(""),
+            "arguments": item{"arguments"}.getStr(""),
+          },
+        }
+      else: discard  # reasoning items: opaque, not replayed
+  let status = r{"status"}.getStr("")
+  if content.len == 0 and toolCalls.len == 0 and status.len == 0:
+    return nil
+  result = %*{"role": "assistant",
+              "content": stripLeadingTrailingBlankLines(content)}
+  result["reasoning_content"] = %""
+  # The turn loop's budget-escalation keys on the completions word
+  # "length"; Responses signals the same starvation as status
+  # "incomplete" with incomplete_details.reason "max_output_tokens".
+  if status == "incomplete":
+    if r{"incomplete_details"}{"reason"}.getStr("") == "max_output_tokens":
+      result["finish_reason"] = %"length"
+    else:
+      result["finish_reason"] = %status
+  elif status.len > 0 and status != "completed":
+    result["finish_reason"] = %status
+  if toolCalls.len > 0:
+    result["tool_calls"] = toolCalls
+  if wasInterrupted:
+    result["interrupted"] = %true
+
+proc streamResponses(url, key, bodyStr: string, baseLabel: string,
+                     slurped: var int,
+                     job: NetJob): StreamOutcome =
+  ## POST /responses with `"stream": true` and consume the semantic SSE
+  ## event stream until `response.completed`. `event:` lines select the
+  ## handler; `data:` payloads are per-event JSON. Tool-call arguments
+  ## arrive as `response.function_call_arguments.delta` fragments keyed
+  ## by `item_id`; the completed `function_call` items on the final
+  ## `response.completed` payload carry name+args in full, so the
+  ## accumulator is only a liveness fallback for interrupted streams.
+  let u = try: parseUri(url) except CatchableError as e:
+    result.errMsg = "bad url: " & e.msg
+    return
+  let host = u.hostname
+  let plainHttp =
+    when defined(testPlainHttp):
+      u.scheme == "http" and (host == "127.0.0.1" or host == "localhost")
+    else:
+      false
+  if u.scheme != "https" and not plainHttp:
+    result.errMsg = "only https supported, got: " & u.scheme
+    return
+  let port =
+    if u.port.len > 0: Port(parseInt(u.port))
+    elif plainHttp: Port(80)
+    else: Port(443)
+  let pathQuery =
+    block:
+      var pq = if u.path.len > 0: u.path else: "/"
+      if u.query.len > 0: pq.add "?" & u.query
+      pq
+
+  let hostKey = host & ":" & $port.uint16
+  var conn: StreamConn
+  var resp: StreamResponse
+  var attempt = 0
+  while true:
+    if isInterrupted():
+      closeCachedStreamConn()
+      result.errMsg = InterruptedByUserMsg
+      return
+    inc attempt
+    if not (cachedStreamConn != nil and cachedStreamHostKey == hostKey):
+      closeCachedStreamConn()
+      try:
+        if plainHttp:
+          conn = connectPlain(host, port, timeoutMs = ConnectTimeoutMs)
+        else:
+          conn = connectTls(host, port, timeoutMs = ConnectTimeoutMs,
+                            caFile = bundledCaFile())
+      except CatchableError as e:
+        invalidateResolved(host, port)
+        if isInterrupted():
+          result.errMsg = InterruptedByUserMsg
+          return
+        result.errMsg =
+          (if plainHttp: "connect failed: " else: "TLS connect failed: ") &
+          connectErrorDetail(e)
+        return
+      cachedStreamConn = conn
+      cachedStreamHostKey = hostKey
+      cachedStreamFd = conn.getFd
+    else:
+      conn = cachedStreamConn
+    conn.setReadTimeoutMs(QuietRecvWakeMs)
+    try:
+      conn.sendRequest("POST", pathQuery, host,
+                       headers = [("Authorization", "Bearer " & key),
+                                  ("Content-Type", "application/json"),
+                                  ("Accept", "text/event-stream")],
+                       body = bodyStr)
+      fireActivity(job)
+      while true:
+        try:
+          resp = conn.readResponseHead()
+          break
+        except StreamTimeoutError:
+          if isInterrupted() or isNetworkQuiet():
+            closeCachedStreamConn()
+            break
+          continue
+      if resp.status == 0 and resp.headers.len == 0:
+        if isInterrupted() and not isNetworkQuiet():
+          result.errMsg = InterruptedByUserMsg
+        else:
+          result.errMsg = networkQuietMsg()
+        return
+      fireActivity(job)
+      break
+    except CatchableError as e:
+      closeCachedStreamConn()
+      if attempt >= 2:
+        result.errMsg = "request failed: " & e.msg
+        return
+  result.statusCode = resp.status
+  result.retryAfter = resp.headers.getOrDefault("retry-after")
+
+  var accContent = ""
+  var accTools = initOrderedTable[int, JsonNode]()
+  var toolIdx = initTable[string, int]()  # item_id -> accTools slot
+  var completedResp: JsonNode
+  var nonSSE: seq[string]
+  var contentStarted = false
+  var event = ""
+  var sawDone = false
+  var line = ""
+  var streamErr = ""
+  var sseErrorBody = ""
+  while true:
+    var hasLine = false
+    try: hasLine = conn.readLine(line)
+    except StreamTimeoutError:
+      if isInterrupted() or isNetworkQuiet():
+        closeCachedStreamConn()
+        break
+      continue
+    except CatchableError as e:
+      streamErr = e.msg
+      closeCachedStreamConn()
+      break
+    if not hasLine: break
+    fireActivity(job)
+    if isInterrupted():
+      closeCachedStreamConn()
+      break
+    if line.startsWith("event: "):
+      event = line["event: ".len .. ^1].strip
+      continue
+    if line.strip.len == 0 or line.startsWith(": "):
+      continue
+    if not line.startsWith("data: "):
+      nonSSE.add line
+      continue
+    let payload = line["data: ".len .. ^1]
+    let j = try: parseJson(payload)
+              except CatchableError as e:
+                if payload.strip.len > 0:
+                  debugOut "malformed SSE data line: " & e.msg & " — " & payload
+                continue
+    let ev =
+      if event.len > 0: event
+      else: j{"type"}.getStr("")
+    event = ""
+    case ev
+    of "response.output_text.delta":
+      let c = j{"delta"}.getStr("")
+      if c.len > 0:
+        accContent &= c
+        slurped += c.len
+        fireProgress(job, slurped)
+        fireContent(job, c, slurped)
+        contentStarted = true
+    of "response.output_item.added":
+      let item = j{"item"}
+      if item != nil and item.kind == JObject and
+         item{"type"}.getStr == "function_call":
+        let id = item{"id"}.getStr("")
+        toolIdx[id] = accTools.len
+        accTools[toolIdx[id]] = %*{
+          "id": id, "type": "function",
+          "function": {"name": item{"name"}.getStr(""),
+                       "arguments": ""}
+        }
+    of "response.function_call_arguments.delta":
+      let id = j{"item_id"}.getStr("")
+      let d = j{"delta"}.getStr("")
+      if id in toolIdx:
+        let fn = accTools[toolIdx[id]]{"function"}
+        if fn != nil:
+          fn["arguments"] = %(fn{"arguments"}.getStr("") & d)
+      slurped += d.len
+      fireProgress(job, slurped)
+    of "response.completed", "response.incomplete":
+      sawDone = true
+      completedResp = j{"response"}
+    of "response.failed":
+      sawDone = true
+      completedResp = j{"response"}
+      sseErrorBody = payload
+    of "error":
+      sseErrorBody = payload
+      sawDone = true
+    else: discard  # created / in_progress / output_item.done / ...
+
+  if contentStarted:
+    result.streamedLive = true
+    fireContentFinished(job, accContent, slurped)
+    fireTrimTrailing(job, accContent, slurped)
+    fireAfterLive(job, slurped)
+
+  if isNetworkQuiet():
+    closeCachedStreamConn()
+    result.errMsg = networkQuietMsg()
+    return
+  if isInterrupted():
+    if completedResp != nil:
+      result.assistantMsg = responsesAssistantMsg(completedResp, true)
+    if result.assistantMsg == nil:
+      result.assistantMsg = buildStreamAssistantMsg(accContent, "",
+        accTools, result.usage, true)
+    closeCachedStreamConn()
+    result.errMsg = InterruptedByUserMsg
+    return
+  if streamErr.len > 0:
+    result.errMsg = "stream read: " & streamErr &
+      (if nonSSE.len > 0: ": " & nonSSE.join("\n") else: "")
+    return
+  if sseErrorBody.len > 0:
+    closeCachedStreamConn()
+    result.errBody = sseErrorBody
+    result.errMsg = "api error: " & extractErrorMsg(sseErrorBody)
+    result.assistantMsg = nil
+    return
+  if completedResp != nil:
+    let u2 = completedResp{"usage"}
+    if u2 != nil and u2.kind == JObject:
+      result.usage = responsesUsage(u2)
+    let status = completedResp{"status"}.getStr("")
+    result.finishReason = status
+    result.assistantMsg = responsesAssistantMsg(completedResp,
+                                                isInterrupted())
+  elif accTools.len > 0 or accContent.len > 0:
+    # EOF before response.completed: interrupted-stream fallback.
+    result.assistantMsg = buildStreamAssistantMsg(accContent, "",
+      accTools, result.usage, false)
+  if result.assistantMsg == nil:
+    result.errBody = nonSSE.join("\n")
+    result.errMsg = EmptyReplyMsg
+  debugOut &"streamResponses end contentStarted={contentStarted} accTools={accTools.len} status={result.finishReason}"
+
 proc buildBatchAssistantMsg*(message, reasoning: string;
                              toolCalls: JsonNode;
                              finishReason = ""): JsonNode =
@@ -1141,6 +1508,158 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
     result.usage = parseUsage(u2)
   debugOut &"callHttp end content={content.len} tools={toolCalls.len} finishReason={finishReason}"
 
+proc callResponses(url, key, bodyStr: string; baseLabel: string;
+                   slurped: var int): StreamOutcome =
+  ## Non-streaming companion to `streamResponses`. Posts `bodyStr` (which
+  ## carries `"stream": false`) and reads the complete response object in
+  ## one shot. Same conn-cache and interrupt behavior as `callHttp`.
+  debugOut "callResponses start"
+  let u = try: parseUri(url) except CatchableError as e:
+    result.errMsg = "bad url: " & e.msg
+    return
+  let host = u.hostname
+  let plainHttp =
+    when defined(testPlainHttp):
+      u.scheme == "http" and (host == "127.0.0.1" or host == "localhost")
+    else:
+      false
+  if u.scheme != "https" and not plainHttp:
+    result.errMsg = "only https supported, got: " & u.scheme
+    return
+  let port =
+    if u.port.len > 0: Port(parseInt(u.port))
+    elif plainHttp: Port(80)
+    else: Port(443)
+  let pathQuery =
+    block:
+      var pq = if u.path.len > 0: u.path else: "/"
+      if u.query.len > 0: pq.add "?" & u.query
+      pq
+
+  let hostKey = host & ":" & $port.uint16
+  var conn: StreamConn
+  var resp: StreamResponse
+  var attempt = 0
+  while true:
+    if isInterrupted():
+      closeCachedStreamConn()
+      result.errMsg = InterruptedByUserMsg
+      return
+    inc attempt
+    if cachedStreamConn != nil and cachedStreamHostKey == hostKey:
+      conn = cachedStreamConn
+    else:
+      closeCachedStreamConn()
+      try:
+        if plainHttp:
+          conn = connectPlain(host, port, timeoutMs = ConnectTimeoutMs)
+        else:
+          conn = connectTls(host, port, timeoutMs = ConnectTimeoutMs,
+                            caFile = bundledCaFile())
+      except CatchableError as e:
+        invalidateResolved(host, port)
+        if isInterrupted():
+          result.errMsg = InterruptedByUserMsg
+          return
+        result.errMsg =
+          (if plainHttp: "connect failed: " else: "TLS connect failed: ") &
+          connectErrorDetail(e)
+        return
+      cachedStreamConn = conn
+      cachedStreamHostKey = hostKey
+      cachedStreamFd = conn.getFd
+    conn.setReadTimeoutMs(QuietRecvWakeMs)
+    try:
+      conn.sendRequest("POST", pathQuery, host,
+                       headers = [("Authorization", "Bearer " & key),
+                                  ("Content-Type", "application/json"),
+                                  ("Accept", "application/json")],
+                       body = bodyStr)
+      hookProviderActivity()
+      while true:
+        try:
+          resp = conn.readResponseHead()
+          break
+        except StreamTimeoutError:
+          if isInterrupted() or isNetworkQuiet():
+            closeCachedStreamConn()
+            break
+          continue
+      if resp.status == 0 and resp.headers.len == 0:
+        if isInterrupted() and not isNetworkQuiet():
+          result.errMsg = InterruptedByUserMsg
+        else:
+          result.errMsg = networkQuietMsg()
+        return
+      hookProviderActivity()
+      break
+    except CatchableError as e:
+      closeCachedStreamConn()
+      if attempt >= 2:
+        result.errMsg = "request failed: " & e.msg
+        return
+  result.statusCode = resp.status
+  result.retryAfter = resp.headers.getOrDefault("retry-after")
+
+  var body = ""
+  var readErr = ""
+  block readLoop:
+    while true:
+      try:
+        body = readFullBody(conn)
+        break readLoop
+      except StreamTimeoutError:
+        if isInterrupted() or isNetworkQuiet():
+          closeCachedStreamConn()
+          break readLoop
+        continue
+      except CatchableError as e:
+        readErr = e.msg
+        closeCachedStreamConn()
+        break readLoop
+  hookProviderActivity()
+
+  if isNetworkQuiet():
+    closeCachedStreamConn()
+    result.errMsg = networkQuietMsg()
+    return
+  if isInterrupted():
+    closeCachedStreamConn()
+    result.errMsg = InterruptedByUserMsg
+    return
+  if readErr.len > 0:
+    result.errMsg = "response read: " & readErr
+    return
+  if result.statusCode != 200:
+    result.errBody = body
+    return
+
+  let j = try: parseJson(body)
+           except CatchableError:
+             result.errBody = body
+             result.errMsg = "response parse: " & getCurrentExceptionMsg()
+             return
+  if j == nil or j.kind != JObject:
+    result.errBody = body
+    result.errMsg = "response not a JSON object"
+    return
+  if j{"error"} != nil:
+    result.errBody = body
+    result.errMsg = "api error: " & extractErrorMsg(body)
+    return
+  result.finishReason = j{"status"}.getStr("")
+  result.assistantMsg = responsesAssistantMsg(j, false)
+  if result.assistantMsg == nil:
+    result.errBody = body
+    result.errMsg = EmptyReplyMsg
+    return
+  slurped = result.assistantMsg{"content"}.getStr("").len
+  hookProgress(baseLabel, slurped)
+  let u2 = j{"usage"}
+  if u2 != nil and u2.kind == JObject:
+    result.usage = responsesUsage(u2)
+  debugOut &"callResponses end status={result.finishReason}"
+
 proc stripInternalFields*(messages: JsonNode): JsonNode =
   ## Return a wire-safe copy of `messages` with internal bookkeeping fields
   ## removed. `usage` is stored on assistant messages for local replay but
@@ -1173,12 +1692,6 @@ proc ensureReasoningField(messages: JsonNode) =
     if m{"role"}.getStr != "assistant": continue
     if "reasoning_content" notin m:
       m["reasoning_content"] = %""
-
-proc providerOf(p: Profile): string =
-  ## Lower-case provider name from `Profile.name` ("nvidia.openai/gpt-oss-120b"
-  ## → "nvidia"). "" when no dot.
-  let dot = p.name.find('.')
-  if dot < 0: "" else: p.name[0 ..< dot].toLowerAscii
 
 proc applyGptOssReasoning(p: Profile, body: JsonNode) =
   body["reasoning_effort"] = %p.reasoning
@@ -1541,6 +2054,7 @@ type
     bodyStr: string
     baseLabel: string
     suppressXml: bool
+    responses: bool  # POST /responses instead of /chat/completions
 
 proc networkWorker(a: NetWorkerArgs) {.thread.} =
   ## Runs the full connect+send+SSE loop on a worker thread. Fires deltas
@@ -1551,8 +2065,12 @@ proc networkWorker(a: NetWorkerArgs) {.thread.} =
   {.cast(gcsafe).}:
     setPhase(a.job, npConnecting)
     var slurped = 0
-    var outcome = streamHttp(a.url, a.key, a.bodyStr, a.baseLabel, slurped,
-                             a.suppressXml, a.job)
+    var outcome =
+      if a.responses:
+        streamResponses(a.url, a.key, a.bodyStr, a.baseLabel, slurped, a.job)
+      else:
+        streamHttp(a.url, a.key, a.bodyStr, a.baseLabel, slurped,
+                   a.suppressXml, a.job)
     # The StreamConn is a ref with internal cycles (Socket + SslContext).
     # Under ORC, freeing it from a different thread than the one that
     # allocated it segfaults the cycle collector. The worker owns the
@@ -1594,7 +2112,7 @@ proc drainAndDispatch(job: NetJob; baseLabel: string) =
       hookAfterLiveContent(baseLabel, d.afterSlurped)
 
 proc callModelThreaded*(p: Profile, bodyStr, baseLabel: string;
-                        suppressXml: bool): StreamOutcome =
+                        suppressXml: bool; responses = false): StreamOutcome =
   ## The threaded streaming path. Spawns a worker to run `streamHttp`, polls
   ## the shared state on a ~50ms cadence to replay deltas through the hooks,
   ## and joins the worker once it signals done (or the user interrupts).
@@ -1604,11 +2122,12 @@ proc callModelThreaded*(p: Profile, bodyStr, baseLabel: string;
   var t: Thread[NetWorkerArgs]
   let args = NetWorkerArgs(
     job: addr job,
-    url: p.url & "/chat/completions",
+    url: p.url & (if responses: "/responses" else: "/chat/completions"),
     key: bearerFor(p),
     bodyStr: bodyStr,
     baseLabel: baseLabel,
-    suppressXml: suppressXml)
+    suppressXml: suppressXml,
+    responses: responses)
   createThread(t, networkWorker, args)
   while job.phase != npDone and not isInterrupted() and not isNetworkQuiet():
     drainAndDispatch(addr job, baseLabel)
@@ -1669,10 +2188,13 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
   when providerStub:
     return callModelStub(p, messages, usage, lastPromptTokens, maxTokensOverride)
   debugOut "callModel start"
-  # gpt-family `pro` variants (gpt-5.5-pro, ...) are completions-only
-  # models; chat/completions 404s with "not a chat model". Fail fast so
-  # the picker surfaces a clear message instead of a retry storm.
-  if p.family == "gpt" and p.variant == "pro":
+  # gpt-family `pro` variants (gpt-5.5-pro, ...) are Responses-only
+  # models; chat/completions 404s with "not a chat model". When the
+  # profile would use completions, fail fast so the picker surfaces a
+  # clear message instead of a retry storm. First-party openai already
+  # speaks /responses, where the pro variants are served.
+  let useResponses = responsesApi(p)
+  if not useResponses and p.family == "gpt" and p.variant == "pro":
     raise newHttpError(404, "", p.model & " is not a chat model; " &
       "chat/completions rejects it, use a chat variant instead")
   if p.family == "deepseek":
@@ -1682,25 +2204,35 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     for m in wireMessages:
       if m.kind == JObject and m{"role"}.getStr == "assistant" and m.contains("reasoning_content"):
         m.delete("reasoning_content")
-  var body = %*{
-    "model": p.model,
-    "messages": wireMessages,
-    "stream": streamingEnabled,
-  }
-  # `stream_options.include_usage` is a streaming-only field; non-streaming
-  # completions always carry `usage` in the response body. Fireworks rejects
-  # the field outright, so it is gated on both streaming and provider.
-  if streamingEnabled and providerOf(p) != "fireworks":
-    body["stream_options"] = %*{"include_usage": true}
-  body["tools"] = setup(p).tools
-  body["tool_choice"] = %"auto"
-  applyStreamingOptions(p, body)
-  applyGenerationDefaults(p, body)
-  if maxTokensOverride > 0:
-    body[maxTokensField(p)] = %maxTokensOverride
-  if p.reasoning.len > 0:
-    applyReasoning(p, body)
-  let bodyStr = sanitizeUtf8($body)
+  let bodyStr =
+    if useResponses:
+      block:
+        let body = buildResponsesBody(p, wireMessages)
+        if maxTokensOverride > 0:
+          body["max_output_tokens"] = %maxTokensOverride
+        sanitizeUtf8($body)
+    else:
+      block:
+        var body = %*{
+          "model": p.model,
+          "messages": wireMessages,
+          "stream": streamingEnabled,
+        }
+        # `stream_options.include_usage` is a streaming-only field;
+        # non-streaming completions always carry `usage` in the response
+        # body. Fireworks rejects the field outright, so it is gated on
+        # both streaming and provider.
+        if streamingEnabled and providerOf(p) != "fireworks":
+          body["stream_options"] = %*{"include_usage": true}
+        body["tools"] = setup(p).tools
+        body["tool_choice"] = %"auto"
+        applyStreamingOptions(p, body)
+        applyGenerationDefaults(p, body)
+        if maxTokensOverride > 0:
+          body[maxTokensField(p)] = %maxTokensOverride
+        if p.reasoning.len > 0:
+          applyReasoning(p, body)
+        sanitizeUtf8($body)
   if "\"usage\"" in bodyStr:
     stderr.writeLine "3code: BUG: usage in wireMessages"
     for i, m in wireMessages:
@@ -1713,7 +2245,20 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
   let t0 = epochTime()
   decayLevel(serverRetryLevel, serverLastTs, t0)
   decayLevel(rateRetryLevel, rateLastTs, t0)
-  let window = contextWindowFor(p)
+  # Context window for the token bar: known-good table first, then the
+  # heuristic. Kept inline (not compact.contextWindowFor) so api does
+  # not import compact; compact imports nothing from api either.
+  let window =
+    block:
+      let kg = knownGoodContextWindow(p)
+      if kg > 0: kg
+      else:
+        let m = p.model.toLowerAscii
+        if m == "stub-model": 12_000
+        elif "gpt-5" in m: 400_000
+        elif "gpt-4" in m: 128_000
+        elif "o1" in m or "o3" in m or "o4" in m: 200_000
+        else: 128_000
   let baseLabel = hookBeforeCall(lastPromptTokens, window)
   # Cursor is hidden for the duration of the entire turn by `runTurns`
   # so the prompt placeholder is the only visible caret. callModel
@@ -1756,16 +2301,26 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
           var syncJob: NetJobState
           syncJob.lock.initLock()
           defer: syncJob.lock.deinitLock()
-          let o = streamHttp(p.url & "/chat/completions", bearer, bodyStr,
-                             baseLabel, slurped, xmlToolCallsFallback(p),
-                             addr syncJob)
+          let o =
+            if useResponses:
+              streamResponses(p.url & "/responses", bearer, bodyStr,
+                              baseLabel, slurped, addr syncJob)
+            else:
+              streamHttp(p.url & "/chat/completions", bearer, bodyStr,
+                         baseLabel, slurped, xmlToolCallsFallback(p),
+                         addr syncJob)
           drainAndDispatch(addr syncJob, baseLabel)
           o
         else:
-          callModelThreaded(p, bodyStr, baseLabel, xmlToolCallsFallback(p))
+          callModelThreaded(p, bodyStr, baseLabel, xmlToolCallsFallback(p),
+                            useResponses)
       else:
-        callHttp(p.url & "/chat/completions", bearer, bodyStr,
-                 baseLabel, slurped)
+        if useResponses:
+          callResponses(p.url & "/responses", bearer, bodyStr,
+                        baseLabel, slurped)
+        else:
+          callHttp(p.url & "/chat/completions", bearer, bodyStr,
+                   baseLabel, slurped)
     if isInterruptedMsg(outcome.errMsg):
       hookStopSpinner()
       if outcome.assistantMsg == nil:
@@ -1942,12 +2497,20 @@ proc verifyBody*(p: Profile): string =
   ## JSON body for the provider-verification ping.  Kept as a named proc
   ## so the test suite can assert it matches the streaming convention used
   ## by `callModel` (both must send `"stream": true`).
-  $(%*{
-    "model": p.model,
-    "messages": [%*{"role": "user", "content": "ping"}],
-    maxTokensField(p): 1,
-    "stream": true
-  })
+  $(if responsesApi(p):
+    %*{
+      "model": p.model,
+      "input": [%*{"role": "user", "content": "ping"}],
+      "max_output_tokens": 1,
+      "stream": true
+    }
+  else:
+    %*{
+      "model": p.model,
+      "messages": [%*{"role": "user", "content": "ping"}],
+      maxTokensField(p): 1,
+      "stream": true
+    })
 
 proc verifyProfile*(p: Profile): (bool, string) =
   if verifyProfileHook != nil:
@@ -1969,7 +2532,9 @@ proc verifyProfile*(p: Profile): (bool, string) =
   # `setReadTimeoutMs` mirrors the deadline onto the socket as
   # `SO_RCVTIMEO`, hard-bounding every `recv`; we retry each bounded window
   # until `VerifyTimeoutMs` then fail cleanly.
-  let u = try: parseUri(p.url & "/chat/completions") except CatchableError as e:
+  let endpoint = p.url &
+    (if responsesApi(p): "/responses" else: "/chat/completions")
+  let u = try: parseUri(endpoint) except CatchableError as e:
     return (false, "bad url: " & e.msg)
   let host = u.hostname
   let plainHttp =

@@ -214,6 +214,19 @@ const
     # is the string the transport sites write; `isEmptyReplyMsg` identifies
     # it for display and tests.
 
+proc providerOf*(p: Profile): string =
+  ## Lower-case provider name from `Profile.name` ("nvidia.openai/gpt-oss-120b"
+  ## -> "nvidia"). "" when no dot. Lives in types (not api) so both api
+  ## and compact can dispatch on it without an import cycle.
+  let dot = p.name.find('.')
+  if dot < 0: "" else: p.name[0 ..< dot].toLowerAscii
+
+proc responsesApi*(p: Profile): bool =
+  ## True when this profile speaks the OpenAI Responses API (/responses
+  ## instead of /chat/completions). Currently only first-party openai;
+  ## anthropic may join the same dispatch later.
+  providerOf(p) == "openai"
+
 proc isInterruptedMsg*(msg: string): bool =
   ## Matches the bare `InterruptedByUserMsg` and variants that append
   ## context (e.g. "... during retry backoff"). Every raise of this class

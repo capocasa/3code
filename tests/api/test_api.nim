@@ -74,8 +74,11 @@ suite "api request shaping":
     check "max_tokens" notin body
     check "max_completion_tokens" notin body
     let vb = parseJson(verifyBody(p))
-    check vb{"max_completion_tokens"}.getInt == 1
+    # openai speaks the Responses API: input items + max_output_tokens.
+    check vb{"max_output_tokens"}.getInt == 1
+    check vb{"input"}.kind == JArray
     check "max_tokens" notin vb
+    check "messages" notin vb
 
   test "gpt-oss family keeps plain max_tokens":
     var body = %*{"stream": true}
@@ -645,6 +648,44 @@ suite "xml tool_call fallback":
     check body{"max_tokens"}.getInt == 1
     check body{"messages"}.len == 1
     check body{"messages"}[0]{"role"}.getStr == "user"
+
+  test "openai builds a Responses body: input items, flat tools, max_output_tokens":
+    # First-party openai speaks /responses, not /chat/completions. The
+    # body must translate messages -> input (system -> developer),
+    # flatten chat tool schemas, and use the Responses budget field.
+    let p = Profile(name: "openai.gpt-5.4", family: "gpt", model: "gpt-5.4",
+                    reasoning: "medium")
+    let msgs = %*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "go"},
+      {"role": "assistant", "content": "", "tool_calls": [
+        {"id": "fc_1", "type": "function",
+         "function": {"name": "bash", "arguments": "{}"}}]},
+      {"role": "tool", "tool_call_id": "fc_1", "content": "ok"},
+    ]
+    let body = buildResponsesBody(p, msgs)
+    check body{"model"}.getStr == "gpt-5.4"
+    check "messages" notin body
+    check "max_tokens" notin body
+    check "max_completion_tokens" notin body
+    check body{"max_output_tokens"}.getInt == 8192
+    check body{"input"}[0]{"role"}.getStr == "developer"
+    check body{"input"}[3]{"tool_call_id"}.getStr == "fc_1"
+    let tools = body{"tools"}
+    check tools.kind == JArray and tools.len > 0
+    check tools[0]{"type"}.getStr == "function"
+    check "function" notin tools[0]
+    check tools[0]{"name"}.getStr.len > 0
+    check "parameters" in tools[0]
+    check body{"reasoning"}{"effort"}.getStr == "medium"
+    # gpt on /responses rejects temperature != 1: it must be omitted.
+    check "temperature" notin body
+    # Dispatch is provider-level: every first-party openai combo goes to
+    # /responses; hosted stacks keep chat completions.
+    check responsesApi(Profile(name: "openai.gpt-oss-120b", family: "gpt-oss",
+      model: "gpt-oss-120b")) == true
+    check responsesApi(Profile(name: "nvidia.openai/gpt-oss-120b",
+      family: "gpt-oss", model: "openai/gpt-oss-120b")) == false
 
   test "fallback flag is per-known-good entry":
     check xmlToolCallsFallback(Profile(name: "nvidia.z-ai/glm-5.2",
