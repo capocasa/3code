@@ -693,6 +693,7 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("baseten",     "https://inference.baseten.co/v1"),
   ("cerebras",    "https://api.cerebras.ai/v1"),
   ("cheaperinference", "https://api.cheaperinference.com/v1"),
+  ("crof",        "https://crof.ai/v1"),
   ("deepinfra",   "https://api.deepinfra.com/v1/openai"),
   ("deepseek",    "https://api.deepseek.com/v1"),
   ("fireworks",   "https://api.fireworks.ai/inference/v1"),
