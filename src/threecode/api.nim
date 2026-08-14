@@ -1798,6 +1798,12 @@ proc ensureReasoningField(messages: JsonNode) =
 proc applyGptOssReasoning(p: Profile, body: JsonNode) =
   body["reasoning_effort"] = %p.reasoning
 
+proc applyGptReasoning(p: Profile, body: JsonNode) =
+  ## First-party openai / chatgpt chat-completions knob. The ladder is
+  ## per-model (none/minimal/low/medium/high/xhigh/max, see
+  ## `knownGoodReasonings`), all passed through as `reasoning_effort`.
+  body["reasoning_effort"] = %p.reasoning
+
 
 proc applyGlmReasoning(p: Profile, body: JsonNode) =
   ## Wire mapping for GLM reasoning. Values are `off`/`on` (4.7/5/5.1) or
@@ -2120,7 +2126,7 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   case p.family
   of "laguna": applyLagunaReasoning(p, body)
   of "gpt-oss": applyGptOssReasoning(p, body)
-  of "gpt": applyGptOssReasoning(p, body)
+  of "gpt": applyGptReasoning(p, body)
   of "glm": applyGlmReasoning(p, body)
   of "deepseek": applyDeepseekReasoning(p, body)
   of "minimax": applyMinimaxReasoning(p, body)

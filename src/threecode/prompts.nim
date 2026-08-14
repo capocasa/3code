@@ -2523,6 +2523,29 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
   for combo in KnownGoodCombos:
     if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
       let fam = combo.family
+      if fam == "gpt":
+        # Effort ladder from OpenAI's per-model docs, keyed off the
+        # variant (`5.4-mini` -> variant "5.4-mini"). o-series and gpt-5.0
+        # predate `none`/`xhigh`; 5.1+ adds `none`, 5.4+ adds `xhigh`,
+        # 5.6 adds `max` (and drops `minimal`, which only gpt-5.0 ever
+        # had). The pro tiers reason unconditionally: 5.5-pro accepts
+        # medium/high/xhigh, 5-pro is high-only. gpt-4.x and gpt-oss
+        # carry no reasoning knob (gpt-oss handled below with the other
+        # third-party families).
+        if combo.variant.startsWith("o") or combo.variant in ["4o", "4o-mini"] or
+           combo.variant.startsWith("4."):
+          # o-series: low/medium/high. gpt-4.x has no knob at all.
+          if combo.variant.startsWith("o"): return @["low", "medium", "high"]
+          return @[]
+        if combo.variant == "5-pro": return @["high"]
+        if combo.variant == "5.5-pro": return @["medium", "high", "xhigh"]
+        if combo.variant.startsWith("5.6"):
+          return @["none", "low", "medium", "high", "xhigh", "max"]
+        if combo.variant.startsWith("5.4") or combo.variant.startsWith("5.5"):
+          return @["none", "low", "medium", "high", "xhigh"]
+        if combo.variant in ["5", "5-mini", "5-nano"]:
+          return @["minimal", "low", "medium", "high"]
+        return @ReasoningLevels
       if fam == "glm":
         # 5.2 (variant "2") exposes a graded effort knob (high/max); older
         # GLM is on/off only. Variant encodes the minor version digit

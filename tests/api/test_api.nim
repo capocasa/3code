@@ -246,6 +246,47 @@ suite "api request shaping":
     check "reasoning_effort" notin body
     check "reasoning" notin body
 
+  test "knownGoodReasonings for openai gpt: per-model effort ladder":
+    # Per OpenAI's docs: o-series low/medium/high; gpt-5.0 minimal..high;
+    # 5.1+ adds none; 5.4/5.5 add xhigh; 5.6 adds max; pros reason
+    # unconditionally; gpt-4.x has no knob at all.
+    check knownGoodReasonings("openai", "o3") == @["low", "medium", "high"]
+    check knownGoodReasonings("openai", "o4-mini") == @["low", "medium", "high"]
+    check knownGoodReasonings("openai", "gpt-5") ==
+      @["minimal", "low", "medium", "high"]
+    check knownGoodReasonings("openai", "gpt-5-mini") ==
+      @["minimal", "low", "medium", "high"]
+    check knownGoodReasonings("openai", "gpt-5.4") ==
+      @["none", "low", "medium", "high", "xhigh"]
+    check knownGoodReasonings("openai", "gpt-5.5") ==
+      @["none", "low", "medium", "high", "xhigh"]
+    check knownGoodReasonings("openai", "gpt-5.5-pro") ==
+      @["medium", "high", "xhigh"]
+    check knownGoodReasonings("openai", "gpt-5.6") ==
+      @["none", "low", "medium", "high", "xhigh", "max"]
+    check knownGoodReasonings("openai", "gpt-5.6-luna") ==
+      @["none", "low", "medium", "high", "xhigh", "max"]
+    check knownGoodReasonings("openai", "gpt-4o") == newSeq[string](0)
+    check knownGoodReasonings("openai", "gpt-4.1") == newSeq[string](0)
+    # chatgpt (Codex backend) resolves to the openai catalog.
+    check knownGoodReasonings("chatgpt", "gpt-5.6-sol") ==
+      @["none", "low", "medium", "high", "xhigh", "max"]
+
+  test "openai chat body sends reasoning_effort passthrough":
+    for level in ["none", "low", "medium", "high", "xhigh", "max"]:
+      var body = %*{"stream": true}
+      let p = Profile(name: "openai.gpt-5.6", family: "gpt",
+                      model: "gpt-5.6", reasoning: level)
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == level
+
+  test "openai responses body sends reasoning effort passthrough":
+    for level in ["none", "xhigh", "max"]:
+      let p = Profile(name: "openai.gpt-5.6", family: "gpt",
+                      model: "gpt-5.6", reasoning: level)
+      let body = buildResponsesBody(p, %*[{"role": "user", "content": "go"}])
+      check body{"reasoning"}{"effort"}.getStr == level
+
   test "knownGoodReasonings for grok: 4.5 levels, 4.20 adds off":
     check knownGoodReasonings("xai", "grok-4.5") == @["low", "medium", "high"]
     check knownGoodReasonings("xai", "grok-4.3") == @["low", "medium", "high"]
