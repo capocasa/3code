@@ -2,74 +2,62 @@
 
 ## Introduction
 
-3code grew out of my frustration with AI studios not optimizing at all to conserve
-AI tokens. While I totally get that it's a good thing to take a "what if we had
-endless resources" approach in a rearch lab, in my world, I'm paying- and it looks
-to me like the AI companies are scaling the research lab up, free token fiction and all,
-instead of adapting their research to what my needs are today. So it seems clear our
-priorities are not aligned.
+3code is a coding agent built to use fewer tokens and less local compute.
+It works with OpenAI-compatible providers, including free tiers, flat-rate
+coding plans, and local servers.
 
-I find that open models- particularly GLM- are more than adequate to meet all my programming needs.
-But I also found the other open agents seem to have either taken a page out of the AI companies
-themselves- not optimizing very much for token use- or take a hyper-minimalistic 'the model will do
-what it does' approach. 3code does neither- it makes every decision based on the idea "what will
-bring better results with the least brainpower, tokens and computer resources used", and nothing else.
-That's why it's the economical coding agent.
-
-By being futurists and not having a proper product development vision based on today, the AI labs
-have left a real gap. The open AI companies have filled most of it- 3code is here to make the
-most of these.
+The main design rule is simple: get a correct result with the least model work,
+token use, and computer time. Open models, especially GLM, are good enough for
+most of my programming work. 3code gives them a focused prompt, a small tool
+set, persistent sessions, and a quiet terminal interface.
 
 ## Quickstart
 
-The first thing you need to do is get a provider where you can buy inference via an API, or set up
-your computer with an open model so you can be your own provider.
-
-Note: Being your own provider is just barely workable in terms of the quality you can get.
+You need an API provider or a local OpenAI-compatible server. Local models can
+work, but small local models are still limited on difficult coding tasks.
 
 ### Get a provider
 
-There are lots and lots of providers to choose from.
+There are many compatible providers. Start with a free tier, then choose a
+paid provider after you know which model works for your projects.
 
 #### Free providers
 
-The best way to get to know 3code is with a free provider.
+[NVIDIA Build](https://build.nvidia.com) and
+[Novita](https://novita.ai) often provide useful free models. Free model lists
+and rate limits change, so check the provider before signing up.
 
-There are 2 notable ones I am aware of: `nvidia <https://build.nvidia.com>`_ has free deepseek v4 pro which is quite remarkable, and `novita.ai <novita.ai>`_ has tencent hy3 which is my favorite 'small' model. Both are usable- the rate limits don't make it impossible to work.
+#### Flat-rate coding plans
 
-#### The z.ai coding plan
+The [z.ai coding plan](https://z.ai/subscribe) is my main setup. GLM is capable,
+inexpensive, and well suited to long agentic tasks.
 
-To do proper work, nothing beats GLM 5.2, in my experience. I think it's in the same league as the more well known models- it can work a bit slower but the results are right there. 3code makes sure to be very agentic keep everything hands off- so that tradeoff usually really doesn't matter much!
+3code also supports subscription login for ChatGPT Plus/Pro and SuperGrok or X
+Premium+. These subscriptions are separate from OpenAI and xAI API billing.
 
-The best way to use 3code is the `z.ai coding plan <https://z.ai/subscribe>`_ ! This is the combination that really replaced Claude Code for me.
+#### EU providers
 
-Note: While z.ai coding plan doesn't publically list 3code as a supported agent yet because it's in alpha, its use is officially permitted by z.ai- many thanks!
+I use [TensorX](https://tensorx.ai) when data must stay under EU jurisdiction.
+Nebius and Eurouter are also available in the provider catalog.
 
-#### EU jurisdiction
+#### Low-cost providers
 
-I work with sensitive data that sometimes that I like to keep within EU jurisdiction- I like `tensorx <https://tensorx.ai>` a lot for this.
+DeepInfra, OpenCode, nano-gpt, Novita, and similar aggregators serve quantized
+open models at low prices. Quality and model availability vary by provider.
 
-#### Low cost providers
+#### Other models
 
-There are 3 notable low cost providers supported by 3code- deepinfra, opencode and nano-gpt.com. They work by serving quantized versions of the open weights models and I find they work remarkably well.
+DeepSeek, MiniMax, Kimi, Tencent Hy, Qwen, Grok, and LongCat are all supported
+on one or more providers. The model registry changes often. Use the live list
+instead of relying on a list copied into this manual:
 
-#### More interesting models and providers 
+```
+3code --good
+```
 
-I tried them all!
-
-**Deepseek V4 Pro** is also very capable and inexpensive. I found it much more prone to create bugs than GLM but if you can keep it on track, when it does workit works very well. Available directly from `deepseek <https://deepseek.com>`_.
-
-**LongCat** is interesting- I find it very similar to deepseek and it seemed more focused. Available from openrouter and `longcat <https://longcat.chat>_` directly (alipay app needed).
-
-**Minimax M3** is very interesting- it has great general wide knowledge including of programming and comes up with pretty good approachs but it can be a bit hit or miss and doesn't stay focused very well for programming. It's might runner-up 'light'model. Super inexpensive plans are available directly from Minimax `<https://minimax.io>_`.
-
-**Tencent Hy3** is available for free at the moment- the openrouter free version is rather limited but it's also on a provider called `novita <https://novita.ai>` and I haven't run into a limit yet. It's a lot like GLM but you can't give it as tough jobs. My favorite light model. We'll have to see where it goes with the pricing. 
-
-**Kimi K2.7-code** worked just fine but I found it more expensive and especially much, much more verbose than GLM- so it costs more per task, so I haven't used it very much. Kimi K3 has been met with much enthusiasm but I was unable to test as of yet!
-
-#### Finding even more providers
-
-You can sign up at `openrouter <https://openrouter.com>`_ and `eurouter <https://www.eurouter.ai/>`, or you can do what I like to do and look at their models pages and sign up directly with the provider just to have one entity less in the loop.
+OpenRouter and Eurouter are useful for testing many models through one account.
+A direct provider account removes one service from the request path and is
+often cheaper.
 
 ### Install
 
@@ -81,250 +69,225 @@ curl -fsSL https://3code.capocasa.dev/install | sh
 irm https://3code.capocasa.dev/install.ps1 | iex
 ```
 
-### Termux (Android arm64)
+### Termux on Android arm64
 
-The CI ships a prebuilt Termux binary (`3code-termux-arm64.tar.gz`), or
-build from source inside Termux:
+Releases include `3code-termux-arm64.tar.gz`. You can also build inside
+Termux:
 
 ```
 pkg install nim git openssl
 nimble install https://github.com/capocasa/3code
 ```
 
-The binary needs Termux's OpenSSL for TLS (`pkg install openssl`).
-Notes: the Landlock sandbox and desktop notifications are not available
-on Android; both degrade gracefully (in-process path checks still
-apply, notifications no-op). Auto-update is disabled — update with
-`nimble install` again or re-download the tarball.
+The binary uses Termux OpenSSL for TLS. The OS sandbox and desktop
+notifications are unavailable on Android. In-process path checks still apply,
+and notifications do nothing. Automatic updates are disabled. Install again
+or download a new archive to update.
 
-### Enter your API key
+### Add a provider
 
-Navigate to your project directory and run `3code`. On first launch with no
-config it walks you through setup:
-
-```
-  ╶──╮
-  ╶──┤    3code v0.3.4   the economical coding agent
-  ╶──╯
-
-  no provider configured. let's add one. (ctrl+d to quit)
-  supported: deepinfra, ovh, nvidia, nebius, fireworks
-
-  provider, url, or api key: nvapi-...
-  detected: nvidia -> https://integrate.api.nvidia.com/v1
-  models [gpt-oss-120b ...]:
-  verifying... ok
-  saved to ~/.config/3code/config
-```
-
-The first field accepts a catalog name (`nvidia`, `xai`, …), a URL
-(`--experimental`), an API key (prefix-detected), or a subscription
-login: `supergrok` for SuperGrok / X Premium+, `chatgpt` for ChatGPT
-Plus/Pro.
-
-### Run your first prompt
-
-```
-❯ Build me a Hello World program in Nim
-```
-
-## Picking a provider
-
-There are two categories of provider that are interesting to use with 3code:
-the nvidia free tier and Chinese flat-rate providers. Other providers work but
-will most likely be too expensive except to test-drive different models.
-
-`nvidia <https://build.nvidia.com>`_ - Free tier. You get gpt-oss-120b, which
-is good enough for a lot of cases. You will notice when it starts to get
-limiting. MiniMax M2.7 is a very modern option on nvidia but it is pretty slow,
-something you want to use in the background.
-
-`MiniMax <https://platform.minimax.io>`_ - First-party API for the MiniMax
-M-series: M3 frontier (1M context) and M2.7. The first-party endpoint is the
-cheapest way to run M3 and the only one that exposes the Anthropic-style
-`thinking.type` knob; the OpenAI-compatible surface (api.minimax.io/v1) is
-what 3code talks to and uses the vLLM-style `chat_template_kwargs` knob
-under the hood. M2.7 is also available on nvidia, fireworks, together,
-sambanova, and deepinfra as a hosted alternative.
-
-`z.ai <https://z.ai/>`_ - GLM 5.2 on the z.ai coding plan what I use to develop 3code! The effectiveness is absolutely top notch, you can throw hard problems at it, and it the tokens stack up considerably slower than on any other model I've tried.
-
-`nebius <https://tokenfactory.nebius.com/>`_ - The EU-resident runner up. Only has GLM 5.1, not 5.2, but still a great choice if if tensorx isn't available.
-
-`xAI <https://console.x.ai>`_ - First-party API for the Grok family (grok-4.5,
-grok-4.3, grok-4.20, grok-build-0.1). Keys start with `xai-`, which the setup
-wizard recognizes. The API is OpenAI-compatible and exposes a graded
-`reasoning_effort` knob: low/medium/high on all models, with 4.20 also
-accepting off. Prompt caching is server-side; 3code benefits automatically on
-repeat turns.
-
-Two ways to authenticate, and they can sit side by side:
-
-- Paste an `xai-` API key (or type `xai` then the key) → provider `xai`.
-- Type `supergrok` → browser OAuth against your SuperGrok / X Premium+
-  subscription. The authorize URL is printed and opened immediately.
-  Tokens live in `$XDG_DATA_HOME/3code/auth/xai.json` (mode 0600) and
-  refresh automatically; the provider is saved as `supergrok` with
-  `auth = "oauth"` and no key.
-
-Switch with `:provider xai` / `:provider supergrok`.
-
-`ChatGPT <https://chatgpt.com>`_ - OpenAI first-party models on a ChatGPT
-Plus/Pro subscription instead of a metered API key. Type `chatgpt` in the
-wizard: browser OAuth against auth.openai.com (the same public client the
-Codex CLI uses), tokens in `$XDG_DATA_HOME/3code/auth/openai.json` (mode
-0600), refreshed automatically. Requests go to the ChatGPT Codex backend
-(`chatgpt.com/backend-api/codex`), which speaks the Responses API with a
-few extra gates (stream-only, no server-side storage) that 3code handles
-for you. Sits beside an API-key `openai` provider; switch with
-`:provider openai` / `:provider chatgpt`. Note the Codex backend is an
-internal, unversioned surface meant for first-party clients; using it
-with 3code is your responsibility.
-
-OpenAI reasoning levels are per-model, not a uniform low/medium/high:
-o-series takes low/medium/high, gpt-5.0 minimal..high, 5.1+ adds none,
-5.4/5.5 add xhigh, 5.6 adds max (and drops minimal). The pro tiers
-reason unconditionally (5.5-pro: medium/high/xhigh, 5-pro: high only),
-and gpt-4.x has no knob. `:reasoning` lists exactly what the active
-model accepts.
-
-Add a provider inside the REPL:
+Run `3code` in your project directory. If no provider is configured, the setup
+wizard opens automatically. You can also open it later:
 
 ```
 :provider add
 ```
 
-Or switch between configured providers:
+The first field accepts:
+
+- a catalog name, such as `nvidia`, `zai`, `xai`, or `openai`
+- a provider URL when `--experimental` is enabled
+- an API key with a recognized prefix
+- `supergrok` for SuperGrok or X Premium+ login
+- `chatgpt` for ChatGPT Plus/Pro login
+
+The wizard fetches the provider's model list, verifies selected models in
+parallel, and saves only the models that pass. Press Esc to cancel verification.
+
+### Run your first prompt
 
 ```
-:provider use nvidia
-:provider use zai.glm-5.1
+❯ Build a Hello World program in Nim
 ```
 
-Have a look at the `full list of providers <#known-good>`_.
+## Providers and authentication
 
-## Starting programming
+Use `:provider` to list configured providers. The current provider is marked.
+Use `:model` to list its models. Tab completion works for both commands.
 
-Use the `:model` command (tab-complete it), then press Tab again to rotate
-through all the models configured for the current provider.
+```
+:provider nvidia
+:model gpt-oss-120b
+```
 
-Then tell the model what you want.
+### API keys
 
-I like to keep a `3CODE.md` in the project root that inlines my main project
-style file with a `@../3CODE.md` reference. `AGENTS.md` also works; I prefer
-agent-specific filenames.
+Most providers use an API key. The setup wizard recognizes common key prefixes.
+For an unknown provider or a custom URL, start 3code with `--experimental`.
+
+### xAI and SuperGrok
+
+An `xai-` key creates a normal `xai` provider. Enter `supergrok` to sign in with
+a SuperGrok or X Premium+ subscription. The two providers can exist together.
+
+The browser OAuth flow stores tokens in:
+
+```
+$XDG_DATA_HOME/3code/auth/xai.json
+```
+
+On POSIX systems the file is created with mode 0600. Tokens refresh
+automatically. Switch accounts with `:provider xai` and
+`:provider supergrok`.
+
+### OpenAI and ChatGPT
+
+An OpenAI API key creates an `openai` provider. Enter `chatgpt` to use a ChatGPT
+Plus/Pro subscription instead. The two providers can exist together.
+
+ChatGPT login opens the OpenAI browser OAuth flow and stores tokens in:
+
+```
+$XDG_DATA_HOME/3code/auth/openai.json
+```
+
+On POSIX systems the file is created with mode 0600. Tokens refresh
+automatically. ChatGPT requests use the Codex backend at
+`chatgpt.com/backend-api/codex`. 3code uses that backend for model listing and
+requests.
+
+OpenAI and ChatGPT use the Responses API. Other OpenAI-compatible providers use
+Chat Completions. The Codex backend is an internal, unversioned service for
+first-party clients. Using it through 3code is your responsibility.
+
+Switch accounts with:
+
+```
+:provider openai
+:provider chatgpt
+```
+
+## Working in the REPL
+
+Select a model, then describe the result you want. Tab completes commands,
+provider names, model names, and paths where supported.
+
+3code loads `3CODE.md` and `AGENTS.md` from the project directory and its parent
+directories. Put project rules, build commands, and style requirements there.
+You can include file contents in a prompt with `@path`:
+
+```
+Review @src/parser.nim and add tests for malformed input.
+```
+
+Useful input keys:
+
+| key | action |
+| --- | --- |
+| Enter | submit |
+| Shift+Enter or Alt+Enter | insert a newline |
+| Up / Down | move through visual rows, then history |
+| Ctrl+Arrow | move by word |
+| Ctrl+U | clear the input buffer |
+| Ctrl+W | delete the previous word |
+| Ctrl+L | clear the screen |
+| Ctrl+C | clear current input |
+| Esc | cancel the current operation |
+| Ctrl+D | exit |
+
+Run `:help` for the current command and key list.
 
 ## Usage monitoring
 
-Every response shows a token receipt on its own line:
+Each response ends with a token receipt:
 
 ```
   ○12%  ↑4.2k  ↻18k  ↓1.1k  8s
 ```
 
-The fields:
+| field | meaning |
+| --- | --- |
+| `○N%` | context window used |
+| `↑` | fresh input tokens |
+| `↻` | cached input tokens |
+| `↓` | output tokens |
+| `Xs` | elapsed time |
 
-| glyph | meaning |
-|-------|---------|
-| `○N%` | context window used (percentage) |
-| `↑`   | fresh input tokens (not cached) |
-| `↻`   | cached input tokens |
-| `↓`   | output tokens generated |
-| `Xs`  | wall-clock seconds for this response |
-
-During streaming, the same line updates live so you can watch the numbers tick
-up in real time. If a glyph is absent it just means the provider did not stream
-that information.
+The receipt updates while a response streams. A missing field means the
+provider did not report it.
 
 ## Patient retry
 
-Many providers enforce a rolling usage window, often five hours, after which
-they return `429` until the window slides forward. Hitting one mid-task used to
-mean dropping back to the prompt and re-submitting by hand once the window
-reset. Patient retry removes that.
+Patient retry is enabled by default. It handles `429` limits, `5xx` responses,
+and network failures with exponential backoff. The delay is capped at 2048
+seconds and the retry period can last about 36 hours. This lets a session wait
+through a rolling provider limit or temporary network loss.
 
-When patient retry is on (the default), any retryable failure, a `429` usage
-limit, a `5xx`, or a network dropout, keeps retrying instead of surfacing. The
-backoff is one shared exponential curve (power-of-2 off the category's own
-level) capped at 2048 seconds, so the loop re-probes roughly every 34 minutes
-at worst rather than napping for hours. After the initial ramp-up (~1 minute)
-the attempt counter and the real error message keep scrolling by as transcript
-lines, e.g.:
+After the short initial retry period, each attempt is added to the transcript:
 
 ```
 Usage limit reached for the past 5 hours. (code 429). retry 42/64 in 2048s
 ```
 
-So you can glance over, see the underlying reason, and know the session is
-holding. A network dropout on a train ride recovers the moment the cell comes
-back, without you at the keyboard.
-
-Turn it off if you would rather failures surface quickly:
+Use these commands to inspect or change the setting:
 
 ```
+:retry
 :retry off
+:retry on
 ```
 
-With it off, the initial ramp-up still runs (~1 minute, 7 attempts) before the
-error reaches the prompt, so transient blips still self-heal. The toggle is
-persisted in `[settings]` as `patient_retry` (written only when off, since on
-is the default):
+With patient retry off, 3code still retries transient failures for about one
+minute before returning to the prompt. The setting is stored as
+`patient_retry` in `[settings]`. Press Esc to cancel a retry wait.
+
+## Reasoning
+
+Use `:reasoning` to list the levels supported by the current model. The active
+level is marked. For example:
 
 ```
-[settings]
-patient_retry = "off"
+:reasoning
+:reasoning high
+:reasoning off
 ```
 
-You can cancel a running patient-retry hold at any time with Ctrl-C.
+The valid values depend on the model:
 
-## Thinking
+- binary reasoning models use `off` and `on`
+- many models use `low`, `medium`, and `high`
+- GLM 5.2 uses `off`, `high`, and `max`
+- OpenAI o-series models use `low`, `medium`, and `high`
+- GPT-5.0 uses `minimal`, `low`, `medium`, and `high`
+- GPT-5.1 and later add `none`
+- GPT-5.4 and GPT-5.5 add `xhigh`
+- GPT-5.6 adds `max` and does not use `minimal`
+- GPT-5.5 Pro uses `medium`, `high`, and `xhigh`; GPT-5 Pro uses `high`
+- GPT-4.x has no reasoning setting
 
-When a model reasons before replying, its thinking is shown as a one-line
-ticker above the spinner. This gives you a quick sense of what the model is
-working through without flooding the screen.
+3code sends the provider-specific field for the selected model. It does not
+assume one reasoning scale works everywhere.
 
-To toggle it:
+When a provider streams reasoning text, 3code shows it in a one-line ticker
+above the prompt. The ticker does not add the reasoning text to the transcript.
 
-```
-:think off
-:think on
-```
+## Known-good models
 
-The ticker has no effect if the provider does not emit reasoning content.
+Provider APIs differ in small but important ways. 3code keeps a registry of
+provider and model combinations that have been tested with the correct prompt,
+reasoning settings, token fields, and context size.
 
-## Known good models
-
-3code has a list of models and providers that have been tested to work- each provider usually needs a bit of handholding because there can be difference in the details of how the API is called. You can get the current list by running
+Print the current registry with:
 
 ```
 3code --good
 ```
 
-At the time of writing that's these
-
-| Provider | Models |
-| --- | --- |
-| baseten | GLM-5 GLM-4.7 GLM-5.2 GLM-5.1 gpt-oss-120b DeepSeek-V4-Pro Kimi-K2.6 Kimi-K2.5 |
-| cerebras | zai-glm-4.7 gpt-oss-120b |
-| fireworks | glm-5p1 glm-5 gpt-oss-120b deepseek-v4-pro minimax-m2p7 kimi-k2p6 |
-| nebius | GLM-5.1 GLM-5 GLM-5.2 gpt-oss-120b gpt-oss-120b-fast DeepSeek-V3.2 DeepSeek-V3.2-fast DeepSeek-V4-Pro Kimi-K2.5 Kimi-K2.5-fast MiniMax-M2.5 MiniMax-M2.5-fast MiniMax-M3 Kimi-K2.6 |
-| nvidia | glm4.7 glm-5.2 gpt-oss-120b gpt-oss-20b deepseek-v4-pro deepseek-v4-flash minimax-m2.5 minimax-m2.7 minimax-m3 kimi-k2.6 |
-| together | GLM-5.1 GLM-5 GLM-4.7 GLM-5.2 gpt-oss-20b gpt-oss-120b DeepSeek-V4-Pro MiniMax-M2.7 MiniMax-M3 Kimi-K2.5 Kimi-K2.6 |
-| zai | glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2 |
-| deepinfra | GLM-5.1 GLM-5 GLM-4.7 GLM-4.7-Flash GLM-5.2 gpt-oss-120b gpt-oss-20b DeepSeek-V4-Pro DeepSeek-V4-Flash DeepSeek-V3.2 MiniMax-M2.5 MiniMax-M2.7 MiniMax-M3 Kimi-K2.6 Kimi-K2.5 Hy3 |
-| novita | glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2 gpt-oss-20b gpt-oss-120b deepseek-v3.2 deepseek-v4-flash deepseek-v4-pro minimax-m2.5 minimax-m2.7 minimax-m2.7-highspeed minimax-m3 kimi-k2.5 kimi-k2.6 hy3 |
-| openrouter | glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2 gpt-oss-120b gpt-oss-20b deepseek-chat deepseek-v3.2 deepseek-v4-flash deepseek-v4-pro minimax-m2.5 minimax-m2.7 minimax-m3 kimi-k2.5 kimi-k2.6 hy3:free hy3 grok-4.5 grok-4.5-latest grok-4.3 grok-4.20 grok-4.20-reasoning grok-4.20-multi-agent grok-build-0.1 |
-| groq | gpt-oss-120b gpt-oss-20b |
-| ovh | gpt-oss-120b gpt-oss-20b |
-| sambanova | gpt-oss-120b DeepSeek-V3.2 MiniMax-M2.7 MiniMax-M2.5 |
-| deepseek | deepseek-chat deepseek-reasoner deepseek-v4-flash deepseek-v4-pro |
-| minimax | MiniMax-M3 MiniMax-M2.7 MiniMax-M2.7-highspeed MiniMax-M2.5 |
-| longcat | LongCat-2.0 |
-| xai | grok-4.5 grok-4.5-latest grok-4.3 grok-4.3-latest grok-build-0.1 grok-4.20 grok-4.20-reasoning grok-4.20-multi-agent |
+Use `--experimental` to run a combination outside the registry.
 
 ## Sessions
 
-List recent sessions for the current directory (newest first, up to 20):
+List the 20 most recent sessions for the current directory:
 
 ```
 3code --list
@@ -332,176 +295,128 @@ List recent sessions for the current directory (newest first, up to 20):
 3code -l
 ```
 
-Listing is scoped to the current directory by design. To see every saved
-session, run 3code from the sessions directory itself (e.g.
-`~/.local/share/3code/sessions`).
-
-Resume a specific session by ID:
+Resume the latest session:
 
 ```
+3code --resume
+```
+
+Resume a session by ID:
+
+```
+3code --resume=abc123
+# or
 3code -r:abc123
 ```
 
-Note: different providers expire their prompt cache at different rates. Resuming
-an old session still works but you will not get cache savings on stale context.
+Session listing is scoped to the current directory. Provider prompt caches may
+expire before a saved session does. An old session still resumes, but its old
+context may no longer receive cache discounts.
 
-## Context clear
+## Context management
 
-Inside the REPL, `:clear` wipes the accumulated context and starts a fresh
-conversation with the same provider and model. Useful when a task is done and
-you want to start something new without the old context bleeding in.
+`:clear` starts a new conversation with the same provider and model:
 
 ```
 :clear
 ```
 
-## Chunked mode
-
-For larger tasks, have the model create a plan first and divide the work into
-natural chunks - each saved to a file. Each chunk file should end by calling
-the `context_clear` tool with the next file as the parameter. This produces
-a series of implementing steps with context resets in between.
-
-Example prompt to kick off a chunked task:
+`:summarize` replaces older turns with a generated recap. Use it when you need
+to keep the current task but reduce context use:
 
 ```
-Divide the following task into 4-6 chunks, each in its own impl-N.md file.
+:summarize
+```
+
+A clear context is safer than a summary when the old work is no longer relevant.
+
+## Chunked mode
+
+For a large mechanical task, ask the model to split the work into files. Each
+chunk ends by calling `context_clear` with instructions for the next chunk.
+This keeps only the context needed for the current step.
+
+Example:
+
+```
+Divide this task into 4-6 chunks in impl-N.md files.
 End each file by calling context_clear with instructions to read the next file.
 Then execute chunk 1.
 
-Task: add comprehensive test coverage to the parser module.
+Task: add test coverage to the parser module.
 ```
 
-Chunked mode is well-suited to busywork that does not require human interaction,
-such as adding basic test coverage across a large codebase. A capable model is
-needed; GLM 5.1 works well.
-
-Calling `context_clear` at the end of each chunk with the next file as the
-target also serves as a cheap capability test: if the model loses track enough
-to forget to call the next file, the task was probably too hard for this mode.
+Chunked mode works best for tasks that need little human input, such as adding
+basic tests across many modules. If the model forgets to load the next chunk,
+the task was probably too difficult or the plan was too vague.
 
 ## Cybernetic mode
 
-Cybernetic mode is the go-to way to do a long-running coding session with 3code- agentic use.
+Cybernetic mode is the preferred way to run a long coding task. Give the model
+a worktree and ask it to use the built-in cybernetic planning skill.
 
-How it works is you get yourself a chunk of work in a worktree, and ask our model to use the built-in cybernetic skill to complete it.
+The skill:
 
-Here's what the skill does:
+1. writes a plan file with concrete tasks
+2. implements one task
+3. updates the plan with results and new information
+4. clears context and tells the next session to load the plan
+5. repeats until all tasks are complete
+6. reviews the completed work
 
-- It makes a plan for your work and writes it to a plan file as a todo list
-- Has instructions in the file to pick one of the todo items, implement it, and update the plan file informed by the learnings of implementation
-- Clears the context, with instructions for the next session to load the file
-- Rinse and repeat
-- When all items are completed, the last session performs a review
-
-This allows for long-running task completion of large chunks of work while preserving only the context that is actually needed. This is different from summarizing, where all context is kept at a lower resolution, regardless of whether it is relevant.
+This keeps detailed context for the current task and durable context in the
+plan file. It avoids compressing every old detail into a summary.
 
 ## No sub-agents
 
-Sub-agents are not supported because both research and user feedback says they are very expensive and bring unclear or negative benefits, so I consider it a feature that 3code doesn't have them. Use Cybernetic mode with worktrees instead.
+3code does not provide sub-agents. They use many tokens and their benefit is
+unclear. Use worktrees with cybernetic mode for parallel or long-running work.
 
 ## Sandbox
 
-3code confines every tool call to a filesystem sandbox you define. The
-sandbox is a plain text policy living in exactly one file at a time:
+3code applies a filesystem policy to every tool call. Bash commands also use an
+OS sandbox. A network policy can restrict hosts reached by Bash commands.
 
-1. **repo** - `.sandbox` in your project directory, when it exists.
-2. **user** - `~/.config/3code/sandbox`, next to your config,
-   otherwise.
+Exactly one policy source is active:
 
-There is no cascade and no merging: the repo file wins outright, the
-user file is the fallback. The user file is created from the built-in
-default on first run, so the sandbox is always on and you can change
-what every project without its own `.sandbox` gets by editing that
-one file. Yolo mode (everything writable) is fine but you have to ask
-for it explicitly.
+1. `.sandbox` in the project directory, if it exists
+2. `~/.config/3code/sandbox`, if you created it
+3. the built-in default, held in memory
 
-The sandbox is enforced two ways. Bash commands run through `3code sandbox`,
-the built-in sandwall sandbox (Landlock on Linux, Seatbelt on macOS), which
-3code re-execs itself as; the sandbox process loads the policy file itself,
-so every command launches on the freshest policy. The in-process
-read/write/patch tools check paths against the same policy (reloaded when
-the file changes) in the 3code process. Both layers run the same sandwall
-parser and rule model, so the rules you write apply uniformly.
+Policies do not cascade or merge. The project file replaces the user file.
+3code never creates the user file. Create it yourself to define the default for
+projects without `.sandbox`.
 
-Host rules additionally drive the network wall: the first host rule in
-the effective policy switches on egress fencing for bash commands, which
-then reach the network only through a per-run allowlist proxy (``3code
-wall proxy``). Linux fences with a kernel network namespace (the proxy is
-reached through a unix-socket bridge), macOS with Seatbelt loopback-only
-rules; a fenced command sees ``http_proxy``/``HTTPS_PROXY``/``ALL_PROXY``
-pointed at the proxy and a ``GIT_SSH_COMMAND`` ProxyCommand unless you set
-one yourself. Denied connections fail with a proxy 403. On Windows the
-fence is keyed on a dedicated ``sandwall`` user and needs a one-time
-elevated ``3code wall setup-windows``; without it, host-rule policies
-print a warning and run unfenced (silence with
-``[settings] sandbox_wall_warn = off``).
+The first `:sandbox allow`, `:sandbox readonly`, `:sandbox deny`, or
+`:sandbox edit` command in a project creates `.sandbox` from the current
+effective policy. This gives the project a complete policy before changing it.
 
-### The sandbox file
+### Policy format
 
-Each line is an access word, arbitrary whitespace, and a target. Lines run
-top to bottom; each line supersedes the ones above it for the target it
-names. Later rules win, so you can open a broad path then narrow parts of
-it.
+A policy has one rule per line:
 
-==========  ==============================================
-Word        Meaning
-==========  ==============================================
-``deny``    deny: no read, no write, no connect
-``readonly``  read-only: read and execute (paths only)
-``allow``   writable path / connectable host
-==========  ==============================================
+==============  ==============================================
+Word            Meaning
+==============  ==============================================
+``deny``        no read, write, or network connection
+``readonly``    read and execute, for paths only
+``allow``       read and write a path, or connect to a host
+==============  ==============================================
 
-A word only counts as an access word when it stands alone (whitespace
-or end of line after it); a line starting with anything else is treated
-as a host rule, so hostnames like ``deny.corp.internal`` still parse.
+The target type is determined by its first character:
 
-The target's first character decides what it names:
+==============  ==============================================
+Start           Target
+==============  ==============================================
+``/``           absolute path
+``X:``          Windows drive path
+``~``           path under the home directory
+``.``           path relative to the project directory
+letter/digit    hostname or IP address, with an optional port
+==============  ==============================================
 
-==========  ==============================================
-Start       Target
-==========  ==============================================
-``/``       absolute path (``C:\`` drive roots on Windows)
-``~``       home-dir path
-``.``       path relative to the project dir
-letter/digit  host rule: hostname, IPv4, or IPv6, optional ``:port``
-==========  ==============================================
-
-A bare word with no target means the project dir itself (``allow`` =
-writable project). Host rules (``allow api.example.com``,
-``allow 1.2.3.4:8080``, ``allow *`` for no network restrictions) fence
-the network egress of sandboxed bash commands through the wall proxy.
-
-On first run, 3code initializes `~/.config/3code/sandbox` with this
-default:
-
-```
-deny /
-allow /tmp
-allow
-```
-
-The root is denied, the system temp dir and the project directory are
-writable. This is the safe default: the agent can read and write your
-project and scratch files, nothing else.
-
-### Yolo mode
-
-If you want the agent to have free rein over the whole filesystem, replace
-the file with one line:
-
-```
-allow /
-```
-
-This is the explicit opt-in the spec requires. 3code never writes yolo for
-you; you type it.
-
-### Nesting and overrides
-
-Because each line supersedes the ones above, you can layer rules. This
-makes the working directory writable, opens ``/var`` read-only, then locks
-down a secrets directory inside the project:
+Use `./foo` for a project-relative path. A bare access word means the project
+directory itself:
 
 ```
 deny /
@@ -510,18 +425,78 @@ readonly /var
 deny ./secrets
 ```
 
-The last matching rule for a path wins. ``./secrets`` is covered by the
-root deny, the working-directory writable, and its own deny line - in that
-order - so the deny wins. Read the file bottom-up for the effective policy
-on any given path.
+Rules are read from top to bottom. The last matching path rule wins. In this
+example the project is writable, `/var` is read-only, and `./secrets` is denied.
+Anything not matched by a path rule is denied.
 
-### Editing the sandbox
+Blank lines and lines beginning with `#` are ignored. An access word only has
+special meaning when followed by whitespace or the end of the line, so a host
+such as `deny.example.com` remains a hostname.
 
-The sandbox file is yours. Edit it directly in your editor, or use the
-REPL commands which append a rule and reload immediately:
+### Built-in default
+
+On macOS, Linux, and other POSIX systems, the built-in policy is:
 
 ```
+deny /
+allow /tmp
+allow /var/tmp
+allow
+allow *
+```
+
+The project and temporary directories are writable. Other user files are
+denied. System programs, libraries, configuration, and device files receive a
+read-only baseline so commands can run. `allow *` leaves network access open.
+
+On Windows, the built-in policy is:
+
+```
+deny /
+allow ~/AppData/Local/Temp
+allow
+```
+
+Windows grants network capability when no host rules are present.
+
+### Network rules
+
+A host rule enables the network wall for Bash commands. Examples:
+
+```
+allow api.example.com
+allow github.com:443
+deny telemetry.example.com
+allow *.example.org
+```
+
+A host without a port matches every port. `allow *` permits all hosts. Rules
+use ordered, last-match behavior. If the policy contains an `allow` host rule,
+unmatched hosts are denied. If it contains only `deny` host rules, unmatched
+hosts are allowed.
+
+On Linux and macOS, fenced commands use a local CONNECT and SOCKS5 allowlist
+proxy. Linux puts the command in a network namespace. macOS limits it to
+loopback with Seatbelt. 3code sets the standard proxy variables and a Git SSH
+proxy command for the child process. A denied HTTP connection returns 403.
+
+On Windows, host rules require one elevated setup command:
+
+```
+3code wall setup-windows
+```
+
+Without that setup, 3code warns and runs the command without a network fence.
+Set `sandbox_wall_warn = off` in `[settings]` to hide the warning.
+
+### Editing the policy
+
+Use an editor or REPL commands:
+
+```
+:sandbox
 :sandbox show
+:sandbox edit
 :sandbox allow /opt
 :sandbox readonly /var
 :sandbox deny ./secrets
@@ -529,90 +504,111 @@ REPL commands which append a rule and reload immediately:
 :sandbox off
 ```
 
-The first `allow`/`readonly`/`deny` in a project creates the `.sandbox`
-file by copying your user file, then appends the rule, so project rules
-start from your baseline and you have something concrete to version and
-share. `:sandbox off` disables
-enforcement entirely for the session (bash runs unconfined, in-process
-checks pass through); it persists in `[settings]` as `sandbox = off`. This
-is the only way to run without a sandbox short of editing the file.
+`:sandbox edit` opens `.sandbox` with `$VISUAL`, then `$EDITOR`, then the
+platform default editor. Changes reload when the editor exits. Rule commands
+store project paths in portable `./foo` form and reload immediately.
 
-The agent never writes the sandbox file. If the model proposes a policy
-change, it edits a copy and you move it into place. This keeps the trust
-boundary entirely on your side: the sandbox is defined at prompt time, by
-you, and the agent cannot weaken it.
+`:sandbox off` disables filesystem and network enforcement for the session.
+The setting is stored as `sandbox = off` in `[settings]`. Use `:sandbox on` to
+restore enforcement.
 
-Both policy files are protected directly: `.sandbox` and
-`~/.config/3code/sandbox` are always read-only to the agent and to
-sandboxed commands, whatever the policy says. 3code appends them to
-every load as hidden guard rules that no rule in the file can
-override, so even ``allow /`` cannot make them writable. The guards do
-not appear in `:sandbox show` - they are not yours to edit, and
-listing them would only invite prompt-injection games. On Linux the
-kernel backend (Landlock) cannot subtract a read-only rule from a
-writable root, so there the guard limits the in-process tools; bash
-commands confined with ``allow /`` could still write the file. macOS
-and Windows enforce the guard fully.
+To allow the full filesystem, replace the policy with `allow /`. With no host
+rules, network access is also unrestricted. This is yolo mode. It is explicit
+and 3code never enables it for you.
 
-When enforcement is on and a sandboxed bash command fails with
-``Permission denied``, 3code appends a hint to the tool output pointing
-at the policy files, so the agent knows the sandbox (not the OS) denied
-it and asks you instead of retrying blindly.
+### Policy file protection
 
-### What gets sandboxed
+The model cannot change `.sandbox` or `~/.config/3code/sandbox` through file
+tools. 3code adds hidden read-only rules for both files after loading the
+policy. These rules do not appear in `:sandbox show` and cannot be overridden
+by a later line in the file.
 
-Bash commands, file reads, writes, and patches all consult the sandbox.
-Bash gets full kernel enforcement: the sandbox backend is compiled into
-3code (the `box` subcommand), so every bash command is re-execed as
-`3code sandbox restrict ...` and a write outside the allowed paths fails with
-``Permission denied`` at the syscall level. No child process can escape.
-The read/write/patch tools also check paths in-process, so the
-higher-risk operations (mutating your files directly) stay guarded.
+macOS and Windows enforce these guards for Bash and in-process tools. Landlock
+cannot subtract a read-only file from an already writable root. On Linux, the
+in-process tools still enforce the guard, but a Bash command under `allow /`
+can write the policy file. Avoid `allow /` if policy-file protection matters.
+
+A denied Bash command usually reports `Permission denied`. 3code adds the
+active policy path to denial messages so the cause is clear.
+
+### What is sandboxed
+
+The read, write, and patch tools check paths inside the 3code process. Bash
+commands are re-executed through:
+
+```
+3code sandbox --policy FILE restrict -- COMMAND
+```
+
+`3code sb` is a short alias. The command and all its children inherit the OS
+restriction. The sandbox process reads the policy itself, so a policy edit
+applies to the next Bash launch.
 
 ### Platform behavior and fallback
 
-The bash backend is OS-native: **Landlock** on Linux, **Seatbelt** on
-macOS, and a restricted-token **ACL** scheme on Windows. At startup 3code
-probes whether the backend can actually restrict on this host, then
-applies it. The probe can fail on a kernel built without Landlock, or in
-a container/CI runner whose seccomp filter blocks the syscall.
+The Bash backend uses Landlock on Linux, Seatbelt on macOS, and restricted
+tokens plus ACLs on Windows. 3code probes the backend at startup. The probe can
+fail on an old Linux kernel or in a container whose seccomp policy blocks
+Landlock.
 
-When the probe fails, bash degrades gracefully: commands run unconfined
-(via the plain `setsid`+`sh` path) instead of failing outright. The
-in-process read/write/patch path checks stay in force regardless, so the
-highest-risk operations (directly mutating your files through the
-write/patch tools) remain guarded even when the kernel backend is
-unavailable. There is no way for the agent to bypass this layer.
+If the OS backend is unavailable, Bash runs without filesystem confinement.
+The in-process checks for read, write, and patch remain active. This fallback
+keeps 3code usable, but it does not confine arbitrary file access from a Bash
+command.
 
-## Developments
+## Library API
 
-3code will keep up with the "works right now" approach as agentic coding
-develops.
+Nim programs can embed the same agent loop without the terminal interface:
 
-We will continue to support more models and providers as they come out.
+```nim
+import threecode
+
+let session = initAgentSession(
+  AgentOptions(model: "deepinfra.deepseek-v3.2"))
+
+session.onEvent = proc(event: AgentEvent) =
+  case event.kind
+  of aevDelta: stdout.write event.text
+  of aevRetry, aevTool: stderr.writeLine event.text
+  else: discard
+
+let reply = session.prompt("Run the tests and fix the failure.")
+echo session.command(":tokens")
+session.close()
+```
+
+`prompt` blocks until the model finishes calling tools and returns its final
+reply. `onEvent` receives text, reasoning, tool output, retry notices, and usage
+as they occur. `promptAsync` runs a turn on a library-managed thread and reports
+failures with `aevError`. `interrupt` cancels the active turn. Sessions use the
+same provider config, filesystem policy, locks, and saved session format as the
+CLI.
+
+Only one `AgentSession` may be active in a process. Calls on a session are not
+thread-safe. Keep the session on one worker thread and send prompts and events
+through queues when embedding it in an asynchronous server.
+
+`example/webserve.nim` is a complete web frontend. It keeps the session on a
+worker thread and sends events to the browser with server-sent events.
 
 ## Contributing
 
-Developer documentation (module graph, proc docs, type definitions) is in
-`docs/dev/threecode.html`. Build it with `nimble devdocs`.
+Developer API documentation is generated at `docs/dev/threecode.html`:
 
-Pull requests welcome:
+```
+nimble devdocs
+```
 
-- known-good provider/model pairs with test results
-- bug fixes with a clear reproduction case
-
-Bug reports welcome, but make sure you give enough specific information to
-reproduce the issue. If you are not sure what that means, please find out before
-reporting - if in doubt, ask your own 3code how to do that.
+Useful contributions include tested provider/model combinations and bug fixes
+with a clear reproduction. A terminal rendering bug must include a visual PTY
+test that shows the bad frame before the fix.
 
 ## Prior art
 
-3code is heavily influenced by Claude Code, goose, pi, and codex. While I like
-the particular tradeoffs better, imitation is the sincerest form of flattery and
-3code should be looked at as heavily inspired by them. As a European, I still
-think using Claude Code feels like driving a turbocharged Ford F-150 to buy a
-pack of gum, but I still love you.
+3code is influenced by Claude Code, Goose, Pi, and Codex. It chooses different
+tradeoffs, but the family resemblance is intentional. As a European, using
+Claude Code can feel like driving a turbocharged Ford F-150 to buy a pack of
+gum. It is still a fine truck.
 
-Having said that, 3code deliberately chose to forgo some features they have,
-just to focus on the task of writing software as effectively, reliably, and
-consuming as few resources as possible.
+3code omits features that do not help it write software reliably with fewer
+resources. Economy is the feature, not a billing surprise.

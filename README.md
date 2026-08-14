@@ -78,10 +78,51 @@ A working example lives in [`example/webserve.nim`](example/webserve.nim): a web
 
 ## Changelog
 
-**unreleased** - patient retry, single-file sandbox policy
+**Unreleased** - OAuth providers, Responses API, sandbox and network controls
 
-- **Single-file sandbox policy.** The old two-level cascade is gone: exactly one policy file is active at a time, the repo `.sandbox` when it exists, else the user file `~/.config/3code/sandbox`, else the built-in default. 3code never creates the user file, so if you never configured anything you always get the current shipped default, not whatever default your first launch froze to disk; write `~/.config/3code/sandbox` yourself to change what every project without its own `.sandbox` gets. The first `:sandbox allow|readonly|deny` in a project materializes `.sandbox` from the effective policy, so project rules start from your baseline.
-- **Patient retry.** Retryable API failures (429 usage limits, 5xx, network errors) now keep retrying on one shared exponential backoff capped at 2048s, for up to ~64 attempts (~36h), instead of surfacing after a short probe. A long-running session rides out a provider's rolling usage window or a network dropout (the train ride) without dropping back to the prompt. The underlying error message and attempt counter keep scrolling by as transcript lines so you can see what is being waited out. `:retry on|off` toggles it (default on; `off` keeps the ~1-minute initial ramp-up so transient blips still self-heal); persisted in `[settings]` as `patient_retry`. Ctrl-C cancels a running hold at any time.
+- **ChatGPT and SuperGrok login.** `:provider add` accepts `chatgpt` for
+  ChatGPT Plus/Pro and `supergrok` for SuperGrok or X Premium+. Browser OAuth
+  stores refreshable tokens under `$XDG_DATA_HOME/3code/auth/`. Subscription
+  providers can exist beside API-key `openai` and `xai` providers.
+- **OpenAI Responses API.** OpenAI API and ChatGPT subscription requests use
+  the Responses API. ChatGPT model listing and requests use the Codex backend.
+  Tool calls, streaming replies, verification, and empty completed output from
+  that backend are handled correctly.
+- **Model-specific reasoning.** `:reasoning` lists the levels accepted by the
+  active model. OpenAI models use their actual ladders, including `none`,
+  `minimal`, `xhigh`, and `max` where supported. GPT-4.x exposes no reasoning
+  setting.
+- **Single-file sandbox policy.** Exactly one policy is active: project
+  `.sandbox`, user `~/.config/3code/sandbox`, or the built-in default. Policies
+  no longer cascade. 3code does not create the user file. The first project
+  rule or `:sandbox edit` copies the effective policy to `.sandbox`. Both policy
+  paths have hidden read-only guards.
+- **Network wall.** Host rules in `.sandbox` restrict Bash network access
+  through the built-in allowlist proxy. Linux uses a network namespace, macOS
+  uses Seatbelt, and Windows uses the one-time `3code wall setup-windows`
+  configuration. The default policy keeps normal network access open.
+- **Sandbox commands.** The built-in command is `3code sandbox`, with `3code
+  sb` and `:sb` aliases. `:sandbox edit` opens the project policy in `$VISUAL`
+  or `$EDITOR`. Relative project rules are stored as portable `./path` targets.
+- **Patient retry.** Retryable `429`, `5xx`, and network failures use
+  exponential backoff for up to about 36 hours. `:retry on|off` controls it.
+  Retry notices remain visible in the transcript, and Esc cancels a running
+  wait.
+- **Provider setup and catalog.** The add-provider wizard accepts a provider
+  name, URL, key, or subscription login in its first field. Model checks run in
+  parallel and can be cancelled. Added or refreshed providers include Hetzner,
+  Venice, CheaperInference, xAI, OpenAI, and their current model families.
+- **Library and web example.** The blocking `AgentSession` API supports
+  prompts, events, commands, interruption, persistence, and sandboxing without
+  a terminal. `example/webserve.nim` demonstrates a threaded web frontend with
+  SSE streaming.
+- **Termux arm64.** Releases include an Android arm64 archive. Termux uses its
+  own OpenSSL and temp directory. Unsupported OS sandbox and notification
+  features degrade cleanly.
+- **Terminal and input fixes.** Transcript and footer repainting use one
+  geometry path. Resize, prompt spacing, interruption, and terminal-reply
+  handling are more reliable. Ctrl+C clears input, Esc interrupts, and Ctrl+D
+  exits.
 
 **0.6.0** - filesystem sandbox backed by nimbox, folded into the `box` subcommand
 
