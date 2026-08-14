@@ -563,6 +563,27 @@ proc historyFlush*(ed: var LineEditor) =
   ## next ``readLine`` starts fresh on the user's draft slot.
   ed.history.clearNav()
 
+proc historyResetNav*(ed: var LineEditor) =
+  ## Drop the navigation view without a submit. Modal (wizard) readers
+  ## call this up front: they run on the main prompt's editor and would
+  ## otherwise see the prompt's history entries on Up/Down.
+  ed.history.clearNav()
+
+proc historyRemove*(ed: var LineEditor, s: string) =
+  ## Remove the most recent matching entry from the persistent log.
+  ## Used to pull a secret (an api key pasted into a command line) back
+  ## out of the history file after the fact.
+  if s == "": return
+  let h = addr ed.history
+  for i in countdown(h[].entries.len - 1, 0):
+    if h[].entries[i] == s:
+      var kept = initDeque[string](h[].max)
+      for j, e in h[].entries:
+        if j != i: kept.addLast e
+      h[].entries = kept
+      persist(h[])
+      return
+
 # ---------- Render ----------
 
 proc emitMoveDown(ed: var LineEditor, n: int) =
@@ -574,9 +595,12 @@ proc redrawBytes*(ed: var LineEditor; synchronized = true): string =
   ## cursor's new visual row. Callers that share a render lock with
   ## other terminal chrome can embed these bytes in a larger atomic
   ## frame; ``fullRedraw`` is the ordinary standalone writer.
+  var resized = false
   if ed.getWidth != nil:
     let w = ed.getWidth()
-    if w > 0: ed.width = w
+    if w > 0:
+      resized = w != ed.width
+      ed.width = w
   let width = max(2, ed.width)
   let pw = if ed.promptW > 0: ed.promptW else: visualCols(ed.prompt)
   let cw = if ed.contPromptW > 0: ed.contPromptW else: visualCols(ed.contPrompt)
@@ -595,8 +619,21 @@ proc redrawBytes*(ed: var LineEditor; synchronized = true): string =
   var buf = ""
   if synchronized:
     buf.add "\x1b[?2026h"
-  if ed.renderRow > 0:
-    buf.add "\x1b[" & $ed.renderRow & "A"
+  var walkUp = ed.renderRow
+  if resized:
+    # A width change reflows the already-painted editor rows: the
+    # tracked `renderRow` no longer matches where the cursor sits
+    # relative to the stale rows (a narrowed terminal re-wraps the
+    # block taller, and the cursor's own row shifts with it). Walking
+    # up the stale count lands mid-block, so the erase below spares the
+    # topmost stale row, which then reflows again on every later
+    # repaint and stacks duplicates above the live entry line. Clamp to
+    # the fresh row count and walk one row further: at worst that row
+    # was already reflowed into the block, and overshooting into real
+    # scrollback only blanks content the terminal itself rewrote.
+    walkUp = min(ed.renderRow, max(1, total) - 1) + 1
+  if walkUp > 0:
+    buf.add "\x1b[" & $walkUp & "A"
   buf.add "\r\x1b[J"
   buf.add renderBuffer(renderedText, ed.prompt, ed.contPrompt, width)
   if endRow > targetRow:

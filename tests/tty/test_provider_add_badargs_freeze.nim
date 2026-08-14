@@ -1,5 +1,5 @@
-## Regression: `:provider add foo` (a modal-classified command that bails
-## out on a usage error before any wizard runs) must not freeze the input
+## Regression: `:provider add foo bar` (a modal-classified command that
+## bails out on a usage error before any wizard runs) must not freeze the input
 ## thread. `classifyCommand` returns ckModal for `:provider add`, so the
 ## controller takes the cdModal path and on the way out calls
 ## `wizardFinish()`, which clears `inputModalActive`. But the input thread's
@@ -58,8 +58,10 @@ suite "provider add bad-args freeze regression":
     # Idle prompt is up.
     tty.expect "\u276f"
 
-    # Submit a modal-classified command that bails out before the wizard.
-    for ch in ":provider add foo":
+    # Submit a modal-classified command that bails out before the wizard
+    # (`:provider add` takes at most one entry argument since the wizard
+    # learned to prefill its first field from the command line).
+    for ch in ":provider add foo bar":
       tty.send($ch)
       tty.drain(10)
     tty.send "\n"

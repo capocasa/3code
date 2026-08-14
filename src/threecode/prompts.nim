@@ -2323,6 +2323,7 @@ commands:
   :provider         list configured providers (current marked with *)
   :provider X       switch to provider X (model defaults to first in its list)
   :provider add     add a new provider (interactive, verified)
+  :provider add X   same, with X as provider name, url, or api key
   :provider edit X  edit provider X (url, key, models)
   :provider rm X    remove provider X
   :reasoning        list reasoning levels for current model (* marks active)

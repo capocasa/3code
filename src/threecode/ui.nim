@@ -139,8 +139,17 @@ proc completionFor*(line: string): seq[string] =
     if words.len == 2:
       for pr in activeProviders: result.add pr.name
       return
-    if words.len == 3 and words[1] in ["edit", "rm", "remove"]:
-      for pr in activeProviders: result.add pr.name
+    if words.len == 3:
+      if words[1] in ["edit", "rm", "remove"]:
+        for pr in activeProviders: result.add pr.name
+      elif words[1] == "add":
+        result.add ["supergrok", "chatgpt"]
+        if experimentalEnabled:
+          for (n, _) in ProviderCatalog:
+            if n notin result: result.add n
+        else:
+          for combo in KnownGoodCombos:
+            if combo.provider notin result: result.add combo.provider
       return
   if words[0] == ":model" and words.len == 2:
     let prov = currentProvider()
@@ -409,10 +418,21 @@ proc readFirstProviderField(editor: var minline.LineEditor): string =
   result = readRequired(editor, "  provider, url, or api key: ")
   editor.completionCallback = prevCb
 
-proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
+proc promptNewProvider*(editor: var minline.LineEditor,
+                        prefilled = ""): ProviderRec =
   printSupported()
   stdout.write "\n"
-  let entry = readFirstProviderField(editor)
+  let entry =
+    if prefilled != "":
+      # `:provider add <entry>` carries the first field on the command
+      # line. The prompt's `onSubmit` already logged the full command
+      # line to history; when the entry reads as an api key, scrub the
+      # secret out of the history file.
+      if inferProvider(prefilled) != "":
+        editor.historyRemove(":provider add " & prefilled)
+      prefilled
+    else:
+      readFirstProviderField(editor)
   var key = ""
   var auth = ""
   var name, url: string
@@ -716,13 +736,14 @@ proc cmdProviderSelect(target: string, prof: var Profile): string =
   if not gateExperimental(candidate):
     result.add errLnS(experimentalGateText(candidate))
 
-proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile): string =
+proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile,
+                    prefilled = ""): string =
   # Cancel propagates from `wizardReadLine` through `promptNewProvider`
   # back to `handleCommandResult`, which turns it into an empty
   # `cdModal` return. No message, no state change — the prompt is
   # repainted by the input thread's cancel handler before we get
   # here.
-  let prov = promptNewProvider(editor)
+  let prov = promptNewProvider(editor, prefilled)
   activeProviders.add prov
   if activeCurrent == "":
     activeCurrent = prov.name & "." & firstModel(prov)
@@ -777,9 +798,10 @@ proc cmdProvider(arg: string, editor: var minline.LineEditor,
     return cmdProviderList(prof)
   case parts[0]
   of "add":
-    if parts.len != 1:
-      return errLnS("usage: :provider add")
-    cmdProviderAdd(editor, prof)
+    if parts.len > 2:
+      return errLnS("usage: :provider add [name|url|api-key]")
+    cmdProviderAdd(editor, prof,
+      if parts.len == 2: parts[1] else: "")
   of "edit":
     if parts.len != 2:
       return errLnS("usage: :provider edit <name>")
