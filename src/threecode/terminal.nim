@@ -131,28 +131,35 @@ proc beginEditorRedraw*(ed: var minline.LineEditor; ready: bool;
   stdout.write SyncBegin
   stdout.write "\x1b[?25l\r"
   ed.redrawWrappedExternally = true
-  if footerBarBytes.len > 0:
-    # Reserve the bar's own row(s) above the editor, then walk back up to
-    # the editor's current top so the erase lands on the editor, not the bar.
-    let rows = ed.renderRow + max(1, footerRowsAboveEditor)
-    stdout.write "\x1b[" & $rows & "A"
+  # `footerRowsAboveEditor` is the source of truth for reserved chrome above
+  # the editor (gap-only prompt-only startup counts as 1 even with empty
+  # footer bytes; bar/spinner add their rows). Do not key walk-up on byte
+  # length alone — that ignored the startup gap and let later overwrites
+  # land one row too high once a bar appeared.
+  let footerRows = max(0, footerRowsAboveEditor)
+  if footerRows > 0:
+    let rows = ed.renderRow + footerRows
+    if rows > 0:
+      stdout.write "\x1b[" & $rows & "A"
   elif ready and ed.renderRow > 0:
     # A previously-painted multi-row editor sits above us: walk up to its
     # top row and redraw in place. Net cursor movement is zero (up N, then
     # the trailing newline steps back down N), so this never orphans a line.
     stdout.write "\x1b[" & $(ed.renderRow + 1) & "A"
   # Only advance to a fresh row when we had reserved chrome above us
-  # (a bar, or a previously-walked-up editor). On the very first bar-less
-  # paint the editor is already on the current row — a bare newline would
-  # strand the `❯ ` that `paintInitialPrompt`/a finished wizard just
-  # wrote on a blank line. Redraw in place instead.
-  #
+  # (gap/bar, or a previously-walked-up editor). On the very first paint
+  # with no reserved footer rows the editor is already on the current row
+  # — a bare newline would strand the `❯ ` that `paintInitialPrompt`/a
+  # finished wizard just wrote on a blank line. Redraw in place instead.
   stdout.write "\x1b[J"
   if footerBarBytes.len > 0:
     stdout.write footerBarBytes
   else:
+    # Gap-only or bare editor: clear the current row. When footerRows > 0
+    # the following \r\n leaves that blank as the reserved gap above the
+    # editor (ffNone rowsAboveEditor == 1 with empty bytes).
     stdout.write "\r\x1b[2K"
-  if footerBarBytes.len > 0 or (ready and ed.renderRow > 0):
+  if footerBarBytes.len > 0 or footerRows > 0 or (ready and ed.renderRow > 0):
     stdout.write "\r\n"
   ed.renderRow = 0
 

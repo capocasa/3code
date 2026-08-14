@@ -62,3 +62,14 @@ suite "engine transcript commits: balanced DEC 2026 frames":
         newFooter = noFooterFrame(), restoreEditor = true))
     check bytes.count("\x1b[?2026h") == 1
     check bytes.count("\x1b[?2026l") == 1
+
+suite "engine footer geometry: prompt-only gap":
+  test "ffNone rowsAboveEditor is the reserved gap row":
+    check noFooterFrame().rowsAboveEditor() == 1
+    check noFooterFrame().footerFrameBytes().len == 0
+
+  test "renderFooter registers gap-only painted rows without an editor":
+    var e: TerminalEngine
+    discard captureStdout(proc() =
+      e.renderFooter(noFooterFrame(), inputRunning = false, editor = nil))
+    check e.paintedFooterRowCount() == 1

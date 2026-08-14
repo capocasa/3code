@@ -451,7 +451,13 @@ proc footerLayout*(frame: FooterFrame; termW = 0): FooterLayout =
   ## on committed scrollback.
   case frame.kind
   of ffNone:
-    discard
+    # Prompt-only chrome still reserves the gap/ticker row above the editor.
+    # Startup intentionally hides the token bar until the first response has
+    # real usage, but the gap stays so scrollback never sits flush against the
+    # prompt and so walk-up/erase math matches the row that is actually on
+    # screen. Counting this as 0 made the first spinner/bar paint under-walk
+    # and overwrite the line above the prompt.
+    result.rowsAboveEditor = 1
   of ffClear:
     result.rowsAboveEditor = max(1, frame.clearRows)
     result.bytes = "\r\x1b[2K"
@@ -545,24 +551,26 @@ proc clearPromptAfterPendingReceiptBytes*(): string =
 proc clearBarRowBytes*(): string =
   "\r\x1b[2K"
 
-proc footerRowsAboveEditor*(s: FatPromptState): int =
-  if s.footer.barLabel.len == 0:
-    return 0
-  result = 1
-  if s.footer.ticker.len > 0:
-    inc result
-
 proc tokenBarRows*(s: FatPromptState; termW = 0): int =
   ## Number of terminal rows occupied by the current token bar.
   if s.footer.barLabel.len == 0: 0
   else: barWrapRows(2 + labelCells(s.footer.barLabel), termW)
 
+proc footerRowsAboveEditor*(s: FatPromptState; termW = 0): int =
+  ## Rows above the editor for the live footer state. The gap/ticker row is
+  ## always reserved (prompt-only startup included); the token bar adds its
+  ## own wrapped height when present. Matches `footerLayout` / `rowsAboveEditor`.
+  result = 1
+  if s.footer.barLabel.len > 0:
+    result += tokenBarRows(s, termW)
+
 proc footerGeometry*(s: FatPromptState; editorRows: int; termW = 0): FatPromptGeometry =
-  ## Size of the reserved fat-prompt area: ticker, token bar, and editor rows.
+  ## Size of the reserved fat-prompt area: ticker/gap, optional token bar, and
+  ## editor rows. Prompt-only startup (no bar yet) still reserves the gap row.
   let barRows = tokenBarRows(s, termW)
-  # Always reserve the ticker row to match frameRows: an empty gap between
-  # scrollback and the token bar reads better than flush adjacency, whether or
-  # not a thinking ticker is active.
+  # Always reserve the ticker/gap row: scrollback flush against the prompt or
+  # bar never reads well, whether or not a thinking ticker or token bar is
+  # active. This matches `footerLayout` for ffNone and ffTokenBar/ffSpinner.
   let tickerRows = 1
   result = FatPromptGeometry(
     tickerRows: tickerRows,

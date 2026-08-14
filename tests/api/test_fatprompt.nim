@@ -28,6 +28,30 @@ suite "ticker clamping":
                         ticker: "x".repeat(200), elapsed: 3)
     check f.rowsAboveEditor(termW = 40) == f.rowsAboveEditor(termW = 80)
 
+  test "prompt-only ffNone reserves the gap row, not bar or ticker":
+    # Startup paints prompt-only chrome: no token bar, no thinking ticker.
+    # Overwrite/walk-up math must still count the reserved gap row above the
+    # editor, and must not invent bar/ticker rows that are not on screen.
+    let none = noFooterFrame()
+    check none.rowsAboveEditor() == 1
+    check none.footerFrameBytes().len == 0
+
+    var s = initFatPromptState()
+    check footerRowsAboveEditor(s) == 1
+    let geo = footerGeometry(s, editorRows = 1)
+    check geo.tickerRows == 1
+    check not geo.hasBar
+    check geo.barRows == 0
+    check geo.editorRows == 1
+    check geo.reservedRows == 2
+
+    # Once a bar appears, gap + bar are both counted.
+    s.footer.barLabel = "○1%  ↑20"
+    check footerRowsAboveEditor(s) == 2
+    let withBar = footerFrame(s)
+    check withBar.kind == ffTokenBar
+    check withBar.rowsAboveEditor() == 2
+
 suite "fat prompt frame model":
   test "token bar and editor reserve rows below scrollback":
     var p = initFatPrompt(width = 30, height = 6, window = 1000)

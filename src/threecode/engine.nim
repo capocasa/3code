@@ -258,7 +258,12 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
       if not (inputRunning and editor != nil):
         stdout.write termio.SyncBegin
         stdout.write bytes
-        e.noteNoFooter()
+        # Gap-only ffNone has empty bytes but still reserves one row. Keep
+        # the row model honest so the next walk-up does not under-count.
+        if frame.kind == ffClear:
+          e.noteNoFooter()
+        else:
+          e.noteFooterPainted(footerRowsAboveEditor)
         stdout.write termio.SyncEnd
         stdout.flushFile
         e.lastPaintedWidth = width
@@ -273,8 +278,14 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
         stdout.write "\x1b[" & $up & "A"
       stdout.write "\x1b[J"
       e.writeToolViewportRows()
-      stdout.write bytes
-      stdout.write "\r\n"
+      if bytes.len > 0:
+        stdout.write bytes
+        stdout.write "\r\n"
+      elif footerRowsAboveEditor > 0:
+        # Prompt-only / gap-only: reserve the blank gap row, then the editor.
+        stdout.write "\r\x1b[2K\r\n"
+      else:
+        stdout.write "\r\n"
       edPtr[].renderRow = 0
       stdout.write edPtr[].redrawBytes(synchronized = false)
       if not edPtr[].pendingCaret:
@@ -550,6 +561,18 @@ proc liveContentRowCount*(): int {.gcsafe.} =
 proc paintedFooterRowCount*(e: TerminalEngine): int {.gcsafe.} =
   e.paintedFooterRows
 
+proc paintedFooterRowCount*(): int {.gcsafe.} =
+  {.cast(gcsafe).}:
+    defaultEngine.paintedFooterRows
+
+proc noteFooterPainted*(footerRowsAboveEditor: int) {.gcsafe.} =
+  ## Register the currently-painted footer height without repainting.
+  ## Used by the prompt-only startup path, which paints the gap+prompt via
+  ## raw bytes before the input thread is up, so the first walk-up still
+  ## knows the reserved gap row is live chrome.
+  {.cast(gcsafe).}:
+    defaultEngine.noteFooterPainted(footerRowsAboveEditor)
+
 # Commit the transcript blob as real scrollback, with the one blank
 # separator row owned here (see `appendTranscript` for the contract).
 proc writeTranscriptItem(e: var TerminalEngine; transcript: string) =
@@ -575,13 +598,10 @@ proc repaintVolatileAfterCommit(e: var TerminalEngine;
     return
   let editing = edPtr != nil and restoreEditor
   if editing and footerRowsAboveEditor == 0 and footerBytes.len == 0:
-    # ffNone keeps the reserved gap row between the last committed item
-    # and the editor. It is live chrome, so the row model must count it:
-    # otherwise the next commit walks up 0 rows, erases only the editor
-    # row, and leaves this gap row behind as a stray blank scrollback row
-    # (the extra-line bug). Leave the cursor on the gap row: stepping the
-    # erased editor row down to it is exactly one row's move, and the
-    # editor redraw below restores the caret into the editor.
+    # Defensive: ffNone's rowsAboveEditor is 1 (the reserved gap). If a
+    # caller still hands us 0, force the gap into both the bytes and the
+    # row model so the next walk-up cannot leave a stray blank scrollback
+    # row (the extra-line bug).
     stdout.write "\r\n"
     stdout.write "\x1b[1A"
     footerRowsAboveEditor = 1

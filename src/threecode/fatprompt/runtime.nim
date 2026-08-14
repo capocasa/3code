@@ -911,7 +911,11 @@ proc paintInitialPrompt*(p: Profile) =
                              inputThreadRunning, inputEditor,
                              currentTermW())
   else:
+    # Raw gap + prompt. Register the reserved gap row so the first later
+    # walk-up (spinner/bar paint, submit erase) does not under-count and
+    # overwrite the line above the prompt.
     termengine.writeRaw("\n\x1b[?25l" & promptOnlyResetBytes())
+    termengine.noteFooterPainted(1)
 
 
 # --- Bar tick: repaints the token bar with an incrementing elapsed counter
