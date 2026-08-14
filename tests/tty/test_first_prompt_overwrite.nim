@@ -81,8 +81,13 @@ suite "first prompt overwrite math":
     # Must remain visible after the turn settles (token bar now present).
     tty.expectRowAppearsOnce("● UNIQUE-FIRST-ANSWER-MARKER visible forever")
     tty.expectRowAppearsOnce("❯ hello first turn")
-    # No multi-blank-run from over-erase / under-count gap math.
-    let rows = tty.frames[^1].rows
+    # No multi-blank-run from over-erase / under-count gap math. Only
+    # interior runs count: the blank tail below the prompt is a terminal
+    # artifact (ConPTY materializes every erased row, so on Windows it is
+    # always a long blank run).
+    var rows = tty.frames[^1].rows
+    while rows.len > 0 and rows[^1].strip.len == 0:
+      rows.setLen(rows.len - 1)
     var maxRun = 0
     var cur = 0
     for r in rows:
