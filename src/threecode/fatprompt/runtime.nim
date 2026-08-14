@@ -1988,6 +1988,12 @@ proc inputThreadProc() {.thread.} =
         # Flag the editor as wizard-owned so ctrl+c/ctrl+d/esc behave as
         # the provider wizard wants (clear line vs abort; ctrl+d ignored).
         edPtr[].wizardMode = true
+        # The wizard runs on the main prompt's editor, whose Up/Down
+        # history navigation is global state. Reset the nav view so
+        # arrow keys never leak prompt history into wizard fields
+        # (api keys, urls, model names). Wizard submissions themselves
+        # already skip `historyAdd` via `noHistory`.
+        edPtr[].historyResetNav()
         try:
           let text = minline.readLineWith(edPtr[],
                                           req.prompt,
