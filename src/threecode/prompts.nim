@@ -58,6 +58,10 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("zaicode", "glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
     ("zaicode", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("zaicode", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    # glm-5.3 (forced thinking, reasoning_effort low/high/max) is live on
+    # the z.ai coding endpoint; API access staged later. GLM-5.2 table
+    # values carried over, default effort high (max is there via :reasoning).
+    ("zaicode", "glm-5.3", "glm", "5", "3", "high", 0.2, 8192, false, 1_000_000),
     # qwen is out
     ("deepinfra", "zai-org/GLM-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("deepinfra", "zai-org/GLM-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
@@ -272,6 +276,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencodego", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, false, 262_144),
     ("opencodego", "kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
     ("opencodego", "hy3-preview", "hy", "3", "preview", "no_think", 0.2, 8192, false, 262_144),
+    ("opencodego", "glm-5.3", "glm", "5", "3", "high", 0.2, 8192, false, 1_000_000),
     ("opencodego", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
     ("opencodego", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("opencodego", "glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
@@ -586,6 +591,7 @@ Act first, explain after. Don't narrate your plan before executing it — just e
 Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked operation fails with an error that names the policy file.
 
 - `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
+- `read(path, offset?, limit?)` — read a file. Without offset/limit capped at 250 lines; an explicit range raises the cap to 2000. Lines over 2KB are skipped.
 - `write(path, body)` — create or overwrite a file with `body`.
 - `patch(path, edits)` — apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
 - `update_plan(items)` — update the todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
@@ -2571,9 +2577,11 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         return @ReasoningLevels
       if fam == "glm":
         # 5.2 (variant "2") exposes a graded effort knob (high/max); older
-        # GLM is on/off only. Variant encodes the minor version digit
-        # (4.7 -> "7", 5.1 -> "1", 5.2 -> "2").
+        # GLM is on/off only. 5.3 forces thinking: low/high/max, no off.
+        # Variant encodes the minor version digit (4.7 -> "7", 5.1 -> "1",
+        # 5.2 -> "2", 5.3 -> "3").
         if combo.version == "5" and combo.variant == "2": return @["off", "high", "max"]
+        if combo.version == "5" and combo.variant == "3": return @["low", "high", "max"]
         return @["off", "on"]
       if fam in ["laguna", "kimi", "qwen", "longcat", "minimax", "mimo", "ling"]:
         # These families have no graded effort knob on the OpenAI-compatible

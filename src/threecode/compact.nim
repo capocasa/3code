@@ -29,7 +29,7 @@ proc contextWindowFor*(model: string): int =
   elif "deepseek" in m: 128_000
   elif "gemini" in m: 1_000_000
   elif "llama" in m: 128_000
-  elif "glm-5.2" in m: 1_000_000
+  elif "glm-5.2" in m or "glm-5.3" in m: 1_000_000
   elif "glm" in m: 200_000
   elif "mistral" in m or "mixtral" in m: 128_000
   elif "minimax-m3" in m: 1_000_000
