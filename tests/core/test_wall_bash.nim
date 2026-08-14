@@ -94,8 +94,10 @@ suite "wall proxy lifecycle":
     # second launch: new tmp dirB; the proxy must rebind there
     sb.moveWallSock(dirB)
     check sb.ensureWallProxy(dirA)
-    check sb.proxySockPath() == dirB / "proxy.sock"
     when defined(linux):
+      # proxySockPath is the bridge target on Linux; on macOS it is ""
+      # by design (the sandbox reaches host loopback directly).
+      check sb.proxySockPath() == dirB / "proxy.sock"
       check posix.stat(sb.proxySockPath().cstring, st) == 0
     # same dir again: no rebind, same port
     let portB = sb.wallProxyPort()

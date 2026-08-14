@@ -1,4 +1,4 @@
-import std/[net, os, osproc, posix, strtabs, strutils, times, unittest]
+import std/[net, os, osproc, posix, sequtils, strtabs, strutils, times, unittest]
 import threecode/session
 
 const binName = when defined(windows): "3code.exe" else: "3code"
@@ -6,7 +6,11 @@ const binName = when defined(windows): "3code.exe" else: "3code"
 proc binPath(): string = getCurrentDir() / binName
 
 proc run(args: openArray[string]): tuple[o: string, code: int] =
-  let (outp, code) = execCmdEx(binPath() & " " & args.join(" "))
+  # Each arg must be shell-quoted: execCmdEx re-parses the command line
+  # through /bin/sh, so a bare join lets metacharacters in an argument
+  # (e.g. `>>` inside an sh -c payload) escape into the OUTER shell.
+  let cmd = binPath().quoteShell & " " & args.mapIt(it.quoteShell).join(" ")
+  let (outp, code) = execCmdEx(cmd)
   return (outp.strip(), code)
 
 suite "cli argument validation":
