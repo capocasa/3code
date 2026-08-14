@@ -40,6 +40,7 @@ jobs:
           cat > /tmp/sbprobe/p.nim <<'NIM'
           import sandwall/seatbelt
           import std/os
+          import std/osproc
           let profile = buildProfile(["/"], ["/tmp/sbprobe/pol"], [])
           echo profile
           restrictImpl(["/"], ["/tmp/sbprobe/pol"], [])
