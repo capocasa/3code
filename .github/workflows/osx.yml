@@ -32,6 +32,15 @@ jobs:
         if: steps.cache-nim.outputs.cache-hit == 'true'
         run: echo "$HOME/nim-toolchain/bin" >> $GITHUB_PATH
 
+      - name: Probe seatbelt readonly subtraction
+        run: |
+          nimble install -y https://github.com/capocasa/sandwall
+          mkdir -p /tmp/sbprobe/w
+          echo secret > /tmp/sbprobe/w/pol
+          printf '%s
+' 'import sandwall/seatbelt' 'echo buildProfile(["/tmp/sbprobe/w"], ["/tmp/sbprobe/w/pol"], [])' 'restrictImpl(["/tmp/sbprobe/w"], ["/tmp/sbprobe/w/pol"], [])' 'try:' '  writeFile("/tmp/sbprobe/w/pol", "pwned")' '  echo "WRITE SUCCEEDED (bad)"' 'except CatchableError as e:' '  echo "write blocked (good): ", e.msg' 'try:' '  writeFile("/tmp/sbprobe/w/other", "x")' '  echo "sibling write ok (good)"' 'except CatchableError as e:' '  echo "sibling blocked (bad): ", e.msg' > /tmp/sbprobe/p.nim
+          nim c -r --nimblePath:$HOME/.nimble/pkgs2 /tmp/sbprobe/p.nim
+
       - name: Install dependencies
         # sandwall is not on the public package registry; install it from
         # its git URL first so --depsOnly can resolve it from the local store.
