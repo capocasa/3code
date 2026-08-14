@@ -2079,6 +2079,8 @@ proc applyGrokReasoning(p: Profile, body: JsonNode) =
   ## `reasoning_content` (parsed generically, DeepSeek-style).
   ##
   ## Model-specific behavior:
+  ## - grok-4.6: reasoning_effort low/medium/high (default)/xhigh. Reasoning
+  ##   cannot be disabled. Known-good default is "high".
   ## - grok-4.5: reasoning_effort low/medium/high (default high). Reasoning
   ##   cannot be disabled — there is no "off". We never send an empty/off
   ##   value; the known-good combos default to "high".

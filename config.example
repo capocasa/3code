@@ -79,7 +79,7 @@ models = "openai/gpt-oss-120b"
 ; url = "https://api.x.ai/v1"
 ; key = ""
 ; auth = "oauth"
-; models = "grok-4.5 grok-4.20"
+; models = "grok-4.6 grok-4.5 grok-4.20"
 ;
 ; ChatGPT Plus/Pro subscription (browser OAuth via `:provider add` → chatgpt).
 ; Tokens live in $XDG_DATA_HOME/3code/auth/openai.json and refresh
@@ -97,7 +97,7 @@ models = "openai/gpt-oss-120b"
 ; name = "xai"
 ; url = "https://api.x.ai/v1"
 ; key = "xai-..."
-; models = "grok-4.5 grok-4.20"
+; models = "grok-4.6 grok-4.5 grok-4.20"
 
 [provider]
 name = "together"

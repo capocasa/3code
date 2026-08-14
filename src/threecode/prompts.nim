@@ -211,6 +211,9 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "tencent/hy3", "hy", "3", "", "no_think", 0.2, 8192, false, 262_144),
 
     # grok (xAI first-party API, api.x.ai/v1; OpenAI-compatible)
+    # grok-4.6: 500k ctx, reasoning_effort low/medium/high (default)/xhigh
+    ("xai", "grok-4.6", "grok", "4", "6", "high", 0.2, 8192, false, 500_000),
+    ("xai", "grok-4.6-latest", "grok", "4", "6-latest", "high", 0.2, 8192, false, 500_000),
     ("xai", "grok-4.5", "grok", "4", "5", "high", 0.2, 8192, false, 500_000),
     ("xai", "grok-4.5-latest", "grok", "4", "5-latest", "high", 0.2, 8192, false, 500_000),
     ("xai", "grok-4.3", "grok", "4", "3", "low", 0.2, 8192, false, 1_000_000),
@@ -219,6 +222,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("xai", "grok-4.20", "grok", "4", "20", "low", 0.2, 8192, false, 2_000_000),
     ("xai", "grok-4.20-reasoning", "grok", "4", "20-r", "low", 0.2, 8192, false, 2_000_000),
     ("xai", "grok-4.20-multi-agent", "grok", "4", "20-ma", "high", 0.2, 8192, false, 2_000_000),
+    ("openrouter", "x-ai/grok-4.6", "grok", "4", "6", "high", 0.2, 8192, false, 500_000),
     ("openrouter", "x-ai/grok-4.5", "grok", "4", "5", "high", 0.2, 8192, false, 500_000),
     ("openrouter", "x-ai/grok-4.3", "grok", "4", "3", "low", 0.2, 8192, false, 1_000_000),
     ("openrouter", "x-ai/grok-4.20", "grok", "4", "20", "low", 0.2, 8192, false, 2_000_000),
@@ -312,6 +316,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("venice", "grok-4-20", "grok", "4", "20", "low", 0.2, 8192, false, 2_000_000),
     ("venice", "grok-4-20-multi-agent", "grok", "4", "20-ma", "high", 0.2, 8192, false, 2_000_000),
     ("venice", "grok-4-3", "grok", "4", "3", "low", 0.2, 8192, false, 1_000_000),
+    ("venice", "grok-4-6", "grok", "4", "6", "high", 0.2, 8192, false, 500_000),
     ("venice", "grok-4-5", "grok", "4", "5", "high", 0.2, 8192, false, 500_000),
     ("venice", "grok-build-0-1", "grok", "build", "0.1", "low", 0.2, 8192, false, 256_000),
     ("venice", "inkling", "inkling", "1", "", "medium", 0.2, 8192, false, 256_000),
@@ -360,6 +365,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("cheaperinference", "gpt-5.6-sol", "gpt", "", "5.6-sol", "medium", 0.2, 8192, false, 400_000),
     ("cheaperinference", "gpt-5.6-terra", "gpt", "", "5.6-terra", "medium", 0.2, 4096, false, 400_000),
     ("cheaperinference", "gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("cheaperinference", "grok-4.6", "grok", "4", "6", "high", 0.2, 8192, false, 500_000),
     ("cheaperinference", "grok-4.5", "grok", "4", "5", "high", 0.2, 8192, false, 500_000),
     ("cheaperinference", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, false, 1_000_000),
     ("cheaperinference", "minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, false, 204_800),
@@ -446,6 +452,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencode", "gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, false, 400_000),
     ("opencode", "gpt-5.6-sol", "gpt", "", "5.6-sol", "medium", 0.2, 8192, false, 400_000),
     ("opencode", "gpt-5.6-terra", "gpt", "", "5.6-terra", "medium", 0.2, 4096, false, 400_000),
+    ("opencode", "grok-4.6", "grok", "4", "6", "high", 0.2, 8192, false, 500_000),
     ("opencode", "grok-4.5", "grok", "4", "5", "high", 0.2, 8192, false, 500_000),
     ("opencode", "grok-build-0.1", "grok", "build", "0.1", "low", 0.2, 8192, false, 256_000),
     ("opencode", "kimi-k2.5", "kimi", "2", "5", "on", 0.6, 8192, false, 262_144),
@@ -500,6 +507,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "x-ai/grok-4.20", "grok", "4", "20", "low", 0.2, 8192, false, 2_000_000),
     ("nanogpt", "x-ai/grok-4.20-multi-agent", "grok", "4", "20-ma", "high", 0.2, 8192, false, 2_000_000),
     ("nanogpt", "x-ai/grok-4.3", "grok", "4", "3", "low", 0.2, 8192, false, 1_000_000),
+    ("nanogpt", "x-ai/grok-4.6", "grok", "4", "6", "high", 0.2, 8192, false, 500_000),
     ("nanogpt", "x-ai/grok-4.5", "grok", "4", "5", "high", 0.2, 8192, false, 500_000),
     ("nanogpt", "x-ai/grok-build-0.1", "grok", "build", "0.1", "low", 0.2, 8192, false, 256_000),
     ("nanogpt", "xiaomi/mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, false, 1_000_000),
@@ -511,6 +519,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "zai-org/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("nanogpt", "zai-org/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
     ("opencodego", "gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, false, 400_000),
+    ("opencodego", "grok-4.6", "grok", "4", "6", "high", 0.2, 8192, false, 500_000),
     ("opencodego", "grok-4.5", "grok", "4", "5", "high", 0.2, 8192, false, 500_000),
     ("opencodego", "hy3", "hy", "3", "", "no_think", 0.2, 8192, false, 262_144),
     ("opencodego", "kimi-k2.5", "kimi", "2", "5", "on", 0.6, 8192, false, 262_144),
@@ -2581,15 +2590,17 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # mode. We don't offer the level-based `low/medium/high` set.
         return @["no_think", "low", "high"]
       if fam == "grok":
-        # grok-4.5: reasoning_effort low/medium/high (default high), cannot
-        # be disabled — no "off" offered. grok-4.3: same levels (accepts
-        # "none" on the wire but 3code doesn't expose it). grok-4.20:
-        # reasoning can be disabled via `reasoning: {enabled: false}`, so
-        # "off" is offered alongside low/medium/high. grok-build-0.1:
-        # reasoning model, low/medium/high only. Variant starting with
-        # "20" marks the 4.20 family (see `applyGrokReasoning` in api.nim).
+        # grok-4.6: reasoning_effort low/medium/high (default)/xhigh; cannot
+        # be disabled. grok-4.5: low/medium/high (default high), no off.
+        # grok-4.3: same levels (accepts "none" on the wire but 3code
+        # doesn't expose it). grok-4.20: reasoning can be disabled via
+        # `reasoning: {enabled: false}`, so "off" is offered alongside
+        # low/medium/high. grok-build-0.1: low/medium/high only. Variant
+        # starting with "20" marks the 4.20 family (see applyGrokReasoning).
         if combo.version == "4" and combo.variant.startsWith("20"):
           return @["off", "low", "medium", "high"]
+        if combo.version == "4" and combo.variant.startsWith("6"):
+          return @["low", "medium", "high", "xhigh"]
         return @ReasoningLevels
       return @ReasoningLevels
   @[]
