@@ -29,34 +29,25 @@
     <div class="container">
       <h1 class="title">3code - the economical coding agent</h1>
       
-<h2 id="introduction">Introduction</h2><p>3code grew out of my frustration with AI studios not optimizing at all to conserve AI tokens. While I totally get that it's a good thing to take a &quot;what if we had endless resources&quot; approach in a rearch lab, in my world, I'm paying- and it looks to me like the AI companies are scaling the research lab up, free token fiction and all, instead of adapting their research to what my needs are today. So it seems clear our priorities are not aligned.</p>
-<p>I find that open models- particularly GLM- are more than adequate to meet all my programming needs. But I also found the other open agents seem to have either taken a page out of the AI companies themselves- not optimizing very much for token use- or take a hyper-minimalistic 'the model will do what it does' approach. 3code does neither- it makes every decision based on the idea &quot;what will bring better results with the least brainpower, tokens and computer resources used&quot;, and nothing else. That's why it's the economical coding agent.</p>
-<p>By being futurists and not having a proper product development vision based on today, the AI labs have left a real gap. The open AI companies have filled most of it- 3code is here to make the most of these.</p>
+<h2 id="introduction">Introduction</h2><p>3code is the coding agent I wanted for my own work: capable, quiet, and not forever looking for new ways to spend tokens. It works with OpenAI-compatible providers, including free tiers, flat-rate coding plans, and local servers.</p>
+<p>The design rule is simple: get a correct result with the least model work, token use, and computer time. Open models, especially GLM, are good enough for most of my programming work. 3code gives them a focused prompt, a small tool set, persistent sessions, and a terminal interface that stays out of the way.</p>
 
-<h2 id="quickstart">Quickstart</h2><p>The first thing you need to do is get a provider where you can buy inference via an API, or set up your computer with an open model so you can be your own provider.</p>
-<p>Note: Being your own provider is just barely workable in terms of the quality you can get.</p>
+<h2 id="quickstart">Quickstart</h2><p>First, give 3code somewhere to run inference: an API provider or a local OpenAI-compatible server. Local models can work, though small ones still have a rough time with difficult coding tasks.</p>
 
-<h3 id="get-a-provider">Get a provider</h3><p>There are lots and lots of providers to choose from.</p>
+<h3 id="get-a-provider">Get a provider</h3><p>There are plenty of compatible providers. A free tier is a good place to start. Pay for one after you know which model actually works for your projects.</p>
 
-<h4 id="free-providers">Free providers</h4><p>The best way to get to know 3code is with a free provider.</p>
-<p>There are 2 notable ones I am aware of: <a class="reference external" href="https://build.nvidia.com">nvidia</a> has free deepseek v4 pro which is quite remarkable, and <a class="reference external" href="novita.ai">novita.ai</a> has tencent hy3 which is my favorite 'small' model. Both are usable- the rate limits don't make it impossible to work.</p>
+<h4 id="free-providers">Free providers</h4><p><a class="reference external" href="https://build.nvidia.com">NVIDIA Build</a> and <a class="reference external" href="https://novita.ai">Novita</a> often have useful free models. The lists and rate limits move around, as free things tend to do, so check before signing up.</p>
 
-<h4 id="the-zdotai-coding-plan">The z.ai coding plan</h4><p>To do proper work, nothing beats GLM 5.2, in my experience. I think it's in the same league as the more well known models- it can work a bit slower but the results are right there. 3code makes sure to be very agentic keep everything hands off- so that tradeoff usually really doesn't matter much!</p>
-<p>The best way to use 3code is the <a class="reference external" href="https://z.ai/subscribe">z.ai coding plan</a> ! This is the combination that really replaced Claude Code for me.</p>
-<p>Note: While z.ai coding plan doesn't publically list 3code as a supported agent yet because it's in alpha, its use is officially permitted by z.ai- many thanks!</p>
+<h4 id="flatminusrate-coding-plans">Flat-rate coding plans</h4><p>The <a class="reference external" href="https://z.ai/subscribe">z.ai coding plan</a> is my main setup. GLM is capable, inexpensive, and happy to keep working through a long task.</p>
+<p>3code can also log in with ChatGPT Plus/Pro and SuperGrok or X Premium+ subscriptions. These are separate from OpenAI and xAI API billing, despite the similar names.</p>
 
-<h4 id="eu-jurisdiction">EU jurisdiction</h4><p>I work with sensitive data that sometimes that I like to keep within EU jurisdiction- I like <tt class="docutils literal"><span class="pre">tensorx &lt;https://tensorx.ai&gt;</span></tt> a lot for this.</p>
+<h4 id="eu-providers">EU providers</h4><p>When data must stay under EU jurisdiction, I use <a class="reference external" href="https://tensorx.ai">TensorX</a>. Nebius and Eurouter are also in the provider catalog.</p>
 
-<h4 id="low-cost-providers">Low cost providers</h4><p>There are 3 notable low cost providers supported by 3code- deepinfra, opencode and nano-gpt.com. They work by serving quantized versions of the open weights models and I find they work remarkably well.</p>
+<h4 id="lowminuscost-providers">Low-cost providers</h4><p>DeepInfra, OpenCode, nano-gpt, Novita, and similar aggregators serve quantized open models cheaply. Quality and availability vary, so a little comparison shopping pays off.</p>
 
-<h4 id="more-interesting-models-and-providers">More interesting models and providers</h4><p>I tried them all!</p>
-<p><strong>Deepseek V4 Pro</strong> is also very capable and inexpensive. I found it much more prone to create bugs than GLM but if you can keep it on track, when it does workit works very well. Available directly from <a class="reference external" href="https://deepseek.com">deepseek</a>.</p>
-<p><strong>LongCat</strong> is interesting- I find it very similar to deepseek and it seemed more focused. Available from openrouter and <tt class="docutils literal"><span class="pre">longcat &lt;https://longcat.chat&gt;_</span></tt> directly (alipay app needed).</p>
-<p><strong>Minimax M3</strong> is very interesting- it has great general wide knowledge including of programming and comes up with pretty good approachs but it can be a bit hit or miss and doesn't stay focused very well for programming. It's might runner-up 'light'model. Super inexpensive plans are available directly from Minimax <tt class="docutils literal"><span class="pre">&lt;https://minimax.io&gt;_</span></tt>.</p>
-<p><strong>Tencent Hy3</strong> is available for free at the moment- the openrouter free version is rather limited but it's also on a provider called <tt class="docutils literal"><span class="pre">novita &lt;https://novita.ai&gt;</span></tt> and I haven't run into a limit yet. It's a lot like GLM but you can't give it as tough jobs. My favorite light model. We'll have to see where it goes with the pricing.</p>
-<p><strong>Kimi K2.7-code</strong> worked just fine but I found it more expensive and especially much, much more verbose than GLM- so it costs more per task, so I haven't used it very much. Kimi K3 has been met with much enthusiasm but I was unable to test as of yet!</p>
-
-<h4 id="finding-even-more-providers">Finding even more providers</h4><p>You can sign up at <a class="reference external" href="https://openrouter.com">openrouter</a> and <tt class="docutils literal"><span class="pre">eurouter &lt;https://www.eurouter.ai/&gt;</span></tt>, or you can do what I like to do and look at their models pages and sign up directly with the provider just to have one entity less in the loop.</p>
+<h4 id="other-models">Other models</h4><p>DeepSeek, MiniMax, Kimi, Tencent Hy, Qwen, Grok, and LongCat are all supported somewhere. The registry changes too often for a copied list to age gracefully, so ask 3code for the current one:</p>
+<p><pre class="listing">3code --good</pre></p>
+<p>OpenRouter and Eurouter are handy when you want to try many models through one account. Once you settle on one, a direct provider account removes a service from the request path and is often cheaper.</p>
 
 <h3 id="install">Install</h3><p><pre class="listing"># macOS / Linux
 curl -fsSL https://3code.capocasa.dev/install | sh
@@ -64,174 +55,257 @@ curl -fsSL https://3code.capocasa.dev/install | sh
 # Windows (PowerShell)
 irm https://3code.capocasa.dev/install.ps1 | iex</pre></p>
 
-<h3 id="enter-your-api-key">Enter your API key</h3><p>Navigate to your project directory and run <tt class="docutils literal"><span class="pre">3code</span></tt>. On first launch with no config it walks you through setup:</p>
-<p><pre class="listing">  ╶──╮
-  ╶──┤    3code v0.3.4   the economical coding agent
-  ╶──╯
-  
-  no provider configured. let's add one. (ctrl+d to quit)
-  supported: deepinfra, ovh, nvidia, nebius, fireworks
-  
-  api key              : ************************
-  provider name or url : nvidia
-  verifying... ok
-  saved to ~/.config/3code/config</pre></p>
+<h3 id="termux-on-android-arm64">Termux on Android arm64</h3><p>Releases include <tt class="docutils literal"><span class="pre">3code-termux-arm64.tar.gz</span></tt>. If you prefer to build it where it will run, Termux only needs:</p>
+<p><pre class="listing">pkg install nim git openssl
+nimble install https://github.com/capocasa/3code</pre></p>
+<p>The binary uses Termux OpenSSL for TLS. Android has no OS sandbox or desktop notifications, but the in-process path checks still apply. Notifications do nothing and automatic updates are disabled. To update, install again or unpack a new archive.</p>
 
-<h3 id="run-your-first-prompt">Run your first prompt</h3><p><pre class="listing">❯ Build me a Hello World program in Nim</pre></p>
-
-<h2 id="picking-a-provider">Picking a provider</h2><p>There are two categories of provider that are interesting to use with 3code: the nvidia free tier and Chinese flat-rate providers. Other providers work but will most likely be too expensive except to test-drive different models.</p>
-<p><a class="reference external" href="https://build.nvidia.com">nvidia</a> - Free tier. You get gpt-oss-120b, which is good enough for a lot of cases. You will notice when it starts to get limiting. MiniMax M2.7 is a very modern option on nvidia but it is pretty slow, something you want to use in the background.</p>
-<p><a class="reference external" href="https://platform.minimax.io">MiniMax</a> - First-party API for the MiniMax M-series: M3 frontier (1M context) and M2.7. The first-party endpoint is the cheapest way to run M3 and the only one that exposes the Anthropic-style <tt class="docutils literal"><span class="pre">thinking.type</span></tt> knob; the OpenAI-compatible surface (api.minimax.io/v1) is what 3code talks to and uses the vLLM-style <tt class="docutils literal"><span class="pre">chat_template_kwargs</span></tt> knob under the hood. M2.7 is also available on nvidia, fireworks, together, sambanova, and deepinfra as a hosted alternative.</p>
-<p><a class="reference external" href="https://z.ai/">z.ai</a> - GLM 5.2 on the z.ai coding plan what I use to develop 3code! The effectiveness is absolutely top notch, you can throw hard problems at it, and it the tokens stack up considerably slower than on any other model I've tried.</p>
-<p><a class="reference external" href="https://tokenfactory.nebius.com/">nebius</a> - The EU-resident runner up. Only has GLM 5.1, not 5.2, but still a great choice if if tensorx isn't available.</p>
-<p>Add a provider inside the REPL:</p>
+<h3 id="add-a-provider">Add a provider</h3><p>Run <tt class="docutils literal"><span class="pre">3code</span></tt> in your project directory. With no provider configured, it goes straight to the setup wizard. You can return to the wizard later with:</p>
 <p><pre class="listing">:provider add</pre></p>
-<p>Or switch between configured providers:</p>
-<p><pre class="listing">:provider use nvidia
-:provider use zai.glm-5.1</pre></p>
-<p>Have a look at the <a class="reference external" href="#known-good">full list of providers</a>.</p>
+<p>The first field accepts:</p>
+<ul class="simple"><li>a catalog name, such as <tt class="docutils literal"><span class="pre">nvidia</span></tt>, <tt class="docutils literal"><span class="pre">zai</span></tt>, <tt class="docutils literal"><span class="pre">xai</span></tt>, or <tt class="docutils literal"><span class="pre">openai</span></tt></li>
+<li>a provider URL when <tt class="docutils literal"><span class="pre">--experimental</span></tt> is enabled</li>
+<li>an API key with a recognized prefix</li>
+<li><tt class="docutils literal"><span class="pre">supergrok</span></tt> for SuperGrok or X Premium+ login</li>
+<li><tt class="docutils literal"><span class="pre">chatgpt</span></tt> for ChatGPT Plus/Pro login</li>
+</ul>
+<p>The wizard fetches the provider's models, checks your selections in parallel, and saves the ones that work. Press Esc to stop verification.</p>
 
-<h2 id="starting-programming">Starting programming</h2><p>Use the <tt class="docutils literal"><span class="pre">:model</span></tt> command (tab-complete it), then press Tab again to rotate through all the models configured for the current provider.</p>
-<p>Then tell the model what you want.</p>
-<p>I like to keep a <tt class="docutils literal"><span class="pre">3CODE.md</span></tt> in the project root that inlines my main project style file with a <tt class="docutils literal"><span class="pre">@../3CODE.md</span></tt> reference. <tt class="docutils literal"><span class="pre">AGENTS.md</span></tt> also works; I prefer agent-specific filenames.</p>
+<h3 id="run-your-first-prompt">Run your first prompt</h3><p><pre class="listing">❯ Build a Hello World program in Nim</pre></p>
+<p>That is enough to get started.</p>
 
-<h2 id="usage-monitoring">Usage monitoring</h2><p>Every response shows a token receipt on its own line:</p>
+<h2 id="providers-and-authentication">Providers and authentication</h2><p><tt class="docutils literal"><span class="pre">:provider</span></tt> lists configured providers and marks the current one. <tt class="docutils literal"><span class="pre">:model</span></tt> does the same for its models. Both commands have tab completion, so there is no need to memorize catalog names.</p>
+<p><pre class="listing">:provider nvidia
+:model gpt-oss-120b</pre></p>
+
+<h3 id="api-keys">API keys</h3><p>Most providers use an API key, and the wizard recognizes the common prefixes. For an unknown provider or a custom URL, start 3code with <tt class="docutils literal"><span class="pre">--experimental</span></tt>. The flag is deliberate: compatibility is likely, not promised.</p>
+
+<h3 id="xai-and-supergrok">xAI and SuperGrok</h3><p>An <tt class="docutils literal"><span class="pre">xai-</span></tt> key creates a normal <tt class="docutils literal"><span class="pre">xai</span></tt> provider. Enter <tt class="docutils literal"><span class="pre">supergrok</span></tt> instead to sign in with a SuperGrok or X Premium+ subscription. They can live side by side, which is useful if you have both kinds of account.</p>
+<p>The browser OAuth flow stores tokens in:</p>
+<p><pre class="listing">$XDG_DATA_HOME/3code/auth/xai.json</pre></p>
+<p>On POSIX systems the file is created with mode 0600, and tokens refresh automatically. Switch accounts with <tt class="docutils literal"><span class="pre">:provider xai</span></tt> and <tt class="docutils literal"><span class="pre">:provider supergrok</span></tt>.</p>
+
+<h3 id="openai-and-chatgpt">OpenAI and ChatGPT</h3><p>An OpenAI API key creates an <tt class="docutils literal"><span class="pre">openai</span></tt> provider. Enter <tt class="docutils literal"><span class="pre">chatgpt</span></tt> instead to use a ChatGPT Plus/Pro subscription. As with xAI and SuperGrok, both providers can exist together.</p>
+<p>ChatGPT login opens the OpenAI browser OAuth flow and stores tokens in:</p>
+<p><pre class="listing">$XDG_DATA_HOME/3code/auth/openai.json</pre></p>
+<p>On POSIX systems the file is created with mode 0600, and tokens refresh automatically. ChatGPT model listings and requests go through the Codex backend at <tt class="docutils literal"><span class="pre">chatgpt.com/backend-api/codex</span></tt>.</p>
+<p>OpenAI and ChatGPT use the Responses API. Other OpenAI-compatible providers use Chat Completions. The Codex backend is internal, unversioned, and intended for first-party clients. It works, but using it through 3code is your responsibility.</p>
+<p>Switch accounts with:</p>
+<p><pre class="listing">:provider openai
+:provider chatgpt</pre></p>
+
+<h2 id="interactive-use">Interactive use</h2><p>At the interactive prompt, describe the result you want or enter a command beginning with <tt class="docutils literal"><span class="pre">:</span></tt>. Tab completes commands, provider names, model names, and paths where supported.</p>
+<p>3code loads <tt class="docutils literal"><span class="pre">3CODE.md</span></tt> and <tt class="docutils literal"><span class="pre">AGENTS.md</span></tt> from the project directory and its parents. These are good homes for project rules, build commands, and style requirements. To include a file directly in a prompt, prefix its path with <tt class="docutils literal"><span class="pre">@</span></tt>:</p>
+<p><pre class="listing">Review @src/parser.nim and add tests for malformed input.</pre></p>
+<p>Useful input keys:</p>
+<table border="1" class="docutils"><tr><th>key</th><th>action</th></tr>
+<tr><td>Enter</td><td>submit</td></tr>
+<tr><td>Shift+Enter or Alt+Enter</td><td>insert a newline</td></tr>
+<tr><td>Up / Down</td><td>move through visual rows, then history</td></tr>
+<tr><td>Ctrl+Arrow</td><td>move by word</td></tr>
+<tr><td>Ctrl+U</td><td>clear the input buffer</td></tr>
+<tr><td>Ctrl+W</td><td>delete the previous word</td></tr>
+<tr><td>Ctrl+L</td><td>clear the screen</td></tr>
+<tr><td>Ctrl+C</td><td>clear current input</td></tr>
+<tr><td>Esc</td><td>cancel the current operation</td></tr>
+<tr><td>Ctrl+D</td><td>exit</td></tr>
+</table><p>If you forget one, <tt class="docutils literal"><span class="pre">:help</span></tt> prints the current command and key list.</p>
+
+<h2 id="usage-monitoring">Usage monitoring</h2><p>Each response ends with a compact token receipt:</p>
 <p><pre class="listing">  ○12%  ↑4.2k  ↻18k  ↓1.1k  8s</pre></p>
-<p>The fields:</p>
-<table border="1" class="docutils"><tr><th>glyph</th><th>meaning</th></tr>
-<tr><td><tt class="docutils literal"><span class="pre">○N%</span></tt></td><td>context window used (percentage)</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">↑</span></tt></td><td>fresh input tokens (not cached)</td></tr>
+<table border="1" class="docutils"><tr><th>field</th><th>meaning</th></tr>
+<tr><td><tt class="docutils literal"><span class="pre">○N%</span></tt></td><td>context window used</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">↑</span></tt></td><td>fresh input tokens</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">↻</span></tt></td><td>cached input tokens</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">↓</span></tt></td><td>output tokens generated</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">Xs</span></tt></td><td>wall-clock seconds for this response</td></tr>
-</table><p>During streaming, the same line updates live so you can watch the numbers tick up in real time. If a glyph is absent it just means the provider did not stream that information.</p>
+<tr><td><tt class="docutils literal"><span class="pre">↓</span></tt></td><td>output tokens</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">Xs</span></tt></td><td>elapsed time</td></tr>
+</table><p>The receipt updates while the response streams. If a field is missing, the provider did not report it. 3code declines to invent accounting.</p>
 
-<h2 id="thinking">Thinking</h2><p>When a model reasons before replying, its thinking is shown as a one-line ticker above the spinner. This gives you a quick sense of what the model is working through without flooding the screen.</p>
-<p>To toggle it:</p>
-<p><pre class="listing">:think off
-:think on</pre></p>
-<p>The ticker has no effect if the provider does not emit reasoning content.</p>
+<h2 id="patient-retry">Patient retry</h2><p>Patient retry is enabled by default. On <tt class="docutils literal"><span class="pre">429</span></tt> limits, <tt class="docutils literal"><span class="pre">5xx</span></tt> responses, and network failures, 3code backs off exponentially rather than failing immediately. Delays are capped at 2048 seconds and retries can continue for about 36 hours, long enough to outwait a rolling limit or a bad connection.</p>
+<p>After the short initial retry period, attempts become part of the transcript:</p>
+<p><pre class="listing">Usage limit reached for the past 5 hours. (code 429). retry 42/64 in 2048s</pre></p>
+<p>Use these commands to inspect or change the setting:</p>
+<p><pre class="listing">:retry
+:retry off
+:retry on</pre></p>
+<p>Even with patient retry off, 3code gives transient failures about a minute before returning to the interactive prompt. The setting is stored as <tt class="docutils literal"><span class="pre">patient_retry</span></tt> in <tt class="docutils literal"><span class="pre">[settings]</span></tt>. Press Esc to cancel the wait.</p>
 
-<h2 id="known-good-models">Known good models</h2><p>3code has a list of models and providers that have been tested to work- each provider usually needs a bit of handholding because there can be difference in the details of how the API is called. You can get the current list by running</p>
+<h2 id="reasoning">Reasoning</h2><p><tt class="docutils literal"><span class="pre">:reasoning</span></tt> lists the levels the current model actually supports and marks the active one:</p>
+<p><pre class="listing">:reasoning
+:reasoning high
+:reasoning off</pre></p>
+<p>The valid values depend on the model:</p>
+<ul class="simple"><li>binary reasoning models use <tt class="docutils literal"><span class="pre">off</span></tt> and <tt class="docutils literal"><span class="pre">on</span></tt></li>
+<li>many models use <tt class="docutils literal"><span class="pre">low</span></tt>, <tt class="docutils literal"><span class="pre">medium</span></tt>, and <tt class="docutils literal"><span class="pre">high</span></tt></li>
+<li>GLM 5.2 uses <tt class="docutils literal"><span class="pre">off</span></tt>, <tt class="docutils literal"><span class="pre">high</span></tt>, and <tt class="docutils literal"><span class="pre">max</span></tt></li>
+<li>OpenAI o-series models use <tt class="docutils literal"><span class="pre">low</span></tt>, <tt class="docutils literal"><span class="pre">medium</span></tt>, and <tt class="docutils literal"><span class="pre">high</span></tt></li>
+<li>GPT-5.0 uses <tt class="docutils literal"><span class="pre">minimal</span></tt>, <tt class="docutils literal"><span class="pre">low</span></tt>, <tt class="docutils literal"><span class="pre">medium</span></tt>, and <tt class="docutils literal"><span class="pre">high</span></tt></li>
+<li>GPT-5.1 and later add <tt class="docutils literal"><span class="pre">none</span></tt></li>
+<li>GPT-5.4 and GPT-5.5 add <tt class="docutils literal"><span class="pre">xhigh</span></tt></li>
+<li>GPT-5.6 adds <tt class="docutils literal"><span class="pre">max</span></tt> and does not use <tt class="docutils literal"><span class="pre">minimal</span></tt></li>
+<li>GPT-5.5 Pro uses <tt class="docutils literal"><span class="pre">medium</span></tt>, <tt class="docutils literal"><span class="pre">high</span></tt>, and <tt class="docutils literal"><span class="pre">xhigh</span></tt>; GPT-5 Pro uses <tt class="docutils literal"><span class="pre">high</span></tt></li>
+<li>GPT-4.x has no reasoning setting</li>
+</ul>
+<p>3code sends the right provider-specific field for the selected model. Providers have not settled on one common reasoning scale.</p>
+<p>When a provider streams reasoning text, 3code keeps it moving through a one-line ticker above the interactive prompt. It is not added to the transcript.</p>
+
+<h2 id="knownminusgood-models">Known-good models</h2><p>Provider APIs differ in small, consequential ways. 3code therefore keeps a registry of combinations tested with the right prompt, reasoning settings, token fields, and context size.</p>
+<p>Print the current registry with:</p>
 <p><pre class="listing">3code --good</pre></p>
-<p>At the time of writing that's these</p>
-<table border="1" class="docutils"><tr><th>Provider</th><th>Models</th></tr>
-<tr><td>baseten</td><td>GLM-5 GLM-4.7 GLM-5.2 GLM-5.1 gpt-oss-120b DeepSeek-V4-Pro Kimi-K2.6 Kimi-K2.5</td></tr>
-<tr><td>cerebras</td><td>zai-glm-4.7 gpt-oss-120b</td></tr>
-<tr><td>fireworks</td><td>glm-5p1 glm-5 gpt-oss-120b deepseek-v4-pro minimax-m2p7 kimi-k2p6</td></tr>
-<tr><td>nebius</td><td>GLM-5.1 GLM-5 GLM-5.2 gpt-oss-120b gpt-oss-120b-fast DeepSeek-V3.2 DeepSeek-V3.2-fast DeepSeek-V4-Pro Kimi-K2.5 Kimi-K2.5-fast MiniMax-M2.5 MiniMax-M2.5-fast MiniMax-M3 Kimi-K2.6</td></tr>
-<tr><td>nvidia</td><td>glm4.7 glm-5.2 gpt-oss-120b gpt-oss-20b deepseek-v4-pro deepseek-v4-flash minimax-m2.5 minimax-m2.7 minimax-m3 kimi-k2.6</td></tr>
-<tr><td>together</td><td>GLM-5.1 GLM-5 GLM-4.7 GLM-5.2 gpt-oss-20b gpt-oss-120b DeepSeek-V4-Pro MiniMax-M2.7 MiniMax-M3 Kimi-K2.5 Kimi-K2.6</td></tr>
-<tr><td>zai</td><td>glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2</td></tr>
-<tr><td>deepinfra</td><td>GLM-5.1 GLM-5 GLM-4.7 GLM-4.7-Flash GLM-5.2 gpt-oss-120b gpt-oss-20b DeepSeek-V4-Pro DeepSeek-V4-Flash DeepSeek-V3.2 MiniMax-M2.5 MiniMax-M2.7 MiniMax-M3 Kimi-K2.6 Kimi-K2.5 Hy3</td></tr>
-<tr><td>novita</td><td>glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2 gpt-oss-20b gpt-oss-120b deepseek-v3.2 deepseek-v4-flash deepseek-v4-pro minimax-m2.5 minimax-m2.7 minimax-m2.7-highspeed minimax-m3 kimi-k2.5 kimi-k2.6 hy3</td></tr>
-<tr><td>openrouter</td><td>glm-4.7 glm-4.7-flash glm-5 glm-5-turbo glm-5.1 glm-5.2 gpt-oss-120b gpt-oss-20b deepseek-chat deepseek-v3.2 deepseek-v4-flash deepseek-v4-pro minimax-m2.5 minimax-m2.7 minimax-m3 kimi-k2.5 kimi-k2.6 hy3:free hy3</td></tr>
-<tr><td>groq</td><td>gpt-oss-120b gpt-oss-20b</td></tr>
-<tr><td>ovh</td><td>gpt-oss-120b gpt-oss-20b</td></tr>
-<tr><td>sambanova</td><td>gpt-oss-120b DeepSeek-V3.2 MiniMax-M2.7 MiniMax-M2.5</td></tr>
-<tr><td>deepseek</td><td>deepseek-chat deepseek-reasoner deepseek-v4-flash deepseek-v4-pro</td></tr>
-<tr><td>minimax</td><td>MiniMax-M3 MiniMax-M2.7 MiniMax-M2.7-highspeed MiniMax-M2.5</td></tr>
-<tr><td>longcat</td><td>LongCat-2.0</td></tr>
-</table>
-<h2 id="sessions">Sessions</h2><p>List recent sessions for the current directory (newest first, up to 20):</p>
+<p>For combinations outside the registry, <tt class="docutils literal"><span class="pre">--experimental</span></tt> opens the gate.</p>
+
+<h2 id="sessions">Sessions</h2><p>List the 20 most recent sessions for the current directory:</p>
 <p><pre class="listing">3code --list
 # or
 3code -l</pre></p>
-<p>Listing is scoped to the current directory by design. To see every saved session, run 3code from the sessions directory itself (e.g. <tt class="docutils literal"><span class="pre">~/.local/share/3code/sessions</span></tt>).</p>
-<p>Resume a specific session by ID:</p>
-<p><pre class="listing">3code -r:abc123</pre></p>
-<p>Note: different providers expire their prompt cache at different rates. Resuming an old session still works but you will not get cache savings on stale context.</p>
+<p>Resume the latest session:</p>
+<p><pre class="listing">3code --resume</pre></p>
+<p>Resume a session by ID:</p>
+<p><pre class="listing">3code --resume=abc123
+# or
+3code -r:abc123</pre></p>
+<p>Sessions are listed per working directory, so unrelated projects stay out of each other's history. Provider prompt caches may expire before a saved session does. The session will still resume, but its old context may no longer get the cache discount.</p>
 
-<h2 id="context-clear">Context clear</h2><p>Inside the REPL, <tt class="docutils literal"><span class="pre">:clear</span></tt> wipes the accumulated context and starts a fresh conversation with the same provider and model. Useful when a task is done and you want to start something new without the old context bleeding in.</p>
+<h2 id="context-management">Context management</h2><p><tt class="docutils literal"><span class="pre">:clear</span></tt> starts a new conversation with the same provider and model:</p>
 <p><pre class="listing">:clear</pre></p>
+<p><tt class="docutils literal"><span class="pre">:summarize</span></tt> replaces older turns with a generated recap. It is useful when the task must continue but the context has become expensive:</p>
+<p><pre class="listing">:summarize</pre></p>
+<p>If the old work is no longer relevant, clear it. A fresh context is safer than a summary of things the model no longer needs.</p>
 
-<h2 id="chunked-mode">Chunked mode</h2><p>For larger tasks, have the model create a plan first and divide the work into natural chunks - each saved to a file. Each chunk file should end by calling the <tt class="docutils literal"><span class="pre">context_clear</span></tt> tool with the next file as the parameter. This produces a series of implementing steps with context resets in between.</p>
-<p>Example prompt to kick off a chunked task:</p>
-<p><pre class="listing">Divide the following task into 4-6 chunks, each in its own impl-N.md file.
+<h2 id="chunked-mode">Chunked mode</h2><p>For a large mechanical task, ask the model to split the work into files. Each chunk ends by calling <tt class="docutils literal"><span class="pre">context_clear</span></tt> with instructions for the next one. The model carries the plan forward and leaves the spent context behind.</p>
+<p>Example:</p>
+<p><pre class="listing">Divide this task into 4-6 chunks in impl-N.md files.
 End each file by calling context_clear with instructions to read the next file.
 Then execute chunk 1.
 
-Task: add comprehensive test coverage to the parser module.</pre></p>
-<p>Chunked mode is well-suited to busywork that does not require human interaction, such as adding basic test coverage across a large codebase. A capable model is needed; GLM 5.1 works well.</p>
-<p>Calling <tt class="docutils literal"><span class="pre">context_clear</span></tt> at the end of each chunk with the next file as the target also serves as a cheap capability test: if the model loses track enough to forget to call the next file, the task was probably too hard for this mode.</p>
+Task: add test coverage to the parser module.</pre></p>
+<p>Chunked mode works best when little human input is needed, such as adding basic tests across many modules. If the model forgets to load the next chunk, the task was probably too difficult or the plan too vague.</p>
 
-<h2 id="cybernetic-mode">Cybernetic mode</h2><p>Cybernetic mode is the go-to way to do a long-running coding session with 3code- agentic use.</p>
-<p>How it works is you get yourself a chunk of work in a worktree, and ask our model to use the built-in cybernetic skill to complete it.</p>
-<p>Here's what the skill does:</p>
-<ul class="simple"><li>It makes a plan for your work and writes it to a plan file as a todo list</li>
-<li>Has instructions in the file to pick one of the todo items, implement it, and update the plan file informed by the learnings of implementation</li>
-<li>Clears the context, with instructions for the next session to load the file</li>
-<li>Rinse and repeat</li>
-<li>When all items are completed, the last session performs a review</li>
-</ul>
-<p>This allows for long-running task completion of large chunks of work while preserving only the context that is actually needed. This is different from summarizing, where all context is kept at a lower resolution, regardless of whether it is relevant.</p>
-
-<h2 id="no-subminusagents">No sub-agents</h2><p>Sub-agents are not supported because both research and user feedback says they are very expensive and bring unclear or negative benefits, so I consider it a feature that 3code doesn't have them. Use Cybernetic mode with worktrees instead.</p>
-
-<h2 id="sandbox">Sandbox</h2><p>3code confines every tool call to a filesystem sandbox you define. The sandbox is a plain text policy built from a cascade of files, each filling in for the ones below it:</p>
-<ol class="simple"><li><strong>system</strong> - <tt class="docutils literal"><span class="pre">~/.config/3code/sandbox</span></tt>, next to your config.</li>
-<li><strong>repo</strong> - <tt class="docutils literal"><span class="pre">.3code/sandbox</span></tt> in your project directory.</li>
+<h2 id="cybernetic-mode">Cybernetic mode</h2><p>Cybernetic mode is the sturdier option for a long coding task. Give the model a worktree and ask it to use the built-in cybernetic planning skill.</p>
+<p>The skill:</p>
+<ol class="simple"><li>writes a plan file with concrete tasks</li>
+<li>implements one task</li>
+<li>updates the plan with results and new information</li>
+<li>clears context and tells the next session to load the plan</li>
+<li>repeats until all tasks are complete</li>
+<li>reviews the completed work</li>
 </ol>
-<p>A missing level is not empty: it contributes the built-in default (<tt class="docutils literal"><span class="pre">.</span></tt> deny <tt class="docutils literal"><span class="pre">/</span></tt>, then <tt class="docutils literal"><span class="pre">O</span></tt> writable cwd), so the sandbox is always on. The effective policy is the two texts concatenated (system then repo) and parsed once, so a repo-level <tt class="docutils literal"><span class="pre">.</span></tt> on <tt class="docutils literal"><span class="pre">/</span></tt> cleanly resets anything a system file opened above it. 3code never writes a sandbox file into your project on first run; the default lives in memory until you create one (explicitly, or via the <tt class="docutils literal"><span class="pre">:sandbox</span></tt> edit commands, which seed the repo file on first use). Yolo mode (everything writable) is fine but you have to ask for it explicitly.</p>
-<p>The sandbox is enforced two ways. Bash commands run through <tt class="docutils literal"><span class="pre">3code box</span></tt>, the built-in nimbox sandbox (Landlock on Linux, Seatbelt on macOS), which 3code re-execs itself as. The in-process read/write/patch tools check paths against the same policy in the 3code process. Both layers consult the same file, so the rules you write apply uniformly.</p>
+<p>The current task keeps its detailed context while the plan file keeps the durable state. This loses less information than repeatedly summarizing all the old work.</p>
 
-<h3 id="the-sandbox-file">The sandbox file</h3><p>Each line is a one-character access code, a space, and a path. Lines run top to bottom; each line supersedes the ones above it for the path it names. Later rules win, so you can open a broad path then narrow parts of it.</p>
-<table border="1" class="docutils"><tr><th>Code</th><th>Meaning</th></tr>
-<tr><td><tt class="docutils literal"><span class="pre">.</span></tt></td><td>deny: no read, no write</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">o</span></tt></td><td>read-only: read and execute</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">O</span></tt></td><td>writable: read, write, create, delete, rename</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">0</span></tt></td><td>writable: alias for <tt class="docutils literal"><span class="pre">O</span></tt> (the digit zero)</td></tr>
-</table><p>A blank path means the working directory itself. Relative paths resolve against the working directory; absolute paths are used as-is.</p>
-<p>On first run in a new directory, 3code creates this default:</p>
-<p><pre class="listing">. /
-O</pre></p>
-<p>The root is denied, the working directory is writable. This is the safe default: the agent can read and write your project, nothing else.</p>
+<h2 id="no-subminusagents">No sub-agents</h2><p>3code does not provide sub-agents. They use plenty of tokens, and I have not seen enough benefit to justify the little management consultancy they form. For parallel or long-running work, use worktrees with cybernetic mode.</p>
 
-<h3 id="yolo-mode">Yolo mode</h3><p>If you want the agent to have free rein over the whole filesystem, replace the file with one line:</p>
-<p><pre class="listing">0 /</pre></p>
-<p>This is the explicit opt-in the spec requires. 3code never writes yolo for you; you type it.</p>
+<h2 id="sandbox">Sandbox</h2><p>The model is useful, but it does not need the run of your entire computer. 3code applies a filesystem policy to every tool call. Bash commands also enter an OS sandbox, and host rules can fence their network access.</p>
+<p>Exactly one policy source is active:</p>
+<ol class="simple"><li><tt class="docutils literal"><span class="pre">.sandbox</span></tt> in the project directory, if it exists</li>
+<li><tt class="docutils literal"><span class="pre">~/.config/3code/sandbox</span></tt>, if you created it</li>
+<li>the built-in default, held in memory</li>
+</ol>
+<p>Policies do not cascade or merge. One file wins, so what is allowed remains inspectable. A project file replaces the user file. 3code never creates the user file; create it yourself to set defaults for projects without <tt class="docutils literal"><span class="pre">.sandbox</span></tt>.</p>
+<p>The first <tt class="docutils literal"><span class="pre">:sandbox allow</span></tt>, <tt class="docutils literal"><span class="pre">:sandbox readonly</span></tt>, <tt class="docutils literal"><span class="pre">:sandbox deny</span></tt>, or <tt class="docutils literal"><span class="pre">:sandbox edit</span></tt> command in a project copies the effective policy to <tt class="docutils literal"><span class="pre">.sandbox</span></tt> before changing it. You get a complete project policy, not a mysterious patch on top of another file.</p>
 
-<h3 id="nesting-and-overrides">Nesting and overrides</h3><p>Because each line supersedes the ones above, you can layer rules. This makes the working directory writable, opens <tt class="docutils literal"><span class="pre">/tmp</span></tt> read-only, then locks down a secrets directory inside the project:</p>
-<p><pre class="listing">. /
-O
-o /tmp
-. ./secrets</pre></p>
-<p>The last matching rule for a path wins. <tt class="docutils literal"><span class="pre">./secrets</span></tt> is covered by the root deny, the working-directory writable, and its own deny line - in that order - so the deny wins. Read the file bottom-up for the effective policy on any given path.</p>
+<h3 id="policy-format">Policy format</h3><p>A policy has one rule per line:</p>
+<table border="1" class="docutils"><tr><th>Word</th><th>Meaning</th></tr>
+<tr><td><tt class="docutils literal"><span class="pre">deny</span></tt></td><td>no read, write, or network connection</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">readonly</span></tt></td><td>read and execute, for paths only</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">allow</span></tt></td><td>read and write a path, or connect to a host</td></tr>
+</table><p>The target type is determined by its first character:</p>
+<table border="1" class="docutils"><tr><th>Start</th><th>Target</th></tr>
+<tr><td><tt class="docutils literal"><span class="pre">/</span></tt></td><td>absolute path</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">X:</span></tt></td><td>Windows drive path</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">~</span></tt></td><td>path under the home directory</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">.</span></tt></td><td>path relative to the project directory</td></tr>
+<tr><td>letter/digit</td><td>hostname or IP address, with an optional port</td></tr>
+</table><p>Paths are intentionally explicit. Use <tt class="docutils literal"><span class="pre">./foo</span></tt> for a project-relative path. An access word on its own means the project directory itself:</p>
+<p><pre class="listing">deny /
+allow
+readonly /var
+deny ./secrets</pre></p>
+<p>Rules are read from top to bottom and the last matching path rule wins. In this example the project is writable, <tt class="docutils literal"><span class="pre">/var</span></tt> is read-only, and <tt class="docutils literal"><span class="pre">./secrets</span></tt> is denied. Everything else is denied because unmatched paths are denied by default.</p>
+<p>Blank lines and lines beginning with <tt class="docutils literal"><span class="pre">#</span></tt> are ignored. An access word only has special meaning when followed by whitespace or the end of the line, so a host such as <tt class="docutils literal"><span class="pre">deny.example.com</span></tt> remains a hostname.</p>
 
-<h3 id="editing-the-sandbox">Editing the sandbox</h3><p>The sandbox file is yours. Edit it directly in your editor, or use the REPL commands which append a rule and reload immediately:</p>
-<p><pre class="listing">:sandbox show
+<h3 id="builtminusin-default">Built-in default</h3><p>On macOS, Linux, and other POSIX systems, the built-in policy is:</p>
+<p><pre class="listing">deny /
+allow /tmp
+allow /var/tmp
+allow
+allow *</pre></p>
+<p>This lets the model write in the project and temporary directories, not wander through other user files. System programs, libraries, configuration, and device files get a read-only baseline so commands can still run. <tt class="docutils literal"><span class="pre">allow *</span></tt> leaves the network open.</p>
+<p>On Windows, the built-in policy is:</p>
+<p><pre class="listing">deny /
+allow ~/AppData/Local/Temp
+allow</pre></p>
+<p>Windows grants network capability when no host rules are present.</p>
+
+<h3 id="network-rules">Network rules</h3><p>With no host rules, every host is allowed. <tt class="docutils literal"><span class="pre">allow *</span></tt> says the same thing explicitly. To close the network completely, use:</p>
+<p><pre class="listing">deny *</pre></p>
+<p>Host targets may be domains or IP addresses. A single <tt class="docutils literal"><span class="pre">allow</span></tt> rule turns the policy into an allowlist: that host works and all others do not.</p>
+<p><pre class="listing">allow api.example.com</pre></p>
+<p>A single <tt class="docutils literal"><span class="pre">deny</span></tt> rule does the inverse: that host is blocked and the rest of the network stays open.</p>
+<p><pre class="listing">deny telemetry.example.com</pre></p>
+<p>IP addresses work the same way, for example <tt class="docutils literal"><span class="pre">allow 192.0.2.10</span></tt> or <tt class="docutils literal"><span class="pre">deny 192.0.2.10</span></tt>. The spelling matters: bare <tt class="docutils literal"><span class="pre">foo</span></tt> is a hostname, while <tt class="docutils literal"><span class="pre">./foo</span></tt> is a file or directory named <tt class="docutils literal"><span class="pre">foo</span></tt> in the working directory.</p>
+<p>A host without a port matches every port. Add one when it matters, as in <tt class="docutils literal"><span class="pre">allow github.com:443</span></tt>. Wildcards work too: <tt class="docutils literal"><span class="pre">allow *.example.org</span></tt> allows that domain pattern.</p>
+<p>As with paths, the last matching rule wins. Any <tt class="docutils literal"><span class="pre">allow</span></tt> host rule makes unmatched hosts denied. With only <tt class="docutils literal"><span class="pre">deny</span></tt> host rules, unmatched hosts remain allowed. This is the small detail that decides whether you have made an allowlist or a blocklist.</p>
+<p>On Linux and macOS, fenced commands reach the network through a local CONNECT and SOCKS5 allowlist proxy. Linux puts the command in a network namespace; macOS confines it to loopback with Seatbelt. 3code sets the standard proxy variables and a Git SSH proxy command for the child process. Denied HTTP connections return 403.</p>
+<p>On Windows, host rules require one elevated setup command:</p>
+<p><pre class="listing">3code wall setup-windows</pre></p>
+<p>Without that setup, 3code warns and runs the command without a network fence. That is safer than pretending the fence exists. Set <tt class="docutils literal"><span class="pre">sandbox_wall_warn = off</span></tt> in <tt class="docutils literal"><span class="pre">[settings]</span></tt> if you no longer need the warning.</p>
+
+<h3 id="editing-the-policy">Editing the policy</h3><p>Use an editor or the sandbox commands:</p>
+<p><pre class="listing">:sandbox
+:sandbox show
+:sandbox edit
 :sandbox allow /opt
 :sandbox readonly /var
 :sandbox deny ./secrets
 :sandbox on
 :sandbox off</pre></p>
-<p>The first <tt class="docutils literal"><span class="pre">allow</span></tt>/<tt class="docutils literal"><span class="pre">readonly</span></tt>/<tt class="docutils literal"><span class="pre">deny</span></tt> in a project creates the <tt class="docutils literal"><span class="pre">.3code/sandbox</span></tt> file (seeded with the built-in default, then your appended rule) so you have something concrete to version and share. <tt class="docutils literal"><span class="pre">:sandbox off</span></tt> disables enforcement entirely for the session (bash runs unconfined, in-process checks pass through); it persists in <tt class="docutils literal"><span class="pre">[settings]</span></tt> as <tt class="docutils literal"><span class="pre">sandbox = off</span></tt>. This is the only way to run without a sandbox short of editing the file.</p>
-<p>The agent never writes the sandbox file. If the model proposes a policy change, it edits a copy and you move it into place. This keeps the trust boundary entirely on your side: the sandbox is defined at prompt time, by you, and the agent cannot weaken it.</p>
+<p><tt class="docutils literal"><span class="pre">:sandbox edit</span></tt> tries <tt class="docutils literal"><span class="pre">$VISUAL</span></tt>, then <tt class="docutils literal"><span class="pre">$EDITOR</span></tt>, then the platform default. Changes take effect when the editor exits. Rule commands store project paths in portable <tt class="docutils literal"><span class="pre">./foo</span></tt> form and reload immediately.</p>
+<p><tt class="docutils literal"><span class="pre">:sandbox off</span></tt> disables filesystem and network enforcement for the session. The setting is stored as <tt class="docutils literal"><span class="pre">sandbox = off</span></tt> in <tt class="docutils literal"><span class="pre">[settings]</span></tt>. Use <tt class="docutils literal"><span class="pre">:sandbox on</span></tt> to restore enforcement.</p>
+<p>To allow the full filesystem, replace the policy with <tt class="docutils literal"><span class="pre">allow /</span></tt>. Without host rules, the network is unrestricted too. This is yolo mode. 3code makes you ask for it explicitly and will not have the bright idea on its own.</p>
 
-<h3 id="what-gets-sandboxed">What gets sandboxed</h3><p>Bash commands, file reads, writes, and patches all consult the sandbox. Bash gets full kernel enforcement: the sandbox backend is compiled into 3code (the <tt class="docutils literal"><span class="pre">box</span></tt> subcommand), so every bash command is re-execed as <tt class="docutils literal"><span class="pre">3code box restrict ...</span></tt> and a write outside the allowed paths fails with <tt class="docutils literal"><span class="pre">Permission denied</span></tt> at the syscall level. No child process can escape. The read/write/patch tools also check paths in-process, so the higher-risk operations (mutating your files directly) stay guarded.</p>
+<h3 id="policy-file-protection">Policy file protection</h3><p>A policy is not much use if the model can edit it. The file tools therefore cannot change <tt class="docutils literal"><span class="pre">.sandbox</span></tt> or <tt class="docutils literal"><span class="pre">~/.config/3code/sandbox</span></tt>. After loading the policy, 3code adds hidden read-only guards for both files. They do not appear in <tt class="docutils literal"><span class="pre">:sandbox show</span></tt>, and later rules cannot override them.</p>
+<p>macOS and Windows enforce these guards for Bash and in-process tools. Landlock cannot subtract a read-only file from an already writable root. On Linux, the in-process tools still enforce the guard, but a Bash command under <tt class="docutils literal"><span class="pre">allow /</span></tt> can write the policy file. Avoid <tt class="docutils literal"><span class="pre">allow /</span></tt> if policy-file protection matters.</p>
+<p>A denied Bash command usually reports <tt class="docutils literal"><span class="pre">Permission denied</span></tt>. 3code includes the active policy path in denial messages, saving you from debugging the wrong layer.</p>
 
-<h3 id="platform-behavior-and-fallback">Platform behavior and fallback</h3><p>The bash backend is OS-native: <strong>Landlock</strong> on Linux, <strong>Seatbelt</strong> on macOS, and a restricted-token <strong>ACL</strong> scheme on Windows. At startup 3code probes whether the backend can actually restrict on this host, then applies it. The probe can fail on a kernel built without Landlock, or in a container/CI runner whose seccomp filter blocks the syscall.</p>
-<p>When the probe fails, bash degrades gracefully: commands run unconfined (via the plain <tt class="docutils literal"><span class="pre">setsid</span></tt>+<tt class="docutils literal"><span class="pre">sh</span></tt> path) instead of failing outright. The in-process read/write/patch path checks stay in force regardless, so the highest-risk operations (directly mutating your files through the write/patch tools) remain guarded even when the kernel backend is unavailable. There is no way for the agent to bypass this layer.</p>
+<h3 id="what-is-sandboxed">What is sandboxed</h3><p>The read, write, and patch tools check paths inside 3code itself. Bash needs a stronger boundary, so commands are re-executed through:</p>
+<p><pre class="listing">3code sandbox --policy FILE restrict -- COMMAND</pre></p>
+<p><tt class="docutils literal"><span class="pre">3code sb</span></tt> is the short alias. The command and all its children inherit the OS restriction. The sandbox process reads the policy afresh, so an edit applies to the next Bash launch.</p>
 
-<h2 id="developments">Developments</h2><p>3code will keep up with the &quot;works right now&quot; approach as agentic coding develops.</p>
-<p>We will continue to support more models and providers as they come out.</p>
+<h3 id="platform-behavior-and-fallback">Platform behavior and fallback</h3><p>The Bash backend uses Landlock on Linux, Seatbelt on macOS, and restricted tokens plus ACLs on Windows. 3code probes it at startup rather than assuming it works. Old Linux kernels and containers whose seccomp policy blocks Landlock can fail the probe.</p>
+<p>If the OS backend is unavailable, Bash runs without filesystem confinement. The in-process read, write, and patch checks remain active. This keeps 3code usable, but the distinction matters: an arbitrary Bash command is then outside the filesystem fence.</p>
 
-<h2 id="contributing">Contributing</h2><p>Developer documentation (module graph, proc docs, type definitions) is in <tt class="docutils literal"><span class="pre">docs/dev/threecode.html</span></tt>. Build it with <tt class="docutils literal"><span class="pre">nimble devdocs</span></tt>.</p>
-<p>Pull requests welcome:</p>
-<ul class="simple"><li>known-good provider/model pairs with test results</li>
-<li>bug fixes with a clear reproduction case</li>
-</ul>
-<p>Bug reports welcome, but make sure you give enough specific information to reproduce the issue. If you are not sure what that means, please find out before reporting - if in doubt, ask your own 3code how to do that.</p>
+<h2 id="library-api">Library API</h2><p>A Nim program can embed the same agent loop without bringing along the terminal interface:</p>
+<p><pre class="listing"><span class="Keyword">import</span> <span class="Identifier">threecode</span>
 
-<h2 id="prior-art">Prior art</h2><p>3code is heavily influenced by Claude Code, goose, pi, and codex. While I like the particular tradeoffs better, imitation is the sincerest form of flattery and 3code should be looked at as heavily inspired by them. As a European, I still think using Claude Code feels like driving a turbocharged Ford F-150 to buy a pack of gum, but I still love you.</p>
-<p>Having said that, 3code deliberately chose to forgo some features they have, just to focus on the task of writing software as effectively, reliably, and consuming as few resources as possible. </p>
+<span class="Keyword">let</span> <span class="Identifier">session</span> <span class="Operator">=</span> <span class="Identifier">initAgentSession</span><span class="Punctuation">(</span>
+  <span class="Identifier">AgentOptions</span><span class="Punctuation">(</span><span class="Identifier">model</span><span class="Punctuation">:</span> <span class="StringLit">&quot;deepinfra.deepseek-v3.2&quot;</span><span class="Punctuation">)</span><span class="Punctuation">)</span>
+
+<span class="Identifier">session</span><span class="Operator">.</span><span class="Identifier">onEvent</span> <span class="Operator">=</span> <span class="Keyword">proc</span><span class="Punctuation">(</span><span class="Identifier">event</span><span class="Punctuation">:</span> <span class="Identifier">AgentEvent</span><span class="Punctuation">)</span> <span class="Operator">=</span>
+  <span class="Keyword">case</span> <span class="Identifier">event</span><span class="Operator">.</span><span class="Identifier">kind</span>
+  <span class="Keyword">of</span> <span class="Identifier">aevDelta</span><span class="Punctuation">:</span> <span class="Identifier">stdout</span><span class="Operator">.</span><span class="Identifier">write</span> <span class="Identifier">event</span><span class="Operator">.</span><span class="Identifier">text</span>
+  <span class="Keyword">of</span> <span class="Identifier">aevRetry</span><span class="Punctuation">,</span> <span class="Identifier">aevTool</span><span class="Punctuation">:</span> <span class="Identifier">stderr</span><span class="Operator">.</span><span class="Identifier">writeLine</span> <span class="Identifier">event</span><span class="Operator">.</span><span class="Identifier">text</span>
+  <span class="Keyword">else</span><span class="Punctuation">:</span> <span class="Keyword">discard</span>
+
+<span class="Keyword">let</span> <span class="Identifier">reply</span> <span class="Operator">=</span> <span class="Identifier">session</span><span class="Operator">.</span><span class="Identifier">prompt</span><span class="Punctuation">(</span><span class="StringLit">&quot;Run the tests and fix the failure.&quot;</span><span class="Punctuation">)</span>
+<span class="Identifier">echo</span> <span class="Identifier">session</span><span class="Operator">.</span><span class="Identifier">command</span><span class="Punctuation">(</span><span class="StringLit">&quot;:tokens&quot;</span><span class="Punctuation">)</span>
+<span class="Identifier">session</span><span class="Operator">.</span><span class="Identifier">close</span><span class="Punctuation">(</span><span class="Punctuation">)</span></pre></p>
+<p><tt class="docutils literal"><span class="pre">prompt</span></tt> blocks until the model finishes calling tools and returns its reply. Meanwhile, <tt class="docutils literal"><span class="pre">onEvent</span></tt> receives text, reasoning, tool output, retry notices, and usage. <tt class="docutils literal"><span class="pre">promptAsync</span></tt> puts the turn on a library-managed thread and reports failures with <tt class="docutils literal"><span class="pre">aevError</span></tt>; <tt class="docutils literal"><span class="pre">interrupt</span></tt> cancels it. Sessions use the same provider config, filesystem policy, locks, and saved format as the CLI.</p>
+<p>Only one <tt class="docutils literal"><span class="pre">AgentSession</span></tt> may be active in a process, and calls on it are not thread-safe. In an asynchronous server, keep the session on one worker thread and pass prompts and events through queues. This avoids sharing session state across threads.</p>
+<p><tt class="docutils literal"><span class="pre">example/webserve.nim</span></tt> is the complete example: the session stays on a worker thread and events reach the browser through server-sent events.</p>
+
+<h2 id="contributing">Contributing</h2><p>Developer API documentation is generated at <tt class="docutils literal"><span class="pre">docs/dev/threecode.html</span></tt>:</p>
+<p><pre class="listing">nimble devdocs</pre></p>
+<p>Useful contributions include tested provider/model combinations and bug fixes with a clear reproduction. Terminal rendering bugs need a visual PTY test that shows the bad frame before the fix. A test that cannot show the bug has not reproduced it yet.</p>
+
+<h2 id="prior-art">Prior art</h2><p>3code is influenced by Claude Code, Goose, Pi, and Codex. It chooses different tradeoffs, but the family resemblance is intentional. As a European, using Claude Code can feel like driving a turbocharged Ford F-150 to buy a pack of gum. It is still a fine truck.</p>
+<p>3code omits features that do not help it write software reliably with fewer resources. Economy is the feature, not a billing surprise. </p>
 
 
 
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-07-23 14:04:39 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-14 08:26:06 UTC</small>
       </div>
     </div>
   </div>
