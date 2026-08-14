@@ -376,6 +376,21 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("cheaperinference", "minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, false, 204_800),
     ("cheaperinference", "qwen3-6-35b-a3b", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, false, 262_144),
     ("cheaperinference", "qwen3.6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, false, 128_000),
+
+    # crof (crof.ai aggregator; bare model ids, params harvested by
+    # tools/harvest_models.nim from sibling entries)
+    ("crof", "deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
+    ("crof", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("crof", "deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("crof", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("crof", "deepseek-v4-pro-0813", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("crof", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
+    ("crof", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("crof", "kimi-k2.6", "kimi", "2", "6", "on", 0.6, 8192, false, 262_144),
+    ("crof", "kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
+    ("crof", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, false, 1_000_000),
+    ("crof", "mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, false, 1_000_000),
+    ("crof", "qwen3.6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, false, 128_000),
     ("nvidia", "poolside/laguna-xs-2.1", "laguna", "2", "xs", "on", 0.2, 8192, false, 262_144),
     ("nvidia", "thinkingmachines/inkling", "inkling", "1", "", "medium", 0.2, 8192, false, 256_000),
     ("novita", "moonshotai/kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
