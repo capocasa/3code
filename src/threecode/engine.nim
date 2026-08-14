@@ -210,7 +210,15 @@ proc writeRaw*(bytes: string) {.gcsafe.} =
 proc beginEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor;
                         ready: bool; frame: FooterFrame) =
   let termW = try: terminalWidth() except CatchableError: 0
-  let rows = frame.rowsAboveEditor(termW)
+  var rows = frame.rowsAboveEditor(termW)
+  # The reserved rows may only be walked up when they are actually live
+  # chrome. After a reserveFooter=false commit (initial-prompt submit,
+  # oneshot clear) the cursor sits flush below the committed item: no gap
+  # row exists yet, and walking up `rows` here would erase the committed
+  # line above. Paint in place instead; the next footer paint creates the
+  # gap in the editor row's place.
+  if rows > e.paintedFooterRows:
+    rows = e.paintedFooterRows
   termio.beginEditorRedraw(ed, ready, frame.footerFrameBytes(termW),
                            rows)
   e.editorRedrawPending = true
@@ -572,6 +580,14 @@ proc noteFooterPainted*(footerRowsAboveEditor: int) {.gcsafe.} =
   ## knows the reserved gap row is live chrome.
   {.cast(gcsafe).}:
     defaultEngine.noteFooterPainted(footerRowsAboveEditor)
+
+proc noteNoFooter*() {.gcsafe.} =
+  ## Register that no footer rows are live chrome right now. Used by the
+  ## modal wizard, which paints its field prompts flush at the cursor with
+  ## none of the persistent prompt's reserved gap row; leaving the stale
+  ## count in place makes the next transcript commit erase a scrollback row.
+  {.cast(gcsafe).}:
+    defaultEngine.noteNoFooter()
 
 # Commit the transcript blob as real scrollback, with the one blank
 # separator row owned here (see `appendTranscript` for the contract).

@@ -79,7 +79,7 @@ suite "first prompt overwrite math":
     tty.expect "❯"
     tty.drain(300)
     # Must remain visible after the turn settles (token bar now present).
-    tty.expectRowAppearsOnce("UNIQUE-FIRST-ANSWER-MARKER visible forever")
+    tty.expectRowAppearsOnce("● UNIQUE-FIRST-ANSWER-MARKER visible forever")
     tty.expectRowAppearsOnce("❯ hello first turn")
     # No multi-blank-run from over-erase / under-count gap math.
     let rows = tty.frames[^1].rows

@@ -2035,6 +2035,17 @@ proc inputThreadProc() {.thread.} =
           edPtr[].deferSubmit = true
           edPtr[].submitIcon = DeferredSubmitMarker
           edPtr[].wizardMode = false
+          # The wizard paints its field prompts flush at the cursor with
+          # no reserved gap row, so the persistent prompt's gap count
+          # (noteFooterPainted(1) from startup / command commits) is a
+          # lie while the wizard owns the terminal: a transcript commit
+          # that trusts it walks up one row too many and erases the
+          # wizard's last status line (`verifying... ok`). Restore the
+          # persistent prompt string as well so a mid-hold repaint can
+          # never flash the stale field prompt.
+          edPtr[].prompt = EditorPromptBytes
+          edPtr[].promptW = visualCols(EditorPromptBytes)
+          termengine.noteNoFooter()
         acquire wizardRequestLock
         try:
           wizardResponse = resp
