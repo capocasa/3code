@@ -395,6 +395,7 @@ proc main() =
     if result == "":
       result = auth_openai.subscriptionTokenFor(provider)
   extraHeadersImpl = chatgptExtraHeaders
+  api.codexModelsHook = auth_openai.fetchCodexModels
   api.bearerHook = subscriptionBearer
   api.extraHeadersHook = extraHeadersFor
 

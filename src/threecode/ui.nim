@@ -300,6 +300,13 @@ proc fetchKeyFor(name, key: string): string =
     if t != "": return t
   key
 
+proc modelsListUrl(name, url: string): string =
+  ## Where /models is fetched from for this provider. The chatgpt
+  ## subscription token is only valid against the Codex backend; it 403s
+  ## on api.openai.com.
+  if chatgptProvider(name): auth_openai.CodexApiUrl
+  else: url
+
 proc ensureUniqueName(name: string) =
   for pr in activeProviders:
     if pr.name == name:
@@ -432,6 +439,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
           result = auth_openai.subscriptionTokenFor(provider)
     if extraHeadersImpl == nil:
       extraHeadersImpl = chatgptExtraHeaders
+    api.codexModelsHook = auth_openai.fetchCodexModels
     api.bearerHook = subscriptionBearer
     api.extraHeadersHook = extraHeadersFor
   elif isUrl:
@@ -533,7 +541,7 @@ proc promptNewProvider*(editor: var minline.LineEditor): ProviderRec =
         raise newException(minline.InputCancelled, "cancelled by user")
   hint "  fetching models...   ", resetStyle
   stdout.flushFile
-  let (available, fetchErr) = fetchModels(url, fetchKeyFor(name, key))
+  let (available, fetchErr) = fetchModels(modelsListUrl(name, url), fetchKeyFor(name, key))
   let sortedAvailable = available.sorted
   let lookup = shortToFull(sortedAvailable)
   if fetchErr.len > 0:
@@ -619,7 +627,7 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     let key = if newKey == "": existing.key else: newKey
     hint "  fetching models...   ", resetStyle
     stdout.flushFile
-    let (available, fetchErr) = fetchModels(url, fetchKeyFor(name, key))
+    let (available, fetchErr) = fetchModels(modelsListUrl(name, url), fetchKeyFor(name, key))
     let sortedAvailable = available.sorted
     let prevCb = editor.completionCallback
     editor.completionCallback = proc(ed: LineEditor): seq[string] =

@@ -20,6 +20,11 @@ import types, util, prompts, streamexec, netthread, auth_openai
 type
   VerifyProfileHook* = proc(p: Profile): (bool, string) {.closure.}
   FetchModelsHook* = proc(url, key: string): (seq[string], string) {.closure.}
+  CodexModelsHook* = proc(url: string): seq[string] {.closure.}
+    ## Model slugs from the ChatGPT Codex backend. The subscription OAuth
+    ## token is not valid against api.openai.com/v1/models (403,
+    ## api.model.read), so chatgpt wizards list via the auth_openai
+    ## implementation installed as this hook instead.
   BearerHook* = proc(p: Profile): string {.closure.}
   ExtraHeadersHook* = proc(p: Profile): seq[(string, string)] {.closure.}
     ## Extra request headers for a profile (ChatGPT Codex backend needs
@@ -32,6 +37,7 @@ type
 var
   verifyProfileHook*: VerifyProfileHook
   fetchModelsHook*: FetchModelsHook
+  codexModelsHook*: CodexModelsHook
   bearerHook*: BearerHook
   extraHeadersHook*: ExtraHeadersHook
   extraHeadersProfile*: Profile
@@ -2738,6 +2744,8 @@ proc fetchModels*(url, key: string): (seq[string], string) =
   when providerStub:
     if isStubUrl(url):
       return (stubModels(), "")
+  if codexModelsHook != nil and url == auth_openai.CodexApiUrl:
+    return (codexModelsHook(url), "")
   try:
     let client = newHttpClient(timeout = 20_000, userAgent = "3code",
                                sslContext = bundledSslContext())
