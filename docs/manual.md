@@ -105,8 +105,10 @@ The first field accepts:
 - `supergrok` for SuperGrok or X Premium+ login
 - `chatgpt` for ChatGPT Plus/Pro login
 
-The wizard fetches the provider's models, checks your selections in parallel,
-and saves the ones that work. Press Esc to stop verification.
+The wizard lists the provider's known-good models (a curated registry of
+combinations 3code has tested), checks your selections in parallel, and
+saves the ones that work. With `--experimental` the wizard queries the
+provider's models endpoint instead. Press Esc to stop verification.
 
 ### Run your first prompt
 

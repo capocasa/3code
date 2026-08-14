@@ -148,6 +148,9 @@ suite "provider wizard configuration":
   test "edit fetches chatgpt models from the codex backend":
     # The chatgpt OAuth token 403s on api.openai.com/v1/models
     # (api.model.read); the wizard must list via the Codex backend hook.
+    # Regular mode never calls /models (curated list only), so this runs
+    # under --experimental where the endpoint is consulted.
+    experimentalEnabled = true
     activeProviders = @[
       ProviderRec(name: "chatgpt", url: "https://api.openai.com/v1",
                   auth: "oauth", models: @["gpt-5.4"])
@@ -160,7 +163,7 @@ suite "provider wizard configuration":
         (@["gpt-5.4", "gpt-5.5"], "")
       else:
         (@[], "HTTP 403")
-    inputs = @["", "", "gpt-5.5"]
+    inputs = @["", "", "", "gpt-5.5"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -433,13 +436,17 @@ suite "provider wizard configuration":
     check "gpt-oss-120b" in capturedModels
 
   when not defined(windows):
-    test "edit wizard lists models sorted alphabetically":
+    test "edit wizard lists curated models, no /models fetch":
       activeProviders = @[
         ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
                     key: "nvapi-old", models: @["z-ai/glm-5.2"])
       ]
       activeCurrent = "nvidia.z-ai/glm-5.2"
       inputs = @["", "", "gpt-oss-120b"]
+      var fetchCount = 0
+      fetchModelsHook = proc(url, key: string): (seq[string], string) =
+        inc fetchCount
+        (nvidiaModels(), "")
       var editor: LineEditor
       var prof = buildProfile(activeCurrent, activeProviders, "")
       var messages = newJArray()
@@ -461,18 +468,19 @@ suite "provider wizard configuration":
       let capturedOutput = readFile(capturePath)
       try: removeFile(capturePath) except OSError: discard
 
-      # The models should be listed in sorted order in the edit wizard too.
+      # Regular mode lists the curated known-good models (KnownGoodCombos
+      # order), not the endpoint's /models payload.
       var listedModels: seq[string]
       for line in capturedOutput.splitLines:
         let stripped = stripAnsiCsi(line.strip)
         # Model lines start with "    " (4 spaces) and contain a model name
         if stripped.len > 4 and stripped[0..3] == "    " and
            stripped[4..^1].shortModel() != "" and
-           stripped[4..^1] != "5 available" and
+           stripped[4..^1] != "8 available" and
            stripped[4..^1] != "verifying..." and
            stripped[4..^1] != "ok" and
            stripped[4..^1] != "updated nvidia" and
            stripped[4..^1] != "editing 'nvidia' (enter to keep, ctrl+c to abort)":
           listedModels.add stripped[4..^1].shortModel()
-      check listedModels == @["minimax-m2.5", "minimax-m2.7", "gpt-oss-120b",
-                             "gpt-oss-20b", "glm-5.2"]
+      check listedModels == curatedFor("nvidia").mapIt(shortModel(it))
+      check fetchCount == 0

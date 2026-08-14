@@ -645,19 +645,31 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     let newKey = readOptional(editor,
       "  api key [keep existing] : ", hidden = true)
     let key = if newKey == "": existing.key else: newKey
-    hint "  fetching models...   ", resetStyle
-    stdout.flushFile
-    let (available, fetchErr) = fetchModels(modelsListUrl(name, url), fetchKeyFor(name, key))
-    let sortedAvailable = available.sorted
+    let sortedAvailable =
+      if experimentalEnabled:
+        hint "  fetching models...   ", resetStyle
+        stdout.flushFile
+        let (available, fetchErr) = fetchModels(modelsListUrl(name, url),
+                                               fetchKeyFor(name, key))
+        if fetchErr.len > 0:
+          errLn "unavailable — ", fetchErr
+        elif available.len == 0:
+          hintLn "  unavailable — enter manually", resetStyle
+        available.sorted
+      else:
+        # Regular mode trusts the known-good registry, not /models.
+        # Endpoints routinely list stale ids (or omit live ones), so the
+        # wizard offers exactly the curated combos for this provider.
+        let curated = curatedFor(name)
+        if curated.len == 0:
+          hintLn "  no known-good models for this provider; enable --experimental",
+            resetStyle
+        curated
     let prevCb = editor.completionCallback
     editor.completionCallback = proc(ed: LineEditor): seq[string] =
       sortedAvailable.mapIt(shortModel(it))
     defer: editor.completionCallback = prevCb
-    if fetchErr.len > 0:
-      errLn "unavailable — ", fetchErr
-    elif sortedAvailable.len == 0:
-      hintLn "  unavailable — enter manually", resetStyle
-    else:
+    if sortedAvailable.len > 0:
       hintLn &"  {sortedAvailable.len} available", resetStyle
       for m in sortedAvailable:
         hintLn "    ", resetStyle, shortModel(m)

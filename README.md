@@ -80,6 +80,13 @@ A working example lives in [`example/webserve.nim`](example/webserve.nim): a web
 
 **Unreleased** - OAuth providers, Responses API, sandbox and network controls
 
+- **Wizard trusts the registry, not `/models`.** Provider model lists in
+  regular mode come from the known-good registry instead of the provider's
+  models endpoint, which often lags reality (a model can be live on
+  `/chat/completions` while missing from `/models`). With `--experimental`
+  the wizard still queries the endpoint as before. GLM-5.3 joins the
+  registry for `zai` and `zaicode` with the 5.2-style `high`/`max` effort
+  knob and 1M context.
 - **ChatGPT and SuperGrok login.** `:provider add` accepts `chatgpt` for
   ChatGPT Plus/Pro and `supergrok` for SuperGrok or X Premium+. Browser OAuth
   stores refreshable tokens under `$XDG_DATA_HOME/3code/auth/`. Subscription

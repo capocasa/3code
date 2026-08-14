@@ -53,11 +53,13 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("zai", "glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
     ("zai", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("zai", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("zai", "glm-5.3", "glm", "5", "3", "high", 0.2, 8192, false, 1_000_000),
     ("zaicode", "glm-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
     ("zaicode", "glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
     ("zaicode", "glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
     ("zaicode", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("zaicode", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("zaicode", "glm-5.3", "glm", "5", "3", "high", 0.2, 8192, false, 1_000_000),
     # qwen is out
     ("deepinfra", "zai-org/GLM-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("deepinfra", "zai-org/GLM-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
@@ -2570,10 +2572,11 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
           return @["minimal", "low", "medium", "high"]
         return @ReasoningLevels
       if fam == "glm":
-        # 5.2 (variant "2") exposes a graded effort knob (high/max); older
-        # GLM is on/off only. Variant encodes the minor version digit
-        # (4.7 -> "7", 5.1 -> "1", 5.2 -> "2").
-        if combo.version == "5" and combo.variant == "2": return @["off", "high", "max"]
+        # 5.2+ (variant "2", "3") exposes a graded effort knob
+        # (high/max); older GLM is on/off only. Variant encodes the minor
+        # version digit (4.7 -> "7", 5.1 -> "1", 5.2 -> "2").
+        if combo.version == "5" and combo.variant in ["2", "3"]:
+          return @["off", "high", "max"]
         return @["off", "on"]
       if fam in ["laguna", "kimi", "qwen", "longcat", "minimax", "mimo", "ling"]:
         # These families have no graded effort knob on the OpenAI-compatible
