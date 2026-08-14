@@ -181,6 +181,13 @@ for you. Sits beside an API-key `openai` provider; switch with
 internal, unversioned surface meant for first-party clients; using it
 with 3code is your responsibility.
 
+OpenAI reasoning levels are per-model, not a uniform low/medium/high:
+o-series takes low/medium/high, gpt-5.0 minimal..high, 5.1+ adds none,
+5.4/5.5 add xhigh, 5.6 adds max (and drops minimal). The pro tiers
+reason unconditionally (5.5-pro: medium/high/xhigh, 5-pro: high only),
+and gpt-4.x has no knob. `:reasoning` lists exactly what the active
+model accepts.
+
 Add a provider inside the REPL:
 
 ```

@@ -19,7 +19,7 @@
 ## intended for first-party clients; third-party use is the user's
 ## responsibility.
 
-import std/[atomics, base64, json, os, posix, strutils, times]
+import std/[atomics, base64, httpclient, json, os, posix, strutils, times]
 import oauth, util
 
 const
@@ -142,3 +142,32 @@ proc subscriptionTokenFor*(provider: string): string =
   case provider.toLowerAscii
   of "chatgpt": accessToken()
   else: ""
+
+proc fetchCodexModels*(url: string): seq[string] {.gcsafe.} =
+  ## Model slugs from the Codex backend, per-account when the
+  ## `ChatGPT-Account-Id` header is present. The subscription token is
+  ## not valid against api.openai.com/v1/models; the wizards list
+  ## through here instead (installed as `api.codexModelsHook`).
+  let client = newHttpClient(timeout = 20_000, userAgent = "3code",
+                             sslContext = bundledSslContext())
+  defer: client.close()
+  client.headers = newHttpHeaders({
+    "Authorization": "Bearer " & accessToken(),
+    "ChatGPT-Account-Id": accountId(),
+    "originator": "3code",
+    "OpenAI-Beta": "responses=experimental"})
+  let resp = client.get(url & "/models?client_version=1.0.0")
+  if resp.code.int != 200: return
+  let j = try: parseJson(resp.body) except CatchableError: return
+  let arr = if j.kind == JArray: j
+            elif j{"models"}.kind == JArray: j["models"]
+            elif j{"data"}.kind == JArray: j["data"]
+            else: return
+  for item in arr:
+    if item.kind == JString:
+      result.add item.getStr
+    elif item.kind == JObject:
+      let slug = item{"slug"}.getStr(item{"id"}.getStr)
+      let vis = item{"visibility"}.getStr
+      if slug != "" and vis.toLowerAscii notin ["hide", "hidden"]:
+        result.add slug

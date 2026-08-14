@@ -1,5 +1,5 @@
 import std/[json, monotimes, os, sequtils, strutils, times, unittest]
-import threecode/[api, config, minline, types, ui]
+import threecode/[api, auth_openai, config, minline, types, ui]
 
 proc stripAnsiCsi(line: string): string =
   var i = 0
@@ -144,6 +144,34 @@ suite "provider wizard configuration":
     check activeProviders.len == 1
     check activeProviders[0].name == "nvidia"
     check activeCurrent == "nvidia.openai/gpt-oss-120b"
+
+  test "edit fetches chatgpt models from the codex backend":
+    # The chatgpt OAuth token 403s on api.openai.com/v1/models
+    # (api.model.read); the wizard must list via the Codex backend hook.
+    activeProviders = @[
+      ProviderRec(name: "chatgpt", url: "https://api.openai.com/v1",
+                  auth: "oauth", models: @["gpt-5.4"])
+    ]
+    activeCurrent = "chatgpt.gpt-5.4"
+    var fetchedUrls: seq[string]
+    fetchModelsHook = proc(url, key: string): (seq[string], string) =
+      fetchedUrls.add url
+      if url == auth_openai.CodexApiUrl:
+        (@["gpt-5.4", "gpt-5.5"], "")
+      else:
+        (@[], "HTTP 403")
+    inputs = @["", "", "gpt-5.5"]
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider edit chatgpt", messages, session, prof,
+                          editor)
+
+    check fetchedUrls == @[auth_openai.CodexApiUrl]
+    check activeProviders[0].models == @["gpt-5.5"]
+    check verifiedModels == @["gpt-5.5"]
 
   test "edit prompts for model before verifying updated provider":
     activeProviders = @[

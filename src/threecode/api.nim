@@ -20,6 +20,11 @@ import types, util, prompts, streamexec, netthread, auth_openai
 type
   VerifyProfileHook* = proc(p: Profile): (bool, string) {.closure.}
   FetchModelsHook* = proc(url, key: string): (seq[string], string) {.closure.}
+  CodexModelsHook* = proc(url: string): seq[string] {.closure.}
+    ## Model slugs from the ChatGPT Codex backend. The subscription OAuth
+    ## token is not valid against api.openai.com/v1/models (403,
+    ## api.model.read), so chatgpt wizards list via the auth_openai
+    ## implementation installed as this hook instead.
   BearerHook* = proc(p: Profile): string {.closure.}
   ExtraHeadersHook* = proc(p: Profile): seq[(string, string)] {.closure.}
     ## Extra request headers for a profile (ChatGPT Codex backend needs
@@ -32,6 +37,7 @@ type
 var
   verifyProfileHook*: VerifyProfileHook
   fetchModelsHook*: FetchModelsHook
+  codexModelsHook*: CodexModelsHook
   bearerHook*: BearerHook
   extraHeadersHook*: ExtraHeadersHook
   extraHeadersProfile*: Profile
@@ -1792,6 +1798,12 @@ proc ensureReasoningField(messages: JsonNode) =
 proc applyGptOssReasoning(p: Profile, body: JsonNode) =
   body["reasoning_effort"] = %p.reasoning
 
+proc applyGptReasoning(p: Profile, body: JsonNode) =
+  ## First-party openai / chatgpt chat-completions knob. The ladder is
+  ## per-model (none/minimal/low/medium/high/xhigh/max, see
+  ## `knownGoodReasonings`), all passed through as `reasoning_effort`.
+  body["reasoning_effort"] = %p.reasoning
+
 
 proc applyGlmReasoning(p: Profile, body: JsonNode) =
   ## Wire mapping for GLM reasoning. Values are `off`/`on` (4.7/5/5.1) or
@@ -2114,7 +2126,7 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   case p.family
   of "laguna": applyLagunaReasoning(p, body)
   of "gpt-oss": applyGptOssReasoning(p, body)
-  of "gpt": applyGptOssReasoning(p, body)
+  of "gpt": applyGptReasoning(p, body)
   of "glm": applyGlmReasoning(p, body)
   of "deepseek": applyDeepseekReasoning(p, body)
   of "minimax": applyMinimaxReasoning(p, body)
@@ -2738,6 +2750,8 @@ proc fetchModels*(url, key: string): (seq[string], string) =
   when providerStub:
     if isStubUrl(url):
       return (stubModels(), "")
+  if codexModelsHook != nil and url == auth_openai.CodexApiUrl:
+    return (codexModelsHook(url), "")
   try:
     let client = newHttpClient(timeout = 20_000, userAgent = "3code",
                                sslContext = bundledSslContext())
