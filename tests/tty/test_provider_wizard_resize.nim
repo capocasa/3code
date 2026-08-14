@@ -73,7 +73,9 @@ suite "provider wizard resize":
     tty.send "\r"
     tty.expect "name [stub]"
     tty.send "\r"            # keep name
-    tty.expect "api key"
+    tty.expect "url ["
+    tty.send "\r"            # keep url
+    tty.expect "api key [keep existing]"
     tty.send "\r"            # keep key
     tty.expect "models [stub-model]"
 
@@ -91,10 +93,15 @@ suite "provider wizard resize":
     tty.drain(300)
 
     let screen = tty.screenText()
-    check screen.countRowsContaining("models [stub-model]") <= 2
+    # Exactly one entry line, holding the typed text. Pre-fix each
+    # keystroke stacked another `models [stub-model]` row above it.
+    check screen.countRowsContaining("models [stub-model]") == 1
     check "models [stub-model]  : xyz" in screen.replace("\r", "")
 
-    # Leave the wizard cleanly: ctrl+c, then :q must still work.
+    # Leave the wizard cleanly: first ctrl+c clears the typed text,
+    # the second (empty line) cancels the wizard; then :q must work.
+    tty.send "\x03"
+    tty.drain(200)
     tty.send "\x03"
     tty.drain(300)
     tty.expect "❯"
