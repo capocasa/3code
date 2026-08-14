@@ -159,6 +159,34 @@ suite "prompts: setup — minimax":
   test "falls back to level-based set for unsupported family":
     check defaultReasoningsFor("x", "y", "llama") == @ReasoningLevels
 
+suite "prompts: setup — gpt":
+  test "returns the Sol preamble with the three E's":
+    let p = Profile(name: "openai.gpt-5.6", url: "x", key: "k",
+                    model: "gpt-5.6", family: "gpt")
+    let s = setup(p)
+    check "You are Sol in 3code" in s.prompt
+    check "Token economy" in s.prompt
+    check "Computer economy" in s.prompt
+    check "Ergonomics" in s.prompt
+    check "Own the task end to end" in s.prompt
+    check "Do not ask to confirm a plan" in s.prompt
+    check "Never yield with a requested subtask pending" in s.prompt
+    check "Kimi" notin s.prompt
+
+  test "tools are glmAndQwenTools (bash/read/write/patch)":
+    let p = Profile(name: "openai.gpt-5.6", url: "x", key: "k",
+                    model: "gpt-5.6", family: "gpt")
+    let s = setup(p)
+    check s.tools.kind == JArray
+    check s.tools.len == 8
+    var foundBash = false
+    var foundPatch = false
+    for tool in s.tools:
+      foundBash = foundBash or tool{"function"}{"name"}.getStr == "bash"
+      foundPatch = foundPatch or tool{"function"}{"name"}.getStr == "patch"
+    check foundBash
+    check foundPatch
+
 suite "prompts: setup — kimi":
   test "returns the Kimi preamble":
     let p = Profile(name: "opencode.kimi-k2.7-code", url: "x", key: "k",
