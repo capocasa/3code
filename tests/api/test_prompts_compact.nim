@@ -36,6 +36,33 @@ suite "prompts: knownGoodFamily":
   test "Hetzner DeepSeek-V4-Flash-0731 is known-good":
     check knownGoodFamily("hetzner", "DeepSeek-V4-Flash-0731") == "deepseek"
 
+  test "DeepSeek dated releases are known-good across providers":
+    check knownGoodFamily("openrouter", "deepseek/deepseek-v4-flash-0731") ==
+      "deepseek"
+    check knownGoodFamily("openrouter", "deepseek/deepseek-v4-pro-0813") ==
+      "deepseek"
+    check knownGoodFamily("fireworks",
+      "accounts/fireworks/models/deepseek-v4-flash-0731") == "deepseek"
+    check knownGoodFamily("nvidia", "deepseek-ai/deepseek-v4-flash-0731") ==
+      "deepseek"
+    check knownGoodFamily("nanogpt", "deepseek/deepseek-v4-pro-0813") ==
+      "deepseek"
+
+  test "approved DeepSeek service suffixes are known-good":
+    check knownGoodFamily("opencode", "deepseek-v4-flash-free") == "deepseek"
+    check knownGoodFamily("venice", "deepseek-v4-flash-0731-fast") ==
+      "deepseek"
+
+  test "unverified DeepSeek routing aliases stay experimental":
+    check knownGoodFamily("nanogpt", "deepseek/deepseek-v4-flash-latest") == ""
+    check knownGoodFamily("nanogpt",
+      "deepseek/deepseek-v4-flash-0731-cheaper") == ""
+    check knownGoodFamily("nanogpt",
+      "deepseek/deepseek-v4-flash-0731:thinking") == ""
+    check knownGoodFamily("venice", "e2ee-deepseek-v4-flash") == ""
+    check knownGoodFamily("openrouter",
+      "deepseek/deepseek-v4-flash-20260731") == ""
+
   test "Hetzner Kimi-K2.7-Code is known-good":
     check knownGoodFamily("hetzner", "Kimi-K2.7-Code") == "kimi"
 

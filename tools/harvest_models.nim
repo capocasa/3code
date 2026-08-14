@@ -106,9 +106,7 @@ proc fetchModels(url, key: string): seq[string] =
 
 # --- model id normalization -------------------------------------------------
 
-const VersionMarkers = ["pro", "mini", "nano", "flash", "turbo", "air",
-  "lite", "max", "plus", "free", "latest", "fast", "preview", "instruct",
-  "thinking", "coder", "highspeed"]
+const HarvestSuffixes = ["fast", "free"]
 
 proc shortId(id: string): string =
   ## Bare model id: basename minus provider/owner prefixes, with dots
@@ -134,11 +132,28 @@ proc norm(s: string): string =
   for c in s.toLowerAscii:
     if c in {'a'..'z', '0'..'9'}: result.add c
 
+proc baseModelId(id: string): string =
+  ## Remove only suffixes approved for harvesting. Dated releases and
+  ## service tiers are distinct registry entries, but inherit parameters
+  ## from their base model. Routing aliases such as `latest`, `cheaper`,
+  ## `thinking`, and `e2ee` deliberately do not match.
+  result = shortId(id)
+  while true:
+    let dash = result.rfind('-')
+    if dash < 0: break
+    let suffix = result[dash + 1 .. ^1]
+    let isRelease = suffix.len == 4 and
+      suffix.allCharsInSet({'0'..'9'})
+    if suffix in HarvestSuffixes or isRelease:
+      result.setLen dash
+    else:
+      break
+
 proc isVersionVariant(a, b: string): bool =
-  ## True when a and b are the same id up to dots vs dashes in the
-  ## version part: `glm-4.7` vs `glm-47`, `kimi-k2.6` vs `kimi-k2-6`.
-  let x = a.replace("-", "").replace(".", "")
-  let y = b.replace("-", "").replace(".", "")
+  ## True when a and b are the same id up to approved release/service
+  ## suffixes and dots vs dashes in the version part.
+  let x = baseModelId(a).replace("-", "").replace(".", "")
+  let y = baseModelId(b).replace("-", "").replace(".", "")
   x == y
 
 proc buildRegistryIndex(): Table[string, seq[int]] =
@@ -182,8 +197,13 @@ proc fmtTokens(n: int): string =
   groups.join("_")
 
 proc renderEntry(prov, id: string, src: KnownGoodCombo): string =
+  var variant = src.variant
+  let sid = shortId(id)
+  for suffix in HarvestSuffixes:
+    if sid.endsWith("-" & suffix) and not variant.endsWith("-" & suffix):
+      variant.add "-" & suffix
   "(\"$1\", \"$2\", \"$3\", \"$4\", \"$5\", \"$6\", $7, $8, $9, $10)," % [
-    prov, id, src.family, src.version, src.variant, src.reasoning,
+    prov, id, src.family, src.version, variant, src.reasoning,
     fmtFloat(src.temperature), $src.maxTokens, $src.xmlToolCalls,
     fmtTokens(src.contextWindow)]
 
