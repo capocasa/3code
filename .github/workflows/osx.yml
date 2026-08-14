@@ -2,7 +2,7 @@ name: OSX
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, osx-probe]
     tags: ['[0-9]+.[0-9]+.[0-9]+']
 
 jobs:
