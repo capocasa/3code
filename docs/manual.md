@@ -106,9 +106,9 @@ The first field accepts:
 - `chatgpt` for ChatGPT Plus/Pro login
 
 The wizard lists the provider's known-good models (a curated registry of
-combinations 3code has tested), checks your selections in parallel, and
-saves the ones that work. With `--experimental` the wizard queries the
-provider's models endpoint instead. Press Esc to stop verification.
+combinations 3code has tested) and saves your selection as-is. With
+`--experimental` the wizard queries the provider's models endpoint and
+verifies each selection with a 1-token call; press Esc to stop verification.
 
 ### Run your first prompt
 

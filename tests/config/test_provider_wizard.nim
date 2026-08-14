@@ -80,7 +80,7 @@ suite "provider wizard configuration":
     try: removeDir(tempConfig)
     except OSError: discard
 
-  test "initial bootstrap prompts for model before verifying detected provider":
+  test "initial bootstrap saves without a verification ping":
     inputs = @["nvapi-initial", "gpt-oss-120b"]
     var editor: LineEditor
 
@@ -89,7 +89,7 @@ suite "provider wizard configuration":
     check prof.name == "nvidia.openai/gpt-oss-120b"
     check activeProviders.len == 1
     check activeProviders[0].models == @["openai/gpt-oss-120b"]
-    check verifiedModels == @["openai/gpt-oss-120b"]
+    check verifiedModels.len == 0
 
   test "additional add prompts for model before verifying detected provider":
     activeProviders = @[
@@ -109,7 +109,7 @@ suite "provider wizard configuration":
     check activeProviders[1].name == "nvidia"
     check activeProviders[1].models == @["openai/gpt-oss-20b"]
     check activeCurrent == "groq.openai/gpt-oss-20b"
-    check verifiedModels == @["openai/gpt-oss-20b"]
+    check verifiedModels.len == 0
 
   test "add accepts provider name then api key":
     inputs = @["nvidia", "nvapi-named", "gpt-oss-120b"]
@@ -194,11 +194,12 @@ suite "provider wizard configuration":
     check activeProviders.len == 1
     check activeProviders[0].models == @["openai/gpt-oss-120b"]
     check activeCurrent == "nvidia.openai/gpt-oss-120b"
-    check verifiedModels == @["openai/gpt-oss-120b"]
+    check verifiedModels.len == 0
 
   test "add verifies every entered model and keeps only the ones that pass":
-    # A failed model is a warning, not a blocker: the provider is saved
-    # with the models that verified.
+    # Experimental mode still verifies; a failed model is a warning, not
+    # a blocker: the provider is saved with the models that verified.
+    experimentalEnabled = true
     inputs = @["nvapi-add", "gpt-oss-120b gpt-oss-20b"]
     verifyProfileHook = proc(p: Profile): (bool, string) =
       verifiedModels.add p.model
@@ -216,6 +217,7 @@ suite "provider wizard configuration":
     check verifiedModels == @["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
 
   test "add re-prompts when every model fails verification":
+    experimentalEnabled = true
     inputs = @["nvapi-add", "gpt-oss-120b", "", "gpt-oss-120b"]
     var attempts = 0
     verifyProfileHook = proc(p: Profile): (bool, string) =
@@ -234,12 +236,13 @@ suite "provider wizard configuration":
     check attempts == 2
 
   test "edit verifies every entered model and keeps only the ones that pass":
+    experimentalEnabled = true
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
                   key: "nvapi-old", models: @["z-ai/glm-5.2"])
     ]
     activeCurrent = "nvidia.z-ai/glm-5.2"
-    inputs = @["", "", "gpt-oss-120b gpt-oss-20b"]
+    inputs = @["", "", "", "gpt-oss-120b gpt-oss-20b"]
     verifyProfileHook = proc(p: Profile): (bool, string) =
       verifiedModels.add p.model
       if p.model == "openai/gpt-oss-20b": (false, "HTTP 404")
@@ -256,6 +259,7 @@ suite "provider wizard configuration":
     check activeCurrent == "nvidia.openai/gpt-oss-120b"
 
   test "verification cancel hook aborts the add":
+    experimentalEnabled = true
     inputs = @["nvapi-add", "gpt-oss-120b"]
     wizardVerifyCancelHook = proc(jobDone: proc(): bool {.closure.};
                                   cancelJob: proc() {.closure.}): bool =
@@ -277,6 +281,7 @@ suite "provider wizard configuration":
     # Two slow probes, each ~400ms: sequential would take ~800ms,
     # parallel lands well under that. Uses the threaded path (cancel
     # hook installed) since that is where parallelism matters.
+    experimentalEnabled = true
     inputs = @["nvapi-add", "gpt-oss-120b gpt-oss-20b"]
     wizardVerifyCancelHook = proc(jobDone: proc(): bool {.closure.};
                                   cancelJob: proc() {.closure.}): bool =
