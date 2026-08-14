@@ -195,6 +195,35 @@ suite "api request shaping":
     check knownGoodReasonings("together", "zai-org/GLM-5.1") == @["off", "on"]
     check knownGoodReasonings("together", "zai-org/GLM-5") == @["off", "on"]
 
+  test "glm-5.3 forces thinking: low/high/max, no off":
+    # 5.3 replaced the thinking toggle with a top-level reasoning_effort
+    # knob (z.ai) normalized to reasoning.effort on gateways. Off is gone.
+    check knownGoodReasonings("zaicode", "glm-5.3") == @["low", "high", "max"]
+    check knownGoodReasonings("opencodego", "glm-5.3") == @["low", "high", "max"]
+    block zaiEffort:
+      var body = %*{"stream": true}
+      let p = Profile(name: "zaicode.glm-5.3", family: "glm",
+                      version: "5", variant: "3",
+                      model: "glm-5.3", reasoning: "max")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "max"
+      check "thinking" notin body
+    block zaiOff:
+      var body = %*{"stream": true}
+      let p = Profile(name: "zaicode.glm-5.3", family: "glm",
+                      version: "5", variant: "3",
+                      model: "glm-5.3", reasoning: "off")
+      applyReasoning(p, body)
+      check "thinking" notin body
+      check "reasoning_effort" notin body
+    block gatewayEffort:
+      var body = %*{"stream": true}
+      let p = Profile(name: "opencodego.glm-5.3", family: "glm",
+                      version: "5", variant: "3",
+                      model: "glm-5.3", reasoning: "low")
+      applyReasoning(p, body)
+      check body{"reasoning"}{"effort"}.getStr == "low"
+
   test "hy with empty reasoning sends no wire knob":
     var body = %*{"stream": true}
     let p = Profile(name: "novita.tencent/hy3", family: "hy",

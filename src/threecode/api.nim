@@ -1811,36 +1811,51 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
   ## - `thinking.type` ("enabled"/"disabled") on z.ai's first-party API
   ##   (provider names `zai` / `zai-coding` / `zaicode`), plus
   ##   `thinking.effort` (`high` default, `max` deeper) on GLM-5.2 only.
+  ##   GLM-5.3 replaces both: forced thinking, top-level `reasoning_effort`
+  ##   (`low`/`high`/`max`); `thinking.type: disabled` is a hard error and
+  ##   `thinking.effort` is silently ignored.
   ## - `reasoning_effort` (`high`/`max`) on Together for GLM-5.2; Together
   ##   accepts only those two effort levels and ignores the field on older
   ##   GLM (which think whenever the parameter is absent).
-  ## - `reasoning: {effort: ...}` on OpenRouter for GLM-5.2; OpenRouter maps
-  ##   `high` to high and `max` to its native `xhigh`.
+  ## - `reasoning: {effort: ...}` on OpenRouter for GLM-5.2 (and the
+  ##   OpenCode gateways serving 5.3); OpenRouter maps `high` to high and
+  ##   `max` to its native `xhigh`.
   ## - `chat_template_kwargs.enable_thinking` (bool) on vLLM stacks (nvidia,
   ##   hetzner); other vLLM GLM providers (nebius, deepinfra, fireworks)
   ##   accept the same knob but always think when it's omitted.
   ## Inert stacks (baseten, cerebras) accept nothing and always think, so
   ## `off` is silently a no-op there.
-  # GLM-5.2 is the only GLM with a graded effort knob (variant "2");
-  # every other GLM is on/off. Variant encodes the minor version digit
-  # (4.7 -> "7", 5.1 -> "1", 5.2 -> "2").
+  # GLM-5.2 and 5.3 are the GLMs with a graded effort knob (variants "2"
+  # and "3"); every other GLM is on/off. Variant encodes the minor version
+  # digit (4.7 -> "7", 5.1 -> "1", 5.2 -> "2", 5.3 -> "3").
   let glm52 = p.family == "glm" and p.version == "5" and p.variant == "2"
+  let glm53 = p.family == "glm" and p.version == "5" and p.variant == "3"
   case providerOf(p)
   of "zai", "zai-coding", "zaicode":
-    case p.reasoning
-    of "off": body["thinking"] = %*{"type": "disabled"}
-    of "on": discard
-    of "high": body["thinking"] = %*{"type": "enabled"}
-    of "max": body["thinking"] = %*{"type": "enabled", "effort": "max"}
-    else: discard
+    if glm53:
+      case p.reasoning
+      of "low", "high", "max": body["reasoning_effort"] = %p.reasoning
+      else: discard
+    else:
+      case p.reasoning
+      of "off": body["thinking"] = %*{"type": "disabled"}
+      of "on": discard
+      of "high": body["thinking"] = %*{"type": "enabled"}
+      of "max": body["thinking"] = %*{"type": "enabled", "effort": "max"}
+      else: discard
   of "together":
     if glm52:
       case p.reasoning
       of "off": body["reasoning"] = %*{"enabled": false}
       of "max": body["reasoning_effort"] = %"max"
       else: body["reasoning_effort"] = %"high"
-  of "openrouter":
-    if glm52:
+  of "openrouter", "opencode", "opencodego":
+    if glm53:
+      # 5.3 has no off; gateways normalize to reasoning.effort passthrough
+      case p.reasoning
+      of "low", "high", "max": body["reasoning"] = %*{"effort": p.reasoning}
+      else: discard
+    elif glm52:
       case p.reasoning
       of "off": body["reasoning"] = %*{"enabled": false}
       of "max": body["reasoning"] = %*{"effort": "xhigh"}

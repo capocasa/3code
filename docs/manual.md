@@ -269,6 +269,7 @@ The valid values depend on the model:
 - binary reasoning models use `off` and `on`
 - many models use `low`, `medium`, and `high`
 - GLM 5.2 uses `off`, `high`, and `max`
+- GLM 5.3 uses `low`, `high`, and `max` (thinking cannot be disabled)
 - OpenAI o-series models use `low`, `medium`, and `high`
 - GPT-5.0 uses `minimal`, `low`, `medium`, and `high`
 - GPT-5.1 and later add `none`
