@@ -580,14 +580,16 @@ proc main() =
         # state, carrying the last response's usage so
         # the bar replaces what would otherwise be the last receipt.
         # `pendingHint` is primed so the next user submit converts this
-        # bar into the receipt for that response.
+        # bar into the receipt for that response. Painted through the
+        # fat-prompt runtime so the chrome's height is registered in the
+        # engine: a raw paint leaves `paintedFooterRows` at 0, and every
+        # keystroke repaint then under-walks and stacks a duplicate
+        # gap+bar pair per keypress.
         stdout.write "\n"
         let label = tokenLineLabel(lastUsage, window)
-        let tw = try: terminalWidth() except CatchableError: 0
-        stdout.write barFooterBytes(label, tw)
-        stdout.flushFile
         emitFatPromptEvent setBarEvent(label, hasGap = true)
         emitFatPromptEvent setPendingHintEvent(lastUsage, window, -1)
+        paintResumedBarPrompt(label)
       else:
         paintInitialPrompt(prof)
     else:
