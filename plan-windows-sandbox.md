@@ -108,16 +108,16 @@ Other verified findings from this session:
   %LOCALAPPDATA%\sandwall.
 - CPLW via the mingw-built C helper worked for cmd/msys2 (cplw.c in
   /tmp on host; copy on beck). err 87 appeared late in the session for
-  ALL users after heavy testing (lockout threshold 10 / 10min window is
-  one suspect) - VM was rebooted (shutdown /r) to clear state and ssh
-  never came back: qemu process alive, port 22220 accepts TCP but the
-  ssh banner times out, >1h. The qemu monitor socket lives outside
-  this sandbox's allowed paths so the VM cannot be reset from here.
-  NEXT CONTEXT: get the VM back (host-side: quickemu beck restart or
-  qemu monitor system_reset; the user may need to look at the SDL
-  window), then re-run the cplw matrix as the NON-ADMIN dedicated user
-  (net localgroup administrators <user> /delete first), then implement
-  the dedicated-user dual-spawn backend in rtoken.nim:
+  stale deployed cplw.exe on beck (rebuilt + redeployed = works again;
+  the real cause was never the API). RESOLVED understanding: CPLW from
+  the session-0 ssh context gives console children 0xC0000142
+  (conhost allocation denied for non-admin users in session 0) -
+  VERIFIED non-console children run fine as the non-admin dedicated
+  user from session 0 (guichild.exe test: combo 0 OK, exit 0, output
+  file written). In production 3code spawns from the INTERACTIVE
+  session with named-pipe stdio (streamexec), so the console issue is
+  a validation-environment artifact. sshd is now AUTO_START on beck.
+  Implement the dedicated-user backend:
 
 In-tree state: COMMITTED 22626d4 on sandwall main (rtoken backend with
 F1 user-SID removal + F2 LUA_TOKEN drop + ACCESS_MODE order fix;
@@ -161,14 +161,23 @@ policy files sw-pol*.txt in ~, WFP fences installed, VM rebooted
    https works as dedicated user instead - folded into the new backend.
 4. [x] ACCESS_MODE deny/revoke swap fixed (bonus find); deny-narrowing
    verified working incl. rollback.
-4b. [ ] NEW BACKEND (replaces steps 4-7 shape): dedicated sandbox user +
-   CreateProcessWithLogonW (lpDesktop winsta0\\default), stamping the
-   USER SID (not synthetic) on writable roots + traverse grants on
-   ancestors; keep the WFP fence keyed on that user for net rules;
-   3code wall setup-windows becomes REQUIRED on first run (docs +
-   --help). Validate: msys2 bash matrix, write deny outside grants,
-   https via schannel, deny-narrowing via per-user DENY ACEs (swap in
-   ACL stamping target SID).
+4b. [ ] NEW BACKEND: dedicated sandbox user + CreateProcessWithLogonW
+   (lpDesktop winsta0\\default, desktop grant needed for sandbox user),
+   stamping the USER SID (not synthetic) on writable roots + traverse
+   grants on ancestors; WFP fence stays keyed on that user for net
+   rules; `3code wall setup-windows` becomes REQUIRED on first run
+   (docs + --help). Design points validated on beck: non-console child
+   runs fine as non-admin dedicated user from session 0; console child
+   in session 0 dies 0xC0000142 (conhost) - 3code's streamexec uses
+   pipes so production is unaffected; sandbox-user account must be
+   ACTIVE with a password (net user reset can disable it - mind
+   UF_ACCOUNTDISABLE); writable roots need grants + ancestor traverse
+   when they live under private profiles. Credentials: DPAPI
+   credentials.dat under the CALLER %LOCALAPPDATA% (elevated setup ran
+   as admin - quickemu ssh is admin, so decrypt works; on real hosts
+   setup runs from an elevated 3code and the file lands in the real
+   user's LOCALAPPDATA - spawnAsSandwall reads it from the same user
+   context. VERIFIED OK.)
 4. [ ] Cross-compile standalone sandwall.exe (same mingw pin as 3code),
    deploy to beck, run the probe matrix:
    - `sandwall <policy> -- cmd /c echo hi > %TEMP%\t.txt` (allowed; file
