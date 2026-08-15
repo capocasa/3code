@@ -72,6 +72,29 @@ Useful: `%TEMP%` = C:\Users\Quickemu\AppData\Local\Temp, msys2 tree at
 
 ## Current state
 
+**DONE (validated end-to-end on beck through 3code.exe).** The
+dedicated-user backend shipped: sandwall 0.4.0 (tag faca4d4, pushed)
+runs children as the `sandwall` user via CreateProcessWithLogonW
+through a C shim (the real prototype is 11 args; a Nim import with the
+CreateProcessAsUserW shape SIGSEGVs), stamps ALLOW ACEs for that user
+on writable roots + traverse ACEs on profile ancestors, DENY-narrows
+with rollback, and the pre-existing WFP fence blocks the user's
+non-loopback egress. Verified on beck through 3code.exe: TEMP write
+ok, home + C:\Windows denied, deny-subpath denied with siblings ok,
+off-loopback connect BLOCKED by the fence. 3code 7d4b203: honest
+fence-absent warning in box.nim, `sandbox`/`wall setup-windows` in
+--help, requires sandwall >= 0.4.0. Windows CI: fs tests gate on
+backend presence (skip on runners, no sandbox user); the remaining
+test_rules failures on windows-latest are PRE-EXISTING at tag 0.3.2
+(verified in run 31840491912) and out of scope. Caveats recorded: the
+child's console stdio does not attach in the ssh session-0 context
+(production spawns from the interactive session with pipes - streamexec);
+`setup` AC-fence re-install errors when filters already exist (legacy
+path, harmless); deny on a nonexistent path is skipped (accepted gap).
+Beck cleanup done (test users, tasks, probes, grants removed).
+
+(Historical session notes below.)
+
 **Architecture decision (validated on beck, hardware): the same-user
 write-restricted token backend cannot work for 3code.** msys2's signal
 pipe fails (Win32 error 5) with restricted list [synthetic, logon,
