@@ -109,19 +109,26 @@ Other verified findings from this session:
 - CPLW via the mingw-built C helper worked for cmd/msys2 (cplw.c in
   /tmp on host; copy on beck). err 87 appeared late in the session for
   ALL users after heavy testing (lockout threshold 10 / 10min window is
-  one suspect) - VM was rebooted to clear state and ssh has not come
-  back yet (banner timeout; qemu process alive; monitor socket path
-  unreachable from this sandbox). NEXT: wait for VM, re-run cplw matrix
-  as non-admin sandbox user, then implement the dual-spawn backend in
-  rtoken.nim.
+  one suspect) - VM was rebooted (shutdown /r) to clear state and ssh
+  never came back: qemu process alive, port 22220 accepts TCP but the
+  ssh banner times out, >1h. The qemu monitor socket lives outside
+  this sandbox's allowed paths so the VM cannot be reset from here.
+  NEXT CONTEXT: get the VM back (host-side: quickemu beck restart or
+  qemu monitor system_reset; the user may need to look at the SDL
+  window), then re-run the cplw matrix as the NON-ADMIN dedicated user
+  (net localgroup administrators <user> /delete first), then implement
+  the dedicated-user dual-spawn backend in rtoken.nim:
 
-In-tree state: rtoken.nim has F1+F2 fixes + doc updates (user SID never
-back in restricted list); acl.nim has the ACCESS_MODE order fix.
-NOT yet committed. Beck has: sandwall-new.exe (fixed), sandwall.exe
-(old AC backend), rtprobe.exe, cplw.exe, swtest/swfresh test users
-(swtest non-admin at last check, swfresh admin), test policy files
-sw-pol.txt / sw-pol2.txt / sw-pol3.txt in ~, WFP fences installed, VM
-rebooted (stuck - see above).
+In-tree state: COMMITTED 22626d4 on sandwall main (rtoken backend with
+F1 user-SID removal + F2 LUA_TOKEN drop + ACCESS_MODE order fix;
+linux suite passes except 3 pre-existing failures, identical on HEAD
+before the change). NOT tagged/released - the backend is now known
+insufficient for 3code (msys2), release should wait for the
+dedicated-user model. Beck has: sandwall-new.exe (fixed rtoken),
+sandwall.exe (old AC backend), rtprobe.exe, cplw.exe,
+swtest/swfresh test users (swtest non-admin, swfresh admin), test
+policy files sw-pol*.txt in ~, WFP fences installed, VM rebooted
+(stuck - see above). 3code/windows at 7481d4f (plan only).
 
 ## Decisions (made now, do not relitigate without new evidence)
 
@@ -145,15 +152,23 @@ rebooted (stuck - see above).
 
 ## Steps
 
-1. [ ] Triage the sandwall worktree: confirm what belongs in the backend
-   commit (rtoken.nim, acl.nim, process.nim, restrict.nim), leave binaries
-   and local config untracked. Check the nimble version field state.
-2. [ ] F1 fix: remove the user SID from `restrictSids`
-   (rtoken.nim:284-309). Keep it in the default-DACL entry list. Update the
-   misleading doc comments (lines ~243, 284-288) to say why the user SID
-   must never return to the restricted list.
-3. [ ] F2 fix: drop LUA_TOKEN (rtoken.nim:313). One-line, but verify
-   together with step 2 in the same probe round.
+1. [x] Triage the sandwall worktree (committed clean in 22626d4; junk
+   left untracked).
+2. [x] F1 fix: user SID removed from restrictSids; verified on beck
+   (home + C:\Windows denied, temp allowed).
+3. [x] F2 fix: LUA_TOKEN dropped. VERDICT: schannel still fails inside
+   the restricted token (upstream Codex bug #17459, same symptom);
+   https works as dedicated user instead - folded into the new backend.
+4. [x] ACCESS_MODE deny/revoke swap fixed (bonus find); deny-narrowing
+   verified working incl. rollback.
+4b. [ ] NEW BACKEND (replaces steps 4-7 shape): dedicated sandbox user +
+   CreateProcessWithLogonW (lpDesktop winsta0\\default), stamping the
+   USER SID (not synthetic) on writable roots + traverse grants on
+   ancestors; keep the WFP fence keyed on that user for net rules;
+   3code wall setup-windows becomes REQUIRED on first run (docs +
+   --help). Validate: msys2 bash matrix, write deny outside grants,
+   https via schannel, deny-narrowing via per-user DENY ACEs (swap in
+   ACL stamping target SID).
 4. [ ] Cross-compile standalone sandwall.exe (same mingw pin as 3code),
    deploy to beck, run the probe matrix:
    - `sandwall <policy> -- cmd /c echo hi > %TEMP%\t.txt` (allowed; file
