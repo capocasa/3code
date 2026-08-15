@@ -301,10 +301,15 @@ proc backendWorks*(exe: string): bool =
     if not dirExists(tmp): createDir(tmp)
     # Capture (discard) stdout+stderr so a failing backend's OSError
     # traceback never leaks into the parent's output, which would trip
-    # tests that assert no "unhandled exception" appears.
+    # tests that assert no "unhandled exception" appears. The probe
+    # child is `true` on POSIX, `cmd /c exit 0` on Windows (no true.exe
+    # ships there; a 127 from the missing binary would look like a
+    # broken backend and silently disable the sandbox).
+    const probeChild = when defined(windows): "cmd /c exit 0"
+                       else: "true"
     let (outp, code) = execCmdEx(
       quoteShell(exe) & " sandbox restrict " & quoteShell(tmp) &
-        " -- true </dev/null >/dev/null 2>&1")
+        " -- " & probeChild & " </dev/null >/dev/null 2>&1")
     discard outp
     result = code == 0
   except CatchableError:

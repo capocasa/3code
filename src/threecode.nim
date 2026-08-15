@@ -229,6 +229,12 @@ proc main() =
   # confined child. `box` stays as a hidden alias for binaries already
   # running under the old name.
   let rawParams = commandLineParams()
+  # All the early-dispatch subcommands below run with redirected or
+  # piped stdio (box children, the stdio relay, elevated setup); their
+  # exit procs must not splice terminal-restore escapes into the stream.
+  if rawParams.len > 0 and rawParams[0] in
+      ["sandbox", "sb", "box", "wall", "stdio-relay", "setup", "unsetup"]:
+    minline.terminalRestoreSuppressed = true
   if rawParams.len > 0 and rawParams[0] in ["sandbox", "sb", "box"]:
     quit(boxMain(rawParams[1 .. ^1]))
   # `wall` is the network half of sandwall, same early-dispatch
@@ -236,6 +242,13 @@ proc main() =
   # Internal: the user-facing names are `3code setup` / `3code unsetup`.
   if rawParams.len > 0 and rawParams[0] == "wall":
     quit(wallMain(rawParams[1 .. ^1]))
+  # The CPLW stdio relay hop: sandwall's Windows backend prefixes the
+  # sandboxed command with `<self> stdio-relay --`. Must dispatch before
+  # anything interactive or the relay child would hang in the TUI.
+  # wallMain accepts the arg shape `stdio-relay -- CMD ...` directly.
+  when defined(windows):
+    if rawParams.len > 0 and rawParams[0] == "stdio-relay":
+      quit(wallMain(rawParams))
   # One-time elevated sandbox setup / teardown (see wall.nim). The
   # commands exist on every platform; POSIX reports "Windows only".
   if rawParams.len > 0 and rawParams[0] == "setup":
