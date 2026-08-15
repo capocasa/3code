@@ -181,7 +181,7 @@ proc boxRestrict(args: seq[string]): int =
     # stamps the sandbox user's ALLOW grants. runSandboxed spawns the
     # child as that user via CreateProcessWithLogonW and rolls the
     # per-run DENY narrowing back in a defer. fenceNet needs no extra
-    # work here: the WFP fence installed by `3code wall setup-windows`
+    # work here: the WFP fence installed by `3code setup`
     # blocks the sandbox user's non-loopback egress at the kernel, and
     # the caller points the child at the wall proxy via env for host
     # rules. When the fence is NOT installed, say so instead of

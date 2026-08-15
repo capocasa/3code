@@ -11,17 +11,18 @@
 ##             3code process uses the in-library startWallProxy
 ##             instead; this subcommand is for standalone/debug use)
 ##   connect - SOCKS5 stdio pump for git ProxyCommand
-##   setup-windows - one-time elevated Windows fence setup
 ##   wfp-probe - internal: egress probe run AS the sandwall user
 
 when defined(posix):
   import std/posix except Time
 import std/[os, strutils]
 import sandwall, sandwall/wall
+when defined(windows):
+  import sandwall/wall/stdio
 import sandbox as sb
 
 const usage = """
-3code wall - network firewall (proxy / connect / windows setup)
+3code wall - internal network-firewall subcommands (not for users)
 
 Usage:
   3code wall proxy --policy FILE [--project DIR] [--port N] [--unix SOCK] [-v]
@@ -33,13 +34,14 @@ Usage:
       SOCKS5 client pump for git ProxyCommand: stdio <-> proxy at
       127.0.0.1:$WALL_PROXY_PORT (default 1080) <-> HOST:PORT. Blocks.
 
-  3code wall setup-windows [--status] [--uninstall]
-      (Windows only) Elevated one-time setup: create the sandwall user
-      and install the WFP filters. --status is non-elevated.
-
   3code wall wfp-probe
       (Windows only) Internal: run AS the sandwall user by the
       behavioral fence check. Exits 0 iff egress is blocked.
+
+  3code wall stdio-relay -- CMD [ARGS ...]
+      (Windows only) Internal: the sandbox child's first hop. Opens
+      NIMBOX_OUT_PIPE as stdout+stderr, spawns CMD inheriting it,
+      forwards the exit code. See sandwall wall/stdio.nim.
 """
 
 when defined(posix):
@@ -96,6 +98,53 @@ when defined(posix):
                     except ValueError: 1080'u16
     socksConnect(proxyPort, args[0], port)
 
+proc setupMain*(args: seq[string]): int =
+  ## Entry for `3code setup` / `3code unsetup` (Windows only). Elevated
+  ## one-time sandbox setup: create the sandwall user, install the WFP
+  ## fences. Idempotent; failures are reported and fail the command.
+  when defined(windows):
+    if args.len > 0 and args[0] in ["--status", "status"]:
+      let st = fenceStatus()
+      echo "fence: installed=", st.installed, " filters=", st.filters
+      if st.hint.len > 0: echo "  ", st.hint
+      return 0
+    try:
+      let sid = setupSandwallUser()
+      installFence(sid, FirstProxyPort, LastProxyPort)
+      echo "fence installed; sandwall user SID ", sid
+      # The AC fence covers the legacy AppContainer backend; its
+      # re-install over existing filters is best-effort.
+      try:
+        installAcFence()
+      except OSError as e:
+        stderr.writeLine("3code setup: legacy AC fence not refreshed: " & e.msg)
+      echo "setup complete"
+      return 0
+    except OSError as e:
+      stderr.writeLine("3code setup: " & e.msg)
+      return 1
+  else:
+    stderr.writeLine("3code setup is only available on Windows")
+    return 2
+
+proc unsetupMain*(args: seq[string]): int =
+  ## Entry for `3code unsetup` (Windows only): remove the WFP fences.
+  ## Best-effort; safe to run repeatedly. Leaves the sandwall user and
+  ## its DPAPI credentials in place (uninstalling a user with an active
+  ## password policy is riskier than leaving a dormant account).
+  when defined(windows):
+    try:
+      uninstallFence()
+      uninstallAcFence()
+      echo "fence removed"
+      return 0
+    except OSError as e:
+      stderr.writeLine("3code unsetup: " & e.msg)
+      return 1
+  else:
+    stderr.writeLine("3code unsetup is only needed on Windows")
+    return 2
+
 proc wallMain*(args: seq[string]): int =
   ## Entry for the `3code wall` subcommand. `args` is the full argv
   ## after `wall`.
@@ -113,44 +162,21 @@ proc wallMain*(args: seq[string]): int =
       connectMain(args[1 .. ^1])
     else:
       stderr.writeLine("Error: wall connect is POSIX-only"); return 2
-  of "setup-windows":
-    when defined(windows):
-      if "--status" in args:
-        let st = fenceStatus()
-        let ast = acFenceStatus()
-        echo "user fence: installed=", st.installed, " filters=", st.filters
-        echo "ac fence:   installed=", ast.installed, " filters=", ast.filters
-        if st.hint.len > 0: echo "  ", st.hint
-        if ast.hint.len > 0: echo "  ", ast.hint
-        return 0
-      if "--uninstall" in args:
-        uninstallFence()
-        uninstallAcFence()
-        echo "wall filters removed"
-        return 0
-      try:
-        let sid = setupSandwallUser()
-        installFence(sid, FirstProxyPort, LastProxyPort)
-        try:
-          installAcFence()
-          echo "ac fence installed"
-        except OSError as e:
-          stderr.writeLine("3code wall: AC fence install failed: " & e.msg)
-        echo "wall setup complete; sandwall user SID ", sid
-        return 0
-      except OSError as e:
-        stderr.writeLine("3code wall: " & e.msg)
-        return 1
-    else:
-      echo "wall setup-windows is only needed on Windows"
-      return 0
   of "wfp-probe":
     when defined(windows):
       wfpProbeMain()
     else:
       0  # nothing to fence on POSIX
+  of "stdio-relay":
+    when defined(windows):
+      if args.len < 3 or args[1] != "--":
+        stderr.writeLine("Error: stdio-relay needs -- CMD")
+        return 2
+      stdio.relayMain(args[2 .. ^1])
+    else:
+      stderr.writeLine("Error: stdio-relay is Windows-only"); return 2
   else:
     stderr.writeLine(usage)
     stderr.writeLine("\nError: unknown subcommand (expected proxy, " &
-      "connect, setup-windows or wfp-probe)")
+      "connect, wfp-probe or stdio-relay)")
     return 2

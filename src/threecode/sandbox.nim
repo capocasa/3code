@@ -40,8 +40,7 @@
 import std/[os, osproc, strutils, times]
 from std/posix import kill, Pid
 import sandwall
-when defined(posix):
-  import sandwall/wall as sandwallWall
+import sandwall/wall as sandwallWall
 import types
 import util
 
@@ -137,29 +136,24 @@ proc defaultPolicyFilePath*(projectDir: string): string =
 # (the sandwall accept loop is sequential and fork-safe; per-launch
 # proxies are both wasteful and wrong - see sandwall wall/proxy.nim).
 
+var
+  wallProxy: sandwallWall.WallProxy
+    ## .sock == nil means not running.
+  wallProxyBoundDir: string = ""
+    ## The dir the running proxy's policy file lives in. On POSIX the
+    ## unix listener is rebound when the bash tmp dir changes; Windows
+    ## has no unix listener, only the loopback TCP port.
+
 when defined(posix):
   var
-    wallProxy: sandwallWall.WallProxy
-      ## .sock == nil means not running.
     wallProxyDir*: string = ""
       ## Per-run temp dir holding the merged policy file + unix socket.
-    wallProxyBoundDir: string = ""
-      ## The dir the running proxy's unix socket was bound in. The
-      ## per-launch bash tmp dir changes every fenced call and is
-      ## deleted right after; when it differs from the bound dir the
-      ## proxy must rebind, or the bridge connects to a dead socket.
 
 proc wallProxyNeeded*(pol: Policy): bool =
   ## Fencing is off until the effective policy names its first host.
   pol.resolve().hosts.len > 0
 
 when defined(posix):
-
-  proc wallPolicyText*(projectDir: string): string =
-    ## The effective policy text the proxy enforces: the active policy
-    ## file's contents, matching loadPolicy.
-    let f = activePolicyPath(projectDir)
-    (if fileExists(f): readFile(f) else: "") & "\n"
 
   proc proxySockPath*(): string =
     ## The proxy's AF_UNIX listener (Linux bridge target); "" on macOS,
@@ -175,54 +169,75 @@ when defined(posix):
     ## ensureWallProxy; the proxy binds lazily there.
     wallProxyDir = dir
 
-  proc ensureWallProxy*(projectDir: string): bool =
-    ## Start the per-run proxy when the policy needs it. When it is
-    ## already running but bound in a different (since-deleted) bash
-    ## tmp dir, restart it so the unix socket lives in the current
-    ## launch's writable dir; the bridge connects there. True when
-    ## fenced bash may launch.
-    if not wallProxyNeeded(current): return false
+proc wallPolicyText*(projectDir: string): string =
+  ## The effective policy text the proxy enforces: the active policy
+  ## file's contents, matching loadPolicy.
+  let f = activePolicyPath(projectDir)
+  (if fileExists(f): readFile(f) else: "") & "\n"
+
+proc wallProxyPolicyDir(): string =
+  ## Temp dir holding the proxy's merged policy file.
+  tempDir() / ("3code-wall-" & $getCurrentProcessId())
+
+proc ensureWallProxy*(projectDir: string): bool =
+  ## Start the per-run proxy when the policy needs it. On POSIX, when
+  ## it is already running but bound in a different (since-deleted)
+  ## bash tmp dir, restart it so the unix socket lives in the current
+  ## launch's writable dir; the bridge connects there. True when
+  ## fenced bash may launch.
+  if not wallProxyNeeded(current): return false
+  when defined(posix):
     if wallProxyDir.len == 0:
-      wallProxyDir = tempDir() / ("3code-wall-" & $getCurrentProcessId())
+      wallProxyDir = wallProxyPolicyDir()
       createDir(wallProxyDir)
     if wallProxy.port != 0 and wallProxyBoundDir == wallProxyDir:
       return true
+  else:
     if wallProxy.port != 0:
-      sandwallWall.stopWallProxy(wallProxy)
-      wallProxy.port = 0
-    let polFile = wallProxyDir / "policy"
-    writeFile(polFile, wallPolicyText(projectDir))
-    try:
+      return true
+  if wallProxy.port != 0:
+    sandwallWall.stopWallProxy(wallProxy)
+    wallProxy.port = 0
+  let dir = when defined(posix): wallProxyDir else: wallProxyPolicyDir()
+  createDir(dir)
+  let polFile = dir / "policy"
+  writeFile(polFile, wallPolicyText(projectDir))
+  try:
+    when defined(posix):
       wallProxy = sandwallWall.startWallProxy(polFile, projectDir,
         port = 0, unixSockPath = proxySockPath())
-      wallProxyBoundDir = wallProxyDir
-    except CatchableError as e:
-      raise newException(IOError, "wall proxy: " & e.msg)
-    true
+    else:
+      # port = 0 picks a free port in the WFP fence range on Windows
+      wallProxy = sandwallWall.startWallProxy(polFile, projectDir)
+    wallProxyBoundDir = dir
+  except CatchableError as e:
+    raise newException(IOError, "wall proxy: " & e.msg)
+  true
 
-  proc wallProxyPort*(): uint16 =
-    ## The proxy's loopback port; 0 when not running.
-    wallProxy.port
+proc wallProxyPort*(): uint16 =
+  ## The proxy's loopback port; 0 when not running.
+  wallProxy.port
 
-  proc syncWallProxyPolicy*(projectDir: string) =
-    ## Rewrite the proxy's policy file after a reload; the proxy
-    ## hot-reloads on mtime.
-    if wallProxy.port == 0 or wallProxyDir.len == 0: return
-    writeFile(wallProxyDir / "policy", wallPolicyText(projectDir))
+proc syncWallProxyPolicy*(projectDir: string) =
+  ## Rewrite the proxy's policy file after a reload; the proxy
+  ## hot-reloads on mtime.
+  if wallProxy.port == 0 or wallProxyBoundDir.len == 0: return
+  writeFile(wallProxyBoundDir / "policy", wallPolicyText(projectDir))
 
-  proc stopWall*() =
-    ## Proxy + temp dir teardown, called from 3code's cleanup exit proc.
-    if wallProxy.port != 0:
-      sandwallWall.stopWallProxy(wallProxy)
-      wallProxy.port = 0
-      wallProxyBoundDir = ""
+proc stopWall*() =
+  ## Proxy + temp dir teardown, called from 3code's cleanup exit proc.
+  if wallProxy.port != 0:
+    sandwallWall.stopWallProxy(wallProxy)
+    wallProxy.port = 0
+    wallProxyBoundDir = ""
+  when defined(posix):
     if wallProxyDir.len > 0:
       try: removeDir(wallProxyDir)
       except CatchableError: discard
       wallProxyDir = ""
 
-  proc wallEnv*(selfExe, port, sockPath: string;
-                existingGitSsh: string): seq[(string, string)] =
+proc wallEnv*(selfExe, port, sockPath: string;
+              existingGitSsh: string): seq[(string, string)] =
     ## Environment additions for a fenced bash launch: the WALL_* vars
     ## box reads, the standard proxy vars pointing at the loopback
     ## proxy (socks5h = remote DNS), and a ProxyCommand GIT_SSH_COMMAND
@@ -245,6 +260,7 @@ when defined(posix):
       result.add ("GIT_SSH_COMMAND",
         "ssh -o ProxyCommand=\"" & selfExe & " wall connect %h %p\"")
 
+when defined(posix):
   proc sweepStaleWallDirs*() =
     ## Best-effort removal of proxy dirs from dead 3code processes,
     ## mirroring cleanupStaleBinaries. Runs at startup.

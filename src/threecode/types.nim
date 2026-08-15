@@ -39,7 +39,7 @@ var patientRetryEnabled*: bool = true
   ## `patient_retry`.
 var sandboxWallWarn*: bool = true
   ## When true, a policy with host rules on Windows without the wall
-  ## setup (`3code wall setup-windows`) prints a one-time warning that
+  ## setup (`3code setup`) prints a one-time warning that
   ## bash runs unfenced. Default on; `[settings] sandbox_wall_warn =
   ## off` silences it.
 

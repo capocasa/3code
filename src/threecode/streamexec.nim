@@ -413,21 +413,6 @@ export DEBIAN_FRONTEND=noninteractive
       let b = resolveBash()
       if b == "":
         return ("bash not found", 127, cap)
-      # Windows wall: fencing is keyed on the sandwall user (sandwall
-      # wall/wfp.nim), set up once via `3code wall setup-windows`. With
-      # host rules but no setup, bash runs unfenced - warn once per run
-      # unless `[settings] sandbox_wall_warn = off`.
-      if sandboxWallWarn and not wallWarnShown and
-          sandbox.active and sandbox.wallProxyNeeded(sandbox.current):
-        wallWarnShown = true
-        when defined(windows):
-          let fenceInstalled = try: sandwallWall.acFenceStatus().installed
-                               except CatchableError: false
-          if not fenceInstalled:
-            stderr.writeLine("3code: policy has host rules but the " &
-              "Windows wall is not set up; bash runs unfenced. Run " &
-              "`3code wall setup-windows` once as admin. " &
-              "(disable this warning: [settings] sandbox_wall_warn = off)")
       # On Windows, we use bash -c with the script file path.
       # We set MSYSTEM, HOME, and PATH using putenv so that bash
       # can find its tools and the user's home directory.
@@ -442,8 +427,54 @@ export DEBIAN_FRONTEND=noninteractive
       let posixStdin = toPosixPath(stdinPath)
       # Use bash -c to source the script and exit
       let bashCmd = &"source \"{posixScript}\" <\"{posixStdin}\" 2>&1; exit"
-      startProcess(b, args = ["-c", bashCmd],
-                   options = {poStdErrToStdOut, poUsePath})
+      when defined(windows):
+        # Windows sandbox: same shape as POSIX - re-exec this binary as
+        # `sandbox restrict --policy ... -- bash -c ...`. The box child
+        # stamps the sandbox user's ALLOW grants and spawns bash as that
+        # user via CreateProcessWithLogonW (see sandwall rtoken.nim);
+        # the WFP fence installed by `3code setup` keys on that user,
+        # so host rules are enforced through the wall proxy below.
+        # Without setup (no sandbox user / credentials) the probe in
+        # initSandbox cleared procboxExe and we fall through to plain
+        # bash, warning when host rules wanted the fence.
+        if sandboxEnabled and sandbox.active and sandbox.procboxExe.len > 0:
+          discard sandbox.reloadIfChanged(getCurrentDir())
+          let policy = sandbox.defaultPolicyFilePath(getCurrentDir())
+          var args = @["sandbox", "--policy", policy, "restrict",
+                      "--ro", tmp, "--", b, "-c", bashCmd]
+          var fenced = false
+          if sandbox.wallProxyNeeded(sandbox.current):
+            let fenceInstalled = try: sandwallWall.acFenceStatus().installed
+                                 except CatchableError: false
+            if fenceInstalled:
+              try:
+                fenced = sandbox.ensureWallProxy(getCurrentDir())
+              except CatchableError:
+                fenced = false
+          if fenced:
+            for (k, v) in sandbox.wallEnv(sandbox.procboxExe,
+                $int(sandbox.wallProxyPort()), "",
+                getEnv("GIT_SSH_COMMAND", "")):
+              putenv(k, v)
+            # the fence permits loopback only within the proxy port
+            # range; tmp must be writable for bash's redirections
+            args = @["sandbox", "--policy", policy, "restrict",
+                     tmp, "--", b, "-c", bashCmd]
+          startProcess(sandbox.procboxExe, args = args,
+                       options = {poStdErrToStdOut, poUsePath})
+        else:
+          if sandboxWallWarn and not wallWarnShown and
+              sandbox.active and sandbox.wallProxyNeeded(sandbox.current):
+            wallWarnShown = true
+            stderr.writeLine("3code: policy has host rules but the " &
+              "Windows sandbox is not set up; bash runs unfenced. " &
+              "Run `3code setup` once as admin. " &
+              "(disable this warning: [settings] sandbox_wall_warn = off)")
+          startProcess(b, args = ["-c", bashCmd],
+                       options = {poStdErrToStdOut, poUsePath})
+      else:
+        startProcess(b, args = ["-c", bashCmd],
+                     options = {poStdErrToStdOut, poUsePath})
   startToolCancelWatcher(p.processID)
   startToolTimeoutWatcher(cap)
   var cancelled = false
