@@ -29,6 +29,8 @@ when defined(posix):
   import std/posix except Time
 import std/[os, strutils]
 import sandwall
+when defined(windows):
+  import sandwall/wall as sandwallWall
 import sandbox
 
 const usage = """
@@ -175,11 +177,25 @@ proc boxRestrict(args: seq[string]): int =
   let wallSock = getEnv("WALL_PROXY_SOCK", "")
 
   when defined(windows):
-    # Windows cannot confine the current process; restrict() only prepares
-    # the token and stamps ACLs. runSandboxed spawns the child with that
-    # token and rolls the ACLs back in a defer. fenceNet is ignored: the
-    # Windows wall is keyed on the sandwall user's SID and lives on the
-    # spawn path (see sandwall wall/winuser.nim).
+    # Windows cannot confine the current process; restrict() only
+    # stamps the sandbox user's ALLOW grants. runSandboxed spawns the
+    # child as that user via CreateProcessWithLogonW and rolls the
+    # per-run DENY narrowing back in a defer. fenceNet needs no extra
+    # work here: the WFP fence installed by `3code wall setup-windows`
+    # blocks the sandbox user's non-loopback egress at the kernel, and
+    # the caller points the child at the wall proxy via env for host
+    # rules. When the fence is NOT installed, say so instead of
+    # pretending (honest degrade posture).
+    if fence:
+      try:
+        let st = sandwallWall.acFenceStatus()
+        if not st.installed:
+          stderr.writeLine("3code sandbox: WARNING: host rules are " &
+            "present but the WFP fence is not installed. The child " &
+            "will have OPEN network access. Run '3code wall " &
+            "setup-windows' (elevated) once to enforce host rules.")
+      except CatchableError:
+        discard
     try:
       return int(runSandboxed(writable, a.cmd, read = readOnly,
                               denied = denied, inetOk = fence))

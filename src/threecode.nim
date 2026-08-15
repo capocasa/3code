@@ -53,6 +53,8 @@ export types, util, prompts, shell, session, compact,
 proc usage() {.noreturn.} =
   stderr.writeLine """usage: 3code [options] [prompt...]
        3code good                   # list known-good provider/variant combos
+       3code sandbox restrict DIR -- CMD   # run CMD sandboxed (alias: sb)
+       3code wall setup-windows     # one-time elevated sandbox setup (Windows)
 
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
   -r, --resume[=ID]    resume latest session from this directory (or by id)
