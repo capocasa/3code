@@ -108,6 +108,13 @@ suite "session: save → index → resume-latest integration":
     saveSession(s, msgs)   # re-save: file now exists → not first save
     check listSessionPathsForCwd("/proj/A").len == 1
 
+  when defined(posix):
+    test "session file is only owner-readable (pasted secrets)":
+      let msgs = %*[{"role": "user", "content": "hunter2"}]
+      saveSession(makeSession("/proj/P", "20250101T110000"), msgs)
+      let saved = sessionDir() / ("20250101T110000" & SessionExt)
+      check getFilePermissions(saved) == {fpUserRead, fpUserWrite}
+
 suite "session: usageFromJson":
   test "parses all fields":
     let j = %*{"promptTokens": 100, "completionTokens": 50,
