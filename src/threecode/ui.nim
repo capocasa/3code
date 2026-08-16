@@ -1068,6 +1068,9 @@ proc loadAgentsMd(start: string): string =
     if parent == dir or parent == "": break
     dir = parent
 
+when not defined(windows):
+  let timeoutExe = findExe("timeout")
+
 proc shellCapture(cmd: string, timeoutS = 3): string =
   ## Run a short shell command via `sh -c` and return its stdout (trimmed).
   ## Empty on failure — used purely to gather context, so failures are silent.
@@ -1076,15 +1079,19 @@ proc shellCapture(cmd: string, timeoutS = 3): string =
   let tmp = tempDir() / ("3code_ctx_" & $getCurrentProcessId() & "_" & $epochTime().int64)
   createDir(tmp)
   let outPath = tmp / "out"
-  let wrapped = when defined(windows):
+  when defined(windows):
     let b = resolveBash()
     if b.len == 0: return ""
     # `timeout` (MSYS2 coreutils) bounds the run; the redirect lives outside
     # bash quotes so cmd.exe handles it with Windows-correct `2>nul`.
-    &"{b} -lc \"timeout {timeoutS}s {cmd}\" >\"{outPath}\" 2>nul"
+    discard execShellCmd(&"{b} -lc \"timeout {timeoutS}s {cmd}\" >\"{outPath}\" 2>nul")
   else:
-    &"timeout {timeoutS}s sh -c \"{cmd}\" >\"{outPath}\" 2>/dev/null"
-  discard execShellCmd(wrapped)
+    # `timeout` is absent on stock macOS; every caller passes a sub-second
+    # literal, so run the raw command when the wrapper is unavailable.
+    if timeoutExe.len > 0:
+      discard execShellCmd(&"timeout {timeoutS}s sh -c \"{cmd}\" >\"{outPath}\" 2>/dev/null")
+    else:
+      discard execShellCmd(&"sh -c \"{cmd}\" >\"{outPath}\" 2>/dev/null")
   result =
     if fileExists(outPath): readFile(outPath).strip
     else: ""
