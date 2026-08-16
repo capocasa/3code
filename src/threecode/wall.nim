@@ -142,7 +142,7 @@ proc unsetupMain*(args: seq[string]): int =
       stderr.writeLine("3code unsetup: " & e.msg)
       return 1
   else:
-    stderr.writeLine("3code unsetup is only needed on Windows")
+    stderr.writeLine("3code unsetup is only available on Windows")
     return 2
 
 proc wallMain*(args: seq[string]): int =

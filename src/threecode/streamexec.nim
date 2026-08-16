@@ -420,7 +420,11 @@ export DEBIAN_FRONTEND=noninteractive
       # the entire environment (including SYSTEMROOT, WINDIR, etc.)
       # which would cause bash to fail.
       putenv("MSYSTEM", "MSYS")
-      putenv("HOME", getEnv("USERPROFILE"))
+      # HOME: the per-run tmp dir, not USERPROFILE - the sandbox user
+      # cannot read the invoking user's profile, and bash would print
+      # ".bashrc: Permission denied" on every call (and msys2 tools
+      # would try to write .bash_history there).
+      putenv("HOME", tmp)
       let msysBin = getEnv("LOCALAPPDATA") & r"\3code\msys64\usr\bin"
       putenv("PATH", msysBin & ";" & getEnv("PATH"))
       let posixScript = toPosixPath(scriptPath)

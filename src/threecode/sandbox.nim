@@ -304,14 +304,20 @@ proc backendWorks*(exe: string): bool =
     # tests that assert no "unhandled exception" appears. The probe
     # child is `true` on POSIX, `cmd /c exit 0` on Windows (no true.exe
     # ships there; a 127 from the missing binary would look like a
-    # broken backend and silently disable the sandbox).
-    const probeChild = when defined(windows): "cmd /c exit 0"
-                       else: "true"
-    let (outp, code) = execCmdEx(
-      quoteShell(exe) & " sandbox restrict " & quoteShell(tmp) &
-        " -- " & probeChild & " </dev/null >/dev/null 2>&1")
+    # broken backend and silently disable the sandbox). POSIX gets the
+    # shell redirects; Windows execCmdEx runs the string through
+    # CreateProcess with no shell, where a literal `</dev/null` argv
+    # would reach the probe child as arguments.
+    when defined(windows):
+      let probeCmd = quoteShell(exe) & " sandbox restrict " &
+        quoteShell(tmp) & " -- cmd /c exit 0"
+    else:
+      let probeCmd = quoteShell(exe) & " sandbox restrict " &
+        quoteShell(tmp) & " -- true </dev/null >/dev/null 2>&1"
+    let (outp, code) = execCmdEx(probeCmd)
     discard outp
     result = code == 0
+    try: removeDir(tmp) except CatchableError: discard
   except CatchableError:
     result = false
 
