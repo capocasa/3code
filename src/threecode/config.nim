@@ -377,6 +377,15 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           if not prov.models[i].startsWith(prov.modelPrefix):
             prov.models[i] = prov.modelPrefix & prov.models[i]
         prov.modelPrefix = ""
+      # Backward compat: an oauth provider whose `auth = "oauth"` line was
+      # lost (written by a binary that dropped the field) reads back as an
+      # empty-key API-key provider and fails buildProfile's completeness
+      # check, silently disabling the provider. An empty key is only ever
+      # meaningful for a subscription login, so re-mark the known
+      # subscription twins here instead of asking the user to re-add.
+      if prov.auth == "" and prov.key == "" and
+         prov.name.toLowerAscii in ["supergrok", "chatgpt"]:
+        prov.auth = "oauth"
       providers.add prov
       prov = ProviderRec()
       inProvider = false

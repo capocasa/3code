@@ -112,6 +112,42 @@ suite "config: parseConfigFile round-trip":
     check readProvs[0].auth == "oauth"
     check readProvs[0].key == ""
 
+  test "empty-key subscription twin without auth line re-marks as oauth":
+    # Configs written by a binary that dropped `auth = "oauth"` leave the
+    # subscription twins looking like empty-key API-key providers, which
+    # buildProfile rejects as incomplete. The parser re-marks them.
+    writeFile(tmp, """
+[settings]
+current = "supergrok.grok-4.5"
+
+[provider]
+name = "supergrok"
+url = "https://api.x.ai/v1"
+key = ""
+models = "grok-4.5"
+
+[provider]
+name = "chatgpt"
+url = "https://api.openai.com/v1"
+key = ""
+models = "gpt-5.6-luna"
+""")
+    let (_, readProvs, _, _, _) = parseConfigFile(tmp)
+    check readProvs.len == 2
+    check readProvs[0].auth == "oauth"
+    check readProvs[1].auth == "oauth"
+
+  test "empty key does not re-mark ordinary providers":
+    writeFile(tmp, """
+[provider]
+name = "xai"
+url = "https://api.x.ai/v1"
+key = ""
+models = "grok-4.5"
+""")
+    let (_, readProvs, _, _, _) = parseConfigFile(tmp)
+    check readProvs[0].auth == ""
+
 suite "config: parseConfigFile model prefix expansion":
   var tmp = ""
 
