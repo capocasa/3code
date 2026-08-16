@@ -449,6 +449,12 @@ proc editPolicy*(sandboxFile: string): string =
   ## first when absent. Blocks until the editor quits, then reloads so
   ## the edit is live for the next check. Returns a user-facing status
   ## line; a leading "error:" marks failure.
+  ##
+  ## The editor string is deliberately passed through the shell
+  ## unquoted, like git: `VISUAL="code -w"` must reach the shell as
+  ## flags. An editor path containing spaces must be escaped by the
+  ## user (`VISUAL="/opt/Visual Studio Code"` would try to exec
+  ## `/opt/Visual`), same contract as $EDITOR everywhere else.
   if not fileExists(sandboxFile):
     if not ensureRepoPolicy(sandboxFile.parentDir):
       return "error: could not create sandbox file at " & sandboxFile
