@@ -542,23 +542,10 @@ proc promptNewProvider*(editor: var minline.LineEditor,
         errLn "unknown known-good model: " & unknown.join(", ")
         prev = models.mapIt(shortModel(it)).join(" ")
       else:
-        let res = verifyModels(name, url, key, models)
-        if res.cancelled:
-          raise newException(minline.InputCancelled, "cancelled by user")
-        if res.kept.len > 0:
-          return ProviderRec(name: name, url: url, key: key, auth: auth,
-                             models: res.kept)
-        prev = models.mapIt(shortModel(it)).join(" ")
-      let retryPrompt =
-        if auth == "": "  [enter]=retry models, k=re-enter key, c=cancel : "
-        else: "  [enter]=retry models, c=cancel : "
-      let choice = readOptional(editor, retryPrompt).toLowerAscii
-      if choice == "k" and auth == "":
-        key = readRequired(editor,
-          "  api key              : ", hidden = true)
-      elif choice == "c":
-        # User wants to abort the provider addition
-        raise newException(minline.InputCancelled, "cancelled by user")
+        # Registry-trusted: no verification ping. A bad key surfaces on
+        # the first turn instead.
+        return ProviderRec(name: name, url: url, key: key, auth: auth,
+                           models: models)
   hint "  fetching models...   ", resetStyle
   stdout.flushFile
   let (available, fetchErr) = fetchModels(modelsListUrl(name, url), fetchKeyFor(name, key))
@@ -645,19 +632,31 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     let newKey = readOptional(editor,
       "  api key [keep existing] : ", hidden = true)
     let key = if newKey == "": existing.key else: newKey
-    hint "  fetching models...   ", resetStyle
-    stdout.flushFile
-    let (available, fetchErr) = fetchModels(modelsListUrl(name, url), fetchKeyFor(name, key))
-    let sortedAvailable = available.sorted
+    let sortedAvailable =
+      if experimentalEnabled:
+        hint "  fetching models...   ", resetStyle
+        stdout.flushFile
+        let (available, fetchErr) = fetchModels(modelsListUrl(name, url),
+                                               fetchKeyFor(name, key))
+        if fetchErr.len > 0:
+          errLn "unavailable — ", fetchErr
+        elif available.len == 0:
+          hintLn "  unavailable — enter manually", resetStyle
+        available.sorted
+      else:
+        # Regular mode trusts the known-good registry, not /models.
+        # Endpoints routinely list stale ids (or omit live ones), so the
+        # wizard offers exactly the curated combos for this provider.
+        let curated = curatedFor(name)
+        if curated.len == 0:
+          hintLn "  no known-good models for this provider; enable --experimental",
+            resetStyle
+        curated
     let prevCb = editor.completionCallback
     editor.completionCallback = proc(ed: LineEditor): seq[string] =
       sortedAvailable.mapIt(shortModel(it))
     defer: editor.completionCallback = prevCb
-    if fetchErr.len > 0:
-      errLn "unavailable — ", fetchErr
-    elif sortedAvailable.len == 0:
-      hintLn "  unavailable — enter manually", resetStyle
-    else:
+    if sortedAvailable.len > 0:
       hintLn &"  {sortedAvailable.len} available", resetStyle
       for m in sortedAvailable:
         hintLn "    ", resetStyle, shortModel(m)
@@ -666,13 +665,21 @@ proc promptEditProvider*(editor: var minline.LineEditor,
       &"  models [{modelsCurrent}]  : ")
     let rawModels = if newModels == "": existing.models
                    else: splitModels(newModels)
-    # Resolve short names against the fetched model list; unknown names
-    # pass through as-is (full id entered by the user).
+    # Resolve short names against the offered list; unknown names pass
+    # through as-is (full id entered by the user).
     let lookup = shortToFull(sortedAvailable)
     let models = rawModels.mapIt(lookup.getOrDefault(it, it))
     if models.len == 0:
       errLn "need at least one model"
       continue
+    if not experimentalEnabled:
+      # Registry-trusted: no verification ping. A bad key surfaces on
+      # the first turn instead.
+      return ProviderRec(name: name, url: url, key: key,
+                         auth: existing.auth, models: models,
+                         family: existing.family,
+                         reasoning: existing.reasoning,
+                         reasonings: existing.reasonings)
     let res = verifyModels(name, url, key, models)
     if res.cancelled:
       raise newException(minline.InputCancelled, "cancelled by user")

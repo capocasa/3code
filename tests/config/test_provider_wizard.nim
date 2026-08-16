@@ -80,7 +80,7 @@ suite "provider wizard configuration":
     try: removeDir(tempConfig)
     except OSError: discard
 
-  test "initial bootstrap prompts for model before verifying detected provider":
+  test "initial bootstrap saves without a verification ping":
     inputs = @["nvapi-initial", "gpt-oss-120b"]
     var editor: LineEditor
 
@@ -89,7 +89,7 @@ suite "provider wizard configuration":
     check prof.name == "nvidia.openai/gpt-oss-120b"
     check activeProviders.len == 1
     check activeProviders[0].models == @["openai/gpt-oss-120b"]
-    check verifiedModels == @["openai/gpt-oss-120b"]
+    check verifiedModels.len == 0
 
   test "additional add prompts for model before verifying detected provider":
     activeProviders = @[
@@ -109,7 +109,7 @@ suite "provider wizard configuration":
     check activeProviders[1].name == "nvidia"
     check activeProviders[1].models == @["openai/gpt-oss-20b"]
     check activeCurrent == "groq.openai/gpt-oss-20b"
-    check verifiedModels == @["openai/gpt-oss-20b"]
+    check verifiedModels.len == 0
 
   test "add accepts provider name then api key":
     inputs = @["nvidia", "nvapi-named", "gpt-oss-120b"]
@@ -148,6 +148,9 @@ suite "provider wizard configuration":
   test "edit fetches chatgpt models from the codex backend":
     # The chatgpt OAuth token 403s on api.openai.com/v1/models
     # (api.model.read); the wizard must list via the Codex backend hook.
+    # Regular mode never calls /models (curated list only), so this runs
+    # under --experimental where the endpoint is consulted.
+    experimentalEnabled = true
     activeProviders = @[
       ProviderRec(name: "chatgpt", url: "https://api.openai.com/v1",
                   auth: "oauth", models: @["gpt-5.4"])
@@ -160,7 +163,7 @@ suite "provider wizard configuration":
         (@["gpt-5.4", "gpt-5.5"], "")
       else:
         (@[], "HTTP 403")
-    inputs = @["", "", "gpt-5.5"]
+    inputs = @["", "", "", "gpt-5.5"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -191,11 +194,12 @@ suite "provider wizard configuration":
     check activeProviders.len == 1
     check activeProviders[0].models == @["openai/gpt-oss-120b"]
     check activeCurrent == "nvidia.openai/gpt-oss-120b"
-    check verifiedModels == @["openai/gpt-oss-120b"]
+    check verifiedModels.len == 0
 
   test "add verifies every entered model and keeps only the ones that pass":
-    # A failed model is a warning, not a blocker: the provider is saved
-    # with the models that verified.
+    # Experimental mode still verifies; a failed model is a warning, not
+    # a blocker: the provider is saved with the models that verified.
+    experimentalEnabled = true
     inputs = @["nvapi-add", "gpt-oss-120b gpt-oss-20b"]
     verifyProfileHook = proc(p: Profile): (bool, string) =
       verifiedModels.add p.model
@@ -213,6 +217,7 @@ suite "provider wizard configuration":
     check verifiedModels == @["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
 
   test "add re-prompts when every model fails verification":
+    experimentalEnabled = true
     inputs = @["nvapi-add", "gpt-oss-120b", "", "gpt-oss-120b"]
     var attempts = 0
     verifyProfileHook = proc(p: Profile): (bool, string) =
@@ -231,12 +236,13 @@ suite "provider wizard configuration":
     check attempts == 2
 
   test "edit verifies every entered model and keeps only the ones that pass":
+    experimentalEnabled = true
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
                   key: "nvapi-old", models: @["z-ai/glm-5.2"])
     ]
     activeCurrent = "nvidia.z-ai/glm-5.2"
-    inputs = @["", "", "gpt-oss-120b gpt-oss-20b"]
+    inputs = @["", "", "", "gpt-oss-120b gpt-oss-20b"]
     verifyProfileHook = proc(p: Profile): (bool, string) =
       verifiedModels.add p.model
       if p.model == "openai/gpt-oss-20b": (false, "HTTP 404")
@@ -253,6 +259,7 @@ suite "provider wizard configuration":
     check activeCurrent == "nvidia.openai/gpt-oss-120b"
 
   test "verification cancel hook aborts the add":
+    experimentalEnabled = true
     inputs = @["nvapi-add", "gpt-oss-120b"]
     wizardVerifyCancelHook = proc(jobDone: proc(): bool {.closure.};
                                   cancelJob: proc() {.closure.}): bool =
@@ -274,6 +281,7 @@ suite "provider wizard configuration":
     # Two slow probes, each ~400ms: sequential would take ~800ms,
     # parallel lands well under that. Uses the threaded path (cancel
     # hook installed) since that is where parallelism matters.
+    experimentalEnabled = true
     inputs = @["nvapi-add", "gpt-oss-120b gpt-oss-20b"]
     wizardVerifyCancelHook = proc(jobDone: proc(): bool {.closure.};
                                   cancelJob: proc() {.closure.}): bool =
@@ -433,13 +441,17 @@ suite "provider wizard configuration":
     check "gpt-oss-120b" in capturedModels
 
   when not defined(windows):
-    test "edit wizard lists models sorted alphabetically":
+    test "edit wizard lists curated models, no /models fetch":
       activeProviders = @[
         ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
                     key: "nvapi-old", models: @["z-ai/glm-5.2"])
       ]
       activeCurrent = "nvidia.z-ai/glm-5.2"
       inputs = @["", "", "gpt-oss-120b"]
+      var fetchCount = 0
+      fetchModelsHook = proc(url, key: string): (seq[string], string) =
+        inc fetchCount
+        (nvidiaModels(), "")
       var editor: LineEditor
       var prof = buildProfile(activeCurrent, activeProviders, "")
       var messages = newJArray()
@@ -461,18 +473,19 @@ suite "provider wizard configuration":
       let capturedOutput = readFile(capturePath)
       try: removeFile(capturePath) except OSError: discard
 
-      # The models should be listed in sorted order in the edit wizard too.
+      # Regular mode lists the curated known-good models (KnownGoodCombos
+      # order), not the endpoint's /models payload.
       var listedModels: seq[string]
       for line in capturedOutput.splitLines:
         let stripped = stripAnsiCsi(line.strip)
         # Model lines start with "    " (4 spaces) and contain a model name
         if stripped.len > 4 and stripped[0..3] == "    " and
            stripped[4..^1].shortModel() != "" and
-           stripped[4..^1] != "5 available" and
+           stripped[4..^1] != "8 available" and
            stripped[4..^1] != "verifying..." and
            stripped[4..^1] != "ok" and
            stripped[4..^1] != "updated nvidia" and
            stripped[4..^1] != "editing 'nvidia' (enter to keep, ctrl+c to abort)":
           listedModels.add stripped[4..^1].shortModel()
-      check listedModels == @["minimax-m2.5", "minimax-m2.7", "gpt-oss-120b",
-                             "gpt-oss-20b", "glm-5.2"]
+      check listedModels == curatedFor("nvidia").mapIt(shortModel(it))
+      check fetchCount == 0

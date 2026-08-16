@@ -402,6 +402,16 @@ proc barFooterBytes*(label: string, termW = 0): string =
     "\r\n\x1b[2K" & EditorPromptBytes &
     "\r\x1b[" & $barRows & "A"
 
+proc barPromptStartupBytes*(label: string; termW = 0): string =
+  ## Bar + idle prompt painted at the cursor's current row with the cursor
+  ## left ON the prompt row, the editor's top row. Startup twin of
+  ## `barFooterBytes`, whose trailing walk-up parks the cursor on the bar
+  ## row for the mid-stream content writes that follow it there. Here the
+  ## next writer is the first editor redraw, whose walk-up is
+  ## `renderRow + paintedFooterRows`: from the prompt row that lands on the
+  ## gap row exactly, so the repaint is in place instead of one row lower.
+  paintBarBytes(label) & "\r\n\x1b[2K" & EditorPromptBytes
+
 const ClearBarPromptBytes* = "\r\x1b[J"
 
 proc barFooterBelowAtColBytes*(label: string; col: int; termW = 0): string =
