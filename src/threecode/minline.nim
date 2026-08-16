@@ -47,10 +47,16 @@ when defined(posix):
   if isatty(stdin):
     installResizeHandler()
 
+var terminalRestoreSuppressed* = false
+  ## Early-dispatch CLI children (sandbox / wall / stdio-relay / setup)
+  ## run with a redirected or piped stdout; the exit-proc terminal
+  ## restore would splice escape garbage into their output stream.
+
 proc restoreTerminal*() {.noconv.} =
   ## Single point of terminal restore. Registered once as an exit proc
   ## and called from signal handlers. Covers cursor visibility, color/style
   ## reset, and bracketed-paste teardown.
+  if terminalRestoreSuppressed: return
   try:
     stdout.write "\x1b[?25h"   # show cursor
     stdout.write "\x1b[0m"     # reset attributes (colors, bold, dim, etc.)

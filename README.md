@@ -108,7 +108,7 @@ A working example lives in [`example/webserve.nim`](example/webserve.nim): a web
   paths have hidden read-only guards.
 - **Network wall.** Host rules in `.sandbox` restrict Bash network access
   through the built-in allowlist proxy. Linux uses a network namespace, macOS
-  uses Seatbelt, and Windows uses the one-time `3code wall setup-windows`
+  uses Seatbelt, and Windows uses the one-time `3code setup`
   configuration. The default policy keeps normal network access open.
 - **Sandbox commands.** The built-in command is `3code sandbox`, with `3code
   sb` and `:sb` aliases. `:sandbox edit` opens the project policy in `$VISUAL`

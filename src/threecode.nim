@@ -54,7 +54,7 @@ proc usage() {.noreturn.} =
   stderr.writeLine """usage: 3code [options] [prompt...]
        3code good                   # list known-good provider/variant combos
        3code sandbox restrict DIR -- CMD   # run CMD sandboxed (alias: sb)
-       3code wall setup-windows     # one-time elevated sandbox setup (Windows)
+       3code setup                  # one-time elevated sandbox setup (Windows)
 
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
   -r, --resume[=ID]    resume latest session from this directory (or by id)
@@ -229,12 +229,32 @@ proc main() =
   # confined child. `box` stays as a hidden alias for binaries already
   # running under the old name.
   let rawParams = commandLineParams()
+  # All the early-dispatch subcommands below run with redirected or
+  # piped stdio (box children, the stdio relay, elevated setup); their
+  # exit procs must not splice terminal-restore escapes into the stream.
+  if rawParams.len > 0 and rawParams[0] in
+      ["sandbox", "sb", "box", "wall", "stdio-relay", "setup", "unsetup"]:
+    minline.terminalRestoreSuppressed = true
   if rawParams.len > 0 and rawParams[0] in ["sandbox", "sb", "box"]:
     quit(boxMain(rawParams[1 .. ^1]))
   # `wall` is the network half of sandwall, same early-dispatch
   # rationale: proxy/connect children skip all of 3code's startup.
+  # Internal: the user-facing names are `3code setup` / `3code unsetup`.
   if rawParams.len > 0 and rawParams[0] == "wall":
     quit(wallMain(rawParams[1 .. ^1]))
+  # The CPLW stdio relay hop: sandwall's Windows backend prefixes the
+  # sandboxed command with `<self> stdio-relay --`. Must dispatch before
+  # anything interactive or the relay child would hang in the TUI.
+  # wallMain accepts the arg shape `stdio-relay -- CMD ...` directly.
+  when defined(windows):
+    if rawParams.len > 0 and rawParams[0] == "stdio-relay":
+      quit(wallMain(rawParams))
+  # One-time elevated sandbox setup / teardown (see wall.nim). The
+  # commands exist on every platform; POSIX reports "Windows only".
+  if rawParams.len > 0 and rawParams[0] == "setup":
+    quit(setupMain(rawParams[1 .. ^1]))
+  if rawParams.len > 0 and rawParams[0] == "unsetup":
+    quit(unsetupMain(rawParams[1 .. ^1]))
 
   setupTlsEnv()
   cleanupStaleBinaries()

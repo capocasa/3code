@@ -527,12 +527,13 @@ connections return 403.
 On Windows, host rules require one elevated setup command:
 
 ```
-3code wall setup-windows
+3code setup
 ```
 
 Without that setup, 3code warns and runs the command without a network fence.
 That is safer than pretending the fence exists. Set `sandbox_wall_warn = off`
-in `[settings]` if you no longer need the warning.
+in `[settings]` if you no longer need the warning. `3code unsetup` removes the
+firewall filters; it is safe to run repeatedly.
 
 ### Editing the policy
 

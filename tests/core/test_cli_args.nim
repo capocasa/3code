@@ -351,11 +351,14 @@ suite "wall subcommand (built-in sandwall wall)":
     let r = run(["wall", "connect"])
     check r.code == 2
 
-  test "wall setup-windows is a no-op on posix":
+  test "setup is a no-op on posix":
     when defined(posix):
-      let r = run(["wall", "setup-windows"])
-      check r.code == 0
-      check "only needed on Windows" in r.o
+      let r = run(["setup"])
+      check r.code == 2
+      check "only available on Windows" in r.o
+      let r2 = run(["unsetup"])
+      check r2.code == 2
+      check "only available on Windows" in r2.o
 
   when defined(posix):
     test "wall proxy enforces the allowlist end to end":
