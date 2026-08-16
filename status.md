@@ -176,13 +176,15 @@ mingw compile clean.
 
 ## Leftovers / next steps
 
-- DONE 2026-08-16: sandwall 0.5.1 released. The 0.5.0 tag had gone
-  out with red Windows CI (contractPath separator tests, fixed by
-  a1665d6 after tagging) so no release artifact was ever published;
-  GitHub releases had stalled at 0.2.7. 0.5.1 carries the console-
-  flash fix, the shim-free quality pass, and the contractPath fix;
-  CI green on all three OSes, artifacts up (linux, macos-universal,
-  windows-amd64).
+- DONE 2026-08-16: sandwall 0.5.2 released (0.5.1 + the missing-
+  readonly-target skip: a readonly rule on a nonexistent path, like
+  a policy guard on a `.sandbox` that was never created, no longer
+  kills `--policy` runs with `GetNamedSecurityInfo failed`). 0.5.1
+  had followed the 0.5.0 red-CI tag: that tag shipped the
+  contractPath separator bug, fixed by a1665d6 after tagging, so no
+  0.5.0 artifact was ever published and releases had stalled at
+  0.2.7. 0.5.2 CI green on all three OSes, artifacts up (linux,
+  macos-universal, windows-amd64). 3code requires sandwall >= 0.5.2.
 - The 3code installer should ship `sandwall.exe` next to `3code.exe`
   (the standalone runner works now); today 3code re-execs itself,
   which also works - the runner split is optional hardening.
