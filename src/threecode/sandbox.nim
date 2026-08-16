@@ -379,13 +379,32 @@ proc sandboxPathInCwd*(): string =
   repoPolicyPath(getCurrentDir())
 
 proc resolveRawPath(p: string): string =
-  ## Absolute cleaned form of `p`, ~-expanded. Mirrors util.resolvePath
-  ## without pulling util (which would create a cycle via types). Empty
-  ## for an empty input.
+  ## Canonical form of `p`: ~-expanded, absolute, normalized, symlinks
+  ## resolved, mirroring sandwall's normalize() so the in-process gate
+  ## and the OS backends decide on the same string. Without this, a
+  ## path like `<proj>/sub/../../etc` still starts with the project
+  ## prefix as a raw string and isPathUnder lets it through. Write
+  ## targets may not exist yet, so symlink resolution runs on the
+  ## deepest existing ancestor and re-appends the tail (sandwall's
+  ## canonicalForDisplay pattern). Empty for an empty input.
   if p.len == 0: return ""
   var q = p
   if q.startsWith("~"): q = expandTilde(q)
-  try: absolutePath(q) except CatchableError: q
+  let abs = try: absolutePath(q) except CatchableError: q
+  result = abs.normalizedPath
+  var dir = result
+  var tail = ""
+  while dir.len > 0:
+    try:
+      let r = expandFilename(dir)
+      if r.len > 0:
+        return if tail.len > 0: r & tail else: r
+    except CatchableError:
+      discard
+    let (head, last) = splitPath(dir)
+    if last.len == 0: break
+    tail = DirSep & last & tail
+    dir = head.normalizedPath
 
 
 proc contractPolicyPath*(resolved: string): string =
