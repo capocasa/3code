@@ -5,7 +5,12 @@
 ## (fed prompts through a channel) and the async HTTP dispatcher never
 ## runs a turn itself. Events flow back over Server-Sent Events.
 ##
-##   nim c -r example/webserve.nim [model] [--port N]   # default :8501
+##   nim c -r example/webserve.nim [model] [--port N] [--host H]   # default 127.0.0.1:8501
+##
+## Warning: the server is unauthenticated and POST /prompt runs arbitrary
+## agent-proposed commands, so it binds loopback by default. --host 0.0.0.0
+## (or any non-loopback address) exposes it to the network — only do that
+## on a trusted LAN or behind a reverse proxy with auth.
 ##
 ## Endpoints:
 ##   GET  /           a bare-bones chat page
@@ -219,6 +224,7 @@ proc serve(req: Request) {.async, gcsafe.} =
 
 proc main() =
   var model = ""
+  var host = "127.0.0.1"
   var port = 8501
   var experimental = false
   var i = 1
@@ -227,6 +233,9 @@ proc main() =
     if a == "--port" and i < paramCount():
       port = parseInt(paramStr(i + 1))
       inc i
+    elif a == "--host" and i < paramCount():
+      host = paramStr(i + 1)
+      inc i
     elif a in ["-x", "--experimental"]:
       experimental = true
     elif model.len == 0:
@@ -234,10 +243,10 @@ proc main() =
     inc i
   var worker: Thread[Job]
   createThread(worker, sessionThread, (model: model, experimental: experimental))
-  echo "3code web frontend on http://localhost:", port
+  echo "3code web frontend on http://", host, ":", port
   asyncCheck flushEvents()
   let server = newAsyncHttpServer()
-  waitFor server.serve(port.Port, serve)
+  waitFor server.serve(port.Port, serve, host)
 
 when isMainModule:
   main()
