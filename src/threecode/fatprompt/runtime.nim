@@ -917,6 +917,27 @@ proc paintInitialPrompt*(p: Profile) =
     termengine.writeRaw("\n\x1b[?25l" & promptOnlyResetBytes())
     termengine.noteFooterPainted(1)
 
+proc paintResumedBarPrompt*(label: string) =
+  ## Startup paint for --resume with prior usage: bar + idle prompt in the
+  ## typing-ready shape `endTurn` leaves behind, carrying the resumed
+  ## session's last usage. The caller (threecode.nim) has already primed
+  ## `pendingHint` and the bar label in the frame model; this proc only
+  ## paints. The input thread is not running yet, so unlike
+  ## `paintBarPrompt` there is no anchored editor to repaint through the
+  ## engine: paint the raw bytes and register their height so the first
+  ## editor redraw's walk-up (renderRow + paintedFooterRows from the prompt
+  ## row `barPromptStartupBytes` parks on) erases exactly this chrome and
+  ## repaints in place instead of stacking a duplicate bar row per
+  ## keystroke.
+  if liveEditorFooterAnchored():
+    termengine.renderFooter(footerFrame(fatPromptState),
+                             inputThreadRunning, inputEditor,
+                             currentTermW())
+  else:
+    termengine.syncWrite(hideRealCaretBytes() &
+      barPromptStartupBytes(label, currentTermW()))
+    termengine.noteFooterPainted(
+      footerRowsAboveEditor(fatPromptState, currentTermW()))
 
 # --- Bar tick: repaints the token bar with an incrementing elapsed counter
 #     during tool execution. Bash tool viewports can also attach a compact

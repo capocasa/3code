@@ -304,6 +304,21 @@ suite "terminal visual contract":
         # history rather than tokenBarRows (which keys on the "s" suffix).
         tty.expectInHistory "↑80"
         tty.expectInHistory "↓7"
+        # Regression: every keystroke after --resume-with-usage painted a
+        # fresh gap+bar pair below the previous one instead of repainting
+        # in place (the raw resume bar paint never registered its rows in
+        # the engine, so the redraw walk-up under-counted and left each
+        # stale bar behind as duplicated scrollback). Type a few chars and
+        # require exactly one live token bar on screen, stable. The last
+        # turn's receipt is suppressed by replay, so ↑80 lives only in the
+        # live bar; earlier turns' receipts carry their own counts.
+        tty.expectIdleCaret()
+        tty.expectCount("↑80", 1, where = "screen")
+        for ch in "typ":
+          tty.send $ch
+          tty.drain(80, recordFrame = true)
+        tty.expectCount("↑80", 1, where = "screen")
+        tty.expectOnScreen "typ"
 
   test "active turn colon commands are controller handled":
     let root = newFixture("active_colon_commands")

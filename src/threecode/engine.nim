@@ -683,7 +683,12 @@ proc commitTranscriptItem(e: var TerminalEngine; transcript: string;
     if editing:
       max(0, e.walkUp(edPtr[]) + max(0, compactRowsAboveFooter))
     else:
-      max(0, e.toolViewportRows.len + max(0, compactRowsAboveFooter))
+      # Floating (non-editing) commits must also consume registered footer
+      # chrome: the resume-with-usage startup paint registers its bar rows
+      # while no editor exists yet, and a commit that ignored them would
+      # leave the bar stranded in scrollback as a duplicated line.
+      e.paintedFooterRows +
+        max(0, e.toolViewportRows.len + max(0, compactRowsAboveFooter))
   if up > 0:
     stdout.write "\x1b[" & $up & "A"
   stdout.write "\r\x1b[J"
