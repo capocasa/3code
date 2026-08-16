@@ -198,7 +198,7 @@ proc boxRestrict(args: seq[string]): int =
         discard
     try:
       return int(runSandboxed(writable, a.cmd, read = readOnly,
-                              denied = denied, inetOk = fence))
+                              denied = denied))
     except CatchableError as e:
       stderr.writeLine("3code sandbox: " & e.msg)
       return 127
