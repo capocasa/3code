@@ -153,6 +153,15 @@ proc wallProxyNeeded*(pol: Policy): bool =
   ## Fencing is off until the effective policy names its first host.
   pol.resolve().hosts.len > 0
 
+proc checkRawHost*(host: string; port: uint16): bool =
+  ## The in-process half of the network fence, for tool calls that run
+  ## in the parent and so never pass through the wall proxy (web_fetch).
+  ## Applies the exact matcher the proxy consults per CONNECT/SOCKS5
+  ## request, so both halves of a fenced session decide identically.
+  ## Unfenced (no host rules / sandbox off) is the caller's business:
+  ## this proc says allow and is only consulted when wallProxyNeeded.
+  sandwallWall.toHostList(current.resolve().hosts).allows(host, port)
+
 when defined(posix):
 
   proc proxySockPath*(): string =
@@ -379,13 +388,32 @@ proc sandboxPathInCwd*(): string =
   repoPolicyPath(getCurrentDir())
 
 proc resolveRawPath(p: string): string =
-  ## Absolute cleaned form of `p`, ~-expanded. Mirrors util.resolvePath
-  ## without pulling util (which would create a cycle via types). Empty
-  ## for an empty input.
+  ## Canonical form of `p`: ~-expanded, absolute, normalized, symlinks
+  ## resolved, mirroring sandwall's normalize() so the in-process gate
+  ## and the OS backends decide on the same string. Without this, a
+  ## path like `<proj>/sub/../../etc` still starts with the project
+  ## prefix as a raw string and isPathUnder lets it through. Write
+  ## targets may not exist yet, so symlink resolution runs on the
+  ## deepest existing ancestor and re-appends the tail (sandwall's
+  ## canonicalForDisplay pattern). Empty for an empty input.
   if p.len == 0: return ""
   var q = p
   if q.startsWith("~"): q = expandTilde(q)
-  try: absolutePath(q) except CatchableError: q
+  let abs = try: absolutePath(q) except CatchableError: q
+  result = abs.normalizedPath
+  var dir = result
+  var tail = ""
+  while dir.len > 0:
+    try:
+      let r = expandFilename(dir)
+      if r.len > 0:
+        return if tail.len > 0: r & tail else: r
+    except CatchableError:
+      discard
+    let (head, last) = splitPath(dir)
+    if last.len == 0: break
+    tail = DirSep & last & tail
+    dir = head.normalizedPath
 
 
 proc contractPolicyPath*(resolved: string): string =
@@ -449,6 +477,12 @@ proc editPolicy*(sandboxFile: string): string =
   ## first when absent. Blocks until the editor quits, then reloads so
   ## the edit is live for the next check. Returns a user-facing status
   ## line; a leading "error:" marks failure.
+  ##
+  ## The editor string is deliberately passed through the shell
+  ## unquoted, like git: `VISUAL="code -w"` must reach the shell as
+  ## flags. An editor path containing spaces must be escaped by the
+  ## user (`VISUAL="/opt/Visual Studio Code"` would try to exec
+  ## `/opt/Visual`), same contract as $EDITOR everywhere else.
   if not fileExists(sandboxFile):
     if not ensureRepoPolicy(sandboxFile.parentDir):
       return "error: could not create sandbox file at " & sandboxFile

@@ -16,7 +16,7 @@
 ## The read cache tracks the last-seen mtime and size of every `read` so
 ## `patch` can reject stale edits when the file changed since last read.
 
-import std/[json, os, sequtils, strformat, strutils, tables, times]
+import std/[json, os, sequtils, strformat, strutils, tables, times, uri]
 import types, util, shell, web, config, streamexec, sandbox
 
 # ---------------------------------------------------------------------------
@@ -632,6 +632,24 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
   of akWebFetch:
     if act.body.len == 0:
       return ("error: web_fetch requires a url", 1, "")
+    # web_fetch runs in this process, outside the wall proxy that
+    # fences bash children, so host rules must be applied here too.
+    # web_search stays ungated: it only talks to the fixed configured
+    # search endpoints, never a model-chosen URL.
+    if sandboxEnabled and sandbox.active and
+        sandbox.wallProxyNeeded(sandbox.current):
+      discard sandbox.reloadIfChanged(getCurrentDir())
+      let u = parseUri(act.body)
+      # a malformed port string must deny like any other unfetchable
+      # URL, not raise out of the tool call
+      let port = try:
+        if u.port.len > 0: uint16(parseInt(u.port))
+        elif u.scheme.toLowerAscii == "https": 443'u16
+        else: 80'u16
+      except ValueError: 0'u16
+      if not sandbox.checkRawHost(u.hostname, port):
+        return ("error: sandbox: " & u.hostname & " is denied by the " &
+                "policy (" & sandbox.policyHint() & ")", 1, "")
     try:
       let text = fetchUrl(act.body)
       return (capText(text), 0, "")

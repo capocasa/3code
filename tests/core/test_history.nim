@@ -291,6 +291,16 @@ suite "history file":
     check ed.history.entries[2] == "foo"
     removeFile(path)
 
+  when defined(posix):
+    test "first-created history file is only owner-readable":
+      let path = getTempDir() / "threecode_test_history_create_perms"
+      if fileExists(path): removeFile(path)
+      var ed = initEditor(historyFile = path)
+      check ed.history.entries.len == 0
+      check fileExists(path)
+      check getFilePermissions(path) == {fpUserRead, fpUserWrite}
+      removeFile(path)
+
 # ---------- Cursor preservation ----------
 
 suite "history cursor preservation":

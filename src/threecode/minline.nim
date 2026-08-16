@@ -549,6 +549,9 @@ proc historyInit*(size = 256, file: string = ""): LineHistory =
       result.entries.addLast entry
   else:
     result.file.writeFile("")
+    when defined(posix):
+      # chmod 0600 — history holds every typed prompt, pasted secrets included.
+      discard posix.chmod(result.file.cstring, 0o600)
 
 proc historyAdd*(ed: var LineEditor) =
   ## Append the just-submitted line to the persistent log. Empty
