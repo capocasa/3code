@@ -109,6 +109,26 @@ returns `sandwall proxy: DENY 1.1.1.1:443`, curl code=000 exit 7;
 example.com through the same policy passes with code=200. The
 default probe shape (`cmd /c exit 0`, no redirects) exits 0.
 
+## 2026-08-16 follow-up: console-window flash per sandboxed command
+
+User report: constant extra terminal windows opening while 3code ran
+sandboxed bash commands. Root cause: the CPLW spawn passed no console
+flags. CreateProcessWithLogonW defaults to CREATE_NEW_CONSOLE and a
+cross-logon child cannot inherit the caller's console, so every run
+delegated a fresh console to Windows Terminal (the Win11 default
+host), one visible window per command. Fixed in sandwall
+(737dde4): CREATE_NO_WINDOW + STARTF_USESHOWWINDOW/SW_HIDE on the
+CPLW spawn; the relay's plain CreateProcessW child then inherits the
+invisible console (default flags inherit). Verified on beck: the
+functional matrix (temp write, whoami=sandwall, home/Windows write
+denied, exit propagation, pipelines) passes 6/6 in session 1, session
+0 still works, and WMI start-trace shows only windowless conhosts
+per run. Note for repro: window-visible samplers must account for
+the harness's own console (schtasks /IT gives the PS harness a
+console delegated to Windows Terminal) and session-0 observers see
+nothing; the CPLW child runs as `sandwall`, whose hive has no console
+delegation override.
+
 ## Leftovers / next steps
 
 - sandwall 0.5.0 tag + push + CI watch (release step; user asked for
