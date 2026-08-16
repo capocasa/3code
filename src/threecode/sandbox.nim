@@ -153,6 +153,15 @@ proc wallProxyNeeded*(pol: Policy): bool =
   ## Fencing is off until the effective policy names its first host.
   pol.resolve().hosts.len > 0
 
+proc checkRawHost*(host: string; port: uint16): bool =
+  ## The in-process half of the network fence, for tool calls that run
+  ## in the parent and so never pass through the wall proxy (web_fetch).
+  ## Applies the exact matcher the proxy consults per CONNECT/SOCKS5
+  ## request, so both halves of a fenced session decide identically.
+  ## Unfenced (no host rules / sandbox off) is the caller's business:
+  ## this proc says allow and is only consulted when wallProxyNeeded.
+  sandwallWall.toHostList(current.resolve().hosts).allows(host, port)
+
 when defined(posix):
 
   proc proxySockPath*(): string =
