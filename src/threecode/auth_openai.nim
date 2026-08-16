@@ -48,14 +48,18 @@ proc tokenPath*(): string =
 proc storeTokens*(ts: TokenSet) =
   let path = tokenPath()
   createDir(parentDir(path))
-  writeFile(path, $(%*{
+  # Atomic (temp + rename): a crash mid-write must never leave a truncated
+  # store, which loadTokens would read as a corrupt login.
+  let tmp = path & ".tmp"
+  writeFile(tmp, $(%*{
     "access_token": ts.accessToken,
     "refresh_token": ts.refreshToken,
     "token_type": ts.tokenType,
     "expires_at": ts.expiresAt}))
   when defined(posix):
     # chmod 0600 — the refresh token is a long-lived credential.
-    discard chmod(path.cstring, 0o600)
+    discard chmod(tmp.cstring, 0o600)
+  moveFile(tmp, path)
 
 proc loadTokens*(): TokenSet =
   ## Zero TokenSet when no store exists or it is unreadable.
@@ -67,8 +71,9 @@ proc loadTokens*(): TokenSet =
     result.refreshToken = j{"refresh_token"}.getStr
     result.tokenType = j{"token_type"}.getStr("Bearer")
     result.expiresAt = j{"expires_at"}.getInt(0)
-  except CatchableError:
-    discard
+  except CatchableError as e:
+    debugOut "openai token store corrupt (re-login): " & e.msg
+    result = TokenSet()
 
 proc clearTokens*() =
   let path = tokenPath()

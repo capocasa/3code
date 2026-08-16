@@ -849,6 +849,9 @@ proc saveSession*(session: Session, messages: JsonNode) =
   try:
     createDir(session.savePath.parentDir)
     writeFile(session.savePath, renderSession(session, messages))
+    when defined(posix):
+      # chmod 0600 — the transcript holds anything pasted into a prompt.
+      discard posix.chmod(session.savePath.cstring, 0o600)
   except CatchableError as e:
     stderr.writeLine "3code: session save failed: " & e.msg
   # Index a brand-new session under its cwd so resume-latest finds it
