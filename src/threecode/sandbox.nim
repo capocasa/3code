@@ -309,7 +309,14 @@ proc backendWorks*(exe: string): bool =
     # CreateProcess with no shell, where a literal `</dev/null` argv
     # would reach the probe child as arguments.
     when defined(windows):
-      let probeCmd = quoteShell(exe) & " sandbox restrict " &
+      # The sandbox child inherits our cwd as its lpCurrentDirectory,
+      # and the CPLW spawn fails with error 267 when the sandbox user
+      # cannot enter it (a fresh project dir has no traverse ACE yet).
+      # A probe failure clears procboxExe and every bash command would
+      # silently run unsandboxed, so cd into the probe tmp first - it
+      # gets a traverse stamp as an ancestor of the writable root.
+      let probeCmd = "cmd /c cd /d " & quoteShell(tmp) & " && " &
+        quoteShell(exe) & " sandbox restrict " &
         quoteShell(tmp) & " -- cmd /c exit 0"
     else:
       let probeCmd = quoteShell(exe) & " sandbox restrict " &

@@ -129,6 +129,51 @@ console delegated to Windows Terminal) and session-0 observers see
 nothing; the CPLW child runs as `sandwall`, whose hive has no console
 delegation override.
 
+## 2026-08-16 post-refactor verification: two production bugs found + fixed
+
+Full re-verification of the merged trees on beck (3code main @
+86208be + sandwall main @ d0aa445) surfaced two bugs neither the
+sandwall refactor regression suite nor the earlier beck matrix
+caught, both in the `--policy` production path that the earlier
+matrix (explicit `restrict DIR`) never exercised:
+
+1. **A readonly rule for a nonexistent file killed every
+   `sandbox --policy` run** (sandwall rtoken). box's guard rules add
+   the repo `.sandbox` path unconditionally; when no repo policy
+   exists (fresh project, user policy only) the path is missing and
+   the readonly stamp's readDacl raised `GetNamedSecurityInfo failed
+   (error 2)` -> boxRestrict 127 -> bash tool dead. Fixed in sandwall
+   rtoken.restrictImpl: skip readonly paths that don't exist (same
+   posture as the denied loop one screen up).
+
+2. **backendWorks silently disabled the sandbox from any project
+dir** (3code sandbox.nim). The probe spawns
+   `3code sandbox restrict TMP -- cmd /c exit 0`; the CPLW child
+   inherits getCurrentDir() as lpCurrentDirectory, and a fresh
+   project dir has no sandwall-user traverse ACE, so CPLW fails
+   error 267, the probe returns false, procboxExe clears, and every
+   bash command ran UNSANDBOXED as the admin user (writes owned by
+   Quickemu, host rules unenforced). The earlier matrix passed only
+   because its cwd (C:\Users\Quickemu) already had the traverse ACE
+   from setup. Fixed: the probe now cds into the probe tmp (whose
+   ancestor chain gets stamped) before spawning.
+
+Verified on beck after both fixes, through the production oneshot
+bash-tool path from a fresh project dir with `.sandbox` =
+`deny / allow <proj> allow example.com deny 1.1.1.1`:
+- allowed write exit=0, file owner `...\sandwall`
+- denied write exit=1, `Permission denied` from bash
+- `curl https://example.com` -> 200 through the wall proxy
+- `curl https://1.1.1.1` -> 000 exit 7, `sandwall proxy: DENY
+  1.1.1.1:443`
+- whoami in sandbox = sandwall user; fs matrix (TEMP allowed,
+  home + C:\Windows denied) green; fence installed=true filters=8
+
+Local suites: 3code 65 PASS 0 FAIL; sandwall same 3 pre-existing
+userns-blocked failures as clean HEAD (this box blocks the
+/proc/self/setgroups write), everything else green; whole-tree
+mingw compile clean.
+
 ## Leftovers / next steps
 
 - DONE 2026-08-16: sandwall 0.5.1 released. The 0.5.0 tag had gone
