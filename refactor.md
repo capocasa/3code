@@ -8,7 +8,7 @@ into `refactor` and the line gets a `[merged]` marker with the commit.
 
 ## Owner: `audit-sec` (worktree ../audit-sec) — the sandbox boundary
 
-- [ ] 1. **CRITICAL** `..` traversal defeats the in-process sandbox gate.
+- [x] 1. **CRITICAL** `..` traversal defeats the in-process sandbox gate.
   `sandbox.nim:397` `resolveRawPath` does `absolutePath` with no
   `normalizedPath` + symlink resolution, so `write ../..` escapes the project
   rule while the OS backend (sandwall `normalize()`) would block it. Mirror
@@ -16,7 +16,7 @@ into `refactor` and the line gets a `[merged]` marker with the commit.
   expandFilename on longest existing ancestor for not-yet-existing targets).
   Regression test: policy allows project dir, tool path escapes via `..` and
   via a symlinked dir → both must deny.
-- [ ] 2. **HIGH** `web_fetch` bypasses the network fence (`actions.nim:632`).
+- [x] 2. **HIGH** `web_fetch` bypasses the network fence (`actions.nim:632`).
   Host rules fence bash children via the wall proxy; the native tool fetches
   from the parent with no check. When `sandbox.active` and
   `wallProxyNeeded`, gate the URL's host[:port] against the wall matcher;
@@ -26,11 +26,11 @@ into `refactor` and the line gets a `[merged]` marker with the commit.
 
 ## Owner: `audit-win` (worktree ../audit-win) — Windows + shell quoting
 
-- [ ] 3. **MEDIUM** `ui.nim:300` `openBrowserUrl` Windows branch runs
+- [x] 3. **MEDIUM** `ui.nim:300` `openBrowserUrl` Windows branch runs
   `execShellCmd("start " & url)` unquoted through cmd.exe. Fix to
   `start "" <quoted url>` (the empty title arg keeps `start` from treating a
   quoted URL as a window title). macOS/Linux already quote; align.
-- [ ] 4. **MEDIUM** `sandbox.nim:457` `editPolicy` concatenates `$VISUAL` /
+- [x] 4. **MEDIUM** `sandbox.nim:457` `editPolicy` concatenates `$VISUAL` /
   `$EDITOR` unquoted. Single-token editor paths with spaces misfire;
   multi-word EDITOR values (`code -w`) currently work by accident. Keep
   shell-string semantics (that's how EDITOR works everywhere) but document
@@ -40,10 +40,10 @@ into `refactor` and the line gets a `[merged]` marker with the commit.
 
 ## Owner: `audit-web` (worktree ../audit-web) — example + local-net exposure
 
-- [ ] 5. **MEDIUM** `example/webserve.nim:240` binds 0.0.0.0 (Nim `serve`
+- [x] 5. **MEDIUM** `example/webserve.nim:240` binds 0.0.0.0 (Nim `serve`
   default) while its docs say localhost. Bind `127.0.0.1` by default, add
   `--host` opt-in flag with a help-line warning. Update the header comment.
-- [ ] 6. **LOW** `ui.nim:1073` `shellCapture` depends on the `timeout`
+- [x] 6. **LOW** `ui.nim:1073` `shellCapture` depends on the `timeout`
   binary, absent on stock macOS → `sessionPreamble` silently loses the whole
   git-context block there. Preflight `findExe("timeout")` once; when absent
   run the command directly (all five callers are sub-second literals). Keep
@@ -51,13 +51,13 @@ into `refactor` and the line gets a `[merged]` marker with the commit.
 
 ## Owner: `audit-perm` (worktree ../audit-perm) — file permissions + token store
 
-- [ ] 7. **LOW** `history` (`session.nim:1234` first-create, and minline
+- [x] 7. **LOW** `history` (`session.nim:1234` first-create, and minline
   `historyInit` creates an empty file) and `.3log` session files
   (`session.nim:846` plain `writeFile`) are written with default perms
   (0644). They can hold pasted secrets. Apply 0600 on create (POSIX;
   `setFilePermissions` is a no-op-ish on Windows defaults). One helper,
   minimal call sites: history file create + saveSession write.
-- [ ] 8. **LOW** Token store (`auth_openai.nim`, `auth_xai.nim`):
+- [x] 8. **LOW** Token store (`auth_openai.nim`, `auth_xai.nim`):
   `storeTokens` plain `writeFile` → crash mid-write bricks the login, and
   `loadTokens` swallows parse errors as "logged out". Make the write atomic
   (temp + rename like `writeDraftAtomic`), and have a corrupt store surface
@@ -77,3 +77,22 @@ into `refactor` and the line gets a `[merged]` marker with the commit.
 - TDD per `.agents/development-guide.md`: repro first, then fix.
 - Full `nimble test` green before reporting done.
 - Single-line commit message per item; commit when the item is complete.
+
+## Outcome (all merged into `refactor`)
+
+- audit-sec → e62b9bc (traversal fix + tests), 35462e6 + a4488b3 (web_fetch
+  host gate + tests). Merged 89ffa7b.
+- audit-win → 1628666 (start "" quoting), 76e720a (EDITOR contract doc).
+  Merged be57812.
+- audit-web → 2adb63b (webserve loopback + --host), e9cd797 (shellCapture
+  timeout fallback). Merged b84ffde.
+- audit-perm → a8a6759 (0600 history/session + tests), d51c9c9 (atomic token
+  store + corrupt diagnostic + tests). Merged f9949e6.
+
+Verification: full testament run on the merged tree; the three reported
+failures (test_cli_args, test_config_validation, test_wall_bash) reproduce on
+a pristine non-audit worktree too — they require a pre-built ./3code binary
+at the repo root. With `nim c -o:3code src/threecode.nim` all three pass
+exit-0. Not regressions.
+
+Worktrees audit-{sec,win,web,perm} removed after merge.
