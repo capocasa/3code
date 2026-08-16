@@ -422,18 +422,34 @@ proc contractPolicyPath*(resolved: string): string =
   ## `./x`), under home as `~/...`, else absolute. Display only.
   sandwall.contractPath(resolved, getCurrentDir())
 
+proc canonicalRules*(rules: Policy): Policy =
+  ## The policy with every path rule root run through resolveRawPath,
+  ## matching what the OS backends enforce: they canonicalize rule
+  ## paths (sandwall paths.normalize, symlink-resolving) before handing
+  ## them to Landlock/Seatbelt, so `allow ./` covers the project also
+  ## when its path reaches through a symlink (macOS /var -> /private/var
+  ## makes getTempDir and every fixture under it such a case). Rules
+  ## stay literal in `current` so :sandbox rendering shows the paths the
+  ## user wrote; only the comparison in checkRawPath sees canonical form.
+  result = rules
+  for i in 0 ..< result.len:
+    if result[i].kind == rkPath:
+      result[i].path = resolveRawPath(result[i].path)
+
 proc checkRawPath*(path: string; needsWrite: bool): tuple[allowed: bool, reason: string] =
   ## Check a raw (possibly relative) path against the current policy,
   ## reloading the policy first when the file changed. This is the
-  ## in-process gate for the read/write/patch tools; it calls the same
-  ## sandwall `checkPath` the sandboxed box subprocess enforces at the
-  ## kernel level for bash. `needsWrite = false` allows read-only and
+  ## in-process gate for the read/write/patch tools; it applies the same
+  ## ordered last-match-wins walk as sandwall `checkPath`, which the box
+  ## subprocess enforces at the kernel level for bash. Both the query
+  ## and the rule roots are canonicalized first so a symlinked project
+  ## dir matches its own rules. `needsWrite = false` allows read-only and
   ## writable; `true` requires writable.
   if not active or not sandboxEnabled: return (true, "")
   discard reloadIfChanged(getCurrentDir())
   let resolved = resolveRawPath(path)
   if resolved.len == 0: return (true, "")
-  let access = current.checkPath(resolved)
+  let access = canonicalRules(current).checkPath(resolved)
   let shown = contractPolicyPath(resolved)
   case access
   of akWritable: (true, "")

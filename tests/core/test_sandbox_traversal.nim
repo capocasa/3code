@@ -59,6 +59,32 @@ suite "checkRawPath traversal":
       sandbox.current = saved
       removeDir(home.parentDir)
 
+  when defined(posix):
+    test "project reached through a symlinked dir matches its own rules":
+      # macOS getTempDir is /var/folders/..., a symlink into /private,
+      # so every fixture project there sits behind a symlink. The gate
+      # canonicalizes both query and rule roots, so `allow ./` must
+      # still cover the project and the ../.. escape must still miss it.
+      let (home, proj) = newFixture("throughlink")
+      let prevCwd = getCurrentDir()
+      defer: leaveProj(prevCwd)
+      createSymlink(proj, proj.parentDir / "projlink")
+      enterProj(proj.parentDir / "projlink")
+      let wasActive = sandbox.active
+      let saved = sandbox.current
+      sandbox.active = true
+      try:
+        sandbox.current = sandbox.loadPolicy(proj.parentDir / "projlink")
+        check sandbox.checkRawPath(getCurrentDir() / "sub" / "x.txt",
+                                   needsWrite = true).allowed
+        check not sandbox.checkRawPath(
+          getCurrentDir() & "/sub/../../../etc/passwd",
+          needsWrite = false).allowed
+      finally:
+        sandbox.active = wasActive
+        sandbox.current = saved
+        removeDir(home.parentDir)
+
   test "path through a symlinked dir pointing outside is denied":
     when defined(posix):
       # symlink resolution: the deepest existing ancestor of the write
