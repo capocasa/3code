@@ -1,15 +1,15 @@
 discard """
-  The in-process path gate (checkRawPath) must resolve the raw tool
-  path the same way the OS backends do: absolute + normalizedPath +
-  symlink resolution. Without it, `<proj>/sub/../../etc/passwd` still
-  starts with the project prefix as a raw string, so isPathUnder
-  accepts it and the read/write/patch tools escape the policy while
-  the box subprocess (which canonicalizes via sandwall normalize)
-  would have blocked the same path.
-
-  checkRawPath reloads the policy via getCurrentDir(), so each test
-  chdirs into the fixture project dir (restoring cwd on teardown) to
-  load that project's own policy, not whatever repo the suite runs in.
+  # The in-process path gate (checkRawPath) must resolve the raw tool
+  # path the same way the OS backends do: absolute + normalizedPath +
+  # symlink resolution. Without it, `<proj>/sub/../../etc/passwd` still
+  # starts with the project prefix as a raw string, so isPathUnder
+  # accepts it and the read/write/patch tools escape the policy while
+  # the box subprocess (which canonicalizes via sandwall normalize)
+  # would have blocked the same path.
+  #
+  # checkRawPath reloads the policy via getCurrentDir(), so each test
+  # chdirs into the fixture project dir (restoring cwd on teardown) to
+  # load that project's own policy, not whatever repo the suite runs in.
 """
 import std/[unittest, os, strutils]
 import threecode/sandbox
