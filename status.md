@@ -81,6 +81,34 @@ Plus two smaller ones found while wiring 3code to it:
   child + no redirects, HOME=tmp, probe dir cleanup, escape-garbage
   suppression, unsetup wording).
 
+## Post-release check (2026-08-16, deny 1.1.1.1 report)
+
+User report: `.sandbox` in `~/foo` with `deny 1.1.1.1` still let
+curl through. Reproduced, then cleared: the deployed exe was a stale
+build (0.6.0-windows-8675bb47-unstaged, 01:41) predating the probe
+fix cfa489d. Its backendWorks probe still appended POSIX redirects
+(`</dev/null >/dev/null 2>&1`) to `cmd /c exit 0`; cmd.exe fails the
+redirect ("The system cannot find the path specified"), the probe
+exits nonzero, procboxExe clears, and bash runs completely
+unfenced - host rules included.
+
+Redeploying the current build (b466423) needed two setup-side
+actions, both worth remembering:
+
+- Replacing 3code.exe resets its ACLs; the `sandwall`-user
+  read+execute grant from setup must be re-applied (`icacls
+  3code.exe /grant "sandwall:(RX)"`) or CPLW fails with error 5.
+- After a VM reboot the CPLW child died 0xC0000142 again until
+  `3code setup` was re-run (it re-grants winsta0 + default desktop
+  and re-stamps exe/msys64 execute grants). Setup is idempotent;
+  run it after deploying a new exe.
+
+Verified on the current build through the production bash-tool path
+(bashtool_driver over runStreamingBash in `~/foo`): `deny 1.1.1.1`
+returns `sandwall proxy: DENY 1.1.1.1:443`, curl code=000 exit 7;
+example.com through the same policy passes with code=200. The
+default probe shape (`cmd /c exit 0`, no redirects) exits 0.
+
 ## Leftovers / next steps
 
 - sandwall 0.5.0 tag + push + CI watch (release step; user asked for
