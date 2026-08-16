@@ -255,6 +255,12 @@ proc main() =
     quit(setupMain(rawParams[1 .. ^1]))
   if rawParams.len > 0 and rawParams[0] == "unsetup":
     quit(unsetupMain(rawParams[1 .. ^1]))
+  # -v/-h must not pay for TLS env, stale-binary walk, or sandbox
+  # sweep. On Windows a debug 3code.exe is tens of MB and those
+  # walks dominate `--version`.
+  for a in rawParams:
+    if a in ["-v", "--version"]: echo Version; return
+    if a in ["-h", "--help"]: usage()
 
   setupTlsEnv()
   cleanupStaleBinaries()
