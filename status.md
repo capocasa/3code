@@ -1,129 +1,94 @@
-# Status: Windows sandbox (dedicated-user backend) - mid-task handoff
+# Status: Windows sandbox - WORKING
 
-Goal: **a working sandwall on Windows.** Current state: fs sandbox +
-net fence verified working in *ssh session 0* contexts; the spawn of
-sandboxed children **stalls in interactive (session 1) contexts**.
-Everything below is verified-on-hardware evidence, not theory.
+**The Windows sandbox works end to end.** The blocker (children
+stalling/dying at loader init in interactive contexts) is solved and
+root-caused; every layer is verified on beck hardware in both ssh
+session-0 and interactive session-1 contexts.
 
-## Repos / binaries
+## What was actually wrong (the blocker, dissected)
 
-- `~/p/sandwall` main @ 13a0ee1 (uncommitted: none). sandwall 0.4.0
-  tagged/released earlier; the new commits are not released.
-- `~/p/3code/windows` branch windows @ 7120e2b (uncommitted: none,
-  `3code-linux` untracked build artifact).
-- Cross-build (from `~/p/3code/windows`):
-  `nim c -o:3code.exe --os:windows --cpu:amd64 --opt:none --debugger:native --gcc.exe:x86_64-w64-mingw32-gcc --gcc.linkerexe:x86_64-w64-mingw32-gcc src/threecode.nim`
-  and for sandwall: same flags, `src/sandwall.nim`, out `sandwall.exe`.
-- Deploy: `scp 3code.exe beck:'C:\Users\Quickemu\3code.exe'`. The
-  deployed binary must get `icacls ... /grant sandwall:(RX)` after
-  every deploy (scp replaces the file, grants don't survive).
+Three independent bugs stacked on top of each other:
 
-## Beck (Windows 11 quickemu VM)
+1. **The setup-time desktop grant never applied (and crashed).**
+   `sw_grant_desktop` (csrc/desktop_shim.c) heap-corrupted
+   (0xC0000374) after granting the window station: LocalFree on the
+   old DACL from GetSecurityInfo is fatal in session-0 callers on
+   Win11 26100, and the LookupAccountNameW domain buffer was one
+   terminator short. Setup died before the fence install (which is
+   why the fences showed installed=false at session start) and before
+   the default-desktop ACE. The winsta0 ACE limped through (applied
+   before the crash point), the desktop ACE never did.
 
-- Admin user **Quickemu** (ssh works, askpass recipe in the old plan
-  files). NEW: non-admin user **carlo / carlo** (untested, first task
-  should use it - closest to a real 3code user).
-- `schtasks` gotcha that burned a whole afternoon: by default tasks
-  run in **session 0**. `/it` runs them in session 1 (interactive)
-  but NOT necessarily with a visible console. When validating, always
-  print `$PID -> (Get-Process -Id $PID).SessionId` first.
-- Procdump at `C:\Users\Quickemu\pd\procdump64.exe` (may be cleaned);
-  dumps parse locally with `/tmp/mdvenv/bin/python` + `minidump`
-  package (recreate venv if gone).
+2. **lpDesktop="winsta0\default" kills CPLW children (0xC0000142).**
+   With BOTH the winsta0 and default-desktop ACEs actually in place,
+   an explicit lpDesktop string makes console-subsystem children fail
+   their cross-session desktop connect. lpDesktop must be NULL: the
+   child then initializes in the caller's desktop and works - in
+   session 0 AND session 1. (The historical "the desktop string is
+   REQUIRED" note was an artifact of bug 1: without the grants, NULL
+   also failed, and the string was the only variant probed after a
+   crash-free run happened to apply the winsta0 ACE.)
 
-## What works (verified)
+3. **The child environment was never passed.** CPLW with env=NULL
+   gives the child a fresh block: NIMBOX_OUT_PIPE (the stdio relay
+   pipe name) and the wall-proxy vars never arrived, TEMP/TMP pointed
+   into the sandwall user's absent profile, and the relay silently
+   produced nothing. Fixed with GetEnvironmentStringsW +
+   CREATE_UNICODE_ENVIRONMENT (the flag is mandatory; without it CPLW
+   rejects the block with error 87).
 
-- ACL fs sandbox as the `sandwall` user: home/C: writes denied,
-  writable-root writes allowed, deny-narrowing + rollback.
-- WFP fence: `3code setup` (idempotent now) creates user + 8 filters;
-  wfp-probe as the sandwall user is blocked off-loopback.
-- The **54s-stall fix**: `acl.hasSidAce` pre-check skips redundant
-  ancestor traverse stamps (NTFS subtree walk). restrict: 26s -> 0.27s.
-- CLI: `3code setup` / `3code unsetup` (Windows-only), `wall` is an
-  internal undocumented subcommand, bash tool now routes through
-  `sandbox restrict` + wall proxy env (code in streamexec.nim).
-- Wall proxy compiles on Windows (WSAPoll portability layer) and is
-  exported from sandwall/wall.nim now.
-- msys2 bash, cmd, whoami all ran fine as a sandbox user **when the
-  CPLW parent was a tiny standalone helper (cplw.exe) from elevated
-  ssh session 0** (old plan notes, 0.4.0-era validation).
+Plus two smaller ones found while wiring 3code to it:
 
-## The blocker (read this twice)
+4. The stdio relay: pipe client handle not inheritable, pump thread's
+   Thread object stack-allocated (died with scope), relay command
+   mismatch (`<self> wall stdio-relay` vs the actual CLI), and
+   argv-quoting that mangled embedded quotes (the `bash -c` script
+   string - `source "..." <"..."` became garbage).
 
-`spawnSandboxed` (rtoken.nim) uses CreateProcessWithLogonW (C shim
-`csrc/spawn_shim.c`) to run the child as the `sandwall` user. In
-interactive-session contexts the child **stalls at loader init**:
-single thread, 2-16 modules loaded, blocked `ntdll+0xd1d08` (past the
-last named export), wait reason **LpcReply** - waiting on a CSRSS/
-console ALPC reply that never comes. Sometimes the child dies with
-0xC0000142 instead. Exhausted matrix (all on beck):
+5. 3code's `backendWorks` probe used shell redirections in
+   execCmdEx, which on Windows has NO shell (raw CreateProcess): the
+   literal `</dev/null` argv reached the probe child as arguments and
+   the probe failed, silently disabling the sandbox (bash ran
+   unfenced, unsandboxed, as the admin user).
 
-- console vs GUI-subsystem child: both stall/die
-- lpDesktop = winsta0\default vs NULL vs private station+desktop
-  (private station created in the shim, Everyone DACL): all stall
-- flags 0 / CREATE_NO_WINDOW / DETACHED_PROCESS (CPLW rejects
-  DETACHED with 87/183)
-- with/without our KILL_ON_JOB_CLOSE Job assign
-- schtasks session 0 vs session 1 (`/it`) vs `/rl HIGHEST`
-- sandwall user in no groups vs added to Users
-- window station + desktop ACL grants on session-1's winsta0
-  (grantws.exe helper, rc=0) - still stalls
-- a stdio-relay hop (`3code wall stdio-relay`, sandwall/wall/stdio.nim,
-  named pipes NIMBOX_OUT_PIPE) - relay itself is the CPLW child, so it
-  stalls too
+## What is verified on beck (Windows 11 26100, admin Quickemu)
 
-Crucial confound: **every failure had 3code.exe as the CPLW parent;
-every success had the standalone cplw.exe helper as parent** (from
-elevated ssh). Parent binary identity vs caller context was never
-separated. That is the first experiment to run.
+- `sandwall setup` / `3code setup`: idempotent, no crash; both
+  fences install (8 user + 4 AC filters). unsetup/setup cycle clean.
+- `3code sandbox restrict %TEMP% -- cmd /c whoami` prints
+  `...\sandwall`, exit codes propagate (exit 42 -> 42), in BOTH ssh
+  session 0 and schtasks /IT session 1. ~0.8s per sandboxed command.
+- fs matrix: TEMP write allowed; home, C:\Windows, deny-subpath
+  writes denied (with the EACCES hint appended).
+- WFP fence: off-loopback connect from the sandbox user times out.
+- Wall proxy: allowlisted host fetches through the proxy; raw-IP
+  and non-allowlisted hosts blocked (HTTP CONNECT and SOCKS5 paths).
+- Full production bash-tool path (driver over runStreamingBash with
+  real initSandbox): msys2 bash runs as `sandwall`, clean output
+  (HOME is the per-run tmp; no .bashrc noise), allowlisted host via
+  proxy OK, non-allowlisted blocked.
+- 3code TUI (provider-stub build) in session 1: prompt -> bash tool
+  dispatch -> sandboxed execution -> turn completes, OUTER_EXIT=0.
+  (The stub build disables the sandbox by design; the enforcement
+  evidence is the driver runs above.)
+- 3code test suite: 65 PASS, 0 FAIL locally (Linux).
 
-## Agreed direction (with the user)
+## Repos
 
-Keep the dedicated-user approach. Try: **sandwall.exe as a separate
-runner binary on Windows** (Codex's codex-command-runner.exe shape).
-The user's instinct: have the installer ship the regular sandwall
-binary next to 3code.exe; 3code's bash tool execs sandwall.exe (not
-itself) as the sandbox parent. Note: keep the sandwall *library*
-import for policy parsing; drop the compiled-in execution path on
-Windows only.
+- `~/p/sandwall` main @ 36caac4 (0.5.0: lpDesktop NULL, env
+  passthrough, relay fixes, desktop-shim heap fix, argv quoting).
+- `~/p/3code/windows` @ cfa489d (stdio-relay dispatch, Windows probe
+  child + no redirects, HOME=tmp, probe dir cleanup, escape-garbage
+  suppression, unsetup wording).
 
-If the standalone parent doesn't fix it, the next shape is the full
-Codex two-hop: CPLW launches a long-lived runner *as the sandbox
-user*, which then spawns commands with plain same-session
-CreateProcessW (nothing cross-session ever happens). OpenAI article:
-"Building a safe, effective sandbox to enable Codex on Windows" -
-read it before redesigning.
+## Leftovers / next steps
 
-## Immediately actionable next steps
-
-1. Deploy standalone `sandwall.exe` to beck; run its restrict CLI as
-   the CPLW parent from a REAL interactive console (login as carlo
-   non-admin in the VM console, run there - not ssh, not schtasks).
-   This is the decisive experiment for parent-binary identity.
-2. If it works: restructure (installer ships sandwall.exe; bash tool
-   execs it; remove self-re-exec on Windows). If it stalls: implement
-   the two-hop runner (long-lived, LOGON_WITH_PROFILE likely needed
-   for profile/hive load - we never tried that flag).
-3. Then the full matrix: fs deny/narrowing, msys2 bash, host rules
-   through the wall proxy (the original 1.1.1.1 bug), latency.
-4. Then cleanup: revert `wall/stdio.nim` experiments if superseded,
-   CHANGELOG, version bumps, release.
-
-## Loose ends
-
-- The `probe` in initSandbox still re-execs `3code sandbox restrict`
-  (backendWorks); on a broken spawn this hangs the interactive
-  startup ~30s (probe child stalls + dirlock waits). Any fix must
-  give the probe a timeout or route it through the new runner too.
-- `3code sandbox restrict` on Windows prints box's own minline
-  escape garbage ([?25h[0m[?2004l) on exit - cosmetic, from cleanup
-  exitprocs running in the box process.
-- The wall proxy path for Windows is compiled but unexercised end to
-  end (needs a working child first).
-- tests/core/test_cli_args.nim `setup` test needs a writable HOME
-  (sandbox deny on ~/.config makes it fail locally; green with
-  HOME=/tmp/fakehome). CI is unaffected.
-- Beck has leftover: `t.exe`, `test_winpath.exe`, `sandwall-usersid.exe`
-  in C:\Users\Quickemu (harmless), sandwall user in Users group,
-  winsta0 ACL grants for sandwall on session 1. A `3code unsetup` +
-  re-setup at the end should be part of final verification.
+- sandwall 0.5.0 tag + push + CI watch (release step; user asked for
+  the release to be pushed when ready).
+- The 3code installer should ship `sandwall.exe` next to `3code.exe`
+  (the standalone runner works now); today 3code re-execs itself,
+  which also works - the runner split is optional hardening.
+- CI: windows runners have no sandbox user; the fs tests gate on
+  backend presence (unchanged).
+- Beck still has the pre-existing harmless leftovers (t.exe,
+  test_winpath.exe, sandwall-usersid.exe in C:\Users\Quickemu).
