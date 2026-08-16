@@ -297,7 +297,9 @@ proc printSupported() =
 
 proc openBrowserUrl(url: string) {.gcsafe.} =
   when defined(macosx): discard execShellCmd("open " & quoteShell(url))
-  elif defined(windows): discard execShellCmd("start " & url)
+  # "" is start's window-title arg; without it a quoted URL is swallowed
+  # as the title and nothing opens.
+  elif defined(windows): discard execShellCmd("start \"\" " & quoteShell(url))
   else: discard execShellCmd("xdg-open " & quoteShell(url) & " &")
 
 proc fetchKeyFor(name, key: string): string =
