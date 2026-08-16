@@ -131,8 +131,13 @@ delegation override.
 
 ## Leftovers / next steps
 
-- sandwall 0.5.0 tag + push + CI watch (release step; user asked for
-  the release to be pushed when ready).
+- DONE 2026-08-16: sandwall 0.5.1 released. The 0.5.0 tag had gone
+  out with red Windows CI (contractPath separator tests, fixed by
+  a1665d6 after tagging) so no release artifact was ever published;
+  GitHub releases had stalled at 0.2.7. 0.5.1 carries the console-
+  flash fix, the shim-free quality pass, and the contractPath fix;
+  CI green on all three OSes, artifacts up (linux, macos-universal,
+  windows-amd64).
 - The 3code installer should ship `sandwall.exe` next to `3code.exe`
   (the standalone runner works now); today 3code re-execs itself,
   which also works - the runner split is optional hardening.
