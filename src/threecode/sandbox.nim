@@ -37,7 +37,7 @@
 ## (`3code sandbox --policy`), so a launch always enforces the freshest
 ## file contents even between parent reloads.
 
-import std/[os, osproc, strutils, times]
+import std/[os, osproc, streams, strutils, times]
 from std/posix import kill, Pid
 import sandwall
 import sandwall/wall as sandwallWall
@@ -296,43 +296,57 @@ proc findProcbox*(): string =
   except CatchableError:
     result = ""
 
+const ProbeTimeoutMs = 2000
+  ## Cap on the POSIX restrict probe. A hang is unknown, not "backend
+  ## broken": callers treat false as permission to clear procboxExe and
+  ## run every bash command unconfined.
+
 proc backendWorks*(exe: string): bool =
-  ## Probe whether the OS-native sandbox backend (Landlock/Seatbelt/ACL)
-  ## can actually restrict on this host. Re-execs this binary as
-  ## `sandbox restrict <tmpdir> -- true`; success means the kernel applies the
-  ## domain. Fails on kernels built without Landlock, runners under a
-  ## seccomp filter that blocks the syscall, etc. Callers clear `procboxExe`
-  ## when this returns false so the bash tool falls back to the unconfined
-  ## setsid path rather than failing every bash command.
+  ## Whether the OS-native sandbox backend can restrict on this host.
+  ## Callers clear `procboxExe` when this returns false so the bash tool
+  ## falls back to the unconfined setsid path rather than failing every
+  ## bash command.
+  ##
+  ## Windows: a setup check, not a restrict exec. `CreateProcessWithLogonW`
+  ## of this same 3code.exe as the sandwall user is what first-launch
+  ## Defender/SmartScreen can block for minutes; `backendSupported` is
+  ## the user+creds test and does not spawn. Missing setup is false.
+  ##
+  ## POSIX: re-execs this binary as `sandbox restrict <tmpdir> -- true`.
+  ## Success means the kernel applied the domain. A real nonzero exit
+  ## (no Landlock, seccomp-blocked syscall) is false. A hang past
+  ## ProbeTimeoutMs is unknown-success (true) so a stuck probe does not
+  ## silently disable confinement.
   if exe.len == 0: return false
+  when defined(windows):
+    return backendSupported()
   let tmp = tempDir() / ("3code-probe-" & $getCurrentProcessId())
   try:
     if not dirExists(tmp): createDir(tmp)
-    # Capture (discard) stdout+stderr so a failing backend's OSError
-    # traceback never leaks into the parent's output, which would trip
-    # tests that assert no "unhandled exception" appears. The probe
-    # child is `true` on POSIX, `cmd /c exit 0` on Windows (no true.exe
-    # ships there; a 127 from the missing binary would look like a
-    # broken backend and silently disable the sandbox). POSIX gets the
-    # shell redirects; Windows execCmdEx runs the string through
-    # CreateProcess with no shell, where a literal `</dev/null` argv
-    # would reach the probe child as arguments.
-    when defined(windows):
-      # The sandbox child inherits our cwd as its lpCurrentDirectory,
-      # and the CPLW spawn fails with error 267 when the sandbox user
-      # cannot enter it (a fresh project dir has no traverse ACE yet).
-      # A probe failure clears procboxExe and every bash command would
-      # silently run unsandboxed, so cd into the probe tmp first - it
-      # gets a traverse stamp as an ancestor of the writable root.
-      let probeCmd = "cmd /c cd /d " & quoteShell(tmp) & " && " &
-        quoteShell(exe) & " sandbox restrict " &
-        quoteShell(tmp) & " -- cmd /c exit 0"
+    # poStdErrToStdOut + a drain of the pipe so a failing backend's
+    # OSError traceback never leaks into the parent's output (tests
+    # assert no "unhandled exception" appears). Redirects stay off
+    # the argv: they would reach the probe child as arguments.
+    var p = startProcess(exe,
+      args = ["sandbox", "restrict", tmp, "--", "true"],
+      options = {poStdErrToStdOut})
+    let deadline = epochTime() + ProbeTimeoutMs / 1000
+    var code = -1
+    while epochTime() < deadline:
+      code = p.peekExitCode
+      if code != -1: break
+      sleep(20)
+    if code == -1:
+      try: p.kill() except CatchableError: discard
+      try: discard p.waitForExit() except CatchableError: discard
+      result = true
     else:
-      let probeCmd = quoteShell(exe) & " sandbox restrict " &
-        quoteShell(tmp) & " -- true </dev/null >/dev/null 2>&1"
-    let (outp, code) = execCmdEx(probeCmd)
-    discard outp
-    result = code == 0
+      result = code == 0
+    try:
+      discard p.outputStream.readAll()
+    except CatchableError:
+      discard
+    p.close()
     try: removeDir(tmp) except CatchableError: discard
   except CatchableError:
     result = false
