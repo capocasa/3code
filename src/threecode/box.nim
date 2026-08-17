@@ -195,7 +195,7 @@ proc boxRestrict(args: seq[string]): int =
     # pretending (honest degrade posture).
     if fence:
       try:
-        let st = sandwallWall.acFenceStatus()
+        let st = sandwallWall.fenceStatus()
         if not st.installed:
           stderr.writeLine("3code sandbox: WARNING: host rules are " &
             "present but the WFP fence is not installed. The child " &
