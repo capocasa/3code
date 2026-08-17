@@ -444,8 +444,14 @@ export DEBIAN_FRONTEND=noninteractive
         if sandboxEnabled and sandbox.active and sandbox.procboxExe.len > 0:
           discard sandbox.reloadIfChanged(getCurrentDir())
           let policy = sandbox.defaultPolicyFilePath(getCurrentDir())
+          # cmd.exe as the CPLW image: bash.exe as the sandwall user
+          # dies 0xC0000142 at cygwin init (verified on beck). cmd
+          # then launches bash in the same logon session, which works
+          # for the fs/net fence (user SID) without being the first
+          # image.
           var args = @["sandbox", "--policy", policy, "restrict",
-                      "--ro", tmp, "--", b, "-c", bashCmd]
+                      "--ro", tmp, "--", "cmd", "/c",
+                      quoteShell(b) & " -c " & quoteShell(bashCmd)]
           var fenced = false
           if sandbox.wallProxyNeeded(sandbox.current):
             let fenceInstalled = try: sandwallWall.acFenceStatus().installed
@@ -463,7 +469,8 @@ export DEBIAN_FRONTEND=noninteractive
             # the fence permits loopback only within the proxy port
             # range; tmp must be writable for bash's redirections
             args = @["sandbox", "--policy", policy, "restrict",
-                     tmp, "--", b, "-c", bashCmd]
+                     tmp, "--", "cmd", "/c",
+                     quoteShell(b) & " -c " & quoteShell(bashCmd)]
           startProcess(sandbox.procboxExe, args = args,
                        options = {poStdErrToStdOut, poUsePath})
         else:

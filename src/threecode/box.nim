@@ -128,7 +128,14 @@ proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
     let last = a.policies[^1]
     var projectDir = getCurrentDir()
     if last.extractFilename == PolicyFile:
-      projectDir = last.parentDir
+      let parent = last.parentDir
+      # ".sandbox" (bare) has an empty parentDir; that is cwd, not
+      # a blank project root that would make ./bar miss the allow.
+      if parent.len > 0: projectDir = parent
+    # Relative projectDir (".") makes ".\bar" normalize to the same
+    # string as the bare allow, so last-wins drops the deny.
+    try: projectDir = absolutePath(projectDir)
+    except CatchableError: discard
     var combined = ""
     for t in texts: combined.add t & "\n"
     let pol = parsePolicy(combined, projectDir) &
