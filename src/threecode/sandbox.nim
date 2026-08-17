@@ -38,7 +38,8 @@
 ## file contents even between parent reloads.
 
 import std/[os, osproc, streams, strutils, times]
-from std/posix import kill, Pid
+when defined(posix):
+  from std/posix import kill, Pid
 import sandwall
 import sandwall/wall as sandwallWall
 import types
@@ -319,37 +320,38 @@ proc backendWorks*(exe: string): bool =
   ## silently disable confinement.
   if exe.len == 0: return false
   when defined(windows):
-    return backendSupported()
-  let tmp = tempDir() / ("3code-probe-" & $getCurrentProcessId())
-  try:
-    if not dirExists(tmp): createDir(tmp)
-    # poStdErrToStdOut + a drain of the pipe so a failing backend's
-    # OSError traceback never leaks into the parent's output (tests
-    # assert no "unhandled exception" appears). Redirects stay off
-    # the argv: they would reach the probe child as arguments.
-    var p = startProcess(exe,
-      args = ["sandbox", "restrict", tmp, "--", "true"],
-      options = {poStdErrToStdOut})
-    let deadline = epochTime() + ProbeTimeoutMs / 1000
-    var code = -1
-    while epochTime() < deadline:
-      code = p.peekExitCode
-      if code != -1: break
-      sleep(20)
-    if code == -1:
-      try: p.kill() except CatchableError: discard
-      try: discard p.waitForExit() except CatchableError: discard
-      result = true
-    else:
-      result = code == 0
+    result = backendSupported()
+  else:
+    let tmp = tempDir() / ("3code-probe-" & $getCurrentProcessId())
     try:
-      discard p.outputStream.readAll()
+      if not dirExists(tmp): createDir(tmp)
+      # poStdErrToStdOut + a drain of the pipe so a failing backend's
+      # OSError traceback never leaks into the parent's output (tests
+      # assert no "unhandled exception" appears). Redirects stay off
+      # the argv: they would reach the probe child as arguments.
+      var p = startProcess(exe,
+        args = ["sandbox", "restrict", tmp, "--", "true"],
+        options = {poStdErrToStdOut})
+      let deadline = epochTime() + ProbeTimeoutMs / 1000
+      var code = -1
+      while epochTime() < deadline:
+        code = p.peekExitCode
+        if code != -1: break
+        sleep(20)
+      if code == -1:
+        try: p.kill() except CatchableError: discard
+        try: discard p.waitForExit() except CatchableError: discard
+        result = true
+      else:
+        result = code == 0
+      try:
+        discard p.outputStream.readAll()
+      except CatchableError:
+        discard
+      p.close()
+      try: removeDir(tmp) except CatchableError: discard
     except CatchableError:
-      discard
-    p.close()
-    try: removeDir(tmp) except CatchableError: discard
-  except CatchableError:
-    result = false
+      result = false
 
 proc mtimeOf(path: string): Time =
   try: getLastModificationTime(path)
