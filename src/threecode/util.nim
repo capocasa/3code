@@ -903,11 +903,13 @@ func stripPreamble*(s: string): string =
 proc collapseHome*(path: string): string =
   ## Collapse the user's home dir prefix to `~/`. Guards against the
   ## `getHomeDir()` trailing-slash footgun that produced things like
-  ## `~e/hellodeepseek` for `/home/carlo/e/hellodeepseek`.
-  let home = getHomeDir()
-  if home.len == 0 or not path.startsWith(home):
+  ## `~e/hellodeepseek` for `/home/carlo/e/hellodeepseek`. On Windows
+  ## both sides are compared with `/` so `C:\Users\x\foo` collapses.
+  let home = getHomeDir().replace('\\', '/')
+  let norm = path.replace('\\', '/')
+  if home.len == 0 or not norm.startsWith(home):
     return path
-  var rel = path[home.len .. ^1]
+  var rel = norm[home.len .. ^1]
   while rel.startsWith("/"): rel = rel[1 .. ^1]
   if rel.len == 0: "~" else: "~/" & rel
 

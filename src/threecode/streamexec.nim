@@ -420,14 +420,15 @@ export DEBIAN_FRONTEND=noninteractive
       # the entire environment (including SYSTEMROOT, WINDIR, etc.)
       # which would cause bash to fail.
       putenv("MSYSTEM", "MSYS")
-      # HOME: the per-run tmp dir, not USERPROFILE - the sandbox user
-      # cannot read the invoking user's profile, and bash would print
-      # ".bashrc: Permission denied" on every call (and msys2 tools
-      # would try to write .bash_history there).
+      # HOME for the sandboxed child is the per-run tmp: sandwall cannot
+      # read the invoking user's profile. HISTFILE is discarded so bash
+      # never writes history there. Do not rewrite USERPROFILE: Nim
+      # getHomeDir / collapseHome must keep pointing at the real user.
       putenv("HOME", tmp)
+      putenv("HISTFILE", "/dev/null")
+      putenv("HISTSIZE", "0")
       putenv("CHERE_INVOKING", "1")
       putenv("CYGWIN", "nodosfilewarning")
-      putenv("USERPROFILE", r"C:\Users\sandwall")
       let msysBin = getEnv("LOCALAPPDATA") & r"\3code\msys64\usr\bin"
       putenv("PATH", msysBin & ";" & getEnv("PATH"))
       let posixScript = toPosixPath(scriptPath)

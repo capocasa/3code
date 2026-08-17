@@ -1,4 +1,4 @@
-import std/[os, strutils, unittest]
+import std/[os, sequtils, strutils, unittest]
 import threecode/util
 
 suite "util: detectMdHeader":
@@ -82,6 +82,11 @@ suite "util: collapseHome":
 
   test "no home prefix returns unchanged":
     check collapseHome("/tmp/test.nim") == "/tmp/test.nim"
+
+  test "windows separators collapse against getHomeDir":
+    let home = getHomeDir()
+    if home.len > 0 and {'\\', ':'}.anyIt(it in home):
+      check collapseHome(home & "\\foo") == "~/foo"
 
 suite "util: looksLikePath":
   test "detects file with extension":

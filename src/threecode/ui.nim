@@ -1084,9 +1084,10 @@ proc shellCapture(cmd: string, timeoutS = 3): string =
   when defined(windows):
     let b = resolveBash()
     if b.len == 0: return ""
-    # `timeout` (MSYS2 coreutils) bounds the run; the redirect lives outside
-    # bash quotes so cmd.exe handles it with Windows-correct `2>nul`.
-    discard execShellCmd(&"{b} -lc \"timeout {timeoutS}s {cmd}\" >\"{outPath}\" 2>nul")
+    # Non-login: `bash -lc` cds to HOME, so `ls`/`git` would describe the
+    # user profile instead of cwd. `--norc --noprofile` skips ~/.bashrc.
+    # The redirect lives outside bash quotes so cmd.exe handles `2>nul`.
+    discard execShellCmd(&"{b} --norc --noprofile -c \"timeout {timeoutS}s {cmd}\" >\"{outPath}\" 2>nul")
   else:
     # `timeout` is absent on stock macOS; every caller passes a sub-second
     # literal, so run the raw command when the wrapper is unavailable.
@@ -1121,10 +1122,20 @@ proc sessionPreamble*(cwd: string): string =
         if s.len == 0: continue
         let trimmed = if s.len > 80: utf8ByteCut(s, 77) & "..." else: s
         lines.add "  " & trimmed
-  let listing = shellCapture("ls -1 --color=never | head -30")
-  if listing != "":
-    let entries = listing.splitLines.filterIt(it.strip.len > 0)
-    lines.add "files in cwd: " & entries.join(" ")
+  # Native listing: do not shell out. On Windows `bash -lc ls` used to
+  # list $HOME (the user profile) while cwd said ~/foo.
+  var names: seq[string]
+  try:
+    for _, path in walkDir(cwd):
+      let name = extractFilename(path)
+      if name.len == 0: continue
+      names.add name
+  except OSError:
+    discard
+  if names.len > 0:
+    names.sort()
+    if names.len > 30: names.setLen(30)
+    lines.add "files in cwd: " & names.join(" ")
   let notes = loadAgentsMd(cwd)
   result = "<session_context>\n" & lines.join("\n") & "\n</session_context>"
   if notes.len > 0:

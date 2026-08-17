@@ -620,7 +620,10 @@ proc main() =
         paintInitialPrompt(prof)
     else:
       paintInitialPrompt(prof)
-    if prompt != "" and runInitialPrompt(prompt): return
+    if prompt != "" and runInitialPrompt(prompt):
+      # quit, not return: unwinding `editor` while the input thread still
+      # holds it is the Windows oneshot SIGSEGV (illegal storage access).
+      quit(0)
     # Oneshot: a prompt given on the command line runs once and exits. Only
     # -i/--interactive keeps the REPL open afterward (and no prompt at all
     # means a fresh interactive session). The idle prompt painted by endTurn
@@ -631,7 +634,7 @@ proc main() =
       emitFatPromptEvent clearBarEvent()
       termengine.renderFooter(clearFooterFrame(), inputThreadRunning,
                               addr editor)
-      return
+      quit(0)
     while true:
       var done = false
       var line = readInput(editor, done)
@@ -704,7 +707,7 @@ proc main() =
   except IOError as e:
     stderr.writeLine "3code: output stream broken (" & e.msg &
       "); session saved."
-    return
+    quit(0)
   except CatchableError as e:
     when not defined(release):
       raise
@@ -714,5 +717,6 @@ proc main() =
       stderr.writeLine trace
     stderr.writeLine "3code: session saved at " & session.savePath &
       ". Please open an issue with the lines above."
+    quit(1)
 when isMainModule:
   main()
