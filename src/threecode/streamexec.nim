@@ -333,17 +333,6 @@ export DEBIAN_FRONTEND=noninteractive
 """ & cmd & "\n"
   writeFile(scriptPath, script)
   writeFile(stdinPath, act.stdin)
-  when defined(windows):
-    # cmd.exe cannot source the bash script. The sandboxed Windows path
-    # runs cmd /c on this file; keep the body as the model wrote it so
-    # echo/curl oneshots work. CRLF so cmd parses every line.
-    let winScriptPath = tmp / "cmd.cmd"
-    writeFile(winScriptPath,
-      "@echo off\r\n" &
-      "set PAGER=cat\r\nset GIT_PAGER=cat\r\n" &
-      "set LESS=\r\nset TERM=dumb\r\nset CI=1\r\n" &
-      "set NO_COLOR=1\r\nset GIT_TERMINAL_PROMPT=0\r\n" &
-      cmd & "\r\n")
 
   let cap = bashTimeoutSecs(act.timeoutSecs)
   var p =
@@ -436,6 +425,9 @@ export DEBIAN_FRONTEND=noninteractive
       # ".bashrc: Permission denied" on every call (and msys2 tools
       # would try to write .bash_history there).
       putenv("HOME", tmp)
+      putenv("CHERE_INVOKING", "1")
+      putenv("CYGWIN", "nodosfilewarning")
+      putenv("USERPROFILE", r"C:\Users\sandwall")
       let msysBin = getEnv("LOCALAPPDATA") & r"\3code\msys64\usr\bin"
       putenv("PATH", msysBin & ";" & getEnv("PATH"))
       let posixScript = toPosixPath(scriptPath)
@@ -455,14 +447,8 @@ export DEBIAN_FRONTEND=noninteractive
         if sandboxEnabled and sandbox.active and sandbox.procboxExe.len > 0:
           discard sandbox.reloadIfChanged(getCurrentDir())
           let policy = sandbox.defaultPolicyFilePath(getCurrentDir())
-          # bash.exe as the sandwall user dies 0xC0000142 at cygwin
-          # init, even under cmd /c (verified on beck). Last resort:
-          # run the tool command as cmd.exe /c so oneshots still prove
-          # fs+net. The user SID is the fence, not bash-as-image.
-          # cmd /c sources the same script file the bash path wrote.
           var args = @["sandbox", "--policy", policy, "restrict",
-                      "--ro", tmp, "--", "cmd", "/c",
-                      winScriptPath]
+                      "--ro", tmp, "--", b, "-c", bashCmd]
           var fenced = false
           if sandbox.wallProxyNeeded(sandbox.current):
             let fenceInstalled = try: sandwallWall.fenceStatus().installed
@@ -477,9 +463,9 @@ export DEBIAN_FRONTEND=noninteractive
                 $int(sandbox.wallProxyPort()), "",
                 getEnv("GIT_SSH_COMMAND", "")):
               putenv(k, v)
-            # tmp must be writable for cmd's redirections / script
+            # tmp must be writable for bash's redirections / script
             args = @["sandbox", "--policy", policy, "restrict",
-                     tmp, "--", "cmd", "/c", winScriptPath]
+                     tmp, "--", b, "-c", bashCmd]
           startProcess(sandbox.procboxExe, args = args,
                        options = {poStdErrToStdOut, poUsePath})
         else:
