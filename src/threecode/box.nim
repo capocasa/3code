@@ -29,8 +29,6 @@ when defined(posix):
   import std/posix except Time
 import std/[os, strutils]
 import sandwall
-when defined(windows):
-  import sandwall/wall as sandwallWall
 import sandbox
 
 const usage = """
@@ -193,16 +191,9 @@ proc boxRestrict(args: seq[string]): int =
     # the caller points the child at the wall proxy via env for host
     # rules. When the fence is NOT installed, say so instead of
     # pretending (honest degrade posture).
-    if fence:
-      try:
-        let st = sandwallWall.fenceStatus()
-        if not st.installed:
-          stderr.writeLine("3code sandbox: WARNING: host rules are " &
-            "present but the WFP fence is not installed. The child " &
-            "will have OPEN network access. Run '3code wall " &
-            "setup-windows' (elevated) once to enforce host rules.")
-      except CatchableError:
-        discard
+    # Do not call fenceStatus() here: opening the WFP engine is hundreds
+    # of ms and the fence is installed once by `3code setup`. The
+    # production tool path already warns when the fence is missing.
     try:
       return int(runSandboxed(writable, a.cmd, read = readOnly,
                               denied = denied))

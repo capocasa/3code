@@ -14,6 +14,7 @@ else:
   import std/streams
 import types, util, shell, sandbox
 when defined(windows):
+  import sandwall
   import sandwall/wall as sandwallWall
 
 var wallWarnShown = false  ## one Windows wall warning per run
@@ -436,20 +437,12 @@ export DEBIAN_FRONTEND=noninteractive
       # Use bash -c to source the script and exit
       let bashCmd = &"source \"{posixScript}\" <\"{posixStdin}\" 2>&1; exit"
       when defined(windows):
-        # Windows sandbox: same shape as POSIX - re-exec this binary as
-        # `sandbox restrict --policy ... -- bash -c ...`. The box child
-        # stamps the sandbox user's ALLOW grants and spawns bash as that
-        # user via CreateProcessWithLogonW (see sandwall rtoken.nim);
-        # the WFP fence installed by `3code setup` keys on that user,
-        # so host rules are enforced through the wall proxy below.
-        # Without setup (no sandbox user / credentials) the probe in
-        # initSandbox cleared procboxExe and we fall through to plain
-        # bash, warning when host rules wanted the fence.
+        # Windows cannot confine this process; restrict only stamps
+        # ACLs. Re-execing 3code.exe just to call restrict+CPLW pays a
+        # full Nim+SSL init per command. Call boxMain in-process and
+        # capture the named-pipe pump instead.
         if sandboxEnabled and sandbox.active and sandbox.procboxExe.len > 0:
           discard sandbox.reloadIfChanged(getCurrentDir())
-          let policy = sandbox.defaultPolicyFilePath(getCurrentDir())
-          var args = @["sandbox", "--policy", policy, "restrict",
-                      "--ro", tmp, "--", b, "-c", bashCmd]
           var fenced = false
           if sandbox.wallProxyNeeded(sandbox.current):
             let fenceInstalled = try: sandwallWall.fenceStatus().installed
@@ -459,16 +452,54 @@ export DEBIAN_FRONTEND=noninteractive
                 fenced = sandbox.ensureWallProxy(getCurrentDir())
               except CatchableError:
                 fenced = false
+            elif sandboxWallWarn and not wallWarnShown:
+              wallWarnShown = true
+              stderr.writeLine("3code sandbox: WARNING: host rules are " &
+                "present but the WFP fence is not installed. The child " &
+                "will have OPEN network access. Run '3code setup' once.")
           if fenced:
             for (k, v) in sandbox.wallEnv(sandbox.procboxExe,
                 $int(sandbox.wallProxyPort()), "",
                 getEnv("GIT_SSH_COMMAND", "")):
               putenv(k, v)
-            # tmp must be writable for bash's redirections / script
-            args = @["sandbox", "--policy", policy, "restrict",
-                     tmp, "--", b, "-c", bashCmd]
-          startProcess(sandbox.procboxExe, args = args,
-                       options = {poStdErrToStdOut, poUsePath})
+          let resolved = sandbox.current.resolve()
+          var writable = resolved.writable
+          var readonly = resolved.readonly
+          if fenced: writable.add tmp else: readonly.add tmp
+          sandwallWall.beginCapture()
+          var inProcCode = 127
+          try:
+            inProcCode = int(runSandboxed(writable, [b, "-c", bashCmd],
+                                          read = readonly,
+                                          denied = resolved.denied))
+          except CatchableError as e:
+            discard sandwallWall.endCapture()
+            return ("3code sandbox: " & e.msg, 127, cap)
+          let captured = sandwallWall.endCapture()
+          var rawIn = ""
+          var lineBufIn = ""
+          var partialShownIn = false
+          var partialTextIn = ""
+          var suppressIn = false
+          for ch in captured:
+            if ch == '\x00':
+              suppressIn = true
+              continue
+            if ch == '\n':
+              emitCompleteLine(rawIn, lineBufIn, onLine, partialShownIn,
+                               partialTextIn, suppressIn)
+            elif ch != '\r':
+              lineBufIn.add ch
+          emitFinalPartial(rawIn, lineBufIn, onLine, partialShownIn,
+                           partialTextIn, suppressIn)
+          try: removeDir(tmp) except CatchableError: discard
+          if inProcCode != 0 and sandboxEnabled and sandbox.active and
+              ("Permission denied" in rawIn or
+               "Operation not permitted" in rawIn):
+            if rawIn.len > 0 and not rawIn.endsWith("\n"):
+              rawIn.add "\n"
+            rawIn.add "sandbox deny, see " & sandbox.sandboxPathInCwd() & "\n"
+          return (rawIn, inProcCode, cap)
         else:
           if sandboxWallWarn and not wallWarnShown and
               sandbox.active and sandbox.wallProxyNeeded(sandbox.current):
