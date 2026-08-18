@@ -257,6 +257,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     MaxLengthEscalations = 3
     MaxSteerAttempts = 1
     MaxEmptyRetries = 12
+  decayEmptyRetryLevel(epochTime())
   while true:
     var usage: Usage
     var msg: JsonNode
@@ -326,9 +327,17 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         let window = contextWindowFor(p)
         let bumped = min(cur * 2, window)
         maxTokensOverride = max(maxTokensOverride, bumped)
+        let backoff = emptyReplyBackoffS()
         commitTranscriptBytes(
           errLnS("finished by length, retrying with " &
-            humanTokens(maxTokensOverride) & " token budget"), true)
+            humanTokens(maxTokensOverride) & " token budget in " &
+            $backoff & "s"), true)
+        incEmptyRetryLevel()
+        if emptyReplyWait():
+          saveSession(session, messages)
+          onTurnInterrupted()
+          turnEnded = true
+          return true
         debugOut &"runTurns: empty length-retry {lengthEscalations}/{MaxLengthEscalations} max_tokens={maxTokensOverride}"
         continue
       if steerAttempts < MaxSteerAttempts:
@@ -340,8 +349,16 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         messages.add %*{"role": "user",
           "content": "Please provide your final answer now."}
         saveSession(session, messages)
+        let backoff = emptyReplyBackoffS()
         commitTranscriptBytes(
-          errLnS("empty reply; re-prompting for a final answer"), true)
+          errLnS("empty reply; re-prompting for a final answer in " &
+            $backoff & "s"), true)
+        incEmptyRetryLevel()
+        if emptyReplyWait():
+          saveSession(session, messages)
+          onTurnInterrupted()
+          turnEnded = true
+          return true
         debugOut &"runTurns: empty steer-retry {steerAttempts}/{MaxSteerAttempts}"
         continue
       # Smart-handling exhausted (or never applicable). Retry the bare call,
@@ -353,9 +370,16 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           if finishReason.len > 0: finishReason
           elif usage.reasoningTokens > 0: "reasoning only"
           else: "no content, no tool calls"
+        let backoff = emptyReplyBackoffS()
         commitTranscriptBytes(
           errLnS("empty reply: " & reason & ". retrying " &
-            $emptyRetries & "/" & $MaxEmptyRetries), true)
+            $emptyRetries & "/" & $MaxEmptyRetries & " in " & $backoff & "s"), true)
+        incEmptyRetryLevel()
+        if emptyReplyWait():
+          saveSession(session, messages)
+          onTurnInterrupted()
+          turnEnded = true
+          return true
         debugOut &"runTurns: empty resend {emptyRetries}/{MaxEmptyRetries} finishReason={finishReason}"
         continue
       # All retries exhausted. Persist the empty turn and surface a final
