@@ -50,6 +50,63 @@ jobs:
       - name: Build
         run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
 
+      - name: Verify sandbox matrix (seatbelt + wall proxy)
+        # End-to-end enforcement check of the shipped binary, mirroring
+        # the manual stefani VM verification: the wall proxy fences
+        # egress behind an allowlist, the box subprocess applies the
+        # Seatbelt profile, and the policy's path denies punch through.
+        run: |
+          set -e
+          BIN="$PWD/3code"
+          SB="$(mktemp -d)/sb"
+          mkdir -p "$SB/subdir"
+          cd "$SB"
+          fail() { echo "SANDBOX MATRIX FAIL: $1" >&2; exit 1; }
+
+          # 1. fenced network: allowlist proxy lets google.com through
+          printf 'allow\ndeny ./subdir\nallow *\ndeny 1.1.1.1\n' > .sandbox
+          "$BIN" wall proxy --policy .sandbox --port 0 > /tmp/wallport.txt 2>&1 &
+          sleep 2
+          PORT=$(awk '{print $2}' /tmp/wallport.txt)
+          [ -n "$PORT" ] || fail "wall proxy did not start"
+          export WALL_PROXY_PORT="$PORT"
+          export http_proxy="http://127.0.0.1:$PORT" https_proxy="http://127.0.0.1:$PORT"
+
+          code=$("$BIN" sandbox --policy .sandbox restrict -- curl -sS -o /dev/null -w '%{http_code}' --max-time 20 https://www.google.com) \
+            || fail "curl google.com through the wall proxy"
+          [ "$code" = 200 ] || fail "google.com expected 200, got $code"
+
+          # 2. denied host: the proxy must refuse 1.1.1.1. For a plain
+          # http:// URL the 403 arrives as a regular response, so curl
+          # exits 0; only the status code tells the deny.
+          out=$("$BIN" sandbox --policy .sandbox restrict -- curl -sS -o /dev/null -w '%{http_code}' --max-time 20 http://1.1.1.1) \
+            || fail "curl 1.1.1.1 through the wall proxy errored"
+          [ "$out" = 403 ] || fail "1.1.1.1 expected 403, got $out"
+
+          # 3. writable root: bash write into the project dir works
+          "$BIN" sandbox --policy .sandbox restrict -- sh -c 'echo hi > ok.txt' \
+            || fail "write to the project root was denied"
+          [ "$(cat ok.txt)" = hi ] || fail "project-root write produced wrong content"
+
+          # 4. denied subdir: bash write under ./subdir must fail
+          if "$BIN" sandbox --policy .sandbox restrict -- sh -c 'echo bad > subdir/bad.txt' 2>/dev/null; then
+            fail "write into ./subdir was allowed"
+          fi
+          [ ! -e subdir/bad.txt ] || fail "./subdir/bad.txt exists despite the deny"
+
+          kill %1 2>/dev/null || true
+          unset http_proxy https_proxy
+
+          # 5. open network: a policy without host rules must not block
+          # sockets (the (deny default) baseline covers network-* too;
+          # regression check for the bare (allow network-*) fix)
+          printf 'allow\ndeny ./subdir\n' > .sandbox
+          code=$("$BIN" sandbox --policy .sandbox restrict -- curl -sS -o /dev/null -w '%{http_code}' --max-time 20 https://www.google.com) \
+            || fail "open-network curl google.com"
+          [ "$code" = 200 ] || fail "open-network google.com expected 200, got $code"
+
+          echo "sandbox matrix: all checks passed"
+
       - name: Build x86_64 and create universal binary
         env:
           SLICE_DIR: ${{ runner.temp }}

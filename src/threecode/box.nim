@@ -122,8 +122,10 @@ proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
     for f in a.policies:
       texts.add(if fileExists(f): readFile(f) else: "")
     # Relative targets resolve against the project dir: the parent of
-    # the last `.sandbox` policy file, falling back to cwd.
-    let last = a.policies[^1]
+    # the last `.sandbox` policy file, falling back to cwd. The policy
+    # path itself is made absolute first: a relative `.sandbox` would
+    # otherwise resolve `./x` targets against the filesystem root.
+    let last = absolutePath(a.policies[^1])
     var projectDir = getCurrentDir()
     if last.extractFilename == PolicyFile:
       let parent = last.parentDir
@@ -146,7 +148,7 @@ proc resolvePolicy(a: BoxArgs): tuple[writable, readonly, denied: seq[string];
     hostRules = r.hosts.len
     # The sandboxed command may read its policy but never change it.
     for f in a.policies:
-      if fileExists(f): readonly.add f
+      if fileExists(f): readonly.add absolutePath(f)
   (writable, readonly, denied, hostRules > 0)
 
 proc boxRestrict(args: seq[string]): int =
