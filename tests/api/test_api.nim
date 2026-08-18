@@ -889,8 +889,11 @@ echo "OK"
     if runCode != 0:
       checkpoint runOut
     # The hint line must use the new phrasing and the placeholder must be
-    # filled with the actual budget, not the literal template text.
+    # filled with the actual budget, not the literal template text. The
+    # retry must also carry the backoff delay (instant resends burned
+    # tokens on a hostile provider).
     check "finished by length, retrying with" in runOut
+    check "token budget in 1s" in runOut
     check "{humanTokens(maxTokensOverride)}" notin runOut
     # The bumped budget for 8192 is min(16384, 200000) = 16384 = "16.4k"
     check "16.4k" in runOut
@@ -926,7 +929,7 @@ echo "OK"
   "stream": false
 }]""")
     writeFile(probePath, """
-import std/[json, strutils]
+import std/[json, strutils, times]
 import threecode
 import threecode/api except callModel
 
@@ -940,7 +943,12 @@ session.readCache = newReadCache()
 let profile = Profile(name: "nebius.zai-org/GLM-5.2", url: "stub://", key: "k",
   family: "glm", model: "zai-org/GLM-5.2")
 
+let t0 = epochTime()
 discard runTurnsInteractive(profile, messages, session)
+# The steer (1s) + bare resend (2s) backoffs must actually elapse: an
+# instant retry loop is the bug this guards against.
+doAssert epochTime() - t0 >= 2.5,
+  "empty-reply retries took no backoff: " & $(epochTime() - t0) & "s"
 
 let lastAssistant = messages[^1]
 doAssert lastAssistant{"role"}.getStr == "assistant",
@@ -960,8 +968,8 @@ echo "OK"
     check runCode == 0
     if runCode != 0:
       checkpoint runOut
-    # The bare-resend notice must carry the reason and the retry counter,
-    # matching the requested format: "empty reply: <reason>. retrying N/12".
-    check "empty reply: no content, no tool calls. retrying 1/12" in runOut
+    # The bare-resend notice must carry the reason, the retry counter and
+    # the backoff delay: "empty reply: <reason>. retrying N/12 in Xs".
+    check "empty reply: no content, no tool calls. retrying 1/12 in 2s" in runOut
     # The old dead-end string must NOT appear when recovery succeeds.
     check "empty reply - no content, no tool calls" notin runOut

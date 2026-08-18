@@ -324,6 +324,37 @@ proc decayLevel(level: var int, lastTs: var float, now: float) =
       level = max(0, level - idleMin)
       lastTs = now
 
+var emptyRetryLevel = 0
+  ## Backoff level for empty-assistant-reply resends (`runTurns`'s
+  ## length/steer/resend loop). Independent of the transport categories
+  ## so a burst of empties doesn't inflate a later 5xx's backoff.
+var emptyLastTs = 0.0
+
+proc decayEmptyRetryLevel*(now: float) =
+  decayLevel(emptyRetryLevel, emptyLastTs, now)
+
+proc emptyReplyBackoffS*(): int =
+  min(1 shl emptyRetryLevel, 32)
+
+proc incEmptyRetryLevel*() =
+  inc emptyRetryLevel
+  emptyLastTs = epochTime()
+
+proc emptyReplyWait*(): bool =
+  ## Back off before the next empty-reply resend, keeping the spinner
+  ## live and honoring Ctrl-C. Returns true when interrupted (caller
+  ## aborts the turn); false when the wait elapsed.
+  let backoff = emptyReplyBackoffS()
+  hookStartSpinner("")
+  block wait:
+    var remaining = backoff * 1000
+    while remaining > 0:
+      if isInterrupted(): break wait
+      let step = min(100, remaining)
+      sleep(step)
+      remaining -= step
+  isInterrupted()
+
 # ---- Streaming HTTP via streamhttp ----
 #
 # `streamhttp` is a tiny synchronous TLS HTTP/1.1 client we ship as a
