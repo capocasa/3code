@@ -87,6 +87,8 @@ var pollStdinNowHook*: proc(): bool {.closure.}
   ## Override for tests; nil means use real pollStdinNow().
 
 when defined(windows):
+  import winlean
+
   proc putchr*(c: cint): cint {.discardable, header: "<conio.h>", importc: "_putch".}
     ## Prints an ASCII character to stdout.
   proc rawGetch(): cint {.header: "<conio.h>", importc: "_getch".}
@@ -94,6 +96,35 @@ when defined(windows):
   proc kbhit(): cint {.header: "<conio.h>", importc: "_kbhit".}
     ## Non-blocking "is a key waiting" probe; lets a bare ESC cancel
     ## without `_getch` blocking on a second byte that never comes.
+
+  const STD_INPUT_HANDLE_ML = -10'i32
+
+  proc getConsoleMode(h: Handle; mode: ptr int32): int32 {.stdcall,
+      dynlib: "kernel32", importc: "GetConsoleMode".}
+
+  var stdinKindChecked = false
+  var stdinIsConsole = true
+    ## Whether stdin is a real console. `_kbhit`/`_getch` only work on a
+    ## console; on a pipe ("echo q | 3code.exe") `_kbhit` always returns
+    ## 0 and `_getch` blocks forever, so piped input could never be read
+    ## (and EOF never seen). Detect once and switch to the handle-based
+    ## path for pipes.
+
+  proc stdinConsole(): bool =
+    if not stdinKindChecked:
+      stdinKindChecked = true
+      let h = getStdHandle(STD_INPUT_HANDLE_ML)
+      var mode: int32 = 0
+      stdinIsConsole = h != 0 and getConsoleMode(h, addr mode) != 0
+    stdinIsConsole
+
+  proc pipeByteReady(): bool =
+    ## Non-blocking "is a byte waiting" probe for a piped stdin,
+    ## mirroring what `_kbhit` does for a console. PeekNamedPipe returns
+    ## the unread byte count without blocking.
+    var avail: int32 = 0
+    peekNamedPipe(getStdHandle(STD_INPUT_HANDLE_ML), nil, 0, nil,
+                  addr avail, nil) and avail > 0
 
   proc getchr*(): cint =
     ## Retrieves an ASCII character from stdin. Drains `termPeeked` first
@@ -103,6 +134,16 @@ when defined(windows):
       result = termPeeked.cint
       termPeeked = -1
       return result
+    if not stdinConsole():
+      # Piped stdin: read one byte straight off the handle. ReadFile
+      # blocks until a byte or EOF (write end closed -> returns 0),
+      # neither of which `_getch` can report on a pipe.
+      var ch: char
+      var got: int32 = 0
+      if readFile(getStdHandle(STD_INPUT_HANDLE_ML), addr ch, 1,
+                  addr got, nil) != 0 and got == 1:
+        return ch.ord.cint
+      return -1
     rawGetch()
 else:
   proc putchr*(c: cint) {.header: "stdio.h", importc: "putchar"} =
@@ -1297,6 +1338,11 @@ proc stdinHasByteNow*(): bool =
       pfd.events = POLLIN
       let r = poll(addr pfd, 1.Tnfds, 0.cint)
       return r > 0 and (pfd.revents and POLLIN) != 0
+  when defined(windows):
+    # Pipe stdin: byte-burst probe so a piped newline submits on arrival
+    # rather than waiting for a later key that never comes.
+    if not stdinConsole():
+      return pipeByteReady()
   false
 
 # Terminal reply sequences (`CSI ... final`) the editor must never see:
@@ -1363,16 +1409,17 @@ proc terminalHasPendingInput*(): bool =
   ## tail so `handleEscape` cancels; any byte that arrives — including
   ## printable Alt-chord letters — is stashed and reported as a tail.
   when defined(windows):
-    # Poll `_kbhit` for the same burst window the POSIX branch gives
-    # poll(). A bare ESC (no second byte in time) reports no tail.
+    # Poll for the same burst window the POSIX branch gives poll(). A
+    # bare ESC (no second byte in time) reports no tail. `_kbhit` only
+    # works on a console; on a pipe PeekNamedPipe is the readiness probe.
     if termPeeked >= 0:
       return true
     let deadline = epochTime() + EscapeTailPollMs.float / 1000.0
     while epochTime() < deadline:
-      if kbhit() != 0:
+      if (if stdinConsole(): kbhit() != 0 else: pipeByteReady()):
         return true
       sleep 1
-    return kbhit() != 0
+    return if stdinConsole(): kbhit() != 0 else: pipeByteReady()
   when defined(posix):
     if isatty(0.cint) != 0:
       var pfd: TPollfd

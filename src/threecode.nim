@@ -50,6 +50,17 @@ export types, util, prompts, shell, session, compact,
 
 
 
+when defined(startupTrace):
+  # Runtime-initialized at module load so the baseline is process start;
+  # const would demand a compile-time epochTime (fails on Windows cross).
+  let StartupT0 = epochTime()
+  template startupTrace(label: string) =
+    ## stderr timing probe, compiled in only with -d:startupTrace.
+    stderr.writeLine "[trace] " & label & " " &
+      formatFloat(epochTime() - StartupT0, ffDecimal, 3)
+else:
+  template startupTrace(label: string) = discard
+
 proc usage() {.noreturn.} =
   stderr.writeLine """usage: 3code [options] [prompt...]
        3code good                   # list known-good provider/variant combos
@@ -222,6 +233,7 @@ unhandledExceptionHook = proc(e: ref Exception) {.nimcall, gcsafe, raises: [], t
     restoreCancelTermios()
 
 proc main() =
+  startupTrace("main-enter")
   # `sandbox` is the built-in sandwall CLI: the bash tool re-execs this
   # binary as `3code sandbox restrict ...`. Dispatch before any other
   # startup so the sandboxed command isn't weighed down by 3code's
@@ -262,8 +274,11 @@ proc main() =
     if a in ["-v", "--version"]: echo Version; return
     if a in ["-h", "--help"]: usage()
 
+  startupTrace("early-dispatch-done")
   setupTlsEnv()
+  startupTrace("setupTlsEnv")
   cleanupStaleBinaries()
+  startupTrace("cleanupStaleBinaries")
   when defined(posix):
     sandbox.sweepStaleWallDirs()
   refuseRoot()
@@ -365,11 +380,17 @@ proc main() =
   #    (global interrupt hook, skill extraction disk I/O, background
   #    auto-update fork). A usage error must bail before any of it, and a
   #    session load must not pay for it twice. ──
+  startupTrace("cli-parse-done")
   ensureBash()
+  startupTrace("ensureBash")
   installInterruptHook()
+  startupTrace("installInterruptHook")
   materializeBuiltinSkills()
+  startupTrace("materializeBuiltinSkills")
   showUpdateNoticeMaybe()
+  startupTrace("showUpdateNoticeMaybe")
   spawnBackgroundUpdateMaybe()
+  startupTrace("spawnBackgroundUpdateMaybe")
 
   let prompt = args.join(" ")
   var session: Session
@@ -404,6 +425,7 @@ proc main() =
   # Paths resolve relative to the session cwd so the policy follows
   # the project, not the binary.
   initSandbox(session.cwd)
+  startupTrace("initSandbox")
 
   try:
     acquireDirLock(session.cwd)
@@ -434,7 +456,9 @@ proc main() =
   # the terminal background unless the config pinned a palette. The palette
   # is re-applied so the welcome screen (rendered next) uses the resolved
   # colors before `[colors]` overrides are layered on top.
+  startupTrace("locks-acquired")
   applyPalette(detectColorMode(colorModePref))
+  startupTrace("palette-detect")
   if activeColorKeys.len > 0:
     let (both, lightOnly) = splitColorOverrides(activeColorKeys)
     applyColorOverrides(both, lightOnly)
@@ -444,6 +468,7 @@ proc main() =
     else: ""
   var prof = resolveSessionProfile(wantedProfile, session.profileName)
   var editor = welcome(prof)
+  startupTrace("welcome")
   # Terminal, session lock, and thread cleanup all funnel through a single
   # exit proc so every exit path restores the same state. SIGTERM/SIGHUP get
   # their own handler because the default disposition skips exit procs.
@@ -620,6 +645,7 @@ proc main() =
         paintInitialPrompt(prof)
     else:
       paintInitialPrompt(prof)
+    startupTrace("first-prompt-painted")
     if prompt != "" and runInitialPrompt(prompt):
       # quit, not return: unwinding `editor` while the input thread still
       # holds it is the Windows oneshot SIGSEGV (illegal storage access).
