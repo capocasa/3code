@@ -239,6 +239,9 @@ when defined(windows):
       dynlib: "kernel32", importc: "GetConsoleMode".}
   proc setConsoleMode(hConsole: Handle, dwMode: int32): int32 {.stdcall,
       dynlib: "kernel32", importc: "SetConsoleMode".}
+  proc getNumberOfConsoleInputEvents(hConsoleInput: Handle,
+      lpcNumberOfEvents: ptr int32): int32 {.stdcall,
+      dynlib: "kernel32", importc: "GetNumberOfConsoleInputEvents".}
 
   proc detectColorModeWindows(): ColorMode =
     ## Query the terminal background via OSC 11 on Windows. Windows
@@ -249,7 +252,6 @@ when defined(windows):
     const
       STD_INPUT_HANDLE = -10'i32
       STD_OUTPUT_HANDLE = -11'i32
-      WAIT_OBJECT_0 = 0'i32
       ENABLE_LINE_INPUT = 0x0002'i32
       ENABLE_ECHO_INPUT = 0x0004'i32
     # Only query when stdin is a real console; under a redirected stdin
@@ -277,8 +279,15 @@ when defined(windows):
     let deadlineMs = 150'i32
     var elapsedMs = 0'i32
     const StepMs = 25'i32
+    # Peek the input-event count instead of WaitForSingleObject: a console
+    # input handle signals on ANY queued event (focus, mouse, stale key),
+    # not just our OSC reply, so a wait on the handle can return spuriously
+    # or, when a pending event keeps the queue non-empty, block far past
+    # the deadline until the user hits a key. Counting events bounds the
+    # wait to the deadline regardless of what else is queued.
     while elapsedMs < deadlineMs:
-      if waitForSingleObject(hIn, StepMs) == WAIT_OBJECT_0:
+      var pending: int32 = 0
+      if getNumberOfConsoleInputEvents(hIn, addr pending) != 0 and pending > 0:
         var got: int32 = 0
         if readFile(hIn, addr buf[total], (buf.len - total).int32,
                     addr got, nil) != 0 and got > 0:
@@ -289,6 +298,8 @@ when defined(windows):
           if '\x07' in buf.toOpenArray(0, total - 1) or
              (total >= 2 and buf[total - 2] == '\x1b' and buf[total - 1] == '\\'):
             break
+      else:
+        sleep(StepMs.int)
       elapsedMs += StepMs
     if haveMode:
       discard setConsoleMode(hIn, oldMode)
