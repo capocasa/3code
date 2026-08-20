@@ -271,7 +271,7 @@ else:
 proc showUpdateNoticeMaybe*() =
   ## If the recorded last-seen version differs from the running version,
   ## emit one dim line on stderr and update the marker. First launch
-  ## (no marker) is silent — only writes the marker.
+  ## (no marker) is silent - only writes the marker.
   let marker = lastVersionMarker()
   var prev = ""
   if fileExists(marker):
@@ -283,6 +283,22 @@ proc showUpdateNoticeMaybe*() =
     except CatchableError:
       try: stderr.writeLine "  · updated to v" & Version
       except CatchableError: discard
+  when defined(windows) and not defined(providerStub):
+    if prev != Version:
+      # Cold launch of a new unsigned exe pays a multi-second Defender /
+      # SmartScreen scan before main() even runs. Warn once per version
+      # so the user knows the first slow start is the scan, not 3code.
+      try:
+        stderr.write(GreyFg & "  · first run of a new 3code.exe may " &
+          "take a few seconds: Windows is scanning the new binary " &
+          "(Microsoft Defender / SmartScreen). Later starts are fast." &
+          Reset & "\n")
+      except CatchableError:
+        try:
+          stderr.writeLine "  · first run of a new 3code.exe may take " &
+            "a few seconds: Windows is scanning the new binary " &
+            "(Microsoft Defender / SmartScreen). Later starts are fast."
+        except CatchableError: discard
   if prev != Version:
     try:
       createDir(userDataRoot())

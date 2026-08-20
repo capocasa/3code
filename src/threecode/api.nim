@@ -2212,12 +2212,21 @@ type
     suppressXml: bool
     responses: bool  # POST /responses instead of /chat/completions
 
-proc networkWorker(a: NetWorkerArgs) {.thread.} =
+proc networkWorker(a: ptr NetWorkerArgs) {.thread.} =
   ## Runs the full connect+send+SSE loop on a worker thread. Fires deltas
   ## into `job`; publishes the outcome and sets phase=npDone on exit.
   ## GC-safe cast is valid: only this worker touches the module-global
   ## connection cache during a call (calls are serialized one at a time),
-  ## and the NetJobState is a stack var whose lifetime encloses this run.
+  ## and both the NetJobState and the NetWorkerArgs are main-stack vars
+  ## whose lifetime encloses this run (main joins/detaches before they go
+  ## out of scope). The args are passed by POINTER, not by value: a
+  ## by-value `createThread(t, networkWorker, args)` copies the GC'd
+  ## strings (bodyStr is large) into the thread's arg slot, and the next
+  ## turn's createThread overwriting that slot frees the PREVIOUS turn's
+  ## strings ON THE WORKER THREAD. That is an ORC cross-thread free and
+  ## segfaults (SIGSEGV in netthread.nim publishOutcome -> dealloc). With a
+  ## pointer arg the worker only ever reads the strings; every free happens
+  ## on main, the allocating thread.
   {.cast(gcsafe).}:
     setPhase(a.job, npConnecting)
     var slurped = 0
@@ -2275,8 +2284,13 @@ proc callModelThreaded*(p: Profile, bodyStr, baseLabel: string;
   var job: NetJobState
   job.lock.initLock()
   defer: job.lock.deinitLock()
-  var t: Thread[NetWorkerArgs]
-  let args = NetWorkerArgs(
+  var t: Thread[ptr NetWorkerArgs]
+  # `args` is a stack var that outlives the worker: main joins the worker
+  # below before `args` (and `job`) go out of scope, and on the detach path
+  # the wedge is a getAddrInfo block, after which the worker only reads
+  # args. Passing its address means the worker never owns or frees the
+  # GC'd strings inside.
+  var args = NetWorkerArgs(
     job: addr job,
     url: requestUrl(p) & (if responses: "/responses" else: "/chat/completions"),
     key: bearerFor(p),
@@ -2284,7 +2298,7 @@ proc callModelThreaded*(p: Profile, bodyStr, baseLabel: string;
     baseLabel: baseLabel,
     suppressXml: suppressXml,
     responses: responses)
-  createThread(t, networkWorker, args)
+  createThread(t, networkWorker, addr args)
   while job.phase != npDone and not isInterrupted() and not isNetworkQuiet():
     drainAndDispatch(addr job, baseLabel)
     sleep(NetWorkerPollMs)
