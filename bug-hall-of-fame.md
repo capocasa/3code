@@ -158,3 +158,48 @@ needle, suspect unprintable or trailing-whitespace bytes and hex-dump
 before reasoning further. And: a green `[OK]` with a non-zero exit code is
 itself a bug — a non-fatal `check` in a passing test is a silent failure
 that will break CI gating.
+
+---
+
+## The startup that waited for you to press Enter (Windows)
+
+**Symptom:** On Windows, interactive startup printed the banner/update line,
+then sat dead for tens of seconds to over a minute. Pressing bare Return
+"unblocked" it instantly and the prompt appeared. Looked exactly like a
+Defender/SmartScreen scan, or a slow sandbox fence - but warm launches were
+just as stuck, which ruled both out.
+
+**Root cause:** `detectColorModeWindows` queries the terminal background
+color via OSC 11 (`ESC ] 11 ; ? BEL`) at startup, then reads the reply with a
+150ms deadline. The read loop waited with `WaitForSingleObject` on the
+console *input handle*. A console input handle is signaled by **any** queued
+input event - focus change, mouse movement, a stray keypress - not just our
+OSC reply. Worse, when a stale event keeps the queue non-empty, the wait
+returns immediately and `ReadFile` blocks in the console's line discipline
+until a CR arrives. The net effect: the "150ms deadline" only held when the
+queue stayed empty; in a real Windows Terminal session it blocked until the
+user happened to press a key, and Return was the key that satisfied it.
+
+The trace made it undeniable: `palette-detect` milestone gaps of 23.6s, then
+6.0s, then 0.6s - the fast one being the run after the user pressed Return.
+
+The measurement trap: every automated run over non-interactive ssh has
+`c_isatty(0) == 0`, which short-circuits the OSC query entirely, so the bug
+was invisible to the whole test harness and to every timing probe. It only
+existed in a real interactive console. Fixing the *measurement* (a
+`THREECODE_TRACE_FILE` env that logs milestones from the user's actual
+Windows Terminal session) is what exposed the gap; the numbers over ssh had
+disagreed with the human test for the whole investigation precisely because
+ssh could never reproduce a console input queue.
+
+**Fix:** Poll `GetNumberOfConsoleInputEvents` (peek the queue count) with a
+hard monotonic 150ms deadline instead of waiting on the handle. The query now
+returns within the deadline regardless of what else is queued. Warm
+interactive startup without any keypress: ~0.48s, `palette-detect` 0.235s.
+
+**Lesson:** A console input handle is not a socket. Waiting on it means
+waiting on the *user's* event stream, not your reply. When a "read with
+timeout" can block on human input, the timeout is an illusion - peek, don't
+wait. And when your automated numbers and a human's manual test disagree for
+an entire investigation, the harness isn't running the same program the human
+is; instrument the human's environment, don't keep re-measuring your own.

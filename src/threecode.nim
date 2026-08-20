@@ -54,10 +54,22 @@ when defined(startupTrace):
   # Runtime-initialized at module load so the baseline is process start;
   # const would demand a compile-time epochTime (fails on Windows cross).
   let StartupT0 = epochTime()
+  # When THREECODE_TRACE_FILE is set, milestones append there instead of
+  # stderr, so timing is captured even when stderr is a console that the
+  # caller can't easily scrape (e.g. a manual launch in Windows Terminal).
+  let StartupTraceFile = getEnv("THREECODE_TRACE_FILE")
   template startupTrace(label: string) =
     ## stderr timing probe, compiled in only with -d:startupTrace.
-    stderr.writeLine "[trace] " & label & " " &
-      formatFloat(epochTime() - StartupT0, ffDecimal, 3)
+    let line = "[trace] " & label & " " &
+      formatFloat(epochTime() - StartupT0, ffDecimal, 3) & "\n"
+    if StartupTraceFile.len > 0:
+      try:
+        let f = open(StartupTraceFile, fmAppend)
+        f.write(line)
+        f.close()
+      except CatchableError: discard
+    else:
+      stderr.write(line)
 else:
   template startupTrace(label: string) = discard
 
