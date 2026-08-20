@@ -426,6 +426,20 @@ proc main() =
   # the project, not the binary.
   initSandbox(session.cwd)
   startupTrace("initSandbox")
+  # Windows: when the dedicated sandbox user / creds are not set up,
+  # initSandbox clears procboxExe and every bash tool call runs
+  # unconfined (host rules unfenced). Say so once at startup, where the
+  # user sees it before trusting the sandbox, instead of only inside the
+  # first bash turn. Cheap: backendWorks on Windows is a user+creds
+  # check, no WFP engine open, no spawn.
+  when defined(windows) and not defined(providerStub):
+    if sandboxEnabled and sandbox.active and sandboxWallWarn and
+        sandbox.procboxExe.len == 0:
+      stderr.writeLine("3code: Windows sandbox is not set up; bash " &
+        "runs unconfined and policy host rules are NOT enforced. " &
+        "Run `3code setup` once as admin. " &
+        "(disable this warning: [settings] sandbox_wall_warn = off)")
+    startupTrace("sandbox-setup-warn")
 
   try:
     acquireDirLock(session.cwd)
