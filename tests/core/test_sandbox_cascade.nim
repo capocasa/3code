@@ -84,6 +84,27 @@ suite "single active policy file":
     writeFile(repoPolicyPath(projDir), "allow /\n")
     check activePolicyPath(projDir) == repoPolicyPath(projDir)
 
+  test "materialized default keeps the project dir writable":
+    let (home, projDir) = newFixture("mat")
+    defer:
+      putEnv("XDG_CONFIG_HOME", "")
+      removeDir(home.parentDir)
+    # The built-in default grants the project dir via `allow ./`.
+    let s = parsePolicy(defaultPolicyText(), projDir)
+    check s.checkPath(projDir) == akWritable
+    # The materialized file must not be `.sandbox`-named: the box
+    # child resolves relative targets against the parent of a
+    # `.sandbox`-named policy file, which for a temp-dir
+    # materialization would redirect `allow ./` from the project dir
+    # to the temp dir (regression: the project was unwritable by
+    # default).
+    let mat = defaultPolicyFilePath(projDir)
+    check mat.extractFilename != PolicyFile
+    # Resolved against the real project dir, the materialized text
+    # still grants it.
+    let m = parsePolicy(readFile(mat), projDir)
+    check m.checkPath(projDir) == akWritable
+
   test "appendRule materializes the repo file from the user file":
     let (home, projDir) = newFixture("edit")
     defer:

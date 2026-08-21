@@ -463,7 +463,7 @@ On macOS, Linux, and other POSIX systems, the built-in policy is:
 deny /
 allow /tmp
 allow /var/tmp
-allow
+allow ./
 allow *
 ```
 
@@ -477,10 +477,15 @@ On Windows, the built-in policy is:
 ```
 deny /
 allow ~/AppData/Local/Temp
-allow
+allow ./
 ```
 
 Windows grants network capability when no host rules are present.
+
+When no policy file exists, the built-in default is materialized into a
+per-run temporary file for the Bash sandbox; nothing is written into the
+project or the config directory. The default grants the project directory
+itself (`allow ./`), so a fresh project is writable out of the box.
 
 ### Network rules
 

@@ -68,16 +68,17 @@ proc defaultPolicyText*(): string =
   ## POSIX `allow *` passes all traffic through the wall proxy; Windows
   ## has no host rules because there they would airgap the AppContainer
   ## (the net fence is a separate backend), while no rules grants it
-  ## the internet capability.
+  ## the internet capability. The project dir is spelled `allow ./`
+  ## (a bare `allow` is equivalent; the explicit target reads better).
   when defined(windows):
     "deny /\n" &
     "allow ~/AppData/Local/Temp\n" &
-    "allow\n"
+    "allow ./\n"
   else:
     "deny /\n" &
     "allow /tmp\n" &
     "allow /var/tmp\n" &
-    "allow\n" &
+    "allow ./\n" &
     "allow *\n"
 
 proc repoPolicyPath*(projectDir: string): string =
@@ -122,11 +123,17 @@ proc defaultPolicyFilePath*(projectDir: string): string =
   ## or user policy file exists. The bash box child only accepts a
   ## file (`3code sandbox --policy`), so the in-memory default needs
   ## this materialization; the user file is never written.
+  ##
+  ## The file is deliberately not named `.sandbox`: the box child
+  ## resolves relative targets against the parent of a `.sandbox`-named
+  ## policy file, which for a temp-dir materialization would redirect
+  ## the default's `allow ./` from the project dir to the temp dir. A
+  ## plain name falls through to cwd, which is the project dir.
   let f = activePolicyPath(projectDir)
   if fileExists(f): return f
   let dir = tempDir() / ("3code-default-policy-" & $getCurrentProcessId())
   createDir(dir)
-  let p = dir / PolicyFile
+  let p = dir / "policy"
   writeFile(p, defaultPolicyText())
   p
 
