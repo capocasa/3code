@@ -78,64 +78,67 @@ A working example lives in [`example/webserve.nim`](example/webserve.nim): a web
 
 ## Changelog
 
-**Unreleased** - OAuth providers, Responses API, sandbox and network controls
+**0.6.0** - filesystem sandbox, subscription logins, network wall
 
-- **Wizard trusts the registry, not `/models`.** Provider model lists in
-  regular mode come from the known-good registry instead of the provider's
-  models endpoint, which often lags reality (a model can be live on
-  `/chat/completions` while missing from `/models`), and selections are
-  saved without a verification ping: a bad key surfaces on the first
-  turn. With `--experimental` the wizard still queries the endpoint and
-  verifies each model as before. GLM-5.3 joins the
-  registry for `zai` and `zaicode` with the 5.2-style `high`/`max` effort
-  knob and 1M context.
-- **ChatGPT and SuperGrok login.** `:provider add` accepts `chatgpt` for
-  ChatGPT Plus/Pro and `supergrok` for SuperGrok or X Premium+. Browser OAuth
-  stores refreshable tokens under `$XDG_DATA_HOME/3code/auth/`. Subscription
-  providers can exist beside API-key `openai` and `xai` providers.
-- **OpenAI Responses API.** OpenAI API and ChatGPT subscription requests use
-  the Responses API. ChatGPT model listing and requests use the Codex backend.
-  Tool calls, streaming replies, verification, and empty completed output from
-  that backend are handled correctly.
-- **Model-specific reasoning.** `:reasoning` lists the levels accepted by the
-  active model. OpenAI models use their actual ladders, including `none`,
-  `minimal`, `xhigh`, and `max` where supported. GPT-4.x exposes no reasoning
-  setting.
-- **Single-file sandbox policy.** Exactly one policy is active: project
-  `.sandbox`, user `~/.config/3code/sandbox`, or the built-in default. Policies
-  no longer cascade. 3code does not create the user file. The first project
-  rule or `:sandbox edit` copies the effective policy to `.sandbox`. Both policy
-  paths have hidden read-only guards.
-- **Network wall.** Host rules in `.sandbox` restrict Bash network access
-  through the built-in allowlist proxy. Linux uses a network namespace, macOS
-  uses Seatbelt, and Windows uses the one-time `3code setup`
-  configuration. The default policy keeps normal network access open.
-- **Sandbox commands.** The built-in command is `3code sandbox`, with `3code
-  sb` and `:sb` aliases. `:sandbox edit` opens the project policy in `$VISUAL`
-  or `$EDITOR`. Relative project rules are stored as portable `./path` targets.
-- **Patient retry.** Retryable `429`, `5xx`, and network failures use
-  exponential backoff for up to about 36 hours. `:retry on|off` controls it.
-  Retry notices remain visible in the transcript, and Esc cancels a running
-  wait.
-- **Provider setup and catalog.** The add-provider wizard accepts a provider
-  name, URL, key, or subscription login in its first field. Model checks run in
-  parallel and can be cancelled. Added or refreshed providers include Hetzner,
-  Venice, CheaperInference, xAI, OpenAI, and their current model families.
-- **Library and web example.** The blocking `AgentSession` API supports
-  prompts, events, commands, interruption, persistence, and sandboxing without
-  a terminal. `example/webserve.nim` demonstrates a threaded web frontend with
-  SSE streaming.
-- **Termux arm64.** Releases include an Android arm64 archive. Termux uses its
-  own OpenSSL and temp directory. Unsupported OS sandbox and notification
+- **Filesystem sandbox.** Every tool call is confined by a one-rule-per-line
+  policy: `deny`, `readonly`, `allow`. Exactly one policy is active: project
+  `.sandbox`, else `~/.config/3code/sandbox`, else a built-in default that
+  denies everything except temp dirs and the project itself (spelled
+  `allow ./`), so a fresh project is writable out of the box and 3code never
+  writes a policy into your project or config dir on its own. Bash runs under
+  kernel enforcement via `3code sandbox` (Landlock on Linux, Seatbelt on
+  macOS, restricted-token ACLs on Windows); the read/write/patch tools check
+  the same policy in-process. A host without a working kernel backend
+  degrades to unconfined bash with the in-process checks still on.
+  `:sandbox show|on|off|allow|readonly|deny` inspect, change, and reload the
+  policy live; `:sandbox edit` opens it in `$VISUAL`. Both policy files are
+  hidden read-only to the model.
+- **Network wall.** Host rules in the policy restrict Bash network access
+  through a built-in allowlist proxy: Linux uses a network namespace, macOS
+  confines to loopback with Seatbelt, Windows uses the one-time `3code
+  setup` fence. The default policy leaves the network open.
+- **ChatGPT and SuperGrok logins.** `:provider add chatgpt` (ChatGPT
+  Plus/Pro) and `:provider add supergrok` (SuperGrok, X Premium+)
+  authenticate via browser OAuth with refreshable tokens, and can sit beside
+  API-key `openai` and `xai` providers.
+- **Responses API and per-model reasoning.** OpenAI API and ChatGPT requests
+  use the Responses API (Codex backend for ChatGPT). `:reasoning` lists the
+  levels the active model really accepts, from `none` to `max` where
+  supported.
+- **Patient retry.** `429`, `5xx`, and network failures back off
+  exponentially for up to about 36 hours, so a long session rides out a
+  usage limit without dropping to the prompt. `:retry on|off` controls it;
+  Esc cancels a running wait.
+- **Provider wizard and catalog.** The add-provider wizard accepts a name,
+  URL, key, or subscription login in one field, checks models in parallel,
+  and trusts the known-good registry instead of the provider's `/models`
+  endpoint. GLM-5.3, grok-4.6, Qwen3.8, and refreshed DeepSeek entries join
+  the registry.
+- **Windows and macOS.** Bash is captured in-process on Windows, piped stdin
+  reads via ReadFile so pipe input and EOF work, and startup warnings
+  explain a slow first launch or a missing sandbox setup. macOS gets
+  Seatbelt enforcement and its own build workflow.
+- **Library and web example.** The blocking `AgentSession` API exposes
+  prompts, events, commands, interruption, persistence, and sandboxing
+  without a terminal; `example/webserve.nim` is a threaded web frontend
+  with SSE streaming.
+- **Termux arm64.** Releases include an Android arm64 archive; Termux uses
+  its own OpenSSL and temp dir, and unsupported OS sandbox and notification
   features degrade cleanly.
-- **Terminal and input fixes.** Transcript and footer repainting use one
-  geometry path. Resize, prompt spacing, interruption, and terminal-reply
-  handling are more reliable. Ctrl+C clears input, Esc interrupts, and Ctrl+D
-  exits.
+- **Terminal and input fixes.** Transcript and footer repainting share one
+  geometry path; resize, interruption, and terminal-reply handling are more
+  reliable. Ctrl+C clears input, Esc interrupts, Ctrl+D exits.
 
-**0.6.0** - filesystem sandbox backed by nimbox, folded into the `box` subcommand
+**0.5.2** - search engine overhaul: Exa, Brave, and Parallel backends
 
-- **Filesystem sandbox.** Every tool call is now confined to a one-line-per-rule policy (deny, read-only, writable). The effective policy is a cascade: a system file at `~/.config/3code/sandbox` then a repo file at `.sandbox`, each filling in for the one below with a safe built-in default (root denied, working directory writable) when absent, so the sandbox is always on without 3code ever writing a file into your project on first run. Bash commands get full kernel enforcement via `3code sandbox`, the built-in sandwall backend (Landlock on Linux, Seatbelt on macOS, a restricted-token ACL scheme on Windows) compiled in and re-execed in-process, so a write outside the allowed paths fails with `EACCES` at the syscall level. The read/write/patch tools check paths against the same policy in-process. On a host where the kernel backend can't restrict (a kernel without Landlock, a seccomp-filtered CI runner), bash degrades gracefully to unconfined while the in-process checks stay in force. `:sandbox show|on|off|allow|readonly|deny` edit and reload the policy live (`off` disables enforcement entirely); the agent never writes the file itself except to seed it on your first explicit `:sandbox` edit.
+- **Search backends replaced.** The dead Startpage HTML scraper is gone.
+  `web_search` now speaks Exa's hosted MCP endpoint (keyless by default, one
+  stateless JSON-RPC call), with Brave and Parallel added as alternative
+  REST engines. Engine is configurable via `[settings] engine`, with no
+  failover between them.
+- **Per-engine keys.** The single `[search] key` is split into
+  engine-specific `exa-key` and `brave-key`; each is also read from its
+  environment variable. Exa runs keyless without one.
 
 **0.5.1** - new providers, GLM-5.2 reasoning fixes, Qwen family
 
