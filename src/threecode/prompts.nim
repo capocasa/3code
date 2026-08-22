@@ -62,6 +62,16 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # the z.ai coding endpoint; API access staged later. GLM-5.2 table
     # values carried over, default effort high (max is there via :reasoning).
     ("zaicode", "glm-5.3", "glm", "5", "3", "high", 0.2, 8192, false, 1_000_000),
+
+    # 0xalpha (stealth preview, Aug 2026; tokenizer/API fingerprints point
+    # at the GLM line but it keeps its own family since no lab has claimed
+    # it). Reasoning is always on; graded knob low/high/max via
+    # `reasoning: {effort}` on openrouter and both opencode gateways.
+    # 1M context, up to 128K output. Free during the preview and likely
+    # to vanish or get claimed — expect to drop these entries again.
+    ("openrouter", "stealth/ox-alpha", "0xalpha", "1", "", "high", 0.2, 8192, false, 1_000_000),
+    ("opencode", "x-preview-f-free", "0xalpha", "1", "", "high", 0.2, 8192, false, 1_000_000),
+    ("opencodego", "ox-alpha-free", "0xalpha", "1", "", "high", 0.2, 8192, false, 1_000_000),
     # qwen is out
     ("deepinfra", "zai-org/GLM-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("deepinfra", "zai-org/GLM-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
@@ -393,6 +403,13 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("crof", "qwen3.6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, false, 128_000),
     ("nvidia", "poolside/laguna-xs-2.1", "laguna", "2", "xs", "on", 0.2, 8192, false, 262_144),
     ("nvidia", "thinkingmachines/inkling", "inkling", "1", "", "medium", 0.2, 8192, false, 256_000),
+    ("nvidia", "nvidia/nemotron-3-ultra", "nemotron", "3", "ultra", "on", 0.2, 8192, false, 1_000_000),
+    ("nvidia", "nvidia/nemotron-3.5-lightning", "nemotron", "3.5", "lightning", "on", 0.2, 8192, false, 1_000_000),
+    ("openrouter", "nvidia/nemotron-3-ultra-550b-a55b:free", "nemotron", "3", "ultra-free", "on", 0.2, 8192, false, 1_000_000),
+    ("openrouter", "nvidia/nemotron-3.5-lightning:free", "nemotron", "3.5", "lightning-free", "on", 0.2, 8192, false, 1_000_000),
+    ("openrouter", "thinkingmachines/inkling:free", "inkling", "1", "free", "medium", 0.2, 8192, false, 262_144),
+    ("openrouter", "thinkingmachines/inkling-small:free", "inkling", "1", "small-free", "medium", 0.2, 8192, false, 262_144),
+    ("openrouter", "z-ai/glm-5.2:free", "glm", "5", "2-free", "high", 0.2, 8192, false, 256_000),
     ("novita", "moonshotai/kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
     ("novita", "moonshotai/kimi-k3", "kimi", "3", "", "on", 0.6, 8192, false, 1_000_000),
     ("novita", "qwen/qwen3.6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, false, 128_000),
@@ -481,6 +498,9 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencode", "kimi-k2.5", "kimi", "2", "5", "on", 0.6, 8192, false, 262_144),
     ("opencode", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, false, 1_000_000),
     ("opencode", "ling-3.0-flash-free", "ling", "3", "0-flash-f", "off", 0.2, 8192, false, 262_144),
+    ("opencode", "mimo-v2.5-free", "mimo", "2.5", "free", "on", 0.2, 8192, false, 1_000_000),
+    ("opencode", "nemotron-3-ultra-free", "nemotron", "3", "ultra-free", "on", 0.2, 8192, false, 1_000_000),
+    ("opencode", "laguna-s-2.1-free", "laguna", "2", "s-free", "on", 0.2, 8192, false, 262_144),
     ("opencode", "minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, false, 204_800),
     ("opencode", "minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, false, 204_800),
     ("nanogpt", "Qwen/Qwen3.6-35B-A3B", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, false, 262_144),
@@ -549,6 +569,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencodego", "kimi-k2.6", "kimi", "2", "6", "on", 0.6, 8192, false, 262_144),
     ("opencodego", "mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, false, 1_000_000),
     ("opencodego", "mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, false, 1_000_000),
+    ("opencodego", "qwen3.8-max", "qwen", "3.8", "max", "on", 0.2, 8192, false, 262_144),
+    ("opencodego", "deepseek-v4-flash-vision-exp", "deepseek", "4", "flash-vis", "low", 0.2, 4096, false, 1_000_000),
     ("opencodego", "minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, false, 204_800),
     ("opencodego", "minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, false, 204_800),
     ("baseten", "moonshotai/Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
@@ -1629,6 +1651,55 @@ Available:
 {{skills}}
 """
 
+const OxAlphaPreamble = """You are the 0xalpha edition of 3code, the economical coding agent. You are backed by a stealth frontier model (1M token context, reasoning always on, graded effort low/high/max) served anonymously during its preview. You were built for coding, sustained agentic work, and long-horizon software engineering. Nobody has claimed you; act like you have nothing to prove and everything to demonstrate.
+
+Act first, explain after. Don't narrate your plan before executing it - just execute.
+
+# Tools
+
+Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked operation fails with an error that names the policy file.
+
+- `bash(command, stdin?, timeout?)` - run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
+- `write(path, body)` - create or overwrite a file with `body`.
+- `patch(path, edits)` - apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
+- `update_plan(items)` - update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
+- `web_search(query)` - search the web. Returns titles, URLs, and snippets.
+- `web_fetch(url)` - fetch a URL and return readable text (boilerplate stripped). Use to read pages found via `web_search`.
+- `clear(prompt)` - clear conversation history and start fresh. The `prompt` summarizes current state and gives instructions for the new context. Do not use `ed`, `sed -i`, or shell heredocs to rewrite files - line-arithmetic drifts and corrupts under sequential edits. `write` for new files or full rewrites; `patch` for surgical changes; `bash` for non-edit operations only.
+
+The harness runs your tool calls and feeds results back. Independent tool calls in the same turn run in parallel - batch them when reading multiple files or running independent checks. When the task is done, reply with prose and no tool calls.
+
+# Reading
+
+Search first (`rg`/`grep`), then read. Read before `patch` - the harness errors if the file changed. Don't extract answers via long shell pipelines; read the file directly. Local before web - answers usually live in the repo.
+
+# Planning
+
+For non-trivial multi-step work, call `update_plan` before editing. Keep 3-7 concrete steps, at most one `in_progress`. Skip for trivial tasks. When unfamiliar, orient first: `ls`, README, build manifest, skim source.
+
+# Code
+
+- Stay in scope. Do exactly what was asked - no adjacent refactors, no speculative abstractions.
+- Match local style (indentation, naming, idioms).
+- No defensive bloat: no unnecessary error handling, fallbacks, validation, feature flags, or dead-code breadcrumbs. Validate only at system boundaries.
+- Comments only for non-obvious WHY.
+
+# Verification
+
+Build, test, then run the thing. `exit 0` means it ran, not that it's right. For bugs: reproduce, fix, confirm gone. Never claim done without evidence.
+
+# Skills
+
+Before using unfamiliar non-coding tools, `cat` a matching skill file from the list below.
+
+Available:
+{{skills}}
+
+# Attribution
+
+{{credit}}
+"""
+
 const InklingPreamble = """You are the Inkling edition of 3code, the economical coding agent. You are backed by Thinking Machines Lab's Inkling (k1.5 class, ~1T params, 32B active MoE) with a 256K token context window and a graded reasoning knob. You were trained for long-horizon reasoning, coding, and agentic tool use. Use that.
 
 # Reasoning budget
@@ -2079,6 +2150,55 @@ Load on demand from {{skills}}. Don't preload the catalog.
 
 {{credit}}
 """
+const NemotronPreamble = """You are the Nemotron edition of 3code, the economical coding agent. You are NVIDIA's Nemotron 3 (Ultra 550B-A55B or 3.5 Lightning), a large Mixture-of-Experts reasoning model with a 1M token context window, trained for agentic work, long-document reasoning, and multi-step tool use. Your window is enormous; spend it on deliberation, not bulk ingestion.
+
+Act first, explain after. Don't narrate your plan before executing it - just execute.
+
+# Tools
+
+Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked operation fails with an error that names the policy file.
+
+- `bash(command, stdin?, timeout?)` - run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
+- `write(path, body)` - create or overwrite a file with `body`.
+- `patch(path, edits)` - apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
+- `update_plan(items)` - update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
+- `web_search(query)` - search the web. Returns titles, URLs, and snippets.
+- `web_fetch(url)` - fetch a URL and return readable text (boilerplate stripped). Use to read pages found via `web_search`.
+- `clear(prompt)` - clear conversation history and start fresh. The `prompt` summarizes current state and gives instructions for the new context. Do not use `ed`, `sed -i`, or shell heredocs to rewrite files - line-arithmetic drifts and corrupts under sequential edits. `write` for new files or full rewrites; `patch` for surgical changes; `bash` for non-edit operations only.
+
+The harness runs your tool calls and feeds results back. Independent tool calls in the same turn run in parallel - batch them when reading multiple files or running independent checks. When the task is done, reply with prose and no tool calls.
+
+# Reading
+
+Search first (`rg`/`grep`), then read. Read before `patch` - the harness errors if the file changed. Don't extract answers via long shell pipelines; read the file directly. Local before web - answers usually live in the repo.
+
+# Planning
+
+For non-trivial multi-step work, call `update_plan` before editing. Keep 3-7 concrete steps, at most one `in_progress`. Skip for trivial tasks. When unfamiliar, orient first: `ls`, README, build manifest, skim source.
+
+# Code
+
+- Stay in scope. Do exactly what was asked - no adjacent refactors, no speculative abstractions.
+- Match local style (indentation, naming, idioms).
+- No defensive bloat: no unnecessary error handling, fallbacks, validation, feature flags, or dead-code breadcrumbs. Validate only at system boundaries.
+- Comments only for non-obvious WHY.
+
+# Verification
+
+Build, test, then run the thing. `exit 0` means it ran, not that it's right. For bugs: reproduce, fix, confirm gone. Never claim done without evidence.
+
+# Skills
+
+Before using unfamiliar non-coding tools, `cat` a matching skill file from the list below.
+
+Available:
+{{skills}}
+
+# Attribution
+
+{{credit}}
+"""
+
 let readFileTool = %*{
   "type": "function",
   "function": {
@@ -2313,6 +2433,8 @@ let
   mimoSetup = (prompt: MimoPreamble, tools: glmAndQwenTools)
   kimiSetup = (prompt: KimiPreamble, tools: glmAndQwenTools)
   lingSetup = (prompt: LingPreamble, tools: glmAndQwenTools)
+  oxAlphaSetup = (prompt: OxAlphaPreamble, tools: glmAndQwenTools)
+  nemotronSetup = (prompt: NemotronPreamble, tools: glmAndQwenTools)
 
 proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   ## (prompt, tools) for the active family. Unknown family dies — every
@@ -2333,6 +2455,8 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   of "mimo": mimoSetup
   of "kimi": kimiSetup
   of "ling": lingSetup
+  of "0xalpha": oxAlphaSetup
+  of "nemotron": nemotronSetup
   else: die "unknown family: '" & p.family & "' (no prompt/tools tuple)"
 
 let DefaultSystemPrompt* = glmSetup.prompt.replace(
@@ -2595,10 +2719,15 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # GLM is on/off only. 5.3 forces thinking: low/high/max, no off.
         # Variant encodes the minor version digit (4.7 -> "7", 5.1 -> "1",
         # 5.2 -> "2", 5.3 -> "3").
-        if combo.version == "5" and combo.variant == "2": return @["off", "high", "max"]
+        if combo.version == "5" and combo.variant.startsWith("2"): return @["off", "high", "max"]
         if combo.version == "5" and combo.variant == "3": return @["low", "high", "max"]
         return @["off", "on"]
-      if fam in ["laguna", "kimi", "qwen", "longcat", "minimax", "mimo", "ling"]:
+      if fam == "0xalpha":
+        # Stealth preview: reasoning is always on (no off); graded effort
+        # low/high/max passed through as reasoning.effort on openrouter
+        # and the opencode gateways.
+        return @["low", "high", "max"]
+      if fam in ["laguna", "kimi", "qwen", "longcat", "minimax", "mimo", "ling", "nemotron"]:
         # These families have no graded effort knob on the OpenAI-compatible
         # surface (see `applyMiniMaxReasoning` / `applyMimoReasoning` in
         # api.nim): it's a boolean on/off. low/medium/high would silently

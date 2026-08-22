@@ -1859,7 +1859,8 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
   # GLM-5.2 and 5.3 are the GLMs with a graded effort knob (variants "2"
   # and "3"); every other GLM is on/off. Variant encodes the minor version
   # digit (4.7 -> "7", 5.1 -> "1", 5.2 -> "2", 5.3 -> "3").
-  let glm52 = p.family == "glm" and p.version == "5" and p.variant == "2"
+  # Variant may carry a suffix ("2-free"); compare the leading digit.
+  let glm52 = p.family == "glm" and p.version == "5" and p.variant.startsWith("2")
   let glm53 = p.family == "glm" and p.version == "5" and p.variant == "3"
   case providerOf(p)
   of "zai", "zai-coding", "zaicode":
@@ -2167,6 +2168,24 @@ proc applyLingReasoning(p: Profile, body: JsonNode) =
         content = content.replace("detailed thinking on", target)
       sys["content"] = %content
 
+proc applyOxAlphaReasoning(p: Profile, body: JsonNode) =
+  ## 0xalpha (stealth preview): reasoning is always on; the graded knob
+  ## is low/high/max via `reasoning: {effort}` on openrouter and both
+  ## opencode gateways (same normalization as GLM-5.3 on those routes).
+  case p.reasoning
+  of "low", "high", "max": body["reasoning"] = %*{"effort": p.reasoning}
+  else: discard
+
+proc applyNemotronReasoning(p: Profile, body: JsonNode) =
+  ## Nemotron 3 (NVIDIA): thinking toggle via the vLLM chat-template
+  ## bool on NIM and Zen-hosted routes, same shape as kimi/qwen.
+  case p.reasoning
+  of "off":
+    body["chat_template_kwargs"] = %*{"enable_thinking": false}
+  of "on":
+    body["chat_template_kwargs"] = %*{"enable_thinking": true}
+  else: discard
+
 proc applyReasoning*(p: Profile, body: JsonNode) =
   ## Per-family wire mapping for `Profile.reasoning`. Adding a new
   ## family means: (1) set `reasoning` in the known-good combo table,
@@ -2186,6 +2205,8 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "inkling": applyInklingReasoning(p, body)
   of "grok": applyGrokReasoning(p, body)
   of "mimo": applyMimoReasoning(p, body)
+  of "0xalpha": applyOxAlphaReasoning(p, body)
+  of "nemotron": applyNemotronReasoning(p, body)
   else: discard
 
 # ---------- network worker thread (Tier 2) ----------
