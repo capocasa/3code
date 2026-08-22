@@ -1626,10 +1626,20 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
               if stars > 0:
                 ed.write repeat('*', stars)
             else:
+              # Normalize line endings: `\r\n` -> `\n`, bare `\r` ->
+              # `\n`. A bare CR is itself a valid line separator (classic
+              # Mac, some terminals/clipboards), so stripping every `\r`
+              # would collapse a CR-separated paste into one line.
               var clean = newStringOfCap(paste.len)
+              var prev = '\0'
               for ch in paste:
-                if ch == '\r': discard
-                else: clean.add ch
+                if ch == '\r':
+                  if prev != '\n': clean.add '\n'
+                elif ch == '\n':
+                  if prev != '\r': clean.add '\n'
+                else:
+                  clean.add ch
+                prev = ch
               ed.insertText(clean)
         return false
       if c3 == 51 and c4 == 59:
