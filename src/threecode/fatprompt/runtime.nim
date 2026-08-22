@@ -1736,6 +1736,7 @@ proc inputThreadProc() {.thread.} =
       let fd = STDIN_FILENO.cint
       var pendingInput: seq[int]
       var stdinEof = false
+      var startupDrainDone = false
       proc fillPending(waitMs: cint): bool =
         if pendingInput.len > 0:
           return true
@@ -1783,6 +1784,32 @@ proc inputThreadProc() {.thread.} =
           # the sentinel and the user can type into the wizard.
           if wizardRequestPosted.load(moAcquire):
             return minline.wizardSentinel
+          # Drop escape sequences queued before the first readline
+          # settled (an arrow pressed while the app was booting, or a
+          # late terminal reply fragment). Without this drain a buffered
+          # `ESC [ A` surfaces as historyPrevious and paints the last
+          # history entry into the fresh prompt. The drain ends at the
+          # first printable byte (real typed input is kept) or after
+          # 500ms, so a user who intentionally holds an arrow at boot
+          # still gets history recall once the prompt is live.
+          if not startupDrainDone:
+            let drainDeadline = epochTime() + 0.5
+            while epochTime() < drainDeadline:
+              if pendingInput.len == 0:
+                discard fillPending(25.cint)
+              if pendingInput.len == 0: break
+              if pendingInput[0] == 27:
+                # Drop ESC; structural tail bytes are consumed below.
+                pendingInput.delete(0)
+                continue
+              if pendingInput[0] in {'['.ord, 'O'.ord} or
+                 pendingInput[0] in {'0'.ord..'9'.ord} or
+                 pendingInput[0] in {';'.ord, '?'.ord, '~'.ord} or
+                 pendingInput[0] in {'A'.ord..'D'.ord, 'H'.ord, 'F'.ord, 'R'.ord, 'c'.ord, 'Z'.ord}:
+                pendingInput.delete(0)
+                continue
+              break
+            startupDrainDone = true
           # Park the persistent prompt (not the wizard) on a stale
           # idle-submit; see the protocol header for the lifecycle.
           if inputIdleLinePending.load(moAcquire) and

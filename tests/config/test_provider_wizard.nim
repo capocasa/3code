@@ -489,3 +489,61 @@ suite "provider wizard configuration":
           listedModels.add stripped[4..^1].shortModel()
       check listedModels == curatedFor("nvidia").mapIt(shortModel(it))
       check fetchCount == 0
+
+    test "edit wizard experimental: only known-good models are offered":
+      # Bug report: editing a provider listed every id the endpoint's
+      # /models returns, including stale or untested ones. In
+      # experimental mode the wizard now fetches /models (to learn what
+      # is actually live) but offers only the intersection with the
+      # known-good registry; everything else still requires typing the
+      # full id by hand.
+      experimentalEnabled = true
+      activeProviders = @[
+        ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                    key: "nvapi-old", models: @["z-ai/glm-5.2"])
+      ]
+      activeCurrent = "nvidia.z-ai/glm-5.2"
+      inputs = @["", "", "", "gpt-oss-120b"]
+      var fetchCount = 0
+      fetchModelsHook = proc(url, key: string): (seq[string], string) =
+        inc fetchCount
+        (nvidiaModels(), "")
+      var editor: LineEditor
+      var prof = buildProfile(activeCurrent, activeProviders, "")
+      var messages = newJArray()
+      var session = Session()
+
+      let capturePath = getTempDir() / "wizard_edit_exp_capture.txt"
+      let savedStdout = stdout
+      let captureFile = open(capturePath, fmWrite)
+      stdout = captureFile
+      try:
+        discard handleCommand(":provider edit nvidia", messages, session, prof,
+                              editor)
+      finally:
+        flushFile(stdout)
+        stdout = savedStdout
+        close(captureFile)
+      let capturedOutput = readFile(capturePath)
+      try: removeFile(capturePath) except OSError: discard
+
+      check fetchCount == 1
+      var listedModels: seq[string]
+      for line in capturedOutput.splitLines:
+        let stripped = stripAnsiCsi(line.strip)
+        if stripped.len > 4 and stripped[0..3] == "    " and
+           stripped[4..^1].shortModel() != "" and
+           not stripped[4..^1].endsWith(" available") and
+           stripped[4..^1] != "verifying..." and
+           stripped[4..^1] != "ok" and
+           stripped[4..^1] != "updated nvidia" and
+           not stripped.startsWith("editing '"):
+          listedModels.add stripped[4..^1].shortModel()
+      # nvidiaModels() (the stub endpoint list) carries glm-5.2, the two
+      # gpt-oss ids and the two minimax ids; of those, only the ones in
+      # KnownGoodCombos for nvidia may be offered. minimax-m2.5/m2.7 are
+      # NOT in the nvidia registry (only minimax-m3 is), so they must be
+      # filtered out even though the endpoint lists them.
+      let expected = curatedFor("nvidia").filterIt(it in nvidiaModels())
+      check listedModels == expected.mapIt(shortModel(it))
+      check "minimax-m2.5" notin listedModels
