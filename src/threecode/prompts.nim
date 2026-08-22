@@ -659,7 +659,7 @@ Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphr
 
 # Skills
 
-Load on demand when a skill fits the task; do not preload the catalog. {{skills}}
+Load on demand when a skill fits the task; do not preload the catalog. If the task has more than ~2 moving parts, read cybernetic-plan.md first and follow it. {{skills}}
 
 # Output
 
@@ -831,7 +831,7 @@ Calibrated to refuse rather than guess. If the answer cannot be supported by the
 
 # Skills
 
-Load on demand when a skill fits the task; do not preload the catalog. {{skills}}
+Load on demand when a skill fits the task; do not preload the catalog. If the task has more than ~2 moving parts, read cybernetic-plan.md first and follow it. {{skills}}
 
 # Attribution
 
@@ -1070,7 +1070,7 @@ No command injection, XSS, SQL injection, path traversal, or unescaped shell-out
 
 # Skills
 
-Load on demand when a skill fits the task; don't preload the catalog. {{skills}}
+Load on demand when a skill fits the task; don't preload the catalog. If the task has more than ~2 moving parts, read cybernetic-plan.md first and follow it. {{skills}}
 
 # Output
 
@@ -1925,7 +1925,7 @@ Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphr
 
 # Skills
 
-Load on demand when a skill fits the task; do not preload the catalog. {{skills}}
+Load on demand when a skill fits the task; do not preload the catalog. If the task has more than ~2 moving parts, read cybernetic-plan.md first and follow it. {{skills}}
 
 # Output
 
