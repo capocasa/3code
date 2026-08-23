@@ -1802,10 +1802,20 @@ proc inputThreadProc() {.thread.} =
                 # Drop ESC; structural tail bytes are consumed below.
                 pendingInput.delete(0)
                 continue
-              if pendingInput[0] in {'['.ord, 'O'.ord} or
+              # Structural tail bytes of CSI / OSC replies that can land
+              # before the first prompt: `ESC [ A` (arrow), `ESC [ 6 n`
+              # (DSR), `ESC ] 11 ; rgb:..BEL` (a late OSC 11 background
+              # reply). The OSC charset adds `]`, the `rgb:` label, the
+              # `/` separators, hex letters, and the BEL terminator, so
+              # the whole reply drains here (the ESC was dropped above)
+              # instead of surfacing as a ghost `]11;rgb:...` prompt.
+              if pendingInput[0] in {'['.ord, 'O'.ord, ']'.ord} or
                  pendingInput[0] in {'0'.ord..'9'.ord} or
-                 pendingInput[0] in {';'.ord, '?'.ord, '~'.ord} or
-                 pendingInput[0] in {'A'.ord..'D'.ord, 'H'.ord, 'F'.ord, 'R'.ord, 'c'.ord, 'Z'.ord}:
+                 pendingInput[0] in {'a'.ord..'f'.ord, 'A'.ord..'F'.ord} or
+                 pendingInput[0] in {';'.ord, '?'.ord, '~'.ord, ':'.ord,
+                   '/'.ord, 7.ord} or
+                 pendingInput[0] in {'H'.ord, 'R'.ord, 'c'.ord, 'Z'.ord,
+                   'r'.ord, 'g'.ord, 'b'.ord}:
                 pendingInput.delete(0)
                 continue
               break

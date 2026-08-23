@@ -1563,6 +1563,20 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
     ed.escPutback = c2
     ed.canceled = true
     raise newException(InputCancelled, "")
+  if c2 == 93:  # OSC: `ESC ] ... (BEL | ESC \\)`
+    # A terminal control reply (e.g. the OSC 11 background-color answer)
+    # that arrived after the app stopped listening for it. It is not user
+    # input: swallow the whole sequence so it never repaints the prompt as
+    # a ghost `]11;rgb:...` line. Terminated by BEL or ST (ESC backslash);
+    # read until either, bounded so a malformed tail can't hang the read.
+    var prev = -1
+    for _ in 0 ..< 128:
+      let ch = escCh()
+      if ch < 0: break
+      if ch == 7: break                          # BEL
+      if prev == 27 and ch == 92: break          # ST: ESC \
+      prev = ch
+    return false
   if c2 == 91:  # CSI
     let c3 = escCh(25)
     if c3 < 0: return false

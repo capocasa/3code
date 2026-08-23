@@ -456,6 +456,25 @@ suite "minline editor: newline insertion (multiline)":
     for r in 0..<d.grid.rows.len:
       check "[" notin rowText(d.grid, r)
 
+  test "a late OSC 11 reply is swallowed, never painted into the prompt":
+    # A terminal that answers the background-color query after the app
+    # stopped listening delivers `ESC ] 11 ; rgb:..BEL` into the editor's
+    # input. It must be dropped whole, not echoed byte-by-byte around the
+    # prompt (which would surface `]11;rgb:0000/0000/0000` as ghost text).
+    var ed = initEditor()
+    let d = newDriver()
+    d.pushString "hi"
+    d.push @[27, ']'.ord, '1'.ord, '1'.ord, ';'.ord, 'r'.ord, 'g'.ord,
+      'b'.ord, ':'.ord, '0'.ord, '0'.ord, '0'.ord, '0'.ord, '/'.ord,
+      '0'.ord, '0'.ord, '0'.ord, '0'.ord, '/'.ord, '0'.ord, '0'.ord,
+      '0'.ord, '0'.ord, 7]
+    d.pushString "!"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "hi!"
+    check rowText(d.grid, 0) == "> hi!"
+    for r in 0..<d.grid.rows.len:
+      check "rgb" notin rowText(d.grid, r)
+
   test "trailing backslash stays literal — no continuation":
     # The old behaviour appended `\` to the line and re-prompted for a
     # continuation. Now `\` is just text and the line submits.

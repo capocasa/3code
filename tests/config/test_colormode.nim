@@ -1,5 +1,10 @@
-import std/[os, unittest, tables]
+import std/[os, unittest, tables, strutils]
 import threecode/[util, types]
+when defined(posix):
+  import std/[posix, times]
+  import std/termios
+  proc openpty(amaster, aslave: ptr cint, name: cstring, termp,
+      winp: pointer): cint {.importc, header: "<pty.h>".}
 
 suite "color mode resolution":
   test "forced dark stays dark":
@@ -12,6 +17,72 @@ suite "color mode resolution":
     # Under the test runner stdin is not a tty, so OSC 11 is never sent
     # and detection falls back to dark rather than blocking.
     check detectColorMode(cmAuto) == cmDark
+
+when defined(posix):
+  proc runWithScriptedReply(delayMs: int): (ColorMode, string) =
+    ## Drive `detectColorMode(cmAuto)` against a PTY whose master side
+    ## answers the OSC 11 query `delayMs` after seeing it. Returns the
+    ## resolved mode plus every byte still queued on stdin once the call
+    ## returns -- bytes the editor would otherwise inherit as a ghost
+    ## "prefilled" prompt.
+    var masterFd, slaveFd: cint
+    doAssert openpty(addr masterFd, addr slaveFd, nil, nil, nil) == 0
+    # A fresh PTY starts in cooked mode with ECHO on, which would echo the
+    # app's OSC 11 query back at it (a real terminal never echoes output).
+    # detectColorMode flips raw/cooked around its query but leaves the echo
+    # flag as it found it, so start the slave echo-off like a real tty.
+    var t: Termios
+    doAssert tcGetAttr(slaveFd, addr t) == 0
+    t.c_lflag = t.c_lflag and not Cflag(ECHO)
+    doAssert tcSetAttr(slaveFd, TCSANOW, addr t) == 0
+    let savedStdin = dup(0)
+    doAssert dup2(slaveFd, 0) == 0
+    # Thread arg packs (masterFd, delayMs); nimcall threads can't capture.
+    type WatcherArg = object
+      m: cint
+      delayMs: int
+    var th: Thread[WatcherArg]
+    proc watcher(a: WatcherArg) {.thread, nimcall.} =
+      var seen = ""
+      let deadline = epochTime() + 5.0
+      while epochTime() < deadline:
+        var pfd: TPollfd
+        pfd.fd = a.m
+        pfd.events = POLLIN
+        if poll(addr pfd, 1, 10) <= 0: continue
+        var b: array[64, char]
+        let n = posix.read(a.m, addr b, b.len)
+        if n <= 0: break
+        for i in 0 ..< n: seen.add b[i]
+        if "\x1b]11;?" in seen:
+          if a.delayMs > 0: sleep(a.delayMs)
+          discard write(a.m, cstring("\x1b]11;rgb:0000/0000/0000\x07"), 24)
+          break
+    createThread(th, watcher, WatcherArg(m: masterFd, delayMs: delayMs))
+    let mode = detectColorMode(cmAuto)
+    joinThread(th)
+    # Nonblocking sweep of whatever the call left queued on stdin.
+    discard fcntl(0, F_SETFL, O_NONBLOCK)
+    var leftover = ""
+    var c: char
+    while posix.read(0, addr c, 1) > 0: leftover.add c
+    doAssert dup2(savedStdin, 0) == 0
+    discard close(savedStdin)
+    discard close(masterFd)
+    discard close(slaveFd)
+    (mode, leftover)
+
+  suite "OSC 11 late reply does not leak into the prompt":
+    test "prompt reply is consumed":
+      let (mode, leftover) = runWithScriptedReply(0)
+      check mode == cmDark
+      check leftover == ""
+    test "reply past the deadline is drained":
+      let (_, leftover) = runWithScriptedReply(200)
+      check leftover == ""
+    test "very late reply is drained":
+      let (_, leftover) = runWithScriptedReply(300)
+      check leftover == ""
 
 suite "OSC 11 background reply parsing":
   test "parseHex16 scales 1/2/4-digit channels to 0..255":
