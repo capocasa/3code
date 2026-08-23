@@ -1,4 +1,4 @@
-import std/[json, monotimes, os, sequtils, strutils, times, unittest]
+import std/[algorithm, json, monotimes, os, sequtils, strutils, times, unittest]
 import threecode/[api, auth_openai, config, minline, types, ui]
 
 proc stripAnsiCsi(line: string): string =
@@ -490,13 +490,11 @@ suite "provider wizard configuration":
       check listedModels == curatedFor("nvidia").mapIt(shortModel(it))
       check fetchCount == 0
 
-    test "edit wizard experimental: only known-good models are offered":
-      # Bug report: editing a provider listed every id the endpoint's
-      # /models returns, including stale or untested ones. In
-      # experimental mode the wizard now fetches /models (to learn what
-      # is actually live) but offers only the intersection with the
-      # known-good registry; everything else still requires typing the
-      # full id by hand.
+    test "edit wizard experimental: full /models endpoint output is offered":
+      # In experimental mode the wizard fetches /models and offers the
+      # full endpoint output, including ids not in the known-good
+      # registry (minimax-m2.5/m2.7). Non-experimental mode is the one
+      # that restricts to the curated list.
       experimentalEnabled = true
       activeProviders = @[
         ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
@@ -540,10 +538,10 @@ suite "provider wizard configuration":
            not stripped.startsWith("editing '"):
           listedModels.add stripped[4..^1].shortModel()
       # nvidiaModels() (the stub endpoint list) carries glm-5.2, the two
-      # gpt-oss ids and the two minimax ids; of those, only the ones in
-      # KnownGoodCombos for nvidia may be offered. minimax-m2.5/m2.7 are
-      # NOT in the nvidia registry (only minimax-m3 is), so they must be
-      # filtered out even though the endpoint lists them.
-      let expected = curatedFor("nvidia").filterIt(it in nvidiaModels())
+      # gpt-oss ids and the two minimax ids. Experimental mode offers the
+      # full endpoint output, so minimax-m2.5/m2.7 (not in the nvidia
+      # KnownGoodCombos registry) must be listed.
+      let expected = nvidiaModels().sorted
       check listedModels == expected.mapIt(shortModel(it))
-      check "minimax-m2.5" notin listedModels
+      check "minimax-m2.5" in listedModels
+      check "minimax-m2.7" in listedModels

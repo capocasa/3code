@@ -645,13 +645,8 @@ proc promptEditProvider*(editor: var minline.LineEditor,
           errLn "unavailable — ", fetchErr
         elif available.len == 0:
           hintLn "  unavailable — enter manually", resetStyle
-        # Experimental mode fetches /models, but only known-good entries
-        # are offered: the endpoint's list routinely carries stale or
-        # untested ids, and the wizard is not the place to vet them.
-        if curated.len > 0:
-          curated.filterIt(it in available)
-        else:
-          available.sorted
+        # Experimental mode shows the full /models endpoint output.
+        available.sorted
       else:
         # Regular mode trusts the known-good registry, not /models.
         # Endpoints routinely list stale ids (or omit live ones), so the
