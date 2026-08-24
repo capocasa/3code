@@ -3,8 +3,13 @@ import threecode/[util, types]
 when defined(posix):
   import std/[posix, times]
   import std/termios
-  proc openpty(amaster, aslave: ptr cint, name: cstring, termp,
-      winp: pointer): cint {.importc, header: "<pty.h>".}
+  # macOS has no <pty.h>; openpty lives in <util.h> there.
+  when defined(macosx):
+    proc openpty(amaster, aslave: ptr cint, name: cstring, termp,
+        winp: pointer): cint {.importc, header: "<util.h>".}
+  else:
+    proc openpty(amaster, aslave: ptr cint, name: cstring, termp,
+        winp: pointer): cint {.importc, header: "<pty.h>".}
 
 suite "color mode resolution":
   test "forced dark stays dark":
