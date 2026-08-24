@@ -23,6 +23,7 @@ when defined(windows):
   proc setConsoleCtrlHandler(handlerRoutine: pointer; add: WinBool):
       WinBool {.stdcall, dynlib: "kernel32",
       importc: "SetConsoleCtrlHandler".}
+  proc conioKbhit(): cint {.header: "<conio.h>", importc: "_kbhit".}
 import ../types, ../util, ../compact, ../display, ../minline,
   ../signals, ../terminal as termui, ../session
 import ../engine as termengine
@@ -1856,14 +1857,42 @@ proc inputThreadProc() {.thread.} =
           discard fillPending(minline.EscapeTailPollMs.cint)
         pendingInput.len > 0 and minline.isEscapeTailByte(pendingInput[0])
     else:
+      var startupDrainDone = false
+      var drainedChar = -1
       let getCh: minline.GetChProc = proc(): int =
         while inputRunning():
           if wizardRequestPosted.load(moAcquire):
             return minline.wizardSentinel
+          # Drop keys queued before the first readline settled (an arrow
+          # pressed while the app was booting); see the posix branch above
+          # for the full rationale. Console keys arrive as two-byte
+          # `<prefix>, <key>` pairs via `_getch`, so whole pairs are
+          # drained; a real typed byte ends the drain and is kept.
+          if not startupDrainDone:
+            let drainDeadline = epochTime() + 0.5
+            while epochTime() < drainDeadline and conioKbhit() != 0:
+              let first = getchr().int
+              if first in minline.ESCAPES:
+                # The pair's tail can trail its prefix by a scheduler
+                # tick; without the wait a lone tail byte would surface
+                # as a ghost character in the fresh prompt.
+                let tailDeadline = epochTime() + 0.05
+                while epochTime() < tailDeadline and conioKbhit() == 0:
+                  sleep(1)
+                if conioKbhit() != 0:
+                  discard getchr()
+                continue
+              drainedChar = first
+              break
+            startupDrainDone = true
           if inputIdleLinePending.load(moAcquire) and
              not inputModalActive.load(moAcquire):
             sleep(5)
             continue
+          if drainedChar != -1:
+            result = drainedChar
+            drainedChar = -1
+            return result
           return getchr().int
         -1
       let hasPendingInput: minline.HasPendingInputProc = nil
