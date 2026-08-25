@@ -78,6 +78,21 @@ A working example lives in [`example/webserve.nim`](example/webserve.nim): a web
 
 ## Changelog
 
+**0.6.1** - --no-sandbox, paste-aware input, catalog refresh
+
+- **`--no-sandbox`.** Disable kernel sandbox enforcement so bash runs
+  unconfined. In-process read/write/patch checks still follow the policy
+  unless you also turn the sandbox off live.
+- **Pasted newlines.** A multi-line paste is kept as one draft instead of
+  treating each line as a submit.
+- **Provider wizard.** Experimental mode lists the full `/models` output;
+  regular mode still offers only known-good ids.
+- **Catalog.** 0xalpha stealth preview and current free tiers. Nemotron
+  was catalogued then dropped from known-good.
+- **Terminal.** Late OSC 11 replies no longer paint as a ghost prompt.
+  Windows drains leftover startup keystrokes so a boot-time Up cannot
+  recall history. macOS builds `openpty` from `util.h`.
+
 **0.6.0** - filesystem sandbox, subscription logins, network wall
 
 - **Filesystem sandbox.** Every tool call is confined by a one-rule-per-line
