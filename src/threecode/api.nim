@@ -1859,9 +1859,9 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
   # GLM-5.2 and 5.3 are the GLMs with a graded effort knob (variants "2"
   # and "3"); every other GLM is on/off. Variant encodes the minor version
   # digit (4.7 -> "7", 5.1 -> "1", 5.2 -> "2", 5.3 -> "3").
-  # Variant may carry a suffix ("2-free"); compare the leading digit.
+  # Variant may carry a suffix ("2-free", "3-flash"); compare the leading digit.
   let glm52 = p.family == "glm" and p.version == "5" and p.variant.startsWith("2")
-  let glm53 = p.family == "glm" and p.version == "5" and p.variant == "3"
+  let glm53 = p.family == "glm" and p.version == "5" and p.variant.startsWith("3")
   case providerOf(p)
   of "zai", "zai-coding", "zaicode":
     if glm53:

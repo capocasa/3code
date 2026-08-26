@@ -130,6 +130,9 @@ suite "prompts: defaultReasoningsFor":
   test "glm-5.3 exposes low/high/max (no off, thinking is forced)":
     check defaultReasoningsFor("zaicode", "glm-5.3", "glm") == @["low", "high", "max"]
     check defaultReasoningsFor("opencodego", "glm-5.3", "glm") == @["low", "high", "max"]
+    check defaultReasoningsFor("zai", "glm-5.3", "glm") == @["low", "high", "max"]
+    check defaultReasoningsFor("zai", "glm-5.3-flash", "glm") == @["low", "high", "max"]
+    check defaultReasoningsFor("zaicode", "glm-5.3-flash", "glm") == @["low", "high", "max"]
 
   test "kimi exposes off/on":
     check defaultReasoningsFor("nvidia", "moonshotai/kimi-k2.6", "kimi") ==

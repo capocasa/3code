@@ -53,15 +53,18 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("zai", "glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
     ("zai", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("zai", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("zai", "glm-5.3", "glm", "5", "3", "high", 0.2, 8192, false, 1_000_000),
+    ("zai", "glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 8192, false, 1_000_000),
     ("zaicode", "glm-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
     ("zaicode", "glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
     ("zaicode", "glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
     ("zaicode", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("zaicode", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
-    # glm-5.3 (forced thinking, reasoning_effort low/high/max) is live on
-    # the z.ai coding endpoint; API access staged later. GLM-5.2 table
-    # values carried over, default effort high (max is there via :reasoning).
+    # glm-5.3 / glm-5.3-flash: forced thinking, reasoning_effort
+    # low/high/max. Flash is the 320B-A18B multimodal sibling; same
+    # text params and 1M window. Default effort high (max via :reasoning).
     ("zaicode", "glm-5.3", "glm", "5", "3", "high", 0.2, 8192, false, 1_000_000),
+    ("zaicode", "glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 8192, false, 1_000_000),
 
     # 0xalpha (stealth preview, Aug 2026; tokenizer/API fingerprints point
     # at the GLM line but it keeps its own family since no lab has claimed
@@ -2711,11 +2714,11 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         return @ReasoningLevels
       if fam == "glm":
         # 5.2 (variant "2") exposes a graded effort knob (high/max); older
-        # GLM is on/off only. 5.3 forces thinking: low/high/max, no off.
-        # Variant encodes the minor version digit (4.7 -> "7", 5.1 -> "1",
-        # 5.2 -> "2", 5.3 -> "3").
+        # GLM is on/off only. 5.3 / 5.3-flash force thinking: low/high/max,
+        # no off. Variant encodes the minor version digit (4.7 -> "7",
+        # 5.1 -> "1", 5.2 -> "2", 5.3 -> "3") and may carry a suffix.
         if combo.version == "5" and combo.variant.startsWith("2"): return @["off", "high", "max"]
-        if combo.version == "5" and combo.variant == "3": return @["low", "high", "max"]
+        if combo.version == "5" and combo.variant.startsWith("3"): return @["low", "high", "max"]
         return @["off", "on"]
       if fam == "0xalpha":
         # Stealth preview: reasoning is always on (no off); graded effort
