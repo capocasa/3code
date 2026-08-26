@@ -39,7 +39,7 @@ jobs:
               failed=$(gh run list --workflow "$workflow" \
                 --status failure --event push --limit 20 \
                 --json databaseId,headBranch,headSha \
-                -q ".[] | select(.headSha==\"$sha\" and .headBranch==\"$tag\") | .databaseId")
+                -q "[.[] | select(.headSha==\"$sha\" and .headBranch==\"$tag\") | .databaseId] | first")
               if [ -n "$failed" ]; then
                 echo "  $workflow run $failed FAILED — aborting" >&2
                 exit 1
@@ -48,10 +48,11 @@ jobs:
               # Match on commit SHA (unique) + headBranch (tag name for tag-
               # triggered runs per GitHub REST API docs). Double match
               # disambiguates from a branch-push run on the same commit.
+              # `first` keeps a single id if a tag was pushed twice.
               run_id=$(gh run list --workflow "$workflow" \
                 --status success --event push --limit 20 \
                 --json databaseId,headBranch,headSha \
-                -q ".[] | select(.headSha==\"$sha\" and .headBranch==\"$tag\") | .databaseId")
+                -q "[.[] | select(.headSha==\"$sha\" and .headBranch==\"$tag\") | .databaseId] | first")
               if [ -n "$run_id" ]; then
                 echo "  found run $run_id"
                 gh run download "$run_id" --dir dl
