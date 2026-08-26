@@ -203,6 +203,8 @@ suite "api request shaping":
     check knownGoodReasonings("zai", "glm-5.3") == @["low", "high", "max"]
     check knownGoodReasonings("zai", "glm-5.3-flash") == @["low", "high", "max"]
     check knownGoodReasonings("zaicode", "glm-5.3-flash") == @["low", "high", "max"]
+    check knownGoodReasonings("opencodego", "glm-5.3-flash") == @["low", "high", "max"]
+    check knownGoodReasonings("openrouter", "z-ai/glm-5.3-flash") == @["low", "high", "max"]
     block zaiEffort:
       var body = %*{"stream": true}
       let p = Profile(name: "zaicode.glm-5.3", family: "glm",

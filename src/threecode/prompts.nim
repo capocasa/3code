@@ -85,17 +85,20 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("novita", "zai-org/glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
     ("novita", "zai-org/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("novita", "zai-org/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("novita", "zai-org/glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 8192, false, 1_000_000),
     # nvidia's GLM endpoint leaks <tool_call> tags into content; keep the
     # xmlToolCalls fallback that the retired z-ai/glm4.7 entry carried
     ("nvidia", "z-ai/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, true, 1_000_000),
     ("deepinfra", "zai-org/GLM-4.7-Flash", "glm", "4", "flash", "on", 0.2, 8192, false, 200_000),
     ("deepinfra", "zai-org/GLM-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("deepinfra", "zai-org/GLM-5.3-Flash", "glm", "5", "3-flash", "high", 0.2, 8192, false, 1_000_000),
     ("openrouter", "z-ai/glm-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
     ("openrouter", "z-ai/glm-4.7-flash", "glm", "4", "flash", "on", 0.2, 8192, false, 200_000),
     ("openrouter", "z-ai/glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
     ("openrouter", "z-ai/glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
     ("openrouter", "z-ai/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("openrouter", "z-ai/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("openrouter", "z-ai/glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 8192, false, 1_000_000),
     ("together", "zai-org/GLM-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
     ("together", "zai-org/GLM-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
     ("nebius", "zai-org/GLM-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
@@ -290,6 +293,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencodego", "kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
     ("opencodego", "hy3-preview", "hy", "3", "preview", "no_think", 0.2, 8192, false, 262_144),
     ("opencodego", "glm-5.3", "glm", "5", "3", "high", 0.2, 8192, false, 1_000_000),
+    ("opencodego", "glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 8192, false, 1_000_000),
     ("opencodego", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
     ("opencodego", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("opencodego", "glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
@@ -364,6 +368,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("venice", "zai-org-glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
     ("venice", "zai-org-glm-5-1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("venice", "zai-org-glm-5-2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("venice", "z-ai-glm-5-3-flash", "glm", "5", "3-flash", "high", 0.2, 8192, false, 1_000_000),
 
     # cheaperinference (api.cheaperinference.com; bare first-party ids,
     # params harvested by tools/harvest_models.nim)

@@ -133,6 +133,11 @@ suite "prompts: defaultReasoningsFor":
     check defaultReasoningsFor("zai", "glm-5.3", "glm") == @["low", "high", "max"]
     check defaultReasoningsFor("zai", "glm-5.3-flash", "glm") == @["low", "high", "max"]
     check defaultReasoningsFor("zaicode", "glm-5.3-flash", "glm") == @["low", "high", "max"]
+    check defaultReasoningsFor("opencodego", "glm-5.3-flash", "glm") == @["low", "high", "max"]
+    check defaultReasoningsFor("openrouter", "z-ai/glm-5.3-flash", "glm") == @["low", "high", "max"]
+    check defaultReasoningsFor("deepinfra", "zai-org/GLM-5.3-Flash", "glm") == @["low", "high", "max"]
+    check defaultReasoningsFor("novita", "zai-org/glm-5.3-flash", "glm") == @["low", "high", "max"]
+    check defaultReasoningsFor("venice", "z-ai-glm-5-3-flash", "glm") == @["low", "high", "max"]
 
   test "kimi exposes off/on":
     check defaultReasoningsFor("nvidia", "moonshotai/kimi-k2.6", "kimi") ==
