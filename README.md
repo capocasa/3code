@@ -78,6 +78,12 @@ A working example lives in [`example/webserve.nim`](example/webserve.nim): a web
 
 ## Changelog
 
+**0.6.2** - GLM-5.3-Flash
+
+- **Catalog.** GLM-5.3-Flash on `zai` and `zaicode`, same forced-thinking
+  contract as GLM-5.3 (`low`/`high`/`max`). GLM-5.3 itself is now also
+  known-good on the regular z.ai API, not just the coding endpoint.
+
 **0.6.1** - --no-sandbox, paste-aware input, catalog refresh
 
 - **`--no-sandbox`.** Disable kernel sandbox enforcement so bash runs
