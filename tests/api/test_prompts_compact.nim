@@ -66,6 +66,9 @@ suite "prompts: knownGoodFamily":
   test "Hetzner Kimi-K2.7-Code is known-good":
     check knownGoodFamily("hetzner", "Kimi-K2.7-Code") == "kimi"
 
+  test "litellm k3 (kimicode via counting proxy) is known-good":
+    check knownGoodFamily("litellm", "k3") == "kimi"
+
 suite "prompts: isKnownGood":
   test "true for known-good profile":
     let p = Profile(name: "zai.glm-5.1", model: "glm-5.1")

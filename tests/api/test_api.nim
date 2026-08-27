@@ -109,6 +109,15 @@ suite "api request shaping":
     check "temperature" notin body
     check body{"max_tokens"}.getInt == 8192
 
+  test "litellm k3 omits temperature (same as kimicode)":
+    var body = %*{"stream": true}
+    let p = Profile(name: "litellm.k3", family: "kimi", model: "k3")
+
+    applyGenerationDefaults(p, body)
+
+    check "temperature" notin body
+    check body{"max_tokens"}.getInt == 8192
+
   test "nvidia glm sends chat_template_kwargs.enable_thinking":
     var body = %*{"stream": true}
     let p = Profile(name: "nvidia.z-ai/glm-5.2", family: "glm",

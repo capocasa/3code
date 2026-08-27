@@ -311,6 +311,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("kimicode", "k3", "kimi", "3", "", "on", -1.0, 8192, false, 1_000_000),
     ("kimicode", "kimi-for-coding", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
     ("kimicode", "kimi-for-coding-highspeed", "kimi", "2", "7-code-hs", "on", 0.6, 4096, false, 262_144),
+    # litellm counting proxy (3code-swe): same k3 id, same omit-temperature.
+    ("litellm", "k3", "kimi", "3", "", "on", -1.0, 8192, false, 1_000_000),
 
     # inkling (Thinking Machines Lab, thinkingmachines/Inkling; 975B MoE,
     # 41B active, multimodal. Level-based reasoning via `reasoning_effort`
