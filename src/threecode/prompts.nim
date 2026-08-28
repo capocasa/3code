@@ -313,6 +313,10 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("kimicode", "kimi-for-coding-highspeed", "kimi", "2", "7-code-hs", "on", 0.6, 4096, false, 262_144),
     # litellm counting proxy (3code-swe): same k3 id, same omit-temperature.
     ("litellm", "k3", "kimi", "3", "", "on", -1.0, 8192, false, 1_000_000),
+    # qwen3.8-27b: groq behind the counting proxy; reasoning_effort
+    # none/default is injected by usage_logger (see groq branch in
+    # applyQwenReasoning, api.nim). Context 128K per Groq.
+    ("litellm", "qwen3.8-27b", "qwen", "3.8", "27b", "on", 0.2, 8192, false, 128_000),
 
     # inkling (Thinking Machines Lab, thinkingmachines/Inkling; 975B MoE,
     # 41B active, multimodal. Level-based reasoning via `reasoning_effort`
