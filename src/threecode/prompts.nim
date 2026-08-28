@@ -477,6 +477,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("tensorx", "z-ai/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("tensorx", "z-ai/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
     ("groq", "qwen/qwen3.6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, false, 128_000),
+    ("groq", "qwen/qwen3.8-27b", "qwen", "3.8", "27b", "on", 0.2, 8192, false, 128_000),
     ("sambanova", "DeepSeek-V3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
     ("sambanova", "MiniMax-M2.7", "minimax", "2", "7", "on", 0.2, 8192, false, 204_800),
     ("together", "Qwen/Qwen3.6-Plus", "qwen", "3.6", "plus", "on", 0.2, 8192, false, 262_144),

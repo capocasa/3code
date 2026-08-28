@@ -2039,6 +2039,17 @@ proc applyQwenReasoning(p: Profile, body: JsonNode) =
   ## `on` engages interleaved reasoning, `off` cuts it to a direct
   ## response. Served via aggregator routes (nanogpt) that expose the
   ## same chat-template knob.
+  ##
+  ## Groq is the exception: it 400s on `chat_template_kwargs` and takes
+  ## the top-level `reasoning_effort` string instead, but only the
+  ## values `none` (no thinking) and `default` (think) — `low`/`high`
+  ## are rejected. `on` maps to `default`, `off` to `none`.
+  if providerOf(p) == "groq":
+    case p.reasoning
+    of "off": body["reasoning_effort"] = %"none"
+    of "on": body["reasoning_effort"] = %"default"
+    else: discard
+    return
   case p.reasoning
   of "off":
     body["chat_template_kwargs"] = %*{"enable_thinking": false}
