@@ -1113,6 +1113,21 @@ No preamble before tool calls. After completion: one sentence, what changed and 
 {{credit}}
 """
 
+# Tiny qwen preamble, rewritten by qwen3.8-max (openrouter) after a
+# deep dive on qwen3 prompting: numbered rules, read-the-test-first
+# bias, hard ban on environment modification (the 27B's observed
+# failure mode was pip-install fights), dead-end stop rule.
+const QwenTinyPreamble = """You are 3code, a coding agent. Fix the issue with the smallest correct change.
+
+Rules:
+1. First moves, always: read the failing test and its error, rg/grep to locate code, read only the lines you need. Never dump whole files, never re-read a file.
+2. The environment is complete. Never run pip/apt/npm/uv, create venvs, or modify the system. If something is missing, work with what the repo has and say so.
+3. Edit source only. Reproduce the bug, make the minimal fix, rerun the failing test to prove it passes.
+4. Act, don't narrate. Call tools without preamble, never explain output back. Never re-run a command that just failed; read the error and change approach. After two dead ends, stop and report.
+5. One-line replies. Fragments over sentences. Code refs as path:line.
+6. If unsure of intent, ask one short question. Otherwise proceed.
+"""
+
 const HyPreamble = """You are the Hy3 edition of 3code, the economical coding agent.
 
 You are a tool-using agent backed by Tencent Hy3 (295B total / 21B active MoE), an
@@ -2428,10 +2443,87 @@ let gptOssTools = %*[
   clearTool
 ]
 
+# Slim 4-tool surface for the 27B qwens on rate-limited endpoints
+# (groq free tier: 8k TPM). Same four file tools 3code can't run
+# without, minimal descriptions; update_plan/web/clear dropped.
+let qwenTinyTools = %*[
+  {
+    "type": "function",
+    "function": {
+      "name": "bash",
+      "description": "Run a shell command; returns stdout, stderr, and exit code.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {"type": "string", "description": "Shell command to run."}
+        },
+        "required": ["command"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "read",
+      "description": "Read a file (250-line cap; use offset/limit for more).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "offset": {"type": "integer"},
+          "limit": {"type": "integer"}
+        },
+        "required": ["path"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "write",
+      "description": "Overwrite a file with the given content.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "body": {"type": "string"}
+        },
+        "required": ["path", "body"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "patch",
+      "description": "Search-and-replace edit; each search must match exactly once.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "edits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "search": {"type": "string"},
+                "replace": {"type": "string"}
+              },
+              "required": ["search", "replace"]
+            }
+          }
+        },
+        "required": ["path", "edits"]
+      }
+    }
+  }
+]
+
 let
   lagunaSetup = (prompt: LagunaPreamble, tools: glmAndQwenTools)
   glmSetup = (prompt: GlmPreamble, tools: glmAndQwenTools)
   qwenSetup = (prompt: QwenPreamble, tools: glmAndQwenTools)
+  qwenTinySetup = (prompt: QwenTinyPreamble, tools: qwenTinyTools)
   deepseekSetup = (prompt: DeepSeekPreamble, tools: glmAndQwenTools)
   gptOssSetup = (prompt: GptOssPreamble, tools: gptOssTools)
   gptSetup = (prompt: GptPreamble, tools: glmAndQwenTools)
@@ -2453,7 +2545,11 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   case p.family
   of "laguna": lagunaSetup
   of "glm": glmSetup
-  of "qwen": qwenSetup
+  of "qwen":
+    # The 27B qwens on rate-limited endpoints (groq free tier: 8k TPM,
+    # single request must stay well under) get the tiny prompt and slim
+    # 4-tool surface; the big hosted qwens keep the full one.
+    if p.variant == "27b": qwenTinySetup else: qwenSetup
   of "gpt-oss": gptOssSetup
   of "gpt": gptSetup
   of "deepseek": deepseekSetup
