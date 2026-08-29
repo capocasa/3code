@@ -353,6 +353,27 @@ suite "api request shaping":
     check knownGoodReasonings("xai", "grok-build-0.1") == @["low", "medium", "high"]
     check knownGoodReasonings("openrouter", "x-ai/grok-4.5") == @["low", "medium", "high"]
 
+  test "maxOutputTokensFor caps the escalation ladder at model output limits":
+    # GLM-5.3 and DeepSeek-V4 sit in 1M contexts but cap a single
+    # generation far lower; the ladder must not ask for more output than
+    # the model can produce.
+    check maxOutputTokensFor(Profile(name: "zai.glm-5.3-flash",
+      model: "glm-5.3-flash")) == 131_072
+    check maxOutputTokensFor(Profile(name: "openrouter.z-ai/glm-5.3",
+      model: "z-ai/glm-5.3")) == 131_072
+    check maxOutputTokensFor(Profile(name: "openrouter.deepseek/deepseek-v4-flash",
+      model: "deepseek/deepseek-v4-flash")) == 384_000
+    # Everything else falls back to the context window.
+    check maxOutputTokensFor(Profile(name: "zai.glm-5.1",
+      model: "glm-5.1")) == 200_000
+
+  test "glm-5.3/5.3-flash and deepseek-v4-flash carry raised budgets":
+    # These reasoning models burn the old 8k/4k budgets on thinking alone
+    # and starve into empty "length" replies.
+    check knownGoodGeneration("zai", "glm-5.3-flash").maxTokens == 65_536
+    check knownGoodGeneration("openrouter", "z-ai/glm-5.3").maxTokens == 65_536
+    check knownGoodGeneration("openrouter", "deepseek/deepseek-v4-flash").maxTokens == 65_536
+
   test "grok known-good: isKnownGood + context windows":
     check isKnownGood(Profile(name: "xai.grok-4.5", model: "grok-4.5"))
     check isKnownGood(Profile(name: "openrouter.x-ai/grok-4.5", model: "x-ai/grok-4.5"))
@@ -925,7 +946,7 @@ echo "OK"
     check "finished by length, retrying with" in runOut
     check "token budget in 1s" in runOut
     check "{humanTokens(maxTokensOverride)}" notin runOut
-    # The bumped budget for 8192 is min(16384, 200000) = 16384 = "16.4k"
+    # The bumped budget for 8192 is min(8192 * 2, 131072) = 16384 = "16.4k"
     check "16.4k" in runOut
 
   test "runTurns retries then recovers on a bare empty reply (no finish_reason)":

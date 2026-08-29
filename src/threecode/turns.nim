@@ -323,9 +323,16 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         usage.reasoningTokens > 0
       if budgetStarved and lengthEscalations < MaxLengthEscalations:
         inc lengthEscalations
-        let cur = knownGoodGeneration(p).maxTokens
-        let window = contextWindowFor(p)
-        let bumped = min(cur * 2, window)
+        # Double from the budget that just starved, not from the known-good
+        # base: with a 65k base the old `min(base * 2, window)` formula
+        # re-derived the same 131k override on every escalation, so retries
+        # 2 and 3 burned a full turn each without raising the cap. Doubling
+        # the override walks 131k -> 262k -> 524k, and the model's max
+        # output (not the 1M context window) is the real ceiling.
+        let cur =
+          if maxTokensOverride > 0: maxTokensOverride
+          else: knownGoodGeneration(p).maxTokens
+        let bumped = min(cur * 2, maxOutputTokensFor(p))
         maxTokensOverride = max(maxTokensOverride, bumped)
         let backoff = emptyReplyBackoffS()
         commitTranscriptBytes(

@@ -53,8 +53,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("zai", "glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
     ("zai", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("zai", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
-    ("zai", "glm-5.3", "glm", "5", "3", "high", 0.2, 8192, false, 1_000_000),
-    ("zai", "glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 8192, false, 1_000_000),
+    ("zai", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, false, 1_000_000),
+    ("zai", "glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
     ("zaicode", "glm-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
     ("zaicode", "glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
     ("zaicode", "glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
@@ -63,8 +63,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # glm-5.3 / glm-5.3-flash: forced thinking, reasoning_effort
     # low/high/max. Flash is the 320B-A18B multimodal sibling; same
     # text params and 1M window. Default effort high (max via :reasoning).
-    ("zaicode", "glm-5.3", "glm", "5", "3", "high", 0.2, 8192, false, 1_000_000),
-    ("zaicode", "glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 8192, false, 1_000_000),
+    ("zaicode", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, false, 1_000_000),
+    ("zaicode", "glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
 
     # 0xalpha (stealth preview, Aug 2026; tokenizer/API fingerprints point
     # at the GLM line but it keeps its own family since no lab has claimed
@@ -85,20 +85,20 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("novita", "zai-org/glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
     ("novita", "zai-org/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("novita", "zai-org/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
-    ("novita", "zai-org/glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 8192, false, 1_000_000),
+    ("novita", "zai-org/glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
     # nvidia's GLM endpoint leaks <tool_call> tags into content; keep the
     # xmlToolCalls fallback that the retired z-ai/glm4.7 entry carried
     ("nvidia", "z-ai/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, true, 1_000_000),
     ("deepinfra", "zai-org/GLM-4.7-Flash", "glm", "4", "flash", "on", 0.2, 8192, false, 200_000),
     ("deepinfra", "zai-org/GLM-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
-    ("deepinfra", "zai-org/GLM-5.3-Flash", "glm", "5", "3-flash", "high", 0.2, 8192, false, 1_000_000),
+    ("deepinfra", "zai-org/GLM-5.3-Flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
     ("openrouter", "z-ai/glm-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
     ("openrouter", "z-ai/glm-4.7-flash", "glm", "4", "flash", "on", 0.2, 8192, false, 200_000),
     ("openrouter", "z-ai/glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
     ("openrouter", "z-ai/glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
     ("openrouter", "z-ai/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("openrouter", "z-ai/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
-    ("openrouter", "z-ai/glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 8192, false, 1_000_000),
+    ("openrouter", "z-ai/glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
     ("together", "zai-org/GLM-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
     ("together", "zai-org/GLM-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
     ("nebius", "zai-org/GLM-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
@@ -156,33 +156,33 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openai", "gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, false, 400_000),
 
     # deepseek
-    ("baseten", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("baseten", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("baseten", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
-    ("deepseek", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("deepseek", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("deepseek", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
-    ("deepinfra", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
-    ("deepinfra", "deepseek-ai/DeepSeek-V4-Flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("deepinfra", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
+    ("deepinfra", "deepseek-ai/DeepSeek-V4-Flash", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("deepinfra", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
     ("deepinfra", "deepseek-ai/DeepSeek-V3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
-    ("fireworks", "accounts/fireworks/models/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("fireworks", "accounts/fireworks/models/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("fireworks", "accounts/fireworks/models/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
-    ("huggingface", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
-    ("huggingface", "deepseek-ai/DeepSeek-V4-Flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("huggingface", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
+    ("huggingface", "deepseek-ai/DeepSeek-V4-Flash", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("huggingface", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
-    ("inceptron", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
-    ("nebius", "deepseek-ai/DeepSeek-V4-Flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("inceptron", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
+    ("nebius", "deepseek-ai/DeepSeek-V4-Flash", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("nebius", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
-    ("novita", "deepseek/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
-    ("novita", "deepseek/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("novita", "deepseek/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
+    ("novita", "deepseek/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("novita", "deepseek/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
-    ("nvidia", "deepseek-ai/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("nvidia", "deepseek-ai/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("openrouter", "deepseek/deepseek-chat", "deepseek", "3", "", "medium", 0.2, 8192, false, 128_000),
     ("openrouter", "deepseek/deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
-    ("openrouter", "deepseek/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("openrouter", "deepseek/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("openrouter", "deepseek/deepseek-v4-pro-0813", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
-    ("openrouter", "deepseek/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("openrouter", "deepseek/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("openrouter", "deepseek/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
-    ("together", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("together", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("together", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
 
     # laguna (served via poolside's OpenAI-compatible API)
@@ -266,9 +266,9 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "TEE/qwen3.6-35b-a3b-uncensored", "qwen", "3.6", "35b-a3b-u", "on", 0.2, 8192, false, 262_144),
     ("nanogpt", "TEE/qwen3.6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, false, 128_000),
     ("nanogpt", "alibaba/qwen3.6-flash", "qwen", "3.6", "flash", "on", 0.2, 4096, false, 128_000),
-    ("nanogpt", "deepseek/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("nanogpt", "deepseek/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("nanogpt", "deepseek/deepseek-v4-pro-0813", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
-    ("nanogpt", "TEE/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("nanogpt", "TEE/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("nanogpt", "deepseek/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
     ("nanogpt", "minimax/minimax-m3", "minimax", "3", "", "on", 0.2, 8192, false, 1_000_000),
 
@@ -280,8 +280,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencode", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("opencode", "glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
     ("opencode", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
-    ("opencode", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
-    ("opencode", "deepseek-v4-flash-free", "deepseek", "4", "flash-free", "low", 0.2, 4096, false, 1_000_000),
+    ("opencode", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
+    ("opencode", "deepseek-v4-flash-free", "deepseek", "4", "flash-free", "low", 0.2, 65536, false, 1_000_000),
     ("opencode", "qwen3.6-plus", "qwen", "3.6", "plus", "on", 0.2, 8192, false, 262_144),
 
     # opencodego (OpenCode Go subscription gateway; bare model ids)
@@ -292,13 +292,13 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencodego", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, false, 262_144),
     ("opencodego", "kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
     ("opencodego", "hy3-preview", "hy", "3", "preview", "no_think", 0.2, 8192, false, 262_144),
-    ("opencodego", "glm-5.3", "glm", "5", "3", "high", 0.2, 8192, false, 1_000_000),
-    ("opencodego", "glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 8192, false, 1_000_000),
+    ("opencodego", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, false, 1_000_000),
+    ("opencodego", "glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
     ("opencodego", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
     ("opencodego", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("opencodego", "glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
     ("opencodego", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
-    ("opencodego", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("opencodego", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
 
     # kimi (Kimi API Platform, api.moonshot.ai; bare model ids)
     ("kimi", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, false, 1_000_000),
@@ -337,9 +337,9 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # venice (api.venice.ai; flattened ids like `zai-org-glm-5-2`,
     # params harvested by tools/harvest_models.nim from sibling entries)
     ("venice", "deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
-    ("venice", "deepseek-v4-flash-0731-fast", "deepseek", "4", "flash-fast", "low", 0.2, 4096, false, 1_000_000),
-    ("venice", "deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
-    ("venice", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("venice", "deepseek-v4-flash-0731-fast", "deepseek", "4", "flash-fast", "low", 0.2, 65536, false, 1_000_000),
+    ("venice", "deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
+    ("venice", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("venice", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
     ("venice", "grok-4-20", "grok", "4", "20", "low", 0.2, 8192, false, 2_000_000),
     ("venice", "grok-4-20-multi-agent", "grok", "4", "20-ma", "high", 0.2, 8192, false, 2_000_000),
@@ -374,11 +374,11 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("venice", "zai-org-glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
     ("venice", "zai-org-glm-5-1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("venice", "zai-org-glm-5-2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
-    ("venice", "z-ai-glm-5-3-flash", "glm", "5", "3-flash", "high", 0.2, 8192, false, 1_000_000),
+    ("venice", "z-ai-glm-5-3-flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
 
     # cheaperinference (api.cheaperinference.com; bare first-party ids,
     # params harvested by tools/harvest_models.nim)
-    ("cheaperinference", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("cheaperinference", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("cheaperinference", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
     ("cheaperinference", "glm-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
     ("cheaperinference", "glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
@@ -404,8 +404,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # crof (crof.ai aggregator; bare model ids, params harvested by
     # tools/harvest_models.nim from sibling entries)
     ("crof", "deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
-    ("crof", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
-    ("crof", "deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("crof", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
+    ("crof", "deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("crof", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
     ("crof", "deepseek-v4-pro-0813", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
     ("crof", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
@@ -463,13 +463,13 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "qwen/qwen3.8-2.4t-a95b", "qwen", "3.8", "2.4t-a95b", "on", 0.2, 8192, false, 1_000_000),
     ("openrouter", "tencent/hy3-preview", "hy", "3", "preview", "no_think", 0.2, 8192, false, 262_144),
     ("openrouter", "thinkingmachines/inkling", "inkling", "1", "", "medium", 0.2, 8192, false, 256_000),
-    ("fireworks", "accounts/fireworks/models/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("fireworks", "accounts/fireworks/models/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("fireworks", "accounts/fireworks/models/gpt-oss-20b", "gpt-oss", "", "20b", "medium", 0.2, 4096, false, 131_072),
     ("fireworks", "accounts/fireworks/models/kimi-k3", "kimi", "3", "", "on", 0.6, 8192, false, 1_000_000),
     ("fireworks", "accounts/fireworks/models/minimax-m3", "minimax", "3", "", "on", 0.2, 8192, false, 1_000_000),
     ("tensorx", "deepseek/deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
     ("tensorx", "deepseek/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
-    ("tensorx", "deepseek/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("tensorx", "deepseek/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("tensorx", "minimax/minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, false, 204_800),
     ("tensorx", "minimax/minimax-m3", "minimax", "3", "", "on", 0.2, 8192, false, 1_000_000),
     ("tensorx", "moonshotai/kimi-k2.5", "kimi", "2", "5", "on", 0.6, 8192, false, 262_144),
@@ -490,7 +490,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # hetzner (Hetzner Inference Experiments; vLLM, OpenAI-compatible)
     ("hetzner", "Qwen/Qwen3.6-35B-A3B-FP8", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, false, 262_144),
     ("hetzner", "GLM-5.2-NVFP4", "glm", "5", "2", "high", 0.2, 8192, false, 512_000),
-    ("hetzner", "DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 4096, false, 512_000),
+    ("hetzner", "DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 512_000),
     ("hetzner", "Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
     ("together", "moonshotai/Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
     ("together", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.6, 8192, false, 1_000_000),
@@ -522,7 +522,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "deepseek-chat", "deepseek", "3", "", "medium", 0.2, 8192, false, 128_000),
     ("nanogpt", "deepseek-reasoner", "deepseek", "r1", "", "medium", 0.2, 8192, false, 128_000),
     ("nanogpt", "deepseek/deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
-    ("nanogpt", "deepseek/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 4096, false, 1_000_000),
+    ("nanogpt", "deepseek/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("nanogpt", "inclusionai/ling-3.0-flash", "ling", "3", "0-flash", "off", 0.2, 8192, false, 262_144),
     ("nanogpt", "longcat-2.0", "longcat", "2", "", "on", 0.2, 8192, false, 1_000_000),
     ("opencodego", "longcat-2.0", "longcat"   , "2", "", "on", 0.2, 8192, false, 1000000),
@@ -572,20 +572,20 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "zai-org/glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
     ("nanogpt", "zai-org/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("nanogpt", "zai-org/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
-    ("cheaperinference", "glm-5.3-flash", "glm"       , "5", "3-flash", "high", 0.2, 8192, false, 1000000),
-    ("cheaperinference", "glm-5.3", "glm"       , "5", "3", "high", 0.2, 8192, false, 1000000),
-    ("nanogpt",   "zai-org/glm-5.3", "glm"       , "5", "3", "high", 0.2, 8192, false, 1000000),
-    ("nanogpt",   "z-ai/glm-5.3-flash", "glm"       , "5", "3-flash", "high", 0.2, 8192, false, 1000000),
-    ("tensorx",   "z-ai/glm-5.3", "glm"       , "5", "3", "high", 0.2, 8192, false, 1000000),
-    ("tensorx",   "z-ai/glm-5.3-flash", "glm"       , "5", "3-flash", "high", 0.2, 8192, false, 1000000),
-    ("novita",    "zai-org/glm-5.3", "glm"       , "5", "3", "high", 0.2, 8192, false, 1000000),
-    ("deepinfra", "zai-org/GLM-5.3", "glm"       , "5", "3", "high", 0.2, 8192, false, 1000000),
-    ("openrouter", "z-ai/glm-5.3", "glm"       , "5", "3", "high", 0.2, 8192, false, 1000000),
-    ("together",  "zai-org/GLM-5.3-Flash", "glm"       , "5", "3-flash", "high", 0.2, 8192, false, 1000000),
-    ("together",  "zai-org/GLM-5.3", "glm"       , "5", "3", "high", 0.2, 8192, false, 1000000),
-    ("nebius",    "zai-org/GLM-5.3-Flash", "glm"       , "5", "3-flash", "high", 0.2, 8192, false, 1000000),
-    ("baseten",   "zai-org/GLM-5.3", "glm"       , "5", "3", "high", 0.2, 8192, false, 1000000),
-    ("baseten",   "zai-org/GLM-5.3-Flash", "glm"       , "5", "3-flash", "high", 0.2, 8192, false, 1000000),
+    ("cheaperinference", "glm-5.3-flash", "glm"       , "5", "3-flash", "high", 0.2, 65536, false, 1000000),
+    ("cheaperinference", "glm-5.3", "glm"       , "5", "3", "high", 0.2, 65536, false, 1000000),
+    ("nanogpt",   "zai-org/glm-5.3", "glm"       , "5", "3", "high", 0.2, 65536, false, 1000000),
+    ("nanogpt",   "z-ai/glm-5.3-flash", "glm"       , "5", "3-flash", "high", 0.2, 65536, false, 1000000),
+    ("tensorx",   "z-ai/glm-5.3", "glm"       , "5", "3", "high", 0.2, 65536, false, 1000000),
+    ("tensorx",   "z-ai/glm-5.3-flash", "glm"       , "5", "3-flash", "high", 0.2, 65536, false, 1000000),
+    ("novita",    "zai-org/glm-5.3", "glm"       , "5", "3", "high", 0.2, 65536, false, 1000000),
+    ("deepinfra", "zai-org/GLM-5.3", "glm"       , "5", "3", "high", 0.2, 65536, false, 1000000),
+    ("openrouter", "z-ai/glm-5.3", "glm"       , "5", "3", "high", 0.2, 65536, false, 1000000),
+    ("together",  "zai-org/GLM-5.3-Flash", "glm"       , "5", "3-flash", "high", 0.2, 65536, false, 1000000),
+    ("together",  "zai-org/GLM-5.3", "glm"       , "5", "3", "high", 0.2, 65536, false, 1000000),
+    ("nebius",    "zai-org/GLM-5.3-Flash", "glm"       , "5", "3-flash", "high", 0.2, 65536, false, 1000000),
+    ("baseten",   "zai-org/GLM-5.3", "glm"       , "5", "3", "high", 0.2, 65536, false, 1000000),
+    ("baseten",   "zai-org/GLM-5.3-Flash", "glm"       , "5", "3-flash", "high", 0.2, 65536, false, 1000000),
     ("opencodego", "gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, false, 400_000),
     ("cheaperinference", "gpt-5-mini", "gpt"       , "", "5-mini", "medium", 0.2, 4096, false, 400000),
     ("cheaperinference", "gpt-5.4-nano", "gpt"       , "", "5.4-nano", "medium", 0.2, 4096, false, 400000),
@@ -600,22 +600,22 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencodego", "mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, false, 1_000_000),
     ("opencodego", "mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, false, 1_000_000),
     ("opencodego", "qwen3.8-max", "qwen", "3.8", "max", "on", 0.2, 8192, false, 262_144),
-    ("opencodego", "deepseek-v4-flash-vision-exp", "deepseek", "4", "flash-vis", "low", 0.2, 4096, false, 1_000_000),
+    ("opencodego", "deepseek-v4-flash-vision-exp", "deepseek", "4", "flash-vis", "low", 0.2, 65536, false, 1_000_000),
     ("cheaperinference", "deepseek-v4-pro-0813", "deepseek"  , "4", "pro", "low", 0.2, 8192, false, 1000000),
-    ("cheaperinference", "deepseek-v4-flash-0731", "deepseek"  , "4", "flash", "low", 0.2, 4096, false, 1000000),
+    ("cheaperinference", "deepseek-v4-flash-0731", "deepseek"  , "4", "flash", "low", 0.2, 65536, false, 1000000),
     ("venice",    "deepseek-v4-pro-0813", "deepseek"  , "4", "pro", "low", 0.2, 8192, false, 1000000),
     ("nvidia",    "deepseek-ai/deepseek-v4-pro-0813", "deepseek"  , "4", "pro", "low", 0.2, 8192, false, 1000000),
-    ("nanogpt",   "deepseek/deepseek-v4-flash-vision-exp", "deepseek"  , "4", "flash-vis", "low", 0.2, 4096, false, 1000000),
+    ("nanogpt",   "deepseek/deepseek-v4-flash-vision-exp", "deepseek"  , "4", "flash-vis", "low", 0.2, 65536, false, 1000000),
     ("tensorx",   "deepseek/deepseek-v4-pro-0813", "deepseek"  , "4", "pro", "low", 0.2, 8192, false, 1000000),
     ("novita",    "deepseek/deepseek-v3.2", "deepseek"  , "3.2", "", "medium", 0.2, 8192, false, 128000),
-    ("novita",    "deepseek/deepseek-v4-flash-vision-exp", "deepseek"  , "4", "flash-vis", "low", 0.2, 4096, false, 1000000),
+    ("novita",    "deepseek/deepseek-v4-flash-vision-exp", "deepseek"  , "4", "flash-vis", "low", 0.2, 65536, false, 1000000),
     ("novita",    "deepseek/deepseek-v4-pro-0813", "deepseek"  , "4", "pro", "low", 0.2, 8192, false, 1000000),
     ("deepinfra", "deepseek-ai/DeepSeek-V4-Pro-0813", "deepseek"  , "4", "pro", "low", 0.2, 8192, false, 1000000),
-    ("openrouter", "deepseek/deepseek-v4-flash-vision-exp", "deepseek"  , "4", "flash-vis", "low", 0.2, 4096, false, 1000000),
+    ("openrouter", "deepseek/deepseek-v4-flash-vision-exp", "deepseek"  , "4", "flash-vis", "low", 0.2, 65536, false, 1000000),
     ("fireworks", "accounts/fireworks/models/deepseek-v4-pro-0813", "deepseek"  , "4", "pro", "low", 0.2, 8192, false, 1000000),
-    ("deepseek",  "deepseek-v4-flash-vision-exp", "deepseek"  , "4", "flash-vis", "low", 0.2, 4096, false, 1000000),
+    ("deepseek",  "deepseek-v4-flash-vision-exp", "deepseek"  , "4", "flash-vis", "low", 0.2, 65536, false, 1000000),
     ("together",  "deepseek-ai/DeepSeek-V4-Pro-0813", "deepseek"  , "4", "pro", "low", 0.2, 8192, false, 1000000),
-    ("nebius",    "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek"  , "4", "flash", "low", 0.2, 4096, false, 1000000),
+    ("nebius",    "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek"  , "4", "flash", "low", 0.2, 65536, false, 1000000),
     ("baseten",   "deepseek-ai/DeepSeek-V4-Pro-0813", "deepseek"  , "4", "pro", "low", 0.2, 8192, false, 1000000),
     ("opencodego", "minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, false, 204_800),
     ("opencodego", "minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, false, 204_800),
@@ -2838,6 +2838,35 @@ proc knownGoodContextWindow*(p: Profile): int =
   let dot = p.name.find('.')
   if dot < 0: return 0
   knownGoodContextWindow(p.name[0 ..< dot], p.model)
+
+proc maxOutputTokensFor*(p: Profile): int =
+  ## Architectural max output for a model, used as the ceiling for the
+  ## turn loop's max_tokens escalation ladder. Distinct from the context
+  ## window: GLM-5.3 and DeepSeek-V4 sit in 1M contexts but cap a single
+  ## generation at 128k/384k, so escalating against the window would ask
+  ## for more output than the model can produce.
+  # Models with an architectural output cap below their context window
+  # resolve first; everything else falls back to the context window
+  # (known-good table, then the same substring heuristic
+  # compact.contextWindowFor uses, not imported here to avoid the
+  # prompts -> compact cycle).
+  let m = p.model.toLowerAscii
+  if "glm-5.3" in m: return 131_072
+  if "deepseek" in m and "v4" in m: return 384_000
+  let kg = knownGoodContextWindow(p)
+  if kg > 0: return kg
+  if "kimi-k2" in m or "qwen3-coder" in m or "qwen3_coder" in m: 262_144
+  elif "qwen" in m: 128_000
+  elif "claude" in m: 200_000
+  elif "gpt-5" in m: 400_000
+  elif "gpt-4" in m or "o1" in m or "o3" in m or "o4" in m: 200_000
+  elif "deepseek" in m: 128_000
+  elif "gemini" in m: 1_000_000
+  elif "glm" in m: 200_000
+  elif "minimax-m3" in m: 1_000_000
+  elif "minimax" in m: 204_800
+  elif "hy3" in m or "hunyuan" in m: 262_144
+  else: 128_000
 
 proc knownGoodReasonings*(provider, model: string): seq[string] =
   ## Value set offered by `:reasoning` for a known-good (provider, model)
