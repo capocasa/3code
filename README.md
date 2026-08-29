@@ -78,6 +78,12 @@ A working example lives in [`example/webserve.nim`](example/webserve.nim): a web
 
 ## Changelog
 
+**0.6.3** - Catalog sweep
+
+- **Catalog.** GLM-5.3 / GLM-5.3-Flash, Qwen 3.8 and DeepSeek V4 known-good
+  on 15 more providers (Baseten, Nebius, Together, DeepInfra, Novita,
+  Tensorx, NanoGPT, Venice, Hetzner, Aki and friends).
+
 **0.6.2** - GLM-5.3-Flash
 
 - **Catalog.** GLM-5.3-Flash on `zai` and `zaicode`, same forced-thinking
