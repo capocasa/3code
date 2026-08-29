@@ -25,8 +25,7 @@ const
 
 const Tarball =
   when defined(android):
-    ""  # Termux builds from source (nimble install); the glibc linux
-        # arm64 tarball wouldn't run under Android's bionic anyway.
+    "3code-termux-arm64.tar.gz"
   elif defined(linux) and (defined(amd64) or defined(x86_64)):
     "3code-linux-amd64.tar.gz"
   elif defined(linux) and (defined(arm64) or defined(aarch64)):

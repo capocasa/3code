@@ -75,8 +75,14 @@ irm https://3code.capocasa.dev/install.ps1 | iex
 
 ### Termux on Android arm64
 
-Releases include `3code-termux-arm64.tar.gz`. If you prefer to build it where
-it will run, Termux only needs:
+Inside Termux, the same one-liner installs the Android arm64 build:
+
+```
+curl -fsSL https://3code.capocasa.dev/install | sh
+```
+
+It detects Termux via `$PREFIX` and installs to `$PREFIX/bin`, which is
+already on PATH. If you prefer to build where it will run, Termux only needs:
 
 ```
 pkg install nim git openssl
@@ -85,8 +91,7 @@ nimble install https://github.com/capocasa/3code
 
 The binary uses Termux OpenSSL for TLS. Android has no OS sandbox or desktop
 notifications, but the in-process path checks still apply. Notifications do
-nothing and automatic updates are disabled. To update, install again or unpack
-a new archive.
+nothing. To update, install again or unpack a new archive.
 
 ### Add a provider
 

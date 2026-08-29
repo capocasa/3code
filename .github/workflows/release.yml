@@ -31,7 +31,7 @@ jobs:
           echo "tag=$tag sha=$sha"
           mkdir -p dl
 
-          for workflow in linux-amd64.yml linux-arm64.yml osx.yml windows.yml; do
+          for workflow in linux-amd64.yml linux-arm64.yml osx.yml windows.yml termux.yml; do
             echo "--- $workflow ---"
             for i in $(seq 1 60); do
               # Fail fast: if this workflow already failed for this tag+commit,
@@ -76,6 +76,7 @@ jobs:
           cp dl/3code-linux-arm64/3code-linux-arm64.tar.gz     . 2>/dev/null || true
           cp dl/3code-macos-universal/3code-macos-universal.tar.gz . 2>/dev/null || true
           cp dl/3code-windows-amd64/3code-windows-amd64.zip    . 2>/dev/null || true
+          cp dl/3code-termux-arm64/3code-termux-arm64.tar.gz   . 2>/dev/null || true
           ls -la *.tar.gz *.zip
 
       - name: Create release
@@ -94,4 +95,5 @@ jobs:
             3code-linux-amd64.tar.gz \
             3code-linux-arm64.tar.gz \
             3code-macos-universal.tar.gz \
-            3code-windows-amd64.zip
+            3code-windows-amd64.zip \
+            3code-termux-arm64.tar.gz

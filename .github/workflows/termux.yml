@@ -36,9 +36,16 @@ jobs:
           unzip -q ndk.zip
           echo "NDK_CLANG=$PWD/android-ndk-r26c/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang" >> "$GITHUB_ENV"
 
+      - name: Compute build flags
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            # autoupdate on releases only, like the other platform builds
+            echo "BUILD_FLAGS=-d:autoUpdate" >> "$GITHUB_ENV"
+          fi
+
       - name: Build (cross, --os:android --cpu:arm64)
         run: |
-          nim c -d:release --os:android --cpu:arm64 -d:ssl -d:testPlainHttp \
+          nim c -d:release --os:android --cpu:arm64 -d:ssl -d:testPlainHttp ${{ env.BUILD_FLAGS }} \
             --clang.exe:"$NDK_CLANG" --clang.linkerexe:"$NDK_CLANG" \
             -o:3code-android src/threecode.nim
           file 3code-android

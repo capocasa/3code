@@ -55,10 +55,12 @@ curl -fsSL https://3code.capocasa.dev/install | sh
 # Windows (PowerShell)
 irm https://3code.capocasa.dev/install.ps1 | iex</pre></p>
 
-<h3 id="termux-on-android-arm64">Termux on Android arm64</h3><p>Releases include <tt class="docutils literal"><span class="pre">3code-termux-arm64.tar.gz</span></tt>. If you prefer to build it where it will run, Termux only needs:</p>
+<h3 id="termux-on-android-arm64">Termux on Android arm64</h3><p>Inside Termux, the same one-liner installs the Android arm64 build:</p>
+<p><pre class="listing">curl -fsSL https://3code.capocasa.dev/install | sh</pre></p>
+<p>It detects Termux via <tt class="docutils literal"><span class="pre">$PREFIX</span></tt> and installs to <tt class="docutils literal"><span class="pre">$PREFIX/bin</span></tt>, which is already on PATH. If you prefer to build where it will run, Termux only needs:</p>
 <p><pre class="listing">pkg install nim git openssl
 nimble install https://github.com/capocasa/3code</pre></p>
-<p>The binary uses Termux OpenSSL for TLS. Android has no OS sandbox or desktop notifications, but the in-process path checks still apply. Notifications do nothing and automatic updates are disabled. To update, install again or unpack a new archive.</p>
+<p>The binary uses Termux OpenSSL for TLS. Android has no OS sandbox or desktop notifications, but the in-process path checks still apply. Notifications do nothing. To update, install again or unpack a new archive.</p>
 
 <h3 id="add-a-provider">Add a provider</h3><p>Run <tt class="docutils literal"><span class="pre">3code</span></tt> in your project directory. With no provider configured, it goes straight to the setup wizard. You can return to the wizard later with:</p>
 <p><pre class="listing">:provider add</pre></p>
@@ -307,7 +309,7 @@ allow ./</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-21 14:54:47 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-29 18:58:48 UTC</small>
       </div>
     </div>
   </div>
