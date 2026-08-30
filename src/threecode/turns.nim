@@ -13,6 +13,58 @@ import types, util, prompts, session, compact, config, actions, api,
   display, fatprompt, streamexec, toolstream, transcript
 import engine as termengine
 
+const
+  FlailRepeatThreshold* = 2  ## same tool call twice in a row = flailing
+  FlailMaxEscalations* = 2   ## two warnings, third identical call aborts
+
+type
+  FlailVerdict* = enum
+    fvOk        ## not a repeat; run the tool
+    fvEscalate  ## repeat: inject an escalation message, skip the tool
+    fvAbort     ## still flailing after both escalations: abort the turn
+
+  FlailDetector* = object
+    ## Tracks identical consecutive tool calls within one turn. A tool
+    ## call is "identical" when the model re-emits the same tool name
+    ## with the same arguments as the previous call. Two identical calls
+    ## in a row count as flailing; each escalation fires once, and a
+    ## repeat after the second escalation aborts the turn. Any call that
+    ## differs from the previous one resets the escalation ladder.
+    lastFp*: string
+    escalations*: int
+
+proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
+  ## Record one tool call and decide what to do with it. Called once per
+  ## tool call before execution; `argsStr` is the raw arguments JSON so
+  ## key-order variants of the same call still compare equal at the model
+  ## level only when the model emits them identically (good enough for a
+  ## loop detector).
+  let fp = name & "\x1f" & argsStr
+  if fp != det.lastFp:
+    det.lastFp = fp
+    det.escalations = 0
+    return fvOk
+  # Identical repeat.
+  if det.escalations < FlailMaxEscalations:
+    inc det.escalations
+    return fvEscalate
+  fvAbort
+
+proc flailEscalationMessage*(step: int): string =
+  ## The user-role message injected in place of the repeated tool result.
+  ## Step 1 is a hint; step 2 is the final warning before the abort.
+  if step == 1:
+    "SYSTEM: Flailing detected: you just emitted the exact same tool call " &
+    "twice in a row. It will not produce a different result. Do not repeat " &
+    "this call. Change at least one input, switch strategy (smaller patch, " &
+    "wider read, different tool), or explain briefly to the user what is " &
+    "blocking progress and stop."
+  else:
+    "SYSTEM: Final warning: you are still flailing (same tool call repeated " &
+    "after a warning). If the next call is again identical, this turn is " &
+    "aborted and the user is asked for help. Change strategy now or " &
+    "respond in prose."
+
 proc emitTestFrameEvent() =
   when defined(posix):
     let fdText = getEnv("THREECODE_TEST_FRAME_FD")
@@ -253,6 +305,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     lengthEscalations = 0          # "length" retries so far this turn
     steerAttempts = 0              # "stop"/unknown steering retries
     emptyRetries = 0               # bare empty-reply resends after smart-handling
+    flailDet: FlailDetector        # identical-consecutive-tool-call guard
   const
     MaxLengthEscalations = 3
     MaxSteerAttempts = 1
@@ -452,6 +505,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           lastCommitIdx = i
       var queuedUser = false # User submitted while tools were running.
       var cleared = false  # akClear: rebuild and continue loop
+      var flailAbort = false  # flail detector fired past both escalations
       for i in 0 ..< toolCalls.len:
         let tc = toolCalls[i]
         let id = tc{"id"}.getStr
@@ -466,6 +520,48 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         let name = if fn != nil and fn.kind == JObject: fn{"name"}.getStr else: ""
         let argsStr =
           if fn != nil and fn.kind == JObject: fn{"arguments"}.getStr("") else: ""
+        case flailDet.observeCall(name, argsStr)
+        of fvOk: discard
+        of fvEscalate:
+          # The model re-emitted the exact same call it just made. Skip
+          # execution, pair the tool_call with the escalation notice (so
+          # the request/response pairing stays intact), and surface a
+          # harness line so the user sees the intervention.
+          let note = flailEscalationMessage(flailDet.escalations)
+          debugOut &"flail: identical repeat of {name}, escalation {flailDet.escalations}/{FlailMaxEscalations}"
+          session.toolLog.add ToolRecord(
+            banner: "! " & name & " (flailing)",
+            output: note, code: -1, kind: akError)
+          messages.add %*{"role": "tool", "tool_call_id": id,
+                          "content": note}
+          commitTranscriptBytes(
+            errLnS(if flailDet.escalations == 1:
+                     "flailing detected (same tool call twice); hinting the model"
+                   else:
+                     "still flailing; final warning to the model"), true)
+          continue
+        of fvAbort:
+          # Still identical after both escalations. Pair the tool_call,
+          # then stop the turn and hand control back to the user with a
+          # visible warning.
+          debugOut &"flail: identical repeat of {name} after both escalations; aborting turn"
+          let note =
+            "SYSTEM: Turn aborted: the same tool call was repeated after " &
+            "two warnings. The model is stuck in a loop."
+          session.toolLog.add ToolRecord(
+            banner: "! " & name & " (flail abort)",
+            output: note, code: -1, kind: akError)
+          messages.add %*{"role": "tool", "tool_call_id": id,
+                          "content": note}
+          # Pair any remaining tool_calls in this batch too: the
+          # assistant message carries them all and an unpaired id breaks
+          # strict providers on the next request.
+          for j in i + 1 ..< toolCalls.len:
+            messages.add %*{"role": "tool",
+              "tool_call_id": toolCalls[j]{"id"}.getStr,
+              "content": note}
+          flailAbort = true
+          break
         let (args, argsMalformed, parseErr) =
           block:
             var a: JsonNode
@@ -558,6 +654,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           session.lastPromptTokens = 0
           session.readCache = nil
           session.plan.setLen 0
+          flailDet = FlailDetector()  # fresh conversation, fresh ladder
           emitFatPromptEvent clearPendingHintEvent()
           emitFatPromptEvent clearBarEvent()
           if session.savePath != "":
@@ -583,6 +680,15 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       if cleared:
         emitFatPromptEvent clearPendingHintEvent()
         continue
+      if flailAbort:
+        saveSession(session, messages)
+        commitTranscriptBytes(
+          errLnS("turn aborted: the model kept repeating the same tool " &
+            "call after two warnings. It appears stuck; please rephrase, " &
+            "give it a hint, or take over."), true)
+        endTurnAfterTranscriptAppend()
+        turnEnded = true
+        return false
       saveSession(session, messages)
       if isInterrupted():
         onTurnInterrupted()
