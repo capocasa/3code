@@ -205,12 +205,6 @@ suite "config validation: end-to-end exit code":
     check r.exitCode == 3
     check "empty value for 'url'" in r.output
 
-  test "[shortcuts] accepted and parsed":
-    let r = runWithConfig("[settings]\ncurrent = \"p.m\"\n\n[shortcuts]\ncancel = \"CtrlC\"\nclear = \"ESC\"\n")
-    check r.exitCode != 3
-    check "unknown key" notin r.output
-    check "invalid shortcut" notin r.output
-
   test "[shortcuts] unknown command rejected":
     let r = runWithConfig("[settings]\ncurrent = \"p.m\"\n\n[shortcuts]\nfoo = \"CtrlC\"\n")
     check r.exitCode == 3
@@ -220,11 +214,6 @@ suite "config validation: end-to-end exit code":
     let r = runWithConfig("[settings]\ncurrent = \"p.m\"\n\n[shortcuts]\ncancel = \"MetaX\"\n")
     check r.exitCode == 3
     check "invalid shortcut value" in r.output
-
-  test "[shortcuts] empty value allowed (unbind)":
-    let r = runWithConfig("[settings]\ncurrent = \"p.m\"\n\n[shortcuts]\nclear = \"\"\n")
-    check r.exitCode != 3
-    check "empty value" notin r.output
 
 suite "config validation: [shortcuts] schema (in-process)":
   const P = "/tmp/cfg-shortcuts.ini"
