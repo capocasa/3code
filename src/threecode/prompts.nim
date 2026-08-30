@@ -2678,6 +2678,8 @@ commands:
   (T is a path or a host; P a path. Project paths write as ./foo,
   home paths as ~/foo; a bare word is a host. Policy words: allow,
   readonly, deny; see .sandbox)
+  :! CMD            run CMD directly through the sandboxed shell
+                    (output shown, not sent to the model)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -2691,6 +2693,8 @@ input:
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
+  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
+  ctrl+x ctrl+e same (emacs edit-and-execute-command)
   @path         inline file contents (e.g. @src/foo.nim)
 """
 

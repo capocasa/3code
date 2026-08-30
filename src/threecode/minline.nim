@@ -244,6 +244,9 @@ type
     postRedraw*: proc(ed: var LineEditor) {.closure.}
     preMutate*: proc(ed: var LineEditor) {.closure.}
     postMutate*: proc(ed: var LineEditor) {.closure.}
+    editInEditor*: proc(ed: var LineEditor) {.closure.}
+      ## Invoked on Alt+E / Ctrl+X Ctrl+E when set; the callback owns
+      ## terminal suspend/restore and buffer replacement.
     redrawWrappedExternally*: bool
     submitIcon*: string ## Icon written at end of text before submit newline (set before readLineWith).
     renderSuffix*: string ## Transient suffix rendered after the buffer, not part of submitted text.
@@ -1552,6 +1555,9 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
   if c2 == 8: altName = "alt+h"        # Ctrl+Alt+H = ESC + backspace byte
   elif c2 in 32..126 and c2 notin StructuralTail:
     altName = "alt+" & c2.char.toLowerAscii
+  if altName == "alt+e" and ed.editInEditor != nil:
+    ed.editInEditor(ed)
+    return false
   if altName.len > 0 and KEYMAP.hasKey(altName):
     KEYMAP[altName](ed)
     return false
@@ -1860,6 +1866,15 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
         continue
       if c1 in ESCAPES:
         discard handleEscape(ed, c1)
+        paintIfCleared(ed, suffixJustCleared)
+        continue
+      if c1 == 24 and ed.editInEditor != nil:
+        # Ctrl+X Ctrl+E (emacs edit-and-execute-command): read the second
+        # char; Ctrl+E opens the external editor, anything else is
+        # swallowed (Ctrl+X alone is a prefix, not an error).
+        let c2 = ed.getCh()
+        if c2 == 5:
+          ed.editInEditor(ed)
         paintIfCleared(ed, suffixJustCleared)
         continue
       if c1 in CTRL and KEYMAP.hasKey(KEYNAMES[c1]):

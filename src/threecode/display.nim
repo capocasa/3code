@@ -122,9 +122,9 @@ proc renderHelpS*(): string =
         result.add BrightWhiteFg & "3code" & ansiResetCode
         i += 5
       elif line[i] == ':' and i + 1 < line.len and
-           line[i + 1] in {'a'..'z', 'A'..'Z', '?'}:
+           line[i + 1] in {'a'..'z', 'A'..'Z', '?', '!'}:
         var j = i + 1
-        while j < line.len and line[j] in {'a'..'z', 'A'..'Z', '?'}:
+        while j < line.len and line[j] in {'a'..'z', 'A'..'Z', '?', '!'}:
           inc j
         # `:command` tokens in the white family: `BrightWhiteFg` so they
         # participate in light/dark mode switching (plain white is

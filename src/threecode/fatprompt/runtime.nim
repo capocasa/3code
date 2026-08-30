@@ -4,7 +4,8 @@
 ## turn is running. The turn controller calls these helpers directly and also
 ## registers them as API stream hooks. `api.nim` must not import this module.
 
-import std/[atomics, json, locks, os, strformat, strutils, terminal, times, unicode]
+import std/[atomics, json, locks, os, osproc, strformat, strutils, terminal,
+  times, unicode]
 when defined(posix):
   import std/posix except SocketHandle
   import posix/termios
@@ -1719,6 +1720,50 @@ proc installApiHeadlessHooks*(hooks: HeadlessStreamHooks) =
     retryNotice: proc(msg: string) =
       (if headlessStreamHooks.retryNotice != nil:
         headlessStreamHooks.retryNotice(msg))))
+proc editBufferInExternalEditor(ed: var minline.LineEditor) =
+  ## Alt+E / Ctrl+X Ctrl+E: copy the prompt buffer to a temp file, hand the
+  ## terminal back to $VISUAL/$EDITOR, then replace the buffer with the
+  ## edited text. The editor string is passed through the shell unquoted,
+  ## like git: `VISUAL="code -w"` must reach the shell as flags.
+  let tmpFile = tempDir() / ("3code_edit_" & $getCurrentProcessId())
+  writeFile(tmpFile, ed.line.text)
+  defer: removeFile(tmpFile)
+  let editor = getEnv("VISUAL", getEnv("EDITOR",
+    when defined(windows): "notepad" else: "vi"))
+  when defined(posix):
+    discard chmod(tmpFile, 0o600)
+    # Suspend raw mode so the editor sees a cooked terminal: snapshot the
+    # current (raw) mode, restore the cooked original, run the editor,
+    # then re-apply the raw snapshot.
+    var raw: Termios
+    discard tcGetAttr(STDIN_FILENO.cint, addr raw)
+    restoreInputTermios()
+    termui.writeRaw("\x1b[?2004l\x1b[?25h")
+    discard execShellCmd(editor & " " & quoteShell(tmpFile))
+    discard tcSetAttr(STDIN_FILENO.cint, TCSADRAIN, addr raw)
+    inputOrigTermios = raw
+    inputOrigTermiosValid = true
+    recordRawMode()
+    termui.writeRaw("\x1b[?2004h")
+  else:
+    let h = getStdHandle(STD_INPUT_HANDLE)
+    var rawMode: int32 = 0
+    discard getConsoleMode(h, addr rawMode)
+    restoreInputTermios()
+    discard execShellCmd(editor & " " & quoteShell(tmpFile))
+    discard setConsoleMode(h, rawMode and not
+      (ENABLE_LINE_INPUT or ENABLE_ECHO_INPUT))
+    inputOrigConsoleMode = rawMode
+    inputOrigConsoleModeValid = true
+  let edited = try: readFile(tmpFile) except CatchableError: ""
+  var text = edited
+  if text.endsWith("\n"):
+    text.setLen(text.len - 1)
+  if text != ed.line.text:
+    ed.line.text = text
+    ed.line.position = text.len
+  minline.fullRedraw(ed)
+
 proc inputThreadProc() {.thread.} =
   ## Runs readline for the UI lifetime. Completed text is queued for the
   ## controller; during active turns the same editor keeps accepting buffered
@@ -1989,6 +2034,9 @@ proc inputThreadProc() {.thread.} =
       termui.acquireTerminalWrite()
     edPtr[].postMutate = proc(ed: var minline.LineEditor) =
       termui.releaseTerminalWrite()
+    edPtr[].editInEditor = proc(ed: var minline.LineEditor) =
+      if inputModalActive.load(moAcquire): return
+      editBufferInExternalEditor(ed)
 
     when defined(posix):
       if isatty(fd) != 0 and fd.tcGetAttr(addr inputOrigTermios) == 0:
@@ -2275,6 +2323,7 @@ proc inputThreadProc() {.thread.} =
     edPtr[].onCancelDeferredSubmit = nil
     edPtr[].preRedraw = nil
     edPtr[].postRedraw = nil
+    edPtr[].editInEditor = nil
     edPtr[].deferSubmit = false
     edPtr[].renderSuffix = ""
     edPtr[].renderSuffixCursor = false
