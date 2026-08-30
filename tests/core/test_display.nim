@@ -2,26 +2,16 @@ import std/[os, strutils, times, unittest]
 import threecode/display
 import threecode/util
 
-proc captureAssistant(content: string): string =
-  let path = getTempDir() / "threecode_test_display_" & $getCurrentProcessId()
-  let f = open(path, fmWrite)
-  defer:
-    try: removeFile(path) except OSError: discard
-  renderAssistantContent(content, f)
-  f.flushFile
-  close(f)
-  readFile(path)
-
 suite "display: assistant rendering":
   test "assistant reply text is bright white across lines":
-    let rendered = captureAssistant("first\nsecond")
+    let rendered = renderAssistantContentBytes("first\nsecond")
     check rendered.startsWith(AssistantTextStyle & "● " & Reset &
       AssistantTextStyle & "first")
     check AssistantTextStyle & "  second" in rendered
     check AssistantTextStyle & "  second" & Reset in rendered
 
   test "assistant style resumes after inline markdown resets":
-    let rendered = captureAssistant("before **bold** after")
+    let rendered = renderAssistantContentBytes("before **bold** after")
     check "\x1b[22m" & AssistantTextStyle & " after" in rendered
 
 import std/[json]
@@ -104,7 +94,7 @@ suite "display: printSessionList cap":
       let listing = captureList(paths)
       check "of 3" notin listing  # no truncation hint
 
-import threecode/types
+import threecode/[transcript, types]
 
 suite "display: tool transcript body strips boundary blanks":
   # A tool item must not bring its own newlines into scrollback. Web
@@ -165,11 +155,12 @@ suite "display: plan glyph rendering is unified":
     check "(1 item" notin bytes  # banner title dropped
 
 when not defined(windows):
-  suite "display: replay routes through the live byte builders":
-    # replaySessionTail must render each tool through the SAME byte builders
-    # the live path uses, so a resumed tool looks byte-identical to how it
-    # looked live. Capture stdout (temp-file swap) and compare to the live
-    # toolTranscriptBytes output for the same action.
+  suite "display: replay routes through the shared transcript formatters":
+    # replaySessionTail must render each item through the SAME formatters
+    # the live path uses (formatItem / toolItem / attachReceipt), so a
+    # resumed session looks byte-identical to how it looked live, with one
+    # blank row between items and no trailing blank after the last. Capture
+    # stdout (temp-file swap) and compare to the live byte builders.
     proc captureReplay(messages: JsonNode; toolLog: seq[ToolRecord];
                        window = 0; family = "glm"): string =
       let outPath = getTempDir() / ("tc_replay_" & $getCurrentProcessId())
@@ -197,8 +188,9 @@ when not defined(windows):
              "arguments": "{\"command\": \"echo hi\"}"}}]},
         {"role": "tool", "tool_call_id": "1", "content": output}]
       let rendered = captureReplay(msgs, toolLog)
-      let live = toolTranscriptBytes(banner, akBash, output, 0, 1) & "\n"
-      check rendered.contains(live)
+      var live = toolTranscriptBytes(banner, akBash, output, 0, 1)
+      live.trimTranscriptTail()
+      check live & "\n" in rendered
       check "$ echo hi" in rendered   # banner icon + command
       check "  hi" in rendered        # body line
 
@@ -215,12 +207,72 @@ when not defined(windows):
         {"role": "tool", "tool_call_id": "1", "content": ""}]
       let rendered = captureReplay(msgs, toolLog)
       let act = Action(kind: akPlan, plan: plan)
-      let live = toolTranscriptBytes(act, "", 0, 1) & "\n"
-      check rendered.contains(live)
+      var live = toolTranscriptBytes(act, "", 0, 1)
+      live.trimTranscriptTail()
+      check live & "\n" in rendered
       check "≡ ──────────" in rendered   # plan header matches live
       check "✓ step one" in rendered
       check "○ step two" in rendered
       check "completed: " notin rendered
+
+    test "replay matches formatItem blocks with live spacing":
+      # The exact replay byte stream must equal the live item blocks
+      # joined by one blank row, with no trailing blank after the last
+      # item. Assemble the expected bytes from the shared formatters so
+      # any divergence between live and replay fails here.
+      let output = "hi\n"
+      let toolLog = @[ToolRecord(banner: "echo hi", output: output,
+        code: 0, kind: akBash)]
+      let msgs = %*[
+        {"role": "user", "content": "hi there"},
+        {"role": "assistant", "content": "On it.",
+         "usage": {"promptTokens": 100, "completionTokens": 5,
+                   "totalTokens": 105, "cachedTokens": 0},
+         "tool_calls": [{"id": "1", "type": "function",
+           "function": {"name": "bash",
+             "arguments": "{\"command\": \"echo hi\"}"}}]},
+        {"role": "tool", "tool_call_id": "1", "content": output},
+        {"role": "assistant", "content": "Done.",
+         "usage": {"promptTokens": 110, "completionTokens": 5,
+                   "totalTokens": 115, "cachedTokens": 0}}]
+      let rendered = captureReplay(msgs, toolLog, window = 1000)
+      var turn1 = formatItem(assistantItem("On it."))
+      turn1.attachReceipt(
+        receiptBytes(tokenLineLabel(
+          Usage(promptTokens: 100, completionTokens: 5,
+                totalTokens: 105), 1000)), true)
+      var toolBytes = toolTranscriptBytes("echo hi", akBash, output, 0, 1)
+      toolBytes.trimTranscriptTail()
+      let expected =
+        formatItem(userPromptItem("hi there")) & "\n" &
+        "\n" & turn1 & "\n" &
+        "\n" & toolBytes & "\n" &
+        "\n" & formatItem(assistantItem("Done.")) & "\n"
+      check rendered == expected
+
+    test "replay suppresses the empty-reply item when tools followed":
+      # Live renders nothing for an empty reply paired with tool calls
+      # (the empty-reply fallback is only for tool-less replies), so the
+      # replay must skip that item too instead of printing the grey
+      # "empty reply" line between tool batches.
+      let output = "hi\n"
+      let toolLog = @[ToolRecord(banner: "echo hi", output: output,
+        code: 0, kind: akBash)]
+      let msgs = %*[
+        {"role": "assistant", "content": "",
+         "usage": {"promptTokens": 50, "completionTokens": 0,
+                   "totalTokens": 50, "cachedTokens": 0},
+         "tool_calls": [{"id": "1", "type": "function",
+           "function": {"name": "bash",
+             "arguments": "{\"command\": \"echo hi\"}"}}]},
+        {"role": "tool", "tool_call_id": "1", "content": output},
+        {"role": "assistant", "content": "Done.",
+         "usage": {"promptTokens": 60, "completionTokens": 5,
+                   "totalTokens": 65, "cachedTokens": 0}}]
+      let rendered = captureReplay(msgs, toolLog, window = 1000)
+      check "empty reply" notin rendered
+      check "$ echo hi" in rendered
+      check "Done." in rendered
 
     proc captureShow(arg: string; toolLog: seq[ToolRecord]): string =
       let outPath = getTempDir() / ("tc_show_" & $getCurrentProcessId())
