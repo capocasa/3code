@@ -22,7 +22,7 @@
 ## since it drops below readable contrast on light backgrounds and has no
 ## clean mode switch.
 
-import std/[critbits, exitprocs, json, os, strformat, strutils, terminal]
+import std/[critbits, exitprocs, json, os, strformat, strutils, tables, terminal]
 import types, util, config, prompts, session, actions, minline, toolstream
 import terminal as termui
 
@@ -662,20 +662,45 @@ var navigatedUp*: bool = false
 var origDown, origUp: proc(ed: var LineEditor) {.closure.}
 
 proc installEditorTweaks*() =
+  # The default Up/Down bindings move by visual row and fall through to
+  # history navigation at the boundary. Wrap those command callbacks so
+  # the UI can tell whether the user has moved into history. Make sure
+  # KEYMAP is populated (including cmd:* entries from applyShortcuts)
+  # before we try to wrap its entries. welcome() runs before the first
+  # readLineWith, so initKeyTables alone is not enough.
+  initKeyTables()
+  applyShortcuts(configuredShortcuts)
+  # Arrow keys still go through KEYMAP["up"]/"down"] (handleEscape
+  # fallback) and CommandProcsAll (SEQCMDS). Wrap all three so history
+  # navigation is tracked regardless of which path fires.
   origUp = KEYMAP["up"]
   origDown = KEYMAP["down"]
-  KEYMAP["up"] = proc(ed: var LineEditor) =
+  let wrapUp = proc(ed: var LineEditor) =
     origUp(ed)
     navigatedUp = true
-  KEYMAP["down"] = proc(ed: var LineEditor) =
+  let wrapDown = proc(ed: var LineEditor) =
     origDown(ed)
     if navigatedUp:
       navigatedUp = false
-  # also reset the flag when the line is cleared via ctrl+u
-  let origClear = KEYMAP["ctrl+u"]
-  KEYMAP["ctrl+u"] = proc(ed: var LineEditor) =
+  KEYMAP["up"] = wrapUp
+  KEYMAP["down"] = wrapDown
+  KEYMAP["cmd:up"] = wrapUp
+  KEYMAP["cmd:down"] = wrapDown
+  # CommandProcs is the source applyShortcuts copies into each thread's
+  # CommandProcsAll / KEYMAP["cmd:*"], so wrapping it here survives the
+  # input thread's later applyShortcuts.
+  CommandProcs["up"] = wrapUp
+  CommandProcs["down"] = wrapDown
+  CommandProcsAll["up"] = wrapUp
+  CommandProcsAll["down"] = wrapDown
+  # also reset the flag when the line is cleared
+  let origClear = KEYMAP["cmd:clear"]
+  let wrapClear = proc(ed: var LineEditor) =
     origClear(ed)
     navigatedUp = false
+  KEYMAP["cmd:clear"] = wrapClear
+  CommandProcs["clear"] = wrapClear
+  CommandProcsAll["clear"] = wrapClear
 
 proc welcome*(p: Profile): minline.LineEditor =
   termui.setSteadyCursor()

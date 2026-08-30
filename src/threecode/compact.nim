@@ -67,10 +67,15 @@ proc applySummary*(messages: JsonNode, summary: string,
   if messages[0]{"role"}.getStr != "system": return 0
   if summary.strip.len == 0: return 0
   let system = messages[0]
-  let tailStart = messages.len - keepRecent
-  var tail = newSeq[JsonNode](keepRecent)
-  for i in 0 ..< keepRecent:
-    tail[i] = messages[tailStart + i]
+  var tailStart = messages.len - keepRecent
+  # Never start the retained suffix on a `role:tool` message: that orphans
+  # the result from its assistant `tool_calls` and Kimi/Moonshot 400 with
+  # `tool_call_id is not found`. Walk back to the owning assistant.
+  while tailStart > 1 and messages[tailStart]{"role"}.getStr == "tool":
+    dec tailStart
+  var tail = newSeq[JsonNode]()
+  for i in tailStart ..< messages.len:
+    tail.add messages[i]
   let collapsed = tailStart - 1  # messages dropped from the middle
   let synthetic = %*{"role": "user",
                      "content": SummaryPrefix & summary.strip}
@@ -78,6 +83,10 @@ proc applySummary*(messages: JsonNode, summary: string,
   rebuilt.add system
   rebuilt.add synthetic
   for m in tail: rebuilt.add m
+  # Drop any leftover leading tool results and pair unanswered tool_calls.
+  let paired = repairToolCallPairing(rebuilt)
+  rebuilt.elems.setLen 0
+  for m in paired: rebuilt.add m
   # Replace `messages` contents in place so callers holding the ref see it.
   # elems is a public exported field on JArray; this is the canonical
   # way to clear a JArray while keeping ref identity for callers.

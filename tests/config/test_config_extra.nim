@@ -18,7 +18,7 @@ suite "config: parseConfigFile round-trip":
                   key: "sk-other", models: @["model-x"])
     ]
     writeConfigFile(tmp, "test.model-a", providers)
-    let (current, readProvs, _, _, _) = parseConfigFile(tmp)
+    let (current, readProvs, _, _, _, _) = parseConfigFile(tmp)
     check current == "test.model-a"
     check readProvs.len == 2
     check readProvs[0].name == "test"
@@ -34,7 +34,7 @@ suite "config: parseConfigFile round-trip":
     let raw = readFile(tmp)
     check raw.find("[search]") >= 0
     check raw.find("exa-key = \"exa-roundtrip\"") >= 0
-    let (_, _, _, searchKeys, _) = parseConfigFile(tmp)
+    let (_, _, _, searchKeys, _, _) = parseConfigFile(tmp)
     check searchKeys["exa"] == "exa-roundtrip"
 
   test "[search] brave-key round-trips alongside exa-key":
@@ -55,7 +55,7 @@ suite "config: parseConfigFile round-trip":
     let raw = readFile(tmp)
     check raw.find("[search]") >= 0
     check raw.find("engine = \"parallel\"") >= 0
-    let (_, _, _, _, searchEngine) = parseConfigFile(tmp)
+    let (_, _, _, _, searchEngine, _) = parseConfigFile(tmp)
     check searchEngine == "parallel"
 
   test "writeConfigFile omits [search] when no keys and engine exa":
@@ -85,7 +85,7 @@ suite "config: parseConfigFile round-trip":
                   reasonings: @["low", "medium", "high"])
     ]
     writeConfigFile(tmp, "test.model-a", providers)
-    let (_, readProvs, _, _, _) = parseConfigFile(tmp)
+    let (_, readProvs, _, _, _, _) = parseConfigFile(tmp)
     check readProvs[0].reasoning == "high"
     check readProvs[0].reasonings == @["low", "medium", "high"]
 
@@ -96,7 +96,7 @@ suite "config: parseConfigFile round-trip":
                   family: "glm")
     ]
     writeConfigFile(tmp, "custom.model-c", providers)
-    let (_, readProvs, _, _, _) = parseConfigFile(tmp)
+    let (_, readProvs, _, _, _, _) = parseConfigFile(tmp)
     check readProvs[0].family == "glm"
 
   test "write then read preserves auth=oauth":
@@ -107,7 +107,7 @@ suite "config: parseConfigFile round-trip":
     writeConfigFile(tmp, "supergrok.grok-4.5", providers)
     let raw = readFile(tmp)
     check raw.find("auth = \"oauth\"") >= 0
-    let (_, readProvs, _, _, _) = parseConfigFile(tmp)
+    let (_, readProvs, _, _, _, _) = parseConfigFile(tmp)
     check readProvs[0].name == "supergrok"
     check readProvs[0].auth == "oauth"
     check readProvs[0].key == ""
@@ -132,7 +132,7 @@ url = "https://api.openai.com/v1"
 key = ""
 models = "gpt-5.6-luna"
 """)
-    let (_, readProvs, _, _, _) = parseConfigFile(tmp)
+    let (_, readProvs, _, _, _, _) = parseConfigFile(tmp)
     check readProvs.len == 2
     check readProvs[0].auth == "oauth"
     check readProvs[1].auth == "oauth"
@@ -145,7 +145,7 @@ url = "https://api.x.ai/v1"
 key = ""
 models = "grok-4.5"
 """)
-    let (_, readProvs, _, _, _) = parseConfigFile(tmp)
+    let (_, readProvs, _, _, _, _) = parseConfigFile(tmp)
     check readProvs[0].auth == ""
 
 suite "config: parseConfigFile model prefix expansion":
@@ -169,7 +169,7 @@ key = "sk-test"
 model_prefix = "openai/"
 models = "gpt-oss-120b llama-4"
 """)
-    let (_, provs, _, _, _) = parseConfigFile(tmp)
+    let (_, provs, _, _, _, _) = parseConfigFile(tmp)
     check provs.len == 1
     check provs[0].models == @["openai/gpt-oss-120b", "openai/llama-4"]
     check provs[0].modelPrefix == ""  # expanded away
@@ -192,7 +192,7 @@ url = "https://api.test.com"
 key = "$THREECODE_TEST_KEY"
 models = "model-a"
 """)
-    let (_, provs, _, _, _) = parseConfigFile(tmp)
+    let (_, provs, _, _, _, _) = parseConfigFile(tmp)
     check provs[0].key == "sk-from-env-123"
     delEnv("THREECODE_TEST_KEY")
 
@@ -255,3 +255,38 @@ suite "config: currentProvider":
     ]
     let p = currentProvider()
     check p.name == ""
+
+suite "config: [shortcuts] round-trip":
+  var tmp = ""
+  var savedShortcuts: Table[string, string]
+
+  setup:
+    tmp = getTempDir() / "3code-test-shortcuts.ini"
+    savedShortcuts = activeShortcuts
+
+  teardown:
+    removeFile(tmp)
+    activeShortcuts = savedShortcuts
+
+  test "write then read preserves [shortcuts]":
+    activeShortcuts = initTable[string, string]()
+    activeShortcuts["cancel"] = "CtrlC"
+    activeShortcuts["clear"] = "ESC"
+    activeShortcuts["quit-if-empty"] = "CtrlD"
+    writeConfigFile(tmp, "test.model-a", @[])
+    activeShortcuts = initTable[string, string]()
+    let raw = readFile(tmp)
+    check raw.find("[shortcuts]") >= 0
+    check raw.find("cancel = \"CtrlC\"") >= 0
+    check raw.find("clear = \"ESC\"") >= 0
+    check raw.find("quit-if-empty = \"CtrlD\"") >= 0
+    let (_, _, _, _, _, shortcuts) = parseConfigFile(tmp)
+    check shortcuts["cancel"] == "CtrlC"
+    check shortcuts["clear"] == "ESC"
+    check shortcuts["quit-if-empty"] == "CtrlD"
+
+  test "writeConfigFile omits [shortcuts] when activeShortcuts empty":
+    activeShortcuts = initTable[string, string]()
+    writeConfigFile(tmp, "test.model-a", @[])
+    let raw = readFile(tmp)
+    check raw.find("[shortcuts]") < 0

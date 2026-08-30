@@ -1,4 +1,4 @@
-import std/[deques, unittest, strutils, sequtils, unicode]
+import std/[deques, os, unittest, strutils, sequtils, tables, unicode]
 import threecode/fatprompt
 import threecode/minline
 import threecode/signals
@@ -1054,3 +1054,56 @@ suite "minline editor: terminal reply filtering":
     d.pushString "X"
     d.push Enter
     check d.run(ed, prompt = "> ") == "abXc"
+
+suite "minline editor: shortcuts":
+  const CtrlG = @[7]
+  var histFile = ""
+
+  setup:
+    histFile = getTempDir() / "3code-shortcuts-hist-" & $getCurrentProcessId()
+    removeFile(histFile)
+
+  teardown:
+    minline.configuredShortcuts = initTable[string, string]()
+    removeFile(histFile)
+
+  test "remap clear to CtrlG":
+    var ed = initEditor(historyFile = histFile)
+    let d = newDriver()
+    minline.configuredShortcuts = {"clear": "CtrlG"}.toTable
+    d.pushString "abc"
+    d.push CtrlG
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ""
+    check ed.history.entries.len == 1
+    check ed.history.entries[^1] == "abc"
+
+  test "DoubleCtrlC requires two presses on empty line":
+    var ed = initEditor(historyFile = histFile)
+    let d = newDriver()
+    minline.configuredShortcuts = {"cancel": "DoubleCtrlC", "clear": ""}.toTable
+    d.push CtrlC
+    d.push CtrlC
+    expect InputCancelled:
+      discard d.run(ed, prompt = "> ")
+
+  test "clear adds text to history":
+    var ed = initEditor(historyFile = histFile)
+    let d = newDriver()
+    minline.configuredShortcuts = {"clear": "CtrlG"}.toTable
+    d.pushString "hello"
+    d.push CtrlG
+    d.push Up
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "hello"
+    check ed.history.entries[^1] == "hello"
+
+  test "unbinding clear makes Esc cancel instead of clear":
+    var ed = initEditor(historyFile = histFile)
+    let d = newDriver()
+    minline.configuredShortcuts = {"clear": ""}.toTable
+    d.pushString "hello"
+    d.push Esc
+    expect InputCancelled:
+      discard d.run(ed, prompt = "> ")
+    check rowText(d.grid, 0) == "> hello"

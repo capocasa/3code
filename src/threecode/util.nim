@@ -1,4 +1,4 @@
-import std/[net, os, sequtils, strformat, strutils, tables, unicode, times]
+import std/[json, net, os, sequtils, strformat, strutils, tables, unicode, times]
 import types
 import threecode/unicodewidth
 when defined(posix):
@@ -1013,3 +1013,62 @@ func levenshteinCapped*(a, b: string, cap: int): int =
     if rowMin > cap: return cap + 1
     swap(prev, curr)
   prev[b.len]
+
+const UnavailableToolResult* = "tool result unavailable (session was interrupted)"
+
+proc repairToolCallPairing*(messages: JsonNode): JsonNode =
+  ## Make the chat history legal for strict OpenAI-compatible validators
+  ## (Kimi/Moonshot 400 `tool_call_id is not found`, DeepSeek unpaired
+  ## tool_calls). Drops leading/orphan `role:tool` messages whose id is
+  ## not pending from the previous assistant, and injects synthetic
+  ## results for any tool_call that never got a matching tool message.
+  ## Empty tool_call ids are filled so a streamed call that never got an
+  ## `id` delta cannot 400 on an empty `tool_call_id`.
+  if messages == nil or messages.kind != JArray: return messages
+  result = newJArray()
+  var pending: seq[string] = @[]
+  var seqn = 0
+  for m in messages:
+    if m.kind != JObject:
+      result.add m
+      continue
+    let role = m{"role"}.getStr
+    if role == "tool":
+      var id = m{"tool_call_id"}.getStr
+      var idx = pending.find(id)
+      # Streamed tool_calls can arrive with an empty id; pair the empty
+      # tool result with the first still-pending call (which we just filled).
+      if idx < 0 and id.len == 0 and pending.len > 0:
+        idx = 0
+        id = pending[0]
+        m["tool_call_id"] = %id
+      if idx >= 0:
+        pending.delete(idx)
+        result.add m
+      # else: orphan tool result (compaction split, resume, steer). Drop.
+    elif role == "assistant":
+      for id in pending:
+        result.add %*{"role": "tool", "tool_call_id": id,
+                      "content": UnavailableToolResult}
+      pending.setLen 0
+      var node = m
+      let tcs = node{"tool_calls"}
+      if tcs != nil and tcs.kind == JArray:
+        for tc in tcs:
+          if tc.kind != JObject: continue
+          var id = tc{"id"}.getStr
+          if id.len == 0:
+            inc seqn
+            id = "fill-" & $seqn
+            tc["id"] = %id
+          pending.add id
+      result.add node
+    else:
+      for id in pending:
+        result.add %*{"role": "tool", "tool_call_id": id,
+                      "content": UnavailableToolResult}
+      pending.setLen 0
+      result.add m
+  for id in pending:
+    result.add %*{"role": "tool", "tool_call_id": id,
+                  "content": UnavailableToolResult}

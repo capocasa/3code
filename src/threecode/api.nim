@@ -1799,18 +1799,34 @@ proc stripInternalFields*(messages: JsonNode): JsonNode =
   ## rejected by strict validators (fireworks, glm-5p1, etc.). `finish_reason`
   ## is attached to empty assistant turns so the turn loop can branch on it
   ## but is not a wire field. `interrupted` marks user-cancelled turns.
+  ## Empty assistant `content` is filled with a placeholder: OpenAI-style
+  ## validators (xAI, OpenAI, Moonshot) 400 on `role: assistant` with an
+  ## empty content string, which is how a thinking-only / length-starved
+  ## turn looks after `reasoning_content` is stripped for non-DeepSeek.
   if messages == nil or messages.kind != JArray: return messages
   result = newJArray()
   for m in messages:
-    if m.kind != JObject or
-       ("usage" notin m and "interrupted" notin m and "finish_reason" notin m):
-      result.add m
-      continue
-    var clean = newJObject()
-    for k, v in m.pairs:
-      if k != "usage" and k != "interrupted" and k != "finish_reason":
-        clean[k] = v
-    result.add clean
+    var node = m
+    if m.kind == JObject and
+       ("usage" in m or "interrupted" in m or "finish_reason" in m):
+      var clean = newJObject()
+      for k, v in m.pairs:
+        if k != "usage" and k != "interrupted" and k != "finish_reason":
+          clean[k] = v
+      node = clean
+    if node.kind == JObject and node{"role"}.getStr == "assistant":
+      let tcs = node{"tool_calls"}
+      let hasToolCalls = tcs != nil and tcs.kind == JArray and tcs.len > 0
+      if not hasToolCalls and node{"content"}.getStr.strip.len == 0:
+        if node != m:
+          node["content"] = %EmptyReplyMsg
+        else:
+          var filled = newJObject()
+          for k, v in node.pairs:
+            filled[k] = v
+          filled["content"] = %EmptyReplyMsg
+          node = filled
+    result.add node
 
 proc ensureReasoningField(messages: JsonNode) =
   ## DeepSeek-R1 with thinking mode rejects any request whose history
@@ -1854,8 +1870,13 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
   ## - `chat_template_kwargs.enable_thinking` (bool) on vLLM stacks (nvidia,
   ##   hetzner); other vLLM GLM providers (nebius, deepinfra, fireworks)
   ##   accept the same knob but always think when it's omitted.
-  ## Inert stacks (baseten, cerebras) accept nothing and always think, so
-  ## `off` is silently a no-op there.
+  ## - GLM-5.3 on every remaining hosted stack (baseten, novita, deepinfra,
+  ##   fireworks, venice, nanogpt, cheaperinference, ...) gets a top-level
+  ##   `reasoning_effort` (`low`/`high`/`max`). 5.3 is forced-thinking: with
+  ##   no effort knob the default high/max thinking burns the whole
+  ##   max_tokens budget and the turn comes back as an empty `length` reply.
+  ## Inert stacks (cerebras) accept nothing and always think, so `off` is
+  ## silently a no-op there.
   # GLM-5.2 and 5.3 are the GLMs with a graded effort knob (variants "2"
   # and "3"); every other GLM is on/off. Variant encodes the minor version
   # digit (4.7 -> "7", 5.1 -> "1", 5.2 -> "2", 5.3 -> "3").
@@ -1876,7 +1897,11 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
       of "max": body["thinking"] = %*{"type": "enabled", "effort": "max"}
       else: discard
   of "together":
-    if glm52:
+    if glm53:
+      case p.reasoning
+      of "low", "high", "max": body["reasoning_effort"] = %p.reasoning
+      else: discard
+    elif glm52:
       case p.reasoning
       of "off": body["reasoning"] = %*{"enabled": false}
       of "max": body["reasoning_effort"] = %"max"
@@ -1893,10 +1918,22 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
       of "max": body["reasoning"] = %*{"effort": "xhigh"}
       else: body["reasoning"] = %*{"effort": "high"}
   of "nvidia", "hetzner":
-    case p.reasoning
-    of "off": body["chat_template_kwargs"] = %*{"enable_thinking": false}
-    else: discard
-  else: discard
+    if glm53:
+      case p.reasoning
+      of "low", "high", "max": body["reasoning_effort"] = %p.reasoning
+      else: discard
+    else:
+      case p.reasoning
+      of "off": body["chat_template_kwargs"] = %*{"enable_thinking": false}
+      else: discard
+  else:
+    # Hosted OpenAI-compatible stacks that don't have a dedicated branch
+    # (baseten, novita, deepinfra, fireworks, venice, nanogpt, ...).
+    # GLM-5.3 needs the effort knob or thinking starves the output budget.
+    if glm53:
+      case p.reasoning
+      of "low", "high", "max": body["reasoning_effort"] = %p.reasoning
+      else: discard
 
 proc applyStreamingOptions*(p: Profile, body: JsonNode) =
   ## Provider-specific additions for SSE fidelity.
@@ -2401,7 +2438,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
       "chat/completions rejects it, use a chat variant instead")
   if p.family == "deepseek":
     ensureReasoningField(messages)
-  let wireMessages = stripInternalFields(messages)
+  let wireMessages = repairToolCallPairing(stripInternalFields(messages))
   if p.family != "deepseek":
     for m in wireMessages:
       if m.kind == JObject and m{"role"}.getStr == "assistant" and m.contains("reasoning_content"):

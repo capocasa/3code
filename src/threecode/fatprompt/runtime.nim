@@ -1447,11 +1447,11 @@ when defined(posix):
         if n > 0:
           for i in 0 ..< n.int:
             let b = buf[i].uint8
-            if b == 0x03 or b == 0x1b:
-              {.cast(gcsafe).}:
+            {.cast(gcsafe).}:
+              if b in cancelWatchSnapshot:
                 requestTurnInterrupt()
                 restoreCancelTermios()
-              return
+                return
 
   proc drainCancelInput() =
     if isatty(0.cint) == 0: return
@@ -1529,7 +1529,7 @@ proc installWizardVerifyCancel*(jobDone: proc(): bool {.closure.};
               if n > 0:
                 for i in 0 ..< n.int:
                   let b = buf[i].uint8
-                  if b == 0x03 or b == 0x1b:
+                  if b in cancelWatchSnapshot:
                     cancelJob()
                     return true
           return false

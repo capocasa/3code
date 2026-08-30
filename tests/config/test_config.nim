@@ -18,38 +18,38 @@ suite "config: [search]":
 
   test "parseConfigFile collects engine-specific keys":
     writeFile(tmp, "[search]\nexa-key = \"e1\"\nbrave-key = \"b1\"\n")
-    let (_, _, _, searchKeys, _) = parseConfigFile(tmp)
+    let (_, _, _, searchKeys, _, _) = parseConfigFile(tmp)
     check searchKeys["exa"] == "e1"
     check searchKeys["brave"] == "b1"
 
   test "parseConfigFile returns empty table when no keys set":
     writeFile(tmp, "[settings]\ncurrent = \"some-provider\"\n")
-    let (_, _, _, searchKeys, _) = parseConfigFile(tmp)
+    let (_, _, _, searchKeys, _, _) = parseConfigFile(tmp)
     check searchKeys.len == 0
 
   test "legacy bare key is filed under the active engine":
     writeFile(tmp, "[search]\nengine = \"brave\"\nkey = \"legacy\"\n")
-    let (_, _, _, searchKeys, _) = parseConfigFile(tmp)
+    let (_, _, _, searchKeys, _, _) = parseConfigFile(tmp)
     check searchKeys["brave"] == "legacy"
 
   test "legacy bare key defaults to exa when no engine set":
     writeFile(tmp, "[search]\nkey = \"legacy\"\n")
-    let (_, _, _, searchKeys, _) = parseConfigFile(tmp)
+    let (_, _, _, searchKeys, _, _) = parseConfigFile(tmp)
     check searchKeys["exa"] == "legacy"
 
   test "parseConfigFile returns the [search] engine when set":
     writeFile(tmp, "[search]\nengine = \"parallel\"\n")
-    let (_, _, _, _, searchEngine) = parseConfigFile(tmp)
+    let (_, _, _, _, searchEngine, _) = parseConfigFile(tmp)
     check searchEngine == "parallel"
 
   test "parseConfigFile lowercases the engine value":
     writeFile(tmp, "[search]\nengine = \"Brave\"\n")
-    let (_, _, _, _, searchEngine) = parseConfigFile(tmp)
+    let (_, _, _, _, searchEngine, _) = parseConfigFile(tmp)
     check searchEngine == "brave"
 
   test "parseConfigFile returns empty engine when absent":
     writeFile(tmp, "[settings]\ncurrent = \"p.m\"\n")
-    let (_, _, _, _, searchEngine) = parseConfigFile(tmp)
+    let (_, _, _, _, searchEngine, _) = parseConfigFile(tmp)
     check searchEngine == ""
 
   test "loadStateOrEmpty resolves the active engine's key":
@@ -243,7 +243,7 @@ suite "config: [colors] section":
 
   test "parseConfigFile collects [colors] keys verbatim (suffix kept)":
     writeFile(tmp, "[colors]\nbright-white = \"\\x1b[37m\"\nbright-white-light = \"\\x1b[90m\"\n")
-    let (_, _, colors, _, _) = parseConfigFile(tmp)
+    let (_, _, colors, _, _, _) = parseConfigFile(tmp)
     # parsecfg interprets the backslash escape, so the value is the real
     # ESC byte, not the literal text "\x1b".
     check colors["bright-white"] == "\x1b[37m"
@@ -251,7 +251,7 @@ suite "config: [colors] section":
 
   test "parseConfigFile returns empty table when no [colors] section":
     writeFile(tmp, "[settings]\ncurrent = \"p.m\"\n")
-    let (_, _, colors, _, _) = parseConfigFile(tmp)
+    let (_, _, colors, _, _, _) = parseConfigFile(tmp)
     check colors.len == 0
 
   test "loadStateOrEmpty returns the colors map":

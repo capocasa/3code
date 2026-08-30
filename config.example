@@ -24,6 +24,20 @@ current = "baseten.glm5"
 ; patient_retry = off ; disable patient retry of 429/5xx/network errors (on by default: ~36h hold so a long-running session rides out a usage limit or network dropout without dropping to the prompt)
 ; sandbox_wall_warn = off ; silence the Windows "wall not set up" warning (host rules in policy, no `3code wall setup-windows` yet)
 ; bash_path = "C:\\tools\\msys64\\usr\\bin\\bash.exe"  ; Windows only: override bash detection
+;
+; [shortcuts] remaps editor commands. Value is a space-separated list of
+; keys; empty string unbinds. Defaults match today's hardcoded behaviour.
+; Key syntax: ESC / Escape, CtrlX / Ctrl+X, AltX / Alt+X, Home, End, Up,
+; Down, Left, Right, Insert, Delete, Backspace, Tab, ShiftTab. Prefix
+; Double for two consecutive presses (DoubleCtrlC, DoubleESC).
+; Commands: cancel, clear, quit-if-empty, home, end, left, right,
+; word-left, word-right, up, down, history-previous, history-next,
+; backspace, delete, insert, delete-word-left, delete-to-boundary-left,
+; clear-screen, suspend, complete, reverse-complete, edit-in-editor,
+; insert-newline. `clear` also adds the discarded text to history.
+; [shortcuts]
+; cancel = "DoubleESC CtrlC"
+; clear = "ESC"
 
 # Colour tone. 3code detects dark vs light background automatically by
 # querying the terminal background (OSC 11). Set `tone` to pin it instead
