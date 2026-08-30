@@ -30,6 +30,12 @@ suite "prompts: knownGoodFamily":
   test "Hetzner Qwen3.6-35B-A3B-FP8 is known-good":
     check knownGoodFamily("hetzner", "Qwen/Qwen3.6-35B-A3B-FP8") == "qwen"
 
+  test "OpenRouter Qwen3.8-27B is known-good":
+    check knownGoodFamily("openrouter", "qwen/qwen3.8-27b") == "qwen"
+
+  test "OpenRouter Qwen3.8-Flash is known-good":
+    check knownGoodFamily("openrouter", "qwen/qwen3.8-flash") == "qwen"
+
   test "Hetzner GLM-5.2-NVFP4 is known-good":
     check knownGoodFamily("hetzner", "GLM-5.2-NVFP4") == "glm"
 

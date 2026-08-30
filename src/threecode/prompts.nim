@@ -75,7 +75,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "stealth/ox-alpha", "0xalpha", "1", "", "high", 0.2, 8192, false, 1_000_000),
     ("opencode", "x-preview-f-free", "0xalpha", "1", "", "high", 0.2, 8192, false, 1_000_000),
     ("opencodego", "ox-alpha-free", "0xalpha", "1", "", "high", 0.2, 8192, false, 1_000_000),
-    # qwen is out
+    # qwen: modern 3.x line kept here for openrouter and first-party gateways.
     ("deepinfra", "zai-org/GLM-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("deepinfra", "zai-org/GLM-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
     ("deepinfra", "zai-org/GLM-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
@@ -459,6 +459,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "qwen/qwen3.7-flash", "qwen", "3.7", "flash", "on", 0.2, 8192, false, 1_000_000),
     ("openrouter", "qwen/qwen3.7-max", "qwen", "3.7", "max", "on", 0.2, 8192, false, 1_000_000),
     ("openrouter", "qwen/qwen3.7-plus", "qwen", "3.7", "plus", "on", 0.2, 8192, false, 1_000_000),
+    ("openrouter", "qwen/qwen3.8-27b", "qwen", "3.8", "27b", "on", 0.2, 8192, false, 128_000),
+    ("openrouter", "qwen/qwen3.8-flash", "qwen", "3.8", "flash", "on", 0.2, 8192, false, 1_000_000),
     ("openrouter", "qwen/qwen3.8-max", "qwen", "3.8", "max", "on", 0.2, 8192, false, 1_000_000),
     ("openrouter", "qwen/qwen3.8-2.4t-a95b", "qwen", "3.8", "2.4t-a95b", "on", 0.2, 8192, false, 1_000_000),
     ("openrouter", "tencent/hy3-preview", "hy", "3", "preview", "no_think", 0.2, 8192, false, 262_144),
