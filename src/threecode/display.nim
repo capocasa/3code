@@ -1,4 +1,4 @@
-## Transcript formatting: markdown, receipts, tool banners, and session replay.
+## Transcript formatting: markdown, receipts, tool banners, and session lists.
 ##
 ## This module formats append-only scrollback content. It may write ordinary
 ## transcript text, usually while `api.writeTranscriptWithFatPrompt` has temporarily
@@ -8,12 +8,12 @@
 ## - **Markdown rendering**: headers, fences, tables, bold/italic/code pass
 ##   through `handleMdLine` which calls `applyInlineMd` and wraps at terminal
 ##   width. Tables buffer rows and render aligned box-drawing via `renderMdTable`.
-## - **Token receipt**: the cyan receipt in scroll history after each turn
-##   (`renderTokenLine`). All receipts route through `receiptBytes`. Live
-##   token-bar policy lives in `fatprompt.nim`.
+## - **Token receipt**: the cyan receipt in scroll history after each turn.
+##   All receipts route through `receiptBytes`. Live token-bar policy lives
+##   in `fatprompt.nim`.
 ## - **Tool banners**: per-kind glyph and path header for each tool call result.
-## - **Session replay**: `replaySession` reprints a loaded session in the same
-##   visual style as a live session, reusing the same render helpers.
+## - **Session replay**: the replay emitter lives in `transcript.nim` and
+##   reuses these formatters so a replayed item matches the live rendering.
 ##
 ## The three-tier colour palette (bold cyan for hints, plain cyan for notes,
 ## a dim-white for subtle FYI output) is mode-aware: the white family is
@@ -513,18 +513,6 @@ proc renderAssistantContentBytes*(content: string): string =
     result.add assistantTextBytes(captureMarkdownBytes(st, line))
   result.add assistantTextBytes(captureMarkdownBytes(st, finish = true))
 
-proc renderAssistantContent*(content: string, outFile: File = stdout) =
-  ## Bullet `● ` + bright-white content with full markdown
-  ## structure (headers, fences, tables, inline bold and backtick-code).
-  ## Used by replay and by the live path when content was buffered (rare:
-  ## streaming bypasses this and feeds the same handlers chunk by chunk).
-  ## `outFile` lets tests capture output to a temp file; default is
-  ## stdout.
-  let bytes = renderAssistantContentBytes(content)
-  if bytes.len > 0:
-    outFile.write bytes
-    outFile.flushFile
-
 proc toolIcon*(kind: ActionKind): string =
   case kind
   of akBash: "$"
@@ -647,25 +635,6 @@ proc receiptBytes*(label: string): string =
   if label.len == 0: return ""
   CyanFg & "  " & label & Reset
 
-proc tokenLineBytes*(usage: Usage, window: int, elapsedS = -1): string =
-  ## Pure-byte form of the **token receipt** row used by the *replay*
-  ## path (saved sessions). The live path uses `emitUserSubmit` /
-  ## `commitTranscriptBytes`, which paint the receipt in place of the
-  ## previous turn's bar.
-  ## Returns "" when there's no usage.
-  let label = tokenLineLabel(usage, window, elapsedS)
-  if label.len == 0: return ""
-  result = receiptBytes(label) & "\n" & Reset
-
-proc renderTokenLine*(usage: Usage, window: int, elapsedS = -1) =
-  ## "○N%  ↑Nk  ↻Nk  ↓Nk  Ts": context glyph, fresh, cached, generated,
-  ## optional duration. Two-space separation, no padding inside slots.
-  ## Empty when usage has no totals. Live passes seconds; replay passes
-  ## -1 to omit the duration.
-  let bytes = tokenLineBytes(usage, window, elapsedS)
-  if bytes.len > 0:
-    stdout.write bytes
-
 proc profileLinesS*(p: Profile; bold = false): string =
   ## String form of `showProfile`: provider/model/reasoning rows with
   ## bright-white values and default (or bold cyan) labels.
@@ -779,99 +748,6 @@ proc printSessionListS*(paths: seq[string], currentPath: string,
 
 proc printSessionList*(paths: seq[string], currentPath: string, showCwd: bool) =
   stdout.write printSessionListS(paths, currentPath, showCwd)
-  stdout.flushFile
-
-proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
-                       window: int, family: string): Usage =
-  ## Replay the whole conversation into scrollback so a resumed session drops
-  ## the user back into the full prior context, reachable by scrolling up.
-  ## The session file is already bounded by compaction to roughly one context
-  ## window, so replaying it in full stays manageable. Renders via the same
-  ## helpers the live path uses; usage is read from each assistant message's
-  ## inline `usage` field (legacy sessions saved before the inline format
-  ## simply skip the token line). The last assistant's inline receipt is
-  ## suppressed and its usage is returned instead — the caller paints the
-  ## live token bar with it, so the resumed shape matches the post-`endTurn`
-  ## typing-ready state.
-  if messages == nil or messages.kind != JArray or messages.len == 0: return
-  # Start at the first non-system message: the `case` below discards the
-  # system message anyway, but skipping it keeps the leading separator clean.
-  var start = 0
-  while start < messages.len and messages[start]{"role"}.getStr == "system":
-    inc start
-  if start >= messages.len: return
-  var lastAssistant = -1
-  for i in countdown(messages.len - 1, start):
-    if messages[i]{"role"}.getStr == "assistant":
-      lastAssistant = i
-      break
-  var toolIdx = 0
-  for i in start ..< messages.len:
-    let m = messages[i]
-    case m{"role"}.getStr
-    of "user":
-      let c = stripPreamble(m{"content"}.getStr("")).strip
-      if c.len == 0: continue
-      let shown = if c.len > 400: c[0 ..< 400] & " …" else: c
-      let userLines = shown.splitLines
-      for idx, l in userLines:
-        let prefix = if idx == 0: "❯ " else: "  "
-        stdout.write prefix & l & "\n"
-      stdout.write "\n"
-    of "assistant":
-      let c = m{"content"}.getStr("").strip
-      if c.len > 0:
-        renderAssistantContent(c)
-      let u = usageFromJson(m{"usage"})
-      if i == lastAssistant:
-        result = u
-      elif u.totalTokens > 0:
-        renderTokenLine(u, window)
-      stdout.write "\n"
-      let tcs = m{"tool_calls"}
-      let hasTools = tcs != nil and tcs.kind == JArray and tcs.len > 0
-      if hasTools:
-        for tc in tcs:
-          inc toolIdx
-          var banner = ""
-          var code = 0
-          var output = ""
-          var kind = akBash
-          var plan: seq[PlanItem] = @[]
-          if toolIdx <= toolLog.len:
-            let rec = toolLog[toolIdx - 1]
-            banner = rec.banner
-            code = rec.code
-            output = rec.output
-            kind = rec.kind
-            plan = rec.plan
-          else:
-            let fn = tc{"function"}
-            let name = if fn != nil: fn{"name"}.getStr else: "?"
-            let argsStr = if fn != nil: fn{"arguments"}.getStr("") else: ""
-            let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
-                       except CatchableError: newJObject()
-            let act = toolCallToAction(family, name, args)
-            banner = bannerFor(act)
-            kind = act.kind
-            plan = act.plan
-          # Route through the SAME byte builders the live path uses
-          # (toolTranscriptBytes / planTranscriptBytes) so a replayed tool
-          # looks byte-identical to how it rendered live. The banner is the
-          # stored one (or bannerFor for the no-toolLog fallback); the body
-          # comes from the shared per-kind renderer.
-          if kind == akPlan and plan.len > 0:
-            let act = Action(kind: akPlan, plan: plan)
-            stdout.write planTranscriptBytes(act)
-          else:
-            stdout.write toolTranscriptBytes(
-              banner, kind, output, code, toolIdx)
-          stdout.write "\n"
-    of "tool":
-      # Result already rendered alongside the assistant's tool_call via
-      # toolLog; nothing to do here.
-      discard
-    else: discard
   stdout.flushFile
 
 proc showToolS*(arg: string, toolLog: seq[ToolRecord]): string =

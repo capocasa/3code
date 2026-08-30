@@ -4,9 +4,9 @@
 ## fat-prompt runtime. Formatters in display/tool modules can still build item
 ## bodies, but this module owns item markers, trimming, and item separators.
 
-import std/[strutils]
+import std/[json, strutils]
 
-import display, fatprompt, types, util
+import actions, display, fatprompt, session, types, util
 
 type
   TranscriptKind* = enum
@@ -101,3 +101,114 @@ proc appendItem*(item: TranscriptItem; restoreEditor = true;
     restoreEditor,
     beforeRepaint,
     reserveFooter = reserveFooter)
+
+proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
+                       window: int, family: string): Usage =
+  ## Replay the whole conversation into scrollback so a resumed session drops
+  ## the user back into the full prior context, reachable by scrolling up.
+  ## The session file is already bounded by compaction to roughly one context
+  ## window, so replaying it in full stays manageable. Renders through the
+  ## same TranscriptItem formatters the live path uses (`formatItem`,
+  ## `toolItem`, `attachReceipt`); usage is read from each assistant
+  ## message's inline `usage` field (legacy sessions saved before the inline
+  ## format simply skip the receipt). The last assistant's inline receipt is
+  ## suppressed and its usage is returned instead: the caller paints the
+  ## live token bar with it, so the resumed shape matches the post-`endTurn`
+  ## typing-ready state.
+  if messages == nil or messages.kind != JArray or messages.len == 0: return
+  # Start at the first non-system message: the `case` below discards the
+  # system message anyway, but skipping it keeps the leading separator clean.
+  var start = 0
+  while start < messages.len and messages[start]{"role"}.getStr == "system":
+    inc start
+  if start >= messages.len: return
+  var lastAssistant = -1
+  for i in countdown(messages.len - 1, start):
+    if messages[i]{"role"}.getStr == "assistant":
+      lastAssistant = i
+      break
+  var firstItem = true
+  var toolIdx = 0
+  for i in start ..< messages.len:
+    let m = messages[i]
+    case m{"role"}.getStr
+    of "user":
+      let c = stripPreamble(m{"content"}.getStr("")).strip
+      if c.len == 0: continue
+      let shown = if c.len > 400: c[0 ..< 400] & " ..." else: c
+      if not firstItem:
+        stdout.write "\n"
+      stdout.write formatItem(userPromptItem(shown)) & "\n"
+      firstItem = false
+    of "assistant":
+      let c = m{"content"}.getStr("").strip
+      let u = usageFromJson(m{"usage"})
+      let isLast = i == lastAssistant
+      let hasTools =
+        block:
+          let tcs = m{"tool_calls"}
+          tcs != nil and tcs.kind == JArray and tcs.len > 0
+      # An empty reply paired with tool calls renders nothing live (the
+      # empty-reply fallback is only for tool-less replies), so the replay
+      # skips the assistant item entirely in that shape.
+      if c.len > 0 or not hasTools:
+        var bytes = formatItem(assistantItem(c))
+        if not isLast and u.totalTokens > 0:
+          bytes.attachReceipt(receiptBytes(tokenLineLabel(u, window)), true)
+        if not firstItem:
+          stdout.write "\n"
+        stdout.write bytes & "\n"
+        firstItem = false
+      if isLast:
+        result = u
+      if hasTools:
+        let tcs = m{"tool_calls"}
+        for tc in tcs:
+          inc toolIdx
+          var banner = ""
+          var code = 0
+          var output = ""
+          var kind = akBash
+          var plan: seq[PlanItem] = @[]
+          if toolIdx <= toolLog.len:
+            let rec = toolLog[toolIdx - 1]
+            banner = rec.banner
+            code = rec.code
+            output = rec.output
+            kind = rec.kind
+            plan = rec.plan
+          else:
+            let fn = tc{"function"}
+            let name = if fn != nil: fn{"name"}.getStr else: "?"
+            let argsStr = if fn != nil: fn{"arguments"}.getStr("") else: ""
+            let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
+                       except CatchableError: newJObject()
+            let act = toolCallToAction(family, name, args)
+            banner = bannerFor(act)
+            kind = act.kind
+            plan = act.plan
+          # Plan and clear items come straight from the shared formatters so
+          # a replayed item looks byte-identical to how it rendered live.
+          # Other kinds keep the stored banner (or the `bannerFor` fallback
+          # when toolLog was not saved) and render the body through the
+          # shared per-kind renderer.
+          var bytes: string
+          if kind == akPlan:
+            bytes = formatItem(toolItem(Action(kind: akPlan, plan: plan),
+              output, code, toolIdx))
+          elif kind == akClear:
+            bytes = formatItem(toolItem(Action(kind: akClear),
+              output, code, toolIdx))
+          else:
+            bytes = toolTranscriptBytes(banner, kind, output, code, toolIdx)
+            bytes.trimTranscriptTail()
+          if not firstItem:
+            stdout.write "\n"
+          stdout.write bytes & "\n"
+          firstItem = false
+    of "tool":
+      # Result already rendered alongside the assistant's tool_call via
+      # toolLog; nothing to do here.
+      discard
+    else: discard
+  stdout.flushFile
