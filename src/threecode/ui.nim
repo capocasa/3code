@@ -11,8 +11,8 @@
 
 import std/[algorithm, atomics, json, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline,
-  fatprompt, streamexec, sandbox, engine as termengine, auth_xai, auth_openai,
-  oauth
+  fatprompt, streamexec, sandbox, actions, engine as termengine, auth_xai,
+  auth_openai, oauth
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":prompt", ":show",
@@ -65,6 +65,8 @@ proc classifyCommand*(cmd: string): CommandKind =
   let name = if sp < 0: c else: c[0 ..< sp]
   let arg = if sp < 0: "" else: c[sp+1 .. ^1].strip
   let parts = arg.splitWhitespace()
+  if name.startsWith(":!"):
+    return ckMutating
   case name
   of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":prompt", ":version":
     ckSafeImmediate
@@ -1297,6 +1299,37 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
   template respErr(b: string) = body.add cmdErrorS(b)
   block dispatch:
     case name
+    of ":!":
+      # Direct shell command through the model's sandboxed executor;
+      # output goes to scrollback only, never to the model. `c[2..^1]`
+      # keeps the text after `:!` verbatim (unlike `arg`, which is
+      # stripped).
+      let cmdText = if c.len > 2: c[2..^1] else: ""
+      if cmdText.strip.len == 0:
+        ok = false
+        respErr "usage: :! <command>"
+      else:
+        if session.readCache == nil:
+          session.readCache = newReadCache()
+        let act = Action(kind: akBash, body: cmdText)
+        var output = ""
+        var code = -1
+        # The input thread owns stdin at idle; the tool cancel watcher
+        # would fight it for keystrokes and restore the wrong termios.
+        setToolStdinWatcherEnabled(false)
+        try:
+          (output, code, _) = runAction(act, session.readCache)
+        except CatchableError as e:
+          output = "ERROR: " & e.msg
+          code = -1
+        finally:
+          setToolStdinWatcherEnabled(true)
+        session.toolLog.add ToolRecord(banner: bannerFor(act), output: output,
+          code: code, kind: act.kind, plan: act.plan)
+        body.add toolBannerBytes(previewCmd(cmdText), akBash, code)
+        body.add toolResultBytes(akBash, output, code, session.toolLog.len)
+        if code != 0:
+          ok = false
     of ":help", ":?":
       body.add renderHelpS()
     of ":tokens":

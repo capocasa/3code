@@ -199,6 +199,16 @@ requirements. To include a file directly in a prompt, prefix its path with
 Review @src/parser.nim and add tests for malformed input.
 ```
 
+To run a shell command yourself without sending anything to the model,
+prefix it with `:!`:
+
+```
+:! cargo test
+```
+
+The output appears in your scrollback only; the model never sees it. The
+command runs through the same sandbox policy as model-run commands.
+
 Useful input keys:
 
 | key | action |
@@ -210,6 +220,8 @@ Useful input keys:
 | Ctrl+U | clear the input buffer |
 | Ctrl+W | delete the previous word |
 | Ctrl+L | clear the screen |
+| Alt+E | edit the input buffer in $VISUAL/$EDITOR |
+| Ctrl+X Ctrl+E | same (emacs edit-and-execute-command) |
 | Ctrl+C | clear current input |
 | Esc | cancel the current operation |
 | Ctrl+D | exit |
