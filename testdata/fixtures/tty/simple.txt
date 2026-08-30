@@ -9,6 +9,20 @@
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
+  ○0%
+❯
+===== 0 =====
+
+  ╭─╮
+   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+  ○0%
 ❯ This is a test prompt
 ===== 623 =====
 
@@ -20,7 +34,6 @@
   model     stub-model
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
-
 ❯ This is a test prompt
   … Thinking about the test prompt
 ⣿ ○0% ↓7 0s
@@ -35,7 +48,6 @@
   model     stub-model
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
-
 ❯ This is a test prompt
 
 ● This is a test response.
@@ -52,7 +64,6 @@
   model     stub-model
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
-
 ❯ This is a test prompt
 
 ● This is a test response.
@@ -69,7 +80,6 @@
   model     stub-model
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
-
 ❯ This is a test prompt
 
 ● This is a test response.

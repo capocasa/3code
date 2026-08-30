@@ -9,6 +9,20 @@
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
+  ○0%
+❯
+===== 0 =====
+
+  ╭─╮
+   ─┤  3code v0.6.0-filename-805c0e7e-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+  ○0%
 ❯ run other tool checks
 ===== 786 =====
 
