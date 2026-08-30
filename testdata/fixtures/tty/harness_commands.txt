@@ -9,9 +9,9 @@
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
+  ○0%
 ❯ :help
 ===== 0 =====
-  :reasoning        list reasoning levels for current model (* marks active)
   :reasoning X      switch reasoning level (low / medium / high)
   :streaming        show streaming mode (on = live output, off = request/response)
   :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
@@ -50,9 +50,9 @@ input:
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
 
+  ○0%
 ❯
 ===== 0 =====
-  :reasoning        list reasoning levels for current model (* marks active)
   :reasoning X      switch reasoning level (low / medium / high)
   :streaming        show streaming mode (on = live output, off = request/response)
   :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
@@ -91,9 +91,9 @@ input:
   ctrl+l        clear the screen
   @path         inline file contents (e.g. @src/foo.nim)
 
+  ○0%
 ❯ :provider
 ===== 0 =====
-  :notify on|off    toggle turn-end desktop notification
   :retry            show patient-retry mode (on = ~36h hold for outages/limits)
   :retry on|off     toggle patient retry of 429/5xx/network errors
   :prompt           show the active system prompt
@@ -132,9 +132,9 @@ input:
 stub  [stub-model]
 alt
 
+  ○0%
 ❯
 ===== 0 =====
-  :notify on|off    toggle turn-end desktop notification
   :retry            show patient-retry mode (on = ~36h hold for outages/limits)
   :retry on|off     toggle patient retry of 429/5xx/network errors
   :prompt           show the active system prompt
@@ -173,9 +173,9 @@ input:
 stub  [stub-model]
 alt
 
+  ○0%
 ❯ :model
 ===== 0 =====
-  :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :version          show the running 3code version
@@ -214,9 +214,9 @@ alt
 stub-model  [stub]
 stub-large
 
+  ○0%
 ❯
 ===== 0 =====
-  :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
   :version          show the running 3code version
@@ -255,9 +255,9 @@ alt
 stub-model  [stub]
 stub-large
 
+  ○0%
 ❯ :reasoning
 ===== 0 =====
-  :sandbox show     (same)
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow T  add a writable/connectable rule (allow T)
   :sandbox readonly P  add a read-only rule (readonly P)
@@ -296,9 +296,9 @@ stub-large
 reasoning: (none)
 experimental: level is free-form, type any value
 
+  ○0%
 ❯
 ===== 0 =====
-  :sandbox show     (same)
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow T  add a writable/connectable rule (allow T)
   :sandbox readonly P  add a read-only rule (readonly P)
@@ -337,6 +337,7 @@ stub-large
 reasoning: (none)
 experimental: level is free-form, type any value
 
+  ○0%
 ❯ :model stub-large
 ===== 0 =====
   :sandbox edit     open the policy file in $VISUAL/$EDITOR, reload on quit
