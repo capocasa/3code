@@ -14,7 +14,7 @@
 import std/[os, parsecfg, sequtils, streams, strformat, strutils, tables, terminal, uri]
 when defined(posix):
   import std/posix except SocketHandle
-import types, prompts, util, auth_openai
+import types, prompts, util, auth_openai, modelname
 
 type
   ProviderRec* = object
@@ -60,12 +60,17 @@ proc shortToFull*(models: seq[string]): Table[string, string] =
       result[s] = m
 
 func findModel*(p: ProviderRec, name: string): int =
-  ## Matches by full model id or by short name (everything after the last
-  ## `/`). Short-name matching handles `:variant <name>` from users who
-  ## type the bare model name and old `current = provider.shortname` config
-  ## values that haven't been rewritten yet.
+  ## Matches by full model id, by short name (everything after the last
+  ## `/`), or by normalized name. Short-name matching handles
+  ## `:variant <name>` from users who type the bare model name and old
+  ## `current = provider.shortname` config values that haven't been
+  ## rewritten yet. Normalized matching lets any provider spelling
+  ## (`zai-glm-5-3-flash`, `glm-5p3-flash`) select the canonical entry.
   for i, m in p.models:
     if m == name or shortModel(m) == name: return i
+  let wanted = normalizeModelName(name)
+  for i, m in p.models:
+    if normalizeModelName(m) == wanted: return i
   -1
 
 var activeCurrent*: string
@@ -495,6 +500,12 @@ func quoteVal(s: string): string =
 proc writeConfigFile*(path: string, current: string,
                      providers: seq[ProviderRec]) =
   createDir(path.parentDir)
+  # Models are always persisted in normalized form; the wire ids stay
+  # untouched in memory. `current` may name a model too.
+  var providers = providers
+  for pr in providers.mitems:
+    pr.models = pr.models.mapIt(normalizeModelName(it))
+  let current = normalizeModelName(current)
   var buf = "[settings]\n"
   buf.add "current = " & quoteVal(current) & "\n"
   if activeSearchKeys.len > 0 or activeSearchEngine != "exa":
