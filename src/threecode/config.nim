@@ -14,7 +14,7 @@
 import std/[os, parsecfg, sequtils, streams, strformat, strutils, tables, terminal, uri]
 when defined(posix):
   import std/posix except SocketHandle
-import types, prompts, util, auth_openai, modelname
+import types, prompts, util, auth_openai, modelname, minline
 
 type
   ProviderRec* = object
@@ -100,6 +100,10 @@ var activeSearchEngine*: string = "exa"
   ## `[search] engine = "..."`. No automatic failover — the chosen engine is
   ## used as-is, and a missing key is an error only if that engine needs one
   ## (brave does; exa and parallel are keyless by default).
+
+var activeShortcuts*: Table[string, string]
+  ## [shortcuts] map loaded from the active config, exposed so minline can
+  ## apply the user's bindings at startup and after config reloads.
 
 var bashPathOverride*: string
   ## Windows-only. `[settings]` `bash_path = "..."` overrides MSYS2
@@ -282,7 +286,7 @@ type
     ## can report `path:line:` for a bad section/key/value without re-reading.
 
 const
-  PermittedSections = ["settings", "search", "colors", "provider"]
+  PermittedSections = ["settings", "search", "colors", "provider", "shortcuts"]
   SettingsKeys = ["current", "notify", "streaming", "sandbox",
                   "sandbox_enabled", "patient_retry", "patient-retry",
                   "sandbox_wall_warn",
@@ -307,6 +311,7 @@ proc permittedKey(section, key: string): bool =
     let base = if key.endsWith("-light"): key[0 ..< key.len - 6] else: key
     base in ColorKeys
   of "provider": key in ProviderKeys
+  of "shortcuts": key in minline.ShortcutNames
   else: false
 
 proc validateConfig*(path: string; entries: seq[RawEntry]): string =
@@ -325,8 +330,10 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
     if ent.value.strip == "":
       # Empty key is fine for auth=oauth providers (and is also a structural
       # gap loadProfile diagnoses). Empty current/url/models likewise.
+      # Empty [shortcuts] values are explicit unbinds, so they are allowed.
       if not (ent.section == "provider" and ent.key == "key") and
-         not (ent.section == "settings" and ent.key == "current"):
+         not (ent.section == "settings" and ent.key == "current") and
+         not (ent.section == "shortcuts"):
         return &"{path}:{ent.line}: empty value for '{ent.key}' in [{ent.section}]"
     case ent.section
     of "search":
@@ -345,12 +352,18 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
           ent.value.strip.toLowerAscii notin ColorModes:
         return &"{path}:{ent.line}: unknown tone '{ent.value}' " &
                "(expected one of: auto, dark, light)"
+    of "shortcuts":
+      if ent.value.strip != "":
+        try:
+          discard minline.parseShortcutSpec(ent.value)
+        except ValueError:
+          return &"{path}:{ent.line}: invalid shortcut value '{ent.value}' for '{ent.key}'"
     else: discard
   ""
 
-proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, string], Table[string, string], string) =
+proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, string], Table[string, string], string, Table[string, string]) =
   ## Streaming parse so that repeated [provider] sections accumulate as a list.
-  ## Returns `(current, providers, colors, searchKeys, searchEngine)`.
+  ## Returns `(current, providers, colors, searchKeys, searchEngine, shortcuts)`.
   ## `searchKeys` maps engine name -> key for each `[search] exa-key` /
   ## `brave-key` set (empty table when none). A legacy bare `[search] key`
   ## is accepted and filed under the active engine for backward compat.
@@ -363,6 +376,7 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
   var searchEngine = ""
   var providers: seq[ProviderRec]
   var colors: Table[string, string]
+  var shortcuts: Table[string, string]
   var section = ""
   var prov: ProviderRec
   var inProvider = false
@@ -480,13 +494,15 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
         of "reasonings": prov.reasonings = splitModels(v).mapIt(it.toLowerAscii)
         of "auth": prov.auth = v.strip.toLowerAscii
         else: discard
+      of "shortcuts":
+        shortcuts[e.key] = v
       else: discard
     of cfgError:
       die &"{path}: {e.msg}", ExitConfig
   p.close
   let verr = validateConfig(path, entries)
   if verr != "": die verr, ExitConfig
-  (current, providers, colors, searchKeys, searchEngine)
+  (current, providers, colors, searchKeys, searchEngine, shortcuts)
 
 func quoteVal(s: string): string =
   result = "\""
@@ -532,6 +548,10 @@ proc writeConfigFile*(path: string, current: string,
   if colorModePref != cmAuto:
     let label = if colorModePref == cmDark: "dark" else: "light"
     buf.add "tone = " & quoteVal(label) & "\n"
+  if activeShortcuts.len > 0:
+    buf.add "\n[shortcuts]\n"
+    for cmd, spec in activeShortcuts:
+      buf.add cmd & " = " & quoteVal(spec) & "\n"
   for pr in providers:
     buf.add "\n[provider]\n"
     buf.add "name = " & quoteVal(pr.name) & "\n"
@@ -565,14 +585,16 @@ proc resolveSearchKey*(engine: string; keys: Table[string, string]): string =
 
 proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec], Table[string, string]) =
   ## Returns `(current, providers, colors)` and updates `activeSearchKey` /
-  ## `activeSearchEngine` / `activeSearchKeys` as a side effect when the config
-  ## sets them. `colors` is the flat `[colors]` map for the caller to route
-  ## through the cascade. Missing file is benign.
+  ## `activeSearchEngine` / `activeSearchKeys` / `activeShortcuts` as a side
+  ## effect when the config sets them. `colors` is the flat `[colors]` map
+  ## for the caller to route through the cascade. Missing file is benign.
   if not fileExists(path): return ("", @[], initTable[string, string]())
-  let (current, providers, colors, searchKeys, searchEngine) = parseConfigFile(path)
+  let (current, providers, colors, searchKeys, searchEngine, shortcuts) = parseConfigFile(path)
   if searchEngine != "": activeSearchEngine = searchEngine
   activeSearchKeys = searchKeys
   activeSearchKey = resolveSearchKey(activeSearchEngine, activeSearchKeys)
+  activeShortcuts = shortcuts
+  minline.configuredShortcuts = activeShortcuts
   (current, providers, colors)
 
 proc resolveFamily*(prov: ProviderRec, prof: Profile): string =
@@ -657,10 +679,12 @@ proc loadProfile*(wanted: string): Profile =
     stderr.writeLine ""
     stderr.writeLine ConfigExample
     quit ExitConfig
-  let (current, providers, _, searchKeys, searchEngine) = parseConfigFile(path)
+  let (current, providers, _, searchKeys, searchEngine, shortcuts) = parseConfigFile(path)
   if searchEngine != "": activeSearchEngine = searchEngine
   activeSearchKeys = searchKeys
   activeSearchKey = resolveSearchKey(activeSearchEngine, activeSearchKeys)
+  activeShortcuts = shortcuts
+  minline.configuredShortcuts = activeShortcuts
   if providers.len == 0:
     die &"no [provider] section in {path}", ExitConfig
   var pick = wanted

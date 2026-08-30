@@ -39,6 +39,41 @@ import
 import signals
 import threecode/unicodewidth as ucwidth
 
+# ShortcutNames is used by config.nim to validate [shortcuts] keys.
+# Keeping the dependency acyclic: minline imports nothing from config.
+const ShortcutNames* = [
+  "cancel",
+  "clear",
+  "quit-if-empty",
+  "home",
+  "end",
+  "left",
+  "right",
+  "word-left",
+  "word-right",
+  "up",
+  "down",
+  "history-previous",
+  "history-next",
+  "backspace",
+  "delete",
+  "insert",
+  "delete-word-left",
+  "delete-to-boundary-left",
+  "clear-screen",
+  "suspend",
+  "complete",
+  "reverse-complete",
+  "edit-in-editor",
+  "insert-newline"
+]
+
+type KeySpec* = tuple[seqKey: string, times: int]
+  ## Parsed form of a single shortcut key token. `seqKey` is the internal
+  ## key name used by KEYMAP/KEYSEQS ("ctrl+c", "esc", "home", ...).
+  ## `times` is how many consecutive presses are required (1 for normal,
+  ## 2 for DoubleCtrlC / DoubleESC).
+
 when defined(posix):
   import posix
   import std/termios
@@ -273,6 +308,8 @@ type
     eof*: bool
     hidechars*: bool
     escPutback*: int           ## byte stashed by `handleEscape` when an Alt chord's letter has no KEYMAP binding; drained by the readLine loop so it prints as normal input after the cancel.
+    lastKeyName*: string      ## last dispatched key name (for double-press counting)
+    keyCount*: int            ## consecutive presses of lastKeyName (0 after a different key)
     wizardMode*: bool         ## true while a modal provider wizard owns the editor; alters ctrl+c/ctrl+d/esc
     complPrefix*: string       ## original prefix before first completion
     complMatches*: seq[string] ## current match list
@@ -1140,11 +1177,336 @@ when defined(posix):
     ed.renderRow = 0
     fullRedraw(ed)
 
+# Command dispatch tables. After `initKeyTables()` populates defaults,
+# `applyShortcuts()` rebuilds the dispatch and sequence maps from the
+# user's `[shortcuts]` config. Commands map to shared KEYMAP entries
+# with a "cmd:" prefix so display tweaks can wrap them independently.
+var DISPATCH* {.threadvar.}: CritBitTree[seq[string]]
+  ## key-name -> ordered list of command names bound to that key.
+var SEQCMDS* {.threadvar.}: seq[(KeySeq, string)]
+  ## key sequences for editing commands (arrows, home/end, ...).
+var ESCMAP* {.threadvar.}: seq[(string, int)]
+  ## "esc" key binding: list of (command, times) for the bare ESC key.
+var KEYTIMES* {.threadvar.}: Table[string, int]
+  ## key-name -> consecutive presses required (1 unless DoubleCtrlC etc.).
+var cancelWatchSnapshot*: set[uint8] = {3'u8, 27'u8}
+  ## Bytes the in-turn cancel watchers recognise. Updated by applyShortcuts
+  ## so the watcher thread (which has empty thread-local DISPATCH) still
+  ## sees the user's cancel/clear bindings.
+
+proc cancelWatchBytes*(): set[uint8]
+
+proc cmdCancel(ed: var LineEditor) =
+  ed.canceled = true
+  raise newException(InputCancelled, "")
+
+proc cmdClear(ed: var LineEditor) =
+  if ed.line.text.len == 0: return
+  if not ed.hidechars and ed.history.file.len > 0:
+    ed.historyAdd()
+  ed.clearLine()
+
+proc cmdQuitIfEmpty(ed: var LineEditor) =
+  if ed.wizardMode: return
+  if ed.line.text.len == 0:
+    ed.eof = true
+    raise newException(EOFError, "")
+
+proc cmdHome(ed: var LineEditor) = ed.goToStart()
+proc cmdEnd(ed: var LineEditor) = ed.goToEnd()
+proc cmdLeft(ed: var LineEditor) = ed.back()
+proc cmdRight(ed: var LineEditor) = ed.forward()
+proc cmdWordLeft(ed: var LineEditor) = ed.wordLeft()
+proc cmdWordRight(ed: var LineEditor) = ed.wordRight()
+proc cmdUp(ed: var LineEditor) =
+  let pw = ed.promptW; let cw = ed.contPromptW
+  let width = max(2, ed.width)
+  let (curR, _) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
+  if curR <= 0: ed.historyPrevious()
+  else: ed.visualUp()
+proc cmdDown(ed: var LineEditor) =
+  let pw = ed.promptW; let cw = ed.contPromptW
+  let width = max(2, ed.width)
+  let (curR, _) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
+  let total = totalRows(ed.line.text, pw, cw, width)
+  if curR >= total - 1: ed.historyNext()
+  else: ed.visualDown()
+proc cmdHistoryPrevious(ed: var LineEditor) = ed.historyPrevious()
+proc cmdHistoryNext(ed: var LineEditor) = ed.historyNext()
+proc cmdBackspace(ed: var LineEditor) = ed.deletePrevious()
+proc cmdDelete(ed: var LineEditor) = ed.deleteNext()
+proc cmdInsert(ed: var LineEditor) =
+  ed.mode = if ed.mode == mdInsert: mdReplace else: mdInsert
+proc cmdDeleteWordLeft(ed: var LineEditor) = ed.deleteWordLeft()
+proc cmdDeleteToBoundaryLeft(ed: var LineEditor) = ed.deleteToBoundaryLeft()
+proc cmdClearScreen(ed: var LineEditor) =
+  ed.write "\x1b[H\x1b[2J"
+  ed.renderRow = 0
+  fullRedraw(ed)
+proc completeLine*(ed: var LineEditor): int {.nimcall.}
+proc reverseCompleteLine*(ed: var LineEditor) {.nimcall.}
+proc cmdComplete(ed: var LineEditor) =
+  let nxt = ed.completeLine()
+  if nxt > 0 and nxt in PRINTABLE:
+    ed.printChar(nxt)
+proc cmdReverseComplete(ed: var LineEditor) = ed.reverseCompleteLine()
+proc cmdEditInEditor(ed: var LineEditor) =
+  if ed.editInEditor != nil: ed.editInEditor(ed)
+when defined(posix):
+  proc cmdSuspend(ed: var LineEditor) =
+    ed.write "\n\e[?2004l"
+    resetAttributes()
+    stdout.flushFile()
+    requestBackground()
+    ed.write "\e[?2004h"
+    ed.renderRow = 0
+    fullRedraw(ed)
+
+var
+  DefaultShortcuts*: Table[string, string] = {
+    # ESC always cancels (even with text). CtrlC clears when the line is
+    # non-empty and cancels when empty. Up/Down move by visual row and
+    # fall through to history at the boundary; CtrlP/CtrlN are history-only.
+    "cancel": "ESC CtrlC",
+    "clear": "CtrlC",
+    "quit-if-empty": "CtrlD",
+    "home": "Home CtrlA",
+    "end": "End CtrlE",
+    "left": "Left CtrlB",
+    "right": "Right CtrlF",
+    "word-left": "AltB",
+    "word-right": "AltF",
+    "up": "Up",
+    "down": "Down",
+    "history-previous": "CtrlP",
+    "history-next": "CtrlN",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "insert": "Insert",
+    "delete-word-left": "CtrlW",
+    "delete-to-boundary-left": "AltH",
+    "clear-screen": "CtrlL",
+    "suspend": "CtrlZ",
+    "complete": "Tab",
+    "reverse-complete": "ShiftTab",
+    "edit-in-editor": "AltE CtrlX CtrlE"
+  }.toTable
+
+var CommandProcs*: Table[string, KeyCallback]
+var CommandProcsAll* {.threadvar.}: Table[string, KeyCallback]
+
+proc normalizeKeyToken(token: string): string =
+  ## Convert a user shortcut token ("CtrlC", "Ctrl+C", "ESC", "Home",
+  ## "DoubleESC") into the internal key name DISPATCH/KEYMAP uses.
+  var t = token.strip.toLowerAscii.replace("+", "")
+  if t.startsWith("double"):
+    t = t[6 .. ^1]
+  if t == "esc" or t == "escape":
+    return "esc"
+  if t == "ctrlc": return "ctrl+c"
+  if t == "ctrld": return "ctrl+d"
+  if t == "ctrla": return "ctrl+a"
+  if t == "ctrle": return "ctrl+e"
+  if t == "ctrlb": return "ctrl+b"
+  if t == "ctrlf": return "ctrl+f"
+  if t == "ctrlg": return "ctrl+g"
+  if t == "ctrlh": return "ctrl+h"
+  if t == "ctrlj": return "ctrl+j"
+  if t == "ctrlk": return "ctrl+k"
+  if t == "ctrll": return "ctrl+l"
+  if t == "ctrlm": return "ctrl+m"
+  if t == "ctrln": return "ctrl+n"
+  if t == "ctrlp": return "ctrl+p"
+  if t == "ctrlu": return "ctrl+u"
+  if t == "ctrlv": return "ctrl+v"
+  if t == "ctrlw": return "ctrl+w"
+  if t == "ctrlx": return "ctrl+x"
+  if t == "ctrly": return "ctrl+y"
+  if t == "ctrlz": return "ctrl+z"
+  if t == "altb": return "alt+b"
+  if t == "alte": return "alt+e"
+  if t == "altf": return "alt+f"
+  if t == "alth": return "alt+h"
+  if t == "shift-tab" or t == "shifttab": return "shift-tab"
+  if t == "backspace": return "backspace"
+  if t == "tab": return "tab"
+  if t == "insert": return "insert"
+  if t == "delete": return "delete"
+  if t == "home": return "home"
+  if t == "end": return "end"
+  if t == "up": return "up"
+  if t == "down": return "down"
+  if t == "left": return "left"
+  if t == "right": return "right"
+  raise newException(ValueError, token)
+
+proc parseShortcutSpec*(spec: string): seq[KeySpec] =
+  ## Parse a space-separated shortcut value into internal key specs.
+  ## Empty string returns an empty sequence (unbind). Unknown tokens
+  ## raise ValueError with the offending token.
+  if spec.strip.len == 0: return
+  for token in strutils.splitWhitespace(spec):
+    let double = token.toLowerAscii.startsWith("double")
+    let keyName = normalizeKeyToken(token)
+    result.add (seqKey: keyName, times: if double: 2 else: 1)
+
+proc defaultBindings*(): Table[string, string] = DefaultShortcuts
+
+proc applyShortcuts*(shortcuts: Table[string, string]) =
+  ## Build DISPATCH/SEQCMDS/ESCMAP from a command -> spec table.
+  ## Start from the built-in defaults, then apply overrides/unbinds.
+  ## Must be called after `initKeyTables()`.
+  var merged = DefaultShortcuts
+  for cmd, spec in shortcuts:
+    if spec.strip.len == 0:
+      if merged.hasKey(cmd): merged.del(cmd)
+    else:
+      merged[cmd] = spec
+  DISPATCH = CritBitTree[seq[string]]()
+  KEYTIMES = initTable[string, int]()
+  for cmd, spec in merged:
+    for ks in parseShortcutSpec(spec):
+      if DISPATCH.hasKey(ks.seqKey):
+        var cmds = DISPATCH[ks.seqKey]
+        if cmd notin cmds: cmds.add(cmd)
+        DISPATCH[ks.seqKey] = cmds
+      else:
+        DISPATCH[ks.seqKey] = @[cmd]
+      KEYTIMES[ks.seqKey] = max(KEYTIMES.getOrDefault(ks.seqKey, 1), ks.times)
+  # Build ESCMAP and SEQCMDS from DISPATCH.
+  ESCMAP = @[]
+  SEQCMDS = @[]
+  var escTimes = 1
+  if "cancel" in merged:
+    for ks in parseShortcutSpec(merged["cancel"]):
+      if ks.seqKey == "esc": escTimes = max(escTimes, ks.times)
+  if "clear" in merged:
+    for ks in parseShortcutSpec(merged["clear"]):
+      if ks.seqKey == "esc": escTimes = max(escTimes, ks.times)
+  for keyName, cmds in DISPATCH:
+    if keyName == "esc":
+      for cmd in cmds:
+        ESCMAP.add (cmd, escTimes)
+      continue
+    if KEYSEQS.hasKey(keyName):
+      # One entry per sequence; handleEscape dispatches via the key name
+      # so multiple commands on the same key (if a user binds them) run
+      # through runCommandsForKey rather than the first CritBit match.
+      SEQCMDS.add (KEYSEQS[keyName], keyName)
+  # Install command callbacks into KEYMAP so the dispatcher can invoke
+  # them by name. Editing commands are looked up directly by command
+  # name; "esc" keys run ESCMAP separately in handleEscape.
+  if CommandProcs.len == 0:
+    CommandProcs = initTable[string, KeyCallback]()
+    CommandProcs["cancel"] = cmdCancel
+    CommandProcs["clear"] = cmdClear
+    CommandProcs["quit-if-empty"] = cmdQuitIfEmpty
+    CommandProcs["home"] = cmdHome
+    CommandProcs["end"] = cmdEnd
+    CommandProcs["left"] = cmdLeft
+    CommandProcs["right"] = cmdRight
+    CommandProcs["word-left"] = cmdWordLeft
+    CommandProcs["word-right"] = cmdWordRight
+    CommandProcs["up"] = cmdUp
+    CommandProcs["down"] = cmdDown
+    CommandProcs["history-previous"] = cmdHistoryPrevious
+    CommandProcs["history-next"] = cmdHistoryNext
+    CommandProcs["backspace"] = cmdBackspace
+    CommandProcs["delete"] = cmdDelete
+    CommandProcs["insert"] = cmdInsert
+    CommandProcs["delete-word-left"] = cmdDeleteWordLeft
+    CommandProcs["delete-to-boundary-left"] = cmdDeleteToBoundaryLeft
+    CommandProcs["clear-screen"] = cmdClearScreen
+    CommandProcs["complete"] = cmdComplete
+    CommandProcs["reverse-complete"] = cmdReverseComplete
+    CommandProcs["edit-in-editor"] = cmdEditInEditor
+  CommandProcsAll = CommandProcs
+  when not defined(posix):
+    CommandProcsAll["suspend"] = proc(ed: var LineEditor) = discard
+  for cmd, cb in CommandProcsAll:
+    KEYMAP["cmd:" & cmd] = cb
+  cancelWatchSnapshot = cancelWatchBytes()
+
+proc runCommandsForKey*(ed: var LineEditor, keyName: string): bool =
+  ## Run the commands bound to `keyName`. Returns true if at least one
+  ## command was dispatched. Raises InputCancelled / EOFError as the
+  ## commands dictate.
+  if not DISPATCH.hasKey(keyName): return false
+  let cmds = DISPATCH[keyName]
+  # Consecutive-press requirement: DoubleCtrlC / DoubleESC set times=2.
+  let minTimes = KEYTIMES.getOrDefault(keyName, 1)
+  if ed.lastKeyName == keyName: inc ed.keyCount
+  else: ed.keyCount = 1
+  ed.lastKeyName = keyName
+  if ed.keyCount < minTimes:
+    # Swallow the pending press; repaint so the user sees feedback.
+    fullRedraw(ed)
+    return true
+  # Deterministic order: clear before cancel so a key bound to both
+  # (CtrlC by default) clears when the line has text and cancels when
+  # empty. Cancel with no clear (ESC by default) always cancels.
+  var ordered: seq[string] = @[]
+  if "clear" in cmds: ordered.add "clear"
+  if "cancel" in cmds: ordered.add "cancel"
+  for cmd in cmds:
+    if cmd != "clear" and cmd != "cancel": ordered.add cmd
+  var ran = false
+  for cmd in ordered:
+    case cmd
+    of "cancel":
+      cmdCancel(ed); ran = true
+    of "clear":
+      if ed.line.text.len > 0:
+        cmdClear(ed); ran = true; break
+    of "quit-if-empty":
+      if ed.line.text.len == 0:
+        cmdQuitIfEmpty(ed); ran = true
+    else:
+      if CommandProcsAll.hasKey(cmd):
+        CommandProcsAll[cmd](ed); ran = true
+  result = ran
+
+var configuredShortcuts*: Table[string, string]
+  ## Command -> spec table set by config.nim after parsing the
+  ## [shortcuts] section. Read-only after startup; every thread that
+  ## calls initKeyTables() picks it up, so the input thread and wizard
+  ## share the same bindings without locks.
+
+proc runEscCommands(ed: var LineEditor) =
+  ## Run ESCMAP commands. Default: ESC always cancels. Double-ESC
+  ## requires two presses. Unbound ESC still cancels (historical).
+  if runCommandsForKey(ed, "esc"): return
+  cmdCancel(ed)
+
+proc cancelWatchBytes*(): set[uint8] =
+  ## Derive the set of raw bytes the cancel watchers should recognise
+  ## from the currently active shortcuts. Includes ESC (27) when either
+  ## cancel or clear is bound to ESC, and the first byte of any bound
+  ## single-byte key.
+  result = {}
+  for keyName, cmds in DISPATCH:
+    if keyName == "esc":
+      if "cancel" in cmds or "clear" in cmds:
+        result.incl(27'u8)
+    elif keyName == "ctrl+c":
+      if "cancel" in cmds or "clear" in cmds:
+        result.incl(3'u8)
+    elif keyName == "ctrl+d":
+      if "quit-if-empty" in cmds:
+        result.incl(4'u8)
+  # Fallback: if dispatch is empty (before init), keep the legacy bytes.
+  if result == {}:
+    result = {3'u8, 27'u8}
+
 proc initKeyTables*() =
   ## ``KEYNAMES``, ``KEYSEQS`` and ``KEYMAP`` are thread-local because
   ## display code may temporarily override callbacks. New input threads
   ## therefore must populate their own copies before reading keys.
   if KEYMAP.hasKey("ctrl+c") and KEYSEQS.hasKey("left"):
+    # Main thread already has the module-level KEYMAP entries, so the
+    # populate path is skipped. cmd:* entries still come from applyShortcuts.
+    if not KEYMAP.hasKey("cmd:up"):
+      applyShortcuts(configuredShortcuts)
     return
   KEYNAMES[1]    = "ctrl+a"
   KEYNAMES[2]    = "ctrl+b"
@@ -1257,6 +1619,7 @@ proc initKeyTables*() =
       ed.write "\e[?2004h"
       ed.renderRow = 0
       fullRedraw(ed)
+  applyShortcuts(configuredShortcuts)
 
 # ---------- Completion ----------
 
@@ -1504,10 +1867,10 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
   ## (Shift+Enter / Alt+Enter — these now insert a real newline rather
   ## than backslash-continuation).
   if c1 == 27 and not ed.hasPendingEscapeTail():
-    # Bare ESC always cancels (interrupts an ongoing turn), and never
-    # touches the line's characters.
-    ed.canceled = true
-    raise newException(InputCancelled, "")
+    # Bare ESC: dispatch via configured ESCMAP instead of hardcoded
+    # cancel.  If ESC is unbound, fall back to historical cancel.
+    runEscCommands(ed)
+    return false
 
   template escCh(retries: int = 3): int =
     block:
@@ -1527,6 +1890,10 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
   # and KEYSEQS holds the same shape; on POSIX KEYSEQS values are 3+ bytes
   # so this two-byte check is always a no-op there.
   var s = @[c1.Key, c2.Key]
+  for (seq, keyName) in SEQCMDS:
+    if s == seq:
+      discard runCommandsForKey(ed, keyName)
+      return false
   if s == KEYSEQS["left"]:   ed.back();             return false
   if s == KEYSEQS["right"]:  ed.forward();          return false
   if s == KEYSEQS["up"]:     KEYMAP["up"](ed);      return false
@@ -1587,6 +1954,10 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
     let c3 = escCh(25)
     if c3 < 0: return false
     s.add c3.Key
+    for (seq, keyName) in SEQCMDS:
+      if s == seq:
+        discard runCommandsForKey(ed, keyName)
+        return false
     if s == KEYSEQS["right"]:  ed.forward(); return false
     if s == KEYSEQS["left"]:   ed.back();    return false
     if s == KEYSEQS["up"]:     KEYMAP["up"](ed);   return false
@@ -1730,6 +2101,7 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
   # between the disable (in the old defer) and the next read's
   # enable.
   fullRedraw(ed)
+  applyShortcuts(configuredShortcuts)
   var c1: int
   var putback = -1
   # Repaint + show caret. Used to clear a just-cancelled deferred-submit
@@ -1827,7 +2199,14 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
                                 max(2, ed.width))
         suffixJustCleared = true
       if c1 == 8 or c1 == 127:
-        ed.deletePrevious()
+        if runCommandsForKey(ed, "backspace"):
+          paintIfCleared(ed, suffixJustCleared)
+          continue
+        continue
+      if c1 == 9:
+        if runCommandsForKey(ed, "tab"):
+          paintIfCleared(ed, suffixJustCleared)
+          continue
         continue
       if c1 in PRINTABLE:
         if hidechars:
@@ -1836,33 +2215,6 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
           ed.write "*"
         else:
           ed.printChar(c1)
-        continue
-      if c1 == 9:
-        let nxt = ed.completeLine()
-        if nxt > 0:
-          # The completion absorbed a trailing keystroke we should treat
-          # as the next char. Re-dispatch via a tiny tail-call by
-          # synthesising a tiny `pending` slot — but we don't have one;
-          # so handle the common "Enter after completion" case here.
-          if nxt == 10 or nxt == 13:
-            if ed.deferSubmit:
-              ed.submitted = true
-              callHook(ed.onSubmit, ed)
-              fullRedraw(ed)
-              if not noHistory and not hidechars:
-                ed.historyAdd()
-              ed.historyFlush()
-              continue
-            parkAtEnd(ed)
-            if not noHistory and not hidechars:
-              ed.historyAdd()
-            ed.historyFlush()
-            ed.write "\x1b[?2004l"
-            ed.submitted = true
-            return ed.line.text
-          if nxt in PRINTABLE:
-            ed.printChar(nxt)
-        paintIfCleared(ed, suffixJustCleared)
         continue
       if c1 in ESCAPES:
         discard handleEscape(ed, c1)
@@ -1877,10 +2229,17 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
           ed.editInEditor(ed)
         paintIfCleared(ed, suffixJustCleared)
         continue
-      if c1 in CTRL and KEYMAP.hasKey(KEYNAMES[c1]):
-        KEYMAP[KEYNAMES[c1]](ed)
-        paintIfCleared(ed, suffixJustCleared)
-        continue
+      if c1 in CTRL:
+        let name =
+          if c1 >= 0 and c1 <= 31: KEYNAMES[c1] else: ""
+        if name.len > 0:
+          if runCommandsForKey(ed, name):
+            paintIfCleared(ed, suffixJustCleared)
+            continue
+          if KEYMAP.hasKey(name):
+            KEYMAP[name](ed)
+            paintIfCleared(ed, suffixJustCleared)
+            continue
       # Multi-byte UTF-8: decode the full sequence and insert it.
       if c1 >= 0x80:
         var buf = ""

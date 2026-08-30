@@ -1,12 +1,15 @@
-import std/[unittest, os, strutils, deques]
+import std/[unittest, os, strutils, tables, deques]
 import threecode/minline
 import minline_testutils
 import ttty/grid
 
+# Bind an extra cancel key so runUntilCancel can end the read without
+# also clearing a non-empty line (ESC still clears by default).
+minline.configuredShortcuts = {"cancel": "CtrlG"}.toTable
+const CancelKey = @[7]
+
 proc runUntilCancel(d: Driver, ed: var LineEditor, prompt = "> ") =
-  # ESC always cancels (Ctrl-C would clear the text instead of cancelling
-  # when the line is non-empty).
-  d.push Esc
+  d.push CancelKey
   try: discard d.run(ed, prompt) except InputCancelled: discard
 
 # ---------- History navigation ----------

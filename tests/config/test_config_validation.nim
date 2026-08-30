@@ -204,3 +204,53 @@ suite "config validation: end-to-end exit code":
     let r = runWithConfig("[provider]\nname = \"x\"\nurl = \"\"\n")
     check r.exitCode == 3
     check "empty value for 'url'" in r.output
+
+  test "[shortcuts] accepted and parsed":
+    let r = runWithConfig("[settings]\ncurrent = \"p.m\"\n\n[shortcuts]\ncancel = \"CtrlC\"\nclear = \"ESC\"\n")
+    check r.exitCode != 3
+    check "unknown key" notin r.output
+    check "invalid shortcut" notin r.output
+
+  test "[shortcuts] unknown command rejected":
+    let r = runWithConfig("[settings]\ncurrent = \"p.m\"\n\n[shortcuts]\nfoo = \"CtrlC\"\n")
+    check r.exitCode == 3
+    check "unknown key 'foo' in [shortcuts]" in r.output
+
+  test "[shortcuts] unknown key spec rejected":
+    let r = runWithConfig("[settings]\ncurrent = \"p.m\"\n\n[shortcuts]\ncancel = \"MetaX\"\n")
+    check r.exitCode == 3
+    check "invalid shortcut value" in r.output
+
+  test "[shortcuts] empty value allowed (unbind)":
+    let r = runWithConfig("[settings]\ncurrent = \"p.m\"\n\n[shortcuts]\nclear = \"\"\n")
+    check r.exitCode != 3
+    check "empty value" notin r.output
+
+suite "config validation: [shortcuts] schema (in-process)":
+  const P = "/tmp/cfg-shortcuts.ini"
+
+  test "shortcuts accepted with valid command and key spec":
+    let entries = @[
+      ("settings", "current", "p.m", 2),
+      ("shortcuts", "cancel", "CtrlC", 5),
+      ("shortcuts", "clear", "ESC", 6),
+      ("shortcuts", "home", "Home", 7),
+    ]
+    check validateConfig(P, entries) == ""
+
+  test "shortcuts unknown command rejected":
+    let entries = @[("settings", "current", "p.m", 2),
+                    ("shortcuts", "foo", "CtrlC", 5)]
+    let m = validateConfig(P, entries)
+    check m == P & ":5: unknown key 'foo' in [shortcuts]"
+
+  test "shortcuts invalid key spec rejected":
+    let entries = @[("settings", "current", "p.m", 2),
+                    ("shortcuts", "cancel", "MetaX", 5)]
+    let m = validateConfig(P, entries)
+    check "invalid shortcut value" in m
+
+  test "shortcuts empty value allowed":
+    let entries = @[("settings", "current", "p.m", 2),
+                    ("shortcuts", "clear", "", 5)]
+    check validateConfig(P, entries) == ""
