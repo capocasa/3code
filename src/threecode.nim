@@ -642,10 +642,9 @@ proc main() =
     # Draw the initial chrome at the bottom of the welcome screen. On
     # resume with prior usage we paint bar+prompt carrying the last
     # response's tokens (typing-ready shape from `endTurn`). On resume
-    # without usage we still paint the bar at zeros. On a fresh start
-    # we paint *just* the prompt — the bar stays hidden until the first
-    # model response brings real values to put in it. From the first
-    # `paintBarPrompt` onward the bar+prompt are always visible.
+    # without usage and on a fresh start we paint the bar at zeros —
+    # the context percentage is always visible, before the first model
+    # response just like after it.
     if restoredDraft.len > 0:
       editor.prefillText = restoredDraft
     if resume:
@@ -673,6 +672,10 @@ proc main() =
         paintInitialPrompt(prof)
     else:
       paintInitialPrompt(prof)
+    # The startup paint is a render boundary the tty harness synchronizes
+    # on: without the frame event the first captured frame can predate the
+    # chrome (or miss it entirely when the PTY burst is coalesced).
+    emitTestFrameEvent()
     startupTrace("first-prompt-painted")
     if prompt != "" and runInitialPrompt(prompt):
       # quit, not return: unwinding `editor` while the input thread still
