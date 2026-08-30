@@ -588,6 +588,10 @@ proc recordToToolCall(r: Record): JsonNode =
       %*{"path": path, "edits": arr}
     of "apply_patch":
       %*{"input": sectionText(sections, "")}
+    of "web_search":
+      %*{"query": sectionText(sections, "")}
+    of "web_fetch":
+      %*{"url": sectionText(sections, "")}
     of "update_plan", "todo":
       var items = newJArray()
       for s in sections:
@@ -733,6 +737,10 @@ proc emitToolUse(s: var string, tc: JsonNode) =
     emitRecord s, "tool_use " & id & " patch " & path, body
   of "apply_patch":
     emitRecord s, "tool_use " & id & " apply_patch", args{"input"}.getStr("")
+  of "web_search":
+    emitRecord s, "tool_use " & id & " web_search", args{"query"}.getStr("")
+  of "web_fetch":
+    emitRecord s, "tool_use " & id & " web_fetch", args{"url"}.getStr("")
   of "update_plan", "todo":
     var body = ""
     let items =

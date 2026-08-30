@@ -314,6 +314,36 @@ suite "session: renderSession → loadSessionFile round-trip":
     # plan should also be rebuilt on the session
     check ls.plan.len == 2
 
+  test "round-trips web_search and web_fetch args":
+    # Regression: these used to fall into the unknown-tool branch, so the
+    # query/url was lost on resume and the replayed banner rendered as a
+    # bare icon.
+    let sess = Session(created: "20250101T120000", profileName: "test",
+                       cwd: "/tmp")
+    let msgs = %*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "search"},
+      {"role": "assistant", "content": "",
+       "tool_calls": [
+         {"id": "call_s", "type": "function",
+          "function": {"name": "web_search",
+                       "arguments": "{\"query\": \"terminal rendering\"}"}},
+         {"id": "call_f", "type": "function",
+          "function": {"name": "web_fetch",
+                       "arguments": "{\"url\": \"https://example.test/x\"}"}}
+       ]},
+      {"role": "tool", "tool_call_id": "call_s", "content": "hit"},
+      {"role": "tool", "tool_call_id": "call_f", "content": "page"}
+    ]
+    let (ls, lm) = roundTrip(sess, msgs)
+    let sArgs = parseJson(lm[2]["tool_calls"][0]["function"]["arguments"].getStr)
+    check sArgs["query"].getStr == "terminal rendering"
+    let fArgs = parseJson(lm[2]["tool_calls"][1]["function"]["arguments"].getStr)
+    check fArgs["url"].getStr == "https://example.test/x"
+    check ls.toolLog.len == 2
+    check ls.toolLog[0].banner == "terminal rendering"
+    check ls.toolLog[1].banner == "https://example.test/x"
+
 suite "session: sessionIdFromPath":
   test "strips .3log extension":
     check sessionIdFromPath("/some/dir/20250101T120000.3log") == "20250101T120000"
