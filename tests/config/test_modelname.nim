@@ -10,7 +10,7 @@ suite "modelname: normalizeModelName":
     check normalizeModelName("accounts/fireworks/models/glm-5p1") == "glm-5.1"
 
   test "p-notation normalized to dots":
-    check normalizeModelName("kimi-k2p6") == "kimi-2.6"
+    check normalizeModelName("kimi-k2p6") == "kimi-k2.6"
 
   test "dash-separated version normalized to dots":
     check normalizeModelName("zai-glm-5-3-flash") == "glm-5.3-flash"
@@ -57,16 +57,22 @@ suite "modelname: normalizeModelName":
     check normalizeModelName("o3-mini") == "gpt-o3-mini"
 
   test "kimi k3":
-    check normalizeModelName("moonshotai/Kimi-K3") == "kimi3"
+    check normalizeModelName("moonshotai/Kimi-K3") == "kimi-k3"
+    check normalizeModelName("k3") == "kimi-k3"
+    check normalizeModelName("kimi3") == "kimi-k3"
+    check normalizeModelName("kimi-k2.6") == "kimi-k2.6"
+    check normalizeModelName("kimi-2.6") == "kimi-k2.6"
 
   test "kimi-for-coding alias":
-    check normalizeModelName("kimi-for-coding") == "kimi-2.7-code"
+    check normalizeModelName("kimi-for-coding") == "kimi-k2.7-code"
 
   test "kimi-for-coding-highspeed alias":
-    check normalizeModelName("kimi-for-coding-highspeed") == "kimi-2.7-code-highspeed"
+    check normalizeModelName("kimi-for-coding-highspeed") == "kimi-k2.7-code-highspeed"
 
   test "minimax highspeed qualifier":
-    check normalizeModelName("MiniMax-M2.7-highspeed") == "minimax-2.7-highspeed"
+    check normalizeModelName("MiniMax-M2.7-highspeed") == "minimax-m2.7-highspeed"
+    check normalizeModelName("MiniMax-M3") == "minimax-m3"
+    check normalizeModelName("minimax-2.7") == "minimax-m2.7"
 
   test "longcat":
     check normalizeModelName("meituan/LongCat-2.0") == "longcat-2.0"
@@ -76,6 +82,7 @@ suite "modelname: normalizeModelName":
 
   test "mimo":
     check normalizeModelName("XiaomiMiMo/MiMo-V2.5-Pro") == "mimo-2.5-pro"
+    check normalizeModelName("mimo-v2.5-pro") == "mimo-2.5-pro"
 
   test "0xalpha aliases":
     check normalizeModelName("stealth/ox-alpha") == "0xalpha1"
@@ -121,6 +128,7 @@ suite "modelname: format":
 
   test "single digit version":
     check format(ModelName(family: "hy", version: "3")) == "hy3"
+    check format(ModelName(family: "kimi", version: "k3")) == "kimi-k3"
 
   test "suffix":
     check format(ModelName(family: "inkling", version: "1",
