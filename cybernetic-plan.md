@@ -58,24 +58,45 @@ Constraints from `.agents/design.md`:
 
 ## Current state
 
-Step 1 in progress: adding signature state + skip logic to engine.nim.
+DONE. Commit `1f4f898` on `flicker`. All four steps complete.
+
+Implementation notes (learned during execution):
+
+- One combined signature `lastPaintSig: string` in `TerminalEngine`, not
+  four per-region sigs: every entry point's skip condition is "the bytes I
+  would write are already on screen", so the signature must describe the
+  whole last painted composite (region tag F/V/L/R, footer bytes, volatile
+  rows, editor sig, width).
+- The signature is stored AFTER the paint completes, not before: the paint
+  paths end in `noteFooterPainted`/`noteNoFooter`, which reset
+  `lastPaintSig` so out-of-band repaints (transcript commit, end turn,
+  modal chrome) always invalidate. Storing before the paint made the
+  reset erase the just-computed signature and the skip never engaged.
+- `editorSig` (engine.nim:165): text + cursor + renderSuffix +
+  renderSuffixCursor + pendingCaret + prompts + width.
+- `viewportSig` (engine.nim:153): gap flag + bannerRows + joined rows.
+- Verified with a throwaway stdout-capture probe (9 checks: identical
+  repaint emits nothing for footer/viewport/live content; text change,
+  keystroke, row change, transcript commit, width change all repaint).
+  Probe not committed.
 
 ## Steps
 
-- [ ] 1. Engine change detection: add `lastFooterBytes`, `lastViewportSig`,
-      `lastLiveSig`, `lastEditorSig` (or one combined signature) to
-      `TerminalEngine`; add an `editorSig` helper. Gate `renderFooter`:
-      skip when footer bytes + width + editor sig + footer row count are
-      unchanged. Reset signatures wherever the screen is invalidated
-      (resize path already forces repaint via width change; verify).
-- [ ] 2. Gate `renderToolViewport`, `renderLiveContent`,
-      `repaintLiveContent` with the same scheme (rows joined into the
-      signature; `bannerRows` included for the viewport).
-- [ ] 3. Run the tty test suite (`nimble test` tty category). Review every
-      fixture failure in the frame viewer; fix regressions, deliberately
-      update fixtures only if the new frames encode the intended behavior.
-- [ ] 4. Full build + `nimble test` (all categories), `nimble install`,
-      commit.
+- [x] 1. Engine change detection: `lastPaintSig` + `editorSig` helper;
+      `renderFooter` gated on footer bytes + width + editor sig + footer
+      row count. Reset via `noteFooterPainted`/`noteNoFooter`.
+- [x] 2. `renderToolViewport`, `renderLiveContent`, `repaintLiveContent`
+      gated with the same scheme (rows joined into the signature;
+      `bannerRows` included for the viewport).
+- [x] 3. Full tty suite: all 30 tests pass, zero fixture changes needed
+      (the harness dedupes identical consecutive frames, as predicted).
+- [x] 4. Release build + full `nimble test` (all categories) +
+      `nimble install` + commit `1f4f898`.
+
+Pre-existing failures (reproduced on clean tree, unrelated to this work):
+`tests/core/test_cli_args.nim` and `tests/config/test_config_validation.nim`
+(exercise the stale installed binary), `tests/core/test_wall_bash.nim`
+(needs network namespaces, blocked in this sandbox).
 
 ## Verification notes
 
