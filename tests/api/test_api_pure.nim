@@ -1,5 +1,5 @@
 import std/[json, strutils, tables, unittest]
-import threecode/[api, types]
+import threecode/[api, types, util]
 
 suite "api: parseUsage":
   test "parses standard OpenAI usage object":
@@ -342,6 +342,48 @@ suite "api: stripInternalFields":
     let stripped = stripInternalFields(messages)
     check "interrupted" notin stripped[0]
     check stripped[0]["content"].getStr == "partial"
+
+  test "fills empty assistant content with EmptyReplyMsg":
+    let messages = %*[
+      {"role": "user", "content": "hi"},
+      {"role": "assistant", "content": "", "finish_reason": "length"}
+    ]
+    let stripped = stripInternalFields(messages)
+    check "finish_reason" notin stripped[1]
+    check stripped[1]["content"].getStr == EmptyReplyMsg
+
+  test "fills empty assistant content even without finish_reason":
+    let messages = %*[
+      {"role": "assistant", "content": "   "}
+    ]
+    let stripped = stripInternalFields(messages)
+    check stripped[0]["content"].getStr == EmptyReplyMsg
+
+  test "does not overwrite assistant messages with tool calls":
+    let messages = %*[
+      {"role": "assistant", "content": "", "tool_calls": [{"id": "1"}]}
+    ]
+    let stripped = stripInternalFields(messages)
+    check stripped[0]["content"].getStr == ""
+    check stripped[0]["tool_calls"].len == 1
+
+  test "leaves non-assistant messages alone":
+    let messages = %*[
+      {"role": "user", "content": ""}
+    ]
+    let stripped = stripInternalFields(messages)
+    check stripped[0]["content"].getStr == ""
+
+  test "repairToolCallPairing after strip drops orphan tool results":
+    let messages = %*[
+      {"role": "user", "content": "hi"},
+      {"role": "tool", "tool_call_id": "missing", "content": "x",
+       "finish_reason": "stop"}
+    ]
+    let stripped = stripInternalFields(messages)
+    let repaired = repairToolCallPairing(stripped)
+    check repaired.len == 1
+    check repaired[0]{"role"}.getStr == "user"
 
 suite "api: buildStreamAssistantMsg":
   test "returns nil when stream produced no assistant data":

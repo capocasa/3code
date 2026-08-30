@@ -305,6 +305,38 @@ suite "api request shaping":
     check "reasoning_effort" notin body
     check "reasoning" notin body
 
+  test "hosted glm-5.3 sends top-level reasoning_effort":
+    block baseten:
+      var body = %*{"stream": true}
+      let p = Profile(name: "baseten.zai-org/GLM-5.3", family: "glm",
+                      version: "5", variant: "3",
+                      model: "zai-org/GLM-5.3", reasoning: "low")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "low"
+      check "thinking" notin body
+    block novita:
+      var body = %*{"stream": true}
+      let p = Profile(name: "novita.zai-org/GLM-5.3", family: "glm",
+                      version: "5", variant: "3",
+                      model: "zai-org/GLM-5.3", reasoning: "high")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "high"
+    block nvidia:
+      var body = %*{"stream": true}
+      let p = Profile(name: "nvidia.z-ai/glm-5.3", family: "glm",
+                      version: "5", variant: "3",
+                      model: "z-ai/glm-5.3", reasoning: "max")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "max"
+    block together:
+      var body = %*{"stream": true}
+      let p = Profile(name: "together.zai-org/GLM-5.3", family: "glm",
+                      version: "5", variant: "3",
+                      model: "zai-org/GLM-5.3", reasoning: "low")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "low"
+      check "reasoning" notin body
+
   test "knownGoodReasonings for openai gpt: per-model effort ladder":
     # Per OpenAI's docs: o-series low/medium/high; gpt-5.0 minimal..high;
     # 5.1+ adds none; 5.4/5.5 add xhigh; 5.6 adds max; pros reason

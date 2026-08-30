@@ -253,3 +253,57 @@ suite "util: visibleWidth unicode":
     # code points beyond U+10FFFF, which unicodedb would otherwise
     # assert on. Each such byte counts as one cell.
     check visibleWidth("\xff\xfe\xfd") == 3
+
+suite "util: repairToolCallPairing":
+  test "drops leading orphan tool results":
+    let messages = %*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "Earlier in this session: recap"},
+      {"role": "tool", "tool_call_id": "call_B", "content": "b"},
+      {"role": "user", "content": "go on"}
+    ]
+    let repaired = repairToolCallPairing(messages)
+    check repaired.len == 3
+    check repaired[0]{"role"}.getStr == "system"
+    check repaired[1]{"role"}.getStr == "user"
+    check repaired[2]{"role"}.getStr == "user"
+
+  test "injects synthetic results for unpaired tool_calls":
+    let messages = %*[
+      {"role": "assistant", "content": "",
+       "tool_calls": [{"id": "call_1", "type": "function",
+                        "function": {"name": "bash", "arguments": "{}"}}]},
+      {"role": "user", "content": "next"}
+    ]
+    let repaired = repairToolCallPairing(messages)
+    check repaired.len == 3
+    check repaired[1]{"role"}.getStr == "tool"
+    check repaired[1]{"tool_call_id"}.getStr == "call_1"
+    check UnavailableToolResult in repaired[1]{"content"}.getStr
+
+  test "fills empty tool_call ids and pairs empty tool_call_id":
+    let messages = %*[
+      {"role": "assistant", "content": "",
+       "tool_calls": [{"id": "", "type": "function",
+                        "function": {"name": "bash", "arguments": "{}"}}]},
+      {"role": "tool", "tool_call_id": "", "content": "ok"}
+    ]
+    let repaired = repairToolCallPairing(messages)
+    check repaired.len == 2
+    check repaired[0]{"tool_calls"}[0]{"id"}.getStr == "fill-1"
+    check repaired[1]{"tool_call_id"}.getStr == "fill-1"
+
+  test "keeps a well-formed parallel batch":
+    let messages = %*[
+      {"role": "assistant", "content": "",
+       "tool_calls": [
+         {"id": "A", "type": "function", "function": {"name": "bash", "arguments": "{}"}},
+         {"id": "B", "type": "function", "function": {"name": "bash", "arguments": "{}"}}
+       ]},
+      {"role": "tool", "tool_call_id": "A", "content": "a"},
+      {"role": "tool", "tool_call_id": "B", "content": "b"}
+    ]
+    let repaired = repairToolCallPairing(messages)
+    check repaired.len == 3
+    check repaired[1]{"tool_call_id"}.getStr == "A"
+    check repaired[2]{"tool_call_id"}.getStr == "B"
