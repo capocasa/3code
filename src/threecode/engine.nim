@@ -31,6 +31,7 @@
 
 import std/terminal
 import std/os
+import std/strutils except toUpperAscii, toLowerAscii
 import minline
 import ./terminal as termio
 import ./fatprompt/rendering
@@ -65,6 +66,15 @@ type
     ## `toolViewportRows.len` no longer reaches the reflowed stale content.
     ## On a change the erase inflates to clear the worst case.
     lastPaintedWidth: int
+    ## Signature of the last painted composite frame. When a render entry
+    ## point is asked to paint bytes identical to the last tick (same footer
+    ## bytes, same volatile rows, same editor state, same width, same footer
+    ## height), the erase+repaint is skipped entirely: the screen already
+    ## shows exactly those bytes. Any path that repaints the screen out of
+    ## band (transcript commit, assistant-content start, end turn, modal
+    ## chrome) resets the signature via `noteFooterPainted`/`noteNoFooter`
+    ## so the next render always paints.
+    lastPaintSig: string
 
 var defaultEngine*: TerminalEngine
 
@@ -133,11 +143,29 @@ proc walkUp(e: var TerminalEngine; ed: var minline.LineEditor): int =
 
 proc noteFooterPainted(e: var TerminalEngine; footerRowsAboveEditor: int) =
   e.paintedFooterRows = max(0, footerRowsAboveEditor)
+  e.lastPaintSig = ""
   geometryAudit("footerPainted", e.paintedFooterRows)
 
 proc noteNoFooter(e: var TerminalEngine) =
   e.paintedFooterRows = 0
+  e.lastPaintSig = ""
   geometryAudit("footerCleared", 0)
+
+proc viewportSig(e: TerminalEngine): string =
+  ## The volatile tool-viewport rows as last painted, including the gap
+  ## row and banner split, so a skip decision knows the erase would be a
+  ## no-op.
+  $e.toolViewportHasGap & "\x1f" & $e.toolViewportBannerRows & "\x1f" &
+    join(e.toolViewportRows, "\x1e")
+
+proc editorSig(ed: var minline.LineEditor): string =
+  ## Everything the embedded editor repaint depends on: buffer, cursor,
+  ## transient suffix, caret mode, prompts, width. A keystroke between two
+  ## identical-footer ticks must still repaint, so this joins the skip
+  ## signature of every footer paint.
+  ed.line.text & "\x1f" & $ed.line.position & "\x1f" & ed.renderSuffix &
+    "\x1f" & $ed.renderSuffixCursor & "\x1f" & $ed.pendingCaret & "\x1f" &
+    ed.prompt & "\x1f" & ed.contPrompt & "\x1f" & $ed.width
 
 proc eraseUp(e: var TerminalEngine; ed: var minline.LineEditor;
              width, footerRowsAboveEditor: int): int =
@@ -264,6 +292,10 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
       let bytes = frame.footerFrameBytes(width)
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
       if not (inputRunning and editor != nil):
+        let sig = "F\x1f" & $footerRowsAboveEditor & "\x1f" & bytes &
+          "\x1f\x1f\x1f" & $width
+        if sig == e.lastPaintSig:
+          return
         stdout.write termio.SyncBegin
         stdout.write bytes
         # Gap-only ffNone has empty bytes but still reserves one row. Keep
@@ -272,14 +304,20 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
           e.noteNoFooter()
         else:
           e.noteFooterPainted(footerRowsAboveEditor)
+        e.lastPaintSig = sig
         stdout.write termio.SyncEnd
         stdout.flushFile
         e.lastPaintedWidth = width
         return
       let edPtr = editor
+      refreshEditorWidth(edPtr[])
+      let sig = "F\x1f" & $footerRowsAboveEditor & "\x1f" &
+        e.viewportSig() & "\x1f" & bytes & "\x1f" & editorSig(edPtr[]) &
+        "\x1f" & $width
+      if sig == e.lastPaintSig:
+        return
       stdout.write termio.SyncBegin
       stdout.write "\x1b[?25l"
-      refreshEditorWidth(edPtr[])
       let up = eraseUp(e, edPtr[], width, footerRowsAboveEditor)
       stdout.write "\r"
       if up > 0:
@@ -302,6 +340,7 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
         e.noteNoFooter()
       else:
         e.noteFooterPainted(footerRowsAboveEditor)
+      e.lastPaintSig = sig
       stdout.write termio.SyncEnd
       stdout.flushFile
       e.lastPaintedWidth = width
@@ -335,6 +374,10 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         # only thing that clears the reflowed stale rows. Consuming the
         # width change here made the next full repaint fall short and
         # left stale banner fragments stacking in scrollback.
+        let sig = "V\x1f" & $e.hasScrollback & "\x1f" & join(rows, "\x1e") &
+          "\x1f" & $bannerRows & "\x1f" & bytes & "\x1f\x1f" & $width
+        if sig == e.lastPaintSig:
+          return
         stdout.write termio.SyncBegin
         stdout.write "\x1b[?25l"
         e.toolViewportHasGap = e.hasScrollback
@@ -344,12 +387,18 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         if bytes.len > 0:
           stdout.write bytes
         e.noteNoFooter()
+        e.lastPaintSig = sig
         stdout.write termio.SyncEnd
         stdout.flushFile
         return
+      refreshEditorWidth(editor[])
+      let sig = "V\x1f" & $e.hasScrollback & "\x1f" & join(rows, "\x1e") &
+        "\x1f" & $bannerRows & "\x1f" & bytes & "\x1f" &
+        editorSig(editor[]) & "\x1f" & $width
+      if sig == e.lastPaintSig:
+        return
       stdout.write termio.SyncBegin
       stdout.write "\x1b[?25l"
-      refreshEditorWidth(editor[])
       # A width change reflowed the already-painted volatile rows: a
       # wide banner/output wraps to more rows (or fewer) on screen, but
       # the stored `toolViewportRows.len` holds the new-width count, so a
@@ -389,6 +438,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         e.noteNoFooter()
       else:
         e.noteFooterPainted(footerRowsAboveEditor)
+      e.lastPaintSig = sig
       e.lastPaintedWidth = width
       stdout.write termio.SyncEnd
       stdout.flushFile
@@ -432,6 +482,10 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
       let bytes = frame.footerFrameBytes(width)
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
       if not (inputRunning and editor != nil):
+        let sig = "L\x1f" & $e.hasScrollback & "\x1f" &
+          join(rows, "\x1e") & "\x1f" & bytes & "\x1f\x1f" & $width
+        if sig == e.lastPaintSig:
+          return
         stdout.write termio.SyncBegin
         stdout.write "\x1b[?25l"
         e.liveContentHasGap = e.hasScrollback
@@ -440,13 +494,18 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
         if bytes.len > 0:
           stdout.write bytes
         e.noteNoFooter()
+        e.lastPaintSig = sig
         e.lastPaintedWidth = width
         stdout.write termio.SyncEnd
         stdout.flushFile
         return
+      refreshEditorWidth(editor[])
+      let sig = "L\x1f" & $e.hasScrollback & "\x1f" & join(rows, "\x1e") &
+        "\x1f" & bytes & "\x1f" & editorSig(editor[]) & "\x1f" & $width
+      if sig == e.lastPaintSig:
+        return
       stdout.write termio.SyncBegin
       stdout.write "\x1b[?25l"
-      refreshEditorWidth(editor[])
       let up = eraseUp(e, editor[], width, footerRowsAboveEditor)
       stdout.write "\r"
       if up > 0:
@@ -472,6 +531,7 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
         e.noteNoFooter()
       else:
         e.noteFooterPainted(footerRowsAboveEditor)
+      e.lastPaintSig = sig
       e.lastPaintedWidth = width
       stdout.write termio.SyncEnd
       stdout.flushFile
@@ -518,19 +578,28 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
       let bytes = frame.footerFrameBytes(width)
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
       if not (inputRunning and editor != nil):
+        let sig = "R\x1f" & $e.liveContentHasGap & "\x1f" & bytes &
+          "\x1f\x1f" & $width
+        if sig == e.lastPaintSig:
+          return
         stdout.write termio.SyncBegin
         stdout.write "\x1b[?25l"
         e.writeLiveContentRows()
         if bytes.len > 0:
           stdout.write bytes
         e.noteNoFooter()
+        e.lastPaintSig = sig
         e.lastPaintedWidth = width
         stdout.write termio.SyncEnd
         stdout.flushFile
         return
+      refreshEditorWidth(editor[])
+      let sig = "R\x1f" & $e.liveContentHasGap & "\x1f" & bytes &
+        "\x1f" & editorSig(editor[]) & "\x1f" & $width
+      if sig == e.lastPaintSig:
+        return
       stdout.write termio.SyncBegin
       stdout.write "\x1b[?25l"
-      refreshEditorWidth(editor[])
       let up = eraseUp(e, editor[], width, footerRowsAboveEditor)
       stdout.write "\r"
       if up > 0:
@@ -548,6 +617,7 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
         e.noteNoFooter()
       else:
         e.noteFooterPainted(footerRowsAboveEditor)
+      e.lastPaintSig = sig
       e.lastPaintedWidth = width
       stdout.write termio.SyncEnd
       stdout.flushFile
