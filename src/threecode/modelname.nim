@@ -10,7 +10,9 @@
 ## `family` is required and must be in `ModelFamilies`; everything else
 ## is optional. The version is the leading run of numeric tokens after
 ## the family, dot-joined (`5-3` and `5p3` both become `5.3`; a single
-## digit drops the dash: `hy3`, `kimi3`, `deepseek4`). The designator is
+## digit drops the dash: `hy3`, `deepseek4`). A letter+digit series
+## (`k3`, `m2.7`) keeps the letter and the dash (`kimi-k3`, not `kimi3`).
+## The designator is
 ## the first non-numeric token (`flash`, `pro`, `sol`, `preview`); the
 ## rest are qualifiers (`a3b`, `0731`, `vision-exp`), kept as-is but
 ## lowercased. The suffix is the `:free` tail. Author prefixes
@@ -28,9 +30,10 @@ const ModelFamilies* = [
   ## `gpt` so the longer family wins.
 
 const ModelAliases* = [
-  ("k3", "kimi-3"),
-  ("kimi-for-coding", "kimi-2.7-code"),
-  ("kimi-for-coding-highspeed", "kimi-2.7-code-highspeed"),
+  ("k3", "kimi-k3"),
+  ("kimi3", "kimi-k3"),
+  ("kimi-for-coding", "kimi-k2.7-code"),
+  ("kimi-for-coding-highspeed", "kimi-k2.7-code-highspeed"),
   ("o1", "gpt-o1"),
   ("o1-mini", "gpt-o1-mini"),
   ("o3", "gpt-o3"),
@@ -53,6 +56,8 @@ type
 
 func normalizeVersion*(v: string): string =
   ## `5p3` / `5-3` / `5_3` -> `5.3`; `3` stays `3`; `2.4t` stays `2.4t`.
+  ## A leading `v` is a generic version marker and is dropped (`v4` ->
+  ## `4`); product-series letters stay (`k3` -> `k3`, `m2.7` -> `m2.7`).
   var s = v.toLowerAscii
   if s.len > 1 and s[0] == 'v' and s[1] in {'0'..'9'}: s = s[1 .. ^1]
   var outp = ""
@@ -64,10 +69,30 @@ func normalizeVersion*(v: string): string =
     outp = outp.replace("..", ".")
   outp.strip(chars = {'.'})
 
+func isVersionToken(t: string): bool =
+  ## Pure numeric (`5`, `5.3`, `5p3`) or a product-letter prefix followed
+  ## by digits (`k3`, `k2p6`, `m2.7`, `v4`). `2.4t` is not a version
+  ## token; the trailing letter makes it a qualifier.
+  if t.len == 0: return false
+  var i = 0
+  if t[0] in {'k', 'm', 'v'} and t.len > 1 and t[1] in {'0'..'9'}:
+    i = 1
+  if i >= t.len: return false
+  t[i .. ^1].allIt(it in {'0'..'9', '.', 'p'})
+
+func familyVersionLetter(fam: string): string =
+  ## Product-series letter that belongs in the version (`kimi-k3`,
+  ## `minimax-m2.7`). Empty when the family has none (`hy3`, `deepseek4`).
+  case fam
+  of "kimi": "k"
+  of "minimax": "m"
+  else: ""
+
 func format*(m: ModelName): string =
   ## Canonical string form: `family-version-designator-qualifiers:suffix`.
-  ## The dash before the version is dropped when the version is a single
-  ## digit (`hy3`, not `hy-3`).
+  ## The dash before the version is dropped only when the version is a
+  ## single digit (`hy3`, not `hy-3`). Letter+digit series keep it
+  ## (`kimi-k3`, not `kimi3`).
   result = m.family
   if m.version != "":
     if m.version.len > 1 or m.version[0] notin {'0'..'9'}:
@@ -133,20 +158,22 @@ func normalizeModelName*(name: string): string =
         break
   if fam == "":
     return name.strip.toLowerAscii  # unknown: keep as-is (lowercased)
-  # A single-letter version marker rides on the first token (`k2p6`,
-  # `m2.7`, `v4`); strip it so the digits parse as a version.
-  if rest.len > 1 and rest[0] in {'k', 'm', 'v'} and rest[1] in {'0'..'9'}:
-    rest = rest[1 .. ^1]
   var toks = rest.split('-').filterIt(it != "")
-  # Version: the leading run of numeric tokens, dot-joined. `5` + `3`
+  # Version: the leading run of version tokens, dot-joined. `5` + `3`
   # (from `glm-5-3-flash`) merges to `5.3`; the run ends at the first
-  # token that isn't purely numeric (`35b`, `2.4t`).
+  # token that isn't a version (`35b`, `2.4t`). Product-series letters
+  # stay (`k3`, `m2.7`); a leading `v` is dropped by normalizeVersion.
   var version = ""
-  while toks.len > 0 and toks[0].len > 0 and
-        toks[0].allIt(it in {'0'..'9', '.', 'p'}):
+  while toks.len > 0 and isVersionToken(toks[0]):
     let t = normalizeVersion(toks[0])
     version = if version == "": t else: version & "." & t
     toks = toks[1 .. ^1]
+  # Old pretty names dropped the series letter (`kimi3`, `kimi-2.6`,
+  # `minimax-2.7`). Put it back so they round-trip to the canonical form.
+  let letter = familyVersionLetter(fam)
+  if letter != "" and version.len > 0 and
+     version.allIt(it in {'0'..'9', '.'}):
+    version = letter & version
   # Designator: the first non-numeric token after the version. A version
   # spelled after the designator (`laguna-s-2.1`, `grok-build-0.1`) stays
   # where it is: reordering would mangle product names.
