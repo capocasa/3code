@@ -409,7 +409,8 @@ proc chatgptOauthLogin(): string =
 
 proc readFirstProviderField(editor: var minline.LineEditor): string =
   ## First wizard field: catalog name, URL, API key, or a subscription
-  ## login (`supergrok`, `chatgpt`).
+  ## login (`supergrok`, `chatgpt`). Regular mode takes a known-good
+  ## provider name or an API key; URLs are experimental-only.
   let prevCb = editor.completionCallback
   editor.completionCallback = proc(ed: LineEditor): seq[string] =
     result.add ["supergrok", "chatgpt"]
@@ -419,7 +420,10 @@ proc readFirstProviderField(editor: var minline.LineEditor): string =
     else:
       for combo in KnownGoodCombos:
         if combo.provider notin result: result.add combo.provider
-  result = readRequired(editor, "  provider, url, or api key: ")
+  let label =
+    if experimentalEnabled: "  provider, url, or api key: "
+    else: "  provider or api key: "
+  result = readRequired(editor, label)
   editor.completionCallback = prevCb
 
 proc promptNewProvider*(editor: var minline.LineEditor,
@@ -495,11 +499,15 @@ proc promptNewProvider*(editor: var minline.LineEditor,
   else:
     # Catalog / known-good provider name. Ask for the key next.
     name = entryLower
-    url = catalogUrl(name)
     if not experimentalEnabled and curatedFor(name).len == 0:
       hintLn &"  unknown provider '{entry}'; enable --experimental for custom",
         resetStyle
       raise newException(minline.InputCancelled, "")
+    # Known-good names (e.g. `kilocode` for `kilo`) are not necessarily
+    # in the URL catalog; fall back to the canonical twin so the wizard
+    # still wires up a default url.
+    url = catalogUrl(name)
+    if url == "": url = catalogUrl(canonicalKnownGoodProvider(name))
     ensureUniqueName(name)
     if experimentalEnabled and url == "":
       url = readRequired(editor, "  api base url         : ")
@@ -678,6 +686,15 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     var models = rawModels.mapIt(lookup.getOrDefault(it, it))
     # Same listed-but-unserved guard as the add wizard.
     preferCurated(name, models)
+    if not experimentalEnabled:
+      # Regular mode trusts the curated list only; free-text model ids
+      # are experimental. Unknown names re-prompt like the add wizard.
+      var unknown: seq[string]
+      for m in models:
+        if m notin curated: unknown.add m
+      if unknown.len > 0:
+        errLn "unknown known-good model: " & unknown.join(", ")
+        continue
     if models.len == 0:
       errLn "need at least one model"
       continue

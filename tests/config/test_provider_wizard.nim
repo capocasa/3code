@@ -124,7 +124,7 @@ suite "provider wizard configuration":
     check activeProviders[0].name == "nvidia"
     check activeProviders[0].key == "nvapi-named"
     check activeProviders[0].models == @["openai/gpt-oss-120b"]
-    check prompts.anyIt(it.startsWith("  provider, url, or api key:"))
+    check prompts.anyIt(it.startsWith("  provider or api key:"))
     check prompts.anyIt(it.startsWith("  api key"))
 
   test "add rejects duplicate provider name":
@@ -569,3 +569,187 @@ suite "provider wizard configuration":
       check listedModels == expected.mapIt(shortModel(it))
       check "minimax-m2.5" in listedModels
       check "minimax-m2.7" in listedModels
+
+  test "add rejects a url in regular mode":
+    # The label promises "provider or api key" without --experimental;
+    # a pasted custom URL must be refused outright.
+    inputs = @["https://api.example.com/v1"]
+    var editor: LineEditor
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider add", messages, session, prof, editor)
+
+    check activeProviders.len == 0
+
+  test "add rejects an unrecognized api key in regular mode":
+    inputs = @["some-free-text-secret"]
+    var editor: LineEditor
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider add", messages, session, prof, editor)
+
+    check activeProviders.len == 0
+
+  test "add rejects a non-listed model in regular mode":
+    # The unknown model re-prompts; the follow-up curated entry saves.
+    inputs = @["nvapi-add", "totally-made-up-model", "gpt-oss-120b"]
+    var editor: LineEditor
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider add", messages, session, prof, editor)
+
+    check activeProviders.len == 1
+    check activeProviders[0].models == @["openai/gpt-oss-120b"]
+    check verifiedModels.len == 0
+
+  test "add accepts a custom url with a custom name in experimental mode":
+    experimentalEnabled = true
+    verifyProfileHook = proc(p: Profile): (bool, string) =
+      verifiedModels.add p.model
+      (true, "")
+    inputs = @["https://api.example.com/v1", "acme", "sk-acme", "acme-1"]
+    var editor: LineEditor
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider add", messages, session, prof, editor)
+
+    check activeProviders.len == 1
+    check activeProviders[0].name == "acme"
+    check activeProviders[0].url == "https://api.example.com/v1"
+    check activeProviders[0].models == @["acme-1"]
+    check verifiedModels == @["acme-1"]
+
+  test "add accepts an unrecognized api key with a custom name in experimental mode":
+    # The key prefix does not resolve, so the entry reads as a provider
+    # name; experimental mode asks for the url and key explicitly.
+    experimentalEnabled = true
+    verifyProfileHook = proc(p: Profile): (bool, string) =
+      verifiedModels.add p.model
+      (true, "")
+    inputs = @["acme2", "https://api2.example.com/v1", "weird-secret", "acme-2"]
+    var editor: LineEditor
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider add", messages, session, prof, editor)
+
+    check activeProviders.len == 1
+    check activeProviders[0].name == "acme2"
+    check activeProviders[0].url == "https://api2.example.com/v1"
+    check activeProviders[0].models == @["acme-2"]
+    check verifiedModels == @["acme-2"]
+
+  test "add accepts a free-text model in experimental mode":
+    experimentalEnabled = true
+    inputs = @["nvapi-add", "totally-made-up-model"]
+    var editor: LineEditor
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider add", messages, session, prof, editor)
+
+    check activeProviders.len == 1
+    check activeProviders[0].models == @["totally-made-up-model"]
+    check verifiedModels == @["totally-made-up-model"]
+
+  test "add prefilled with an api key never enters the wizard":
+    # Regression: `:provider add <key>` prefills the first field; the
+    # wizard must run the key-detection path directly, never surfacing
+    # "unknown provider" for the key itself.
+    var editor: LineEditor
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+    inputs = @["gpt-oss-120b"]
+
+    discard handleCommand(":provider add nvapi-prefilled", messages, session,
+                          prof, editor)
+
+    check activeProviders.len == 1
+    check activeProviders[0].name == "nvidia"
+    check activeProviders[0].key == "nvapi-prefilled"
+    check activeProviders[0].models == @["openai/gpt-oss-120b"]
+
+  test "first field label matches the mode":
+    # Regular mode takes a provider name or api key only; the label must
+    # not promise URLs it will reject. Experimental mode takes all three.
+    var editor: LineEditor
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+
+    experimentalEnabled = false
+    inputs = @["nvapi-key", "gpt-oss-120b"]
+    discard handleCommand(":provider add", messages, session, prof, editor)
+    check prompts[0] == "  provider or api key: "
+
+    prompts = @[]
+    activeProviders = @[]
+    activeCurrent = ""
+    experimentalEnabled = true
+    inputs = @["nvapi-key2", "gpt-oss-120b"]
+    discard handleCommand(":provider add", messages, session, prof, editor)
+    check prompts[0] == "  provider, url, or api key: "
+
+  test "first field completion lists catalog names only in experimental mode":
+    # The completed set is the same set the wizard accepts: known-good
+    # names in regular mode, the full catalog under --experimental.
+    var editor: LineEditor
+    var firstFieldCompletions: seq[string]
+    wizardReadLineHook = proc(prompt: string, hidden, noHistory: bool): string =
+      if prompt.startsWith("  provider"):
+        firstFieldCompletions = editor.completionCallback(editor)
+      prompts.add prompt
+      if inputs.len == 0:
+        raise newException(AssertionDefect, "missing wizard input for " & prompt)
+      result = inputs[0]
+      inputs.delete(0)
+
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+
+    experimentalEnabled = false
+    inputs = @["nvapi-key", "gpt-oss-120b"]
+    discard handleCommand(":provider add", messages, session, prof, editor)
+    check "nvidia" in firstFieldCompletions
+    check "mistral" notin firstFieldCompletions
+
+    activeProviders = @[]
+    activeCurrent = ""
+    firstFieldCompletions = @[]
+    experimentalEnabled = true
+    inputs = @["nvapi-key2", "gpt-oss-120b"]
+    discard handleCommand(":provider add", messages, session, prof, editor)
+    check "mistral" in firstFieldCompletions
+
+  test "edit rejects a free-text model in regular mode":
+    # Same rule as the add wizard: without --experimental the model list
+    # is closed. The first bogus entry re-prompts the whole edit loop;
+    # the second, curated, pass saves.
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["z-ai/glm-5.2"])
+    ]
+    activeCurrent = "nvidia.z-ai/glm-5.2"
+    inputs = @["", "", "totally-made-up-model", "", "", "gpt-oss-120b"]
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider edit nvidia", messages, session, prof,
+                          editor)
+
+    check activeProviders[0].models == @["openai/gpt-oss-120b"]
+    check verifiedModels.len == 0
