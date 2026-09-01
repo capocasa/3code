@@ -636,30 +636,40 @@ import threecode
 let session = initAgentSession(
   AgentOptions(model: "deepinfra.deepseek-v3.2"))
 
+# blocking: run a full turn (model calls + tool calls) and get the reply
+let reply = session.prompt("what does this project do?")
+
+# streaming: same call, events as they happen
 session.onEvent = proc(event: AgentEvent) =
   case event.kind
-  of aevDelta: stdout.write event.text
-  of aevRetry, aevTool: stderr.writeLine event.text
+  of aevDelta: stdout.write event.text        # assistant text chunks
+  of aevRetry, aevTool: stderr.writeLine event.text  # tool results, notices
+  of aevDone: echo event.usage                # per-call token usage
   else: discard
+discard session.prompt("Run the tests and fix the failure.")
 
-let reply = session.prompt("Run the tests and fix the failure.")
+# colon commands work too
 echo session.command(":tokens")
 session.close()
 ```
 
-`prompt` blocks until the model finishes calling tools and returns its reply.
-Meanwhile, `onEvent` receives text, reasoning, tool output, retry notices, and
-usage. `promptAsync` puts the turn on a library-managed thread and reports
-failures with `aevError`; `interrupt` cancels it. Sessions use the same provider
-config, filesystem policy, locks, and saved format as the CLI.
+`AgentOptions` mirrors the CLI flags: `model`, `cwd`, `resume`/`resumeId`,
+`sessionPath`, `experimental`, `debug`. `prompt` blocks until the model
+finishes calling tools and returns its reply. Meanwhile, `onEvent` receives
+text, reasoning, tool output, retry notices, and usage. `promptAsync` puts the
+turn on a library-managed thread and reports failures with `aevError`;
+`interrupt` cancels it. Sessions use the same provider config, filesystem
+policy, locks, and saved format as the CLI.
 
 Only one `AgentSession` may be active in a process, and calls on it are not
 thread-safe. In an asynchronous server, keep the session on one worker thread
 and pass prompts and events through queues. This avoids sharing session state
 across threads.
 
-`example/webserve.nim` is the complete example: the session stays on a worker
-thread and events reach the browser through server-sent events.
+`example/webserve.nim` is the complete example: a web frontend that serves a
+chat page, keeps the session on a worker thread, and streams replies to the
+browser over server-sent events. `nim c -r example/webserve.nim` and open
+http://localhost:8501.
 
 ## Build from source
 
@@ -671,16 +681,21 @@ Requires [Nim](https://nim-lang.org) >= 2.0 and `curl` on `PATH`.
 
 ## Contributing
 
+Patches welcome at [github.com/capocasa/3code](https://github.com/capocasa/3code).
+
+- **Known-good provider/model pairs** with test results
+- **Bug fixes** with a clear reproduction case
+
+Bug reports welcome, but make sure you give enough specific information to
+reproduce the issue. Terminal rendering bugs need a visual PTY test that shows
+the bad frame before the fix. A test that cannot show the bug has not
+reproduced it yet.
+
 Developer API documentation is generated at `docs/dev/threecode.html`:
 
 ```
 nimble devdocs
 ```
-
-Useful contributions include tested provider/model combinations and bug fixes
-with a clear reproduction. Terminal rendering bugs need a visual PTY test that
-shows the bad frame before the fix. A test that cannot show the bug has not
-reproduced it yet.
 
 ## Prior art
 
