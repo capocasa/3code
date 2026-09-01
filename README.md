@@ -2,9 +2,7 @@
 
 **The economical coding agent.**
 
-Get more done with less!
-
-Make your AI plan last longer, lower your token bill, program locally faster. Enjoy yourself more with instant startup and a calm interface.
+Does 5× more work for the same tokens. Your subscription lasts longer. Free-tier models actually work.
 
 → [3code.capocasa.dev](https://3code.capocasa.dev)
 
@@ -14,7 +12,34 @@ Make your AI plan last longer, lower your token bill, program locally faster. En
 
 ## Why
 
-A coding agent that works with any OpenAI-compatible endpoint. Bring your own provider! Free-tier and local models work, and subscriptions will last much longer.
+Claude Code, Cursor, Copilot — they all optimize for capability. Nobody optimizes for **cost**. 3code is the only coding agent that treats your token budget as a first-class constraint.
+
+That means your $20 subscription lasts a month instead of a week. It means you can use DeepSeek V4 or GLM-5.2 free tier and still get real work done. It means you don't have to think twice before asking a question.
+
+Works with any OpenAI-compatible endpoint. Bring your own provider — free tiers, flat-rate coding plans, subscriptions, and local servers all work.
+
+## Data to back it up
+
+SWE-bench Verified, 10-task subset — both agents on Z.ai glm-5.2 via the same LiteLLM proxy, 600s per-task timeout:
+
+| | 3code | opencode |
+|---|---|---|
+| Tasks resolved | **6 / 10** | 5 / 10 |
+| Non-cached input tokens | **~295k** | ~1.45M |
+| Cached input tokens | **~4.7M** | ~10.7M |
+| Output tokens | **~69k** | ~106k |
+| Wall time | **55 min** | 65 min |
+
+opencode sent 4.9× the non-cached input of 3code on comparable work. On most providers cached input accounts for 90%+ of token spend, so this is where efficiency pays off most. Zero eval errors, zero unresolved patches. Full per-task breakdown and methodology → [3code.capocasa.dev](https://3code.capocasa.dev)
+
+## How it pulls it off
+
+- **Chunked mode** — constantly extracts relevant context and discards what's stale. Keeps the agent sharp without carrying dead weight, and *improves* results because of intelligent discarding.
+- **Aggressive caching** — covers all bases; every cache hit is money saved.
+- **Context compaction** — supersede-aware: later writes elide stale reads, shrinking context automatically.
+- **Self-clearing execution** — plan/execute skill resets context between phases for larger tasks. No context bloat.
+
+We eat our own dog food — 3code is now written entirely with 3code, using GLM 5.2 on Z.ai's free tier.
 
 ## Install
 
@@ -52,17 +77,36 @@ another. The [provider guide](https://3code.capocasa.dev/docs#providers-and-auth
 covers free tiers, flat-rate coding plans, subscription logins, and local
 servers.
 
-## Manual
+## Technical details
 
-The full documentation is at [3code.capocasa.dev/docs](https://3code.capocasa.dev/docs):
-providers, configuration, sandbox policies, sessions, colon commands, and
-building from source.
+- **1.6 MB binary** — single executable, no runtime dependencies
+- **Cross-platform** — Linux x86-64/arm64 · macOS universal · Windows · Termux (Android arm64)
+- **No daemon, no web UI** — run it, use it, done
+- **Instant startup** — loads and responds instantly; your agent should never keep you waiting
+- **40 known-good combos** — validated provider + model pairings, just works out of the box
+- **Loop guard** — detects runaway autonomous edits, halts at configurable thresholds
+- **Session persistence** — human-readable `.3log` format; resume any past session
+- **Native web search** — built-in, no curl dependency
+- **No telemetry** — sessions stay local, nothing phoned home
+- **MIT license** — do whatever you want with it
 
 ## Library
 
-3code is also a Nim library: the same agent the CLI runs, embeddable in your own program with the terminal replaced by return values and callbacks. Sandbox, tool calls, session persistence, all of it. This is the foundation for building other coding agents or agents of any kind on top of 3code: a web frontend, a chat bot, a CI runner that fixes its own failures, an IDE plugin. The agent loop, tool use, and sandboxing are done; you bring the interface.
+3code is also a Nim library: the same agent the CLI runs, embeddable in your own program with the terminal replaced by return values and callbacks. Sandbox, tool calls, session persistence, all of it. Build a web frontend, a chat bot, a CI runner that fixes its own failures, an IDE plugin — the agent loop, tool use, and sandboxing are done; you bring the interface.
 
 The programming manual, with examples and API details, lives in the [docs](https://3code.capocasa.dev/docs).
+
+## Contributing
+
+Patches welcome! Open an issue, send a PR, or just try the bleeding edge and report back:
+
+```
+# macOS / Linux
+curl -fsSL https://3code.capocasa.dev/main/install | sh
+
+# Windows (PowerShell)
+irm https://3code.capocasa.dev/main/install.ps1 | iex
+```
 
 ## License
 
