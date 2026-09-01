@@ -83,6 +83,15 @@ const BlockTags = [
   "nav", "aside", "main", "table", "thead", "tbody", "dt", "dd", "dl", "form"
 ]
 
+proc stripAscii(s: string): string =
+  ## `strutils.strip` but byte-based: safe on invalid UTF-8, where
+  ## `unicode.strip` crashes (IndexDefect walking rune heads off index 0).
+  var a = 0
+  var b = s.len - 1
+  while a <= b and s[a] in {' ', '\t', '\r', '\n'}: inc a
+  while b >= a and s[b] in {' ', '\t', '\r', '\n'}: dec b
+  s[a .. b]
+
 proc stripHtml*(html: string): string =
   var raw = newStringOfCap(html.len)
   var i = 0
@@ -119,7 +128,11 @@ proc stripHtml*(html: string): string =
       raw.add c
       inc i
   let decoded = decodeEntities(raw)
-  # per-line horizontal whitespace collapse + blank-line collapse
+  # per-line horizontal whitespace collapse + blank-line collapse.
+  # `unicode.strip` (pulled in via `std/strutils`+`std/unicode` re-export)
+  # walks runes and crashes with IndexDefect on invalid UTF-8 (lone latin-1
+  # bytes from non-UTF-8 pages), so clamp lines to ASCII whitespace by hand
+  # instead of calling `strip`.
   var lines: seq[string]
   for ln in decoded.splitLines:
     var buf = newStringOfCap(ln.len)
@@ -132,7 +145,7 @@ proc stripHtml*(html: string): string =
       else:
         buf.add ch
         prevSpace = false
-    lines.add buf.strip
+    lines.add buf.stripAscii
   var out2: seq[string]
   var prevBlank = false
   for ln in lines:
@@ -140,7 +153,7 @@ proc stripHtml*(html: string): string =
     if blank and prevBlank: continue
     out2.add ln
     prevBlank = blank
-  result = out2.join("\n").strip
+  result = out2.join("\n").stripAscii
 
 # ---------- Fetch ----------
 
@@ -191,13 +204,13 @@ proc parseExaText*(text: string): seq[SearchHit] =
     var bodyLines: seq[string]
     for ln in rec.splitLines:
       if ln.startsWith("Title: "):
-        hit.title = ln[7 .. ^1].strip
+        hit.title = ln[7 .. ^1].stripAscii
       elif ln.startsWith("URL: "):
-        hit.url = ln[5 .. ^1].strip
-      elif ln.strip == "Highlights:":
+        hit.url = ln[5 .. ^1].stripAscii
+      elif ln.stripAscii == "Highlights:":
         seenHigh = true
       elif seenHigh:
-        if ln.strip.len > 0: bodyLines.add ln.strip
+        if ln.stripAscii.len > 0: bodyLines.add ln.stripAscii
     if hit.title.len == 0 and hit.url.len == 0: continue
     if bodyLines.len > 0:
       hit.snippet = bodyLines.join(" ")
@@ -261,7 +274,7 @@ proc parseParallelResults*(text: string): seq[SearchHit] =
     let exc = r{"excerpts"}
     if exc != nil and exc.kind == JArray:
       for ex in exc:
-        let s = ex.getStr("").strip
+        let s = ex.getStr("").stripAscii
         if s.len > 0: snips.add s
     hit.snippet = snips.join(" ")
     if hit.title.len == 0 and hit.url.len == 0: continue
@@ -316,7 +329,7 @@ proc parseBraveResults*(body: string): seq[SearchHit] =
     var hit: SearchHit
     hit.title = r{"title"}.getStr("")
     hit.url = r{"url"}.getStr("")
-    hit.snippet = r{"description"}.getStr("").strip
+    hit.snippet = r{"description"}.getStr("").stripAscii
     if hit.title.len == 0 and hit.url.len == 0: continue
     result.add hit
 
@@ -362,7 +375,7 @@ proc formatHits*(hits: seq[SearchHit]): string =
     if h.snippet.len > 0:
       var snip = h.snippet
       if snip.len > SnippetCap:
-        snip = snip[0 ..< SnippetCap].strip & " ... [truncated]"
+        snip = snip[0 ..< SnippetCap].stripAscii & " ... [truncated]"
       buf.add "   " & snip & "\n"
     buf.add "\n"
-  buf.strip
+  buf.stripAscii

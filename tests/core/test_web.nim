@@ -26,6 +26,12 @@ suite "web helpers":
     check "color:red" notin t
     check "hidden" notin t
 
+  test "stripHtml survives invalid UTF-8 (latin-1 byte)":
+    # Real-world pages are not always UTF-8; a lone high byte made
+    # `unicode.strip` walk off the start of the line (IndexDefect).
+    let t = stripHtml("<p>caf\xe9</p>")
+    check "caf" in t
+
   test "stripHtml collapses whitespace and block tags":
     let h = "<div>one</div><div>two</div><br>three"
     let t = stripHtml(h)
