@@ -137,6 +137,12 @@ url = "https://aki.io/openai/v1"
 key = "..."
 models = "kimi-k2.7-code-1100b deepseek-v4-flash-0731-284b minimax-m2.5-230b"
 
+[provider]
+name = "lyceum"
+url = "https://api.lyceum.technology/openai/v1"
+key = "lk_..."
+models = "z-ai/glm-5.2 moonshotai/kimi-k3 deepseek/deepseek-v4-pro"
+
 # `family` is an experimental-only override (only honored under
 # `--experimental`) that picks the system-prompt branch by family
 # name, when the (provider, model) combo isn't on the known-good
