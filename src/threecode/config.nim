@@ -738,6 +738,7 @@ proc loadProfile*(wanted: string): Profile =
   prof
 
 const ProviderCatalog*: seq[(string, string)] = @[
+  ("aki",         "https://aki.io/openai/v1"),
   ("anthropic",   "https://api.anthropic.com/v1"),
   ("arcee",       "https://conductor.arcee.ai/v1"),
   ("baseten",     "https://inference.baseten.co/v1"),

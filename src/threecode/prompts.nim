@@ -508,6 +508,15 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("greenpt", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, false, 1_000_000),
     ("greenpt", "gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
     ("greenpt", "qwen3.6-35b-a3b", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, false, 262_144),
+    # aki (AKI.IO, EU-hosted; OpenAI-compatible at aki.io/openai/v1). Wire
+    # ids carry size suffixes. Only models known-good elsewhere get entries;
+    # apertus/gemma4/llama3/mistral4 stay experimental.
+    ("aki", "deepseek-v4-flash-0731-284b", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
+    ("aki", "gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("aki", "kimi-k2.7-code-1100b", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
+    ("aki", "minimax-m2.5-230b", "minimax", "2", "5", "low", 0.2, 8192, false, 204_800),
+    ("aki", "qwen3.6-chat-35b", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, false, 262_144),
+    ("aki", "qwen3.8-chat-27b", "qwen", "3.8", "27b", "on", 0.2, 8192, false, 128_000),
     ("together", "moonshotai/Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
     ("together", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.6, 8192, false, 1_000_000),
     ("opencode", "gpt-5", "gpt", "", "5", "medium", 0.2, 8192, false, 400_000),
