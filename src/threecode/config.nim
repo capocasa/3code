@@ -827,3 +827,23 @@ proc curatedFor*(provider: string): seq[string] =
   let p = canonicalKnownGoodProvider(provider)
   for c in KnownGoodCombos:
     if c[0].toLowerAscii == p: result.add c[1]
+
+proc preferCurated*(curated: seq[string], models: var seq[string]) =
+  ## Rewrites entries of `models` that spell a curated known-good model
+  ## with extra qualifiers to the curated wire id. Endpoints occasionally
+  ## list ids they don't serve on chat/completions (kimicode listed
+  ## kimi-k3-256k, then 401'd it with "set model id as k3"), and the
+  ## verification ping doesn't catch it: that gateway serves unknown ids
+  ## too. The known-good id is the one that actually works, so it wins
+  ## when the listed id is the same model plus a qualifier tail
+  ## (kimi-k3-256k -> k3). Distinct models (kimi-k3 vs kimi-k2.6) never
+  ## match: their alias expansions share no prefix relation.
+  for c in curated:
+    let expansion = aliasExpansion(c)
+    for m in models.mitems:
+      if m != c:
+        let em = aliasExpansion(m)
+        if em.startsWith(expansion & "-") or
+           (expansion.startsWith(em & "-") and
+            normalizeModelName(m) == normalizeModelName(c)):
+          m = c

@@ -196,6 +196,30 @@ suite "provider wizard configuration":
     check activeCurrent == "nvidia.openai/gpt-oss-120b"
     check verifiedModels.len == 0
 
+  test "add prefers known-good id over listed-but-unserved variant":
+    # kimicode's /models listed kimi-k3 and kimi-k3-256k, but the
+    # endpoint only serves `k3`; the -256k id passed the verification
+    # ping and 401'd on the first real turn. The wizard rewrites the
+    # listed variant to the known-good id before saving.
+    experimentalEnabled = true
+    fetchModelsHook = proc(url, key: string): (seq[string], string) =
+      (@["kimi-k3", "kimi-k3-256k"], "")
+    inputs = @["", "sk-kimi", "kimi-k3-256k"]
+    verifyProfileHook = proc(p: Profile): (bool, string) =
+      verifiedModels.add p.model
+      (true, "")
+    var editor: LineEditor
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider add kimicode", messages, session, prof,
+                          editor)
+
+    check activeProviders.len == 1
+    check activeProviders[0].models == @["k3"]
+    check verifiedModels == @["k3"]
+
   test "add verifies every entered model and keeps only the ones that pass":
     # Experimental mode still verifies; a failed model is a warning, not
     # a blocker: the provider is saved with the models that verified.
