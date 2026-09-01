@@ -16,6 +16,7 @@
 ## missing key surfaces as a runtime error for engines that need one.
 
 import std/[httpclient, json, strutils, uri, unicode, tables]
+import zippy
 import util
 
 const UserAgent = "Mozilla/5.0 (X11; Linux x86_64) 3code/web"
@@ -32,7 +33,10 @@ proc newClient(): HttpClient =
                          sslContext = bundledSslContext())
   result.headers = newHttpHeaders({
     "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9"
+    "Accept-Language": "en-US,en;q=0.9",
+    # Nim httpclient does not decode content-encoding, so advertise gzip
+    # and gunzip in fetchUrl.
+    "Accept-Encoding": "gzip"
   })
 
 # ---------- HTML entity decoding ----------
@@ -157,18 +161,31 @@ proc stripHtml*(html: string): string =
 
 # ---------- Fetch ----------
 
+proc decodeBody*(cenc, body: string): string =
+  ## Undo HTTP content-encoding. Nim httpclient does not decode it, and
+  ## some servers (Amazon) gzip even when not asked; we asked anyway.
+  if "gzip" in cenc or "deflate" in cenc:
+    zippy.uncompress(body)
+  elif "br" in cenc:
+    raise newException(IOError, "unsupported content-encoding: " & cenc)
+  else:
+    body
+
 proc fetchUrl*(url: string): string =
   let client = newClient()
   defer: client.close()
   let resp = client.get(url)
   if resp.code.int div 100 != 2:
     raise newException(IOError, "HTTP " & $resp.code & " fetching " & url)
+  let body = decodeBody(
+    resp.headers.getOrDefault("content-encoding").toString.toLowerAscii,
+    resp.body)
   let ctype = resp.headers.getOrDefault("content-type").toString.toLowerAscii
   if "html" in ctype or "xml" in ctype:
-    stripHtml(resp.body)
+    stripHtml(body)
   elif ctype.startsWith("text/") or ctype.startsWith("application/json") or
        ctype.startsWith("application/javascript") or ctype == "":
-    resp.body
+    body
   else:
     raise newException(IOError, "unsupported content-type: " & ctype)
 
