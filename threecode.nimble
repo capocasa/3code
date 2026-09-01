@@ -12,6 +12,7 @@ requires "unicodedb >= 0.13.0"
 requires "tinotify >= 0.1.3"
 requires "sandwall >= 0.5.5"
 requires "libsha >= 1.0"
+requires "zippy >= 0.10"
 
 task test, "Run the test suite via testament (all, or named files)":
   # testament ships with Nim: it runs each test in its own process with

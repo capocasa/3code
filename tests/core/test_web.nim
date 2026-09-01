@@ -1,4 +1,5 @@
 import std/[unittest, strutils]
+import zippy
 import threecode/web
 
 const ExaFixture = "Title: Nim Programming Language\nURL: https://nim-lang.org/\nPublished: 2024-01-15\nAuthor: Nim Team\nHighlights:\nNim is a statically typed compiled systems programming language.\nIt combines successful concepts from mature languages like Python, Ada and Modula.\n---\nTitle: Learn Nim in Y Minutes\nURL: https://learnxinyminutes.com/docs/nim/\nPublished: 2023-11-02\nHighlights:\nSingle-page tour of Nim syntax for the impatient.\nCovers procs, types, generics and macros."
@@ -31,6 +32,13 @@ suite "web helpers":
     # `unicode.strip` walk off the start of the line (IndexDefect).
     let t = stripHtml("<p>caf\xe9</p>")
     check "caf" in t
+
+  test "decodeBody gunzips and passes plain through":
+    let plain = "<p>hello</p>"
+    check decodeBody("", plain) == plain
+    check decodeBody("gzip", zippy.compress(plain)) == plain
+    expect IOError:
+      discard decodeBody("br", plain)
 
   test "stripHtml collapses whitespace and block tags":
     let h = "<div>one</div><div>two</div><br>three"
