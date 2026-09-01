@@ -653,13 +653,17 @@ proc buildProfile*(current: string, providers: seq[ProviderRec],
       if pr.url == "" or (pr.key == "" and pr.auth != "oauth") or
          pr.models.len == 0:
         return Profile()
-      let fullModel =
+      var fullModel =
         if model == "": firstModel(pr)
         else:
           let i = pr.findModel(model)
           if i < 0: return Profile()
           pr.models[i]
       if fullModel == "": return Profile()
+      # Config stores normalized ids; the wire needs the full id from
+      # the known-good table when the pair is curated.
+      let wire = knownGoodWireModel(pr.name, fullModel)
+      if wire != "": fullModel = wire
       var prof = Profile(name: pr.name & "." & fullModel, url: pr.url,
                          key: pr.key, model: fullModel)
       prof.family = resolveFamily(pr, prof)
@@ -708,7 +712,7 @@ proc loadProfile*(wanted: string): Profile =
   if prov.key == "" and prov.auth != "oauth":
     die &"provider '{name}': key not set in {path}", ExitConfig
   if prov.models.len == 0: die &"provider '{name}': models not set in {path}", ExitConfig
-  let fullModel =
+  var fullModel =
     if model == "": firstModel(prov)
     else:
       let i = prov.findModel(model)
@@ -717,6 +721,8 @@ proc loadProfile*(wanted: string): Profile =
       prov.models[i]
   if fullModel == "":
     die &"provider '{name}': models list is empty", ExitConfig
+  let wire = knownGoodWireModel(prov.name, fullModel)
+  if wire != "": fullModel = wire
   var prof = Profile(name: prov.name & "." & fullModel, url: prov.url,
                      key: prov.key, model: fullModel)
   prof.family = resolveFamily(prov, prof)
@@ -828,22 +834,13 @@ proc curatedFor*(provider: string): seq[string] =
   for c in KnownGoodCombos:
     if c[0].toLowerAscii == p: result.add c[1]
 
-proc preferCurated*(curated: seq[string], models: var seq[string]) =
+proc preferCurated*(provider: string, models: var seq[string]) =
   ## Rewrites entries of `models` that spell a curated known-good model
   ## with extra qualifiers to the curated wire id. Endpoints occasionally
   ## list ids they don't serve on chat/completions (kimicode listed
   ## kimi-k3-256k, then 401'd it with "set model id as k3"), and the
   ## verification ping doesn't catch it: that gateway serves unknown ids
-  ## too. The known-good id is the one that actually works, so it wins
-  ## when the listed id is the same model plus a qualifier tail
-  ## (kimi-k3-256k -> k3). Distinct models (kimi-k3 vs kimi-k2.6) never
-  ## match: their alias expansions share no prefix relation.
-  for c in curated:
-    let expansion = aliasExpansion(c)
-    for m in models.mitems:
-      if m != c:
-        let em = aliasExpansion(m)
-        if em.startsWith(expansion & "-") or
-           (expansion.startsWith(em & "-") and
-            normalizeModelName(m) == normalizeModelName(c)):
-          m = c
+  ## too. The known-good id is the one that actually works, so it wins.
+  for m in models.mitems:
+    let wire = knownGoodWireModel(provider, m)
+    if wire != "": m = wire

@@ -232,6 +232,26 @@ suite "config: known-good lookup with normalized pretty names":
     check (g.temperature, g.maxTokens) == (0.2, 65536)
     check knownGoodContextWindow("zai", "glm-5.3") == 1_000_000
 
+  test "knownGoodWireModel repairs listed-but-unserved variants":
+    check knownGoodWireModel("kimicode", "kimi-k3-256k") == "k3"
+    check knownGoodWireModel("kimicode", "kimi-k3") == "k3"
+    check knownGoodWireModel("kimicode", "k3") == "k3"
+    check knownGoodWireModel("kimi", "kimi-k3-256k") == "kimi-k3"
+    check knownGoodWireModel("openrouter", "qwen-3.8-27b") == "qwen/qwen3.8-27b"
+    # Distinct models and unknown ids are not rewritten.
+    check knownGoodWireModel("kimicode", "kimi-k2.6") == ""
+    check knownGoodWireModel("kimicode", "weird-model") == ""
+
+  test "buildProfile maps stored variant to the curated wire id":
+    let providers = @[
+      ProviderRec(name: "kimicode", url: "https://api.kimi.com/coding/v1",
+                  key: "sk-kimi", models: @["kimi-k3", "kimi-k3-256k"])
+    ]
+    let prof = buildProfile("kimicode.kimi-k3-256k", providers, "")
+    check prof.model == "k3"
+    check prof.name == "kimicode.k3"
+    check prof.family == "kimi"
+
   test "orderedModels ranks normalized known-good models first":
     let prov = ProviderRec(name: "zai", url: "https://api.z.ai",
                            key: "k", models: @["weird-model", "glm-5.3"])
