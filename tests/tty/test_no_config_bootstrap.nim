@@ -16,6 +16,7 @@
 import std/[os, unittest]
 import tty_expect
 import stub_helpers
+import threecode/types
 
 proc newFixture(name: string): string =
   result = getCurrentDir() / "testdata/output/tty" / (name & "_" & $getCurrentProcessId())
@@ -79,3 +80,20 @@ suite "no-config bootstrap":
     tty.expectExit(0, timeoutMs = 5000)
 
     echo "  PASS: no-config bootstrap wizard completes and reaches prompt"
+
+  test "config with current but no provider section dies with a config error":
+    # Regression (issue #30): a config that sets [settings] current but
+    # has no [provider] section used to drop into the first-run wizard,
+    # which then refused every provider name with "already configured"
+    # (the wizard's ledger check reads the same `current`). Startup must
+    # diagnose the config instead.
+    let root = newFixture("current_no_provider")
+    createDir(root / "xdg" / "3code")
+    writeFile(root / "xdg" / "3code" / "config",
+      "[settings]\ncurrent = \"ghost-provider\"\n")
+    let tty = startTty(root)
+    defer: tty.close()
+    tty.expect "no [provider] section"
+    tty.expectExit(ExitConfig.int, timeoutMs = 5000)
+
+    echo "  PASS: current-without-provider config errors out, no wizard"
