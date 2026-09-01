@@ -88,6 +88,23 @@ func familyVersionLetter(fam: string): string =
   of "minimax": "m"
   else: ""
 
+func aliasExpansion*(name: string): string =
+  ## Slash-stripped, suffix-stripped, alias-expanded form of a model id
+  ## (`k3` -> `kimi-k3`, `moonshotai/kimi-k3:free` -> `kimi-k3`). Lets
+  ## callers compare spellings that differ only by alias, author prefix,
+  ## or qualifier tail without re-parsing the full canonical form.
+  var s = name.strip.toLowerAscii
+  let slash = s.rfind('/')
+  if slash >= 0: s = s[slash + 1 .. ^1]
+  let colon = s.find(':')
+  if colon >= 0: s = s[0 ..< colon]
+  for (a, expansion) in ModelAliases:
+    if s == a:
+      return expansion
+    if s.startsWith(a & "-"):
+      return expansion & s[a.len .. ^1]
+  s
+
 func format*(m: ModelName): string =
   ## Canonical string form: `family-version-designator-qualifiers:suffix`.
   ## The dash before the version is dropped only when the version is a
@@ -126,6 +143,8 @@ func normalizeModelName*(name: string): string =
     if s.startsWith(a & "-"):
       s = expansion & s[a.len .. ^1]
       break
+  # (aliasExpansion duplicates this loop for callers that only need the
+  # expansion; keep the two in sync.)
   # Family: exact, dash-prefix, or glued (`qwen3.8`, `hy3`).
   var fam = ""
   var rest = ""

@@ -591,6 +591,8 @@ proc promptNewProvider*(editor: var minline.LineEditor,
     var models: seq[string]
     for rm in rawModels:
       models.add lookup.getOrDefault(rm, rm)
+    # Listed-but-unserved ids (see preferCurated).
+    preferCurated(name, models)
     if models.len == 0:
       errLn "need at least one model"
       continue
@@ -673,7 +675,9 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     # Resolve short names against the offered list; unknown names pass
     # through as-is (full id entered by the user).
     let lookup = shortToFull(sortedAvailable)
-    let models = rawModels.mapIt(lookup.getOrDefault(it, it))
+    var models = rawModels.mapIt(lookup.getOrDefault(it, it))
+    # Same listed-but-unserved guard as the add wizard.
+    preferCurated(name, models)
     if models.len == 0:
       errLn "need at least one model"
       continue

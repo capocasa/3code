@@ -63,6 +63,12 @@ suite "modelname: normalizeModelName":
     check normalizeModelName("kimi-k2.6") == "kimi-k2.6"
     check normalizeModelName("kimi-2.6") == "kimi-k2.6"
 
+  test "context-size qualifier after series version":
+    check normalizeModelName("kimi-k3-256k") == "kimi-k3-256k"
+    check normalizeModelName("moonshotai/Kimi-K3-256K") == "kimi-k3-256k"
+    check normalizeModelName("minimax-m2.7-256k") == "minimax-m2.7-256k"
+    check normalizeModelName("kimi-k3:free") == "kimi-k3:free"
+
   test "kimi-for-coding alias":
     check normalizeModelName("kimi-for-coding") == "kimi-k2.7-code"
 

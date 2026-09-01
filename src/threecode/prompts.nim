@@ -2713,6 +2713,26 @@ func matchesKnownGoodModel*(comboModel, model: string): bool =
   let m = model.toLowerAscii
   comboModel.toLowerAscii == m or normalizeModelName(comboModel) == m
 
+func matchesWireRepairCandidate*(comboModel, model: string): bool =
+  ## `matchesKnownGoodModel` plus one extra case for
+  ## listed-but-unserved ids: the model is the curated one plus a bare
+  ## qualifier tail (`kimi-k3-256k` for combo `k3`, alias-expanded
+  ## `kimi-k3`). Endpoints occasionally list such ids without serving
+  ## them on chat/completions, and the verification ping doesn't catch
+  ## it (that gateway serves unknown ids too), so the wire-id repair
+  ## rewrites them to the curated id. Only alias-shaped combos
+  ## qualify (combo `k3`, whose normalized form is the alias expansion
+  ## `kimi-k3`): the short ids where providers actually pull this
+  ## trick. Dated and routing variants of ordinary combos
+  ## (`gpt-5.5-pro`, `deepseek-v4-flash-20260731`) stay experimental
+  ## by design. Used only by `knownGoodWireModel`: the experimental
+  ## gate and the curated defaults (`isKnownGood`, `knownGoodFamily`,
+  ## `knownGoodReasonings`) deliberately keep the narrower matching.
+  if matchesKnownGoodModel(comboModel, model): return true
+  let normCombo = normalizeModelName(comboModel)
+  if normCombo != aliasExpansion(comboModel): return false
+  aliasExpansion(model).startsWith(normCombo & "-")
+
 proc canonicalKnownGoodProvider*(provider: string): string =
   ## Map config provider names onto the KnownGoodCombos provider key.
   ## `supergrok` is the SuperGrok/OAuth twin of first-party `xai` (same
@@ -2727,11 +2747,12 @@ proc knownGoodWireModel*(provider, model: string): string =
   ## Full wire model id for a known-good (provider, model), or "" when
   ## off the table. Config files persist normalized ids (the author
   ## prefix is dropped), but the API needs the wire id
-  ## (`qwen/qwen3.8-27b`, not `qwen-3.8-27b`).
+  ## (`qwen/qwen3.8-27b`, not `qwen-3.8-27b`). Also repairs
+  ## listed-but-unserved variants (`kimi-k3-256k` -> `k3`).
   let p = canonicalKnownGoodProvider(provider)
   for combo in KnownGoodCombos:
     if combo.provider.toLowerAscii == p and
-       matchesKnownGoodModel(combo.model, model):
+       matchesWireRepairCandidate(combo.model, model):
       return combo.model
   ""
 
