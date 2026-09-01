@@ -21,6 +21,7 @@ import util
 const UserAgent = "Mozilla/5.0 (X11; Linux x86_64) 3code/web"
 const DefaultFetchCap = 20_000
 const SearchResultCap = 10
+const SnippetCap = 500
 
 type
   SearchHit* = object
@@ -358,6 +359,10 @@ proc formatHits*(hits: seq[SearchHit]): string =
   for i, h in hits:
     buf.add $(i + 1) & ". " & h.title & "\n"
     if h.url.len > 0: buf.add "   " & h.url & "\n"
-    if h.snippet.len > 0: buf.add "   " & h.snippet & "\n"
+    if h.snippet.len > 0:
+      var snip = h.snippet
+      if snip.len > SnippetCap:
+        snip = snip[0 ..< SnippetCap].strip & " ... [truncated]"
+      buf.add "   " & snip & "\n"
     buf.add "\n"
   buf.strip
