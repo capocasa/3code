@@ -78,6 +78,14 @@ A working example lives in [`example/webserve.nim`](example/webserve.nim): a web
 
 ## Changelog
 
+**0.6.4** - Backports
+
+- **Startup.** A config with `current` but no `[provider]` section no
+  longer drops into the first-run wizard (which then refused every name
+  with "already configured"); it dies with a config error instead (#30).
+- **Catalog.** Known-good Qwen 3.8 27B and 3.8 Flash on OpenRouter, new
+  providers greenpt, aki and lyceum with curated model lists.
+
 **0.6.3** - Catalog sweep
 
 - **Catalog.** GLM-5.3 / GLM-5.3-Flash, Qwen 3.8 and DeepSeek V4 known-good
