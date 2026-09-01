@@ -653,17 +653,13 @@ proc buildProfile*(current: string, providers: seq[ProviderRec],
       if pr.url == "" or (pr.key == "" and pr.auth != "oauth") or
          pr.models.len == 0:
         return Profile()
-      var fullModel =
+      let fullModel =
         if model == "": firstModel(pr)
         else:
           let i = pr.findModel(model)
           if i < 0: return Profile()
           pr.models[i]
       if fullModel == "": return Profile()
-      # Config stores normalized ids; the wire needs the full id from
-      # the known-good table when the pair is curated.
-      let wire = knownGoodWireModel(pr.name, fullModel)
-      if wire != "": fullModel = wire
       var prof = Profile(name: pr.name & "." & fullModel, url: pr.url,
                          key: pr.key, model: fullModel)
       prof.family = resolveFamily(pr, prof)
@@ -712,7 +708,7 @@ proc loadProfile*(wanted: string): Profile =
   if prov.key == "" and prov.auth != "oauth":
     die &"provider '{name}': key not set in {path}", ExitConfig
   if prov.models.len == 0: die &"provider '{name}': models not set in {path}", ExitConfig
-  var fullModel =
+  let fullModel =
     if model == "": firstModel(prov)
     else:
       let i = prov.findModel(model)
@@ -721,8 +717,6 @@ proc loadProfile*(wanted: string): Profile =
       prov.models[i]
   if fullModel == "":
     die &"provider '{name}': models list is empty", ExitConfig
-  let wire = knownGoodWireModel(prov.name, fullModel)
-  if wire != "": fullModel = wire
   var prof = Profile(name: prov.name & "." & fullModel, url: prov.url,
                      key: prov.key, model: fullModel)
   prof.family = resolveFamily(prov, prof)
