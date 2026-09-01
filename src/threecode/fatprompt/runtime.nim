@@ -365,17 +365,27 @@ proc currentFrameFromModel*(): FooterFrame {.gcsafe.} =
   ## Build the live `FooterFrame` from the unified `frameModelShared`.
   ## The animation threads and the input thread's editor redraw both use
   ## this so they can never observe a torn spinner-vs-barTick state.
-  let m = getFrameModel()
+  # Build the frame under `frameModelLock` so the model copy's destroy is
+  # serialized with the controller's `setAnim*` writes (ORC+locks
+  # discipline). Runs on the GUI thread (spinner tick) and the input thread
+  # (editor redraw), both cross-thread readers of the shared model.
   {.cast(gcsafe).}:
-    case m.mode
-    of amSpinner:
-      spinnerFooterFrame(
-        if m.spinner.len > 0: m.spinner else: "○",
-        m.label, m.ticker, m.elapsed)
-    of amBarTick:
-      tokenBarFrame(m.label, m.ticker)
-    of amIdle:
-      footerFrame(fatPromptState)
+    acquire frameModelLock
+    try:
+      block:
+        let m = frameModelShared
+        result =
+          case m.mode
+          of amSpinner:
+            spinnerFooterFrame(
+              if m.spinner.len > 0: m.spinner else: "○",
+              m.label, m.ticker, m.elapsed)
+          of amBarTick:
+            tokenBarFrame(m.label, m.ticker)
+          of amIdle:
+            footerFrame(fatPromptState)
+    finally:
+      release frameModelLock
 
 proc testFrameMode(): bool =
   getEnv("THREECODE_TEST_FRAME_FD").len > 0
@@ -598,24 +608,35 @@ proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
     return
   if not liveEditorFooterAnchored():
     return
-  let m = getFrameModel()
-  let frameModel =
-    case m.mode
-    of amSpinner:
-      spinnerFooterFrame(
-        if m.spinner.len > 0: m.spinner else: "○",
-        m.label, m.ticker, m.elapsed)
-    of amBarTick:
-      # The elapsed suffix is ephemeral (changes every tick); recompute it
-      # locally from the model's base label. The single GUI thread does the
-      # same computation when painting bar-tick frames.
-      let elapsed = (epochTime() - barTickStart).int
-      let label =
-        if m.label.hasElapsedSuffix: m.label
-        else: m.label & "  " & $elapsed & "s"
-      tokenBarFrame(label)
-    of amIdle:
-      footerFrame(fatPromptState)
+  # Copy `frameModelShared` and build the frame under `frameModelLock`,
+  # so both the copy's and the frame's destroys (dec-ref of shared strings)
+  # are serialized with the controller's `setAnim*` writes — the same
+  # ORC+locks discipline as the GUI tick.
+  var frameModel: FooterFrame
+  {.cast(gcsafe).}:
+    acquire frameModelLock
+    try:
+      block:
+        let m = frameModelShared
+        frameModel =
+          case m.mode
+          of amSpinner:
+            spinnerFooterFrame(
+              if m.spinner.len > 0: m.spinner else: "○",
+              m.label, m.ticker, m.elapsed)
+          of amBarTick:
+            # The elapsed suffix is ephemeral (changes every tick); recompute
+            # it locally from the model's base label. The single GUI thread
+            # does the same computation when painting bar-tick frames.
+            let elapsed = (epochTime() - barTickStart).int
+            let label =
+              if m.label.hasElapsedSuffix: m.label
+              else: m.label & "  " & $elapsed & "s"
+            tokenBarFrame(label)
+          of amIdle:
+            footerFrame(fatPromptState)
+    finally:
+      release frameModelLock
   termengine.beginEditorRedraw(ed, inputEditorReady.load(moAcquire),
                                frameModel)
 
@@ -793,77 +814,90 @@ proc guiLoop(unused: string) {.thread.} =
         0.0
       else:
         epochTime() - start
-    let m = getFrameModel()
     var paintedViewport = false
-    try:
-      case m.mode
-      of amSpinner:
-        let glyph = frames[i mod frames.len]
-        setSpinFrame(glyph, elapsed.int)
-        let frame = currentFrameFromModel()
-        # When assistant content is streaming, the controller has painted
-        # volatile partial rows into the engine. A bare `renderFooter` would
-        # erase them (`\x1b[J`) and repaint only the footer, clobbering the
-        # streaming partial. Instead paint the tracked live rows + the
-        # animated footer as one composite (the same shape
-        # `renderLiveContent` produces), so the spinner keeps rotating
-        # without destroying the partial.
-        if termengine.liveContentRowCount() > 0:
-          termengine.repaintLiveContent(frame,
-                                        inputThreadRunning, inputEditor,
-                                        currentTermW())
-        else:
-          termengine.renderFooter(frame,
-                                  inputThreadRunning, inputEditor,
-                                  currentTermW())
-        spinnerFramePainted.store(true, moRelaxed)
-      of amBarTick:
-        let secs = (epochTime() - barTickStart).int
-        let label =
-          if m.label.hasElapsedSuffix: m.label
-          else: m.label & "  " & $secs & "s"
-        let frame = tokenBarFrame(label)
-        let snap = m.viewport
-        if snap.active:
-          # Re-derive the wrapped rows from the snapshot at the live
-          # terminal width each tick. Pre-wrap rows frozen at an old width
-          # stacked fragments into scrollback after a resize (the erase
-          # walk-up lagged the rows the terminal actually held); re-wrapping
-          # here keeps the painted rows and the engine's erase bookkeeping in
-          # sync with the current geometry.
-          let termW = currentTermW()
-          var view = initStreamingView(
-            snap.maxLines, snap.idx, snap.banner)
-          view.exitCode = snap.exitCode
-          # Apply the rotating command symbol (starts at `$`, index 0) for
-          # the live "currency ticker" effect during bash execution. The
-          # viewport repaints every 80ms; advance the index only every 4th
-          # frame (~320ms/symbol) so it reads as a slow ticker, not a blur.
-          # In test mode the index never advances so every captured frame
-          # shows `$`, matching the golden fixtures. Skip once exitCode > 0:
-          # `commandIcon` bakes the terminal `Ø` then.
-          if commandStatusActive.load(moRelaxed) and snap.exitCode <= 0:
-            if not testFrameMode() and i mod 4 == 0:
-              discard commandSymbolIndex.fetchAdd(1, moRelease)
-            view.symbol = nextCommandSymbol()
-          for line in snap.lines:
-            addLine(view, line)
-          let bannerRows = bannerRowCountAt(view, termW)
-          let rows = viewportRowsAt(view, termW)
-          termengine.renderToolViewport(rows, frame,
-                                        inputThreadRunning, inputEditor,
-                                        termW, bannerRows)
-        else:
-          termengine.renderFooter(frame, inputThreadRunning, inputEditor,
-                                  currentTermW())
-        paintedViewport = true
-      of amIdle:
-        discard  # nothing to animate; the controller paints idle frames
-      if testFrameMode():
-        testSpinnerPainted.store(observedTestTick, moRelease)
-        if paintedViewport:
-          viewportPainted.store(observedViewportTick, moRelease)
-    except CatchableError: discard
+    {.cast(gcsafe).}:
+      acquire frameModelLock
+      try:
+        block tickBody:
+          let m = frameModelShared
+          case m.mode
+          of amSpinner:
+            # Build the frame inline from the locked copy `m` with the local
+            # rotating glyph. Do NOT call `setSpinFrame`/`currentFrameFromModel`
+            # here — both acquire `frameModelLock`, which this tick already
+            # holds (non-reentrant `Lock` → deadlock). The glyph is the local
+            # constant; `elapsed` comes from the tick clock.
+            let glyph = frames[i mod frames.len]
+            let frame = spinnerFooterFrame(glyph, m.label, m.ticker,
+                                           elapsed.int)
+            # When assistant content is streaming, the controller has painted
+            # volatile partial rows into the engine. A bare `renderFooter` would
+            # erase them (`\x1b[J`) and repaint only the footer, clobbering the
+            # streaming partial. Instead paint the tracked live rows + the
+            # animated footer as one composite (the same shape
+            # `renderLiveContent` produces), so the spinner keeps rotating
+            # without destroying the partial.
+            if termengine.liveContentRowCount() > 0:
+              termengine.repaintLiveContent(frame,
+                                            inputThreadRunning, inputEditor,
+                                            currentTermW())
+            else:
+              termengine.renderFooter(frame,
+                                      inputThreadRunning, inputEditor,
+                                      currentTermW())
+            spinnerFramePainted.store(true, moRelaxed)
+          of amBarTick:
+            let secs = (epochTime() - barTickStart).int
+            let label =
+              if m.label.hasElapsedSuffix: m.label
+              else: m.label & "  " & $secs & "s"
+            let frame = tokenBarFrame(label)
+            let snap = m.viewport
+            if snap.active:
+              # Re-derive the wrapped rows from the snapshot at the live
+              # terminal width each tick. Pre-wrap rows frozen at an old width
+              # stacked fragments into scrollback after a resize (the erase
+              # walk-up lagged the rows the terminal actually held); re-wrapping
+              # here keeps the painted rows and the engine's erase bookkeeping in
+              # sync with the current geometry.
+              let termW = currentTermW()
+              var view = initStreamingView(
+                snap.maxLines, snap.idx, snap.banner)
+              view.exitCode = snap.exitCode
+              # Apply the rotating command symbol (starts at `$`, index 0) for
+              # the live "currency ticker" effect during bash execution. The
+              # viewport repaints every 80ms; advance the index only every 4th
+              # frame (~320ms/symbol) so it reads as a slow ticker, not a blur.
+              # In test mode the index never advances so every captured frame
+              # shows `$`, matching the golden fixtures. Skip once exitCode > 0:
+              # `commandIcon` bakes the terminal `Ø` then.
+              if commandStatusActive.load(moRelaxed) and snap.exitCode <= 0:
+                if not testFrameMode() and i mod 4 == 0:
+                  discard commandSymbolIndex.fetchAdd(1, moRelease)
+                view.symbol = nextCommandSymbol()
+              for line in snap.lines:
+                addLine(view, line)
+              let bannerRows = bannerRowCountAt(view, termW)
+              let rows = viewportRowsAt(view, termW)
+              termengine.renderToolViewport(rows, frame,
+                                            inputThreadRunning, inputEditor,
+                                            termW, bannerRows)
+            else:
+              termengine.renderFooter(frame, inputThreadRunning, inputEditor,
+                                      currentTermW())
+            paintedViewport = true
+          of amIdle:
+            discard  # nothing to animate; the controller paints idle frames
+          if testFrameMode():
+            testSpinnerPainted.store(observedTestTick, moRelease)
+            if paintedViewport:
+              viewportPainted.store(observedViewportTick, moRelease)
+      except CatchableError: discard
+      finally:
+        # `m` is scoped in `tickBody`, whose end precedes this release, so the
+        # copy's destroy (dec-ref of the shared strings) is under the lock —
+        # serialized with the controller's `setAnim*` writes on every thread.
+        release frameModelLock
     if not testFrameMode():
       sleep 80
     inc i
@@ -1045,10 +1079,21 @@ proc snapshotAndSaveDraft() =
   if tryAcquire(inputStateLock):
     try:
       sessionPtr = inputSession
+    finally:
+      release inputStateLock
+  # Read the editor text under the terminal write lock — the same lock the
+  # input thread holds while mutating `line.text` (via preMutate/postMutate)
+  # and the GUI thread holds while reading it in `renderFooter`. Reading it
+  # under `inputStateLock` instead raced those and corrupted the shared
+  # string's refcount (ORC is not thread-safe across the boundary). The copy
+  # is cheap (a draft snapshot); doing it under tryAcquire keeps the
+  # signal-handler path non-blocking.
+  if tryAcquire(termui.terminalLock):
+    try:
       if inputEditor != nil:
         text = inputEditor[].line.text
     finally:
-      release inputStateLock
+      release termui.terminalLock
   if sessionPtr != nil and sessionPtr[].savePath != "":
     saveDraft(sessionPtr[], text)
 
