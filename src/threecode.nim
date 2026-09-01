@@ -480,6 +480,14 @@ proc main() =
 
   var activeColorKeys: Table[string, string]
   (activeCurrent, activeProviders, activeColorKeys) = loadStateOrEmpty(configPath())
+  if activeProviders.len == 0 and activeCurrent != "":
+    # A config that sets `current` but has no [provider] section used to
+    # fall through to the first-run wizard, which then refused every name
+    # with "already configured" (the wizard's ledger check reads the same
+    # `current`). Diagnose the config instead of pretending it's a first
+    # run.
+    die(configPath() & ": no [provider] section; add one or remove " &
+        "'current' from [settings]", ExitConfig)
   # Resolve the real mode now that `[settings] mode` has been read: detect
   # the terminal background unless the config pinned a palette. The palette
   # is re-applied so the welcome screen (rendered next) uses the resolved
