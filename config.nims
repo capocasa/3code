@@ -28,6 +28,16 @@ switch("d", "ssl")
 switch("d", "testPlainHttp")
 
 when defined(android):
+  # Termux: ORC's cross-thread refcounting corrupts the heap when worker
+  # threads (network worker, GUI, input) hand shared GC'd strings/seqs
+  # across a lock, and Android's hardened_malloc aborts on the first touch
+  # of a quarantined chunk ("hardened_malloc: fatal allocator error:
+  # detected write after free" / "double free (quarantine)"). glibc
+  # tolerates the same corruption, so Linux/macOS/Windows ship it silently.
+  # refc uses per-thread heaps with atomic refcounts and no cross-thread
+  # cycle tracker, which removes the failure mode. Verified on device:
+  # ORC crashes every heavy multi-turn run; refc ran 6/6 clean.
+  switch("mm", "refc")
   # Termux: Nim's openssl wrapper dlopens libssl.so.3/libcrypto.so.3 at
   # module init, but Android's linker only searches the system lib dirs
   # and the binary's own DT_RUNPATH for dlopen'd libs, never Termux's
