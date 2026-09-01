@@ -517,6 +517,25 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("aki", "minimax-m2.5-230b", "minimax", "2", "5", "low", 0.2, 8192, false, 204_800),
     ("aki", "qwen3.6-chat-35b", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, false, 262_144),
     ("aki", "qwen3.8-chat-27b", "qwen", "3.8", "27b", "on", 0.2, 8192, false, 128_000),
+    # lyceum (Lyceum Technology, EU; OpenAI-compatible at
+    # api.lyceum.technology/openai/v1, vLLM with org/model wire ids).
+    # Only models known-good elsewhere get entries; qwen3.5-9b and the
+    # gemma/hermes/nemotron lineup stay experimental.
+    ("lyceum", "z-ai/glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
+    ("lyceum", "z-ai/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
+    ("lyceum", "z-ai/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("lyceum", "z-ai/glm-5.3", "glm", "5", "3", "high", 0.2, 65536, false, 1_000_000),
+    ("lyceum", "z-ai/glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
+    ("lyceum", "deepseek/deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
+    ("lyceum", "deepseek/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
+    ("lyceum", "deepseek/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
+    ("lyceum", "minimax/minimax-m3", "minimax", "3", "", "on", 0.2, 8192, false, 1_000_000),
+    ("lyceum", "moonshotai/kimi-k2.5", "kimi", "2", "5", "on", 0.6, 8192, false, 262_144),
+    ("lyceum", "moonshotai/kimi-k2.6", "kimi", "2", "6", "on", 0.6, 8192, false, 262_144),
+    ("lyceum", "moonshotai/kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
+    ("lyceum", "moonshotai/kimi-k3", "kimi", "3", "", "on", 0.6, 8192, false, 1_000_000),
+    ("lyceum", "openai/gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("lyceum", "qwen/qwen3.8-27b", "qwen", "3.8", "27b", "on", 0.2, 8192, false, 128_000),
     ("together", "moonshotai/Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
     ("together", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.6, 8192, false, 1_000_000),
     ("opencode", "gpt-5", "gpt", "", "5", "medium", 0.2, 8192, false, 400_000),

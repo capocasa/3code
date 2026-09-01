@@ -752,6 +752,7 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("inceptron",   "https://api.inceptron.io/v1"),
   ("kimi",        "https://api.moonshot.ai/v1"),
   ("kimicode",    "https://api.kimi.com/coding/v1"),
+  ("lyceum",      "https://api.lyceum.technology/openai/v1"),
   ("minimax",     "https://api.minimax.io/v1"),
   ("minimax-cn",  "https://api.minimaxi.com/v1"),
   ("mistral",     "https://api.mistral.ai/v1"),
