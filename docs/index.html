@@ -41,7 +41,7 @@
 <h4 id="flatminusrate-coding-plans">Flat-rate coding plans</h4><p>The <a class="reference external" href="https://z.ai/subscribe">z.ai coding plan</a> is my main setup. GLM is capable, inexpensive, and happy to keep working through a long task.</p>
 <p>3code can also log in with ChatGPT Plus/Pro and SuperGrok or X Premium+ subscriptions. These are separate from OpenAI and xAI API billing, despite the similar names.</p>
 
-<h4 id="eu-providers">EU providers</h4><p>When data must stay under EU jurisdiction, I use <a class="reference external" href="https://tensorx.ai">TensorX</a>. Nebius and Eurouter are also in the provider catalog.</p>
+<h4 id="eu-providers">EU providers</h4><p>When data must stay under EU jurisdiction, I use <a class="reference external" href="https://greenpt.com">GreenPT</a>. Nebius and Eurouter are also in the provider catalog.</p>
 
 <h4 id="lowminuscost-providers">Low-cost providers</h4><p>DeepInfra, OpenCode, nano-gpt, Novita, and similar aggregators serve quantized open models cheaply. Quality and availability vary, so a little comparison shopping pays off.</p>
 
@@ -99,6 +99,9 @@ nimble install https://github.com/capocasa/3code</pre></p>
 <h2 id="interactive-use">Interactive use</h2><p>At the interactive prompt, describe the result you want or enter a command beginning with <tt class="docutils literal"><span class="pre">:</span></tt>. Tab completes commands, provider names, model names, and paths where supported.</p>
 <p>3code loads <tt class="docutils literal"><span class="pre">3CODE.md</span></tt> and <tt class="docutils literal"><span class="pre">AGENTS.md</span></tt> from the project directory and its parents. These are good homes for project rules, build commands, and style requirements. To include a file directly in a prompt, prefix its path with <tt class="docutils literal"><span class="pre">@</span></tt>:</p>
 <p><pre class="listing">Review @src/parser.nim and add tests for malformed input.</pre></p>
+<p>To run a shell command yourself without sending anything to the model, prefix it with <tt class="docutils literal"><span class="pre">:!</span></tt>:</p>
+<p><pre class="listing">:! cargo test</pre></p>
+<p>The output appears in your scrollback only; the model never sees it. The command runs through the same sandbox policy as model-run commands.</p>
 <p>Useful input keys:</p>
 <table border="1" class="docutils"><tr><th>key</th><th>action</th></tr>
 <tr><td>Enter</td><td>submit</td></tr>
@@ -108,10 +111,22 @@ nimble install https://github.com/capocasa/3code</pre></p>
 <tr><td>Ctrl+U</td><td>clear the input buffer</td></tr>
 <tr><td>Ctrl+W</td><td>delete the previous word</td></tr>
 <tr><td>Ctrl+L</td><td>clear the screen</td></tr>
+<tr><td>Alt+E</td><td>edit the input buffer in $VISUAL/$EDITOR</td></tr>
+<tr><td>Ctrl+X Ctrl+E</td><td>same (emacs edit-and-execute-command)</td></tr>
 <tr><td>Ctrl+C</td><td>clear current input</td></tr>
 <tr><td>Esc</td><td>cancel the current operation</td></tr>
 <tr><td>Ctrl+D</td><td>exit</td></tr>
 </table><p>If you forget one, <tt class="docutils literal"><span class="pre">:help</span></tt> prints the current command and key list.</p>
+
+<h3 id="rebinding-keys">Rebinding keys</h3><p>Keys are commands, and commands are reassignable in the config file (<tt class="docutils literal"><span class="pre">~/.config/3code/config</span></tt>, or the path passed with <tt class="docutils literal"><span class="pre">--config</span></tt>). Add a <tt class="docutils literal"><span class="pre">[shortcuts]</span></tt> section that maps a command name to a space-separated list of keys:</p>
+<p><pre class="listing">[shortcuts]
+cancel = DoubleESC</pre></p>
+<p>Now a single Esc does nothing and two quick Esc presses cancel the current turn, handy if you keep brushing Esc by accident. Values are merged onto the defaults, so a command keeps its built-in keys until you override it. An empty value unbinds a command entirely:</p>
+<p><pre class="listing">[shortcuts]
+suspend =</pre></p>
+<p>The commands: <tt class="docutils literal"><span class="pre">cancel</span></tt>, <tt class="docutils literal"><span class="pre">clear</span></tt>, <tt class="docutils literal"><span class="pre">quit-if-empty</span></tt>, <tt class="docutils literal"><span class="pre">home</span></tt>, <tt class="docutils literal"><span class="pre">end</span></tt>, <tt class="docutils literal"><span class="pre">left</span></tt>, <tt class="docutils literal"><span class="pre">right</span></tt>, <tt class="docutils literal"><span class="pre">word-left</span></tt>, <tt class="docutils literal"><span class="pre">word-right</span></tt>, <tt class="docutils literal"><span class="pre">up</span></tt>, <tt class="docutils literal"><span class="pre">down</span></tt>, <tt class="docutils literal"><span class="pre">history-previous</span></tt>, <tt class="docutils literal"><span class="pre">history-next</span></tt>, <tt class="docutils literal"><span class="pre">backspace</span></tt>, <tt class="docutils literal"><span class="pre">delete</span></tt>, <tt class="docutils literal"><span class="pre">insert</span></tt>, <tt class="docutils literal"><span class="pre">delete-word-left</span></tt>, <tt class="docutils literal"><span class="pre">delete-to-boundary-left</span></tt>, <tt class="docutils literal"><span class="pre">clear-screen</span></tt>, <tt class="docutils literal"><span class="pre">suspend</span></tt>, <tt class="docutils literal"><span class="pre">complete</span></tt>, <tt class="docutils literal"><span class="pre">reverse-complete</span></tt>, <tt class="docutils literal"><span class="pre">edit-in-editor</span></tt>, <tt class="docutils literal"><span class="pre">insert-newline</span></tt>.</p>
+<p>Key names look like <tt class="docutils literal"><span class="pre">Ctrl+C</span></tt>, <tt class="docutils literal"><span class="pre">Alt+F</span></tt>, <tt class="docutils literal"><span class="pre">ShiftTab</span></tt>, <tt class="docutils literal"><span class="pre">Home</span></tt>, <tt class="docutils literal"><span class="pre">End</span></tt>, <tt class="docutils literal"><span class="pre">Up</span></tt>, <tt class="docutils literal"><span class="pre">Down</span></tt>, <tt class="docutils literal"><span class="pre">Left</span></tt>, <tt class="docutils literal"><span class="pre">Right</span></tt>, <tt class="docutils literal"><span class="pre">Backspace</span></tt>, <tt class="docutils literal"><span class="pre">Delete</span></tt>, <tt class="docutils literal"><span class="pre">Insert</span></tt>, <tt class="docutils literal"><span class="pre">Tab</span></tt>, or <tt class="docutils literal"><span class="pre">ESC</span></tt>. <tt class="docutils literal"><span class="pre">Ctrl</span></tt> chords are case-insensitive (<tt class="docutils literal"><span class="pre">CtrlC</span></tt> and <tt class="docutils literal"><span class="pre">ctrl+c</span></tt> are the same key), and <tt class="docutils literal"><span class="pre">Double</span></tt> requires two quick presses, as in <tt class="docutils literal"><span class="pre">DoubleESC</span></tt> or <tt class="docutils literal"><span class="pre">DoubleCtrlC</span></tt>.</p>
+<p><tt class="docutils literal"><span class="pre">:help</span></tt> always shows the bindings currently in effect.</p>
 
 <h2 id="usage-monitoring">Usage monitoring</h2><p>Each response ends with a compact token receipt:</p>
 <p><pre class="listing">  ○12%  ↑4.2k  ↻18k  ↓1.1k  8s</pre></p>
@@ -284,22 +299,35 @@ allow ./</pre></p>
 <span class="Keyword">let</span> <span class="Identifier">session</span> <span class="Operator">=</span> <span class="Identifier">initAgentSession</span><span class="Punctuation">(</span>
   <span class="Identifier">AgentOptions</span><span class="Punctuation">(</span><span class="Identifier">model</span><span class="Punctuation">:</span> <span class="StringLit">&quot;deepinfra.deepseek-v3.2&quot;</span><span class="Punctuation">)</span><span class="Punctuation">)</span>
 
+<span class="Comment"># blocking: run a full turn (model calls + tool calls) and get the reply</span>
+<span class="Keyword">let</span> <span class="Identifier">reply</span> <span class="Operator">=</span> <span class="Identifier">session</span><span class="Operator">.</span><span class="Identifier">prompt</span><span class="Punctuation">(</span><span class="StringLit">&quot;what does this project do?&quot;</span><span class="Punctuation">)</span>
+
+<span class="Comment"># streaming: same call, events as they happen</span>
 <span class="Identifier">session</span><span class="Operator">.</span><span class="Identifier">onEvent</span> <span class="Operator">=</span> <span class="Keyword">proc</span><span class="Punctuation">(</span><span class="Identifier">event</span><span class="Punctuation">:</span> <span class="Identifier">AgentEvent</span><span class="Punctuation">)</span> <span class="Operator">=</span>
   <span class="Keyword">case</span> <span class="Identifier">event</span><span class="Operator">.</span><span class="Identifier">kind</span>
-  <span class="Keyword">of</span> <span class="Identifier">aevDelta</span><span class="Punctuation">:</span> <span class="Identifier">stdout</span><span class="Operator">.</span><span class="Identifier">write</span> <span class="Identifier">event</span><span class="Operator">.</span><span class="Identifier">text</span>
-  <span class="Keyword">of</span> <span class="Identifier">aevRetry</span><span class="Punctuation">,</span> <span class="Identifier">aevTool</span><span class="Punctuation">:</span> <span class="Identifier">stderr</span><span class="Operator">.</span><span class="Identifier">writeLine</span> <span class="Identifier">event</span><span class="Operator">.</span><span class="Identifier">text</span>
+  <span class="Keyword">of</span> <span class="Identifier">aevDelta</span><span class="Punctuation">:</span> <span class="Identifier">stdout</span><span class="Operator">.</span><span class="Identifier">write</span> <span class="Identifier">event</span><span class="Operator">.</span><span class="Identifier">text</span>        <span class="Comment"># assistant text chunks</span>
+  <span class="Keyword">of</span> <span class="Identifier">aevRetry</span><span class="Punctuation">,</span> <span class="Identifier">aevTool</span><span class="Punctuation">:</span> <span class="Identifier">stderr</span><span class="Operator">.</span><span class="Identifier">writeLine</span> <span class="Identifier">event</span><span class="Operator">.</span><span class="Identifier">text</span>  <span class="Comment"># tool results, notices</span>
+  <span class="Keyword">of</span> <span class="Identifier">aevDone</span><span class="Punctuation">:</span> <span class="Identifier">echo</span> <span class="Identifier">event</span><span class="Operator">.</span><span class="Identifier">usage</span>                <span class="Comment"># per-call token usage</span>
   <span class="Keyword">else</span><span class="Punctuation">:</span> <span class="Keyword">discard</span>
+<span class="Keyword">discard</span> <span class="Identifier">session</span><span class="Operator">.</span><span class="Identifier">prompt</span><span class="Punctuation">(</span><span class="StringLit">&quot;Run the tests and fix the failure.&quot;</span><span class="Punctuation">)</span>
 
-<span class="Keyword">let</span> <span class="Identifier">reply</span> <span class="Operator">=</span> <span class="Identifier">session</span><span class="Operator">.</span><span class="Identifier">prompt</span><span class="Punctuation">(</span><span class="StringLit">&quot;Run the tests and fix the failure.&quot;</span><span class="Punctuation">)</span>
+<span class="Comment"># colon commands work too</span>
 <span class="Identifier">echo</span> <span class="Identifier">session</span><span class="Operator">.</span><span class="Identifier">command</span><span class="Punctuation">(</span><span class="StringLit">&quot;:tokens&quot;</span><span class="Punctuation">)</span>
 <span class="Identifier">session</span><span class="Operator">.</span><span class="Identifier">close</span><span class="Punctuation">(</span><span class="Punctuation">)</span></pre></p>
-<p><tt class="docutils literal"><span class="pre">prompt</span></tt> blocks until the model finishes calling tools and returns its reply. Meanwhile, <tt class="docutils literal"><span class="pre">onEvent</span></tt> receives text, reasoning, tool output, retry notices, and usage. <tt class="docutils literal"><span class="pre">promptAsync</span></tt> puts the turn on a library-managed thread and reports failures with <tt class="docutils literal"><span class="pre">aevError</span></tt>; <tt class="docutils literal"><span class="pre">interrupt</span></tt> cancels it. Sessions use the same provider config, filesystem policy, locks, and saved format as the CLI.</p>
+<p><tt class="docutils literal"><span class="pre">AgentOptions</span></tt> mirrors the CLI flags: <tt class="docutils literal"><span class="pre">model</span></tt>, <tt class="docutils literal"><span class="pre">cwd</span></tt>, <tt class="docutils literal"><span class="pre">resume</span></tt>/<tt class="docutils literal"><span class="pre">resumeId</span></tt>, <tt class="docutils literal"><span class="pre">sessionPath</span></tt>, <tt class="docutils literal"><span class="pre">experimental</span></tt>, <tt class="docutils literal"><span class="pre">debug</span></tt>. <tt class="docutils literal"><span class="pre">prompt</span></tt> blocks until the model finishes calling tools and returns its reply. Meanwhile, <tt class="docutils literal"><span class="pre">onEvent</span></tt> receives text, reasoning, tool output, retry notices, and usage. <tt class="docutils literal"><span class="pre">promptAsync</span></tt> puts the turn on a library-managed thread and reports failures with <tt class="docutils literal"><span class="pre">aevError</span></tt>; <tt class="docutils literal"><span class="pre">interrupt</span></tt> cancels it. Sessions use the same provider config, filesystem policy, locks, and saved format as the CLI.</p>
 <p>Only one <tt class="docutils literal"><span class="pre">AgentSession</span></tt> may be active in a process, and calls on it are not thread-safe. In an asynchronous server, keep the session on one worker thread and pass prompts and events through queues. This avoids sharing session state across threads.</p>
-<p><tt class="docutils literal"><span class="pre">example/webserve.nim</span></tt> is the complete example: the session stays on a worker thread and events reach the browser through server-sent events.</p>
+<p><tt class="docutils literal"><span class="pre">example/webserve.nim</span></tt> is the complete example: a web frontend that serves a chat page, keeps the session on a worker thread, and streams replies to the browser over server-sent events. <tt class="docutils literal"><span class="pre">nim c -r example/webserve.nim</span></tt> and open <a class="reference external" href="http://localhost:8501">http://localhost:8501</a>.</p>
 
-<h2 id="contributing">Contributing</h2><p>Developer API documentation is generated at <tt class="docutils literal"><span class="pre">docs/dev/threecode.html</span></tt>:</p>
+<h2 id="build-from-source">Build from source</h2><p><pre class="listing">nimble install https://github.com/capocasa/3code</pre></p>
+<p>Requires <a class="reference external" href="https://nim-lang.org">Nim</a> &gt;= 2.0 and <tt class="docutils literal"><span class="pre">curl</span></tt> on <tt class="docutils literal"><span class="pre">PATH</span></tt>.</p>
+
+<h2 id="contributing">Contributing</h2><p>Patches welcome at <a class="reference external" href="https://github.com/capocasa/3code">github.com/capocasa/3code</a>.</p>
+<ul class="simple"><li><strong>Known-good provider/model pairs</strong> with test results</li>
+<li><strong>Bug fixes</strong> with a clear reproduction case</li>
+</ul>
+<p>Bug reports welcome, but make sure you give enough specific information to reproduce the issue. Terminal rendering bugs need a visual PTY test that shows the bad frame before the fix. A test that cannot show the bug has not reproduced it yet.</p>
+<p>Developer API documentation is generated at <tt class="docutils literal"><span class="pre">docs/dev/threecode.html</span></tt>:</p>
 <p><pre class="listing">nimble devdocs</pre></p>
-<p>Useful contributions include tested provider/model combinations and bug fixes with a clear reproduction. Terminal rendering bugs need a visual PTY test that shows the bad frame before the fix. A test that cannot show the bug has not reproduced it yet.</p>
 
 <h2 id="prior-art">Prior art</h2><p>3code is influenced by Claude Code, Goose, Pi, and Codex. It chooses different tradeoffs, but the family resemblance is intentional. As a European, using Claude Code can feel like driving a turbocharged Ford F-150 to buy a pack of gum. It is still a fine truck.</p>
 <p>3code omits features that do not help it write software reliably with fewer resources. Economy is the feature, not a billing surprise. </p>
@@ -309,7 +337,7 @@ allow ./</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-08-29 18:58:48 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-01 12:40:32 UTC</small>
       </div>
     </div>
   </div>

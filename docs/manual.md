@@ -40,7 +40,7 @@ similar names.
 #### EU providers
 
 When data must stay under EU jurisdiction, I use
-[TensorX](https://tensorx.ai). Nebius and Eurouter are also in the provider
+[GreenPT](https://greenpt.com). Nebius and Eurouter are also in the provider
 catalog.
 
 #### Low-cost providers
@@ -227,6 +227,41 @@ Useful input keys:
 | Ctrl+D | exit |
 
 If you forget one, `:help` prints the current command and key list.
+
+### Rebinding keys
+
+Keys are commands, and commands are reassignable in the config file
+(`~/.config/3code/config`, or the path passed with `--config`). Add a
+`[shortcuts]` section that maps a command name to a space-separated list of
+keys:
+
+```
+[shortcuts]
+cancel = DoubleESC
+```
+
+Now a single Esc does nothing and two quick Esc presses cancel the current
+turn, handy if you keep brushing Esc by accident. Values are merged onto the
+defaults, so a command keeps its built-in keys until you override it. An
+empty value unbinds a command entirely:
+
+```
+[shortcuts]
+suspend =
+```
+
+The commands: `cancel`, `clear`, `quit-if-empty`, `home`, `end`, `left`,
+`right`, `word-left`, `word-right`, `up`, `down`, `history-previous`,
+`history-next`, `backspace`, `delete`, `insert`, `delete-word-left`,
+`delete-to-boundary-left`, `clear-screen`, `suspend`, `complete`,
+`reverse-complete`, `edit-in-editor`, `insert-newline`.
+
+Key names look like `Ctrl+C`, `Alt+F`, `ShiftTab`, `Home`, `End`, `Up`,
+`Down`, `Left`, `Right`, `Backspace`, `Delete`, `Insert`, `Tab`, or `ESC`.
+`Ctrl` chords are case-insensitive (`CtrlC` and `ctrl+c` are the same key),
+and `Double` requires two quick presses, as in `DoubleESC` or `DoubleCtrlC`.
+
+`:help` always shows the bindings currently in effect.
 
 ## Usage monitoring
 
