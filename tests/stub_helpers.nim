@@ -26,20 +26,30 @@ proc nimbleDepPaths(): seq[string] =
   ## The bare `nim c` the stub build uses needs these to find streamhttp,
   ## unicodedb, ttty, tinotify and sandwall, none of which sit on Nim's
   ## default path.
-  for pkg in ["unicodedb", "streamhttp", "ttty", "tinotify", "sandwall"]:
+  for pkg in ["unicodedb", "streamhttp", "ttty", "tinotify", "sandwall",
+              "zippy", "libsha", "x11"]:
     let (outp, code) = execCmdEx("nimble path " & pkg)
     var path = ""
     if code == 0:
-      let first = outp.splitLines()[0]
-      # nimble path can print an error to stdout while still exiting 0
-      # (e.g. for a linked package like sandwall); only accept a real path.
-      if first.len > 0 and first[0] == '/':
-        path = first
+      # nimble prints chatter before the path (an "Info:" line when
+      # NIMBLE_DIR is set, as under nimble test; warnings for stale
+      # packages). Scan all lines and take the one that is a real dir;
+      # linked (develop-mode) packages print only an error, hence no match.
+      for ln in outp.splitLines():
+        if ln.len > 0 and ln[0] == '/' and dirExists(ln):
+          path = ln
+          break
     if path.len == 0:
       # nimble path failed or printed an error; fall back to the nimble
       # links for linked (develop-mode) packages.
       path = linkedPkgSrcDir(pkg)
     if path.len > 0:
+      # nimble path returns the package root. Packages with a `srcDir`
+      # layout (all of ours, and unicodedb's current release) keep their
+      # modules under `src/`; add the dir that actually holds the .nim
+      # files so bare `nim c` resolves the imports.
+      if dirExists(path / "src"):
+        path = path / "src"
       result.add("--path:" & path)
 
 proc nimbleDepFlags*(): string =
