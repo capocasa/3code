@@ -1,5 +1,5 @@
 import std/[os, strutils, tables, unittest]
-import threecode/[config, types]
+import threecode/[config, prompts, types]
 
 suite "config: parseConfigFile round-trip":
   var tmp = ""
@@ -208,6 +208,34 @@ suite "config: splitModels / formatModels":
 
   test "formatModels joins with space":
     check formatModels(@["a", "b", "c"]) == "a b c"
+
+suite "config: known-good lookup with normalized pretty names":
+  test "isKnownGood accepts the normalized form of a prefixed wire id":
+    let p = Profile(name: "nebius.glm-5.1", model: "glm-5.1")
+    check isKnownGood(p)
+
+  test "knownGoodFamily matches on normalized name":
+    check knownGoodFamily("nebius", "glm-5.1") == "glm"
+    check knownGoodFamily("together", "kimi-k2.6") == "kimi"
+
+  test "knownGoodFamily still matches the raw wire id":
+    check knownGoodFamily("nebius", "zai-org/GLM-5.1") == "glm"
+
+  test "unknown models stay experimental":
+    check knownGoodFamily("zai", "glm-9.9-nope") == ""
+    check not isKnownGood(Profile(name: "zai.glm-9.9-nope", model: "glm-9.9-nope"))
+
+  test "tags, reasoning, generation and window follow the normalized name":
+    check knownGoodTags("zai", "glm-5.3") == ("glm", "5", "3")
+    check knownGoodReasoning("zai", "glm-5.3") == "high"
+    let g = knownGoodGeneration("zai", "glm-5.3")
+    check (g.temperature, g.maxTokens) == (0.2, 65536)
+    check knownGoodContextWindow("zai", "glm-5.3") == 1_000_000
+
+  test "orderedModels ranks normalized known-good models first":
+    let prov = ProviderRec(name: "zai", url: "https://api.z.ai",
+                           key: "k", models: @["weird-model", "glm-5.3"])
+    check orderedModels(prov) == @["glm-5.3", "weird-model"]
 
 suite "config: firstKnownGoodCombo":
   test "finds first known-good combo":
