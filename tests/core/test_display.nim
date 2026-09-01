@@ -250,6 +250,54 @@ when not defined(windows):
         "\n" & formatItem(assistantItem("Done.")) & "\n"
       check rendered == expected
 
+    test "web_search replay matches the live toolItem bytes":
+      # The replay path must route a web tool through the same formatter
+      # the live path uses (toolItem/toolTranscriptBytes): a banner ending
+      # directly followed by the body, no extra row after the icon.
+      let output = "1. Hit one\n2. Hit two\n"
+      let toolLog = @[ToolRecord(banner: "nim macros", output: output,
+        code: 0, kind: akWebSearch)]
+      let msgs = %*[
+        {"role": "assistant", "content": "",
+         "tool_calls": [{"id": "1", "type": "function",
+           "function": {"name": "web_search",
+             "arguments": "{\"query\": \"nim macros\"}"}}]},
+        {"role": "tool", "tool_call_id": "1", "content": output}]
+      let rendered = captureReplay(msgs, toolLog)
+      let act = Action(kind: akWebSearch, body: "nim macros")
+      var live = formatItem(toolItem(act, output, 0, 1))
+      live.trimTranscriptTail()
+      check live & "\n" in rendered
+
+    test "saved empty reply replays as the grey fallback, not as prose":
+      # A tool-less empty reply is persisted as the marker text
+      # (`EmptyReplyMsg`). Replay must map it back to the same grey
+      # bullet-less fallback the live path paints, never to a `●` bullet
+      # followed by the marker as white prose.
+      let msgs = %*[
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": EmptyReplyMsg,
+         "usage": {"promptTokens": 50, "completionTokens": 0,
+                   "totalTokens": 50, "cachedTokens": 0}}]
+      let rendered = captureReplay(msgs, @[], window = 1000)
+      check GreyFg & EmptyReplyMsg & Reset in rendered
+      check "● " notin rendered
+
+    test "saved empty reply with finish_reason replays the explanation":
+      # The live retry loop paints `empty reply: <reason>. ...`; a resumed
+      # replay must show the same explanation (from the persisted
+      # `finish_reason`) instead of the bare fallback.
+      let msgs = %*[
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": EmptyReplyMsg,
+         "finish_reason": "length",
+         "usage": {"promptTokens": 50, "completionTokens": 0,
+                   "totalTokens": 50, "cachedTokens": 0}}]
+      let rendered = captureReplay(msgs, @[], window = 1000)
+      check GreyFg & EmptyReplyMsg & Reset in rendered
+      check "empty reply: length" in rendered
+      check "● " notin rendered
+
     test "replay suppresses the empty-reply item when tools followed":
       # Live renders nothing for an empty reply paired with tool calls
       # (the empty-reply fallback is only for tool-less replies), so the

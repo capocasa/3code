@@ -824,7 +824,16 @@ proc renderSession*(session: Session, messages: JsonNode): string =
       let tcs = m{"tool_calls"}
       let hasToolCalls = tcs != nil and tcs.kind == JArray and tcs.len > 0
       if content.len == 0 and not hasToolCalls:
-        emitRecord s, "assistant", "empty reply - no content, no tool calls"
+        # Persist the empty turn with the canonical marker (`EmptyReplyMsg`)
+        # so the wire format keeps the exchange paired. Replay maps the
+        # marker back to the grey fallback rendering, never to prose. The
+        # provider's explanation rides along on the header so a resumed
+        # replay can render the same "empty reply: length ..." line the
+        # live path painted.
+        var hdr = "assistant"
+        let fr = m{"finish_reason"}.getStr("")
+        if fr.len > 0: hdr.add " finish=" & fr
+        emitRecord s, hdr, EmptyReplyMsg
       else:
         emitRecord s, "assistant", content
       if hasToolCalls:
@@ -1089,6 +1098,12 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
       let msg = %*{"role": "assistant",
                    "content": r.body,
                    "reasoning_content": pendingReasoning}
+      # A tool-less empty reply saved with the provider's explanation
+      # (`assistant finish=length`, written by `renderSession`) restores
+      # `finish_reason` so replay can render the same explanatory line the
+      # live path painted instead of the bare empty-reply fallback.
+      if "finish" in kv and kv["finish"].len > 0:
+        msg["finish_reason"] = %kv["finish"]
       pendingReasoning = ""
       messages.add msg
       lastAssistant = msg
