@@ -336,17 +336,6 @@ proc setAnimSpinner*(spinner: string; elapsed: int) {.gcsafe.} =
     frameModelShared.elapsed = elapsed
     release frameModelLock
 
-proc setAnimElapsed*(elapsed: int) {.gcsafe.} =
-  ## Int-only per-tick update from the GUI thread. The spinner glyph is
-  ## derived locally in guiLoop, so the animation thread never writes a
-  ## string into the shared model; only the controller (main thread) does.
-  ## A GUI-thread string write would free the overwritten string on the
-  ## worker while the controller holds a copy, an ORC cross-thread free.
-  {.cast(gcsafe).}:
-    acquire frameModelLock
-    frameModelShared.elapsed = elapsed
-    release frameModelLock
-
 proc setAnimViewport*(banner: string; lines: openArray[string];
                       exitCode = -1; idx = 0;
                       maxLines = StreamMaxLines) {.gcsafe.} =
@@ -810,12 +799,8 @@ proc guiLoop(unused: string) {.thread.} =
       case m.mode
       of amSpinner:
         let glyph = frames[i mod frames.len]
-        setAnimElapsed(elapsed.int)
-        # Build the frame with the locally-derived glyph, not the shared
-        # `spinner` string: the GUI thread never writes a string into the
-        # shared model, so only the controller (main thread) ever frees
-        # those strings. See setAnimElapsed.
-        let frame = spinnerFooterFrame(glyph, m.label, m.ticker, elapsed.int)
+        setSpinFrame(glyph, elapsed.int)
+        let frame = currentFrameFromModel()
         # When assistant content is streaming, the controller has painted
         # volatile partial rows into the engine. A bare `renderFooter` would
         # erase them (`\x1b[J`) and repaint only the footer, clobbering the
