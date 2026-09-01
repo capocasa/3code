@@ -90,6 +90,49 @@ or tool rendering must be captured as visual frames. Prefer tests that send
 real keystrokes and verify the frame stream over tests that infer behavior from
 internal state.
 
+## When the bug is terminal-specific (real-terminal repro)
+
+The PTY harness (ttty) interprets captured bytes with the *same* geometry
+model the code emits (same cell widths, same wrap rules). A model-vs-physical
+desync is therefore invisible in every captured frame: the erase lands one row
+into committed scrollback and ttty applies the identical wrong assumption, so
+the frames look perfect while a real terminal loses a line. Symptoms: a bug
+the user sees on every submit but no PTY test reproduces, typically a line
+above the prompt being eaten.
+
+When a bug survives a green PTY suite, reproduce it in a real terminal. The
+setup that works under the sandbox (xterm is blocked from allocating ptys;
+`st` is not):
+
+1. Start a private X server: `Xvfb :99 -screen 0 1000x700x24 &`
+2. Build a stub binary so no real provider/config is needed:
+   `nim c -d:ssl -d:providerStub --threads:on --path:src -o:/tmp/3code-stub src/threecode.nim`
+   (write to `/tmp`, not `~/.local/bin` — the sandbox blocks the latter).
+3. Point a sandboxed HOME at a stub config (`stub://provider` provider,
+   `THREECODE_STUB_RESPONSES` file) and launch under `st` on the Xvfb display
+   with the DSR probe armed: `THREECODE_TERMDBG=/tmp/3code-dbg.log DISPLAY=:99 st -e /tmp/3code-stub -x -i`.
+   Do NOT redirect the child's stdout to a file — the probe disarms unless
+   stdout is a tty.
+4. Drive keystrokes with `xdotool`:
+   `WID=$(DISPLAY=:99 xdotool search --onlyvisible --class st | tail -1)`
+   `DISPLAY=:99 xdotool type --window $WID "prompt text"`, then
+   `DISPLAY=:99 xdotool key --window $WID Return`.
+5. Read ground truth two ways:
+   - The DSR log (`/tmp/3code-dbg.log`) records the *terminal's own* cursor
+     row next to the model's assumed walk-up at each erase:
+     `commit cursor=(12,28) walkUp=2 targetRow=10 ed=0 ft=2 vp=0 lv=0`.
+     `targetRow` must equal the row the model intends to erase from. If the
+     physical `cursor` row is one higher than the model expects, the walk-up
+     over-shoots into scrollback by exactly that many rows — that is the bug.
+   - Reconstruct the final screen by replaying the child's raw stdout through
+     an independent VT parser (or screenshot the `st` window with
+     `DISPLAY=:99 xwd -id $WID | xwdtopnm | pnmtopng`).
+
+If the line survives under `st` but the user still loses it, the desync is
+specific to their terminal emulator (width/wrap accounting differs). Capture
+the DSR log from *their* terminal — the `cursor=` vs `targetRow=` gap names
+the exact row count and which field (`ed`/`ft`/`vp`/`lv`) is stale.
+
 ## Building a frontend on the library API
 
 The library API (`src/threecode/library.nim`) lets another program drive the

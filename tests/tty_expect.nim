@@ -1080,6 +1080,18 @@ proc writeFrameArtifact*(s: TtySession; path: string) =
   writeFile(path, s.framesText())
   writeFile(path & ".raw", s.cleanRaw())
 
+proc writeRawArtifact*(s: TtySession; path: string) =
+  ## Write the session's raw PTY-master bytes UNMODIFIED (every `\r`
+  ## preserved). `cleanRaw` strips `\r` for human-readable fixtures, which
+  ## destroys the ONLCR doubling (`\r\n` -> `\r\r\n`) a real terminal's line
+  ## discipline produces — the exact signal a model-vs-physical desync
+  ## leaves in the byte stream. Conformance replay against a real terminal
+  ## needs the faithful bytes, not the cleaned ones.
+  let dir = path.splitPath.head
+  if dir.len > 0:
+    createDir(dir)
+  writeFile(path, s.raw)
+
 proc normalizeElapsed(row: string): string =
   var i = 0
   while i < row.len:
