@@ -6,7 +6,7 @@
 ## `api.nim` should stay transport/protocol focused; visual consequences of
 ## model/tool progress should flow through this layer.
 
-import std/[json, os, strformat, strutils, terminal, times]
+import std/[algorithm, json, os, strformat, strutils, tables, terminal, times]
 when defined(posix):
   import std/posix except Time
 import types, util, prompts, session, compact, config, actions, api,
@@ -14,15 +14,15 @@ import types, util, prompts, session, compact, config, actions, api,
 import engine as termengine
 
 const
-  FlailMaxEscalations* = 2   ## two warnings, third flagged call aborts
+  FlailMaxEscalations* = 3   ## three recovery attempts, fourth flagged call aborts
   FlailWindowSize* = 8       ## how many recent call fingerprints to remember
-  FlailRepeatThreshold* = 2  ## repeats of the same call inside the window = flailing
+  FlailSpacedThreshold* = 3  ## failing repeats of one call at any spacing flag on this occurrence
 
 type
   FlailVerdict* = enum
     fvOk        ## not a loop; run the tool
     fvEscalate  ## loop: inject an escalation message, skip the tool
-    fvAbort     ## still looping after both escalations: abort the turn
+    fvAbort     ## still looping after all escalations: abort the turn
 
   FlailDetector* = object
     ## Detects agentic doom loops cheaply, in the harness, spending zero
@@ -33,22 +33,62 @@ type
     ##    `FlailWindowSize` calls catches A-B-A-B cycles, not just identical
     ##    back-to-back calls. Repeats of the *identical consecutive* call
     ##    escalate fastest; spaced repeats need more occurrences.
-    ## 2. No progress: a mutating call (write/patch/apply_patch) that reports
-    ##    making no change (via `noteResult`) followed by the model re-trying
-    ##    a call it already made is a strong stuck signal, so it counts
-    ##    heavier. Read-only and bash calls never use this signal, so a
-    ##    legitimately idempotent command (re-running a test that still
-    ##    fails) is only judged on repetition, never falsely flagged.
+    ## 2. No progress: a call that failed before (recorded per fingerprint
+    ##    via `noteResult`) and keeps recurring in the window is a stuck
+    ##    cycle even when other calls interleave; an immediately retried
+    ##    no-op mutation counts heaviest. Calls whose results succeed are
+    ##    only judged on identical-consecutive repetition, so a
+    ##    legitimately idempotent poll (re-check output that changes) is
+    ##    never falsely flagged.
     ##
-    ## Each escalation fires once; a flagged call after the second escalation
-    ## aborts the turn. A call that is genuinely new (unseen fingerprint, or
-    ## a mutating call that actually changed something) resets the ladder.
+    ## Recovery uses a graduated ladder of injected messages, because field
+    ## reports on GLM 5.x loops (zai-org/GLM-5#116) show a plain "be careful"
+    ## warning does not break the loop: the model's thinking is already
+    ## careful, it is the emission channel that is stuck. What works is
+    ## forcing a change in the *shape* of the call, so the middle rung of
+    ## the ladder demands exactly that before the final warning.
+    ##
+    ## Each escalation fires once; a flagged call after the last escalation
+    ## aborts the turn. A genuinely novel call resets the ladder.
     window*: seq[string]      ## recent fingerprints, oldest first, <= FlailWindowSize
     escalations*: int
     lastNoProgress*: bool     ## did the previous executed call report no change?
+    progress*: Table[string, bool]  ## last result per fingerprint; false = no change
+
+proc canonicalJson(node: JsonNode): string =
+  ## Stable serialization with sorted object keys, so key-order variants of
+  ## the same call fingerprint identically. Models re-emitting "the same
+  ## call" from memory often reshuffle keys; raw-string comparison would
+  ## treat those as different calls and miss the loop.
+  case node.kind
+  of JObject:
+    var keys: seq[string]
+    for k in node.fields.keys: keys.add k
+    keys.sort
+    result = "{"
+    for i, k in keys:
+      if i > 0: result.add ","
+      result.add escapeJson(k)
+      result.add ":"
+      result.add canonicalJson(node.fields[k])
+    result.add "}"
+  of JArray:
+    result = "["
+    for i, e in node.elems:
+      if i > 0: result.add ","
+      result.add canonicalJson(e)
+    result.add "]"
+  else:
+    result = $node
 
 proc fingerprint(name, argsStr: string): string =
-  name & "\x1f" & argsStr
+  var canonical = argsStr
+  if argsStr.len > 0:
+    try:
+      canonical = canonicalJson(parseJson(argsStr))
+    except CatchableError:
+      discard
+  name & "\x1f" & canonical
 
 proc isMutating(name: string): bool =
   ## Only mutating tools participate in the no-progress signal. Name match is
@@ -62,12 +102,15 @@ proc countInWindow(det: FlailDetector, fp: string): int =
   for w in det.window:
     if w == fp: inc result
 
-proc noteResult*(det: var FlailDetector, name: string, madeChange: bool) =
+proc noteResult*(det: var FlailDetector, name, argsStr: string, madeChange: bool) =
   ## Record whether the just-executed call actually changed anything. Called
-  ## after execution with the tool's own verdict (a diff/patch/write that
-  ## reported success vs a no-op). Read-only tools pass madeChange=true so
-  ## they never arm the no-progress signal.
+  ## after execution with the tool's own verdict (exit code 0 vs failure).
+  ## Read-only tools pass madeChange=true so they never arm the no-progress
+  ## signal. The per-fingerprint record powers the spaced-repeat signal: a
+  ## call that failed before and keeps coming back inside the window is a
+  ## stuck cycle even when other calls interleave.
   det.lastNoProgress = isMutating(name) and not madeChange
+  det.progress[fingerprint(name, argsStr)] = madeChange
 
 proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
   ## Record one tool call and decide what to do with it. Called once per
@@ -83,17 +126,23 @@ proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
   if det.window.len > FlailWindowSize:
     det.window.delete 0
 
-  # Flag this call as a loop on either of two signals:
+  # Flag this call as a loop on any of three signals:
   #
   # 1. Identical consecutive repeat: the model re-emitted the exact call it
   #    just made. Strongest signal; flags on the first repeat. This is the
   #    classic GLM identical-call loop and the cheap MTP-duplication case.
   # 2. No-progress re-try: the previous mutating call made no change
   #    (`lastNoProgress`) AND the model is re-trying a call it already made
-  #    in this window. A spaced A-B-A-B cycle of *successful* calls (re-run a
-  #    test, re-check output) is legitimate and is NOT flagged — progress
-  #    distinguishes a stuck loop from a deliberate poll.
-  let isLoop = consecutive or (det.lastNoProgress and seen >= 1)
+  #    in this window.
+  # 3. Spaced failing repeat: this exact call failed before (per-fingerprint
+  #    record from `noteResult`) and this is at least its third sighting in
+  #    the window. Catches A-B-A-B cycles of *failing* calls that signal 1
+  #    misses because the calls interleave. A spaced cycle of *successful*
+  #    calls (re-run a test, re-check output) is legitimate polling and is
+  #    never flagged; progress distinguishes a stuck loop from a poll.
+  let knownFailing = not det.progress.getOrDefault(fp, true)
+  let isLoop = consecutive or (det.lastNoProgress and seen >= 1) or
+    (knownFailing and seen >= FlailSpacedThreshold - 1)
 
   if not isLoop:
     # Genuinely new or harmless: a clearly novel call resets the ladder.
@@ -109,18 +158,29 @@ proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
 
 proc flailEscalationMessage*(step: int): string =
   ## The tool-role message injected in place of the repeated tool result.
-  ## Step 1 is a hint; step 2 is the final warning before the abort. Deliberately
-  ## short: this is the only token cost of the whole mechanism, so it stays
-  ## compact while still naming the loop and the required strategy change.
+  ## Three graduated recovery attempts before the abort: step 1 names the
+  ## loop and demands a strategy change; step 2 forces the only recovery
+  ## known to work on GLM 5.x emission-stuck loops (reply in prose first,
+  ## then a structurally different call, per zai-org/GLM-5#116); step 3 is
+  ## the final warning. Deliberately short: this is the only token cost of
+  ## the whole mechanism.
   if step == 1:
     "SYSTEM: Loop detected: you are repeating tool calls that are not making " &
     "progress. Repeating them will not help. Change strategy now: use a " &
     "different input, a different tool, or a smaller step, or briefly tell " &
     "the user what is blocking you and stop."
+  elif step == 2:
+    "SYSTEM: You repeated the same call after a loop warning. Telling " &
+    "yourself to be careful does not fix this: the next call would likely " &
+    "come out identical again. Do not emit that call. First reply in plain " &
+    "prose with no tool call: one sentence on what you are trying to " &
+    "achieve and why the last attempts failed. Then, if you continue, use " &
+    "a structurally different call (different arguments, flags, or tool), " &
+    "not the same one with cosmetic edits."
   else:
     "SYSTEM: Final warning: you are still repeating non-progress tool calls " &
-    "after a warning. One more repeat and this turn is aborted. Change " &
-    "strategy now or respond in prose."
+    "after two warnings. One more repeat and this turn is aborted. Stop " &
+    "calling tools and tell the user what is blocking you."
 
 proc emitTestFrameEvent() =
   when defined(posix):
@@ -559,7 +619,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           lastCommitIdx = i
       var queuedUser = false # User submitted while tools were running.
       var cleared = false  # akClear: rebuild and continue loop
-      var flailAbort = false  # flail detector fired past both escalations
+      var flailAbort = false  # flail detector fired past all escalations
       for i in 0 ..< toolCalls.len:
         let tc = toolCalls[i]
         let id = tc{"id"}.getStr
@@ -590,18 +650,20 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
                           "content": note}
           commitTranscriptBytes(
             errLnS(if flailDet.escalations == 1:
-                     "flailing detected (same tool call twice); hinting the model"
+                     "flailing detected (repeated tool call); hinting the model"
+                   elif flailDet.escalations < FlailMaxEscalations:
+                     "still flailing; demanding a different approach from the model"
                    else:
                      "still flailing; final warning to the model"), true)
           continue
         of fvAbort:
-          # Still identical after both escalations. Pair the tool_call,
+          # Still looping after all recovery attempts. Pair the tool_call,
           # then stop the turn and hand control back to the user with a
           # visible warning.
-          debugOut &"flail: identical repeat of {name} after both escalations; aborting turn"
+          debugOut &"flail: repeat of {name} after {FlailMaxEscalations} escalations; aborting turn"
           let note =
             "SYSTEM: Turn aborted: the same tool call was repeated after " &
-            "two warnings. The model is stuck in a loop."
+            "three warnings. The model is stuck in a loop."
           session.toolLog.add ToolRecord(
             banner: "! " & name & " (flail abort)",
             output: note, code: -1, kind: akError)
@@ -673,12 +735,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         let toolElapsed = epochTime() - toolT0
         debugOut &"tool done: {act.kind} code={code} elapsed={toolElapsed:.2f}"
 
-        # Feed the no-progress signal: a mutating tool that reported failure
-        # (code != 0) made no change, so a subsequent re-try of an already-
-        # seen call counts heavier toward a loop. Read-only tools pass
-        # madeChange=true and never arm the signal. This uses the tool's own
-        # exit verdict, so it costs nothing extra at runtime.
-        flailDet.noteResult(name, madeChange = code == 0)
+        # Feed the no-progress signal: a failed call (code != 0) is
+        # recorded per fingerprint, so a spaced re-try of that exact call
+        # counts toward a loop; an immediately retried failed mutation
+        # counts heaviest. Successful calls never arm the signal, so
+        # legitimate polling is untouched. Uses the tool's own exit
+        # verdict, so it costs nothing extra at runtime.
+        flailDet.noteResult(name, argsStr, madeChange = code == 0)
 
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r,
           code: code, kind: act.kind, plan: act.plan)
@@ -745,7 +808,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         saveSession(session, messages)
         commitTranscriptBytes(
           errLnS("turn aborted: the model kept repeating the same tool " &
-            "call after two warnings. It appears stuck; please rephrase, " &
+            "call after three warnings. It appears stuck; please rephrase, " &
             "give it a hint, or take over."), true)
         endTurnAfterTranscriptAppend()
         turnEnded = true
