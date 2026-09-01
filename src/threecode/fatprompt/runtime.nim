@@ -110,7 +110,7 @@ proc nextCommandSymbol*(): string =
 #     `paintedFooterRows`, so no stale repaint can survive a transition.
 var guiStop: Atomic[bool]
 var guiRunning = false
-var guiThread: Thread[void]
+var guiThread: Thread[string]
 
 var apiCancelWatcherStarted = false
 
@@ -757,7 +757,7 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
     emitFatPromptEvent setBarEvent(currentBarLabel, hasGap = true)
   debugOut "writeTranscriptWithFatPrompt exit"
 
-proc guiLoop() {.thread.} =
+proc guiLoop(unused: string) {.thread.} =
   ## The single background painter of `renderFooter`. Replaces the two-
   ## thread `spinnerLoop` (80ms) / `barTickLoop` (250ms) design: both
   ## repainted the same footer region on their own schedules with no
@@ -971,7 +971,7 @@ proc ensureGuiStarted() =
   testSpinnerPainted.store(0, moRelease)
   viewportPaintRequested.store(0, moRelease)
   viewportPainted.store(0, moRelease)
-  createThread(guiThread, guiLoop)
+  createThread(guiThread, guiLoop, "")
   guiRunning = true
 
 proc stopGui() =
