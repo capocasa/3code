@@ -24,7 +24,12 @@ curl -fsSL https://3code.capocasa.dev/install | sh
 
 # Windows (PowerShell)
 irm https://3code.capocasa.dev/install.ps1 | iex
+
+# Termux on Android arm64
+pkg install curl && curl -fsSL https://3code.capocasa.dev/install | sh
 ```
+
+The Termux build runs on your phone: the installer detects `$PREFIX` and drops the binary in `$PREFIX/bin`. Android has no OS sandbox, but the in-process path checks still apply. Details in the [manual](https://3code.capocasa.dev/docs#termux-on-android-arm64).
 
 ## Quickstart
 
