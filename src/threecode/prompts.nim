@@ -2762,18 +2762,23 @@ func matchesWireRepairCandidate*(comboModel, model: string): bool =
   ## `kimi-k3`). Endpoints occasionally list such ids without serving
   ## them on chat/completions, and the verification ping doesn't catch
   ## it (that gateway serves unknown ids too), so the wire-id repair
-  ## rewrites them to the curated id. Only alias-shaped combos
-  ## qualify (combo `k3`, whose normalized form is the alias expansion
-  ## `kimi-k3`): the short ids where providers actually pull this
-  ## trick. Dated and routing variants of ordinary combos
+  ## rewrites them to the curated id. Only a numeric qualifier tail
+  ## qualifies (`256k`): the listed-but-unserved ids providers actually
+  ## pull this trick with. A non-numeric tail is a designator, a
+  ## different model (`glm-5.3-flash` never collapses into `glm-5.3`).
+  ## Dated and routing variants of ordinary combos
   ## (`gpt-5.5-pro`, `deepseek-v4-flash-20260731`) stay experimental
   ## by design. Used only by `knownGoodWireModel`: the experimental
   ## gate and the curated defaults (`isKnownGood`, `knownGoodFamily`,
   ## `knownGoodReasonings`) deliberately keep the narrower matching.
   if matchesKnownGoodModel(comboModel, model): return true
+  # The normalized combo must be the full normalized model plus one
+  # qualifier tail: `kimi-k3` + `256k` repairs, but `glm-5.3` +
+  # `flash` is a different designator, a different model.
   let normCombo = normalizeModelName(comboModel)
-  if normCombo != aliasExpansion(comboModel): return false
-  aliasExpansion(model).startsWith(normCombo & "-")
+  if not normalizeModelName(model).startsWith(normCombo & "-"): return false
+  let tail = normalizeModelName(model)[normCombo.len + 1 .. ^1]
+  tail.split('-').allIt(it.len > 0 and it[0] in {'0'..'9'})
 
 proc canonicalKnownGoodProvider*(provider: string): string =
   ## Map config provider names onto the KnownGoodCombos provider key.

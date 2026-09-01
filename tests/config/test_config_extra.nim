@@ -241,6 +241,12 @@ suite "config: known-good lookup with normalized pretty names":
     # Distinct models and unknown ids are not rewritten.
     check knownGoodWireModel("kimicode", "kimi-k2.6") == ""
     check knownGoodWireModel("kimicode", "weird-model") == ""
+    # A designator sibling is not a qualifier tail of the base combo.
+    check knownGoodWireModel("zai", "glm-5.3-flash") == "glm-5.3-flash"
+    check knownGoodWireModel("zai", "glm-5.3") == "glm-5.3"
+    check knownGoodWireModel("openrouter", "z-ai/glm-5.3-flash") == "z-ai/glm-5.3-flash"
+    check knownGoodWireModel("novita", "glm-5.3-flash") == "zai-org/glm-5.3-flash"
+    check knownGoodWireModel("venice", "glm-5.3-flash") == "z-ai-glm-5-3-flash"
 
   test "orderedModels ranks normalized known-good models first":
     let prov = ProviderRec(name: "zai", url: "https://api.z.ai",
