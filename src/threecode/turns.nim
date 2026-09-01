@@ -14,56 +14,113 @@ import types, util, prompts, session, compact, config, actions, api,
 import engine as termengine
 
 const
-  FlailRepeatThreshold* = 2  ## same tool call twice in a row = flailing
-  FlailMaxEscalations* = 2   ## two warnings, third identical call aborts
+  FlailMaxEscalations* = 2   ## two warnings, third flagged call aborts
+  FlailWindowSize* = 8       ## how many recent call fingerprints to remember
+  FlailRepeatThreshold* = 2  ## repeats of the same call inside the window = flailing
 
 type
   FlailVerdict* = enum
-    fvOk        ## not a repeat; run the tool
-    fvEscalate  ## repeat: inject an escalation message, skip the tool
-    fvAbort     ## still flailing after both escalations: abort the turn
+    fvOk        ## not a loop; run the tool
+    fvEscalate  ## loop: inject an escalation message, skip the tool
+    fvAbort     ## still looping after both escalations: abort the turn
 
   FlailDetector* = object
-    ## Tracks identical consecutive tool calls within one turn. A tool
-    ## call is "identical" when the model re-emits the same tool name
-    ## with the same arguments as the previous call. Two identical calls
-    ## in a row count as flailing; each escalation fires once, and a
-    ## repeat after the second escalation aborts the turn. Any call that
-    ## differs from the previous one resets the escalation ladder.
-    lastFp*: string
+    ## Detects agentic doom loops cheaply, in the harness, spending zero
+    ## tokens on detection. Two complementary signals over a bounded window
+    ## of recent calls:
+    ##
+    ## 1. Repetition: a fingerprint (name + args) recurring within the last
+    ##    `FlailWindowSize` calls catches A-B-A-B cycles, not just identical
+    ##    back-to-back calls. Repeats of the *identical consecutive* call
+    ##    escalate fastest; spaced repeats need more occurrences.
+    ## 2. No progress: a mutating call (write/patch/apply_patch) that reports
+    ##    making no change (via `noteResult`) followed by the model re-trying
+    ##    a call it already made is a strong stuck signal, so it counts
+    ##    heavier. Read-only and bash calls never use this signal, so a
+    ##    legitimately idempotent command (re-running a test that still
+    ##    fails) is only judged on repetition, never falsely flagged.
+    ##
+    ## Each escalation fires once; a flagged call after the second escalation
+    ## aborts the turn. A call that is genuinely new (unseen fingerprint, or
+    ## a mutating call that actually changed something) resets the ladder.
+    window*: seq[string]      ## recent fingerprints, oldest first, <= FlailWindowSize
     escalations*: int
+    lastNoProgress*: bool     ## did the previous executed call report no change?
+
+proc fingerprint(name, argsStr: string): string =
+  name & "\x1f" & argsStr
+
+proc isMutating(name: string): bool =
+  ## Only mutating tools participate in the no-progress signal. Name match is
+  ## on the wire tool name (what the model emitted), kept loose so it works
+  ## across providers' naming.
+  let n = name.toLowerAscii
+  n in ["write", "patch", "edit", "apply_patch", "applypatch", "write_file",
+        "edit_file", "str_replace", "str_replace_editor", "create_file"]
+
+proc countInWindow(det: FlailDetector, fp: string): int =
+  for w in det.window:
+    if w == fp: inc result
+
+proc noteResult*(det: var FlailDetector, name: string, madeChange: bool) =
+  ## Record whether the just-executed call actually changed anything. Called
+  ## after execution with the tool's own verdict (a diff/patch/write that
+  ## reported success vs a no-op). Read-only tools pass madeChange=true so
+  ## they never arm the no-progress signal.
+  det.lastNoProgress = isMutating(name) and not madeChange
 
 proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
   ## Record one tool call and decide what to do with it. Called once per
   ## tool call before execution; `argsStr` is the raw arguments JSON so
-  ## key-order variants of the same call still compare equal at the model
-  ## level only when the model emits them identically (good enough for a
-  ## loop detector).
-  let fp = name & "\x1f" & argsStr
-  if fp != det.lastFp:
-    det.lastFp = fp
-    det.escalations = 0
+  ## key-order variants of the same call compare equal only when the model
+  ## emits them identically (good enough for a loop detector).
+  let fp = fingerprint(name, argsStr)
+  let seen = det.countInWindow(fp)
+  let consecutive = det.window.len > 0 and det.window[^1] == fp
+
+  # Push onto the bounded window.
+  det.window.add fp
+  if det.window.len > FlailWindowSize:
+    det.window.delete 0
+
+  # Flag this call as a loop on either of two signals:
+  #
+  # 1. Identical consecutive repeat: the model re-emitted the exact call it
+  #    just made. Strongest signal; flags on the first repeat. This is the
+  #    classic GLM identical-call loop and the cheap MTP-duplication case.
+  # 2. No-progress re-try: the previous mutating call made no change
+  #    (`lastNoProgress`) AND the model is re-trying a call it already made
+  #    in this window. A spaced A-B-A-B cycle of *successful* calls (re-run a
+  #    test, re-check output) is legitimate and is NOT flagged — progress
+  #    distinguishes a stuck loop from a deliberate poll.
+  let isLoop = consecutive or (det.lastNoProgress and seen >= 1)
+
+  if not isLoop:
+    # Genuinely new or harmless: a clearly novel call resets the ladder.
+    if seen == 0:
+      det.escalations = 0
     return fvOk
-  # Identical repeat.
+
+  # Flagged as a loop.
   if det.escalations < FlailMaxEscalations:
     inc det.escalations
     return fvEscalate
   fvAbort
 
 proc flailEscalationMessage*(step: int): string =
-  ## The user-role message injected in place of the repeated tool result.
-  ## Step 1 is a hint; step 2 is the final warning before the abort.
+  ## The tool-role message injected in place of the repeated tool result.
+  ## Step 1 is a hint; step 2 is the final warning before the abort. Deliberately
+  ## short: this is the only token cost of the whole mechanism, so it stays
+  ## compact while still naming the loop and the required strategy change.
   if step == 1:
-    "SYSTEM: Flailing detected: you just emitted the exact same tool call " &
-    "twice in a row. It will not produce a different result. Do not repeat " &
-    "this call. Change at least one input, switch strategy (smaller patch, " &
-    "wider read, different tool), or explain briefly to the user what is " &
-    "blocking progress and stop."
+    "SYSTEM: Loop detected: you are repeating tool calls that are not making " &
+    "progress. Repeating them will not help. Change strategy now: use a " &
+    "different input, a different tool, or a smaller step, or briefly tell " &
+    "the user what is blocking you and stop."
   else:
-    "SYSTEM: Final warning: you are still flailing (same tool call repeated " &
-    "after a warning). If the next call is again identical, this turn is " &
-    "aborted and the user is asked for help. Change strategy now or " &
-    "respond in prose."
+    "SYSTEM: Final warning: you are still repeating non-progress tool calls " &
+    "after a warning. One more repeat and this turn is aborted. Change " &
+    "strategy now or respond in prose."
 
 proc emitTestFrameEvent() =
   when defined(posix):
@@ -618,6 +675,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           session.plan = act.plan
         let toolElapsed = epochTime() - toolT0
         debugOut &"tool done: {act.kind} code={code} elapsed={toolElapsed:.2f}"
+
+        # Feed the no-progress signal: a mutating tool that reported failure
+        # (code != 0) made no change, so a subsequent re-try of an already-
+        # seen call counts heavier toward a loop. Read-only tools pass
+        # madeChange=true and never arm the signal. This uses the tool's own
+        # exit verdict, so it costs nothing extra at runtime.
+        flailDet.noteResult(name, madeChange = code == 0)
 
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r,
           code: code, kind: act.kind, plan: act.plan)
