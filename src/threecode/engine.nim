@@ -763,6 +763,14 @@ proc commitTranscriptItem(e: var TerminalEngine; transcript: string;
     stdout.write "\x1b[" & $up & "A"
   stdout.write "\r\x1b[J"
   e.toolViewportRows = @[]
+  # The erase just consumed the volatile live-content rows (the streaming
+  # partial this commit writes to scrollback). Clear them inside the same
+  # write-lock critical section, not in the controller's later
+  # `clearLiveContent` call: a guiLoop spinner repaint firing in that window
+  # would read the stale row count and over-walk its own erase into the
+  # just-committed scrollback above (erasing the echo/welcome lines).
+  e.liveContentRows = @[]
+  e.liveContentHasGap = false
   e.writeTranscriptItem(transcript)
   let restoreTo = if editing: edPtr else: nil
   var newFooterRows = footerRowsAboveEditor
