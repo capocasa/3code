@@ -32,7 +32,7 @@ SWE-bench Verified, 10-task subset — five agents through the same LiteLLM prox
 
 3code used 9% fewer tokens than pi and resolved one more task. Output tokens are the starkest gap: 71,751 for 3code vs 117,707 for pi — a 1.6× difference, and on a pay-per-token API that's money on every single turn.
 
-An earlier round on GLM-5.2 against opencode alone: 3code used 75% fewer tokens and resolved a task opencode failed. Full per-task data and methodology → [3code.capocasa.dev/swe](https://3code.capocasa.dev/swe/3code-benchmark-10-glm53.html)
+An earlier round on GLM-5.2 against opencode alone: 3code used 75% fewer tokens — 4× savings — and resolved a task opencode failed. Details in the [blog post](https://capocasa.dev/3code-benches-75-lower-token-use-vs-opencode-on-10-task-swe-bench-subset.html). Full per-task data and methodology → [3code.capocasa.dev/swe](https://3code.capocasa.dev/swe/3code-benchmark-10-glm53.html)
 
 ## How it pulls it off
 
