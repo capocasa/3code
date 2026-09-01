@@ -8,6 +8,8 @@ import std/[json, strutils]
 
 import actions, display, fatprompt, session, types, util
 
+export isEmptyReplyMsg
+
 type
   TranscriptKind* = enum
     tiUserPrompt,
@@ -61,8 +63,12 @@ proc toolItem*(act: Action; res: string; code, idx: int; diff = "";
                  body: toolTranscriptBytes(act, res, code, idx, diff, elapsedS),
                  attachSeparator: true)
 
-proc emptyAssistantBytes(attachReceipt: bool; receipt = ""): string =
-  result.add GreyFg & "empty reply - no content, no tool calls" & Reset
+proc emptyAssistantBytes*(attachReceipt: bool; receipt = ""): string =
+  ## The shared empty-reply rendering. Live (`commitAssistantItem`) and
+  ## replay (`formatItem`) both render through this, and the saved-session
+  ## marker text is the same constant (`EmptyReplyMsg`), so the three
+  ## surfaces can't drift apart.
+  result.add GreyFg & EmptyReplyMsg & Reset
   if attachReceipt and receipt.len > 0:
     result.add "\r\n"
     result.add receipt
@@ -141,7 +147,13 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
       stdout.write formatItem(userPromptItem(shown)) & "\n"
       firstItem = false
     of "assistant":
-      let c = m{"content"}.getStr("").strip
+      var c = m{"content"}.getStr("").strip
+      # Sessions saved by `renderSession` persist a tool-less empty reply as
+      # the marker text (`EmptyReplyMsg`); rendering that as prose would show
+      # a white "empty reply" line with a `●` bullet instead of the grey
+      # fallback the live path paints. Map the marker back to empty so the
+      # `tiAssistant` fallback below renders it identically to live.
+      if isEmptyReplyMsg(c): c = ""
       let u = usageFromJson(m{"usage"})
       let isLast = i == lastAssistant
       let hasTools =
@@ -159,6 +171,17 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
           stdout.write "\n"
         stdout.write bytes & "\n"
         firstItem = false
+        # A tool-less empty reply persisted with the provider's explanation
+        # (`finish_reason`) gets the same explanatory line the live retry
+        # loop painted (`empty reply: <reason>. ...`), so a resumed session
+        # shows why the turn was empty instead of the bare fallback. The
+        # reason rides on the item, not the separator, so it joins flush.
+        if c.len == 0:
+          let fr = m{"finish_reason"}.getStr("").strip
+          if fr.len > 0:
+            var reason = errLnS("empty reply: " & fr)
+            reason.trimTranscriptTail()
+            stdout.write reason & "\n"
       if isLast:
         result = u
       if hasTools:

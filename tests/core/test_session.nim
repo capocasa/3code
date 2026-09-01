@@ -282,6 +282,21 @@ suite "session: renderSession → loadSessionFile round-trip":
     check lm[2]["role"].getStr == "assistant"
     check lm[2]["content"].getStr == "empty reply - no content, no tool calls"
 
+  test "round-trips empty assistant reply with finish_reason":
+    # The provider's explanation for an empty turn must survive the .3log
+    # so a resumed replay renders `empty reply: <reason>` instead of the
+    # bare fallback.
+    let sess = Session(created: "20250101T120000", profileName: "test",
+                       cwd: "/tmp")
+    let msgs = %*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "hi"},
+      {"role": "assistant", "content": "", "finish_reason": "length"}
+    ]
+    let (_, lm) = roundTrip(sess, msgs)
+    check lm[2]["content"].getStr == EmptyReplyMsg
+    check lm[2]["finish_reason"].getStr == "length"
+
   test "round-trips session_context / project_notes preamble":
     let sess = Session(created: "20250101T120000", profileName: "test",
                        cwd: "/tmp")

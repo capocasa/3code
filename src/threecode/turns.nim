@@ -290,11 +290,8 @@ proc commitAssistantItem(content: string; restoreEditor = true;
     if attachReceipt: clearSubmittedReceiptState
     else: clearSubmittedTickerState
   if content.strip.len == 0:
-    var bytes = GreyFg & "empty reply - no content, no tool calls" & Reset
     let receipt = if attachReceipt: pendingReceiptBytes() else: ""
-    if attachReceipt and receipt.len > 0:
-      bytes.add "\r\n"
-      bytes.add receipt
+    var bytes = emptyAssistantBytes(attachReceipt, receipt)
     bytes.finishTranscriptItem()
     commitTranscriptBytes(bytes, restoreEditor, afterCommit)
     return
