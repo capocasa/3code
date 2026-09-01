@@ -494,6 +494,20 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("hetzner", "GLM-5.2-NVFP4", "glm", "5", "2", "high", 0.2, 8192, false, 512_000),
     ("hetzner", "DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 512_000),
     ("hetzner", "Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
+    # greenpt (GreenPT, EU-hosted; OpenAI-compatible). Only the catalog ids
+    # that are known-good elsewhere get entries; qwen3.5-397b, the
+    # mistral/gemma/llama chat lineup, and the green-* branded ids are
+    # experimental.
+    ("greenpt", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
+    ("greenpt", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, false, 1_000_000),
+    ("greenpt", "glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
+    ("greenpt", "deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
+    ("greenpt", "minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, false, 204_800),
+    ("greenpt", "kimi-k2.6", "kimi", "2", "6", "on", 0.6, 8192, false, 262_144),
+    ("greenpt", "kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
+    ("greenpt", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, false, 1_000_000),
+    ("greenpt", "gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, false, 131_072),
+    ("greenpt", "qwen3.6-35b-a3b", "qwen", "3.6", "35b-a3b", "on", 0.2, 8192, false, 262_144),
     ("together", "moonshotai/Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
     ("together", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.6, 8192, false, 1_000_000),
     ("opencode", "gpt-5", "gpt", "", "5", "medium", 0.2, 8192, false, 400_000),
