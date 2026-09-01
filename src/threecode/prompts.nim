@@ -15,7 +15,7 @@
 ]#
 
 import std/[algorithm, hashes, json, os, sequtils, strutils]
-import types, util
+import types, util, modelname
 
 # this is expected to be overridden by a more useful value in config.nims
 const Version* {.strdefine.} = "devel"
@@ -2706,6 +2706,14 @@ input:
   @path         inline file contents (e.g. @src/foo.nim)
 """
 
+func matchesKnownGoodModel*(comboModel, model: string): bool =
+  ## Exact match on the raw wire id, or match on the normalized pretty
+  ## form. The wire id ("zai-org/GLM-5.1") stays the ground truth for
+  ## cases the normalizer can't see; the normalized form is what
+  ## config files and `Profile.model` carry now.
+  let m = model.toLowerAscii
+  comboModel.toLowerAscii == m or normalizeModelName(comboModel) == m
+
 proc canonicalKnownGoodProvider*(provider: string): string =
   ## Map config provider names onto the KnownGoodCombos provider key.
   ## `supergrok` is the SuperGrok/OAuth twin of first-party `xai` (same
@@ -2724,15 +2732,14 @@ proc knownGoodFamily*(p: Profile): string =
   let dot = p.name.find('.')
   if dot < 0: return ""
   let provider = canonicalKnownGoodProvider(p.name[0 ..< dot])
-  let model = p.model.toLowerAscii
   for combo in KnownGoodCombos:
     if combo.provider.toLowerAscii == provider and
-       combo.model.toLowerAscii == model: return combo.family
+       matchesKnownGoodModel(combo.model, p.model): return combo.family
   ""
 
 proc isKnownGood*(p: Profile): bool =
-  ## True when (provider name, `modelPrefix & model`) exactly matches
-  ## an entry in `KnownGoodCombos` (case-insensitive on both parts).
+  ## True when (provider name, model) matches an entry in
+  ## `KnownGoodCombos` — by exact wire id or by normalized pretty name.
   ## Empty profiles return false — caller decides what that means.
   knownGoodFamily(p) != ""
 
@@ -2740,9 +2747,8 @@ proc knownGoodFamily*(provider, model: string): string =
   ## Convenience overload for the wizard, where we have a candidate
   ## (provider name, full model id) but no Profile.
   let p = canonicalKnownGoodProvider(provider)
-  let m = model.toLowerAscii
   for combo in KnownGoodCombos:
-    if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
+    if combo.provider.toLowerAscii == p and matchesKnownGoodModel(combo.model, model):
       return combo.family
   ""
 
@@ -2751,18 +2757,16 @@ proc knownGoodTags*(provider, model: string): (string, string, string) =
   ## strings when no match. Used at profile-build time to populate the
   ## informational tags on `Profile`.
   let p = canonicalKnownGoodProvider(provider)
-  let m = model.toLowerAscii
   for combo in KnownGoodCombos:
-    if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
+    if combo.provider.toLowerAscii == p and matchesKnownGoodModel(combo.model, model):
       return (combo.family, combo.version, combo.variant)
   ("", "", "")
 
 proc knownGoodReasoning*(provider, model: string): string =
   ## Default reasoning level for a known-good combo, "" if not on the list.
   let p = canonicalKnownGoodProvider(provider)
-  let m = model.toLowerAscii
   for combo in KnownGoodCombos:
-    if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
+    if combo.provider.toLowerAscii == p and matchesKnownGoodModel(combo.model, model):
       return combo.reasoning
   ""
 
@@ -2792,9 +2796,8 @@ proc knownGoodGeneration*(provider, model: string): GenerationDefaults =
   ## Hardcoded generation defaults for a known-good combo. Experimental
   ## combos return the zero object, which callers treat as "omit".
   let p = canonicalKnownGoodProvider(provider)
-  let m = model.toLowerAscii
   for combo in KnownGoodCombos:
-    if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
+    if combo.provider.toLowerAscii == p and matchesKnownGoodModel(combo.model, model):
       return GenerationDefaults(temperature: combo.temperature, maxTokens: combo.maxTokens)
   GenerationDefaults(temperature: -1.0, maxTokens: 0)
 
@@ -2815,9 +2818,9 @@ proc xmlToolCallsFallback*(p: Profile): bool =
   let dot = p.name.find('.')
   if dot < 0: return false
   let provider = canonicalKnownGoodProvider(p.name[0 ..< dot])
-  let model = p.model.toLowerAscii
   for combo in KnownGoodCombos:
-    if combo.provider.toLowerAscii == provider and combo.model.toLowerAscii == model:
+    if combo.provider.toLowerAscii == provider and
+       matchesKnownGoodModel(combo.model, p.model):
       return combo.xmlToolCalls
   false
 
@@ -2839,9 +2842,8 @@ proc knownGoodContextWindow*(provider, model: string): int =
   ## substring heuristic). The value comes straight from the
   ## `contextWindow` field of the matching entry in `KnownGoodCombos`.
   let p = canonicalKnownGoodProvider(provider)
-  let m = model.toLowerAscii
   for combo in KnownGoodCombos:
-    if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
+    if combo.provider.toLowerAscii == p and matchesKnownGoodModel(combo.model, model):
       return combo.contextWindow
   0
 
@@ -2889,9 +2891,8 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
   ## `@ReasoningLevels` for the level-based families (gpt-oss, deepseek),
   ## and `@[]` when the pair is off the table.
   let p = canonicalKnownGoodProvider(provider)
-  let m = model.toLowerAscii
   for combo in KnownGoodCombos:
-    if combo.provider.toLowerAscii == p and combo.model.toLowerAscii == m:
+    if combo.provider.toLowerAscii == p and matchesKnownGoodModel(combo.model, model):
       let fam = combo.family
       if fam == "gpt":
         # Effort ladder from OpenAI's per-model docs, keyed off the

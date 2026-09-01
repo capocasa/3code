@@ -167,7 +167,7 @@ proc orderedModels*(prov: ProviderRec): seq[string] =
   for combo in KnownGoodCombos:
     if combo.provider.toLowerAscii == p:
       for m in prov.models:
-        if m == combo.model:
+        if matchesKnownGoodModel(combo.model, m):
           result.add m
           break
   for m in prov.models:
@@ -191,7 +191,7 @@ proc firstKnownGoodCombo*(providers: seq[ProviderRec]): string =
       if pr.url == "" or (pr.key == "" and pr.auth != "oauth"): continue
       if canonicalKnownGoodProvider(pr.name) != combo.provider.toLowerAscii: continue
       for m in pr.models:
-        if m == combo.model:
+        if matchesKnownGoodModel(combo.model, m):
           return pr.name & "." & m
   ""
 
