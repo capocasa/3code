@@ -661,6 +661,14 @@ across threads.
 `example/webserve.nim` is the complete example: the session stays on a worker
 thread and events reach the browser through server-sent events.
 
+## Build from source
+
+```
+nimble install https://github.com/capocasa/3code
+```
+
+Requires [Nim](https://nim-lang.org) >= 2.0 and `curl` on `PATH`.
+
 ## Contributing
 
 Developer API documentation is generated at `docs/dev/threecode.html`:
