@@ -1,7 +1,7 @@
-===== 0 =====
+===== 606 =====
 
   ╭─╮
-   ─┤  3code v0.6.0-main-4b9b6b85-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-escape-0cd0efaa-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -11,11 +11,7 @@
 
   ○0%
 ❯ :help
-===== 0 =====
-  :reasoning X      switch reasoning level (low / medium / high)
-  :streaming        show streaming mode (on = live output, off = request/response)
-  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
-  :notify           show notify mode (on = desktop notification when a turn ends)
+===== 888 =====
   :notify on|off    toggle turn-end desktop notification
   :retry            show patient-retry mode (on = ~36h hold for outages/limits)
   :retry on|off     toggle patient retry of 429/5xx/network errors
@@ -35,6 +31,8 @@
   (T is a path or a host; P a path. Project paths write as ./foo,
   home paths as ~/foo; a bare word is a host. Policy words: allow,
   readonly, deny; see .sandbox)
+  :! CMD            run CMD directly through the sandboxed shell
+                    (output shown, not sent to the model)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -48,15 +46,13 @@ input:
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
+  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
+  ctrl+x ctrl+e same (emacs edit-and-execute-command)
   @path         inline file contents (e.g. @src/foo.nim)
 
   ○0%
 ❯
-===== 0 =====
-  :reasoning X      switch reasoning level (low / medium / high)
-  :streaming        show streaming mode (on = live output, off = request/response)
-  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
-  :notify           show notify mode (on = desktop notification when a turn ends)
+===== 622 =====
   :notify on|off    toggle turn-end desktop notification
   :retry            show patient-retry mode (on = ~36h hold for outages/limits)
   :retry on|off     toggle patient retry of 429/5xx/network errors
@@ -76,6 +72,8 @@ input:
   (T is a path or a host; P a path. Project paths write as ./foo,
   home paths as ~/foo; a bare word is a host. Policy words: allow,
   readonly, deny; see .sandbox)
+  :! CMD            run CMD directly through the sandboxed shell
+                    (output shown, not sent to the model)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -89,15 +87,13 @@ input:
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
+  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
+  ctrl+x ctrl+e same (emacs edit-and-execute-command)
   @path         inline file contents (e.g. @src/foo.nim)
 
   ○0%
 ❯ :provider
-===== 0 =====
-  :retry            show patient-retry mode (on = ~36h hold for outages/limits)
-  :retry on|off     toggle patient retry of 429/5xx/network errors
-  :prompt           show the active system prompt
-  :show [N]         show full output of tool call N (default: last)
+===== 702 =====
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
@@ -112,6 +108,8 @@ input:
   (T is a path or a host; P a path. Project paths write as ./foo,
   home paths as ~/foo; a bare word is a host. Policy words: allow,
   readonly, deny; see .sandbox)
+  :! CMD            run CMD directly through the sandboxed shell
+                    (output shown, not sent to the model)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -125,6 +123,8 @@ input:
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
+  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
+  ctrl+x ctrl+e same (emacs edit-and-execute-command)
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
@@ -134,11 +134,7 @@ alt
 
   ○0%
 ❯
-===== 0 =====
-  :retry            show patient-retry mode (on = ~36h hold for outages/limits)
-  :retry on|off     toggle patient retry of 429/5xx/network errors
-  :prompt           show the active system prompt
-  :show [N]         show full output of tool call N (default: last)
+===== 476 =====
   :log              list all tool calls this session
   :sessions         list recent sessions saved in this directory (max 20)
   :summarize        collapse old turns into a synthetic recap (meta model call)
@@ -153,6 +149,8 @@ alt
   (T is a path or a host; P a path. Project paths write as ./foo,
   home paths as ~/foo; a bare word is a host. Policy words: allow,
   readonly, deny; see .sandbox)
+  :! CMD            run CMD directly through the sandboxed shell
+                    (output shown, not sent to the model)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -166,6 +164,8 @@ input:
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
+  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
+  ctrl+x ctrl+e same (emacs edit-and-execute-command)
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
@@ -175,11 +175,7 @@ alt
 
   ○0%
 ❯ :model
-===== 0 =====
-  :sessions         list recent sessions saved in this directory (max 20)
-  :summarize        collapse old turns into a synthetic recap (meta model call)
-  :version          show the running 3code version
-  :sandbox (:sb)    show the active filesystem sandbox rules
+===== 153 =====
   :sandbox show     (same)
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow T  add a writable/connectable rule (allow T)
@@ -189,6 +185,8 @@ alt
   (T is a path or a host; P a path. Project paths write as ./foo,
   home paths as ~/foo; a bare word is a host. Policy words: allow,
   readonly, deny; see .sandbox)
+  :! CMD            run CMD directly through the sandboxed shell
+                    (output shown, not sent to the model)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -202,6 +200,8 @@ input:
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
+  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
+  ctrl+x ctrl+e same (emacs edit-and-execute-command)
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
@@ -216,11 +216,7 @@ stub-large
 
   ○0%
 ❯
-===== 0 =====
-  :sessions         list recent sessions saved in this directory (max 20)
-  :summarize        collapse old turns into a synthetic recap (meta model call)
-  :version          show the running 3code version
-  :sandbox (:sb)    show the active filesystem sandbox rules
+===== 820 =====
   :sandbox show     (same)
   :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
   :sandbox allow T  add a writable/connectable rule (allow T)
@@ -230,6 +226,8 @@ stub-large
   (T is a path or a host; P a path. Project paths write as ./foo,
   home paths as ~/foo; a bare word is a host. Policy words: allow,
   readonly, deny; see .sandbox)
+  :! CMD            run CMD directly through the sandboxed shell
+                    (output shown, not sent to the model)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -243,6 +241,8 @@ input:
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
+  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
+  ctrl+x ctrl+e same (emacs edit-and-execute-command)
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
@@ -257,15 +257,13 @@ stub-large
 
   ○0%
 ❯ :reasoning
-===== 0 =====
-  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow T  add a writable/connectable rule (allow T)
-  :sandbox readonly P  add a read-only rule (readonly P)
-  :sandbox deny T   add a deny rule (deny T)
+===== 413 =====
   :sandbox edit     open the policy file in $VISUAL/$EDITOR, reload on quit
   (T is a path or a host; P a path. Project paths write as ./foo,
   home paths as ~/foo; a bare word is a host. Policy words: allow,
   readonly, deny; see .sandbox)
+  :! CMD            run CMD directly through the sandboxed shell
+                    (output shown, not sent to the model)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -279,6 +277,8 @@ input:
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
+  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
+  ctrl+x ctrl+e same (emacs edit-and-execute-command)
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
@@ -298,15 +298,13 @@ experimental: level is free-form, type any value
 
   ○0%
 ❯
-===== 0 =====
-  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow T  add a writable/connectable rule (allow T)
-  :sandbox readonly P  add a read-only rule (readonly P)
-  :sandbox deny T   add a deny rule (deny T)
+===== 590 =====
   :sandbox edit     open the policy file in $VISUAL/$EDITOR, reload on quit
   (T is a path or a host; P a path. Project paths write as ./foo,
   home paths as ~/foo; a bare word is a host. Policy words: allow,
   readonly, deny; see .sandbox)
+  :! CMD            run CMD directly through the sandboxed shell
+                    (output shown, not sent to the model)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -320,6 +318,8 @@ input:
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
+  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
+  ctrl+x ctrl+e same (emacs edit-and-execute-command)
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
@@ -339,11 +339,9 @@ experimental: level is free-form, type any value
 
   ○0%
 ❯ :model stub-large
-===== 0 =====
-  :sandbox edit     open the policy file in $VISUAL/$EDITOR, reload on quit
-  (T is a path or a host; P a path. Project paths write as ./foo,
-  home paths as ~/foo; a bare word is a host. Policy words: allow,
-  readonly, deny; see .sandbox)
+===== 223 =====
+  :! CMD            run CMD directly through the sandboxed shell
+                    (output shown, not sent to the model)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -357,6 +355,8 @@ input:
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
+  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
+  ctrl+x ctrl+e same (emacs edit-and-execute-command)
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
@@ -380,11 +380,9 @@ provider  stub
 model     stub-large
 
 ❯
-===== 0 =====
-  :sandbox edit     open the policy file in $VISUAL/$EDITOR, reload on quit
-  (T is a path or a host; P a path. Project paths write as ./foo,
-  home paths as ~/foo; a bare word is a host. Policy words: allow,
-  readonly, deny; see .sandbox)
+===== 594 =====
+  :! CMD            run CMD directly through the sandboxed shell
+                    (output shown, not sent to the model)
   :q :quit          exit (also Ctrl-D)
 
 input:
@@ -398,6 +396,8 @@ input:
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
+  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
+  ctrl+x ctrl+e same (emacs edit-and-execute-command)
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
@@ -421,9 +421,7 @@ provider  stub
 model     stub-large
 
 ❯ :reasoning high
-===== 0 =====
-input:
-  single-line   just type and press Enter
+===== 948 =====
   multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
@@ -433,6 +431,8 @@ input:
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
+  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
+  ctrl+x ctrl+e same (emacs edit-and-execute-command)
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
@@ -462,9 +462,7 @@ model     stub-large
 reasoning high
 
 ❯
-===== 0 =====
-input:
-  single-line   just type and press Enter
+===== 952 =====
   multi-line    Shift+Enter (or Alt+Enter) inserts a newline; Enter submits
   arrows        full cursor navigation across lines and visual wraps
   ctrl+arrow    word-by-word jumps (also crosses logical lines)
@@ -474,6 +472,8 @@ input:
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
+  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
+  ctrl+x ctrl+e same (emacs edit-and-execute-command)
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
@@ -503,13 +503,13 @@ model     stub-large
 reasoning high
 
 ❯ :provider alt
-===== 0 =====
-  home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
+===== 543 =====
   ctrl+w        delete the word before the cursor
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
+  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
+  ctrl+x ctrl+e same (emacs edit-and-execute-command)
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
@@ -544,13 +544,13 @@ provider  alt
 model     alt-model
 
 ❯
-===== 0 =====
-  home / end    jump to start / end of the current logical line
-  ctrl+u        clear the buffer
+===== 583 =====
   ctrl+w        delete the word before the cursor
   up / down     visual-row up/down inside the buffer; on the top/bottom row recalls history
   tab           complete :commands, provider names, model names
   ctrl+l        clear the screen
+  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
+  ctrl+x ctrl+e same (emacs edit-and-execute-command)
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
@@ -585,9 +585,9 @@ provider  alt
 model     alt-model
 
 ❯ :tokens
-===== 0 =====
-  tab           complete :commands, provider names, model names
-  ctrl+l        clear the screen
+===== 107 =====
+  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
+  ctrl+x ctrl+e same (emacs edit-and-execute-command)
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
@@ -626,9 +626,9 @@ model     alt-model
 no tokens used yet
 
 ❯
-===== 0 =====
-  tab           complete :commands, provider names, model names
-  ctrl+l        clear the screen
+===== 582 =====
+  alt+e         edit the prompt buffer in $VISUAL/$EDITOR
+  ctrl+x ctrl+e same (emacs edit-and-execute-command)
   @path         inline file contents (e.g. @src/foo.nim)
 
 ❯ :provider
@@ -667,7 +667,7 @@ model     alt-model
 no tokens used yet
 
 ❯ :clear
-===== 0 =====
+===== 624 =====
 ❯ :provider
 
 stub  [stub-model]
@@ -708,7 +708,7 @@ no tokens used yet
 ════════════════════════════════════════
 
 ❯
-===== 0 =====
+===== 697 =====
 ❯ :provider
 
 stub  [stub-model]
@@ -749,7 +749,7 @@ no tokens used yet
 ════════════════════════════════════════
 
 ❯ :sessions
-===== 0 =====
+===== 215 =====
 
 ❯ :model
 
@@ -790,7 +790,7 @@ no tokens used yet
 no saved sessions for this directory
 
 ❯
-===== 0 =====
+===== 188 =====
 
 ❯ :model
 
@@ -831,7 +831,7 @@ no tokens used yet
 no saved sessions for this directory
 
 ❯ :sessions all
-===== 0 =====
+===== 105 =====
 
 ❯ :reasoning
 
@@ -872,7 +872,7 @@ no saved sessions for this directory
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯
-===== 0 =====
+===== 855 =====
 
 ❯ :reasoning
 
@@ -913,7 +913,7 @@ no saved sessions for this directory
 listing is scoped to this directory — run from ~/data/3code/sessions for all
 
 ❯ :log
-===== 0 =====
+===== 840 =====
 experimental: level is free-form, type any value
 
 ❯ :model stub-large
@@ -954,7 +954,7 @@ listing is scoped to this directory — run from ~/data/3code/sessions for all
 no tool calls yet
 
 ❯
-===== 0 =====
+===== 478 =====
 experimental: level is free-form, type any value
 
 ❯ :model stub-large
@@ -995,7 +995,7 @@ listing is scoped to this directory — run from ~/data/3code/sessions for all
 no tool calls yet
 
 ❯ :show
-===== 0 =====
+===== 173 =====
 provider  stub
 model     stub-large
 
@@ -1036,7 +1036,7 @@ no tool calls yet
 no tool calls yet
 
 ❯
-===== 0 =====
+===== 359 =====
 provider  stub
 model     stub-large
 
@@ -1077,7 +1077,7 @@ no tool calls yet
 no tool calls yet
 
 ❯ :compact
-===== 0 =====
+===== 857 =====
 
 provider  stub
 model     stub-large
@@ -1118,7 +1118,7 @@ no tool calls yet
 unknown command: :compact  (try :help)
 
 ❯
-===== 0 =====
+===== 190 =====
 
 provider  stub
 model     stub-large
@@ -1159,7 +1159,7 @@ no tool calls yet
 unknown command: :compact  (try :help)
 
 ❯ :summarize
-===== 0 =====
+===== 538 =====
 
 ❯ :provider alt
 
@@ -1200,7 +1200,7 @@ unknown command: :compact  (try :help)
 failed or not worth it
 
 ❯
-===== 0 =====
+===== 728 =====
 
 ❯ :provider alt
 
@@ -1241,7 +1241,7 @@ unknown command: :compact  (try :help)
 failed or not worth it
 
 ❯ :prompt
-===== 0 =====
+===== 490 =====
 
 Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), har
 d-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (pushing code, open
@@ -1282,7 +1282,7 @@ Brief. State results, not deliberation. Match response shape to task. End-of-tur
 ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯
-===== 0 =====
+===== 199 =====
 
 Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), har
 d-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (pushing code, open
@@ -1323,7 +1323,7 @@ Brief. State results, not deliberation. Match response shape to task. End-of-tur
 ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
 
 ❯ :toknes
-===== 0 =====
+===== 821 =====
 
 # Git
 
@@ -1364,7 +1364,7 @@ ext. No emoji, no forced cheer. Code refs as `path:line`. If the task was alread
 unknown command: :toknes  did you mean :tokens?
 
 ❯
-===== 0 =====
+===== 967 =====
 
 # Git
 
