@@ -20,17 +20,19 @@ Works with any OpenAI-compatible endpoint. Bring your own provider — free tier
 
 ## Data to back it up
 
-SWE-bench Verified, 10-task subset — both agents on Z.ai glm-5.2 via the same LiteLLM proxy, 600s per-task timeout:
+SWE-bench Verified, 10-task subset — five agents through the same LiteLLM proxy on Z.ai GLM-5.3, same provider, same 600s per-task cap, vanilla configs. Every difference in the results is the harness, not the model:
 
-| | 3code | opencode |
-|---|---|---|
-| Tasks resolved | **6 / 10** | 5 / 10 |
-| Non-cached input tokens | **~295k** | ~1.45M |
-| Cached input tokens | **~4.7M** | ~10.7M |
-| Output tokens | **~69k** | ~106k |
-| Wall time | **55 min** | 65 min |
+| agent | total tokens | % of median | resolved |
+|---|---|---|---|
+| **3code** | **4,209,360** | **88.3%** | **7/10** |
+| pi | 4,641,357 | 97.4% | 6/10 |
+| zcode | 4,766,000 | 100.0% | 6/10 |
+| hermes | 6,072,610 | 127.4% | 6/10 |
+| opencode | 6,771,747 | 142.1% | 6/10 |
 
-opencode sent 4.9× the non-cached input of 3code on comparable work. On most providers cached input accounts for 90%+ of token spend, so this is where efficiency pays off most. Zero eval errors, zero unresolved patches. Full per-task breakdown and methodology → [3code.capocasa.dev](https://3code.capocasa.dev)
+3code used 9% fewer tokens than pi and resolved one more task. Output tokens are the starkest gap: 71,751 for 3code vs 117,707 for pi — a 1.6× difference, and on a pay-per-token API that's money on every single turn.
+
+An earlier round on GLM-5.2 against opencode alone: 3code used 75% fewer tokens and resolved a task opencode failed. Full per-task data and methodology → [3code.capocasa.dev/swe](https://3code.capocasa.dev/swe/3code-benchmark-10-glm53.html)
 
 ## How it pulls it off
 
