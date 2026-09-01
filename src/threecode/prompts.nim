@@ -652,7 +652,6 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("deepinfra", "Qwen/Qwen3.8-Max", "qwen"      , "3.8", "max", "on", 0.2, 8192, false, 1000000),
     ("deepinfra", "Qwen/Qwen3.8-2.4T-A95B", "qwen"      , "3.8", "2.4t-a95b", "on", 0.2, 8192, false, 1000000),
     ("deepinfra", "Qwen/Qwen3.8-27B", "qwen"      , "3.8", "27b", "on", 0.2, 8192, false, 128000),
-    ("openrouter", "qwen/qwen3.8-27b", "qwen"      , "3.8", "27b", "on", 0.2, 8192, false, 128000),
     ("aki",       "qwen3.8-27b", "qwen"      , "3.8", "27b", "on", 0.2, 8192, false, 128000),
     ("together",  "Qwen/Qwen3.6-35B-A3B-FP8", "qwen"      , "3.6", "35b-a3b", "on", 0.2, 8192, false, 262144),
     ("together",  "Qwen/Qwen3.8-2.4T-A95B", "qwen"      , "3.8", "2.4t-a95b", "on", 0.2, 8192, false, 1000000),
