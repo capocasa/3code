@@ -323,6 +323,16 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
       if up > 0:
         stdout.write "\x1b[" & $up & "A"
       stdout.write "\x1b[J"
+      # If live content is streaming, the erase just consumed its rows too:
+      # re-emit them so the volatile partial survives a footer-only repaint.
+      # The guiLoop normally routes through `repaintLiveContent` when content
+      # is live, but its `liveContentRowCount() > 0` check is read outside
+      # this lock, so a chunk landing between the check and the call sends a
+      # bare `renderFooter` here with rows tracked. Erasing them without a
+      # rewrite drops the partial and leaves `liveContentRows` pointing at a
+      # row the next commit's walk-up counts but the screen no longer holds —
+      # the over-erase that ate the welcome hint line.
+      e.writeLiveContentRows()
       e.writeToolViewportRows()
       if bytes.len > 0:
         stdout.write bytes
