@@ -98,6 +98,15 @@ suite "web helpers":
     check parseBraveResults("{\"query\":{}}").len == 0
     check parseBraveResults("nope").len == 0
 
+  test "formatHits truncates oversize snippets":
+    let long = "x".repeat(2000)
+    let hits = @[SearchHit(title: "T", url: "https://u/", snippet: long)]
+    let rendered = formatHits(hits)
+    check "... [truncated]" in rendered
+    check "x".repeat(2000) notin rendered
+    let short = formatHits(@[SearchHit(title: "T", url: "", snippet: "brief")])
+    check "truncated" notin short
+
   test "capText middle-truncates oversize input":
     let s = "a".repeat(30_000)
     let c = capText(s, 1000)
