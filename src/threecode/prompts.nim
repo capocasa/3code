@@ -2724,6 +2724,18 @@ proc canonicalKnownGoodProvider*(provider: string): string =
   elif p == "chatgpt": "openai"
   else: p
 
+proc knownGoodWireModel*(provider, model: string): string =
+  ## Full wire model id for a known-good (provider, model), or "" when
+  ## off the table. Config files persist normalized ids (the author
+  ## prefix is dropped), but the API needs the wire id
+  ## (`qwen/qwen3.8-27b`, not `qwen-3.8-27b`).
+  let p = canonicalKnownGoodProvider(provider)
+  for combo in KnownGoodCombos:
+    if combo.provider.toLowerAscii == p and
+       matchesKnownGoodModel(combo.model, model):
+      return combo.model
+  ""
+
 proc knownGoodFamily*(p: Profile): string =
   ## Returns the family label ("glm", ...) for a known-good combo, or ""
   ## if (provider, model) isn't on the list. Match is case-insensitive on
