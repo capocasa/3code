@@ -75,6 +75,14 @@ type
     ## chrome) resets the signature via `noteFooterPainted`/`noteNoFooter`
     ## so the next render always paints.
     lastPaintSig: string
+    ## On-screen content of the volatile block as last painted: bar + ticker
+    ## rows (indices >= 0) and editor visual rows (indices < 0, -1 is the
+    ## editor's top row). The viewport/live-content rows have their own
+    ## tracked model (`toolViewportRows`/`liveContentRows`) and join the diff
+    ## at paint time. The diff painter rewrites only rows whose content
+    ## changed, so a ticking footer no longer repaints the whole volatile
+    ## block every 80ms.
+    lastVolatileRows: seq[string]
 
 var defaultEngine*: TerminalEngine
 
@@ -141,15 +149,33 @@ proc walkUp(e: var TerminalEngine; ed: var minline.LineEditor): int =
     e.viewportGapRows + e.toolViewportRows.len +
     e.liveContentGapRows + e.liveContentRows.len
 
+
 proc noteFooterPainted(e: var TerminalEngine; footerRowsAboveEditor: int) =
+  ## Commit a footer height painted out of band (startup raw paint,
+  ## resume registration). Callers that repaint footer/editor bytes
+  ## out of band must sync the row model with what they painted (see
+  ## `beginEditorRedraw` and `repaintVolatileAfterCommit`); this proc
+  ## only records the height, so it wipes the model and lets the next
+  ## diff paint rewrite every row.
   e.paintedFooterRows = max(0, footerRowsAboveEditor)
   e.lastPaintSig = ""
+  e.lastVolatileRows = @[]
   geometryAudit("footerPainted", e.paintedFooterRows)
 
 proc noteNoFooter(e: var TerminalEngine) =
   e.paintedFooterRows = 0
   e.lastPaintSig = ""
+  e.lastVolatileRows = @[]
   geometryAudit("footerCleared", 0)
+
+proc noteFooterPaintedKeepRows(e: var TerminalEngine;
+                               footerRowsAboveEditor: int) =
+  ## Commit the painted footer height after a diff paint: the row model
+  ## the painter just stored stays valid for the next diff, unlike the
+  ## out-of-band `noteFooterPainted` which must invalidate it.
+  e.paintedFooterRows = max(0, footerRowsAboveEditor)
+  e.lastPaintSig = ""
+  geometryAudit("footerPainted", e.paintedFooterRows)
 
 proc viewportSig(e: TerminalEngine): string =
   ## The volatile tool-viewport rows as last painted, including the gap
@@ -167,27 +193,266 @@ proc editorSig(ed: var minline.LineEditor): string =
     "\x1f" & $ed.renderSuffixCursor & "\x1f" & $ed.pendingCaret & "\x1f" &
     ed.prompt & "\x1f" & ed.contPrompt & "\x1f" & $ed.width
 
-proc eraseUp(e: var TerminalEngine; ed: var minline.LineEditor;
-             width, footerRowsAboveEditor: int): int =
-  ## Rows to move up before erasing the volatile region. Normally this is the
-  ## plain walkUp (editor rows + the previously-painted footer height +
-  ## viewport/live rows). But after a terminal resize the bar/label re-wraps:
-  ## paintedFooterRows still holds the pre-resize count while the rows
-  ## actually on screen may be taller (or shorter). Erasing only the stale
-  ## count leaves the extra wrapped rows behind in scrollback. On a width
-  ## change, erase the larger of the old and new footer heights so the whole
-  ## volatile region, old and new geometry alike, is cleared in one pass.
-  result = editorRowsAboveCursor(ed) + e.viewportGapRows +
-    e.toolViewportRows.len + e.liveContentGapRows + e.liveContentRows.len
-  if width > 0 and e.lastPaintedWidth > 0 and width != e.lastPaintedWidth:
-    result += max(e.paintedFooterRows, footerRowsAboveEditor)
-  else:
-    result += e.paintedFooterRows
+type
+  VolatileRowKind* = enum
+    vrkText,       # one painted row, compared by content
+    vrkEditorSpan  # the editor's visual rows, compared via minline's own
+                   # row model so both sides share the wrap geometry
 
-proc writeViewportRows(rows: openArray[string]) =
-  for row in rows:
-    stdout.write row
-    stdout.write "\r\n"
+  VolatileRow* = object
+    case kind*: VolatileRowKind
+    of vrkText:
+      text*: string
+    of vrkEditorSpan:
+      discard
+
+proc vrText*(text: string): VolatileRow =
+  VolatileRow(kind: vrkText, text: text)
+
+const vrEditor* = VolatileRow(kind: vrkEditorSpan)
+
+proc diffRowBytes(text, prevText: string; width: int): string =
+  ## Rewrite of one volatile row: `\r` + row text + `\x1b[K`. The EL
+  ## clears to end of line without touching the next row: padding to the
+  ## full width would put the cursor on the last cell, which a following
+  ## `\n` (or the terminal's pending wrap) turns into an extra row shift.
+  result = "\r" & text & "\x1b[K"
+
+proc paintVolatileRegion*(e: var TerminalEngine; width: int;
+                          sections: openArray[VolatileRow];
+                          edPtr: ptr minline.LineEditor;
+                          footerRowsAboveEditor: int;
+                          newLiveRows, newViewportRows: seq[string];
+                          newLiveGap, newViewportGap: bool;
+                          newViewportBannerRows: int;
+                          prevPaintedFooterRows = -1) =
+  ## Shared repaint of the whole volatile block (live-content rows, tool
+  ## viewport, footer bar+ticker, editor): walk up the currently-painted
+  ## block, then rewrite only the rows whose painted content changed. The
+  ## fat prompt has diffed via `lastPaintSig` for a long time; this is the
+  ## same idea one level down: a ticking footer rewrites the changed bar
+  ## row instead of erase-repainting the whole block every 80ms.
+  ##
+  ## `sections` is the block below the live/viewport content, top-down;
+  ## the tracked gap rows above live/viewport content are added here so
+  ## callers do not spell them out. The editor's cursor ends at its
+  ## tracked visual row, or the block's bottom when there is no editor
+  ## span.
+  let resized = e.lastPaintedWidth > 0 and width > 0 and
+    width != e.lastPaintedWidth
+
+  if resized:
+    # The terminal reflowed the painted rows; the tracked model no
+    # longer matches the screen. Repaint from scratch: walk up the
+    # larger of the pre/post-reflow block heights (the stale rows
+    # occupy at most the pre-reflow count, the fresh paint the
+    # post-reflow count), erase down, and diff against an empty model
+    # so every row is rewritten.
+    let prevEdRows = if edPtr != nil: max(1, minline.renderedRows(edPtr[])) else: 0
+    let prevTotal = e.paintedFooterRows + e.toolViewportRows.len +
+      e.viewportGapRows + e.liveContentRows.len + e.liveContentGapRows +
+      prevEdRows
+    var newTotal = newLiveRows.len + newViewportRows.len + sections.len +
+      (if newLiveRows.len > 0 and newLiveGap: 1 else: 0) +
+      (if newViewportRows.len > 0 and newViewportGap: 1 else: 0)
+    if edPtr != nil:
+      newTotal += prevEdRows
+    let upErase = max(0, max(prevTotal, newTotal) - 1)
+    if upErase > 0:
+      stdout.write "\x1b[" & $upErase & "A"
+    stdout.write "\r\x1b[J"
+    e.lastVolatileRows = @[]
+    e.lastPaintSig = ""
+    e.paintedFooterRows = 0
+    e.toolViewportRows = @[]
+    e.toolViewportHasGap = false
+    e.liveContentRows = @[]
+    e.liveContentHasGap = false
+  let prevBarCount = (if prevPaintedFooterRows >= 0:
+      prevPaintedFooterRows else: e.paintedFooterRows)
+
+
+  # Previous on-screen block, top-down: the tracked gap rows, live
+  # content, viewport, then `lastVolatileRows` (bar+ticker, editor).
+  # Volatile repaints never commit, so the new block shifts this one
+  # only at the bottom; both share the same block bottom row.
+  var prevRows: seq[string]
+  if e.liveContentRows.len > 0 and e.liveContentHasGap:
+    prevRows.add ""
+  prevRows.add e.liveContentRows
+  if e.toolViewportRows.len > 0 and e.toolViewportHasGap:
+    prevRows.add ""
+  prevRows.add e.toolViewportRows
+  prevRows.add e.lastVolatileRows
+  let prevEditorRows =
+    if e.lastVolatileRows.len > prevBarCount:
+      e.lastVolatileRows[prevBarCount ..< e.lastVolatileRows.len]
+    else: @[]
+  # Physical height of the on-screen block above the cursor: the same
+  # walk-up geometry the old full-erase path used, NOT the (possibly
+  # wiped) row model. Out-of-band commits clear `liveContentRows` /
+  # `lastVolatileRows` while their erase leaves more rows on screen than
+  # the post-commit paint produced; counting from the model under-walks
+  # and strands those rows (the lingering `○0% ↓13` bar). The model seqs
+  # stay the diff's content source; `prevH` is the physical row count.
+  # Editor rows come from the editor's own live geometry (a wiped model
+  # holds none), the rest from the tracked seqs and `paintedFooterRows`.
+  let physEd = if edPtr != nil: max(1, minline.renderedRows(edPtr[])) else: 0
+  let prevPhysEdRows = max(prevEditorRows.len, physEd)
+  let walkH =
+    (if edPtr != nil: physEd else: 0) +
+    max(e.paintedFooterRows, prevBarCount) +
+    e.viewportGapRows + e.toolViewportRows.len +
+    e.liveContentGapRows + e.liveContentRows.len
+  let physH = max(walkH, prevRows.len - prevEditorRows.len + prevPhysEdRows)
+  var prevH = physH
+  # New block, top-down.
+  var cur: seq[VolatileRow]
+  if newLiveRows.len > 0 and newLiveGap:
+    cur.add vrText("")
+  for row in newLiveRows:
+    cur.add vrText(row)
+  if newViewportRows.len > 0 and newViewportGap:
+    cur.add vrText("")
+  for row in newViewportRows:
+    cur.add vrText(row)
+  cur.add sections
+  var newEdModel: seq[string]
+  var caretRow = -1
+  var caretCol = 0
+  if edPtr != nil:
+    for i, row in cur:
+      if row.kind == vrkEditorSpan:
+        newEdModel = edPtr[].renderRowSpans()
+        cur.delete(i)
+        for _ in newEdModel:
+          cur.insert(vrEditor, i)
+        caretRow = i + min(max(1, newEdModel.len) - 1, edPtr[].renderRow)
+        # The diff painter rewrites whole rows, never the caret column:
+        # position the caret exactly like `redrawBytes` does, or the
+        # on-screen cursor rests at column 0 between keystrokes (the
+        # harness's frames show a blank editor row instead of `❯ █`).
+        let renderedText = edPtr[].line.text & edPtr[].renderSuffix
+        let cursorText =
+          if edPtr[].renderSuffixCursor: renderedText
+          else: edPtr[].line.text
+        let cursorPos =
+          if edPtr[].renderSuffixCursor: renderedText.len
+          else: edPtr[].line.position
+        let pw = edPtr[].promptW
+        let cw = edPtr[].contPromptW
+        let (vrow, vcol) = minline.cursorVisual(cursorText, cursorPos,
+          pw, cw, max(2, edPtr[].width))
+        caretCol = vcol
+        caretRow = i + min(max(1, newEdModel.len) - 1, vrow)
+        break
+  let blockH = max(cur.len, 1)
+  # The cursor sits at the block's bottom, which the erase always left as
+  # a live row. A growing block must claim its extra rows from scrollback
+  # first (the old erase created them by clearing rows below the walk-up
+  # target); without the scroll the first rewrite of a row at the
+  # terminal's bottom edge would push the block instead of replacing it.
+  if blockH > prevH:
+    for _ in 0 ..< blockH - prevH:
+      stdout.write "\r\n"
+    prevH = blockH
+  let anchor = if caretRow >= 0: caretRow else: blockH - 1
+  let edTop = if newEdModel.len > 0: blockH - newEdModel.len else: -1
+  # Walk up from the cursor (block bottom) to the block's top.
+  let up = max(0, prevH - 1)
+
+  if up > 0:
+    stdout.write "\x1b[" & $up & "A"
+  # When the previous block was taller at the top (a commit consumed
+  # content rows out of band), the cursor's walk-up reaches the stale
+  # top rows while the anchor-aligned row loop only covers the new
+  # block below them. Blank that stale head explicitly, then step back
+  # down to the new block's top. (ED-0 would be shorter, but terminal
+  # models that implement it as "drop the rows below" shift anything
+  # underneath up into the block.)
+  let staleHead = max(0, prevH - blockH)
+  if staleHead > 0:
+    var headBuf = ""
+    for _ in 0 ..< staleHead:
+      headBuf.add "\r\x1b[2K"
+      headBuf.add "\x1b[1B"
+    headBuf.add "\x1b[" & $staleHead & "A"
+    stdout.write headBuf
+  # Top-down rewrite: rows compare against the previous block aligned
+  # at the bottom. The editor sections align at their cursor rows (the
+  # caret does not move during a volatile repaint); rows before the
+  # previous block ever existed compare against a sentinel.
+  var buf = "\r"
+  # Editor-row indexing uses the physical editor count: after an
+  # out-of-band wipe `prevEditorRows` is empty while the screen still
+  # holds the editor's rows, so treating the count as zero would compare
+  # the fresh editor rows against stale model rows (or nothing) and skip
+  # repainting them.
+  let prevEdTop = prevH - prevPhysEdRows
+  let prevAnchor = prevH - 1 - (blockH - 1 - anchor)
+  const Missing = "\x01MISSING"
+  for i in 0 ..< blockH:
+    let text =
+      if i < cur.len and cur[i].kind == vrkText: cur[i].text
+      elif edTop >= 0 and i >= edTop and i - edTop < newEdModel.len:
+        newEdModel[i - edTop]
+      else: ""
+    var p = Missing
+    if prevPhysEdRows > 0 and i >= edTop:
+      # Current editor row: compare to the previous editor row the same
+      # distance from the cursor. Rows the model no longer holds (wiped
+      # out of band) compare against the sentinel and repaint.
+      let k = prevAnchor + (i - anchor) - prevEdTop
+      p = (if k >= 0 and k < prevEditorRows.len: prevEditorRows[k]
+           else: Missing)
+    else:
+      # The previous block's top shifted by the same amount its cursor
+      # row moved (the caret does not move during a volatile repaint;
+      # sections below the cursor are rewritten each tick). Anchor-align
+      # both blocks so unchanged rows compare to themselves.
+      let j = prevAnchor + (i - anchor)
+      if (prevPhysEdRows == 0 or j < prevEdTop) and
+          j >= 0 and j < min(prevRows.len, prevH):
+        p = prevRows[j]
+    if p == Missing or resized or text != p:
+      buf.add diffRowBytes(text, if p == Missing: "" else: p, width)
+    if i < blockH - 1:
+      # A pending wrap from a full row below (a viewport bar padded to
+      # the width, or a row that filled its last cell) would wrap this
+      # newline into a double row advance; `\r` disarms it first.
+      buf.add "\r\n"
+  # Reposition to the anchor row (editor cursor row or block bottom).
+  let down = blockH - 1 - anchor
+  if down > 0:
+    buf.add "\x1b[" & $down & "A"
+  buf.add "\r"
+  if caretCol > 0:
+    buf.add "\x1b[" & $caretCol & "C"
+  if blockH < prevH:
+    # The block shrank: the rows below the new bottom still hold stale
+    # content the row loop never visits (it stops at the new bottom).
+    # Blank them explicitly. (Erase-to-end-of-screen would be shorter,
+    # but terminal models that implement ED-0 as "drop the rows below"
+    # shift anything underneath — real scrollback in the grid — up into
+    # the block and duplicate it.)
+    for _ in 0 ..< prevH - blockH:
+      buf.add "\x1b[B\x1b[2K"
+    buf.add "\x1b[" & $(prevH - blockH) & "A"
+  stdout.write buf
+  # Store the model for the next diff: bar+ticker and editor rows only
+  # (live/viewport rows are tracked by their own seqs).
+  e.lastVolatileRows = @[]
+  let footerTop = blockH - footerRowsAboveEditor
+  let barEnd = if edTop >= 0: edTop else: blockH
+  for i in max(0, footerTop) ..< min(barEnd, cur.len):
+    e.lastVolatileRows.add (if cur[i].kind == vrkText: cur[i].text else: "")
+  e.lastVolatileRows.add newEdModel
+  e.liveContentRows = newLiveRows
+  e.liveContentHasGap = newLiveGap
+  e.toolViewportRows = newViewportRows
+  e.toolViewportHasGap = newViewportGap
+  e.toolViewportBannerRows = newViewportBannerRows
+
 
 # Row 0 is the tool banner (command line); the rest is streaming bash
 # output. Color them at the write boundary so the semantic rows held in
@@ -251,6 +516,17 @@ proc beginEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor;
                            rows)
   e.editorRedrawPending = true
   e.editorRedrawFooterRows = rows
+  # The upcoming editor redraw rewrites the clamped footer rows and the
+  # editor rows wholesale (`\x1b[J` + fresh bytes). Sync the diff model
+  # with exactly what lands on screen so the next volatile repaint can
+  # still diff (wiping it would full-repaint the block on every
+  # keystroke). Rows the clamp did not cover keep their old content; the
+  # erase below clears them, so mirror that with blanks.
+  e.lastVolatileRows = @[]
+  let texts = footerRowTexts(frame, termW)
+  for i in 0 ..< max(rows, e.paintedFooterRows):
+    e.lastVolatileRows.add (if i < rows and i < texts.len: texts[i] else: "")
+  e.lastVolatileRows.add ed.renderRowSpans()
 
 proc beginEditorRedraw*(ed: var minline.LineEditor; ready: bool;
                         frame: FooterFrame) =
@@ -261,7 +537,9 @@ proc finishEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor;
                          showCaret = true) =
   if e.editorRedrawPending:
     if e.editorRedrawFooterRows > 0:
-      e.noteFooterPainted(e.editorRedrawFooterRows)
+      # beginEditorRedraw already synced the row model with the bytes
+      # this redraw paints; keep it.
+      e.noteFooterPaintedKeepRows(e.editorRedrawFooterRows)
     elif e.paintedFooterRows > 0:
       # A bare editor redraw (no footer bytes) must not wipe a nonzero
       # painted-footer count left by the ffNone commit path: that path
@@ -318,38 +596,26 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
         return
       stdout.write termio.SyncBegin
       stdout.write "\x1b[?25l"
-      let up = eraseUp(e, edPtr[], width, footerRowsAboveEditor)
-      stdout.write "\r"
-      if up > 0:
-        stdout.write "\x1b[" & $up & "A"
-      stdout.write "\x1b[J"
-      # If live content is streaming, the erase just consumed its rows too:
-      # re-emit them so the volatile partial survives a footer-only repaint.
-      # The guiLoop normally routes through `repaintLiveContent` when content
-      # is live, but its `liveContentRowCount() > 0` check is read outside
-      # this lock, so a chunk landing between the check and the call sends a
-      # bare `renderFooter` here with rows tracked. Erasing them without a
-      # rewrite drops the partial and leaves `liveContentRows` pointing at a
-      # row the next commit's walk-up counts but the screen no longer holds —
-      # the over-erase that ate the welcome hint line.
-      e.writeLiveContentRows()
-      e.writeToolViewportRows()
-      if bytes.len > 0:
-        stdout.write bytes
-        stdout.write "\r\n"
-      elif footerRowsAboveEditor > 0:
-        # Prompt-only / gap-only: reserve the blank gap row, then the editor.
-        stdout.write "\r\x1b[2K\r\n"
-      else:
-        stdout.write "\r\n"
-      edPtr[].renderRow = 0
-      stdout.write edPtr[].redrawBytes(synchronized = false)
+      # The diff painter rewrites only rows whose content changed: a
+      # ticking bar no longer erase-repaints the whole volatile block
+      # every 80ms, so streaming live content and the tool viewport
+      # survive a footer-only repaint untouched.
+      let prevFooterRows = e.paintedFooterRows
+      var vrows: seq[VolatileRow]
+      for row in footerRowTexts(frame, width):
+        vrows.add vrText(row)
+      vrows.add vrEditor
+      e.paintVolatileRegion(width, vrows, edPtr, footerRowsAboveEditor,
+        e.liveContentRows, e.toolViewportRows,
+        e.liveContentHasGap, e.toolViewportHasGap,
+        e.toolViewportBannerRows,
+        prevPaintedFooterRows = prevFooterRows)
       if not edPtr[].pendingCaret:
         stdout.write "\x1b[?25h"
       if frame.kind == ffClear:
         e.noteNoFooter()
       else:
-        e.noteFooterPainted(footerRowsAboveEditor)
+        e.noteFooterPaintedKeepRows(footerRowsAboveEditor)
       e.lastPaintSig = sig
       stdout.write termio.SyncEnd
       stdout.flushFile
@@ -409,45 +675,22 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         return
       stdout.write termio.SyncBegin
       stdout.write "\x1b[?25l"
-      # A width change reflowed the already-painted volatile rows: a
-      # wide banner/output wraps to more rows (or fewer) on screen, but
-      # the stored `toolViewportRows.len` holds the new-width count, so a
-      # plain walkUp falls short of (or overshoots) the reflowed stale
-      # content. Erase once using the larger of the pre/post-reflow
-      # region heights: the stale rows occupy at most the pre-reflow
-      # count, the fresh paint the post-reflow count. Walking further up
-      # (e.g. a full terminalHeight) would erase committed scrollback,
-      # which is what made the stacked banner fragments visible.
-      let reflowed = e.lastPaintedWidth > 0 and width > 0 and
-        width != e.lastPaintedWidth
-      let up = if reflowed:
-          max(0, editorRowsAboveCursor(editor[]) +
-            max(e.paintedFooterRows, footerRowsAboveEditor) +
-            max(e.viewportGapRows + e.toolViewportRows.len +
-                e.liveContentGapRows + e.liveContentRows.len,
-                (if e.toolViewportHasGap and rows.len > 0: 1 else: 0) +
-                rows.len))
-        else:
-          max(0, e.walkUp(editor[]))
-      stdout.write "\r"
-      if up > 0:
-        stdout.write "\x1b[" & $up & "A"
-      stdout.write "\x1b[J"
-      e.toolViewportHasGap = e.hasScrollback
-      e.toolViewportRows = @rows
-      e.toolViewportBannerRows = bannerRows
-      e.writeToolViewportRows()
-      if bytes.len > 0:
-        stdout.write bytes
-        stdout.write "\r\n"
-      editor[].renderRow = 0
-      stdout.write editor[].redrawBytes(synchronized = false)
+      let prevFooterRows = e.paintedFooterRows
+      let newGap = e.hasScrollback
+      var vrows: seq[VolatileRow]
+      for row in footerRowTexts(frame, width):
+        vrows.add vrText(row)
+      vrows.add vrEditor
+      e.paintVolatileRegion(width, vrows, editor, footerRowsAboveEditor,
+        e.liveContentRows, @rows,
+        e.liveContentHasGap, newGap, bannerRows,
+        prevPaintedFooterRows = prevFooterRows)
       if not editor[].pendingCaret:
         stdout.write "\x1b[?25h"
       if frame.kind == ffClear:
         e.noteNoFooter()
       else:
-        e.noteFooterPainted(footerRowsAboveEditor)
+        e.noteFooterPaintedKeepRows(footerRowsAboveEditor)
       e.lastPaintSig = sig
       e.lastPaintedWidth = width
       stdout.write termio.SyncEnd
@@ -516,19 +759,16 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
         return
       stdout.write termio.SyncBegin
       stdout.write "\x1b[?25l"
-      let up = eraseUp(e, editor[], width, footerRowsAboveEditor)
-      stdout.write "\r"
-      if up > 0:
-        stdout.write "\x1b[" & $up & "A"
-      stdout.write "\x1b[J"
-      e.liveContentHasGap = e.hasScrollback
-      e.liveContentRows = @rows
-      e.writeLiveContentRows()
-      if bytes.len > 0:
-        stdout.write bytes
-        stdout.write "\r\n"
-      editor[].renderRow = 0
-      stdout.write editor[].redrawBytes(synchronized = false)
+      let prevFooterRows = e.paintedFooterRows
+      var vrows: seq[VolatileRow]
+      for row in footerRowTexts(frame, width):
+        vrows.add vrText(row)
+      vrows.add vrEditor
+      e.paintVolatileRegion(width, vrows, editor, footerRowsAboveEditor,
+        @rows, e.toolViewportRows,
+        e.hasScrollback, e.toolViewportHasGap,
+        e.toolViewportBannerRows,
+        prevPaintedFooterRows = prevFooterRows)
       # Restore the caret to whatever the editor's pendingCaret dictates,
       # matching `renderFooter` and the input thread's postRedraw. During
       # buffered typing (pendingCaret == false) the caret must stay visible
@@ -540,7 +780,7 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
       if frame.kind == ffClear:
         e.noteNoFooter()
       else:
-        e.noteFooterPainted(footerRowsAboveEditor)
+        e.noteFooterPaintedKeepRows(footerRowsAboveEditor)
       e.lastPaintSig = sig
       e.lastPaintedWidth = width
       stdout.write termio.SyncEnd
@@ -610,23 +850,22 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
         return
       stdout.write termio.SyncBegin
       stdout.write "\x1b[?25l"
-      let up = eraseUp(e, editor[], width, footerRowsAboveEditor)
-      stdout.write "\r"
-      if up > 0:
-        stdout.write "\x1b[" & $up & "A"
-      stdout.write "\x1b[J"
-      e.writeLiveContentRows()
-      if bytes.len > 0:
-        stdout.write bytes
-        stdout.write "\r\n"
-      editor[].renderRow = 0
-      stdout.write editor[].redrawBytes(synchronized = false)
+      let prevFooterRows = e.paintedFooterRows
+      var vrows: seq[VolatileRow]
+      for row in footerRowTexts(frame, width):
+        vrows.add vrText(row)
+      vrows.add vrEditor
+      e.paintVolatileRegion(width, vrows, editor, footerRowsAboveEditor,
+        e.liveContentRows, e.toolViewportRows,
+        e.liveContentHasGap, e.toolViewportHasGap,
+        e.toolViewportBannerRows,
+        prevPaintedFooterRows = prevFooterRows)
       if not editor[].pendingCaret:
         stdout.write "\x1b[?25h"
       if frame.kind == ffClear:
         e.noteNoFooter()
       else:
-        e.noteFooterPainted(footerRowsAboveEditor)
+        e.noteFooterPaintedKeepRows(footerRowsAboveEditor)
       e.lastPaintSig = sig
       e.lastPaintedWidth = width
       stdout.write termio.SyncEnd
@@ -727,6 +966,12 @@ proc repaintVolatileAfterCommit(e: var TerminalEngine;
     if not edPtr[].pendingCaret:
       stdout.write "\x1b[?25h"
     e.noteFooterPainted(footerRowsAboveEditor)
+    # Do NOT sync the diff model here: the submit path clears the
+    # editor buffer right after this repaint, and the next volatile
+    # paint would compare its fresh editor rows against the stale spans
+    # captured now and skip repainting them. The wiped model forces a
+    # full rewrite of the chrome rows once, which is exactly what the
+    # screen needs after a commit.
   elif footerBytes.len > 0:
     e.noteFooterPainted(max(1, footerRowsAboveEditor))
   else:

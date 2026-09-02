@@ -543,6 +543,24 @@ proc totalRows*(text: string, promptW, contW, width: int): int =
   if width <= 0: return 1
   lineSpans(text, promptW, contW, width).len
 
+proc renderRowSpans*(ed: var LineEditor): seq[string] =
+  ## The editor's painted cell content per visual row, top-down (no cursor
+  ## controls). Both the full repaint and the diff painter use it, so the
+  ## two can never drift. Index 0 is the editor's top row.
+  if ed.getWidth != nil:
+    let w = ed.getWidth()
+    if w > 0:
+      ed.width = w
+  let width = max(2, ed.width)
+  let pw = if ed.promptW > 0: ed.promptW else: visualCols(ed.prompt)
+  let cw = if ed.contPromptW > 0: ed.contPromptW else: visualCols(ed.contPrompt)
+  ed.promptW = pw
+  ed.contPromptW = cw
+  result = @[]
+  for li, sp in lineSpans(ed.line.text & ed.renderSuffix, pw, cw, width):
+    result.add (if li == 0: ed.prompt else: ed.contPrompt) &
+      (ed.line.text & ed.renderSuffix)[sp.start ..< sp.stop]
+
 proc renderBuffer*(text, prompt, cont: string, width: int): string =
   ## Bytes that paint the buffer. Visual rows are joined with ``"\r\n"``
   ## and no trailing newline is emitted. The prompt is written verbatim

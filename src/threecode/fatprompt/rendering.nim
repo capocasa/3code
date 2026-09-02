@@ -516,6 +516,95 @@ proc clearSpinnerFooterBytes*(hadTicker: bool): string =
   else:
     "\r\x1b[2K"
 
+proc liveBarText*(label: string): string =
+  ## Bar cell content without cursor controls: what `liveBarBytes` leaves
+  ## on the row.
+  CyanFg & BoldOn & "  " & label & Reset
+
+proc spinnerBarText*(frame, label: string; elapsed: int): string =
+  ## Spinner-bar cell content: what `spinnerBarBytes` leaves on the row.
+  spinnerBarBytes(frame, label, elapsed)
+
+proc wrapStyledLine*(content: string; width: int): seq[string] =
+  ## Soft-wrap styled row content (no newlines) into per-row painted cell
+  ## text, the same whitespace word-wrap the editor uses. The diff painter
+  ## needs this so a label that outgrows the width reflows instead of
+  ## hard-wrapping: a hard wrap leaves a stray tail row on screen that the
+  ## row diff would never rewrite (continuation rows only show padding).
+  if width <= 0:
+    return @[content]
+  var col = 0
+  var word = ""        # pending run of non-space bytes, flushed on wrap
+  var wordW = 0
+  var spaceRun = ""    # pending spaces (kept only if the word fits)
+  var spaceW = 0
+  var i = 0
+  var rows: seq[string] = @[""]
+  proc flushWord() =
+    if word.len == 0: return
+    if col + spaceW + wordW > width and col > 0:
+      # The word does not fit on the rest of this row: soft-wrap before
+      # it. The pending spaces stay with the old row (unpainted cells
+      # the terminal keeps blank).
+      rows.add word
+      col = wordW
+    else:
+      rows[rows.high].add spaceRun & word
+      col += spaceW + wordW
+    word = ""
+    wordW = 0
+    spaceRun = ""
+    spaceW = 0
+  while i < content.len:
+    if content[i] == '\x1b' and i + 1 < content.len and
+        content[i + 1] == '[':
+      let escStart = i
+      i += 2
+      while i < content.len and content[i] notin {'A'..'Z', 'a'..'z'}:
+        inc i
+      if i < content.len: inc i
+      # Zero-width: paint positionally wherever the cursor sits.
+      let esc = content[escStart ..< i]
+      if word.len > 0: word.add esc else: rows[rows.high].add esc
+      continue
+    let rl = max(1, runeLenAt(content, i))
+    let cw = runeCellWidth(content.runeAt(i))
+    if content[i] == ' ':
+      flushWord()
+      spaceRun.add ' '
+      spaceW += 1
+    else:
+      word.add content[i ..< i + rl]
+      wordW += cw
+    i += rl
+  flushWord()
+  rows
+
+proc footerRowTexts*(frame: FooterFrame; termW: int): seq[string] =
+  ## Painted cell content of each footer row above the editor, top-down.
+  ## One entry per `rowsAboveEditor` row: the ticker/gap row first (empty
+  ## when blank, clamped to the width when live), then the bar rows.
+  result = @[]
+  case frame.kind
+  of ffNone, ffClear:
+    for _ in 0 ..< frame.rowsAboveEditor(termW):
+      result.add ""
+  of ffTokenBar:
+    result.add (if frame.ticker.len > 0:
+        let shown = if termW > 0: clampToWidth(frame.ticker, termW)
+                    else: frame.ticker
+        GreyFg & shown & Reset
+      else: "")
+    result.add wrapStyledLine(liveBarText(frame.label), max(1, termW))
+  of ffSpinner:
+    result.add (if frame.ticker.len > 0:
+        let shown = if termW > 0: clampToWidth(frame.ticker, termW)
+                    else: frame.ticker
+        GreyFg & shown & Reset
+      else: "")
+    result.add wrapStyledLine(spinnerBarText(frame.spinner, frame.label,
+                                             frame.elapsed), max(1, termW))
+
 proc footerFrameBytes*(frame: FooterFrame; termW = 0): string =
   case frame.kind
   of ffSpinner:
