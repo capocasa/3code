@@ -104,6 +104,15 @@ proc ensureStubBinary*(extraDefines = "", forceRebuild = false): string =
   ## additional define beyond the standard provider stub flags. The output
   ## path encodes the define set, so different flag combinations do not share
   ## a binary. Call `forceRebuild` to discard a cached binary first.
+  ##
+  ## `THREECODE_TEST_STUB_BINARY` points at a prebuilt stub and skips the
+  ## local build entirely. Cross-compiled test runs (the termux yrc-stress
+  ## CI job builds an arm64 stub + arm64 test binaries on the x86 host, then
+  ## runs them in termux-docker) can't invoke `nim` at test time, so the
+  ## prebuilt binary is injected via the environment instead.
+  let prebuilt = getEnv("THREECODE_TEST_STUB_BINARY")
+  if prebuilt.len > 0:
+    return prebuilt
   const baseDefines = "-d:ssl -d:providerStub --threads:on"
   let defines =
     if extraDefines.len > 0: baseDefines & " " & extraDefines
