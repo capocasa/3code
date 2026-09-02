@@ -504,6 +504,10 @@ proc main() =
     else: ""
   var prof = resolveSessionProfile(wantedProfile, session.profileName)
   var editor = welcome(prof)
+  # The welcome banner + hint are real scrollback rows painted raw above;
+  # register them so the first transcript commit prepends the inter-item
+  # blank-row separator instead of landing flush under the hint.
+  termengine.noteScrollbackExists()
   startupTrace("welcome")
   # Terminal, session lock, and thread cleanup all funnel through a single
   # exit proc so every exit path restores the same state. SIGTERM/SIGHUP get

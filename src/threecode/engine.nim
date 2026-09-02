@@ -908,6 +908,16 @@ proc noteNoFooter*() {.gcsafe.} =
   {.cast(gcsafe).}:
     defaultEngine.noteNoFooter()
 
+proc noteScrollbackExists*() {.gcsafe.} =
+  ## Register that scrollback content is already on screen without writing
+  ## any. The welcome screen is painted raw (display.welcome) before the
+  ## input thread and engine frame model are up, so `hasScrollback` stays
+  ## false even though the hint line occupies a real row. The first
+  ## transcript commit then skips the inter-item separator and lands the
+  ## echo flush under the hint instead of one blank row below it.
+  {.cast(gcsafe).}:
+    defaultEngine.hasScrollback = true
+
 # Commit the transcript blob as real scrollback, with the one blank
 # separator row owned here (see `appendTranscript` for the contract).
 proc writeTranscriptItem(e: var TerminalEngine; transcript: string) =

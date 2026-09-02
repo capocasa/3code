@@ -1,108 +1,52 @@
-# Cybernetic plan: change-gated rendering (skip identical paints)
+# Cybernetic plan: fix missing blank row after first submit
 
 ## Context
 
-The fat prompt footer (token bar / spinner / ticker) and the live command
-areas (tool viewport, live assistant content) are repainted completely on
-every tick: `guiLoop` (src/threecode/fatprompt/runtime.nim:757) calls
-`renderFooter` / `renderToolViewport` every 80ms, and the controller calls
-`renderLiveContent` on every streaming chunk. Each paint erases the whole
-volatile region (`\x1b[J` after a walk-up) and rewrites every row, even when
-not one byte changed. This causes visible flicker on slow terminals and
-wasted I/O.
+Bug: after the FIRST prompt submit, the row that held the `○0%` token bar
+collapses away instead of surviving as an empty line. The committed echo
+`❯ <prompt>` lands flush under the welcome hint instead of one blank row
+below it. Later turns in the same session separate correctly. Full repro
+detail in `reproduction.md`.
 
-Goal, in two stages:
+Root cause (confirmed at the byte level via ttty replay of a real-xterm
+capture, `/tmp/probe2`): the welcome banner + hint are painted RAW in
+`display.welcome()` (src/threecode/display.nim:705) before the input thread
+and engine frame model are up, so the engine's `hasScrollback` flag stays
+false even though the hint occupies a real row. `writeTranscriptItem`
+(src/threecode/engine.nim:674) only prepends the inter-item `\r\n`
+separator `if e.hasScrollback`, so the first commit skips it and the echo
+lands flush. The erase/walk-up geometry was always correct (this is why
+five prior geometry patches failed and the DSR probe reported the model
+internally consistent); the missing piece was the separator gate.
 
-1. **This task:** change-gated painting. Each render entry point computes
-   what it is about to write and skips the entire erase+repaint when it is
-   byte-identical to what is already on screen (and the editor state it
-   would repaint is unchanged).
-2. **Future, out of scope:** a full diff renderer that paints only changed
-   rows within a region.
+## Fix
 
-All terminal painting flows through `src/threecode/engine.nim`
-(`TerminalEngine`, single choke point). Key state:
-
-- `paintedFooterRows` — bar+ticker rows currently on screen.
-- `lastPaintedWidth` — for resize handling in `eraseUp`.
-- `toolViewportRows` / `liveContentRows` — volatile region rows.
-
-Render entry points to gate:
-
-- `renderFooter` (engine.nim:253) — footer bytes + editor repaint.
-- `renderToolViewport` (engine.nim:316) — viewport rows + footer + editor.
-- `renderLiveContent` (engine.nim:419) — live rows + footer + editor.
-- `repaintLiveContent` (engine.nim:501) — stored live rows + new footer.
-
-Skip condition per entry point: the composed bytes (footer bytes, viewport
-rows, live rows) equal the last painted ones AND `width` is unchanged AND
-the editor signature is unchanged AND `paintedFooterRows` matches the new
-frame's `rowsAboveEditor` (geometry, not just pixels). On skip, return
-without writing anything; all engine state stays as-is, which is consistent
-because the screen is unchanged.
-
-Editor signature: text + cursor position + render suffix + width, from the
-`LineEditor` (minline.nim). The editor repaint is embedded in every footer
-paint, so a keystroke since the last paint must force a repaint even when
-footer bytes are identical.
-
-Constraints from `.agents/design.md`:
-
-- Caret must end up visible in the editor after any render tick; skipping
-  is only safe when nothing changed, so caret state is unchanged too.
-- Scrollback stays append-only; `appendTranscript` is NOT gated.
-- Test frame mode: the guiLoop handshake
-  (`testSpinnerRequested`/`testSpinnerPainted`) completes even when the
-  paint is skipped; the tty harness dedupes identical consecutive frames,
-  so golden fixtures should not shift.
+- Added `termengine.noteScrollbackExists()` (src/threecode/engine.nim) —
+  registers `hasScrollback = true` without writing bytes.
+- Call it in src/threecode.nim right after `welcome(prof)`, so the first
+  transcript commit prepends the blank-row separator.
 
 ## Current state
 
-DONE. Commit `1f4f898` on `flicker`. All four steps complete.
-
-Implementation notes (learned during execution):
-
-- One combined signature `lastPaintSig: string` in `TerminalEngine`, not
-  four per-region sigs: every entry point's skip condition is "the bytes I
-  would write are already on screen", so the signature must describe the
-  whole last painted composite (region tag F/V/L/R, footer bytes, volatile
-  rows, editor sig, width).
-- The signature is stored AFTER the paint completes, not before: the paint
-  paths end in `noteFooterPainted`/`noteNoFooter`, which reset
-  `lastPaintSig` so out-of-band repaints (transcript commit, end turn,
-  modal chrome) always invalidate. Storing before the paint made the
-  reset erase the just-computed signature and the skip never engaged.
-- `editorSig` (engine.nim:165): text + cursor + renderSuffix +
-  renderSuffixCursor + pendingCaret + prompts + width.
-- `viewportSig` (engine.nim:153): gap flag + bannerRows + joined rows.
-- Verified with a throwaway stdout-capture probe (9 checks: identical
-  repaint emits nothing for footer/viewport/live content; text change,
-  keystroke, row change, transcript commit, width change all repaint).
-  Probe not committed.
+- Reproduction committed: `reproduction.md` +
+  `tests/tty/test_first_submit_blank_row.nim` (reasoning on + off). Both
+  FAILED before the fix (echo flush under hint), both PASS after.
+- Fix implemented in src/threecode/{engine.nim,threecode.nim}.
+- Verified on the REAL-XTERM byte stream (ground-truth surface) via
+  `/tmp/hintcheck/fifo_5s.sh` + `/tmp/probe2`: hint row 9, BLANK row 10,
+  echo row 11, stable 3/3 runs. Screenshot OCR confirms hint/blank/echo.
+- Related geometry tests still green: test_first_prompt_overwrite,
+  test_repro_spacing.
+- `nimble test` running in background (pid was 1599713, log
+  /tmp/nimble_test.log). tty category was passing when last checked.
 
 ## Steps
 
-- [x] 1. Engine change detection: `lastPaintSig` + `editorSig` helper;
-      `renderFooter` gated on footer bytes + width + editor sig + footer
-      row count. Reset via `noteFooterPainted`/`noteNoFooter`.
-- [x] 2. `renderToolViewport`, `renderLiveContent`, `repaintLiveContent`
-      gated with the same scheme (rows joined into the signature;
-      `bannerRows` included for the viewport).
-- [x] 3. Full tty suite: all 30 tests pass, zero fixture changes needed
-      (the harness dedupes identical consecutive frames, as predicted).
-- [x] 4. Release build + full `nimble test` (all categories) +
-      `nimble install` + commit `1f4f898`.
-
-Pre-existing failures (reproduced on clean tree, unrelated to this work):
-`tests/core/test_cli_args.nim` and `tests/config/test_config_validation.nim`
-(exercise the stale installed binary), `tests/core/test_wall_bash.nim`
-(needs network namespaces, blocked in this sandbox).
-
-## Verification notes
-
-- `nimble test tests/tty/...` runs the PTY visual tests; fixtures in
-  `testdata/fixtures/tty/`.
-- Frame viewer: `nim r tools/pty_frames.nim -- testdata/output/tty/<run>/frames.txt`.
-- Manual smoke: run `3code` in a terminal, watch that the spinner still
-  animates, typing during a stream still repaints the editor, and resize
-  still repaints correctly.
+- [x] Write reproduction.md (real-xterm harness + OCR + expected vs actual)
+- [x] Reproduce in ttty (test_first_submit_blank_row.nim, reasoning on+off)
+- [x] Diagnose root cause (hasScrollback never set for raw welcome paint)
+- [x] Implement fix (noteScrollbackExists + call after welcome)
+- [x] Verify ttty test passes both reasoning states
+- [x] Verify real-xterm byte stream + screenshot (3/3 stable)
+- [ ] nimble test to completion (73 PASS/0 FAIL baseline)
+- [ ] Commit fix + test

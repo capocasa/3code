@@ -109,16 +109,27 @@ for f in s3_1_idle s3_2_typed s3_3_after5s; do
 done
 ```
 
-## Where the bug lives
+## Root cause (FIXED)
 
-`src/threecode/engine.nim`:
-- `commitTranscriptItem` (~735) — the submit commit-repaint path. Walks up
-  `walkUp(ed) + compactRowsAboveFooter`, erases `\r\x1b[J`, then
-  `writeTranscriptItem` + `repaintVolatileAfterCommit`.
-- `writeTranscriptItem` (~674) — writes `\r\n` before the item only when
-  `e.hasScrollback` is already true, then the transcript, then `\r\n`.
-- `repaintVolatileAfterCommit` (~682) — rebuilds footer + editor below.
+The welcome banner + hint are painted RAW in `display.welcome()`
+(src/threecode/display.nim:705) before the input thread and engine frame
+model are up, so the engine's `hasScrollback` flag stays false even though
+the hint occupies a real row. `writeTranscriptItem`
+(src/threecode/engine.nim:674) only prepends the inter-item `\r\n`
+separator `if e.hasScrollback`, so the first transcript commit skips it and
+the echo lands flush under the hint. Later turns have `hasScrollback=true`
+(already set by the first commit), so they separate correctly.
 
-The blank spacer row between the hint (first scrollback item) and the echo
-(the next item) is not being preserved across the first submit commit. The
-echo lands one row too high.
+The erase/walk-up geometry was always correct. This is why five prior
+geometry patches failed and the DSR probe reported the model internally
+consistent: the divergence was the separator GATE, not the geometry.
+
+## Fix
+
+- `termengine.noteScrollbackExists()` (src/threecode/engine.nim) sets
+  `hasScrollback = true` without writing bytes.
+- Called in src/threecode.nim right after `welcome(prof)`.
+
+Regression test: `tests/tty/test_first_submit_blank_row.nim` (reasoning on
++ off) asserts the echo lands two rows below the hint with a blank row
+between.
