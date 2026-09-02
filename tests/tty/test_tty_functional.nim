@@ -1063,6 +1063,11 @@ suite "terminal visual contract":
     # The cancelled turn's reply never reached scrollback (dropped, not
     # leaked into the next turn).
     tty.expectNeverInHistory("should not appear")
+    # Regression (spurious interrupt): the raw byte stream must contain
+    # exactly one "interrupted by user" — the cancelled first turn's.
+    # A second one at the normal turn's return means a stale or
+    # re-armed interrupt flag fired on a turn nobody cancelled.
+    tty.expectCount("interrupted by user", 1, where = "raw")
 
   test "ctrl-c cancels during network-quiet":
     let root = newFixture("quiet_cancel_ctrlc")
@@ -1115,6 +1120,9 @@ suite "terminal visual contract":
     # The cancelled turn's reply never reached scrollback (dropped, not
     # leaked into the next turn).
     tty.expectNeverInHistory("should not appear")
+    # Same spurious-interrupt lockout as the ESC case above: exactly one
+    # "interrupted by user" in the raw stream after the normal turn.
+    tty.expectCount("interrupted by user", 1, where = "raw")
 
   test "bare esc at idle clears the draft without eating scrollback":
     # ESC at idle shares the InputCancelled path with Ctrl-C, so the same

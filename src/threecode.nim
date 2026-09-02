@@ -550,7 +550,7 @@ proc main() =
         commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true)
       of ckQuit:
         pushInputEvent(InputEvent(kind: ieQuit))
-        requestTurnInterrupt()
+        requestTurnInterrupt("quit-command-during-turn")
       of ckMutating, ckModal:
         let msg = "cannot run " & cmd.strip & " while a turn is active"
         let bytes = plainCommandBodyBytes(msg & "\n")

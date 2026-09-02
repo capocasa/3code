@@ -71,10 +71,15 @@ proc buildBinary*(defines, outName: string; forceRebuild = false): string =
   if fileExists(result):
     let binMtime = getLastModificationTime(result)
     var stale = false
-    for f in walkDirRec(getCurrentDir() / "src"):
-      if f.endsWith(".nim") and getLastModificationTime(f) > binMtime:
-        stale = true
-        break
+    # The stub provider is `include`d into api.nim, so its source must
+    # count toward staleness too; otherwise an edit to testdata/stub is
+    # silently ignored and tests run against the old stub behaviour.
+    for dir in [getCurrentDir() / "src", getCurrentDir() / "testdata" / "stub"]:
+      for f in walkDirRec(dir):
+        if f.endsWith(".nim") and getLastModificationTime(f) > binMtime:
+          stale = true
+          break
+      if stale: break
     if stale:
       removeFile(result)
   if fileExists(result):

@@ -303,7 +303,7 @@ proc interrupt*(s: AgentSession) =
   ## Cancel the in-flight turn (same mechanism as Ctrl-C in the CLI).
   ## The running `prompt` call returns by raising `AgentError` with the
   ## interrupted message. Process-wide: every live session observes it.
-  requestTurnInterrupt()
+  requestTurnInterrupt("library-interrupt")
 
 proc profileLabel*(s: AgentSession): string =
   ## Short "provider.model" label for display.

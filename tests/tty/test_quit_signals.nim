@@ -308,6 +308,9 @@ suite "quit signals":
     tty.expectInHistory "interrupted by user"
     tty.expectIdleCaret()         # prompt returns after the interrupt
     tty.expectAlive()             # interrupt did not exit the process
+    # The interrupt line must appear exactly once: a second print at a
+    # later prompt return means the flag re-armed outside a cancelled turn.
+    tty.expectCount("interrupted by user", 1, where = "raw")
     # Now at an idle, empty prompt: Ctrl-D must quit like `:q` would. Before
     # the fix this did nothing because inputTurnActive was still true.
     tty.send "\x04"
@@ -336,6 +339,8 @@ suite "quit signals":
     tty.expectInHistory "interrupted by user"
     tty.expectIdleCaret()        # prompt returns after the interrupt
     tty.expectAlive()            # interrupt did not exit the process
+    # Same single-print lockout as the backoff case above.
+    tty.expectCount("interrupted by user", 1, where = "raw")
     # Now at an idle, empty prompt: Ctrl-D must quit like `:q` would.
     tty.send "\x04"
     tty.expectExit(0, timeoutMs = 5000)
