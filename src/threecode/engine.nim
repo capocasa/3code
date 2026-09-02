@@ -12,10 +12,12 @@
 ##
 ## One blank row separates every pair of scrollback items. The separator is
 ## owned by a single emission point (`appendTranscript`): it prepends `\r\n`
-## before every item after the first (gated by `hasScrollback`) and
-## terminates each item's line with `\r\n`. No item carries its own trailing
-## separator. The footer's ticker row is separate volatile breathing room
-## below the last item, so the two never stack.
+## before every item after the first and terminates each item's line with
+## `\r\n`. The CLI always paints the welcome banner before the first item,
+## so a committed item always sits below existing scrollback and the
+## separator is unconditional. No item carries its own trailing separator.
+## The footer's ticker row is separate volatile breathing room below the
+## last item, so the two never stack.
 ##
 ## The walk-up from cursor to the top of the volatile region is always derived
 ## from live state, never cached:
@@ -55,11 +57,6 @@ type
     liveContentHasGap: bool  # separator row above live content, matching committed scrollback spacing
     editorRedrawPending: bool
     editorRedrawFooterRows: int
-    ## True once any non-empty transcript content has been committed. Gates
-    ## the inter-item separator: `appendTranscript` prepends `\r\n\r\n`
-    ## before every item after the first, so the separator is owned by one
-    ## emission point rather than carried by each item.
-    hasScrollback: bool
     ## Terminal width at the last paint. A width change means the terminal
     ## reflowed already-painted rows (a wide banner wraps to more rows, a
     ## narrow one to fewer), so the relative walk-up from the stale
@@ -650,13 +647,13 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         # only thing that clears the reflowed stale rows. Consuming the
         # width change here made the next full repaint fall short and
         # left stale banner fragments stacking in scrollback.
-        let sig = "V\x1f" & $e.hasScrollback & "\x1f" & join(rows, "\x1e") &
+        let sig = "V\x1f" & join(rows, "\x1e") &
           "\x1f" & $bannerRows & "\x1f" & bytes & "\x1f\x1f" & $width
         if sig == e.lastPaintSig:
           return
         stdout.write termio.SyncBegin
         stdout.write "\x1b[?25l"
-        e.toolViewportHasGap = e.hasScrollback
+        e.toolViewportHasGap = true
         e.toolViewportRows = @rows
         e.toolViewportBannerRows = bannerRows
         e.writeToolViewportRows()
@@ -668,7 +665,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         stdout.flushFile
         return
       refreshEditorWidth(editor[])
-      let sig = "V\x1f" & $e.hasScrollback & "\x1f" & join(rows, "\x1e") &
+      let sig = "V\x1f" & join(rows, "\x1e") &
         "\x1f" & $bannerRows & "\x1f" & bytes & "\x1f" &
         editorSig(editor[]) & "\x1f" & $width
       if sig == e.lastPaintSig:
@@ -676,7 +673,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
       stdout.write termio.SyncBegin
       stdout.write "\x1b[?25l"
       let prevFooterRows = e.paintedFooterRows
-      let newGap = e.hasScrollback
+      let newGap = true
       var vrows: seq[VolatileRow]
       for row in footerRowTexts(frame, width):
         vrows.add vrText(row)
@@ -735,13 +732,13 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
       let bytes = frame.footerFrameBytes(width)
       let footerRowsAboveEditor = frame.rowsAboveEditor(width)
       if not (inputRunning and editor != nil):
-        let sig = "L\x1f" & $e.hasScrollback & "\x1f" &
+        let sig = "L\x1f" &
           join(rows, "\x1e") & "\x1f" & bytes & "\x1f\x1f" & $width
         if sig == e.lastPaintSig:
           return
         stdout.write termio.SyncBegin
         stdout.write "\x1b[?25l"
-        e.liveContentHasGap = e.hasScrollback
+        e.liveContentHasGap = true
         e.liveContentRows = @rows
         e.writeLiveContentRows()
         if bytes.len > 0:
@@ -753,7 +750,7 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
         stdout.flushFile
         return
       refreshEditorWidth(editor[])
-      let sig = "L\x1f" & $e.hasScrollback & "\x1f" & join(rows, "\x1e") &
+      let sig = "L\x1f" & join(rows, "\x1e") &
         "\x1f" & bytes & "\x1f" & editorSig(editor[]) & "\x1f" & $width
       if sig == e.lastPaintSig:
         return
@@ -766,7 +763,7 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
       vrows.add vrEditor
       e.paintVolatileRegion(width, vrows, editor, footerRowsAboveEditor,
         @rows, e.toolViewportRows,
-        e.hasScrollback, e.toolViewportHasGap,
+        true, e.toolViewportHasGap,
         e.toolViewportBannerRows,
         prevPaintedFooterRows = prevFooterRows)
       # Restore the caret to whatever the editor's pendingCaret dictates,
@@ -908,25 +905,15 @@ proc noteNoFooter*() {.gcsafe.} =
   {.cast(gcsafe).}:
     defaultEngine.noteNoFooter()
 
-proc noteScrollbackExists*() {.gcsafe.} =
-  ## Register that scrollback content is already on screen without writing
-  ## any. The welcome screen is painted raw (display.welcome) before the
-  ## input thread and engine frame model are up, so `hasScrollback` stays
-  ## false even though the hint line occupies a real row. The first
-  ## transcript commit then skips the inter-item separator and lands the
-  ## echo flush under the hint instead of one blank row below it.
-  {.cast(gcsafe).}:
-    defaultEngine.hasScrollback = true
-
 # Commit the transcript blob as real scrollback, with the one blank
-# separator row owned here (see `appendTranscript` for the contract).
+# separator row owned here (see `appendTranscript` for the contract). The
+# CLI always paints the welcome banner before the first commit, so the
+# separator is unconditional.
 proc writeTranscriptItem(e: var TerminalEngine; transcript: string) =
   if transcript.len == 0: return
-  if e.hasScrollback:
-    stdout.write "\r\n"
+  stdout.write "\r\n"
   stdout.write transcript
   stdout.write "\r\n"
-  e.hasScrollback = true
 
 proc repaintVolatileAfterCommit(e: var TerminalEngine;
                                 edPtr: ptr minline.LineEditor;
