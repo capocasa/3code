@@ -38,7 +38,7 @@ from ../api import ApiStreamHooks, requestTurnInterrupt, requestQuietShutdown,
 when defined(windows):
   proc consoleCtrlHandler(ctrlType: int32): WinBool {.stdcall, gcsafe.} =
     if ctrlType == CTRL_C_EVENT or ctrlType == CTRL_BREAK_EVENT:
-      try: requestTurnInterrupt()
+      try: requestTurnInterrupt("console-ctrl-handler")
       except CatchableError: discard
       return 1.WinBool
     0.WinBool
@@ -1449,7 +1449,7 @@ when defined(posix):
             let b = buf[i].uint8
             {.cast(gcsafe).}:
               if b in cancelWatchSnapshot:
-                requestTurnInterrupt()
+                requestTurnInterrupt("api-cancel-watcher")
                 restoreCancelTermios()
                 return
 
@@ -2255,7 +2255,7 @@ proc inputThreadProc() {.thread.} =
         continue
       except minline.InputCancelled:
         if inputTurnActive.load(moAcquire):
-          requestTurnInterrupt()
+          requestTurnInterrupt("input-thread-cancel")
           # Preserve any text the user typed into the buffered editor so the
           # prompt that comes back after the cancel lands with the same text
           # (and cursor position) the user had before pressing Ctrl-C. The

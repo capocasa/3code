@@ -425,12 +425,15 @@ proc shutdownCachedStreamFd*() {.gcsafe.} =
     if fd != osInvalidSocket:
       discard posix.shutdown(posix.SocketHandle(fd), SHUT_RDWR.cint)
 
-proc requestTurnInterrupt*() {.gcsafe.} =
+proc requestTurnInterrupt*(source = "unspecified") {.gcsafe.} =
   ## One cancellation path for signal hooks, buffered prompt keys, and
   ## stream/tool stdin watchers. Setting the flag alone is not enough:
   ## blocking HTTP reads must be woken and active tool subprocesses must
   ## be signalled, otherwise Ctrl-C appears to do nothing until the
-  ## provider or command produces output.
+  ## provider or command produces output. `source` is a debug breadcrumb
+  ## (visible with -D) naming the watcher/hook that fired, so a spurious
+  ## "interrupted by user" on a turn nobody cancelled can be traced.
+  debugOut("interrupt flag set", source)
   setInterrupted(true)
   shutdownCachedStreamFd()
   cancelActiveTool()

@@ -309,6 +309,11 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
   if result.kind == JObject and "role" notin result:
     result["role"] = %"assistant"
   debugOut &"callModel stub idx={stubResponseIdx-1} failure={stubFailureName(lastFailure)}"
+  # Test-only fault injection: arm the process-global interrupt flag as if a
+  # watcher had fired mid-turn with no user key, so tests can lock out the
+  # "interrupted by user printed on a normal turn return" bug.
+  if result{"spuriousInterrupt"}.getBool(false):
+    requestTurnInterrupt("stub-spurious-injection")
   var slurped = 0
   let preStreamDelay = stubDelayMs(result, "preStreamDelayMs", 0)
   if preStreamDelay > 0:
