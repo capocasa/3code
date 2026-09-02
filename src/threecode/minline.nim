@@ -303,15 +303,6 @@ type
     getWidth*: WidthProc
     echoRows*: int
     submitted*: bool
-    freshPrompt*: bool
-      ## True until the editor's first paint after (re)entering a read at a
-      ## fresh cursor position (startup, endTurn, wizard). At that boundary
-      ## the rows above the cursor are committed scrollback / startup chrome
-      ## whose physical height the terminal owns — it may have wrapped wider
-      ## lines than the app's width model predicts — so a model-derived
-      ## walk-up erase can clip content the editor does not own. The first
-      ## paint is therefore non-destructive: it anchors the prompt to the
-      ## actual cursor row and erases only downward, never up.
     deferSubmit*: bool
     canceled*: bool
     eof*: bool
@@ -719,10 +710,6 @@ proc redrawBytes*(ed: var LineEditor; synchronized = true): string =
   if synchronized:
     buf.add "\x1b[?2026h"
   var walkUp = ed.renderRow
-  if ed.freshPrompt:
-    # First paint at a fresh cursor row: erase only downward (see the field
-    # doc). The rows above are not the editor's to walk into.
-    walkUp = 0
   if resized:
     # A width change reflows the already-painted editor rows: the
     # tracked `renderRow` no longer matches where the cursor sits
@@ -747,7 +734,6 @@ proc redrawBytes*(ed: var LineEditor; synchronized = true): string =
   if synchronized:
     buf.add "\x1b[?2026l"
   ed.renderRow = targetRow
-  ed.freshPrompt = false
   result = buf
 
 proc renderedRows*(ed: LineEditor): int =
@@ -1864,7 +1850,6 @@ proc resetForRead(ed: var LineEditor, prompt: string, hidechars: bool) =
   ed.renderRow = 0
   ed.echoRows = 0
   ed.submitted = false
-  ed.freshPrompt = true
   ed.renderSuffix = ""
   ed.renderSuffixCursor = false
   ed.pendingCaret = false
