@@ -1,7 +1,7 @@
-===== 197 =====
+===== 254 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -9,12 +9,11 @@
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
-  ○0%
 ❯
-===== 0 =====
+===== 288 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -22,12 +21,11 @@
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
-  ○0%
 ❯ run bash checks
-===== 392 =====
+===== 754 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -41,10 +39,10 @@
 
 ⣿ ○0% ↓5 0s
 ❯
-===== 353 =====
+===== 914 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -58,10 +56,10 @@
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 579 =====
+===== 338 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -77,10 +75,10 @@ $ printf 'ok-one\nok-two\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 631 =====
+===== 844 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -97,10 +95,10 @@ $ printf 'ok-one\nok-two\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 119 =====
+===== 858 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -118,10 +116,10 @@ $ printf 'ok-one\nok-two\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 656 =====
+===== 906 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -141,10 +139,10 @@ $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 821 =====
+===== 110 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -165,10 +163,10 @@ $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 939 =====
+===== 296 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -190,10 +188,10 @@ $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 670 =====
+===== 874 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -216,10 +214,10 @@ $ printf 'ok-one\nok-two\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 766 =====
+===== 963 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -244,10 +242,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 228 =====
+===== 192 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -273,10 +271,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 458 =====
+===== 844 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -303,10 +301,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 130 =====
+===== 152 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -334,10 +332,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 383 =====
+===== 863 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -366,10 +364,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 845 =====
+===== 345 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -399,10 +397,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 448 =====
+===== 607 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -433,10 +431,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 410 =====
+===== 326 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -468,10 +466,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 422 =====
+===== 330 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -504,10 +502,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 934 =====
+===== 593 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -540,10 +538,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 936 =====
+===== 258 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -576,10 +574,10 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 180 =====
+===== 134 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -614,10 +612,10 @@ $ sleep 3; printf 'slow-done\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 705 =====
+===== 511 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -653,10 +651,10 @@ $ sleep 3; printf 'slow-done\n'
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 962 =====
+===== 371 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -695,10 +693,10 @@ $ echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 808 =====
+===== 690 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -739,10 +737,10 @@ $ echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
   ○1%  ↑130  ↓18  0s
 ❯
-===== 587 =====
+===== 153 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -786,10 +784,10 @@ xx
 
 ⣿ ○1% ↓5 0s
 ❯
-===== 152 =====
+===== 419 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -833,10 +831,10 @@ xx
 
   ○1%  ↑210  ↓20  0s
 ❯
-===== 191 =====
+===== 855 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub

@@ -1,7 +1,7 @@
-===== 745 =====
+===== 590 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -9,12 +9,11 @@
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
-  ○0%
 ❯
-===== 0 =====
+===== 162 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -22,64 +21,67 @@
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
-  ○0%
 ❯ This is a test prompt
-===== 623 =====
+===== 750 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
+
 ❯ This is a test prompt
   … Thinking about the test prompt
 ⣿ ○0% ↓7 0s
 ❯
-===== 872 =====
+===== 383 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
+
 ❯ This is a test prompt
 
 ● This is a test response.
 
 ⣿ ○0% ↓13 0s
 ❯
-===== 475 =====
+===== 535 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
+
 ❯ This is a test prompt
 
 ● This is a test response.
 
   ○1%  ↑120  ↓24  0s
 ❯
-===== 986 =====
+===== 278 =====
 
   ╭─╮
-   ─┤  3code v0.5.0-bash1-0453a5d8-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
   model     stub-model
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
+
 ❯ This is a test prompt
 
 ● This is a test response.
