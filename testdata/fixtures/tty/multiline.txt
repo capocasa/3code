@@ -9,7 +9,6 @@
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
-  ○0%
 ❯
 ===== 0 =====
 
@@ -22,7 +21,6 @@
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
-  ○0%
 ❯ first line
 ===== 436 =====
 
@@ -35,7 +33,6 @@
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
-  ○0%
 ❯ first line
   
 ===== 504 =====
@@ -49,7 +46,6 @@
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
-  ○0%
 ❯ first line
   second line
 ===== 659 =====

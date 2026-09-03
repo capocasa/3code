@@ -339,9 +339,8 @@ proc clearTranscriptBytes(act: Action): string =
 
 proc contextLabel*(promptTokens, window: int): string =
   ## "○ 12%" / "◔ 25%" / … / "● 92%". Empty when there's no useful
-  ## number (no window). Previously also omitted when there were no tokens yet,
-  ## which hid the context indicator at startup. We now always show a bullet
-  ## with a percentage, defaulting to 0% when `promptTokens` is zero.
+  ## number (no window). Always shows a bullet with a percentage, defaulting
+  ## to 0% while `promptTokens` is still zero (first turn in flight).
   if window <= 0: return ""
   let pct = int(promptTokens.float / window.float * 100.0)
   let glyph =

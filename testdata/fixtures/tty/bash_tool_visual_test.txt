@@ -9,7 +9,6 @@
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
-  ○0%
 ❯
 ===== 0 =====
 
@@ -22,7 +21,6 @@
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
-  ○0%
 ❯ run bash checks
 ===== 392 =====
 
