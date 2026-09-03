@@ -1963,6 +1963,12 @@ proc applyGenerationDefaults*(p: Profile, body: JsonNode) =
     body["temperature"] = %d.temperature
   if d.maxTokens > 0:
     body[maxTokensField(p)] = %d.maxTokens
+  # kimicode's coding gateway 400s K2.x requests on any temperature
+  # other than 1.0; omit the field so the server default applies.
+  # Table rows can't say "omit" per provider (temperature < 0 would
+  # silence every route to that model), so special-case here like k3.
+  if providerOf(p) == "kimicode" and body.hasKey("temperature"):
+    body.delete("temperature")
 
 proc applyDeepseekReasoning(p: Profile, body: JsonNode) =
   ## DeepSeek's reasoning surface differs by serving stack. The
@@ -2066,6 +2072,11 @@ proc applyKimiReasoning(p: Profile, body: JsonNode) =
   ## thinking-on (and nebius always reasons regardless of the flag);
   ## baseten defaults off. `on` sends enable_thinking=true, `off` sends
   ## false (inert on nebius, which can't be turned off).
+  ##
+  ## First-party gateways (kimicode's api.kimi.com/coding, moonshot.ai)
+  ## are the exception: K2.x there is forced-thinking and 400s on
+  ## `chat_template_kwargs`. Send nothing; thinking stays on.
+  if providerOf(p) in ["kimicode", "kimi"]: return
   case p.reasoning
   of "off":
     body["chat_template_kwargs"] = %*{"enable_thinking": false}
