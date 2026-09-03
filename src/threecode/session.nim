@@ -249,15 +249,17 @@ proc pidAlive(pid: int): bool =
     discard winlean.closeHandle(h)
     ok != 0'i32 and code == WinStillActive
 
-proc writeOwnerPid(fd: int; pid: string) =
-  ## Write the owner pid into a freshly created lock file.
+proc writeOwnerInfo(fd: int; data: string) =
+  ## Write the owner record into a freshly created lock file: the pid line,
+  ## plus (dir locks) a second line carrying the holder's session id so a
+  ## collision report can name the session, not just the process.
   when defined(posix):
-    if pid.len > 0:
-      discard write(cint(fd), pid.cstring, pid.len)
+    if data.len > 0:
+      discard write(cint(fd), data.cstring, data.len)
   else:
     var written: int32 = 0
-    if pid.len > 0:
-      discard writeFile(fd, pid.cstring, int32 pid.len, addr written, nil)
+    if data.len > 0:
+      discard writeFile(fd, data.cstring, int32 data.len, addr written, nil)
 
 proc tryCreateLockFile(lockPath: string; pid: string): int =
   ## Atomically create `lockPath` and write `pid` into it.
@@ -273,7 +275,7 @@ proc tryCreateLockFile(lockPath: string; pid: string): int =
       if errno.int32 == EEXIST.int32: return -1
       raise newException(SessionLocked,
         "could not create session lock " & lockPath & ": " & osErrorMsg(errno))
-    writeOwnerPid(fd, pid)
+    writeOwnerInfo(fd, pid)
     discard close(fd)
     0
   else:
@@ -286,12 +288,18 @@ proc tryCreateLockFile(lockPath: string; pid: string): int =
       if errno.int32 == 80'i32 or errno.int32 == 183'i32: return -1
       raise newException(SessionLocked,
         "could not create session lock " & lockPath & ": " & osErrorMsg(errno))
-    writeOwnerPid(h, pid)
+    writeOwnerInfo(h, pid)
     discard winlean.closeHandle(h)
     0
 
 proc readOwnerPid(lockPath: string): string =
-  try: readFile(lockPath).strip except CatchableError: ""
+  ## First line of the lock file (the pid). Dir locks carry a second line
+  ## (the holder's session id) that must not leak into the int parse.
+  try: readFile(lockPath).strip.splitLines[0].strip except CatchableError: ""
+
+proc readOwnerSessionId(lockPath: string): string =
+  let lines = try: readFile(lockPath).strip.splitLines except CatchableError: @[]
+  if lines.len > 1: lines[1].strip else: ""
 
 proc lockHeldError(path, lockPath, owner: string): ref SessionLocked =
   var mtime = getTime()
@@ -371,12 +379,16 @@ proc dirLockPathFor*(cwd: string): string =
 
 type DirLocked* = object of CatchableError
 
-proc lockHeldDirError*(cwd, lockPath, owner: string): ref DirLocked =
+proc lockHeldDirError*(cwd, lockPath, owner, sessionId: string): ref DirLocked =
   var mtime = getTime()
   try: mtime = getLastModificationTime(lockPath) except OSError: discard
+  var holder = ""
+  if owner.len > 0:
+    holder = " (pid " & owner
+    if sessionId.len > 0: holder &= ", session " & sessionId
+    holder &= ")"
   newException(DirLocked,
-    "directory \"" & cwd & "\" is already open" &
-    (if owner.len > 0: " (pid " & owner & ")" else: "") &
+    "directory \"" & cwd & "\" is already open" & holder &
     " in another running 3code process. Lock file: " & lockPath &
     " (last modified " & format(mtime.local, "yyyy-MM-dd HH:mm:ss") & ")." &
     " If no 3code is running, the lock is stale and the pid check failed —" &
@@ -394,7 +406,7 @@ proc tryCreateDirLockFile(lockPath: string; pid: string): int =
       if errno.int32 == EEXIST.int32: return -1
       raise newException(DirLocked,
         "could not create directory lock " & lockPath & ": " & osErrorMsg(errno))
-    writeOwnerPid(fd, pid)
+    writeOwnerInfo(fd, pid)
     discard close(fd)
     0
   else:
@@ -406,31 +418,36 @@ proc tryCreateDirLockFile(lockPath: string; pid: string): int =
       if errno.int32 == 80'i32 or errno.int32 == 183'i32: return -1
       raise newException(DirLocked,
         "could not create directory lock " & lockPath & ": " & osErrorMsg(errno))
-    writeOwnerPid(h, pid)
+    writeOwnerInfo(h, pid)
     discard winlean.closeHandle(h)
     0
 
-proc acquireDirLock*(cwd: string) =
+proc acquireDirLock*(cwd: string; sessionPath = "") =
   ## Atomically claim the directory lock for `cwd`. If a lock exists but its
   ## owner process is no longer alive, it's treated as stale and removed
   ## automatically, then acquisition retries once. Raises DirLocked only when
-  ## another live 3code process genuinely holds the lock.
+  ## another live 3code process genuinely holds the lock. `sessionPath`, when
+  ## known, is recorded as a second line so the collision error can name the
+  ## holder's session instead of a bare pid.
   if cwd == "": return
   let dir = dirLockDir()
   try: createDir(dir) except OSError: discard
   let lockPath = dirLockPathFor(cwd)
   let pid = $getCurrentProcessId()
+  let sid = sessionIdFromPath(sessionPath)
+  let ownerData = if sid.len > 0: pid & "\n" & sid else: pid
   for attempt in 0 .. 1:
-    if tryCreateDirLockFile(lockPath, pid) >= 0:
+    if tryCreateDirLockFile(lockPath, ownerData) >= 0:
       activeDirLockPath = lockPath
       return
     let owner = readOwnerPid(lockPath)
     var ownerPid = -1
     try: ownerPid = parseInt(owner) except ValueError: discard
     if ownerPid > 0 and pidAlive(ownerPid):
-      raise lockHeldDirError(cwd, lockPath, owner)
+      raise lockHeldDirError(cwd, lockPath, owner, readOwnerSessionId(lockPath))
     try: removeFile(lockPath) except OSError: discard
-  raise lockHeldDirError(cwd, lockPath, readOwnerPid(lockPath))
+  raise lockHeldDirError(cwd, lockPath, readOwnerPid(lockPath),
+                         readOwnerSessionId(lockPath))
 
 proc releaseDirLock*(cwd: string) =
   if cwd == "": return
@@ -442,6 +459,19 @@ proc releaseActiveDirLock*() =
   if activeDirLockPath != "":
     try: removeFile(activeDirLockPath) except OSError: discard
     activeDirLockPath = ""
+
+proc updateActiveDirLockSession*(sessionPath: string) =
+  ## Rewrite the session-id line of the dir lock this process holds, for when
+  ## the live session id moves (:clear forks a fresh one). Keeping it current
+  ## means a collision report from another process never names a session this
+  ## process has already abandoned. Best-effort: a failed rewrite only means
+  ## the report falls back to the previous id.
+  if activeDirLockPath == "": return
+  let sid = sessionIdFromPath(sessionPath)
+  try:
+    writeFile(activeDirLockPath,
+              $getCurrentProcessId() & (if sid.len > 0: "\n" & sid else: ""))
+  except CatchableError: discard
 
 proc listSessionPaths*(): seq[string] =
   let d = sessionDir()

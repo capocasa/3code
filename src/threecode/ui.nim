@@ -16,8 +16,8 @@ import types, util, prompts, session, config, api, compact, display, minline,
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":prompt", ":show",
-                      ":log", ":sessions", ":summarize", ":version", ":sandbox",
-                      ":sb", ":retry",
+                      ":log", ":sessions", ":session", ":summarize", ":version",
+                      ":sandbox", ":sb", ":retry",
                       ":q", ":quit", ":exit"]
 
 type WizardReadLineHook* = proc(prompt: string, hidden,
@@ -68,7 +68,7 @@ proc classifyCommand*(cmd: string): CommandKind =
   if name.startsWith(":!"):
     return ckMutating
   case name
-  of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":prompt", ":version":
+  of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":session", ":prompt", ":version":
     ckSafeImmediate
   of ":streaming", ":notify", ":retry":
     if parts.len == 0 or (parts.len == 1 and parts[0] == "list"): ckSafeImmediate
@@ -1379,6 +1379,7 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         session.created = $now()
         session.cwd = safeCwd()
         acquireSessionLock(session.savePath)
+        updateActiveDirLockSession(session.savePath)
       resp "════════════════════════════════════════"
     of ":model":
       body.add cmdModel(arg, prof)
@@ -1443,6 +1444,8 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       body.add showToolS(arg, session.toolLog)
     of ":log":
       body.add listToolsS(session.toolLog)
+    of ":session":
+      resp sessionIdFromPath(session.savePath)
     of ":sessions":
       # Listing is directory-scoped by design; the full set lives under
       # `sessionDir()`. `showCwd` is threaded through as false to keep

@@ -203,7 +203,7 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
   # Locks after profile resolution: a config error must fail fast without
   # claiming the directory. Lock failures roll back in reverse order.
   try:
-    acquireDirLock(s.state.cwd)
+    acquireDirLock(s.state.cwd, s.state.savePath)
   except DirLocked as e:
     raise newException(AgentError, e.msg)
   try:

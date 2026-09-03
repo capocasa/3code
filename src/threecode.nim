@@ -456,7 +456,7 @@ proc main() =
     startupTrace("sandbox-setup-warn")
 
   try:
-    acquireDirLock(session.cwd)
+    acquireDirLock(session.cwd, session.savePath)
   except DirLocked as e:
     die(e.msg, ExitConfig)
 

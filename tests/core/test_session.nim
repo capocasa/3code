@@ -497,7 +497,8 @@ suite "session: directory lock acquire/release":
 
   test "acquiring a held lock raises DirLocked with guidance":
     let cwd = "/home/carlo/p/test-dir-lock-live"
-    acquireDirLock(cwd)
+    let sess = sessionDir() / ("20260101T000000" & SessionExt)
+    acquireDirLock(cwd, sess)
     let lp = dirLockPathFor(cwd)
     var msg = ""
     try:
@@ -508,7 +509,32 @@ suite "session: directory lock acquire/release":
     check cwd in msg
     check lp in msg
     check $getCurrentProcessId() in msg
+    # second lock line names the holder's session id
+    check readFile(lp).strip.splitLines.len == 2
+    check "20260101T000000" in readFile(lp)
+    check "session 20260101T000000" in msg
     check "stale" in msg.toLowerAscii
+
+  test "updateActiveDirLockSession rewrites the session id line":
+    let cwd = "/home/carlo/p/test-dir-lock-move"
+    acquireDirLock(cwd, sessionDir() / ("20260101T000000" & SessionExt))
+    updateActiveDirLockSession(sessionDir() / ("20260202T000000" & SessionExt))
+    let lp = dirLockPathFor(cwd)
+    check readFile(lp).strip.splitLines == @[$getCurrentProcessId(), "20260202T000000"]
+
+  test "pid-only dir lock (no session line) still reports the pid":
+    let cwd = "/home/carlo/p/test-dir-lock-bare"
+    acquireDirLock(cwd)
+    let lp = dirLockPathFor(cwd)
+    check readFile(lp).strip == $getCurrentProcessId()
+    var msg = ""
+    try:
+      acquireDirLock(cwd)
+      fail()
+    except DirLocked as e:
+      msg = e.msg
+    check "pid " & $getCurrentProcessId() in msg
+    check "session" notin msg
 
   test "releaseDirLock removes the file":
     let cwd = "/home/carlo/p/test-dir-lock-rel"
