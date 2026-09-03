@@ -6,7 +6,7 @@
 ## `api.nim` should stay transport/protocol focused; visual consequences of
 ## model/tool progress should flow through this layer.
 
-import std/[algorithm, json, os, strformat, strutils, tables, terminal, times]
+import std/[algorithm, json, os, sets, strformat, strutils, tables, terminal, times]
 when defined(posix):
   import std/posix except Time
 import types, util, prompts, session, compact, config, actions, api,
@@ -17,6 +17,7 @@ const
   FlailMaxEscalations* = 3   ## three recovery attempts, fourth flagged call aborts
   FlailWindowSize* = 8       ## how many recent call fingerprints to remember
   FlailSpacedThreshold* = 3  ## failing repeats of one call at any spacing flag on this occurrence
+  FlailStreakMin* = 9        ## same-tool calls in a row all carrying one distinctive token flag here
 
 type
   FlailVerdict* = enum
@@ -26,7 +27,7 @@ type
 
   FlailDetector* = object
     ## Detects agentic doom loops cheaply, in the harness, spending zero
-    ## tokens on detection. Two complementary signals over a bounded window
+    ## tokens on detection. Four complementary signals over a bounded window
     ## of recent calls:
     ##
     ## 1. Repetition: a fingerprint (name + args) recurring within the last
@@ -40,6 +41,10 @@ type
     ##    only judged on identical-consecutive repetition, so a
     ##    legitimately idempotent poll (re-check output that changes) is
     ##    never falsely flagged.
+    ## 4. Stuck streak: `FlailStreakMin` consecutive calls to the same tool
+    ##    sharing one distinctive argument token. Every call in the
+    ##    recorded doom loop was a novel, successful fingerprint; only this
+    ##    signal sees it.
     ##
     ## Recovery uses a graduated ladder of injected messages, because field
     ## reports on GLM 5.x loops (zai-org/GLM-5#116) show a plain "be careful"
@@ -54,6 +59,8 @@ type
     escalations*: int
     lastNoProgress*: bool     ## did the previous executed call report no change?
     progress*: Table[string, bool]  ## last result per fingerprint; false = no change
+    streakName*: string       ## tool name of the current same-tool run
+    streakTokens*: seq[HashSet[string]]  ## ring of per-call distinctive tokens
 
 proc canonicalJson(node: JsonNode): string =
   ## Stable serialization with sorted object keys, so key-order variants of
@@ -98,6 +105,56 @@ proc isMutating(name: string): bool =
   n in ["write", "patch", "edit", "apply_patch", "applypatch", "write_file",
         "edit_file", "str_replace", "str_replace_editor", "create_file"]
 
+proc tokenify(s: var string, outSet: var HashSet[string]) =
+  ## Strip a leading `cd <dir> &&`, split into tokens, trim punctuation,
+  ## normalize digits to '#', keep tokens of length >= 6.
+  if s.startsWith("cd "):
+    let rest = s[3 ..^ 1]
+    let sp = rest.find(" && ")
+    if sp > 0: s = rest[sp + 4 ..^ 1]
+  for tok in s.splitWhitespace():
+    var t = tok
+    while t.len > 0 and not (t[0].isAlphanumeric or t[0] == '_'):
+      t = t[1 ..^ 1]
+    while t.len > 0 and not (t[^1].isAlphanumeric or t[^1] == '_'):
+      t = t[0 ..< t.len - 1]
+    if t.len < 6: continue
+    var norm = ""
+    for ch in t:
+      if ch.isDigit: norm.add '#'
+      else: norm.add ch
+    outSet.incl norm
+
+proc collectValues(node: JsonNode, outSet: var HashSet[string]) =
+  case node.kind
+  of JObject:
+    for v in node.fields.values: collectValues(v, outSet)
+  of JArray:
+    for e in node.elems: collectValues(e, outSet)
+  of JString:
+    var s = node.str
+    tokenify(s, outSet)
+  else:
+    discard
+
+proc distinctiveTokens(argsStr: string): HashSet[string] =
+  ## Tokens likely to carry the *intent* of a call, as opposed to shell
+  ## grammar, cwd boilerplate, argument-key names or universal flags.
+  ## Used only by the streak signal: a long run of same-tool calls all
+  ## carrying one distinctive token is probing the same thing over and
+  ## over. Only JSON string *values* are tokenized (the keys - command,
+  ## path, search - would otherwise be the persistent "theme" of every
+  ## call). A leading `cd <dir> &&` is stripped from each value so a
+  ## persistent working directory cannot masquerade as the theme.
+  ## Digits are normalized away so counters, line numbers and pids do not
+  ## mask similarity; tokens shorter than 6 chars are dropped because
+  ## short tokens are usually flags, paths' common words or shell keywords.
+  try:
+    collectValues(parseJson(argsStr), result)
+  except CatchableError:
+    var s = argsStr
+    tokenify(s, result)
+
 proc countInWindow(det: FlailDetector, fp: string): int =
   for w in det.window:
     if w == fp: inc result
@@ -121,12 +178,32 @@ proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
   let seen = det.countInWindow(fp)
   let consecutive = det.window.len > 0 and det.window[^1] == fp
 
+  # Streak signal state: a ring of the last FlailStreakMin same-tool
+  # calls and the distinctive tokens each carried. A switch to a different
+  # tool empties the ring. The signal fires when the full ring shares at
+  # least one token: every recent call to this tool is probing the same
+  # thing. A sliding window (not a shrinking run intersection) so one
+  # healthy deviation inside a doom loop does not permanently disarm it.
+  let toks = distinctiveTokens(argsStr)
+  if det.streakName != name:
+    det.streakName = name
+    det.streakTokens = @[]
+  det.streakTokens.add toks
+  if det.streakTokens.len > FlailStreakMin:
+    det.streakTokens.delete 0
+  var stuckStreak = false
+  if det.streakTokens.len == FlailStreakMin:
+    var common = det.streakTokens[0]
+    for s in det.streakTokens[1 ..^ 1]:
+      common = common * s
+    stuckStreak = common.len > 0
+
   # Push onto the bounded window.
   det.window.add fp
   if det.window.len > FlailWindowSize:
     det.window.delete 0
 
-  # Flag this call as a loop on any of three signals:
+  # Flag this call as a loop on any of four signals:
   #
   # 1. Identical consecutive repeat: the model re-emitted the exact call it
   #    just made. Strongest signal; flags on the first repeat. This is the
@@ -140,10 +217,15 @@ proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
   #    misses because the calls interleave. A spaced cycle of *successful*
   #    calls (re-run a test, re-check output) is legitimate polling and is
   #    never flagged; progress distinguishes a stuck loop from a poll.
+  # 4. Stuck streak: the last FlailStreakMin calls were all to the same tool
+  #    and all carry one distinctive argument token. Catches the recorded GLM
+  #    doom loop where every call was a novel fingerprint (cosmetic
+  #    pipeline variations of one grep), succeeded (exit 0), and never
+  #    repeated exactly, so signals 1-3 all stayed quiet while the model
+  #    spent 25 calls re-probing one fact.
   let knownFailing = not det.progress.getOrDefault(fp, true)
   let isLoop = consecutive or (det.lastNoProgress and seen >= 1) or
-    (knownFailing and seen >= FlailSpacedThreshold - 1)
-
+    (knownFailing and seen >= FlailSpacedThreshold - 1) or stuckStreak
   if not isLoop:
     # Genuinely new or harmless: a clearly novel call resets the ladder.
     if seen == 0:

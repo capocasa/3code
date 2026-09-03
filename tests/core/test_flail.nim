@@ -3,7 +3,7 @@
 ## calls, and re-tried no-op mutations), run three graduated recovery
 ## attempts, then abort the turn; genuinely novel calls reset the ladder.
 
-import std/[strutils, unittest]
+import std/[json, sequtils, sets, strutils, unittest]
 import threecode/turns
 
 suite "flail detector":
@@ -162,3 +162,67 @@ suite "flail detector":
     check "structurally different" in shape
     check "Final warning" in warn
     check "aborted" in warn
+
+  test "healthy varied work never trips the streak signal":
+    # Mirrors the successful parts of the recorded mergepdf session:
+    # short same-tool runs whose shared tokens change as work moves on
+    # (build, then a help lookup, then tests), interleaved with writes
+    # and patches. Nothing reaches FlailStreakMin with a shared token.
+    var det: FlailDetector
+    template bashCmd(c: string) =
+      check det.observeCall("bash", "{\"command\":" & escapeJson(c) & "}") == fvOk
+      det.noteResult("bash", "{\"command\":" & escapeJson(c) & "}", true)
+    bashCmd "nim c -o:mergepdf mergepdf.nim"
+    bashCmd "cd /tmp && mergepdf a.pdf b.pdf -o out.pdf && qpdf --check out.pdf"
+    bashCmd "qpdf --help=page-selection | head -30"
+    bashCmd "cd /tmp && mergepdf a.pdf b.pdf c.pdf -o out.pdf && qpdf --show-npages out.pdf"
+    check det.observeCall("patch", "{\"path\":\"a\"}") == fvOk
+    det.noteResult("patch", "{\"path\":\"a\"}", true)
+    bashCmd "cd /tmp && rm -f out.pdf && mergepdf a.pdf -o out.pdf && qpdf --check out.pdf"
+    check det.escalations == 0
+
+  test "stuck streak of same-tool novel calls escalates, then aborts":
+    # The recorded doom loop: 25 consecutive bash calls, every one a novel
+    # fingerprint (cosmetic grep variations), all exit 0. Signals 1-3 stay
+    # quiet; only the streak signal sees the run sharing one distinctive
+    # token (execCmdEx).
+    var det: FlailDetector
+    # Verbatim tail of the recorded doom loop (20260903T214207.3log,
+    # calls #52-#63): every call a novel fingerprint, all exit 0, all
+    # grepping for execCmdEx.
+    let greps = [
+      "grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/os.nim | head -3; grep -rn \"proc execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/os*.nim",
+      "grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/std/*.nim 2>/dev/null | grep proc; grep -rn \"cmdline\\|execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/std/private/*.nim | grep proc | head",
+      "grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/ --include='*.nim' | grep -v '##\\|html' | grep -v osproc.nim",
+      "grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | grep -n \"1[0-9][0-9][0-9]\"; awk 'NR>=1522 && NR<=1535' ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim",
+      "grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | head -2; grep -rn \"args: openArray[string]\\|seq[string]\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim",
+      "grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/os.nim; grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/std/*.nim | grep -v '##'",
+      "grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/ --include='*.nim' -l; grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/system/*.nim 2>/dev/null | head -3",
+      "grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | grep -v '##'; grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | wc -l",
+      "grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | grep -v '  ##'; grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | grep -c '##'",
+      "grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | grep -v '##' ; grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | grep -v '##' | wc -l",
+      "grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | grep -v '##' ; echo ---; grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | grep -v '##' | wc -l; echo ---",
+      "grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | grep -v '##' ; echo ---; grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | grep -v '##' | wc -l; echo ---; grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | grep -v '##' | tail -2"]
+    var verdicts: seq[FlailVerdict]
+    for g in greps:
+      verdicts.add det.observeCall("bash", "{\"command\":" & escapeJson(g) & "}")
+      det.noteResult("bash", "{\"command\":" & escapeJson(g) & "}", true)
+    # First FlailStreakMin-1 calls pass; the run then climbs the ladder.
+    for v in verdicts[0 ..< FlailStreakMin - 1]:
+      check v == fvOk
+    check fvEscalate in verdicts
+    check fvAbort in verdicts[verdicts.len - 3 .. ^1]
+
+  test "a genuinely different call breaks the streak":
+    var det: FlailDetector
+    for i in 1 ..< FlailStreakMin:
+      let c = "sed -n '" & $i & ",30p' src/module" & $i & ".nim; wc -l src/module" & $i & ".nim"
+      check det.observeCall("bash", "{\"command\":" & escapeJson(c) & "}") == fvOk
+      det.noteResult("bash", "{\"command\":" & escapeJson(c) & "}", true)
+    # A call sharing no distinctive token with the rest of the ring means
+    # the full-ring intersection is empty: the signal is disarmed and 8
+    # more on-theme calls would be needed to re-arm it.
+    let other = "nim c -o:tool tools/thing.nim"
+    check det.observeCall("bash", "{\"command\":" & escapeJson(other) & "}") == fvOk
+    check "src/module#.nim" notin det.streakTokens[^1]
+    check "o:tool" in det.streakTokens[^1]
