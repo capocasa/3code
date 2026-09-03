@@ -1374,6 +1374,54 @@ suite "terminal visual contract":
     tty.send "after cancel"
     tty.expectTypedAtPrompt "after cancel"
 
+  test "typing a long wrapped prompt repaints only the touched rows":
+    # Flicker regression: the per-keystroke redraw used to walk up to the
+    # editor's top row, erase to end of screen, and repaint every wrapped
+    # row — every intermediate frame of a long prompt changed the whole
+    # editor block (the visible flicker). The row-diffing painter rewrites
+    # only the row the keystroke touched, so once the prompt is tall, no
+    # keystroke frame may change more than the wrapped row count.
+    let root = newFixture("long_typing_no_flicker")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "content": "long prompt reply",
+        "contentChunks": ["long prompt reply"],
+        "usage": {"promptTokens": 10, "completionTokens": 3,
+                  "totalTokens": 13, "cachedTokens": 0}
+      }
+    ])
+    let tty = startStub(root)
+    defer: tty.close()
+    tty.expect "❯"
+    # ~100 words at 120 cols wraps across several visual rows.
+    let words = "the quick brown fox jumps over the lazy dog while the agent patiently waits for its next instruction from the user who keeps typing a very long prompt that wraps across several terminal rows before finally pressing enter to submit the whole thing"
+    tty.expectIdleCaret()
+    let framesBefore = tty.frames.len
+    # One write per word (plus trailing space) so each chunk triggers its
+    # own keystroke repaint without stalling `send`'s printable-echo wait
+    # on an instant paste.
+    for word in words.split(' '):
+      tty.send word & " "
+    tty.drain(300)
+    # The prompt occupies at least three visual rows by now; a full-block
+    # erase-and-repaint would change them all (plus the bar) on every
+    # keystroke. The diff painter changes the row the text landed on, so
+    # no keystroke frame may touch more rows than the editor is tall.
+    for i in framesBefore ..< tty.frames.len:
+      let f = tty.frames[i]
+      doAssert "❯" in f.rows.join("\n"),
+        "frame " & $i & " lost the prompt glyph mid-typing\n" & f.rows.join("\n")
+      doAssert f.changedRows.len <= 4,
+        "frame " & $i & " changed " & $f.changedRows.len &
+        " rows on one keystroke (whole-block repaint flicker): " &
+        $f.changedRows & "\n" & f.rows.join("\n")
+    tty.send "\n"
+    tty.expectCount("long prompt reply", 1, where = "screen")
+    tty.expect "❯"
+    tty.expectAlive()
+
   test "multiline prompt and queued multiline autosend":
     let root = newFixture("multiline_visual_test")
     writeConfiguredProvider(root)

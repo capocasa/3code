@@ -280,6 +280,17 @@ type
     postRedraw*: proc(ed: var LineEditor) {.closure.}
     preMutate*: proc(ed: var LineEditor) {.closure.}
     postMutate*: proc(ed: var LineEditor) {.closure.}
+    painter*: proc(ed: var LineEditor) {.closure.}
+      ## When set, `fullRedraw` hands the repaint to this proc instead of
+      ## the standalone erase-and-repaint below. The fat prompt installs a
+      ## row-diffing painter here (same one every other volatile repaint
+      ## uses) so typing into a long wrapped prompt rewrites only the rows
+      ## that changed instead of blanking the whole editor block per
+      ## keystroke. It must honor `preRedraw`/`postRedraw` itself.
+    prevRowSpans*: seq[string]
+      ## The row spans this editor last painted. Set by every repaint
+      ## (standalone and wrapped alike); the diffing `painter` compares
+      ## against it so typing one character rewrites one row.
     editInEditor*: proc(ed: var LineEditor) {.closure.}
       ## Invoked on Alt+E / Ctrl+X Ctrl+E when set; the callback owns
       ## terminal suspend/restore and buffer replacement.
@@ -775,9 +786,14 @@ proc fullRedraw*(ed: var LineEditor) =
   ## wrapped in DEC 2026 synchronized-output (``CSI ? 2026 h/l``) so
   ## conhost treats the repaint as one atomic frame; terminals that
   ## don't recognize the mode ignore it silently.
+  if ed.painter != nil:
+    callHook(ed.painter, ed)
+    return
   callHook(ed.preRedraw, ed)
   let synchronized = not ed.redrawWrappedExternally
-  ed.write ed.redrawBytes(synchronized = synchronized)
+  let bytes = ed.redrawBytes(synchronized = synchronized)
+  ed.prevRowSpans = ed.renderRowSpans()
+  ed.write bytes
   ed.redrawWrappedExternally = false
   callHook(ed.postRedraw, ed)
 
@@ -1875,6 +1891,7 @@ proc resetForRead(ed: var LineEditor, prompt: string, hidechars: bool) =
   ed.canceled = false
   ed.eof = false
   ed.hidechars = hidechars
+  ed.prevRowSpans = @[]
   if ed.getWidth != nil:
     let w = ed.getWidth()
     if w > 0: ed.width = w
