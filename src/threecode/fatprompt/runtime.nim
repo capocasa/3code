@@ -378,7 +378,15 @@ proc currentFrameFromModel*(): FooterFrame {.gcsafe.} =
       footerFrame(fatPromptState)
 
 proc testFrameMode(): bool =
-  getEnv("THREECODE_TEST_FRAME_FD").len > 0
+  ## Deterministic test mode gates the free-running gui thread behind a
+  ## frame-request handshake so the tty harness captures stable frames.
+  ## `THREECODE_TEST_GUI_LIVE=1` opts back out: the frame event channel stays
+  ## up (so the harness still synchronizes on commits) but the gui thread runs
+  ## its real 80ms cadence. Race-hunting tests (submit/stream repaint
+  ## interleaves) need the live thread; the handshake disables the very
+  ## concurrency they exercise.
+  getEnv("THREECODE_TEST_FRAME_FD").len > 0 and
+    getEnv("THREECODE_TEST_GUI_LIVE") != "1"
 
 proc requestTestSpinnerFrame() =
   if not testFrameMode() or not guiRunning:

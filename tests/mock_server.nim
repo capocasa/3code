@@ -36,6 +36,7 @@ type
     msSlowStream         ## valid SSE head + first chunk, then stall
     msSlowStreamNoUsage  ## content chunk with NO usage object, then stall
     msStallAfterDone     ## complete SSE response, then black-hole (teardown close hang)
+    msDripStream         ## many content chunks dripped with chunkDelayMs, then done
 
   MockServer* = ref object of RootObj
     listener*: Socket
@@ -112,6 +113,30 @@ proc handleSlowStream(s: MockServer; client: Socket) =
   # Now stall: hold the socket, never send [DONE] or the closing chunk.
   client.holdUntilGone()
 
+proc handleDripStream(s: MockServer; client: Socket) =
+  ## Stream many small content chunks with an inter-chunk delay, then a clean
+  ## [DONE]. Each chunk triggers a live-content repaint on the controller
+  ## thread while the 80ms gui spinner also repaints the volatile footer;
+  ## dripping them stretches that interleave so a submit/turn transition that
+  ## races a repaint has time to fire. This is the streaming cadence a real
+  ## provider produces (and the in-process stub cannot), needed to reproduce
+  ## the intermittent row loss on submit.
+  client.send("HTTP/1.1 200 OK\r\n")
+  client.send("Content-Type: text/event-stream\r\n")
+  client.send("Transfer-Encoding: chunked\r\n\r\n")
+  let delay = if s.chunkDelayMs > 0: s.chunkDelayMs else: 40
+  for i in 1..24:
+    let body = "{\"choices\":[{\"delta\":{\"content\":\"word" & $i &
+      " \"},\"finish_reason\":\"\"}]}"
+    client.send(sseChunk(body))
+    sleep(delay)
+  let usageTail = "{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]," &
+    "\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":24," &
+    "\"total_tokens\":36,\"cached_tokens\":0}}"
+  client.send(sseChunk(usageTail))
+  client.send(sseDoneChunk())
+  client.send("0\r\n\r\n")
+
 proc handleSlowStreamNoUsage(s: MockServer; client: Socket) =
   ## Content delta with no `usage` object, then stall. Models the real-world
   ## interrupt shape: providers send usage as a separate end-of-stream SSE
@@ -142,6 +167,7 @@ proc serverLoop(s: MockServer) {.thread.} =
         of msSlowStream: s.handleSlowStream(client)
         of msSlowStreamNoUsage: s.handleSlowStreamNoUsage(client)
         of msStallAfterDone: s.handleStallAfterDone(client)
+        of msDripStream: s.handleDripStream(client)
         try: client.close() except CatchableError: discard
     except CatchableError:
       discard

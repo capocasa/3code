@@ -571,7 +571,7 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
           "\x1f\x1f\x1f" & $width
         if sig == e.lastPaintSig:
           return
-        stdout.write termio.SyncBegin
+        stdout.write termio.SyncBegin()
         stdout.write bytes
         # Gap-only ffNone has empty bytes but still reserves one row. Keep
         # the row model honest so the next walk-up does not under-count.
@@ -580,7 +580,7 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
         else:
           e.noteFooterPainted(footerRowsAboveEditor)
         e.lastPaintSig = sig
-        stdout.write termio.SyncEnd
+        stdout.write termio.SyncEnd()
         stdout.flushFile
         e.lastPaintedWidth = width
         return
@@ -591,7 +591,7 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
         "\x1f" & $width
       if sig == e.lastPaintSig:
         return
-      stdout.write termio.SyncBegin
+      stdout.write termio.SyncBegin()
       stdout.write "\x1b[?25l"
       # The diff painter rewrites only rows whose content changed: a
       # ticking bar no longer erase-repaints the whole volatile block
@@ -614,7 +614,7 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
       else:
         e.noteFooterPaintedKeepRows(footerRowsAboveEditor)
       e.lastPaintSig = sig
-      stdout.write termio.SyncEnd
+      stdout.write termio.SyncEnd()
       stdout.flushFile
       e.lastPaintedWidth = width
 
@@ -651,7 +651,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
           "\x1f" & $bannerRows & "\x1f" & bytes & "\x1f\x1f" & $width
         if sig == e.lastPaintSig:
           return
-        stdout.write termio.SyncBegin
+        stdout.write termio.SyncBegin()
         stdout.write "\x1b[?25l"
         e.toolViewportHasGap = true
         e.toolViewportRows = @rows
@@ -661,7 +661,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
           stdout.write bytes
         e.noteNoFooter()
         e.lastPaintSig = sig
-        stdout.write termio.SyncEnd
+        stdout.write termio.SyncEnd()
         stdout.flushFile
         return
       refreshEditorWidth(editor[])
@@ -670,7 +670,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         editorSig(editor[]) & "\x1f" & $width
       if sig == e.lastPaintSig:
         return
-      stdout.write termio.SyncBegin
+      stdout.write termio.SyncBegin()
       stdout.write "\x1b[?25l"
       let prevFooterRows = e.paintedFooterRows
       let newGap = true
@@ -690,7 +690,7 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         e.noteFooterPaintedKeepRows(footerRowsAboveEditor)
       e.lastPaintSig = sig
       e.lastPaintedWidth = width
-      stdout.write termio.SyncEnd
+      stdout.write termio.SyncEnd()
       stdout.flushFile
 
 proc renderToolViewport*(rows: openArray[string]; frame: FooterFrame;
@@ -736,7 +736,7 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
           join(rows, "\x1e") & "\x1f" & bytes & "\x1f\x1f" & $width
         if sig == e.lastPaintSig:
           return
-        stdout.write termio.SyncBegin
+        stdout.write termio.SyncBegin()
         stdout.write "\x1b[?25l"
         e.liveContentHasGap = true
         e.liveContentRows = @rows
@@ -746,7 +746,7 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
         e.noteNoFooter()
         e.lastPaintSig = sig
         e.lastPaintedWidth = width
-        stdout.write termio.SyncEnd
+        stdout.write termio.SyncEnd()
         stdout.flushFile
         return
       refreshEditorWidth(editor[])
@@ -754,7 +754,7 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
         "\x1f" & bytes & "\x1f" & editorSig(editor[]) & "\x1f" & $width
       if sig == e.lastPaintSig:
         return
-      stdout.write termio.SyncBegin
+      stdout.write termio.SyncBegin()
       stdout.write "\x1b[?25l"
       let prevFooterRows = e.paintedFooterRows
       var vrows: seq[VolatileRow]
@@ -780,7 +780,7 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
         e.noteFooterPaintedKeepRows(footerRowsAboveEditor)
       e.lastPaintSig = sig
       e.lastPaintedWidth = width
-      stdout.write termio.SyncEnd
+      stdout.write termio.SyncEnd()
       stdout.flushFile
 
 proc renderLiveContent*(rows: openArray[string]; frame: FooterFrame;
@@ -829,7 +829,7 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
           "\x1f\x1f" & $width
         if sig == e.lastPaintSig:
           return
-        stdout.write termio.SyncBegin
+        stdout.write termio.SyncBegin()
         stdout.write "\x1b[?25l"
         e.writeLiveContentRows()
         if bytes.len > 0:
@@ -837,7 +837,7 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
         e.noteNoFooter()
         e.lastPaintSig = sig
         e.lastPaintedWidth = width
-        stdout.write termio.SyncEnd
+        stdout.write termio.SyncEnd()
         stdout.flushFile
         return
       refreshEditorWidth(editor[])
@@ -845,7 +845,7 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
         "\x1f" & editorSig(editor[]) & "\x1f" & $width
       if sig == e.lastPaintSig:
         return
-      stdout.write termio.SyncBegin
+      stdout.write termio.SyncBegin()
       stdout.write "\x1b[?25l"
       let prevFooterRows = e.paintedFooterRows
       var vrows: seq[VolatileRow]
@@ -865,7 +865,7 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
         e.noteFooterPaintedKeepRows(footerRowsAboveEditor)
       e.lastPaintSig = sig
       e.lastPaintedWidth = width
-      stdout.write termio.SyncEnd
+      stdout.write termio.SyncEnd()
       stdout.flushFile
 
 proc repaintLiveContent*(frame: FooterFrame; inputRunning: bool;
@@ -998,7 +998,7 @@ proc commitTranscriptItem(e: var TerminalEngine; transcript: string;
       editorRowsAboveCursor(edPtr[]), e.paintedFooterRows,
       e.toolViewportRows.len + e.viewportGapRows,
       e.liveContentRows.len + e.liveContentGapRows)
-  stdout.write termio.SyncBegin
+  stdout.write termio.SyncBegin()
   if editing:
     stdout.write "\x1b[?25l\r"
   let up =
@@ -1029,7 +1029,7 @@ proc commitTranscriptItem(e: var TerminalEngine; transcript: string;
   e.repaintVolatileAfterCommit(restoreTo, footerBytes,
                                newFooterRows,
                                restoreEditor, reserveFooter)
-  stdout.write termio.SyncEnd
+  stdout.write termio.SyncEnd()
   stdout.flushFile
 
 proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
@@ -1072,20 +1072,20 @@ proc prepareAssistantContentStart*(e: var TerminalEngine;
       refreshEditorWidth(editor[])
       terminaldbg.probeErase("assistantContentStart", max(0, e.walkUp(editor[])))
       let up = max(0, e.walkUp(editor[]))
-      stdout.write termio.SyncBegin
+      stdout.write termio.SyncBegin()
       stdout.write "\r"
       if up > 0:
         stdout.write "\x1b[" & $up & "A"
       stdout.write "\x1b[J"
       e.noteNoFooter()
-      stdout.write termio.SyncEnd
+      stdout.write termio.SyncEnd()
       if flush:
         stdout.flushFile
     elif oldFooter.kind != ffNone and not hadBufferedSubmit:
-      stdout.write termio.SyncBegin
+      stdout.write termio.SyncBegin()
       stdout.write oldFooter.footerFrameBytes(termW)
       e.noteNoFooter()
-      stdout.write termio.SyncEnd
+      stdout.write termio.SyncEnd()
       if flush:
         stdout.flushFile
     elif flush:
@@ -1107,7 +1107,7 @@ proc endTurn*(e: var TerminalEngine; inputRunning: bool;
   ## transition bytes are produced by the fat-prompt renderer; cursor
   ## geometry uses the engine's live footer state.
   termio.withTerminalWriteLock:
-    stdout.write termio.SyncBegin
+    stdout.write termio.SyncBegin()
     if inputRunning and editor != nil:
       refreshEditorWidth(editor[])
       let up = max(0, e.walkUp(editor[]))
@@ -1116,7 +1116,7 @@ proc endTurn*(e: var TerminalEngine; inputRunning: bool;
         stdout.write "\x1b[" & $up & "A"
     stdout.write bytes
     e.noteNoFooter()
-    stdout.write termio.SyncEnd
+    stdout.write termio.SyncEnd()
     stdout.flushFile
 
 proc endTurn*(inputRunning: bool; editor: ptr minline.LineEditor;

@@ -6,10 +6,10 @@
 
 import std/[locks, terminal]
 import minline
+import ./syncoutput
 
-const
-  SyncBegin* = "\x1b[?2026h"
-  SyncEnd* = "\x1b[?2026l"
+proc SyncBegin*(): string = syncoutput.SyncBegin()
+proc SyncEnd*(): string = syncoutput.SyncEnd()
 
 ## Terminal write serialization lock.
 ##
@@ -96,9 +96,9 @@ proc refreshEditorWidth(ed: var minline.LineEditor) =
 proc syncWrite*(bytes: string) =
   ## Write one synchronized terminal update.
   withTerminalWriteLock:
-    stdout.write SyncBegin
+    stdout.write SyncBegin()
     stdout.write bytes
-    stdout.write SyncEnd
+    stdout.write SyncEnd()
     stdout.flushFile
 
 proc writeRaw*(bytes: string) =
@@ -128,7 +128,7 @@ proc beginEditorRedraw*(ed: var minline.LineEditor; ready: bool;
   ## `finishEditorRedraw` after minline has emitted the editor bytes.
   acquireTerminalWrite()
   refreshEditorWidth(ed)
-  stdout.write SyncBegin
+  stdout.write SyncBegin()
   stdout.write "\x1b[?25l\r"
   ed.redrawWrappedExternally = true
   # `footerRowsAboveEditor` is the source of truth for reserved chrome above
@@ -168,7 +168,7 @@ proc finishEditorRedraw*(showCaret = true) =
   try:
     if showCaret:
       stdout.write "\x1b[?25h"
-    stdout.write SyncEnd
+    stdout.write SyncEnd()
     stdout.flushFile()
   finally:
     releaseTerminalWrite()
