@@ -661,10 +661,10 @@ suite "terminal visual contract":
     # bar-less first-paint branch ended in `\r\n`), stranding the painted
     # `❯ ` row as a blank line. The user saw a blank line with the caret at
     # column 0, and the real `❯ ` only appeared on the row below. Startup
-    # now always primes the token bar (`○0%` at zero usage) and emits the
-    # thinking-ticker gap row explicitly, so the first paint is bar+prompt
-    # with exactly one blank gap row between the welcome's last hint line
-    # and the bar, and it must be present on the very first frame.
+    # now emits the gap row explicitly and paints the bare prompt (no
+    # token bar until the first turn has real usage), with exactly one
+    # blank gap row between the welcome's last hint line and the prompt,
+    # present on the very first frame.
     let root = newFixture("startup_no_orphan")
     writeConfiguredProvider(root)
     writeStubResponses(root, %*[])
@@ -715,14 +715,14 @@ suite "terminal visual contract":
     doAssert liveRow.startsWith("❯"),
       "startup prompt not anchored at the `❯ ` glyph: '" & liveRow & "'"
 
-  test "startup gap+bar paint leaves exactly one blank gap above the chrome":
+  test "startup paint leaves exactly one blank gap above the prompt":
     # The startup paint path (`paintInitialPrompt`, used on a fresh start and
-    # on resume without prior usage) primes the bar and emits the ticker gap
-    # row before painting bar+prompt. With prior content above (the welcome
-    # screen, or resumed scrollback), the chrome must not sit flush against
+    # on resume without prior usage) emits the gap row and paints the bare
+    # prompt (no token bar until the first turn has real usage). With prior
+    # content above (the welcome
+    # screen, or resumed scrollback), the prompt must not sit flush against
     # it. Exactly one blank gap row must separate the last prior-content line
-    # from the topmost chrome row (the `○0%` bar row on startup, which is
-    # non-blank), matching the `endTurn` gap.
+    # from the prompt row, matching the `endTurn` gap.
     let root = newFixture("prompt_only_gap")
     writeConfiguredProvider(root)
     writeStubResponses(root, %*[])
@@ -733,10 +733,11 @@ suite "terminal visual contract":
       tty.close()
     tty.expect "❯"
     tty.drain(200)
-    # Find the first frame showing the startup prompt and locate the topmost
-    # chrome row: the `○0%` bar row just above the `❯ ` row. Count the blank
-    # rows between the last prior-content row (the welcome hint) and that bar.
-    var barRow = -1
+    # Find the first frame showing the startup prompt. There must be no
+    # token bar yet (a `○0%` bar before the first response says nothing),
+    # and exactly one blank gap row between the last prior-content row
+    # (the welcome hint) and the `❯ ` row.
+    var promptRow = -1
     var contentRow = -1
     var blankRowsBetween = 0
     for f in tty.frames:
@@ -746,26 +747,26 @@ suite "terminal visual contract":
         if r.strip(leading = true).startsWith("❯"):
           p = ri
           break
-      if p >= 0 and barRow < 0:
-        doAssert p >= 1 and rows[p - 1].strip.startsWith("○"),
-          "expected the startup bar row directly above the prompt, found '" &
+      if p >= 0 and promptRow < 0:
+        promptRow = p
+        doAssert p < 1 or not rows[p - 1].strip.startsWith("○"),
+          "unexpected token bar above the startup prompt: '" &
             rows[p - 1] & "'"
-        barRow = p - 1
-        # last non-blank row above the bar is prior content
-        for r in countdown(barRow - 1, 0):
+        # last non-blank row above the prompt is prior content
+        for r in countdown(p - 1, 0):
           if rows[r].strip.len > 0:
             contentRow = r
             break
         if contentRow >= 0:
-          for r in (contentRow + 1) ..< barRow:
+          for r in (contentRow + 1) ..< p:
             if rows[r].strip.len == 0:
               inc blankRowsBetween
-      if barRow >= 0:
+      if promptRow >= 0:
         break
-    doAssert barRow >= 0, "startup prompt never appeared in frames"
-    doAssert contentRow >= 0, "no prior-content line above the startup bar"
+    doAssert promptRow >= 0, "startup prompt never appeared in frames"
+    doAssert contentRow >= 0, "no prior-content line above the startup prompt"
     doAssert blankRowsBetween == 1,
-      "expected exactly one blank gap row above the startup chrome, found " &
+      "expected exactly one blank gap row above the startup prompt, found " &
         $blankRowsBetween
 
   test "repeated system commands keep the gap row above the idle prompt":

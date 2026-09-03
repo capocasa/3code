@@ -1,7 +1,7 @@
-===== 257 =====
+===== 299 =====
 
   ╭─╮
-   ─┤  3code v0.6.0-filename-805c0e7e-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -9,12 +9,11 @@
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
-  ○0%
 ❯
-===== 0 =====
+===== 665 =====
 
   ╭─╮
-   ─┤  3code v0.6.0-filename-805c0e7e-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -22,12 +21,11 @@
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
-  ○0%
 ❯ run other tool checks
-===== 786 =====
+===== 674 =====
 
   ╭─╮
-   ─┤  3code v0.6.0-filename-805c0e7e-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -41,10 +39,10 @@
 
 ⣿ ○0% ↓6 0s
 ❯
-===== 251 =====
+===== 428 =====
 
   ╭─╮
-   ─┤  3code v0.6.0-filename-805c0e7e-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -58,10 +56,10 @@
 
   ○2%  ↑300  ↓44  0s
 ❯
-===== 526 =====
+===== 869 =====
 
   ╭─╮
-   ─┤  3code v0.6.0-filename-805c0e7e-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -126,10 +124,10 @@ p --- /tmp/applied.txt
 
 ⣿ ○0% ↓4 0s
 ❯
-===== 340 =====
+===== 120 =====
 
   ╭─╮
-   ─┤  3code v0.6.0-filename-805c0e7e-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -194,10 +192,10 @@ p --- /tmp/applied.txt
 
   ○0%  ↑90  ↓12  0s
 ❯
-===== 964 =====
+===== 403 =====
 
   ╭─╮
-   ─┤  3code v0.6.0-filename-805c0e7e-unstaged   the economical coding agent
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub

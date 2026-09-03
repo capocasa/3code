@@ -650,9 +650,8 @@ proc main() =
     # Draw the initial chrome at the bottom of the welcome screen. On
     # resume with prior usage we paint bar+prompt carrying the last
     # response's tokens (typing-ready shape from `endTurn`). On resume
-    # without usage and on a fresh start we paint the bar at zeros —
-    # the context percentage is always visible, before the first model
-    # response just like after it.
+    # without usage and on a fresh start we paint a bare idle prompt;
+    # the token bar first appears when a turn ends with real usage.
     if restoredDraft.len > 0:
       editor.prefillText = restoredDraft
     if resume:

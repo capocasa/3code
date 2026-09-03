@@ -1,10 +1,12 @@
-## Reproduction: after the first submit, the row that held the `○0%` token
-## bar collapses away instead of being left blank, so the committed echo
-## lands directly under the welcome hint with no empty row between them.
+## Reproduction: after the first submit, the volatile gap row above the
+## idle prompt collapses away instead of being left blank, so the committed
+## echo lands directly under the welcome hint with no empty row between
+## them. (When startup still primed a `○0%` bar, this was the row it sat
+## on.)
 ##
 ## Expected layout after the turn settles:
 ##   type a prompt. :help ...
-##   <blank row>            <- was the ○0% bar, must survive as empty
+##   <blank row>            <- the gap row, must survive as empty
 ##   ❯ <echo>
 ##   ○... footer
 ##   ❯ <fresh prompt>
@@ -96,7 +98,7 @@ proc runCase(reasoning: bool) =
     doAssert echoIdx >= 0, "echo row missing (" & tag & ")\n" & tty.dumpFramesAround("ANSWER-MARKER")
 
     # The echo must not sit directly under the hint: exactly one blank row
-    # (the collapsed ○0% bar) separates them.
+    # (the leftover gap row) separates them.
     doAssert echoIdx == hintIdx + 2,
       "(" & tag & ") expected echo two rows below hint (hint, blank, echo); got hint=" &
       $hintIdx & " echo=" & $echoIdx & "\n" &

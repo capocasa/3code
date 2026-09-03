@@ -509,6 +509,7 @@ proc beginEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor;
   # gap in the editor row's place.
   if rows > e.paintedFooterRows:
     rows = e.paintedFooterRows
+  let paintedRows = rows
   termio.beginEditorRedraw(ed, ready, frame.footerFrameBytes(termW),
                            rows)
   e.editorRedrawPending = true
@@ -521,8 +522,8 @@ proc beginEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor;
   # erase below clears them, so mirror that with blanks.
   e.lastVolatileRows = @[]
   let texts = footerRowTexts(frame, termW)
-  for i in 0 ..< max(rows, e.paintedFooterRows):
-    e.lastVolatileRows.add (if i < rows and i < texts.len: texts[i] else: "")
+  for i in 0 ..< paintedRows:
+    e.lastVolatileRows.add (if i < texts.len: texts[i] else: "")
   e.lastVolatileRows.add ed.renderRowSpans()
 
 proc beginEditorRedraw*(ed: var minline.LineEditor; ready: bool;
