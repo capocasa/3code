@@ -127,3 +127,74 @@ jobs:
         run: |
           curl -f -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-termux-arm64.tar.gz" \
             https://3code.capocasa.dev/main/builds/upload.nim
+
+  yrc-stress:
+    # YRC is Nim's experimental thread-safe ORC (shared heap, atomic RC,
+    # concurrent cycle collector), only in devel (>= 2.3.1). 3code keeps a
+    # GUI animation thread painting a footer from a shared lock-protected
+    # frame model; stock ORC's non-atomic refcount races corrupt the heap,
+    # which glibc tolerates but Android's hardened_malloc aborts on
+    # ("write after free", the termux freeze). YRC makes those cross-thread
+    # RC ops safe. This job cross-compiles the tty stress tests + a stub
+    # 3code to arm64 with --mm:yrc and runs them in emulated Termux
+    # (termux-docker) to confirm the freeze is gone on the target that
+    # actually aborts. Requires Nim devel, so it uses nim-version: devel
+    # (the build/smoke jobs stay on stable for the shipped binary).
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: devel
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          parent-nim-install-directory: $HOME
+          nim-install-directory: nim-toolchain
+
+      - name: Install dependencies
+        run: |
+          nimble install -y https://github.com/capocasa/sandwall
+          nimble install -y --depsOnly
+
+      - name: Download Android NDK
+        run: |
+          curl -fsSL -o ndk.zip https://dl.google.com/android/repository/android-ndk-r26c-linux.zip
+          unzip -q ndk.zip
+          echo "NDK_CLANG=$PWD/android-ndk-r26c/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang" >> "$GITHUB_ENV"
+
+      - name: Cross-compile yrc stub + stress tests (arm64)
+        # The stub and the tty stress tests are built for android/arm64
+        # with --mm:yrc so they run under bionic in termux-docker. The
+        # stress tests drive the stub through a PTY, so THREECODE_TEST_STUB_BINARY
+        # points the test harness at the prebuilt arm64 stub (it can't run
+        # `nim` at test time in the container).
+        run: |
+          set -e
+          mkdir -p build
+          COMMON="-d:release --os:android --cpu:arm64 --mm:yrc -d:ssl -d:testPlainHttp -d:providerStub -d:fastStubRetries --threads:on --path:src --path:tests --clang.exe:$NDK_CLANG --clang.linkerexe:$NDK_CLANG"
+          nim c $COMMON --nimcache:build/yrc_stub_cache -o:build/3code_stub_android src/threecode.nim
+          for t in test_spinner_race_stress test_resize_ticker test_gui_join_freeze; do
+            nim c $COMMON --nimcache:build/yrc_${t}_cache -o:build/${t}_android tests/tty/${t}.nim
+          done
+          file build/3code_stub_android
+
+      - name: Run yrc stress tests in emulated Termux
+        run: |
+          set -e
+          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes > /dev/null
+          CID=$(docker create -t --platform linux/arm64 --user 1000:1000 \
+            termux/termux-docker:latest sleep 1800)
+          docker start $CID >/dev/null
+          trap 'docker rm -f $CID >/dev/null 2>&1 || true' EXIT
+          W=/data/data/com.termux/files/usr/tmp/work
+          docker exec $CID mkdir -p $W
+          docker cp build/3code_stub_android $CID:$W/3code_stub
+          docker cp build/test_spinner_race_stress_android $CID:$W/test_spinner_race_stress
+          docker cp build/test_resize_ticker_android $CID:$W/test_resize_ticker
+          docker cp build/test_gui_join_freeze_android $CID:$W/test_gui_join_freeze
+          for t in test_spinner_race_stress test_resize_ticker test_gui_join_freeze; do
+            docker exec -t \
+              -e THREECODE_TEST_STUB_BINARY=$W/3code_stub \
+              -e THREECODE_ALLOW_ROOT=1 \
+              $CID sh -c "cd $W && ./$t"
+          done

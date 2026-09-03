@@ -799,8 +799,17 @@ proc guiLoop(unused: string) {.thread.} =
       case m.mode
       of amSpinner:
         let glyph = frames[i mod frames.len]
-        setSpinFrame(glyph, elapsed.int)
-        let frame = currentFrameFromModel()
+        # Build the frame from the snapshot copy instead of writing the
+        # glyph back via setSpinFrame + currentFrameFromModel: each of
+        # those is a separate frameModelLock critical section, and
+        # `stopGui`'s join (from consumeQueuedInput -> stopSpinner,
+        # holding inputStateLock) can land between them while the render
+        # below blocks on the terminal write lock the join path needs:
+        # caller waits for join, this thread waits for the lock. The tick
+        # reads the model exactly once (the getFrameModel above) and never
+        # re-enters frameModelLock, so the join always makes progress.
+        let frame = spinnerFooterFrame(glyph, m.label, m.ticker,
+                                       elapsed.int)
         # When assistant content is streaming, the controller has painted
         # volatile partial rows into the engine. A bare `renderFooter` would
         # erase them (`\x1b[J`) and repaint only the footer, clobbering the
