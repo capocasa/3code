@@ -38,6 +38,7 @@ import
 
 import signals
 import threecode/unicodewidth as ucwidth
+import threecode/syncoutput
 
 # ShortcutNames is used by config.nim to validate [shortcuts] keys.
 # Keeping the dependency acyclic: minline imports nothing from config.
@@ -726,7 +727,7 @@ proc redrawBytes*(ed: var LineEditor; synchronized = true): string =
   let (targetRow, targetCol) = cursorVisual(cursorText, cursorPos, pw, cw, width)
   var buf = ""
   if synchronized:
-    buf.add "\x1b[?2026h"
+    buf.add syncoutput.SyncBegin()
   var walkUp = ed.renderRow
   if resized:
     # A width change reflows the already-painted editor rows: the
@@ -750,7 +751,7 @@ proc redrawBytes*(ed: var LineEditor; synchronized = true): string =
   if targetCol > 0:
     buf.add "\x1b[" & $targetCol & "C"
   if synchronized:
-    buf.add "\x1b[?2026l"
+    buf.add syncoutput.SyncEnd()
   ed.renderRow = targetRow
   result = buf
 

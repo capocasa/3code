@@ -44,8 +44,8 @@ proc chunks(prefix: string): JsonNode =
   for i in 1..30:
     result.add %(prefix & " chunk" & $i & " ")
 
-proc one(iter: int): string =
-  let root = newFixture("gui_live_" & $iter)
+proc one(iter: int; term: string): string =
+  let root = newFixture("gui_live_" & term.replace("-", "_") & "_" & $iter)
   writeConfiguredProvider(root)
   writeFile(root / "run" / "stub_responses.json", $ %*[
     {"content": "", "contentChunks": chunks("ONE"),
@@ -57,7 +57,11 @@ proc one(iter: int): string =
   let tty = newTtySession(ensureStubBinary(), args = ["-x", "-i"],
                           cwd = root / "run",
                           env = @[
-                            (key: "TERM", val: "xterm-256color"),
+                            # term drives the DEC 2026 sync gate: xterm-256color
+                            # keeps sync on, xterm-ghostty turns it off (the
+                            # ghostty corruption workaround). Both must produce
+                            # the same committed layout.
+                            (key: "TERM", val: term),
                             (key: "PATH", val: getEnv("PATH")),
                             (key: "HOME", val: root),
                             (key: "TMPDIR", val: root / "tmp"),
@@ -112,9 +116,10 @@ when isMainModule:
   let n = if paramCount() >= 1: parseInt(paramStr(1)) else: 20
   var failures = 0
   for i in 1..n:
-    let f = one(i)
-    if f.len > 0:
-      inc failures
-      echo "FAIL: ", f
-  echo "ran ", n, " iterations, ", failures, " failures"
+    for term in ["xterm-256color", "xterm-ghostty"]:
+      let f = one(i, term)
+      if f.len > 0:
+        inc failures
+        echo "FAIL[", term, "]: ", f
+  echo "ran ", n, " iterations x2 terms, ", failures, " failures"
   if failures > 0: quit(1)
