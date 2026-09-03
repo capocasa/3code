@@ -243,18 +243,34 @@ suite "prompts: setup — kimi":
     check "Kimi" in s.prompt
     check "Moonshot" in s.prompt
 
-  test "tools are glmAndQwenTools (bash/read/write/patch)":
+  test "tools are glmAndQwenTools plus dmail":
     let p = Profile(name: "opencode.kimi-k2.7-code", url: "x", key: "k",
                     model: "kimi-k2.7-code", family: "kimi")
     let s = setup(p)
     check s.tools.kind == JArray
-    check s.tools.len == 8
+    check s.tools.len == 9
     var foundBash = false
+    var foundDMail = false
     for t in s.tools:
-      if t{"function"}{"name"}.getStr == "bash":
+      case t{"function"}{"name"}.getStr
+      of "bash":
         foundBash = true
         check t{"function"}{"parameters"}{"properties"}.hasKey("command")
+      of "dmail":
+        foundDMail = true
+        check t{"function"}{"parameters"}{"properties"}.hasKey("checkpoint")
+        check t{"function"}{"parameters"}{"properties"}.hasKey("message")
+      else: discard
     check foundBash
+    check foundDMail
+
+  test "glm keeps the plain tool list (no dmail)":
+    let p = Profile(name: "zai.glm-5.1", url: "x", key: "k",
+                    model: "glm-5.1", family: "glm")
+    let s = setup(p)
+    check s.tools.len == 8
+    for t in s.tools:
+      check t{"function"}{"name"}.getStr != "dmail"
 
 suite "prompts: buildCredit":
   test "builds attribution for valid profile":

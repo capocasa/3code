@@ -523,6 +523,7 @@ proc toolIcon*(kind: ActionKind): string =
   of akWebSearch: "⌕"
   of akWebFetch: "⇊"
   of akClear: "⟳"
+  of akDMail: "✉"
   of akError: "✕"
 
 proc toolBannerBytes*(banner: string; kind: ActionKind; code: int;

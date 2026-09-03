@@ -2165,7 +2165,7 @@ K2.7-code and K3 always think (no off mode). K2.5/K2.6 toggle via `:reasoning`. 
 
 Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked operation fails with an error that names the policy file.
 
-`bash`, `read`, `write`, `patch`, `update_plan`, `web_search`, `web_fetch`, `clear`. Use exact names — no invented tools, no tools from prior sessions not in the current schema. Independent calls run in parallel; batch them. Sequential only when one result determines the next. If a tool fails twice, stop and explain.
+`bash`, `read`, `write`, `patch`, `update_plan`, `web_search`, `web_fetch`, `clear`, `dmail`. Use exact names — no invented tools, no tools from prior sessions not in the current schema. Independent calls run in parallel; batch them. Sequential only when one result determines the next. If a tool fails twice, stop and explain.
 
 For edits: `patch` for surgical changes, `write` for new files or full rewrites. No `ed`, `sed -i`, or heredocs to rewrite files. Read before `patch` — the harness errors if the file changed.
 
@@ -2195,6 +2195,8 @@ After two failed attempts on one hypothesis, switch strategy: smaller patch, wid
 # Long context (256K / 1M)
 
 Your window is for holding context, not bulk ingestion. Compress after each iteration: replace raw tool output with a 2-4 line summary. Prefer targeted reads over full re-ingest. For long inputs, put the task instruction at the END of the user message.
+
+Your assistant messages carry `[checkpoint N]` markers. When recent context holds bulk you no longer need (a huge file read, a web search, a long failed debugging attempt), `dmail(checkpoint, message)` reverts the conversation to the checkpoint just before the bloat and appends your message: write there only what your past self needs, what you did, what you learned, what not to repeat. The filesystem is not reverted; written files stay written. Use sparingly, never twice for the same stretch. Tell only your past self, not the user.
 
 # Honesty
 
@@ -2390,6 +2392,22 @@ let clearTool = %*{
         "prompt": {"type": "string", "description": "Prompt for the fresh-context agent. Should summarize current state (files changed, tests, open questions) and give concrete next steps."}
       },
       "required": ["prompt"]
+    }
+  }
+}
+
+let dmailTool = %*{
+  "type": "function",
+  "function": {
+    "name": "dmail",
+    "description": "Send a message to your past self: revert the conversation to a checkpoint and append the message. Assistant messages in this conversation carry `[checkpoint N]` markers. Use this to fold large tool results (huge file reads, web searches, long failed debugging attempts) into one short summary: send a dmail to the checkpoint just before the bloat began, containing only what is needed to continue. The filesystem is NOT reverted; anything you wrote stays written. The message must tell your past self clearly what you did, what you learned, and what not to repeat. Use sparingly; never twice for the same stretch.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "checkpoint": {"type": "integer", "description": "Checkpoint id from a `[checkpoint N]` marker."},
+        "message": {"type": "string", "description": "Message to your past self: what you did, what you learned, what to do next."}
+      },
+      "required": ["checkpoint", "message"]
     }
   }
 }
@@ -2641,7 +2659,14 @@ let
   inklingSetup = (prompt: InklingPreamble, tools: glmAndQwenTools)
   grokSetup = (prompt: GrokPreamble, tools: glmAndQwenTools)
   mimoSetup = (prompt: MimoPreamble, tools: glmAndQwenTools)
-  kimiSetup = (prompt: KimiPreamble, tools: glmAndQwenTools)
+  kimiSetup = (prompt: KimiPreamble, tools: block:
+    # Kimi's home harness (kimi-cli) trains a dmail/checkpoint tool for
+    # model-initiated context pruning; field reports say Kimi leans on it
+    # hard and other models ignore it, so it is kimi-only here. JsonNode
+    # is ref: copy the shared array and append rather than mutate it.
+    let t = copy(glmAndQwenTools)
+    t.add dmailTool
+    t)
   lingSetup = (prompt: LingPreamble, tools: glmAndQwenTools)
   oxAlphaSetup = (prompt: OxAlphaPreamble, tools: glmAndQwenTools)
   nemotronSetup = (prompt: NemotronPreamble, tools: glmAndQwenTools)

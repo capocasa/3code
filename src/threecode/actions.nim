@@ -107,6 +107,11 @@ proc clearAction(args: JsonNode): Action =
   Action(kind: akClear,
          body: args{"prompt"}.getStr(""))
 
+proc dmailAction(args: JsonNode): Action =
+  Action(kind: akDMail,
+         path: $args{"checkpoint"}.getInt(-1),
+         body: args{"message"}.getStr(""))
+
 proc dispatchGlmOrQwen(family, name: string, args: JsonNode): Action =
   case name
   # Canonical names (the schema we offer glm/qwen/deepseek):
@@ -118,6 +123,7 @@ proc dispatchGlmOrQwen(family, name: string, args: JsonNode): Action =
   of "web_search": Action(kind: akWebSearch, body: args{"query"}.getStr)
   of "web_fetch": Action(kind: akWebFetch, body: args{"url"}.getStr)
   of "clear": clearAction(args)
+  of "dmail": dmailAction(args)
   # Aliases — gpt-oss-shape names that show up as training leakage.
   # Lossless: `shell` → akBash, `apply_patch` → akApplyPatch (we have
   # the V4A parser), `edit` → akPatch (same shape as patch). Routed
@@ -192,6 +198,8 @@ proc bannerFor*(act: Action): string =
     act.body
   of akClear:
     "context cleared"
+  of akDMail:
+    "dmail to " & act.path
   of akError:
     "unknown tool '" & act.path & "'"
 
@@ -656,6 +664,9 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
     except CatchableError as e:
       return ("error: web_fetch: " & e.msg, 1, "")
   of akClear:
+    return ("", 0, "")
+  of akDMail:
+    # turns.nim owns the revert; runAction is never the real handler.
     return ("", 0, "")
   of akError:
     return (act.body, 1, "")
