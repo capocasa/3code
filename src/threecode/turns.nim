@@ -364,14 +364,20 @@ proc commitAssistantItem(content: string; restoreEditor = true;
   bytes.finishTranscriptItem()
   commitTranscriptBytes(bytes, restoreEditor, afterCommit)
 
-proc commitPendingReceiptAfterStream(restoreEditor = true) =
+proc commitPendingReceiptAfterStream(restoreEditor = true;
+                                    flushWithPrevious = true) =
   ## Streaming assistant content is already in scrollback. Once usage arrives,
-  ## append only the receipt as an ordinary item with its trailing separator.
+  ## append only the receipt. With `flushWithPrevious` it joins the streamed
+  ## answer it caps with no separator blank (design.md: "no blank line
+  ## between the last output of the API call and its token receipt"); the
+  ## all-tools-skipped fallback passes false because nothing of this call's
+  ## output may be directly above it.
   var bytes = pendingReceiptBytes()
   if bytes.len == 0:
     return
   bytes.finishTranscriptItem()
-  commitTranscriptBytes(bytes, restoreEditor, clearSubmittedReceiptState)
+  commitTranscriptBytes(bytes, restoreEditor, clearSubmittedReceiptState,
+                        flushWithPrevious = flushWithPrevious)
 
 proc commitTranscriptItem(formatBody: proc(): string; restoreEditor = true;
                           receipt = "") =
@@ -799,7 +805,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       # the turn's token usage still lands in scrollback rather than silently
       # evaporating with the bar.
       if deferredReceipt.len > 0:
-        commitPendingReceiptAfterStream()
+        commitPendingReceiptAfterStream(flushWithPrevious = streamedLive)
         deferredReceipt = ""
       if cleared:
         emitFatPromptEvent clearPendingHintEvent()

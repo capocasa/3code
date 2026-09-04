@@ -213,14 +213,12 @@
 ❯ first line
 
 ● First multiline response.
-
   ○1%  ↑120  ↓24  0s
 
 ❯ queued line one
   queued line two
 
 ● Queued multiline response.
-
   ○1%  ↑180  ↓32  0s
 
   ○1%

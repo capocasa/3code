@@ -605,6 +605,26 @@ suite "terminal visual contract":
     tty.expectCount("This is a test response.", 1, where = "screen")
     tty.expectTokenBar(["○", "↑120", "↓24"])
     tty.drain(200)
+    # Wait for the settled idle repaint (caret back on the live ❯ row):
+    # the live bar is painted before the receipt commits to scrollback, so
+    # sampling earlier races the final commit.
+    let settleDeadline = epochTime() + 5.0
+    while epochTime() < settleDeadline and not tty.exited:
+      tty.drain(20)
+      if tty.frames.len > 0:
+        let f = tty.frames[^1]
+        if not f.cursorHidden and f.cursorRow >= 0 and
+            f.cursorRow < f.rows.len and "❯" in f.rows[f.cursorRow]:
+          break
+    # The receipt sits flush under the answer, no blank row between them
+    # (design.md: "no blank line between the last output of the API call
+    # and its token receipt"). The row directly below the answer must be
+    # the receipt itself, not a separator blank.
+    let answerRow = tty.rowContaining("This is a test response.")
+    doAssert answerRow >= 0, "answer row missing:\n" & tty.dumpFramesAround("This is a test response.")
+    doAssert "↑120" in tty.rows()[answerRow + 1],
+      "receipt not flush under answer; row below answer is '" &
+      tty.rows()[answerRow + 1] & "'\n" & tty.dumpFramesAround("↑120")
     tty.expectMeaningfulFrameArtifact(
       SimpleVisualTestFrames,
       root / "simple_visual_test_actual.txt")

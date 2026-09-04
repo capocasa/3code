@@ -908,10 +908,14 @@ proc noteNoFooter*() {.gcsafe.} =
 # Commit the transcript blob as real scrollback, with the one blank
 # separator row owned here (see `appendTranscript` for the contract). The
 # CLI always paints the welcome banner before the first commit, so the
-# separator is unconditional.
-proc writeTranscriptItem(e: var TerminalEngine; transcript: string) =
+# separator is unconditional. `flushWithPrevious` skips it for a blob
+# that continues the item above it (a receipt joining the streamed
+# answer it caps).
+proc writeTranscriptItem(e: var TerminalEngine; transcript: string;
+                         flushWithPrevious = false) =
   if transcript.len == 0: return
-  stdout.write "\r\n"
+  if not flushWithPrevious:
+    stdout.write "\r\n"
   stdout.write transcript
   stdout.write "\r\n"
 
@@ -981,7 +985,8 @@ proc commitTranscriptItem(e: var TerminalEngine; transcript: string;
                           footerRowsAboveEditor: int;
                           compactRowsAboveFooter: int;
                           restoreEditor: bool;
-                          reserveFooter: bool) =
+                          reserveFooter: bool;
+                          flushWithPrevious = false) =
   ## The single commit-repaint path for both anchored and floating state:
   ## walk from the cursor to the top of the volatile region, erase it,
   ## commit the item as scrollback, rebuild the chrome. One proc owns the
@@ -1023,7 +1028,7 @@ proc commitTranscriptItem(e: var TerminalEngine; transcript: string;
   # just-committed scrollback above (erasing the echo/welcome lines).
   e.liveContentRows = @[]
   e.liveContentHasGap = false
-  e.writeTranscriptItem(transcript)
+  e.writeTranscriptItem(transcript, flushWithPrevious)
   let restoreTo = if editing: edPtr else: nil
   var newFooterRows = footerRowsAboveEditor
   e.repaintVolatileAfterCommit(restoreTo, footerBytes,
@@ -1039,7 +1044,8 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
                        oldFooter, newFooter: FooterFrame;
                        compactRowsAboveFooter = 0;
                        restoreEditor = true;
-                       reserveFooter = true) =
+                       reserveFooter = true;
+                       flushWithPrevious = false) =
   ## Append transcript bytes as real scrollback while preserving or clearing
   ## the volatile footer. One blank row separates every pair of items, owned
   ## by one place: here. Before every item after the first, `\r\n` is
@@ -1056,7 +1062,7 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
     e.commitTranscriptItem(transcript, inputRunning, editor,
                            footerBytes, footerRowsAboveEditor,
                            compactRowsAboveFooter,
-                           restoreEditor, reserveFooter)
+                           restoreEditor, reserveFooter, flushWithPrevious)
 
 proc prepareAssistantContentStart*(e: var TerminalEngine;
                                    inputRunning: bool;
@@ -1131,7 +1137,8 @@ proc appendTranscript*(transcriptBytes: string;
                        oldFooter, newFooter: FooterFrame;
                        compactRowsAboveFooter = 0;
                        restoreEditor = true;
-                       reserveFooter = true) =
+                       reserveFooter = true;
+                       flushWithPrevious = false) =
   if not engineOutputEnabled:
     if headlessTranscriptHook != nil and transcriptBytes.len > 0:
       headlessTranscriptHook(transcriptBytes)
@@ -1145,4 +1152,5 @@ proc appendTranscript*(transcriptBytes: string;
     newFooter,
     compactRowsAboveFooter,
     restoreEditor,
-    reserveFooter)
+    reserveFooter,
+    flushWithPrevious)

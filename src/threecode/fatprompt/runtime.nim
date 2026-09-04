@@ -715,7 +715,8 @@ proc resetEditorRowModel*(ed: ptr minline.LineEditor) =
 
 proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
                             beforeRepaint: proc() = nil;
-                            reserveFooter = true) =
+                            reserveFooter = true;
+                            flushWithPrevious = false) =
   ## Commit transcript output while preserving the volatile footer.
   ## The controller owns the transcript bytes and item spacing. This proc owns
   ## the terminal mechanics: clear the volatile footer, append the bytes as
@@ -748,7 +749,8 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
         newFooter,
         0,
         restoreEditor,
-        reserveFooter)
+        reserveFooter,
+        flushWithPrevious)
       resetEditorRowModel(inputEditor)
   else:
     termengine.appendTranscript(
@@ -760,7 +762,8 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
       newFooter,
       0,
       restoreEditor,
-      reserveFooter)
+      reserveFooter,
+      flushWithPrevious)
   if reserveFooter and transcriptBytes.hasNonNewlineBytes and currentBarLabel.len > 0:
     emitFatPromptEvent setBarEvent(currentBarLabel, hasGap = true)
   debugOut "writeTranscriptWithFatPrompt exit"

@@ -78,10 +78,10 @@
   model     stub-model
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
+
 ❯ This is a test prompt
 
 ● This is a test response.
-
   ○1%  ↑120  ↓24  0s
 
   ○1%
