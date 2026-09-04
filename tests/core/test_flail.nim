@@ -203,19 +203,25 @@ suite "flail detector":
       "grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | grep -v '##' ; grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | grep -v '##' | wc -l",
       "grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | grep -v '##' ; echo ---; grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | grep -v '##' | wc -l; echo ---",
       "grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | grep -v '##' ; echo ---; grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | grep -v '##' | wc -l; echo ---; grep -rn \"execCmdEx\" ~/.choosenim/toolchains/nim-2.2.10/lib/pure/osproc.nim | grep -v '##' | tail -2"]
+    # Cycle the tail so the run passes the arm gate and fills the ring;
+    # cycling 12 distinct greps keeps every fingerprint spaced beyond the
+    # 8-wide window, so only the streak signal can fire.
     var verdicts: seq[FlailVerdict]
-    for g in greps:
+    for i in 0 ..< FlailStreakArm + FlailStreakMin + 3:
+      let g = greps[i mod greps.len]
       verdicts.add det.observeCall("bash", "{\"command\":" & escapeJson(g) & "}")
       det.noteResult("bash", "{\"command\":" & escapeJson(g) & "}", true)
-    # First FlailStreakMin-1 calls pass; the run then climbs the ladder.
-    for v in verdicts[0 ..< FlailStreakMin - 1]:
+    # The run is quiet until the ring fills: arming takes FlailStreakArm
+    # calls (index FlailStreakArm-1), a full ring FlailStreakMin more.
+    const firstFire = FlailStreakArm + FlailStreakMin - 2
+    for v in verdicts[0 ..< firstFire]:
       check v == fvOk
-    check fvEscalate in verdicts
+    check verdicts[firstFire] == fvEscalate
     check fvAbort in verdicts[verdicts.len - 3 .. ^1]
 
   test "a genuinely different call breaks the streak":
     var det: FlailDetector
-    for i in 1 ..< FlailStreakMin:
+    for i in 1 .. FlailStreakArm:
       let c = "sed -n '" & $i & ",30p' src/module" & $i & ".nim; wc -l src/module" & $i & ".nim"
       check det.observeCall("bash", "{\"command\":" & escapeJson(c) & "}") == fvOk
       det.noteResult("bash", "{\"command\":" & escapeJson(c) & "}", true)
@@ -226,3 +232,45 @@ suite "flail detector":
     check det.observeCall("bash", "{\"command\":" & escapeJson(other) & "}") == fvOk
     check "src/module#.nim" notin det.streakTokens[^1]
     check "o:tool" in det.streakTokens[^1]
+
+  test "short burst of same-prefix command variants does not flag":
+    # Regression from 20260905T000324.3log: while debugging an image
+    # pipeline the model ran 11 novel bash calls that all share the fixed
+    # prefix tokens (magick, -colorspace Gray -resize 60x -dither
+    # FloydSteinberg -remap pattern:gray50) and vary only the tail. The
+    # streak signal flagged call #9; healthy iterative work, not a loop.
+    # The arm gate keeps runs shorter than FlailStreakArm from ever
+    # filling the ring.
+    var det: FlailDetector
+    let variants = [
+      "magick /tmp/bst-test.png -colorspace Gray -resize 60x -dither FloydSteinberg -remap pattern:gray50 txt:/dev/stdout 2>/dev/null | sed -n '2p'",
+      "magick /tmp/bst-test.png -colorspace Gray -resize 60x -dither FloydSteinberg -remap pattern:gray50 txt:/dev/stdout 2>/dev/null | sed -n '2p;300p'",
+      "magick /tmp/bst-test.png -colorspace Gray -resize 60x -dither FloydSteinberg -remap pattern:gray50 txt:/dev/stdout 2>/dev/null | sed -n '2p;300p;900p'",
+      "magick /tmp/bst-test.png -colorspace Gray -resize 60x -dither FloydSteinberg -remap pattern:gray50 txt:/dev/stdout 2>/dev/null | awk -F'[,:]' 'NR>1 && $2+0<100 {c++} END {print c, \"dark of\", NR-1}'",
+      "magick /tmp/bst-test.png -colorspace Gray -resize 60x txt:/dev/stdout 2>/dev/null | sed -n '2p;900p'; echo ---; magick /tmp/bst-test.png -colorspace Gray -resize 60x -dither FloydSteinberg -remap pattern:gray50 txt:/dev/stdout 2>/dev/null | sed -n '2p;900p'",
+      "magick /tmp/bst-test.png -colorspace Gray -resize 60x -dither FloydSteinberg -remap pattern:gray50 txt:/dev/stdout 2>/dev/null | awk -F'[,:]' 'NR>1 {print $3}' | sort | uniq -c",
+      "magick /tmp/bst-test.png -colorspace Gray -resize 60x -dither FloydSteinberg -remap pattern:gray50 txt:/dev/stdout 2>/dev/null | awk -F'[,:]' 'NR>1 {printf \"%s\", ($3 ~ /black/) ? \"#\" : \" \"}' | fold -w 60",
+      "magick /tmp/bst-test.png -colorspace Gray -resize 60x -dither FloydSteinberg -remap pattern:gray50 txt:/dev/stdout 2>/dev/null | awk -F'[,:]' 'NR>1 {printf \"%s\", ($3 ~ /black/) ? \"#\" : \" \"}' | head -c 200 | od -c | head",
+      "magick /tmp/bst-test.png -colorspace Gray -resize 60x -dither FloydSteinberg -remap pattern:gray50 txt:/dev/stdout 2>/dev/null | awk -F'[,:]' 'NR>1 {printf \"%s\", ($3 ~ /black/) ? \"#\" : \" \"}' > /tmp/bst-raw; wc -c /tmp/bst-raw; head -c 120 /tmp/bst-raw | od -c | head -8",
+      "magick /tmp/bst-test.png -colorspace Gray -resize 60x -dither FloydSteinberg -remap pattern:gray50 txt:/dev/stdout 2>/dev/null | awk -F'[,:]' 'NR>1 {printf \"%s\", ($3 ~ /black/) ? \"#\" : \" \"}' | head -c 200 | od -c | head -4",
+      "magick /tmp/bst-test.png -colorspace Gray -resize 60x -dither FloydSteinberg -remap pattern:gray50 txt:/dev/stdout 2>/dev/null | awk -F'[,:]' 'NR>1 {printf \"%s\", ($3 ~ /black/) ? \"#\" : \" \"}' | head -c 100 | od -c | head -4; echo done"]
+    for v in variants:
+      check det.observeCall("bash", "{\"command\":" & escapeJson(v) & "}") == fvOk
+      det.noteResult("bash", "{\"command\":" & escapeJson(v) & "}", true)
+    check det.escalations == 0
+    check det.streakTokens.len == 0
+
+  test "same-prefix burst that turns into a real loop still flags":
+    # The other side of the arm gate: keep the shared-prefix variants
+    # going past FlailStreakArm + FlailStreakMin and the signal must
+    # still fire. The prefix survives cd trimming, so this also covers
+    # the `cd <dir> &&` case from the report.
+    var det: FlailDetector
+    for i in 0 ..< FlailStreakArm + FlailStreakMin:
+      let c = "cd /home/carlo/.local/bin && nim c -d:release --opt:speed -o:bst-ocr bst.nim 2>&1 | tail -" & $i
+      let v = det.observeCall("bash", "{\"command\":" & escapeJson(c) & "}")
+      if i < FlailStreakArm + FlailStreakMin - 2:
+        check v == fvOk
+      else:
+        check v == fvEscalate
+      det.noteResult("bash", "{\"command\":" & escapeJson(c) & "}", true)

@@ -18,6 +18,7 @@ const
   FlailWindowSize* = 8       ## how many recent call fingerprints to remember
   FlailSpacedThreshold* = 3  ## failing repeats of one call at any spacing flag on this occurrence
   FlailStreakMin* = 9        ## same-tool calls in a row all carrying one distinctive token flag here
+  FlailStreakArm* = 12       ## same-tool run length before the streak signal is even considered
 
 type
   FlailVerdict* = enum
@@ -44,7 +45,11 @@ type
     ## 4. Stuck streak: `FlailStreakMin` consecutive calls to the same tool
     ##    sharing one distinctive argument token. Every call in the
     ##    recorded doom loop was a novel, successful fingerprint; only this
-    ##    signal sees it.
+    ##    signal sees it. Only armed once the same-tool run reaches
+    ##    `FlailStreakArm`: models legitimately iterate 9-11 variants of one
+    ##    command prefix (fixed binary and flags, varying tail) while
+    ##    debugging, and the shared-prefix tokens that survive trimming the
+    ##    `cd <dir> &&` boilerplate would flag that healthy work.
     ##
     ## Recovery uses a graduated ladder of injected messages, because field
     ## reports on GLM 5.x loops (zai-org/GLM-5#116) show a plain "be careful"
@@ -60,6 +65,7 @@ type
     lastNoProgress*: bool     ## did the previous executed call report no change?
     progress*: Table[string, bool]  ## last result per fingerprint; false = no change
     streakName*: string       ## tool name of the current same-tool run
+    streakLen*: int           ## length of the current same-tool run
     streakTokens*: seq[HashSet[string]]  ## ring of per-call distinctive tokens
 
 proc canonicalJson(node: JsonNode): string =
@@ -184,13 +190,19 @@ proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
   # least one token: every recent call to this tool is probing the same
   # thing. A sliding window (not a shrinking run intersection) so one
   # healthy deviation inside a doom loop does not permanently disarm it.
+  # The ring only starts filling at FlailStreakArm calls into the run, so
+  # a healthy burst of same-tool iteration (compile, read, tweak, test)
+  # shorter than that never arms the signal at all.
   let toks = distinctiveTokens(argsStr)
   if det.streakName != name:
     det.streakName = name
+    det.streakLen = 0
     det.streakTokens = @[]
-  det.streakTokens.add toks
-  if det.streakTokens.len > FlailStreakMin:
-    det.streakTokens.delete 0
+  inc det.streakLen
+  if det.streakLen >= FlailStreakArm:
+    det.streakTokens.add toks
+    if det.streakTokens.len > FlailStreakMin:
+      det.streakTokens.delete 0
   var stuckStreak = false
   if det.streakTokens.len == FlailStreakMin:
     var common = det.streakTokens[0]
@@ -218,11 +230,13 @@ proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
   #    calls (re-run a test, re-check output) is legitimate polling and is
   #    never flagged; progress distinguishes a stuck loop from a poll.
   # 4. Stuck streak: the last FlailStreakMin calls were all to the same tool
-  #    and all carry one distinctive argument token. Catches the recorded GLM
-  #    doom loop where every call was a novel fingerprint (cosmetic
-  #    pipeline variations of one grep), succeeded (exit 0), and never
-  #    repeated exactly, so signals 1-3 all stayed quiet while the model
-  #    spent 25 calls re-probing one fact.
+  #    and all carry one distinctive argument token, and the same-tool run
+  #    is at least FlailStreakArm long. Catches the recorded GLM doom loop
+  #    where every call was a novel fingerprint (cosmetic pipeline
+  #    variations of one grep), succeeded (exit 0), and never repeated
+  #    exactly, so signals 1-3 all stayed quiet while the model spent 25
+  #    calls re-probing one fact; the arm gate keeps short healthy bursts
+  #    of same-command-prefix iteration out.
   let knownFailing = not det.progress.getOrDefault(fp, true)
   let isLoop = consecutive or (det.lastNoProgress and seen >= 1) or
     (knownFailing and seen >= FlailSpacedThreshold - 1) or stuckStreak
