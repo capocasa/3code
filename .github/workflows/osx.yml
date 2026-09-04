@@ -118,32 +118,16 @@ jobs:
           file 3code
 
       - name: Run tests
-        # nimble's nimscript task swallows a non-zero testament exit (it
-        # converts the OSError into a logged exception but still exits 0),
-        # so a failing test reports green. Call testament directly and
-        # propagate $? so a test failure actually fails the step.
-        #
-        # Run categories sequentially rather than via `all` (which fan-outs
-        # every category in parallel). The tty PTY tests spawn real
-        # subprocesses whose render threads are scheduler-sensitive; under
-        # the OSX runner's core budget, running them concurrently with five
-        # other compiling categories starves those threads and produces
-        # load-induced hangs. Sequential `cat` runs the identical tests
-        # without that contention. Linux runners have more cores and tolerate
-        # the parallel `all`; OSX does not.
-        run: |
-          if command -v testament >/dev/null 2>&1; then
-            for c in core config shell stream api tty; do
-              testament --print --megatest:off cat "$c" || exit 1
-            done
-          else
-            for d in tests/*/; do
-              for f in "$d"*.nim; do
-                nim c -r --path:src --path:tests "$f" || exit 1
-              done
-            done
-          fi
-        timeout-minutes: 25
+        # tools/ci_tests.sh wraps testament: log file instead of a pipe (a
+        # single hung test used to stall the pipe and hide everything after
+        # it), a watchdog that bounds the run and attributes any hang to the
+        # exact test binary, and a propagated exit code. Categories run in
+        # parallel via `testament all`; the tty PTY tests get the runner to
+        # themselves because each category is still sequential inside
+        # testament. If load-induced tty flakes reappear on this 3-core
+        # runner, pass explicit categories to serialize them.
+        run: sh tools/ci_tests.sh 1500
+        timeout-minutes: 30
 
       - name: Package
         run: |

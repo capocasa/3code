@@ -39,30 +39,15 @@ jobs:
         run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
 
       - name: Run tests
-        # nimble's nimscript task swallows a non-zero testament exit (it
-        # converts the OSError into a logged exception but still exits 0),
-        # so a failing test reports green. Call testament directly and
-        # propagate $? so a test failure actually fails the step.
-        #
-        # Run categories sequentially rather than via `all` (which fan-outs
-        # every category in parallel). The tty PTY tests spawn real
-        # subprocesses whose render threads are scheduler-sensitive; under
-        # load the parallel fan-out starves those threads and produces
-        # load-induced frame mismatches. Sequential `cat` runs the identical
-        # tests without that contention.
-        run: |
-          if command -v testament >/dev/null 2>&1; then
-            for c in core config shell stream api tty; do
-              testament --print --megatest:off cat "$c" || exit 1
-            done
-          else
-            for d in tests/*/; do
-              for f in "$d"*.nim; do
-                nim c -r --path:src --path:tests "$f" || exit 1
-              done
-            done
-          fi
-        timeout-minutes: 25
+        # tools/ci_tests.sh wraps `testament all`: categories still run in
+        # parallel (one testament child per category), but output lands in
+        # a log file instead of a pipe, a watchdog bounds the run and
+        # attributes any hang to the exact test binary, and the exit code
+        # is propagated. The old `for c in ...; testament cat` loop ran
+        # categories sequentially and, worse, a single hung test stalled
+        # the pipe so the step showed nothing after it.
+        run: sh tools/ci_tests.sh 1500
+        timeout-minutes: 30
 
       - name: Package
         run: |

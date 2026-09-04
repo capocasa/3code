@@ -63,19 +63,8 @@ jobs:
         # load the parallel fan-out starves those threads and produces
         # load-induced frame mismatches. Sequential `cat` runs the identical
         # tests without that contention.
-        run: |
-          if command -v testament >/dev/null 2>&1; then
-            for c in core config shell stream api tty; do
-              testament --print --megatest:off cat "$c" || exit 1
-            done
-          else
-            for d in tests/*/; do
-              for f in "$d"*.nim; do
-                nim c -r --path:src --path:tests "$f" || exit 1
-              done
-            done
-          fi
-        timeout-minutes: 25
+        run: sh tools/ci_tests.sh 1500
+        timeout-minutes: 30
 
       - name: Package
         run: |
