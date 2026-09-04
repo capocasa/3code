@@ -454,7 +454,12 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
       return (&"[binary file: {path}, {content.len} bytes — refused]", 0, "")
     const DefaultLineCap = 250
     const MaxLines = 2000
-    const MaxBytes = 60 * 1024
+    # 32KB: a full-cap read costs ~10k GLM tokens that ride every later
+    # turn of the context; SWE-bench traces showed 17-37k-token single-turn
+    # jumps from one or two parallel capped reads, often followed by an
+    # immediate clear() that discarded them. Half the cap keeps paging
+    # viable while halving the worst-case context injection.
+    const MaxBytes = 32 * 1024
     const LineSkipBytes = 2048
     let lines = content.splitLines
     let total =

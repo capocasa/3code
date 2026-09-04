@@ -541,6 +541,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
   # broken provider can't pin the turn in a retry loop. See the empty-handling
   # block below (after toolCalls is computed).
   var
+    wire = p                      # mutable copy: length-retries demote reasoning
+                                  # effort here instead of only raising the budget
     maxTokensOverride = 0          # > 0 replaces known-good max_tokens
     lengthEscalations = 0          # "length" retries so far this turn
     steerAttempts = 0              # "stop"/unknown steering retries
@@ -548,9 +550,10 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     flailDet: FlailDetector        # identical-consecutive-tool-call guard
     nextCheckpoint = 0             # id of the marker on the next assistant message
   # dmail is offered only when the active profile's tool schema includes
-  # it (kimi family); the marker tagging below keys off the same flag.
+  # it (kimi and glm families); the marker tagging below keys off the same
+  # flag.
   var dmailEnabled = false
-  if p.family == "kimi":
+  if p.family == "kimi" or p.family == "glm":
     let tools = setup(p).tools
     if tools != nil and tools.kind == JArray:
       for t in tools:
@@ -566,7 +569,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     var usage: Usage
     var msg: JsonNode
     try:
-      msg = callModel(p, messages, usage, session.lastPromptTokens,
+      msg = callModel(wire, messages, usage, session.lastPromptTokens,
         maxTokensOverride)
     except ApiError as e:
       if isInterruptedMsg(e.msg):
@@ -623,25 +626,36 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       # callModel's transport retry block.
       let budgetStarved =
         finishReason == "length" or
-        usage.completionTokens >= knownGoodGeneration(p).maxTokens or
+        usage.completionTokens >= knownGoodGeneration(wire).maxTokens or
         usage.reasoningTokens > 0
       if budgetStarved and lengthEscalations < MaxLengthEscalations:
         inc lengthEscalations
-        # Double from the budget that just starved, not from the known-good
-        # base: with a 65k base the old `min(base * 2, window)` formula
-        # re-derived the same 131k override on every escalation, so retries
-        # 2 and 3 burned a full turn each without raising the cap. Doubling
-        # the override walks 131k -> 262k -> 524k, and the model's max
-        # output (not the 1M context window) is the real ceiling.
-        let cur =
-          if maxTokensOverride > 0: maxTokensOverride
-          else: knownGoodGeneration(p).maxTokens
-        let bumped = min(cur * 2, maxOutputTokensFor(p))
-        maxTokensOverride = max(maxTokensOverride, bumped)
+        # A forced-thinking model that spent the whole budget on reasoning
+        # and returned nothing will usually do it again at 2x the budget:
+        # the thinking scales with effort, not with headroom. Demote the
+        # effort first (high -> low; verified against Z.ai: effort high
+        # starves 400-token budgets that effort low finishes in 1k) and
+        # only raise the budget once effort is already at the floor or
+        # the family has no graded knob. Budget bumps are also clamped
+        # by the model's real output cap (131k on GLM-5.3), so a starved
+        # turn at the cap would otherwise just re-derive the same
+        # override and burn identical retries.
+        var demoted = false
+        if wire.reasoning == "max":
+          wire.reasoning = "high"; demoted = true
+        elif wire.reasoning == "high":
+          wire.reasoning = "low"; demoted = true
+        if not demoted:
+          let cur =
+            if maxTokensOverride > 0: maxTokensOverride
+            else: knownGoodGeneration(wire).maxTokens
+          let bumped = min(cur * 2, maxOutputTokensFor(wire))
+          maxTokensOverride = max(maxTokensOverride, bumped)
         let backoff = emptyReplyBackoffS()
         commitTranscriptBytes(
-          errLnS("finished by length, retrying with " &
-            humanTokens(maxTokensOverride) & " token budget in " &
+          errLnS((if demoted: "finished by length, retrying with lower " &
+            "reasoning effort" else: "finished by length, retrying with " &
+            humanTokens(maxTokensOverride) & " token budget") & " in " &
             $backoff & "s"), true)
         incEmptyRetryLevel()
         if emptyReplyWait():
@@ -649,7 +663,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           onTurnInterrupted()
           turnEnded = true
           return true
-        debugOut &"runTurns: empty length-retry {lengthEscalations}/{MaxLengthEscalations} max_tokens={maxTokensOverride}"
+        debugOut &"runTurns: empty length-retry {lengthEscalations}/{MaxLengthEscalations} max_tokens={maxTokensOverride} reasoning={wire.reasoning}"
         continue
       if steerAttempts < MaxSteerAttempts:
         inc steerAttempts

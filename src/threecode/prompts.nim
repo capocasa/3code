@@ -54,7 +54,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("zai", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("zai", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
     ("zai", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, false, 1_000_000),
-    ("zai", "glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
+    ("zai", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, false, 1_000_000),
     ("zaicode", "glm-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
     ("zaicode", "glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
     ("zaicode", "glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
@@ -62,9 +62,11 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("zaicode", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
     # glm-5.3 / glm-5.3-flash: forced thinking, reasoning_effort
     # low/high/max. Flash is the 320B-A18B multimodal sibling; same
-    # text params and 1M window. Default effort high (max via :reasoning).
+    # text params and 1M window. Flash defaults to low effort (it runs
+    # 29-42% reasoning on high and its job is cheap bulk turns; :reasoning
+    # high/max is one keystroke away); big 5.3 keeps high.
     ("zaicode", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, false, 1_000_000),
-    ("zaicode", "glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
+    ("zaicode", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, false, 1_000_000),
 
     # 0xalpha (stealth preview, Aug 2026; tokenizer/API fingerprints point
     # at the GLM line but it keeps its own family since no lab has claimed
@@ -85,20 +87,20 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("novita", "zai-org/glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
     ("novita", "zai-org/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("novita", "zai-org/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
-    ("novita", "zai-org/glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
+    ("novita", "zai-org/glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, false, 1_000_000),
     # nvidia's GLM endpoint leaks <tool_call> tags into content; keep the
     # xmlToolCalls fallback that the retired z-ai/glm4.7 entry carried
     ("nvidia", "z-ai/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, true, 1_000_000),
     ("deepinfra", "zai-org/GLM-4.7-Flash", "glm", "4", "flash", "on", 0.2, 8192, false, 200_000),
     ("deepinfra", "zai-org/GLM-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
-    ("deepinfra", "zai-org/GLM-5.3-Flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
+    ("deepinfra", "zai-org/GLM-5.3-Flash", "glm", "5", "3-flash", "low", 0.2, 65536, false, 1_000_000),
     ("openrouter", "z-ai/glm-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
     ("openrouter", "z-ai/glm-4.7-flash", "glm", "4", "flash", "on", 0.2, 8192, false, 200_000),
     ("openrouter", "z-ai/glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
     ("openrouter", "z-ai/glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, false, 200_000),
     ("openrouter", "z-ai/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("openrouter", "z-ai/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
-    ("openrouter", "z-ai/glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
+    ("openrouter", "z-ai/glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, false, 1_000_000),
     ("together", "zai-org/GLM-4.7", "glm", "4", "7", "on", 0.2, 8192, false, 200_000),
     ("together", "zai-org/GLM-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
     ("nebius", "zai-org/GLM-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
@@ -293,7 +295,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencodego", "kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.6, 8192, false, 262_144),
     ("opencodego", "hy3-preview", "hy", "3", "preview", "no_think", 0.2, 8192, false, 262_144),
     ("opencodego", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, false, 1_000_000),
-    ("opencodego", "glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
+    ("opencodego", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, false, 1_000_000),
     # omen-alpha (OpenCode Go stealth release, Sep 2026): tokenizer and
     # reasoning_content wire shape match the GLM line, so it rides the glm
     # prompt and the 5.3 effort surface. Effort ladder is low/high only;
@@ -388,7 +390,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("venice", "zai-org-glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
     ("venice", "zai-org-glm-5-1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("venice", "zai-org-glm-5-2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
-    ("venice", "z-ai-glm-5-3-flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
+    ("venice", "z-ai-glm-5-3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, false, 1_000_000),
 
     # cheaperinference (api.cheaperinference.com; bare first-party ids,
     # params harvested by tools/harvest_models.nim)
@@ -514,7 +516,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # experimental.
     ("greenpt", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
     ("greenpt", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, false, 1_000_000),
-    ("greenpt", "glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
+    ("greenpt", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, false, 1_000_000),
     ("greenpt", "deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("greenpt", "minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, false, 204_800),
     ("greenpt", "kimi-k2.6", "kimi", "2", "6", "on", 0.6, 8192, false, 262_144),
@@ -539,7 +541,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("lyceum", "z-ai/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("lyceum", "z-ai/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
     ("lyceum", "z-ai/glm-5.3", "glm", "5", "3", "high", 0.2, 65536, false, 1_000_000),
-    ("lyceum", "z-ai/glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
+    ("lyceum", "z-ai/glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, false, 1_000_000),
     ("lyceum", "deepseek/deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, false, 128_000),
     ("lyceum", "deepseek/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
     ("lyceum", "deepseek/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, false, 1_000_000),
@@ -630,20 +632,20 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "zai-org/glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
     ("nanogpt", "zai-org/glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("nanogpt", "zai-org/glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
-    ("cheaperinference", "glm-5.3-flash", "glm"       , "5", "3-flash", "high", 0.2, 65536, false, 1000000),
+    ("cheaperinference", "glm-5.3-flash", "glm"       , "5", "3-flash", "low", 0.2, 65536, false, 1000000),
     ("cheaperinference", "glm-5.3", "glm"       , "5", "3", "high", 0.2, 65536, false, 1000000),
     ("nanogpt",   "zai-org/glm-5.3", "glm"       , "5", "3", "high", 0.2, 65536, false, 1000000),
-    ("nanogpt",   "z-ai/glm-5.3-flash", "glm"       , "5", "3-flash", "high", 0.2, 65536, false, 1000000),
+    ("nanogpt",   "z-ai/glm-5.3-flash", "glm"       , "5", "3-flash", "low", 0.2, 65536, false, 1000000),
     ("tensorx",   "z-ai/glm-5.3", "glm"       , "5", "3", "high", 0.2, 65536, false, 1000000),
-    ("tensorx",   "z-ai/glm-5.3-flash", "glm"       , "5", "3-flash", "high", 0.2, 65536, false, 1000000),
+    ("tensorx",   "z-ai/glm-5.3-flash", "glm"       , "5", "3-flash", "low", 0.2, 65536, false, 1000000),
     ("novita",    "zai-org/glm-5.3", "glm"       , "5", "3", "high", 0.2, 65536, false, 1000000),
     ("deepinfra", "zai-org/GLM-5.3", "glm"       , "5", "3", "high", 0.2, 65536, false, 1000000),
     ("openrouter", "z-ai/glm-5.3", "glm"       , "5", "3", "high", 0.2, 65536, false, 1000000),
-    ("together",  "zai-org/GLM-5.3-Flash", "glm"       , "5", "3-flash", "high", 0.2, 65536, false, 1000000),
+    ("together",  "zai-org/GLM-5.3-Flash", "glm"       , "5", "3-flash", "low", 0.2, 65536, false, 1000000),
     ("together",  "zai-org/GLM-5.3", "glm"       , "5", "3", "high", 0.2, 65536, false, 1000000),
-    ("nebius",    "zai-org/GLM-5.3-Flash", "glm"       , "5", "3-flash", "high", 0.2, 65536, false, 1000000),
+    ("nebius",    "zai-org/GLM-5.3-Flash", "glm"       , "5", "3-flash", "low", 0.2, 65536, false, 1000000),
     ("baseten",   "zai-org/GLM-5.3", "glm"       , "5", "3", "high", 0.2, 65536, false, 1000000),
-    ("baseten",   "zai-org/GLM-5.3-Flash", "glm"       , "5", "3-flash", "high", 0.2, 65536, false, 1000000),
+    ("baseten",   "zai-org/GLM-5.3-Flash", "glm"       , "5", "3-flash", "low", 0.2, 65536, false, 1000000),
     ("opencodego", "gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, false, 400_000),
     ("cheaperinference", "gpt-5-mini", "gpt"       , "", "5-mini", "medium", 0.2, 4096, false, 400000),
     ("cheaperinference", "gpt-5.4-nano", "gpt"       , "", "5.4-nano", "medium", 0.2, 4096, false, 400000),
@@ -830,6 +832,7 @@ Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked oper
 - `web_search(query)` — search the web. Returns titles, URLs, and snippets.
 - `web_fetch(url)` — fetch a URL and return readable text (boilerplate stripped). Use to read pages found via `web_search`.
 - `clear(prompt)` — clear conversation history and start fresh. The `prompt` summarizes current state and gives instructions for the new context. Do not use `ed`, `sed -i`, or shell heredocs to rewrite files — line-arithmetic drifts and corrupts under sequential edits. `write` for new files or full rewrites; `patch` for surgical changes; `bash` for non-edit operations only.
+- `dmail(checkpoint, message)` — send a message to your past self: revert the conversation to a `[checkpoint N]` marker on one of your assistant messages and append the message. Use it to fold bulk you no longer need (a huge read, a long failed debugging stretch) into one short summary instead of `clear()`ing and re-reading the same files. The filesystem is NOT reverted; anything you wrote stays written. Use sparingly; never twice for the same stretch.
 
 The harness runs your tool calls and feeds results back. Independent tool calls in the same turn run in parallel — batch them when reading multiple files or running independent checks. When the task is done, reply with prose and no tool calls.
 
@@ -2661,8 +2664,16 @@ let qwenTinyTools = %*[
 ]
 
 let
+  # The dmail/checkpoint tool started kimi-only (its home harness trains
+  # the pattern); SWE-bench GLM-flash traces showed the exact loop it
+  # fixes (bulk read -> clear() -> re-read the same files from scratch),
+  # so glm gets it too. Other families keep the shared surface.
+  glmDmailTools = block:
+    let t = copy(glmAndQwenTools)
+    t.add dmailTool
+    t
   lagunaSetup = (prompt: LagunaPreamble, tools: glmAndQwenTools)
-  glmSetup = (prompt: GlmPreamble, tools: glmAndQwenTools)
+  glmSetup = (prompt: GlmPreamble, tools: glmDmailTools)
   qwenSetup = (prompt: QwenPreamble, tools: glmAndQwenTools)
   qwenTinySetup = (prompt: QwenTinyPreamble, tools: qwenTinyTools)
   deepseekSetup = (prompt: DeepSeekPreamble, tools: glmAndQwenTools)
@@ -2674,14 +2685,7 @@ let
   inklingSetup = (prompt: InklingPreamble, tools: glmAndQwenTools)
   grokSetup = (prompt: GrokPreamble, tools: glmAndQwenTools)
   mimoSetup = (prompt: MimoPreamble, tools: glmAndQwenTools)
-  kimiSetup = (prompt: KimiPreamble, tools: block:
-    # Kimi's home harness (kimi-cli) trains a dmail/checkpoint tool for
-    # model-initiated context pruning; field reports say Kimi leans on it
-    # hard and other models ignore it, so it is kimi-only here. JsonNode
-    # is ref: copy the shared array and append rather than mutate it.
-    let t = copy(glmAndQwenTools)
-    t.add dmailTool
-    t)
+  kimiSetup = (prompt: KimiPreamble, tools: glmDmailTools)
   lingSetup = (prompt: LingPreamble, tools: glmAndQwenTools)
   oxAlphaSetup = (prompt: OxAlphaPreamble, tools: glmAndQwenTools)
   nemotronSetup = (prompt: NemotronPreamble, tools: glmAndQwenTools)
