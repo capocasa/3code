@@ -48,7 +48,10 @@ etime_secs() {
     *:*)  h=0; m=${t%%:*}; s=${t##*:} ;;
     *)    h=0; m=0; s=${t} ;;
   esac
-  echo $(( d * 86400 + h * 3600 + m * 60 + s ))
+  # Force base 10: ps pads etime with zeros and $((...)) reads 08/09
+  # as invalid octal, silently disarming the watchdog for a minute out
+  # of every ten.
+  echo $(( 10#$d * 86400 + 10#$h * 3600 + 10#$m * 60 + 10#$s ))
 }
 
 # Kill test binaries that exceed the per-test cap. The match is anchored

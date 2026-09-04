@@ -384,10 +384,12 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   # first (the old erase created them by clearing rows below the walk-up
   # target); without the scroll the first rewrite of a row at the
   # terminal's bottom edge would push the block instead of replacing it.
+  var blockGrew = false
   if blockH > prevH:
     for _ in 0 ..< blockH - prevH:
       stdout.write "\r\n"
     prevH = blockH
+    blockGrew = true
   let anchor = if caretRow >= 0: caretRow else: blockH - 1
   let edTop = if newEdModel.len > 0: blockH - newEdModel.len else: -1
   # Walk up from the cursor (block bottom) to the block's top.
@@ -422,6 +424,13 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   # repainting them.
   let prevEdTop = prevH - prevPhysEdRows
   let prevAnchor = prevH - 1 - (blockH - 1 - anchor)
+  # A growth scroll relocated the whole block: the previous model rows
+  # no longer sit where the bottom-aligned comparison assumes, so a
+  # "row unchanged" skip would leave the screen holding the previous
+  # geometry (a blanked gap row with the prompt one row off — the
+  # wizard-bootstrap lost-prompt race). Compare everything as missing
+  # and rewrite the full block, exactly like the resize path.
+  let diffValid = not blockGrew
   const Missing = "\x01MISSING"
   for i in 0 ..< blockH:
     let text =
@@ -430,7 +439,7 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
         newEdModel[i - edTop]
       else: ""
     var p = Missing
-    if prevPhysEdRows > 0 and i >= edTop:
+    if diffValid and prevPhysEdRows > 0 and i >= edTop:
       # Current editor row: compare to the previous editor row the same
       # distance from the cursor. Rows the model no longer holds (wiped
       # out of band) compare against the sentinel and repaint.
@@ -443,7 +452,7 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
       # sections below the cursor are rewritten each tick). Anchor-align
       # both blocks so unchanged rows compare to themselves.
       let j = prevAnchor + (i - anchor)
-      if (prevPhysEdRows == 0 or j < prevEdTop) and
+      if diffValid and (prevPhysEdRows == 0 or j < prevEdTop) and
           j >= 0 and j < min(prevRows.len, prevH):
         p = prevRows[j]
     if p == Missing or resized or text != p:
