@@ -321,7 +321,7 @@ proc runStreamingBash*(act: Action, cache: ReadCache,
   if cache != nil and readPath != "" and fullRead:
     let p = resolvePath(readPath)
     if fileExists(p) and cache.state.hasKey(p) and localFileSig(p) == cache.state[p]:
-      return (&"[unchanged since prior read of {p}; see earlier read in this session]", 0, DefaultBashTimeout)
+      return (&"[unchanged since prior read of {p} — wasted call; refer to the earlier read instead. Do not re-read to verify; patch/write would have failed if the change had not applied.]", 0, DefaultBashTimeout)
 
   let tmp = tempDir() / ("3code_bash_" & $getCurrentProcessId() & "_" & $epochTime().int64)
   createDir(tmp)

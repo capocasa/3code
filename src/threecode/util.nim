@@ -929,6 +929,143 @@ func replaceFirst*(s, needle, repl: string): (string, bool) =
   if idx < 0: return (s, false)
   (s[0 ..< idx] & repl & s[idx + needle.len .. ^1], true)
 
+func normalizePatchLine*(line: string): string =
+  ## Fuzzy-match normalization for one search-block line: strip the
+  ## leading indentation and trailing whitespace and drop a leading
+  ## `N> ` style diff/git prompt prefix if present. Two lines that differ
+  ## only in indentation or a copied prompt artifact still compare equal.
+  var l = line.strip(false, true)
+  l = l.strip(true, false)
+  # Drop common transcript prefixes models copy by accident: git diff
+  # markers, quoted-reply markers, line-number prefixes from read output.
+  if l.len > 0 and l[0] in {'+', '-', ' '}: l = l[1 ..^ 1]
+  if l.len > 1 and l[0] == '>' and l[1] == ' ': l = l[2 ..^ 1]
+  let sp = l.find(' ')
+  if sp > 0:
+    let cand = l[0 ..< sp]
+    if cand.len in 1..6 and cand.allCharsInSet(Digits): l = l[sp + 1 ..^ 1]
+  l.strip
+
+func findFirstLineIdx*(lines: seq[string], needleLines: seq[string]): int =
+  ## Index of the first line in `lines` whose normalized form equals the
+  ## first normalized needle line, or -1. Windowed scan: every candidate
+  ## start is checked against all needle lines. Trailing blank lines (the
+  ## artifact of splitting text that ends in \n) are dropped from both
+  ## sides first so a mid-file block matches with or without a trailing
+  ## newline in the search text.
+  var nl = needleLines
+  var sl = lines
+  while nl.len > 0 and nl[^1].strip.len == 0: nl.setLen nl.len - 1
+  while sl.len > 0 and sl[^1].strip.len == 0: sl.setLen sl.len - 1
+  if nl.len == 0 or sl.len == 0: return -1
+  let head = normalizePatchLine(nl[0])
+  if head.len == 0: return -1
+  for i in 0 .. sl.len - nl.len:
+    if normalizePatchLine(sl[i]) != head: continue
+    block candidate:
+      for j in 1 ..< nl.len:
+        if normalizePatchLine(sl[i + j]) != normalizePatchLine(nl[j]):
+          break candidate
+      return i
+  -1
+
+func leadingWs(line: string): string =
+  ## The leading whitespace run of a line ("" when none).
+  let i = line.len - line.strip(leading = true).len
+  line[0 ..< i]
+
+func fuzzyReplaceFirst*(s, needle, repl: string): tuple[newText: string, ok: bool, strategy: string] =
+  ## Extended `replaceFirst` for patch search blocks. Tries, in order:
+  ##   exact        - byte-exact substring (the fast path)
+  ##   indent       - line-by-line with leading indentation ignored (models
+  ##                  re-indent context lines to the nesting level they
+  ##                  expect rather than the one they read)
+  ##   whitespace   - interior runs of whitespace collapsed on both sides
+  ## Each fuzzy strategy rebuilds the replacement from the *actual* matched
+  ## span: the replacement text keeps the model's own lines but the match
+  ## consumes the file's real bytes, so a later exact `search` on the same
+  ## region still works. Bounded work: normalization is O(n) per line and
+  ## matching scans each candidate at most once.
+  let idx = s.find(needle)
+  if idx >= 0:
+    return (s[0 ..< idx] & repl & s[idx + needle.len .. ^1], true, "exact")
+
+  let nl = needle.splitLines
+  let sl = s.splitLines
+  let start = findFirstLineIdx(sl, nl)
+  # Work on the blank-stripped view: the rebuild below joins with \n and
+  # the final trailing newline is re-appended only if the original had one.
+  var fileLines = sl
+  while fileLines.len > 0 and fileLines[^1].strip.len == 0: fileLines.setLen fileLines.len - 1
+  var needleLines = nl
+  while needleLines.len > 0 and needleLines[^1].strip.len == 0: needleLines.setLen needleLines.len - 1
+  # indent strategy: line equality after unindenting both sides. The
+  # replacement keeps the FILE's indentation: each replacement line is
+  # shifted by (file base indent - repl base indent), so an
+  # under-indented search block in a nested region neither dedents the
+  # replaced code nor double-indents the replacement.
+  if start >= 0 and start + needleLines.len <= fileLines.len:
+    block indentCheck:
+      for j in 0 ..< needleLines.len:
+        if normalizePatchLine(fileLines[start + j]) != normalizePatchLine(needleLines[j]):
+          break indentCheck
+      # Re-anchor the replacement to the file's real indentation, line
+      # by line: each replacement line keeps the matched file line's exact
+      # leading whitespace (the body follows, stripped of whatever the
+      # model's own block indented it to). Replacement lines beyond the
+      # matched span inherit the last matched line's indent. This is what
+      # makes an under-indented search block in a nested region produce
+      # correctly nested code instead of dedented (or double-indented)
+      # code.
+      var replLines = repl.splitLines
+      while replLines.len > 0 and replLines[^1].strip.len == 0:
+        replLines.setLen replLines.len - 1
+      var newLines = fileLines[0 ..< start]
+      var lastFileIndent = if start < fileLines.len:
+          leadingWs(fileLines[start]) else: ""
+      for j, rl in replLines:
+        if rl.strip.len == 0:
+          newLines.add rl
+          continue
+        if start + j < fileLines.len:
+          lastFileIndent = leadingWs(fileLines[start + j])
+        let body = rl.strip
+        newLines.add lastFileIndent & body
+      if start + needleLines.len < fileLines.len:
+        newLines.add fileLines[start + needleLines.len .. ^1]
+      var outText = newLines.join("\n")
+      if s.endsWith("\n"): outText.add "\n"
+      return (outText, true, "indent")
+  # whitespace strategy: interior whitespace runs collapsed. Has its own
+  # candidate finder because the head line itself differs by interior
+  # whitespace, so the normalized scan above never located it.
+  block wsCheck:
+    proc squash(x: string): string =
+      strutils.splitWhitespace(x).join(" ")
+    let headSq = squash(needleLines[0])
+    if headSq.len == 0: break wsCheck
+    var wsStart = -1
+    if fileLines.len >= needleLines.len:
+      for i in 0 .. fileLines.len - needleLines.len:
+        block c2:
+          for j in 0 ..< needleLines.len:
+            if squash(fileLines[i + j]) != squash(needleLines[j]):
+              break c2
+          wsStart = i
+          break
+    if wsStart < 0: break wsCheck
+    var replLines = repl.splitLines
+    while replLines.len > 0 and replLines[^1].strip.len == 0:
+      replLines.setLen replLines.len - 1
+    var newLines = fileLines[0 ..< wsStart]
+    newLines.add replLines
+    if wsStart + needleLines.len < fileLines.len:
+      newLines.add fileLines[wsStart + needleLines.len .. ^1]
+    var outText = newLines.join("\n")
+    if s.endsWith("\n"): outText.add "\n"
+    return (outText, true, "whitespace")
+  (s, false, "")
+
 func isBinaryContent*(s: string): bool =
   ## Scan the first 512 bytes for binary indicators: any NUL byte, or
   ## >5% non-printable control chars (excluding \t \n \r and ANSI escape

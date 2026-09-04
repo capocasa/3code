@@ -1,5 +1,5 @@
 import std/[json, os, strutils, unittest]
-import threecode/[actions, display, types]
+import threecode/[actions, display, types, util]
 
 suite "actions: stripHarmonyChannel":
   test "strips <|channel|> suffix":
@@ -190,3 +190,82 @@ suite "actions: tool result not empty":
     check code == 0
     check output.len > 0
     check "updated" in output
+
+suite "fuzzy patch matching":
+  test "exact match unchanged":
+    let (newText, ok, strategy) = fuzzyReplaceFirst(
+      "alpha\nbeta\ngamma\n", "beta", "BETA")
+    check ok
+    check strategy == "exact"
+    check newText == "alpha\nBETA\ngamma\n"
+
+  test "indent mismatch still matches":
+    let file = "def f():\n    if x:\n        return 1\n    return 2\n"
+    let search = "if x:\n  return 1\n"
+    let (newText, ok, strategy) = fuzzyReplaceFirst(file, search,
+      "if x:\n  return 42\n")
+    check ok
+    check strategy == "indent"
+    check "return 42" in newText
+    check newText.contains("def f():")
+
+  test "interior whitespace collapse matches":
+    let file = "foo   bar\nbaz\n"
+    let search = "foo bar\n"
+    let (newText, ok, strategy) = fuzzyReplaceFirst(file, search, "qux\n")
+    check ok
+    check strategy == "whitespace"
+    check newText == "qux\nbaz\n"
+
+  test "no match returns not ok":
+    let (newText, ok, strategy) = fuzzyReplaceFirst(
+      "one\ntwo\n", "three", "x")
+    check not ok
+    check strategy == ""
+    check newText == "one\ntwo\n"
+
+  test "quoted-line-number prefix stripped":
+    # The model copies `12  if x:` from read output (cat -n format).
+    let file = "if x:\n  return 1\n"
+    let search = "12  if x:\n13    return 1\n"
+    let (_, ok, strategy) = fuzzyReplaceFirst(file, search, "y\n")
+    check ok
+    check strategy == "indent"
+
+  test "real patch action lands via indent strategy":
+    let path = getTempDir() / "3code_fuzzy_patch_test.txt"
+    writeFile(path, "def f():\n    if x:\n        return 1\n")
+    let act = Action(kind: akPatch, path: path,
+      edits: @[("if x:\n  return 1\n", "if x:\n  return 99\n")])
+    let (output, code, _) = runAction(act, nil)
+    defer: removeFile(path)
+    check code == 0
+    # The replacement is re-anchored to the FILE's per-line indentation:
+    # `return 99` lands at the 8-space nesting the matched line had.
+    check readFile(path) == "def f():\n    if x:\n        return 99\n"
+    check "indent" in output   # strategy note surfaced to the model
+
+suite "semantic exit notes":
+  test "grep exit 1 no output":
+    let note = semanticExitNote("cd /repo && grep -n foo bar.py", 1, "")
+    check "no matches" in note
+    check "not an error" in note
+
+  test "rg exit 1 via pipe qualifies on rg":
+    let note = semanticExitNote("grep -rn zed src | rg specialthing", 1, "")
+    check "no matches" in note
+
+  test "diff exit 1":
+    let note = semanticExitNote("diff a.txt b.txt", 1, "1c1\n< x\n---\n> y\n")
+    check "files differ" in note
+
+  test "test exit 1":
+    let note = semanticExitNote("test -f /tmp/x", 1, "")
+    check "condition is false" in note
+
+  test "unrelated program exit 1 gets no note":
+    check semanticExitNote("python -m pytest tests/", 1, "FAILURES") == ""
+
+  test "exit codes other than 1 get no note":
+    check semanticExitNote("grep foo bar", 2, "") == ""
+    check semanticExitNote("grep foo bar", 0, "") == ""

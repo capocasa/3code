@@ -752,7 +752,8 @@ Your first call in an unfamiliar repo must be a search (`rg`/`grep`), never `cat
 
 - `rg pattern` first, then `read` with `offset`/`limit` to pull only relevant lines. If `rg` found the match at line 200, read 195-250, not 1-500.
 - Batch independent searches and reads into one turn. The harness runs them in parallel.
-- Never re-read a file you already read this session. Never `cat` a file after `write` or `patch` — the success message is truthful.
+- Never re-read a file you already read this session. Never `cat` a file after `write` or `patch` — the success message is truthful. A re-read of an unchanged file returns a "wasted call" notice instead of content.
+- `grep`/`rg`/`find`/`diff`/`test` exiting 1 is a normal POSIX result (no match / condition false / files differ), not an error. The result notes this; don't retry or switch tools over it.
 - Local before web — answers usually live in the repo. Don't fetch a URL when a vendored file, man page, or sister module has the same information.
 
 # Planning

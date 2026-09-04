@@ -436,7 +436,7 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
     if cache != nil and act.offset <= 0 and act.limit <= 0 and path in cache.state:
       let sig = fileSig(path)
       if sig == cache.state[path]:
-        return (&"[unchanged since prior read of {path}; see earlier read in this session]", 0, "")
+        return (&"[unchanged since prior read of {path} — wasted call; refer to the earlier read instead. Do not re-read to verify; patch/write would have failed if the change had not applied.]", 0, "")
     let content = try: readFile(path)
                   except CatchableError as e:
                     return (&"error: read {path}: {e.msg}", 1, "")
@@ -512,18 +512,24 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
       let before = readFile(path)
       var content = before
       var applied = 0
+      var fuzzyNotes: seq[string]
       for (s, r) in act.edits:
-        let (next, ok) = replaceFirst(content, s, r)
+        let (next, ok, strategy) = fuzzyReplaceFirst(content, s, r)
         if not ok:
           let hint = nearestLineHint(content, s)
           return (&"error: SEARCH block did not match in {path}{hint}:\n{s}", 1, "")
+        if strategy != "exact":
+          fuzzyNotes.add &"note: SEARCH matched via {strategy} strategy; " &
+            "indentation/whitespace may differ from your block — re-read if unsure"
         content = next
         inc applied
       writeFile(path, content)
       if cache != nil:
         cache.state[path] = fileSig(path)
       let diff = computeDiff(before, content, path)
-      let summary = if diff.len > 0: diff else: &"patched {path} (no textual change)"
+      var summary = if diff.len > 0: diff else: &"patched {path} (no textual change)"
+      if fuzzyNotes.len > 0:
+        summary = fuzzyNotes.join("\n") & "\n" & summary
       return (summary, 0, diff)
     except CatchableError as e:
       return (&"error: patch {path}: {e.msg}", 1, "")
@@ -572,13 +578,15 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
           var applied = 0
           var hunkOk = true
           for (s, r) in op.edits:
-            let (next, ok) = replaceFirst(content, s, r)
+            let (next, ok, strategy) = fuzzyReplaceFirst(content, s, r)
             if not ok:
               let hint = nearestLineHint(content, s)
               msgs.add &"error: hunk did not match in {path}{hint}:\n{s}"
               hunkOk = false
               anyFail = true
               break
+            if strategy != "exact":
+              msgs.add &"note: hunk matched via {strategy} strategy in {path}"
             content = next
             inc applied
           if hunkOk:
@@ -660,6 +668,44 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
   of akError:
     return (act.body, 1, "")
 
+proc semanticExitNote*(cmd: string, code: int, body: string): string =
+  ## Non-error interpretation of exit codes that weak models read as
+  ## failures and panic-retry. grep/find/diff/test exit 1 on "no match" /
+  ## "condition false" / "files differ" by POSIX design; `test`/`[` exit 1
+  ## means the tested condition is false. Returning a one-line verdict
+  ## (zcode-style) keeps the model from re-running the same command or
+  ## switching strategies over a successful lookup. Empty for codes we
+  ## can't interpret — the raw failure path is untouched.
+  if code != 1: return ""
+  let first = cmd.strip.splitLines[0].strip
+  # Shell pipelines report the LAST command's status, so qualify on the
+  # final segment after the last pipe/&&/|| — that's whose exit 1 this is.
+  var seg = first
+  for sep in ["|", "&&", ";"]:
+    let i = seg.rfind(sep)
+    if i >= 0: seg = seg[i + sep.len ..^ 1].strip
+  let words = seg.split(Whitespace)
+  if words.len == 0: return ""
+  # Strip a leading sudo/env/nohup prefix to find the real program.
+  var wi = 0
+  while wi < words.len and words[wi] in ["sudo", "env", "nohup"]: inc wi
+  if wi >= words.len: return ""
+  let pw = words[wi].split("/")[^1]
+  case pw
+  of "grep", "egrep", "fgrep", "rg":
+    if body.strip.len == 0:
+      "[exit 1: no matches — this is a normal grep/rg result, not an error]"
+    else:
+      "[exit 1: matches found but a pattern/test in the command failed]"
+  of "find":
+    "[exit 1: some traversed directories were inaccessible; results above are what was reachable]"
+  of "diff":
+    "[exit 1: files differ — that is diff's success signal, not an error]"
+  of "test", "[", "[[":
+    "[exit 1: condition is false]"
+  else:
+    ""
+
 proc runActionStreaming*(act: Action, cache: ReadCache = nil,
     onLine: proc(line: string) = nil): tuple[output: string, code: int, diff: string] =
   ## Like `runAction` but streams bash stdout line-by-line via `onLine`.
@@ -694,6 +740,9 @@ proc runActionStreaming*(act: Action, cache: ReadCache = nil,
     if not outClip.endsWith("\n"): body.add "\n"
   if code == 124:
     body.add &"[timed out after {cap}s. This is your own setting, not a system limit: pass timeout={maxBashTimeoutSecs()} (or any value up to that) and rerun. Or background the work.]"
+  elif code > 0:
+    let verdict = semanticExitNote(cmd, code, body)
+    if verdict.len > 0: body.add verdict
   if cache != nil and code == 0:
     if readPath != "":
       let p = resolvePath(readPath)
