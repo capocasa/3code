@@ -7,27 +7,26 @@
 #   A pipe's 64KiB buffer is what turns a hang into silence: PASS lines
 #   stop mid-stream and everything after the hung test is invisible.
 #   Writing to a file keeps every finished test visible.
-# - A shell watchdog (no GNU timeout dependency; macOS has none) bounds
-#   the run. Snapshots of live test binaries go to a side file: the log
-#   fd is shared with testament's children without O_APPEND, so writes
-#   racing into the same file clobber each other. The side file is
-#   merged only after the process tree is dead, which attributes a hang
-#   to the exact test binary.
+# - A per-test watchdog kills any single test binary that exceeds
+#   PER_TEST_SECS: testament reports it failed and moves on, so one
+#   hang costs minutes, not the whole run. Snapshots name the culprit.
+# - A global watchdog bounds the run (no GNU timeout needed; macOS and
+#   git-bash have none) and a pass/fail summary is always printed, so
+#   failures cannot fall outside a tail window.
 #
 # Categories run in parallel but each category is sequential inside
 # testament: the tty PTY tests are scheduler-sensitive and starve when
 # run against concurrently compiling categories on small runners.
 #
-# Usage:
-#   tools/ci_tests.sh [timeout-seconds] [categories...]
-# With categories given, runs those categories (single testament child,
-# sequential within the category); otherwise `testament all` (parallel).
+# Usage: tools/ci_tests.sh [global-timeout-secs] [categories...]
+#   PER_TEST_SECS env overrides the per-test cap (default 300, 0=off).
 set -u
 
 TIMEOUT_SECS=${1:-1500}
 [ $# -gt 0 ] && shift
 CATEGORIES=${*:-}
 WATCH_SECS=30
+PER_TEST_SECS=${PER_TEST_SECS:-300}
 
 LOG=$(mktemp "${TMPDIR:-/tmp}/3code_testament.XXXXXXXX") || exit 1
 SNAP=$(mktemp "${TMPDIR:-/tmp}/3code_watch.XXXXXXXX") || exit 1
@@ -36,11 +35,50 @@ trap cleanup EXIT
 
 snapshot() {
   ps -eo etime,args 2>/dev/null |
-    grep -E 'tests/[a-z]+/test_|tests/megatest|build/3code_stub' |
+    grep -E 'tests/[a-z]+/test_|build/3code_stub' |
     grep -v grep | sed 's/^/  /'
 }
 
-echo "testament ${CATEGORIES:-all} (timeout ${TIMEOUT_SECS}s, log $LOG)"
+# ps etime comes as MM:SS, HH:MM:SS or D-HH:MM:SS
+etime_secs() {
+  t=$1; d=0
+  case $t in *-*) d=${t%%-*}; t=${t#*-} ;; esac
+  case $t in
+    *:*:*) h=${t%%:*}; r=${t#*:}; m=${r%%:*}; s=${r##*:} ;;
+    *:*)  h=0; m=${t%%:*}; s=${t##*:} ;;
+    *)    h=0; m=0; s=${t} ;;
+  esac
+  echo $(( d * 86400 + h * 3600 + m * 60 + s ))
+}
+
+# Kill test binaries that exceed the per-test cap. The match is anchored
+# to argv[0]: testament execs test binaries as "tests/<cat>/test_*", while
+# compilers and other testament invocations only carry the path mid-args and
+# must not be touched. Needs ps/pgrep; silently off on shells without them
+# (git-bash), where the global timeout still applies.
+kill_sluggish_tests() {
+  command -v ps >/dev/null 2>&1 || return 0
+  command -v pgrep >/dev/null 2>&1 || return 0
+  [ "${PER_TEST_SECS:-0}" -gt 0 ] || return 0
+  ps -eo etime=,pid=,args= 2>/dev/null |
+    while read -r et pid rest; do
+      case $rest in
+        tests/*/test_*) ;;
+        *) continue ;;
+      esac
+      secs=$(etime_secs "$et")
+      if [ "$secs" -ge "$PER_TEST_SECS" ]; then
+        echo "[watchdog] killed: $rest (pid $pid, ${secs}s > ${PER_TEST_SECS}s cap)" >>"$SNAP"
+        kill -TERM "$pid" 2>/dev/null
+        for c in $(pgrep -P "$pid" 2>/dev/null); do
+          kill -KILL "$c" 2>/dev/null
+        done
+        ( sleep 5; kill -KILL "$pid" 2>/dev/null ) &
+      fi
+    done
+}
+
+echo "testament ${CATEGORIES:-all} (timeout ${TIMEOUT_SECS}s, per-test cap ${PER_TEST_SECS:-off}s, log $LOG)"
 if [ -n "$CATEGORIES" ]; then
   # shellcheck disable=SC2086
   testament --print --megatest:off cat $CATEGORIES >"$LOG" 2>&1 &
@@ -55,7 +93,7 @@ while kill -0 "$TID" 2>/dev/null; do
   if [ "$elapsed" -ge "$TIMEOUT_SECS" ]; then
     timed_out=1
     {
-      echo "[watchdog] timeout after ${TIMEOUT_SECS}s; live test processes:"
+      echo "[watchdog] global timeout after ${TIMEOUT_SECS}s; live test processes:"
       snapshot
     } >>"$SNAP"
     kill -TERM "$TID" 2>/dev/null
@@ -67,6 +105,7 @@ while kill -0 "$TID" 2>/dev/null; do
     kill -KILL "$TID" 2>/dev/null
     break
   fi
+  kill_sluggish_tests
   if [ "$elapsed" -gt 0 ] && [ $((elapsed % WATCH_SECS)) -eq 0 ]; then
     {
       echo "[watch $(date +%T)] live test processes:"
@@ -83,10 +122,14 @@ rc=$?
 echo "----- testament log (last 80 lines) -----"
 tail -n 80 "$LOG"
 echo "-----------------------------------------"
+echo "----- pass/fail summary -----"
+sed 's/\x1b\[[0-9;]*m//g' "$LOG" |
+  grep -aE 'PASS:|FAIL:|JOINED:|SKIP:|FAILURE!|Tests passed' | tail -n 250
+echo "-----------------------------"
 if [ -s "$SNAP" ]; then
-  echo "----- process snapshots -----"
+  echo "----- watchdog -----"
   cat "$SNAP"
-  echo "-----------------------------"
+  echo "--------------------"
 fi
 
 if [ "$timed_out" -eq 1 ]; then
