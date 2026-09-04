@@ -9,8 +9,13 @@ var
   stubMaxTokensOverride* = 0  # last override passed to callModelStub; a
                               # turns-level test asserts this to confirm
                               # the empty-content escalation bumped the budget
+  stubReasoningEffort* = ""    # last p.reasoning seen by callModelStub; a
+                              # turns-level test asserts the length-retry
+                              # demote path lowered it
 
 proc lastStubMaxTokensOverride*(): int = stubMaxTokensOverride
+
+proc lastStubReasoningEffort*(): string = stubReasoningEffort
 
 proc emitTestFrameEvent() =
   when defined(posix):
@@ -252,6 +257,7 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
         else: 128_000
   let stubBaseLabel = hookBeforeCall(lastPromptTokens, stubWindow)
   stubMaxTokensOverride = maxTokensOverride
+  stubReasoningEffort = p.reasoning
   defer:
     hookAfterCall()
   const StubMaxAttempts =

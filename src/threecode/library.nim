@@ -261,11 +261,14 @@ proc prompt*(s: AgentSession; text: string): string =
     raise newException(AgentError, InterruptedByUserMsg)
   # The final assistant text is the last assistant message's content.
   # Tool turns end with the model's closing reply; an empty reply
-  # surfaces as "" (runTurns already emitted its notices).
+  # surfaces as "" (runTurns already emitted its notices). Dmail
+  # checkpoint markers stay in the stored content but are harness
+  # bookkeeping, not reply text, so they are stripped here like the
+  # terminal path strips them at paint time.
   for i in countdown(s.messages.len - 1, 0):
     let m = s.messages[i]
     if m.kind == JObject and m{"role"}.getStr == "assistant":
-      return m{"content"}.getStr("")
+      return stripCheckpointMarkers(m{"content"}.getStr(""))
   ""
 
 proc promptThread(job: TurnJob) {.thread.} =

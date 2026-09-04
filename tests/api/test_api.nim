@@ -981,8 +981,9 @@ discard runTurnsInteractive(profile, messages, session)
 let lastAssistant = messages[^1]
 doAssert lastAssistant{"role"}.getStr == "assistant",
   "last msg role: " & lastAssistant{"role"}.getStr
-doAssert lastAssistant{"content"}.getStr == "RECOVERED_AFTER_ESCALATION",
-  "content: " & lastAssistant{"content"}.getStr
+let got = lastAssistant{"content"}.getStr
+doAssert "RECOVERED_AFTER_ESCALATION" in got,
+  "content: " & got
 doAssert lastStubMaxTokensOverride() > 8192,
   "override was " & $lastStubMaxTokensOverride() & " (no escalation happened)"
 echo "OK"
@@ -1007,6 +1008,72 @@ echo "OK"
     check "{humanTokens(maxTokensOverride)}" notin runOut
     # The bumped budget for 8192 is min(8192 * 2, 131072) = 16384 = "16.4k"
     check "16.4k" in runOut
+
+  test "runTurns demotes reasoning effort before raising the budget on length":
+    # A forced-thinking model at effort high burns any budget on reasoning
+    # and returns empty content with finish_reason length. Doubling
+    # max_tokens just buys another starved turn (and past the model's real
+    # output cap it buys nothing at all); demoting effort first is the
+    # cheap fix. This profile carries reasoning: "high" like glm-5.3.
+    let pid = $getCurrentProcessId()
+    let probeDir = getTempDir() / ("tc_empty_demote_" & pid)
+    let probePath = probeDir / "probe.nim"
+    let outPath = probeDir / ("probe" & Exe)
+    let cacheDir = probeDir / "nimcache"
+    createDir(probeDir)
+    createDir(cacheDir)
+    defer:
+      try: removeDir(probeDir) except OSError: discard
+    writeFile(probeDir / "stub_responses.json", """[{
+  "role": "assistant",
+  "content": "",
+  "stream": false,
+  "finish_reason": "length"
+},{
+  "role": "assistant",
+  "content": "RECOVERED_AFTER_DEMOTE",
+  "stream": false
+}]""")
+    writeFile(probePath, """
+import std/[json, strutils]
+import threecode
+import threecode/api except callModel
+
+var messages = %*[
+  {"role": "system", "content": "sys"},
+  {"role": "user", "content": "go"}
+]
+var session: Session
+session.savePath = ""
+session.readCache = newReadCache()
+let profile = Profile(name: "zai.glm-5.3", url: "stub://", key: "k",
+  family: "glm", model: "glm-5.3", reasoning: "high")
+
+discard runTurnsInteractive(profile, messages, session)
+
+let lastAssistant = messages[^1]
+doAssert lastAssistant{"role"}.getStr == "assistant"
+doAssert "RECOVERED_AFTER_DEMOTE" in lastAssistant{"content"}.getStr,
+  "content: " & lastAssistant{"content"}.getStr
+doAssert lastStubReasoningEffort() == "low",
+  "effort was " & lastStubReasoningEffort() & " (no demote happened)"
+doAssert lastStubMaxTokensOverride() == 0,
+  "override was " & $lastStubMaxTokensOverride() & " (budget raised before demote)"
+echo "OK"
+""")
+    let compileCmd = "nim c -d:ssl -d:providerStub --threads:on --path:src " &
+      nimbleDepFlags() & " --nimcache:" & cacheDir.quoteShell &
+      " -o:" & outPath.quoteShell & " " & probePath.quoteShell
+    let (compileOut, compileCode) = execCmdEx(compileCmd)
+    check compileCode == 0
+    if compileCode != 0:
+      checkpoint compileOut
+    let (runOut, runCode) = execCmdEx(outPath.quoteShell, workingDir = probeDir)
+    check runCode == 0
+    if runCode != 0:
+      checkpoint runOut
+    check "retrying with lower reasoning effort" in runOut
+    check "token budget" notin runOut
 
   test "runTurns retries then recovers on a bare empty reply (no finish_reason)":
     # A 200 OK that comes back with no content, no tool calls, and no
@@ -1063,7 +1130,7 @@ doAssert epochTime() - t0 >= 2.5,
 let lastAssistant = messages[^1]
 doAssert lastAssistant{"role"}.getStr == "assistant",
   "last msg role: " & lastAssistant{"role"}.getStr
-doAssert lastAssistant{"content"}.getStr == "RECOVERED_AFTER_RESEND",
+doAssert "RECOVERED_AFTER_RESEND" in lastAssistant{"content"}.getStr,
   "content: " & lastAssistant{"content"}.getStr
 echo "OK"
 """)
