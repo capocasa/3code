@@ -520,8 +520,20 @@ suite "terminal visual contract":
       tty.drain(120)
     tty.expectAlive()  # no command in the suite exited the process
     tty.expectInHistory "unknown command: :toknes  did you mean :tokens?"
+    # :session prints this session's id; cross-check it against the id the
+    # dir lock recorded for this process (second line of the lock file).
+    tty.send ":session"
+    tty.drain(80)
+    tty.send "\n"
+    var lockId = ""
+    for p in walkFiles(root / "tmp" / "3code" / "dirlock" / "*.lock"):
+      let lines = readFile(p).strip.splitLines
+      if lines.len > 1: lockId = lines[1]
+    doAssert lockId.len == 15 and lockId[8] == 'T',
+      "dir lock should carry a session id line, got: " & lockId
+    tty.expectInHistory lockId
     tty.send "\x1b[A"
-    tty.expect "❯ :toknes"
+    tty.expect "❯ :session"
     tty.drain(200)
     tty.expectMeaningfulFrameArtifact(
       HarnessCommandFrames,

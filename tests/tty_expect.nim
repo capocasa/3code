@@ -1266,6 +1266,30 @@ proc normalizeVersionBanner(text: string): string =
     else:
       result.add line
 
+proc normalizeSessionIds(text: string): string =
+  ## Replace session-id timestamps (`20260904T004815`) with a stable
+  ## placeholder so fixture comparison doesn't break on capture time.
+  ## Applied symmetrically like `normalizeVersionBanner`: `:session` prints
+  ## the live id and `● resumed <id>` carries it too.
+  const Placeholder = "<session-id>"
+  var i = 0
+  while i < text.len:
+    # 8 digits + 'T' + 6 digits, starting at a word boundary
+    if i + 15 <= text.len and text[i] in {'0'..'9'} and
+        (i == 0 or text[i - 1] notin {'0'..'9'}):
+      var ok = true
+      for j in i + 1 ..< i + 15:
+        let isDigit = text[j] in {'0'..'9'}
+        if (j == i + 8 and text[j] != 'T') or (j != i + 8 and not isDigit):
+          ok = false
+          break
+      if ok and (i + 15 >= text.len or text[i + 15] notin {'0'..'9'}):
+        result.add Placeholder
+        inc i, 15
+        continue
+    result.add text[i]
+    inc i
+
 proc normalizeSpinnerPhases(text: string): string =
   ## Text-level pass over a whole recording: collapse animated spinner phase
   ## glyphs to the canonical `⣿` on every row. Applied symmetrically to both
@@ -1365,9 +1389,11 @@ proc expectMeaningfulFrameArtifact*(s: TtySession; expectedPath,
     "missing expected full-frame artifact: " & expectedPath & "\nactual written to: " &
       actualPath
   let expected = readFile(expectedPath)
-  doAssert actual.normalizeVersionBanner.normalizeSpinnerPhases.normalizeFrameSeparators.
+  doAssert actual.normalizeVersionBanner.normalizeSessionIds.
+      normalizeSpinnerPhases.normalizeFrameSeparators.
       normalizeWrappedPathTail.stripFrameBlanks ==
-      expected.normalizeVersionBanner.normalizeSpinnerPhases.normalizeFrameSeparators.
+      expected.normalizeVersionBanner.normalizeSessionIds.
+      normalizeSpinnerPhases.normalizeFrameSeparators.
       normalizeWrappedPathTail.stripFrameBlanks,
     "full-frame recording differed from expected frames\nexpected: " & expectedPath &
       "\nactual: " & actualPath
