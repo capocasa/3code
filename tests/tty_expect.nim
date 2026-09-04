@@ -1556,34 +1556,28 @@ proc framePresenceRuns*(s: TtySession; needle: string): int =
   ## (whitespace-stripped) match for `needle`. One run means the row
   ## committed once and was never erased; zero means it never appeared;
   ## more than one means it flickered out and back in (the overwrite bug).
-  ## Single-frame gaps are ignored: a transient clear that lasts exactly
-  ## one frame (a mid-burst repaint state captured by SyncEnd splitting)
-  ## does not count as a real disappearance.
+  ## No gap tolerance: frames commit only at SyncEnd boundaries (plus
+  ## quiet-point forced flushes), so a committed scrollback row that is
+  ## absent from any committed frame was erased on screen too — a
+  ## transient clear a real terminal never shows.
   var wasPresent = false
-  var gapLen = 0
   for frame in s.frames:
     var present = false
     for row in frame.rows:
       if row.strip == needle:
         present = true
         break
-    if present:
-      if not wasPresent and gapLen == 0:
-        inc result
-      wasPresent = true
-      gapLen = 0
-    else:
-      if wasPresent:
-        inc gapLen
-      if gapLen > 1:
-        wasPresent = false
+    if present and not wasPresent:
+      inc result
+    wasPresent = present
 
 proc expectRowAppearsOnce*(s: TtySession; text: string): bool {.discardable.} =
   ## Assert a row exactly equal to `text` (after stripping whitespace)
   ## appears in exactly one contiguous run of recorded frames — i.e. it
   ## commits once and is never erased and re-committed. Catches the
   ## scrollback-overwrite regression where a committed row flickers out and
-  ## back in. Drain all the frames you care about before calling this.
+  ## back in, including a clear that lasts a single frame. Drain all the
+  ## frames you care about before calling this.
   let runs = s.framePresenceRuns(text)
   doAssert runs == 1, &"REGRESSION (scrollback overwrite): expected row to " &
     &"appear once (one contiguous run), appeared {runs} times: {text}. This " &
