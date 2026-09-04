@@ -1404,8 +1404,10 @@ proc expectMeaningfulFrameArtifact*(s: TtySession; expectedPath,
   # contract (one separator between items, none between an item and its
   # receipt), so compare it with blanks intact (runs collapsed, so a frame
   # ending mid-scroll still matches).
-  doAssert actual.lastFrameText.normalizeVersionBanner.collapseBlankRuns ==
-      expected.lastFrameText.normalizeVersionBanner.collapseBlankRuns,
+  doAssert actual.lastFrameText.normalizeVersionBanner.normalizeSessionIds.
+      collapseBlankRuns ==
+      expected.lastFrameText.normalizeVersionBanner.normalizeSessionIds.
+      collapseBlankRuns,
     "settled frame spacing differed (blank-row contract)\nexpected: " & expectedPath &
     "\nactual: " & actualPath
 
