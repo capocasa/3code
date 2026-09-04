@@ -1318,6 +1318,36 @@ proc stripFrameBlanks(text: string): string =
     else:
       result.add line
 
+proc lastFrameText(text: string): string =
+  ## The final `===== n =====` section of a meaningful-frame recording: the
+  ## settled screen state. Blank rows here are committed scrollback spacing,
+  ## not the transient repaint noise `stripFrameBlanks` guards against.
+  var start = -1
+  let lines = text.splitLines
+  for i in countdown(lines.len - 1, 0):
+    if lines[i].startsWith("====="):
+      start = i + 1
+      break
+  if start < 0: return ""
+  for i in start ..< lines.len:
+    if lines[i].len > 0:
+      result.add lines[i]
+      result.add '\n'
+
+proc collapseBlankRuns(text: string): string =
+  ## Collapse each run of blank rows to a single blank row. Absorbs run-length
+  ## noise (a stranded 2-blank bug flaking into 3) while still asserting the
+  ## spacing contract itself: whether a blank separates two given rows.
+  var prevBlank = false
+  for line in text.splitLines(keepEol = true):
+    if line.strip.len == 0:
+      if not prevBlank:
+        result.add "\n"
+      prevBlank = true
+    else:
+      result.add line
+      prevBlank = false
+
 proc writeMeaningfulFrameArtifact*(s: TtySession; path: string) =
   let dir = path.splitPath.head
   if dir.len > 0:
@@ -1341,6 +1371,17 @@ proc expectMeaningfulFrameArtifact*(s: TtySession; expectedPath,
       normalizeWrappedPathTail.stripFrameBlanks,
     "full-frame recording differed from expected frames\nexpected: " & expectedPath &
       "\nactual: " & actualPath
+  # Blank-aware check of the settled final frame: `stripFrameBlanks` above
+  # keeps the full-recording comparison stable against transient repaint
+  # noise, at the cost of blindness to inter-item spacing. The last frame is
+  # the settled state, where a blank row between two rows IS the product
+  # contract (one separator between items, none between an item and its
+  # receipt), so compare it with blanks intact (runs collapsed, so a frame
+  # ending mid-scroll still matches).
+  doAssert actual.lastFrameText.normalizeVersionBanner.collapseBlankRuns ==
+      expected.lastFrameText.normalizeVersionBanner.collapseBlankRuns,
+    "settled frame spacing differed (blank-row contract)\nexpected: " & expectedPath &
+    "\nactual: " & actualPath
 
 proc expect*(s: TtySession; text: string; timeoutMs = 5000): bool {.discardable.} =
   ## Poll for `text` on the live screen or raw byte stream. Frame commits

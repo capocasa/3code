@@ -638,6 +638,12 @@ proc formatUserPromptItem*(line: string): string =
   ## included; the controller/transcript emitter owns inter-item spacing.
   result.addUserEcho(line, trailingNewline = false)
 
+proc promptOnlyBytes*(): string =
+  "\r\x1b[2K" & EditorPromptBytes
+
+proc promptOnlyResetBytes*(): string =
+  "\x1b[2K" & EditorPromptBytes
+
 proc clearPromptAfterPendingReceiptBytes*(): string =
   "\r\x1b[1A\x1b[J"
 

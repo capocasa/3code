@@ -605,6 +605,26 @@ suite "terminal visual contract":
     tty.expectCount("This is a test response.", 1, where = "screen")
     tty.expectTokenBar(["○", "↑120", "↓24"])
     tty.drain(200)
+    # Wait for the settled idle repaint (caret back on the live ❯ row):
+    # the live bar is painted before the receipt commits to scrollback, so
+    # sampling earlier races the final commit.
+    let settleDeadline = epochTime() + 5.0
+    while epochTime() < settleDeadline and not tty.exited:
+      tty.drain(20)
+      if tty.frames.len > 0:
+        let f = tty.frames[^1]
+        if not f.cursorHidden and f.cursorRow >= 0 and
+            f.cursorRow < f.rows.len and "❯" in f.rows[f.cursorRow]:
+          break
+    # The receipt sits flush under the answer, no blank row between them
+    # (design.md: "no blank line between the last output of the API call
+    # and its token receipt"). The row directly below the answer must be
+    # the receipt itself, not a separator blank.
+    let answerRow = tty.rowContaining("This is a test response.")
+    doAssert answerRow >= 0, "answer row missing:\n" & tty.dumpFramesAround("This is a test response.")
+    doAssert "↑120" in tty.rows()[answerRow + 1],
+      "receipt not flush under answer; row below answer is '" &
+      tty.rows()[answerRow + 1] & "'\n" & tty.dumpFramesAround("↑120")
     tty.expectMeaningfulFrameArtifact(
       SimpleVisualTestFrames,
       root / "simple_visual_test_actual.txt")
@@ -660,11 +680,10 @@ suite "terminal visual contract":
     # `beginEditorRedraw` erased that line and advanced one row down (the
     # bar-less first-paint branch ended in `\r\n`), stranding the painted
     # `❯ ` row as a blank line. The user saw a blank line with the caret at
-    # column 0, and the real `❯ ` only appeared on the row below. Startup
-    # now emits the gap row explicitly and paints the bare prompt (no
-    # token bar until the first turn has real usage), with exactly one
-    # blank gap row between the welcome's last hint line and the prompt,
-    # present on the very first frame.
+    # column 0, and the real `❯ ` only appeared on the row below. Startup is
+    # prompt-only (no token bar until the first response), so the first
+    # paint is gap row + prompt with exactly one blank gap row between the
+    # welcome's last hint line and the `❯`, present on the very first frame.
     let root = newFixture("startup_no_orphan")
     writeConfiguredProvider(root)
     writeStubResponses(root, %*[])
@@ -714,60 +733,6 @@ suite "terminal visual contract":
     let liveRow = tty.frames[^1].rows[tty.frames[^1].cursorRow]
     doAssert liveRow.startsWith("❯"),
       "startup prompt not anchored at the `❯ ` glyph: '" & liveRow & "'"
-
-  test "startup paint leaves exactly one blank gap above the prompt":
-    # The startup paint path (`paintInitialPrompt`, used on a fresh start and
-    # on resume without prior usage) emits the gap row and paints the bare
-    # prompt (no token bar until the first turn has real usage). With prior
-    # content above (the welcome
-    # screen, or resumed scrollback), the prompt must not sit flush against
-    # it. Exactly one blank gap row must separate the last prior-content line
-    # from the prompt row, matching the `endTurn` gap.
-    let root = newFixture("prompt_only_gap")
-    writeConfiguredProvider(root)
-    writeStubResponses(root, %*[])
-    let tty = startStub(root)
-    defer:
-      tty.writeFrameArtifact(root / "frames.txt")
-      tty.writeMeaningfulFrameArtifact(root / "meaningful_frames.txt")
-      tty.close()
-    tty.expect "❯"
-    tty.drain(200)
-    # Find the first frame showing the startup prompt. There must be no
-    # token bar yet (a `○0%` bar before the first response says nothing),
-    # and exactly one blank gap row between the last prior-content row
-    # (the welcome hint) and the `❯ ` row.
-    var promptRow = -1
-    var contentRow = -1
-    var blankRowsBetween = 0
-    for f in tty.frames:
-      let rows = f.rows
-      var p = -1
-      for ri, r in rows:
-        if r.strip(leading = true).startsWith("❯"):
-          p = ri
-          break
-      if p >= 0 and promptRow < 0:
-        promptRow = p
-        doAssert p < 1 or not rows[p - 1].strip.startsWith("○"),
-          "unexpected token bar above the startup prompt: '" &
-            rows[p - 1] & "'"
-        # last non-blank row above the prompt is prior content
-        for r in countdown(p - 1, 0):
-          if rows[r].strip.len > 0:
-            contentRow = r
-            break
-        if contentRow >= 0:
-          for r in (contentRow + 1) ..< p:
-            if rows[r].strip.len == 0:
-              inc blankRowsBetween
-      if promptRow >= 0:
-        break
-    doAssert promptRow >= 0, "startup prompt never appeared in frames"
-    doAssert contentRow >= 0, "no prior-content line above the startup prompt"
-    doAssert blankRowsBetween == 1,
-      "expected exactly one blank gap row above the startup prompt, found " &
-        $blankRowsBetween
 
   test "repeated system commands keep the gap row above the idle prompt":
     # Regression: with no token bar the idle footer owns the ticker gap row

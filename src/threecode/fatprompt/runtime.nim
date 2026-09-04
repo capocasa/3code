@@ -727,7 +727,8 @@ proc resetEditorRowModel*(ed: ptr minline.LineEditor) =
 
 proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
                             beforeRepaint: proc() = nil;
-                            reserveFooter = true) =
+                            reserveFooter = true;
+                            flushWithPrevious = false) =
   ## Commit transcript output while preserving the volatile footer.
   ## The controller owns the transcript bytes and item spacing. This proc owns
   ## the terminal mechanics: clear the volatile footer, append the bytes as
@@ -760,7 +761,8 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
         newFooter,
         0,
         restoreEditor,
-        reserveFooter)
+        reserveFooter,
+        flushWithPrevious)
       resetEditorRowModel(inputEditor)
   else:
     termengine.appendTranscript(
@@ -772,7 +774,8 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
       newFooter,
       0,
       restoreEditor,
-      reserveFooter)
+      reserveFooter,
+      flushWithPrevious)
   if reserveFooter and transcriptBytes.hasNonNewlineBytes and currentBarLabel.len > 0:
     emitFatPromptEvent setBarEvent(currentBarLabel, hasGap = true)
   debugOut "writeTranscriptWithFatPrompt exit"
@@ -925,33 +928,29 @@ proc liveLabel*(base: string, slurped: int): string =
     parts.join("  ")
 
 proc paintInitialPrompt*(p: Profile) =
-  ## Welcome-time paint when starting fresh: gap row + idle prompt, no
-  ## token bar. A bar at zero usage only says "no turn has run yet", so
-  ## the bar first appears when a turn ends with real usage (`endTurn`).
-  ## The gap/ticker row above the prompt is still reserved so the
-  ## footer's height math matches `footerLayout`'s ffNone branch.
+  ## Welcome-time paint when starting fresh. The first prompt is
+  ## intentionally prompt-only: the token bar stays hidden until the
+  ## first response brings real usage to display.
   ##
-  ## Paints through the engine's frame model when the live editor is
-  ## anchored so `paintedFooterRows` tracks the chrome; the
-  ## pre-input-thread path (no editor yet) falls back to a raw paint,
+  ## Leaves `currentBarLabel = ""` — the signal `readInput`,
+  ## `emitUserSubmit`, and the slash-command repaint use to detect
+  ## prompt-only mode. Paints through the engine's frame model when the
+  ## live editor is anchored so `paintedFooterRows` tracks the prompt row;
+  ## the pre-input-thread path (no editor yet) falls back to a raw paint,
   ## cleared later by the walk-up's erase.
-  # The gap row between the welcome's last line and the prompt: the
-  # same blank row the bar path leaves. Without it the prompt paints
-  # flush against the hint line, and the first keystroke's walk-up
-  # (sized from paintedFooterRows) erases the hint instead of the gap.
-  termengine.syncWrite("\r\n")
+  discard p
+  emitFatPromptEvent clearBarEvent()
   if liveEditorFooterAnchored():
     termengine.renderFooter(footerFrame(fatPromptState),
                              inputThreadRunning, inputEditor,
                              currentTermW())
   else:
-    # Raw prompt on the fresh row the gap left the cursor on. Register
-    # the reserved gap row so the first later walk-up (spinner/bar
-    # paint, submit erase) does not under-count and overwrite the line
-    # above the prompt.
-    termengine.syncWrite(hideRealCaretBytes() & EditorPromptBytes)
-    termengine.noteFooterPainted(
-      footerRowsAboveEditor(fatPromptState, currentTermW()))
+    # Raw gap + prompt. Register the reserved gap row so the first later
+    # walk-up (spinner/bar paint, submit erase) does not under-count and
+    # overwrite the line above the prompt.
+    termengine.syncWrite("\n" & hideRealCaretBytes() &
+      promptOnlyResetBytes())
+    termengine.noteFooterPainted(1)
 
 
 proc paintResumedBarPrompt*(label: string) =

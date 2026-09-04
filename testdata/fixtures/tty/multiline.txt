@@ -97,7 +97,7 @@
 ⣿ ○0% 0s
 ❯ queued line one
   
-===== 651 =====
+===== 324 =====
 
   ╭─╮
    ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
@@ -114,7 +114,7 @@
 ⣿ ○0% 0s
 ❯ queued line one
   queued line two
-===== 451 =====
+===== 999 =====
 
   ╭─╮
    ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
@@ -181,7 +181,6 @@
 ❯ first line
 
 ● First multiline response.
-
   ○1%  ↑120  ↓24  0s
 
 ❯ queued line one
@@ -205,7 +204,6 @@
 ❯ first line
 
 ● First multiline response.
-
   ○1%  ↑120  ↓24  0s
 
 ❯ queued line one
@@ -229,14 +227,12 @@
 ❯ first line
 
 ● First multiline response.
-
   ○1%  ↑120  ↓24  0s
 
 ❯ queued line one
   queued line two
 
 ● Queued multiline response.
-
   ○1%  ↑180  ↓32  0s
 
   ○1%

@@ -37,7 +37,7 @@
 
 ⣿ ○0% 0s
 ❯
-===== 782 =====
+===== 383 =====
 
   ╭─╮
    ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
@@ -52,7 +52,7 @@
   … Thinking about the test prompt
 ⣿ ○0% ↓7 0s
 ❯
-===== 383 =====
+===== 742 =====
 
   ╭─╮
    ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
@@ -100,7 +100,6 @@
 ❯ This is a test prompt
 
 ● This is a test response.
-
   ○1%  ↑120  ↓24  0s
 
   ○1%
