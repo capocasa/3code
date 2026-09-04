@@ -257,7 +257,6 @@ p --- /tmp/applied.txt
   ○2%  ↑300  ↓44  0s
 
 ● Clear completed.
-
   ○0%  ↑90  ↓12  0s
 
   ○0%

@@ -1323,55 +1323,6 @@ proc normalizeWrappedPathTail(text: string): string =
     result.add cur
     inc i
 
-proc stripFrameBlanks(text: string): string =
-  ## Drop blank rows inside each frame for comparison. The separator row a
-  ## full repaint inserts between the prompt echo and arriving assistant
-  ## content is a transient grid state: depending on PTY byte scheduling it
-  ## lands in the captured frame as a blank row or not at all. That
-  ## 0-vs-1-blank difference is timing noise, not a content change. Content
-  ## rows are always non-blank, so stripping blanks cannot hide a missing or
-  ## altered row; multi-blank spacing regressions are covered by the dedicated
-  ## separators test, which inspects frames directly.
-  var inFrame = false
-  for line in text.splitLines(keepEol = true):
-    if line.startsWith("=====") and line.strip.endsWith("====="):
-      result.add "===== frame =====\n"
-      inFrame = true
-    elif inFrame and line.strip.len == 0:
-      discard
-    else:
-      result.add line
-
-proc lastFrameText(text: string): string =
-  ## The final `===== n =====` section of a meaningful-frame recording: the
-  ## settled screen state. Blank rows here are committed scrollback spacing,
-  ## not the transient repaint noise `stripFrameBlanks` guards against.
-  var start = -1
-  let lines = text.splitLines
-  for i in countdown(lines.len - 1, 0):
-    if lines[i].startsWith("====="):
-      start = i + 1
-      break
-  if start < 0: return ""
-  for i in start ..< lines.len:
-    if lines[i].len > 0:
-      result.add lines[i]
-      result.add '\n'
-
-proc collapseBlankRuns(text: string): string =
-  ## Collapse each run of blank rows to a single blank row. Absorbs run-length
-  ## noise (a stranded 2-blank bug flaking into 3) while still asserting the
-  ## spacing contract itself: whether a blank separates two given rows.
-  var prevBlank = false
-  for line in text.splitLines(keepEol = true):
-    if line.strip.len == 0:
-      if not prevBlank:
-        result.add "\n"
-      prevBlank = true
-    else:
-      result.add line
-      prevBlank = false
-
 proc writeMeaningfulFrameArtifact*(s: TtySession; path: string) =
   let dir = path.splitPath.head
   if dir.len > 0:
@@ -1391,25 +1342,12 @@ proc expectMeaningfulFrameArtifact*(s: TtySession; expectedPath,
   let expected = readFile(expectedPath)
   doAssert actual.normalizeVersionBanner.normalizeSessionIds.
       normalizeSpinnerPhases.normalizeFrameSeparators.
-      normalizeWrappedPathTail.stripFrameBlanks ==
+      normalizeWrappedPathTail ==
       expected.normalizeVersionBanner.normalizeSessionIds.
       normalizeSpinnerPhases.normalizeFrameSeparators.
-      normalizeWrappedPathTail.stripFrameBlanks,
+      normalizeWrappedPathTail,
     "full-frame recording differed from expected frames\nexpected: " & expectedPath &
       "\nactual: " & actualPath
-  # Blank-aware check of the settled final frame: `stripFrameBlanks` above
-  # keeps the full-recording comparison stable against transient repaint
-  # noise, at the cost of blindness to inter-item spacing. The last frame is
-  # the settled state, where a blank row between two rows IS the product
-  # contract (one separator between items, none between an item and its
-  # receipt), so compare it with blanks intact (runs collapsed, so a frame
-  # ending mid-scroll still matches).
-  doAssert actual.lastFrameText.normalizeVersionBanner.normalizeSessionIds.
-      collapseBlankRuns ==
-      expected.lastFrameText.normalizeVersionBanner.normalizeSessionIds.
-      collapseBlankRuns,
-    "settled frame spacing differed (blank-row contract)\nexpected: " & expectedPath &
-    "\nactual: " & actualPath
 
 proc expect*(s: TtySession; text: string; timeoutMs = 5000): bool {.discardable.} =
   ## Poll for `text` on the live screen or raw byte stream. Frame commits
