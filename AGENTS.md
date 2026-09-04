@@ -67,6 +67,15 @@ during development; it is only a pre-release smoke test, and it is exactly
 what poisons later `nimble build`s. If the binary behaves like an old commit,
 delete `~/.nimble/pkgs2/threecode-*` and rebuild with `nim c`.
 
+Dependencies (ttty, streamhttp, sandwall, tinotify) are develop-linked to
+their checkouts in `~/p/<name>` via `nimble develop -g`; `nimble setup` here
+resolves to those source dirs, so local edits to a dependency are live on
+the next `nim c`. Never `nimble install` a dependency: the pkgs2 snapshot
+shadows the develop link and the solver keeps reinstalling it. If a dep
+resolves to pkgs2, delete the copy and check
+`~/.nimble/pkgcache/tagged_versions.json` for a stale pre-tag entry. See
+`guidelines-updated.md` section 8.
+
 ## Commits
 
 Commit when a change reaches a sensible, complete state — don't wait to be
