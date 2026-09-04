@@ -3038,6 +3038,18 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # low/high/max passed through as reasoning.effort on openrouter
         # and the opencode gateways.
         return @["low", "high", "max"]
+      if fam == "kimi" and p in ["kimi", "kimicode"]:
+        # First-party Kimi (api.moonshot.ai / api.kimi.com/coding) does
+        # not speak the vLLM `enable_thinking` knob the aggregators take.
+        # K3 always reasons and grades effort via top-level
+        # `reasoning_effort` (low/high/max, default max). K2.6 toggles
+        # via `thinking.type` enabled/disabled; K2.7-code (incl.
+        # highspeed) thinks unconditionally, so no knob is offered.
+        if combo.version == "3":
+          return @["low", "high", "max"]
+        if combo.variant.startsWith("7-code"):
+          return @[]
+        return @["off", "on"]
       if fam in ["laguna", "kimi", "qwen", "longcat", "minimax", "mimo", "ling", "nemotron"]:
         # These families have no graded effort knob on the OpenAI-compatible
         # surface (see `applyMiniMaxReasoning` / `applyMimoReasoning` in
@@ -3071,8 +3083,13 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
 proc defaultReasoningsFor*(provider, model, family: string): seq[string] =
   ## Value set for the `:reasoning` listing. Falls back to
   ## `@ReasoningLevels` for any family not in the known-good table.
+  ## A known-good pair with NO knob (forced-thinking models like
+  ## kimi-k2.7-code) returns empty: `knownGoodReasonings` found the pair
+  ## and deliberately offered nothing, which the fallback must not
+  ## paper over.
   let r = knownGoodReasonings(provider, model)
   if r.len > 0: return r
+  if knownGoodFamily(provider, model) != "": return @[]
   @ReasoningLevels
 
 proc buildCredit*(p: Profile): string =

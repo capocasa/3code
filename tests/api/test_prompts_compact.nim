@@ -156,6 +156,17 @@ suite "prompts: defaultReasoningsFor":
     check defaultReasoningsFor("deepinfra", "moonshotai/Kimi-K2.6", "kimi") ==
       @["off", "on"]
 
+  test "first-party kimi: k3 grades effort, k2.6 toggles, k2.7-code has no knob":
+    check defaultReasoningsFor("kimi", "kimi-k3", "kimi") ==
+      @["low", "high", "max"]
+    check defaultReasoningsFor("kimicode", "k3", "kimi") ==
+      @["low", "high", "max"]
+    check defaultReasoningsFor("kimi", "kimi-k2.6", "kimi") ==
+      @["off", "on"]
+    check defaultReasoningsFor("kimi", "kimi-k2.7-code", "kimi") == newSeq[string]()
+    check defaultReasoningsFor("kimicode", "kimi-for-coding", "kimi") == newSeq[string]()
+    check defaultReasoningsFor("kimicode", "kimi-for-coding-highspeed", "kimi") == newSeq[string]()
+
   test "level-based families still use ReasoningLevels":
     check defaultReasoningsFor("openai", "gpt-oss-1", "gpt-oss") ==
       @["low", "medium", "high"]
