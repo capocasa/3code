@@ -8,8 +8,8 @@
 ##
 ## Known-good validation lives here: a profile must correspond to a
 ## `KnownGoodCombos` entry unless `experimentalEnabled` is true. Tab-completion
-## and `:model` cycling both walk `KnownGoodCombos` order, so the curated
-## ranking determines what the user sees first when tabbing through models.
+## and `:model` cycling walk the wizard-entered model order: the first model
+## the user entered is the default and cycling follows config order.
 
 import std/[os, parsecfg, sequtils, streams, strformat, strutils, tables, terminal, uri]
 when defined(posix):
@@ -157,29 +157,16 @@ proc hasKnownGoodModel*(prov: ProviderRec): bool =
   false
 
 proc orderedModels*(prov: ProviderRec): seq[string] =
-  ## Models in the order they should be presented to the user and used
-  ## for default selection:
-  ##   1. Known-good models in KnownGoodCombos order (curated quality ranking).
-  ##   2. Experimental models in config-file order, appended after.
-  ## This way the best-tested model is always first regardless of how the
-  ## config was written or the API listed them.
-  let p = canonicalKnownGoodProvider(prov.name)
-  for combo in KnownGoodCombos:
-    if combo.provider.toLowerAscii == p:
-      for m in prov.models:
-        if matchesKnownGoodModel(combo.model, m):
-          result.add m
-          break
-  for m in prov.models:
-    if knownGoodFamily(prov.name, m) == "":
-      result.add m
+  ## Models in the order the user entered them in the provider wizard, as
+  ## persisted in the config file. Completion cycling, `:model` listing and
+  ## default selection all use this order; the first entry is the default
+  ## when switching providers.
+  prov.models
 
 proc firstModel*(prov: ProviderRec): string =
-  ## First model in KnownGoodCombos order, or `models[0]` if none are
-  ## known-good (e.g. a provider added with --experimental).
-  let ordered = orderedModels(prov)
-  if ordered.len > 0: ordered[0]
-  elif prov.models.len > 0: prov.models[0]
+  ## First model in wizard-entered order: the default when switching
+  ## providers or booting with a model-less `current`.
+  if prov.models.len > 0: prov.models[0]
   else: ""
 
 proc firstKnownGoodCombo*(providers: seq[ProviderRec]): string =

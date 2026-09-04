@@ -139,9 +139,11 @@ suite "config: gateExperimental":
     check gateExperimental(Profile()) == true
 
 suite "config: orderedModels":
-  test "known-good models come first":
+  test "wizard-entered order is preserved":
     let prov = ProviderRec(name: "zai", models: @["unknown", "glm-5.1"])
-    let ordered = orderedModels(prov)
-    check ordered.len == 2
-    check ordered[0] == "glm-5.1"
-    check ordered[1] == "unknown"
+    check orderedModels(prov) == @["unknown", "glm-5.1"]
+  test "firstModel is the first entered model":
+    let prov = ProviderRec(name: "zai", models: @["unknown", "glm-5.1"])
+    check firstModel(prov) == "unknown"
+  test "firstModel on empty provider":
+    check firstModel(ProviderRec(name: "zai")) == ""

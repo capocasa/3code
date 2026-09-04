@@ -5,9 +5,9 @@
 ## management (`:clear`, `:summarize`), provider/model switching
 ## (`:provider`, `:model`, `:reasoning`).
 ##
-## Tab-completion in `tabComplete` walks `KnownGoodCombos` and the live
-## provider list to offer only valid model names. The provider-add wizard in
-## `runProviderAdd` validates the API key with a one-token probe before saving.
+## Tab-completion in `tabComplete` offers model names in wizard-entered
+## (config-file) order. The provider-add wizard in `runProviderAdd` validates
+## the API key with a one-token probe before saving.
 
 import std/[algorithm, atomics, json, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline,

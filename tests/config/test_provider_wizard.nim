@@ -778,3 +778,66 @@ suite "provider wizard configuration":
 
     check activeProviders[0].models == @["openai/gpt-oss-120b"]
     check verifiedModels.len == 0
+
+suite "provider/model order":
+  # nvidia's curated order is gpt-oss-120b before gpt-oss-20b; these
+  # providers list them reversed, so any re-ranking by KnownGoodCombos
+  # would flip the results.
+  var
+    savedCurrent: string
+    savedProviders: seq[ProviderRec]
+    savedXdg: string
+    hadXdg: bool
+    tempConfig: string
+
+  setup:
+    savedCurrent = activeCurrent
+    savedProviders = activeProviders
+    hadXdg = existsEnv("XDG_CONFIG_HOME")
+    savedXdg = getEnv("XDG_CONFIG_HOME")
+    tempConfig = getTempDir() / ("3code-model-order-" &
+      $getCurrentProcessId())
+    putEnv("XDG_CONFIG_HOME", tempConfig)
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi",
+                  models: @["openai/gpt-oss-20b", "openai/gpt-oss-120b"])
+    ]
+    activeCurrent = "nvidia.openai/gpt-oss-20b"
+
+  teardown:
+    activeCurrent = savedCurrent
+    activeProviders = savedProviders
+    if hadXdg:
+      putEnv("XDG_CONFIG_HOME", savedXdg)
+    else:
+      delEnv("XDG_CONFIG_HOME")
+    try: removeDir(tempConfig)
+    except OSError: discard
+
+
+  test "switching provider defaults to the first entered model":
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider nvidia", messages, session, prof, editor)
+    check activeCurrent == "nvidia.openai/gpt-oss-20b"
+    check prof.model == "openai/gpt-oss-20b"
+
+  test ":model completion cycles in entered order":
+    var completions = completionFor(":model ")
+    check completions == @["gpt-oss-20b", "gpt-oss-120b"]
+
+  test ":model list shows entered order":
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    let listing = handleCommandResult(":model", messages, session,
+                                    prof, editor).body
+    let i20 = listing.find("gpt-oss-20b")
+    let i120 = listing.find("gpt-oss-120b")
+    check i20 >= 0 and i120 >= 0 and i20 < i120
