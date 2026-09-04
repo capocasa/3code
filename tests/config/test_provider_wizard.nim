@@ -1,4 +1,4 @@
-import std/[algorithm, json, monotimes, os, sequtils, strutils, times, unittest]
+import std/[algorithm, atomics, json, os, sequtils, strutils, times, unittest]
 import threecode/[api, auth_openai, config, minline, types, ui]
 
 proc stripAnsiCsi(line: string): string =
@@ -285,12 +285,25 @@ suite "provider wizard configuration":
   test "verification cancel hook aborts the add":
     experimentalEnabled = true
     inputs = @["nvapi-add", "gpt-oss-120b"]
+    # The verify hook blocks until the cancel flag is set: without that,
+    # an instant-verify worker can finish before the cancel hook's first
+    # jobDone() poll under load, and `check not jobDone()` races the
+    # scheduler instead of testing the cancel path.
+    type Flag = object
+      f: Atomic[bool]
+    let cancelledFlag = cast[ptr Flag](allocShared0(sizeof(Flag)))
+    defer: deallocShared(cancelledFlag)
     wizardVerifyCancelHook = proc(jobDone: proc(): bool {.closure.};
                                   cancelJob: proc() {.closure.}): bool =
       check not jobDone()
       cancelJob()
+      {.cast(gcsafe).}:
+        cancelledFlag.f.store(true, moRelease)
       true
     verifyProfileHook = proc(p: Profile): (bool, string) =
+      {.cast(gcsafe).}:
+        while not cancelledFlag.f.load(moAcquire):
+          sleep 1
       (true, "")
     var editor: LineEditor
     var prof: Profile
@@ -302,31 +315,43 @@ suite "provider wizard configuration":
     check activeProviders.len == 0
 
   test "verification workers run in parallel":
-    # Two slow probes, each ~400ms: sequential would take ~800ms,
-    # parallel lands well under that. Uses the threaded path (cancel
-    # hook installed) since that is where parallelism matters.
+    # Overlap is proven by rendezvous, not by a wall-clock bound: each
+    # worker blocks until BOTH workers are inside verifyProfileHook.
+    # Sequential execution deadlocks worker 1 waiting for worker 2, which
+    # fails the run loudly (a stuck thread plus an eventual suite timeout)
+    # instead of racing a `elapsed < 700` check under parallel-suite load.
+    # Uses the threaded path (cancel hook installed) since that is where
+    # parallelism matters.
     experimentalEnabled = true
     inputs = @["nvapi-add", "gpt-oss-120b gpt-oss-20b"]
+    type Rendezvous = object
+      entered: Atomic[int]
+      bothIn: Atomic[bool]
+    let rdv = cast[ptr Rendezvous](allocShared0(sizeof(Rendezvous)))
+    defer: deallocShared(rdv)
     wizardVerifyCancelHook = proc(jobDone: proc(): bool {.closure.};
                                   cancelJob: proc() {.closure.}): bool =
       while not jobDone(): sleep 5
       false
     verifyProfileHook = proc(p: Profile): (bool, string) =
-      sleep 400
+      {.cast(gcsafe).}:
+        discard rdv.entered.fetchAdd(1, moAcquireRelease)
+        while not rdv.bothIn.load(moAcquire):
+          if rdv.entered.load(moAcquire) >= 2: break
+          sleep 1
+        rdv.bothIn.store(true, moRelease)
       (true, "")
     var editor: LineEditor
     var prof: Profile
     var messages = newJArray()
     var session = Session()
 
-    let t0 = getMonoTime()
     discard handleCommand(":provider add", messages, session, prof, editor)
-    let elapsed = (getMonoTime() - t0).inMilliseconds
 
     check activeProviders.len == 1
     check activeProviders[0].models == @["openai/gpt-oss-120b",
                                          "openai/gpt-oss-20b"]
-    check elapsed < 700
+    check rdv.bothIn.load(moAcquire)
 
   test "add wizard lists models sorted alphabetically":
     activeProviders = @[
@@ -365,7 +390,7 @@ suite "provider wizard configuration":
       # temp file around the call. The earlier posix.dup/dup2 trick
       # only redirected the OS fd, which the C runtime ignores on Windows
       # (it writes to the buffered FILE*'s own HANDLE, not fd 1).
-      let capturePath = getTempDir() / "wizard_add_capture.txt"
+      let capturePath = getTempDir() / ("wizard_add_capture_" & $getCurrentProcessId() & ".txt")
       let savedStdout = stdout
       let captureFile = open(capturePath, fmWrite)
       stdout = captureFile
@@ -483,7 +508,7 @@ suite "provider wizard configuration":
 
       # Capture stdout to verify model listing order. See the add-wizard
       # test above for why we swap the `stdout` var.
-      let capturePath = getTempDir() / "wizard_edit_capture.txt"
+      let capturePath = getTempDir() / ("wizard_edit_capture_" & $getCurrentProcessId() & ".txt")
       let savedStdout = stdout
       let captureFile = open(capturePath, fmWrite)
       stdout = captureFile
@@ -535,7 +560,7 @@ suite "provider wizard configuration":
       var messages = newJArray()
       var session = Session()
 
-      let capturePath = getTempDir() / "wizard_edit_exp_capture.txt"
+      let capturePath = getTempDir() / ("wizard_edit_exp_capture_" & $getCurrentProcessId() & ".txt")
       let savedStdout = stdout
       let captureFile = open(capturePath, fmWrite)
       stdout = captureFile

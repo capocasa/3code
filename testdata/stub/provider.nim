@@ -314,6 +314,13 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
   # "interrupted by user printed on a normal turn return" bug.
   if result{"spuriousInterrupt"}.getBool(false):
     requestTurnInterrupt("stub-spurious-injection")
+  # Optional call-start marker for tests that must synchronize another
+  # thread onto "the stub is inside this response" without a wall-clock
+  # sleep: the file appears the moment the response is selected, before
+  # preStreamDelayMs / streaming begin.
+  let markerPath = result{"markerPath"}.getStr("")
+  if markerPath.len > 0:
+    writeFile(markerPath, "")
   var slurped = 0
   let preStreamDelay = stubDelayMs(result, "preStreamDelayMs", 0)
   if preStreamDelay > 0:
