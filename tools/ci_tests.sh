@@ -39,19 +39,22 @@ snapshot() {
     grep -v grep | sed 's/^/  /'
 }
 
-# ps etime comes as MM:SS, HH:MM:SS or D-HH:MM:SS
+# ps etime comes as MM:SS, HH:MM:SS or D-HH:MM:SS. Each field goes through
+# 10#N to strip zero padding: bare $((...)) reads 08/09 as invalid octal,
+# aborts the arithmetic ("value too great for base") and leaves the
+# watchdog comparing against an empty string instead of a number.
 etime_secs() {
   t=$1; d=0
   case $t in *-*) d=${t%%-*}; t=${t#*-} ;; esac
   case $t in
     *:*:*) h=${t%%:*}; r=${t#*:}; m=${r%%:*}; s=${r##*:} ;;
     *:*)  h=0; m=${t%%:*}; s=${t##*:} ;;
-    *)    h=0; m=0; s=${t} ;;
+    *)    h=0; m=0; s=$t ;;
   esac
   # Force base 10: ps pads etime with zeros and $((...)) reads 08/09
   # as invalid octal, silently disarming the watchdog for a minute out
-  # of every ten.
-  echo $(( 10#$d * 86400 + 10#$h * 3600 + 10#$m * 60 + 10#$s ))
+  # of every ten. printf, not echo: a bare echo can re-split the result.
+  printf '%s\n' $(( 10#$d * 86400 + 10#$h * 3600 + 10#$m * 60 + 10#$s ))
 }
 
 # Kill test binaries that exceed the per-test cap. The match is anchored
@@ -82,12 +85,27 @@ kill_sluggish_tests() {
 }
 
 echo "testament ${CATEGORIES:-all} (timeout ${TIMEOUT_SECS}s, per-test cap ${PER_TEST_SECS:-off}s, log $LOG)"
-if [ -n "$CATEGORIES" ]; then
-  # shellcheck disable=SC2086
-  testament --print --megatest:off cat $CATEGORIES >"$LOG" 2>&1 &
-else
-  testament --print --megatest:off all >"$LOG" 2>&1 &
-fi
+# One testament invocation per category, run concurrently. `testament cat
+# a b` does NOT select two categories: extra words are forwarded as
+# per-test arguments and every test fails with "arguments can only be
+# given if the '--run' option is selected".
+run_testament() {
+  if [ -z "$CATEGORIES" ]; then
+    testament --print --megatest:off all >>"$LOG" 2>&1
+    return $?
+  fi
+  pids=""
+  rc=0
+  for cat_ in $CATEGORIES; do
+    testament --print --megatest:off cat "$cat_" >>"$LOG" 2>&1 &
+    pids="$pids $!"
+  done
+  for p in $pids; do
+    wait "$p" || rc=1
+  done
+  return $rc
+}
+run_testament &
 TID=$!
 
 timed_out=0

@@ -107,6 +107,13 @@ type
     tickerCommandFd*: FdLike
     tickerAckFd*: FdLike
     apiContinueFd*: FdLike
+    ## Bytes of an escape sequence cut off at the end of the last PTY
+    ## read. ttty's CSI parser drops a truncated sequence and prints its
+    ## tail as literal text when the rest arrives in the next chunk — xterm
+    ## buffers and completes it. Hold the incomplete prefix here and
+    ## prepend it to the next chunk so the grid always sees whole
+    ## sequences (model-vs-physical desync class).
+    pendingEsc*: string
 
 const
   DefaultTtyCols* = 120
@@ -230,32 +237,84 @@ const
   SyncBegin = "\x1b[?2026h"
   SyncEnd = "\x1b[?2026l"
 
-proc feedGridChunk(s: TtySession; chunk: string) =
+proc splitIncompleteEscape*(bytes: string): tuple[complete, pending: string] =
+  ## Split `bytes` into the prefix that ends on a whole escape sequence and
+  ## a trailing incomplete one. A CSI sequence whose final byte has not
+  ## arrived yet must not be fed to the grid: ttty's parser drops the
+  ## truncated head and prints the tail as literal text when it arrives in
+  ## the next chunk, while a real terminal buffers until the final byte.
+  ## A lone trailing ESC is held too (its `[` may be the next chunk's first
+  ## byte); anything after ESC that is not `[` is complete by definition.
+  if bytes.len == 0:
+    return
+  var i = 0
+  var cut = -1
+  while i < bytes.len:
+    if bytes[i] == '\x1b':
+      if i + 1 >= bytes.len:
+        cut = i
+        break
+      if bytes[i + 1] == '[':
+        var j = i + 2
+        # A private-marker `?` is part of the sequence; params are digits
+        # and `;` (ttty's parser ignores other intermediates, but any byte
+        # outside final range still means "not done").
+        if j < bytes.len and bytes[j] == '?':
+          inc j
+        while j < bytes.len and bytes[j] notin {'@'..'~'}:
+          inc j
+        if j >= bytes.len:
+          cut = i
+          break
+        i = j + 1
+        continue
+      # Non-CSI escape (OSC, SS3, ESC-key): ttty prints the payload as
+      # text anyway; only a trailing lone ESC can extend.
+      if i + 2 >= bytes.len and i + 1 < bytes.len:
+        cut = i
+        break
+    inc i
+  if cut >= 0:
+    result.complete = bytes[0 ..< cut]
+    result.pending = bytes[cut ..< bytes.len]
+  else:
+    result.complete = bytes
+
+proc feedGridChunk*(s: TtySession; chunk: string) =
   ## Feed the grid incrementally, splitting on sync-burst boundaries so
   ## each SyncBegin..SyncEnd render is committed as its own frame with the
   ## grid in the state that burst produced. Feeding the whole chunk at once
   ## would snapshot the final grid for every intermediate SyncEnd, losing
   ## intermediate render states and causing boundary drift when the PTY
-  ## delivers multiple bursts in one read().
+  ## delivers multiple bursts in one read(). Incomplete escape sequences
+  ## at the chunk tail are buffered in `pendingEsc` and completed by the
+  ## next chunk, mirroring a real terminal's escape parser.
   if chunk.len == 0:
     return
   s.raw.add chunk
+  var text =
+    if s.pendingEsc.len > 0:
+      s.pendingEsc & chunk
+    else:
+      chunk
+  let (bytes, pending) = splitIncompleteEscape(text)
+  s.pendingEsc = pending
   var i = 0
-  while i < chunk.len:
-    let nextBegin = chunk.find(SyncBegin, i)
-    let nextEnd = chunk.find(SyncEnd, i)
+  while i < bytes.len:
+    let nextBegin = bytes.find(SyncBegin, i)
+    let nextEnd = bytes.find(SyncEnd, i)
     if nextBegin < 0 and nextEnd < 0:
-      s.grid.feed chunk[i ..< chunk.len].stripCsiWithIntermediates()
+      s.grid.feed bytes[i ..< bytes.len].stripCsiWithIntermediates()
       s.markFrameDirty()
       break
     if nextBegin >= 0 and (nextEnd < 0 or nextBegin < nextEnd):
       if nextBegin > i:
-        s.grid.feed chunk[i ..< nextBegin].stripCsiWithIntermediates()
+        s.grid.feed bytes[i ..< nextBegin].stripCsiWithIntermediates()
         s.markFrameDirty()
       inc s.syncDepth
       i = nextBegin + SyncBegin.len
     else:
-      s.grid.feed chunk[i ..< nextEnd].stripCsiWithIntermediates()
+      s.grid.feed bytes[i ..< nextEnd].stripCsiWithIntermediates()
       s.markFrameDirty()
       if s.syncDepth > 0:
         dec s.syncDepth
@@ -1323,55 +1382,6 @@ proc normalizeWrappedPathTail(text: string): string =
     result.add cur
     inc i
 
-proc stripFrameBlanks(text: string): string =
-  ## Drop blank rows inside each frame for comparison. The separator row a
-  ## full repaint inserts between the prompt echo and arriving assistant
-  ## content is a transient grid state: depending on PTY byte scheduling it
-  ## lands in the captured frame as a blank row or not at all. That
-  ## 0-vs-1-blank difference is timing noise, not a content change. Content
-  ## rows are always non-blank, so stripping blanks cannot hide a missing or
-  ## altered row; multi-blank spacing regressions are covered by the dedicated
-  ## separators test, which inspects frames directly.
-  var inFrame = false
-  for line in text.splitLines(keepEol = true):
-    if line.startsWith("=====") and line.strip.endsWith("====="):
-      result.add "===== frame =====\n"
-      inFrame = true
-    elif inFrame and line.strip.len == 0:
-      discard
-    else:
-      result.add line
-
-proc lastFrameText(text: string): string =
-  ## The final `===== n =====` section of a meaningful-frame recording: the
-  ## settled screen state. Blank rows here are committed scrollback spacing,
-  ## not the transient repaint noise `stripFrameBlanks` guards against.
-  var start = -1
-  let lines = text.splitLines
-  for i in countdown(lines.len - 1, 0):
-    if lines[i].startsWith("====="):
-      start = i + 1
-      break
-  if start < 0: return ""
-  for i in start ..< lines.len:
-    if lines[i].len > 0:
-      result.add lines[i]
-      result.add '\n'
-
-proc collapseBlankRuns(text: string): string =
-  ## Collapse each run of blank rows to a single blank row. Absorbs run-length
-  ## noise (a stranded 2-blank bug flaking into 3) while still asserting the
-  ## spacing contract itself: whether a blank separates two given rows.
-  var prevBlank = false
-  for line in text.splitLines(keepEol = true):
-    if line.strip.len == 0:
-      if not prevBlank:
-        result.add "\n"
-      prevBlank = true
-    else:
-      result.add line
-      prevBlank = false
-
 proc writeMeaningfulFrameArtifact*(s: TtySession; path: string) =
   let dir = path.splitPath.head
   if dir.len > 0:
@@ -1391,25 +1401,12 @@ proc expectMeaningfulFrameArtifact*(s: TtySession; expectedPath,
   let expected = readFile(expectedPath)
   doAssert actual.normalizeVersionBanner.normalizeSessionIds.
       normalizeSpinnerPhases.normalizeFrameSeparators.
-      normalizeWrappedPathTail.stripFrameBlanks ==
+      normalizeWrappedPathTail ==
       expected.normalizeVersionBanner.normalizeSessionIds.
       normalizeSpinnerPhases.normalizeFrameSeparators.
-      normalizeWrappedPathTail.stripFrameBlanks,
+      normalizeWrappedPathTail,
     "full-frame recording differed from expected frames\nexpected: " & expectedPath &
       "\nactual: " & actualPath
-  # Blank-aware check of the settled final frame: `stripFrameBlanks` above
-  # keeps the full-recording comparison stable against transient repaint
-  # noise, at the cost of blindness to inter-item spacing. The last frame is
-  # the settled state, where a blank row between two rows IS the product
-  # contract (one separator between items, none between an item and its
-  # receipt), so compare it with blanks intact (runs collapsed, so a frame
-  # ending mid-scroll still matches).
-  doAssert actual.lastFrameText.normalizeVersionBanner.normalizeSessionIds.
-      collapseBlankRuns ==
-      expected.lastFrameText.normalizeVersionBanner.normalizeSessionIds.
-      collapseBlankRuns,
-    "settled frame spacing differed (blank-row contract)\nexpected: " & expectedPath &
-    "\nactual: " & actualPath
 
 proc expect*(s: TtySession; text: string; timeoutMs = 5000): bool {.discardable.} =
   ## Poll for `text` on the live screen or raw byte stream. Frame commits
@@ -1618,34 +1615,28 @@ proc framePresenceRuns*(s: TtySession; needle: string): int =
   ## (whitespace-stripped) match for `needle`. One run means the row
   ## committed once and was never erased; zero means it never appeared;
   ## more than one means it flickered out and back in (the overwrite bug).
-  ## Single-frame gaps are ignored: a transient clear that lasts exactly
-  ## one frame (a mid-burst repaint state captured by SyncEnd splitting)
-  ## does not count as a real disappearance.
+  ## No gap tolerance: frames commit only at SyncEnd boundaries (plus
+  ## quiet-point forced flushes), so a committed scrollback row that is
+  ## absent from any committed frame was erased on screen too — a
+  ## transient clear a real terminal never shows.
   var wasPresent = false
-  var gapLen = 0
   for frame in s.frames:
     var present = false
     for row in frame.rows:
       if row.strip == needle:
         present = true
         break
-    if present:
-      if not wasPresent and gapLen == 0:
-        inc result
-      wasPresent = true
-      gapLen = 0
-    else:
-      if wasPresent:
-        inc gapLen
-      if gapLen > 1:
-        wasPresent = false
+    if present and not wasPresent:
+      inc result
+    wasPresent = present
 
 proc expectRowAppearsOnce*(s: TtySession; text: string): bool {.discardable.} =
   ## Assert a row exactly equal to `text` (after stripping whitespace)
   ## appears in exactly one contiguous run of recorded frames — i.e. it
   ## commits once and is never erased and re-committed. Catches the
   ## scrollback-overwrite regression where a committed row flickers out and
-  ## back in. Drain all the frames you care about before calling this.
+  ## back in, including a clear that lasts a single frame. Drain all the
+  ## frames you care about before calling this.
   let runs = s.framePresenceRuns(text)
   doAssert runs == 1, &"REGRESSION (scrollback overwrite): expected row to " &
     &"appear once (one contiguous run), appeared {runs} times: {text}. This " &

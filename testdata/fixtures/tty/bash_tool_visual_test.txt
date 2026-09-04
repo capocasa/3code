@@ -875,7 +875,6 @@ xx
   ○1%  ↑130  ↓18  0s
 
 ● Bash checks complete.
-
   ○1%  ↑210  ↓20  0s
 
   ○1%

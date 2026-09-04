@@ -168,7 +168,26 @@ deadlock hall-of-fame entries. Rules that fall out of it:
   that need redirects and nothing else. Do not add new httpclient uses
   beyond those four.
 
-## 8. Misc hard rules
+## 8. Dependency handling
+
+Local dependencies (ttty, streamhttp, sandwall, tinotify, ...) are checked
+out under `~/p/<name>` and linked with `nimble develop -g` run once from
+that repo. `nimble setup` in a consumer then resolves them to the source
+dir; edits are live immediately, no reinstall step.
+
+Agents must NOT `nimble install` new packages. Installing copies a frozen
+snapshot into `~/.nimble/pkgs2`, which then shadows the develop link in
+the SAT solve and silently poisons every later build with stale modules
+(three separate ttty 0.5.1 copies with different content is the incident
+on record). `nimble build` at most; prefer plain `nim c` with the
+`nimble.paths` from `nimble setup`.
+
+If a dependency resolves to `~/.nimble/pkgs2` instead of `~/p/<name>`:
+delete the pkgs2 copy, and check `~/.nimble/pkgcache/tagged_versions.json`
+for a stale entry for that package (the solver prefers tagged releases
+over develop links, and a cache from before a tag was pushed hides it).
+
+## 9. Misc hard rules
 
 - No em dashes anywhere, including code comments.
 - No Nim macros unless explicitly instructed.
