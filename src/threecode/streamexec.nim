@@ -64,19 +64,40 @@ when defined(windows):
 
 const PartialLineFlushMs = 700
 
-proc emitCompleteLine(rawOut: var string; lineBuf: var string;
+type
+  LineAcc = object
+    ## One physical output line under terminal semantics: `phys` is the
+    ## on-screen text, `col` the cursor's column within it. A bare `\r`
+    ## (curl's classic progress meter, spinner rewrites) moves the column
+    ## home and lets following chars overwrite the line in place instead of
+    ## appending — stripping `\r` used to concatenate every meter snapshot
+    ## into one unbounded mega-line that outgrew the viewport and flickered.
+    phys: string
+    col: int
+
+proc feedLineChar(a: var LineAcc; ch: char) =
+  if ch == '\r':
+    a.col = 0
+  else:
+    if a.col < a.phys.len:
+      a.phys[a.col] = ch
+    else:
+      a.phys.add ch
+    inc a.col
+
+proc emitCompleteLine(rawOut: var string; acc: var LineAcc;
                       onLine: proc(line: string);
                       partialShown: var bool; partialText: var string;
                       suppress: var bool) =
-  rawOut.add lineBuf & "\n"
+  rawOut.add acc.phys & "\n"
   if onLine != nil and not suppress and
-      not (partialShown and partialText == lineBuf):
-    onLine(lineBuf)
-  lineBuf.setLen(0)
+      not (partialShown and partialText == acc.phys):
+    onLine(acc.phys)
+  acc = LineAcc()
   partialShown = false
   partialText.setLen(0)
 
-proc feedOutputChunk(rawOut: var string; lineBuf: var string; chunk: string;
+proc feedOutputChunk(rawOut: var string; acc: var LineAcc; chunk: string;
                      onLine: proc(line: string);
                      partialShown: var bool; partialText: var string;
                      suppress: var bool) =
@@ -85,26 +106,26 @@ proc feedOutputChunk(rawOut: var string; lineBuf: var string; chunk: string;
       suppress = true
       continue
     if ch == '\n':
-      emitCompleteLine(rawOut, lineBuf, onLine, partialShown, partialText, suppress)
-    elif ch != '\r':
-      lineBuf.add ch
+      emitCompleteLine(rawOut, acc, onLine, partialShown, partialText, suppress)
+    else:
+      feedLineChar(acc, ch)
 
-proc emitPartialLine(lineBuf: string; onLine: proc(line: string);
+proc emitPartialLine(acc: LineAcc; onLine: proc(line: string);
                      partialShown: var bool; partialText: var string;
                      suppress: var bool) =
-  if onLine != nil and not suppress and lineBuf.len > 0 and
-      (not partialShown or partialText != lineBuf):
-    onLine(lineBuf)
+  if onLine != nil and not suppress and acc.phys.len > 0 and
+      (not partialShown or partialText != acc.phys):
+    onLine(acc.phys)
     partialShown = true
-    partialText = lineBuf
+    partialText = acc.phys
 
-proc emitFinalPartial(rawOut: var string; lineBuf: var string;
+proc emitFinalPartial(rawOut: var string; acc: var LineAcc;
                       onLine: proc(line: string);
                       partialShown: var bool; partialText: var string;
                       suppress: var bool) =
-  if lineBuf.len == 0:
+  if acc.phys.len == 0:
     return
-  emitCompleteLine(rawOut, lineBuf, onLine, partialShown, partialText, suppress)
+  emitCompleteLine(rawOut, acc, onLine, partialShown, partialText, suppress)
 
 when defined(posix):
   proc readChunk(buf: var array[4096, char]; n: int): string =
@@ -113,7 +134,7 @@ when defined(posix):
       copyMem(addr result[0], addr buf[0], n)
 
   proc readAvailableOutput(p: Process, rawOut: var string;
-                           lineBuf: var string;
+                           acc: var LineAcc;
                            onLine: proc(line: string)) =
     var partialShown = false
     var partialText = ""
@@ -131,7 +152,7 @@ when defined(posix):
         var buf: array[4096, char]
         let n = posix.read(fd, addr buf[0], buf.len)
         if n > 0:
-          feedOutputChunk(rawOut, lineBuf, readChunk(buf, n.int),
+          feedOutputChunk(rawOut, acc, readChunk(buf, n.int),
                           onLine, partialShown, partialText, suppress)
           lastActivity = epochTime()
         else:
@@ -139,9 +160,9 @@ when defined(posix):
       elif p.peekExitCode != -1:
         processExited = true
 
-      if lineBuf.len > 0 and
+      if acc.phys.len > 0 and
           (epochTime() - lastActivity) * 1000 >= PartialLineFlushMs.float:
-        emitPartialLine(lineBuf, onLine, partialShown, partialText, suppress)
+        emitPartialLine(acc, onLine, partialShown, partialText, suppress)
 
       if processExited:
         while true:
@@ -155,11 +176,11 @@ when defined(posix):
           let n = posix.read(fd, addr buf[0], buf.len)
           if n <= 0:
             break
-          feedOutputChunk(rawOut, lineBuf, readChunk(buf, n.int),
+          feedOutputChunk(rawOut, acc, readChunk(buf, n.int),
                           onLine, partialShown, partialText, suppress)
         break
 
-    emitFinalPartial(rawOut, lineBuf, onLine, partialShown, partialText, suppress)
+    emitFinalPartial(rawOut, acc, onLine, partialShown, partialText, suppress)
 
 when defined(posix):
   var
@@ -477,7 +498,7 @@ export DEBIAN_FRONTEND=noninteractive
             return ("3code sandbox: " & e.msg, 127, cap)
           let captured = sandwallWall.endCapture()
           var rawIn = ""
-          var lineBufIn = ""
+          var accIn = LineAcc()
           var partialShownIn = false
           var partialTextIn = ""
           var suppressIn = false
@@ -486,11 +507,11 @@ export DEBIAN_FRONTEND=noninteractive
               suppressIn = true
               continue
             if ch == '\n':
-              emitCompleteLine(rawIn, lineBufIn, onLine, partialShownIn,
+              emitCompleteLine(rawIn, accIn, onLine, partialShownIn,
                                partialTextIn, suppressIn)
-            elif ch != '\r':
-              lineBufIn.add ch
-          emitFinalPartial(rawIn, lineBufIn, onLine, partialShownIn,
+            else:
+              feedLineChar(accIn, ch)
+          emitFinalPartial(rawIn, accIn, onLine, partialShownIn,
                            partialTextIn, suppressIn)
           try: removeDir(tmp) except CatchableError: discard
           if inProcCode != 0 and sandboxEnabled and sandbox.active and
@@ -521,9 +542,9 @@ export DEBIAN_FRONTEND=noninteractive
 
   var rawOut = ""
   try:
-    var lineBuf = ""
+    var acc = LineAcc()
     when defined(posix):
-      readAvailableOutput(p, rawOut, lineBuf, onLine)
+      readAvailableOutput(p, rawOut, acc, onLine)
     else:
       let outStream = p.outputStream
       var partialShown = false
@@ -535,10 +556,10 @@ export DEBIAN_FRONTEND=noninteractive
           suppress = true
           continue
         if ch == '\n':
-          emitCompleteLine(rawOut, lineBuf, onLine, partialShown, partialText, suppress)
-        elif ch != '\r':
-          lineBuf.add ch
-      emitFinalPartial(rawOut, lineBuf, onLine, partialShown, partialText, suppress)
+          emitCompleteLine(rawOut, acc, onLine, partialShown, partialText, suppress)
+        else:
+          feedLineChar(acc, ch)
+      emitFinalPartial(rawOut, acc, onLine, partialShown, partialText, suppress)
   finally:
     cancelled = stopToolCancelWatcher()
     timedOut = stopToolTimeoutWatcher()

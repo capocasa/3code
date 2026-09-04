@@ -1189,6 +1189,78 @@ suite "terminal visual contract":
     tty.send "\n"
     tty.expectInHistory "foo 01bar 2baz"
 
+  test "curl-style CR meter rewrites one viewport line, never stacks snapshots":
+    # The omarchy-ISO flicker: curl's classic progress meter redraws the
+    # same line with \r hundreds of times, emitting no \n until done. The
+    # reader used to strip \r and append every snapshot, so each 700ms
+    # partial flush grew an unbounded multi-snapshot mega-line; the
+    # wrapped block outgrew the screen and the 80ms repaint flickered
+    # blank/content while growth-scrolls buried the prompt. CR must mean
+    # "line restart": the viewport shows one meter line whose text
+    # updates, the final transcript holds only the last snapshot.
+    let root = newFixture("cr_meter")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "content": "Downloading.",
+        "contentChunks": ["Downloading."],
+        "tool_calls": [
+          toolCall("call_meter", "bash", %*{
+            "command": "i=0; while [ $i -lt 12 ]; do " &
+              "printf '  %d%%  28.13M  28.13M/s  0:03:31' \"$i\"; " &
+              "printf '\\r'; i=$((i+1)); sleep 0.15; done; printf '\\n'"
+          })
+        ],
+        "usage": {"promptTokens": 10, "completionTokens": 5,
+                  "totalTokens": 15, "cachedTokens": 0}
+      },
+      {
+        "role": "assistant",
+        "content": "Downloaded.",
+        "contentChunks": ["Downloaded."],
+        "usage": {"promptTokens": 10, "completionTokens": 5,
+                  "totalTokens": 15, "cachedTokens": 0}
+      }
+    ])
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+    tty.expect "❯"
+    tty.send "download the iso"
+    tty.send "\n"
+    tty.expectInHistory "$ "
+    tty.drain(700)
+    # Mid-run: exactly one meter line on the live screen, no snapshot
+    # stacking. CR must mean "line restart", so earlier snapshots are
+    # gone from the painted row, not concatenated onto it.
+    var meterRows = 0
+    for row in tty.screenText().splitLines():
+      if "28.13M/s" in row:
+        inc meterRows
+        doAssert(not ("0%" in row) or row.count("%") == 1,
+          "REGRESSION (cr-meter): viewport row stacks snapshots: " & row)
+    doAssert meterRows == 1:
+      "REGRESSION (cr-meter): expected 1 live meter row, got " & $meterRows
+    tty.drain(2500)
+    # Final transcript: exactly one committed meter row, holding one
+    # snapshot, not the concatenated rewrite history.
+    var meterRowsAfter = 0
+    var snapshots = 0
+    for row in tty.screenText().splitLines():
+      if "28.13M/s" in row and not ("$ i=0" in row):
+        inc meterRowsAfter
+        snapshots += row.count("%")
+        doAssert(not ("0%" in row and row.count("%") > 1),
+          "REGRESSION (cr-meter): committed row stacks snapshots: " & row)
+    doAssert meterRowsAfter == 1 and snapshots == 1:
+      "REGRESSION (cr-meter): committed meter rows " & $meterRowsAfter &
+        " snapshots " & $snapshots & " != 1/1 (history in scrollback)"
+    tty.expectInHistory "Downloaded."
+    tty.expectOnScreen "❯"
+    tty.expectAlive()
+
   test "ctrl-c during bash tool then prompt accepts input":
     let root = newFixture("ctrlc_during_bash")
     writeConfiguredProvider(root)
