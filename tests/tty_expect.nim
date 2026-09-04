@@ -107,6 +107,13 @@ type
     tickerCommandFd*: FdLike
     tickerAckFd*: FdLike
     apiContinueFd*: FdLike
+    ## Bytes of an escape sequence cut off at the end of the last PTY
+    ## read. ttty's CSI parser drops a truncated sequence and prints its
+    ## tail as literal text when the rest arrives in the next chunk — xterm
+    ## buffers and completes it. Hold the incomplete prefix here and
+    ## prepend it to the next chunk so the grid always sees whole
+    ## sequences (model-vs-physical desync class).
+    pendingEsc*: string
 
 const
   DefaultTtyCols* = 120
@@ -230,32 +237,84 @@ const
   SyncBegin = "\x1b[?2026h"
   SyncEnd = "\x1b[?2026l"
 
-proc feedGridChunk(s: TtySession; chunk: string) =
+proc splitIncompleteEscape*(bytes: string): tuple[complete, pending: string] =
+  ## Split `bytes` into the prefix that ends on a whole escape sequence and
+  ## a trailing incomplete one. A CSI sequence whose final byte has not
+  ## arrived yet must not be fed to the grid: ttty's parser drops the
+  ## truncated head and prints the tail as literal text when it arrives in
+  ## the next chunk, while a real terminal buffers until the final byte.
+  ## A lone trailing ESC is held too (its `[` may be the next chunk's first
+  ## byte); anything after ESC that is not `[` is complete by definition.
+  if bytes.len == 0:
+    return
+  var i = 0
+  var cut = -1
+  while i < bytes.len:
+    if bytes[i] == '\x1b':
+      if i + 1 >= bytes.len:
+        cut = i
+        break
+      if bytes[i + 1] == '[':
+        var j = i + 2
+        # A private-marker `?` is part of the sequence; params are digits
+        # and `;` (ttty's parser ignores other intermediates, but any byte
+        # outside final range still means "not done").
+        if j < bytes.len and bytes[j] == '?':
+          inc j
+        while j < bytes.len and bytes[j] notin {'@'..'~'}:
+          inc j
+        if j >= bytes.len:
+          cut = i
+          break
+        i = j + 1
+        continue
+      # Non-CSI escape (OSC, SS3, ESC-key): ttty prints the payload as
+      # text anyway; only a trailing lone ESC can extend.
+      if i + 2 >= bytes.len and i + 1 < bytes.len:
+        cut = i
+        break
+    inc i
+  if cut >= 0:
+    result.complete = bytes[0 ..< cut]
+    result.pending = bytes[cut ..< bytes.len]
+  else:
+    result.complete = bytes
+
+proc feedGridChunk*(s: TtySession; chunk: string) =
   ## Feed the grid incrementally, splitting on sync-burst boundaries so
   ## each SyncBegin..SyncEnd render is committed as its own frame with the
   ## grid in the state that burst produced. Feeding the whole chunk at once
   ## would snapshot the final grid for every intermediate SyncEnd, losing
   ## intermediate render states and causing boundary drift when the PTY
-  ## delivers multiple bursts in one read().
+  ## delivers multiple bursts in one read(). Incomplete escape sequences
+  ## at the chunk tail are buffered in `pendingEsc` and completed by the
+  ## next chunk, mirroring a real terminal's escape parser.
   if chunk.len == 0:
     return
   s.raw.add chunk
+  var text =
+    if s.pendingEsc.len > 0:
+      s.pendingEsc & chunk
+    else:
+      chunk
+  let (bytes, pending) = splitIncompleteEscape(text)
+  s.pendingEsc = pending
   var i = 0
-  while i < chunk.len:
-    let nextBegin = chunk.find(SyncBegin, i)
-    let nextEnd = chunk.find(SyncEnd, i)
+  while i < bytes.len:
+    let nextBegin = bytes.find(SyncBegin, i)
+    let nextEnd = bytes.find(SyncEnd, i)
     if nextBegin < 0 and nextEnd < 0:
-      s.grid.feed chunk[i ..< chunk.len].stripCsiWithIntermediates()
+      s.grid.feed bytes[i ..< bytes.len].stripCsiWithIntermediates()
       s.markFrameDirty()
       break
     if nextBegin >= 0 and (nextEnd < 0 or nextBegin < nextEnd):
       if nextBegin > i:
-        s.grid.feed chunk[i ..< nextBegin].stripCsiWithIntermediates()
+        s.grid.feed bytes[i ..< nextBegin].stripCsiWithIntermediates()
         s.markFrameDirty()
       inc s.syncDepth
       i = nextBegin + SyncBegin.len
     else:
-      s.grid.feed chunk[i ..< nextEnd].stripCsiWithIntermediates()
+      s.grid.feed bytes[i ..< nextEnd].stripCsiWithIntermediates()
       s.markFrameDirty()
       if s.syncDepth > 0:
         dec s.syncDepth
