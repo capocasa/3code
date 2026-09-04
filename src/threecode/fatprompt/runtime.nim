@@ -1333,7 +1333,7 @@ proc partialContentRows(s: LiveMarkdownStream): seq[string] =
   ## chunk) until a newline commits them to real scrollback.
   let termW = max(1, try: terminalWidth() except CatchableError: 80)
   let bodyW = max(1, termW - 2)
-  let styled = assistantTextBytes(applyInlineMd(s.pendingLine))
+  let styled = assistantTextBytes(applyInlineMd(stripCheckpointMarkers(s.pendingLine)))
   if s.md.firstEmit:
     let chunks = wrapAnsi(styled, bodyW)
     if chunks.len == 0:
@@ -1387,8 +1387,15 @@ proc commitPendingLine(s: var LiveMarkdownStream, slurpedNow: int) =
   if s.pendingBlank:
     s.pendingBlank = false
     s.commitBlankLine()
+  let stripped = stripCheckpointMarkers(s.pendingLine)
+  if stripped.strip.len == 0:
+    # Marker-only line (harness tag or model echo): nothing to paint.
+    # The line ends here, so the accumulated text is discarded; keeping
+    # it in pendingLine would glue it to the next line's prose.
+    s.pendingLine = ""
+    return
   let isFirstLine = s.md.firstEmit
-  let body = s.captureMd(s.pendingLine)
+  let body = s.captureMd(stripped)
   s.pendingLine = ""
   let rendered =
     if isFirstLine and body.len > 0:

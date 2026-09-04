@@ -471,6 +471,44 @@ proc commitTranscriptItem(formatBody: proc(): string; restoreEditor = true;
   bytes.finishTranscriptItem()
   commitTranscriptBytes(bytes, restoreEditor)
 
+proc tagCheckpoint*(msg: JsonNode, id: int) =
+  ## Prefix an assistant message's content with a `[checkpoint N]` marker
+  ## so a dmail-capable model can name a revert target. Only tagged for
+  ## profiles whose tool schema includes `dmail`; every other family
+  ## passes messages through untouched (no wire diff, no test churn).
+  ## Skips nil content (tool-call-only messages) so the wire shape of the
+  ## string-vs-null content field is preserved.
+  if msg.kind != JObject: return
+  let content = msg{"content"}
+  if content == nil or content.kind != JString: return
+  content.str = "[checkpoint " & $id & "]\n" & content.str
+
+proc revertHistory*(messages: var JsonNode, checkpoint: int): bool =
+  ## Truncate `messages` just before the assistant message whose content
+  ## carries the `[checkpoint N]` marker. Orphaned tool results at the new
+  ## tail are dropped too (the summarizer walks back from tool messages
+  ## for the same reason; their assistant owner may sit before the
+  ## checkpoint). Returns false when no marker matches; the caller leaves
+  ## the conversation untouched.
+  if messages == nil or messages.kind != JArray: return false
+  let marker = "[checkpoint " & $checkpoint & "]"
+  var cut = -1
+  for i in countdown(messages.len - 1, 1):
+    let m = messages[i]
+    if m.kind != JObject or m{"role"}.getStr != "assistant": continue
+    let content = m{"content"}
+    if content != nil and content.kind == JString and
+       content.str.startsWith(marker):
+      cut = i
+      break
+  if cut < 0: return false
+  # Everything before the tagged message survives as-is: any tool result
+  # in there has its assistant owner right before it, also kept. (This is
+  # different from the summarizer's walk-back, which keeps a TAIL and
+  # must not start it on a tool message; here we keep a PREFIX.)
+  messages.elems.setLen(cut)
+  true
+
 proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
   ## Returns true if the turn was interrupted by the user (Ctrl-C / ESC).
   ## Callers use this to skip end-of-turn side effects like desktop
@@ -508,6 +546,17 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     steerAttempts = 0              # "stop"/unknown steering retries
     emptyRetries = 0               # bare empty-reply resends after smart-handling
     flailDet: FlailDetector        # identical-consecutive-tool-call guard
+    nextCheckpoint = 0             # id of the marker on the next assistant message
+  # dmail is offered only when the active profile's tool schema includes
+  # it (kimi family); the marker tagging below keys off the same flag.
+  var dmailEnabled = false
+  if p.family == "kimi":
+    let tools = setup(p).tools
+    if tools != nil and tools.kind == JArray:
+      for t in tools:
+        if t{"function"}{"name"}.getStr == "dmail":
+          dmailEnabled = true
+          break
   const
     MaxLengthEscalations = 3
     MaxSteerAttempts = 1
@@ -654,6 +703,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       endTurnAfterTranscriptAppend()
       turnEnded = true
       break
+    if dmailEnabled:
+      tagCheckpoint(msg, nextCheckpoint)
+      inc nextCheckpoint
     messages.add msg
     saveSession(session, messages)
     let window = contextWindowFor(p)
@@ -707,6 +759,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           lastCommitIdx = i
       var queuedUser = false # User submitted while tools were running.
       var cleared = false  # akClear: rebuild and continue loop
+      var dmailRevert = false  # akDMail: history truncated, continue loop
       var flailAbort = false  # flail detector fired past all escalations
       for i in 0 ..< toolCalls.len:
         let tc = toolCalls[i]
@@ -852,6 +905,34 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           # before the model-initiated follow-up call. The interactive loop
           # drains the queued user text and starts the next user turn.
           queuedUser = true
+        if act.kind == akDMail:
+          # Model-initiated context pruning: pair the tool_call, then
+          # truncate the conversation to just before the assistant message
+          # carrying the requested `[checkpoint N]` marker and append the
+          # dmail as a user message. Everything after the marker
+          # (including the assistant message that requested this dmail
+          # and the tool result just paired) is discarded; the filesystem
+          # is NOT reverted. An invalid checkpoint keeps the conversation
+          # untouched and reports back in the tool result instead.
+          let cp = try: parseInt(act.path) except CatchableError: -1
+          let ok = dmailEnabled and cp >= 0 and
+                   revertHistory(messages, cp)
+          if ok:
+            messages.add %*{"role": "user", "content":
+              "[dmail from your future self] " & act.body}
+            saveSession(session, messages)
+            dmailRevert = true
+            commitTranscriptBytes(
+              hintLnS("· dmail to checkpoint " & $cp & " (" &
+                humanTokens(session.lastPromptTokens) & " prompt tokens folded)"),
+              true)
+            break
+          else:
+            messages.add %*{"role": "tool", "tool_call_id": id,
+              "content": "ERROR: checkpoint " & act.path &
+                " not found. Checkpoints are the `[checkpoint N]` markers " &
+                "on your assistant messages; pick one of those."}
+            continue
         if act.kind == akClear:
           # Rebuild: fresh system prompt + synthetic user message, then
           # continue the loop so the model processes the prompt.
@@ -892,6 +973,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         deferredReceipt = ""
       if cleared:
         emitFatPromptEvent clearPendingHintEvent()
+        continue
+      if dmailRevert:
         continue
       if flailAbort:
         saveSession(session, messages)

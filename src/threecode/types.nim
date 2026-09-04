@@ -88,7 +88,7 @@ type
     ## One item in a model-emitted `update_plan` / `todo` list.
     text*: string
     status*: string
-  ActionKind* = enum akBash, akRead, akWrite, akPatch, akApplyPatch, akPlan, akWebSearch, akWebFetch, akClear, akError
+  ActionKind* = enum akBash, akRead, akWrite, akPatch, akApplyPatch, akPlan, akWebSearch, akWebFetch, akClear, akDMail, akError
   Action* = object
     ## The parsed, tool-agnostic representation of a single model tool call.
     ## `runAction` in actions.nim consumes this and produces the tool result.

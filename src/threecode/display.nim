@@ -500,11 +500,37 @@ proc assistantBulletBytes*(): string =
 proc writeAssistantBullet*(outFile: File = stdout) =
   outFile.write assistantBulletBytes()
 
+proc stripCheckpointMarkers*(content: string): string =
+  ## Remove dmail `[checkpoint N]` lines for display. The markers stay in
+  ## the message content (the model reads them, and the session file
+  ## keeps them), but painting them puts harness bookkeeping on screen
+  ## and, worse, teaches the model to echo the marker itself (a marker in
+  ## the visible stream gets parroted back as content). Stripping is
+  ## line-based: a line whose only text is one marker drops entirely.
+  ## Multiple markers on one line (an echoed batch) all drop, keeping any
+  ## surrounding text.
+  result = content
+  while true:
+    let start = result.find("[checkpoint ")
+    if start < 0: break
+    let close = result.find(']', start)
+    if close < 0: break
+    let numStr = result[start + 12 ..< close]
+    if numStr.len == 0 or not numStr.allCharsInSet({'0'..'9'}): break
+    # Drop the marker and one adjacent newline so no blank row remains.
+    if close + 1 < result.len and result[close + 1] == '\n':
+      result.delete(start .. close + 1)
+    elif start > 0 and result[start - 1] == '\n':
+      result.delete(start - 1 .. close)
+    else:
+      result.delete(start .. close)
+
 proc renderAssistantContentBytes*(content: string): string =
   ## String form of `renderAssistantContent`: the assistant item body
   ## (bullet + styled markdown) without touching a File. Used by the
   ## controller's transcript path, which owns when the bytes hit the
   ## terminal.
+  let content = stripCheckpointMarkers(content)
   if content.strip.len == 0: return
   var st = initMarkdownState()
   result = assistantBulletBytes()
@@ -522,6 +548,7 @@ proc toolIcon*(kind: ActionKind): string =
   of akWebSearch: "⌕"
   of akWebFetch: "⇊"
   of akClear: "⟳"
+  of akDMail: "✉"
   of akError: "✕"
 
 proc toolBannerBytes*(banner: string; kind: ActionKind; code: int;
