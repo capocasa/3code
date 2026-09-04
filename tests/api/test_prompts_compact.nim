@@ -148,6 +148,13 @@ suite "prompts: defaultReasoningsFor":
     check defaultReasoningsFor("novita", "zai-org/glm-5.3-flash", "glm") == @["low", "high", "max"]
     check defaultReasoningsFor("venice", "z-ai-glm-5-3-flash", "glm") == @["low", "high", "max"]
 
+  test "omen-alpha exposes low/high only (gateway caps effort at high)":
+    check defaultReasoningsFor("opencodego", "omen-alpha", "glm") == @["low", "high"]
+    check knownGoodReasonings("opencodego", "omen-alpha") == @["low", "high"]
+    check knownGoodFamily("opencodego", "omen-alpha") == "glm"
+    check knownGoodContextWindow("opencodego", "omen-alpha") == 500_000
+    check knownGoodGeneration("opencodego", "omen-alpha").maxTokens == 65_536
+
   test "kimi exposes off/on":
     check defaultReasoningsFor("nvidia", "moonshotai/kimi-k2.6", "kimi") ==
       @["off", "on"]

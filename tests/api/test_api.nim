@@ -214,6 +214,8 @@ suite "api request shaping":
     check knownGoodReasonings("zaicode", "glm-5.3-flash") == @["low", "high", "max"]
     check knownGoodReasonings("opencodego", "glm-5.3-flash") == @["low", "high", "max"]
     check knownGoodReasonings("openrouter", "z-ai/glm-5.3-flash") == @["low", "high", "max"]
+    # omen-alpha: same forced-thinking surface, gateway caps effort at high
+    check knownGoodReasonings("opencodego", "omen-alpha") == @["low", "high"]
     block zaiEffort:
       var body = %*{"stream": true}
       let p = Profile(name: "zaicode.glm-5.3", family: "glm",
@@ -237,6 +239,15 @@ suite "api request shaping":
                       model: "glm-5.3", reasoning: "low")
       applyReasoning(p, body)
       check body{"reasoning"}{"effort"}.getStr == "low"
+    block omenEffort:
+      var body = %*{"stream": true}
+      let p = Profile(name: "opencodego.omen-alpha", family: "glm",
+                      version: "5", variant: "3",
+                      model: "omen-alpha", reasoning: "high")
+      applyReasoning(p, body)
+      check body{"reasoning"}{"effort"}.getStr == "high"
+      check "reasoning_effort" notin body
+      check "thinking" notin body
     block flashEffort:
       var body = %*{"stream": true}
       let p = Profile(name: "zai.glm-5.3-flash", family: "glm",

@@ -294,6 +294,11 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencodego", "hy3-preview", "hy", "3", "preview", "no_think", 0.2, 8192, false, 262_144),
     ("opencodego", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, false, 1_000_000),
     ("opencodego", "glm-5.3-flash", "glm", "5", "3-flash", "high", 0.2, 65536, false, 1_000_000),
+    # omen-alpha (OpenCode Go stealth release, Sep 2026): tokenizer and
+    # reasoning_content wire shape match the GLM line, so it rides the glm
+    # prompt and the 5.3 effort surface. Effort ladder is low/high only;
+    # 500k window, 128k output.
+    ("opencodego", "omen-alpha", "glm", "5", "3", "high", 0.2, 65536, false, 500_000),
     ("opencodego", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, false, 1_000_000),
     ("opencodego", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, false, 200_000),
     ("opencodego", "glm-5", "glm", "5", "", "on", 0.2, 8192, false, 200_000),
@@ -3042,6 +3047,8 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # no off. Variant encodes the minor version digit (4.7 -> "7",
         # 5.1 -> "1", 5.2 -> "2", 5.3 -> "3") and may carry a suffix.
         if combo.version == "5" and combo.variant.startsWith("2"): return @["off", "high", "max"]
+        # omen-alpha rides the 5.3 surface but its gateway tops out at high
+        if combo.model == "omen-alpha": return @["low", "high"]
         if combo.version == "5" and combo.variant.startsWith("3"): return @["low", "high", "max"]
         return @["off", "on"]
       if fam == "0xalpha":

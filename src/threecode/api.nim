@@ -1868,8 +1868,8 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
   ##   accepts only those two effort levels and ignores the field on older
   ##   GLM (which think whenever the parameter is absent).
   ## - `reasoning: {effort: ...}` on OpenRouter for GLM-5.2 (and the
-  ##   OpenCode gateways serving 5.3); OpenRouter maps `high` to high and
-  ##   `max` to its native `xhigh`.
+  ##   OpenCode gateways serving 5.3 and omen-alpha); OpenRouter maps
+  ##   `high` to high and `max` to its native `xhigh`.
   ## - `chat_template_kwargs.enable_thinking` (bool) on vLLM stacks (nvidia,
   ##   hetzner); other vLLM GLM providers (nebius, deepinfra, fireworks)
   ##   accept the same knob but always think when it's omitted.
@@ -1911,7 +1911,8 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
       else: body["reasoning_effort"] = %"high"
   of "openrouter", "opencode", "opencodego":
     if glm53:
-      # 5.3 has no off; gateways normalize to reasoning.effort passthrough
+      # 5.3 (and omen-alpha, same surface) has no off; gateways
+      # normalize to reasoning.effort passthrough
       case p.reasoning
       of "low", "high", "max": body["reasoning"] = %*{"effort": p.reasoning}
       else: discard
