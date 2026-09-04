@@ -384,33 +384,30 @@ proc commitTranscriptItem(formatBody: proc(): string; restoreEditor = true;
   commitTranscriptBytes(bytes, restoreEditor)
 
 proc tagCheckpoint*(msg: JsonNode, id: int) =
-  ## Prefix an assistant message's content with a `[checkpoint N]` marker
-  ## so a dmail-capable model can name a revert target. Only tagged for
-  ## profiles whose tool schema includes `dmail`; every other family
-  ## passes messages through untouched (no wire diff, no test churn).
-  ## Skips nil content (tool-call-only messages) so the wire shape of the
-  ## string-vs-null content field is preserved.
+  ## Tag an assistant message with a `checkpoint` id so a dmail-capable
+  ## model can name a revert target. The id travels as a separate field,
+  ## never inside the content: a marker in the content stream is visible
+  ## to the model, which echoes it back (repeating `[checkpoint N]` lines
+  ## on screen and in its own output). Only tagged for profiles whose
+  ## tool schema includes `dmail`; every other family passes messages
+  ## through untouched. `stripInternalFields` removes the field before
+  ## the wire, so no provider ever sees it.
   if msg.kind != JObject: return
-  let content = msg{"content"}
-  if content == nil or content.kind != JString: return
-  content.str = "[checkpoint " & $id & "]\n" & content.str
+  msg["checkpoint"] = %id
 
 proc revertHistory*(messages: var JsonNode, checkpoint: int): bool =
-  ## Truncate `messages` just before the assistant message whose content
-  ## carries the `[checkpoint N]` marker. Orphaned tool results at the new
-  ## tail are dropped too (the summarizer walks back from tool messages
-  ## for the same reason; their assistant owner may sit before the
-  ## checkpoint). Returns false when no marker matches; the caller leaves
-  ## the conversation untouched.
+  ## Truncate `messages` just before the assistant message tagged with
+  ## `checkpoint`. Orphaned tool results at the new tail are dropped too
+  ## (the summarizer walks back from tool messages for the same reason;
+  ## their assistant owner may sit before the checkpoint). Returns false
+  ## when no tag matches; the caller leaves the conversation untouched.
   if messages == nil or messages.kind != JArray: return false
-  let marker = "[checkpoint " & $checkpoint & "]"
   var cut = -1
   for i in countdown(messages.len - 1, 1):
     let m = messages[i]
     if m.kind != JObject or m{"role"}.getStr != "assistant": continue
-    let content = m{"content"}
-    if content != nil and content.kind == JString and
-       content.str.startsWith(marker):
+    let cp = m{"checkpoint"}
+    if cp != nil and cp.kind == JInt and cp.getInt == checkpoint:
       cut = i
       break
   if cut < 0: return false
@@ -820,7 +817,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         if act.kind == akDMail:
           # Model-initiated context pruning: pair the tool_call, then
           # truncate the conversation to just before the assistant message
-          # carrying the requested `[checkpoint N]` marker and append the
+          # carrying the requested checkpoint tag and append the
           # dmail as a user message. Everything after the marker
           # (including the assistant message that requested this dmail
           # and the tool result just paired) is discarded; the filesystem
@@ -842,8 +839,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           else:
             messages.add %*{"role": "tool", "tool_call_id": id,
               "content": "ERROR: checkpoint " & act.path &
-                " not found. Checkpoints are the `[checkpoint N]` markers " &
-                "on your assistant messages; pick one of those."}
+                " not found. Checkpoints are the tags on your assistant " &
+                "messages (see the dmail tool description); pick one of those."}
             continue
         if act.kind == akClear:
           # Rebuild: fresh system prompt + synthetic user message, then

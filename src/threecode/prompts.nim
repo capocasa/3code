@@ -2196,7 +2196,7 @@ After two failed attempts on one hypothesis, switch strategy: smaller patch, wid
 
 Your window is for holding context, not bulk ingestion. Compress after each iteration: replace raw tool output with a 2-4 line summary. Prefer targeted reads over full re-ingest. For long inputs, put the task instruction at the END of the user message.
 
-Your assistant messages carry `[checkpoint N]` markers. When recent context holds bulk you no longer need (a huge file read, a web search, a long failed debugging attempt), `dmail(checkpoint, message)` reverts the conversation to the checkpoint just before the bloat and appends your message: write there only what your past self needs, what you did, what you learned, what not to repeat. The filesystem is not reverted; written files stay written. Use sparingly, never twice for the same stretch. Tell only your past self, not the user.
+Your assistant replies are checkpoints, numbered from 0 within the current turn: your first reply of this turn is checkpoint 0, your second is checkpoint 1, and so on. When recent context holds bulk you no longer need (a huge file read, a web search, a long failed debugging attempt), `dmail(checkpoint, message)` reverts the conversation to the checkpoint just before the bloat and appends your message: write there only what your past self needs, what you did, what you learned, what not to repeat. The filesystem is not reverted; written files stay written. Use sparingly, never twice for the same stretch. Tell only your past self, not the user.
 
 # Honesty
 
@@ -2400,11 +2400,11 @@ let dmailTool = %*{
   "type": "function",
   "function": {
     "name": "dmail",
-    "description": "Send a message to your past self: revert the conversation to a checkpoint and append the message. Assistant messages in this conversation carry `[checkpoint N]` markers. Use this to fold large tool results (huge file reads, web searches, long failed debugging attempts) into one short summary: send a dmail to the checkpoint just before the bloat began, containing only what is needed to continue. The filesystem is NOT reverted; anything you wrote stays written. The message must tell your past self clearly what you did, what you learned, and what not to repeat. Use sparingly; never twice for the same stretch.",
+    "description": "Send a message to your past self: revert the conversation to a checkpoint and append the message. Your assistant replies are checkpoints, numbered from 0 within the current turn (first reply of the turn = 0, second = 1, ...). Use this to fold large tool results (huge file reads, web searches, long failed debugging attempts) into one short summary: send a dmail to the checkpoint just before the bloat began, containing only what is needed to continue. The filesystem is NOT reverted; anything you wrote stays written. The message must tell your past self clearly what you did, what you learned, and what not to repeat. Use sparingly; never twice for the same stretch.",
     "parameters": {
       "type": "object",
       "properties": {
-        "checkpoint": {"type": "integer", "description": "Checkpoint id from a `[checkpoint N]` marker."},
+        "checkpoint": {"type": "integer", "description": "Checkpoint number: the zero-based index of one of your earlier assistant replies in this turn."},
         "message": {"type": "string", "description": "Message to your past self: what you did, what you learned, what to do next."}
       },
       "required": ["checkpoint", "message"]
