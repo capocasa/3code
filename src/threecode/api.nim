@@ -2096,6 +2096,16 @@ proc applyQwenReasoning(p: Profile, body: JsonNode) =
   ## the top-level `reasoning_effort` string instead, but only the
   ## values `none` (no thinking) and `default` (think) — `low`/`high`
   ## are rejected. `on` maps to `default`, `off` to `none`.
+  ##
+  ## DashScope (first-party qwen/qwen-cn/qwen-us compatible-mode) also
+  ## rejects `chat_template_kwargs`: it takes a top-level
+  ## `enable_thinking` boolean instead.
+  if providerOf(p) in ["qwen", "qwen-cn", "qwen-us"]:
+    case p.reasoning
+    of "off": body["enable_thinking"] = %false
+    of "on": body["enable_thinking"] = %true
+    else: discard
+    return
   if providerOf(p) == "groq":
     case p.reasoning
     of "off": body["reasoning_effort"] = %"none"
