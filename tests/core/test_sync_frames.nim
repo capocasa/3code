@@ -41,6 +41,16 @@ proc captureStdout(body: proc()): string =
   removeFile(outPath)
 
 suite "engine transcript commits: balanced DEC 2026 frames":
+  # Sync output is opt-in since the unconditional-2026-off change
+  # (THREECODE_FORCE_SYNC_OUTPUT=1 re-enables); the balance guard only
+  # means anything when it is on, so turn it on for these two tests.
+  # putEnv at suite scope would leak into later suites in the same binary;
+  # setup/teardown keeps it scoped.
+  setup:
+    putEnv("THREECODE_FORCE_SYNC_OUTPUT", "1")
+  teardown:
+    putEnv("THREECODE_FORCE_SYNC_OUTPUT", "0")
+
   test "liveAnchored commit emits exactly one sync frame":
     var e: TerminalEngine
     var ed = initEditor(historyFile = "")

@@ -22,14 +22,26 @@ import threecode/[fatprompt, terminal as termui]
 
 {.push checks: off.}
 
+proc waitForGuiPaint(timeoutMs = 5000): bool =
+  ## Block until the gui thread has painted at least one frame. A fixed
+  ## sleep here was the flake: under parallel-suite load the sleep expired
+  ## before the thread was ever scheduled, and the test then asserted on a
+  ## thread that had not entered its render loop. The paint counter is the
+  ## signal; the timeout only bounds a dead thread.
+  let deadline = epochTime() + timeoutMs.float / 1000.0
+  while epochTime() < deadline:
+    if guiPaintCount() > 0: return true
+    sleep 1
+  false
+
 suite "spinner join deadlock":
   test "stopSpinner completes when called while holding the terminal lock":
     # Start the real spinner. It paints to stdout (ANSI codes; harmless when
     # stdout is redirected, which it is under the test runner).
     startSpinner("test")
-    # Give the render thread a moment to enter its loop so the join has a
+    # Wait for the render thread to actually paint, so the join has a
     # thread mid-render to contend with.
-    sleep 150
+    require waitForGuiPaint()
     # Hold the terminal lock on THIS thread, then stop the spinner. Without
     # the fix, joinThread inside stopSpinner blocks forever here.
     termui.acquireTerminalWrite()
@@ -47,7 +59,7 @@ suite "spinner join deadlock":
   test "stopBarTick completes when called while holding the terminal lock":
     # Same hazard: barTickLoop paints via renderFooter, which needs the lock.
     discard startBarTick("tool")
-    sleep 150
+    require waitForGuiPaint()
     termui.acquireTerminalWrite()
     check termui.terminalLockDepth == 1
     let t0 = epochTime()

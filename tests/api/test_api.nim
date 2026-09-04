@@ -506,7 +506,7 @@ suite "api request shaping":
     "type": "function",
     "function": {
       "name": "bash",
-      "arguments": "{\"command\":\"sleep 0.3; echo tooldone\"}"
+      "arguments": "{\"command\":\"touch started; sleep 0.3; echo tooldone\"}"
     }
   }]
 },{
@@ -514,7 +514,7 @@ suite "api request shaping":
   "content": "SHOULD_NOT_BE_CALLED"
 }]""")
     writeFile(probePath, """
-import std/[json, locks, os, strutils]
+import std/[json, locks, os, strutils, times]
 import threecode
 
 var messages = %*[
@@ -527,7 +527,14 @@ session.readCache = newReadCache()
 let profile = Profile(name: "stub", family: "glm", model: "stub-model")
 
 proc queueAutosend() {.thread, gcsafe.} =
-  sleep 100
+  # Signal, not sleep: wait until the bash tool has actually started (its
+  # marker file), so the queued line always lands inside the tool window
+  # regardless of how loaded the machine is. The 30s bound turns "the
+  # marker never appeared" (tool failed to run) into a fast queue that the
+  # probe's assertions then fail loudly, instead of hanging the suite.
+  let deadline = epochTime() + 30.0
+  while not fileExists("started") and epochTime() < deadline:
+    sleep 1
   {.cast(gcsafe).}:
     pushInputEvent(InputEvent(kind: ieLine, text: "queued", echoRows: 1))
 
@@ -570,6 +577,7 @@ doAssert "SHOULD_NOT_BE_CALLED" notin $messages
   "role": "assistant",
   "content": null,
   "preStreamDelayMs": 300,
+  "markerPath": "started",
   "tool_calls": [{
     "id": "call_1",
     "type": "function",
@@ -583,7 +591,7 @@ doAssert "SHOULD_NOT_BE_CALLED" notin $messages
   "content": "SHOULD_NOT_BE_CALLED"
 }]""")
     writeFile(probePath, """
-import std/[json, locks, os, strutils]
+import std/[json, locks, os, strutils, times]
 import threecode
 
 var messages = %*[
@@ -596,7 +604,11 @@ session.readCache = newReadCache()
 let profile = Profile(name: "stub", family: "glm", model: "stub-model")
 
 proc queueAutosend() {.thread, gcsafe.} =
-  sleep 100
+  # Signal, not sleep (see the tool-window test above). Bounded so a
+  # missing marker fails the assertions instead of hanging the probe.
+  let deadline = epochTime() + 30.0
+  while not fileExists("started") and epochTime() < deadline:
+    sleep 1
   {.cast(gcsafe).}:
     pushInputEvent(InputEvent(kind: ieLine, text: "queued", echoRows: 1))
 
@@ -645,7 +657,7 @@ doAssert "SHOULD_NOT_BE_CALLED" notin $messages
     "type": "function",
     "function": {
       "name": "bash",
-      "arguments": "{\"command\":\"sleep 0.3; echo first-tool\"}"
+      "arguments": "{\"command\":\"touch started; sleep 0.3; echo first-tool\"}"
     }
   },{
     "id": "call_2",
@@ -660,7 +672,7 @@ doAssert "SHOULD_NOT_BE_CALLED" notin $messages
   "content": "SHOULD_NOT_BE_CALLED"
 }]""")
     writeFile(probePath, """
-import std/[json, locks, os, strutils]
+import std/[json, locks, os, strutils, times]
 import threecode
 
 var messages = %*[
@@ -673,7 +685,11 @@ session.readCache = newReadCache()
 let profile = Profile(name: "stub", family: "glm", model: "stub-model")
 
 proc queueAutosend() {.thread, gcsafe.} =
-  sleep 100
+  # Signal, not sleep (see the tool-window test above). Bounded so a
+  # missing marker fails the assertions instead of hanging the probe.
+  let deadline = epochTime() + 30.0
+  while not fileExists("started") and epochTime() < deadline:
+    sleep 1
   {.cast(gcsafe).}:
     pushInputEvent(InputEvent(kind: ieLine, text: "queued", echoRows: 1))
 

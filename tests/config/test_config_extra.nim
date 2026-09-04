@@ -238,7 +238,10 @@ suite "config: known-good lookup with normalized pretty names":
     check knownGoodWireModel("kimicode", "k3") == "k3"
     check knownGoodWireModel("kimi", "kimi-k3-256k") == "kimi-k3"
     check knownGoodWireModel("openrouter", "qwen-3.8-27b") == "qwen/qwen3.8-27b"
-    # Distinct models and unknown ids are not rewritten.
+    # Distinct models and unknown ids are not rewritten. kimi-k2.6 is a
+    # listed kimicode combo (litellm direct-gateway row), so it resolves to
+    # itself, not ""; only off-table ids stay empty.
+    check knownGoodWireModel("kimicode", "kimi-k2.6") == "kimi-k2.6"
     check knownGoodWireModel("kimicode", "kimi-k2.5") == ""
     check knownGoodWireModel("kimicode", "weird-model") == ""
     # A designator sibling is not a qualifier tail of the base combo.

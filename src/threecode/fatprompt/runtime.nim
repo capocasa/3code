@@ -109,6 +109,7 @@ proc nextCommandSymbol*(): string =
 #     paths (`startContent`, `endTurn`) `stopGui` before reading
 #     `paintedFooterRows`, so no stale repaint can survive a transition.
 var guiStop: Atomic[bool]
+var guiPaintedFrames: Atomic[int]
 var guiRunning = false
 var guiThread: Thread[string]
 
@@ -891,6 +892,7 @@ proc guiLoop(unused: string) {.thread.} =
         paintedViewport = true
       of amIdle:
         discard  # nothing to animate; the controller paints idle frames
+      discard guiPaintedFrames.fetchAdd(1, moRelease)
       if testFrameMode():
         testSpinnerPainted.store(observedTestTick, moRelease)
         if paintedViewport:
@@ -989,12 +991,21 @@ proc ensureGuiStarted() =
   if not termengine.engineOutputEnabled: return
   ensureTestTickerControlStarted()
   guiStop.store(false, moRelaxed)
+  guiPaintedFrames.store(0, moRelaxed)
   testSpinnerRequested.store(0, moRelease)
   testSpinnerPainted.store(0, moRelease)
   viewportPaintRequested.store(0, moRelease)
   viewportPainted.store(0, moRelease)
   createThread(guiThread, guiLoop, "")
   guiRunning = true
+
+proc guiPaintCount*(): int =
+  ## Frames the gui thread has painted since it started. Tests wait on
+  ## this instead of sleeping a fixed interval for the thread to enter
+  ## its render loop: under parallel-suite load a fixed sleep can expire
+  ## before the thread was ever scheduled, so the test would assert on
+  ## a thread that never painted anything.
+  guiPaintedFrames.load(moAcquire)
 
 proc stopGui() =
   ## Signal the GUI thread to stop and join it. Joins with the terminal

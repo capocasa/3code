@@ -22,6 +22,15 @@ task test, "Run the test suite via testament (all, or named files)":
   # miscompare as expected output. Tests that can't run on a platform
   # self-disable via specs (disabled: "win"); see docs/windows-testing.md.
   #
+  # Several tests (core/test_cli_args, core/test_wall_bash,
+  # config/test_config_validation) exec the real `./3code` binary. Build it
+  # first so their availability does not depend on a prior manual build;
+  # a missing binary shows up as exit-127 failures that look like flaky
+  # parallel-race failures but are just ordering. nimscript cannot stat a
+  # path, so the staleness check (rebuild only when newer than src/) lives
+  # in the same shell command. Plain `nim c`, never `nimble build`, which
+  # resolves imports against a stale `nimble install`ed copy.
+  #
   # commandLineParams carries nimble's own flags plus any trailing file
   # args; we forward only the non-flag args so `nimble test foo.nim` runs
   # just that file, matching nimble's default runner UX. Nimscript has no
@@ -50,7 +59,11 @@ task test, "Run the test suite via testament (all, or named files)":
   else:
     for f in files:
       fcmds.add("nim c -r --path:src --path:tests " & f)
-  exec "sh -c 'if command -v testament >/dev/null 2>&1; then " &
+  let binstamp = "newest=0; for f in src/threecode.nim src/threecode/*.nim " &
+    "src/threecode/*/*.nim; do [ \"$f\" -nt 3code ] && newest=1; done; " &
+    "if [ $newest = 1 ]; then nim c -o:3code src/threecode.nim || exit 1; fi"
+  exec "sh -c '" & binstamp & "; " &
+    "if command -v testament >/dev/null 2>&1; then " &
     tcmds.join("; ") & "; " &
     "else echo \"Warning: testament not found, falling back to sequential run\" >&2; " &
     fcmds.join("; ") & "; fi'"

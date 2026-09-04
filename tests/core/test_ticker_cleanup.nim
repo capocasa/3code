@@ -8,9 +8,18 @@
 ## render path overwrites the ticker in place every frame, so cleanup owes
 ## no compensating removal: it must walk up exactly one row.
 
-import std/[os, strutils, unittest]
+import std/[os, strutils, times, unittest]
 import threecode/[fatprompt, terminal as termui]
 import ttty/grid
+
+proc waitForGuiPaint(timeoutMs = 5000): bool =
+  ## Block until the gui thread has painted at least one frame (see
+  ## test_spinner_join.nim; a fixed sleep here flakes under parallel load).
+  let deadline = epochTime() + timeoutMs.float / 1000.0
+  while epochTime() < deadline:
+    if guiPaintCount() > 0: return true
+    sleep 1
+  false
 
 suite "ticker cleanup":
   # This test captures the spinner's stdout by redirecting the global
@@ -30,7 +39,7 @@ suite "ticker cleanup":
       doAssert reopen(stdout, outPath, fmWrite)
       try:
         startSpinner("test")
-        sleep 200
+        doAssert waitForGuiPaint()
         stopSpinner(clearLiveFooter = false)
         stdout.flushFile
       finally:
