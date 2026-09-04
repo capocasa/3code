@@ -12,6 +12,10 @@ import threecode/engine
 import threecode/minline
 import threecode/fatprompt/rendering
 
+# Sync output is off by default now (see syncoutput.nim); the guard only
+# means something with 2026 emission live, so force it on for this suite.
+putEnv("THREECODE_FORCE_SYNC_OUTPUT", "1")
+
 proc count(s, sub: string): int =
   var i = 0
   while true:

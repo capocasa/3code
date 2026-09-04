@@ -596,6 +596,35 @@ proc releaseIdleSubmittedInput*() =
   ## single owner of this flag's lifecycle.
   inputIdleLinePending.store(false, moRelease)
 
+proc liveFatPromptFrame(): FooterFrame =
+  ## The footer frame the persistent prompt's editor redraws paint around:
+  ## the animating spinner/bar-tick frame while the GUI thread owns the
+  ## footer, the idle state frame otherwise. Single source so the erase
+  ## path (beginEditorRedraw) and the diff path (diffEditorFrame) can never
+  ## disagree about what sits above the editor.
+  if getFrameModel().mode == amIdle:
+    footerFrame(fatPromptState)
+  else:
+    currentFrameFromModel()
+
+proc diffEditorPaint(ed: var minline.LineEditor) =
+  ## The editor's `painter` while the persistent prompt is live: one
+  ## keystroke frame through the engine's row-diffing volatile painter,
+  ## replacing beginEditorRedraw's per-keystroke erase-and-repaint.
+  if inputModalActive.load(moAcquire):
+    # A modal wizard owns the editor and paints its field prompts flush at
+    # the cursor with no fat-prompt chrome: a standalone erase-and-repaint,
+    # exactly what fullRedraw does without a painter installed.
+    let bytes = ed.redrawBytes(synchronized = true)
+    ed.prevRowSpans = ed.renderRowSpans()
+    ed.write bytes
+    ed.redrawWrappedExternally = false
+    return
+  if not liveEditorFooterAnchored():
+    return
+  termengine.diffEditorFrame(ed, liveFatPromptFrame())
+  inputEditorReady.store(true, moRelease)
+
 proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
   ## Called by the editor before every redraw while a turn is active.
   ## The reserved footer height follows the editor's live rendered height
@@ -606,26 +635,8 @@ proc reserveEditorFooterForRedraw(ed: var minline.LineEditor) =
     return
   if not liveEditorFooterAnchored():
     return
-  let m = getFrameModel()
-  let frameModel =
-    case m.mode
-    of amSpinner:
-      spinnerFooterFrame(
-        if m.spinner.len > 0: m.spinner else: "○",
-        m.label, m.ticker, m.elapsed)
-    of amBarTick:
-      # The elapsed suffix is ephemeral (changes every tick); recompute it
-      # locally from the model's base label. The single GUI thread does the
-      # same computation when painting bar-tick frames.
-      let elapsed = (epochTime() - barTickStart).int
-      let label =
-        if m.label.hasElapsedSuffix: m.label
-        else: m.label & "  " & $elapsed & "s"
-      tokenBarFrame(label)
-    of amIdle:
-      footerFrame(fatPromptState)
   termengine.beginEditorRedraw(ed, inputEditorReady.load(moAcquire),
-                               frameModel)
+                               liveFatPromptFrame())
 
 var foregroundRedrawWrapped {.threadvar.}: bool
 var foregroundRedrawEditor {.threadvar.}: ptr minline.LineEditor
@@ -712,6 +723,7 @@ proc resetEditorRowModel*(ed: ptr minline.LineEditor) =
   ed[].renderSuffixCursor = false
   ed[].renderRow = 0
   ed[].echoRows = 0
+  ed[].prevRowSpans = @[]
 
 proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
                             beforeRepaint: proc() = nil;
@@ -2042,6 +2054,8 @@ proc inputThreadProc() {.thread.} =
       ed.renderSuffixCursor = false
     edPtr[].preRedraw = proc(ed: var minline.LineEditor) =
       reserveEditorFooterForRedraw(ed)
+    edPtr[].painter = proc(ed: var minline.LineEditor) =
+      diffEditorPaint(ed)
     edPtr[].postRedraw = proc(ed: var minline.LineEditor) =
       if inputModalActive.load(moAcquire):
         # The modal wizard owns the terminal during its prompts; the
@@ -2346,6 +2360,7 @@ proc inputThreadProc() {.thread.} =
     edPtr[].onCancelDeferredSubmit = nil
     edPtr[].preRedraw = nil
     edPtr[].postRedraw = nil
+    edPtr[].painter = nil
     edPtr[].editInEditor = nil
     edPtr[].deferSubmit = false
     edPtr[].renderSuffix = ""

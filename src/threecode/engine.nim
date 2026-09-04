@@ -132,6 +132,16 @@ proc editorRowsAboveCursor(ed: var minline.LineEditor): int =
   refreshEditorWidth(ed)
   min(ed.renderRow, max(1, minline.renderedRows(ed)) - 1)
 
+proc clampedFooterRows(e: TerminalEngine; frame: FooterFrame;
+                       termW: int): int =
+  ## The reserved rows may only be walked up when they are actually live
+  ## chrome. After a reserveFooter=false commit (initial-prompt submit,
+  ## oneshot clear) the cursor sits flush below the committed item: no gap
+  ## row exists yet, and walking up `rows` here would erase the committed
+  ## line above. Paint in place instead; the next footer paint creates the
+  ## gap in the editor row's place.
+  min(frame.rowsAboveEditor(termW), e.paintedFooterRows)
+
 proc viewportGapRows(e: TerminalEngine): int {.inline.} =
   if e.toolViewportHasGap and e.toolViewportRows.len > 0: 1 else: 0
 
@@ -292,9 +302,22 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   # the post-commit paint produced; counting from the model under-walks
   # and strands those rows (the lingering `○0% ↓13` bar). The model seqs
   # stay the diff's content source; `prevH` is the physical row count.
-  # Editor rows come from the editor's own live geometry (a wiped model
-  # holds none), the rest from the tracked seqs and `paintedFooterRows`.
-  let physEd = if edPtr != nil: max(1, minline.renderedRows(edPtr[])) else: 0
+  # Editor rows come from the editor's own geometry: its painted row
+  # spans when they are current (typing), its live wrap otherwise (a
+  # wiped model holds none). The painted spans matter when the buffer
+  # just shrank (idle cancel clears a multi-row draft before the
+  # repaint): the live wrap is already 1 row, but the screen still
+  # shows the stale wrapped rows, so the walk-up must still cover them.
+  # A *growing* buffer inverts the logic: the keystroke's new row is not
+  # on screen yet, so the walk-up must count the painted rows only and
+  # let the block-growth scroll below claim the extra row — counting
+  # the live wrap here walks one row too far and blanks the committed
+  # row above the block (the welcome hint on a shift+enter).
+  let physEd =
+    if edPtr != nil:
+      max(1, (if edPtr[].prevRowSpans.len > 0: edPtr[].prevRowSpans.len
+              else: minline.renderedRows(edPtr[])))
+    else: 0
   let prevPhysEdRows = max(prevEditorRows.len, physEd)
   let walkH =
     (if edPtr != nil: physEd else: 0) +
@@ -342,6 +365,18 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
           pw, cw, max(2, edPtr[].width))
         caretCol = vcol
         caretRow = i + min(max(1, newEdModel.len) - 1, vrow)
+        # `renderRow` is the cursor's visual row within the editor, the
+        # number the erase paths (walkUp in commits, redrawBytes' own
+        # walk-up) count on. `redrawBytes` maintains it; this painter must
+        # too or every walk-up after a diff-painted keystroke under-counts
+        # by the rows the cursor sits below the editor's top.
+        edPtr[].renderRow = min(max(1, newEdModel.len) - 1, vrow)
+        # Every volatile paint rewrites the editor rows wholesale through
+        # the diff below; the keystroke diff painter (`diffEditorFrame`)
+        # compares against these spans, so keep them current here too or
+        # the first keystroke after a background tick would compare
+        # against a stale buffer shape and rewrite rows it need not.
+        edPtr[].prevRowSpans = newEdModel
         break
   let blockH = max(cur.len, 1)
   # The cursor sits at the block's bottom, which the erase always left as
@@ -500,16 +535,7 @@ proc writeRaw*(bytes: string) {.gcsafe.} =
 proc beginEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor;
                         ready: bool; frame: FooterFrame) =
   let termW = try: terminalWidth() except CatchableError: 0
-  var rows = frame.rowsAboveEditor(termW)
-  # The reserved rows may only be walked up when they are actually live
-  # chrome. After a reserveFooter=false commit (initial-prompt submit,
-  # oneshot clear) the cursor sits flush below the committed item: no gap
-  # row exists yet, and walking up `rows` here would erase the committed
-  # line above. Paint in place instead; the next footer paint creates the
-  # gap in the editor row's place.
-  if rows > e.paintedFooterRows:
-    rows = e.paintedFooterRows
-  let paintedRows = rows
+  let rows = e.clampedFooterRows(frame, termW)
   termio.beginEditorRedraw(ed, ready, frame.footerFrameBytes(termW),
                            rows)
   e.editorRedrawPending = true
@@ -522,9 +548,51 @@ proc beginEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor;
   # erase below clears them, so mirror that with blanks.
   e.lastVolatileRows = @[]
   let texts = footerRowTexts(frame, termW)
-  for i in 0 ..< paintedRows:
+  for i in 0 ..< rows:
     e.lastVolatileRows.add (if i < texts.len: texts[i] else: "")
-  e.lastVolatileRows.add ed.renderRowSpans()
+  let spans = ed.renderRowSpans()
+  e.lastVolatileRows.add spans
+  ed.prevRowSpans = spans
+
+proc diffEditorFrame*(e: var TerminalEngine; ed: var minline.LineEditor;
+                      frame: FooterFrame) =
+  ## Repaint one editor keystroke through the row-diffing volatile painter
+  ## instead of beginEditorRedraw's erase-and-repaint: a typing burst into a
+  ## long wrapped prompt rewrites only the rows whose cells changed, so the
+  ## editor block no longer blanks and redraws wholesale per keystroke (the
+  ## visible flicker on long prompts). The footer rows are clamped to the
+  ## live chrome exactly like beginEditorRedraw: a reserveFooter=false
+  ## commit leaves no reserved rows to walk into.
+  termio.withTerminalWriteLock:
+    let termW = try: terminalWidth() except CatchableError: 0
+    refreshEditorWidth(ed)
+    let rows = e.clampedFooterRows(frame, termW)
+    let sig = "T\x1f" & $rows & "\x1f" & frame.footerFrameBytes(termW) &
+      "\x1f" & e.viewportSig() & "\x1f" & editorSig(ed) & "\x1f" & $termW
+    if sig == e.lastPaintSig:
+      return
+    stdout.write termio.SyncBegin()
+    stdout.write "\x1b[?25l"
+    var vrows: seq[VolatileRow]
+    let texts = footerRowTexts(frame, termW)
+    for i in 0 ..< rows:
+      vrows.add vrText(if i < texts.len: texts[i] else: "")
+    vrows.add vrEditor
+    e.paintVolatileRegion(termW, vrows, addr ed, rows,
+      e.liveContentRows, e.toolViewportRows,
+      e.liveContentHasGap, e.toolViewportHasGap,
+      e.toolViewportBannerRows)
+    if not ed.pendingCaret:
+      stdout.write "\x1b[?25h"
+    e.noteFooterPaintedKeepRows(rows)
+    e.lastPaintSig = sig
+    stdout.write termio.SyncEnd()
+    stdout.flushFile
+    e.lastPaintedWidth = termW
+
+proc diffEditorFrame*(ed: var minline.LineEditor; frame: FooterFrame) =
+  if not engineOutputEnabled: return
+  defaultEngine.diffEditorFrame(ed, frame)
 
 proc beginEditorRedraw*(ed: var minline.LineEditor; ready: bool;
                         frame: FooterFrame) =
@@ -961,6 +1029,7 @@ proc repaintVolatileAfterCommit(e: var TerminalEngine;
     # would emit a doubled ?2026l, which 2026-honoring terminals (foot,
     # ghostty) can batch/drop differently than the row model expects.
     stdout.write edPtr[].redrawBytes(synchronized = false)
+    edPtr[].prevRowSpans = edPtr[].renderRowSpans()
     if not edPtr[].pendingCaret:
       stdout.write "\x1b[?25h"
     e.noteFooterPainted(footerRowsAboveEditor)

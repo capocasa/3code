@@ -34,6 +34,21 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ This is a test prompt
+
+⣿ ○0% 0s
+❯
+===== 782 =====
+
+  ╭─╮
+   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ This is a test prompt
   … Thinking about the test prompt
 ⣿ ○0% ↓7 0s
 ❯
