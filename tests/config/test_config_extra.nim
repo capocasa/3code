@@ -248,10 +248,10 @@ suite "config: known-good lookup with normalized pretty names":
     check knownGoodWireModel("novita", "glm-5.3-flash") == "zai-org/glm-5.3-flash"
     check knownGoodWireModel("venice", "glm-5.3-flash") == "z-ai-glm-5-3-flash"
 
-  test "orderedModels ranks normalized known-good models first":
+  test "orderedModels keeps entered order regardless of known-good rank":
     let prov = ProviderRec(name: "zai", url: "https://api.z.ai",
                            key: "k", models: @["weird-model", "glm-5.3"])
-    check orderedModels(prov) == @["glm-5.3", "weird-model"]
+    check orderedModels(prov) == @["weird-model", "glm-5.3"]
 
 suite "config: firstKnownGoodCombo":
   test "finds first known-good combo":
