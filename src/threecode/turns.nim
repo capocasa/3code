@@ -260,17 +260,23 @@ proc flailEscalationMessage*(step: int): string =
   ## then a structurally different call, per zai-org/GLM-5#116); step 3 is
   ## the final warning. Deliberately short: this is the only token cost of
   ## the whole mechanism.
+  ##
+  ## Steps 1-2 never invite the model to stop and ask the user: these
+  ## messages persist in context for the rest of the session, and GLM
+  ## generalizes "tell the user what is blocking you" into a habit of
+  ## checking in instead of acting (field reports, Sep 2026). The
+  ## user-handoff instruction lives only in the step-3 final warning.
   if step == 1:
     "SYSTEM: Loop detected: you are repeating tool calls that are not making " &
     "progress. Repeating them will not help. Change strategy now: use a " &
-    "different input, a different tool, or a smaller step, or briefly tell " &
-    "the user what is blocking you and stop."
+    "different input, a different tool, or a smaller step, and continue " &
+    "the task."
   elif step == 2:
     "SYSTEM: You repeated the same call after a loop warning. Telling " &
     "yourself to be careful does not fix this: the next call would likely " &
     "come out identical again. Do not emit that call. First reply in plain " &
-    "prose with no tool call: one sentence on what you are trying to " &
-    "achieve and why the last attempts failed. Then, if you continue, use " &
+    "prose with no tool call: one sentence stating the hypothesis your next " &
+    "attempt will test. Then, if you continue, use " &
     "a structurally different call (different arguments, flags, or tool), " &
     "not the same one with cosmetic edits."
   else:

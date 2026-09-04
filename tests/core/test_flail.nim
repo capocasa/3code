@@ -162,6 +162,13 @@ suite "flail detector":
     check "structurally different" in shape
     check "Final warning" in warn
     check "aborted" in warn
+    # Recovery steps must push the model back to work, never to the user;
+    # these messages persist in context and GLM generalizes any "tell the
+    # user" into a habit of asking for guidance instead of acting.
+    for m in [hint, shape]:
+      check "tell the user" notin m
+      check "blocking you" notin m
+    check "tell the user what is blocking you" in warn
 
   test "healthy varied work never trips the streak signal":
     # Mirrors the successful parts of the recorded mergepdf session:
