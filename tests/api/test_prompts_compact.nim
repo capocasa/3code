@@ -282,15 +282,16 @@ suite "prompts: setup — kimi":
     check foundBash
     check foundDMail
 
-  test "glm carries the dmail tool (context fold for forced-thinking models)":
+  test "glm does not carry dmail (parroted markers, never used the tool)":
     let p = Profile(name: "zai.glm-5.1", url: "x", key: "k",
                     model: "glm-5.1", family: "glm")
     let s = setup(p)
-    check s.tools.len == 9
+    check s.tools.len == 8
     var seen = false
     for t in s.tools:
       if t{"function"}{"name"}.getStr == "dmail": seen = true
-    check seen
+    check not seen
+    check "dmail" notin s.prompt
 
 suite "prompts: buildCredit":
   test "builds attribution for valid profile":
