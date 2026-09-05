@@ -491,6 +491,11 @@ suite "verifyProfile bounded against silent provider":
     let server = newSseServer("")
     var thr: Thread[SseServer]
     createThread(thr, serveVerifyOk, server)
+    # Drop any connection cached from an earlier suite's server first:
+    # verifyProfile would happily reuse it (its peer already answered and
+    # closed), never dial THIS server, and the joinThread below would wait
+    # forever on an accept that never comes. The 1442s CI hang.
+    closeCachedStreamConn()
     let (ok, err) = verifyProfile(pingProfile(server))
     joinThread(thr)
     server.socket.close()
@@ -506,6 +511,7 @@ suite "verifyProfile bounded against silent provider":
     let server = newSseServer("")
     var thr: Thread[SseServer]
     createThread(thr, serveVerifySilent, server)
+    closeCachedStreamConn()
     let t0 = epochTime()
     let (ok, err) = verifyProfile(pingProfile(server))
     let elapsed = epochTime() - t0
