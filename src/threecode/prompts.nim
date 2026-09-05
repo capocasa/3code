@@ -933,7 +933,6 @@ Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked oper
 - `web_search(query)` — search the web. Returns titles, URLs, and snippets.
 - `web_fetch(url)` — fetch a URL and return readable text (boilerplate stripped). Use to read pages found via `web_search`.
 - `clear(prompt)` — clear conversation history and start fresh. The `prompt` summarizes current state and gives instructions for the new context. Do not use `ed`, `sed -i`, or shell heredocs to rewrite files — line-arithmetic drifts and corrupts under sequential edits. `write` for new files or full rewrites; `patch` for surgical changes; `bash` for non-edit operations only.
-- `dmail(checkpoint, message)` — send a message to your past self: revert the conversation to a `[checkpoint N]` marker on one of your assistant messages and append the message. Use it to fold bulk you no longer need (a huge read, a long failed debugging stretch) into one short summary instead of `clear()`ing and re-reading the same files. The filesystem is NOT reverted; anything you wrote stays written. Use sparingly; never twice for the same stretch.
 
 The harness runs your tool calls and feeds results back. Independent tool calls in the same turn run in parallel — batch them when reading multiple files or running independent checks. When the task is done, reply with prose and no tool calls.
 
@@ -2765,16 +2764,15 @@ let qwenTinyTools = %*[
 ]
 
 let
-  # The dmail/checkpoint tool started kimi-only (its home harness trains
-  # the pattern); SWE-bench GLM-flash traces showed the exact loop it
-  # fixes (bulk read -> clear() -> re-read the same files from scratch),
-  # so glm gets it too. Other families keep the shared surface.
-  glmDmailTools = block:
+  # dmail/checkpoint stays kimi-only: glm never called it in the field
+  # and instead parroted the `[checkpoint N]` markers as invented
+  # bracket tags ([claiming], [classes]) atop its replies.
+  kimiDmailTools = block:
     let t = copy(glmAndQwenTools)
     t.add dmailTool
     t
   lagunaSetup = (prompt: LagunaPreamble, tools: glmAndQwenTools)
-  glmSetup = (prompt: GlmPreamble, tools: glmDmailTools)
+  glmSetup = (prompt: GlmPreamble, tools: glmAndQwenTools)
   qwenSetup = (prompt: QwenPreamble, tools: glmAndQwenTools)
   qwenTinySetup = (prompt: QwenTinyPreamble, tools: qwenTinyTools)
   deepseekSetup = (prompt: DeepSeekPreamble, tools: glmAndQwenTools)
@@ -2786,7 +2784,7 @@ let
   inklingSetup = (prompt: InklingPreamble, tools: glmAndQwenTools)
   grokSetup = (prompt: GrokPreamble, tools: glmAndQwenTools)
   mimoSetup = (prompt: MimoPreamble, tools: glmAndQwenTools)
-  kimiSetup = (prompt: KimiPreamble, tools: glmDmailTools)
+  kimiSetup = (prompt: KimiPreamble, tools: kimiDmailTools)
   lingSetup = (prompt: LingPreamble, tools: glmAndQwenTools)
   oxAlphaSetup = (prompt: OxAlphaPreamble, tools: glmAndQwenTools)
   nemotronSetup = (prompt: NemotronPreamble, tools: glmAndQwenTools)

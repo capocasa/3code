@@ -570,10 +570,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     flailDet: FlailDetector        # identical-consecutive-tool-call guard
     nextCheckpoint = 0             # id of the marker on the next assistant message
   # dmail is offered only when the active profile's tool schema includes
-  # it (kimi and glm families); the marker tagging below keys off the same
-  # flag.
+  # it (kimi family); the marker tagging below keys off the same flag.
   var dmailEnabled = false
-  if p.family == "kimi" or p.family == "glm":
+  if p.family == "kimi":
     let tools = setup(p).tools
     if tools != nil and tools.kind == JArray:
       for t in tools:
