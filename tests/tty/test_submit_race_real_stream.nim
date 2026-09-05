@@ -53,24 +53,41 @@ proc ensureRealBinary(): string =
   const defines = "-d:ssl -d:testPlainHttp --threads:on"
   buildBinary(defines, "3code_real")
 
+# Phase marker flushed as it changes: when the CI watchdog kills this
+# binary mid-wait, the retained output names the last phase reached, so
+# the stuck wait is identified without a signal handler (writing from a
+# handler deadlocks on the stdout lock - learned the hard way).
+var phase: string = "init"
+
+proc setPhase(p: string) =
+  phase = p
+  stdout.write p, "\n"
+  flushFile(stdout)
+
 proc one(realBin: string; iter: int): string =
   let root = newFixture("submit_race_" & $iter)
+  setPhase "iter " & $iter & ": mock server started"
   let srv = startMockServer(msDripStream, chunkDelayMs = 40)
   defer: stopMockServer(srv)
   writeProviderConfig(root, srv.url)
+  setPhase "iter " & $iter & ": tty session fork"
   let tty = newTtySession(realBin, args = ["-x", "-i"],
                           cwd = root / "run", env = env(root),
                           cols = 119, rows = 40)
   defer:
     tty.writeFrameArtifact(root / "frames.txt")
     tty.close()
+  setPhase "iter " & $iter & ": wait welcome"
   tty.expect "type a prompt"
+  setPhase "iter " & $iter & ": wait prompt"
   tty.expect "❯"
 
+  setPhase "iter " & $iter & ": type turn 1"
   for ch in "first prompt here":
     tty.send $ch
     tty.drain(8)
   tty.send "\n"
+  setPhase "iter " & $iter & ": turn 1 streaming"
   tty.expect "❯"
   tty.drain(300)
   block:
@@ -83,10 +100,12 @@ proc one(realBin: string; iter: int): string =
       return "iter " & $iter & " turn1: echo not 2 below hint (hint=" & $hintIdx &
         " echo=" & $echoIdx & ")\n" & tty.dumpFramesAround("word2")
 
+  setPhase "iter " & $iter & ": type turn 2"
   for ch in "second prompt now":
     tty.send $ch
     tty.drain(8)
   tty.send "\n"
+  setPhase "iter " & $iter & ": turn 2 streaming"
   tty.expect "❯"
   tty.drain(300)
   block:
@@ -102,6 +121,7 @@ proc one(realBin: string; iter: int): string =
   ""
 
 when isMainModule:
+  setPhase "building real binary"
   let realBin = ensureRealBinary()
   # OSX CI analysis (1f5d779 heartbeat): iteration 1 alone stalls to the
   # watchdog kill, so the iteration count is not the variable there - it
