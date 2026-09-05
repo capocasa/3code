@@ -58,6 +58,19 @@ etime_secs() {
   printf '%s\n' $(( 10#$d * 86400 + 10#$h * 3600 + 10#$m * 60 + 10#$s ))
 }
 
+# Kill a test binary and every descendant: tests spawn 3code/pty
+# children, and a surviving grandchild keeps holding /tmp/3code session
+# locks with a live pid, which later blocks other tests' initAgentSession
+# on second-granularity id collisions (the test_library CI flake). A
+# process-group kill is unsafe here (tests share the script's group), so
+# walk descendants recursively via pgrep -P.
+kill_tree() {
+  for c in $(pgrep -P "$1" 2>/dev/null); do
+    kill_tree "$c"
+  done
+  kill -KILL "$1" 2>/dev/null
+}
+
 # Kill test binaries that exceed the per-test cap. The match is anchored
 # to argv[0]: testament execs test binaries as "tests/<cat>/test_*", while
 # compilers and other testament invocations only carry the path mid-args and
@@ -77,9 +90,7 @@ kill_sluggish_tests() {
       if [ "$secs" -ge "$PER_TEST_SECS" ]; then
         echo "[watchdog] killed: $rest (pid $pid, ${secs}s > ${PER_TEST_SECS}s cap)" >>"$SNAP"
         kill -TERM "$pid" 2>/dev/null
-        for c in $(pgrep -P "$pid" 2>/dev/null); do
-          kill -KILL "$c" 2>/dev/null
-        done
+        kill_tree "$pid"
         ( sleep 5; kill -KILL "$pid" 2>/dev/null ) &
       fi
     done

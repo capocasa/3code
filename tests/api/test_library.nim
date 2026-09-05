@@ -38,8 +38,15 @@ models = "stub-model"
 """)
 
 proc isolateEnv(root: string) =
+  # TMPDIR too: session locks live in $TMPDIR/3code/lock, shared with every
+  # other test process on the machine. Testament runs categories in
+  # parallel, so without this a leaked or still-held lock from another
+  # test's 3code process blocks initAgentSession the moment the
+  # second-granularity session ids collide.
   putEnv("XDG_CONFIG_HOME", root / "xdg")
   putEnv("XDG_DATA_HOME", root / "data")
+  putEnv("TMPDIR", root / "tmp")
+  createDir(root / "tmp")
 
 suite "library: AgentSession":
   when not stubbed:
