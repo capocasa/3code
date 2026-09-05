@@ -112,4 +112,11 @@ irm https://3code.capocasa.dev/main/install.ps1 | iex
 
 ## License
 
-MIT.
+MIT
+
+## Trademark
+
+3code™ is a trade mark owned by Carlo Capocasa. Registration pending.
+
+https://euipo.europa.eu/eSearch/#details/trademarks/019415437
+
