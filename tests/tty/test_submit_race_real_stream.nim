@@ -64,7 +64,10 @@ proc setPhase(p: string) =
   stdout.write p, "\n"
   flushFile(stdout)
 
-var sessionDumpRaw {.threadvar.}: pointer
+# Not a threadvar: the watchdog thread must read the value the main
+# thread stored. A raw pointer keeps the GC out of the picture; the cast
+# back happens only inside the dump, gcsafe by cast.
+var sessionDumpRaw: pointer
 
 proc stuckDump() {.thread, gcsafe.} =
   ## Watchdog thread: if one iteration exceeds 150s, snapshot the live
