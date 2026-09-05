@@ -2349,9 +2349,18 @@ proc inputThreadProc() {.thread.} =
         # Ctrl-C / ESC's job.
         # A pending idle line means the controller hasn't consumed the
         # submit yet; getCh returned -1 for backpressure, not because
-        # stdin closed. Don't push ieQuit—wait for the controller.
+        # stdin closed. Don't push ieQuit: wait for the controller.
         if not inputTurnActive.load(moAcquire) and
            inputIdleLinePending.load(moAcquire):
+          continue
+        # Ctrl-D while a turn is running is inert, like Ctrl-D on a
+        # non-empty line. Queueing ieQuit here made the quit fire the
+        # moment the turn ended (Ctrl-C interrupt, stream done), exiting
+        # the REPL with code 0 as if the user had quit: the premature-exit
+        # bug class (test_quit_signals' 1-in-10 flake). A user who really
+        # wants out mid-turn presses Ctrl-C first, then Ctrl-D at the
+        # repainted prompt.
+        if inputTurnActive.load(moAcquire):
           continue
         # Clear the idle-park flag so the quit path doesn't wait on a
         # parked getCh that will never be released.
