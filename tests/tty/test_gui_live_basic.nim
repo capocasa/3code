@@ -113,7 +113,10 @@ proc one(iter: int; term: string): string =
   ""
 
 when isMainModule:
-  let n = if paramCount() >= 1: parseInt(paramStr(1)) else: 20
+  # 12 iters x 2 terms ≈ 175s: the default 20 sat at ~290s, flush against
+  # the CI wrapper's 300s per-test watchdog cap. Pass an explicit count to
+  # soak longer locally.
+  let n = if paramCount() >= 1: parseInt(paramStr(1)) else: 12
   var failures = 0
   for i in 1..n:
     for term in ["xterm-256color", "xterm-ghostty"]:
