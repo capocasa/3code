@@ -129,12 +129,39 @@ type
     socket: Socket
     port: Port
     response: string
+    ## Wakes a blocking accept() every 200ms so a serve thread whose client
+    ## never dials (connection cache reuse, a transport retry that stays on
+    ## the old socket) can pass its deadline and exit instead of blocking
+    ## forever: the joinThread-after-it hang (1442s CI kill).
+    acceptDeadline: float
+
+proc setSocketTimeoutMs(sock: Socket; ms: int) =
+  when defined(posix):
+    var tv: Timeval
+    tv.tv_sec = Time(ms div 1000)
+    tv.tv_usec = Suseconds((ms mod 1000) * 1000)
+    discard setsockopt(sock.getFd(), SOL_SOCKET, SO_RCVTIMEO,
+                       addr tv, sizeof(tv).SockLen)
+
+proc acceptWithinDeadline(server: SseServer; client: var Socket): bool =
+  ## Accept with a deadline. Returns false when no client dialed in time,
+  ## letting serve threads (and their joiners) terminate instead of hanging
+  ## on an accept that will never come.
+  while epochTime() < server.acceptDeadline:
+    try:
+      server.socket.accept(client)
+      return true
+    except OSError:
+      discard  # SO_RCVTIMEO wake: loop and re-check the deadline.
+  false
 
 proc newSseServer(response: string): SseServer =
-  result = SseServer(socket: newSocket(), response: response)
+  result = SseServer(socket: newSocket(), response: response,
+                     acceptDeadline: epochTime() + 30.0)
   result.socket.setSockOpt(OptReuseAddr, true)
   result.socket.bindAddr(Port(0))
   result.socket.listen()
+  result.socket.setSocketTimeoutMs(200)
   let (_, p) = result.socket.getLocalAddr()
   result.port = p
 
@@ -166,7 +193,7 @@ proc drainRequestBody(client: Socket; contentLength: int) =
 
 proc serveOnce(server: SseServer) =
   var client: Socket
-  server.socket.accept(client)
+  if not server.acceptWithinDeadline(client): return
   let contentLength = client.readRequestHead()
   let body = server.response
   let resp = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
@@ -182,7 +209,7 @@ proc serveOnceDelayedHead(server: SseServer; delayMs: int) =
   ## head. Models providers (z.ai GLM) that hold the connection for several
   ## seconds while the model warms up before emitting even the status line.
   var client: Socket
-  server.socket.accept(client)
+  if not server.acceptWithinDeadline(client): return
   let contentLength = client.readRequestHead()
   sleep(delayMs)
   let body = server.response
@@ -442,7 +469,7 @@ proc serveVerifyOk(server: SseServer) {.thread.} =
   ## Serve a minimal 200 OK SSE ping response. The request body is drained
   ## after the response so the closing FIN is not downgraded to an RST.
   var client: Socket
-  server.socket.accept(client)
+  if not server.acceptWithinDeadline(client): return
   let contentLength = client.readRequestHead()
   let body = "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}," &
     "\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
@@ -453,14 +480,6 @@ proc serveVerifyOk(server: SseServer) {.thread.} =
   client.drainRequestBody(contentLength)
   client.close()
 
-proc setSocketTimeoutMs(sock: Socket; ms: int) =
-  when defined(posix):
-    var tv: Timeval
-    tv.tv_sec = Time(ms div 1000)
-    tv.tv_usec = Suseconds((ms mod 1000) * 1000)
-    discard setsockopt(sock.getFd(), SOL_SOCKET, SO_RCVTIMEO,
-                       addr tv, sizeof(tv).SockLen)
-
 proc serveVerifySilent(server: SseServer) {.thread.} =
   ## Accept the connection, drain the request, then hold the socket open
   ## WITHOUT EVER REPLYING. This is the deadlock case: connect and the
@@ -469,7 +488,7 @@ proc serveVerifySilent(server: SseServer) {.thread.} =
   ## sleep; on client teardown the peer-closed socket surfaces as a
   ## recv returning "", which lets us exit.
   var client: Socket
-  server.socket.accept(client)
+  if not server.acceptWithinDeadline(client): return
   client.setSocketTimeoutMs(200)
   while client.recvLine(timeout = 3000).strip() != "":
     discard
