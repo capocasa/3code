@@ -114,6 +114,13 @@ type
     ## prepend it to the next chunk so the grid always sees whole
     ## sequences (model-vs-physical desync class).
     pendingEsc*: string
+    ## Cursor visibility as declared by the app's own DECSET/DECRST 25
+    ## sequences. `beginTurn` hides the cursor for the whole turn and
+    ## `endTurn` shows it, so this is the only reliable idle signal:
+    ## with the persistent prompt the ❯ caret row is painted while a
+    ## turn is still live, which used to fool caret-only idle checks
+    ## into sending the next input mid-turn (the gui_join_freeze race).
+    cursorShown*: bool
 
 const
   DefaultTtyCols* = 120
@@ -292,6 +299,18 @@ proc feedGridChunk*(s: TtySession; chunk: string) =
   if chunk.len == 0:
     return
   s.raw.add chunk
+  # Track cursor show/hide declarations: last one in the chunk wins.
+  var scan = 0
+  while true:
+    let hideAt = chunk.find("\x1b[?25l", scan)
+    let showAt = chunk.find("\x1b[?25h", scan)
+    if hideAt < 0 and showAt < 0: break
+    if hideAt >= 0 and (showAt < 0 or hideAt > showAt):
+      s.cursorShown = false
+      scan = hideAt + 6
+    else:
+      s.cursorShown = true
+      scan = showAt + 6
   var text =
     if s.pendingEsc.len > 0:
       s.pendingEsc & chunk
@@ -663,6 +682,7 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       grid: newGrid(),
       started: epochTime(),
       keepHistory: keepHistory,
+      cursorShown: true,
       exitCode: -1,
       frameEventFd: frameRead,
       frameAckFd: ackWrite,
@@ -834,6 +854,7 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       grid: newGrid(),
       started: epochTime(),
       keepHistory: keepHistory,
+      cursorShown: true,
       exitCode: -1)
     discard result.resize(cols, rows)
 
@@ -1060,6 +1081,14 @@ proc cleanRaw*(raw: string): string =
 
 proc cleanRaw*(s: TtySession): string =
   cleanRaw(s.raw)
+
+proc countInHistory*(s: TtySession; text: string): int =
+  ## Occurrences of `text` in the committed history. Pairs with
+  ## `expectNewInHistory`: a recurring status line ("interrupted by
+  ## user") must be awaited as a NEW occurrence, or an earlier turn's
+  ## copy satisfies the wait instantly and the test races ahead of the
+  ## app (the gui_join_freeze OSX failure).
+  s.historyText().count(text) + s.cleanRaw().count(text)
 
 proc rows*(s: TtySession): seq[string] =
   s.currentRows()
@@ -1506,6 +1535,23 @@ proc expectNeverInHistory*(s: TtySession; text: string) =
   doAssert text notin s.historyText() and text notin s.cleanRaw(),
     "unexpected history text found: " & text & "\n" & s.dumpFramesAround(text)
 
+proc expectNewInHistory*(s: TtySession; text: string; before: int;
+                         timeoutMs = 5000): bool {.discardable.} =
+  ## Wait until `text` appears in history MORE than `before` times.
+  ## `before` is a `countInHistory` snapshot taken before the action that
+  ## should produce a fresh occurrence. A plain `expectInHistory` matches
+  ## any earlier occurrence of a recurring line ("interrupted by user")
+  ## and returns instantly, letting the test race ahead of the app.
+  let deadline = epochTime() + timeoutMs.float / 1000.0
+  while epochTime() < deadline:
+    s.drain(0, recordFrame = false)
+    if s.countInHistory(text) > before:
+      return true
+    let remaining = max(1, int((deadline - epochTime()) * 1000))
+    discard s.waitForOutput(remaining, recordFrame = false)
+  doAssert false, "expected new history text not found: " & text & "\n" &
+    s.dumpFramesAround(text)
+
 proc expectExit*(s: TtySession; code: int; timeoutMs = 5000): bool {.discardable.} =
   let deadline = epochTime() + timeoutMs.float / 1000.0
   while epochTime() < deadline:
@@ -1536,7 +1582,11 @@ proc expectIdleCaret*(s: TtySession; timeoutMs = 5000) =
   let deadline = epochTime() + timeoutMs.float / 1000.0
   while epochTime() < deadline and not s.exited:
     s.drain(0, recordFrame = false)
-    if s.cursorRowHasText("\u276f"):
+    # The caret row alone is not enough: the persistent prompt keeps the
+    # ❯ row painted while a turn is live, so a caret-only check passes
+    # mid-turn and the next send races the running turn. Require the
+    # app-declared cursor too — beginTurn hides it, endTurn shows it.
+    if s.cursorShown and s.cursorRowHasText("\u276f"):
       return
     let remaining = max(1, int((deadline - epochTime()) * 1000))
     discard s.waitForOutput(remaining, recordFrame = false)

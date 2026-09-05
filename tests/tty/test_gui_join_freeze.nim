@@ -102,8 +102,12 @@ suite "spinner/bar-tick churn with concurrent input does not freeze":
         tty.drain(120)
         tty.send "typing during spinner"
         tty.drain(60)
+        # The interrupt line recurs every third turn; an occurrence-count
+        # snapshot stops an earlier turn's copy from satisfying the wait
+        # before THIS turn's interrupt has landed (the OSX race).
+        let seenInterrupts = tty.countInHistory("interrupted by user")
         tty.send "\x1b"  # ESC: cancel the in-flight turn
-        tty.expectInHistory "interrupted by user"
+        tty.expectNewInHistory("interrupted by user", seenInterrupts)
         tty.expectIdleCaret()
       of 2:
         # Fast turn: full spinner start -> content -> stop cycle.
