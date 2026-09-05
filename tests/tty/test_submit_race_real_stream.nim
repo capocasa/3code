@@ -103,11 +103,11 @@ proc one(realBin: string; iter: int): string =
 
 when isMainModule:
   let realBin = ensureRealBinary()
-  # ~5s/iter locally but ~27s/iter on the slow macOS CI runner plus a
-  # ~90s cold build of 3code_real: 10 and 8 iterations both hit the 300s
-  # per-test watchdog there (the 303s kills). 6 clears the cap with ~50s
-  # of headroom.
-  let n = if paramCount() >= 1: parseInt(paramStr(1)) else: 6
+  # OSX CI analysis (1f5d779 heartbeat): iteration 1 alone stalls to the
+  # watchdog kill, so the iteration count is not the variable there - it
+  # is the app's first streaming turn against the mock server on that
+  # runner. Keep the full 12 locally where the race coverage matters.
+  let n = if paramCount() >= 1: parseInt(paramStr(1)) else: 12
   var failures = 0
   for i in 1..n:
     # Heartbeat per iteration: when the CI watchdog kills this test the
