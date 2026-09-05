@@ -9,17 +9,11 @@
 ##
 ## Must be compiled with -d:testPlainHttp so streamHttp accepts http://127.0.0.1.
 
-import std/[json, jsonutils, net, os, strutils, threadpool, unittest]
+import std/[json, jsonutils, net, os, strutils, unittest]
 from std/times import epochTime
 when defined(posix):
   from std/posix import Timeval, Time, Suseconds, SockLen, SOL_SOCKET,
                            SO_RCVTIMEO, setsockopt
-
-proc syncPool() =
-  ## Flush the Nim threadpool: every `spawn serveThread` must complete
-  ## before the process tears down or the pool's join on Windows CI
-  ## runners races the GC and crashes at exit. Called at suite end.
-  sync()
 
 import threecode/[api, types]
 
@@ -144,18 +138,43 @@ proc newSseServer(response: string): SseServer =
   let (_, p) = result.socket.getLocalAddr()
   result.port = p
 
+proc readRequestHead(client: Socket): int =
+  ## Read the request headers up to the blank line; return Content-Length.
+  while true:
+    let line = client.recvLine(timeout = 3000)
+    let s = line.strip()
+    if s.len == 0: return result
+    if s.toLowerAscii().startsWith("content-length:"):
+      result = try: parseInt(s.split(":")[1].strip) except ValueError: 0
+
+proc drainRequestBody(client: Socket; contentLength: int) =
+  ## Consume exactly the Content-Length body bytes before close(). Reading
+  ## headers alone leaves the POST body unread in the socket's receive
+  ## buffer, and a close() with unread data makes the kernel send RST
+  ## instead of FIN; the RST can discard response bytes already queued on
+  ## the client, which then sees a 200 head with an empty body and retries
+  ## into a server that only accepts one connection (the suite hang).
+  ## Runs AFTER the response is fully sent: draining first can deadlock
+  ## against the client's send timeout on a partially-written request.
+  if contentLength <= 0: return
+  var bodyBuf = newString(contentLength)
+  var got = 0
+  while got < contentLength:
+    let r = client.recv(bodyBuf, contentLength - got, timeout = 10_000)
+    if r == 0: break
+    got += r
+
 proc serveOnce(server: SseServer) =
   var client: Socket
   server.socket.accept(client)
-  # Drain the request headers + blank line.
-  while client.recvLine(timeout = 3000).strip() != "":
-    discard
+  let contentLength = client.readRequestHead()
   let body = server.response
   let resp = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
   client.send(resp)
   let chunk = toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n"
   client.send(chunk)
   client.send("0\r\n\r\n")
+  client.drainRequestBody(contentLength)
   client.close()
 
 proc serveOnceDelayedHead(server: SseServer; delayMs: int) =
@@ -164,8 +183,7 @@ proc serveOnceDelayedHead(server: SseServer; delayMs: int) =
   ## seconds while the model warms up before emitting even the status line.
   var client: Socket
   server.socket.accept(client)
-  while client.recvLine(timeout = 3000).strip() != "":
-    discard
+  let contentLength = client.readRequestHead()
   sleep(delayMs)
   let body = server.response
   let resp = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
@@ -173,6 +191,7 @@ proc serveOnceDelayedHead(server: SseServer; delayMs: int) =
   let chunk = toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n"
   client.send(chunk)
   client.send("0\r\n\r\n")
+  client.drainRequestBody(contentLength)
   client.close()
 
 proc serveThread(server: SseServer) {.thread.} =
@@ -192,19 +211,22 @@ proc testProfile(server: SseServer): Profile =
 suite "streaming SSE tool-call accumulation":
   test "complete fragmented tool_call reassembles correct arguments":
     let server = newSseServer(makeSseToolDeltas("echo HELLO_WORLD_42", "id-1"))
-    spawn serveThread(server)
+    var srv: Thread[SseServer]
+    createThread(srv, serveThread, server)
     var usage = Usage()
     let result = callModel(testProfile(server), %*[{"role": "user", "content": "run echo HELLO"}], usage, 0)
     check result != nil
     check result{"tool_calls"}.len == 1
     let args = result{"tool_calls"}[0]{"function"}{"arguments"}.getStr()
     check args == "{\"command\":\"echo HELLO_WORLD_42\"}"
+    joinThread(srv)
     server.socket.close()
     closeCachedStreamConn()
 
   test "truncated tool_call mid-stream (no finish_reason)":
     let server = newSseServer(makeSseTruncatedToolDelta("echo TRUNCATED", "id-2", cutAfter = 12))
-    spawn serveThread(server)
+    var srv: Thread[SseServer]
+    createThread(srv, serveThread, server)
     var usage = Usage()
     let result = callModel(testProfile(server), %*[{"role": "user", "content": "run echo TRUNCATED"}], usage, 0)
     # With the truncation guard disabled, the partial arguments survive into
@@ -213,40 +235,47 @@ suite "streaming SSE tool-call accumulation":
     if result != nil and result{"tool_calls"}.len > 0:
       let args = result{"tool_calls"}[0]{"function"}{"arguments"}.getStr()
       check args.len < "{\"command\":\"echo TRUNCATED\"}".len
+    joinThread(srv)
     server.socket.close()
     closeCachedStreamConn()
 
   test "complete plain content - no tool calls":
     let server = newSseServer(makeSseCompleteContent("Hello from the model!", "id-3"))
-    spawn serveThread(server)
+    var srv: Thread[SseServer]
+    createThread(srv, serveThread, server)
     var usage = Usage()
     let result = callModel(testProfile(server), %*[{"role": "user", "content": "say hello"}], usage, 0)
     check result != nil
     check result{"content"}.getStr() == "Hello from the model!"
+    joinThread(srv)
     server.socket.close()
     closeCachedStreamConn()
 
   test "reasoning then fragmented tool_call":
     let server = newSseServer(makeSseReasoningThenTool("Let me run a command.", "echo MIXED_99", "id-4"))
-    spawn serveThread(server)
+    var srv: Thread[SseServer]
+    createThread(srv, serveThread, server)
     var usage = Usage()
     let result = callModel(testProfile(server), %*[{"role": "user", "content": "run echo MIXED"}], usage, 0)
     check result != nil
     check result{"tool_calls"}.len == 1
     let args = result{"tool_calls"}[0]{"function"}{"arguments"}.getStr()
     check args == "{\"command\":\"echo MIXED_99\"}"
+    joinThread(srv)
     server.socket.close()
     closeCachedStreamConn()
 
   test "two tool_calls both fragmented reassemble correctly":
     let server = newSseServer(makeSseMultiTool("echo FIRST", "echo SECOND", "id-5"))
-    spawn serveThread(server)
+    var srv: Thread[SseServer]
+    createThread(srv, serveThread, server)
     var usage = Usage()
     let result = callModel(testProfile(server), %*[{"role": "user", "content": "run two commands"}], usage, 0)
     check result != nil
     check result{"tool_calls"}.len == 2
     check result{"tool_calls"}[0]{"function"}{"arguments"}.getStr() == "{\"command\":\"echo FIRST\"}"
     check result{"tool_calls"}[1]{"function"}{"arguments"}.getStr() == "{\"command\":\"echo SECOND\"}"
+    joinThread(srv)
     server.socket.close()
     closeCachedStreamConn()
 
@@ -264,7 +293,6 @@ suite "streaming SSE tool-call accumulation":
     check body.hasKey("tool_stream")
     check body{"tool_stream"}.getBool == true
 
-  syncPool()
 
 suite "streaming SSE: slow response head":
   # Regression: readResponseHead used the same QuietRecvWakeMs-bounded recv
@@ -303,7 +331,8 @@ suite "streaming SSE: empty-content with finish_reason":
     let server = newSseServer(
       makeSseEmptyWithFinish("length", "id-empty-length",
         completionTokens = 8192, reasoningTokens = 8192))
-    spawn serveThread(server)
+    var srv: Thread[SseServer]
+    createThread(srv, serveThread, server)
     var usage = Usage()
     let result = callModel(testProfile(server),
       %*[{"role": "user", "content": "go"}], usage, 0)
@@ -311,34 +340,38 @@ suite "streaming SSE: empty-content with finish_reason":
     check result{"content"}.getStr() == ""
     check result{"finish_reason"}.getStr == "length"
     check usage.reasoningTokens == 8192
+    joinThread(srv)
     server.socket.close()
     closeCachedStreamConn()
 
   test "empty with finish_reason stop returns a tagged msg, not an error":
     let server = newSseServer(makeSseEmptyWithFinish("stop", "id-empty-stop"))
-    spawn serveThread(server)
+    var srv: Thread[SseServer]
+    createThread(srv, serveThread, server)
     var usage = Usage()
     let result = callModel(testProfile(server),
       %*[{"role": "user", "content": "go"}], usage, 0)
     check result != nil
     check result{"content"}.getStr() == ""
     check result{"finish_reason"}.getStr == "stop"
+    joinThread(srv)
     server.socket.close()
     closeCachedStreamConn()
 
   test "empty with finish_reason content_filter returns a tagged msg":
     let server = newSseServer(
       makeSseEmptyWithFinish("content_filter", "id-empty-cf"))
-    spawn serveThread(server)
+    var srv: Thread[SseServer]
+    createThread(srv, serveThread, server)
     var usage = Usage()
     let result = callModel(testProfile(server),
       %*[{"role": "user", "content": "go"}], usage, 0)
     check result != nil
     check result{"finish_reason"}.getStr == "content_filter"
+    joinThread(srv)
     server.socket.close()
     closeCachedStreamConn()
 
-  syncPool()
 
 suite "streaming SSE: mid-stream error (OpenRouter)":
   # OpenRouter emits mid-stream provider failures as a `data:` chunk with a
@@ -353,7 +386,8 @@ suite "streaming SSE: mid-stream error (OpenRouter)":
     let server = newSseServer(
       makeSseMidStreamError("Provider disconnected unexpectedly", "id-err-1",
         code = 400))
-    spawn serveThread(server)
+    var srv: Thread[SseServer]
+    createThread(srv, serveThread, server)
     var usage = Usage()
     var raised = false
     try:
@@ -363,6 +397,7 @@ suite "streaming SSE: mid-stream error (OpenRouter)":
       raised = true
       check "Provider disconnected unexpectedly" in e.msg
     check raised
+    joinThread(srv)
     server.socket.close()
     closeCachedStreamConn()
 
@@ -371,7 +406,8 @@ suite "streaming SSE: mid-stream error (OpenRouter)":
     let server = newSseServer(
       makeSseMidStreamErrorAfterContent("partial text...",
         "Provider overloaded", "id-err-2", code = 400))
-    spawn serveThread(server)
+    var srv: Thread[SseServer]
+    createThread(srv, serveThread, server)
     var usage = Usage()
     var raised = false
     try:
@@ -381,10 +417,10 @@ suite "streaming SSE: mid-stream error (OpenRouter)":
       raised = true
       check "Provider overloaded" in e.msg
     check raised
+    joinThread(srv)
     server.socket.close()
     closeCachedStreamConn()
 
-  syncPool()
 
 # ---------------------------------------------------------------------------
 # verifyProfile
@@ -403,17 +439,18 @@ suite "streaming SSE: mid-stream error (OpenRouter)":
 # plain-HTTP server, mirroring the SSE tests above.
 
 proc serveVerifyOk(server: SseServer) {.thread.} =
-  ## Serve a minimal 200 OK SSE ping response, draining the request first.
+  ## Serve a minimal 200 OK SSE ping response. The request body is drained
+  ## after the response so the closing FIN is not downgraded to an RST.
   var client: Socket
   server.socket.accept(client)
-  while client.recvLine(timeout = 3000).strip() != "":
-    discard
+  let contentLength = client.readRequestHead()
   let body = "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}," &
     "\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
   client.send("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n" &
     "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
   client.send(toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n")
   client.send("0\r\n\r\n")
+  client.drainRequestBody(contentLength)
   client.close()
 
 proc setSocketTimeoutMs(sock: Socket; ms: int) =
