@@ -85,8 +85,10 @@ suite "429 backoff with buffered typing":
     tty.expect "go"
     tty.send "\n"
     # Wait for the retry notice to land in scrollback so the spinner is
-    # mid-backoff when we type.
-    tty.expectInHistory "429"
+    # mid-backoff when we type. Generous budget: on the slow macOS CI
+    # runner the app's submit-to-notice latency alone approached the 5s
+    # default (two OSX flakes).
+    tty.expectInHistory("429", timeoutMs = 15_000)
     tty.drain(50)
     # Type the follow-up. The text lives in `ed.line.text` while a turn
     # is running; the editor paints it on top of the spinner so the
