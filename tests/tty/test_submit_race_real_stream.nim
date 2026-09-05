@@ -47,6 +47,10 @@ proc env(root: string): seq[EnvVar] =
     (key: "XDG_CACHE_HOME", val: root / "xdg" / "cache"),
     (key: "TMPDIR", val: root / "tmp"),
     (key: "HOME", val: root),
+    # Plain-file debug sink: the stuck-dump reads its tail to see the
+    # app's last debug trace before the stall, without ANSI garbage in
+    # the grid.
+    (key: "THREECODE_DEBUG_LOG", val: root / "debug.log"),
   ]
 
 proc ensureRealBinary(): string =
@@ -57,6 +61,8 @@ proc ensureRealBinary(): string =
 # binary mid-wait, the retained output names the last phase reached, so
 # the stuck wait is identified without a signal handler (writing from a
 # handler deadlocks on the stdout lock - learned the hard way).
+var root_dbg: string
+
 var phase: string = "init"
 
 proc setPhase(p: string) =
@@ -85,26 +91,31 @@ proc stuckDump() {.thread, gcsafe.} =
         stderr.write i, ": ", row, "\n"
       stderr.write "--- raw tail ---\n"
       stderr.write s.cleanRaw()[^1500 .. ^1], "\n"
-      # Sample the child's stacks: the screen state says the APP stalled
-      # mid-stream; only its call graph names the stuck syscall/lock.
-      when defined(macosx):
-        let (sampleOut, sampleRc) = execCmdEx("sample " & $s.pid &
-          " 3 3 2>&1 | head -200")
-        stderr.write "sample rc=", sampleRc, "\n"
-        for line in sampleOut.splitLines():
-          if line.len > 0:
-            stderr.write line, "\n"
+      # The app's debug-log tail: the screen state says the APP stalled
+      # mid-stream (words stop, spinner lives, quiet-watch never fires);
+      # the trace names the last stream-loop step before the stall.
+      when defined(posix):
+        try:
+          let dbg = readFile(root_dbg)
+          let lines = dbg.splitLines()
+          stderr.write "--- debug log tail (last 40) ---\n"
+          for line in lines[max(0, lines.len - 40) ..^ 1]:
+            if line.len > 0:
+              stderr.write line, "\n"
+        except CatchableError:
+          stderr.write "(no debug log)\n"
     flushFile(stderr)
   quit(7)
 
 proc one(realBin: string; iter: int): string =
   let root = newFixture("submit_race_" & $iter)
+  root_dbg = root / "debug.log"
   setPhase "iter " & $iter & ": mock server started"
   let srv = startMockServer(msDripStream, chunkDelayMs = 40)
   defer: stopMockServer(srv)
   writeProviderConfig(root, srv.url)
   setPhase "iter " & $iter & ": tty session fork"
-  let tty = newTtySession(realBin, args = ["-x", "-i"],
+  let tty = newTtySession(realBin, args = ["-x", "-i", "-D"],
                           cwd = root / "run", env = env(root),
                           cols = 119, rows = 40)
   sessionDumpRaw = cast[pointer](tty)

@@ -324,16 +324,44 @@ proc splitColorOverrides*(flat: Table[string, string]):
     else:
       result[0][k] = v
 
+when defined(posix):
+  var debugLogFd: cint = -1  ## raw fd: an int global keeps debugOut GC-safe
+
+  proc debugLogLine(line: string) {.gcsafe.} =
+    if debugLogFd == -2: return  # known-disabled sentinel
+    if debugLogFd == -1:
+      let path = getEnv("THREECODE_DEBUG_LOG")
+      if path.len == 0:
+        debugLogFd = -2
+        return
+      debugLogFd = posix.open(path, O_WRONLY or O_APPEND or O_CREAT, 0o600)
+      if debugLogFd < 0:
+        debugLogFd = -2
+        return
+    var buf = line & "\n"
+    discard posix.write(debugLogFd, buf[0].addr, buf.len)
+else:
+  proc debugLogLine(line: string) {.gcsafe, inline.} = discard
+
+proc debugToStderr(line: string): bool {.gcsafe, inline.} =
+  ## False when the file sink is active: then the trace stays out of the
+  ## pty so tty-test grid parsing is unaffected.
+  when defined(posix): debugLogFd < 0 else: true
+
 proc debugOut*(msg: string) =
   if not debugEnabled: return
   let t = epochTime().formatFloat(ffDecimal, 3)
-  stderr.writeLine BlueFg & "[dbg " & t & "] " & msg & Reset
+  debugLogLine("[dbg " & t & "] " & msg)
+  if debugToStderr(""):
+    stderr.writeLine BlueFg & "[dbg " & t & "] " & msg & Reset
 
 proc debugOut*(msg, tag: string) =
   if not debugEnabled: return
   let t = epochTime().formatFloat(ffDecimal, 3)
-  stderr.writeLine BlueFg & "[dbg " & t & "] " & BoldOn & tag &
-    Reset & BlueFg & " " & msg & Reset
+  debugLogLine("[dbg " & t & "] " & tag & " " & msg)
+  if debugToStderr(""):
+    stderr.writeLine BlueFg & "[dbg " & t & "] " & BoldOn & tag &
+      Reset & BlueFg & " " & msg & Reset
 
 proc bundledCaFile*(): string =
   ## Path to the `cacert.pem` we ship alongside the binary on macOS /
