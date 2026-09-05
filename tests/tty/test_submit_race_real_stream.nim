@@ -110,7 +110,14 @@ when isMainModule:
   let n = if paramCount() >= 1: parseInt(paramStr(1)) else: 6
   var failures = 0
   for i in 1..n:
+    # Heartbeat per iteration: when the CI watchdog kills this test the
+    # retained output shows exactly which iteration (and phase) stalled,
+    # instead of an empty log.
+    stdout.write "iter ", i, " start\n"
+    flushFile(stdout)
     let f = one(realBin, i)
+    stdout.write "iter ", i, " done\n"
+    flushFile(stdout)
     if f.len > 0:
       inc failures
       echo "FAIL: ", f
