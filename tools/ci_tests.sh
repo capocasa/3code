@@ -156,7 +156,7 @@ print_failures() {
     /^diff --git .*diffStrings_/ { indiff = 1 }
     indiff                     { print; if ($0 == "" && NR > 1) indiff = 0; next }
     /^Test "/                  { intest = 1 }
-    intest                     { print; if ($0 ~ /^\s*re[A-Z]/) intest = 0; next }
+    intest                     { print; if ($0 ~ /^[ \t]*re[A-Z]/) intest = 0; next }
   ' > "$FAILS"
   [ -s "$FAILS" ] || return 0
   echo "----- failure detail -----"
