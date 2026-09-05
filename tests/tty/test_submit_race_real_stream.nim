@@ -64,6 +64,27 @@ proc setPhase(p: string) =
   stdout.write p, "\n"
   flushFile(stdout)
 
+var sessionDumpRaw {.threadvar.}: pointer
+
+proc stuckDump() {.thread, gcsafe.} =
+  ## Watchdog thread: if one iteration exceeds 150s, snapshot the live
+  ## session's screen rows and raw tail to stderr and exit(7) - the CI
+  ## log then carries the app's on-screen state at the stall instead of
+  ## an empty kill. (The macOS-26 runner stalls somewhere in iteration 1
+  #  turn 2; every harness wait is deadline-bounded, so the stall lives
+  ## under the app or the pty layer and only its screen state travels.)
+  sleep(150_000)
+  stderr.write "STUCK-DUMP after 150s\n"
+  let s = cast[TtySession](sessionDumpRaw)
+  if s != nil:
+    {.gcsafe.}:
+      for i, row in s.rows():
+        stderr.write i, ": ", row, "\n"
+      stderr.write "--- raw tail ---\n"
+      stderr.write s.cleanRaw()[^1500 .. ^1], "\n"
+  flushFile(stderr)
+  quit(7)
+
 proc one(realBin: string; iter: int): string =
   let root = newFixture("submit_race_" & $iter)
   setPhase "iter " & $iter & ": mock server started"
@@ -74,6 +95,7 @@ proc one(realBin: string; iter: int): string =
   let tty = newTtySession(realBin, args = ["-x", "-i"],
                           cwd = root / "run", env = env(root),
                           cols = 119, rows = 40)
+  sessionDumpRaw = cast[pointer](tty)
   defer:
     tty.writeFrameArtifact(root / "frames.txt")
     tty.close()
@@ -121,6 +143,8 @@ proc one(realBin: string; iter: int): string =
   ""
 
 when isMainModule:
+  var wd: Thread[void]
+  createThread(wd, stuckDump)
   setPhase "building real binary"
   let realBin = ensureRealBinary()
   # OSX CI analysis (1f5d779 heartbeat): iteration 1 alone stalls to the
