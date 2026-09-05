@@ -30,7 +30,8 @@ PER_TEST_SECS=${PER_TEST_SECS:-300}
 
 LOG=$(mktemp "${TMPDIR:-/tmp}/3code_testament.XXXXXXXX") || exit 1
 SNAP=$(mktemp "${TMPDIR:-/tmp}/3code_watch.XXXXXXXX") || exit 1
-cleanup() { rm -f "$LOG" "$SNAP"; }
+FAILS=$(mktemp "${TMPDIR:-/tmp}/3code_fails.XXXXXXXX") || exit 1
+cleanup() { rm -f "$LOG" "$SNAP" "$FAILS"; }
 trap cleanup EXIT
 
 snapshot() {
@@ -143,10 +144,30 @@ rc=$?
 echo "----- testament log (last 80 lines) -----"
 tail -n 80 "$LOG"
 echo "-----------------------------------------"
+# Failure detail survives: the last-80-line tail lands mid-compile and
+# cuts away every failure report. Two shapes to recover from the full
+# log: single-test runs print a `Test "..." ... Output:` report right
+# after the FAIL: line, while multi-test runs emit one unified diff per
+# failing test (`diff --git .../diffStrings_*`) whose body carries the
+# expected/gotten exitcodes and the test's whole stdout - assertion
+# traces, [FAILED] blocks, frame dumps. Print both, verbatim.
+print_failures() {
+  sed 's/\x1b\[[0-9;]*m//g' "$LOG" | awk '
+    /^diff --git .*diffStrings_/ { indiff = 1 }
+    indiff                     { print; if ($0 == "" && NR > 1) indiff = 0; next }
+    /^Test "/                  { intest = 1 }
+    intest                     { print; if ($0 ~ /^\s*re[A-Z]/) intest = 0; next }
+  ' > "$FAILS"
+  [ -s "$FAILS" ] || return 0
+  echo "----- failure detail -----"
+  cat "$FAILS"
+  echo "--------------------------"
+}
 echo "----- pass/fail summary -----"
 sed 's/\x1b\[[0-9;]*m//g' "$LOG" |
   grep -aE 'PASS:|FAIL:|JOINED:|SKIP:|FAILURE!|Tests passed' | tail -n 250
 echo "-----------------------------"
+print_failures
 if [ -s "$SNAP" ]; then
   echo "----- watchdog -----"
   cat "$SNAP"

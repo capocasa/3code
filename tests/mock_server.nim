@@ -58,6 +58,32 @@ proc setSocketTimeoutMs(sock: Socket; ms: int) =
     discard setsockopt(sock.getFd(), SOL_SOCKET, SO_RCVTIMEO,
                        addr tv, sizeof(tv).SockLen)
 
+proc readRequestHead(client: Socket): int =
+  ## Read the request headers up to the blank line; return Content-Length.
+  client.setSocketTimeoutMs(3000)
+  while true:
+    let line = try: client.recvLine() except CatchableError: return 0
+    let s = line.strip()
+    if s.len == 0: return result
+    if s.toLowerAscii().startsWith("content-length:"):
+      result = try: parseInt(s.split(":")[1].strip) except ValueError: 0
+
+proc drainRequestBody(client: Socket; contentLength: int) =
+  ## Consume exactly the Content-Length body bytes before close(). A close()
+  ## with unread request data makes the kernel send RST instead of FIN, and
+  ## the RST can discard response bytes already queued on the client, which
+  ## reads it as a truncated stream (a retryable anomaly for `callModel`,
+  ## which multiplies into hangs on one-shot servers). Runs AFTER the
+  ## response is fully sent: draining first can deadlock against the
+  ## client's send timeout on a partially-written request.
+  if contentLength <= 0: return
+  var bodyBuf = newString(contentLength)
+  var got = 0
+  while got < contentLength:
+    let r = try: client.recv(bodyBuf, contentLength - got) except CatchableError: break
+    if r == 0: break
+    got += r
+
 proc sseChunk(data: string): string =
   ## Wrap `data` as one SSE ``data:`` event with chunked encoding framing.
   let payload = "data: " & data & "\n\n"
@@ -168,6 +194,11 @@ proc serverLoop(s: MockServer) {.thread.} =
         of msSlowStreamNoUsage: s.handleSlowStreamNoUsage(client)
         of msStallAfterDone: s.handleStallAfterDone(client)
         of msDripStream: s.handleDripStream(client)
+        # Read the POST head now (post-response, pre-close) so the drain
+        # below sees the right Content-Length. The handlers above already
+        # sent everything; scenarios that stall forever never get here.
+        let contentLength = client.readRequestHead()
+        client.drainRequestBody(contentLength)
         try: client.close() except CatchableError: discard
     except CatchableError:
       discard
