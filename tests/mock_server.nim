@@ -187,18 +187,28 @@ proc serverLoop(s: MockServer) {.thread.} =
           # SO_RCVTIMEO on the listener wakes accept() every 200ms; the
           # resulting timeout surfaces as OSError here. Re-check `stop`.
           continue
+        # Read the request head BEFORE the scenario handler: the client
+        # sends its POST head immediately after connecting, so it is
+        # already in flight here. Reading it after the response races the
+        # client's send timing: on a slow runner the 3s recv timeout can
+        # fire first, the head read returns 0, the body never drains, and
+        # close() with unread data sends RST mid-response: the app reads a
+        # truncated stream, classifies it retryable, and retries multiply
+        # into a watchdog kill (the OSX submit_race 303s). The body itself
+        # is drained only on scenarios whose handler completes, and only
+        # AFTER the response (draining first deadlocks against the
+        # client's send timeout on a partially-written request).
+        let contentLength = client.readRequestHead()
+        var handlerFinished = false
         case s.scenario
-        of msOk: s.handleOk(client)
+        of msOk: s.handleOk(client); handlerFinished = true
+        of msSlowStream: s.handleSlowStream(client); handlerFinished = true
+        of msDripStream: s.handleDripStream(client); handlerFinished = true
         of msSilentAfterAccept: s.handleSilent(client)
-        of msSlowStream: s.handleSlowStream(client)
         of msSlowStreamNoUsage: s.handleSlowStreamNoUsage(client)
         of msStallAfterDone: s.handleStallAfterDone(client)
-        of msDripStream: s.handleDripStream(client)
-        # Read the POST head now (post-response, pre-close) so the drain
-        # below sees the right Content-Length. The handlers above already
-        # sent everything; scenarios that stall forever never get here.
-        let contentLength = client.readRequestHead()
-        client.drainRequestBody(contentLength)
+        if handlerFinished:
+          client.drainRequestBody(contentLength)
         try: client.close() except CatchableError: discard
     except CatchableError:
       discard
