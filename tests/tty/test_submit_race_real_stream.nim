@@ -103,7 +103,10 @@ proc one(realBin: string; iter: int): string =
 
 when isMainModule:
   let realBin = ensureRealBinary()
-  let n = if paramCount() >= 1: parseInt(paramStr(1)) else: 12
+  # 12 iterations run ~60s locally but ~300s on the slow macOS CI runner,
+  # right at the per-test watchdog cap (the 303s kills). 10 keeps the race
+  # coverage while clearing the cap with ~50s of headroom there.
+  let n = if paramCount() >= 1: parseInt(paramStr(1)) else: 10
   var failures = 0
   for i in 1..n:
     let f = one(realBin, i)
