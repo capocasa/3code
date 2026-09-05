@@ -72,7 +72,7 @@ suite "spinner runs through backoff while typing":
       tty.send "go"
       tty.expect "go"
       tty.send "\n"
-      tty.expectInHistory "429"
+      tty.expectInHistory("429", timeoutMs = 15_000)
       # Hammer the buffered editor with keystrokes throughout the backoff.
       for burst in 1 .. 40:
         tty.send "abcdefghij"

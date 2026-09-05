@@ -302,7 +302,9 @@ suite "quit signals":
       tty.send($ch); tty.drain(10)
     tty.send "\n"
     # Wait for the first retry notice so the transport is mid-backoff.
-    tty.expectInHistory "429"
+    # Generous budget: submit-to-notice latency alone brushes the 5s
+    # default on slow CI runners (OSX and Windows flakes).
+    tty.expectInHistory("429", timeoutMs = 15_000)
     tty.drain(50)
     tty.send "\x03"               # Ctrl-C during the retry backoff
     tty.expectInHistory "interrupted by user"
