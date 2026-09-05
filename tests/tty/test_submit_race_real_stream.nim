@@ -14,7 +14,7 @@ discard """
 ## hint row H, blank row H+1, echo row H+2, and the first echo survives the
 ## second submit.
 
-import std/[json, os, strutils]
+import std/[json, os, osproc, strutils]
 import tty_expect, stub_helpers, mock_server
 
 proc newFixture(name: string): string =
@@ -85,7 +85,14 @@ proc stuckDump() {.thread, gcsafe.} =
         stderr.write i, ": ", row, "\n"
       stderr.write "--- raw tail ---\n"
       stderr.write s.cleanRaw()[^1500 .. ^1], "\n"
-  flushFile(stderr)
+      # Sample the child's stacks: the screen state says the APP stalled
+      # mid-stream; only its call graph names the stuck syscall/lock.
+      when defined(macosx):
+        discard execCmdEx("sample " & $s.pid & " 3 -file /tmp/submit_race_sample.txt")
+        for line in readFile("/tmp/submit_race_sample.txt").splitLines():
+          if line.len > 0:
+            stderr.write line, "\n"
+    flushFile(stderr)
   quit(7)
 
 proc one(realBin: string; iter: int): string =
