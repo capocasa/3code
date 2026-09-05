@@ -1472,6 +1472,67 @@ suite "terminal visual contract":
     tty.expect "❯"
     tty.expectAlive()
 
+  test "arrow up/down in a multiline draft never eats scrollback above":
+    # Regression: the volatile repaint's walk-up assumed the cursor sits
+    # at the block's bottom row. After Up/Down moves the caret to a middle
+    # row of a multiline draft, walking prevH-1 rows over-walked into
+    # scrollback: the welcome hint row above the prompt was blanked and a
+    # stale duplicate of the editor's bottom row was left behind.
+    let root = newFixture("multiline_history_nav")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "content": "history nav reply",
+        "contentChunks": ["history nav reply"],
+        "usage": {"promptTokens": 10, "completionTokens": 3,
+                  "totalTokens": 13, "cachedTokens": 0}
+      }
+    ])
+    createDir(root / "data" / "3code")
+    writeFile(root / "data" / "3code" / "history",
+              "first short prompt\nsecond short prompt")
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "line one of a quite long draft"
+    tty.send "\x1b[13;2u"
+    tty.send "line two of the draft"
+    tty.send "\x1b[13;2u"
+    tty.send "line three ends here"
+    tty.expect "line three ends here"
+    tty.drain(200)
+
+    # Caret walks up through the draft rows, crosses into history, comes
+    # back, and returns to the bottom row. Every intermediate screen must
+    # keep the scrollback above the prompt intact.
+    tty.send "\x1b[A"
+    tty.drain(200)
+    tty.send "\x1b[A"
+    tty.drain(200)
+    tty.send "\x1b[A"
+    tty.drain(200)
+    tty.expect "second short prompt"
+    tty.send "\x1b[B"
+    tty.drain(200)
+    tty.expect "line three ends here"
+    tty.send "\x1b[B"
+    tty.drain(200)
+    tty.send "\x1b[B"
+    tty.drain(200)
+
+    tty.expectCount("type a prompt. :help for commands.", 1,
+                    where = "screen")
+    tty.expectCount("❯ line one of a quite long draft", 1, where = "screen")
+    tty.expectCount("  line two of the draft", 1, where = "screen")
+    tty.expectCount("  line three ends here", 1, where = "screen")
+    tty.expectCount("second short prompt", 0, where = "screen")
+    tty.expectIdleCaret()
+    tty.expectAlive()
+
   test "multiline prompt and queued multiline autosend":
     let root = newFixture("multiline_visual_test")
     writeConfiguredProvider(root)
