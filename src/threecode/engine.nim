@@ -248,6 +248,17 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   let resized = e.lastPaintedWidth > 0 and width > 0 and
     width != e.lastPaintedWidth
 
+  # Physical caret row at entry: every paint parks the cursor at the
+  # editor's caret (editor top + `renderRow`), the same invariant the
+  # commit walk-ups (`walkUp`, `redrawBytes`) count from. `renderRow`
+  # is reassigned below once the new row model is built, so capture the
+  # entry value first — the walk-up geometry below must start from the
+  # caret's actual row, not the block bottom (Up/Down inside a
+  # multiline draft leaves the caret mid-block; walking `prevH - 1`
+  # from there over-walked into scrollback and ate the row above the
+  # prompt).
+  let entryCaretRow = if edPtr != nil: edPtr[].renderRow else: -1
+
   if resized:
     # The terminal reflowed the painted rows; the tracked model no
     # longer matches the screen. Repaint from scratch: walk up the
@@ -256,6 +267,8 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
     # post-reflow count), erase down, and diff against an empty model
     # so every row is rewritten.
     let prevEdRows = if edPtr != nil: max(1, minline.renderedRows(edPtr[])) else: 0
+    let belowCaretRz = if entryCaretRow >= 0:
+      max(0, prevEdRows - 1 - min(entryCaretRow, prevEdRows - 1)) else: 0
     let prevTotal = e.paintedFooterRows + e.toolViewportRows.len +
       e.viewportGapRows + e.liveContentRows.len + e.liveContentGapRows +
       prevEdRows
@@ -264,7 +277,7 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
       (if newViewportRows.len > 0 and newViewportGap: 1 else: 0)
     if edPtr != nil:
       newTotal += prevEdRows
-    let upErase = max(0, max(prevTotal, newTotal) - 1)
+    let upErase = max(0, max(prevTotal, newTotal) - 1 - belowCaretRz)
     if upErase > 0:
       stdout.write "\x1b[" & $upErase & "A"
     stdout.write "\r\x1b[J"
@@ -319,6 +332,9 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
               else: minline.renderedRows(edPtr[])))
     else: 0
   let prevPhysEdRows = max(prevEditorRows.len, physEd)
+  var belowCaret = if entryCaretRow >= 0:
+    max(0, prevPhysEdRows - 1 - min(entryCaretRow, prevPhysEdRows - 1))
+  else: 0
   let walkH =
     (if edPtr != nil: physEd else: 0) +
     max(e.paintedFooterRows, prevBarCount) +
@@ -386,14 +402,22 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   # terminal's bottom edge would push the block instead of replacing it.
   var blockGrew = false
   if blockH > prevH:
+    if belowCaret > 0:
+      # The growth scroll must run at the block's bottom row: a `\r\n`
+      # from a mid-block caret merely steps down one existing row (no
+      # scroll), and the rewrite below would then push the block at the
+      # screen's bottom edge instead of replacing it.
+      stdout.write "\x1b[" & $belowCaret & "B"
+      belowCaret = 0
     for _ in 0 ..< blockH - prevH:
       stdout.write "\r\n"
     prevH = blockH
     blockGrew = true
   let anchor = if caretRow >= 0: caretRow else: blockH - 1
   let edTop = if newEdModel.len > 0: blockH - newEdModel.len else: -1
-  # Walk up from the cursor (block bottom) to the block's top.
-  let up = max(0, prevH - 1)
+  # Walk up from the caret's entry row to the block's top. After a
+  # growth scroll the cursor already sits at the (new) block bottom.
+  let up = max(0, prevH - 1 - belowCaret)
 
   if up > 0:
     stdout.write "\x1b[" & $up & "A"
@@ -472,13 +496,20 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   if blockH < prevH:
     # The block shrank: the rows below the new bottom still hold stale
     # content the row loop never visits (it stops at the new bottom).
-    # Blank them explicitly. (Erase-to-end-of-screen would be shorter,
-    # but terminal models that implement ED-0 as "drop the rows below"
-    # shift anything underneath — real scrollback in the grid — up into
-    # the block and duplicate it.)
+    # Blank them explicitly, counting from the new bottom — the anchor
+    # (caret row) can sit mid-block, and blanking from there would wipe
+    # live editor rows below the caret. (Erase-to-end-of-screen would
+    # be shorter, but terminal models that implement ED-0 as "drop the
+    # rows below" shift anything underneath — real scrollback in the
+    # grid — up into the block and duplicate it.)
+    let toBottom = blockH - 1 - anchor
+    if toBottom > 0:
+      buf.add "\x1b[" & $toBottom & "B"
     for _ in 0 ..< prevH - blockH:
       buf.add "\x1b[B\x1b[2K"
-    buf.add "\x1b[" & $(prevH - blockH) & "A"
+    let backUp = toBottom + (prevH - blockH)
+    if backUp > 0:
+      buf.add "\x1b[" & $backUp & "A"
   stdout.write buf
   # Store the model for the next diff: bar+ticker and editor rows only
   # (live/viewport rows are tracked by their own seqs).
