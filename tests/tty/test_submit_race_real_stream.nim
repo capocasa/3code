@@ -88,8 +88,10 @@ proc stuckDump() {.thread, gcsafe.} =
       # Sample the child's stacks: the screen state says the APP stalled
       # mid-stream; only its call graph names the stuck syscall/lock.
       when defined(macosx):
-        discard execCmdEx("sample " & $s.pid & " 3 -file /tmp/submit_race_sample.txt")
-        for line in readFile("/tmp/submit_race_sample.txt").splitLines():
+        let (sampleOut, sampleRc) = execCmdEx("sample " & $s.pid &
+          " 3 3 2>&1 | head -200")
+        stderr.write "sample rc=", sampleRc, "\n"
+        for line in sampleOut.splitLines():
           if line.len > 0:
             stderr.write line, "\n"
     flushFile(stderr)
