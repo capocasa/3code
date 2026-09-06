@@ -17,6 +17,7 @@ discard """
   disabled: "win"
 """
 import std/[json, os, strutils, times, unicode, unittest]
+import threecode/types
 when defined(posix):
   import posix except SocketHandle
 import tty_expect
@@ -72,6 +73,22 @@ url = "stub://alt"
 key = "alt"
 family = "glm"
 models = "alt-model alt-large"
+""")
+
+proc writeKimiStubProvider(root: string) =
+  ## Kimi-family stub: `-x` lets the config family override resolve, which
+  ## arms dmail/checkpoint tagging (glm never tags).
+  createDir(root / "xdg" / "3code")
+  writeFile(root / "xdg" / "3code" / "config", """
+[settings]
+current = "stub.stub-model"
+
+[provider]
+name = "stub"
+url = "stub://provider"
+key = "stub"
+family = "kimi"
+models = "stub-model"
 """)
 
 proc toolCall(id, name: string, args: JsonNode; stub: JsonNode = nil): JsonNode =
@@ -825,6 +842,59 @@ suite "terminal visual contract":
     # The committed line lands on the live grid exactly once (the partial
     # repaints are volatile chrome that the final screen does not double).
     tty.expectCount("combination of colors.", 1, where = "screen")
+    tty.expect "❯"
+
+  test "streamed checkpoint markers never paint, not even as bare bullets":
+    # Kimi dmail tagging prefixes the first assistant message with
+    # `[checkpoint N]\n`. Three artifacts when the marker streams in
+    # chunks: (1) the volatile partial painted `[checkpoint 0` for one
+    # chunk, then erased it at commit - a visible flash; (2) a bare `●`
+    # row with no text when the completed marker emptied the pending
+    # line; (3) a marker-only reply committed nothing, leaving the token
+    # receipt floating with no item above it and no empty-reply notice.
+    # All three are kimi-only paths (glm never emits the markers).
+    let root = newFixture("checkpoint_stream_clean")
+    writeKimiStubProvider(root)
+    writeStubResponses(root, %*[
+      {"role": "assistant",
+       "content": "[checkpoint 0]\nKimi marker streamed piecewise.",
+       "contentChunks": ["[checkpoint", " 0]\nKimi", " marker streamed",
+                         " piecewise."],
+       "usage": {"promptTokens": 10, "completionTokens": 14,
+                 "totalTokens": 24, "cachedTokens": 0}},
+      {"role": "assistant",
+       "content": "[checkpoint 1]",
+       "contentChunks": ["[checkpoint 1]"],
+       "usage": {"promptTokens": 24, "completionTokens": 4,
+                 "totalTokens": 28, "cachedTokens": 0}}
+    ])
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+    tty.expect "❯"
+    tty.send "go\n"
+    # The partial must paint real prose only: no frame may show the raw
+    # marker bytes or a bare bullet with no text after it.
+    tty.drain(500, recordFrame = true)
+    for f in tty.frames:
+      let scr = f.rows.join("\n")
+      check "checkpoint" notin scr
+      check "[ch" notin scr
+    # Prose commits once, with its bullet, and the marker is gone from
+    # scrollback entirely.
+    tty.expectCount("Kimi marker streamed piecewise.", 1, where = "screen")
+    tty.expectNeverInHistory "[checkpoint 0]"
+    tty.expectInHistory "● Kimi marker streamed piecewise."
+    tty.expectTokenBar(["○"])
+    # Turn 2: a reply whose only content is the marker line. It must
+    # render the canonical empty-reply fallback (painted by the commit,
+    # reachable only because the streamed-empty case no longer skips it),
+    # never a floating receipt, never the raw marker.
+    tty.send "again\n"
+    tty.expectInHistory EmptyReplyMsg
+    tty.expectNeverInHistory "[checkpoint 1]"
+    tty.expectCount("empty reply", 1, where = "screen")
     tty.expect "❯"
 
   test "api retry notice is a harness line in scrollback, not stderr noise":

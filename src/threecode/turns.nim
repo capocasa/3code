@@ -448,10 +448,13 @@ proc clearSubmittedTickerState() =
 
 proc commitAssistantItem(content: string; restoreEditor = true;
                          attachReceipt = true) =
+  # Emptiness is judged on the visible content, not the raw string: a
+  # reply whose only text is checkpoint bookkeeping paints nothing, so it
+  # must take the same empty-reply fallback as a bare empty reply.
   let afterCommit =
     if attachReceipt: clearSubmittedReceiptState
     else: clearSubmittedTickerState
-  if content.strip.len == 0:
+  if stripCheckpointMarkers(content).strip.len == 0:
     let receipt = if attachReceipt: pendingReceiptBytes() else: ""
     var bytes = emptyAssistantBytes(attachReceipt, receipt)
     bytes.finishTranscriptItem()
@@ -780,7 +783,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         # receipt (captured above) caps the last tool below so the turn's
         # token usage lands in scrollback even when the model emits only
         # tool calls and no prose.
-        if not streamedLive:
+        if not streamedLive and
+           not (toolCalls.len > 0 and
+                stripCheckpointMarkers(content).strip.len == 0):
+          # The second guard keeps live in sync with replay: an empty or
+          # marker-only text paired with tool calls renders nothing (the
+          # grey empty-reply fallback is for the final tool-less reply),
+          # so it must not commit a fallback row the replay suppresses.
           commitAssistantItem(content, attachReceipt = false)
       # The last tool that will actually reach its commit is the one the
       # deferred receipt caps. Tools that are interrupted or have malformed
@@ -1041,12 +1050,19 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       debugOut "runTurns: loop continue"
       continue
     let queuedBeforeFinalRender = hasQueuedAutosend()
+    # Streamed prose is already in scrollback; committing it again would
+    # duplicate it, so the commit only tops the stream up with the receipt.
+    # A reply whose visible text is empty (marker-only, kimi dmail tag)
+    # painted nothing at all, so it must still go through the assistant-item
+    # commit: streaming used to skip it, leaving a bare receipt floating in
+    # scrollback and no empty-reply notice.
+    let displayEmpty = stripCheckpointMarkers(content).strip.len == 0
     discard stopBarTick()
     stopSpinner(clearLiveFooter = false)
-    if streamedLive:
+    if streamedLive and not displayEmpty:
       commitPendingReceiptAfterStream(restoreEditor = not queuedBeforeFinalRender)
     else:
-      if not queuedBeforeFinalRender:
+      if not queuedBeforeFinalRender and not streamedLive:
         stopTurnInputForFinalRender()
       commitAssistantItem(
         content,

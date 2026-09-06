@@ -1326,14 +1326,55 @@ proc suppressLiveAssistantStream(): bool =
   ## held back and dumped at end of turn.
   false
 
+proc trailingPartialMarker(line: string): int =
+  ## Start index of a trailing `[checkpoint N` still mid-stream, or -1.
+  ## Unlike `stripCheckpointMarkers` (which only matches complete markers),
+  ## a marker whose bytes have only partly arrived must already count as
+  ## invisible: painting it puts harness bookkeeping on screen for one
+  ## chunk, then erases it at commit - the visible flash this helper exists
+  ## to prevent. A suffix hides while it can still grow into a marker: a
+  ## proper prefix of "[checkpoint ", or "[checkpoint " followed by only
+  ## digits (closing ']' not arrived yet). Prose like "[checkpoints]"
+  ## stops matching the digit run, so it never hides.
+  const Open = "[checkpoint "
+  var i = line.len
+  while i > 0:
+    dec i
+    if line[i] != '[': continue
+    let tail = line[i .. ^1]
+    if tail.len < Open.len:
+      if Open.startsWith(tail): return i
+    elif tail.startsWith(Open):
+      var j = i + Open.len
+      while j < line.len and line[j] in {'0'..'9'}: inc j
+      if j >= line.len: return i
+  -1
+
+proc pendingVisibleText(s: LiveMarkdownStream): string =
+  ## What of the pending line would actually paint: complete markers
+  ## stripped (as at commit) plus a still-streaming trailing marker held
+  ## back. Shared by the partial painter and the commit so a line can
+  ## never flash on screen and then vanish, or vice versa.
+  result = stripCheckpointMarkers(s.pendingLine)
+  let cut = trailingPartialMarker(result)
+  if cut >= 0:
+    result.setLen(cut)
+
 proc partialContentRows(s: LiveMarkdownStream): seq[string] =
   ## The volatile row(s) for the in-progress line: the bullet on the first
   ## emitted line, then the inline-markdown-rendered pending text wrapped to
   ## the terminal width. These rows are live chrome (erased/rewritten each
-  ## chunk) until a newline commits them to real scrollback.
+  ## chunk) until a newline commits them to real scrollback. A line that
+  ## carries only checkpoint bookkeeping paints nothing (no bare bullet
+  ## row); see `commitPendingLine`.
   let termW = max(1, try: terminalWidth() except CatchableError: 80)
   let bodyW = max(1, termW - 2)
-  let styled = assistantTextBytes(applyInlineMd(stripCheckpointMarkers(s.pendingLine)))
+  let vis = s.pendingVisibleText()
+  if vis.strip.len == 0:
+    # Marker-only (harness tag or model echo): nothing to paint, not even
+    # a bare bullet row.
+    return
+  let styled = assistantTextBytes(applyInlineMd(vis))
   if s.md.firstEmit:
     let chunks = wrapAnsi(styled, bodyW)
     if chunks.len == 0:
@@ -1358,7 +1399,12 @@ proc renderPendingPartial(s: var LiveMarkdownStream, slurpedNow: int) =
   ## newline. The partial rows are erased and rewritten each chunk (they are
   ## live chrome, not scrollback); at a newline `commitPendingLine` sends the
   ## line through the block-level markdown renderer to real scrollback, so
-  ## fences/tables/word-wrap match replay exactly.
+  ## fences/tables/word-wrap match replay exactly. A line with no visible
+  ## text (checkpoint bookkeeping still streaming in) bails before
+  ## `startContent`: painting empty rows and tearing down the footer for
+  ## them would leave the engine's gap bookkeeping desynced from the
+  ## physical screen.
+  if s.pendingVisibleText().strip.len == 0: return
   s.startContent(slurpedNow)
   emitFatPromptEvent setBarEvent(s.currentLabel(slurpedNow))
   # Use currentFrameFromModel() (not footerFrame(fatPromptState)) so the
@@ -1387,11 +1433,17 @@ proc commitPendingLine(s: var LiveMarkdownStream, slurpedNow: int) =
   if s.pendingBlank:
     s.pendingBlank = false
     s.commitBlankLine()
-  let stripped = stripCheckpointMarkers(s.pendingLine)
+  # What actually paints is what commits: complete markers stripped and a
+  # still-streaming trailing marker held back, exactly as the partial
+  # painter did (or the bytes would appear at commit that never showed
+  # mid-stream, or the reverse).
+  let stripped = s.pendingVisibleText()
   if stripped.strip.len == 0:
     # Marker-only line (harness tag or model echo): nothing to paint.
     # The line ends here, so the accumulated text is discarded; keeping
-    # it in pendingLine would glue it to the next line's prose.
+    # it in pendingLine would glue it to the next line's prose. The
+    # markdown state is untouched, so `firstEmit` still holds and the
+    # first visible line keeps its bullet.
     s.pendingLine = ""
     return
   let isFirstLine = s.md.firstEmit
