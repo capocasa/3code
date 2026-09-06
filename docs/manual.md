@@ -329,6 +329,7 @@ The valid values depend on the model:
 - GPT-5.1 and later add `none`
 - GPT-5.4 and GPT-5.5 add `xhigh`
 - GPT-5.6 adds `max` and does not use `minimal`
+- GPT-6 Astra uses `low`, `medium`, `high`, `xhigh`, and `max`; thinking cannot be disabled
 - GPT-5.5 Pro uses `medium`, `high`, and `xhigh`; GPT-5 Pro uses `high`
 - GPT-4.x has no reasoning setting
 

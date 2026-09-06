@@ -321,6 +321,9 @@ suite "compact: contextWindowFor":
   test "gpt-5 returns 400000":
     check contextWindowFor("gpt-5") == 400_000
 
+  test "gpt-6-astra returns 1050000":
+    check contextWindowFor("gpt-6-astra") == 1_050_000
+
   test "gpt-4 returns 128000":
     check contextWindowFor("gpt-4o") == 128_000
 

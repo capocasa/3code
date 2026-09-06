@@ -161,6 +161,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openai", "gpt-5.6-sol", "gpt", "", "5.6-sol", "medium", 0.2, 8192, false, 400_000),
     ("openai", "gpt-5.6-terra", "gpt", "", "5.6-terra", "medium", 0.2, 4096, false, 400_000),
     ("openai", "gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, false, 400_000),
+    ("openai", "gpt-6-astra", "gpt", "", "6-astra", "medium", 0.2, 8192, false, 1_050_000),
 
     # deepseek
     ("baseten", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, false, 1_000_000),
@@ -3102,11 +3103,13 @@ proc maxOutputTokensFor*(p: Profile): int =
   let m = p.model.toLowerAscii
   if "glm-5.3" in m: return 131_072
   if "deepseek" in m and "v4" in m: return 384_000
+  if "gpt-6-astra" in m: return 128_000
   let kg = knownGoodContextWindow(p)
   if kg > 0: return kg
   if "kimi-k2" in m or "qwen3-coder" in m or "qwen3_coder" in m: 262_144
   elif "qwen" in m: 128_000
   elif "claude" in m: 200_000
+  elif "gpt-6-astra" in m: 1_050_000
   elif "gpt-5" in m: 400_000
   elif "gpt-4" in m or "o1" in m or "o3" in m or "o4" in m: 200_000
   elif "deepseek" in m: 128_000
@@ -3147,6 +3150,8 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         if combo.variant == "5.5-pro": return @["medium", "high", "xhigh"]
         if combo.variant.startsWith("5.6"):
           return @["none", "low", "medium", "high", "xhigh", "max"]
+        if combo.variant == "6-astra":
+          return @["low", "medium", "high", "xhigh", "max"]
         if combo.variant.startsWith("5.4") or combo.variant.startsWith("5.5"):
           return @["none", "low", "medium", "high", "xhigh"]
         if combo.variant in ["5", "5-mini", "5-nano"]:

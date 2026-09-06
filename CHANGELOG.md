@@ -1,5 +1,14 @@
 # Changelog
 
+**0.7.1** - GPT-6 Astra on OpenAI and ChatGPT
+
+- **GPT-6 Astra.** `gpt-6-astra` is known-good for both the `openai`
+  (API key) and `chatgpt` (Plus/Pro subscription) providers: 1.05M-token
+  context, 128k architectural output cap, and a reasoning ladder of
+  `low`/`medium`/`high`/`xhigh`/`max` (no `none`: Astra always thinks).
+  `chatgpt` continues to route through the Codex backend with the same
+  subscription login.
+
 **0.7.0** - key rebinding, editor integration, smarter stuck-loop guard
 
 - **`[shortcuts]` key rebinding.** Every key is a named command, and every

@@ -368,11 +368,16 @@ suite "api request shaping":
       @["none", "low", "medium", "high", "xhigh", "max"]
     check knownGoodReasonings("openai", "gpt-5.6-luna") ==
       @["none", "low", "medium", "high", "xhigh", "max"]
+    # gpt-6-astra drops "none": reasoning cannot be disabled.
+    check knownGoodReasonings("openai", "gpt-6-astra") ==
+      @["low", "medium", "high", "xhigh", "max"]
     check knownGoodReasonings("openai", "gpt-4o") == newSeq[string](0)
     check knownGoodReasonings("openai", "gpt-4.1") == newSeq[string](0)
     # chatgpt (Codex backend) resolves to the openai catalog.
     check knownGoodReasonings("chatgpt", "gpt-5.6-sol") ==
       @["none", "low", "medium", "high", "xhigh", "max"]
+    check knownGoodReasonings("chatgpt", "gpt-6-astra") ==
+      @["low", "medium", "high", "xhigh", "max"]
 
   test "openai chat body sends reasoning_effort passthrough":
     for level in ["none", "low", "medium", "high", "xhigh", "max"]:
@@ -389,12 +394,53 @@ suite "api request shaping":
       let body = buildResponsesBody(p, %*[{"role": "user", "content": "go"}])
       check body{"reasoning"}{"effort"}.getStr == level
 
+  test "gpt-6-astra chat body uses max_completion_tokens and reasoning_effort":
+    # Same gpt-family wire surface: chat/completions rejects max_tokens
+    # and takes reasoning_effort passthrough (astra accepts low..max, no
+    # none, but the wire mapping is shared).
+    var body = %*{"stream": true}
+    let p = Profile(name: "openai.gpt-6-astra", family: "gpt",
+                    model: "gpt-6-astra", reasoning: "xhigh")
+
+    applyGenerationDefaults(p, body)
+    applyReasoning(p, body)
+
+    check body{"max_completion_tokens"}.getInt == 8192
+    check body{"reasoning_effort"}.getStr == "xhigh"
+    check "max_tokens" notin body
+
+  test "chatgpt gpt-6-astra verify body hits the Codex backend shape":
+    # The subscription twin posts to chatgpt.com/backend-api/codex with
+    # the codex gates; the astra model id passes through untouched.
+    let p = Profile(name: "chatgpt.gpt-6-astra", family: "gpt",
+                    model: "gpt-6-astra",
+                    url: "https://api.openai.com/v1")
+    check requestUrl(p) == "https://chatgpt.com/backend-api/codex"
+    let body = buildResponsesBody(p, %*[{"role": "system", "content": "sys"},
+                                        {"role": "user", "content": "go"}])
+    check body{"model"}.getStr == "gpt-6-astra"
+    check body{"store"}.getBool == false
+    check "max_output_tokens" notin body
+    check body{"instructions"}.getStr == "sys"
+
   test "knownGoodReasonings for grok: 4.5 levels, 4.20 adds off":
     check knownGoodReasonings("xai", "grok-4.5") == @["low", "medium", "high"]
     check knownGoodReasonings("xai", "grok-4.3") == @["low", "medium", "high"]
     check knownGoodReasonings("xai", "grok-4.20") == @["off", "low", "medium", "high"]
     check knownGoodReasonings("xai", "grok-build-0.1") == @["low", "medium", "high"]
     check knownGoodReasonings("openrouter", "x-ai/grok-4.5") == @["low", "medium", "high"]
+
+  test "gpt-6-astra is known-good for openai and chatgpt":
+    # The subscription twin resolves through the openai catalog; same
+    # context window, same 128k architectural output cap (1.05M context
+    # but a single generation tops out at 128k).
+    check isKnownGood(Profile(name: "openai.gpt-6-astra", model: "gpt-6-astra"))
+    check isKnownGood(Profile(name: "chatgpt.gpt-6-astra", model: "gpt-6-astra"))
+    check knownGoodContextWindow("openai", "gpt-6-astra") == 1_050_000
+    check knownGoodContextWindow("chatgpt", "gpt-6-astra") == 1_050_000
+    check knownGoodGeneration("openai", "gpt-6-astra").maxTokens == 8192
+    check maxOutputTokensFor(Profile(name: "openai.gpt-6-astra",
+      model: "gpt-6-astra")) == 128_000
 
   test "maxOutputTokensFor caps the escalation ladder at model output limits":
     # GLM-5.3 and DeepSeek-V4 sit in 1M contexts but cap a single

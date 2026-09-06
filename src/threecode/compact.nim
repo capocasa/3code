@@ -23,6 +23,7 @@ proc contextWindowFor*(model: string): int =
   elif "qwen3-coder" in m or "qwen3_coder" in m: 262_144
   elif "qwen" in m: 128_000
   elif "claude" in m: 200_000
+  elif "gpt-6-astra" in m: 1_050_000
   elif "gpt-5" in m: 400_000
   elif "gpt-4" in m: 128_000
   elif "o1" in m or "o3" in m or "o4" in m: 200_000
