@@ -1,7 +1,27 @@
 # Changelog
 
-**0.7.0** - OpenCode Zen/Go session header
+**0.7.0** - key rebinding, editor integration, smarter stuck-loop guard
 
+- **`[shortcuts]` key rebinding.** Every key is a named command, and every
+  command can be reassigned in the config file (`cancel = DoubleESC`, or an
+  empty value to unbind). See the manual for the full command list.
+- **Editor and shell integration.** `Alt+E` (or `Ctrl+X Ctrl+E`) edits the
+  input buffer in `$VISUAL`/`$EDITOR`; `:! <cmd>` runs a shell command
+  yourself, output lands in your scrollback only, the model never sees it.
+- **Stuck-turn recovery ("flail").** When the model spins without progress,
+  3code nudges it back to work twice before aborting the turn, and a
+  windowed no-progress guard catches doom loops of ever-new commands.
+  Healthy repeated builds no longer trigger it.
+- **Faster, steadier rendering.** Identical frames are skipped, editor
+  keystrokes are diff-painted instead of erase-repainting the block, and
+  ghostty no longer loses a row on submit (DEC 2026 sync output off).
+  Fixed: missing blank row after first submit, over-erased scrollback on
+  live-content commit, multiline up/down eating scrollback, stacked curl
+  progress meters in the tool viewport.
+- **Kimi K3 and GLM efficiency.** Kimi gets first-party reasoning knobs
+  (K3 `effort`, K2.x `thinking.type`) and a prompt rewrite that favors
+  action over offers to continue. GLM-5.3 gains an effort ladder for
+  length-starved turns and a 32k read cap.
 - **OpenCode Zen/Go.** Every model request now carries
   `User-Agent: 3code/<version>` (previously none at all — Zen asked) and,
   on the `opencode`/`opencodego` gateways, `x-opencode-session` with the
@@ -9,6 +29,16 @@
   rejects headerless requests from 2026-09-06. The id is stable across a
   conversation's turns (token-cache affinity) and rotates with `:clear`,
   which starts a new conversation.
+- **Catalog.** Qwen 3.5–3.8 lineup including small models, first-party
+  DashScope, Omen-alpha on opencodego, and new providers Aki, GreenPT,
+  Lyceum with known-good model lists. Model ids are normalized everywhere
+  (input, config, wizard), so a listed-but-unserved variant quietly maps
+  to the known-good wire id.
+- **Resume.** Replays render through the shared transcript formatters, and
+  web_search/web_fetch calls round-trip their queries.
+- **Termux.** Release tarball with autoupdate and a one-liner install.
+- **Notifications.** Transcript visibility rules strip checkpoint markers
+  and skip empty replies.
 
 **0.6.3** - Catalog sweep
 
