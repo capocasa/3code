@@ -228,7 +228,9 @@ proc serveThread(server: SseServer) {.thread.} =
   serveOnce(server)
 
 proc url(server: SseServer): string =
-  "http://127.0.0.1:" & $server.port.uint16 & "/chat/completions"
+  # Bare endpoint like production provider urls; the transport appends
+  # /chat/completions (or /responses) itself.
+  "http://127.0.0.1:" & $server.port.uint16 & "/v1"
 
 proc testProfile(server: SseServer): Profile =
   Profile(name: "test", url: server.url, key: "test-key",
@@ -585,6 +587,11 @@ suite "request headers (OpenCode Zen/Go contract)":
     server.socket.close()
     check server.capturedHeaders.filterIt(it.startsWith("user-agent:")).len == 1
     check "user-agent: 3code/" in server.capturedHeaders[0..^1].join("\n")
+    # Request line: the profile url is a bare /v1 endpoint and the transport
+    # appends /chat/completions exactly once (no doubled path).
+    check server.capturedHeaders.len > 0
+    check server.capturedHeaders[0] ==
+      "post /v1/chat/completions http/1.1"
     closeCachedStreamConn()
 
   test "opencode gateway gets x-opencode-session; other providers do not":

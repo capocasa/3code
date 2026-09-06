@@ -58,7 +58,9 @@ proc serveStuckHead(server: StuckServer) {.thread.} =
   client.close()
 
 proc url(server: StuckServer): string =
-  "http://127.0.0.1:" & $server.port.uint16 & "/chat/completions"
+  # Bare endpoint like production provider urls; the transport appends
+  # /chat/completions itself.
+  "http://127.0.0.1:" & $server.port.uint16 & "/v1"
 
 proc testProfile(server: StuckServer): Profile =
   Profile(name: "test", url: server.url, key: "test-key",
