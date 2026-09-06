@@ -1,5 +1,15 @@
 # Changelog
 
+**0.7.0** - OpenCode Zen/Go session header
+
+- **OpenCode Zen/Go.** Every model request now carries
+  `User-Agent: 3code/<version>` (previously none at all — Zen asked) and,
+  on the `opencode`/`opencodego` gateways, `x-opencode-session` with the
+  conversation's `.3log` id. The gateway routes/shards by that header and
+  rejects headerless requests from 2026-09-06. The id is stable across a
+  conversation's turns (token-cache affinity) and rotates with `:clear`,
+  which starts a new conversation.
+
 **0.6.3** - Catalog sweep
 
 - **Catalog.** GLM-5.3 / GLM-5.3-Flash, Qwen 3.8 and DeepSeek V4 known-good

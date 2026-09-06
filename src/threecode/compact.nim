@@ -156,11 +156,18 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
   var status = 0
   var respBody = ""
   try:
-    let client = newHttpClient(timeout = 120_000, userAgent = "3code",
+    let client = newHttpClient(timeout = 120_000,
+                               userAgent = ModelUserAgent,
                                sslContext = bundledSslContext())
     defer: client.close()
     client.headers["Authorization"] = "Bearer " & p.key
     client.headers["Content-Type"] = "application/json"
+    # Same Zen/Go contract as the main transport: the summarizer is a
+    # mid-conversation call, so it rides the conversation's session id
+    # (runTurns published it); without one it mints a per-call id.
+    if providerOf(p) in ["opencode", "opencodego"]:
+      client.headers["x-opencode-session"] =
+        if conversationId != "": conversationId else: oneShotSessionId()
     let resp = client.request(endpoint,
                               httpMethod = HttpPost, body = sanitizeUtf8($body))
     status = resp.code.int

@@ -20,6 +20,11 @@ import types, util, modelname
 # this is expected to be overridden by a more useful value in config.nims
 const Version* {.strdefine.} = "devel"
 
+const ModelUserAgent* = "3code/" & Version
+  ## Sent on every model request (streaming, non-streaming, verify ping,
+  ## summarizer, /models). Providers log UA to identify clients; OpenCode
+  # Zen/Go treat a missing User-Agent as an anonymous client.
+
 type
   KnownGoodCombo* = tuple[
     # `xmlToolCalls`: endpoint sometimes leaks the model's native

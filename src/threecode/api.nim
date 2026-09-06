@@ -650,7 +650,15 @@ proc requestHeaders(p: Profile, key: string;
   ## `chatgpt-account-id`, `OpenAI-Beta`, `originator`).
   result = @[("Authorization", "Bearer " & key),
              ("Content-Type", "application/json"),
-             ("Accept", accept)]
+             ("Accept", accept),
+             ("User-Agent", ModelUserAgent)]
+  if providerOf(p) in ["opencode", "opencodego"]:
+    # Zen/Go route and shard by this header; requests without it are
+    # rejected as of 2026-09-06. Stable across the conversation's turns
+    # (token-cache affinity), unique per conversation. One-shot calls
+    # (verify/summarize) fall back to a per-call id.
+    result.add ("x-opencode-session",
+      if conversationId != "": conversationId else: oneShotSessionId())
   if extraHeadersHook != nil:
     for kv in extraHeadersHook(p):
       result.add kv
@@ -2909,7 +2917,8 @@ proc fetchModels*(url, key: string): (seq[string], string) =
   if codexModelsHook != nil and url == auth_openai.CodexApiUrl:
     return (codexModelsHook(url), "")
   try:
-    let client = newHttpClient(timeout = 20_000, userAgent = "3code",
+    let client = newHttpClient(timeout = 20_000,
+                               userAgent = ModelUserAgent,
                                sslContext = bundledSslContext())
     defer: client.close()
     client.headers["Authorization"] = "Bearer " & key

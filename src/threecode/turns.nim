@@ -584,6 +584,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     MaxSteerAttempts = 1
     MaxEmptyRetries = 12
   decayEmptyRetryLevel(epochTime())
+  # Publish the conversation id for the OpenCode Zen/Go session header
+  # (stable across turns → routing/token-cache affinity). Recomputed every
+  # turn because :clear/akClear rotate savePath mid-conversation. A session
+  # with no savePath mints a one-shot id so the whole turn (tool-call loop,
+  # retries) shares one header value.
+  let sid = sessionIdFromPath(session.savePath)
+  conversationId = if sid != "": sid else: oneShotSessionId()
   while true:
     var usage: Usage
     var msg: JsonNode

@@ -9,7 +9,7 @@
 ##
 ## Must be compiled with -d:testPlainHttp so streamHttp accepts http://127.0.0.1.
 
-import std/[json, jsonutils, net, os, strutils, unittest]
+import std/[json, jsonutils, net, os, sequtils, strutils, unittest]
 from std/times import epochTime
 when defined(posix):
   from std/posix import Timeval, Time, Suseconds, SockLen, SOL_SOCKET,
@@ -129,11 +129,14 @@ type
     socket: Socket
     port: Port
     response: string
-    ## Wakes a blocking accept() every 200ms so a serve thread whose client
-    ## never dials (connection cache reuse, a transport retry that stays on
-    ## the old socket) can pass its deadline and exit instead of blocking
-    ## forever: the joinThread-after-it hang (1442s CI kill).
+    capturedHeaders*: seq[string]
+      ## Request header lines read by serveCaptureHeaders; read after
+      # joinThread. Drives the OpenCode Zen/Go header contract tests.
     acceptDeadline: float
+      ## Wakes a blocking accept() every 200ms so a serve thread whose client
+      ## never dials (connection cache reuse, a transport retry that stays on
+      ## the old socket) can pass its deadline and exit instead of blocking
+      ## forever: the joinThread-after-it hang (1442s CI kill).
 
 proc setSocketTimeoutMs(sock: Socket; ms: int) =
   when defined(posix):
@@ -465,6 +468,28 @@ suite "streaming SSE: mid-stream error (OpenRouter)":
 # These tests run the REAL transport (not -d:providerStub) against a local
 # plain-HTTP server, mirroring the SSE tests above.
 
+proc serveCaptureHeaders(server: SseServer) {.thread.} =
+  ## Serve one complete-content SSE response, capturing every request
+  ## header line into `server.capturedHeaders` for the caller to assert
+  ## on (User-Agent, x-opencode-session).
+  var client: Socket
+  if not server.acceptWithinDeadline(client): return
+  var contentLength = 0
+  while true:
+    let line = client.recvLine(timeout = 3000)
+    let s = line.strip()
+    if s.len == 0: break
+    server.capturedHeaders.add s.toLowerAscii()
+    if s.toLowerAscii().startsWith("content-length:"):
+      contentLength = try: parseInt(s.split(":")[1].strip) except ValueError: 0
+  let body = makeSseCompleteContent("ok", "cap-1")
+  client.send("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n" &
+    "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
+  client.send(toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n")
+  client.send("0\r\n\r\n")
+  client.drainRequestBody(contentLength)
+  client.close()
+
 proc serveVerifyOk(server: SseServer) {.thread.} =
   ## Serve a minimal 200 OK SSE ping response. The request body is drained
   ## after the response so the closing FIN is not downgraded to an RST.
@@ -542,4 +567,55 @@ suite "verifyProfile bounded against silent provider":
     # return is ~3s; an unbounded one would run the full 60s hold. Allow
     # generous headroom over the 3s budget but well under the 60s deadline.
     check elapsed < 20.0
+
+suite "request headers (OpenCode Zen/Go contract)":
+  # Issue #32: OpenCode Zen/Go require x-opencode-session on every request
+  # (routing/session affinity; headerless requests rejected from 2026-09-06)
+  # and asked for an identifying User-Agent. These drive the REAL transport
+  # and assert on the header lines the server actually received.
+  test "every request carries User-Agent 3code/<version>":
+    let server = newSseServer("")
+    var thr: Thread[SseServer]
+    createThread(thr, serveCaptureHeaders, server)
+    closeCachedStreamConn()
+    var usage: Usage
+    discard callModel(testProfile(server),
+      %*[{"role": "user", "content": "hi"}], usage, 0)
+    joinThread(thr)
+    server.socket.close()
+    check server.capturedHeaders.filterIt(it.startsWith("user-agent:")).len == 1
+    check "user-agent: 3code/" in server.capturedHeaders[0..^1].join("\n")
+    closeCachedStreamConn()
+
+  test "opencode gateway gets x-opencode-session; other providers do not":
+    let server = newSseServer("")
+    var thr: Thread[SseServer]
+    createThread(thr, serveCaptureHeaders, server)
+    closeCachedStreamConn()
+    var usage: Usage
+    let p = Profile(name: "opencode.glm-5.3", url: server.url,
+                    key: "test-key", model: "glm-5.3", family: "glm")
+    conversationId = ""
+    discard callModel(p, %*[{"role": "user", "content": "hi"}], usage, 0)
+    joinThread(thr)
+    server.socket.close()
+    let hdrs = server.capturedHeaders.join("\n")
+    check hdrs.contains("x-opencode-session: 3code-")  # one-shot fallback
+    closeCachedStreamConn()
+
+  test "conversationId rides the header when published":
+    let server = newSseServer("")
+    var thr: Thread[SseServer]
+    createThread(thr, serveCaptureHeaders, server)
+    closeCachedStreamConn()
+    var usage: Usage
+    let p = Profile(name: "opencodego.glm-5.3", url: server.url,
+                    key: "test-key", model: "glm-5.3", family: "glm")
+    conversationId = "20260903T101415"
+    defer: conversationId = ""
+    discard callModel(p, %*[{"role": "user", "content": "hi"}], usage, 0)
+    joinThread(thr)
+    server.socket.close()
+    # The capture lowercases lines, so compare on the lowered id.
+    check "x-opencode-session: 20260903t101415" in server.capturedHeaders.join("\n")
     closeCachedStreamConn()

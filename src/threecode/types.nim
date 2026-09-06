@@ -28,6 +28,28 @@ var sandboxEnabled*: bool = true
   ## checks pass through.
   ## Default on, preserving the historical sandboxed behavior. Toggled
   ## at runtime via `:sandbox on/off`, persisted in `[settings]`.
+var conversationId*: string = ""
+  ## Stable per-conversation id published by the session layer
+  ## (sessionIdFromPath of the `.3log`). Sent as `x-opencode-session` on
+  ## OpenCode Zen/Go requests: the gateway routes/shards by that header
+  ## and as of 2026-09-06 rejects headerless requests, so it must be stable
+  ## across a conversation's turns but unique per conversation. Empty for
+  ## one-shot calls (verify/summarize), which then send a per-call id.
+
+var oneShotSessionIdSeed: string
+  ## Memoized timestamp seed so same-microsecond one-shot ids still differ
+  ## (a trailing counter). Only touched when no conversation is active.
+
+proc oneShotSessionId*(): string =
+  ## Fallback `x-opencode-session` value when no conversation is published
+  ## (verify wizard, library one-shots): unique per call, opaque.
+  let stamp = now().format("yyyyMMdd'T'HHmmss'.'ffffff")
+  if oneShotSessionIdSeed == stamp:
+    oneShotSessionIdSeed = stamp & "+"
+  else:
+    oneShotSessionIdSeed = stamp
+  "3code-" & oneShotSessionIdSeed
+
 var patientRetryEnabled*: bool = true
   ## Patient retry. When true, retryable API failures (429, 5xx, network
   ## errors) keep retrying on one shared exponential curve capped at 2048s,
