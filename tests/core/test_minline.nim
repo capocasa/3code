@@ -124,6 +124,40 @@ suite "minline pure helpers":
     check r == 1
     check c == 6
 
+  test "totalRows: prompt wider than the row contributes fragment rows":
+    # The chatgpt signup wizard's models prompt is ~251 cols wide; at
+    # width 120 the terminal wraps it over 2 full rows plus a 11-col
+    # tail. Those fragment rows are real painted rows: the editor must
+    # count them or every keystroke repaints below the stale prompt.
+    check totalRows("", 251, 2, 120) == 3
+    check totalRows("x", 251, 2, 120) == 3
+    check totalRows("", 120, 2, 120) == 2
+    check totalRows("", 119, 2, 120) == 1
+    check totalRows("", 242, 2, 120) == 3  # exactly 2 full rows, tail at col 2
+
+  test "cursorVisual: wrapped prompt shifts rows and columns":
+    # 251-col prompt at width 120: 2 fragment rows, content starts at
+    # col 11 on the third row.
+    let (r0, c0) = cursorVisual("", 0, 251, 2, 120)
+    check r0 == 2
+    check c0 == 11
+    let (r1, c1) = cursorVisual("x", 1, 251, 2, 120)
+    check r1 == 2
+    check c1 == 12
+    # A narrow prompt keeps the classic behavior.
+    let (r2, c2) = cursorVisual("hello", 5, 2, 2, 80)
+    check r2 == 0 and c2 == 7
+
+  test "renderBuffer: wrapped prompt's first content span shares its tail row":
+    # The prompt bytes wrap on their own (11 cols at width 5 = 2 fragment
+    # rows + tail col 1); the first content span continues on the tail row
+    # at the wrapped column, so no \r\n separates it from the prompt.
+    check renderBuffer("x", "MMMMMMMMMMM", "  ", 5) == "MMMMMMMMMMMx"
+    # Text long enough to wrap past the tail row joins later rows with
+    # \r\n + cont as usual.
+    check renderBuffer("abcdef", "MMMMMMMMMMM", "..", 5) ==
+      "MMMMMMMMMMMabcd\r\n..ef"
+
   test "renderBuffer: over-long word still char-wraps":
     # width 5, prompt 2 -> 3 data cells. "abcdef" has no space; must
     # char-wrap as "abc"/"def" rather than overflow.

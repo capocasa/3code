@@ -298,11 +298,18 @@ proc printSupported() =
   subtleWriteLn(stdout, "  supported: " & seen.join(", "))
 
 proc openBrowserUrl(url: string) {.gcsafe.} =
-  when defined(macosx): discard execShellCmd("open " & quoteShell(url))
+  # The browser inherits our fds; Chrome-family startup chatter
+  # (puffin patcher, OpenH264 reinit warnings) then lands mid-wizard on
+  # the terminal and garbles the frame. Sink stdout+stderr for every
+  # launcher; the URL is printed separately for manual copy.
+  when defined(macosx):
+    discard execShellCmd("open " & quoteShell(url) & " >/dev/null 2>&1")
   # "" is start's window-title arg; without it a quoted URL is swallowed
   # as the title and nothing opens.
-  elif defined(windows): discard execShellCmd("start \"\" " & quoteShell(url))
-  else: discard execShellCmd("xdg-open " & quoteShell(url) & " &")
+  elif defined(windows):
+    discard execShellCmd("start \"\" " & quoteShell(url))
+  else:
+    discard execShellCmd("xdg-open " & quoteShell(url) & " >/dev/null 2>&1 &")
 
 proc fetchKeyFor(name, key: string): string =
   ## Key used for /models and verify. Empty-key oauth providers resolve

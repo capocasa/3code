@@ -446,16 +446,31 @@ proc expectedSeqLen(lead: int): int =
 
 type LineSpan* = tuple[start, stop: int]
 
+proc promptWrap*(promptW, width: int): tuple[head, firstCol: int] =
+  ## Physical layout of a prompt that may be wider than the terminal
+  ## row. The prompt is written verbatim (color escapes and all), so a
+  ## terminal wider-than-row prompt hard-wraps over `head` full rows and
+  ## the buffer text continues at `firstCol` on the next one. Those
+  ## fragment rows are real painted rows the editor must erase on every
+  ## repaint; a prompt narrower than the width owns no rows of its own.
+  if width <= 0 or promptW < width:
+    (0, promptW)
+  else:
+    (promptW div width, promptW mod width)
+
 proc lineSpans*(text: string; promptW, contW, width: int): seq[LineSpan] =
   ## Visual line byte spans under greedy word-wrap: break at whitespace when
   ## possible, char-wrap words longer than the width. ``stop`` excludes the
   ## trailing break spaces and the terminating newline; the renderer re-adds
   ## the newline/continuation. ``\n`` always starts a new span.
+  let head = promptWrap(promptW, width).head
+  for _ in 0 ..< head:
+    result.add (0, 0)
   result.add (0, 0)
   if width <= 0:
     result[0].stop = text.len
     return
-  var col = promptW
+  var col = promptWrap(promptW, width).firstCol
   var i = 0
   var lastBreak = -1   # byte offset of the last space available as a break
   var contentEnd = 0   # byte offset just past the last non-space on this line
@@ -517,18 +532,27 @@ proc cursorVisual*(text: string, position, promptW, contW, width: int): (int, in
   ## (visualRow, visualCol) of the cursor when ``text[0 ..< position]``
   ## has been rendered into a ``width``-wide grid with ``promptW`` cells
   ## reserved before the first logical line and ``contW`` cells reserved
-  ## before each subsequent logical line.
+  ## before each subsequent logical line. Rows are physical: a prompt
+  ## wider than the row contributes its wrapped fragment rows too, and
+  ## the first content row starts at the wrapped prompt's tail column
+  ## instead of ``promptW``.
   if width <= 0: return (0, 0)
   let p = min(max(position, 0), text.len)
   var row = 0
   let allSpans = lineSpans(text, promptW, contW, width)
+  let head = promptWrap(promptW, width).head
+  let firstCol = promptWrap(promptW, width).firstCol
   for si, sp in allSpans:
-    if p <= sp.start and not (row == 0 and p == 0):
+    if si < head:
+      # Wrapped prompt fragment rows hold no buffer text.
+      inc row
+      continue
+    if p <= sp.start and not (si == head and p == 0):
       # Cursor sits in the gap between spans (on a break or newline); it
       # belongs at the start of this span.
-      return (row, if row == 0: promptW else: contW)
+      return (row, if si == head: firstCol else: contW)
     if p <= sp.stop:
-      var col = if row == 0: promptW else: contW
+      var col = if si == head: firstCol else: contW
       var i = sp.start
       while i < p:
         inc col, runeCellWidth(text.runeAt(i))
@@ -540,7 +564,7 @@ proc cursorVisual*(text: string, position, promptW, contW, width: int): (int, in
     # span start through p so the cursor column accounts for unrendered
     # characters (e.g. a trailing space the user just typed).
     if si + 1 >= allSpans.len or p < allSpans[si + 1].start:
-      var col = if row == 0: promptW else: contW
+      var col = if si == head: firstCol else: contW
       var i = sp.start
       while i < p:
         inc col, runeCellWidth(text.runeAt(i))
@@ -548,7 +572,7 @@ proc cursorVisual*(text: string, position, promptW, contW, width: int): (int, in
       return (row, col)
     inc row
   let lastRow = max(0, row - 1)
-  (lastRow, if lastRow == 0: promptW else: contW)
+  (lastRow, if lastRow == head: firstCol else: contW)
 
 proc totalRows*(text: string, promptW, contW, width: int): int =
   ## Number of visual rows the rendered buffer occupies, always ``>= 1``.
@@ -569,8 +593,13 @@ proc renderRowSpans*(ed: var LineEditor): seq[string] =
   ed.promptW = pw
   ed.contPromptW = cw
   result = @[]
+  let head = promptWrap(pw, width).head
+  for _ in 0 ..< head:
+    result.add ""          # prompt fragment row: cells the terminal wrapped
   for li, sp in lineSpans(ed.line.text & ed.renderSuffix, pw, cw, width):
-    result.add (if li == 0: ed.prompt else: ed.contPrompt) &
+    if li < head:
+      continue             # fragment rows emitted above
+    result.add (if li == head: ed.prompt else: ed.contPrompt) &
       (ed.line.text & ed.renderSuffix)[sp.start ..< sp.stop]
 
 proc renderBuffer*(text, prompt, cont: string, width: int): string =
@@ -581,10 +610,15 @@ proc renderBuffer*(text, prompt, cont: string, width: int): string =
   let promptW = visualCols(prompt)
   let contW = visualCols(cont)
   if width <= 0: return prompt & text
+  let head = promptWrap(promptW, width).head
   result = prompt
   for li, sp in lineSpans(text, promptW, contW, width):
-    if li > 0:
+    if li > head:
       result.add "\r\n" & cont
+    elif li > 0:
+      # The wrapped prompt's last fragment shares a row with the first
+      # content span; the terminal cursor is already at that column.
+      discard
     result.add text[sp.start ..< sp.stop]
 
 # History
@@ -991,7 +1025,7 @@ proc visualUp*(ed: var LineEditor) =
   let pw = ed.promptW
   let cw = ed.contPromptW
   let (curR, curC) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
-  if curR == 0:
+  if curR <= promptWrap(pw, width).head:
     return  # caller decides whether to invoke history
   var bestP = ed.line.position
   var bestDiff = high(int)
@@ -1166,7 +1200,7 @@ KEYMAP["up"]        = proc(ed: var LineEditor) =
   let pw = ed.promptW; let cw = ed.contPromptW
   let width = max(2, ed.width)
   let (curR, _) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
-  if curR <= 0: ed.historyPrevious()
+  if curR <= promptWrap(pw, width).head: ed.historyPrevious()
   else: ed.visualUp()
 KEYMAP["ctrl+n"]    = proc(ed: var LineEditor) = ed.historyNext()
 KEYMAP["ctrl+p"]    = proc(ed: var LineEditor) = ed.historyPrevious()
@@ -1257,7 +1291,7 @@ proc cmdUp(ed: var LineEditor) =
   let pw = ed.promptW; let cw = ed.contPromptW
   let width = max(2, ed.width)
   let (curR, _) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
-  if curR <= 0: ed.historyPrevious()
+  if curR <= promptWrap(pw, width).head: ed.historyPrevious()
   else: ed.visualUp()
 proc cmdDown(ed: var LineEditor) =
   let pw = ed.promptW; let cw = ed.contPromptW
@@ -1604,7 +1638,7 @@ proc initKeyTables*() =
     let pw = ed.promptW; let cw = ed.contPromptW
     let width = max(2, ed.width)
     let (curR, _) = cursorVisual(ed.line.text, ed.line.position, pw, cw, width)
-    if curR <= 0: ed.historyPrevious()
+    if curR <= promptWrap(pw, width).head: ed.historyPrevious()
     else: ed.visualUp()
   KEYMAP["ctrl+n"]    = proc(ed: var LineEditor) = ed.historyNext()
   KEYMAP["ctrl+p"]    = proc(ed: var LineEditor) = ed.historyPrevious()
