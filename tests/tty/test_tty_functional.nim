@@ -558,7 +558,15 @@ suite "terminal visual contract":
       {"role": "assistant", "preStreamDelayMs": 100,
        "content": "hello", "contentChunks": ["hello"],
        "usage": {"promptTokens": 5, "completionTokens": 2,
-                  "totalTokens": 7, "cachedTokens": 0}}
+                  "totalTokens": 7, "cachedTokens": 0}},
+      {"role": "assistant", "preStreamDelayMs": 100,
+       "content": "hello", "contentChunks": ["hello"],
+       "usage": {"promptTokens": 15, "completionTokens": 3,
+                  "totalTokens": 18, "cachedTokens": 0}},
+      {"role": "assistant", "preStreamDelayMs": 100,
+       "content": "hello", "contentChunks": ["hello"],
+       "usage": {"promptTokens": 25, "completionTokens": 4,
+                  "totalTokens": 29, "cachedTokens": 0}}
     ])
 
     let tty = startStub(root)
@@ -574,10 +582,15 @@ suite "terminal visual contract":
     tty.expect "\u276f"  # prompt must return
     tty.expectAlive()  # must not exit after :provider
     # Send a message — if the program exited this times out
+    let hellosBefore = tty.countInHistory("● hello")
     tty.send "hi"
     tty.expect "hi"
     tty.send "\n"
-    tty.expectInHistory "hello"
+    tty.expectNewInHistory("● hello", hellosBefore)
+    # endTurn receipt: per-turn distinct usage (↑5/↑15/↑25) gates each
+    # turn's completion unambiguously — identical replies would let an
+    # earlier turn's repaint satisfy the wait.
+    tty.expectTokenBar(["↑5"])
     tty.expect "\u276f"
     tty.expectAlive()
     # Change model
@@ -589,7 +602,27 @@ suite "terminal visual contract":
     tty.send "hey"
     tty.expect "hey"
     tty.send "\n"
-    tty.expectInHistory "hello"
+    tty.expectTokenBar(["↑15"])
+    tty.expect "\u276f"
+    tty.expectAlive()
+    # Change model via Tab completion cycling: two Tabs rotate through the
+    # provider's models (alt-model -> alt-large), and the single Enter that
+    # follows must submit the command. Regression: the keystroke that broke
+    # the Tab cycle used to be intercepted by the completion loop, so Enter
+    # was swallowed and needed a second press.
+    tty.send ":model a"
+    tty.send "\t\t\n"
+    tty.drain(300)
+    # The profile echo only prints when the command actually executed;
+    # the cycled match (alt-large, not the first match alt-model) proves
+    # the rotation, and the single-Enter submit proves the fix.
+    tty.expectInHistory "model     alt-large"
+    tty.expect "\u276f"  # prompt must return
+    tty.expectAlive()
+    tty.send "again"
+    tty.expect "again"
+    tty.send "\n"
+    tty.expectTokenBar(["↑25"])
 
   test "simple one-turn prompt and reply":
     let root = newFixture("simple_visual_test")
