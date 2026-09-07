@@ -1437,7 +1437,7 @@ proc expectMeaningfulFrameArtifact*(s: TtySession; expectedPath,
     "full-frame recording differed from expected frames\nexpected: " & expectedPath &
       "\nactual: " & actualPath
 
-proc expect*(s: TtySession; text: string; timeoutMs = 5000): bool {.discardable.} =
+proc waitForText*(s: TtySession; text: string; timeoutMs = 5000): bool =
   ## Poll for `text` on the live screen or raw byte stream. Frame commits
   ## are suppressed during the wait: `expect` checks screen state and raw
   ## bytes, neither of which needs recorded frames, and the child's initial
@@ -1475,15 +1475,21 @@ proc expect*(s: TtySession; text: string; timeoutMs = 5000): bool {.discardable.
       return false
     let remaining = max(1, int((deadline - epochTime()) * 1000))
     discard s.waitForOutput(remaining, recordFrame = false)
-  doAssert false, "expected text not found: " & text & "\n" &
-    s.dumpFramesAround(text)
+  false
+
+proc expect*(s: TtySession; text: string; timeoutMs = 5000): bool {.discardable.} =
+  doAssert s.waitForText(text, timeoutMs),
+    "expected text not found (" & (if s.exited: "child exited" else: "deadline expired") &
+    "): " & text & "\n" & s.dumpFramesAround(text)
+  true
 
 proc expectNo*(s: TtySession; text: string; settleMs = 250): bool {.discardable.} =
   let deadline = epochTime() + settleMs.float / 1000.0
-  while epochTime() < deadline and not s.exited:
+  while true:
     s.drain(0, recordFrame = false)
     doAssert text notin s.screenText() and text notin s.cleanRaw(),
       "unexpected text found: " & text & "\n" & s.dumpFramesAround(text)
+    if epochTime() >= deadline: break
     let remaining = max(1, int((deadline - epochTime()) * 1000))
     discard s.waitForOutput(remaining, recordFrame = false)
   true
@@ -1633,7 +1639,8 @@ proc expectCount*(s: TtySession; text: string; n: int;
     if s.exited:
       s.drain(20, recordFrame = false)
       last = s.countIn(text, where)
-      return last == n
+      if last == n: return true
+      break
     let remaining = max(1, int((deadline - epochTime()) * 1000))
     discard s.waitForOutput(remaining, recordFrame = false)
   doAssert false, &"REGRESSION (duplicate or swallow): expected count {n} of " &
@@ -1652,7 +1659,8 @@ proc expectOnScreen*(s: TtySession; text: string;
       return true
     if s.exited:
       s.drain(20, recordFrame = false)
-      return text in s.screenText()
+      if text in s.screenText(): return true
+      break
     let remaining = max(1, int((deadline - epochTime()) * 1000))
     discard s.waitForOutput(remaining, recordFrame = false)
   doAssert false, "REGRESSION (render-then-overwrite): expected text not " &
