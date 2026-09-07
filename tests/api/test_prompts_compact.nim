@@ -226,6 +226,17 @@ suite "prompts: setup — minimax":
     check defaultReasoningsFor("x", "y", "llama") == @ReasoningLevels
 
 suite "prompts: setup — gpt":
+  test "older and current GPT models share the verification contract":
+    let shared = setup(Profile(family: "gpt", model: "gpt-4o-mini"))
+    for model in ["gpt-5.6", "gpt-6-astra"]:
+      let current = setup(Profile(family: "gpt", model: model))
+      check current.prompt == shared.prompt
+      check current.tools == shared.tools
+    check "{{skills}}" in shared.prompt
+    check "name the verification surface" in shared.prompt
+    check "Never weaken expectations" in shared.prompt
+    check "When handing off" in shared.prompt
+
   test "returns the Sol preamble with the three E's":
     let p = Profile(name: "openai.gpt-5.6", url: "x", key: "k",
                     model: "gpt-5.6", family: "gpt")
@@ -236,7 +247,8 @@ suite "prompts: setup — gpt":
     check "Ergonomics" in s.prompt
     check "Own the task end to end" in s.prompt
     check "Do not ask to confirm a plan" in s.prompt
-    check "Never yield with a requested subtask pending" in s.prompt
+    check "Define observable success" in s.prompt
+    check "if blocked, state what remains" in s.prompt
     check "Kimi" notin s.prompt
 
   test "tools are glmAndQwenTools (bash/read/write/patch)":
