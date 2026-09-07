@@ -1,6 +1,56 @@
 import std/[json, os, osproc, sequtils, strutils, times, unittest]
 import threecode/[session, types]
 
+if paramCount() == 2 and paramStr(1) == "--allocate":
+  putEnv("XDG_DATA_HOME", paramStr(2))
+  for i in 0..<30: echo newSessionPath()
+  quit(0)
+
+suite "session: atomic allocation":
+  test "concurrent same and independent roots preserve identities and first save":
+    let root = getTempDir() / ("3code-allocation-" & $getCurrentProcessId())
+    createDir(root)
+    defer: removeDir(root)
+    var workers: seq[Process]
+    for suffix in ["a", "a", "b", "b"]:
+      workers.add startProcess(getAppFilename(), args = @["--allocate", root / suffix],
+        options = {poStdErrToStdOut})
+    var paths: seq[string]
+    for worker in workers:
+      let (output, code) = worker.readLines()
+      check code == 0
+      paths.add output
+      worker.close()
+    check paths.len == 120
+    check paths.deduplicate.len == paths.len
+    for path in paths:
+      check fileExists(path)
+      check getFileSize(path) == 0
+    let oldData = getEnv("XDG_DATA_HOME")
+    putEnv("XDG_DATA_HOME", root / "a")
+    defer: putEnv("XDG_DATA_HOME", oldData)
+    let s = Session(savePath: paths[0], cwd: root / "project")
+    check currentDraftPath(s) == pendingDraftPathFor(s.cwd)
+    saveSession(s, %*[])
+    check currentDraftPath(s) == draftPathFor(s.savePath)
+    check s.savePath in listSessionPathsForCwd(s.cwd)
+
+  test "lock identity separates roots and resolves symlink aliases":
+    let root = getTempDir() / ("3code-identity-" & $getCurrentProcessId())
+    createDir(root / "a")
+    createDir(root / "b")
+    defer: removeDir(root)
+    let a = root / "a" / "same.3log"
+    let b = root / "b" / "same.3log"
+    writeFile(a, "")
+    writeFile(b, "")
+    check sessionLockPathFor(a) != sessionLockPathFor(b)
+    when defined(posix):
+      createSymlink(root / "a", root / "alias")
+      check sessionLockPathFor(a) == sessionLockPathFor(root / "alias" / "same.3log")
+      check sessionLockPathFor(root / "a" / "new.3log") ==
+        sessionLockPathFor(root / "alias" / "new.3log")
+
 suite "session: mangleCwd":
   test "renders the common path readably":
     check mangleCwd("/home/carlo/p/3code/myworktree") == "home_carlo_p_3code_myworktree"
