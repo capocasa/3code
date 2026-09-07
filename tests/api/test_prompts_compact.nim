@@ -228,20 +228,27 @@ suite "prompts: setup — minimax":
 suite "prompts: setup — gpt":
   test "older and current GPT models share the verification contract":
     let shared = setup(Profile(family: "gpt", model: "gpt-4o-mini"))
-    for model in ["gpt-5.6", "gpt-6-astra"]:
+    for model in ["gpt-5.6", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-6-astra"]:
       let current = setup(Profile(family: "gpt", model: model))
       check current.prompt == shared.prompt
       check current.tools == shared.tools
     check "{{skills}}" in shared.prompt
     check "name the verification surface" in shared.prompt
     check "Never weaken expectations" in shared.prompt
-    check "When handing off" in shared.prompt
+    check "Before clearing context or handing off" in shared.prompt
+    check "commands and results, unresolved risks, next step" in shared.prompt
 
-  test "returns the Sol preamble with the three E's":
+  test "returns a family-neutral preamble with the three E's":
     let p = Profile(name: "openai.gpt-5.6", url: "x", key: "k",
                     model: "gpt-5.6", family: "gpt")
     let s = setup(p)
-    check "You are Sol in 3code" in s.prompt
+    check "You are the GPT edition of 3code" in s.prompt
+    check "You are Sol" notin s.prompt
+    check "# Sol" notin s.prompt
+    check "verified work per token" in s.prompt
+    check "Scale effort to uncertainty and consequence" in s.prompt
+    check "Stop exploring when the evidence is sufficient to act" in s.prompt
+    check "synthesis, precise reasoning, and sustained execution" in s.prompt
     check "Token economy" in s.prompt
     check "Computer economy" in s.prompt
     check "Ergonomics" in s.prompt
