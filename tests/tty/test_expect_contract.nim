@@ -7,6 +7,15 @@ import std/unittest
 import ../tty_expect
 
 suite "PTY assertion failure contracts":
+  test "readiness has a bounded failing case and quiet cap is not success":
+    let s = newTtySession("/bin/sh", @["-c", "while :; do printf x; sleep 0.01; done"])
+    defer: s.close()
+    s.waitUntil(proc(s: TtySession): bool = s.raw.len > 0, timeoutMs = 1000)
+    expect AssertionDefect:
+      s.waitUntil(proc(s: TtySession): bool = false, timeoutMs = 30)
+    expect AssertionDefect:
+      s.waitForQuiet(quietMs = 100, capMs = 40)
+
   test "missing assertions fail even after child exit":
     let s = newTtySession("/bin/sh", ["-c", "printf present"])
     defer: s.close()

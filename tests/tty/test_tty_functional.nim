@@ -637,14 +637,12 @@ suite "terminal visual contract":
     # Wait for the settled idle repaint (caret back on the live ❯ row):
     # the live bar is painted before the receipt commits to scrollback, so
     # sampling earlier races the final commit.
-    let settleDeadline = epochTime() + 5.0
-    while epochTime() < settleDeadline and not tty.exited:
-      tty.drain(20)
-      if tty.frames.len > 0:
-        let f = tty.frames[^1]
-        if not f.cursorHidden and f.cursorRow >= 0 and
-            f.cursorRow < f.rows.len and "❯" in f.rows[f.cursorRow]:
-          break
+    tty.waitUntil(proc(s: TtySession): bool =
+      not s.grid.cursorHidden and s.grid.row >= 0 and
+        s.grid.row < s.rows().len and "❯" in s.rows()[s.grid.row])
+    let settled = tty.checkpoint("one-turn/idle-after-reply")
+    doAssert not settled.cursorHidden
+    tty.writeCheckpoints(root / "checkpoints.jsonl")
     # The receipt sits flush under the answer, no blank row between them
     # (design.md: "no blank line between the last output of the API call
     # and its token receipt"). The row directly below the answer must be

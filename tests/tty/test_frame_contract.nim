@@ -11,6 +11,20 @@ proc capture(s: TtySession; bytes: string) =
   s.rememberFrame()
 
 suite "lossless frame contracts (ttty model)":
+  test "semantic checkpoints do not suppress diagnostic capture":
+    let s = TtySession(grid: newGrid(), keepHistory: true, started: epochTime())
+    s.frameRecordingPaused = true
+    s.feedGridChunk("\e[?2026hfirst\e[?2026l")
+    check s.frames.len == 1
+    let first = s.checkpoint("prompt-ready")
+    s.feedGridChunk("\e[?2026h\e[1Gsecond\e[?2026l")
+    check s.frames.len == 2
+    check s.checkpoints.len == 1
+    check first.id == "prompt-ready"
+    check s.checkpoints[0].cells[0][0].rune == Rune('f')
+    expect AssertionDefect:
+      discard s.checkpoint("prompt-ready")
+
   test "cursor movement visibility and style are visual changes":
     let s = TtySession(grid: newGrid(), keepHistory: true, started: epochTime())
     s.capture("abc")
@@ -58,6 +72,12 @@ suite "lossless frame contracts (ttty model)":
     createDir(root)
     defer: removeDir(root)
     s.writeFrameArtifact(root / "frames.txt")
+    discard s.checkpoint("styled-ready")
+    s.writeCheckpoints(root / "expected.jsonl")
+    s.expectCheckpoints(root / "expected.jsonl", root / "actual.jsonl")
+    s.checkpoints[0].cursorHidden = not s.checkpoints[0].cursorHidden
+    expect AssertionDefect:
+      s.expectCheckpoints(root / "expected.jsonl", root / "actual.jsonl")
     let viewer = root / "viewer"
     check execCmd("nim c --hints:off --out:" & quoteShell(viewer) & " tools/pty_frames.nim") == 0
     let artifact = quoteShell(root / "frames.txt.jsonl")

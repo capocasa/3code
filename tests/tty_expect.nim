@@ -10,7 +10,11 @@
 ## and the public expect*/send/resize/close API are identical across both;
 ## only the harness internals fork on `when defined(...)`.
 
-import std/[os, strformat, strutils, times, unicode, json]
+import std/[os, strformat, strutils, monotimes, unicode, json]
+
+proc epochTime(): float =
+  ## Harness-relative clock only: all deadlines and frame offsets are monotonic.
+  getMonoTime().ticks.float / 1_000_000_000.0
 import ttty/grid
 import frame_artifact
 export frame_artifact
@@ -95,6 +99,7 @@ type
     grid*: Grid
     raw*: string
     frames*: seq[TtyFrame]
+    checkpoints*: seq[VisualFrame]
     started*: float
     exited*: bool
     exitCode*: int
@@ -348,7 +353,7 @@ proc feedGridChunk*(s: TtySession; chunk: string) =
       s.markFrameDirty()
       if s.syncDepth > 0:
         dec s.syncDepth
-        if s.syncDepth == 0 and not s.frameRecordingPaused:
+        if s.syncDepth == 0:
           s.flushFrame()
       i = nextEnd + SyncEnd.len
 
@@ -522,15 +527,15 @@ proc waitForOutput*(s: TtySession; timeoutMs = 5000; recordFrame = true): bool =
   ##
   ## `pollOnce` watches both fds: the PTY master fd (bytes the child wrote)
   ## and the frame-event fd (explicit sync signal). Either one wakes us.
-  ## Returns false on timeout or child exit. When `recordFrame` is false,
-  ## SyncEnd-driven frame commits are suppressed so screen-state `expect*`
-  ## procs can poll without committing non-deterministic intermediate frames.
+  ## Returns false on timeout or child exit. `recordFrame` is retained for
+  ## source compatibility; diagnostic capture is always continuous.
   let deadline = epochTime() + timeoutMs.float / 1000.0
   let wasPaused = s.frameRecordingPaused
   if not recordFrame:
     s.frameRecordingPaused = true
   while epochTime() < deadline and not s.exited:
-    if s.pollOnce(200, recordIdleFrame = false):
+    if s.pollOnce(min(200, max(1, int((deadline - epochTime()) * 1000))),
+                  recordIdleFrame = true):
       if not recordFrame:
         s.frameRecordingPaused = wasPaused
       return true
@@ -547,19 +552,22 @@ proc waitForQuiet*(s: TtySession; quietMs = 120; capMs = 3000;
   ## fixed short drain is not enough to guarantee the terminal is settled.
   ## Waiting for a quiet window means a following `send` never types into
   ## an in-flight repaint (which would echo keys at the wrong row, or
-  ## before a hidden-input field engaged its mask). Frame commits stay
-  ## suppressed like `expect`'s own polling.
+  ## before a hidden-input field engaged its mask). Cap expiry is a failure,
+  ## not evidence of readiness. Prefer waitUntil for semantic readiness.
   let wasPaused = s.frameRecordingPaused
   if not recordFrame:
     s.frameRecordingPaused = true
   let cap = epochTime() + capMs.float / 1000.0
   var quietStart = epochTime()
   while epochTime() < cap and not s.exited:
-    if s.pollOnce(10, recordIdleFrame = false):
+    if s.pollOnce(10, recordIdleFrame = true):
       quietStart = epochTime()  # output arrived; restart the quiet window
     elif (epochTime() - quietStart) * 1000.0 >= quietMs.float:
-      break
+      s.frameRecordingPaused = wasPaused
+      s.flushFrame(force = true)
+      return
   s.frameRecordingPaused = wasPaused
+  doAssert s.exited, "waitForQuiet: quiet window not reached within capMs=" & $capMs
   if recordFrame:
     s.flushFrame(force = true)
 
@@ -572,19 +580,17 @@ proc drain*(s: TtySession; settleMs = 20; recordFrame = true) =
   ## a render arriving *during* a drain got folded in while the same render
   ## arriving *between* drains became its own frame — same content, different
   ## partitioning, flaky golden comparison.) The trailing force-flush catches any
-  ## pending state not closed by a SyncEnd. When `recordFrame` is false, no frame
-  ## is committed (used by `expect*` procs, which poll screen state).
+  ## pending state not closed by a SyncEnd. `recordFrame` is retained for
+  ## compatibility but never suppresses diagnostic capture.
   let wasPaused = s.frameRecordingPaused
   if not recordFrame:
     s.frameRecordingPaused = true
   let deadline = epochTime() + settleMs.float / 1000.0
   while epochTime() < deadline and not s.exited:
-    discard s.pollOnce(1, false)
-  while s.pollOnce(0, false):
-    discard
+    discard s.pollOnce(1, true)
+  discard s.pollOnce(0, false)
   s.frameRecordingPaused = wasPaused
-  if recordFrame:
-    s.flushFrame(force = true)
+  s.flushFrame(force = true)
 
 proc resize*(s: TtySession; cols, rows: int): bool {.discardable.} =
   ## Resize the PTY and send SIGWINCH to the child. POSIX only.
@@ -1167,6 +1173,40 @@ proc writeFrameArtifact*(s: TtySession; path: string) =
     visual.ms = frame.ms
     structured.add $visual.frameJson() & "\n"
   writeFile(path & ".jsonl", structured)
+
+proc checkpoint*(s: TtySession; id: string): VisualFrame =
+  ## Explicit semantic snapshot; never controls continuous recording.
+  doAssert id.len > 0, "checkpoint requires a semantic ID"
+  for frame in s.checkpoints:
+    doAssert frame.id != id, "duplicate checkpoint: " & id
+  result = VisualFrame(id: id, width: s.grid.width, height: s.grid.height,
+    cells: s.grid.rows, cursorRow: s.grid.row, cursorCol: s.grid.col,
+    cursorHidden: s.grid.cursorHidden, pendingWrap: s.grid.pendingWrap)
+  s.checkpoints.add result
+
+proc writeCheckpoints*(s: TtySession; path: string) =
+  var data = ""
+  for frame in s.checkpoints:
+    data.add $frame.frameJson() & "\n"
+  writeFile(path, data)
+
+proc expectCheckpoints*(s: TtySession; expectedPath, actualPath: string) =
+  s.writeCheckpoints(actualPath)
+  doAssert fileExists(expectedPath), "missing checkpoints: " & expectedPath
+  let difference = compareArtifacts(readFile(expectedPath), readFile(actualPath))
+  doAssert difference.len == 0, difference
+
+proc waitUntil*(s: TtySession; ready: proc(s: TtySession): bool {.closure.};
+                timeoutMs = 5000) =
+  ## Observe live state/events instead of guessing a settling sleep.
+  let deadline = epochTime() + timeoutMs.float / 1000.0
+  while true:
+    s.drain(0)
+    if ready(s): return
+    doAssert not s.exited, "waitUntil: child exited before readiness"
+    let remaining = int((deadline - epochTime()) * 1000)
+    doAssert remaining > 0, "waitUntil: readiness deadline expired"
+    discard s.waitForOutput(min(remaining, 50))
 
 proc writeRawArtifact*(s: TtySession; path: string) =
   ## Write the session's raw PTY-master bytes UNMODIFIED (every `\r`
