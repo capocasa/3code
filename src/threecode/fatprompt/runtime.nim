@@ -1130,10 +1130,23 @@ proc startSpinner*(label: string) =
   spinnerFramePainted.store(false, moRelaxed)
   ensureGuiStarted()
   # Paint one immediate frame so the spinner appears instantly (matches the
-  # old startSpinner which rendered before createThread).
-  termengine.renderFooter(currentFrameFromModel(),
-                          inputThreadRunning, inputEditor,
-                          currentTermW())
+  # old startSpinner which rendered before createThread) — but only when no
+  # live gui thread is painting. With the thread up, an immediate
+  # controller-side renderFooter makes TWO writers contend for
+  # terminalWriteLock at every spinner restart (each retry notice commits,
+  # then startSpinner repaints while the gui thread re-acquires for its next
+  # 80ms tick). That convoy starved retry-notice commits for whole backoff
+  # cycles in the wild (session 20260907T112800: notices 15/16 never painted,
+  # 17 did) and is the documented freeze family in
+  # test_submit_race_real_stream's OSX skip note. The gui thread paints the
+  # first spinner frame within one tick, so nothing is lost. Test-frame mode
+  # keeps the immediate paint: there the gui thread paints only on request,
+  # so the controller render is what puts the spinner on screen for the
+  # harness's golden frames.
+  if not guiRunning or testFrameMode():
+    termengine.renderFooter(currentFrameFromModel(),
+                            inputThreadRunning, inputEditor,
+                            currentTermW())
   spinnerFramePainted.store(true, moRelaxed)
 
 proc stopSpinner*(clearLiveFooter = true) =
