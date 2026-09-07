@@ -244,6 +244,76 @@ suite "minline editor: basic typing":
     d.push Enter
     check d.run(ed, prompt = "> ") == ""
 
+# ---------------- Driver: completion cycling ----------------
+
+suite "minline editor: completion cycle":
+  test "Enter right after Tab-cycled completion submits the line":
+    # Regression: completeLine used to intercept the keystroke that broke
+    # the Tab cycle and only re-printed it when printable, so Enter (and
+    # every other non-printable key) was swallowed and the user had to
+    # press it twice.
+    var ed = initEditor()
+    ed.completionCallback = proc(ed: LineEditor): seq[string] =
+      @[":model", ":modes", ":modem"]
+    let d = newDriver()
+    d.pushString ":mod"
+    d.push Tab
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ":model"
+
+  test "Enter after a second Tab (cycled off the first match) submits":
+    var ed = initEditor()
+    ed.completionCallback = proc(ed: LineEditor): seq[string] =
+      @[":model", ":modes", ":modem"]
+    let d = newDriver()
+    d.pushString ":mod"
+    d.push Tab
+    d.push Tab
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ":modes"
+
+  test "printable key after Tab-cycled completion is kept":
+    var ed = initEditor()
+    ed.completionCallback = proc(ed: LineEditor): seq[string] =
+      @[":model", ":modes", ":modem"]
+    let d = newDriver()
+    d.pushString ":mod"
+    d.push Tab
+    d.pushString "!"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ":model!"
+
+  test "backspace after Tab-cycled completion edits the completed word":
+    var ed = initEditor()
+    ed.completionCallback = proc(ed: LineEditor): seq[string] =
+      @[":model", ":modes", ":modem"]
+    let d = newDriver()
+    d.pushString ":mod"
+    d.push Tab
+    d.push Backspace
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ":mode"
+
+  test "Tab keeps cycling and wraps around":
+    var ed = initEditor()
+    ed.completionCallback = proc(ed: LineEditor): seq[string] =
+      @[":model", ":modes", ":modem"]
+    let d = newDriver()
+    d.pushString ":mod"
+    d.push Tab
+    d.push Tab
+    d.push Tab
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ":modem"
+    # Fourth Tab wraps back to the first match.
+    d.pushString ":mod"
+    d.push Tab
+    d.push Tab
+    d.push Tab
+    d.push Tab
+    d.push Enter
+    check d.run(ed, prompt = "> ") == ":model"
+
 # ---------------- Driver: cursor navigation ----------------
 
 suite "minline editor: cursor navigation":

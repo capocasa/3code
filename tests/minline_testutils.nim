@@ -36,6 +36,7 @@ const
   Esc* = KeyEsc
   Enter* = KeyEnter
   Backspace* = KeyBackspace
+  Tab* = @[9]
   CtrlU* = @[21]
   CtrlW* = @[23]
   CtrlA* = @[1]

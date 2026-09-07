@@ -1312,12 +1312,10 @@ proc cmdClearScreen(ed: var LineEditor) =
   ed.write "\x1b[H\x1b[2J"
   ed.renderRow = 0
   fullRedraw(ed)
-proc completeLine*(ed: var LineEditor): int {.nimcall.}
+proc completeLine*(ed: var LineEditor) {.nimcall.}
 proc reverseCompleteLine*(ed: var LineEditor) {.nimcall.}
 proc cmdComplete(ed: var LineEditor) =
-  let nxt = ed.completeLine()
-  if nxt > 0 and nxt in PRINTABLE:
-    ed.printChar(nxt)
+  ed.completeLine()
 proc cmdReverseComplete(ed: var LineEditor) = ed.reverseCompleteLine()
 proc cmdEditInEditor(ed: var LineEditor) =
   if ed.editInEditor != nil: ed.editInEditor(ed)
@@ -1722,17 +1720,12 @@ proc complAdvance(ed: var LineEditor; offset: int) =
   for _ in 0 ..< ed.complMatches[oldIdx].len: ed.deletePrevious()
   ed.insertText(ed.complMatches[ed.complIndex])
 
-proc completeLine*(ed: var LineEditor): int =
-  ## First Tab: insert first match. Subsequent Tabs: cycle forward.
-  ## Returns the non-Tab keystroke that broke the cycle.
+proc completeLine*(ed: var LineEditor) =
+  ## Tab: insert the first match; each further Tab cycles forward. The
+  ## keystroke that breaks the cycle is NOT intercepted: it flows through
+  ## the normal readLineWith dispatch on the next iteration, so Enter
+  ## submits and any other key acts immediately on the completed line.
   ed.complAdvance(+1)
-  if ed.complIndex == -1: return -1
-  var ch = ed.getCh()
-  while ch == 9:
-    ed.complAdvance(+1)
-    ch = ed.getCh()
-  ed.complIndex = -1
-  return ch
 
 proc reverseCompleteLine*(ed: var LineEditor) =
   ed.complAdvance(-1)
@@ -1926,6 +1919,9 @@ proc resetForRead(ed: var LineEditor, prompt: string, hidechars: bool) =
   ed.eof = false
   ed.hidechars = hidechars
   ed.prevRowSpans = @[]
+  ed.complIndex = -1
+  ed.complMatches = @[]
+  ed.complPrefix = ""
   if ed.getWidth != nil:
     let w = ed.getWidth()
     if w > 0: ed.width = w
