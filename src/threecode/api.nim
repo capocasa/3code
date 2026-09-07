@@ -1919,6 +1919,11 @@ proc applyGenerationDefaults*(p: Profile, body: JsonNode) =
   # silence every route to that model), so special-case here like k3.
   if providerOf(p) == "kimicode" and body.hasKey("temperature"):
     body.delete("temperature")
+  # Gemini 3 deprecates temperature/top_p (the 3.8 migration guide says
+  # to strip them; the OpenAI-compat layer rejects or ignores them
+  # depending on tier). Omit so the model's own sampling applies.
+  if p.family == "gemini" and body.hasKey("temperature"):
+    body.delete("temperature")
 
 proc applyDeepseekReasoning(p: Profile, body: JsonNode) =
   ## DeepSeek's reasoning surface differs by serving stack. The
@@ -2169,6 +2174,19 @@ proc applyGrokReasoning(p: Profile, body: JsonNode) =
   else:
     body["reasoning_effort"] = %p.reasoning
 
+proc applyGeminiReasoning(p: Profile, body: JsonNode) =
+  ## Gemini 3 thinking on the OpenAI-compatible endpoint
+  ## (generativelanguage.googleapis.com/v1beta/openai). The compat layer
+  ## maps `reasoning_effort` onto thinking levels: minimal/low/medium/high
+  ## (2.5 models map to thinking_budget instead). Thinking cannot be
+  ## disabled on Gemini 3 (no off/none); 3.8 Flash additionally rejects
+  ## `minimal`. Thought summaries stay off (include_thoughts unset): the
+  ## raw thoughts aren't exposed, and the summary would double the stream.
+  case p.reasoning
+  of "minimal", "low", "medium", "high":
+    body["reasoning_effort"] = %p.reasoning
+  else: discard
+
 proc applyLingReasoning(p: Profile, body: JsonNode) =
   ## Ling (InclusionAI Ling-3.0-flash) toggles reasoning via a textual
   ## directive in the system message — `detailed thinking on` /
@@ -2226,6 +2244,7 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "hy": applyHy3Reasoning(p, body)
   of "inkling": applyInklingReasoning(p, body)
   of "grok": applyGrokReasoning(p, body)
+  of "gemini": applyGeminiReasoning(p, body)
   of "mimo": applyMimoReasoning(p, body)
   of "0xalpha": applyOxAlphaReasoning(p, body)
   of "nemotron": applyNemotronReasoning(p, body)
