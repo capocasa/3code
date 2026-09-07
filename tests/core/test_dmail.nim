@@ -104,6 +104,33 @@ suite "checkpoint marker display stripping":
   test "leaves non-numeric bracket text untouched":
     check stripCheckpointMarkers("[checkpoint soon] hi") == "[checkpoint soon] hi"
 
+suite "truncated trailing marker cut":
+  # A stream can END mid-marker (kimi dmail tag echoed by the model, then
+  # the reply stops): the live painter held the partial tail back, so the
+  # final commit, emptiness checks, notifications, and library reply text
+  # must cut it too, or a stray `● [` row paints at end of turn.
+  test "cuts a bare truncated open bracket tail":
+    check cutPartialTrailingMarker(stripCheckpointMarkers("[checkpoint 8]\nhello\n[checkpoint")) == "hello"
+
+  test "cuts a truncated numeric tail":
+    check cutPartialTrailingMarker(stripCheckpointMarkers("[checkpoint 8]\nhello\n[checkpoint 12")) == "hello"
+
+  test "cuts a truncated tail with trailing space":
+    check cutPartialTrailingMarker(stripCheckpointMarkers("[checkpoint 8]\nhello\n[checkpoint ")) == "hello"
+
+  test "keeps prose that merely looks like a marker":
+    check cutPartialTrailingMarker(stripCheckpointMarkers("see [checkpoints] docs")) == "see [checkpoints] docs"
+
+  test "marker-only reply with truncated tail renders nothing":
+    check renderAssistantContentBytes("[checkpoint 3]\n[checkpoint") == ""
+
+  test "turn-finished body treats truncated tail as bookkeeping":
+    let msgs = %*[
+      {"role": "user", "content": "task"},
+      {"role": "assistant", "content": "[checkpoint 3]\n[checkpoint"},
+    ]
+    check turnFinishedBody(msgs) == ""
+
 suite "turn-finished notification body":
   test "checkpoint marker never reaches the notification":
     let msgs = %*[

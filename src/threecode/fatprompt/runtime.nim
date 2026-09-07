@@ -1454,6 +1454,13 @@ proc commitPendingLine(s: var LiveMarkdownStream, slurpedNow: int) =
       assistantTextBytes(AssistantTextStyle & "\u25CF " & Reset & body)
     else:
       assistantTextBytes(body)
+  # A line can commit straight to scrollback without the volatile partial
+  # painter ever having run (every chunk boundary fell on invisible
+  # marker text). Content IS streaming to the screen, so `started` must
+  # flip here: the api hook relays it as contentStarted, and a false
+  # would make the turn loop commit the whole reply again at end of turn
+  # (duplicating the streamed prose under a fresh bullet).
+  s.startContent(slurpedNow)
   commitTranscriptBytes(rendered)
   termengine.clearLiveContent()
   s.partialActive = false

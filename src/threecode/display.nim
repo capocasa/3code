@@ -525,12 +525,41 @@ proc stripCheckpointMarkers*(content: string): string =
     else:
       result.delete(start .. close)
 
+proc cutPartialTrailingMarker*(content: string): string =
+  ## Drop a trailing INCOMPLETE marker (`[checkpoint`, `[checkpoint ` with
+  ## spaces, or `[checkpoint N` with no closing bracket) from already-final
+  ## content. A stream that ends mid-marker never paints the tail (the live
+  ## partial painter holds it back), so the end-of-turn commit must not
+  ## paint it either; `stripCheckpointMarkers` only matches complete
+  ## markers, and a truncated tag would otherwise render as a stray
+  ## `● [` row. Prose like `[checkpoints]` never matches the digit run.
+  result = content
+  var i = result.len
+  while i > 0:
+    dec i
+    if result[i] != '[': continue
+    let tail = result[i .. ^1]
+    if tail == "[checkpoint" or tail == "[checkpoint ":
+      result.setLen(i)
+      break
+    if tail.startsWith("[checkpoint "):
+      let digits = tail[12 .. ^1]
+      if digits.len > 0 and digits.allCharsInSet({'0'..'9'}):
+        result.setLen(i)
+      break
+  # Trailing whitespace after the cut would otherwise paint a blank row.
+  var last = result.len
+  while last > 0 and result[last - 1] in {' ', '\t', '\r', '\n'}: dec last
+  result.setLen(last)
+
 proc renderAssistantContentBytes*(content: string): string =
   ## String form of `renderAssistantContent`: the assistant item body
   ## (bullet + styled markdown) without touching a File. Used by the
   ## controller's transcript path, which owns when the bytes hit the
   ## terminal.
-  let content = stripCheckpointMarkers(content)
+  # Complete markers stripped, then a truncated trailing marker cut: the
+  # live painter held that tail back, so the commit must not paint it.
+  let content = cutPartialTrailingMarker(stripCheckpointMarkers(content))
   if content.strip.len == 0: return
   var st = initMarkdownState()
   result = assistantBulletBytes()
