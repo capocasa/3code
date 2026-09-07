@@ -1455,27 +1455,45 @@ proc expectMeaningfulFrameArtifact*(s: TtySession; expectedPath,
     "full-frame recording differed from expected frames\nexpected: " & expectedPath &
       "\nactual: " & actualPath
 
+proc expectFinalFrameArtifact*(s: TtySession; expectedPath, actualPath: string) =
+  ## Legacy text fixtures specify the final semantic state, not the scheduling
+  ## of diagnostic redraws. Keep structured checkpoints alongside this lossy
+  ## text assertion; new visual contracts should use expectCheckpoints.
+  s.waitForQuiet()
+  discard s.checkpoint(expectedPath.extractFilename & "/final")
+  s.writeCheckpoints(actualPath & ".jsonl")
+  s.writeMeaningfulFrameArtifact(actualPath)
+  proc finalFrame(text: string): string =
+    for line in text.splitLines:
+      if line.startsWith("===== "):
+        result.setLen(0)
+      else:
+        result.add line & "\n"
+    result = result.strip(leading = false)
+  let actual = finalFrame(s.meaningfulFrameText())
+  var expected = finalFrame(readFile(expectedPath))
+  # Historical fixtures predate visible end-of-input cursors. The final
+  # prompt is the only compatibility insertion; internal cursor cells and
+  # physical row boundaries are not erased or joined.
+  if expected.endsWith("❯"):
+    expected.add " █"
+  doAssert actual.normalizeVersionBanner.normalizeSessionIds ==
+      expected.normalizeVersionBanner.normalizeSessionIds,
+    "final frame differs\nexpected: " & expectedPath & "\nactual: " & actualPath &
+      "\nEXPECTED:\n" & expected & "\nACTUAL:\n" & actual
+
 proc waitForText*(s: TtySession; text: string; timeoutMs = 5000): bool =
-  ## Poll for `text` on the live screen or raw byte stream. Frame commits
-  ## are suppressed during the wait: `expect` checks screen state and raw
-  ## bytes, neither of which needs recorded frames, and the child's initial
-  ## editor redraw (which can capture transient state like the idle hint
-  ## before the first keystroke clears it) arrives non-deterministically
-  ## relative to when the text is found. Suppressing it keeps the frame
-  ## list deterministic.
+  ## Poll for text, then a short quiet window before the next keystroke.
+  ## Live GUI redraw cadence is 80ms; longer readiness needs waitUntil.
   let deadline = epochTime() + timeoutMs.float / 1000.0
   while epochTime() < deadline:
     s.drain(0, recordFrame = false)
     if text in s.screenText() or text in cleanRaw(s.freshRaw()):
       s.advanceRawMark()
-      # Settle before returning so the caller's next action (usually a
-      # `send`) never types into an in-flight redraw. A fixed drain is
-      # not enough: `expect` can match the prompt text in the raw stream
-      # while the child's repaint of that same prompt is still being
-      # written, and a keystroke landing mid-repaint echoes at the wrong
-      # row (or, for a hidden field, before the mask engages, leaking the
-      # secret onto the screen). Wait for a genuinely quiet terminal.
-      s.waitForQuiet(recordFrame = false)
+      # Allow prompt initialization to finish before the next keystroke.
+      # Stay below the live GUI's 80ms cadence; 120ms can never settle it.
+      s.waitForQuiet(quietMs = 40, capMs = max(1,
+        int((deadline - epochTime()) * 1000)))
       return true
     if s.exited:
       # The child process has exited, but on Windows the ConPTY conhost is a

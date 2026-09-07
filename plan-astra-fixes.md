@@ -9,7 +9,28 @@ Implement the findings in docs/astra-review.md, requested after review commit a8
 - [x] 3. Session and transport identity. Make new session identities collision resistant with atomic resource allocation, preserving old lookups and session-format expectations. Key locks by actual resource identity, not timestamp basename. Add simultaneous independent-root and same-root tests. Include TLS/plain mode in connection cache identity and centralize repeated connection acquisition without combining protocol-specific decoders. Clarify loopback HTTP as test capability or explicit supported product capability. Reproduce scheme-switch issue in local mock transport test, no external credentials. Inspect library global ownership boundaries and address concrete unsafe concurrent use without speculative framework.
 - [x] 4. Lossless visual harness. Read .agents/design.md, .agents/development-guide.md, and root notes first; .agents/testing.md and .agents/osx-testing.md were missing and must be restored using current evidence. Add harness regression tests BEFORE changes for cursor-only moves/visibility, wide and combining character overlay, style differences, and wrap normalization. Preserve structured cell attributes and explicit cursor state; stable frame/checkpoint identities; geometry-preserving redaction; one artifact format accepted by comparator/viewer; first difference coordinates and useful crops. Do not blindly regenerate golden output. Real emulator screenshots required where ttty cannot reproduce disagreement; state verification surfaces.
 - [x] 5. Deterministic scenarios and docs. Use monotonic deadlines, explicit readiness events rather than silence, report quiet-cap expiry. Keep raw capture continuous independently from selected comparison checkpoints. Make broad shakedown scenarios individually selectable without exploding executables; isolate demonstrated unsupported scenarios rather than blanket disabling platforms where possible. Separate stress lane, expose timing/build identity and one run/diff/view workflow. Restore canonical docs, archive historical guidance clearly rather than rewriting unrelated plans. Split prompts.nim responsibilities only where it yields a small coherent improvement; avoid broad speculative framework. Add examples and end-to-end tests for new user-facing tooling per project notes.
-- [ ] 6. Integration. Review all findings against fixes, run focused and broader suite, debug failures rather than weaken expectations. Run release compile with plain nim c, no nimble install. Record actual timing and verification surface, platform limitations, and any remaining risks in docs/astra-review.md. All local actionable work completed before final response.
+- [x] 6. Integration. Review all findings against fixes, run focused and broader suite, debug failures rather than weaken expectations. Run release compile with plain nim c, no nimble install. Record actual timing and verification surface, platform limitations, and any remaining risks in docs/astra-review.md. All local actionable work completed before final response.
+
+## Stage 6 completed
+
+Integrated all ten findings; evidence and boundaries are recorded in docs/astra-review.md.
+Fixed dependency-flag quoting for out-of-tree API probes, selector advertisement of
+compile-disabled scenarios, legacy session-ID/reservation assertions, and a mock
+server EPIPE send-loop hang reproduced with bounded strace. Reviewed active visual
+final states without regenerating fixtures: final-state compatibility assertions
+retain physical rows/cursor and emit structured checkpoints; command output uses
+behavioral results plus recalled-input caret instead of path-collapsing goldens.
+A 40ms post-match quiet window preserves initial keystrokes without demanding
+silence longer than the live GUI tick. Added negative final-state and selector
+contracts plus an out-of-tree dependency compilation regression.
+
+Verification: full functional file passes 298.94s; broader TTY 33/35 files initially
+passed and both failures pass after fixes (frame contract; 12-iteration real-stream
+25.58s). Other mock consumer passes 47.46s. Core/config/shell/stream broader passes
+and corrected API 59.32s documented. Release compile and --version pass. No native
+Mac/Windows claim: configured stefani connection refused. No installs/pushes.
+No subtask handoff remains; residual platform/model/path-identity boundaries are
+explicit in the review follow-up.
 
 ## Current state
 

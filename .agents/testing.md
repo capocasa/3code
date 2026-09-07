@@ -3,10 +3,25 @@
 Read `design.md`, `development-guide.md`, and root `AGENTS.md` first.
 Build locally with `nimble setup` once, then plain `nim c`; never install.
 
+## Legacy fixture integration
+
+Continuous recordings are diagnostics, not scheduling-stable goldens. The active
+simple, multiline, bash and other-tool scenarios compare the final semantic text
+frame against the reviewed historical fixture, retaining physical row boundaries
+and adding the formerly omitted final prompt cursor. They also emit structured
+checkpoints. This compatibility assertion remains lossy (not a style golden);
+new visual contracts should use `expectCheckpoints` with explicit physical-cell
+redactions, plus intermediate behavioral assertions. The command scenario asserts
+each result and the recalled-input cursor instead of collapsing machine-specific
+skill paths to fit its obsolete continuous fixture. No fixtures were regenerated.
+
+The selector excludes the historical `when false` block and clears the old
+`THREECODE_TTY_ONLY` filter so an exact selection cannot silently skip its body.
+
 ## Run, inspect, compare
 
 ```
-tools/test_dispatch.sh tests/tty/test_frame_contract.nim
+tools/test_dispatch.sh files tests/tty/test_frame_contract.nim
 nim c --out:/tmp/pty_frames tools/pty_frames.nim
 /tmp/pty_frames testdata/output/tty/<run>/frames.txt.jsonl
 /tmp/pty_frames --dump testdata/output/tty/<run>/frames.txt.jsonl

@@ -5,7 +5,10 @@ import std/[os, osproc, strutils, sha1]
 proc nimbleDepFlags*(): string =
   ## Out-of-tree probes must explicitly load the project's dependency paths.
   for line in readFile(getCurrentDir() / "nimble.paths").splitLines:
-    for arg in parseCmdLine(line):
+    let arg = line.strip
+    if arg.startsWith("--path:\"") and arg.endsWith("\""):
+      result.add " " & quoteShell("--path:" & arg[8 ..< arg.len - 1])
+    elif arg.len > 0:
       result.add " " & quoteShell(arg)
 
 proc buildBinary*(defines, outName: string; forceRebuild = false): string =

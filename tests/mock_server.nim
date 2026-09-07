@@ -23,7 +23,13 @@
 ## without needing a local TLS cert. The connect-phase interrupt mechanism
 ## (fd shutdown wake) is transport-agnostic; `streamhttp`'s own suite covers
 ## the TLS-handshake variant.
-import std/[net, os, strutils]
+import std/[os, strutils]
+import std/net except send
+
+proc send(client: Socket; data: string) =
+  # Nim 2.2 SafeDisconn suppresses EPIPE inside send's retry loop without
+  # advancing it. Raise so interrupted clients cannot hang server teardown.
+  net.send(client, data, flags = {})
 from std/times import epochTime
 
 when defined(posix):
@@ -187,6 +193,8 @@ proc serverLoop(s: MockServer) {.thread.} =
           # SO_RCVTIMEO on the listener wakes accept() every 200ms; the
           # resulting timeout surfaces as OSError here. Re-check `stop`.
           continue
+        defer:
+          try: client.close() except CatchableError: discard
         # Read the request head BEFORE the scenario handler: the client
         # sends its POST head immediately after connecting, so it is
         # already in flight here. Reading it after the response races the
@@ -209,7 +217,6 @@ proc serverLoop(s: MockServer) {.thread.} =
         of msStallAfterDone: s.handleStallAfterDone(client)
         if handlerFinished:
           client.drainRequestBody(contentLength)
-        try: client.close() except CatchableError: discard
     except CatchableError:
       discard
 

@@ -149,14 +149,13 @@ proc appendSessionIndex*(cwd, id: string) =
 # `.3log` transcript (it isn't a committed message yet) but losing it on an
 # unexpected shutdown — kill, power-off, Ctrl-C, SIGTERM — is exactly what a
 # draft is for. Keeping it out of the `.3log` means the audit transcript stays
-# clean and the draft can never be mistaken for a real user turn, and means no
-# phantom session file is created before the first real turn.
+# clean and the draft can never be mistaken for a real user turn.
 #
-# Two scopes, chosen by whether a `.3log` exists yet (it first appears during
-# the first turn, at the saveSession in turns.nim):
+# Two scopes, chosen by whether the `.3log` has committed content (allocation
+# reserves an empty file; the first turn saves content in turns.nim):
 #
-#   * Pending (pre-first-turn): `drafts/pending/<cwd-hash>.prompt`. No session
-#     `.3log` exists, so there is no session id to key on. The draft is keyed
+#   * Pending (pre-first-turn): `drafts/pending/<cwd-hash>.prompt`. The reserved
+#     `.3log` is still empty. The draft is keyed
 #     by the working directory instead and loads into the next fresh session
 #     started in that directory. This is the "typed a prompt, got killed
 #     before sending" case.
@@ -186,7 +185,7 @@ proc hasSavedSession(path: string): bool =
   path.len > 0 and fileExists(path) and getFileSize(path) > 0
 
 proc currentDraftPath*(session: Session): string =
-  ## The draft path for the live session: id-keyed once a `.3log` exists
+  ## The draft path for the live session: id-keyed once a `.3log` has content
   ## (post-first-turn), otherwise the cwd-keyed pending path. This is the
   ## single decision point for which scope a draft lives in.
   if hasSavedSession(session.savePath):

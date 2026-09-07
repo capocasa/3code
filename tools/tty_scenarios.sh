@@ -3,7 +3,9 @@
 set -eu
 cd "$(dirname "$0")/.."
 source=tests/tty/test_tty_functional.nim
-names=$(sed -n 's/^  test "\(.*\)":$/\1/p' "$source")
+names=$(sed '/^when false:/,$d' "$source" | sed -n 's/^  test "\(.*\)":$/\1/p')
+# Historical environment filters can silently skip a selected test.
+unset THREECODE_TTY_ONLY
 case ${1:---list} in
   --list) printf '%s\n' "$names"; exit 0 ;;
   --stress) shift; set -- 'shakedown: one session exercises the full REPL contract' "$@" ;;

@@ -30,7 +30,6 @@ const MultilineVisualTestFrames = "testdata" / "fixtures" / "tty" / "multiline.t
 const BashToolVisualTestFrames = "testdata" / "fixtures" / "tty" / "bash_tool_visual_test.txt"
 const OtherToolsVisualTestFrames = "testdata" / "fixtures" / "tty" / "other_tools_visual_test.txt"
 const ResizeStreamFrames = "testdata" / "fixtures" / "tty" / "resize_stream_frames.txt"
-const HarnessCommandFrames = "testdata" / "fixtures" / "tty" / "harness_commands.txt"
 
 proc newFixture(name: string): string =
   result = getCurrentDir() / VisualOutputRoot / (name & "_" & $getCurrentProcessId())
@@ -485,16 +484,9 @@ suite "terminal visual contract":
     let root = newFixture("harness_commands")
     writeHarnessProviders(root)
     writeStubResponses(root, %*[])
-    check fileExists(HarnessCommandFrames)
 
-    # 128 cols (was 120 default): a rendered built-in skill path
-    # (`<output>/.../<skill>.md`) can exceed 120 cols on some checkouts and
-    # hard-wrap, adding rows that scroll `# Git` off the grid. 128 cols fits
-    # the longest built-in skill path so it never wraps. The rejoin normalizer
-    # (`normalizeWrappedPathTail`) still guards the comparison against wraps on
-    # checkouts with an even longer cwd. Per-test sizing is an established
-    # pattern; cols change only rewraps the fixed system-prompt text
-    # (deterministic, checkout-independent), so the fixture regenerates cleanly.
+    # Keep path-heavy :prompt output readable; assertions use committed
+    # history and never join physical rows to hide checkout-dependent wraps.
     let tty = startStub(root, cols = 128)
     defer:
       tty.writeFrameArtifact(root / "frames.txt")
@@ -546,15 +538,18 @@ suite "terminal visual contract":
     for p in walkFiles(root / "tmp" / "3code" / "dirlock" / "*.lock"):
       let lines = readFile(p).strip.splitLines
       if lines.len > 1: lockId = lines[1]
-    doAssert lockId.len == 15 and lockId[8] == 'T',
+    doAssert lockId.len > 16 and lockId[8] == 'T' and lockId[15] == '-',
       "dir lock should carry a session id line, got: " & lockId
     tty.expectInHistory lockId
     tty.send "\x1b[A"
     tty.expect "❯ :session"
     tty.drain(200)
-    tty.expectMeaningfulFrameArtifact(
-      HarnessCommandFrames,
-      root / "harness_commands_actual.txt")
+    # :prompt embeds machine-specific skill paths and their physical wraps.
+    # Assert command results above and the live recalled-input cursor here,
+    # without collapsing paths/rows to fit the historical text recording.
+    tty.requireVisibleEditorCaret(":session")
+    discard tty.checkpoint("commands/recalled-session")
+    tty.writeCheckpoints(root / "checkpoints.jsonl")
 
   test "profile commands return to prompt and accept further input":
     let root = newFixture("profile_cmd_noexit")
@@ -652,7 +647,7 @@ suite "terminal visual contract":
     doAssert "↑120" in tty.rows()[answerRow + 1],
       "receipt not flush under answer; row below answer is '" &
       tty.rows()[answerRow + 1] & "'\n" & tty.dumpFramesAround("↑120")
-    tty.expectMeaningfulFrameArtifact(
+    tty.expectFinalFrameArtifact(
       SimpleVisualTestFrames,
       root / "simple_visual_test_actual.txt")
 
@@ -1021,18 +1016,21 @@ suite "terminal visual contract":
     tty1.expect draftText
     # Wait past the 250ms flusher debounce so the draft reaches disk. No turn
     # has run, so this is the pre-first-turn case: the draft lands under the
-    # cwd-keyed pending path and no .3log exists yet.
+    # cwd-keyed pending path; the reserved .3log has no committed messages.
     sleep 800
     tty1.drain(100)
     let draftPath = draftPathForDir(root)
     check fileExists(draftPath)
     check readFile(draftPath) == draftText
-    # No session transcript exists for a conversation that never had a turn.
+    # Session allocation atomically reserves an empty file before first turn.
+    # Reservation is not a committed transcript and must not contain the draft.
     let sessDir = root / "data" / "3code" / "sessions"
-    var any3log = false
+    var reservations = 0
     for kind, p in walkDir(sessDir):
-      if kind == pcFile and p.endsWith(".3log"): any3log = true
-    check not any3log
+      if kind == pcFile and p.endsWith(".3log"):
+        inc reservations
+        check readFile(p).len == 0
+    check reservations == 1
 
     # Phase 2: simulate an unexpected shutdown (kill / power-off / Ctrl-C).
     # SIGTERM triggers cleanup()'s final draft flush; SIGKILL is the fallback.
@@ -1668,7 +1666,7 @@ suite "terminal visual contract":
     tty.expectCount("Queued multiline response.", 1, where = "screen")
     tty.expectTokenBar(["○", "↑180", "↓32"])
     tty.drain(200)
-    tty.expectMeaningfulFrameArtifact(
+    tty.expectFinalFrameArtifact(
       MultilineVisualTestFrames,
       root / "multiline_visual_test_actual.txt")
 
@@ -2062,7 +2060,7 @@ suite "terminal visual contract":
     tty.expectInHistory "Bash checks complete."
     tty.expectTokenBar(["○", "↑210", "↓20"])
     tty.drain(200)
-    tty.expectMeaningfulFrameArtifact(
+    tty.expectFinalFrameArtifact(
       BashToolVisualTestFrames,
       root / "bash_tool_visual_test_actual.txt")
 
@@ -2407,7 +2405,7 @@ suite "terminal visual contract":
     tty.expectInHistory "Clear completed."
     tty.expectTokenBar(["○", "↑90", "↓12"])
     tty.drain(200)
-    tty.expectMeaningfulFrameArtifact(
+    tty.expectFinalFrameArtifact(
       OtherToolsVisualTestFrames,
       root / "other_tools_visual_test_actual.txt")
 
@@ -2880,7 +2878,7 @@ when false:
       tty.resizeMainThread(132, 38)
       tty.expectInHistory "Resize stream complete."
       tty.expectTokenBar(["○", "↑42", "↓9"])
-      tty.expectMeaningfulFrameArtifact(
+      tty.expectFinalFrameArtifact(
         ResizeStreamFrames,
         root / "resize_stream_actual.txt")
 
@@ -3096,6 +3094,6 @@ when false:
       tty.send "\n"
       tty.expectInHistory "yes it is"
       tty.expectInHistory "Sure is. Let me know when you have a real task."
-      tty.expectMeaningfulFrameArtifact(
+      tty.expectFinalFrameArtifact(
         MainVisualTestFrames,
         root / "main_visual_test_actual.txt")

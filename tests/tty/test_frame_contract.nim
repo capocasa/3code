@@ -54,6 +54,27 @@ suite "lossless frame contracts (ttty model)":
     s.capture("abc")
     check s.meaningfulFrameText() == s.meaningfulFrameText()
 
+  test "legacy final-state assertion ignores redraw count but preserves rows":
+    let dir = getTempDir() / ("3code-final-frame-" & $getCurrentProcessId())
+    createDir(dir)
+    defer: removeDir(dir)
+    let fixture = dir / "expected.txt"
+    let actual = dir / "actual.txt"
+    let s = TtySession(grid: newGrid(), exited: true, keepHistory: true,
+      started: epochTime())
+    s.grid.width = 12
+    s.grid.height = 3
+    s.grid.cursorHidden = true
+    s.capture("first")
+    s.capture("\r\nsecond")
+    writeFile(fixture, "===== 99 =====\nfirst\nsecond\n")
+    s.expectFinalFrameArtifact(fixture, actual)
+    check fileExists(actual & ".jsonl")
+    s.checkpoints.setLen(0)
+    writeFile(fixture, "===== 99 =====\nfirst second\n")
+    expect AssertionDefect:
+      s.expectFinalFrameArtifact(fixture, actual)
+
   test "structured roundtrip style coordinates redaction and CLI":
     let s = TtySession(grid: newGrid(), keepHistory: true, started: epochTime())
     s.capture("\e[31m界abc")

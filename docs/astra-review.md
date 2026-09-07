@@ -1,6 +1,86 @@
 # Astra review
 
-Scope: test architecture, screenshot-driven development, transport/session boundaries, and the GPT-family prompt. Reviewed against baseline `645409a`. This is a targeted source review, not a whole-repository correctness certification. Only the prompt and its integration tests were changed.
+Original review scope: test architecture, screenshot-driven development, transport/session boundaries, and the GPT-family prompt, against baseline `645409a`. The original review changed only the prompt and its integration tests. The implementation follow-up below supersedes its change/verification limits; neither is a whole-repository correctness certification.
+
+## Implementation follow-up (stages 1–6)
+
+The findings below describe the review baseline, not the current implementation.
+Stages 1–5 landed in `c3ee0a6`, `227ba75`, `56b1b6c`, `1330e9f`, and `0e0ffee`.
+Stage 6 integrated them without regenerating visual fixtures.
+
+| Finding | Resolution / boundary |
+|---|---|
+| 1 — false-pass expectations | Unmet assertions fail after exit and deadline; negative PTY contracts cover both. |
+| 2 — lossy capture | Continuous JSONL preserves modeled cells, attributes, cursor, wrap and geometry; raw bytes remain the authoritative escape stream. |
+| 3 — stale binaries | One serialized incremental compiler wrapper, atomic publication and option-specific stub paths; source/include/staticRead/config/concurrency regressions. Integration also fixed literal quotes in out-of-tree dependency flags. |
+| 4 — hidden runner failures | Shared metadata-aware testament dispatcher, quoted selections and aggregate status; missing testament is an error. |
+| 5 — watchdog ownership | Only descendants of the owned test runner are eligible for termination; duration arithmetic is POSIX-compatible. |
+| 6 — session collisions | Atomic random-suffixed reservations and canonical full-path lock keys; symlink resolution and empty-reservation draft semantics tested. Hard-link and case-fold aliases are not unified by pathname identity. |
+| 7 — connection identity | Scheme/TLS participates in reusable connection identity; library initialization explicitly rejects concurrent singleton ownership. This is not multi-session isolation. |
+| 8 — viewer/comparator | Shared structured parser, dump, compare and style rendering; negative comparator and CLI contracts. |
+| 9 — settling | Monotonic bounded polling, quiet-cap failure, semantic readiness/checkpoints independent of diagnostic capture. Integration uses a 40ms post-match quiet window below the live GUI's 80ms cadence; removing settling entirely reproduced dropped initial keystrokes. |
+| 10 — selection/platforms | Exact compiled-scenario selection and explicit stress lane with revision/checksum/timing. Disabled source blocks are not advertised; old environment filtering cannot silently skip an exact selection. Native quarantines remain, not falsely declared fixed. |
+
+### Stage 6 visual review
+
+Reviewed the final states in simple, multiline, bash and other-tool fixtures
+against actual recordings. Newly retained startup, cursor-only and streamed
+intermediate frames are expected consequences of continuous capture, not a stable
+golden sequence. Those scenarios now assert the historical final text state,
+with the visible final cursor restored, and emit structured semantic checkpoints.
+Row joins and cursor stripping were not reinstated. A negative contract verifies
+that a changed physical row boundary fails. Text compatibility still masks version
+and elapsed values and does not assert style; structured comparison is the new
+contract for style-sensitive tests, not a claim that these old fixtures are lossless.
+
+The command fixture embeds machine-specific paths previously collapsed by the
+normalizer. Its replacement contract asserts every command result, the actual
+random-suffixed session ID and the recalled-input caret, retaining full diagnostic
+and checkpoint artifacts. The pre-existing disabled resize/main-visual block is
+still disabled and no longer appears as a runnable selector success.
+
+### Verification evidence and limits
+
+Linux x86_64, Nim 2.2.10; terminal surface is POSIX PTY bytes interpreted by ttty,
+**not an emulator screenshot**. No rendering discrepancy required a real-emulator
+reproduction. No packages installed or pushed.
+
+- Initial `sh tools/test_dispatch.sh all` exercised all six categories. API probes
+  exposed the dependency-quote bug; the API file then passed in 59.32s. The run
+  recorded 29 core, 7 config, 4 shell, 6 stream and 5 other API file passes.
+  Overlapping exploratory runs were stopped by owned process tree; this is not
+  presented as a single clean full-suite pass.
+- Full functional file passed through testament in **298.94s** after fixing the
+  reservation assertion: a pre-turn session owns exactly one empty `.3log`, not
+  no file. `/tmp/astra-functional6-verified.log`.
+- Build provenance, frame and selector contracts pass in
+  `/tmp/astra-contracts6-final.log`; PTY negative assertions pass in
+  `/tmp/astra-contracts6.log`. The frame suite includes the new negative legacy
+  final-state comparison; the selector rejects disabled names before compilation.
+- Selected shakedown and command scenarios pass: build 5s, run 9s/13s,
+  `/tmp/astra-harness6b.log`. Four active final-state goldens pass in
+  `/tmp/astra-goldens6b.log`; draft restoration passes in `/tmp/astra-draft6.log`.
+- Broader TTY rerun verified live GUI (242.64s), spinner race stress (128.65s),
+  provider editing/cancellation, quiet-network interruption, resize and signal
+  paths. The completed `/tmp/astra-tty6-final.log` has **33/35 file passes**;
+  its two failures were the intermediate frame-contract compile error and a
+  real-stream teardown hang. Both corrected files pass on rerun. The latter was
+  reproduced in one iteration and traced with bounded `strace`: Nim 2.2's default
+  SafeDisconn send loop spins on EPIPE after child teardown. Mock sends now raise
+  on disconnect and close the accepted socket on error. Both mock-server consumers
+  pass in `/tmp/astra-mock6-final.log` (12-iteration real-stream test 25.58s,
+  network interruption 47.46s). This is broader coverage plus corrected-file
+  reruns, not a claim of one clean full-suite invocation.
+- `sh tools/build_binary.sh /tmp/astra-release6 src/threecode.nim -d:release`
+  passed (cold 30.479s, final incremental 10.746s); `--version` reports the tested
+  working-tree revision. `/tmp/astra-release6-final.log`.
+- Configured `stefani` VM probe with batch mode and strict known-host checking was
+  refused at 127.0.0.1:22222. macOS and Windows are **unverified**; no remote CI
+  was triggered. Exact selectors support native reproduction when access exists.
+- Remaining boundaries: ttty does not retain RGB components from its dependency
+  model (raw bytes do); canonical pathname locks do not unify hard links or
+  case-fold aliases; library state remains singleton; no behavioral model A/B
+  evaluation or speculative prompt-module split was performed.
 
 ## Prioritized findings
 
@@ -114,7 +194,7 @@ The revision emphasizes total task cost rather than shortest replies, discrimina
 
 This plays to careful reasoning without demanding long narration. It does not claim that prompt text alone solves the infrastructure defects above or that a particular persona makes a model more capable.
 
-## Verification and limits
+## Original review verification and limits
 
 - `nimble setup` generated local dependency paths; no package installation or push.
 - `nim c -r --out:/tmp/astreview-prompts tests/api/test_prompts_compact.nim`: **84 tests passed**, including shared GPT prompt/tool routing and the existing compact tests. Pure integration tests, no renderer or model API evaluation.

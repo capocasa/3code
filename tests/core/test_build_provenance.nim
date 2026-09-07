@@ -4,8 +4,20 @@ discard """
   disabled: "windows"
 """
 import std/[os, osproc, strutils, unittest]
+import stub_helpers
 
 suite "incremental build provenance":
+  test "out-of-tree probes resolve quoted dependency paths":
+    let dir = getTempDir() / ("3code-dep-path-" & $getCurrentProcessId())
+    createDir(dir)
+    defer: removeDir(dir)
+    let source = dir / "probe.nim"
+    writeFile(source, "import unicodedb/widths\necho \"resolved\"\n")
+    let run = execCmdEx("nim c -r --hints:off" & nimbleDepFlags() &
+      " --out:" & quoteShell(dir / "probe") & " " & source.quoteShell)
+    check run.exitCode == 0
+    check "resolved" in run.output
+
   test "inputs, options, atomic failure, concurrent cold writers":
     let dir = getTempDir() / ("3code-build-" & $getCurrentProcessId())
     createDir(dir)
