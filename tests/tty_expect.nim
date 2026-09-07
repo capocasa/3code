@@ -10,8 +10,10 @@
 ## and the public expect*/send/resize/close API are identical across both;
 ## only the harness internals fork on `when defined(...)`.
 
-import std/[os, random, strformat, strutils, times, unicode]
+import std/[os, strformat, strutils, times, unicode, json]
 import ttty/grid
+import frame_artifact
+export frame_artifact
 
 when defined(windows):
   import winlean
@@ -71,6 +73,7 @@ type
     changedRows*: seq[int]
     cursorRow*, cursorCol*: int
     cursorHidden*: bool
+    visual*: VisualFrame
 
   TtySession* = ref object
     # The PTY/conduit handle and the child identifier. POSIX uses a single
@@ -179,8 +182,15 @@ proc rememberFrame(s: TtySession) =
   if not s.keepHistory:
     return
   let rows = s.currentRows()
-  if s.frames.len > 0 and s.frames[^1].rows == rows:
-    return
+  let visual = VisualFrame(id: $s.frames.len, width: s.grid.width,
+    height: s.grid.height, cells: s.grid.rows, cursorRow: s.grid.row,
+    cursorCol: s.grid.col, cursorHidden: s.grid.cursorHidden,
+    pendingWrap: s.grid.pendingWrap)
+  if s.frames.len > 0:
+    var prev = s.frames[^1].visual
+    prev.id = visual.id
+    if firstDifference(prev, visual).len == 0:
+      return
 
   var changed: seq[int]
   if s.frames.len == 0:
@@ -191,7 +201,8 @@ proc rememberFrame(s: TtySession) =
     for i in 0 ..< max(prev.len, rows.len):
       let oldText = if i < prev.len: prev[i] else: ""
       let newText = if i < rows.len: rows[i] else: ""
-      if oldText != newText:
+      if oldText != newText or i >= s.frames[^1].visual.cells.len or
+          i >= visual.cells.len or s.frames[^1].visual.cells[i] != visual.cells[i]:
         changed.add i
 
   s.frames.add TtyFrame(
@@ -200,7 +211,7 @@ proc rememberFrame(s: TtySession) =
     changedRows: changed,
     cursorRow: s.grid.row,
     cursorCol: s.grid.col,
-    cursorHidden: s.grid.cursorHidden)
+    cursorHidden: s.grid.cursorHidden, visual: visual)
 
 proc markFrameDirty(s: TtySession) =
   if not s.keepHistory:
@@ -1141,32 +1152,21 @@ proc framesText*(s: TtySession): string =
       if frame.cursorHidden: "hidden"
       else: &"visible@({frame.cursorRow},{frame.cursorCol})"
     result.add &"===== frame {i:04d} @{frame.ms}ms changed={frame.changedRows} cursor={cursorState} =====\n"
-    for rowIdx, row in frame.rows:
-      var text = row
-      if not frame.cursorHidden and rowIdx == frame.cursorRow:
-        let col = max(0, frame.cursorCol)
-        var bytePos = 0
-        var cells = 0
-        while bytePos < text.len and cells < col:
-          bytePos += max(1, runeLenAt(text, bytePos))
-          inc cells
-        if cells < col:
-          text.add repeat(" ", col - cells)
-          text.add "█"
-        elif bytePos < text.len:
-          let next = bytePos + max(1, runeLenAt(text, bytePos))
-          text = text[0 ..< bytePos] & "█" & text[next .. ^1]
-        else:
-          text.add "█"
-      result.add text
-      result.add "\n"
+    for row in frame.visual.displayRows():
+      result.add row & "\n"
 
 proc writeFrameArtifact*(s: TtySession; path: string) =
   let dir = path.splitPath.head
   if dir.len > 0:
     createDir(dir)
   writeFile(path, s.framesText())
-  writeFile(path & ".raw", s.cleanRaw())
+  writeFile(path & ".raw", s.raw)
+  var structured = ""
+  for frame in s.frames:
+    var visual = frame.visual
+    visual.ms = frame.ms
+    structured.add $visual.frameJson() & "\n"
+  writeFile(path & ".jsonl", structured)
 
 proc writeRawArtifact*(s: TtySession; path: string) =
   ## Write the session's raw PTY-master bytes UNMODIFIED (every `\r`
@@ -1191,7 +1191,7 @@ proc normalizeElapsed(row: string): string =
         let beforeOk = start == 0 or row[start - 1] in {' ', '\t', '(', '['}
         let afterOk = i + 1 >= row.len or row[i + 1] in {' ', '\t', ')', ']'}
         if beforeOk and afterOk:
-          result.add "0s"
+          result.add repeat("0", i - start) & "s"
           inc i
         else:
           result.add row[start ..< i]
@@ -1238,14 +1238,12 @@ proc normalizeTtyRunRoots(row: string): string =
 
 proc normalizeFrameRows*(rows: openArray[string]): seq[string] =
   for row in rows:
-    var normalized = row.normalizeElapsed().normalizeSpinnerGlyphs().
-      normalizeTtyRunRoots().strip(leading = false, trailing = true)
-    if normalized.endsWith("█"):
-      normalized = normalized[0 ..< normalized.len - "█".len].
-        strip(leading = false, trailing = true)
-    result.add normalized
+    result.add row.normalizeElapsed().normalizeSpinnerGlyphs().
+      strip(leading = false, trailing = true)
 
 proc frameRowsWithCursor(frame: TtyFrame): seq[string] =
+  if frame.visual.cells.len > 0:
+    return frame.visual.displayRows()
   result = frame.rows
   if frame.cursorHidden or frame.cursorRow < 0 or frame.cursorRow >= result.len:
     return
@@ -1308,7 +1306,6 @@ proc meaningfulFrameText*(s: TtySession): string =
   ## frame) are collapsed to the final typed state, since their count varies with
   ## PTY byte scheduling and is not a content change.
   var lastRows: seq[string]
-  randomize()
   var i = 0
   let n = s.frames.len
   while i < n:
@@ -1322,7 +1319,7 @@ proc meaningfulFrameText*(s: TtySession): string =
       let nextRows = normalizeFrameRows(s.frames[i].frameRowsWithCursor())
       if isTypingPrefix(lastRows, rows, nextRows):
         continue
-    result.add &"===== {rand(100..999)} =====\n"
+    result.add &"===== frame {i - 1} =====\n"
     for row in rows:
       result.add row
       result.add "\n"
@@ -1389,27 +1386,8 @@ proc normalizeSpinnerPhases(text: string): string =
     result.add line.normalizeSpinnerGlyphs()
 
 proc normalizeWrappedPathTail(text: string): string =
-  ## A long skill path that exceeds the 120-col terminal hard-wraps; the
-  ## `normalizeTtyRunRoots` prefix redaction collapses the path AFTER capture
-  ## but cannot UN-wrap a line the terminal already broke. The wrap point is
-  ## deterministic: the skill path always lands as `...implementation.m` + a
-  ## lone `d` on the next row. Rejoin such a lone trailing fragment back onto
-  ## the line it broke from, applied symmetrically so a captured wrap on either
-  ## side of the comparison cannot break the golden match. The split is content
-  ## (terminal width), not behavior.
-  let lines = text.splitLines(keepEol = true)
-  var i = 0
-  while i < lines.len:
-    let cur = lines[i]
-    let curStripped = cur.strip()
-    if i + 1 < lines.len and curStripped.endsWith(".m") and
-        lines[i + 1].strip() == "d":
-      let eol = if cur.endsWith("\n"): "\n" else: ""
-      result.add cur[0 ..< cur.len - eol.len] & "d" & eol
-      inc i, 2
-      continue
-    result.add cur
-    inc i
+  ## Compatibility pass: physical row boundaries must never be rewritten.
+  text
 
 proc writeMeaningfulFrameArtifact*(s: TtySession; path: string) =
   let dir = path.splitPath.head
