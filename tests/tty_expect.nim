@@ -10,8 +10,14 @@
 ## and the public expect*/send/resize/close API are identical across both;
 ## only the harness internals fork on `when defined(...)`.
 
-import std/[os, random, strformat, strutils, times, unicode]
+import std/[os, strformat, strutils, monotimes, unicode, json]
+
+proc epochTime(): float =
+  ## Harness-relative clock only: all deadlines and frame offsets are monotonic.
+  getMonoTime().ticks.float / 1_000_000_000.0
 import ttty/grid
+import frame_artifact
+export frame_artifact
 
 when defined(windows):
   import winlean
@@ -71,6 +77,7 @@ type
     changedRows*: seq[int]
     cursorRow*, cursorCol*: int
     cursorHidden*: bool
+    visual*: VisualFrame
 
   TtySession* = ref object
     # The PTY/conduit handle and the child identifier. POSIX uses a single
@@ -92,6 +99,7 @@ type
     grid*: Grid
     raw*: string
     frames*: seq[TtyFrame]
+    checkpoints*: seq[VisualFrame]
     started*: float
     exited*: bool
     exitCode*: int
@@ -179,8 +187,15 @@ proc rememberFrame(s: TtySession) =
   if not s.keepHistory:
     return
   let rows = s.currentRows()
-  if s.frames.len > 0 and s.frames[^1].rows == rows:
-    return
+  let visual = VisualFrame(id: $s.frames.len, width: s.grid.width,
+    height: s.grid.height, cells: s.grid.rows, cursorRow: s.grid.row,
+    cursorCol: s.grid.col, cursorHidden: s.grid.cursorHidden,
+    pendingWrap: s.grid.pendingWrap)
+  if s.frames.len > 0:
+    var prev = s.frames[^1].visual
+    prev.id = visual.id
+    if firstDifference(prev, visual).len == 0:
+      return
 
   var changed: seq[int]
   if s.frames.len == 0:
@@ -191,7 +206,8 @@ proc rememberFrame(s: TtySession) =
     for i in 0 ..< max(prev.len, rows.len):
       let oldText = if i < prev.len: prev[i] else: ""
       let newText = if i < rows.len: rows[i] else: ""
-      if oldText != newText:
+      if oldText != newText or i >= s.frames[^1].visual.cells.len or
+          i >= visual.cells.len or s.frames[^1].visual.cells[i] != visual.cells[i]:
         changed.add i
 
   s.frames.add TtyFrame(
@@ -200,7 +216,7 @@ proc rememberFrame(s: TtySession) =
     changedRows: changed,
     cursorRow: s.grid.row,
     cursorCol: s.grid.col,
-    cursorHidden: s.grid.cursorHidden)
+    cursorHidden: s.grid.cursorHidden, visual: visual)
 
 proc markFrameDirty(s: TtySession) =
   if not s.keepHistory:
@@ -337,7 +353,7 @@ proc feedGridChunk*(s: TtySession; chunk: string) =
       s.markFrameDirty()
       if s.syncDepth > 0:
         dec s.syncDepth
-        if s.syncDepth == 0 and not s.frameRecordingPaused:
+        if s.syncDepth == 0:
           s.flushFrame()
       i = nextEnd + SyncEnd.len
 
@@ -511,15 +527,15 @@ proc waitForOutput*(s: TtySession; timeoutMs = 5000; recordFrame = true): bool =
   ##
   ## `pollOnce` watches both fds: the PTY master fd (bytes the child wrote)
   ## and the frame-event fd (explicit sync signal). Either one wakes us.
-  ## Returns false on timeout or child exit. When `recordFrame` is false,
-  ## SyncEnd-driven frame commits are suppressed so screen-state `expect*`
-  ## procs can poll without committing non-deterministic intermediate frames.
+  ## Returns false on timeout or child exit. `recordFrame` is retained for
+  ## source compatibility; diagnostic capture is always continuous.
   let deadline = epochTime() + timeoutMs.float / 1000.0
   let wasPaused = s.frameRecordingPaused
   if not recordFrame:
     s.frameRecordingPaused = true
   while epochTime() < deadline and not s.exited:
-    if s.pollOnce(200, recordIdleFrame = false):
+    if s.pollOnce(min(200, max(1, int((deadline - epochTime()) * 1000))),
+                  recordIdleFrame = true):
       if not recordFrame:
         s.frameRecordingPaused = wasPaused
       return true
@@ -536,19 +552,22 @@ proc waitForQuiet*(s: TtySession; quietMs = 120; capMs = 3000;
   ## fixed short drain is not enough to guarantee the terminal is settled.
   ## Waiting for a quiet window means a following `send` never types into
   ## an in-flight repaint (which would echo keys at the wrong row, or
-  ## before a hidden-input field engaged its mask). Frame commits stay
-  ## suppressed like `expect`'s own polling.
+  ## before a hidden-input field engaged its mask). Cap expiry is a failure,
+  ## not evidence of readiness. Prefer waitUntil for semantic readiness.
   let wasPaused = s.frameRecordingPaused
   if not recordFrame:
     s.frameRecordingPaused = true
   let cap = epochTime() + capMs.float / 1000.0
   var quietStart = epochTime()
   while epochTime() < cap and not s.exited:
-    if s.pollOnce(10, recordIdleFrame = false):
+    if s.pollOnce(10, recordIdleFrame = true):
       quietStart = epochTime()  # output arrived; restart the quiet window
     elif (epochTime() - quietStart) * 1000.0 >= quietMs.float:
-      break
+      s.frameRecordingPaused = wasPaused
+      s.flushFrame(force = true)
+      return
   s.frameRecordingPaused = wasPaused
+  doAssert s.exited, "waitForQuiet: quiet window not reached within capMs=" & $capMs
   if recordFrame:
     s.flushFrame(force = true)
 
@@ -561,19 +580,17 @@ proc drain*(s: TtySession; settleMs = 20; recordFrame = true) =
   ## a render arriving *during* a drain got folded in while the same render
   ## arriving *between* drains became its own frame — same content, different
   ## partitioning, flaky golden comparison.) The trailing force-flush catches any
-  ## pending state not closed by a SyncEnd. When `recordFrame` is false, no frame
-  ## is committed (used by `expect*` procs, which poll screen state).
+  ## pending state not closed by a SyncEnd. `recordFrame` is retained for
+  ## compatibility but never suppresses diagnostic capture.
   let wasPaused = s.frameRecordingPaused
   if not recordFrame:
     s.frameRecordingPaused = true
   let deadline = epochTime() + settleMs.float / 1000.0
   while epochTime() < deadline and not s.exited:
-    discard s.pollOnce(1, false)
-  while s.pollOnce(0, false):
-    discard
+    discard s.pollOnce(1, true)
+  discard s.pollOnce(0, false)
   s.frameRecordingPaused = wasPaused
-  if recordFrame:
-    s.flushFrame(force = true)
+  s.flushFrame(force = true)
 
 proc resize*(s: TtySession; cols, rows: int): bool {.discardable.} =
   ## Resize the PTY and send SIGWINCH to the child. POSIX only.
@@ -1141,32 +1158,55 @@ proc framesText*(s: TtySession): string =
       if frame.cursorHidden: "hidden"
       else: &"visible@({frame.cursorRow},{frame.cursorCol})"
     result.add &"===== frame {i:04d} @{frame.ms}ms changed={frame.changedRows} cursor={cursorState} =====\n"
-    for rowIdx, row in frame.rows:
-      var text = row
-      if not frame.cursorHidden and rowIdx == frame.cursorRow:
-        let col = max(0, frame.cursorCol)
-        var bytePos = 0
-        var cells = 0
-        while bytePos < text.len and cells < col:
-          bytePos += max(1, runeLenAt(text, bytePos))
-          inc cells
-        if cells < col:
-          text.add repeat(" ", col - cells)
-          text.add "█"
-        elif bytePos < text.len:
-          let next = bytePos + max(1, runeLenAt(text, bytePos))
-          text = text[0 ..< bytePos] & "█" & text[next .. ^1]
-        else:
-          text.add "█"
-      result.add text
-      result.add "\n"
+    for row in frame.visual.displayRows():
+      result.add row & "\n"
 
 proc writeFrameArtifact*(s: TtySession; path: string) =
   let dir = path.splitPath.head
   if dir.len > 0:
     createDir(dir)
   writeFile(path, s.framesText())
-  writeFile(path & ".raw", s.cleanRaw())
+  writeFile(path & ".raw", s.raw)
+  var structured = ""
+  for frame in s.frames:
+    var visual = frame.visual
+    visual.ms = frame.ms
+    structured.add $visual.frameJson() & "\n"
+  writeFile(path & ".jsonl", structured)
+
+proc checkpoint*(s: TtySession; id: string): VisualFrame =
+  ## Explicit semantic snapshot; never controls continuous recording.
+  doAssert id.len > 0, "checkpoint requires a semantic ID"
+  for frame in s.checkpoints:
+    doAssert frame.id != id, "duplicate checkpoint: " & id
+  result = VisualFrame(id: id, width: s.grid.width, height: s.grid.height,
+    cells: s.grid.rows, cursorRow: s.grid.row, cursorCol: s.grid.col,
+    cursorHidden: s.grid.cursorHidden, pendingWrap: s.grid.pendingWrap)
+  s.checkpoints.add result
+
+proc writeCheckpoints*(s: TtySession; path: string) =
+  var data = ""
+  for frame in s.checkpoints:
+    data.add $frame.frameJson() & "\n"
+  writeFile(path, data)
+
+proc expectCheckpoints*(s: TtySession; expectedPath, actualPath: string) =
+  s.writeCheckpoints(actualPath)
+  doAssert fileExists(expectedPath), "missing checkpoints: " & expectedPath
+  let difference = compareArtifacts(readFile(expectedPath), readFile(actualPath))
+  doAssert difference.len == 0, difference
+
+proc waitUntil*(s: TtySession; ready: proc(s: TtySession): bool {.closure.};
+                timeoutMs = 5000) =
+  ## Observe live state/events instead of guessing a settling sleep.
+  let deadline = epochTime() + timeoutMs.float / 1000.0
+  while true:
+    s.drain(0)
+    if ready(s): return
+    doAssert not s.exited, "waitUntil: child exited before readiness"
+    let remaining = int((deadline - epochTime()) * 1000)
+    doAssert remaining > 0, "waitUntil: readiness deadline expired"
+    discard s.waitForOutput(min(remaining, 50))
 
 proc writeRawArtifact*(s: TtySession; path: string) =
   ## Write the session's raw PTY-master bytes UNMODIFIED (every `\r`
@@ -1191,7 +1231,7 @@ proc normalizeElapsed(row: string): string =
         let beforeOk = start == 0 or row[start - 1] in {' ', '\t', '(', '['}
         let afterOk = i + 1 >= row.len or row[i + 1] in {' ', '\t', ')', ']'}
         if beforeOk and afterOk:
-          result.add "0s"
+          result.add repeat("0", i - start) & "s"
           inc i
         else:
           result.add row[start ..< i]
@@ -1238,14 +1278,12 @@ proc normalizeTtyRunRoots(row: string): string =
 
 proc normalizeFrameRows*(rows: openArray[string]): seq[string] =
   for row in rows:
-    var normalized = row.normalizeElapsed().normalizeSpinnerGlyphs().
-      normalizeTtyRunRoots().strip(leading = false, trailing = true)
-    if normalized.endsWith("█"):
-      normalized = normalized[0 ..< normalized.len - "█".len].
-        strip(leading = false, trailing = true)
-    result.add normalized
+    result.add row.normalizeElapsed().normalizeSpinnerGlyphs().
+      strip(leading = false, trailing = true)
 
 proc frameRowsWithCursor(frame: TtyFrame): seq[string] =
+  if frame.visual.cells.len > 0:
+    return frame.visual.displayRows()
   result = frame.rows
   if frame.cursorHidden or frame.cursorRow < 0 or frame.cursorRow >= result.len:
     return
@@ -1308,7 +1346,6 @@ proc meaningfulFrameText*(s: TtySession): string =
   ## frame) are collapsed to the final typed state, since their count varies with
   ## PTY byte scheduling and is not a content change.
   var lastRows: seq[string]
-  randomize()
   var i = 0
   let n = s.frames.len
   while i < n:
@@ -1322,7 +1359,7 @@ proc meaningfulFrameText*(s: TtySession): string =
       let nextRows = normalizeFrameRows(s.frames[i].frameRowsWithCursor())
       if isTypingPrefix(lastRows, rows, nextRows):
         continue
-    result.add &"===== {rand(100..999)} =====\n"
+    result.add &"===== frame {i - 1} =====\n"
     for row in rows:
       result.add row
       result.add "\n"
@@ -1389,27 +1426,8 @@ proc normalizeSpinnerPhases(text: string): string =
     result.add line.normalizeSpinnerGlyphs()
 
 proc normalizeWrappedPathTail(text: string): string =
-  ## A long skill path that exceeds the 120-col terminal hard-wraps; the
-  ## `normalizeTtyRunRoots` prefix redaction collapses the path AFTER capture
-  ## but cannot UN-wrap a line the terminal already broke. The wrap point is
-  ## deterministic: the skill path always lands as `...implementation.m` + a
-  ## lone `d` on the next row. Rejoin such a lone trailing fragment back onto
-  ## the line it broke from, applied symmetrically so a captured wrap on either
-  ## side of the comparison cannot break the golden match. The split is content
-  ## (terminal width), not behavior.
-  let lines = text.splitLines(keepEol = true)
-  var i = 0
-  while i < lines.len:
-    let cur = lines[i]
-    let curStripped = cur.strip()
-    if i + 1 < lines.len and curStripped.endsWith(".m") and
-        lines[i + 1].strip() == "d":
-      let eol = if cur.endsWith("\n"): "\n" else: ""
-      result.add cur[0 ..< cur.len - eol.len] & "d" & eol
-      inc i, 2
-      continue
-    result.add cur
-    inc i
+  ## Compatibility pass: physical row boundaries must never be rewritten.
+  text
 
 proc writeMeaningfulFrameArtifact*(s: TtySession; path: string) =
   let dir = path.splitPath.head
@@ -1437,27 +1455,45 @@ proc expectMeaningfulFrameArtifact*(s: TtySession; expectedPath,
     "full-frame recording differed from expected frames\nexpected: " & expectedPath &
       "\nactual: " & actualPath
 
-proc expect*(s: TtySession; text: string; timeoutMs = 5000): bool {.discardable.} =
-  ## Poll for `text` on the live screen or raw byte stream. Frame commits
-  ## are suppressed during the wait: `expect` checks screen state and raw
-  ## bytes, neither of which needs recorded frames, and the child's initial
-  ## editor redraw (which can capture transient state like the idle hint
-  ## before the first keystroke clears it) arrives non-deterministically
-  ## relative to when the text is found. Suppressing it keeps the frame
-  ## list deterministic.
+proc expectFinalFrameArtifact*(s: TtySession; expectedPath, actualPath: string) =
+  ## Legacy text fixtures specify the final semantic state, not the scheduling
+  ## of diagnostic redraws. Keep structured checkpoints alongside this lossy
+  ## text assertion; new visual contracts should use expectCheckpoints.
+  s.waitForQuiet()
+  discard s.checkpoint(expectedPath.extractFilename & "/final")
+  s.writeCheckpoints(actualPath & ".jsonl")
+  s.writeMeaningfulFrameArtifact(actualPath)
+  proc finalFrame(text: string): string =
+    for line in text.splitLines:
+      if line.startsWith("===== "):
+        result.setLen(0)
+      else:
+        result.add line & "\n"
+    result = result.strip(leading = false)
+  let actual = finalFrame(s.meaningfulFrameText())
+  var expected = finalFrame(readFile(expectedPath))
+  # Historical fixtures predate visible end-of-input cursors. The final
+  # prompt is the only compatibility insertion; internal cursor cells and
+  # physical row boundaries are not erased or joined.
+  if expected.endsWith("❯"):
+    expected.add " █"
+  doAssert actual.normalizeVersionBanner.normalizeSessionIds ==
+      expected.normalizeVersionBanner.normalizeSessionIds,
+    "final frame differs\nexpected: " & expectedPath & "\nactual: " & actualPath &
+      "\nEXPECTED:\n" & expected & "\nACTUAL:\n" & actual
+
+proc waitForText*(s: TtySession; text: string; timeoutMs = 5000): bool =
+  ## Poll for text, then a short quiet window before the next keystroke.
+  ## Live GUI redraw cadence is 80ms; longer readiness needs waitUntil.
   let deadline = epochTime() + timeoutMs.float / 1000.0
   while epochTime() < deadline:
     s.drain(0, recordFrame = false)
     if text in s.screenText() or text in cleanRaw(s.freshRaw()):
       s.advanceRawMark()
-      # Settle before returning so the caller's next action (usually a
-      # `send`) never types into an in-flight redraw. A fixed drain is
-      # not enough: `expect` can match the prompt text in the raw stream
-      # while the child's repaint of that same prompt is still being
-      # written, and a keystroke landing mid-repaint echoes at the wrong
-      # row (or, for a hidden field, before the mask engages, leaking the
-      # secret onto the screen). Wait for a genuinely quiet terminal.
-      s.waitForQuiet(recordFrame = false)
+      # Allow prompt initialization to finish before the next keystroke.
+      # Stay below the live GUI's 80ms cadence; 120ms can never settle it.
+      s.waitForQuiet(quietMs = 40, capMs = max(1,
+        int((deadline - epochTime()) * 1000)))
       return true
     if s.exited:
       # The child process has exited, but on Windows the ConPTY conhost is a
@@ -1475,15 +1511,21 @@ proc expect*(s: TtySession; text: string; timeoutMs = 5000): bool {.discardable.
       return false
     let remaining = max(1, int((deadline - epochTime()) * 1000))
     discard s.waitForOutput(remaining, recordFrame = false)
-  doAssert false, "expected text not found: " & text & "\n" &
-    s.dumpFramesAround(text)
+  false
+
+proc expect*(s: TtySession; text: string; timeoutMs = 5000): bool {.discardable.} =
+  doAssert s.waitForText(text, timeoutMs),
+    "expected text not found (" & (if s.exited: "child exited" else: "deadline expired") &
+    "): " & text & "\n" & s.dumpFramesAround(text)
+  true
 
 proc expectNo*(s: TtySession; text: string; settleMs = 250): bool {.discardable.} =
   let deadline = epochTime() + settleMs.float / 1000.0
-  while epochTime() < deadline and not s.exited:
+  while true:
     s.drain(0, recordFrame = false)
     doAssert text notin s.screenText() and text notin s.cleanRaw(),
       "unexpected text found: " & text & "\n" & s.dumpFramesAround(text)
+    if epochTime() >= deadline: break
     let remaining = max(1, int((deadline - epochTime()) * 1000))
     discard s.waitForOutput(remaining, recordFrame = false)
   true
@@ -1633,7 +1675,8 @@ proc expectCount*(s: TtySession; text: string; n: int;
     if s.exited:
       s.drain(20, recordFrame = false)
       last = s.countIn(text, where)
-      return last == n
+      if last == n: return true
+      break
     let remaining = max(1, int((deadline - epochTime()) * 1000))
     discard s.waitForOutput(remaining, recordFrame = false)
   doAssert false, &"REGRESSION (duplicate or swallow): expected count {n} of " &
@@ -1652,7 +1695,8 @@ proc expectOnScreen*(s: TtySession; text: string;
       return true
     if s.exited:
       s.drain(20, recordFrame = false)
-      return text in s.screenText()
+      if text in s.screenText(): return true
+      break
     let remaining = max(1, int((deadline - epochTime()) * 1000))
     discard s.waitForOutput(remaining, recordFrame = false)
   doAssert false, "REGRESSION (render-then-overwrite): expected text not " &

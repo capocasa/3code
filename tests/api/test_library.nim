@@ -53,9 +53,29 @@ suite "library: AgentSession":
     test "init without a config raises AgentError":
       let root = newFixture("noconfig")
       isolateEnv(root)
+      for attempt in 0..1:
+        expect AgentError:
+          discard initAgentSession(AgentOptions(cwd: root / "run"))
+      for path in walkDirRec(root / "data"):
+        check not path.endsWith(".3log")
+  else:
+    test "second open is rejected without disturbing first; close permits reinit":
+      let root = newFixture("ownership")
+      writeConfig(root)
+      isolateEnv(root)
+      let first = initAgentSession(AgentOptions(cwd: root / "run"))
+      expect AgentError:
+        discard initAgentSession(AgentOptions(cwd: root / "missing"))
+      let before = first.command(":tokens")
+      check before.len > 0
+      check first.command(":tokens") == before
+      first.close()
+      let second = initAgentSession(AgentOptions(cwd: root / "run"))
+      first.close() # an old handle must not release the new owner
       expect AgentError:
         discard initAgentSession(AgentOptions(cwd: root / "run"))
-  else:
+      second.close()
+
     test "blocking prompt runs tools and returns the reply":
       let root = newFixture("prompt")
       writeConfig(root)

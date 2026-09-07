@@ -28,9 +28,11 @@
 ## One live `AgentSession` per process: stream hooks, the interrupt flag,
 ## and the config/sandbox globals are process-wide, and `close` restores
 ## them. `prompt`/`command` on one session are not thread-safe; serialize
-## calls (one worker thread per session is the intended shape).
+## calls (one worker thread per session is the intended shape), and join
+## workers before close. Initialization rejects a second open session before
+## changing globals.
 
-import std/[json, os, strutils, tables, times]
+import std/[json, os, strutils, tables, times, atomics]
 import types, util, prompts, session, config, actions, api, display, ui,
        auth_xai, auth_openai, sandbox, minline, transcript, turns
 import fatprompt as fatruntime
@@ -84,6 +86,8 @@ type
     ## text travel in one heap box because thread procs can't capture.
     s: AgentSession
     text: string
+
+var agentSessionOwned: Atomic[bool]
 
 # ---------- ANSI stripping ----------
 #
@@ -148,6 +152,16 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
   ## Raises `AgentError` when no usable provider is configured, the model
   ## doesn't resolve, or the directory/session locks are held by a live
   ## 3code process.
+  if agentSessionOwned.exchange(true):
+    raise newException(AgentError, "only one AgentSession may be open per process")
+  var initialized = false
+  var reservation = ""
+  defer:
+    if not initialized:
+      if reservation.len > 0:
+        try: removeFile(reservation)
+        except OSError: discard
+      agentSessionOwned.store(false)
   experimentalEnabled = opts.experimental
   debugEnabled = opts.debug
   let cwd = if opts.cwd.len > 0: opts.cwd else: safeCwd()
@@ -182,10 +196,11 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
         else: "no saved sessions for " & cwd)
     (s.state, s.messages) = loadSessionFile(path)
   else:
+    if opts.sessionPath.len == 0: reservation = newSessionPath()
     s.messages = %* [{"role": "system", "content": DefaultSystemPrompt}]
     s.state = Session(created: $now(), cwd: cwd,
       savePath: if opts.sessionPath.len > 0: opts.sessionPath
-                else: newSessionPath())
+                else: reservation)
 
   let wanted =
     if opts.model.len > 0: opts.model
@@ -229,6 +244,7 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
       s.emit(AgentEvent(kind: aevDone, usage: usage, elapsed: elapsed)),
     retryNotice: proc(msg: string) =
       s.emit(AgentEvent(kind: aevRetry, text: msg))))
+  initialized = true
   s
 
 proc close*(s: AgentSession) =
@@ -242,6 +258,7 @@ proc close*(s: AgentSession) =
   termengine.headlessTranscriptHook = nil
   termengine.engineOutputEnabled = true
   fatruntime.installApiStreamHooks()
+  agentSessionOwned.store(false)
 
 # ---------- prompts and commands ----------
 

@@ -414,6 +414,23 @@ proc closeCachedStreamConn*() =
     cachedStreamHostKey = ""
   cachedStreamFd = osInvalidSocket
 
+proc acquireStreamConn(host: string; port: Port; plainHttp: bool): StreamConn =
+  let identity = (if plainHttp: "http://" else: "https://") & host & ":" & $port.uint16
+  if cachedStreamConn != nil and cachedStreamHostKey == identity:
+    return cachedStreamConn
+  closeCachedStreamConn()
+  try:
+    result = if plainHttp:
+      connectPlain(host, port, timeoutMs = ConnectTimeoutMs)
+    else:
+      connectTls(host, port, timeoutMs = ConnectTimeoutMs, caFile = bundledCaFile())
+  except CatchableError:
+    invalidateResolved(host, port)
+    raise
+  cachedStreamConn = result
+  cachedStreamHostKey = identity
+  cachedStreamFd = result.getFd
+
 proc shutdownCachedStreamFd*() {.gcsafe.} =
   ## Async-signal-safe: only the `shutdown` syscall, no allocation, no
   ## Nim GC traffic. Forces a blocking `recv` on `cachedStreamConn` to
@@ -701,7 +718,6 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       if u.query.len > 0: pq.add "?" & u.query
       pq
 
-  let hostKey = host & ":" & $port.uint16
   var conn: StreamConn
   var resp: StreamResponse
   var attempt = 0
@@ -711,34 +727,12 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       result.errMsg = InterruptedByUserMsg
       return
     inc attempt
-    if not (cachedStreamConn != nil and cachedStreamHostKey == hostKey):
-      closeCachedStreamConn()
-      try:
-        if plainHttp:
-          conn = connectPlain(host, port, timeoutMs = ConnectTimeoutMs)
-        else:
-          conn = connectTls(host, port, timeoutMs = ConnectTimeoutMs,
-                            caFile = bundledCaFile())
-      except CatchableError as e:
-        # Drop the cached IP so the next attempt re-resolves: a stale record
-        # pointing at a dead host must not pin every retry.
-        invalidateResolved(host, port)
-        # A Ctrl-C during connect shuts down the in-progress fd (via the
-        # `onConnectingFd` hook), which makes the blocking connect raise. The
-        # user cancelled, so surface that, not a misleading connect error —
-        # and skip the retry the generic error path would trigger.
-        if isInterrupted():
-          result.errMsg = InterruptedByUserMsg
-          return
-        result.errMsg =
-          (if plainHttp: "connect failed: " else: "TLS connect failed: ") &
-          connectErrorDetail(e)
-        return
-      cachedStreamConn = conn
-      cachedStreamHostKey = hostKey
-      cachedStreamFd = conn.getFd
-    else:
-      conn = cachedStreamConn
+    try:
+      conn = acquireStreamConn(host, port, plainHttp)
+    except CatchableError as e:
+      result.errMsg = if isInterrupted(): InterruptedByUserMsg
+        else: (if plainHttp: "connect failed: " else: "TLS connect failed: ") & connectErrorDetail(e)
+      return
     conn.setReadTimeoutMs(QuietRecvWakeMs)
     try:
       conn.sendRequest("POST", pathQuery, host,
@@ -1195,7 +1189,6 @@ proc streamResponses(url, key, bodyStr: string, baseLabel: string,
       if u.query.len > 0: pq.add "?" & u.query
       pq
 
-  let hostKey = host & ":" & $port.uint16
   var conn: StreamConn
   var resp: StreamResponse
   var attempt = 0
@@ -1205,28 +1198,12 @@ proc streamResponses(url, key, bodyStr: string, baseLabel: string,
       result.errMsg = InterruptedByUserMsg
       return
     inc attempt
-    if not (cachedStreamConn != nil and cachedStreamHostKey == hostKey):
-      closeCachedStreamConn()
-      try:
-        if plainHttp:
-          conn = connectPlain(host, port, timeoutMs = ConnectTimeoutMs)
-        else:
-          conn = connectTls(host, port, timeoutMs = ConnectTimeoutMs,
-                            caFile = bundledCaFile())
-      except CatchableError as e:
-        invalidateResolved(host, port)
-        if isInterrupted():
-          result.errMsg = InterruptedByUserMsg
-          return
-        result.errMsg =
-          (if plainHttp: "connect failed: " else: "TLS connect failed: ") &
-          connectErrorDetail(e)
-        return
-      cachedStreamConn = conn
-      cachedStreamHostKey = hostKey
-      cachedStreamFd = conn.getFd
-    else:
-      conn = cachedStreamConn
+    try:
+      conn = acquireStreamConn(host, port, plainHttp)
+    except CatchableError as e:
+      result.errMsg = if isInterrupted(): InterruptedByUserMsg
+        else: (if plainHttp: "connect failed: " else: "TLS connect failed: ") & connectErrorDetail(e)
+      return
     conn.setReadTimeoutMs(QuietRecvWakeMs)
     try:
       conn.sendRequest("POST", pathQuery, host,
@@ -1481,7 +1458,6 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
       if u.query.len > 0: pq.add "?" & u.query
       pq
 
-  let hostKey = host & ":" & $port.uint16
   var conn: StreamConn
   var resp: StreamResponse
   var attempt = 0
@@ -1491,30 +1467,12 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
       result.errMsg = InterruptedByUserMsg
       return
     inc attempt
-    if cachedStreamConn != nil and cachedStreamHostKey == hostKey:
-      conn = cachedStreamConn
-    else:
-      closeCachedStreamConn()
-      try:
-        if plainHttp:
-          conn = connectPlain(host, port, timeoutMs = ConnectTimeoutMs)
-        else:
-          conn = connectTls(host, port, timeoutMs = ConnectTimeoutMs,
-                            caFile = bundledCaFile())
-      except CatchableError as e:
-        # Drop the cached IP so the next attempt re-resolves: a stale record
-        # pointing at a dead host must not pin every retry.
-        invalidateResolved(host, port)
-        if isInterrupted():
-          result.errMsg = InterruptedByUserMsg
-          return
-        result.errMsg =
-          (if plainHttp: "connect failed: " else: "TLS connect failed: ") &
-          connectErrorDetail(e)
-        return
-      cachedStreamConn = conn
-      cachedStreamHostKey = hostKey
-      cachedStreamFd = conn.getFd
+    try:
+      conn = acquireStreamConn(host, port, plainHttp)
+    except CatchableError as e:
+      result.errMsg = if isInterrupted(): InterruptedByUserMsg
+        else: (if plainHttp: "connect failed: " else: "TLS connect failed: ") & connectErrorDetail(e)
+      return
     conn.setReadTimeoutMs(QuietRecvWakeMs)
     try:
       conn.sendRequest("POST", pathQuery, host,
@@ -1681,7 +1639,6 @@ proc callResponses(url, key, bodyStr: string; baseLabel: string;
       if u.query.len > 0: pq.add "?" & u.query
       pq
 
-  let hostKey = host & ":" & $port.uint16
   var conn: StreamConn
   var resp: StreamResponse
   var attempt = 0
@@ -1691,28 +1648,12 @@ proc callResponses(url, key, bodyStr: string; baseLabel: string;
       result.errMsg = InterruptedByUserMsg
       return
     inc attempt
-    if cachedStreamConn != nil and cachedStreamHostKey == hostKey:
-      conn = cachedStreamConn
-    else:
-      closeCachedStreamConn()
-      try:
-        if plainHttp:
-          conn = connectPlain(host, port, timeoutMs = ConnectTimeoutMs)
-        else:
-          conn = connectTls(host, port, timeoutMs = ConnectTimeoutMs,
-                            caFile = bundledCaFile())
-      except CatchableError as e:
-        invalidateResolved(host, port)
-        if isInterrupted():
-          result.errMsg = InterruptedByUserMsg
-          return
-        result.errMsg =
-          (if plainHttp: "connect failed: " else: "TLS connect failed: ") &
-          connectErrorDetail(e)
-        return
-      cachedStreamConn = conn
-      cachedStreamHostKey = hostKey
-      cachedStreamFd = conn.getFd
+    try:
+      conn = acquireStreamConn(host, port, plainHttp)
+    except CatchableError as e:
+      result.errMsg = if isInterrupted(): InterruptedByUserMsg
+        else: (if plainHttp: "connect failed: " else: "TLS connect failed: ") & connectErrorDetail(e)
+      return
     conn.setReadTimeoutMs(QuietRecvWakeMs)
     try:
       conn.sendRequest("POST", pathQuery, host,

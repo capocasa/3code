@@ -12,7 +12,7 @@
 ## On load, the full OpenAI-shape `messages` JsonNode array is reconstructed
 ## from the records so the session can be resumed mid-conversation with no loss.
 
-import std/[algorithm, json, os, strutils, tables, times]
+import std/[algorithm, json, os, strutils, tables, times, tempfiles, sha1]
 when defined(posix):
   import std/posix
 when defined(windows):
@@ -66,7 +66,10 @@ proc sessionIdFromPath*(path: string): string =
 
 proc newSessionPath*(): string =
   let stamp = now().format("yyyyMMdd'T'HHmmss")
-  sessionDir() / (stamp & SessionExt)
+  createDir(sessionDir())
+  let (file, path) = createTempFile(stamp & "-", SessionExt, sessionDir())
+  file.close()
+  path
 
 # ---------------------------------------------------------------------------
 # Cwd path mangling.
@@ -146,14 +149,13 @@ proc appendSessionIndex*(cwd, id: string) =
 # `.3log` transcript (it isn't a committed message yet) but losing it on an
 # unexpected shutdown — kill, power-off, Ctrl-C, SIGTERM — is exactly what a
 # draft is for. Keeping it out of the `.3log` means the audit transcript stays
-# clean and the draft can never be mistaken for a real user turn, and means no
-# phantom session file is created before the first real turn.
+# clean and the draft can never be mistaken for a real user turn.
 #
-# Two scopes, chosen by whether a `.3log` exists yet (it first appears during
-# the first turn, at the saveSession in turns.nim):
+# Two scopes, chosen by whether the `.3log` has committed content (allocation
+# reserves an empty file; the first turn saves content in turns.nim):
 #
-#   * Pending (pre-first-turn): `drafts/pending/<cwd-hash>.prompt`. No session
-#     `.3log` exists, so there is no session id to key on. The draft is keyed
+#   * Pending (pre-first-turn): `drafts/pending/<cwd-hash>.prompt`. The reserved
+#     `.3log` is still empty. The draft is keyed
 #     by the working directory instead and loads into the next fresh session
 #     started in that directory. This is the "typed a prompt, got killed
 #     before sending" case.
@@ -179,11 +181,14 @@ proc pendingDraftPathFor*(cwd: string): string =
   ## overwritten as the user edits.
   pendingDraftDir() / (mangleCwd(cwd) & ".prompt")
 
+proc hasSavedSession(path: string): bool =
+  path.len > 0 and fileExists(path) and getFileSize(path) > 0
+
 proc currentDraftPath*(session: Session): string =
-  ## The draft path for the live session: id-keyed once a `.3log` exists
+  ## The draft path for the live session: id-keyed once a `.3log` has content
   ## (post-first-turn), otherwise the cwd-keyed pending path. This is the
   ## single decision point for which scope a draft lives in.
-  if session.savePath != "" and fileExists(session.savePath):
+  if hasSavedSession(session.savePath):
     draftPathFor(session.savePath)
   else:
     pendingDraftPathFor(session.cwd)
@@ -211,7 +216,14 @@ proc sessionLockDir*(): string =
   tempDir() / "3code" / "lock"
 
 proc sessionLockPathFor*(path: string): string =
-  sessionLockDir() / (sessionIdFromPath(path) & ".lock")
+  # Resolve existing symlinks, including a symlinked data root. New explicit
+  # output paths may not exist yet, but their parent normally does.
+  let identity =
+    if fileExists(path): expandFilename(path)
+    elif dirExists(path.absolutePath.parentDir):
+      expandFilename(path.absolutePath.parentDir) / path.extractFilename
+    else: normalizedPath(absolutePath(path))
+  sessionLockDir() / ($secureHash(identity) & ".lock")
 
 type SessionLocked* = object of CatchableError
 
@@ -892,7 +904,7 @@ proc isInSessionDir(path: string): bool =
 
 proc saveSession*(session: Session, messages: JsonNode) =
   if session.savePath == "": return
-  let firstSave = not fileExists(session.savePath)
+  let firstSave = not hasSavedSession(session.savePath)
   try:
     createDir(session.savePath.parentDir)
     writeFile(session.savePath, renderSession(session, messages))

@@ -25,6 +25,8 @@ proc getVersionString(): string =
 switch("path", "src")
 switch("path", "tests")  # test helpers (tty_expect, stub_helpers, minline_testutils)
 switch("d", "ssl")
+# Supported loopback HTTP providers (e.g. local inference servers), including
+# production builds. Historical define name; non-loopback HTTP stays forbidden.
 switch("d", "testPlainHttp")
 
 when defined(android):

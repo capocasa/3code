@@ -1,5 +1,6 @@
 import std/[os, posix, strformat, strutils, terminal, times]
 import posix/termios
+import ../tests/frame_artifact
 
 type
   Frame = object
@@ -17,14 +18,19 @@ const
   InitialSpeed = 4
 
 proc isHeader(line: string): bool =
-  line.startsWith("===== frame ") and line.endsWith(" =====")
+  line.startsWith("===== ") and line.endsWith(" =====")
 
 proc parseFrames(path: string): seq[Frame] =
   var current = Frame()
   var haveFrame = false
 
   for line in lines(path):
-    if line.isHeader:
+    if line.startsWith("{"):
+      let visual = parseVisualFrame(line)
+      result.add Frame(title: visual.id & " cursor=" & $visual.cursorRow & "," &
+        $visual.cursorCol & " hidden=" & $visual.cursorHidden,
+        rows: visual.ansiRows())
+    elif line.isHeader:
       if haveFrame:
         result.add current
       current = Frame(title: line)
@@ -99,7 +105,6 @@ proc render(frames: openArray[Frame]; frameNo, speed: int; path: string) =
   for i in 0 ..< min(usableRows, frames[frameNo].rows.len):
     stdout.write &"\e[{i + 1};1H"
     stdout.write frames[frameNo].rows[i]
-    stdout.write "\e[K"
 
   if usableRows > frames[frameNo].rows.len:
     for i in frames[frameNo].rows.len ..< usableRows:
@@ -117,9 +122,19 @@ proc render(frames: openArray[Frame]; frameNo, speed: int; path: string) =
   stdout.flushFile()
 
 proc usage() =
-  quit "usage: nim r tools/pty_frames.nim -- [testdata/output/tty/.../frames.txt]", 2
+  quit "usage: pty_frames [frames.txt|frames.txt.jsonl] | --dump PATH | --diff EXPECTED.jsonl ACTUAL.jsonl", 2
 
 proc main() =
+  if paramCount() == 3 and paramStr(1) == "--diff":
+    let diff = compareArtifacts(readFile(paramStr(2)), readFile(paramStr(3)))
+    if diff.len > 0: quit diff, 1
+    echo "frames match"
+    return
+  if paramCount() == 2 and paramStr(1) == "--dump":
+    for frame in parseFrames(paramStr(2)):
+      echo "===== ", frame.title, " ====="
+      for row in frame.rows: echo row
+    return
   if paramCount() > 1:
     usage()
 

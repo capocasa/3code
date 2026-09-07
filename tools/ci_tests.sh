@@ -22,9 +22,11 @@
 #   PER_TEST_SECS env overrides the per-test cap (default 300, 0=off).
 set -u
 
+sh tools/build_binary.sh 3code src/threecode.nim || exit $?
+
 TIMEOUT_SECS=${1:-1500}
 [ $# -gt 0 ] && shift
-CATEGORIES=${*:-}
+. "$(dirname "$0")/test_processes.sh"
 WATCH_SECS=30
 PER_TEST_SECS=${PER_TEST_SECS:-300}
 
@@ -35,40 +37,9 @@ cleanup() { rm -f "$LOG" "$SNAP" "$FAILS"; }
 trap cleanup EXIT
 
 snapshot() {
-  ps -eo etime,args 2>/dev/null |
-    grep -E 'tests/[a-z]+/test_|build/3code_stub' |
-    grep -v grep | sed 's/^/  /'
-}
-
-# ps etime comes as MM:SS, HH:MM:SS or D-HH:MM:SS. Each field goes through
-# 10#N to strip zero padding: bare $((...)) reads 08/09 as invalid octal,
-# aborts the arithmetic ("value too great for base") and leaves the
-# watchdog comparing against an empty string instead of a number.
-etime_secs() {
-  t=$1; d=0
-  case $t in *-*) d=${t%%-*}; t=${t#*-} ;; esac
-  case $t in
-    *:*:*) h=${t%%:*}; r=${t#*:}; m=${r%%:*}; s=${r##*:} ;;
-    *:*)  h=0; m=${t%%:*}; s=${t##*:} ;;
-    *)    h=0; m=0; s=$t ;;
-  esac
-  # Force base 10: ps pads etime with zeros and $((...)) reads 08/09
-  # as invalid octal, silently disarming the watchdog for a minute out
-  # of every ten. printf, not echo: a bare echo can re-split the result.
-  printf '%s\n' $(( 10#$d * 86400 + 10#$h * 3600 + 10#$m * 60 + 10#$s ))
-}
-
-# Kill a test binary and every descendant: tests spawn 3code/pty
-# children, and a surviving grandchild keeps holding /tmp/3code session
-# locks with a live pid, which later blocks other tests' initAgentSession
-# on second-granularity id collisions (the test_library CI flake). A
-# process-group kill is unsafe here (tests share the script's group), so
-# walk descendants recursively via pgrep -P.
-kill_tree() {
-  for c in $(pgrep -P "$1" 2>/dev/null); do
-    kill_tree "$c"
+  for pid in $(descendants "$TID"); do
+    ps -p "$pid" -o etime=,args= 2>/dev/null | sed 's/^/  /'
   done
-  kill -KILL "$1" 2>/dev/null
 }
 
 # Kill test binaries that exceed the per-test cap. The match is anchored
@@ -83,42 +54,37 @@ kill_sluggish_tests() {
   ps -eo etime=,pid=,args= 2>/dev/null |
     while read -r et pid rest; do
       case $rest in
-        tests/*/test_*) ;;
+        tests/*/test_*|*/tests/*/test_*) ;;
+        *) continue ;;
+      esac
+      case " $(descendants "$TID" | tr '\n' ' ') " in
+        *" $pid "*) ;;
         *) continue ;;
       esac
       secs=$(etime_secs "$et")
       if [ "$secs" -ge "$PER_TEST_SECS" ]; then
         echo "[watchdog] killed: $rest (pid $pid, ${secs}s > ${PER_TEST_SECS}s cap)" >>"$SNAP"
-        kill -TERM "$pid" 2>/dev/null
         kill_tree "$pid"
-        ( sleep 5; kill -KILL "$pid" 2>/dev/null ) &
       fi
     done
 }
 
-echo "testament ${CATEGORIES:-all} (timeout ${TIMEOUT_SECS}s, per-test cap ${PER_TEST_SECS:-off}s, log $LOG)"
+echo "testament $* (timeout ${TIMEOUT_SECS}s, per-test cap ${PER_TEST_SECS:-off}s, log $LOG)"
 # One testament invocation per category, run concurrently. `testament cat
 # a b` does NOT select two categories: extra words are forwarded as
 # per-test arguments and every test fails with "arguments can only be
 # given if the '--run' option is selected".
 run_testament() {
-  if [ -z "$CATEGORIES" ]; then
-    testament --print --megatest:off all >>"$LOG" 2>&1
-    return $?
+  if [ $# -eq 0 ]; then
+    sh tools/test_dispatch.sh all
+  else
+    sh tools/test_dispatch.sh categories "$@"
   fi
-  pids=""
-  rc=0
-  for cat_ in $CATEGORIES; do
-    testament --print --megatest:off cat "$cat_" >>"$LOG" 2>&1 &
-    pids="$pids $!"
-  done
-  for p in $pids; do
-    wait "$p" || rc=1
-  done
-  return $rc
 }
-run_testament &
+run_testament "$@" >>"$LOG" 2>&1 &
 TID=$!
+trap 'kill_tree "$TID"; exit 130' INT
+trap 'kill_tree "$TID"; exit 143' TERM
 
 timed_out=0
 elapsed=0
@@ -129,13 +95,7 @@ while kill -0 "$TID" 2>/dev/null; do
       echo "[watchdog] global timeout after ${TIMEOUT_SECS}s; live test processes:"
       snapshot
     } >>"$SNAP"
-    kill -TERM "$TID" 2>/dev/null
-    sleep 5
-    if command -v pkill >/dev/null 2>&1; then
-      pkill -KILL -f 'tests/[a-z]+/test_' 2>/dev/null
-      pkill -KILL -f 'build/3code_stub' 2>/dev/null
-    fi
-    kill -KILL "$TID" 2>/dev/null
+    kill_tree "$TID"
     break
   fi
   kill_sluggish_tests
