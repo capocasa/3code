@@ -22,6 +22,8 @@
 #   PER_TEST_SECS env overrides the per-test cap (default 300, 0=off).
 set -u
 
+sh tools/build_binary.sh 3code src/threecode.nim || exit $?
+
 TIMEOUT_SECS=${1:-1500}
 [ $# -gt 0 ] && shift
 . "$(dirname "$0")/test_processes.sh"

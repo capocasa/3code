@@ -1,4 +1,7 @@
 /3code
+/3code.nimcache/
+/3code.pending
+/3code.build-lock/
 3code.exe
 0.5/
 bin/

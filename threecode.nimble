@@ -20,7 +20,7 @@ task test, "Run the test suite via testament (all, or named files)":
     if p.len > 0 and p[0] notin {'-'}:
       files.add p
   # Plain Nim tracks all imported/configured inputs, not just source mtimes.
-  exec "nim c -o:3code src/threecode.nim"
+  exec "sh tools/build_binary.sh 3code src/threecode.nim"
   var cmd = "sh tools/test_dispatch.sh " & (if files.len == 0: "all" else: "files")
   for file in files:
     cmd.add " '" & file.replace("'", "'\"'\"'") & "'"
