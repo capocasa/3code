@@ -5,6 +5,7 @@
 
 import std/[json, strutils, unittest]
 import threecode/turns
+import threecode/types
 
 proc assistantMsg(content: string): JsonNode =
   %*{"role": "assistant", "content": content}
@@ -102,3 +103,43 @@ suite "checkpoint marker display stripping":
 
   test "leaves non-numeric bracket text untouched":
     check stripCheckpointMarkers("[checkpoint soon] hi") == "[checkpoint soon] hi"
+
+suite "turn-finished notification body":
+  test "checkpoint marker never reaches the notification":
+    let msgs = %*[
+      %*{"role": "user", "content": "task"},
+      %*{"role": "assistant", "content": "[checkpoint 0]\nAll checks pass."},
+    ]
+    check turnFinishedBody(msgs) == "All checks pass."
+
+  test "marker-only reply sends no notification":
+    let msgs = %*[
+      %*{"role": "user", "content": "task"},
+      %*{"role": "assistant", "content": "[checkpoint 3]"},
+    ]
+    check turnFinishedBody(msgs) == ""
+
+  test "empty-reply marker sends no notification":
+    let msgs = %*[
+      %*{"role": "user", "content": "task"},
+      %*{"role": "assistant", "content": EmptyReplyMsg},
+    ]
+    check turnFinishedBody(msgs) == ""
+
+  test "dmail bookkeeping turn sends no notification":
+    # A dmail revert ends the messages array on the injected user note,
+    # not an assistant message, so no notification fires at all.
+    let msgs = %*[
+      %*{"role": "user", "content": "task"},
+      %*{"role": "assistant", "content": "[checkpoint 0]\nfirst"},
+      %*{"role": "user", "content":
+        "[dmail from your future self] folded the bloat"},
+    ]
+    check turnFinishedBody(msgs) == ""
+
+  test "plain reply passes through untouched":
+    let msgs = %*[
+      %*{"role": "user", "content": "task"},
+      %*{"role": "assistant", "content": "plain reply"},
+    ]
+    check turnFinishedBody(msgs) == "plain reply"

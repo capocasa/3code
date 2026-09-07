@@ -506,6 +506,18 @@ proc tagCheckpoint*(msg: JsonNode, id: int) =
   if content == nil or content.kind != JString: return
   content.str = "[checkpoint " & $id & "]\n" & content.str
 
+proc turnFinishedBody*(messages: JsonNode): string =
+  ## The desktop-notification body for a finished turn. Same visibility
+  ## rules as the transcript: checkpoint markers are harness bookkeeping,
+  ## and an empty-reply marker renders as nothing, so neither belongs in
+  ## a notification. "" means "send no notification".
+  if messages.len == 0: return ""
+  let last = messages[^1]
+  if last.kind != JObject or last{"role"}.getStr != "assistant": return ""
+  let body = last{"content"}.getStr
+  if isEmptyReplyMsg(body.strip): return ""
+  stripCheckpointMarkers(body)
+
 proc revertHistory*(messages: var JsonNode, checkpoint: int): bool =
   ## Truncate `messages` just before the assistant message whose content
   ## carries the `[checkpoint N]` marker. Orphaned tool results at the new

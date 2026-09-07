@@ -897,6 +897,89 @@ suite "terminal visual contract":
     tty.expectCount("empty reply", 1, where = "screen")
     tty.expect "❯"
 
+  test "kimi dmail session: real tool work, invisible markers, folded 3log":
+    # End-to-end kimi-family contract for the dmail/checkpoint machinery,
+    # driven through the real binary with REAL tool execution (no stub
+    # results): the model runs bash commands, reads a file, then dmails
+    # back to checkpoint 0 folding the bloat. The checkpoint markers and
+    # the dmail cycle must be invisible on screen (no raw `[checkpoint N]`
+    # ever paints), the one user-visible dmail artifact is the harness
+    # hint line, and the `.3log` retains the markers so resume keeps the
+    # revert targets.
+    let root = newFixture("kimi_dmail_session")
+    writeKimiStubProvider(root)
+    # The work happens in the fixture cwd; real commands create and read
+    # a file whose content would bloat context.
+    writeFile(root / "run" / "bloat.txt", "A".repeat(400) & "\n")
+    writeStubResponses(root, %*[
+      # Turn 1, reply 1: tag + prose, then REAL tool calls (no `stub` key:
+      # the commands actually execute in root/run).
+      {"role": "assistant",
+       "content": "I will inspect things.",
+       "contentChunks": ["I will inspect things."],
+       "tool_calls": [
+         toolCall("c_ls", "bash", %*{"command": "printf 'kimi-dmail-ok\\n'"}),
+         toolCall("c_read", "read", %*{"path": "bloat.txt"})
+       ],
+       "usage": {"promptTokens": 10, "completionTokens": 6,
+                 "totalTokens": 16, "cachedTokens": 0}},
+      # Turn 1, reply 2: dmail back to checkpoint 0 (the reply-1 marker),
+      # folding both tool results.
+      {"role": "assistant",
+       "content": "",
+       "contentChunks": [],
+       "tool_calls": [
+         toolCall("c_dmail", "dmail", %*{"checkpoint": 0,
+            "message": "bloat.txt is all A's, nothing more to learn."})
+       ],
+       "usage": {"promptTokens": 900, "completionTokens": 8,
+                 "totalTokens": 908, "cachedTokens": 0}},
+      # Turn 1, reply 3 (after revert): the model answers from the folded
+      # context. A second marker tags this reply.
+      {"role": "assistant",
+       "content": "Folded and done.",
+       "contentChunks": ["Folded and done."],
+       "usage": {"promptTokens": 40, "completionTokens": 4,
+                 "totalTokens": 44, "cachedTokens": 0}}
+    ])
+
+    let tty = startStub(root, rows = 40)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send "look at bloat.txt and summarize\n"
+    # Real tool output paints (streamed by the real executor), and the
+    # read banner shows the actual file.
+    tty.expectInHistory "kimi-dmail-ok"
+    tty.expectInHistory "bloat.txt"
+    # No checkpoint marker ever reaches the screen, in any frame, even
+    # while the markers tag messages in flight.
+    tty.drain(800, recordFrame = true)
+    for f in tty.frames:
+      check "[checkpoint" notin f.rows.join("\n")
+    # The dmail cycle's only screen artifact: the harness hint line.
+    tty.expectInHistory "dmail to checkpoint 0"
+    # Post-revert reply paints with its bullet; prompt returns.
+    tty.expectInHistory "● Folded and done."
+    tty.expect "❯"
+    tty.expectNeverInHistory "[checkpoint"
+    tty.expectNeverInHistory "[dmail from your future self]"
+
+    # The .3log is the counterparty: the surviving assistant messages
+    # keep their markers (resume re-arms revert targets), the dmail note
+    # is recorded as the user-visible fold point, and the post-revert
+    # reply is persisted. The folded-away messages are gone from the
+    # conversation, and therefore from the log (it mirrors the live
+    # conversation, not an append-only byte history).
+    tty.drain(300)
+    let log = sessionLogText(root)
+    check "[checkpoint 2]" in log
+    check "[dmail from your future self]" in log
+    check "Folded and done." in log
+    check "kimi-dmail-ok" notin log
+
   test "api retry notice is a harness line in scrollback, not stderr noise":
     # Regression: the retry notice used to be `stderr.writeLine` from the
     # transport layer (api.nim). That bypassed fat-prompt preservation and

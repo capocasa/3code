@@ -192,14 +192,7 @@ proc setupTlsEnv() =
 const NotifyMinSeconds = 5.0
 
 proc notifyTurnFinished(messages: JsonNode) =
-  # Same visibility rules as the transcript: checkpoint markers are
-  # harness bookkeeping, and an empty-reply marker renders as nothing,
-  # so neither belongs in a desktop notification.
-  let last = messages[^1]
-  if last.kind != JObject or last{"role"}.getStr != "assistant": return
-  var body = last{"content"}.getStr
-  if isEmptyReplyMsg(body.strip): return
-  body = stripCheckpointMarkers(body)
+  let body = turnFinishedBody(messages)
   if body.len == 0: return
   notify("3code", "Turn finished", body)
 
