@@ -1009,10 +1009,15 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           # continue the loop so the model processes the prompt.
           let freshMsg = act.body
           let rebuilt = newJArray()
-          rebuilt.add %*{"role": "system", "content": buildSystemPrompt(p)}
+          rebuilt.add %*{"role": "system", "content": DefaultSystemPrompt}
           rebuilt.add %*{"role": "user", "content": freshMsg}
           messages.elems.setLen 0
           for m in rebuilt: messages.add m
+          # Fresh promptState for the rebuilt conversation: resolve the new
+          # system prompt and stamp identity/skills so the persisted header
+          # describes the new message, not the old one.
+          session.promptState = PromptState()
+          refreshSystemPrompt(messages, p, session.promptState)
           session.toolLog.setLen 0
           session.usage = Usage()
           session.lastPromptTokens = 0

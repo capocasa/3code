@@ -12,7 +12,7 @@ discard """
 ## per-test fixture so nothing touches the developer's real 3code state.
 
 import std/[json, os, strutils, unittest]
-import threecode/[library, types]
+import threecode/[api, library, types, util]
 
 const stubbed = defined(providerStub)
 
@@ -49,6 +49,7 @@ proc isolateEnv(root: string) =
   createDir(root / "tmp")
 
 suite "library: AgentSession":
+  let stableTmp = getTempDir()  # isolateEnv re-points TMPDIR per fixture
   when not stubbed:
     test "init without a config raises AgentError":
       let root = newFixture("noconfig")
@@ -157,6 +158,82 @@ suite "library: AgentSession":
       check s2.messages.len >= 3
       check s2.prompt("second") == "second reply"
       s2.close()
+
+    test "resumed session re-sends byte-identical wire history":
+      # The cache-parity contract end to end: a turn driven live and the
+      # same turn driven through save/close/resume must produce the exact
+      # same request bytes. Both fixtures share ONE xdg root (the prompt
+      # embeds skill paths under $XDG_DATA_HOME, so distinct roots would
+      # make the prefixes differ for fixture reasons, not app ones).
+      # Turn one includes a tool call (update_plan: deterministic output,
+      # no path-bearing result) plus reasoning; turn two is the parity-
+      # checked continuation.
+      let root = newFixture("parity")
+      writeConfig(root)
+      isolateEnv(root)
+      let liveRun = root / "live"
+      let resRun = root / "res"
+      createDir(liveRun)
+      createDir(resRun)
+
+      block live:
+        resetStubResponses()
+        writeFile(liveRun / "stub_responses.json", $(%*[
+          {"role": "assistant", "content": "", "reasoning_content": "",
+           "tool_calls": [{
+            "id": "call_p1", "type": "function",
+            "function": {"name": "update_plan",
+                         "arguments": $(%*{"items": [
+                           {"text": "one", "status": "pending"}]})}}]},
+          {"role": "assistant", "content": "ran it",
+           "reasoning_content": "thought briefly"},
+          {"role": "assistant", "content": "turn two live",
+           "reasoning_content": ""}
+        ]))
+        putEnv("THREECODE_STUB_RESPONSES", liveRun / "stub_responses.json")
+        let s = initAgentSession(AgentOptions(cwd: liveRun,
+                                              experimental: true))
+        discard s.prompt("run a tool")
+        discard s.prompt("continue")
+        writeFile(stableTmp / "3code-parity-live.txt",
+                  $repairToolCallPairing(stripInternalFields(s.messages)))
+        s.close()
+
+      block resumed:
+        resetStubResponses()
+        writeFile(resRun / "stub_responses.json", $(%*[
+          {"role": "assistant", "content": "", "reasoning_content": "",
+           "tool_calls": [{
+            "id": "call_p1", "type": "function",
+            "function": {"name": "update_plan",
+                         "arguments": $(%*{"items": [
+                           {"text": "one", "status": "pending"}]})}}]},
+          {"role": "assistant", "content": "ran it",
+           "reasoning_content": "thought briefly"}
+        ]))
+        putEnv("THREECODE_STUB_RESPONSES", resRun / "stub_responses.json")
+        let s1 = initAgentSession(AgentOptions(cwd: resRun,
+                                               experimental: true))
+        discard s1.prompt("run a tool")
+        s1.close()
+
+        writeFile(resRun / "stub_responses.json", $(%*[
+          {"role": "assistant", "content": "unused"},
+          {"role": "assistant", "content": "unused"},
+          {"role": "assistant", "content": "turn two live",
+           "reasoning_content": ""}
+        ]))
+        let s2 = initAgentSession(AgentOptions(cwd: resRun, resume: true,
+                                               experimental: true))
+        discard s2.prompt("continue")
+        writeFile(stableTmp / "3code-parity-resume.txt",
+                  $repairToolCallPairing(stripInternalFields(s2.messages)))
+        s2.close()
+
+      check readFile(stableTmp / "3code-parity-live.txt") ==
+            readFile(stableTmp / "3code-parity-resume.txt")
+      removeFile(stableTmp / "3code-parity-live.txt")
+      removeFile(stableTmp / "3code-parity-resume.txt")
 
     test "unknown model raises AgentError":
       let root = newFixture("badmodel")

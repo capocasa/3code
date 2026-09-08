@@ -1,5 +1,5 @@
 import std/[json, os, osproc, sequtils, strutils, times, unittest]
-import threecode/[session, types]
+import threecode/[api, session, types, util]
 
 if paramCount() == 2 and paramStr(1) == "--allocate":
   putEnv("XDG_DATA_HOME", paramStr(2))
@@ -271,7 +271,9 @@ suite "session: renderSession → loadSessionFile round-trip":
     let (_, lm) = roundTrip(sess, msgs)
     let args = parseJson(lm[2]["tool_calls"][0]["function"]["arguments"].getStr)
     check args["path"].getStr == "src/foo.nim"
-    check args["body"].getStr == "echo 1"
+    # The wire section preserves the body byte-exactly, trailing newline
+    # included (the old human-readable codec stripped it).
+    check args["body"].getStr == "echo 1\n"
 
   test "round-trips patch action":
     let sess = Session(created: "20250101T120000", profileName: "test",
@@ -408,6 +410,132 @@ suite "session: renderSession → loadSessionFile round-trip":
     check ls.toolLog.len == 2
     check ls.toolLog[0].banner == "terminal rendering"
     check ls.toolLog[1].banner == "https://example.test/x"
+
+suite "session: resume wire parity":
+  ## The resume path must re-send exactly what the live session sent.
+  ## `callModel` transmits repairToolCallPairing(stripInternalFields(m)),
+  ## so parity means that composition over the loaded array equals the
+  ## composition over the saved array, byte for byte.
+  var tmp: string
+
+  setup:
+    tmp = getTempDir() / ("3code-wire-parity-" & $getCurrentProcessId() & ".3log")
+
+  teardown:
+    if fileExists(tmp): removeFile(tmp)
+
+  proc wireOf(msgs: JsonNode): string =
+    $repairToolCallPairing(stripInternalFields(msgs))
+
+  proc roundTrip(sess: Session, msgs: JsonNode): JsonNode =
+    writeFile(tmp, renderSession(sess, msgs))
+    loadSessionFile(tmp)[1]
+
+  test "tool result trailing newline survives the round-trip":
+    # Bash output always ends in a newline; the old codec dropped it,
+    # so every resumed session's history differed by one byte per tool.
+    let sess = Session(created: "t", profileName: "p", cwd: "/tmp")
+    let msgs = %*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "run"},
+      {"role": "assistant", "content": "", "reasoning_content": "",
+       "tool_calls": [{"id": "c1", "type": "function",
+                        "function": {"name": "bash",
+                                     "arguments": "{\"command\": \"echo hi\"}"}}]},
+      {"role": "tool", "tool_call_id": "c1", "content": "hi\n"}
+    ]
+    let lm = roundTrip(sess, msgs)
+    check lm[3]{"content"}.getStr == "hi\n"
+    check wireOf(lm) == wireOf(msgs)
+
+  test "bodies with trailing blank lines round-trip":
+    let sess = Session(created: "t", profileName: "p", cwd: "/tmp")
+    let msgs = %*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "a\n\n\n"},
+      {"role": "assistant", "content": "b\n"},
+      {"role": "user", "content": "\n\n"},
+      {"role": "assistant", "content": "done"}
+    ]
+    let lm = roundTrip(sess, msgs)
+    for i in 1 ..< msgs.len:
+      check lm[i]{"content"}.getStr == msgs[i]{"content"}.getStr
+
+  test "tool_call wire JSON is preserved verbatim":
+    # Key order, extra fields like `index`, and raw argument spacing are
+    # the bytes the server sent; the loader must replay them exactly.
+    let sess = Session(created: "t", profileName: "p", cwd: "/tmp")
+    let verbatim = %*{"id": "c9", "index": 0, "type": "function",
+                       "function": {"name": "bash",
+                                    "arguments": "{\"command\": \"ls -la\"}"}}
+    let msgs = %*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "go"},
+      {"role": "assistant", "content": "", "reasoning_content": "",
+       "tool_calls": [verbatim]},
+      {"role": "tool", "tool_call_id": "c9", "content": "out\n"}
+    ]
+    let lm = roundTrip(sess, msgs)
+    check $lm[2]{"tool_calls"}[0] == $verbatim
+    check wireOf(lm) == wireOf(msgs)
+
+  test "preamble bytes round-trip without reflow":
+    let sess = Session(created: "t", profileName: "p", cwd: "/tmp")
+    let content = "<session_context>\ncwd: /tmp\ngit: main\n" &
+      "</session_context>\n\n<project_notes>\n# Notes\n\nkeep\n" &
+      "</project_notes>\n\nuser text here"
+    let msgs = %*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": content}
+    ]
+    let lm = roundTrip(sess, msgs)
+    check lm[1]{"content"}.getStr == content
+    check wireOf(lm) == wireOf(msgs)
+
+  test "persisted system prompt survives with identity stamps":
+    let sess = Session(created: "t", profileName: "p", cwd: "/tmp",
+      promptState: PromptState(identity: "[\"prov.m\"]",
+                               skills: "abc123"))
+    let msgs = %*[
+      {"role": "system", "content": "EXACT CACHED PREFIX"},
+      {"role": "user", "content": "hi"},
+      {"role": "assistant", "content": "yo", "reasoning_content": ""}
+    ]
+    writeFile(tmp, renderSession(sess, msgs))
+    let (ls, lm) = loadSessionFile(tmp)
+    check lm[0]{"content"}.getStr == "EXACT CACHED PREFIX"
+    check ls.promptState.identity == "[\"prov.m\"]"
+    check ls.promptState.skills == "abc123"
+    check cast[pointer](ls.promptState.system) == cast[pointer](lm[0])
+    check wireOf(lm) == wireOf(msgs)
+
+  test "empty reasoning_content key is present on resumed assistants":
+    # Think-back families keep the field on the wire; the loader must set
+    # it (empty) like the live transports do, not omit it.
+    let sess = Session(created: "t", profileName: "p", cwd: "/tmp")
+    let msgs = %*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "hi"},
+      {"role": "assistant", "content": "hello",
+       "reasoning_content": ""}
+    ]
+    let lm = roundTrip(sess, msgs)
+    check lm[2].contains("reasoning_content")
+    check wireOf(lm) == wireOf(msgs)
+
+  test "legacy log without stamps still loads":
+    writeFile(tmp, """session 2025-01-01T00:00:00+00:00 profile=p cwd=/tmp
+
+user
+  old style
+
+assistant
+  reply
+""")
+    let (ls, lm) = loadSessionFile(tmp)
+    check ls.promptState.identity.len == 0
+    check lm[0]{"role"}.getStr == "system"
+    check lm[1]{"content"}.getStr == "old style"
 
 suite "session: sessionIdFromPath":
   test "strips .3log extension":
