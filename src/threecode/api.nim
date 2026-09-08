@@ -1794,6 +1794,29 @@ proc ensureReasoningField(messages: JsonNode) =
     if "reasoning_content" notin m:
       m["reasoning_content"] = %""
 
+proc stripThinkBack*(mode: ThinkBackMode, wireMessages: JsonNode) =
+  ## Enforce `mode` on the wire copy of the history: delete
+  ## `reasoning_content` from assistant messages per the knob. tbNone
+  ## strips everywhere (strict validators reject the field); tbCurrentTurn
+  ## keeps it only inside the active tool loop, i.e. after the last user
+  ## message, so the model sees its own fresh reasoning but old turns
+  ## stop costing tokens; tbAllTurns keeps everything (deepseek 400s
+  ## without the field, glm/kimi Preserved Thinking reward it).
+  ## `wireMessages` must be a mutable copy, not the live history.
+  if wireMessages == nil or wireMessages.kind != JArray: return
+  if mode == tbAllTurns: return
+  var lastUser = -1
+  if mode == tbCurrentTurn:
+    for i in 0 ..< wireMessages.len:
+      if wireMessages[i]{"role"}.getStr == "user":
+        lastUser = i
+  for i in 0 ..< wireMessages.len:
+    let m = wireMessages[i]
+    if m.kind != JObject or m{"role"}.getStr != "assistant": continue
+    if mode == tbCurrentTurn and i >= lastUser: continue
+    if m.contains("reasoning_content"):
+      m.delete("reasoning_content")
+
 proc applyGptOssReasoning(p: Profile, body: JsonNode) =
   body["reasoning_effort"] = %p.reasoning
 
@@ -2240,22 +2263,29 @@ proc applyThinkBack*(p: Profile, body: JsonNode) =
   ## (z.ai: preserved thinking is on by default on the Coding Plan and off
   ## on the standard API; Kimi k2.6 keeps nothing unless `thinking.keep`
   ## is set; k3/k2.7-code always keep).
-  if not knownGoodThinkBack(p): return
+  if knownGoodThinkBack(p) == tbNone: return
   case providerOf(p)
   of "zai", "zai-coding", "zaicode":
     # GLM Preserved Thinking: only honored when the full unmodified
     # reasoning blocks come back in order; `clear_thinking: false` turns
     # it on for the standard API (the Coding Plan endpoint has it on by
-    # default; sending it anyway is accepted).
+    # default; sending it anyway is accepted). tbCurrentTurn sends
+    # nothing: interleaved thinking with tool results is the default
+    # when thinking is enabled, and clear_thinking: false would commit
+    # us to replaying cross-turn reasoning too.
+    if knownGoodThinkBack(p) == tbCurrentTurn: return
     body["clear_thinking"] = %false
   of "kimi", "kimicode", "moonshot", "moonshot-cn":
     # Kimi k2.6 ignores historical reasoning unless `keep` is "all".
     # k3/k2.7-code always keep, and the field is inert there.
+    # tbCurrentTurn omits `keep`: the k2.6 default ignores historical
+    # reasoning but retains current-turn tool-loop reasoning server-side.
     var thinking = body{"thinking"}
     if thinking == nil or thinking.kind != JObject:
       thinking = %*{"type": "enabled"}
       body["thinking"] = thinking
-    thinking["keep"] = %"all"
+    if knownGoodThinkBack(p) == tbAllTurns:
+      thinking["keep"] = %"all"
   else: discard
 
 # ---------- network worker thread (Tier 2) ----------
@@ -2440,10 +2470,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
   if p.family == "deepseek":
     ensureReasoningField(messages)
   let wireMessages = repairToolCallPairing(stripInternalFields(messages))
-  if not knownGoodThinkBack(p):
-    for m in wireMessages:
-      if m.kind == JObject and m{"role"}.getStr == "assistant" and m.contains("reasoning_content"):
-        m.delete("reasoning_content")
+  stripThinkBack(knownGoodThinkBack(p), wireMessages)
   let bodyStr =
     if useResponses:
       block:

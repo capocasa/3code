@@ -973,21 +973,21 @@ suite "xml tool_call fallback":
     check xmlToolCallsFallback(Profile(name: "nvidia.openai/gpt-oss-120b",
       model: "openai/gpt-oss-120b", family: "gpt-oss")) == false
 
-  test "thinkBack is on for deepseek, glm and kimi rows, off elsewhere":
+  test "thinkBack replays for deepseek, glm and kimi rows, strips elsewhere":
     check knownGoodThinkBack(Profile(name: "deepseek.deepseek-v4-pro",
-      model: "deepseek-v4-pro", family: "deepseek")) == true
+      model: "deepseek-v4-pro", family: "deepseek")) == tbAllTurns
     check knownGoodThinkBack(Profile(name: "zai.glm-5.2",
-      model: "glm-5.2", family: "glm")) == true
-    check knownGoodThinkBack(Profile(name: "kimicode.kimi-for-coding",
-      model: "kimi-for-coding", family: "kimi")) == true
+      model: "glm-5.2", family: "glm")) == tbAllTurns
+    check knownGoodThinkBack(Profile(name: "kimicode.kimi-k2.6",
+      model: "kimi-k2.6", family: "kimi")) == tbAllTurns
     check knownGoodThinkBack(Profile(name: "together.moonshotai/Kimi-K2.6",
-      model: "moonshotai/Kimi-K2.6", family: "kimi")) == true
+      model: "moonshotai/Kimi-K2.6", family: "kimi")) == tbAllTurns
     check knownGoodThinkBack(Profile(name: "openai.gpt-5.5",
-      model: "gpt-5.5", family: "gpt")) == false
+      model: "gpt-5.5", family: "gpt")) == tbNone
     check knownGoodThinkBack(Profile(name: "together.Qwen/Qwen3.8-Flash",
-      model: "Qwen/Qwen3.8-Flash", family: "qwen")) == false
+      model: "Qwen/Qwen3.8-Flash", family: "qwen")) == tbNone
     check knownGoodThinkBack(Profile(name: "local.unknown",
-      model: "unknown", family: "glm")) == false
+      model: "unknown", family: "glm")) == tbNone
 
   test "thinkBack keeps reasoning_content on the wire for opted-in families":
     let messages = %*[
@@ -998,15 +998,47 @@ suite "xml tool_call fallback":
     ]
     block keep:
       let p = Profile(name: "zai.glm-5.2", family: "glm", model: "glm-5.2")
+      check knownGoodThinkBack(p) == tbAllTurns
       let wire = stripInternalFields(messages)
-      # the strip decision lives in callModel; mirror it by asserting the
-      # accessor + a non-deepseek glm row survives stripInternalFields and
-      # would NOT be deleted (deleted only under `not knownGoodThinkBack`)
-      check knownGoodThinkBack(p) == true
+      # same strip path as callModel: the glm row keeps its reasoning
+      check knownGoodThinkBack(p) == tbAllTurns
+      stripThinkBack(knownGoodThinkBack(p), wire)
       check wire[1]{"reasoning_content"}.getStr == "private chain of thought"
     block strip:
       let p = Profile(name: "openai.gpt-5.5", family: "gpt", model: "gpt-5.5")
-      check knownGoodThinkBack(p) == false
+      let wire = stripInternalFields(messages)
+      check knownGoodThinkBack(p) == tbNone
+      stripThinkBack(knownGoodThinkBack(p), wire)
+      check "reasoning_content" notin wire[1]
+
+  test "stripThinkBack keeps current turn, drops older turns":
+    # every assistant message carries reasoning_content (possibly empty);
+    # current turn = messages after the last user message
+    let messages = %*[
+      {"role": "user", "content": "go"},
+      {"role": "assistant", "content": "step",
+       "reasoning_content": "old"},
+      {"role": "user", "content": "continue"},
+      {"role": "assistant", "content": "tool call coming",
+       "reasoning_content": "fresh"}
+    ]
+    block none:
+      let wire = parseJson($messages)
+      stripThinkBack(tbNone, wire)
+      check "reasoning_content" notin wire[1]
+      check "reasoning_content" notin wire[3]
+    block currentTurn:
+      let wire = parseJson($messages)
+      stripThinkBack(tbCurrentTurn, wire)
+      check "reasoning_content" notin wire[1]
+      check wire[3]{"reasoning_content"}.getStr == "fresh"
+    block allTurns:
+      let wire = parseJson($messages)
+      stripThinkBack(tbAllTurns, wire)
+      check wire[1]{"reasoning_content"}.getStr == "old"
+      check wire[3]{"reasoning_content"}.getStr == "fresh"
+    # tbCurrentTurn never touches the live history, only the wire copy
+    check messages[1]{"reasoning_content"}.getStr == "old"
 
   test "applyThinkBack sends explicit knobs on z.ai and kimi":
     block zai:
@@ -1020,9 +1052,11 @@ suite "xml tool_call fallback":
       applyThinkBack(p, body)
       check body{"clear_thinking"}.getBool == false
     block kimi:
+      # k2.6 needs `keep: "all"` to replay anything historical
       var body = %*{"stream": true}
-      let p = Profile(name: "kimicode.kimi-for-coding", family: "kimi",
-                      model: "kimi-for-coding")
+      let p = Profile(name: "kimicode.kimi-k2.6", family: "kimi",
+                      model: "kimi-k2.6")
+      check knownGoodThinkBack(p) == tbAllTurns
       applyThinkBack(p, body)
       check body{"thinking"}{"keep"}.getStr == "all"
       check body{"thinking"}{"type"}.getStr == "enabled"
@@ -1032,6 +1066,26 @@ suite "xml tool_call fallback":
       let p = Profile(name: "kimicode.k3", family: "kimi", model: "k3")
       applyThinkBack(p, body)
       check body{"thinking"}{"keep"}.getStr == "all"
+    block zaicurrent:
+      # cheap glm row trialling current-turn replay: interleaved thinking
+      # with tool results is the default, and clear_thinking: false would
+      # commit to cross-turn keep, so send nothing extra
+      var body = %*{"stream": true}
+      let p = Profile(name: "zai.glm-5.3-flash", family: "glm",
+                      model: "glm-5.3-flash")
+      check knownGoodThinkBack(p) == tbCurrentTurn
+      applyThinkBack(p, body)
+      check "clear_thinking" notin body
+    block kimicurrent:
+      # kimi row trialling current-turn replay: thinking knob still
+      # needed to enable thinking, but no `keep` so history is not kept
+      var body = %*{"stream": true}
+      let p = Profile(name: "kimicode.kimi-for-coding", family: "kimi",
+                      model: "kimi-for-coding")
+      check knownGoodThinkBack(p) == tbCurrentTurn
+      applyThinkBack(p, body)
+      check body{"thinking"}{"type"}.getStr == "enabled"
+      check "keep" notin body{"thinking"}
     block off:
       var body = %*{"stream": true}
       let p = Profile(name: "openai.gpt-5.5", family: "gpt", model: "gpt-5.5")

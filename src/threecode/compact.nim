@@ -125,10 +125,13 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
       payload2.add m
   payload = payload2
   let useResponses = responsesApi(p)
-  if not knownGoodThinkBack(p) or useResponses:
-    # Same wire-safety as callModel: strict providers reject unknown
-    # fields on replayed assistant messages (fireworks et al.); Responses
-    # (first-party openai) rejects `reasoning_content` outright.
+  # The summarizer payload is one synthetic call over the raw history, so
+  # there is no active tool loop to preserve: tbCurrentTurn strips here
+  # just like tbNone. Same wire-safety as callModel: strict providers
+  # reject unknown fields on replayed assistant messages (fireworks et
+  # al.); Responses (first-party openai) rejects `reasoning_content`
+  # outright.
+  if knownGoodThinkBack(p) != tbAllTurns or useResponses:
     for m in payload:
       if m.kind == JObject and m{"role"}.getStr == "assistant" and
          m.contains("reasoning_content"):
