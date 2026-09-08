@@ -630,6 +630,24 @@ proc recordToToolCall(r: Record): JsonNode =
       %*{"path": path, "edits": arr}
     of "apply_patch":
       %*{"input": sectionText(sections, "")}
+    of "clear":
+      %*{"prompt": sectionText(sections, "")}
+    of "dmail":
+      %*{"checkpoint": (try: parseInt(path) except ValueError: -1),
+         "message": sectionText(sections, "")}
+    of "read":
+      var a = %{"path": %path}
+      let hdr = if pos.len > 3: pos[3 ..^ 1].join(" ") else: ""
+      let nums = if "-" in hdr: hdr.split('-') else: @[]
+      if nums.len == 2:
+        try:
+          let off = parseInt(nums[0])
+          let last = parseInt(nums[1])
+          if off > 0:
+            a["offset"] = %off
+            a["limit"] = %(if last >= off: last - off + 1 else: 0)
+        except ValueError: discard
+      a
     of "web_search":
       %*{"query": sectionText(sections, "")}
     of "web_fetch":
@@ -779,6 +797,21 @@ proc emitToolUse(s: var string, tc: JsonNode) =
     emitRecord s, "tool_use " & id & " patch " & path, body
   of "apply_patch":
     emitRecord s, "tool_use " & id & " apply_patch", args{"input"}.getStr("")
+  of "read":
+    let path = args{"path"}.getStr("")
+    let offset = args{"offset"}.getInt(0)
+    let limit = args{"limit"}.getInt(0)
+    var hdr = "tool_use " & id & " read " & path
+    if offset > 0 or limit > 0:
+      hdr.add " " & $offset & "-" &
+        (if limit > 0: $(offset + limit - 1) else: "end")
+    emitRecord s, hdr, ""
+  of "clear":
+    emitRecord s, "tool_use " & id & " clear", args{"prompt"}.getStr("")
+  of "dmail":
+    let cp = $args{"checkpoint"}.getInt(-1)
+    emitRecord s, "tool_use " & id & " dmail " & cp,
+      args{"message"}.getStr("")
   of "web_search":
     emitRecord s, "tool_use " & id & " web_search", args{"query"}.getStr("")
   of "web_fetch":
@@ -1052,6 +1085,9 @@ proc buildToolLogFromMessages(messages: JsonNode,
           Action(kind: akWebFetch, body: args{"url"}.getStr)
         of "clear":
           Action(kind: akClear, body: args{"prompt"}.getStr)
+        of "dmail":
+          Action(kind: akDMail, path: $args{"checkpoint"}.getInt(-1),
+                body: args{"message"}.getStr)
         of "edit":
           var a = Action(kind: akPatch, path: args{"path"}.getStr)
           let edits = args{"edits"}

@@ -219,7 +219,9 @@ when not defined(windows):
       # The exact replay byte stream must equal the live item blocks
       # joined by one blank row, with no trailing blank after the last
       # item. Assemble the expected bytes from the shared formatters so
-      # any divergence between live and replay fails here.
+      # any divergence between live and replay fails here. The turn's
+      # receipt caps the LAST TOOL (the live `deferredReceipt` contract),
+      # not the prose above it.
       let output = "hi\n"
       let toolLog = @[ToolRecord(banner: "echo hi", output: output,
         code: 0, kind: akBash)]
@@ -236,16 +238,16 @@ when not defined(windows):
          "usage": {"promptTokens": 110, "completionTokens": 5,
                    "totalTokens": 115, "cachedTokens": 0}}]
       let rendered = captureReplay(msgs, toolLog, window = 1000)
-      var turn1 = formatItem(assistantItem("On it."))
-      turn1.attachReceipt(
-        receiptBytes(tokenLineLabel(
-          Usage(promptTokens: 100, completionTokens: 5,
-                totalTokens: 105), 1000)), true)
+      let prose1 = formatItem(assistantItem("On it."))
+      let receipt = receiptBytes(tokenLineLabel(
+        Usage(promptTokens: 100, completionTokens: 5,
+              totalTokens: 105), 1000))
       var toolBytes = toolTranscriptBytes("echo hi", akBash, output, 0, 1)
       toolBytes.trimTranscriptTail()
+      toolBytes.attachReceipt(receipt, true)
       let expected =
         formatItem(userPromptItem("hi there")) & "\n" &
-        "\n" & turn1 & "\n" &
+        "\n" & prose1 & "\n" &
         "\n" & toolBytes & "\n" &
         "\n" & formatItem(assistantItem("Done.")) & "\n"
       check rendered == expected
