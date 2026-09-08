@@ -171,10 +171,28 @@ proc decodeBody*(cenc, body: string): string =
   else:
     body
 
+proc statusFromDefect(msg: string): string =
+  ## Pull the offending status out of a RangeDefect message shaped
+  ## "value out of range: 999 notin 0 .. 599".
+  let i = msg.find(": ")
+  let j = msg.find(" notin ")
+  if i >= 0 and j > i:
+    "HTTP " & msg[i+2 ..< j]
+  else:
+    "HTTP status out of range (" & msg & ")"
+
 proc fetchUrl*(url: string): string =
   let client = newClient()
   defer: client.close()
-  let resp = client.get(url)
+  # Some hosts (LinkedIn's anti-bot reply) send a status outside Nim's
+  # HttpCode range (0..599); httpclient converts the status line inside
+  # `get` itself and dies with RangeDefect before the check below runs,
+  # so it must be translated here, not at the caller.
+  let resp =
+    try: client.get(url)
+    except RangeDefect as e:
+      raise newException(IOError,
+        statusFromDefect(e.msg) & " fetching " & url)
   if resp.code.int div 100 != 2:
     raise newException(IOError, "HTTP " & $resp.code & " fetching " & url)
   let body = decodeBody(

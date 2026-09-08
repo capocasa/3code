@@ -1,6 +1,37 @@
-import std/[unittest, strutils]
+import std/[net, os, unittest, strutils]
 import zippy
 import threecode/web
+
+# A one-shot server that replies with LinkedIn's anti-bot status 999.
+# `HttpCode` is `range[0..599]`, so httpclient's `parseResponse` itself
+# dies with RangeDefect inside `get` — the regression this suite pins.
+type Srv999 = ref object
+  listener: Socket
+  done: bool
+
+proc serve999(s: Srv999) {.thread.} =
+  {.cast(gcsafe).}:
+    try:
+      var client: Socket
+      s.listener.accept(client)
+      try:
+        while client.recvLine(3000).strip.len > 0: discard
+      except CatchableError: discard
+      client.send("HTTP/1.1 999 Request Denied\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+      client.close()
+    except CatchableError:
+      discard
+    s.done = true
+
+proc start999(): tuple[url: string, srv: Srv999] =
+  let s = Srv999(listener: newSocket())
+  s.listener.setSockOpt(OptReuseAddr, true)
+  s.listener.bindAddr(Port(0), "127.0.0.1")
+  s.listener.listen()
+  let (_, port) = s.listener.getLocalAddr()
+  var thr: Thread[Srv999]
+  createThread(thr, serve999, s)
+  result = ("http://127.0.0.1:" & $port.uint16 & "/", s)
 
 const ExaFixture = "Title: Nim Programming Language\nURL: https://nim-lang.org/\nPublished: 2024-01-15\nAuthor: Nim Team\nHighlights:\nNim is a statically typed compiled systems programming language.\nIt combines successful concepts from mature languages like Python, Ada and Modula.\n---\nTitle: Learn Nim in Y Minutes\nURL: https://learnxinyminutes.com/docs/nim/\nPublished: 2023-11-02\nHighlights:\nSingle-page tour of Nim syntax for the impatient.\nCovers procs, types, generics and macros."
 
@@ -126,3 +157,20 @@ suite "web helpers":
     let c = capText(s, 1000)
     check c.len < s.len
     check "truncated" in c
+
+  test "fetchUrl survives a non-standard status (LinkedIn 999)":
+    # httpclient raises RangeDefect inside `get` for statuses >= 600;
+    # fetchUrl must surface it as the same IOError a normal non-2xx gets.
+    let (url, srv) = start999()
+    defer:
+      for i in 0 ..< 100:
+        if srv.done: break
+        sleep(20)
+      try: srv.listener.close() except CatchableError: discard
+    try:
+      discard fetchUrl(url)
+      fail()
+    except IOError as e:
+      check e.msg == "HTTP 999 fetching " & url
+    except RangeDefect:
+      fail()
