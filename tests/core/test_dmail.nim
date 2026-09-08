@@ -121,6 +121,28 @@ suite "truncated trailing marker cut":
   test "keeps prose that merely looks like a marker":
     check cutPartialTrailingMarker(stripCheckpointMarkers("see [checkpoints] docs")) == "see [checkpoints] docs"
 
+  test "cuts a bare open bracket tail (kimi echo loop cut at the output cap)":
+    # Field shape, session 20260907T182657: the model parroted its
+    # `[checkpoint N]` tag in a loop until the output budget killed the
+    # stream mid-marker. The live painter holds a lone `[` back (any
+    # prefix of the marker open can still grow into one), so the commit
+    # must cut it too, or the reply renders as a stray `● [` row.
+    let echoLoop = repeat("[checkpoint 3]\n", 612) & "["
+    check cutPartialTrailingMarker(stripCheckpointMarkers(echoLoop)) == ""
+
+  test "cuts any partial prefix of the marker open":
+    for partial in ["[", "[c", "[che", "[checkpo", "[checkpoint"]:
+      check cutPartialTrailingMarker(
+        stripCheckpointMarkers("hello\n" & partial)) == "hello"
+
+  test "keeps prose whose bracket text diverges from the marker open":
+    # `[checked` stops matching `[checkpoint ` at the 7th byte, so it is
+    # prose and survives; a bare trailing `[` does not survive (it can
+    # still grow into a marker, so the live painter holds it back and
+    # the commit must match).
+    check cutPartialTrailingMarker(stripCheckpointMarkers("see [checked")) == "see [checked"
+    check cutPartialTrailingMarker(stripCheckpointMarkers("see [check]")) == "see [check]"
+
   test "marker-only reply with truncated tail renders nothing":
     check renderAssistantContentBytes("[checkpoint 3]\n[checkpoint") == ""
 

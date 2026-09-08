@@ -892,7 +892,12 @@ suite "terminal visual contract":
        "content": "[checkpoint 1]",
        "contentChunks": ["[checkpoint 1]"],
        "usage": {"promptTokens": 24, "completionTokens": 4,
-                 "totalTokens": 28, "cachedTokens": 0}}
+                 "totalTokens": 28, "cachedTokens": 0}},
+      {"role": "assistant",
+       "content": "Second turn recovered.",
+       "contentChunks": ["Second turn recovered."],
+       "usage": {"promptTokens": 28, "completionTokens": 3,
+                 "totalTokens": 31, "cachedTokens": 0}}
     ])
     let tty = startStub(root)
     defer:
@@ -913,14 +918,63 @@ suite "terminal visual contract":
     tty.expectNeverInHistory "[checkpoint 0]"
     tty.expectInHistory "● Kimi marker streamed piecewise."
     tty.expectTokenBar(["○"])
-    # Turn 2: a reply whose only content is the marker line. It must
-    # render the canonical empty-reply fallback (painted by the commit,
-    # reachable only because the streamed-empty case no longer skips it),
-    # never a floating receipt, never the raw marker.
+    # Turn 2: a reply whose only content is the marker line. It paints
+    # nothing, so to the user it is an empty reply: runTurns must say WHY
+    # it is returning (the recovery notice) and resend, never commit the
+    # bookkeeping as a one-character reply, never a floating receipt,
+    # never the raw marker.
     tty.send "again\n"
-    tty.expectInHistory EmptyReplyMsg
+    tty.expectInHistory "finished by length, retrying"
     tty.expectNeverInHistory "[checkpoint 1]"
-    tty.expectCount("empty reply", 1, where = "screen")
+    tty.expectNeverInHistory "● ["
+    tty.expectInHistory "● Second turn recovered."
+    tty.expect "❯"
+
+  test "kimi marker-echo loop cut at the output cap returns with a reason":
+    # Field shape, session 20260907T182657: kimi parroted its dmail tag in
+    # a loop (`[checkpoint 3]` hundreds of times) until the output budget
+    # killed the stream mid-marker, tail a bare `[`. The user saw only a
+    # `● [` row with no indication why the turn returned. Contract: the
+    # marker echoes never paint (complete markers stripped, the truncated
+    # tail held back exactly as the live painter holds it), the reply
+    # counts as empty, and the empty-reply recovery explains the return.
+    let root = newFixture("checkpoint_echo_loop")
+    writeKimiStubProvider(root)
+    writeStubResponses(root, %*[
+      {"role": "assistant",
+       "content": repeat("[checkpoint 3]\n", 40) & "[",
+       "contentChunks": [repeat("[checkpoint 3]\n", 20),
+                         repeat("[checkpoint 3]\n", 20), "["],
+       "usage": {"promptTokens": 900, "completionTokens": 2082,
+                 "totalTokens": 2982, "cachedTokens": 0}},
+      {"role": "assistant",
+       "content": "Echo loop recovered.",
+       "contentChunks": ["Echo loop recovered."],
+       "usage": {"promptTokens": 1000, "completionTokens": 4,
+                 "totalTokens": 1004, "cachedTokens": 0}}
+    ])
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+    tty.expect "❯"
+    tty.send "go\n"
+    # Nothing of the loop may ever paint: no marker bytes, no partial
+    # marker, and no bare-bullet row (the `● [` artifact of the report).
+    tty.drain(800, recordFrame = true)
+    for f in tty.frames:
+      let scr = f.rows.join("\n")
+      check "checkpoint" notin scr
+      check "[ch" notin scr
+      for row in f.rows:
+        let trimmed = row.strip
+        check trimmed != "●"
+        check trimmed != "● ["
+    # The turn must explain itself: the empty-reply recovery notice names
+    # the length cut and the resend, then the resent call's prose lands
+    # under a proper bullet.
+    tty.expectInHistory "finished by length, retrying"
+    tty.expectInHistory "● Echo loop recovered."
     tty.expect "❯"
 
   test "kimi dmail session: real tool work, invisible markers, folded 3log":

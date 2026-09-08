@@ -1346,10 +1346,12 @@ proc trailingPartialMarker(line: string): int =
   ## invisible: painting it puts harness bookkeeping on screen for one
   ## chunk, then erases it at commit - the visible flash this helper exists
   ## to prevent. A suffix hides while it can still grow into a marker: a
-  ## proper prefix of "[checkpoint ", or "[checkpoint " followed by only
-  ## digits (closing ']' not arrived yet). Prose like "[checkpoints]"
-  ## stops matching the digit run, so it never hides.
-  const Open = "[checkpoint "
+  ## prefix of `CheckpointOpen` (down to a bare `[`), or `CheckpointOpen`
+  ## followed by only digits (closing ']' not arrived yet). Prose like
+  ## "[checkpoints]" stops matching the digit run, so it never hides.
+  ## `CheckpointOpen` is display's exported constant so this rule and the
+  ## commit-side `cutPartialTrailingMarker` cannot drift apart again.
+  const Open = CheckpointOpen
   var i = line.len
   while i > 0:
     dec i

@@ -668,7 +668,13 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       if tcNode != nil and tcNode.kind == JArray: tcNode
       else: newJArray()
     let finishReason = msg{"finish_reason"}.getStr("")
-    if content.strip.len == 0 and toolCalls.len == 0:
+    # Emptiness is judged on what would paint (markers stripped, truncated
+    # marker tail cut): a kimi marker-echo loop that exhausts the output
+    # budget mid-tag is an empty reply to the user (field shape: hundreds
+    # of `[checkpoint N]` lines, stream cut at a bare `[`), so it must take
+    # the empty-reply recovery, not commit as a one-character reply.
+    let replyIsEmpty = cutVisibleContent(content).strip.len == 0
+    if replyIsEmpty and toolCalls.len == 0:
       # Empty assistant turn. Try the targeted recoveries first (escalate the
       # budget on "length", steer on "stop"/unknown), then fall back to a
       # bare resend. A hostile or broken provider can't pin the turn: each
