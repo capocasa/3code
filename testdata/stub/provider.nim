@@ -13,6 +13,13 @@ var
                               # turns-level test asserts the length-retry
                               # demote path lowered it
 
+proc resetStubResponses*() =
+  ## Test hook: restart the process-global response index at 0. Used when
+  ## one test process runs several independent scenarios, so each fixture's
+  ## `stub_responses.json` can be written from index 0 instead of padding
+  ## with dummy entries to catch up to the global counter.
+  stubResponseIdx = 0
+
 proc lastStubMaxTokensOverride*(): int = stubMaxTokensOverride
 
 proc lastStubReasoningEffort*(): string = stubReasoningEffort

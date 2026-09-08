@@ -5,9 +5,20 @@
 ## indented two spaces. The format is both the on-disk representation and the
 ## session audit trail - readable without tooling and diffable in git.
 ##
-## The system prompt is intentionally omitted on save: it is rebuilt from the
-## profile on every resume, saving several KB per session and ensuring the
-## prompt is always current (not a stale snapshot from when the session started).
+## The system prompt is persisted verbatim: rebuilding it from the profile
+## on resume rewrites the cached prefix (skills catalog, credit line, any
+## override edit made since) and busts the provider's prompt cache. The
+## persisted bytes are the contract; catalog updates ride the tail message
+## via `refreshSystemPrompt` instead.
+##
+## Cache-parity contract: the message array `loadSessionFile` reconstructs is
+## byte-identical to the one the live session held at save time. Resuming
+## must not change what the next request re-sends: the system prompt is
+## persisted verbatim, bodies round-trip through the record codec without
+## loss, tool_calls carry their original wire JSON, and user preambles split
+## and rejoin on the exact grammar `sessionPreamble` emits. A resumed turn
+## hits the provider's prompt cache exactly like the live session's next
+## turn would.
 ##
 ## On load, the full OpenAI-shape `messages` JsonNode array is reconstructed
 ## from the records so the session can be resumed mid-conversation with no loss.
@@ -26,13 +37,13 @@ const SessionExt* = ".3log"
 #
 # A session.3log is an append-of-records text file. Each record is a header
 # line at column 0, followed by zero or more body lines indented exactly two
-# spaces. Blank lines visually separate records but are also accepted as
-# body content while a record is open (so editors that strip trailing
-# whitespace round-trip cleanly).
+# spaces. A `~~` terminator closes a body that ends in a newline; blank
+# lines below a terminator visually separate records. Bodies round-trip
+# byte-exactly: what was sent on the wire is what a resume re-sends.
 #
 #   header := role [' ' arg]*
 #   arg    := positional | key=value | +flag[=value]
-#   body   := ('  ' line '\n')*
+#   body   := ('  ' line '\n')* ['~~\n']
 #
 # Roles:
 #   session     - one per file, top of the file. Created stamp + profile + cwd.
@@ -501,6 +512,21 @@ type
     args: seq[string]
     body: string
 
+const BodyEnd = "~~"
+  ## Column-0 terminator closing a record body that ends in a newline.
+  ## Body lines are always two-space indented (or blank), so this never
+  ## collides with content. Without it a trailing blank line and a trailing
+  ## single newline are indistinguishable, and tool results (whose wire
+  ## content ends in `\n`) lose their last byte on every save/load
+  ## round-trip. A body not ending in a newline needs no terminator; the
+  ## next header closes it as before.
+
+proc trimTrailingEmptyLegacy(s: var seq[string]) =
+  ## Old-codec behavior for records without a terminator: every trailing
+  ## blank line was a record separator, never content.
+  while s.len > 0 and s[^1].len == 0:
+    s.setLen s.len - 1
+
 proc isHeaderLine(line: string): bool =
   if line.len == 0: return false
   if line[0] == ' ' or line[0] == '\t': return false
@@ -509,23 +535,32 @@ proc isHeaderLine(line: string): bool =
       return true
   false
 
-proc trimTrailingEmpty(s: var seq[string]) =
-  while s.len > 0 and s[^1].len == 0:
-    s.setLen s.len - 1
-
 proc parseRecords(text: string): seq[Record] =
   var current = Record()
   var inRecord = false
   var bodyLines: seq[string]
+  var closed = false
   proc flush(buf: var seq[Record]) =
     if not inRecord: return
-    trimTrailingEmpty(bodyLines)
-    current.body = bodyLines.join("\n")
+    # A terminator says the body ended in a newline; everything indented
+    # above it is content, blanks included. Without one (legacy shape, or
+    # a body not ending in a newline) trailing blank lines were record
+    # separators, so they are dropped exactly like the old codec did.
+    if closed:
+      current.body = bodyLines.join("\n") & "\n"
+    else:
+      trimTrailingEmptyLegacy(bodyLines)
+      current.body = bodyLines.join("\n")
     buf.add current
     current = Record()
     bodyLines.setLen 0
     inRecord = false
+    closed = false
   for line in text.splitLines:
+    if inRecord and line == BodyEnd:
+      closed = true
+      flush(result)
+      continue
     if isHeaderLine(line):
       flush(result)
       let parts = line.split(' ')
@@ -588,14 +623,26 @@ proc sectionText(sections: seq[(string, string)], label: string): string =
 
 proc recordToToolCall(r: Record): JsonNode =
   ## Reconstruct the OpenAI-shape tool_call JSON the model originally
-  ## emitted. Loses any extra fields the model included beyond what each
-  ## dispatcher reads, which the model would have ignored on the next
-  ## turn anyway.
+  ## emitted. Prefers the verbatim `-- wire --` section (the exact bytes
+  ## the server sent, so a resumed request replays the cache-eligible
+  ## history byte-for-byte); falls back to rebuilding from the readable
+  ## sections for pre-wire logs. The legacy rebuild loses extra fields
+  ## the model included beyond what each dispatcher reads, which the
+  ## model would have ignored on the next turn anyway.
   let (pos, _, _) = parseArgs(r.args)
   let id = if pos.len >= 1: pos[0] else: ""
   let tool = if pos.len >= 2: pos[1] else: ""
   let path = if pos.len >= 3: pos[2] else: ""
   let sections = parseSections(r.body)
+  block wireSection:
+    let verbatim = sectionText(sections, "wire")
+    if verbatim.len == 0: break wireSection
+    try:
+      let j = parseJson(verbatim)
+      if j.kind == JObject:
+        return j
+    except CatchableError:
+      discard  # corrupt wire section: fall through to the rebuild
   let args =
     case tool
     of "bash":
@@ -677,61 +724,128 @@ proc recordToUsage(r: Record): JsonNode =
 
 # ---------- writer ----------
 
+const
+  CtxOpen = "<session_context>"
+  CtxClose = "</session_context>"
+  NotesOpen = "<project_notes>"
+  NotesClose = "</project_notes>"
+
 proc splitPreamble(content: string): tuple[ctx, notes, body: string] =
-  ## Peel `<session_context>...</session_context>` and the optional trailing
-  ## `<project_notes>...</project_notes>` off a user message's content.
-  ## Mirror of `buildUserMessage` / `stripPreamble`: only acts on a leading
-  ## block, so a user who literally writes `<session_context>` mid-message
-  ## stays intact.
-  if not content.strip.startsWith("<session_context>"):
+  ## Peel the preamble off a user message's content byte-exactly. Only the
+  ## exact grammar `sessionPreamble` emits is peeled: `<session_context>\n`
+  ## at position 0, a closing tag on its own line, the optional
+  ## `\n\n<project_notes>\n...\n</project_notes>` block, and a `\n\n`
+  ## before the user's own text. Anything else (user-typed tags, odd
+  ## spacing) is not a 3code preamble and stays in `body` so the wire
+  ## bytes round-trip untouched.
+  if not content.startsWith(CtxOpen & "\n"): return ("", "", content)
+  let j = content.find("\n" & CtxClose)
+  if j < 0: return ("", "", content)
+  result.ctx = content[CtxOpen.len + 1 ..< j]
+  var rest = content[j + CtxClose.len + 1 .. ^1]
+  if rest.startsWith("\n\n" & NotesOpen & "\n"):
+    let k = rest.find("\n" & NotesClose)
+    if k >= 0:
+      result.notes = rest[NotesOpen.len + 3 ..< k]
+      rest = rest[k + NotesClose.len + 1 .. ^1]
+  if rest.startsWith("\n\n"):
+    result.body = rest[2 .. ^1]
+  elif result.notes.len == 0:
+    # Not the exact grammar: keep the whole content as body so nothing
+    # is silently rewritten.
     return ("", "", content)
-  var s = content
-  for tag in ["session_context", "project_notes"]:
-    let openTag = "<" & tag & ">"
-    let closeTag = "</" & tag & ">"
-    let i = s.find(openTag)
-    if i < 0: continue
-    let j = s.find(closeTag, i + openTag.len)
-    if j < 0: continue
-    let inner = s[i + openTag.len ..< j].strip
-    if tag == "session_context": result.ctx = inner
-    else: result.notes = inner
-    s = s[0 ..< i] & s[j + closeTag.len .. ^1]
-  result.body = s.strip
+  else:
+    result.body = rest
 
 proc joinPreamble(ctx, notes, body: string): string =
-  ## Inverse of `splitPreamble`. Reassembles the wire-format user content
-  ## the model originally saw. Both blocks are optional; `body` may be
-  ## empty if the user sent no text alongside the preamble.
-  var pre = ""
-  if ctx.len > 0:
-    pre.add "<session_context>\n" & ctx & "\n</session_context>"
+  ## Exact inverse of `splitPreamble`, reproducing `sessionPreamble`'s
+  ## grammar: no `strip`, no reflow.
+  if ctx.len == 0: return body
+  result = CtxOpen & "\n" & ctx & "\n" & CtxClose
   if notes.len > 0:
-    if pre.len > 0: pre.add "\n\n"
-    pre.add "<project_notes>\n" & notes & "\n</project_notes>"
-  if pre.len == 0: return body
-  if body.len == 0: return pre
-  pre & "\n\n" & body
-
-proc indentBody(body: string): string =
-  if body.len == 0: return ""
-  var b = body
-  if b.endsWith("\n"): b.setLen b.len - 1
-  var lines = b.split('\n')
-  for i, l in lines: lines[i] = "  " & l
-  result = lines.join("\n") & "\n"
+    result.add "\n\n" & NotesOpen & "\n" & notes & "\n" & NotesClose
+  # `sessionPreamble` always joins with "\n\n", even under an empty user
+  # body, so an empty submission keeps its trailing separator byte-exactly.
+  result.add "\n\n" & body
 
 proc emitRecord(s: var string, header, body: string) =
+  ## Write a record byte-exactly: body lines two-space indented, a
+  ## `BodyEnd` terminator only when the body ends in a newline (the
+  ## ambiguous case), and a blank separator line after every record.
+  ## Round-trip invariant: parseRecords of this record yields `body` back.
   s.add header
   s.add '\n'
-  s.add indentBody(body)
+  if body.len > 0:
+    var b = body
+    let terminated = b.endsWith("\n")
+    if terminated: b.setLen b.len - 1
+    for l in b.split('\n'):
+      s.add "  "
+      s.add l
+      s.add '\n'
+    if terminated: s.add BodyEnd & "\n"
   s.add '\n'
 
 proc emitHeaderOnly(s: var string, header: string) =
   s.add header
   s.add "\n\n"
 
+proc humanBody(name: string, args: JsonNode): string =
+  ## Readable rendering of a tool call for the audit trail / `--list`. The
+  ## loader never reads this back for wire parity; `recordToToolCall`
+  ## prefers the `-- wire --` section. `nil` args or an unrecognized name
+  ## yield "" so the record degenerates to just the wire section.
+  if args == nil or args.kind != JObject: return ""
+  case name
+  of "bash":
+    result = args{"command"}.getStr("")
+    let stdin = args{"stdin"}.getStr("")
+    if stdin.len > 0:
+      if not result.endsWith("\n"): result.add "\n"
+      result.add "-- stdin --\n" & stdin
+  of "shell":
+    let argv = args{"cmd"}.getElems
+    result = if argv.len > 0: argv[^1].getStr else: ""
+    let stdin = args{"stdin"}.getStr("")
+    if stdin.len > 0:
+      if not result.endsWith("\n"): result.add "\n"
+      result.add "-- stdin --\n" & stdin
+  of "write":
+    result = args{"body"}.getStr("")
+  of "patch":
+    let edits = args{"edits"}
+    if edits != nil and edits.kind == JArray:
+      for e in edits:
+        if result.len > 0 and not result.endsWith("\n"): result.add "\n"
+        result.add "-- search --\n"
+        result.add e{"search"}.getStr("")
+        if not result.endsWith("\n"): result.add "\n"
+        result.add "-- replace --\n"
+        result.add e{"replace"}.getStr("")
+  of "apply_patch":
+    result = args{"input"}.getStr("")
+  of "web_search":
+    result = args{"query"}.getStr("")
+  of "web_fetch":
+    result = args{"url"}.getStr("")
+  of "update_plan", "todo":
+    let items =
+      if args{"items"} != nil and args{"items"}.kind == JArray: args{"items"}
+      else: args{"steps"}
+    for item in items.getElems:
+      if result.len > 0 and not result.endsWith("\n"): result.add "\n"
+      result.add "-- item --\n"
+      result.add item{"status"}.getStr("pending") & "\n"
+      result.add item{"text"}.getStr(item{"description"}.getStr(""))
+  else: discard
+
 proc emitToolUse(s: var string, tc: JsonNode) =
+  ## Human-readable body (what diff review and `--list` show) plus a
+  ## trailing `-- wire --` section with the exact tool_call JSON the
+  ## server sent: key order, extra fields (`index`, ...), raw argument
+  ## bytes. `recordToToolCall` prefers the wire section on load, so a
+  ## resumed session re-sends byte-identical history and the provider's
+  ## prompt cache stays hot.
   let id = tc{"id"}.getStr("")
   let fn = tc{"function"}
   let rawName = if fn != nil: fn{"name"}.getStr("") else: ""
@@ -743,61 +857,15 @@ proc emitToolUse(s: var string, tc: JsonNode) =
   var name = rawName
   let pipe = name.find("<|")
   if pipe >= 0: name = name[0 ..< pipe]
-  case name
-  of "bash":
-    let cmd = args{"command"}.getStr("")
-    let stdin = args{"stdin"}.getStr("")
-    var body = cmd
-    if stdin.len > 0:
-      if not body.endsWith("\n"): body.add "\n"
-      body.add "-- stdin --\n" & stdin
-    emitRecord s, "tool_use " & id & " bash", body
-  of "shell":
-    let argv = args{"cmd"}.getElems
-    let line = if argv.len > 0: argv[^1].getStr else: ""
-    let stdin = args{"stdin"}.getStr("")
-    var body = line
-    if stdin.len > 0:
-      if not body.endsWith("\n"): body.add "\n"
-      body.add "-- stdin --\n" & stdin
-    emitRecord s, "tool_use " & id & " shell", body
-  of "write":
-    let path = args{"path"}.getStr("")
-    emitRecord s, "tool_use " & id & " write " & path, args{"body"}.getStr("")
-  of "patch":
-    let path = args{"path"}.getStr("")
-    var body = ""
-    let edits = args{"edits"}
-    if edits != nil and edits.kind == JArray:
-      for e in edits:
-        if body.len > 0 and not body.endsWith("\n"): body.add "\n"
-        body.add "-- search --\n"
-        body.add e{"search"}.getStr("")
-        if not body.endsWith("\n"): body.add "\n"
-        body.add "-- replace --\n"
-        body.add e{"replace"}.getStr("")
-    emitRecord s, "tool_use " & id & " patch " & path, body
-  of "apply_patch":
-    emitRecord s, "tool_use " & id & " apply_patch", args{"input"}.getStr("")
-  of "web_search":
-    emitRecord s, "tool_use " & id & " web_search", args{"query"}.getStr("")
-  of "web_fetch":
-    emitRecord s, "tool_use " & id & " web_fetch", args{"url"}.getStr("")
-  of "update_plan", "todo":
-    var body = ""
-    let items =
-      if args{"items"} != nil and args{"items"}.kind == JArray: args{"items"}
-      else: args{"steps"}
-    for item in items.getElems:
-      if body.len > 0 and not body.endsWith("\n"): body.add "\n"
-      body.add "-- item --\n"
-      body.add item{"status"}.getStr("pending") & "\n"
-      body.add item{"text"}.getStr(item{"description"}.getStr(""))
-    emitRecord s, "tool_use " & id & " " & name, body
-  else:
-    # Unknown tool name: preserve the JSON args verbatim in the body so
-    # nothing is lost. Tool name itself stays in the header.
-    emitRecord s, "tool_use " & id & " " & name, $args
+  var body = humanBody(name, args)
+  if body.len > 0 and not body.endsWith("\n"): body.add "\n"
+  body.add "-- wire --\n" & $tc
+  let hdr = if name in ["write", "patch"]:
+              let path = args{"path"}.getStr("")
+              "tool_use " & id & " " & name & (if path.len > 0: " " & path else: "")
+            else:
+              "tool_use " & id & " " & name
+  emitRecord s, hdr, body
 
 proc emitTokens(s: var string, usage: JsonNode) =
   if usage == nil or usage.kind != JObject: return
@@ -826,8 +894,17 @@ proc renderSession*(session: Session, messages: JsonNode): string =
   if session.created.len > 0: hdr.add " " & session.created
   if session.profileName.len > 0: hdr.add " profile=" & session.profileName
   if session.cwd.len > 0: hdr.add " cwd=" & session.cwd
+  # Cache-parity stamps: which profile built the persisted system prompt
+  # and which skills catalog went into it. The loader restores both into
+  # PromptState so a resume keeps the persisted prefix when they still
+  # match (and rebuilds/notes when they do not) exactly like the live path.
+  if session.promptState.identity.len > 0:
+    hdr.add " prompt_identity=" & session.promptState.identity
+  if session.promptState.skills.len > 0:
+    hdr.add " skills=" & session.promptState.skills
   emitHeaderOnly s, hdr
   if messages == nil or messages.kind != JArray: return s
+  var seenSystem = false
   # Map tool_call_id → exit code via the parallel toolLog (entries are
   # appended in the same order tool_calls fire across the message stream).
   var idToExit = initTable[string, int]()
@@ -847,10 +924,12 @@ proc renderSession*(session: Session, messages: JsonNode): string =
     if m.kind != JObject: continue
     case m{"role"}.getStr
     of "system":
-      # The system prompt is rebuilt from the profile on resume.
-      # Saving 5-10KB of boilerplate per session also pushes the
-      # actual conversation too far down to skim.
-      discard
+      # Persisted verbatim so resume re-sends the exact cached prefix
+      # (see the module doc). Duplicated `system` messages beyond the
+      # first would each re-send too, so only index 0 is kept.
+      if m{"content"}.getStr("").len > 0 and not seenSystem:
+        emitRecord s, "system", m{"content"}.getStr("")
+        seenSystem = true
     of "user":
       let raw = m{"content"}.getStr("")
       let (ctx, notes, body) = splitPreamble(raw)
@@ -858,9 +937,11 @@ proc renderSession*(session: Session, messages: JsonNode): string =
       if notes.len > 0: emitRecord s, "project_notes", notes
       emitRecord s, "user", body
     of "assistant":
-      let reasoning = m{"reasoning_content"}.getStr("")
-      if reasoning.len > 0:
-        emitRecord s, "reasoning", reasoning
+      # Always emit the reasoning record, empty included: the live
+      # transports stamp `reasoning_content` on every assistant message,
+      # and a resumed assistant without the key would diverge from the
+      # bytes the live session sent.
+      emitRecord s, "reasoning", m{"reasoning_content"}.getStr("")
       let content = m{"content"}.getStr("")
       let tcs = m{"tool_calls"}
       let hasToolCalls = tcs != nil and tcs.kind == JArray and tcs.len > 0
@@ -1113,6 +1194,7 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
   var pendingNotes = ""
   var lastAssistant: JsonNode = nil
   var exitByCallId = initTable[string, int]()
+  var hasResolvedSystem = false
   for r in records:
     let (pos, kv, _) = parseArgs(r.args)
     case r.role
@@ -1120,8 +1202,16 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
       if pos.len > 0: sess.created = pos[0]
       if "profile" in kv: sess.profileName = kv["profile"]
       if "cwd" in kv: sess.cwd = kv["cwd"]
+      if "prompt_identity" in kv:
+        sess.promptState.identity = kv["prompt_identity"]
+      if "skills" in kv: sess.promptState.skills = kv["skills"]
     of "system":
-      messages.add %*{"role": "system", "content": r.body}
+      # Only the first system record is the persisted prompt; duplicates
+      # (hand-merges, exotic histories) drop here rather than re-sending.
+      if hasResolvedSystem: discard
+      else:
+        messages.add %*{"role": "system", "content": r.body}
+        hasResolvedSystem = true
       lastAssistant = nil
     of "context":
       pendingCtx = r.body
@@ -1136,6 +1226,11 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
     of "reasoning":
       pendingReasoning = r.body
     of "assistant":
+      # `reasoning_content` is always present (possibly empty): the live
+      # transports (`buildStreamAssistantMsg`/`buildBatchAssistantMsg`)
+      # set it on every assistant message, and wire parity for
+      # think-back families (deepseek/glm/kimi) requires the key set to
+      # survive resume unchanged.
       let msg = %*{"role": "assistant",
                    "content": r.body,
                    "reasoning_content": pendingReasoning}
@@ -1185,6 +1280,14 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
     backfill.add %*{"role": "system", "content": DefaultSystemPrompt}
     for m in messages: backfill.add m
     messages = backfill
+  # Seed the resume-time PromptState so `refreshSystemPrompt` keeps the
+  # persisted bytes when the restored identity still matches the resolved
+  # profile. Sessions saved before the identity stamp (or with an
+  # unresolved/placeholder system message) stay unseeded, so their first
+  # turn resolves the prompt like a fresh session.
+  if hasResolvedSystem and sess.promptState.identity.len > 0 and
+     messages[0]{"content"}.getStr != DefaultSystemPrompt:
+    sess.promptState.system = messages[0]
   sess.toolLog = buildToolLogFromMessages(messages, exitByCallId)
   sess.plan = buildPlanFromMessages(messages, exitByCallId)
   (sess, messages)

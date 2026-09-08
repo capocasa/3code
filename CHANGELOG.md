@@ -1,5 +1,21 @@
 # Changelog
 
+**unreleased** - resume keeps the prompt cache hot
+
+- **Resume re-sends byte-identical history.** `-r` used to rebuild the
+  system prompt from the profile (busting the provider's prompt cache the
+  moment you reopened 3code) and to round-trip message bodies through a
+  lossy text codec: tool results lost their trailing newline and tool
+  calls were re-serialized from a human-readable summary. The `.3log`
+  format now persists the system prompt verbatim (stamped with the
+  profile identity and skills digest that built it, so a real model
+  switch still rebuilds), stores every tool call's original wire JSON in
+  a `-- wire --` section, closes newline-ended bodies with a `~~`
+  terminator, and splits user preambles on the exact grammar the live
+  path emits. A resumed turn hits the cache exactly like the live
+  session's next turn would; an end-to-end test asserts live and resumed
+  continuations produce identical request bytes.
+
 **0.7.1** - GPT-6 Astra on OpenAI and ChatGPT
 
 - **GPT-6 Astra.** `gpt-6-astra` is known-good for both the `openai`
