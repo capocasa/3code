@@ -125,7 +125,7 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
       payload2.add m
   payload = payload2
   let useResponses = responsesApi(p)
-  if p.family != "deepseek" or useResponses:
+  if not knownGoodThinkBack(p) or useResponses:
     # Same wire-safety as callModel: strict providers reject unknown
     # fields on replayed assistant messages (fireworks et al.); Responses
     # (first-party openai) rejects `reasoning_content` outright.

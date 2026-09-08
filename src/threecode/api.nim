@@ -2231,6 +2231,33 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "nemotron": applyNemotronReasoning(p, body)
   else: discard
 
+proc applyThinkBack*(p: Profile, body: JsonNode) =
+  ## Explicit per-provider knob for reasoning replay (`knownGoodThinkBack`).
+  ## The history side of the decision lives in callModel: think-back pairs
+  ## keep `reasoning_content` on replayed assistant messages, the rest
+  ## strip it. These fields make the opt-in explicit instead of relying on
+  ## each provider's silent default, which can differ per endpoint
+  ## (z.ai: preserved thinking is on by default on the Coding Plan and off
+  ## on the standard API; Kimi k2.6 keeps nothing unless `thinking.keep`
+  ## is set; k3/k2.7-code always keep).
+  if not knownGoodThinkBack(p): return
+  case providerOf(p)
+  of "zai", "zai-coding", "zaicode":
+    # GLM Preserved Thinking: only honored when the full unmodified
+    # reasoning blocks come back in order; `clear_thinking: false` turns
+    # it on for the standard API (the Coding Plan endpoint has it on by
+    # default; sending it anyway is accepted).
+    body["clear_thinking"] = %false
+  of "kimi", "kimicode", "moonshot", "moonshot-cn":
+    # Kimi k2.6 ignores historical reasoning unless `keep` is "all".
+    # k3/k2.7-code always keep, and the field is inert there.
+    var thinking = body{"thinking"}
+    if thinking == nil or thinking.kind != JObject:
+      thinking = %*{"type": "enabled"}
+      body["thinking"] = thinking
+    thinking["keep"] = %"all"
+  else: discard
+
 # ---------- network worker thread (Tier 2) ----------
 #
 # `streamHttp` fires deltas into a `NetJob` instead of calling hooks. The
@@ -2413,7 +2440,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
   if p.family == "deepseek":
     ensureReasoningField(messages)
   let wireMessages = repairToolCallPairing(stripInternalFields(messages))
-  if p.family != "deepseek":
+  if not knownGoodThinkBack(p):
     for m in wireMessages:
       if m.kind == JObject and m{"role"}.getStr == "assistant" and m.contains("reasoning_content"):
         m.delete("reasoning_content")
@@ -2445,6 +2472,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
           body[maxTokensField(p)] = %maxTokensOverride
         if p.reasoning.len > 0:
           applyReasoning(p, body)
+        applyThinkBack(p, body)
         sanitizeUtf8($body)
   if "\"usage\"" in bodyStr:
     stderr.writeLine "3code: BUG: usage in wireMessages"

@@ -973,6 +973,72 @@ suite "xml tool_call fallback":
     check xmlToolCallsFallback(Profile(name: "nvidia.openai/gpt-oss-120b",
       model: "openai/gpt-oss-120b", family: "gpt-oss")) == false
 
+  test "thinkBack is on for deepseek, glm and kimi rows, off elsewhere":
+    check knownGoodThinkBack(Profile(name: "deepseek.deepseek-v4-pro",
+      model: "deepseek-v4-pro", family: "deepseek")) == true
+    check knownGoodThinkBack(Profile(name: "zai.glm-5.2",
+      model: "glm-5.2", family: "glm")) == true
+    check knownGoodThinkBack(Profile(name: "kimicode.kimi-for-coding",
+      model: "kimi-for-coding", family: "kimi")) == true
+    check knownGoodThinkBack(Profile(name: "together.moonshotai/Kimi-K2.6",
+      model: "moonshotai/Kimi-K2.6", family: "kimi")) == true
+    check knownGoodThinkBack(Profile(name: "openai.gpt-5.5",
+      model: "gpt-5.5", family: "gpt")) == false
+    check knownGoodThinkBack(Profile(name: "together.Qwen/Qwen3.8-Flash",
+      model: "Qwen/Qwen3.8-Flash", family: "qwen")) == false
+    check knownGoodThinkBack(Profile(name: "local.unknown",
+      model: "unknown", family: "glm")) == false
+
+  test "thinkBack keeps reasoning_content on the wire for opted-in families":
+    let messages = %*[
+      {"role": "user", "content": "hi"},
+      {"role": "assistant", "content": "hello",
+       "reasoning_content": "private chain of thought"},
+      {"role": "user", "content": "continue"}
+    ]
+    block keep:
+      let p = Profile(name: "zai.glm-5.2", family: "glm", model: "glm-5.2")
+      let wire = stripInternalFields(messages)
+      # the strip decision lives in callModel; mirror it by asserting the
+      # accessor + a non-deepseek glm row survives stripInternalFields and
+      # would NOT be deleted (deleted only under `not knownGoodThinkBack`)
+      check knownGoodThinkBack(p) == true
+      check wire[1]{"reasoning_content"}.getStr == "private chain of thought"
+    block strip:
+      let p = Profile(name: "openai.gpt-5.5", family: "gpt", model: "gpt-5.5")
+      check knownGoodThinkBack(p) == false
+
+  test "applyThinkBack sends explicit knobs on z.ai and kimi":
+    block zai:
+      var body = %*{"stream": true}
+      let p = Profile(name: "zai.glm-5.2", family: "glm", model: "glm-5.2")
+      applyThinkBack(p, body)
+      check body{"clear_thinking"}.getBool == false
+    block zaicode:
+      var body = %*{"stream": true}
+      let p = Profile(name: "zaicode.glm-5.2", family: "glm", model: "glm-5.2")
+      applyThinkBack(p, body)
+      check body{"clear_thinking"}.getBool == false
+    block kimi:
+      var body = %*{"stream": true}
+      let p = Profile(name: "kimicode.kimi-for-coding", family: "kimi",
+                      model: "kimi-for-coding")
+      applyThinkBack(p, body)
+      check body{"thinking"}{"keep"}.getStr == "all"
+      check body{"thinking"}{"type"}.getStr == "enabled"
+    block kimik3:
+      # k3 row: inert keep-all, thinking untouched otherwise
+      var body = %*{"stream": true}
+      let p = Profile(name: "kimicode.k3", family: "kimi", model: "k3")
+      applyThinkBack(p, body)
+      check body{"thinking"}{"keep"}.getStr == "all"
+    block off:
+      var body = %*{"stream": true}
+      let p = Profile(name: "openai.gpt-5.5", family: "gpt", model: "gpt-5.5")
+      applyThinkBack(p, body)
+      check "clear_thinking" notin body
+      check "thinking" notin body
+
 suite "runTurns empty-content auto-handling":
 
   test "runTurns escalates max_tokens then recovers on empty length reply":
