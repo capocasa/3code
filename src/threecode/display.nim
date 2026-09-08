@@ -525,28 +525,41 @@ proc stripCheckpointMarkers*(content: string): string =
     else:
       result.delete(start .. close)
 
+const CheckpointOpen* = "[checkpoint "
+  ## The dmail marker tag prefix. Shared by the commit-side cut below and
+  ## the live stream's partial-marker holdback so the two never disagree
+  ## about what counts as "still growing into a marker".
+
 proc cutPartialTrailingMarker*(content: string): string =
-  ## Drop a trailing INCOMPLETE marker (`[checkpoint`, `[checkpoint ` with
-  ## spaces, or `[checkpoint N` with no closing bracket) from already-final
-  ## content. A stream that ends mid-marker never paints the tail (the live
-  ## partial painter holds it back), so the end-of-turn commit must not
-  ## paint it either; `stripCheckpointMarkers` only matches complete
-  ## markers, and a truncated tag would otherwise render as a stray
-  ## `● [` row. Prose like `[checkpoints]` never matches the digit run.
+  ## Drop a trailing INCOMPLETE marker from already-final content: any
+  ## proper suffix that could still grow into `[checkpoint N]`, down to a
+  ## bare `[`. A stream that ends mid-marker never paints the tail (the
+  ## live partial painter holds back exactly these suffixes), so the
+  ## end-of-turn commit must not paint it either; `stripCheckpointMarkers`
+  ## only matches complete markers, and a truncated tag would otherwise
+  ## render as a stray `● [` row. Field shape (session 20260907T182657):
+  ## hundreds of echoed marker lines, stream cut at the output cap, tail
+  ## `[`. Prose like `[checkpoints]` never matches: `s` breaks the prefix
+  ## and the digit run alike.
   result = content
-  var i = result.len
-  while i > 0:
-    dec i
-    if result[i] != '[': continue
-    let tail = result[i .. ^1]
-    if tail == "[checkpoint" or tail == "[checkpoint ":
-      result.setLen(i)
-      break
-    if tail.startsWith("[checkpoint "):
-      let digits = tail[12 .. ^1]
-      if digits.len > 0 and digits.allCharsInSet({'0'..'9'}):
-        result.setLen(i)
-      break
+  block scan:
+    var i = result.len
+    while i > 0:
+      dec i
+      if result[i] != '[': continue
+      let tail = result[i .. ^1]
+      if tail.len <= CheckpointOpen.len:
+        # A prefix of the open (`[`, `[c`, ..., `[checkpoint ` inclusive);
+        # it can still grow into a marker, so the live painter held it
+        # back and the commit must not paint it either.
+        if CheckpointOpen.startsWith(tail):
+          result.setLen(i)
+          break scan
+      elif tail.startsWith(CheckpointOpen):
+        let digits = tail[CheckpointOpen.len .. ^1]
+        if digits.len > 0 and digits.allCharsInSet({'0'..'9'}):
+          result.setLen(i)
+        break scan
   # Trailing whitespace after the cut would otherwise paint a blank row.
   var last = result.len
   while last > 0 and result[last - 1] in {' ', '\t', '\r', '\n'}: dec last
