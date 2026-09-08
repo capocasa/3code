@@ -300,16 +300,26 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
         if retryAfter > 0: retryAfter
         elif category == "rate": min(1 shl rateRetryLevel, 90)
         else: min(1 shl serverRetryLevel, 16)
-      hookRetryNotice formatApiDetail(errMsg, stubErrBody(lastFailure, node), code) &
-        ". retry " & $(attempt + 1) & "/" & $StubMaxAttempts & " in " & $backoff & "s"
+      let detail = formatApiDetail(errMsg, stubErrBody(lastFailure, node), code)
+      let retryLabel = detail & ", retry " & $(attempt + 1) &
+        "/" & $StubMaxAttempts & " in"
+      hookRetryNotice retryLabel & " " & humanDuration(backoff)
       hookStartSpinner("")
+      hookRetryWait(retryLabel, backoff)
       var waitMs = backoff * 1000
+      var lastShown = backoff
       while waitMs > 0:
         if isInterrupted():
+          hookRetryWaitClear()
           raise newException(ApiError, "interrupted by user during retry backoff")
         let step = min(100, waitMs)
         sleep(step)
         waitMs -= step
+        let shown = (waitMs + 999) div 1000
+        if shown != lastShown:
+          lastShown = shown
+          hookRetryWaitTick(shown)
+      hookRetryWaitClear()
       if category == "rate":
         inc rateRetryLevel
         rateLastTs = epochTime()

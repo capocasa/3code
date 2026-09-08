@@ -141,6 +141,12 @@ type
                       assistantContent: string; streamedLive: bool) {.closure.}
     noUsage*: proc(elapsed: int) {.closure.}
     retryNotice*: proc(msg: string) {.closure.}
+    retryWait*: proc(label: string; remainingS: int) {.closure.}
+      ## Enter the backoff countdown (spinner glyph swaps to a clock).
+    retryWaitTick*: proc(remainingS: int) {.closure.}
+      ## Update just the countdown seconds.
+    retryWaitClear*: proc() {.closure.}
+      ## Leave the countdown: the next HTTP attempt is starting.
 
 var apiStreamHooks*: ApiStreamHooks
 
@@ -205,6 +211,17 @@ proc hookNoUsage(elapsed: int) =
 
 proc hookRetryNotice(msg: string) =
   if apiStreamHooks.retryNotice != nil: apiStreamHooks.retryNotice(msg)
+
+proc hookRetryWait(label: string; remainingS: int) =
+  if apiStreamHooks.retryWait != nil:
+    apiStreamHooks.retryWait(label, remainingS)
+
+proc hookRetryWaitTick(remainingS: int) =
+  if apiStreamHooks.retryWaitTick != nil:
+    apiStreamHooks.retryWaitTick(remainingS)
+
+proc hookRetryWaitClear() =
+  if apiStreamHooks.retryWaitClear != nil: apiStreamHooks.retryWaitClear()
 
 
 proc parseUsage*(u: JsonNode): Usage =
@@ -2695,16 +2712,23 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     # spinner's footer repaint re-asserts itself on the next 80ms tick), and
     # the backoff sleep is the long phase that most needs a live indicator.
     let detail = formatApiDetail(errMsg, outcome.errBody, code)
-    hookRetryNotice detail & ". retry " & $(attempt + 1) &
-      "/" & $MaxAttempts & " in " & $backoff & "s"
+    let retryLabel = detail & ", retry " & $(attempt + 1) &
+      "/" & $MaxAttempts & " in"
+    hookRetryNotice retryLabel & " " & humanDuration(backoff)
     hookStartSpinner("")
+    hookRetryWait(retryLabel, backoff)
     block wait:
       var remaining = backoff * 1000
+      var lastShown = backoff
       while remaining > 0:
         if isInterrupted(): break wait
         let step = min(100, remaining)
         sleep(step)
         remaining -= step
+        let shown = (remaining + 999) div 1000
+        if shown != lastShown:
+          lastShown = shown
+          hookRetryWaitTick(shown)
     if isInterrupted():
       # Same interrupt class as `InterruptedByUserMsg` (matched by
       # `isInterruptedMsg`), with the backoff context appended. The turn
@@ -2712,8 +2736,10 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
       # `onTurnInterrupted`; a literal match on the bare message would route
       # this through the generic-error path, which skips the turn-state
       # reset and leaves Ctrl-D/Ctrl-C misrouted to a dead turn.
+      hookRetryWaitClear()
       raise newException(ApiError,
         InterruptedByUserMsg & " during retry backoff")
+    hookRetryWaitClear()
     clearNetworkQuiet()
     # Reset the quiet watchdog's activity timer so the next attempt gets a
     # fresh QuietTooLongMs window. Without this, the watchdog's idle clock is
