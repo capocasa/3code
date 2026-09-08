@@ -65,7 +65,8 @@ proc postForm(client: HttpClient, url: string,
   # for form fields that may contain '+'-sensitive values.
   let body = encodeQuery(fields, usePlus = false)
   client.headers["Content-Type"] = "application/x-www-form-urlencoded"
-  let resp = client.post(url, body = body)
+  let resp = guardedHttp(client.post(url, body = body), OAuthError,
+                         "posting " & url)
   let j = try: parseJson(resp.body) except CatchableError: newJObject()
   if resp.code.int notin 200..299:
     let detail =

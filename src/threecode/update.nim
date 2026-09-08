@@ -95,8 +95,8 @@ proc fetchLatestTag(): string =
     let client = newHttpClient(timeout = 10_000, userAgent = "3code-update",
                                sslContext = bundledSslContext())
     defer: client.close()
-    let resp = client.get("https://api.github.com/repos/" & Repo &
-                          "/releases/latest")
+    let resp = guardedHttp(client.get("https://api.github.com/repos/" & Repo &
+                            "/releases/latest"), IOError, "fetching releases")
     if resp.code.int div 100 != 2: return ""
     let j = parseJson(resp.body)
     j{"tag_name"}.getStr("")
@@ -111,7 +111,7 @@ proc downloadAsset(tag, asset, dest: string): bool =
     let client = newHttpClient(timeout = 60_000, userAgent = "3code-update",
                                sslContext = bundledSslContext())
     defer: client.close()
-    let resp = client.get(url)
+    let resp = guardedHttp(client.get(url), IOError, "downloading " & url)
     if resp.code.int div 100 != 2: return false
     writeFile(dest, resp.body)
     fileExists(dest) and getFileSize(dest) > 0

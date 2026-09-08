@@ -387,6 +387,29 @@ proc bundledSslContext*(): SslContext =
   ## internally), so the bundle wiring lives in one place either way.
   newContext(verifyMode = CVerifyPeer, caFile = bundledCaFile())
 
+proc httpStatusDetail*(msg: string): string =
+  ## Pull the offending status out of the RangeDefect httpclient raises
+  ## when a server sends a non-standard status (LinkedIn's anti-bot 999,
+  ## Cloudflare-origin 6xx): `value out of range: 999 notin 0 .. 599`.
+  ## HttpCode is `range[0..599]`, and `parseResponse` converts the status
+  ## line inside `get`/`post` itself, so the defect fires before any
+  ## caller-side status check can run.
+  let i = msg.find(": ")
+  let j = msg.find(" notin ")
+  if i >= 0 and j > i:
+    "HTTP " & msg[i+2 ..< j]
+  else:
+    "HTTP status out of range (" & msg & ")"
+
+template guardedHttp*(req: untyped; E: typedesc; what: string): untyped =
+  ## Run an httpclient request, translating the out-of-range-status
+  ## RangeDefect into `E` (the module's native error type) so callers'
+  ## `except CatchableError` arms see a normal failure, not a crash.
+  try:
+    req
+  except RangeDefect as e:
+    raise newException(E, httpStatusDetail(e.msg) & " " & what)
+
 proc connectErrorDetail*(e: ref CatchableError): string =
   ## The message a connect raises. `nativesockets.getAddrInfo` surfaces DNS
   ## failures as `raiseOSError(osLastError(), gai_strerror(...))`, which packs

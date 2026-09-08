@@ -307,3 +307,19 @@ suite "util: repairToolCallPairing":
     check repaired.len == 3
     check repaired[1]{"tool_call_id"}.getStr == "A"
     check repaired[2]{"tool_call_id"}.getStr == "B"
+
+suite "util: httpStatusDetail":
+  test "extracts LinkedIn 999":
+    check httpStatusDetail(
+        "value out of range: 999 notin 0 .. 599") == "HTTP 999"
+
+  test "extracts 6xx":
+    check httpStatusDetail(
+        "value out of range: 782 notin 0 .. 599") == "HTTP 782"
+
+  test "falls back on a foreign RangeDefect message":
+    # Any other range defect (index, set element) must not masquerade
+    # as an HTTP status; the whole message is preserved.
+    let d = httpStatusDetail("index 4 notin 0 .. 3")
+    check "out of range" in d
+    check "index 4" in d

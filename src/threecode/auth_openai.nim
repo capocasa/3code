@@ -161,7 +161,8 @@ proc fetchCodexModels*(url: string): seq[string] {.gcsafe.} =
     "ChatGPT-Account-Id": accountId(),
     "originator": "3code",
     "OpenAI-Beta": "responses=experimental"})
-  let resp = client.get(url & "/models?client_version=1.0.0")
+  let resp = guardedHttp(client.get(url & "/models?client_version=1.0.0"),
+                         OAuthError, "fetching " & url)
   if resp.code.int != 200: return
   let j = try: parseJson(resp.body) except CatchableError: return
   let arr = if j.kind == JArray: j
