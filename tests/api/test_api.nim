@@ -533,6 +533,19 @@ suite "api request shaping":
     check "temperature" notin body
     check body{"max_tokens"}.getInt == 65536
 
+  test "geminicli requestUrl pins Code Assist, not AI Studio":
+    let p = Profile(name: "geminicli.gemini-3.8-flash",
+                    model: "gemini-3.8-flash", family: "gemini",
+                    url: "https://generativelanguage.googleapis.com/v1beta/openai")
+    check geminicliProfile(p)
+    check requestUrl(p) == "https://cloudcode-pa.googleapis.com"
+    check endpointUrl(p, false, true).endsWith(
+      "/v1internal:streamGenerateContent?alt=sse")
+    check endpointUrl(p, false, false).endsWith(
+      "/v1internal:generateContent")
+    check not geminicliProfile(Profile(name: "google.gemini-3.8-flash",
+                                      model: "gemini-3.8-flash"))
+
   test "gemini setup resolves to GeminiPreamble + bash/patch tools":
     let p = Profile(name: "google.gemini-3.8-flash", family: "gemini",
                     model: "gemini-3.8-flash")

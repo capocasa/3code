@@ -15,7 +15,8 @@ import std/[algorithm, atomics, hashes, httpclient, json, locks, monotimes, nati
 when defined(posix):
   import std/posix except SocketHandle
 import streamhttp
-import types, util, prompts, streamexec, netthread, auth_openai
+import types, util, prompts, streamexec, netthread, auth_openai, auth_google,
+       codeassist
 
 type
   VerifyProfileHook* = proc(p: Profile): (bool, string) {.closure.}
@@ -652,13 +653,32 @@ proc chatgptProvider*(name: string): bool =
 proc chatgptProfile*(p: Profile): bool =
   chatgptProvider(p.name)
 
+proc geminicliProfile*(p: Profile): bool =
+  ## True when this profile speaks the Google Code Assist wire
+  ## (cloudcode-pa wrapped Gemini-native shape, OAuth token from
+  ## auth_google) instead of OpenAI chat completions.
+  providerOf(p) == "geminicli"
+
 proc requestUrl*(p: Profile): string =
   ## Full request URL (scheme://host/path, no endpoint suffix). The
   ## ChatGPT subscription token is not valid against api.openai.com, so
   ## `chatgpt` profiles always post to the Codex backend regardless of
   ## the configured url.
   if chatgptProfile(p): auth_openai.CodexApiUrl
+  elif geminicliProfile(p): auth_google.CloudCodeApiUrl
   else: p.url
+
+proc endpointUrl*(p: Profile, responses, streaming: bool): string =
+  ## Full URL the transport POSTs to for this profile. OpenAI-shaped
+  ## providers append /responses or /chat/completions to the base;
+  ## geminicli pins the Code Assist v1internal methods (the
+  ## `?alt=sse` query selects server-sent events on the stream path).
+  let base = requestUrl(p)
+  if geminicliProfile(p):
+    if streaming: base & CodeAssistStreamPath
+    else: base & CodeAssistGeneratePath
+  elif responses: base & "/responses"
+  else: base & "/chat/completions"
 
 proc requestHeaders(p: Profile, key: string;
                     accept: string): seq[(string, string)] =
@@ -682,7 +702,7 @@ proc requestHeaders(p: Profile, key: string;
 
 proc streamHttp(url, key, bodyStr: string, baseLabel: string,
                 slurped: var int, suppressXml: bool,
-                job: NetJob): StreamOutcome =
+                job: NetJob, codeAssist = false): StreamOutcome =
   debugOut "streamHttp start"
   # Post `bodyStr` to `url` and consume SSE chunks until `[DONE]`. `slurped`
   # accumulates an approximate output-character count so the caller can
@@ -797,25 +817,41 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   # error message. Capture the error here so it surfaces to the user.
   var sseErrorBody = ""
   var sseErrorCode = 0
+  var caState: CodeAssistStreamState
+  # Translated Gemini chunks queued by the Code Assist path: one SSE
+  # event can fan out to several OpenAI payloads (delta + usage +
+  # [DONE]), replayed one per loop iteration.
+  var caQueue: seq[string]
   while true:
-    var hasLine = false
-    try: hasLine = conn.readLine(line)
-    except StreamTimeoutError:
-      if isInterrupted() or isNetworkQuiet():
+    # Drain translated Gemini chunks before reading another SSE line:
+    # one event can fan out to several OpenAI payloads.
+    var payload = ""
+    if caQueue.len > 0:
+      payload = caQueue[0]
+      caQueue.delete(0)
+    else:
+      var hasLine = false
+      try: hasLine = conn.readLine(line)
+      except StreamTimeoutError:
+        if isInterrupted() or isNetworkQuiet():
+          closeCachedStreamConn()
+          break
+        continue
+      except CatchableError as e:
+        streamErr = e.msg
         closeCachedStreamConn()
         break
-      continue
-    except CatchableError as e:
-      streamErr = e.msg
-      closeCachedStreamConn()
-      break
-    if not hasLine: break
-    fireActivity(job)
-    if isInterrupted():
-      closeCachedStreamConn()
-      break
-    if line.startsWith("data: "):
-      let payload = line["data: ".len .. ^1]
+      if not hasLine: break
+      fireActivity(job)
+      if isInterrupted():
+        closeCachedStreamConn()
+        break
+      if line.startsWith("data: "):
+        payload = line["data: ".len .. ^1]
+        if codeAssist:
+          caQueue = translateEvent(caState, payload)
+          continue
+    if payload.len > 0:
       if payload.strip == "[DONE]":
         sawDone = true
         continue
@@ -885,10 +921,10 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       let u = j{"usage"}
       if u != nil and u.kind == JObject:
         result.usage = parseUsage(u)
-    elif line.startsWith("event:") or line.strip.len == 0 or
-         line.startsWith(": "):  # SSE comment
+    elif payload.len == 0 and (line.startsWith("event:") or line.strip.len == 0 or
+         line.startsWith(": ")):  # SSE comment
       discard
-    else:
+    elif payload.len == 0:
       nonSSE.add line
 
   if suppressXml:
@@ -1420,7 +1456,7 @@ when httpStub:
   include "../../testdata/stub/http.nim"
 
 proc callHttp(url, key, bodyStr: string; baseLabel: string;
-              slurped: var int): StreamOutcome =
+              slurped: var int; codeAssist = false): StreamOutcome =
   ## Non-streaming companion to `streamHttp`. Posts `bodyStr` (which carries
   ## `"stream": false`) and reads the complete JSON completion in one shot —
   ## no SSE, no recv-loop race. Same `StreamConn` cache and stale-conn retry
@@ -1540,8 +1576,18 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
     result.errBody = body
     return
 
-  # Parse the single JSON completion object.
-  let j = try: parseJson(body)
+  # Parse the single JSON completion object. The Code Assist wire
+  # answers with a Gemini GenerateContentResponse; translate it to the
+  # OpenAI completion shape first so the rest of this proc is uniform.
+  var body2 = body
+  if codeAssist:
+    let translated = translateResponse(body)
+    if translated == nil:
+      result.errBody = body
+      result.errMsg = "response parse: not a Code Assist response"
+      return
+    body2 = $translated
+  let j = try: parseJson(body2)
            except CatchableError:
              result.errBody = body
              result.errMsg = "response parse: " & getCurrentExceptionMsg()
@@ -2273,6 +2319,7 @@ type
     baseLabel: string
     suppressXml: bool
     responses: bool  # POST /responses instead of /chat/completions
+    codeAssist: bool  # Google Code Assist wire (translate Gemini SSE)
 
 proc networkWorker(a: ptr NetWorkerArgs) {.thread.} =
   ## Runs the full connect+send+SSE loop on a worker thread. Fires deltas
@@ -2297,7 +2344,7 @@ proc networkWorker(a: ptr NetWorkerArgs) {.thread.} =
         streamResponses(a.url, a.key, a.bodyStr, a.baseLabel, slurped, a.job)
       else:
         streamHttp(a.url, a.key, a.bodyStr, a.baseLabel, slurped,
-                   a.suppressXml, a.job)
+                   a.suppressXml, a.job, a.codeAssist)
     # The StreamConn is a ref with internal cycles (Socket + SslContext).
     # Under ORC, freeing it from a different thread than the one that
     # allocated it segfaults the cycle collector. The worker owns the
@@ -2354,12 +2401,13 @@ proc callModelThreaded*(p: Profile, bodyStr, baseLabel: string;
   # GC'd strings inside.
   var args = NetWorkerArgs(
     job: addr job,
-    url: requestUrl(p) & (if responses: "/responses" else: "/chat/completions"),
+    url: endpointUrl(p, responses, streaming = true),
     key: bearerFor(p),
     bodyStr: bodyStr,
     baseLabel: baseLabel,
     suppressXml: suppressXml,
-    responses: responses)
+    responses: responses,
+    codeAssist: geminicliProfile(p))
   createThread(t, networkWorker, addr args)
   while job.phase != npDone and not isInterrupted() and not isNetworkQuiet():
     drainAndDispatch(addr job, baseLabel)
@@ -2464,7 +2512,13 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
           body[maxTokensField(p)] = %maxTokensOverride
         if p.reasoning.len > 0:
           applyReasoning(p, body)
-        sanitizeUtf8($body)
+        if geminicliProfile(p):
+          # OpenAI-shaped body is only an intermediate: Code Assist
+          # wants the wrapped Gemini-native envelope. Project id is
+          # discovered once (loadCodeAssist/onboardUser) and persisted.
+          sanitizeUtf8(codeAssistBody(p, body, auth_google.projectId()))
+        else:
+          sanitizeUtf8($body)
   if "\"usage\"" in bodyStr:
     stderr.writeLine "3code: BUG: usage in wireMessages"
     for i, m in wireMessages:
@@ -2534,6 +2588,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     # profiles ride the streaming transport even when the user turned
     # streaming off (the body pins "stream": true the same way).
     let streamTransport = streamingEnabled or chatgptProfile(p)
+    let useCodeAssist = geminicliProfile(p)
     outcome =
       if streamTransport:
         when networkSync:
@@ -2542,12 +2597,12 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
           defer: syncJob.lock.deinitLock()
           let o =
             if useResponses:
-              streamResponses(requestUrl(p) & "/responses", bearer, bodyStr,
+              streamResponses(endpointUrl(p, true, true), bearer, bodyStr,
                               baseLabel, slurped, addr syncJob)
             else:
-              streamHttp(requestUrl(p) & "/chat/completions", bearer, bodyStr,
+              streamHttp(endpointUrl(p, false, true), bearer, bodyStr,
                          baseLabel, slurped, xmlToolCallsFallback(p),
-                         addr syncJob)
+                         addr syncJob, useCodeAssist)
           drainAndDispatch(addr syncJob, baseLabel)
           o
         else:
@@ -2555,11 +2610,11 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
                             useResponses)
       else:
         if useResponses:
-          callResponses(requestUrl(p) & "/responses", bearer, bodyStr,
+          callResponses(endpointUrl(p, true, false), bearer, bodyStr,
                         baseLabel, slurped)
         else:
-          callHttp(requestUrl(p) & "/chat/completions", bearer, bodyStr,
-                   baseLabel, slurped)
+          callHttp(endpointUrl(p, false, false), bearer, bodyStr,
+                   baseLabel, slurped, useCodeAssist)
     if isInterruptedMsg(outcome.errMsg):
       hookStopSpinner()
       if outcome.assistantMsg == nil:
@@ -2736,7 +2791,17 @@ proc verifyBody*(p: Profile): string =
   ## JSON body for the provider-verification ping.  Kept as a named proc
   ## so the test suite can assert it matches the streaming convention used
   ## by `callModel` (both must send `"stream": true`).
-  $(if chatgptProfile(p):
+  $(if geminicliProfile(p):
+    # Code Assist ping: wrapped Gemini-native envelope, same shape as
+    # a real turn. Project id is empty until login+discovery; the
+    # verify then 400s with a clear message rather than hanging.
+    parseJson(codeAssistBody(p, %*{
+      "model": p.model,
+      "messages": [%*{"role": "user", "content": "ping"}],
+      "max_tokens": 1,
+      "reasoning_effort": "low"
+    }, auth_google.projectId()))
+  elif chatgptProfile(p):
     # Codex backend: SSE-only, server-side storage off, top-level
     # `instructions` mandatory.
     %*{
@@ -2782,8 +2847,7 @@ proc verifyProfile*(p: Profile): (bool, string) =
   # `setReadTimeoutMs` mirrors the deadline onto the socket as
   # `SO_RCVTIMEO`, hard-bounding every `recv`; we retry each bounded window
   # until `VerifyTimeoutMs` then fail cleanly.
-  let endpoint = requestUrl(p) &
-    (if responsesApi(p): "/responses" else: "/chat/completions")
+  let endpoint = endpointUrl(p, responsesApi(p), streaming = true)
   let u = try: parseUri(endpoint) except CatchableError as e:
     return (false, "bad url: " & e.msg)
   let host = u.hostname
