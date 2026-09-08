@@ -12,7 +12,7 @@
 import std/[algorithm, atomics, json, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline,
   fatprompt, streamexec, sandbox, actions, engine as termengine, auth_xai,
-  auth_openai, oauth
+  auth_openai, auth_google, oauth
 
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":prompt", ":show",
@@ -145,7 +145,7 @@ proc completionFor*(line: string): seq[string] =
       if words[1] in ["edit", "rm", "remove"]:
         for pr in activeProviders: result.add pr.name
       elif words[1] == "add":
-        result.add ["supergrok", "chatgpt"]
+        result.add ["supergrok", "chatgpt", "geminicli"]
         if experimentalEnabled:
           for (n, _) in ProviderCatalog:
             if n notin result: result.add n
@@ -414,13 +414,19 @@ proc chatgptOauthLogin(): string =
   runOauthLogin("  sign in with your ChatGPT Plus/Pro account",
     auth_openai.loginBrowser, auth_openai.storeTokens)
 
+proc geminiOauthLogin(): string =
+  ## Gemini Code Assist browser login against accounts.google.com (the
+  ## gemini-cli public client).
+  runOauthLogin("  sign in with your Google / Gemini Code Assist account",
+    auth_google.loginBrowser, auth_google.storeTokens)
+
 proc readFirstProviderField(editor: var minline.LineEditor): string =
   ## First wizard field: catalog name, URL, API key, or a subscription
-  ## login (`supergrok`, `chatgpt`). Regular mode takes a known-good
+  ## login (`supergrok`, `chatgpt`, `geminicli`). Regular mode takes a known-good
   ## provider name or an API key; URLs are experimental-only.
   let prevCb = editor.completionCallback
   editor.completionCallback = proc(ed: LineEditor): seq[string] =
-    result.add ["supergrok", "chatgpt"]
+    result.add ["supergrok", "chatgpt", "geminicli"]
     if experimentalEnabled:
       for (n, _) in ProviderCatalog:
         if n notin result: result.add n
@@ -455,23 +461,30 @@ proc promptNewProvider*(editor: var minline.LineEditor,
   let isUrl = entry.startsWith("http://") or entry.startsWith("https://")
   let inferredFromKey = inferProvider(entry)
 
-  if entryLower == "supergrok" or entryLower == "chatgpt":
+  if entryLower == "supergrok" or entryLower == "chatgpt" or
+     entryLower == "geminicli":
     # Subscription login: browser OAuth against the provider's auth
-    # host. Named `supergrok`/`chatgpt` so an API-key `xai`/`openai` can
-    # sit beside it.
+    # host. Named `supergrok`/`chatgpt`/`geminicli` so an API-key
+    # `xai`/`openai`/`google` can sit beside it.
     ensureUniqueName(entryLower)
-    auth = if entryLower == "supergrok": xaiOauthLogin()
-           else: chatgptOauthLogin()
+    auth =
+      if entryLower == "supergrok": xaiOauthLogin()
+      elif entryLower == "chatgpt": chatgptOauthLogin()
+      else: geminiOauthLogin()
     key = ""
     name = entryLower
-    url = catalogUrl(canonicalKnownGoodProvider(name))
+    url =
+      if entryLower == "geminicli": auth_google.CloudCodeApiUrl
+      else: catalogUrl(canonicalKnownGoodProvider(name))
     if subscriptionTokenForImpl == nil:
-      # Startup normally installs the combined xai+openai resolver; cover
-      # bare-UI entry points with the same pair.
+      # Startup normally installs the combined resolver; cover bare-UI
+      # entry points with the same triple.
       subscriptionTokenForImpl = proc(provider: string): string {.closure.} =
         result = auth_xai.subscriptionTokenFor(provider)
         if result == "":
           result = auth_openai.subscriptionTokenFor(provider)
+        if result == "":
+          result = auth_google.subscriptionTokenFor(provider)
     if extraHeadersImpl == nil:
       extraHeadersImpl = chatgptExtraHeaders
     api.codexModelsHook = auth_openai.fetchCodexModels
@@ -527,6 +540,8 @@ proc promptNewProvider*(editor: var minline.LineEditor,
       hintLn "  for subscription login, enter supergrok", resetStyle
     elif name == "openai":
       hintLn "  for subscription login, enter chatgpt", resetStyle
+    elif name == "google":
+      hintLn "  for subscription login, enter geminicli", resetStyle
     key = readRequired(editor, "  api key              : ", hidden = true)
 
   if not experimentalEnabled:

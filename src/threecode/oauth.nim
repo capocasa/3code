@@ -27,6 +27,10 @@ type
     ## Everything generic OAuth needs to know about a provider.
     authorize*, token*, deviceCode*: string  ## deviceCode "" = no device flow
     clientId*, scope*: string
+    clientSecret*: string  ## "" for pure-PKCE public clients (xai, openai);
+                           ## Google's desktop clients register a (public,
+                           ## embedded-in-source) secret the token endpoint
+                           ## demands even with PKCE.
 
   OAuthError* = object of CatchableError
 
@@ -106,10 +110,13 @@ proc exchangeCode*(ep: OAuthEndpoints, code, redirectUri,
                    verifier: string): TokenSet =
   let client = newOAuthClient()
   defer: client.close()
-  toTokenSet(postForm(client, ep.token, [
+  var fields = @[
     ("grant_type", "authorization_code"), ("client_id", ep.clientId),
     ("code", code), ("redirect_uri", redirectUri),
-    ("code_verifier", verifier)]))
+    ("code_verifier", verifier)]
+  if ep.clientSecret != "":
+    fields.add ("client_secret", ep.clientSecret)
+  toTokenSet(postForm(client, ep.token, fields))
 
 proc refreshTokens*(ep: OAuthEndpoints, refreshToken: string): TokenSet =
   ## Exchange a refresh token. On servers that rotate refresh tokens the
@@ -117,9 +124,12 @@ proc refreshTokens*(ep: OAuthEndpoints, refreshToken: string): TokenSet =
   ## response is empty and the caller keeps the old one.
   let client = newOAuthClient()
   defer: client.close()
-  result = toTokenSet(postForm(client, ep.token, [
+  var fields = @[
     ("grant_type", "refresh_token"), ("client_id", ep.clientId),
-    ("refresh_token", refreshToken)]))
+    ("refresh_token", refreshToken)]
+  if ep.clientSecret != "":
+    fields.add ("client_secret", ep.clientSecret)
+  result = toTokenSet(postForm(client, ep.token, fields))
   if result.refreshToken == "":
     result.refreshToken = refreshToken
 
@@ -186,6 +196,19 @@ proc recvRequestLine(client: Socket, deadline: float;
     if result == "\r\n":
       raise newException(OAuthError, "browser callback closed before request")
     return
+
+proc freeLoopbackPort*(): int =
+  ## An ephemeral TCP port free on 127.0.0.1, for OAuth clients that
+  ## register a wildcard loopback redirect (Google's gemini-cli client:
+  ## any port) instead of one fixed port (OpenAI's Codex client: 1455).
+  ## Racy by nature (the port can be taken between close and rebind);
+  ## awaitLoopbackCode's bind would then fail fast, and the caller sees
+  ## an OAuthError rather than a hang.
+  let s = newSocket()
+  defer: s.close()
+  s.bindAddr(Port(0), "127.0.0.1")
+  let (_, port) = s.getLocalAddr()
+  int(port)
 
 proc awaitLoopbackCode*(listenPort: int, expectState: string,
                         timeoutSec = 300;
