@@ -2841,8 +2841,8 @@ let DefaultSystemPrompt* = glmSetup.prompt.replace(
     "{{credit}}",
     "Credit where it's due — to whoever trained the weights driving you and the lab serving them.")
   ## Bytes for the placeholder system message in fresh sessions and unloaded
-  ## session files. `refreshSystemPrompt` rewrites it on every turn so the
-  ## resolved profile (model, lab, variant) takes over.
+  ## session files. `refreshSystemPrompt` resolves it on the first turn
+  ## and on explicit model/provider changes.
 
 const ConfigExample* = """  [settings]
   current = "openai.gpt-4o-mini"
@@ -3341,26 +3341,37 @@ proc findSystemPromptOverride*(family: string): string =
   if fileExists(global): return global
   ""
 
-proc buildSystemPrompt*(p: Profile): string =
-  ## Bytes are stable within a (provider, model, variant) triple — that's
-  ## what the prompt now embeds for credit. Within a session that's constant,
-  ## so prefix caching on Anthropic/OpenAI/DeepInfra still applies; switching
-  ## model or provider mid-session will invalidate the cache.
-  ## Skills are discovered fresh on every call so a newly added skill file
-  ## becomes visible on the next turn without restarting the session.
+proc buildSystemPrompt(p: Profile, skills: string): string =
   let override = findSystemPromptOverride(p.family)
   if override != "":
     stderr.writeLine "3code: system prompt overridden by " & override
     return readFile(override)
       .replace("{{credit}}", buildCredit(p))
-      .replace("{{skills}}", discoverSkills())
+      .replace("{{skills}}", skills)
   setup(p).prompt
     .replace("{{credit}}", buildCredit(p))
-    .replace("{{skills}}", discoverSkills())
+    .replace("{{skills}}", skills)
 
-proc refreshSystemPrompt*(messages: JsonNode, p: Profile) =
+proc buildSystemPrompt*(p: Profile): string =
+  buildSystemPrompt(p, discoverSkills())
+
+proc refreshSystemPrompt*(messages: JsonNode, p: Profile,
+                          state: var PromptState) =
+  ## Snapshot the system prompt per conversation/profile. Catalog updates
+  ## belong in the newly submitted user message, never in the cached prefix.
   if messages == nil or messages.kind != JArray or messages.len == 0: return
   let m = messages[0]
   if m.kind != JObject or m{"role"}.getStr != "system": return
-  m["content"] = %buildSystemPrompt(p)
+  let identity = $ %*[p.name, p.url, p.model, p.family, p.version, p.variant]
+  let skills = discoverSkills()
+  if cast[pointer](state.system) != cast[pointer](m) or state.identity != identity:
+    m["content"] = %buildSystemPrompt(p, skills)
+    state = PromptState(system: m, identity: identity, skills: skills)
+  elif skills != state.skills:
+    let tail = messages[^1]
+    if tail.kind != JObject or tail{"role"}.getStr != "user": return
+    tail["content"] = %(tail{"content"}.getStr &
+      "\n\n<available_skills>\nThe current skill catalog replaces earlier listings. " &
+      "Read skill files only when needed.\n" & skills & "\n</available_skills>")
+    state.skills = skills
 

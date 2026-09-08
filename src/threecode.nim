@@ -585,7 +585,7 @@ proc main() =
       return false
     messages.add %*{"role": "user",
                     "content": buildUserMessage(messages, queued)}
-    refreshSystemPrompt(messages, prof)
+    refreshSystemPrompt(messages, prof, session.promptState)
     editor.echoRows = queuedRows
     commitUserPromptTranscript(queued)
     resetEditorRowModel(addr editor)
@@ -638,7 +638,7 @@ proc main() =
   # if a buffered quit/interrupt event should end the session.
   proc runInitialPrompt(text: string): bool =
     messages.add %*{"role": "user", "content": buildUserMessage(messages, text)}
-    refreshSystemPrompt(messages, prof)
+    refreshSystemPrompt(messages, prof, session.promptState)
     emitUserSubmit(text)
     resetEditorRowModel(addr editor)
     clearDraft(session)
@@ -755,7 +755,7 @@ proc main() =
         releaseIdleSubmittedInput()
         continue
       messages.add %*{"role": "user", "content": buildUserMessage(messages, line)}
-      refreshSystemPrompt(messages, prof)
+      refreshSystemPrompt(messages, prof, session.promptState)
       # User-submit transition: walk back to the previous turn's bar
       # row, repaint it as the receipt (cyan, skipped on the first turn),
       # echo the user's input as scroll-history content. Cursor lands

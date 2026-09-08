@@ -27,7 +27,8 @@ proc buildExample(): string =
   if fileExists(result):
     let binMtime = getLastModificationTime(result)
     var stale = false
-    for f in [getCurrentDir() / "example" / "webserve.nim"]:
+    for f in [getCurrentDir() / "example" / "webserve.nim",
+              getCurrentDir() / "tests" / "core" / "test_example_webserve.nim"]:
       if getLastModificationTime(f) > binMtime: stale = true
     if not stale:
       for f in walkDirRec(getCurrentDir() / "src"):
@@ -37,9 +38,10 @@ proc buildExample(): string =
     if not stale: return
     removeFile(result)
   createDir(result.parentDir)
-  var cmd = "nim c -d:ssl -d:providerStub --threads:on"
+  var cmd = "nim c --skipParentCfg:on -d:ssl -d:testPlainHttp -d:providerStub --threads:on"
   cmd.add " " & nimbleDepFlags()
-  cmd.add " --path:src --nimcache:" & (getCurrentDir() / "build" / "example_cache").quoteShell
+  cmd.add " --path:" & (getCurrentDir() / "src").quoteShell
+  cmd.add " --nimcache:" & (getCurrentDir() / "build" / "example_cache").quoteShell
   cmd.add " -o:" & result.quoteShell
   cmd.add " example/webserve.nim"
   let (outp, code) = execCmdEx(cmd)
@@ -64,7 +66,8 @@ family = "glm"
 models = "stub-model"
 """)
   writeFile(result / "run" / "stub_responses.json", $(%*[
-    {"content": "web reply", "contentChunks": ["web ", "reply"]}
+    {"content": "web reply", "contentChunks": ["web ", "reply"]},
+    {"content": "second reply"}
   ]))
 
 proc waitForPort(path: string; timeoutS = 15): bool =
@@ -127,11 +130,33 @@ suite "example: webserve":
     var acc = ""
     let deadline = epochTime() + 10.0
     while epochTime() < deadline and not acc.contains("\"turnend\""):
-      let chunk = try: ss.recv(256, timeout = 1_000)
+      let chunk = try: ss.recv(1, timeout = 1_000)
+        except TimeoutError: ""
+        except CatchableError: break
+      acc.add chunk
+    check acc.contains("web reply")
+    check acc.contains("\"delta\"")
+    check acc.contains("\"done\"")
+
+    # Discover a skill after the first request. Its listing must travel in
+    # the next user message, not by rewriting the already-sent system prompt.
+    createDir(root / "run" / ".3code" / "skills")
+    writeFile(root / "run" / ".3code" / "skills" / "late.md", "PRIVATE SKILL BODY")
+    check client.post("http://localhost:" & $WebPort & "/prompt",
+                      "continue").code == Http202
+    acc = ""
+    let secondDeadline = epochTime() + 10.0
+    while epochTime() < secondDeadline and not acc.contains("\"turnend\""):
+      let chunk = try: ss.recv(1, timeout = 1_000)
         except TimeoutError: ""
         except CatchableError: break
       acc.add chunk
     ss.close()
-    check acc.contains("web reply")
-    check acc.contains("\"delta\"")
-    check acc.contains("\"done\"")
+    check acc.contains("second reply")
+    check acc.contains("\"turnend\"")
+    var saved = ""
+    for path in walkDirRec(root / "data"):
+      if path.endsWith(".3log"): saved.add readFile(path)
+    check saved.contains("<available_skills>")
+    check saved.contains("late.md")
+    check not saved.contains("PRIVATE SKILL BODY")

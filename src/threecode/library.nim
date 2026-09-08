@@ -270,7 +270,7 @@ proc prompt*(s: AgentSession; text: string): string =
   ## and saved.
   s.messages.add %*{"role": "user",
                     "content": buildUserMessage(s.messages, text)}
-  refreshSystemPrompt(s.messages, s.profile)
+  refreshSystemPrompt(s.messages, s.profile, s.state.promptState)
   clearDraft(s.state)
   let interrupted = runTurnsInteractive(s.profile, s.messages, s.state)
   saveSession(s.state, s.messages)
