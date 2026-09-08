@@ -285,7 +285,7 @@ proc prompt*(s: AgentSession; text: string): string =
   for i in countdown(s.messages.len - 1, 0):
     let m = s.messages[i]
     if m.kind == JObject and m{"role"}.getStr == "assistant":
-      return stripCheckpointMarkers(m{"content"}.getStr(""))
+      return cutPartialTrailingMarker(stripCheckpointMarkers(m{"content"}.getStr("")))
   ""
 
 proc promptThread(job: TurnJob) {.thread.} =

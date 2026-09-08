@@ -446,21 +446,31 @@ proc clearSubmittedReceiptState() =
 proc clearSubmittedTickerState() =
   emitFatPromptEvent clearTickerEvent()
 
+proc cutVisibleContent(content: string): string =
+  ## What of an assistant reply would actually paint: complete marker lines
+  ## stripped plus a truncated trailing marker cut (a stream that ends
+  ## mid-`[checkpoint` held that tail back, so every end-of-turn commit,
+  ## emptiness check, notification, and reply-text extraction must treat it
+  ## as bookkeeping, not prose).
+  cutPartialTrailingMarker(stripCheckpointMarkers(content))
+
 proc commitAssistantItem(content: string; restoreEditor = true;
                          attachReceipt = true) =
   # Emptiness is judged on the visible content, not the raw string: a
   # reply whose only text is checkpoint bookkeeping paints nothing, so it
-  # must take the same empty-reply fallback as a bare empty reply.
+  # must take the same empty-reply fallback as a bare empty reply. The
+  # truncated trailing marker counts as bookkeeping too (the stream held
+  # it back, so the commit must not paint it).
   let afterCommit =
     if attachReceipt: clearSubmittedReceiptState
     else: clearSubmittedTickerState
-  if stripCheckpointMarkers(content).strip.len == 0:
+  if cutVisibleContent(content).strip.len == 0:
     let receipt = if attachReceipt: pendingReceiptBytes() else: ""
     var bytes = emptyAssistantBytes(attachReceipt, receipt)
     bytes.finishTranscriptItem()
     commitTranscriptBytes(bytes, restoreEditor, afterCommit)
     return
-  var bytes = renderAssistantContentBytes(content)
+  var bytes = renderAssistantContentBytes(cutVisibleContent(content))
   bytes.trimTranscriptTail()
   let receipt = if attachReceipt: pendingReceiptBytes() else: ""
   if attachReceipt and receipt.len > 0:
@@ -516,7 +526,7 @@ proc turnFinishedBody*(messages: JsonNode): string =
   if last.kind != JObject or last{"role"}.getStr != "assistant": return ""
   let body = last{"content"}.getStr
   if isEmptyReplyMsg(body.strip): return ""
-  stripCheckpointMarkers(body)
+  cutPartialTrailingMarker(stripCheckpointMarkers(body))
 
 proc revertHistory*(messages: var JsonNode, checkpoint: int): bool =
   ## Truncate `messages` just before the assistant message whose content
@@ -797,7 +807,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         # tool calls and no prose.
         if not streamedLive and
            not (toolCalls.len > 0 and
-                stripCheckpointMarkers(content).strip.len == 0):
+                cutVisibleContent(content).strip.len == 0):
           # The second guard keeps live in sync with replay: an empty or
           # marker-only text paired with tool calls renders nothing (the
           # grey empty-reply fallback is for the final tool-less reply),
@@ -1068,7 +1078,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     # painted nothing at all, so it must still go through the assistant-item
     # commit: streaming used to skip it, leaving a bare receipt floating in
     # scrollback and no empty-reply notice.
-    let displayEmpty = stripCheckpointMarkers(content).strip.len == 0
+    let displayEmpty = cutVisibleContent(content).strip.len == 0
     discard stopBarTick()
     stopSpinner(clearLiveFooter = false)
     if streamedLive and not displayEmpty:
