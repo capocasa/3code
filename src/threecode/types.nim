@@ -4,7 +4,7 @@
 ## `experimentalEnabled` is a global because every module that validates a
 ## profile needs it, and threading it through every call site is noise.
 
-import std/[os, strutils, tables, times]
+import std/[json, os, strutils, tables, times]
 
 var experimentalEnabled*: bool = false
   ## Set by `-x`/`--experimental`.
@@ -150,7 +150,11 @@ type
     plan*: seq[PlanItem]
   ReadCache* = ref object
     state*: Table[string, (Time, int)]
+  PromptState* = object
+    system*: JsonNode
+    identity*, skills*: string
   Session* = object
+    promptState*: PromptState
     usage*: Usage
     lastPromptTokens*: int
     toolLog*: seq[ToolRecord]

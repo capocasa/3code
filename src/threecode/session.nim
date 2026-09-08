@@ -847,9 +847,8 @@ proc renderSession*(session: Session, messages: JsonNode): string =
     if m.kind != JObject: continue
     case m{"role"}.getStr
     of "system":
-      # Skip — the system prompt is rebuilt from the profile on every
-      # `refreshSystemPrompt`, so what's on disk is stale the moment we
-      # resume. Saving 5-10KB of boilerplate per session also pushes the
+      # The system prompt is rebuilt from the profile on resume.
+      # Saving 5-10KB of boilerplate per session also pushes the
       # actual conversation too far down to skim.
       discard
     of "user":
