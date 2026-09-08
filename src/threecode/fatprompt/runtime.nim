@@ -337,6 +337,27 @@ proc setAnimSpinner*(spinner: string; elapsed: int) {.gcsafe.} =
     frameModelShared.elapsed = elapsed
     release frameModelLock
 
+proc setAnimRetryWait*(label: string; remainingS: int) {.gcsafe.} =
+  ## Enter/update the retry-backoff countdown shown in the spinner bar.
+  {.cast(gcsafe).}:
+    acquire frameModelLock
+    frameModelShared.retryWait = RetryWaitState(active: true,
+      label: label, remainingS: max(0, remainingS))
+    release frameModelLock
+
+proc setAnimRetryRemaining*(remainingS: int) {.gcsafe.} =
+  ## Tick the countdown down without touching the label or spinner glyph.
+  {.cast(gcsafe).}:
+    acquire frameModelLock
+    frameModelShared.retryWait.remainingS = max(0, remainingS)
+    release frameModelLock
+
+proc clearAnimRetryWait*() {.gcsafe.} =
+  {.cast(gcsafe).}:
+    acquire frameModelLock
+    frameModelShared.retryWait = RetryWaitState()
+    release frameModelLock
+
 proc setAnimViewport*(banner: string; lines: openArray[string];
                       exitCode = -1; idx = 0;
                       maxLines = StreamMaxLines) {.gcsafe.} =
@@ -372,7 +393,7 @@ proc currentFrameFromModel*(): FooterFrame {.gcsafe.} =
     of amSpinner:
       spinnerFooterFrame(
         if m.spinner.len > 0: m.spinner else: "○",
-        m.label, m.ticker, m.elapsed)
+        m.label, m.ticker, m.elapsed, m.retryWait)
     of amBarTick:
       tokenBarFrame(m.label, m.ticker)
     of amIdle:
@@ -498,7 +519,7 @@ proc currentSpinnerFooterFrame(): FooterFrame {.gcsafe.} =
   let m = getFrameModel()
   spinnerFooterFrame(
     if m.spinner.len > 0: m.spinner else: "○",
-    m.label, m.ticker, m.elapsed)
+    m.label, m.ticker, m.elapsed, m.retryWait)
 
 proc refreshEditorWidth(ed: var minline.LineEditor) =
   let w = try: terminalWidth() except CatchableError: 0
@@ -822,7 +843,10 @@ proc guiLoop(unused: string) {.thread.} =
     try:
       case m.mode
       of amSpinner:
-        let glyph = frames[i mod frames.len]
+        # Clock glyph while a retry backoff counts down; braille rotation
+        # resumes the moment the next HTTP attempt starts (the controller
+        # clears retryWait then).
+        let glyph = if m.retryWait.active: "⧗" else: frames[i mod frames.len]
         # Build the frame from the snapshot copy instead of writing the
         # glyph back via setSpinFrame + currentFrameFromModel: each of
         # those is a separate frameModelLock critical section, and
@@ -833,7 +857,7 @@ proc guiLoop(unused: string) {.thread.} =
         # reads the model exactly once (the getFrameModel above) and never
         # re-enters frameModelLock, so the join always makes progress.
         let frame = spinnerFooterFrame(glyph, m.label, m.ticker,
-                                       elapsed.int)
+                                       elapsed.int, m.retryWait)
         # When assistant content is streaming, the controller has painted
         # volatile partial rows into the engine. A bare `renderFooter` would
         # erase them (`\x1b[J`) and repaint only the footer, clobbering the
@@ -1151,6 +1175,7 @@ proc startSpinner*(label: string) =
 
 proc stopSpinner*(clearLiveFooter = true) =
   debugOut "stopSpinner"
+  clearAnimRetryWait()
   if not guiRunning:
     setAnimMode(amIdle)
     return
@@ -1779,7 +1804,13 @@ proc installApiStreamHooks*() =
     afterLiveContent: apiAfterLiveContent,
     finalUsage: apiFinalUsage,
     noUsage: apiNoUsage,
-    retryNotice: apiRetryNotice))
+    retryNotice: apiRetryNotice,
+    retryWait: proc(label: string; remainingS: int) =
+      setAnimRetryWait(label, remainingS),
+    retryWaitTick: proc(remainingS: int) =
+      setAnimRetryRemaining(remainingS),
+    retryWaitClear: proc() =
+      clearAnimRetryWait()))
 
 # ---------- Headless (library) stream hooks ----------
 #

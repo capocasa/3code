@@ -1038,7 +1038,7 @@ suite "terminal visual contract":
       tty.send "go"
       tty.send "\n"
       # The retry notice is visible in scrollback as ordinary history.
-      tty.expectInHistory "rate limit (code 429). retry 2/12 in 1s"
+      tty.expectInHistory "rate limit (code 429), retry 2/12 in 0:01"
       # ...and the retried reply reaches scrollback after the backoff.
       tty.expectInHistory "reply after retry"
       # The prompt is live again afterward (the footer was preserved, not
@@ -1053,7 +1053,7 @@ suite "terminal visual contract":
       var hist = tty.historyText().splitLines()
       var idx = -1
       for i, line in hist:
-        if line == "rate limit (code 429). retry 2/12 in 1s": idx = i
+        if line == "rate limit (code 429), retry 2/12 in 0:01": idx = i
       check idx > 0
       check hist[idx - 1].strip.len == 0
       check hist[idx + 1].strip.len == 0

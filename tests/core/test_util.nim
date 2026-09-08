@@ -114,6 +114,22 @@ suite "util: humanTokens":
   test "formats zero":
     check humanTokens(0) == "0"
 
+suite "util: humanDuration":
+  test "sub-minute is m:ss":
+    check humanDuration(0) == "0:00"
+    check humanDuration(4) == "0:04"
+    check humanDuration(59) == "0:59"
+
+  test "under an hour is m:ss":
+    check humanDuration(60) == "1:00"
+    check humanDuration(128) == "2:08"
+    check humanDuration(2047) == "34:07"
+
+  test "an hour and up is h m s":
+    check humanDuration(3600) == "1h00m00s"
+    check humanDuration(4341) == "1h12m21s"
+    check humanDuration(2048) == "34:08"
+
 suite "util: tokenSlot":
   test "returns icon + formatted count":
     let r = tokenSlot("●", 500)

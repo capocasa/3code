@@ -552,6 +552,19 @@ func humanTokens*(n: int): string =
   if n < 1000: $n
   else: &"{n.float/1000:.1f}k"
 
+func humanDuration*(secs: int): string =
+  ## Second-precise but human-friendly: 0:04, 2:08, 34:07, 1h12m21s.
+  let s = max(0, secs)
+  if s < 3600:
+    let m = s div 60
+    let r = s mod 60
+    &"{m}:{r:02}"
+  else:
+    let h = s div 3600
+    let m = (s mod 3600) div 60
+    let r = s mod 60
+    &"{h}h{m:02}m{r:02}s"
+
 func detectMdHeader*(line: string): (bool, string) =
   ## A line of `###...` followed by a space and at least one non-space
   ## char. Returns (true, body) on match, (false, "") otherwise.
