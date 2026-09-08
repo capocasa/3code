@@ -141,10 +141,12 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
     of "user":
       let c = stripPreamble(m{"content"}.getStr("")).strip
       if c.len == 0: continue
-      let shown = if c.len > 400: c[0 ..< 400] & " ..." else: c
+      # No length truncation: the live path echoes the full submitted line
+      # (wrapped at terminal width by `formatUserPromptItem`), so the replay
+      # must too.
       if not firstItem:
         stdout.write "\n"
-      stdout.write formatItem(userPromptItem(shown)) & "\n"
+      stdout.write formatItem(userPromptItem(c)) & "\n"
       firstItem = false
     of "assistant":
       var c = m{"content"}.getStr("").strip
@@ -160,12 +162,17 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
         block:
           let tcs = m{"tool_calls"}
           tcs != nil and tcs.kind == JArray and tcs.len > 0
+      # The turn's token receipt lands under the LAST tool of the turn,
+      # not under the prose (the live path defers it via `deferredReceipt`
+      # so it never renders between the answer and the tools it documents).
+      # A turn without tools keeps the receipt under the prose.
+      let receiptCap = not isLast and u.totalTokens > 0 and not hasTools
       # An empty reply paired with tool calls renders nothing live (the
       # empty-reply fallback is only for tool-less replies), so the replay
       # skips the assistant item entirely in that shape.
       if c.len > 0 or not hasTools:
         var bytes = formatItem(assistantItem(c))
-        if not isLast and u.totalTokens > 0:
+        if receiptCap:
           bytes.attachReceipt(receiptBytes(tokenLineLabel(u, window)), true)
         if not firstItem:
           stdout.write "\n"
@@ -186,43 +193,74 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
         result = u
       if hasTools:
         let tcs = m{"tool_calls"}
-        for tc in tcs:
+        let deferredReceipt =
+          if not isLast and u.totalTokens > 0:
+            receiptBytes(tokenLineLabel(u, window))
+          else: ""
+        for j in 0 ..< tcs.len:
+          let tc = tcs[j]
           inc toolIdx
-          var banner = ""
           var code = 0
           var output = ""
           var kind = akBash
           var plan: seq[PlanItem] = @[]
+          var act: Action
+          var haveAct = false
           if toolIdx <= toolLog.len:
             let rec = toolLog[toolIdx - 1]
-            banner = rec.banner
             code = rec.code
             output = rec.output
             kind = rec.kind
             plan = rec.plan
-          else:
+          # Rebuild the Action from the persisted tool_call args so the
+          # shared `toolItem(act, ...)` renders exactly what live rendered:
+          # the banner (`bannerFor`), the write tool's body-as-diff, and the
+          # patch header all derive from the Action, and the stored banner
+          # alone loses the body (a replayed `w` item rendered banner-only).
+          block rebuildAction:
             let fn = tc{"function"}
-            let name = if fn != nil: fn{"name"}.getStr else: "?"
-            let argsStr = if fn != nil: fn{"arguments"}.getStr("") else: ""
+            if fn == nil or fn.kind != JObject: break rebuildAction
+            let name = fn{"name"}.getStr("?")
+            let argsStr = fn{"arguments"}.getStr("")
             let args = try: parseJson(if argsStr == "": "{}" else: argsStr)
                        except CatchableError: newJObject()
-            let act = toolCallToAction(family, name, args)
-            banner = bannerFor(act)
+            act = toolCallToAction(family, name, args)
+            haveAct = true
             kind = act.kind
-            plan = act.plan
-          # Plan and clear items come straight from the shared formatters so
-          # a replayed item looks byte-identical to how it rendered live.
-          # Other kinds keep the stored banner (or the `bannerFor` fallback
-          # when toolLog was not saved) and render the body through the
-          # shared per-kind renderer.
+            # A plan round-trip can lose its items in the persisted args
+            # (empty `items` array) while toolLog kept them; the stored
+            # plan wins when the rebuilt one came back empty.
+            if act.kind == akPlan and act.plan.len == 0 and plan.len > 0:
+              act.plan = plan
+            else:
+              plan = act.plan
+            if toolIdx > toolLog.len:
+              code = 0
+              output = ""
           var bytes: string
-          if kind == akPlan:
-            bytes = formatItem(toolItem(Action(kind: akPlan, plan: plan),
-              output, code, toolIdx))
-          elif kind == akClear:
-            bytes = formatItem(toolItem(Action(kind: akClear),
-              output, code, toolIdx))
+          if haveAct:
+            # A skill read renders live as the single suppressed marker, not
+            # a tool transcript (`isSkillRead` in the turn loop); the replay
+            # must render the same marker so a scrolled-back skill load
+            # looks identical after resume.
+            if isSkillRead(act):
+              bytes = skillLoadedBytes(act)
+              bytes.trimTranscriptTail()
+            else:
+              let diff =
+                if act.kind == akWrite and code == 0: act.body else: ""
+              var item = toolItem(act, output, code, toolIdx, diff)
+              bytes = formatItem(item)
+              # The deferred receipt caps the LAST tool of the turn, flush
+              # below the item, exactly where the live path attached it.
+              if deferredReceipt.len > 0 and j == tcs.len - 1:
+                bytes.attachReceipt(deferredReceipt, true)
           else:
+            # tool_call payload unreadable (malformed/legacy session): fall
+            # back to the stored banner + shared per-kind renderer.
+            var banner = ""
+            if toolIdx <= toolLog.len: banner = toolLog[toolIdx - 1].banner
+            if banner.len == 0: banner = "?"
             bytes = toolTranscriptBytes(banner, kind, output, code, toolIdx)
             bytes.trimTranscriptTail()
           if not firstItem:

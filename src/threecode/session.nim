@@ -677,6 +677,24 @@ proc recordToToolCall(r: Record): JsonNode =
       %*{"path": path, "edits": arr}
     of "apply_patch":
       %*{"input": sectionText(sections, "")}
+    of "clear":
+      %*{"prompt": sectionText(sections, "")}
+    of "dmail":
+      %*{"checkpoint": (try: parseInt(path) except ValueError: -1),
+         "message": sectionText(sections, "")}
+    of "read":
+      var a = %{"path": %path}
+      let hdr = if pos.len > 3: pos[3 ..^ 1].join(" ") else: ""
+      let nums = if "-" in hdr: hdr.split('-') else: @[]
+      if nums.len == 2:
+        try:
+          let off = parseInt(nums[0])
+          let last = parseInt(nums[1])
+          if off > 0:
+            a["offset"] = %off
+            a["limit"] = %(if last >= off: last - off + 1 else: 0)
+        except ValueError: discard
+      a
     of "web_search":
       %*{"query": sectionText(sections, "")}
     of "web_fetch":
@@ -824,6 +842,10 @@ proc humanBody(name: string, args: JsonNode): string =
         result.add e{"replace"}.getStr("")
   of "apply_patch":
     result = args{"input"}.getStr("")
+  of "clear":
+    result = args{"prompt"}.getStr("")
+  of "dmail":
+    result = args{"message"}.getStr("")
   of "web_search":
     result = args{"query"}.getStr("")
   of "web_fetch":
@@ -860,11 +882,25 @@ proc emitToolUse(s: var string, tc: JsonNode) =
   var body = humanBody(name, args)
   if body.len > 0 and not body.endsWith("\n"): body.add "\n"
   body.add "-- wire --\n" & $tc
-  let hdr = if name in ["write", "patch"]:
-              let path = args{"path"}.getStr("")
-              "tool_use " & id & " " & name & (if path.len > 0: " " & path else: "")
-            else:
-              "tool_use " & id & " " & name
+  # Headers stay lossy-parseable for the legacy rebuild in recordToToolCall:
+  # `read` carries its offset range and `dmail` its checkpoint number.
+  let hdr = case name
+    of "write", "patch":
+      let path = args{"path"}.getStr("")
+      "tool_use " & id & " " & name & (if path.len > 0: " " & path else: "")
+    of "read":
+      let path = args{"path"}.getStr("")
+      let offset = args{"offset"}.getInt(0)
+      let limit = args{"limit"}.getInt(0)
+      var h = "tool_use " & id & " read " & path
+      if offset > 0 or limit > 0:
+        h.add " " & $offset & "-" &
+          (if limit > 0: $(offset + limit - 1) else: "end")
+      h
+    of "dmail":
+      "tool_use " & id & " dmail " & $args{"checkpoint"}.getInt(-1)
+    else:
+      "tool_use " & id & " " & name
   emitRecord s, hdr, body
 
 proc emitTokens(s: var string, usage: JsonNode) =
@@ -1133,6 +1169,9 @@ proc buildToolLogFromMessages(messages: JsonNode,
           Action(kind: akWebFetch, body: args{"url"}.getStr)
         of "clear":
           Action(kind: akClear, body: args{"prompt"}.getStr)
+        of "dmail":
+          Action(kind: akDMail, path: $args{"checkpoint"}.getInt(-1),
+                body: args{"message"}.getStr)
         of "edit":
           var a = Action(kind: akPatch, path: args{"path"}.getStr)
           let edits = args{"edits"}

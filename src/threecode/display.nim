@@ -557,15 +557,72 @@ proc renderAssistantContentBytes*(content: string): string =
   ## (bullet + styled markdown) without touching a File. Used by the
   ## controller's transcript path, which owns when the bytes hit the
   ## terminal.
+  ##
+  ## Reproduces the LIVE streaming commit shape (`feedContent` /
+  ## `finishContent` in fatprompt/runtime.nim) line for line: every
+  ## committed source line becomes one transcript item, consecutive items
+  ## are separated by one blank row, interior blank source lines coalesce
+  ## into a single extra blank row, and leading/trailing blanks are
+  ## dropped. Keeping the two shapes in one place is what makes a resumed
+  ## replay byte-identical to how the reply rendered live; the walk below
+  ## must mirror feedContent's rules exactly.
   # Complete markers stripped, then a truncated trailing marker cut: the
   # live painter held that tail back, so the commit must not paint it.
   let content = cutPartialTrailingMarker(stripCheckpointMarkers(content))
   if content.strip.len == 0: return
   var st = initMarkdownState()
-  result = assistantBulletBytes()
+  # Accumulate the exact byte sequence the live stream commits, one
+  # `\r\n + body + \r\n` transcript item per committed source line
+  # (`commitPendingLine`) and one empty item per deferred paragraph break
+  # (`commitBlankLine`). One leading and trailing `\r\n` are trimmed
+  # because the transcript emitter re-adds them around the whole body.
+  var commits: seq[string] = @[]
+  var pendingBlank = false
   for line in content.splitLines:
-    result.add assistantTextBytes(captureMarkdownBytes(st, line))
-  result.add assistantTextBytes(captureMarkdownBytes(st, finish = true))
+    if line.strip.len == 0:
+      # Leading blanks fall while `firstEmit` still holds (the stream
+      # strips them before the first real content); interior blanks
+      # defer, coalesced, until the next committed line.
+      if not st.firstEmit:
+        pendingBlank = true
+      continue
+    let wasFirst = st.firstEmit
+    let body = captureMarkdownBytes(st, line)
+    if body.strip.len == 0:
+      # Buffered table/code row: nothing commits for this source line,
+      # so a deferred blank stays pending (the stream's blank flushes
+      # only when real bytes commit).
+      continue
+    if pendingBlank and commits.len > 0:
+      commits.add ""
+      pendingBlank = false
+    if wasFirst:
+      commits.add assistantBulletBytes() & assistantTextBytes(body)
+    else:
+      commits.add assistantTextBytes(body)
+  let finish = captureMarkdownBytes(st, finish = true)
+  if finish.strip.len > 0:
+    if pendingBlank and commits.len > 0:
+      commits.add ""
+    commits.add assistantTextBytes(finish)
+  if commits.len == 0: return
+  for c in commits:
+    # Trim each commit's tail exactly as the transcript emitter trims an
+    # item before writing it (`trimTrailingNewlines`): the markdown body
+    # carries its own `\n` line ending, and keeping it would stack an
+    # extra blank row onto every separator.
+    var body = c
+    while body.len > 0 and body[^1] in {'\r', '\n'}:
+      body.setLen(body.len - 1)
+    # An empty commit (the stream's deferred paragraph break) also writes
+    # nothing in the live emitter (`writeTranscriptItem` returns early on
+    # empty), so a paragraph break renders exactly one blank row, same as
+    # any line break.
+    if body.len == 0: continue
+    result.add "\r\n" & body & "\r\n"
+  while result.len > 0 and result[^1] in {'\r', '\n'}:
+    result.setLen(result.len - 1)
+  if result.startsWith("\r\n"): result.delete(0, 1)
 
 proc toolIcon*(kind: ActionKind): string =
   case kind
