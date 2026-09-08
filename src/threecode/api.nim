@@ -2891,7 +2891,8 @@ proc fetchModels*(url, key: string): (seq[string], string) =
                                sslContext = bundledSslContext())
     defer: client.close()
     client.headers["Authorization"] = "Bearer " & key
-    let resp = client.get(url & "/models")
+    let resp = guardedHttp(client.get(url & "/models"), IOError,
+                           "fetching " & url)
     if resp.code.int != 200:
       return (@[], "HTTP " & $resp.code.int & " — " &
                    resp.body[0 ..< min(120, resp.body.len)])

@@ -169,8 +169,9 @@ proc callSummarizer(p: Profile, messages: JsonNode): string =
     if providerOf(p) in ["opencode", "opencodego"]:
       client.headers["x-opencode-session"] =
         if conversationId != "": conversationId else: oneShotSessionId()
-    let resp = client.request(endpoint,
-                              httpMethod = HttpPost, body = sanitizeUtf8($body))
+    let resp = guardedHttp(client.request(endpoint, httpMethod = HttpPost,
+                               body = sanitizeUtf8($body)),
+                           IOError, "fetching " & endpoint)
     status = resp.code.int
     respBody = resp.body
   except CatchableError as e:

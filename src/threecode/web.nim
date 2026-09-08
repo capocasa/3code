@@ -171,28 +171,10 @@ proc decodeBody*(cenc, body: string): string =
   else:
     body
 
-proc statusFromDefect(msg: string): string =
-  ## Pull the offending status out of a RangeDefect message shaped
-  ## "value out of range: 999 notin 0 .. 599".
-  let i = msg.find(": ")
-  let j = msg.find(" notin ")
-  if i >= 0 and j > i:
-    "HTTP " & msg[i+2 ..< j]
-  else:
-    "HTTP status out of range (" & msg & ")"
-
 proc fetchUrl*(url: string): string =
   let client = newClient()
   defer: client.close()
-  # Some hosts (LinkedIn's anti-bot reply) send a status outside Nim's
-  # HttpCode range (0..599); httpclient converts the status line inside
-  # `get` itself and dies with RangeDefect before the check below runs,
-  # so it must be translated here, not at the caller.
-  let resp =
-    try: client.get(url)
-    except RangeDefect as e:
-      raise newException(IOError,
-        statusFromDefect(e.msg) & " fetching " & url)
+  let resp = guardedHttp(client.get(url), IOError, "fetching " & url)
   if resp.code.int div 100 != 2:
     raise newException(IOError, "HTTP " & $resp.code & " fetching " & url)
   let body = decodeBody(
@@ -281,7 +263,7 @@ proc webSearchExa(query: string; key: string): seq[SearchHit] =
     "Content-Type": "application/json",
     "Accept": "application/json, text/event-stream"
   })
-  let resp = client.post(base, body)
+  let resp = guardedHttp(client.post(base, body), IOError, "searching")
   if resp.code.int div 100 != 2:
     raise newException(IOError, "HTTP " & $resp.code & " searching")
   let data = extractSseData(resp.body)
@@ -341,7 +323,8 @@ proc webSearchParallel(query: string; key: string): seq[SearchHit] =
   if key.len > 0:
     hdrs.add ("Authorization", "Bearer " & key)
   client.headers = newHttpHeaders(hdrs)
-  let resp = client.post("https://search.parallel.ai/mcp", body)
+  let resp = guardedHttp(client.post("https://search.parallel.ai/mcp", body),
+                          IOError, "searching")
   if resp.code.int div 100 != 2:
     raise newException(IOError, "HTTP " & $resp.code & " searching")
   let data = extractSseData(resp.body)
@@ -384,7 +367,7 @@ proc webSearchBrave(query: string; key: string): seq[SearchHit] =
     "Accept": "application/json",
     "X-Subscription-Token": key
   })
-  let resp = client.get(url)
+  let resp = guardedHttp(client.get(url), IOError, "searching")
   if resp.code.int div 100 != 2:
     raise newException(IOError, "HTTP " & $resp.code & " searching")
   parseBraveResults(resp.body)
