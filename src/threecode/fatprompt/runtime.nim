@@ -96,6 +96,13 @@ var barTickStart: float
 var commandSymbolIndex: Atomic[int]
   ## Currency-symbol rotation index for the bash tool viewport's command
   ## row, advanced by the GUI thread while a bash command runs.
+var lastPaintedElapsedS: Atomic[int64]
+  ## The elapsed counter (whole seconds) of the frame the GUI thread last
+  ## painted, or 0 at the start of an animation era. The input thread's
+  ## editor repaints rebuild the live footer frame outside the GUI thread;
+  ## reading this keeps their elapsed counter identical to what is on
+  ## screen instead of falling back to the frame model's stale `elapsed`
+  ## (which painted `0s` for one frame per keystroke).
 
 proc nextCommandSymbol*(): string =
   const symbols = ["$", "€", "£", "¥"]
@@ -393,9 +400,11 @@ proc currentFrameFromModel*(): FooterFrame {.gcsafe.} =
     of amSpinner:
       spinnerFooterFrame(
         if m.spinner.len > 0: m.spinner else: "○",
-        m.label, m.ticker, m.elapsed, m.retryWait)
+        m.label, m.ticker, lastPaintedElapsedS.load(moAcquire).int,
+        m.retryWait)
     of amBarTick:
-      tokenBarFrame(m.label, m.ticker)
+      tokenBarFrame(barTickLabel(m.label, lastPaintedElapsedS.load(moAcquire).int),
+                    m.ticker)
     of amIdle:
       footerFrame(fatPromptState)
 
@@ -519,7 +528,8 @@ proc currentSpinnerFooterFrame(): FooterFrame {.gcsafe.} =
   let m = getFrameModel()
   spinnerFooterFrame(
     if m.spinner.len > 0: m.spinner else: "○",
-    m.label, m.ticker, m.elapsed, m.retryWait)
+    m.label, m.ticker, lastPaintedElapsedS.load(moAcquire).int,
+    m.retryWait)
 
 proc refreshEditorWidth(ed: var minline.LineEditor) =
   let w = try: terminalWidth() except CatchableError: 0
@@ -856,6 +866,7 @@ proc guiLoop(unused: string) {.thread.} =
         # caller waits for join, this thread waits for the lock. The tick
         # reads the model exactly once (the getFrameModel above) and never
         # re-enters frameModelLock, so the join always makes progress.
+        lastPaintedElapsedS.store(elapsed.int, moRelease)
         let frame = spinnerFooterFrame(glyph, m.label, m.ticker,
                                        elapsed.int, m.retryWait)
         # When assistant content is streaming, the controller has painted
@@ -876,10 +887,8 @@ proc guiLoop(unused: string) {.thread.} =
         spinnerFramePainted.store(true, moRelaxed)
       of amBarTick:
         let secs = (epochTime() - barTickStart).int
-        let label =
-          if m.label.hasElapsedSuffix: m.label
-          else: m.label & "  " & $secs & "s"
-        let frame = tokenBarFrame(label)
+        lastPaintedElapsedS.store(secs, moRelease)
+        let frame = tokenBarFrame(barTickLabel(m.label, secs))
         let snap = m.viewport
         if snap.active:
           # Re-derive the wrapped rows from the snapshot at the live
@@ -1048,6 +1057,7 @@ proc startBarTick*(base: string): bool =
   ## owns the tick and must stop it on scope exit.
   debugOut "startBarTick"
   if getFrameModel().mode == amBarTick: return false
+  lastPaintedElapsedS.store(0, moRelease)
   setAnimLabel(base)
   setAnimMode(amBarTick)
   barTickStart = epochTime()
@@ -1148,6 +1158,10 @@ proc setCommandStatusActive*(active: bool) =
 
 proc startSpinner*(label: string) =
   debugOut "startSpinner"
+  if not guiRunning:
+    # Fresh animation era: the GUI thread (re)starts with a zeroed clock,
+    # so any frame painted before its first tick must read zero too.
+    lastPaintedElapsedS.store(0, moRelease)
   if label.len > 0: setSpinLabel(label)
   setSpinFrame("⠋", 0)
   setAnimMode(amSpinner)

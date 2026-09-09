@@ -7,6 +7,13 @@ discard """
 ## Reproduction for the gui-thread-refactor regression where the buffered
 ## editor repaint walks up one row too far, so typed text briefly lands
 ## on the row above and is then overwritten.
+##
+## Second regression (same keystroke path): the editor repaint rebuilds
+## the live footer frame from the frame model, whose `elapsed` field is
+## never updated by the GUI thread (it computes its own clock), so every
+## keystroke repaints the spinner bar with a stale `0s` until the next
+## 80ms GUI tick restores the real elapsed. Typed keystrokes must never
+## show an elapsed counter older than the frames around them.
 import std/[json, os, posix, strutils, unittest]
 import tty_expect
 import stub_helpers
@@ -41,6 +48,10 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
     (key: "XDG_CONFIG_HOME", val: root / "xdg"),
     (key: "XDG_DATA_HOME", val: root / "data"),
     (key: "THREECODE_STUB_RESPONSES", val: responsesPath),
+    # Keep the gui thread's real 80ms cadence and turn clock: the frame
+    # channel stays up, but test-frame mode would freeze the elapsed
+    # counter at 0, hiding exactly the stale-elapsed flicker under test.
+    (key: "THREECODE_TEST_GUI_LIVE", val: "1"),
   ]
 
 proc rawSend(s: TtySession; text: string) =
@@ -59,13 +70,26 @@ proc snapshot(s: TtySession; label: string) =
     let mark = if i == f.cursorRow: " <CARET" else: ""
     echo "    row ", i, mark, ": '", row, "'"
 
+proc barElapsedSecs(row: string): int =
+  ## The trailing ` Ns` elapsed counter of a spinner/bar row, or -1.
+  ## Harness rows carry full-width trailing padding; drop it first.
+  result = -1
+  let row = row.strip(leading = false, trailing = true)
+  if row.len < 3 or row[^1] != 's': return
+  var i = row.len - 2
+  while i >= 0 and row[i].isDigit: dec i
+  if i < row.len - 2 and i >= 0 and row[i] == ' ':
+    result = parseInt(row[i + 1 .. row.len - 2])
+
 suite "typing during active stream":
   test "typed text lands on caret row, not one row above":
     let root = newFixture("typing_during_stream")
     writeConfiguredProvider(root)
     let chunkList = ["alpha ", "beta ", "gamma ", "delta ", "epsilon ",
                      "zeta ", "eta ", "theta ", "iota ", "kappa ",
-                     "lambda ", "mu ", "nu ", "xi "]
+                     "lambda ", "mu ", "nu ", "xi ", "omicron ",
+                     "pi ", "rho ", "sigma ", "tau ", "upsilon ",
+                     "phi ", "chi ", "psi ", "omega "]
     let chunks = %* chunkList
     let joined = chunkList.join("").strip()
     # Small content + a real usage block so the response completes cleanly
@@ -75,7 +99,7 @@ suite "typing during active stream":
     let responses = %*[
       {"content": joined,
        "contentChunks": chunks,
-       "contentChunkDelayMs": 100,
+       "contentChunkDelayMs": 150,
        "usage": {"promptTokens": 20, "completionTokens": 14,
                  "totalTokens": 34, "cachedTokens": 0}}
     ]
@@ -122,7 +146,38 @@ suite "typing during active stream":
     check hiddenOnPromptRow == 0
     if hiddenOnPromptRow != 0:
       echo "caret flickered off the prompt row ", hiddenOnPromptRow,
-           " frames while typing during the stream"
-    tty.drain(2000)
+        " frames while typing during the stream"
+
+    # Elapsed-counter regression: once the turn clock is past 1s, keep
+    # typing and scan every captured frame. The keystroke repaint and
+    # the GUI tick must agree: after the bar has shown >= 1s no later
+    # frame may fall back to `0s` (the stale frame-model elapsed).
+    var liveSecs = -1
+    var waitedMs = 0
+    while liveSecs < 1 and waitedMs < 10000:
+      tty.drain(100)
+      inc waitedMs, 100
+      block clockSeen:
+        for fi in countdown(tty.frames.high, 0):
+          for row in tty.frames[fi].rows:
+            let secs = barElapsedSecs(row)
+            if secs >= 1:
+              liveSecs = secs
+              break clockSeen
+    check liveSecs >= 1
+    var staleZeroFrames: seq[string]
+    since = tty.frames.len
+    for ch in "world":
+      rawSend(tty, $ch)
+      tty.drain(60)
+      for fi in since ..< tty.frames.len:
+        for row in tty.frames[fi].rows:
+          if " 0s" in row:
+            staleZeroFrames.add "frame " & $fi & ": '" & row & "'"
+      since = tty.frames.len
+    check staleZeroFrames.len == 0
+    for hit in staleZeroFrames:
+      echo "stale 0s bar frame while typing: ", hit
+    tty.drain(4500)
     tty.expectAlive()
     snapshot(tty, "final")
