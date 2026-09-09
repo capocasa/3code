@@ -27,10 +27,6 @@ type
     ## stored a separate `model_prefix` key; it is expanded into the model
     ## ids on load and never written back out.
     name*, url*, key*, modelPrefix*, family*: string
-    params*: ModelParams  ## [provider.params] overrides for the
-                          ## known-good model parameters (temperature,
-                          ## max_tokens, think_back, context_window).
-                          ## All-none means "use the known-good table".
     auth*: string  ## "oauth" = subscription login (tokens in the auth
                    ## store, `key` stays empty); anything else = static key.
     models*: seq[string]
@@ -41,6 +37,14 @@ type
     reasonings*: seq[string]  ## available reasoning levels for `:reasoning`
                               ## listing. Empty means "fall back to the
                               ## model default" (`defaultReasoningsFor`).
+  ParamsRec* = object
+    ## One `[params]` section: model-parameter overrides scoped to a
+    ## (provider, model) pair. `model` empty means the whole provider.
+    ## Fields merge across matching sections at profile-build time
+    ## (`resolveParams`): provider-wide entries apply first, then
+    ## model-scoped ones over them, each in file order.
+    provider*, model*: string
+    params*: ModelParams
 
 func shortModel*(model: string): string =
   ## Everything after the last `/` in a model id. This is the
@@ -79,6 +83,10 @@ func findModel*(p: ProviderRec, name: string): int =
 
 var activeCurrent*: string
 var activeProviders*: seq[ProviderRec]
+var activeParams*: seq[ParamsRec]
+  ## Every `[params]` section from the active config, in file order. Kept
+  ## so `writeConfigFile` can persist them and `buildProfile` can resolve
+  ## the entry matching the current (provider, model).
 var activeSearchKey*: string = ""
   ## The key for the *active* search engine, resolved at config load from
   ## the engine-specific `[search] exa-key` / `brave-key` (or the matching
@@ -278,7 +286,7 @@ type
 
 const
   PermittedSections = ["settings", "search", "colors", "provider",
-                       "provider.params", "shortcuts"]
+                       "params", "shortcuts"]
   SettingsKeys = ["current", "notify", "streaming", "sandbox",
                   "sandbox_enabled", "patient_retry", "patient-retry",
                   "sandbox_wall_warn",
@@ -291,6 +299,7 @@ const
   ProviderParamsKeys = ["temperature", "max-tokens", "max_tokens",
                         "think-back", "think_back",
                         "context-window", "context_window"]
+  ParamsScopeKeys = ["provider", "model"]
   ThinkBackValues = ["none", "turn", "all"]
   SearchEngines = ["exa", "parallel", "brave"]
   # `light` is the canonical light-background value; `bright` is the
@@ -307,7 +316,7 @@ proc permittedKey(section, key: string): bool =
     let base = if key.endsWith("-light"): key[0 ..< key.len - 6] else: key
     base in ColorKeys
   of "provider": key in ProviderKeys
-  of "provider.params": key in ProviderParamsKeys
+  of "params": key in ProviderParamsKeys or key in ParamsScopeKeys
   of "shortcuts": key in minline.ShortcutNames
   else: false
 
@@ -330,6 +339,7 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
       # Empty [shortcuts] values are explicit unbinds, so they are allowed.
       if not (ent.section == "provider" and ent.key == "key") and
          not (ent.section == "settings" and ent.key == "current") and
+         not (ent.section == "params" and ent.key == "model") and
          not (ent.section == "shortcuts"):
         return &"{path}:{ent.line}: empty value for '{ent.key}' in [{ent.section}]"
     case ent.section
@@ -349,18 +359,21 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
           ent.value.strip.toLowerAscii notin ColorModes:
         return &"{path}:{ent.line}: unknown tone '{ent.value}' " &
                "(expected one of: auto, dark, light)"
-    of "provider.params":
+    of "params":
+      # `provider` and `model` are scope keys (plain strings, `model` may
+      # be empty for a provider-wide entry); the rest carry typed values
+      # checked here.
       case ent.key
       of "temperature":
         try: discard parseFloat(ent.value.strip)
         except ValueError:
           return &"{path}:{ent.line}: bad value '{ent.value}' for 'temperature' " &
-                 "in [provider.params] (expected a number like 0.4)"
+                 "in [params] (expected a number like 0.4)"
       of "max-tokens", "max_tokens", "context-window", "context_window":
         try: discard parseInt(ent.value.strip)
         except ValueError:
           return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
-                 "in [provider.params] (expected a whole number of tokens)"
+                 "in [params] (expected a whole number of tokens)"
       of "think-back", "think_back":
         if ent.value.strip.toLowerAscii notin ThinkBackValues:
           return &"{path}:{ent.line}: unknown think-back mode '{ent.value}' " &
@@ -376,8 +389,12 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
   ""
 
 proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, string], Table[string, string], string, Table[string, string]) =
-  ## Streaming parse so that repeated [provider] sections accumulate as a list.
-  ## Returns `(current, providers, colors, searchKeys, searchEngine, shortcuts)`.
+  ## Streaming parse so that repeated [provider] and [params] sections
+  ## accumulate as lists. Returns
+  ## `(current, providers, colors, searchKeys, searchEngine, shortcuts)`;
+  ## the parsed `[params]` entries land in `activeParams` as a side
+  ## effect (same pattern as the settings toggles above), for
+  ## `buildProfile` resolution and `writeConfigFile` persistence.
   ## `searchKeys` maps engine name -> key for each `[search] exa-key` /
   ## `brave-key` set (empty table when none). A legacy bare `[search] key`
   ## is accepted and filed under the active engine for backward compat.
@@ -389,16 +406,24 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
   var searchKeys: Table[string, string]
   var searchEngine = ""
   var providers: seq[ProviderRec]
+  var paramList: seq[ParamsRec]
   var colors: Table[string, string]
   var shortcuts: Table[string, string]
   var section = ""
   var prov: ProviderRec
   var inProvider = false
+  var paramRec: ParamsRec
+  var inParams = false
   var entries: seq[RawEntry]
   let stream = newFileStream(path, fmRead)
   if stream == nil: die &"cannot open {path}", ExitConfig
   var p: CfgParser
   p.open(stream, path)
+  proc flushParams() =
+    if inParams:
+      paramList.add paramRec
+      paramRec = ParamsRec()
+      inParams = false
   proc flush() =
     if inProvider:
       # Backward compat: old configs wrote `model_prefix = "openai/"` and
@@ -425,16 +450,13 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
   while true:
     let e = p.next
     case e.kind
-    of cfgEof: flush(); break
+    of cfgEof: flush(); flushParams(); break
     of cfgSectionStart:
-      # [provider.params] extends the [provider] section before it, so
-      # it must not flush the provider being built.
-      if e.section != "provider.params": flush()
+      flush()
+      flushParams()
       section = e.section
-      if section == "provider":
-        inProvider = true
-      elif section == "provider.params" and not inProvider:
-        die &"{path}:{p.getLine()}: [provider.params] with no [provider] section in scope", ExitConfig
+      if section == "provider": inProvider = true
+      if section == "params": inParams = true
     of cfgKeyValuePair, cfgOption:
       entries.add (section, e.key, e.value, p.getLine())
       let v = expandEnvValue(e.value)
@@ -513,21 +535,23 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
         of "reasonings": prov.reasonings = splitModels(v).mapIt(it.toLowerAscii)
         of "auth": prov.auth = v.strip.toLowerAscii
         else: discard
-      of "provider.params":
+      of "params":
         # Malformed numbers land here as unset; validateConfig (run at
         # the end of this parse) rejects them with path:line before any
-        # caller sees the half-parsed provider.
+        # caller sees the half-parsed section.
         case e.key
+        of "provider": paramRec.provider = v.strip
+        of "model": paramRec.model = v.strip
         of "temperature":
-          try: prov.params.temperature = some(parseFloat(v.strip))
+          try: paramRec.params.temperature = some(parseFloat(v.strip))
           except ValueError: discard
         of "max-tokens", "max_tokens":
-          try: prov.params.maxTokens = some(parseInt(v.strip))
+          try: paramRec.params.maxTokens = some(parseInt(v.strip))
           except ValueError: discard
         of "think-back", "think_back":
-          prov.params.thinkBack = some(parseThinkBackMode(v))
+          paramRec.params.thinkBack = some(parseThinkBackMode(v))
         of "context-window", "context_window":
-          try: prov.params.contextWindow = some(parseInt(v.strip))
+          try: paramRec.params.contextWindow = some(parseInt(v.strip))
           except ValueError: discard
         else: discard
       of "shortcuts":
@@ -538,6 +562,7 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
   p.close
   let verr = validateConfig(path, entries)
   if verr != "": die verr, ExitConfig
+  activeParams = paramList
   (current, providers, colors, searchKeys, searchEngine, shortcuts)
 
 func quoteVal(s: string): string =
@@ -603,17 +628,19 @@ proc writeConfigFile*(path: string, current: string,
       buf.add "reasoning = " & quoteVal(pr.reasoning) & "\n"
     if pr.reasonings.len > 0:
       buf.add "reasonings = " & quoteVal(formatModels(pr.reasonings)) & "\n"
-    if pr.params.temperature.isSome or pr.params.maxTokens.isSome or
-       pr.params.thinkBack.isSome or pr.params.contextWindow.isSome:
-      buf.add "\n[provider.params]\n"
-      if pr.params.temperature.isSome:
-        buf.add "temperature = " & quoteVal($pr.params.temperature.get) & "\n"
-      if pr.params.maxTokens.isSome:
-        buf.add "max-tokens = " & quoteVal($pr.params.maxTokens.get) & "\n"
-      if pr.params.thinkBack.isSome:
-        buf.add "think-back = " & quoteVal(formatThinkBack(pr.params.thinkBack.get)) & "\n"
-      if pr.params.contextWindow.isSome:
-        buf.add "context-window = " & quoteVal($pr.params.contextWindow.get) & "\n"
+  for pm in activeParams:
+    buf.add "\n[params]\n"
+    buf.add "provider = " & quoteVal(pm.provider) & "\n"
+    if pm.model != "":
+      buf.add "model = " & quoteVal(pm.model) & "\n"
+    if pm.params.temperature.isSome:
+      buf.add "temperature = " & quoteVal($pm.params.temperature.get) & "\n"
+    if pm.params.maxTokens.isSome:
+      buf.add "max-tokens = " & quoteVal($pm.params.maxTokens.get) & "\n"
+    if pm.params.thinkBack.isSome:
+      buf.add "think-back = " & quoteVal(formatThinkBack(pm.params.thinkBack.get)) & "\n"
+    if pm.params.contextWindow.isSome:
+      buf.add "context-window = " & quoteVal($pm.params.contextWindow.get) & "\n"
   writeFile(path, buf)
 
 proc configPath*(): string =
@@ -654,6 +681,34 @@ proc resolveFamily*(prov: ProviderRec, prof: Profile): string =
   if experimentalEnabled and prov.family.strip != "":
     return prov.family.strip.toLowerAscii
   "glm"
+
+func paramsModelMatches*(spec, model: string): bool =
+  ## Same lenient matching as `ProviderRec.findModel`: exact id, short
+  ## name (after the last `/`), or normalized spelling. Lets a `[params]`
+  ## section say `model = "glm-5.2"` against any wire spelling of it.
+  spec == model or shortModel(spec) == shortModel(model) or
+    normalizeModelName(spec) == normalizeModelName(model)
+
+proc patchParams(dst: var ModelParams, src: ModelParams) =
+  ## Merge the fields `src` sets onto `dst`; unset fields pass through.
+  if src.temperature.isSome: dst.temperature = src.temperature
+  if src.maxTokens.isSome: dst.maxTokens = src.maxTokens
+  if src.thinkBack.isSome: dst.thinkBack = src.thinkBack
+  if src.contextWindow.isSome: dst.contextWindow = src.contextWindow
+
+proc resolveParams*(list: seq[ParamsRec], provider, model: string): ModelParams =
+  ## The `[params]` settings that govern this (provider, model), merged
+  ## per field: provider-wide entries (`model` empty) apply first, then
+  ## model-scoped ones over them, each pass in file order so a later
+  ## section wins. A field no matching section sets stays none, which
+  ## every lookup treats as "not configured".
+  for pass in 0 .. 1:
+    for e in list:
+      if e.provider != provider: continue
+      if pass == 0 and e.model != "": continue
+      if pass == 1 and (e.model == "" or
+                        not paramsModelMatches(e.model, model)): continue
+      patchParams(result, e.params)
 
 proc resolveReasoning*(prov: ProviderRec, prof: Profile): string =
   ## Reasoning level resolution at profile-build time:
@@ -718,7 +773,7 @@ proc buildProfile*(current: string, providers: seq[ProviderRec],
       prof.version = ver
       prof.variant = vrt
       prof.reasoning = resolveReasoning(pr, prof)
-      prof.params = pr.params
+      prof.params = resolveParams(activeParams, pr.name, fullModel)
       return prof
   Profile()
 
@@ -778,7 +833,7 @@ proc loadProfile*(wanted: string): Profile =
   prof.version = ver
   prof.variant = vrt
   prof.reasoning = resolveReasoning(prov, prof)
-  prof.params = prov.params
+  prof.params = resolveParams(activeParams, prov.name, fullModel)
   if wanted == "" and not experimentalEnabled and not isKnownGood(prof):
     let fallback = firstKnownGoodCombo(providers)
     if fallback != "":

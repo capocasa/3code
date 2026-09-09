@@ -259,16 +259,18 @@ suite "config: [colors] section":
     let (_, _, colors) = loadStateOrEmpty(tmp)
     check colors["dim-white"] == "\x1b[38;5;240m"
 
-suite "config: [provider.params]":
+suite "config: [params]":
   var tmp = ""
 
   setup:
-    tmp = getTempDir() / "3code-test-pparams.ini"
+    tmp = getTempDir() / "3code-test-params.ini"
+    activeParams = @[]
 
   teardown:
     removeFile(tmp)
+    activeParams = @[]
 
-  test "params attach to the nearest preceding [provider]":
+  test "parseConfigFile accumulates [params] sections with their scope":
     writeFile(tmp, """
 [provider]
 name = "zai"
@@ -276,84 +278,114 @@ url = "https://z.ai/v1"
 key = "k"
 models = "glm-5.2"
 
-[provider.params]
+[params]
+provider = "zai"
+model = "glm-5.2"
 temperature = "0.4"
 max-tokens = "16384"
 think-back = "none"
 context-window = "250000"
 
-[provider]
-name = "openai"
-url = "https://api.openai.com/v1"
-key = "k"
-models = "gpt-5.5"
+[params]
+provider = "openai"
+model = "gpt-5.5"
+think-back = "all"
 """)
-    let (_, providers, _, _, _, _) = parseConfigFile(tmp)
-    check providers.len == 2
-    check providers[0].params.temperature.get == 0.4
-    check providers[0].params.maxTokens.get == 16384
-    check providers[0].params.thinkBack.get == tbNone
-    check providers[0].params.contextWindow.get == 250000
-    check providers[1].params.temperature.isNone
-    check providers[1].params.maxTokens.isNone
-    check providers[1].params.thinkBack.isNone
-    check providers[1].params.contextWindow.isNone
+    discard parseConfigFile(tmp)
+    check activeParams.len == 2
+    check activeParams[0].provider == "zai"
+    check activeParams[0].model == "glm-5.2"
+    check activeParams[0].params.temperature.get == 0.4
+    check activeParams[0].params.maxTokens.get == 16384
+    check activeParams[0].params.thinkBack.get == tbNone
+    check activeParams[0].params.contextWindow.get == 250000
+    check activeParams[1].params.thinkBack.get == tbAllTurns
+    check activeParams[1].params.temperature.isNone
+
+  test "empty model scopes the entry to the whole provider":
+    writeFile(tmp, """
+[params]
+provider = "zai"
+think-back = "turn"
+""")
+    discard parseConfigFile(tmp)
+    check activeParams.len == 1
+    check activeParams[0].model == ""
+    check activeParams[0].params.thinkBack.get == tbCurrentTurn
 
   test "underscore spellings are accepted":
     writeFile(tmp, """
-[provider]
-name = "zai"
-url = "https://z.ai/v1"
-key = "k"
-models = "glm-5.2"
-
-[provider.params]
+[params]
+provider = "zai"
 think_back = "turn"
 max_tokens = "4096"
 context_window = "128000"
 """)
-    let (_, providers, _, _, _, _) = parseConfigFile(tmp)
-    check providers[0].params.thinkBack.get == tbCurrentTurn
-    check providers[0].params.maxTokens.get == 4096
-    check providers[0].params.contextWindow.get == 128000
+    discard parseConfigFile(tmp)
+    check activeParams[0].params.thinkBack.get == tbCurrentTurn
+    check activeParams[0].params.maxTokens.get == 4096
+    check activeParams[0].params.contextWindow.get == 128000
 
-  test "each param is optional":
-    writeFile(tmp, """
-[provider]
-name = "zai"
-url = "https://z.ai/v1"
-key = "k"
-models = "glm-5.2"
+  test "resolveParams: model-scoped beats provider-wide, last wins":
+    var wide = ParamsRec(provider: "zai", model: "")
+    wide.params.temperature = some(0.2)
+    var scoped = ParamsRec(provider: "zai", model: "glm-5.2")
+    scoped.params.temperature = some(0.4)
+    var other = ParamsRec(provider: "zai", model: "glm-5.3")
+    other.params.temperature = some(0.8)
+    var list = @[wide, scoped, other]
+    check resolveParams(list, "zai", "glm-5.2").temperature.get == 0.4
+    check resolveParams(list, "zai", "glm-5.3").temperature.get == 0.8
+    check resolveParams(list, "zai", "glm-5.1").temperature.get == 0.2
+    check resolveParams(list, "openai", "glm-5.2").temperature.isNone
+    var again = ParamsRec(provider: "zai", model: "glm-5.2")
+    again.params.temperature = some(0.9)
+    list.add again
+    check resolveParams(list, "zai", "glm-5.2").temperature.get == 0.9
 
-[provider.params]
-think-back = "all"
-""")
-    let (_, providers, _, _, _, _) = parseConfigFile(tmp)
-    check providers[0].params.thinkBack.get == tbAllTurns
-    check providers[0].params.temperature.isNone
+  test "resolveParams layers per field, unset fields pass through":
+    var wide = ParamsRec(provider: "zai", model: "")
+    wide.params.temperature = some(0.2)
+    wide.params.maxTokens = some(4096)
+    var scoped = ParamsRec(provider: "zai", model: "glm-5.2")
+    scoped.params.temperature = some(0.4)
+    let r = resolveParams(@[wide, scoped], "zai", "glm-5.2")
+    check r.temperature.get == 0.4   # model-scoped wins
+    check r.maxTokens.get == 4096    # provider-wide supplies the rest
+    check r.thinkBack.isNone         # nobody sets it
 
-  test "writeConfigFile roundtrips [provider.params]":
-    var pr = ProviderRec(name: "zai", url: "https://z.ai/v1", key: "k",
-                         models: @["glm-5.2"])
-    pr.params.temperature = some(0.4)
-    pr.params.maxTokens = some(16384)
-    pr.params.thinkBack = some(tbNone)
-    pr.params.contextWindow = some(250000)
-    writeConfigFile(tmp, "zai.glm-5.2", @[pr])
-    let (_, back, _, _, _, _) = parseConfigFile(tmp)
-    check back.len == 1
-    check back[0].params.temperature.get == 0.4
-    check back[0].params.maxTokens.get == 16384
-    check back[0].params.thinkBack.get == tbNone
-    check back[0].params.contextWindow.get == 250000
+  test "resolveParams matches lenient model spellings":
+    var e = ParamsRec(provider: "nvidia", model: "glm-5.2")
+    e.params.maxTokens = some(2048)
+    check resolveParams(@[e], "nvidia", "z-ai/glm-5.2").maxTokens.get == 2048
 
-  test "writeConfigFile omits the section when no params are set":
+  test "writeConfigFile roundtrips [params]":
+    var pm = ParamsRec(provider: "zai", model: "glm-5.2")
+    pm.params.temperature = some(0.4)
+    pm.params.maxTokens = some(16384)
+    pm.params.thinkBack = some(tbNone)
+    pm.params.contextWindow = some(250000)
+    activeParams = @[pm]
     let pr = ProviderRec(name: "zai", url: "https://z.ai/v1", key: "k",
                          models: @["glm-5.2"])
     writeConfigFile(tmp, "zai.glm-5.2", @[pr])
-    check readFile(tmp).find("provider.params") < 0
+    discard parseConfigFile(tmp)
+    check activeParams.len == 1
+    check activeParams[0].provider == "zai"
+    check activeParams[0].model == "glm-5.2"
+    check activeParams[0].params.temperature.get == 0.4
+    check activeParams[0].params.maxTokens.get == 16384
+    check activeParams[0].params.thinkBack.get == tbNone
+    check activeParams[0].params.contextWindow.get == 250000
 
-  test "buildProfile carries params into the Profile":
+  test "writeConfigFile omits the section when no params are set":
+    activeParams = @[]
+    let pr = ProviderRec(name: "zai", url: "https://z.ai/v1", key: "k",
+                         models: @["glm-5.2"])
+    writeConfigFile(tmp, "zai.glm-5.2", @[pr])
+    check readFile(tmp).find("[params]") < 0
+
+  test "buildProfile carries the matching params into the Profile":
     writeFile(tmp, """
 [settings]
 current = "zai.glm-5.2"
@@ -362,13 +394,21 @@ current = "zai.glm-5.2"
 name = "zai"
 url = "https://z.ai/v1"
 key = "k"
-models = "glm-5.2"
+models = "glm-5.2 glm-5.3"
 
-[provider.params]
+[params]
+provider = "zai"
 temperature = "0.6"
+
+[params]
+provider = "zai"
+model = "glm-5.2"
 think-back = "none"
 """)
     let (_, providers, _, _, _, _) = parseConfigFile(tmp)
     let prof = buildProfile("zai.glm-5.2", providers, "")
     check prof.params.temperature.get == 0.6
     check prof.params.thinkBack.get == tbNone
+    let prof3 = buildProfile("zai.glm-5.3", providers, "")
+    check prof3.params.temperature.get == 0.6
+    check prof3.params.thinkBack.isNone

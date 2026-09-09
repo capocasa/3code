@@ -156,37 +156,45 @@ suite "config validation: schema (in-process)":
     ]
     check validateConfig(P, entries) == ""
 
-  test "clean [provider.params] entries are accepted":
+  test "clean [params] entries are accepted":
     let entries = @[
-      ("provider.params", "temperature", "0.4", 9),
-      ("provider.params", "max-tokens", "16384", 10),
-      ("provider.params", "max_tokens", "4096", 11),
-      ("provider.params", "think-back", "turn", 12),
-      ("provider.params", "think_back", "all", 13),
-      ("provider.params", "context-window", "250000", 14),
-      ("provider.params", "context_window", "128000", 15),
+      ("params", "provider", "zai", 7),
+      ("params", "model", "glm-5.2", 8),
+      ("params", "model", "", 9),
+      ("params", "temperature", "0.4", 10),
+      ("params", "max-tokens", "16384", 11),
+      ("params", "max_tokens", "4096", 12),
+      ("params", "think-back", "turn", 13),
+      ("params", "think_back", "all", 14),
+      ("params", "context-window", "250000", 15),
+      ("params", "context_window", "128000", 16),
     ]
     check validateConfig(P, entries) == ""
 
-  test "unknown key in [provider.params] is reported":
-    let entries = @[("provider.params", "top_p", "0.9", 7)]
+  test "empty provider in [params] is reported":
+    let entries = @[("params", "provider", "", 7)]
     let m = validateConfig(P, entries)
-    check m == P & ":7: unknown key 'top_p' in [provider.params]"
+    check m == P & ":7: empty value for 'provider' in [params]"
+
+  test "unknown key in [params] is reported":
+    let entries = @[("params", "top_p", "0.9", 7)]
+    let m = validateConfig(P, entries)
+    check m == P & ":7: unknown key 'top_p' in [params]"
 
   test "non-numeric temperature is reported":
-    let entries = @[("provider.params", "temperature", "warm", 8)]
+    let entries = @[("params", "temperature", "warm", 8)]
     let m = validateConfig(P, entries)
-    check m == P & ":8: bad value 'warm' for 'temperature' in " &
-          "[provider.params] (expected a number like 0.4)"
+    check m == P & ":8: bad value 'warm' for 'temperature' " &
+          "in [params] (expected a number like 0.4)"
 
   test "non-integer max-tokens is reported":
-    let entries = @[("provider.params", "max-tokens", "lots", 9)]
+    let entries = @[("params", "max-tokens", "lots", 9)]
     let m = validateConfig(P, entries)
-    check m == P & ":9: bad value 'lots' for 'max-tokens' in " &
-          "[provider.params] (expected a whole number of tokens)"
+    check m == P & ":9: bad value 'lots' for 'max-tokens' " &
+          "in [params] (expected a whole number of tokens)"
 
   test "unknown think-back mode is reported":
-    let entries = @[("provider.params", "think-back", "sometimes", 10)]
+    let entries = @[("params", "think-back", "sometimes", 10)]
     let m = validateConfig(P, entries)
     check m == P & ":10: unknown think-back mode 'sometimes' " &
           "(expected one of: none, turn, all)"
@@ -250,10 +258,10 @@ suite "config validation: end-to-end exit code":
     check r.exitCode == 3
     check "invalid shortcut value" in r.output
 
-  test "orphan [provider.params] without a [provider] exits 3":
-    let r = runWithConfig("[settings]\ncurrent = \"p.m\"\n\n[provider.params]\nthink-back = \"all\"\n")
+  test "[params] unknown key exits with ExitConfig (3)":
+    let r = runWithConfig("[settings]\ncurrent = \"p.m\"\n\n[params]\nprovider = \"zai\"\ntop_p = \"0.9\"\n")
     check r.exitCode == 3
-    check "[provider.params] with no [provider] section in scope" in r.output
+    check "unknown key 'top_p' in [params]" in r.output
 
 suite "config validation: [shortcuts] schema (in-process)":
   const P = "/tmp/cfg-shortcuts.ini"

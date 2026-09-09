@@ -1993,7 +1993,7 @@ proc applyStreamingOptions*(p: Profile, body: JsonNode) =
 
 proc applyGenerationDefaults*(p: Profile, body: JsonNode) =
   ## Known-good generation policy: table values with any
-  ## `[provider.params]` overrides already patched in (they resolve inside
+  ## `[params]` overrides already patched in (they resolve inside
   ## `knownGoodGeneration(p: Profile)`).
   let d = knownGoodGeneration(p)
   if d.temperature >= 0.0:
@@ -2004,7 +2004,7 @@ proc applyGenerationDefaults*(p: Profile, body: JsonNode) =
   # other than 1.0; omit the field so the server default applies.
   # Table rows can't say "omit" per provider (temperature < 0 would
   # silence every route to that model), so special-case here like k3.
-  # A user-set [provider.params] temperature survives: overriding the
+  # A user-set [params] temperature survives: overriding the
   # curated behavior is the point of the override.
   if providerOf(p) == "kimicode" and p.params.temperature.isNone and
      body.hasKey("temperature"):
