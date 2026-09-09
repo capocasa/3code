@@ -39,6 +39,9 @@ const
   # Use bright cyan there so the brand tone renders as actual cyan.
   # Campbell's bright cyan slot is the only one that is true cyan.
   CyanFg* = (when defined(windows): "\x1b[96m" else: "\x1b[36m")
+  # Magenta is the private-mode tone; bright on Windows for the same
+  # reason cyan is (Campbell's regular magenta reads too dark).
+  MagentaFg* = (when defined(windows): "\x1b[95m" else: "\x1b[35m")
   BoldOn* = "\x1b[1m"
   BlueFg* = "\x1b[34m"
   Reset* = "\x1b[0m"
@@ -50,13 +53,15 @@ var
 
 type
   ColorSpec* = tuple
-    brightWhite, offWhite, dimWhite: string
+    brightWhite, offWhite, dimWhite, tokenBar, privateBar: string
 
 var
   DarkPalette*: ColorSpec = (
     brightWhite: "\x1b[97m",        # bright white
     offWhite:    "\x1b[38;5;252m",  # near-white
     dimWhite:    "\x1b[38;5;244m",  # grey 244
+    tokenBar:    CyanFg,             # the brand tone on the live bar
+    privateBar:  MagentaFg,          # private mode repaints the bar in this
   )
   LightPalette*: ColorSpec = (
     # Invert the white family: white -> black, off-white -> dark grey,
@@ -65,10 +70,16 @@ var
     brightWhite: "\x1b[30m",        # black
     offWhite:    "\x1b[38;5;238m",  # dark grey
     dimWhite:    "\x1b[38;5;250m",  # lighter dark grey
+    tokenBar:    CyanFg,
+    privateBar:  MagentaFg,
   )
 
 proc paletteFor*(mode: ColorMode): ColorSpec =
   if mode == cmLight: LightPalette else: DarkPalette
+
+var
+  TokenBarFg* = CyanFg
+  PrivateBarFg* = MagentaFg
 
 proc applyPalette*(mode: ColorMode) =
   ## Set the white-family `var`s for `mode`. Call once at startup after
@@ -78,28 +89,42 @@ proc applyPalette*(mode: ColorMode) =
   BrightWhiteFg = p.brightWhite
   OffWhiteFg = p.offWhite
   GreyFg = p.dimWhite
+  TokenBarFg = p.tokenBar
+  PrivateBarFg = p.privateBar
+
+proc tokenBarFg*(): string =
+  ## The live token-bar color: the normal bar tone, or the private one
+  ## while private mode is on, so the mode is visible on every repaint
+  ## of the bar (and only there: scrollback receipts stay cyan, which
+  ## conveniently marks which turns ran private).
+  if privateMode: PrivateBarFg else: TokenBarFg
 
 proc resetPalettes*() =
   ## Restore `DarkPalette` / `LightPalette` to their built-in defaults
   ## and re-resolve the active mode. Used by tests (which mutate the
   # palettes via `applyColorOverrides`) to leave global state clean.
   DarkPalette  = (brightWhite: "\x1b[97m", offWhite: "\x1b[38;5;252m",
-                  dimWhite: "\x1b[38;5;244m")
+                  dimWhite: "\x1b[38;5;244m", tokenBar: CyanFg,
+                  privateBar: MagentaFg)
   LightPalette = (brightWhite: "\x1b[30m", offWhite: "\x1b[38;5;238m",
-                  dimWhite: "\x1b[38;5;250m")
+                  dimWhite: "\x1b[38;5;250m", tokenBar: CyanFg,
+                  privateBar: MagentaFg)
   applyPalette(colorMode)
 
 proc applyColorOverrides*(dark, light: Table[string, string]) =
   ## Apply user `[colors]` config overrides on top of the mode palettes.
   ## `dark` keys override BOTH modes (a plain config key has no suffix);
   ## `light` keys override light mode only and win for light mode. Keys
-  ## are `bright-white`, `off-white`, `dim-white`; values are ANSI escape
-  ## sequences. Unknown keys are ignored. Re-resolves the active mode last.
+  ## are `bright-white`, `off-white`, `dim-white`, `token-bar`,
+  ## `private-bar`; values are ANSI escape sequences. Unknown keys are
+  ## ignored. Re-resolves the active mode last.
   proc setSpec(t: var ColorSpec; key, val: string) =
     case key
     of "bright-white": t.brightWhite = val
     of "off-white":    t.offWhite = val
     of "dim-white":    t.dimWhite = val
+    of "token-bar":    t.tokenBar = val
+    of "private-bar":  t.privateBar = val
     else: discard
   var dp = DarkPalette
   var lp = LightPalette

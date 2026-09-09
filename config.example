@@ -49,13 +49,16 @@ current = "baseten.glm5"
 #
 # The white-family colours can be overridden per tone. A plain key sets
 # BOTH tones; a "-light" key sets light tone only and wins there. Keys
-# are bright-white, off-white, dim-white. Values are quoted ANSI escape
-# sequences (parsecfg interprets backslash escapes, so "\x1b[30m" becomes
-# a real ESC byte). Defaults:
+# are bright-white, off-white, dim-white, token-bar, private-bar. Values
+# are quoted ANSI escape sequences (parsecfg interprets backslash escapes,
+# so "\x1b[30m" becomes a real ESC byte). Defaults:
 #   bright-white = "\x1b[97m"   (dark)  / "\x1b[30m"   (light, black)
 #   off-white    = "\x1b[38;5;252m" / "\x1b[38;5;238m"
 #   dim-white    = "\x1b[38;5;244m" / "\x1b[38;5;250m"
-# The colourful colours (cyan/green/red/magenta) are fixed in both tones.
+#   token-bar   = "\x1b[36m"  (cyan; the live token bar)
+#   private-bar = "\x1b[35m"  (magenta; the bar in private mode)
+# The colourful colours (cyan/green/red/magenta) are otherwise fixed in
+# both tones.
 ;
 ; [colors]
 ; bright-white = "\x1b[37m"
@@ -174,6 +177,11 @@ models = "z-ai/glm-5.2 moonshotai/kimi-k3 deepseek/deepseek-v4-pro"
 #                    all keeps every turn (deepseek demands it, glm/kimi
 #                    preserved thinking rewards it)
 #   context-window   int, tokens; drives compaction thresholds
+#   allow-private    bool: trust this provider (or just this model) with
+#                    private-mode data (`:private on` gates turns on it;
+#                    see Private mode in the manual). Curated zero-training
+#                    providers, e.g. together/fireworks/ovh/novita, are
+#                    allowed without this
 #
 # [params]
 # provider = "zai"
