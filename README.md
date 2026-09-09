@@ -90,6 +90,7 @@ servers.
 - **Session persistence** — human-readable `.3log` format; resume any past session
 - **Native web search** — built-in, no curl dependency
 - **No telemetry** — sessions stay local, nothing phoned home
+- **Private mode** — one switch (`-p`) gates turns to zero-training providers; the token bar turns magenta so you can't forget it's on
 - **MIT license** — do whatever you want with it
 
 ## Library

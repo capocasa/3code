@@ -2,6 +2,17 @@
 
 **unreleased** - resume keeps the prompt cache hot
 
+- **Private mode.** `-p`/`--private` or `:private on` (default off,
+  session-only, like a browser's private window). While on, turns only
+  run on allow-private providers/models and the live token bar repaints
+  magenta (`[colors] private-bar`, configurable like every other color;
+  scrollback receipts stay cyan so old receipts mark which turns ran
+  private). Trust is a `[params] allow-private = "true"` setting
+  (provider-wide or per model, `:private allow <provider> [model]`
+  writes it), or a curated known-good flag for providers whose published
+  policy is zero data retention / no training on API data: together,
+  fireworks, ovh, novita. Shortlist and walkthrough in the manual.
+
 - **`[params]`: per-(provider, model) parameter overrides.** A new
   config section overrides any known-good model parameter:
   `temperature`, `max-tokens`, `think-back` (`none`/`turn`/`all`, how

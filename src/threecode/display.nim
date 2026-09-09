@@ -775,6 +775,10 @@ proc profileLinesS*(p: Profile; bold = false): string =
   if p.reasoning != "":
     result.add labelOn & pad & "reasoning " & ansiResetCode &
       BrightWhiteFg & p.reasoning & ansiResetCode & "\r\n"
+  if privateMode:
+    result.add labelOn & pad & "private   " & ansiResetCode &
+      BrightWhiteFg & (if privateAllowed(p): "allowed" else: "NOT allowed") &
+      ansiResetCode & "\r\n"
 
 proc showProfile*(p: Profile; bold = false) =
   let s = profileLinesS(p, bold)

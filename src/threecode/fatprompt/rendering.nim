@@ -355,11 +355,12 @@ proc spinnerBarBytes*(frame, label: string, elapsed: int): string =
   let timedLabel =
     if elapsed < 0 or label.hasElapsedSuffix: label
     else: label & " " & $elapsed & "s"
-  CyanFg & BoldOn & frame & Reset & CyanFg & BoldOn & " " &
+  let fg = tokenBarFg()
+  fg & BoldOn & frame & Reset & fg & BoldOn & " " &
     timedLabel & Reset
 
 proc liveBarBytes*(label: string): string =
-  CyanFg & BoldOn & "  " & label & Reset
+  tokenBarFg() & BoldOn & "  " & label & Reset
 
 func labelCells(label: string): int =
   var i = 0
@@ -550,7 +551,7 @@ proc clearSpinnerFooterBytes*(hadTicker: bool): string =
 proc liveBarText*(label: string): string =
   ## Bar cell content without cursor controls: what `liveBarBytes` leaves
   ## on the row.
-  CyanFg & BoldOn & "  " & label & Reset
+  tokenBarFg() & BoldOn & "  " & label & Reset
 
 proc spinnerBarText*(frame, label: string; elapsed: int): string =
   ## Spinner-bar cell content: what `spinnerBarBytes` leaves on the row.
