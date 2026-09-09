@@ -490,6 +490,74 @@ suite "api request shaping":
     check "patch" in names
     check "apply_patch" notin names
 
+  test "gemini known-good: isKnownGood, context windows, output caps":
+    check isKnownGood(Profile(name: "google.gemini-3.8-flash", model: "gemini-3.8-flash"))
+    check isKnownGood(Profile(name: "google.gemini-3.1-pro-preview", model: "gemini-3.1-pro-preview"))
+    check knownGoodContextWindow("google", "gemini-3.8-flash") == 1_048_576
+    check knownGoodContextWindow("google", "gemini-3.7-flash") == 1_048_576
+    check maxOutputTokensFor(Profile(name: "google.gemini-3.8-flash",
+                                     model: "gemini-3.8-flash")) == 65_536
+
+  test "geminicli aliases google known-good entries":
+    check canonicalKnownGoodProvider("geminicli") == "google"
+    check isKnownGood(Profile(name: "geminicli.gemini-3.8-flash", model: "gemini-3.8-flash"))
+    check knownGoodFamily("geminicli", "gemini-3.8-flash") == "gemini"
+    check curatedFor("geminicli") == curatedFor("google")
+
+  test "gemini reasoning_effort: 3.8 levels, no off, no minimal on 3.8":
+    check knownGoodReasonings("google", "gemini-3.8-flash") == @["low", "medium", "high"]
+    check knownGoodReasonings("google", "gemini-3.7-flash") == @["minimal", "low", "medium", "high"]
+    check knownGoodReasonings("google", "gemini-3.1-pro-preview") == @["minimal", "low", "medium", "high"]
+    block effort:
+      var body = %*{"stream": true}
+      let p = Profile(name: "google.gemini-3.8-flash", family: "gemini",
+                      version: "3", variant: "8-flash",
+                      model: "gemini-3.8-flash", reasoning: "high")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "high"
+      check "reasoning" notin body
+      check "thinking" notin body
+    block minimal:
+      var body = %*{"stream": true}
+      let p = Profile(name: "google.gemini-3.7-flash", family: "gemini",
+                      version: "3", variant: "7-flash",
+                      model: "gemini-3.7-flash", reasoning: "minimal")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "minimal"
+
+  test "gemini omits deprecated temperature":
+    let body = %*{"stream": true}
+    let p = Profile(name: "google.gemini-3.8-flash", family: "gemini",
+                    model: "gemini-3.8-flash", reasoning: "medium")
+    applyGenerationDefaults(p, body)
+    check "temperature" notin body
+    check body{"max_tokens"}.getInt == 65536
+
+  test "geminicli requestUrl pins Code Assist, not AI Studio":
+    let p = Profile(name: "geminicli.gemini-3.8-flash",
+                    model: "gemini-3.8-flash", family: "gemini",
+                    url: "https://generativelanguage.googleapis.com/v1beta/openai")
+    check geminicliProfile(p)
+    check requestUrl(p) == "https://cloudcode-pa.googleapis.com"
+    check endpointUrl(p, false, true).endsWith(
+      "/v1internal:streamGenerateContent?alt=sse")
+    check endpointUrl(p, false, false).endsWith(
+      "/v1internal:generateContent")
+    check not geminicliProfile(Profile(name: "google.gemini-3.8-flash",
+                                      model: "gemini-3.8-flash"))
+
+  test "gemini setup resolves to GeminiPreamble + bash/patch tools":
+    let p = Profile(name: "google.gemini-3.8-flash", family: "gemini",
+                    model: "gemini-3.8-flash")
+    let s = setup(p)
+    check s.prompt.startsWith("You are the Gemini edition of 3code")
+    var names: seq[string]
+    for t in s.tools:
+      names.add t{"function"}{"name"}.getStr
+    check "bash" in names
+    check "patch" in names
+    check "apply_patch" notin names
+
   test "mimo on xiaomi sends thinking.type enabled/disabled":
     block onn:
       var body = %*{"stream": true}

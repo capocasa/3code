@@ -34,7 +34,7 @@
 
 import std/[json, os, strutils, tables, times, atomics]
 import types, util, prompts, session, config, actions, api, display, ui,
-       auth_xai, auth_openai, sandbox, minline, transcript, turns
+       auth_xai, auth_openai, auth_google, sandbox, minline, transcript, turns
 import fatprompt as fatruntime
 import engine as termengine
 
@@ -127,6 +127,8 @@ proc combinedSubscriptionTokenFor(provider: string): string =
   result = auth_xai.subscriptionTokenFor(provider)
   if result == "":
     result = auth_openai.subscriptionTokenFor(provider)
+  if result == "":
+    result = auth_google.subscriptionTokenFor(provider)
 
 proc resolveSessionProfile*(wanted, resumeProfile: string): Profile =
   ## Resolve the effective profile the same way the CLI does: explicit
