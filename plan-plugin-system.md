@@ -100,6 +100,39 @@ marketplace, no 5000-package swamp. One curated list of economy-grade
 CLIs, plus `mcpwrap` to bridge anything missing. Success metric: every
 entry earns its place the same way everything else earns its tokens.
 
+### `3code tool add`: the installer for the list
+
+**Decision: included in the one binary, as `3code tool add <name>`,
+implemented as a thin dispatcher over the system package manager**, not
+as a package manager. Three rules keep it from becoming the bloat you
+feared:
+
+1. **Dispatcher, not manager.** It knows, per tool per platform, the
+   package id and the silent flags (winget `BurntSushi.ripgrep.MSVC`,
+   brew/apt `ripgrep`, pkg `ripgrep`, ...), detects the manager in
+   order (winget, scoop, choco / brew / apt, dnf, pacman / pkg), execs
+   it, and prints the manual command when no manager exists. No
+   version pinning, no mirrors, no dependency resolution, no checksums
+   (the manager's job). Updates: tell the user to use their manager.
+2. **One data source.** The same table drives `docs/tools.md`,
+   `3code tool list`, and the install path. The table *is* the
+   curation; the command is exec over it.
+3. **User-run only.** Installing software is a human action; default
+   sandbox policy denies `3code tool add` from the agent's bash.
+
+Estimated cost: ~300-400 loc, which buys the Windows crowd
+`3code tool add rg gh jq` instead of package-name archaeology across
+winget/scoop/choco. Bloat tripwire: the day it needs pinning, mirrors,
+or its own update path is the day it becomes a separate tool. A
+separate binary now would fragment the official list's data and hand
+the audience least equipped to install things (Windows, first day) a
+second installer. Naming: `tool`, not bare `add`, because `add` alone
+is ambiguous (`:provider add` exists in-app) and `3code tool` groups
+`list`/`doctor` later, matching the `3code wall setup-windows`
+subcommand pattern. After install it prints the tool's built-in skill
+path so the loop from list, to install, to agent-usable closes in one
+command.
+
 ## Layer 2: the harness = in-tree Nim plugins, one binary
 
 **Plugins are Nim modules in `plugins/` in the 3code repo, compiled
