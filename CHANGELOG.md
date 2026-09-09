@@ -38,6 +38,15 @@
   and an explicit `temperature` overrides even the kimicode /
   Gemini 3 "omit temperature" endpoint quirks.
 
+- **Retry notices no longer stack in scrollback.** A network-quiet or
+  rate-limit notice is printed once on a live notice row above the token
+  bar and dynamically replaced while the countdown ticks and later
+  attempts fail, instead of appending one magenta line per retry. The
+  countdown lives inside the notice; the token bar keeps token
+  information and its count-up turn timer, now in `hh:mm:ss` form
+  instead of bare seconds. On retry exhaustion the final error still
+  commits through the ordinary path.
+
 - **Resume re-sends byte-identical history.** `-r` used to rebuild the
   system prompt from the profile (busting the provider's prompt cache the
   moment you reopened 3code) and to round-trip message bodies through a

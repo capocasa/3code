@@ -100,8 +100,9 @@ type
 
   RetryWaitState* = object
     ## Patient-retry backoff countdown. `active` while the transport is
-    ## sleeping between attempts; the spinner glyph swaps to a clock and
-    ## the label carries the remaining time instead of the turn clock.
+    ## sleeping between attempts; the notice (label + live countdown) is
+    ## painted on the ticker row above the bar and replaced in place each
+    ## tick, while the bar keeps its token label and turn timer.
     active*: bool
     label*: string     # e.g. "usage limit (code 429), retry 13/64 in"
     remainingS*: int   # seconds until the next attempt (controller-driven)
@@ -325,7 +326,7 @@ proc tokenBarText*(state: TokenBarState): string =
   if output.len > 0:
     parts.add output
   if state.apiActive and state.elapsedS >= 0:
-    parts.add $state.elapsedS & "s"
+    parts.add clockDuration(state.elapsedS)
   parts.join("  ")
 
 func hasNonNewlineBytes*(s: string): bool =
@@ -334,36 +335,35 @@ func hasNonNewlineBytes*(s: string): bool =
       return true
 
 func hasElapsedSuffix*(label: string): bool =
-  var i = label.len - 1
-  if i < 0 or label[i] != 's':
-    return false
-  dec i
-  if i < 0 or not label[i].isDigit:
-    return false
-  while i >= 0 and label[i].isDigit:
-    dec i
-  i >= 0 and label[i] == ' '
+  ## True when the label already carries its own clock (" 45s" legacy or
+  ## " 00:00:45"), so a live timer must not be appended a second time.
+  let sp = label.rfind(' ')
+  if sp < 0 or sp == label.len - 1: return false
+  let tail = label[sp + 1 .. ^1]
+  if tail[^1] == 's':
+    return tail.len > 1 and tail[0 .. ^2].allCharsInSet({'0'..'9'})
+  tail.len >= 4 and tail.allCharsInSet({'0'..'9', ':'}) and
+    tail[0].isDigit and ':' in tail
 
 func barTickLabel*(label: string; secs: int): string =
-  ## Bar-tick label with the whole-second elapsed counter appended. Labels
-  ## that already carry a clock (retry countdown) are passed through
-  ## unchanged. Both the GUI thread's tick and the input thread's editor
-  ## repaint must build the bar label through this so a keystroke frame can
-  ## never show a different counter than the frame above/below it.
+  ## Bar-tick label with the whole-second turn timer appended (hh:mm:ss).
+  ## Labels that already carry a clock are passed through unchanged. Both
+  ## the GUI thread's tick and the input thread's editor repaint must build
+  ## the bar label through this so a keystroke frame can never show a
+  ## different counter than the frame above/below it.
   if label.hasElapsedSuffix: label
-  else: label & "  " & $secs & "s"
+  else: label & "  " & clockDuration(secs)
 
 func waitBarLabel*(w: RetryWaitState): string =
-  ## Bar label for a retry backoff: the retry context plus the live
-  ## countdown. The turn clock is omitted while the transport sleeps.
+  ## Retry-backoff notice text: the retry context plus the live countdown.
   w.label & " " & humanDuration(w.remainingS)
 
 proc spinnerBarBytes*(frame, label: string, elapsed: int): string =
-  ## `elapsed < 0` means the label already carries its own clock (retry
-  ## countdown); do not append the turn timer.
+  ## `elapsed < 0` means the label already carries its own clock; do not
+  ## append the turn timer.
   let timedLabel =
     if elapsed < 0 or label.hasElapsedSuffix: label
-    else: label & " " & $elapsed & "s"
+    else: label & " " & clockDuration(elapsed)
   let fg = tokenBarFg()
   fg & BoldOn & frame & Reset & fg & BoldOn & " " &
     timedLabel & Reset
@@ -482,6 +482,24 @@ func clampToWidth*(s: string; width: int): string =
     inc i, rl
 
 
+proc retryNoticeRow*(frame: FooterFrame; termW = 0): string =
+  ## Ticker-row content for a footer frame: while a retry backoff is live
+  ## the row carries the retry notice (non-bold magenta, countdown inside
+  ## the message, repainted in place each tick) instead of the grey
+  ## thinking ticker. The token bar below is untouched.
+  if frame.retryWait.active:
+    let shown =
+      if termW > 0: clampToWidth(waitBarLabel(frame.retryWait), termW)
+      else: waitBarLabel(frame.retryWait)
+    MagentaFg & shown & Reset
+  elif frame.ticker.len > 0:
+    let shown =
+      if termW > 0: clampToWidth(frame.ticker, termW)
+      else: frame.ticker
+    GreyFg & shown & Reset
+  else:
+    ""
+
 proc footerLayout*(frame: FooterFrame; termW = 0): FooterLayout =
   ## The first row is always a gap (blank unless a thinking ticker fills
   ## it): this makes the footer height invariant to the ticker appearing
@@ -509,27 +527,18 @@ proc footerLayout*(frame: FooterFrame; termW = 0): FooterLayout =
       result.bytes.add GreyFg & shown & Reset
     result.bytes.add "\r\n" & paintBarBytes(frame.label)
   of ffSpinner:
-    let barText =
-      if frame.retryWait.active:
-        # Backoff countdown: clock glyph, retry label, remaining time; the
-        # turn clock is meaningless while the transport is sleeping.
-        spinnerBarBytes(frame.spinner, waitBarLabel(frame.retryWait), -1)
-      else:
-        spinnerBarBytes(frame.spinner, frame.label, frame.elapsed)
+    # The retry notice lives on the ticker row (see retryNoticeRow); the
+    # bar always keeps its token label and count-up turn timer.
+    let barText = spinnerBarBytes(frame.spinner, frame.label, frame.elapsed)
     let barCells =
-      if frame.retryWait.active:
-        # glyph(1) + space(1) + wait label (already carries its own clock)
-        2 + labelCells(waitBarLabel(frame.retryWait))
+      if frame.elapsed >= 0 and not frame.label.hasElapsedSuffix:
+        labelCells(frame.label) + 4 + clockDuration(frame.elapsed).len
       else:
-        let elapsedTextLen = if frame.elapsed >= 0: ($frame.elapsed).len else: 1
-        labelCells(frame.label) + 4 + elapsedTextLen
+        labelCells(frame.label) + 5
     let barRows = barWrapRows(barCells, termW)
     result.rowsAboveEditor = 1 + barRows
     result.bytes = "\x1b[?25l\r\x1b[2K"
-    if frame.ticker.len > 0:
-      result.bytes.add GreyFg
-      result.bytes.add frame.ticker
-      result.bytes.add Reset
+    result.bytes.add retryNoticeRow(frame, termW)
     result.bytes.add "\r\n\x1b[2K"
     result.bytes.add barText
     result.bytes.add "\r\n\x1b[2K" & EditorPromptBytes
@@ -542,12 +551,12 @@ proc spinnerFooterBytes*(frame, label, ticker: string; elapsed: int,
                          termW = 0): string =
   spinnerFooterFrame(frame, label, ticker, elapsed).footerLayout(termW).bytes
 
-proc liveEditorSpinnerFooterBytes*(frame, label, ticker: string;
+proc liveEditorSpinnerFooterBytes*(frame, label, tickerRow: string;
                                    elapsed: int; termW = 0): string =
+  ## `tickerRow` is pre-styled ticker-row content (see retryNoticeRow),
+  ## "" for a blank gap row.
   result.add "\r\x1b[2K"
-  if ticker.len > 0:
-    let shown = if termW > 0: clampToWidth(ticker, termW) else: ticker
-    result.add GreyFg & shown & Reset
+  result.add tickerRow
   result.add "\r\n"
   result.add liveEditorSpinnerBarBytes(frame, label, elapsed)
 
@@ -638,16 +647,9 @@ proc footerRowTexts*(frame: FooterFrame; termW: int): seq[string] =
       else: "")
     result.add wrapStyledLine(liveBarText(frame.label), max(1, termW))
   of ffSpinner:
-    result.add (if frame.ticker.len > 0:
-        let shown = if termW > 0: clampToWidth(frame.ticker, termW)
-                    else: frame.ticker
-        GreyFg & shown & Reset
-      else: "")
+    result.add retryNoticeRow(frame, termW)
     result.add wrapStyledLine(
-      if frame.retryWait.active:
-        spinnerBarText(frame.spinner, waitBarLabel(frame.retryWait), -1)
-      else:
-        spinnerBarText(frame.spinner, frame.label, frame.elapsed),
+      spinnerBarText(frame.spinner, frame.label, frame.elapsed),
       max(1, termW))
 
 proc footerFrameBytes*(frame: FooterFrame; termW = 0): string =
@@ -657,12 +659,8 @@ proc footerFrameBytes*(frame: FooterFrame; termW = 0): string =
     # ticker+bar rows paint (see liveEditorSpinnerFooterBytes). This is
     # not the standalone layout's full footer, which includes the editor
     # prompt and a cursor park.
-    if frame.retryWait.active:
-      result = liveEditorSpinnerFooterBytes(frame.spinner,
-        waitBarLabel(frame.retryWait), frame.ticker, -1, termW)
-    else:
-      result = liveEditorSpinnerFooterBytes(frame.spinner, frame.label,
-                                            frame.ticker, frame.elapsed, termW)
+    result = liveEditorSpinnerFooterBytes(frame.spinner, frame.label,
+      retryNoticeRow(frame, termW), frame.elapsed, termW)
   else:
     result = frame.footerLayout(termW).bytes
 
