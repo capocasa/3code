@@ -85,9 +85,11 @@ mcpwrap skill github > ~/.config/3code/skills/github-cli.md
 
 ### The official tools list
 
-A curated, versioned page (`docs/tools.md`, linked from the README):
-command-line tools that work *well* with 3code, each with a shipped
-built-in skill. Seed set: `rg`, `gh`, `jq`, `git`, `sqlite3`, `curl`.
+A curated, versioned list, rendered to `docs/tools.md` (linked from
+the README) but *owned by the tools repo* (next section): command-line
+tools that work *well* with 3code, each with a shipped skill. Seed
+set: `rg`, `gh`, `jq`, `git`, `sqlite3`, `curl`, plus the first-party
+ten.
 Admission criteria are 3code-flavored, not generic:
 
 - economical output by default (quiet flags, concise modes, no color
@@ -111,12 +113,13 @@ feared:
    package id and the silent flags (winget `BurntSushi.ripgrep.MSVC`,
    brew/apt `ripgrep`, pkg `ripgrep`, ...), detects the manager in
    order (winget, scoop, choco / brew / apt, dnf, pacman / pkg), execs
-   it, and prints the manual command when no manager exists. No
-   version pinning, no mirrors, no dependency resolution, no checksums
-   (the manager's job). Updates: tell the user to use their manager.
-2. **One data source.** The same table drives `docs/tools.md`,
-   `3code tool list`, and the install path. The table *is* the
-   curation; the command is exec over it.
+   it, and falls back to the tools-repo artifact (below) when no
+   manager carries the tool. No version pinning, no mirrors, no
+   dependency resolution (the manager's job). Updates: tell the user
+   to use their manager.
+2. **One data source.** The registry in the tools repo drives
+   `docs/tools.md`, `3code tool list`, and the install path. The
+   table *is* the curation; the command is exec over it.
 3. **User-run only.** Installing software is a human action; default
    sandbox policy denies `3code tool add` from the agent's bash.
 
@@ -132,6 +135,45 @@ is ambiguous (`:provider add` exists in-app) and `3code tool` groups
 subcommand pattern. After install it prints the tool's built-in skill
 path so the loop from list, to install, to agent-usable closes in one
 command.
+
+### The tools repo: the list's home and build farm
+
+**Decision: the official list lives in its own repo** (working name
+`3code-tools`), not baked into the binary. The first ten tools are
+capocasa-authored (`mcpwrap` is entry #1); anyone can PR the list
+against the same admission criteria, with AI review and human merge.
+
+```
+3code-tools/
+  registry.toml        # the list: name, blurb, per-platform install
+  tools/<name>/        # skill.md + build recipe (or submodule pin)
+  .github/workflows/   # win/mac/linux/arm matrix, publishes the signed registry
+```
+
+- **Decoupled cadence is the reason this is a repo**: list entries and
+  tool builds ship on their own schedule; the binary carries only a
+  bootstrap (registry URL, fetch over HTTPS, verify). Community
+  additions never wait on a 3code release.
+- **Artifact path**: for tools no package manager carries (the
+  first-party ten, initially), CI builds from tagged sources and
+  attaches per-platform artifacts; `3code tool add` verifies the
+  sha256 against the signed registry and installs into
+  `~/.local/share/3code/tools/bin`, prepended to PATH by 3code.
+  This is also the Windows answer for tools winget does not carry.
+- **Catalog property**: a tool's skill lands in the user skills dir
+  only on install, so the official list adds zero catalog cost until
+  the user acts. The invariant holds end to end.
+- **Agent-neutral schema**: the registry is just name/description/
+  install/skill; any agent can read it. Other tools consuming the
+  list grows 3code's gravity for free.
+- **Vendoring policy**: tools start vendored under `tools/` for
+  velocity; any tool that grows its own identity splits to its own
+  repo with the registry carrying a pin. Same tripwire as the
+  installer.
+- **Security bar**: CI builds from tagged sources, checksums ride the
+  signed registry, keys held by the maintainer, `tool add` stays
+  user-run. Detached minisign-style signatures are deferred until a
+  second maintainer exists to rotate keys.
 
 ## Layer 2: the harness = in-tree Nim plugins, one binary
 
@@ -286,10 +328,13 @@ sleep-walk the agent; they queue visible input.
 2. **First-party tree**: `plugins/lintgate.nim` (reference
    implementation and test fixture), then `tokenmeter`, `approve`,
    `goalkeeper`.
-3. **`mcpwrap`** (~700 loc, standalone): stdio MCP client, `add`/
-   `skill`, tools.json cache, flag mapping, text output with caps.
-4. **The official list**: `docs/tools.md` with the seed set and
-   admission criteria, plus built-in skills for each entry.
+3. **`mcpwrap`** (~700 loc, standalone, tools repo entry #1): stdio
+   MCP client, `add`/`skill`, tools.json cache, flag mapping, text
+   output with caps.
+4. **The tools repo**: `registry.toml` with the seed set and admission
+   criteria, per-tool skills, the CI build matrix, and the
+   `3code tool add` artifact path (registry fetch + sha256 verify).
+   `docs/tools.md` is generated from the registry.
 5. **Settings discipline**: `formatter = "..."` (`'formatprg'` analog)
    and the `path:line:col:` issue-line convention for plugin messages
    (the quickfix analog: textual now, navigable later).
