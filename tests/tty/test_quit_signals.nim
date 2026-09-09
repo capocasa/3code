@@ -320,6 +320,61 @@ suite "quit signals":
     assertNoTrace(tty)
     echo "  PASS: Ctrl-C during retry backoff then Ctrl-D quit cleanly"
 
+  test "fatal API error then Ctrl-D quits (inputTurnActive reset)":
+    # Regression: a fatal ApiError (retry budget exhausted with no user
+    # interrupt) took the generic-error path: commitTranscriptBytes +
+    # endTurnAfterTranscriptAppend, which set turnEnded without calling
+    # stopTurnInputForFinalRender. inputTurnActive stayed true, so every
+    # later Ctrl-D at the empty prompt was misrouted to the inert mid-turn
+    # branch and the prompt could not be quit via the keyboard.
+    let root = newFixture("fatal_api_error_then_ctrl_d")
+    writeConfiguredProvider(root)
+    # 3x 429 covers StubMaxAttempts (2, via -d:fastStubRetries) with one to
+    # spare; no success entry, so the budget exhausts into a fatal ApiError
+    # with no user interrupt involved.
+    writeStubResponses(root, %*[
+      {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
+      {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
+      {"failure": "429", "body": "{\"error\":\"rate limit\"}"}
+    ])
+    let stub = ensureStubBinary(extraDefines = "-d:fastStubRetries")
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer: tty.close()
+    tty.expect "\u276f"
+    for ch in "go":
+      tty.send($ch); tty.drain(10)
+    tty.send "\n"
+    # Wait for the first retry notice so the transport is mid-flow, then
+    # let the budget exhaust on its own (no Ctrl-C: that path resets the
+    # flag via onTurnInterrupted and would mask the leak).
+    tty.expectInHistory("429", timeoutMs = 15_000)
+    # Wait for the turn to actually end: the fatal ApiError commit lands
+    # as a scrollback row holding the bare error text, while the live
+    # retry notices always carry a ", retry N/M in ..." suffix. Neither
+    # expectIdleCaret (the caret shows during backoff notice repaints) nor
+    # frame-quiet (the countdown label updates only once per second, so a
+    # 1s quiet window fits between ticks) is a valid turn-over signal here.
+    var over = false
+    for _ in 0 ..< 200:
+      tty.drain(100)
+      for row in tty.screenText().splitLines():
+        let r = row.strip
+        if "rate limit (code 429)" in r and "retry" notin r:
+          over = true
+          break
+      if over: break
+    check over
+    tty.expectAlive()             # a fatal API error must not exit the process
+    # Now at an idle, empty prompt: Ctrl-D must quit like `:q` would. With
+    # the stuck flag this was a permanent no-op.
+    tty.send "\x04"
+    tty.expectExit(0, timeoutMs = 5000)
+    assertNoTrace(tty)
+    echo "  PASS: fatal API error then Ctrl-D quit cleanly"
+
   test "Ctrl-C interrupt then Ctrl-D quits (inputTurnActive must reset)":
     # Regression: a user interrupt (Ctrl-C/ESC) during an active turn left
     # `inputTurnActive` stuck true because `runTurns` skips its deferred
