@@ -84,6 +84,70 @@ const Reasoning = "Pondering the repository layout and weighing every " &
   "possible approach before responding carefully now end."
 
 suite "fat prompt on terminal resize":
+  test "width resize at idle never erases rows above the prompt":
+    ## Regression: a width-only resize used to walk the erase one row past
+    ## the volatile block's top (the resize walk-up double-counted the
+    ## editor: one sentinel row in `sections` plus the editor's own row
+    ## count), so every width change blanked the row directly above the
+    ## block and pulled the prompt up a row — the separator or token bar
+    ## first, committed transcript lines once those were gone. Nothing
+    ## above the prompt block may change across a width-only resize.
+    let root = newFixture("resize_idle_above")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "content": "committed reply alpha\ncommitted reply beta",
+        "contentChunks": ["committed reply alpha\ncommitted reply beta"],
+        "usage": {
+          "promptTokens": 20, "completionTokens": 5,
+          "totalTokens": 25, "cachedTokens": 0
+        }
+      }
+    ])
+    let tty = startStub(root, cols = 80, rows = 24)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.drain(300)
+    # Fresh prompt, fully settled: a width-only resize must repaint the
+    # prompt in place, leaving every row above it untouched. The screen
+    # (content and row placement) has to come back identical.
+    let settled = tty.screenText()
+    for w in [100, 60, 80, 104]:
+      tty.resize(w, 24)
+      tty.drain(400)
+      let now = tty.screenText()
+      if now != settled:
+        doAssert false, "width " & $w & " resize moved or wiped rows: " &
+          "screen before the first resize vs after:\n--- before ---\n" &
+          settled & "\n--- after " & $w & " ---\n" & now & "\n" &
+          tty.dumpFramesAround("❯")
+
+    # Commit a turn so real transcript lines sit above the idle prompt's
+    # chrome, then resize across widths again: every committed line must
+    # survive each change.
+    tty.send "hello\n"
+    tty.expectInHistory "committed reply beta"
+    tty.drain(800)
+    for w in [104, 60, 80]:
+      tty.resize(w, 24)
+      tty.drain(400)
+      let screen = tty.screenText()
+      if "committed reply alpha" notin screen or
+          "committed reply beta" notin screen:
+        doAssert false, "width " & $w &
+          " resize wiped committed rows above the prompt:\n" & screen &
+          "\n" & tty.dumpFramesAround("committed reply")
+
+    # The prompt itself is still live and editable after all resizes.
+    tty.send "still here"
+    tty.expect "still here"
+    tty.send "\x15"              # ctrl-u: clear the line
+    tty.send ":q\n"
+    tty.expectExit(0, timeoutMs = 5000)
+
   test "shrink while the thinking ticker is live keeps one footer":
     let root = newFixture("resize_shrink_ticker")
     writeConfiguredProvider(root)

@@ -775,17 +775,15 @@ proc redrawBytes*(ed: var LineEditor; synchronized = true): string =
     buf.add syncoutput.SyncBegin()
   var walkUp = ed.renderRow
   if resized:
-    # A width change reflows the already-painted editor rows: the
-    # tracked `renderRow` no longer matches where the cursor sits
-    # relative to the stale rows (a narrowed terminal re-wraps the
-    # block taller, and the cursor's own row shifts with it). Walking
-    # up the stale count lands mid-block, so the erase below spares the
-    # topmost stale row, which then reflows again on every later
-    # repaint and stacks duplicates above the live entry line. Clamp to
-    # the fresh row count and walk one row further: at worst that row
-    # was already reflowed into the block, and overshooting into real
-    # scrollback only blanks content the terminal itself rewrote.
-    walkUp = min(ed.renderRow, max(1, total) - 1) + 1
+    # A width change reflows the already-painted editor rows (on terminals
+    # that reflow; others freeze them), so the tracked `renderRow` and the
+    # fresh `targetRow` are two different guesses at the caret's distance
+    # from the block top. Walk the taller of the two: it always reaches
+    # the block top or higher, never landing mid-block (which left stale
+    # rows above the live entry line). The old `+ 1` here over-walked
+    # even when both counts agreed, blanking the committed row above the
+    # prompt on every width change.
+    walkUp = max(ed.renderRow, targetRow)
   if walkUp > 0:
     buf.add "\x1b[" & $walkUp & "A"
   buf.add "\r\x1b[J"
