@@ -77,6 +77,15 @@ const VerifyTimeoutMs* {.intdefine.} = 30_000
   ## deadline then fail cleanly instead of blocking forever. 30s is
   ## generous for a `max_tokens=1` ping that should answer in well under a
   ## second. An `intdefine` so tests can shrink it.
+const NonStreamTooLongMs* {.intdefine.} = 1_800_000
+  ## Hard ceiling for ONE non-streaming wait (30min). With `:streaming
+  ## off` the provider is silent by design until the whole completion is
+  ## ready, so the 45s quiet watchdog cannot tell "generating" from
+  ## "black-holed peer" — the wait loops feed the watchdog clock per tick
+  ## and enforce this ceiling themselves instead. Long enough for the
+  ## slowest reasoning generations; past it the link is presumed dead and
+  ## the error rides the same NetworkHealthError retry path as a quiet
+  ## stream. An `intdefine` so tests can shrink it.
 const QuietTooLongMs* {.intdefine.} = 45_000
   ## If a streaming response goes this long with no data from the
   ## provider (45s), the turn is aborted. `posix.shutdown(fd)` from another
@@ -253,13 +262,13 @@ proc classifyRetry*(exc: ref CatchableError, code: int): string =
   of 500, 502, 503, 504: "server"
   else: ""
 
-proc networkQuietMsg*(): string =
+proc networkQuietMsg*(quietMs = QuietTooLongMs): string =
   ## Canonical "network quiet for Ns" message the transport writes into
   ## `StreamOutcome.errMsg`. `callModel` detects it via `isNetworkQuietMsg`
   ## and raises a `NetworkHealthError`, which the retry loop treats as a
   ## server error. One constructor so every call site carries the same
-  ## text (and the `QuietTooLongMs` budget) without drift.
-  NetworkQuietPrefix & " " & $(QuietTooLongMs div 1000) & "s"
+  ## text (and the quiet budget that fired) without drift.
+  NetworkQuietPrefix & " " & $(quietMs div 1000) & "s"
 
 proc extractErrorMsg*(errBody: string): string =
   ## Pull a human-readable message from a JSON error body.
@@ -1533,6 +1542,8 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
                          extraHeadersProfile, key, "application/json"),
                        body = bodyStr)
       hookProviderActivity()
+      var waitCapHit = false
+      let waitStart = getMonoTime()
       while true:
         try:
           resp = conn.readResponseHead()
@@ -1541,9 +1552,29 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
           if isInterrupted() or isNetworkQuiet():
             closeCachedStreamConn()
             break
+          if getMonoTime() - waitStart >=
+              initDuration(milliseconds = NonStreamTooLongMs):
+            # Black-holed peer: no bytes for the whole non-streaming
+            # ceiling. The wait is bounded after all — at 30min, not 45s
+            # and not never. Surface as network quiet so callModel's
+            # NetworkHealthError path retries it like a dead stream.
+            closeCachedStreamConn()
+            waitCapHit = true
+            break
+          # A non-streaming reply is silent by design: the provider sends
+          # nothing until the whole completion is ready, and reasoning
+          # models generate for minutes — far past the quiet watchdog's
+          # QuietTooLongMs. Feed the watchdog clock on every wake tick so
+          # a healthy slow wait is not killed as a dead link; without this
+          # every :streaming off turn on a slow provider died at 45s and
+          # retried into the same kill. A genuinely dead conn still
+          # surfaces as EOF/IOError; Ctrl-C still interrupts within a tick.
+          hookProviderActivity()
           continue
       if resp.status == 0 and resp.headers.len == 0:
-        if isInterrupted() and not isNetworkQuiet():
+        if waitCapHit:
+          result.errMsg = networkQuietMsg(NonStreamTooLongMs)
+        elif isInterrupted() and not isNetworkQuiet():
           result.errMsg = InterruptedByUserMsg
         else:
           result.errMsg = networkQuietMsg()
@@ -1561,6 +1592,8 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
 
   var body = ""
   var readErr = ""
+  var bodyCapHit = false
+  let bodyWaitStart = getMonoTime()
   block readLoop:
     while true:
       try:
@@ -1570,6 +1603,15 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
         if isInterrupted() or isNetworkQuiet():
           closeCachedStreamConn()
           break readLoop
+        if getMonoTime() - bodyWaitStart >=
+            initDuration(milliseconds = NonStreamTooLongMs):
+          # Same ceiling as the head wait: bounded, never a 45s false kill.
+          closeCachedStreamConn()
+          bodyCapHit = true
+          break readLoop
+        # Same feed as the head wait above: provider silence during a
+        # non-streaming generation is expected, not a dead link.
+        hookProviderActivity()
         continue
       except CatchableError as e:
         readErr = e.msg
@@ -1577,6 +1619,9 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
         break readLoop
   hookProviderActivity()
 
+  if bodyCapHit:
+    result.errMsg = networkQuietMsg(NonStreamTooLongMs)
+    return
   if isNetworkQuiet():
     closeCachedStreamConn()
     result.errMsg = networkQuietMsg()
@@ -1724,6 +1769,8 @@ proc callResponses(url, key, bodyStr: string; baseLabel: string;
                          extraHeadersProfile, key, "application/json"),
                        body = bodyStr)
       hookProviderActivity()
+      var waitCapHit = false
+      let waitStart = getMonoTime()
       while true:
         try:
           resp = conn.readResponseHead()
@@ -1732,9 +1779,21 @@ proc callResponses(url, key, bodyStr: string; baseLabel: string;
           if isInterrupted() or isNetworkQuiet():
             closeCachedStreamConn()
             break
+          if getMonoTime() - waitStart >=
+              initDuration(milliseconds = NonStreamTooLongMs):
+            # Black-holed peer, bounded at the non-streaming ceiling
+            # (see callHttp). Retried as network quiet by callModel.
+            closeCachedStreamConn()
+            waitCapHit = true
+            break
+          # Non-streaming silence is expected (see callHttp): feed the
+          # quiet watchdog so a long generation is not killed at 45s.
+          hookProviderActivity()
           continue
       if resp.status == 0 and resp.headers.len == 0:
-        if isInterrupted() and not isNetworkQuiet():
+        if waitCapHit:
+          result.errMsg = networkQuietMsg(NonStreamTooLongMs)
+        elif isInterrupted() and not isNetworkQuiet():
           result.errMsg = InterruptedByUserMsg
         else:
           result.errMsg = networkQuietMsg()
@@ -1751,6 +1810,8 @@ proc callResponses(url, key, bodyStr: string; baseLabel: string;
 
   var body = ""
   var readErr = ""
+  var bodyCapHit = false
+  let bodyWaitStart = getMonoTime()
   block readLoop:
     while true:
       try:
@@ -1760,6 +1821,14 @@ proc callResponses(url, key, bodyStr: string; baseLabel: string;
         if isInterrupted() or isNetworkQuiet():
           closeCachedStreamConn()
           break readLoop
+        if getMonoTime() - bodyWaitStart >=
+            initDuration(milliseconds = NonStreamTooLongMs):
+          # Same ceiling as the head wait.
+          closeCachedStreamConn()
+          bodyCapHit = true
+          break readLoop
+        # Same feed as the head wait above.
+        hookProviderActivity()
         continue
       except CatchableError as e:
         readErr = e.msg
@@ -1767,6 +1836,9 @@ proc callResponses(url, key, bodyStr: string; baseLabel: string;
         break readLoop
   hookProviderActivity()
 
+  if bodyCapHit:
+    result.errMsg = networkQuietMsg(NonStreamTooLongMs)
+    return
   if isNetworkQuiet():
     closeCachedStreamConn()
     result.errMsg = networkQuietMsg()
