@@ -125,9 +125,11 @@ That is enough to get started.
 
 ## Providers and authentication
 
-`:provider` lists configured providers and marks the current one. `:model`
-does the same for its models. Both commands have tab completion, so there is no
-need to memorize catalog names.
+`:provider` lists configured providers and marks the current one, along with
+the model a switch would land on. `:model` does the same for its models. Both
+commands have tab completion, so there is no need to memorize catalog names.
+Model choices are sticky per provider: switching back with `:provider` returns
+to the model you last used there, not the first one in its list.
 
 ```
 :provider nvidia

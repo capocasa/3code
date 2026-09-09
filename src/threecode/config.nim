@@ -37,6 +37,11 @@ type
     reasonings*: seq[string]  ## available reasoning levels for `:reasoning`
                               ## listing. Empty means "fall back to the
                               ## model default" (`defaultReasoningsFor`).
+    currentModel*: string  ## persisted last-used model for this provider
+                           ## (`current_model` in the [provider] section).
+                           ## `:provider <name>` switches back to it instead
+                           ## of the first wizard-entered model. Empty means
+                           ## no selection recorded yet.
   ParamsRec* = object
     ## One `[params]` section: model-parameter overrides scoped to a
     ## (provider, model) pair. `model` empty means the whole provider.
@@ -181,6 +186,28 @@ proc firstModel*(prov: ProviderRec): string =
   if prov.models.len > 0: prov.models[0]
   else: ""
 
+proc rememberedModel*(prov: ProviderRec): string =
+  ## The model `:provider <name>` lands on: the provider's persisted
+  ## selection when it still resolves against its models list, else the
+  ## first wizard-entered model. Stale entries (model since removed in an
+  ## edit) fall back silently.
+  if prov.currentModel != "":
+    let i = prov.findModel(prov.currentModel)
+    if i >= 0: return prov.models[i]
+  firstModel(prov)
+
+proc setCurrentModel*(provName, model: string) =
+  ## Record `model` as `provName`'s persisted default; the next
+  ## `writeConfigFile` flushes it. `model` is resolved against the
+  ## provider's models list first so the config always stores a list id,
+  ## never a wire spelling that only the known-good table knows.
+  for i, pr in activeProviders:
+    if pr.name == provName:
+      let idx = pr.findModel(model)
+      activeProviders[i].currentModel =
+        if idx >= 0: pr.models[idx] else: model
+      break
+
 proc firstKnownGoodCombo*(providers: seq[ProviderRec]): string =
   ## "<provider>.<model>" of the first known-good (provider, model) pair
   ## across `providers`, walking KnownGoodCombos order so the curated
@@ -296,7 +323,8 @@ const
   ColorKeys = ["bright-white", "off-white", "dim-white", "token-bar",
                "private-bar"]
   ProviderKeys = ["name", "url", "key", "model_prefix", "family",
-                  "models", "reasoning", "reasonings", "auth"]
+                  "models", "reasoning", "reasonings", "auth",
+                  "current_model", "current-model"]
   ProviderParamsKeys = ["temperature", "max-tokens", "max_tokens",
                         "think-back", "think_back",
                         "context-window", "context_window",
@@ -539,6 +567,8 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
         of "models": prov.models = splitModels(v)
         of "reasoning": prov.reasoning = v.strip.toLowerAscii
         of "reasonings": prov.reasonings = splitModels(v).mapIt(it.toLowerAscii)
+        of "current_model", "current-model":
+          prov.currentModel = v.strip
         of "auth": prov.auth = v.strip.toLowerAscii
         else: discard
       of "params":
@@ -573,6 +603,20 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
   p.close
   let verr = validateConfig(path, entries)
   if verr != "": die verr, ExitConfig
+  # Migration: older configs only kept one global `current`. Seed the
+  # active provider's per-provider selection from it so stickiness works
+  # (and persists) from the very next config write, not just after the
+  # user re-selects a model by hand.
+  block:
+    let dot = current.find('.')
+    if dot > 0:
+      let pname = current[0 ..< dot]
+      let mname = current[dot + 1 .. ^1]
+      for i, pr in providers:
+        if pr.name == pname and providers[i].currentModel == "":
+          let idx = pr.findModel(mname)
+          if idx >= 0: providers[i].currentModel = pr.models[idx]
+          break
   activeParams = paramList
   (current, providers, colors, searchKeys, searchEngine, shortcuts)
 
@@ -593,7 +637,14 @@ proc writeConfigFile*(path: string, current: string,
   var providers = providers
   for pr in providers.mitems:
     pr.models = pr.models.mapIt(normalizeModelName(it))
-  let current = normalizeModelName(current)
+  # Normalize only the model part: running the whole "provider.model"
+  # string through normalizeModelName strips everything up to the model's
+  # last `/`, which drops the provider name entirely for ids like
+  # "baseten.zai-org/GLM-4.7" and leaves an unbootable current.
+  let curDot = current.find('.')
+  let current =
+    if curDot < 0: normalizeModelName(current)
+    else: current[0 .. curDot] & normalizeModelName(current[curDot + 1 .. ^1])
   var buf = "[settings]\n"
   buf.add "current = " & quoteVal(current) & "\n"
   if activeSearchKeys.len > 0 or activeSearchEngine != "exa":
@@ -635,6 +686,9 @@ proc writeConfigFile*(path: string, current: string,
     if pr.family != "":
       buf.add "family = " & quoteVal(pr.family) & "\n"
     buf.add "models = " & quoteVal(formatModels(pr.models)) & "\n"
+    if pr.currentModel != "":
+      buf.add "current_model = " &
+        quoteVal(normalizeModelName(pr.currentModel)) & "\n"
     if pr.reasoning != "":
       buf.add "reasoning = " & quoteVal(pr.reasoning) & "\n"
     if pr.reasonings.len > 0:

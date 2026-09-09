@@ -69,6 +69,9 @@ name = "baseten"
 url = "https://inference.baseten.co/v1"
 key = "..."
 models = "zai-org/GLM-5 thinkingmachines/inkling"
+; current_model = "zai-org/GLM-5"  ; remembered per-provider model: switching
+;                                   ; back with :provider returns here, not to the first
+;                                   ; entry. Written automatically by :model.
 
 [provider]
 name = "openai"

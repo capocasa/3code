@@ -1,5 +1,5 @@
-import std/[options, os, strutils, tables, unittest]
-import threecode/[config, types, util]
+import std/[json, options, os, strutils, tables, unittest]
+import threecode/[config, minline, types, ui, util]
 
 suite "config: [search]":
   var tmp = ""
@@ -412,3 +412,200 @@ think-back = "none"
     let prof3 = buildProfile("zai.glm-5.3", providers, "")
     check prof3.params.temperature.get == 0.6
     check prof3.params.thinkBack.isNone
+
+suite "config: per-provider current model":
+  var tmp = ""
+
+  setup:
+    tmp = getTempDir() / "3code-test-currentmodel.ini"
+    activeProviders = @[]
+    activeCurrent = ""
+    activeParams = @[]
+
+  teardown:
+    removeFile(tmp)
+    activeProviders = @[]
+    activeCurrent = ""
+    activeParams = @[]
+
+  test "parseConfigFile reads current_model and the hyphen spelling":
+    writeFile(tmp, """
+[settings]
+current = "a.m1"
+
+[provider]
+name = "a"
+url = "https://a/v1"
+key = "k"
+models = "m1 m2"
+current_model = "m2"
+
+[provider]
+name = "b"
+url = "https://b/v1"
+key = "k"
+models = "n1 n2"
+current-model = "n1"
+""")
+    let (_, providers, _, _, _, _) = parseConfigFile(tmp)
+    check providers[0].currentModel == "m2"
+    check providers[1].currentModel == "n1"
+
+  test "parseConfigFile seeds the current provider's selection from current":
+    # Old configs have no current_model; the active provider inherits the
+    # model part of `current` so stickiness survives the migration.
+    writeFile(tmp, """
+[settings]
+current = "a.m2"
+
+[provider]
+name = "a"
+url = "https://a/v1"
+key = "k"
+models = "m1 m2"
+
+[provider]
+name = "b"
+url = "https://b/v1"
+key = "k"
+models = "n1 n2"
+""")
+    let (_, providers, _, _, _, _) = parseConfigFile(tmp)
+    check providers[0].currentModel == "m2"
+    check providers[1].currentModel == ""
+
+  test "explicit current_model wins over the current migration seed":
+    writeFile(tmp, """
+[settings]
+current = "a.m1"
+
+[provider]
+name = "a"
+url = "https://a/v1"
+key = "k"
+models = "m1 m2"
+current_model = "m2"
+""")
+    let (_, providers, _, _, _, _) = parseConfigFile(tmp)
+    check providers[0].currentModel == "m2"
+
+  test "stale model part does not seed a selection":
+    writeFile(tmp, """
+[settings]
+current = "a.gone"
+
+[provider]
+name = "a"
+url = "https://a/v1"
+key = "k"
+models = "m1 m2"
+""")
+    let (_, providers, _, _, _, _) = parseConfigFile(tmp)
+    check providers[0].currentModel == ""
+
+  test "writeConfigFile round-trips current_model and skips empty":
+    var a = ProviderRec(name: "a", url: "https://a/v1", key: "k",
+                        models: @["m1", "m2"], currentModel: "m2")
+    var b = ProviderRec(name: "b", url: "https://b/v1", key: "k",
+                        models: @["n1", "n2"])
+    writeConfigFile(tmp, "a.m2", @[a, b])
+    check readFile(tmp).contains("current_model = \"m2\"")
+    check readFile(tmp).count("current_model") == 1
+    let (_, providers, _, _, _, _) = parseConfigFile(tmp)
+    check providers[0].currentModel == "m2"
+    check providers[1].currentModel == ""
+
+  test "writeConfigFile keeps the provider prefix of current":
+    # Regression: normalizing the whole "provider.model" string used to
+    # strip everything before the model's last slash, losing the provider.
+    var a = ProviderRec(name: "baseten", url: "https://b/v1", key: "k",
+                        models: @["zai-org/GLM-4.7"],
+                        currentModel: "zai-org/GLM-4.7")
+    writeConfigFile(tmp, "baseten.zai-org/GLM-4.7", @[a])
+    check readFile(tmp).contains("current = \"baseten.glm-4.7\"")
+
+  test "rememberedModel prefers the stored selection and survives staleness":
+    let a = ProviderRec(name: "a", models: @["m1", "m2"],
+                        currentModel: "m2")
+    check rememberedModel(a) == "m2"
+    let stale = ProviderRec(name: "a", models: @["m1", "m2"],
+                            currentModel: "gone")
+    check rememberedModel(stale) == "m1"
+    let fresh = ProviderRec(name: "a", models: @["m1", "m2"])
+    check rememberedModel(fresh) == "m1"
+
+  test "setCurrentModel resolves the value against the models list":
+    activeProviders = @[ProviderRec(name: "a", models: @["m1", "org/m2"])]
+    setCurrentModel("a", "m2")  # short name resolves to the full list id
+    check activeProviders[0].currentModel == "org/m2"
+    setCurrentModel("a", "unheard-of")  # unmatched passes through as-is
+    check activeProviders[0].currentModel == "unheard-of"
+
+suite "config: sticky model across provider switches":
+  var
+    savedXdg = ""
+    hadXdg = false
+    tempRoot = ""
+    savedCurrent = ""
+    savedProviders: seq[ProviderRec]
+
+  setup:
+    savedCurrent = activeCurrent
+    savedProviders = activeProviders
+    hadXdg = existsEnv("XDG_CONFIG_HOME")
+    savedXdg = getEnv("XDG_CONFIG_HOME")
+    tempRoot = getTempDir() / ("3code-test-sticky-" & $getCurrentProcessId())
+    putEnv("XDG_CONFIG_HOME", tempRoot)
+    activeParams = @[]
+    activeProviders = @[
+      ProviderRec(name: "zai", url: "https://api.z.ai/v1", key: "k",
+                  models: @["glm-5.2", "glm-5.3"]),
+      ProviderRec(name: "baseten", url: "https://inference.baseten.co/v1",
+                  key: "k", models: @["zai-org/GLM-4.7"])]
+    activeCurrent = "zai.glm-5.2"
+
+  teardown:
+    activeCurrent = savedCurrent
+    activeProviders = savedProviders
+    activeParams = @[]
+    if hadXdg:
+      putEnv("XDG_CONFIG_HOME", savedXdg)
+    else:
+      delEnv("XDG_CONFIG_HOME")
+    try: removeDir(tempRoot)
+    except OSError: discard
+
+  var messages = %*[]
+  var session = Session()
+  var prof = Profile()
+  var editor: LineEditor
+
+  proc run(cmd: string): CommandResult =
+    handleCommandResult(cmd, messages, session, prof, editor)
+
+  test ":model selection survives switching away and back":
+    prof = buildProfile(activeCurrent, activeProviders, "")
+    discard run(":model glm-5.3")
+    check prof.model == "glm-5.3"
+    discard run(":provider baseten")
+    check prof.name == "baseten.zai-org/GLM-4.7"
+    discard run(":provider zai")
+    check prof.model == "glm-5.3"
+
+  test ":model selection persists to the config per provider":
+    prof = buildProfile(activeCurrent, activeProviders, "")
+    discard run(":model glm-5.3")
+    discard run(":provider baseten")
+    let cfg = readFile(configPath())
+    check cfg.contains("current_model = \"glm-5.3\"")
+    # writeConfigFile stores normalized ids; buildProfile maps back to wire.
+    check cfg.contains("current = \"baseten.glm-4.7\"")
+
+  test "provider without a recorded selection lands on its first model":
+    prof = buildProfile(activeCurrent, activeProviders, "")
+    discard run(":provider baseten")
+    check prof.model == "zai-org/GLM-4.7"
+    # and the switch records it (normalized), so a reload keeps the state
+    let (_, providers, _, _, _, _) = parseConfigFile(configPath())
+    check providers[1].currentModel == "glm-4.7"
+    check rememberedModel(providers[1]) == "glm-4.7"
