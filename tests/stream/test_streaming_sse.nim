@@ -9,7 +9,8 @@
 ##
 ## Must be compiled with -d:testPlainHttp so streamHttp accepts http://127.0.0.1.
 
-import std/[json, jsonutils, net, os, sequtils, strutils, unittest]
+import std/[atomics, json, jsonutils, net, os, sequtils, strutils,
+            unittest]
 from std/times import epochTime
 when defined(posix):
   from std/posix import Timeval, Time, Suseconds, SockLen, SOL_SOCKET,
@@ -619,3 +620,111 @@ suite "request headers (OpenCode Zen/Go contract)":
     # The capture lowercases lines, so compare on the lowered id.
     check "x-opencode-session: 20260903t101415" in server.capturedHeaders.join("\n")
     closeCachedStreamConn()
+
+# ---------------------------------------------------------------------------
+# Non-streaming transport vs the quiet watchdog
+# ---------------------------------------------------------------------------
+
+proc serveNonStreamDelayed(server: SseServer; delayMs: int) =
+  ## Serve one complete NON-streaming JSON completion after `delayMs` of
+  ## total wire silence: exactly what every provider does with
+  ## `"stream": false` while the model generates. Reasoning models hold
+  ## this silence for minutes, far past the quiet watchdog's 45s budget.
+  var client: Socket
+  if not server.acceptWithinDeadline(client): return
+  let contentLength = client.readRequestHead()
+  sleep(delayMs)
+  let body = $ %*{"choices": [{"index": 0,
+      "message": {"content": "BATCH_SURVIVED", "reasoning_content": ""},
+      "finish_reason": "stop"}],
+    "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}}
+  client.send("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" &
+    "Content-Length: " & $body.len & "\r\nConnection: close\r\n\r\n" & body)
+  client.drainRequestBody(contentLength)
+  client.close()
+
+type QuietWatchSim = ref object
+  ## Scaled-down stand-in for fatprompt's quietWatchLoop: fires
+  ## requestQuietShutdown when the provider-activity clock goes 900ms
+  ## stale (production budget: QuietTooLongMs = 45s).
+  lastActivityMs: Atomic[int]
+  stop: Atomic[bool]
+
+proc quietWatchSimLoop(w: QuietWatchSim) {.thread.} =
+  while not w.stop.load(moRelaxed):
+    if int(epochTime() * 1000) - w.lastActivityMs.load(moRelaxed) > 900:
+      requestQuietShutdown()
+    sleep(50)
+
+suite "non-streaming transport: provider silence is not a dead link":
+  # :streaming off posts "stream": false; the provider then says NOTHING
+  # until the whole completion is ready. The 45s quiet watchdog (fed via
+  # the providerActivity hook, which the streaming path feeds per SSE
+  # line) saw that silence as a dead connection and killed the request;
+  # callModel retried, the generation restarted from scratch, and the
+  # watchdog killed it again: the continuous network warnings users saw
+  # on every :streaming off turn past the first with slower providers
+  # (DeepSeek answers inside 45s, so it was immune). The non-streaming
+  # wait loops now feed the watchdog on every QuietRecvWakeMs tick.
+
+  var savedStreaming: bool
+
+  setup:
+    savedStreaming = streamingEnabled
+    streamingEnabled = false
+    closeCachedStreamConn()
+
+  teardown:
+    streamingEnabled = savedStreaming
+    setApiStreamHooks(ApiStreamHooks())
+    closeCachedStreamConn()
+    clearNetworkQuiet()
+
+  test "providerActivity is fed throughout a long non-streaming wait":
+    var marks: Atomic[int]
+    marks.store(0, moRelaxed)
+    setApiStreamHooks(ApiStreamHooks(
+      providerActivity: proc() = discard marks.fetchAdd(1, moRelaxed)))
+    let server = newSseServer("")
+    var srv: Thread[SseServer]
+    proc delayed(s: SseServer) {.thread.} = serveNonStreamDelayed(s, 1400)
+    createThread(srv, delayed, server)
+    var usage: Usage
+    let msg = callModel(testProfile(server),
+      %*[{"role": "user", "content": "hi"}], usage, 0)
+    joinThread(srv)
+    server.socket.close()
+    check msg != nil
+    check msg{"content"}.getStr == "BATCH_SURVIVED"
+    # Send/head/body marks are 3; the 1400ms head wait must add at least
+    # one QuietRecvWakeMs (500ms) tick mark of its own. Before the fix
+    # the wait was fed nothing, so the count stayed at 3.
+    check marks.load(moRelaxed) >= 4
+
+  test "simulated quiet watchdog never fires during a slow generation":
+    let sim = QuietWatchSim()
+    sim.lastActivityMs.store(int(epochTime() * 1000), moRelaxed)
+    setApiStreamHooks(ApiStreamHooks(
+      providerActivity: proc() =
+        sim.lastActivityMs.store(int(epochTime() * 1000), moRelaxed)))
+    var watch: Thread[QuietWatchSim]
+    createThread(watch, quietWatchSimLoop, sim)
+    let server = newSseServer("")
+    var srv: Thread[SseServer]
+    proc delayed(s: SseServer) {.thread.} = serveNonStreamDelayed(s, 2000)
+    createThread(srv, delayed, server)
+    var usage: Usage
+    var raised = false
+    var msg: JsonNode
+    try:
+      msg = callModel(testProfile(server),
+        %*[{"role": "user", "content": "hi"}], usage, 0)
+    except ApiError:
+      raised = true
+    sim.stop.store(true, moRelaxed)
+    joinThread(watch)
+    joinThread(srv)
+    server.socket.close()
+    check not raised
+    check msg != nil
+    check msg{"content"}.getStr == "BATCH_SURVIVED"
