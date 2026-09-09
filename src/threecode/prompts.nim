@@ -15,7 +15,7 @@
 ]#
 
 import std/[algorithm, hashes, json, options, os, sequtils, sha1, strutils]
-import types, util, modelname
+import types, util, modelname, screen
 
 # ThinkBackMode moved to types.nim (Profile.params needs it); re-export
 # for modules that historically reached it through prompts.
@@ -2667,6 +2667,21 @@ let dmailTool = %*{
   }
 }
 
+let screenshotTool = %*{
+  "type": "function",
+  "function": {
+    "name": "screenshot",
+    "description": "Capture the screen; the image is attached to your next message. Coordinates you read off it are delivered-raster pixels — drive the desktop with the `shot` script (see the computer-use note), never raw xdotool. Re-capture after actions to verify what actually happened.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "fidelity": {"type": "boolean", "description": "PNG instead of JPEG for unreadable small text (slower, larger)."}
+      },
+      "required": []
+    }
+  }
+}
+
 let glmAndQwenTools = %*[
   {
     "type": "function",
@@ -3004,6 +3019,9 @@ commands:
   :private on|off   toggle private mode for this session (bar recolors)
   :private allow X  trust provider X (optionally one model: allow X M) with
                     private data; persists as [params] allow-private
+  :computer         show computer use (screenshot + shot; off by default)
+  :computer on|off  let the model see and drive this desktop for the session
+                    (vision models only; one-time note enters the chat)
   :prompt           show the active system prompt
   :show [N]         show full output of tool call N (default: last)
   :log              list all tool calls this session
@@ -3524,6 +3542,21 @@ proc findSystemPromptOverride*(family: string): string =
   let global = userConfigRoot() / family & ".txt"
   if fileExists(global): return global
   ""
+
+proc screenshotOffered*(p: Profile): bool =
+  ## The screenshot schema rides the tools array only while computer use
+  ## is active on a vision profile: session-scoped activation, zero cost
+  ## when idle. The array change is a one-time cache bust at activation,
+  ## accepted and logged like any mid-session tool change.
+  computerUseEnabled and p.vision and screenBackendOk()
+
+proc activeTools*(p: Profile): JsonNode =
+  ## The request-facing tools for `p`: the family's static surface, plus
+  ## `screenshot` when computer use is live.
+  result = setup(p).tools
+  if screenshotOffered(p):
+    result = copy(result)
+    result.add screenshotTool
 
 proc buildSystemPrompt(p: Profile, skills: string): string =
   let override = findSystemPromptOverride(p.family)

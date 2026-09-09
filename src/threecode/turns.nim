@@ -11,7 +11,7 @@ import std/[algorithm, json, os, sequtils, sets, strformat, strutils, tables,
 when defined(posix):
   import std/posix except Time
 import types, util, prompts, session, compact, config, actions, api,
-  display, fatprompt, streamexec, toolstream, transcript, images
+  display, fatprompt, streamexec, toolstream, transcript, images, screen
 import engine as termengine
 
 const
@@ -610,6 +610,35 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     emptyRetries = 0               # bare empty-reply resends after smart-handling
     flailDet: FlailDetector        # identical-consecutive-tool-call guard
     nextCheckpoint = 0             # id of the marker on the next assistant message
+  # Computer use activates once per run, before the first request: the
+  # backend probe, the `shot` script and the one-time note all happen
+  # here so every entry path (REPL :command, --computer flag, config
+  # line, library session) behaves identically. A probe failure or a
+  # non-vision profile surfaces once and disarms the tool for the run.
+  if computerUseEnabled and not session.computerActivated:
+    session.computerActivated = true
+    block computerGate:
+      if not p.vision:
+        computerUseEnabled = false
+        commitTranscriptBytes(errLnS(
+          "computer use unavailable: " & p.model & " cannot see images — " &
+          "a vision model (glm-5.3-flash on zai) is required"), true)
+        break computerGate
+      let (ok, err) = screen.ensureComputerUse(sessionIdFromPath(session.savePath))
+      if not ok:
+        computerUseEnabled = false
+        commitTranscriptBytes(errLnS(err), true)
+        break computerGate
+      let sp = screen.shotScriptPath(sessionIdFromPath(session.savePath))
+      messages.add %*{"role": "user", "content":
+        "[computer use on] screenshot() captures this screen and attaches " &
+        "the image to your next message; the shot script drives mouse and " &
+        "keyboard with delivered-raster coordinates:\n" & sp &
+        " click 640 360   (also: doubleclick/rightclick/middleclick X Y, " &
+        "drag X1 Y1 X2 Y2, type TEXT, key ctrl+s, scroll up 3, title)\n" &
+        "Act on what you see; a stale-frame error means call screenshot() " &
+        "first. Esc is the panic button; the user sees every action."}
+      saveSession(session, messages)
   # dmail is offered only when the active profile's tool schema includes
   # it (kimi family); the marker tagging below keys off the same flag.
   var dmailEnabled = false
@@ -1097,9 +1126,19 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           extraNote = &"\n[{rest.len} image read(s) not attached: " &
             rest.join(", ") & "]"
           imgs.setLen MaxImagesPerTurn
-        let names = imgs.mapIt(it.name).join(", ")
+        # Screenshots announce geometry so the model can pin coordinates
+        # to the raster it just got; reads stay name-only as before.
+        let parts = imgs.mapIt(
+          if it.screenshot:
+            &"{it.name} {it.width}x{it.height} -> " &
+            &"{it.deliveredWidth}x{it.deliveredHeight}"
+          else: it.name)
+        let label =
+          if imgs.len > 0 and imgs.allIt(it.screenshot): "screenshot"
+          else: "image read"
+        let joined = parts.join(", ")
         messages.add imageUserMessage(
-          &"attached: {names} (image read){extraNote}", imgs)
+          &"attached: {joined} ({label}){extraNote}", imgs)
       saveSession(session, messages)
       if isInterrupted():
         onTurnInterrupted()

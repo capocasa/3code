@@ -17,7 +17,7 @@
 ## `patch` can reject stale edits when the file changed since last read.
 
 import std/[json, os, sequtils, strformat, strutils, tables, times, uri]
-import types, util, shell, web, config, streamexec, sandbox, images
+import types, util, shell, web, config, streamexec, sandbox, images, screen
 
 # ---------------------------------------------------------------------------
 # Tool dispatch: strictly per-model.
@@ -124,6 +124,8 @@ proc dispatchGlmOrQwen(family, name: string, args: JsonNode): Action =
   of "web_fetch": Action(kind: akWebFetch, body: args{"url"}.getStr)
   of "clear": clearAction(args)
   of "dmail": dmailAction(args)
+  of "screenshot": Action(kind: akScreenshot,
+                          body: if args{"fidelity"}.getBool: "fidelity" else: "")
   # Aliases — gpt-oss-shape names that show up as training leakage.
   # Lossless: `shell` → akBash, `apply_patch` → akApplyPatch (we have
   # the V4A parser), `edit` → akPatch (same shape as patch). Routed
@@ -144,6 +146,8 @@ proc dispatchGptOss(family, rawName: string, args: JsonNode): Action =
   of "web_search": Action(kind: akWebSearch, body: args{"query"}.getStr)
   of "web_fetch": Action(kind: akWebFetch, body: args{"url"}.getStr)
   of "clear": clearAction(args)
+  of "screenshot": Action(kind: akScreenshot,
+                          body: if args{"fidelity"}.getBool: "fidelity" else: "")
   # Aliases — glm/qwen-shape names that show up as training leakage,
   # plus the misspellings Codex's own prompt warns about. Routed
   # silently rather than warning the model out of it.
@@ -196,6 +200,8 @@ proc bannerFor*(act: Action): string =
     act.body
   of akWebFetch:
     act.body
+  of akScreenshot:
+    "screenshot"
   of akClear:
     "context cleared"
   of akDMail:
@@ -696,6 +702,22 @@ proc runAction*(act: Action, cache: ReadCache = nil, vision = false,
       return (capText(text), 0, "")
     except CatchableError as e:
       return ("error: web_fetch: " & e.msg, 1, "")
+  of akScreenshot:
+    if not computerUseEnabled:
+      return ("error: the screenshot tool is not enabled — the user must " &
+        "turn computer use on (`:computer on`) first", 1, "")
+    if not vision:
+      return ("error: this model cannot see images, so a screenshot would " &
+        "be wasted. Switch to a vision model (glm-5.3-flash on zai).", 1, "")
+    # The capture runs in this process (execCmdEx), outside the wall
+    # proxy that fences bash children — a capture must reach the real X
+    # server, the same standing exemption web_fetch has for HTTP.
+    let dest = if visionDir.len > 0: visionDir else: getTempDir() / "3code-img"
+    let (info, err) = captureScreenshot(dest, act.body == "fidelity")
+    if err.len > 0:
+      return (err, 1, "")
+    if cache != nil: cache.images.add info
+    return (screenshotReceipt(info), 0, "")
   of akClear:
     return ("", 0, "")
   of akDMail:

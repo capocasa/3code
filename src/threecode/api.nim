@@ -1148,7 +1148,7 @@ proc buildResponsesBody*(p: Profile, wireMessages: JsonNode): JsonNode =
     "input": responsesInput(wireMessages),
     "stream": streamingEnabled,
   }
-  result["tools"] = responsesTools(setup(p).tools)
+  result["tools"] = responsesTools(activeTools(p))
   result["tool_choice"] = %"auto"
   let d = knownGoodGeneration(p)
   # The Codex backend rejects `max_output_tokens` outright (400
@@ -2669,7 +2669,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
         # both streaming and provider.
         if streamingEnabled and providerOf(p) != "fireworks":
           body["stream_options"] = %*{"include_usage": true}
-        body["tools"] = setup(p).tools
+        body["tools"] = activeTools(p)
         body["tool_choice"] = %"auto"
         applyStreamingOptions(p, body)
         applyGenerationDefaults(p, body)

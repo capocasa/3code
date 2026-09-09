@@ -24,7 +24,7 @@
 
 import std/[critbits, exitprocs, json, os, strformat, strutils, tables, terminal]
 import types, util, config, prompts, session, actions, minline, toolstream,
-  images
+  images, screen
 import terminal as termui
 
 # Three visible tiers, designed to read on both light + dark terminal
@@ -647,6 +647,7 @@ proc toolIcon*(kind: ActionKind): string =
   of akPlan: "▸"
   of akWebSearch: "⌕"
   of akWebFetch: "⇊"
+  of akScreenshot: "◫"
   of akClear: "⟳"
   of akDMail: "✉"
   of akError: "✕"
@@ -682,6 +683,8 @@ proc toolResultBytes*(kind: ActionKind; res: string; code: int; idx: int;
         result.add wrappedSubtleBytes(lines[i])
   elif kind == akRead and isImageReceipt(res):
     result.add wrappedSubtleBytes(imageReadBanner(res))
+  elif kind == akScreenshot and isScreenshotReceipt(res):
+    result.add wrappedSubtleBytes(screenshotBanner(res))
   elif kind == akRead:
     var lines = res.splitLines
     while lines.len > 0 and lines[^1].startsWith("... [") and

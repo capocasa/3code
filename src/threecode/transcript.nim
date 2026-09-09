@@ -142,19 +142,26 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
       let raw = m{"content"}
       # Image-bearing user messages: a user @attach echoes with the same
       # `[image attached]` marker the live path painted (array content has
-      # no string to getStr); the harness-made follow-up that rides image
-      # reads (`attached: ... (image read)`) rendered nothing live — its
-      # tool row already carries the `· read img` banner — so it stays
-      # invisible here too. Replay/live parity is the contract.
+      # no string to getStr); the harness-made follow-ups that ride image
+      # reads and screenshots (`attached: ... (image read)` /
+      # `(screenshot)`) rendered nothing live — their tool rows already
+      # carry the `· read img` / `· shot` banners — so they stay invisible
+      # here too. Replay/live parity is the contract.
       if raw != nil and raw.kind == JArray:
         let text = userTextBlocks(raw).strip
-        if text.startsWith("attached: ") and "(image read)" in text:
+        if text.startsWith("attached: ") and
+            ("(image read)" in text or "(screenshot)" in text):
           continue
         let c = stripPreamble(text).strip & " [image attached]"
         if not firstItem:
           stdout.write "\n"
         stdout.write formatItem(userPromptItem(c)) & "\n"
         firstItem = false
+        continue
+      # The one-time computer-use activation note entered the conversation
+      # silently live (the :computer response covered the terminal); replay
+      # keeps it invisible for parity with the live path.
+      if m{"content"}.getStr("").startsWith("[computer use on]"):
         continue
       let c = stripPreamble(m{"content"}.getStr("")).strip
       if c.len == 0: continue
