@@ -1541,6 +1541,15 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
           if isInterrupted() or isNetworkQuiet():
             closeCachedStreamConn()
             break
+          # A non-streaming reply is silent by design: the provider sends
+          # nothing until the whole completion is ready, and reasoning
+          # models generate for minutes — far past the quiet watchdog's
+          # QuietTooLongMs. Feed the watchdog clock on every wake tick so
+          # a healthy slow wait is not killed as a dead link; without this
+          # every :streaming off turn on a slow provider died at 45s and
+          # retried into the same kill. A genuinely dead conn still
+          # surfaces as EOF/IOError; Ctrl-C still interrupts within a tick.
+          hookProviderActivity()
           continue
       if resp.status == 0 and resp.headers.len == 0:
         if isInterrupted() and not isNetworkQuiet():
@@ -1570,6 +1579,9 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
         if isInterrupted() or isNetworkQuiet():
           closeCachedStreamConn()
           break readLoop
+        # Same feed as the head wait above: provider silence during a
+        # non-streaming generation is expected, not a dead link.
+        hookProviderActivity()
         continue
       except CatchableError as e:
         readErr = e.msg
@@ -1732,6 +1744,9 @@ proc callResponses(url, key, bodyStr: string; baseLabel: string;
           if isInterrupted() or isNetworkQuiet():
             closeCachedStreamConn()
             break
+          # Non-streaming silence is expected (see callHttp): feed the
+          # quiet watchdog so a long generation is not killed at 45s.
+          hookProviderActivity()
           continue
       if resp.status == 0 and resp.headers.len == 0:
         if isInterrupted() and not isNetworkQuiet():
@@ -1760,6 +1775,8 @@ proc callResponses(url, key, bodyStr: string; baseLabel: string;
         if isInterrupted() or isNetworkQuiet():
           closeCachedStreamConn()
           break readLoop
+        # Same feed as the head wait above.
+        hookProviderActivity()
         continue
       except CatchableError as e:
         readErr = e.msg
