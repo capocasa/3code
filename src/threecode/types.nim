@@ -8,6 +8,13 @@ import std/[json, options, os, strutils, tables, times]
 
 var experimentalEnabled*: bool = false
   ## Set by `-x`/`--experimental`.
+var privateMode*: bool = false
+  ## Private mode: incognito for the agent. Default off, session-only
+  ## (never persisted), turned on with `-p`/`--private` or `:private on`.
+  ## While on, turns only run on providers/models marked private-allowed
+  ## (a `[params] allow-private` setting or a known-good entry curated
+  ## for a zero-training provider) and the live token bar repaints in the
+  ## private color so the mode is visible on every frame.
 var debugEnabled*: bool = false
   ## Set by `-D`/`--debug`.
 var streamingEnabled*: bool = true
@@ -139,6 +146,11 @@ type
     maxTokens*: Option[int]
     thinkBack*: Option[ThinkBackMode]
     contextWindow*: Option[int]
+    allowPrivate*: Option[bool]  ## policy flag, never a wire param: true
+                                ## trusts this (provider, model) with
+                                ## private-mode data. `none` means "not
+                                ## configured", deferring to the known-good
+                                ## table's curated flag.
 
   Profile* = object
     ## `model` is the full wire value sent in the API `model` field

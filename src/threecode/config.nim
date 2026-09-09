@@ -293,12 +293,14 @@ const
                   "tone", "mode", "bash_path", "bash-path",
                   "auto_update"]
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
-  ColorKeys = ["bright-white", "off-white", "dim-white"]
+  ColorKeys = ["bright-white", "off-white", "dim-white", "token-bar",
+               "private-bar"]
   ProviderKeys = ["name", "url", "key", "model_prefix", "family",
                   "models", "reasoning", "reasonings", "auth"]
   ProviderParamsKeys = ["temperature", "max-tokens", "max_tokens",
                         "think-back", "think_back",
-                        "context-window", "context_window"]
+                        "context-window", "context_window",
+                        "allow-private", "allow_private"]
   ParamsScopeKeys = ["provider", "model"]
   ThinkBackValues = ["none", "turn", "all"]
   SearchEngines = ["exa", "parallel", "brave"]
@@ -378,6 +380,10 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
         if ent.value.strip.toLowerAscii notin ThinkBackValues:
           return &"{path}:{ent.line}: unknown think-back mode '{ent.value}' " &
                  "(expected one of: none, turn, all)"
+      of "allow-private", "allow_private":
+        if ent.value.strip.toLowerAscii notin BoolValues:
+          return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
+                 "in [params] (expected on or off)"
       else: discard
     of "shortcuts":
       if ent.value.strip != "":
@@ -553,6 +559,11 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
         of "context-window", "context_window":
           try: paramRec.params.contextWindow = some(parseInt(v.strip))
           except ValueError: discard
+        of "allow-private", "allow_private":
+          case v.strip.toLowerAscii
+          of "on", "true", "yes", "1": paramRec.params.allowPrivate = some(true)
+          of "off", "false", "no", "0": paramRec.params.allowPrivate = some(false)
+          else: discard
         else: discard
       of "shortcuts":
         shortcuts[e.key] = v
@@ -641,6 +652,9 @@ proc writeConfigFile*(path: string, current: string,
       buf.add "think-back = " & quoteVal(formatThinkBack(pm.params.thinkBack.get)) & "\n"
     if pm.params.contextWindow.isSome:
       buf.add "context-window = " & quoteVal($pm.params.contextWindow.get) & "\n"
+    if pm.params.allowPrivate.isSome:
+      buf.add "allow-private = " &
+        quoteVal(if pm.params.allowPrivate.get: "true" else: "false") & "\n"
   writeFile(path, buf)
 
 proc configPath*(): string =
@@ -695,6 +709,7 @@ proc patchParams(dst: var ModelParams, src: ModelParams) =
   if src.maxTokens.isSome: dst.maxTokens = src.maxTokens
   if src.thinkBack.isSome: dst.thinkBack = src.thinkBack
   if src.contextWindow.isSome: dst.contextWindow = src.contextWindow
+  if src.allowPrivate.isSome: dst.allowPrivate = src.allowPrivate
 
 proc resolveParams*(list: seq[ParamsRec], provider, model: string): ModelParams =
   ## The `[params]` settings that govern this (provider, model), merged
@@ -709,6 +724,26 @@ proc resolveParams*(list: seq[ParamsRec], provider, model: string): ModelParams 
       if pass == 1 and (e.model == "" or
                         not paramsModelMatches(e.model, model)): continue
       patchParams(result, e.params)
+
+proc privateAllowed*(p: Profile): bool =
+  ## May this profile run under private mode? An explicit `[params]
+  ## allow-private` wins (either way, so `allow-private = false` can also
+  ## revoke a curated provider); otherwise the known-good table's curated
+  ## flag decides; otherwise false. Empty profiles return true; the
+  ## no-provider case has its own bail-out path.
+  if p.name == "": return true
+  if p.params.allowPrivate.isSome: return p.params.allowPrivate.get
+  let dot = p.name.find('.')
+  if dot < 0: return false
+  knownGoodAllowsPrivate(p.name[0 ..< dot], p.model)
+
+proc privateGateText*(p: Profile): string =
+  ## The private-gate refusal. Magenta styling is applied by the caller's
+  ## err path (same convention as `experimentalGateText`).
+  let dot = p.name.find('.')
+  let provider = if dot < 0: p.name else: p.name[0 ..< dot]
+  p.name & " is not allow-private (trust it with :private allow " &
+    provider & ", or switch to a zero-training provider; :private lists)"
 
 proc resolveReasoning*(prov: ProviderRec, prof: Profile): string =
   ## Reasoning level resolution at profile-build time:

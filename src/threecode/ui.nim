@@ -9,7 +9,7 @@
 ## (config-file) order. The provider-add wizard in `runProviderAdd` validates
 ## the API key with a one-token probe before saving.
 
-import std/[algorithm, atomics, json, os, sequtils, strformat, strutils, tables, terminal, times]
+import std/[algorithm, atomics, json, options, os, sequtils, strformat, strutils, tables, terminal, times]
 import types, util, prompts, session, config, api, compact, display, minline,
   fatprompt, streamexec, sandbox, actions, engine as termengine, auth_xai,
   auth_openai, auth_google, oauth
@@ -17,7 +17,7 @@ import types, util, prompts, session, config, api, compact, display, minline,
 const CommandNames* = [":help", ":tokens", ":clear", ":model", ":provider",
                       ":reasoning", ":streaming", ":notify", ":prompt", ":show",
                       ":log", ":sessions", ":session", ":summarize", ":version",
-                      ":sandbox", ":sb", ":retry",
+                      ":sandbox", ":sb", ":retry", ":private",
                       ":q", ":quit", ":exit"]
 
 type WizardReadLineHook* = proc(prompt: string, hidden,
@@ -70,7 +70,7 @@ proc classifyCommand*(cmd: string): CommandKind =
   case name
   of ":help", ":?", ":tokens", ":show", ":log", ":sessions", ":session", ":prompt", ":version":
     ckSafeImmediate
-  of ":streaming", ":notify", ":retry":
+  of ":streaming", ":notify", ":retry", ":private":
     if parts.len == 0 or (parts.len == 1 and parts[0] == "list"): ckSafeImmediate
     else: ckMutating
   of ":provider":
@@ -175,6 +175,18 @@ proc completionFor*(line: string): seq[string] =
     result.add "on"
     result.add "off"
     return
+  if words[0] == ":private":
+    if words.len == 2:
+      for v in ["on", "off", "list", "allow", "deny"]: result.add v
+      return
+    if words.len == 3 and words[1] in ["allow", "deny"]:
+      for pr in activeProviders: result.add pr.name
+      return
+    if words.len == 4 and words[1] in ["allow", "deny"]:
+      for pr in activeProviders:
+        if pr.name == words[2]:
+          for m in orderedModels(pr): result.add shortModel(m)
+      return
   if words[0] in [":sandbox", ":sb"] and words.len == 2:
     result.add "show"
     result.add "allow"
@@ -790,6 +802,8 @@ proc cmdProviderSelect(target: string, prof: var Profile): string =
   result = profileLinesS(prof)
   if not gateExperimental(candidate):
     result.add errLnS(experimentalGateText(candidate))
+  if privateMode and not privateAllowed(candidate):
+    result.add errLnS(privateGateText(candidate))
 
 proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile,
                     prefilled = ""): string =
@@ -898,6 +912,8 @@ proc cmdModelSelect(target: string, prof: var Profile): string =
   let candidate = buildProfile(newCurrent, activeProviders, "")
   if not gateExperimental(candidate):
     return errLnS(experimentalGateText(candidate))
+  if privateMode and not privateAllowed(candidate):
+    return errLnS(privateGateText(candidate))
   activeCurrent = newCurrent
   prof = candidate
   writeConfigFile(configPath(), activeCurrent, activeProviders)
@@ -1044,6 +1060,91 @@ proc cmdRetry(arg: string): string =
     return cmdRetrySelect(parts[0])
   else:
     return errLnS("usage: :retry [on|off]")
+
+proc cmdPrivateList(prof: Profile): string =
+  let mark = if privateMode: "on" else: "off"
+  result.add hintLnS("private: " & mark &
+    "  (on = only allow-private providers/models run; session only)")
+  if prof.name != "":
+    result.add hintLnS("current     " & prof.name &
+      (if privateAllowed(prof): "  allowed" else: "  not allowed"))
+  var shown = 0
+  for pr in activeProviders:
+    let explicit = resolveParams(activeParams, pr.name, "").allowPrivate
+    var curated = false
+    for m in pr.models:
+      if knownGoodAllowsPrivate(pr.name, m): curated = true
+    if explicit.isSome or curated:
+      let tag =
+        if explicit.isSome:
+          "allow-private " & (if explicit.get: "on" else: "off")
+        else: "curated zero-training"
+      result.add hintLnS("  " & pr.name & "  " & tag)
+      inc shown
+  if shown == 0:
+    result.add hintLnS("  no allow-private providers configured yet")
+
+proc cmdPrivateSelect(target: string, prof: Profile): string =
+  case target.toLowerAscii
+  of "on":
+    privateMode = true
+  of "off":
+    privateMode = false
+  else:
+    return errLnS(&"unknown value: {target} (choose on or off)")
+  # Session-only like a browser's private window: nothing to persist.
+  result.add cmdPrivateList(prof)
+  if privateMode and prof.name != "" and not privateAllowed(prof):
+    result.add errLnS(privateGateText(prof))
+
+proc cmdPrivateAllow(parts: seq[string], allow: bool): string =
+  var prov: ProviderRec
+  for pr in activeProviders:
+    if pr.name == parts[0]: prov = pr
+  if prov.name == "":
+    return errLnS(&"unknown provider: {parts[0]}")
+  var model = ""
+  if parts.len == 2:
+    let idx = prov.findModel(parts[1])
+    if idx < 0:
+      return errLnS(&"unknown model: {parts[1]}")
+    model = prov.models[idx]
+  # Upsert the matching [params] section (provider-wide when no model)
+  # so a `:private allow` never duplicates entries in the config file.
+  var hit = -1
+  for i, e in activeParams:
+    if e.provider == prov.name and e.model == model: hit = i
+  if hit >= 0:
+    activeParams[hit].params.allowPrivate = some(allow)
+  else:
+    var e = ParamsRec(provider: prov.name, model: model)
+    e.params.allowPrivate = some(allow)
+    activeParams.add e
+  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  let scope = if model == "": "" else: " " & shortModel(model)
+  hintLnS((if allow: "private allow " else: "private deny ") &
+    prov.name & scope)
+
+proc cmdPrivate(arg: string, prof: var Profile): string =
+  let parts = arg.splitWhitespace()
+  if parts.len == 0 or (parts.len == 1 and parts[0] == "list"):
+    return cmdPrivateList(prof)
+  case parts[0]
+  of "on", "off":
+    if parts.len != 1:
+      return errLnS("usage: :private [on|off|allow <provider> [model]]")
+    result.add cmdPrivateSelect(parts[0], prof)
+  of "allow", "deny":
+    if parts.len < 2 or parts.len > 3:
+      return errLnS(&"usage: :private {parts[0]} <provider> [model]")
+    result.add cmdPrivateAllow(parts[1 .. ^1], parts[0] == "allow")
+    # A change touching the live provider must reach `prof.params` or
+    # the turn gate keeps judging the stale resolution.
+    let dot = prof.name.find('.')
+    if dot >= 0 and prof.name[0 ..< dot] == parts[1]:
+      prof = buildProfile(activeCurrent, activeProviders, "")
+  else:
+    return errLnS("usage: :private [on|off|allow <provider> [model]|deny <provider> [model]]")
 
 proc cmdSandboxSettingSelect(target: string): string =
   case target.toLowerAscii
@@ -1417,6 +1518,8 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       body.add cmdNotify(arg)
     of ":retry":
       body.add cmdRetry(arg)
+    of ":private":
+      body.add cmdPrivate(arg, prof)
     of ":prompt":
       resp buildSystemPrompt(prof)
     of ":version":
