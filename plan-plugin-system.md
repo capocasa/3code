@@ -389,6 +389,18 @@ transcript, appended as the newest message so the prefix cache
 survives); it is deliberately not in the plan until the skill path is
 proven insufficient.
 
+## Distribution tiers (the Linux driver lesson)
+
+Analysis in `plan-evaluation-pi-5000.md`; the decision: plugins socially,
+monolith technically, tiers by trust. The first-party tier is promoted
+from deferred to core deliverable.
+
+| tier | mechanism | for | quality model |
+|---|---|---|---|
+| first-party tree | `plugins/` in the 3code repo, Nim source compiled with the binary, no internal ABI stability promised | `lintgate`, `goalkeeper`, `tokenmeter` | full test-suite coverage; evolves with the core |
+| `.so` C-ABI | the vtable, versioned, crash-guarded, opt-in | vendors (auth), things that cannot upstream | small surface; out-of-tree `.ko`: tolerated, never romanticized |
+| text long tail | skills + CLIs (+ mcpwrap) | personal, LLM-authored quirks; the pi 5000 phenomenon | free, fenced by `.sandbox`, zero cost until loaded |
+
 ## Implementation sketch
 
 Two deliverables, loosely coupled:
@@ -403,8 +415,9 @@ Two deliverables, loosely coupled:
    command, `[plugins]` config, sandbox deny rule for config dirs, the
    seven host services (`setBarText`, `askUser`, `emitTranscript`,
    `post`+`setTimer`, `registerCommand`, `lastResult`, `bindKey`), the
-   `:` command dispatch table, and one example plugin (`lintgate`) as
-   the reference implementation and test fixture.
+   `:` command dispatch table, plus the first-party `plugins/` tree
+   (`lintgate` as the reference implementation and test fixture,
+   `goalkeeper` and `tokenmeter` to follow) compiled with the binary.
 
 Also in scope per the vim lesson: the `formatter = "..."` setting
 (`'formatprg'` analog, the 90% of lintgate that belongs in config) and
@@ -416,6 +429,4 @@ the boundary. Visual tests per `.agents/testing.md` cover the
 `askUser` editor-line prompt and the bar segment; the rest is protocol
 and can be testament-tested headlessly.
 
-Deferred: `mcpwrapd` daemon, more UI setters, a static compile-in tier
-(`plugins/*.nim` compiled into source builds, zero ABI risk, for users
-who live in the toolchain anyway).
+Deferred: `mcpwrapd` daemon, more UI setters.
