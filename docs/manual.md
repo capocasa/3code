@@ -129,7 +129,10 @@ That is enough to get started.
 the model a switch would land on. `:model` does the same for its models. Both
 commands have tab completion, so there is no need to memorize catalog names.
 Model choices are sticky per provider: switching back with `:provider` returns
-to the model you last used there, not the first one in its list.
+to the model you last used there, not the first one in its list. The current
+provider and model are also sticky per directory: each project starts where
+it last left off, while directories never touched by `:provider` / `:model`
+keep the global config default.
 
 ```
 :provider nvidia

@@ -121,6 +121,32 @@ proc mangleCwd*(cwd: string): string =
 # latest session; `indexIdsAt` returns ids latest-first.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Per-directory sticky current: the `provider.model` a directory last used.
+#
+# The global config keeps one `current` for everywhere else; this override
+# makes `:provider` / `:model` stick per project, keyed by the same
+# collision-free mangled cwd as the session index and drafts.
+# ---------------------------------------------------------------------------
+
+proc dirCurrentPathFor*(cwd: string): string =
+  userDataRoot() / "dirs" / (mangleCwd(cwd) & ".current")
+
+proc loadDirCurrent*(cwd: string): string =
+  ## The sticky `provider.model` for this directory, "" when unset or blank.
+  let path = dirCurrentPathFor(cwd)
+  if not fileExists(path): return ""
+  readFile(path).strip
+
+proc saveDirCurrent*(cwd, current: string) =
+  ## Atomically record `current` for this directory (temp + rename, same
+  ## scheme as drafts), so a crash mid-write never leaves it truncated.
+  let path = dirCurrentPathFor(cwd)
+  createDir(path.parentDir)
+  let tmp = path & ".tmp"
+  writeFile(tmp, current & "\n")
+  moveFile(tmp, path)
+
 proc sessionPathIndexDir*(): string =
   userDataRoot() / "session-paths"
 
