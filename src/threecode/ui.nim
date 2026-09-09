@@ -752,6 +752,15 @@ proc promptEditProvider*(editor: var minline.LineEditor,
                          reasonings: existing.reasonings,
                          currentModel: existing.currentModel)
 
+proc persistCurrent() =
+  ## Flush the global config and the per-directory sticky current, so a
+  ## `:provider` / `:model` switch lands back where this directory left it
+  ## on the next start. Skipped when current is empty (no providers left):
+  ## a stale dir file simply fails to resolve and falls back to global.
+  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  if activeCurrent != "":
+    saveDirCurrent(safeCwd(), activeCurrent)
+
 proc bootstrapProvider*(editor: var minline.LineEditor): Profile =
   stdout.styledWriteLine fgMagenta,
     "no provider configured, let's add one. (ctrl+c to abort; esc clears line)",
@@ -762,7 +771,7 @@ proc bootstrapProvider*(editor: var minline.LineEditor): Profile =
   activeProviders.add prov
   activeCurrent = prov.name & "." & firstModel(prov)
   setCurrentModel(prov.name, firstModel(prov))
-  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  persistCurrent()
   hintLn &"  saved to {configPath()}", resetStyle
   # The wizard's last `wizardReadLine` left `inputModalActive` held so
   # the input thread could not race these post-writes; release it now that
@@ -807,7 +816,7 @@ proc cmdProviderSelect(target: string, prof: var Profile): string =
   setCurrentModel(prov.name, model)
   activeCurrent = newCurrent
   prof = candidate
-  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  persistCurrent()
   result = profileLinesS(prof)
   if not gateExperimental(candidate):
     result.add errLnS(experimentalGateText(candidate))
@@ -826,7 +835,7 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile,
   if activeCurrent == "":
     activeCurrent = prov.name & "." & firstModel(prov)
     setCurrentModel(prov.name, firstModel(prov))
-  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  persistCurrent()
   if prof.name == "":
     prof = buildProfile(activeCurrent, activeProviders, "")
   hintLnS(&"added {prov.name}") & profileLinesS(prof)
@@ -849,7 +858,7 @@ proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
     activeCurrent = updated.name & "." & model
     setCurrentModel(updated.name, model)
     prof = buildProfile(activeCurrent, activeProviders, "")
-  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  persistCurrent()
   hintLnS(&"updated {target}")
 
 proc cmdProviderRm(target: string, prof: var Profile): string =
@@ -870,7 +879,7 @@ proc cmdProviderRm(target: string, prof: var Profile): string =
     else:
       activeCurrent = ""
       prof = Profile()
-  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  persistCurrent()
   hintLnS(&"removed {target}")
 
 proc cmdProvider(arg: string, editor: var minline.LineEditor,
@@ -930,7 +939,7 @@ proc cmdModelSelect(target: string, prof: var Profile): string =
   setCurrentModel(prov.name, fullModel)
   activeCurrent = newCurrent
   prof = candidate
-  writeConfigFile(configPath(), activeCurrent, activeProviders)
+  persistCurrent()
   profileLinesS(prof)
 
 proc cmdModel(arg: string, prof: var Profile): string =

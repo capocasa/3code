@@ -180,6 +180,13 @@ proc initAgentSession*(opts: AgentOptions): AgentSession =
 
   var colorKeys: Table[string, string]
   (activeCurrent, activeProviders, colorKeys) = loadStateOrEmpty(configPath())
+  # Per-directory sticky current, same resolution as the CLI main: this
+  # directory's last `:provider` / `:model` wins when it still resolves.
+  block:
+    let dirCurrent = loadDirCurrent(cwd)
+    if dirCurrent != "" and
+       buildProfile(dirCurrent, activeProviders, "").name.len > 0:
+      activeCurrent = dirCurrent
   if sandboxEnabled:
     sandbox.current = sandbox.loadPolicy(cwd)
     sandbox.active = true
