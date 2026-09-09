@@ -157,6 +157,31 @@ url = "https://api.lyceum.technology/openai/v1"
 key = "lk_..."
 models = "z-ai/glm-5.2 moonshotai/kimi-k3 deepseek/deepseek-v4-pro"
 
+# [provider.params] overrides the known-good model parameters for the
+# nearest preceding [provider] section. Every key is optional; unset
+# keys keep the known-good value (models off the known-good table just
+# get that parameter sent, where before it was omitted). Values are
+# still quoted string literals.
+#   temperature      float, e.g. "0.4"
+#   max-tokens       int, per-turn output budget
+#   think-back       none | turn | all: how much of the assistant's
+#                    own reasoning_content is replayed in the request
+#                    history. none strips it everywhere (strict
+#                    validators), turn keeps only the active tool loop,
+#                    all keeps every turn (deepseek demands it, glm/kimi
+#                    preserved thinking rewards it)
+#   context-window   int, tokens; drives compaction thresholds
+# [provider]
+# name = "zai"
+# url = "https://api.z.ai/api/paas/v4"
+# key = "zai-..."
+# models = "glm-5.2"
+#
+# [provider.params]
+# temperature = "0.4"
+# max-tokens = "16384"
+# think-back = "all"
+#
 # `family` is an experimental-only override (only honored under
 # `--experimental`) that picks the system-prompt branch by family
 # name, when the (provider, model) combo isn't on the known-good

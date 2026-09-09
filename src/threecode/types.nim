@@ -4,7 +4,7 @@
 ## `experimentalEnabled` is a global because every module that validates a
 ## profile needs it, and threading it through every call site is noise.
 
-import std/[json, os, strutils, tables, times]
+import std/[json, options, os, strutils, tables, times]
 
 var experimentalEnabled*: bool = false
   ## Set by `-x`/`--experimental`.
@@ -123,6 +123,23 @@ type
     plan*: seq[PlanItem]
     offset*: int
     limit*: int
+  ThinkBackMode* = enum
+    tbNone         ## strip reasoning_content from all replayed assistant messages
+    tbCurrentTurn  ## keep reasoning within the active tool loop, strip at the
+                   ## last user turn boundary
+    tbAllTurns     ## keep reasoning_content on every replayed assistant message
+
+  ModelParams* = object
+    ## Per-provider overrides for the known-good model parameters
+    ## (`KnownGoodCombos` in prompts.nim). Read from a
+    ## `[provider.params]` config section; every field is an Option so
+    ## `none` cleanly means "not configured" and the known-good table
+    ## value (or its absence) applies.
+    temperature*: Option[float]
+    maxTokens*: Option[int]
+    thinkBack*: Option[ThinkBackMode]
+    contextWindow*: Option[int]
+
   Profile* = object
     ## `model` is the full wire value sent in the API `model` field
     ## (e.g. "openai/gpt-oss-120b"). Display code shortens it with
@@ -137,6 +154,10 @@ type
                         ## "high", or "" when the model has no such knob.
                         ## Mapped to a wire field in `callModel` per family
                         ## (gpt-oss: `reasoning_effort`; glm: `thinking.type`).
+    params*: ModelParams  ## [provider.params] overrides, resolved at
+                          ## profile-build time. Lookups that consult the
+                          ## known-good table (generation defaults, think-back,
+                          ## context window) patch these over the table values.
   Usage* = object
     promptTokens*, completionTokens*, totalTokens*, cachedTokens*: int
     reasoningTokens*: int  # tokens consumed by internal reasoning
@@ -269,6 +290,22 @@ proc isNetworkQuietMsg*(msg: string): bool =
 
 proc isEmptyReplyMsg*(msg: string): bool =
   msg == EmptyReplyMsg
+
+func parseThinkBackMode*(s: string): ThinkBackMode =
+  ## Config spelling of `ThinkBackMode`: `none`, `turn`, `all`, the
+  ## exact set `validateConfig` admits. Unknown values return tbNone;
+  ## config load rejects them before this sees them in practice.
+  case s.strip.toLowerAscii
+  of "none": tbNone
+  of "turn": tbCurrentTurn
+  of "all": tbAllTurns
+  else: tbNone
+
+func formatThinkBack*(m: ThinkBackMode): string =
+  case m
+  of tbNone: "none"
+  of tbCurrentTurn: "turn"
+  of tbAllTurns: "all"
 
 proc die*(msg: string, code = 1) {.noreturn.} =
   # Leading newline: mid-turn deaths (unknown family, etc.) fire while the

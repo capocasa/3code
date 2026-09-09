@@ -156,6 +156,41 @@ suite "config validation: schema (in-process)":
     ]
     check validateConfig(P, entries) == ""
 
+  test "clean [provider.params] entries are accepted":
+    let entries = @[
+      ("provider.params", "temperature", "0.4", 9),
+      ("provider.params", "max-tokens", "16384", 10),
+      ("provider.params", "max_tokens", "4096", 11),
+      ("provider.params", "think-back", "turn", 12),
+      ("provider.params", "think_back", "all", 13),
+      ("provider.params", "context-window", "250000", 14),
+      ("provider.params", "context_window", "128000", 15),
+    ]
+    check validateConfig(P, entries) == ""
+
+  test "unknown key in [provider.params] is reported":
+    let entries = @[("provider.params", "top_p", "0.9", 7)]
+    let m = validateConfig(P, entries)
+    check m == P & ":7: unknown key 'top_p' in [provider.params]"
+
+  test "non-numeric temperature is reported":
+    let entries = @[("provider.params", "temperature", "warm", 8)]
+    let m = validateConfig(P, entries)
+    check m == P & ":8: bad value 'warm' for 'temperature' in " &
+          "[provider.params] (expected a number like 0.4)"
+
+  test "non-integer max-tokens is reported":
+    let entries = @[("provider.params", "max-tokens", "lots", 9)]
+    let m = validateConfig(P, entries)
+    check m == P & ":9: bad value 'lots' for 'max-tokens' in " &
+          "[provider.params] (expected a whole number of tokens)"
+
+  test "unknown think-back mode is reported":
+    let entries = @[("provider.params", "think-back", "sometimes", 10)]
+    let m = validateConfig(P, entries)
+    check m == P & ":10: unknown think-back mode 'sometimes' " &
+          "(expected one of: none, turn, all)"
+
 suite "config validation: end-to-end exit code":
   var tmp = ""
 
@@ -214,6 +249,11 @@ suite "config validation: end-to-end exit code":
     let r = runWithConfig("[settings]\ncurrent = \"p.m\"\n\n[shortcuts]\ncancel = \"MetaX\"\n")
     check r.exitCode == 3
     check "invalid shortcut value" in r.output
+
+  test "orphan [provider.params] without a [provider] exits 3":
+    let r = runWithConfig("[settings]\ncurrent = \"p.m\"\n\n[provider.params]\nthink-back = \"all\"\n")
+    check r.exitCode == 3
+    check "[provider.params] with no [provider] section in scope" in r.output
 
 suite "config validation: [shortcuts] schema (in-process)":
   const P = "/tmp/cfg-shortcuts.ini"

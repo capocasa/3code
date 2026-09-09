@@ -1,4 +1,4 @@
-import std/[os, strutils, tables, unittest]
+import std/[options, os, strutils, tables, unittest]
 import threecode/[config, types, util]
 
 suite "config: [search]":
@@ -258,3 +258,117 @@ suite "config: [colors] section":
     writeFile(tmp, "[colors]\ndim-white = \"\\x1b[38;5;240m\"\n")
     let (_, _, colors) = loadStateOrEmpty(tmp)
     check colors["dim-white"] == "\x1b[38;5;240m"
+
+suite "config: [provider.params]":
+  var tmp = ""
+
+  setup:
+    tmp = getTempDir() / "3code-test-pparams.ini"
+
+  teardown:
+    removeFile(tmp)
+
+  test "params attach to the nearest preceding [provider]":
+    writeFile(tmp, """
+[provider]
+name = "zai"
+url = "https://z.ai/v1"
+key = "k"
+models = "glm-5.2"
+
+[provider.params]
+temperature = "0.4"
+max-tokens = "16384"
+think-back = "none"
+context-window = "250000"
+
+[provider]
+name = "openai"
+url = "https://api.openai.com/v1"
+key = "k"
+models = "gpt-5.5"
+""")
+    let (_, providers, _, _, _, _) = parseConfigFile(tmp)
+    check providers.len == 2
+    check providers[0].params.temperature.get == 0.4
+    check providers[0].params.maxTokens.get == 16384
+    check providers[0].params.thinkBack.get == tbNone
+    check providers[0].params.contextWindow.get == 250000
+    check providers[1].params.temperature.isNone
+    check providers[1].params.maxTokens.isNone
+    check providers[1].params.thinkBack.isNone
+    check providers[1].params.contextWindow.isNone
+
+  test "underscore spellings are accepted":
+    writeFile(tmp, """
+[provider]
+name = "zai"
+url = "https://z.ai/v1"
+key = "k"
+models = "glm-5.2"
+
+[provider.params]
+think_back = "turn"
+max_tokens = "4096"
+context_window = "128000"
+""")
+    let (_, providers, _, _, _, _) = parseConfigFile(tmp)
+    check providers[0].params.thinkBack.get == tbCurrentTurn
+    check providers[0].params.maxTokens.get == 4096
+    check providers[0].params.contextWindow.get == 128000
+
+  test "each param is optional":
+    writeFile(tmp, """
+[provider]
+name = "zai"
+url = "https://z.ai/v1"
+key = "k"
+models = "glm-5.2"
+
+[provider.params]
+think-back = "all"
+""")
+    let (_, providers, _, _, _, _) = parseConfigFile(tmp)
+    check providers[0].params.thinkBack.get == tbAllTurns
+    check providers[0].params.temperature.isNone
+
+  test "writeConfigFile roundtrips [provider.params]":
+    var pr = ProviderRec(name: "zai", url: "https://z.ai/v1", key: "k",
+                         models: @["glm-5.2"])
+    pr.params.temperature = some(0.4)
+    pr.params.maxTokens = some(16384)
+    pr.params.thinkBack = some(tbNone)
+    pr.params.contextWindow = some(250000)
+    writeConfigFile(tmp, "zai.glm-5.2", @[pr])
+    let (_, back, _, _, _, _) = parseConfigFile(tmp)
+    check back.len == 1
+    check back[0].params.temperature.get == 0.4
+    check back[0].params.maxTokens.get == 16384
+    check back[0].params.thinkBack.get == tbNone
+    check back[0].params.contextWindow.get == 250000
+
+  test "writeConfigFile omits the section when no params are set":
+    let pr = ProviderRec(name: "zai", url: "https://z.ai/v1", key: "k",
+                         models: @["glm-5.2"])
+    writeConfigFile(tmp, "zai.glm-5.2", @[pr])
+    check readFile(tmp).find("provider.params") < 0
+
+  test "buildProfile carries params into the Profile":
+    writeFile(tmp, """
+[settings]
+current = "zai.glm-5.2"
+
+[provider]
+name = "zai"
+url = "https://z.ai/v1"
+key = "k"
+models = "glm-5.2"
+
+[provider.params]
+temperature = "0.6"
+think-back = "none"
+""")
+    let (_, providers, _, _, _, _) = parseConfigFile(tmp)
+    let prof = buildProfile("zai.glm-5.2", providers, "")
+    check prof.params.temperature.get == 0.6
+    check prof.params.thinkBack.get == tbNone
