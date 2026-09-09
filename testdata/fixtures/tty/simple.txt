@@ -35,7 +35,7 @@
 
 ❯ This is a test prompt
 
-⣿ ○0% 0s
+⣿ ○0% 00:00:00
 ❯
 ===== 383 =====
 
@@ -50,7 +50,7 @@
 
 ❯ This is a test prompt
   … Thinking about the test prompt
-⣿ ○0% ↓7 0s
+⣿ ○0% ↓7 00:00:00
 ❯
 ===== 742 =====
 
@@ -67,7 +67,7 @@
 
 ● This is a test response.
 
-⣿ ○0% ↓13 0s
+⣿ ○0% ↓13 00:00:00
 ❯
 ===== 535 =====
 
@@ -84,7 +84,7 @@
 
 ● This is a test response.
 
-  ○1%  ↑120  ↓24  0s
+  ○1%  ↑120  ↓24  00:00:00
 ❯
 ===== 278 =====
 
@@ -100,7 +100,7 @@
 ❯ This is a test prompt
 
 ● This is a test response.
-  ○1%  ↑120  ↓24  0s
+  ○1%  ↑120  ↓24  00:00:00
 
   ○1%
 ❯

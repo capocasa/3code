@@ -736,7 +736,7 @@ proc toolTranscriptBytes*(act: Action; res: string; code: int; idx: int;
 
 proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
   ## Pure label string for the bar / receipt: "○N%  ↑input  ↻cached
-  ## ↓completion  Ts" (no styling, no leading spaces — caller wraps
+  ## ↓completion  hh:mm:ss" (no styling, no leading spaces — caller wraps
   ## it in cyan-bright for the bar or cyan for the receipt). Empty
   ## when there's no usage to report.
   if usage.totalTokens <= 0: return ""
@@ -749,7 +749,7 @@ proc tokenLineLabel*(usage: Usage, window: int, elapsedS = -1): string =
   if ts2.len > 0: parts.add ts2
   let ts3 = tokenSlot("↓", usage.completionTokens)
   if ts3.len > 0: parts.add ts3
-  if elapsedS >= 0: parts.add $elapsedS & "s"
+  if elapsedS >= 0: parts.add clockDuration(elapsedS)
   result = parts.join("  ")
 
 proc receiptBytes*(label: string): string =

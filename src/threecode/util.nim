@@ -39,8 +39,9 @@ const
   # Use bright cyan there so the brand tone renders as actual cyan.
   # Campbell's bright cyan slot is the only one that is true cyan.
   CyanFg* = (when defined(windows): "\x1b[96m" else: "\x1b[36m")
-  # Magenta is the private-mode tone; bright on Windows for the same
-  # reason cyan is (Campbell's regular magenta reads too dark).
+  # Magenta is the private-mode bar tone and the warning tier (retry
+  # notices, transport errors); bright on Windows for the same reason cyan
+  # is (Campbell's regular magenta reads too dark).
   MagentaFg* = (when defined(windows): "\x1b[95m" else: "\x1b[35m")
   BoldOn* = "\x1b[1m"
   BlueFg* = "\x1b[34m"
@@ -599,6 +600,11 @@ func humanBytes*(n: int): string =
 func humanTokens*(n: int): string =
   if n < 1000: $n
   else: &"{n.float/1000:.1f}k"
+
+func clockDuration*(secs: int): string =
+  ## Turn-timer format: 00:00:04, 00:02:08, 01:12:21 (hh:mm:ss).
+  let s = max(0, secs)
+  &"{s div 3600:02}:{(s mod 3600) div 60:02}:{s mod 60:02}"
 
 func humanDuration*(secs: int): string =
   ## Second-precise but human-friendly: 0:04, 2:08, 34:07, 1h12m21s.

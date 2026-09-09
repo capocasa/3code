@@ -96,8 +96,9 @@ suite "activity indicator covers every turn phase":
     tty.send "go"
     tty.expect "go"
     tty.send "\n"
-    # Retry notice lands in scrollback. The backoff sleep follows.
-    tty.expectInHistory("429", timeoutMs = 15_000)
+    # The retry notice paints on the live notice row; the backoff sleep
+    # follows it.
+    tty.expectNoticeRow("429")
     # Sample the live screen repeatedly across the backoff window. The
     # spinner repaints every 80ms, so a 250ms settle captures at least one
     # animated frame with high probability. We ask the harness to advance

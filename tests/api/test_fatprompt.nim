@@ -76,10 +76,10 @@ suite "fat prompt frame model":
     p.setEditor "hello"
 
     p.checkFrame ["three", "four", "", "thinking...",
-                  "◐  ○2%  ↑20  7s", "❯ hello"]
+                  "◐  ○2%  ↑20  00:00:07", "❯ hello"]
 
     p.setTicker ""
-    p.checkFrame ["three", "four", "", "", "◐  ○2%  ↑20  7s",
+    p.checkFrame ["three", "four", "", "", "◐  ○2%  ↑20  00:00:07",
                   "❯ hello"]
 
   test "multiline editor grows reserved area and shrinking reveals scrollback":
@@ -124,13 +124,13 @@ suite "fat prompt frame model":
                         completionTokens: 25, totalTokens: 2025),
                   window = 128000, apiActive = true, spinner = "●",
                   elapsedS = 3)
-    check tokenBarText(p.tokenBar) == "●  ○1%  ↑2.0k  ↻500  ↓25  3s"
+    check tokenBarText(p.tokenBar) == "●  ○1%  ↑2.0k  ↻500  ↓25  00:00:03"
 
     p.setTokenBar(Usage(promptTokens: 16, cachedTokens: 3200,
                         completionTokens: 36, totalTokens: 52),
                   window = 128000, apiActive = true, spinner = "○",
                   elapsedS = 3)
-    check tokenBarText(p.tokenBar) == "○  ○0%  ↑16  ↻3.2k  ↓36  3s"
+    check tokenBarText(p.tokenBar) == "○  ○0%  ↑16  ↻3.2k  ↓36  00:00:03"
 
   test "bash viewport shows cutoff plus bottom seven while active":
     var p = initFatPrompt(width = 50, height = 13, window = 1000)
