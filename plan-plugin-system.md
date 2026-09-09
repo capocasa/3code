@@ -330,6 +330,65 @@ that survives `:clear`.
 login + Keychain token storage, shipped as a `.so` the day the vendor
 launches, no 3code release needed.
 
+## Worked example: `:goal` mode (stress-testing the design)
+
+Goal mode: the user sets a session-persistent objective; 3code keeps
+it visible (human and model), tracks progress, and optionally drives
+the agent until done. It is the dsh `ctx.goals` seam replayed on our
+primitives, and it exercises almost every one of them. Implemented as
+one plugin, `goalkeeper`, plus one small plan amendment at the end.
+
+**State: a file, not an API.** The goal lives at
+`~/.local/share/3code/goal/<session>` (text: objective line, optional
+notes, `DONE: <summary>` marker). The filesystem is the model↔plugin
+channel: the model reads it with the native `read` tool and completes
+it with the native `write` tool. Zero new ABI surface; the vim lesson
+applied literally (state as text in the medium).
+
+**Human side.** `registerCommand(":goal", ...)` with completion
+(`:goal <text>` sets, `:goal` shows, `:goal off` clears).
+`setBarText("\u25CE fix flicker \u00B7 3/5")` renders the objective and
+live plan progress on every frame. `emitTranscript` prints a goal card
+on set/complete. `session.start` reloads the file so the goal survives
+restarts and `:clear` (it is outside the context, which is the point:
+the goal outlives the conversation that pursues it).
+
+**Model side: a bundled skill, not an injection.** The plugin ships
+`skills/goal-mode.md`: when the goal file exists, read it first each
+turn, align `update_plan` against it, write `DONE: <summary>` when the
+objective is met. Cost: one ~60-token read per turn, only while a goal
+is active. This is the zero-schema, zero-injection answer, and it
+ships with the plan exactly as written.
+
+**Progress tracking.** `tool.pre` on `update_plan` sees the plan items
+passively (name + args JSON); the bar's `3/5` and the completion
+heuristic (all items done + goal file still active) come from that,
+with no extra model calls.
+
+**Completion.** `file.write` on the goal file is the model's completion
+signal; the plugin then `askUser`s "mark goal done?" (the human, not a
+heuristic, closes a goal) and `emitTranscript`s the card.
+
+**Auto-continue (the one amendment).** Driving turn after turn without
+the user needs a new host service, `queuePrompt(text)`: it feeds the
+existing queued-user drain in `turns.nim` (`hasQueuedAutosend`), so
+the prompt renders as a normal user line (`[goal] continue`), the loop
+stays core-owned, and Esc cancels as always. Guardrails: rate-limited
+(max K consecutive auto-continues), every queued line visible in the
+transcript, and an `askUser` checkpoint each K turns. Plugins never
+sleep-walk the agent; they queue visible input.
+
+**What this example proves.** Nine of ten pieces needed nothing new:
+commands, bar, transcript, skill, file.write, tool.pre, askUser, read
+services, plugin state. The seams compose without the plugin ever
+touching the conversation array, and the dsh `agent.inject()` need is
+answered by text (a file + a skill) instead of an API. If model
+discipline proves insufficient in practice, the deterministic fallback
+is a bounded `turnContext` injection (≤200 chars, rendered in the
+transcript, appended as the newest message so the prefix cache
+survives); it is deliberately not in the plan until the skill path is
+proven insufficient.
+
 ## Implementation sketch
 
 Two deliverables, loosely coupled:
