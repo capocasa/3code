@@ -3158,7 +3158,7 @@ proc knownGoodGeneration*(provider, model: string): GenerationDefaults =
   GenerationDefaults(temperature: -1.0, maxTokens: 0)
 
 proc knownGoodGeneration*(p: Profile): GenerationDefaults =
-  ## Table value for the pair, with any `[provider.params]` overrides
+  ## Table value for the pair, with any `[params]` overrides
   ## patched over it. Each field overrides independently: a config that
   ## sets only `temperature` keeps the table's maxTokens.
   result = GenerationDefaults(temperature: -1.0, maxTokens: 0)
@@ -3181,7 +3181,7 @@ proc knownGoodThinkBack*(provider, model: string): ThinkBackMode =
   tbNone
 
 proc knownGoodThinkBack*(p: Profile): ThinkBackMode =
-  ## `[provider.params] think_back` wins over the table entry; unset
+  ## `[params] think_back` wins over the table entry; unset
   ## falls through to it.
   if p.params.thinkBack.isSome: return p.params.thinkBack.get
   if p.name == "": return tbNone
@@ -3230,7 +3230,7 @@ proc knownGoodContextWindow*(provider, model: string): int =
   0
 
 proc knownGoodContextWindow*(p: Profile): int =
-  ## `[provider.params] context_window` wins over the table entry; unset
+  ## `[params] context_window` wins over the table entry; unset
   ## falls through to it.
   if p.params.contextWindow.isSome: return p.params.contextWindow.get
   if p.name == "": return 0

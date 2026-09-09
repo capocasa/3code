@@ -132,7 +132,7 @@ type
   ModelParams* = object
     ## Per-provider overrides for the known-good model parameters
     ## (`KnownGoodCombos` in prompts.nim). Read from a
-    ## `[provider.params]` config section; every field is an Option so
+    ## `[params]` config section; every field is an Option so
     ## `none` cleanly means "not configured" and the known-good table
     ## value (or its absence) applies.
     temperature*: Option[float]
@@ -154,10 +154,11 @@ type
                         ## "high", or "" when the model has no such knob.
                         ## Mapped to a wire field in `callModel` per family
                         ## (gpt-oss: `reasoning_effort`; glm: `thinking.type`).
-    params*: ModelParams  ## [provider.params] overrides, resolved at
-                          ## profile-build time. Lookups that consult the
-                          ## known-good table (generation defaults, think-back,
-                          ## context window) patch these over the table values.
+    params*: ModelParams  ## [params] overrides for this (provider,
+                          ## model), resolved at profile-build time.
+                          ## Lookups that consult the known-good table
+                          ## (generation defaults, think-back, context
+                          ## window) patch these over the table values.
   Usage* = object
     promptTokens*, completionTokens*, totalTokens*, cachedTokens*: int
     reasoningTokens*: int  # tokens consumed by internal reasoning

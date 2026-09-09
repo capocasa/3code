@@ -1161,7 +1161,7 @@ suite "xml tool_call fallback":
       check "clear_thinking" notin body
       check "thinking" notin body
 
-suite "api: [provider.params] overrides":
+suite "api: [params] overrides":
   test "generation defaults patch per field, unset fields keep the table value":
     let base = Profile(name: "zai.glm-5.2", model: "glm-5.2", family: "glm")
     check knownGoodGeneration(base).temperature == 0.2

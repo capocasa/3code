@@ -2,17 +2,19 @@
 
 **unreleased** - resume keeps the prompt cache hot
 
-- **`[provider.params]`: per-provider model parameter overrides.** A
-  new config section (placed after any `[provider]` block it should
-  amend) overrides any known-good model parameter: `temperature`,
-  `max-tokens`, `think-back` (`none`/`turn`/`all`, how much of the
-  assistant's own reasoning is replayed in the request history), and
-  `context-window`. Unset keys keep the curated value, so a section
-  with only `think_back = "none"` silences reasoning replay for a
-  strict provider without touching anything else. Off-table
-  (experimental) models can now get these parameters sent at all.
-  Hyphen and underscore spellings both work, values are schema-checked
-  at load, and an explicit `temperature` overrides even the kimicode /
+- **`[params]`: per-(provider, model) parameter overrides.** A new
+  config section overrides any known-good model parameter:
+  `temperature`, `max-tokens`, `think-back` (`none`/`turn`/`all`, how
+  much of the assistant's own reasoning is replayed in the request
+  history), and `context-window`. Each section names a `provider` and
+  optionally a `model`; with `model` empty it covers every model of
+  that provider, and a model-scoped entry beats a provider-wide one.
+  Unset keys keep the curated value, so a section with only
+  `think_back = "none"` silences reasoning replay for a strict
+  provider without touching anything else. Off-table (experimental)
+  models can now get these parameters sent at all. Hyphen and
+  underscore spellings both work, values are schema-checked at load,
+  and an explicit `temperature` overrides even the kimicode /
   Gemini 3 "omit temperature" endpoint quirks.
 
 - **Resume re-sends byte-identical history.** `-r` used to rebuild the
