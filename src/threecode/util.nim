@@ -41,6 +41,7 @@ const
   CyanFg* = (when defined(windows): "\x1b[96m" else: "\x1b[36m")
   BoldOn* = "\x1b[1m"
   BlueFg* = "\x1b[34m"
+  MagentaFg* = "\x1b[35m"     # warning tier (retry notices, transport errors)
   Reset* = "\x1b[0m"
 
 var
@@ -574,6 +575,11 @@ func humanBytes*(n: int): string =
 func humanTokens*(n: int): string =
   if n < 1000: $n
   else: &"{n.float/1000:.1f}k"
+
+func clockDuration*(secs: int): string =
+  ## Turn-timer format: 00:00:04, 00:02:08, 01:12:21 (hh:mm:ss).
+  let s = max(0, secs)
+  &"{s div 3600:02}:{(s mod 3600) div 60:02}:{s mod 60:02}"
 
 func humanDuration*(secs: int): string =
   ## Second-precise but human-friendly: 0:04, 2:08, 34:07, 1h12m21s.

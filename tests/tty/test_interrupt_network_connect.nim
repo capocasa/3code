@@ -290,14 +290,11 @@ suite "network-quiet timeout on threaded transport (no interrupt)":
     # No user interrupt. The server accepted the connection and will never
     # reply. Before the fix this hung silently past the quiet window; with
     # the fix a retry notice must appear within a bounded time of the quiet
-    # flag firing (QuietTooLongMs=3s here + a margin).
+    # flag firing (QuietTooLongMs=3s here + a margin). The notice lives on
+    # the live notice row, so the wait drives the gui frame handshake.
     let t0 = epochTime()
-    let seen = tty.expectInHistory("retry", timeoutMs = 12000)
+    tty.expectNoticeRow("retry", timeoutMs = 12000)
     let elapsed = epochTime() - t0
-    doAssert seen,
-      "no retry notice appeared after " & formatFloat(elapsed, ffDecimal, 1) &
-      "s against a black-holed server; the threaded transport did not " &
-      "surface the network-quiet timeout\n" & tty.dumpFramesAround("retry")
     tty.expectAlive()
     echo "  PASS: network-quiet surfaced and retried in ",
       formatFloat(elapsed, ffDecimal, 2), "s"
