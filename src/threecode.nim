@@ -87,6 +87,8 @@ proc usage() {.noreturn.} =
   -a, --all            (reserved) with -l, accepted but a no-op for now
   -g, --good           list known-good provider/variant combos and exit
   -x, --experimental   allow combos outside the known-good list
+  -p, --private        private mode: only allow-private providers/models run
+                      (zero-training providers; the token bar repaints to show it)
       --no-sandbox     disable sandbox enforcement (bash runs unconfined)
   -D, --debug          colored debug trace to stderr
   -v, --version        print version
@@ -319,6 +321,7 @@ proc main() =
       of "h", "help": usage()
       of "g", "good": printKnownGood(); return
       of "x", "experimental": experimentalEnabled = true
+      of "p", "private": privateMode = true
       of "no-sandbox": sandboxEnabled = false
       of "D", "debug": debugEnabled = true
       of "i", "interactive": interactive = true

@@ -1123,6 +1123,11 @@ proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
     # `no provider configured` bail-out in the REPL loop.
     releaseIdleSubmittedInput()
     return false
+  if privateMode and not privateAllowed(p):
+    stdout.styledWriteLine fgMagenta, privateGateText(p), resetStyle
+    emitTestFrameEvent()
+    releaseIdleSubmittedInput()
+    return false
   try:
     return runTurns(p, messages, session)
   except ApiError as e:

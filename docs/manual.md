@@ -307,6 +307,89 @@ Even with patient retry off, 3code gives transient failures about a minute
 before returning to the interactive prompt. The setting is stored as
 `patient_retry` in `[settings]`. Press Esc to cancel the wait.
 
+## Private mode
+
+Private mode is incognito mode for the agent: off by default, on for one
+session only, never persisted. While it is on, turns only run on providers
+you have marked as trusted with your data, and the live token bar repaints
+in the private color (magenta by default) so the mode is always visible.
+Scrollback receipts keep the normal color, so old receipts also show which
+turns ran private.
+
+Turn it on either way:
+
+```
+3code -p            # from the start
+:private on         # mid-session (turns the bar magenta)
+```
+
+A provider or model is *allow-private* when:
+
+1. you set it explicitly with `:private allow`, or in the config:
+
+   ```
+   [params]
+   provider = "together"
+   allow-private = "true"
+
+   [params]
+   provider = "zai"
+   model = "glm-5.3"
+   allow-private = "true"
+   ```
+
+   With `model` empty the whole provider is trusted; a model-scoped entry
+   beats a provider-wide one, and `allow-private = "false"` revokes.
+
+2. or its known-good entry is curated for a provider whose published policy
+   is zero data retention with no training on API data. Curated today:
+   `together`, `fireworks`, `ovh`, `novita`. Everything else, including all
+   first-party labs, must be allowed explicitly.
+
+Everything else is refused at the gate with a pointer to the fix:
+
+```
+zai.glm-5.2 is not allow-private (trust it with :private allow zai, or
+switch to a zero-training provider; :private lists)
+```
+
+### Picking a private provider
+
+Pick a provider with a zero-training policy you are satisfied with (a strict
+zero data retention policy, or at least a no-training plus bounded retention
+policy). A shortlist by region:
+
+| region | provider | policy |
+| --- | --- | --- |
+| EU | [TensorX](https://tensorx.ai) | zero data retention; GPUs in Dublin and Helsinki, Irish/EU jurisdiction (add it as a custom provider, it is not in the catalog) |
+| EU | [OVHcloud AI Endpoints](https://www.ovhcloud.com/en/public-cloud/ai-endpoints/) | no training on your data, retention for billing only; hosted in France (catalog: `ovh`) |
+| USA | [Together AI](https://together.ai) | no storage of inputs/outputs by default; training is opt-in and off (catalog: `together`) |
+| USA | [Fireworks AI](https://fireworks.ai) | zero data retention by default; no logging of prompts or generations (catalog: `fireworks`) |
+| Asia | [Novita](https://novita.ai) | zero data retention by default, no training on your content, per their terms of service (catalog: `novita`) |
+| Asia | Z.ai pay-as-you-go | routing guides report zero retention on the paid API; read the current DPA before trusting it (catalog: `zai`) |
+
+Or pick any provider you trust, and allow it explicitly. That is a judgment
+call, not a recommendation.
+
+### Walkthrough
+
+```
+❯ :provider myprovider
+❯ :model glm-5.3
+❯ :private allow myprovider glm-5.3   # persisted as [params] allow-private
+❯ :private on                         # bar turns magenta, turns are gated
+```
+
+`:private` with no argument shows the mode, whether the current model is
+allowed, and which configured providers are trusted. `:private deny`
+removes trust. The bar color is configurable like the other colors:
+
+```
+[colors]
+private-bar = "\x1b[95m"
+token-bar = "\x1b[36m"
+```
+
 ## Reasoning
 
 `:reasoning` lists the levels the current model actually supports and marks the
