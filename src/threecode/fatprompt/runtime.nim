@@ -2703,6 +2703,13 @@ proc endTurnAfterTranscriptAppend*() =
   ## mode/state so no transient prompt-only or duplicate-token frame appears.
   discard stopBarTick()
   stopSpinner()
+  # The turn is over, so the input thread must route keys as idle again.
+  # Callers that take this path (fatal ApiError, empty-reply exhausted,
+  # flail abort) set turnEnded and skip the deferred endTurn that normally
+  # performs this reset; without it inputTurnActive stays true and every
+  # later Ctrl-D at the empty prompt is misrouted to the inert mid-turn
+  # branch, making the prompt impossible to quit via the keyboard.
+  stopTurnInputForFinalRender()
   let hadTicker = fatPromptState.footer.ticker.len > 0
   if hadTicker:
     emitFatPromptEvent clearTickerEvent()
