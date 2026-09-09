@@ -739,7 +739,8 @@ proc promptEditProvider*(editor: var minline.LineEditor,
                          auth: existing.auth, models: models,
                          family: existing.family,
                          reasoning: existing.reasoning,
-                         reasonings: existing.reasonings)
+                         reasonings: existing.reasonings,
+                         currentModel: existing.currentModel)
     let res = verifyModels(name, url, key, models)
     if res.cancelled:
       raise newException(minline.InputCancelled, "cancelled by user")
@@ -748,7 +749,8 @@ proc promptEditProvider*(editor: var minline.LineEditor,
                          models: res.kept,
                          family: existing.family,
                          reasoning: existing.reasoning,
-                         reasonings: existing.reasonings)
+                         reasonings: existing.reasonings,
+                         currentModel: existing.currentModel)
 
 proc bootstrapProvider*(editor: var minline.LineEditor): Profile =
   stdout.styledWriteLine fgMagenta,
@@ -759,6 +761,7 @@ proc bootstrapProvider*(editor: var minline.LineEditor): Profile =
                die "aborted", ExitConfig
   activeProviders.add prov
   activeCurrent = prov.name & "." & firstModel(prov)
+  setCurrentModel(prov.name, firstModel(prov))
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   hintLn &"  saved to {configPath()}", resetStyle
   # The wizard's last `wizardReadLine` left `inputModalActive` held so
@@ -776,7 +779,10 @@ proc cmdProviderList(prof: Profile): string =
   let curName = if prof.name == "": "" else: prof.name.split('.')[0]
   for pr in activeProviders:
     let current = pr.name == curName
-    let tail = if current: &"  [{shortModel(prof.model)}]" else: ""
+    # Current provider shows the live model; the others show the model a
+    # switch would land on (last used, else the first wizard entry).
+    let mark = if current: prof.model else: rememberedModel(pr)
+    let tail = if pr.models.len > 0: &"  [{shortModel(mark)}]" else: ""
     if not experimentalEnabled and not hasKnownGoodModel(pr):
       result.add GreyFg & pr.name & tail & Reset & "\r\n"
     else:
@@ -794,8 +800,11 @@ proc cmdProviderSelect(target: string, prof: var Profile): string =
     return errLnS(&"unknown provider: {target}")
   if prov.models.len == 0:
     return errLnS(&"provider {target} has no models")
-  let newCurrent = prov.name & "." & firstModel(prov)
+  # Sticky models: land on this provider's last-used model, not its first.
+  let model = rememberedModel(prov)
+  let newCurrent = prov.name & "." & model
   let candidate = buildProfile(newCurrent, activeProviders, "")
+  setCurrentModel(prov.name, model)
   activeCurrent = newCurrent
   prof = candidate
   writeConfigFile(configPath(), activeCurrent, activeProviders)
@@ -816,6 +825,7 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile,
   activeProviders.add prov
   if activeCurrent == "":
     activeCurrent = prov.name & "." & firstModel(prov)
+    setCurrentModel(prov.name, firstModel(prov))
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   if prof.name == "":
     prof = buildProfile(activeCurrent, activeProviders, "")
@@ -835,8 +845,9 @@ proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
     let wantedModel = prof.model
     let model =
       if updated.findModel(wantedModel) >= 0: wantedModel
-      else: firstModel(updated)
+      else: rememberedModel(updated)
     activeCurrent = updated.name & "." & model
+    setCurrentModel(updated.name, model)
     prof = buildProfile(activeCurrent, activeProviders, "")
   writeConfigFile(configPath(), activeCurrent, activeProviders)
   hintLnS(&"updated {target}")
@@ -852,7 +863,9 @@ proc cmdProviderRm(target: string, prof: var Profile): string =
   if curName == target:
     if activeProviders.len > 0:
       let np = activeProviders[0]
-      activeCurrent = np.name & "." & firstModel(np)
+      let model = rememberedModel(np)
+      activeCurrent = np.name & "." & model
+      setCurrentModel(np.name, model)
       prof = buildProfile(activeCurrent, activeProviders, "")
     else:
       activeCurrent = ""
@@ -914,6 +927,7 @@ proc cmdModelSelect(target: string, prof: var Profile): string =
     return errLnS(experimentalGateText(candidate))
   if privateMode and not privateAllowed(candidate):
     return errLnS(privateGateText(candidate))
+  setCurrentModel(prov.name, fullModel)
   activeCurrent = newCurrent
   prof = candidate
   writeConfigFile(configPath(), activeCurrent, activeProviders)
