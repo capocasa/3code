@@ -177,6 +177,26 @@ suite "screen capture (seam)":
     check info.format == "png"
     check fileExists(work / "img2" / "001.png")
 
+suite "platform gate":
+  test "X11/Linux probe is platform-clean; Wayland-only sessions refuse":
+    # This dev platform is X11 Linux: no platform error before the
+    # binary-level checks (DISPLAY etc. are exercised by the capture
+    # suite). A Wayland session without Xwayland must get the named
+    # not-here-yet error instead of a half-working backend.
+    when defined(macosx) or defined(windows):
+      skip()
+    else:
+      let savedWayland = getEnv("WAYLAND_DISPLAY")
+      let savedDisplay = getEnv("DISPLAY")
+      putEnv("WAYLAND_DISPLAY", "wayland-0")
+      putEnv("DISPLAY", "")
+      let (ok, err) = screen.ensureComputerUse("plat")
+      check not ok
+      check "Wayland" in err
+      check "grim" in err
+      putEnv("WAYLAND_DISPLAY", savedWayland)
+      putEnv("DISPLAY", savedDisplay)
+
 suite "screenshot receipt/banner":
   test "round trip":
     let info = ImageInfo(width: 1920, height: 1080,

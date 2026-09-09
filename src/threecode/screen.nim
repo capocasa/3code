@@ -117,18 +117,21 @@ proc shotScriptPath*(sessionId: string): string =
 
 proc platformNotSupportedError(): string =
   ## Phase-3 platform table: X11 is the only implemented backend; the
-  ## others must fail loudly rather than half-work.
+  ## others must fail loudly rather than half-work. The OS arms are
+  ## compile-time; Wayland detection is runtime env (a `when` there would
+  ## fold against the *compiler's* environment, not the user's session).
   when defined(macosx):
     "error: computer use: the macOS backend (screencapture + cliclick) is " &
       "not implemented yet — X11 only for now"
   elif defined(windows):
     "error: computer use: the Windows backend (.NET SendInput) is not " &
       "implemented yet — X11 only for now"
-  elif getEnv("WAYLAND_DISPLAY").len > 0 and getEnv("DISPLAY").len == 0:
-    "error: computer use: Wayland is not supported here yet (grim + " &
-      "ydotool backend unimplemented) — run under X11"
   else:
-    ""
+    if getEnv("WAYLAND_DISPLAY").len > 0 and getEnv("DISPLAY").len == 0:
+      "error: computer use: Wayland is not supported here yet (grim + " &
+        "ydotool backend unimplemented) — run under X11 (Xwayland counts)"
+    else:
+      ""
 
 proc materializeShotScript*(dir: string): string =
   ## Write (or refresh) `dir/shot`. Empty return = ok. Split out of
