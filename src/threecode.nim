@@ -483,6 +483,14 @@ proc main() =
 
   var activeColorKeys: Table[string, string]
   (activeCurrent, activeProviders, activeColorKeys) = loadStateOrEmpty(configPath())
+  # Per-directory sticky current: this directory's last `:provider` / `:model`
+  # wins over the global config when it still resolves. An explicit --model
+  # or a resumed session's own profile still wins over both.
+  block:
+    let dirCurrent = loadDirCurrent(safeCwd())
+    if dirCurrent != "" and
+       buildProfile(dirCurrent, activeProviders, "").name.len > 0:
+      activeCurrent = dirCurrent
   if activeProviders.len == 0 and activeCurrent != "":
     # A config that sets `current` but has no [provider] section used to
     # fall through to the first-run wizard, which then refused every name
