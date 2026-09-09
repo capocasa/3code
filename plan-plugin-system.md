@@ -6,7 +6,9 @@ tools instead), and harness plugins are **in-process** via a versioned
 C-ABI. Both changes are decisions, not suggestions. Revision 3 folds in
 the vim/neovim lesson (see `plan-vim-lesson.md`): command registration,
 transcript emission, async post + timers, read services, keymap
-registration.
+registration. Revision 4 elevates the product concern to governing law:
+the economy invariant, and re-scopes the plugin taxonomy around it
+(soft, policy, transport, text).
 
 ## The one-sentence version
 
@@ -15,6 +17,43 @@ Capabilities are extended with **CLI tools documented by skills**
 MCP servers into commands); the harness is extended with **in-process
 Nim plugins** loaded from shared libraries through a small versioned
 ABI. 3code itself never speaks MCP and never mounts tool schemas.
+
+## The economy invariant (rev 4: the governing law)
+
+**An installed but idle plugin may not add any recurring token cost,
+and no plugin API anywhere may add recurring model-visible cost.
+Model-visible text enters only through usage-priced channels: tool
+results the model chose to invoke, files it chose to read.**
+
+The reasoning is incentive economics, not aesthetics. Every agent
+plugin ecosystem splurges (pi's `registerTool` schemas per call, dsh's
+schema assembly, Claude Code's MCP prefixes) because plugin authors
+pay nothing for the user's context: visibility is free to the author
+and billed to the user. The only durable fix is architectural: do not
+ship the spending API. Our ABI already mostly lacks one (no new tools,
+no message mutation); rev 4 makes that absence the law and tightens the
+last leak (plugin-shipped skills, see Layer 4).
+
+What survives the law is exactly the non-spending plugin classes, with
+the taxonomy renamed to say so:
+
+| class | touches | token cost | examples |
+|---|---|---|---|
+| **soft** | human surface only: commands, keys, bar, transcript, askUser | zero | tokenmeter, goalkeeper UI, `:session pick` |
+| **policy** | tool gates: veto/rewrite/redact | zero or negative | lintgate, approve, secretkeeper, dbguard |
+| **transport** | provider auth/headers | zero | vendor auth |
+| **text** | skills + CLIs, opt-in per use | usage-priced | mcpwrap, github-cli |
+
+The pitch line this suggests for the README: plugins can make 3code
+cheaper, safer, or nicer to drive, never bigger.
+
+**Why not zero plugins, then?** Because everything the invariant keeps
+is human-side or usage-priced, and the no-plugin extreme loses real
+things: vendor auth velocity (every new subscription waits on a core
+release), personal UX (the vim spirit), and organization policy gates
+(the anti-splurge plugins: a formatter veto and a secret redactor are
+*discipline*, the very thing economy requires). The invariant keeps
+discipline as the product and lets plugins enforce it, not erode it.
 
 ## Point of departure: the model-facing surface is already complete
 
@@ -253,6 +292,13 @@ Unchanged from revision 1 and now the *primary* path: a plugin (or an
 joins `skillsDirs()` precedence (project > user > built-in). For
 harness plugins this ships usage prose; for capability plugins it is
 the whole interface, and `mcpwrap skill` generates it.
+
+Rev 4 tightening, the invariant's last leak: a catalog line is
+recurring cost, so plugin-shipped skills join the catalog only when
+the plugin is enabled, a plugin contributes at most two lines by
+default (more require explicit `:plugin skills <name>` opt-in), and
+the `:plugin` listing shows each plugin's catalog cost. Skills must
+earn their line the same way everything else earns its tokens.
 
 ## What we deliberately do not expose
 
