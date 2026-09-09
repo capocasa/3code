@@ -31,7 +31,7 @@ capabilities is not to build a mechanism into 3code; it is to
 mass-produce CLIs + skills from the one ecosystem that already has
 hundreds of them (MCP), without letting MCP itself into the agent loop.
 
-## Layer 1: capabilities — CLI tools + skills, produced by `mcpwrap`
+## Layer 1: capabilities: CLI tools + skills, produced by `mcpwrap`
 
 **Decision: 3code never speaks MCP. No schema mounting, no MCP client,
 no `tools/call` from the harness, ever.** Instead, a new Nim framework,
@@ -46,8 +46,8 @@ paid as one catalog line per call plus a one-time skill read.
 
 | approach | per-call cost | one-time | 30-call session, plugin used |
 |---|---|---|---|
-| raw MCP schema mount | ~2,800 tok | — | ~84,000 tok |
-| curated schema mount | ~900 tok | — | ~27,000 tok |
+| raw MCP schema mount | ~2,800 tok | (none) | ~84,000 tok |
+| curated schema mount | ~900 tok | (none) | ~27,000 tok |
 | CLI + generated skill | ~15 tok (catalog line) | ~400 tok (skill `cat`) | ~850 tok |
 
 27,000 / 850 is 32x; 84,000 / 850 is 99x; prompt-cache discounts apply
@@ -98,7 +98,7 @@ Design points:
 - Non-MCP tools need no framework at all: `gh`, `sqlite3`, `jq` plus a
   hand-written skill are first-class plugins by the same definition.
 
-## Layer 2: the harness — in-process Nim plugins
+## Layer 2: the harness: in-process Nim plugins
 
 **Decision: plugins run inside the 3code process, loaded from shared
 libraries (`.so`/`.dll`) through a versioned C-ABI.** This is critical,
@@ -121,7 +121,7 @@ rules that make it work:
 ### The ABI sketch
 
 ```nim
-# threecode/plugin/api.nim — the SDK plugins compile against
+# threecode/plugin/api.nim - the SDK plugins compile against
 type
   HostServices* {.bycopy.} = object
     abiVersion*: cint
@@ -201,7 +201,7 @@ description = "format-on-write gate"
 events = ["tool.pre", "tool.post"]   ; lets 3code skip pointless loads
 ```
 
-## Layer 3: auth plugins — vendor adapters
+## Layer 3: auth plugins: vendor adapters
 
 To answer the open question directly: **yes, an auth plugin ships a
 vendor.** Today every vendor's login is a compiled-in module
