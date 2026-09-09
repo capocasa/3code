@@ -643,6 +643,24 @@ proc serveNonStreamDelayed(server: SseServer; delayMs: int) =
   client.drainRequestBody(contentLength)
   client.close()
 
+proc serveBlackHoleThen401(server: SseServer) {.thread.} =
+  ## Connection 1 accepts, reads the request, then says NOTHING forever
+  ## (a black-holed peer holding the socket open). Connection 2 answers
+  ## 401 so callModel's retry after the non-streaming cap terminates fast.
+  var c1: Socket
+  if not server.acceptWithinDeadline(c1): return
+  discard c1.readRequestHead()
+  var c2: Socket
+  if not server.acceptWithinDeadline(c2):
+    c1.close()
+    return
+  discard c2.readRequestHead()
+  let body = "{\"error\":\"unauthorized\"}"
+  c2.send("HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\n" &
+    "Content-Length: " & $body.len & "\r\nConnection: close\r\n\r\n" & body)
+  c2.close()
+  c1.close()
+
 type QuietWatchSim = ref object
   ## Scaled-down stand-in for fatprompt's quietWatchLoop: fires
   ## requestQuietShutdown when the provider-activity clock goes 900ms
@@ -728,3 +746,29 @@ suite "non-streaming transport: provider silence is not a dead link":
     check not raised
     check msg != nil
     check msg{"content"}.getStr == "BATCH_SURVIVED"
+
+  test "black-holed non-streaming request dies at the non-stream cap":
+    # The feed-the-watchdog fix alone would leave a peer that holds the
+    # socket open but never sends waiting forever (provider silence is
+    # indistinguishable from a black hole at the transport level). The
+    # NonStreamTooLongMs ceiling (30min in production, shrunk to 5s in
+    # this binary) bounds the wait: the stall must surface as a network
+    # quiet error, retry, and terminate on the second connection's 401 —
+    # not hang until the user interrupts.
+    let server = newSseServer("")
+    var srv: Thread[SseServer]
+    createThread(srv, serveBlackHoleThen401, server)
+    var usage: Usage
+    let t0 = epochTime()
+    var code = 0
+    try:
+      discard callModel(testProfile(server),
+        %*[{"role": "user", "content": "hi"}], usage, 0)
+    except HttpError as e:
+      code = e.code
+    except ApiError:
+      discard
+    joinThread(srv)
+    server.socket.close()
+    check code == 401
+    check epochTime() - t0 < 30.0
