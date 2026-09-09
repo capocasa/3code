@@ -131,13 +131,13 @@ suite "util: humanDuration":
     check humanDuration(2048) == "34:08"
 
 suite "util: clockDuration":
-  test "is always hh:mm:ss":
-    check clockDuration(0) == "00:00:00"
-    check clockDuration(4) == "00:00:04"
-    check clockDuration(59) == "00:00:59"
-    check clockDuration(128) == "00:02:08"
-    check clockDuration(2047) == "00:34:07"
-    check clockDuration(4341) == "01:12:21"
+  test "drops leading zero fields":
+    check clockDuration(0) == "0"
+    check clockDuration(4) == "4"
+    check clockDuration(59) == "59"
+    check clockDuration(128) == "2:08"
+    check clockDuration(2047) == "34:07"
+    check clockDuration(4341) == "1:12:21"
 
 suite "util: tokenSlot":
   test "returns icon + formatted count":
