@@ -602,9 +602,14 @@ func humanTokens*(n: int): string =
   else: &"{n.float/1000:.1f}k"
 
 func clockDuration*(secs: int): string =
-  ## Turn-timer format: 00:00:04, 00:02:08, 01:12:21 (hh:mm:ss).
+  ## Turn-timer format: 4, 2:08, 1:12:21 (leading zero fields dropped).
   let s = max(0, secs)
-  &"{s div 3600:02}:{(s mod 3600) div 60:02}:{s mod 60:02}"
+  let h = s div 3600
+  let m = (s mod 3600) div 60
+  let r = s mod 60
+  if h > 0: &"{h}:{m:02}:{r:02}"
+  elif m > 0: &"{m}:{r:02}"
+  else: $r
 
 func humanDuration*(secs: int): string =
   ## Second-precise but human-friendly: 0:04, 2:08, 34:07, 1h12m21s.
