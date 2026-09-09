@@ -1,357 +1,331 @@
-# Plugin system: design
+# Plugin system: design, revision 2
 
-Status: **proposal**. Nothing implemented. This document decides the
-shape; implementation phases at the end.
+Status: **proposal**, revised after review. Deltas from revision 1: no
+MCP anywhere in 3code (a Nim framework wraps MCP servers into plain CLI
+tools instead), and harness plugins are **in-process** via a versioned
+C-ABI. Both changes are decisions, not suggestions.
 
 ## The one-sentence version
 
-Plugins are out-of-process MCP servers (tools) plus a tiny 3code-native
-event stream (hooks), with every model-facing surface mounted lazily so
-the per-request schema only grows when a plugin is actually used. Idle
-plugins cost zero tokens.
+Capabilities are extended with **CLI tools documented by skills**
+(zero schema tokens, produced in bulk by a new Nim framework that wraps
+MCP servers into commands); the harness is extended with **in-process
+Nim plugins** loaded from shared libraries through a small versioned
+ABI. 3code itself never speaks MCP and never mounts tool schemas.
 
-## What already exists (and why a plugin system is still missing)
+## Point of departure: the model-facing surface is already complete
 
-3code has three extension seams today:
-
-- **Closure hooks** (`api.nim`): `VerifyProfileHook`, `BearerHook`,
-  `ExtraHeadersHook`, `ApiStreamHooks`. Internal, compile-time, used by
-  the auth modules. Not user-extensible.
-- **Skills** (`prompts.nim` `discoverSkills`): markdown files from
-  `.3code/skills`, `.agents/skills`, user config dir, built-in dir.
-  Listed as a compact catalog in the system prompt, `cat`-ed by the model
-  on demand. This is already the right *economics* pattern (zero cost
-  until loaded) but it only extends knowledge, not capability.
-- **Config** (`config.nim`): `[provider]`, `[settings]`, `[search]`,
-  `[shortcuts]`. Static data, no code.
-
-What none of these give you: new tools the model can call, lifecycle
-observability, third-party auth, policy enforcement at tool time. That
-is what plugins are for.
-
-## Non-negotiable constraints (these decide everything)
-
-1. **Token economy is the product.** A plugin system that appends N tools'
-   JSON schemas to every request is a denial-of-wallet attack on 3code's
-   core promise. Claude Code with 5 MCP servers pays ~2-4k schema tokens
-   on every single call. We cannot ship that. Consequence: tool schemas
-   are **mounted on demand**, never blanket-advertised.
-2. **The TUI process must not crash, ever.** The rendering engine is the
-   most bug-dense code we own (see AGENTS.md, bug-hall-of-fame.md).
-   Plugin code must never run in-process. Consequence: plugins are
-   subprocesses, unconditionally. No `dynlib`, no Nim-script eval.
-3. **Language-agnostic.** Free-tier users have Python, Node, a shell.
-   Plugins must be trivially writable in anything. Consequence: the wire
-   protocol is line-delimited JSON over stdio, nothing more exotic.
-4. **The sandbox story must stay coherent.** The agent (model) is
-   untrusted and fenced. Plugins are software the *user* installed, same
-   trust level as 3code itself. Consequence: plugins run unfenced, but
-   the model can only reach them through the dispatch layer, and the
-   agent itself must never be able to install or enable plugins.
-5. **Windows/macOS/Termux parity.** stdio subprocesses work everywhere
-   we ship. No sockets, no unix-only tricks in v1.
-
-## Layer 1: tools, via MCP
-
-**Decision: adopt MCP (Model Context Protocol) as the tool protocol.**
-
-Not a bespoke protocol. The reasoning is blunt:
-
-- The MCP ecosystem already exists. Hundreds of servers (GitHub,
-  Postgres, Playwright, Linear, Sentry, filesystem gateways...). A small
-  agent building a bespoke protocol gets zero third-party plugins
-  forever; one speaking the MCP subset gets the whole corpus on day one.
-- 3code already speaks MCP-shaped JSON-RPC for web search (`web.nim`:
-  the exa and parallel backends are MCP endpoints, `tools/call` over
-  HTTP). The wire shape is not foreign to the codebase.
-- We implement a **subset**: `initialize`, `tools/list`, `tools/call`.
-  We ignore `resources`, `prompts`, `roots`, and explicitly refuse
-  `sampling` (see "What we deliberately do not expose").
-
-But MCP is *transport*, not economics. The 3code layer on top is the
-mount system:
-
-### Mounting
-
-Plugins with tools are listed in the system prompt as one catalog line
-each (same shape as the skills catalog):
+3code's tool surface for the model is `bash`, `read`, `write`,
+`patch`, `web_search`, `web_fetch`, `update_plan`. Its knowledge surface
+is skills: a one-line-per-file catalog in the system prompt, `cat`-ed by
+the model on demand. Together these already form a complete capability
+extension mechanism: any executable plus a skill is a plugin the model
+can use, today, with no core changes.
 
 ```
-Plugins (idle): github (GitHub issues/PRs), sqlite (query ./app.db), approve (ask the human)
-To load a plugin's tools, call `plugin {load: "<name>"}`.
+- ~/.local/share/3code/skills/github-cli.md
 ```
 
-When the model calls `plugin {load: "github"}`:
+That catalog line is the *entire* recurring token cost. So the plan for
+capabilities is not to build a mechanism into 3code; it is to
+mass-produce CLIs + skills from the one ecosystem that already has
+hundreds of them (MCP), without letting MCP itself into the agent loop.
 
-1. 3code spawns the plugin (if not already running), performs the MCP
-   handshake, caches `tools/list`.
-2. The plugin's tool schemas are merged into the wire tool schema as an
-   overlay on the family's base schema, from that model call onward.
-3. The tool result confirms compactly:
-   `loaded github: get_issue, list_prs, create_comment (+412 schema tokens)`.
-4. Dispatch: `actions.nim`'s unknown-tool catch-all consults mounted
-   plugin tools before erroring. A mounted tool call goes out as
-   `tools/call`, result text comes back capped and truncated like web
-   results (default 20k chars, manifest can lower it).
+## Layer 1: capabilities — CLI tools + skills, produced by `mcpwrap`
 
-Cost profile: idle plugin = 1 catalog line (~15 tokens). Mounted plugin
-= its schema size, once, for the rest of the session. This mirrors the
-skills philosophy exactly: list cheap, load on demand.
+**Decision: 3code never speaks MCP. No schema mounting, no MCP client,
+no `tools/call` from the harness, ever.** Instead, a new Nim framework,
+`mcpwrap`, turns any MCP server into a normal command-line tool. The
+model then uses that tool through `bash`, exactly like `git` or `rg`,
+and learns it from a generated skill.
 
-**Cache interaction (important).** Mounting changes the tool schema,
-which busts the prompt cache prefix for the next call. That is one cache
-break per plugin per session, not per call, and the mount point is where
-the user's task already demanded it. The alternative (schemas always in
-the prefix) pays on every call. Document it, don't fight it.
+### The token math (why this is ~26x cheaper, minimum)
 
-**User control.** Config keys:
+An MCP tool schema is paid on *every* model call while mounted. A CLI is
+paid as one catalog line per call plus a one-time skill read.
+
+| approach | per-call cost | one-time | 30-call session, plugin used |
+|---|---|---|---|
+| raw MCP schema mount | ~2,800 tok | — | ~84,000 tok |
+| curated schema mount | ~900 tok | — | ~27,000 tok |
+| CLI + generated skill | ~15 tok (catalog line) | ~400 tok (skill `cat`) | ~850 tok |
+
+27,000 / 850 is 32x; 84,000 / 850 is 99x; prompt-cache discounts apply
+to both sides and preserve the ratio. The "26x" headline is the
+conservative floor of this table. And when the plugin is *not* used in
+a session, the CLI costs its 15-token line while the mounted schema
+costs its 900 tokens anyway.
+
+Qualitatively, not just cheaper: models have deep training coverage of
+shell usage and near-zero coverage of niche MCP tool schemas; commands
+compose (`mcpwrap gh list-prs | jq ...`, grep, redirect); results are
+plain text already capped by the existing bash output limits.
+
+### What `mcpwrap` is
+
+A standalone Nim binary (shipped alongside 3code, useful to any agent).
+It contains a minimal MCP client (stdio JSON-RPC: `initialize`,
+`tools/list`, `tools/call`) and exposes wrapped servers as subcommands:
 
 ```
-[plugins]
-off = "github"          ; never listed, never mountable
-mount = "auto"          ; auto | ask | never
-                            auto: model mounts freely (default)
-                            ask: TUI prompt on first mount per session
-                            never: catalog hidden from the model entirely
+# register a server (records the command; fetches nothing)
+mcpwrap add github -- npx -y @modelcontextprotocol/server-github
+
+# use it: each MCP tool becomes a subcommand, schema properties become flags
+mcpwrap github list_prs --repo capocasa/3code --state open
+mcpwrap github get_issue --number 43
+
+# generate the skill (one line per tool, flags from the schema)
+mcpwrap skill github > ~/.config/3code/skills/github-cli.md
 ```
 
-`:plugin` in the TUI lists plugins with live status (running, mounted,
-sick) and toggles.
+Design points:
 
-**Description dieting.** MCP tool descriptions in the wild are often
-500-character essays. A plugin manifest may override descriptions:
+- **Per-call spawn in v1**: each invocation runs the MCP server, does
+  the handshake, calls one tool, exits. Simple, no daemons, works on
+  Termux. Slow for npx-class servers (~2s); a `mcpwrapd` daemon holding
+  hot servers is the v2 optimization, behind the same CLI surface.
+- **`tools/list` is cached** (`~/.local/share/3code/mcp/<name>/`),
+  so usage is instant and `mcpwrap skill` works offline.
+- **The diet happens in the skill, not the schema.** Generated skills
+  are one command line per tool plus a flag summary, editable by hand;
+  regeneration writes `.new` rather than clobbering user edits. Curating
+  a bloated 500-char MCP description into a one-liner now costs zero
+  per-call tokens.
+- **Output is text**, not JSON: tool results print as-is (most MCP
+  tools return markdown/text blobs), JSON results pretty-compact, a
+  `--max-chars N` cap defaults to the same 20k budget as web results.
+- Non-MCP tools need no framework at all: `gh`, `sqlite3`, `jq` plus a
+  hand-written skill are first-class plugins by the same definition.
+
+## Layer 2: the harness — in-process Nim plugins
+
+**Decision: plugins run inside the 3code process, loaded from shared
+libraries (`.so`/`.dll`) through a versioned C-ABI.** This is critical,
+and it is achievable safely in Nim if the boundary is disciplined. The
+rules that make it work:
+
+1. **Only C types cross the boundary.** No Nim objects, no GC refs, no
+   seqs. Strings cross as `(cstring, len)` or JSON, always copied.
+2. **Each side owns its heap.** The plugin is a full Nim compilation
+   with its own allocator. The host hands the plugin an
+   allocate/deallocate pair for return values, so the host can free
+   them. GC pointers never cross.
+3. **One flat vtable, versioned.** The plugin exports a single
+   `threecode_plugin_init` returning a vtable struct; the host checks
+   `abiVersion` and refuses mismatches with a clear error.
+4. **Errors cross as values.** Catchable plugin errors return a code +
+   message; the host logs and demotes the plugin. (A hard segfault
+   still kills the TUI; see the crash guard.)
+
+### The ABI sketch
+
+```nim
+# threecode/plugin/api.nim — the SDK plugins compile against
+type
+  HostServices* {.bycopy.} = object
+    abiVersion*: cint
+    alloc*: proc (n: csize_t): pointer {.cdecl.}
+    dealloc*: proc (p: pointer) {.cdecl.}
+    setBarText*: proc (s: cstring) {.cdecl.}
+      ## The one UI surface in v1: a text segment in the status bar.
+    askUser*: proc (question, options: cstring,
+                    outBuf: cstring, outCap: cint): cint {.cdecl.}
+      ## Synchronous y/n/choice prompt in the editor line. Returns the
+      ## chosen index (1-based) or 0 on timeout/ctrl-c.
+
+  PluginVtable* {.bycopy.} = object
+    abiVersion*: cint
+    name*: cstring
+    onEvent*: proc (ev: cstring, payloadJson: cstring,
+                    outJson: cstring, outCap: cint): cint {.cdecl.}
+      ## Returns: 0 = no-op, 1 = veto (outJson carries the reason),
+      ## 2 = rewrite (outJson carries new args)
+
+  InitFn* = proc (host: ptr HostServices): ptr PluginVtable {.cdecl.}
+```
+
+Events ride one entry point as `(name, JSON payload)`, which keeps the
+vtable flat and lets new events ship without ABI churn. The SDK wraps
+this in Nim ergonomics (`onEvent "tool.pre": ...` sugar via plain
+proc assignment; no macros).
+
+### Event set (v1)
+
+| event | payload | sync? | fired from |
+|---|---|---|---|
+| `session.start` | cwd, provider, model, session path | no | main |
+| `turn.start` / `turn.end` | turn no; `Usage` record + wall time | no | main |
+| `model.retry` | provider error, backoff seconds | no | netthread |
+| `tool.pre` | tool name, args JSON | **yes** | turn loop |
+| `tool.post` | name, exit/size digest, duration | no | turn loop |
+| `file.write` | path, bytes (write/patch/apply) | no | turn loop |
+
+`tool.pre` keeps the 2s budget from revision 1: silence or timeout =
+allow, veto = tool result prefixed `plugin <name>: ...`, rewrite =
+replace args. Being in-process, a sync hook can now do what
+out-of-process never could: **call `askUser` and block on the human**
+while the harness pumps the input loop. That single capability is worth
+the whole ABI (see `approve` below).
+
+Threading: callbacks must be thread-safe; `tool.*` fire on the turn
+loop thread, `model.*` and auth on the netthread, and all must return
+fast. Plugins that need slow work keep their own thread and surface
+results on a later event.
+
+### Crash guard (the honest cost of in-process)
+
+A plugin segfault takes the TUI with it. Mitigations, browser-style:
+
+- On load, 3code writes `plugins/<name>.loaded`; cleared on clean exit.
+  A stale marker at startup means the last session died with that
+  plugin loaded: skip it, print one line, remember the disable.
+- Plugins load **after** TUI init and are strictly opt-in; project-dir
+  plugins start disabled exactly as in revision 1.
+- Every sync call is wrapped for `CatchableError`; a plugin that throws
+  or times out repeatedly is demoted (events stop, notice logged).
+
+This is the trade the review chose: direct memory access and zero IPC
+in exchange for shared fate, contained by opt-in + guard. It should be
+stated in `:plugin help`: an in-process plugin is a native extension of
+the 3code binary itself; installing one is installing software with
+full user privileges.
+
+### Manifest (harness plugins only)
 
 ```
-[tool.create_comment]
-desc = "Comment on a GitHub PR/issue."
+# ~/.config/3code/plugins/lintgate/plugin.toml
+name = "lintgate"
+lib = "lintgate.so"            ; .dll on Windows
+description = "format-on-write gate"
+events = ["tool.pre", "tool.post"]   ; lets 3code skip pointless loads
 ```
 
-The mount path sends the overridden one-liner on the wire. This is the
-3code house style applied to someone else's schema, and it routinely
-halves mounted cost.
+## Layer 3: auth plugins — vendor adapters
 
-## Layer 2: hooks, 3code-native
+To answer the open question directly: **yes, an auth plugin ships a
+vendor.** Today every vendor's login is a compiled-in module
+(`auth_openai`, `auth_google`, `auth_xai`) implementing the internal
+closure hooks (`BearerHook`, `ExtraHeadersHook`, `FetchModelsHook`).
+Auth plugins externalize exactly that pattern, nothing more:
 
-MCP deliberately has no lifecycle events. We need them, so we define a
-small event stream, pushed as JSON lines to the plugin's stdin (same
-process as Layer 1; a plugin may be tools-only, hooks-only, or both,
-per its manifest).
+- given a `[provider]` profile, mint and refresh bearer tokens
+  (device-code flow, browser dance, enterprise SSO, whatever the vendor
+  invented this quarter),
+- contribute per-request headers,
+- answer the model-list call when the vendor's API shape demands it.
 
-Events (v1):
-
-| event | payload | sync? |
-|---|---|---|
-| `session.start` | cwd, provider, model, session path | no |
-| `turn.start` | turn number, prompt token estimate | no |
-| `turn.end` | `Usage` record, wall time | no |
-| `tool.pre` | tool name, args, working dir | **yes** |
-| `tool.post` | tool name, result digest (size, exit code, first 200 chars), duration | no |
-| `file.write` | path, bytes (fires for write/patch/apply) | no |
-
-`tool.pre` is the only synchronous hook and the whole reason the layer
-exists. A plugin has 2 seconds to reply with one of:
-
-- `{"allow": true}` or silence (timeout = allow; a hung hook may never
-  block the agent)
-- `{"allow": false, "message": "PATH is in .git, refusing"}` (veto: the
-  tool result carries the message, prefixed `plugin <name>: ...` so the
-  model sees provenance and can adapt)
-- `{"rewrite": {<new args>}}` (e.g. inject `--no-color`, force a
-  timeout, redact a secret)
-
-Fire-and-forget events never block the loop: written to the pipe and
-forgotten. A plugin whose pipe is full gets dropped from notification
-for the session (it is too slow to be a hook), never blocks.
-
-**Plugin state.** Hooks see every tool call, including calls to MCP
-tools (Layer 1) and to native tools. A hook plugin can veto a
-`sqlite_exec` from an MCP plugin. This composition (policy plugin
-watches capability plugin) is where the design earns its keep; see
-"Conceived plugins" below.
-
-## Layer 3: auth plugins
-
-The internal closure hooks (`BearerHook`, `ExtraHeadersHook`) exist
-because OAuth flows can't be expressed as static config. Externalize
-the narrow case: a manifest `type = "auth"` plugin is an executable
-that, when run with a profile name, prints a fresh bearer token to
-stdout (plus optional header lines). 3code caches per its declared TTL
-and installs it as that provider's `BearerHook`. This lets a new
-subscription provider ship as a plugin instead of a fork. ~30 lines of
-contract, no MCP involved. v1.5, after tools and hooks prove the
-subprocess machinery.
+New subscription vendors, weird proxies, and platform integration
+(macOS Keychain token storage instead of plaintext config, corporate
+cert profiles) then ship as a `.so` + config without a 3code release.
+The contract is two vtable events (`auth.bearer`, `auth.headers`) plus
+a declare-refresh-TTL field, all on the netthread, so implementations
+must not block; token refresh blocking the request path is the one
+place a slow plugin is felt, and the existing patient-retry machinery
+already tolerates it.
 
 ## Layer 4: skills bundling
 
-A plugin manifest may name a `skills/` directory; its markdown files
-join `skillsDirs()` search path (project plugins' skills shadow
-user-level, matching existing precedence). Trivial to implement, ships
-with Layer 1, and means a plugin can carry its own usage knowledge
-("how to query this database well") instead of bloated tool
-descriptions. This is the correct place for plugin prose: skills are
-loaded on demand by the model, priced per use.
+Unchanged from revision 1 and now the *primary* path: a plugin (or an
+`mcpwrap` registration) may name a `skills/` directory whose markdown
+joins `skillsDirs()` precedence (project > user > built-in). For
+harness plugins this ships usage prose; for capability plugins it is
+the whole interface, and `mcpwrap skill` generates it.
 
 ## What we deliberately do not expose
 
-Each refusal is a decision, not an omission:
+- **MCP in the model path.** No schema mounting, no MCP client in
+  3code, no `tools/call` dispatch. `mcpwrap` is the only door, and it
+  exits to a shell.
+- **New model-facing tools from plugins.** Capabilities are commands;
+  the fixed per-family tool surface stays fixed (it is what the models
+  were trained on). A plugin that needs model interaction uses hooks,
+  the bar, or ships a CLI.
+- **Message-list mutation.** Plugins never see the conversation array.
+- **UI internals.** `setBarText` is the entire UI surface in v1,
+  through one vetted setter, because the layout engine is fragile by
+  admission. More setters only after visual-test coverage per
+  `.agents/testing.md`.
+- **Plugin installation or enablement by the agent.** The model can
+  never write config/plugin dirs; default sandbox policy gains that
+  deny rule regardless of the plugin system.
 
-- **Message-list mutation.** Plugins never see or edit the conversation
-  array. It would break per-family prompt discipline, bust caches, and
-  make prompt injection a plugin API. Hooks observe tool I/O, not chat.
-- **UI internals.** No drawing, no layout, no footer access. The engine
-  is fragile by admission (hall of fame). v2 may allow one bar text
-  segment through a single vetted setter, experimental-gated. Not v1.
-- **MCP `sampling`** (plugin asks the model to run inference). A cost
-  hole and a loop risk. Refused on handshake.
-- **In-process anything.** No dynlib, no eval, no scripts run inside
-  the TUI. One exception already exists: config `[shortcuts]` remaps
-  editor keys, which is data, not code.
-- **Plugin installation by the agent.** The model can never write
-  `~/.config/3code/plugins` (the default `.sandbox` policy should deny
-  writes there explicitly, plugin system or not). Installing a plugin
-  is a human action.
+## Trust model
 
-## Discovery, manifests, trust
+- Harness plugins: native code in-process, full privileges, opt-in,
+  crash-guarded, project-dir copies disabled until the user enables
+  (answer remembered in *user* config, never in the repo).
+- Capability CLIs: ordinary programs run via the sandboxed bash tool,
+  so they are fenced by the existing `.sandbox` policy like any other
+  command. This is a genuine advantage over MCP mounting: a mounted
+  MCP tool escapes the sandbox policy by construction, a wrapped CLI
+  cannot.
+- Veto and rewrite messages carry plugin provenance so the model can
+  distinguish harness policy from its own errors.
 
-Layout mirrors the skills pattern:
+## Conceived plugins (revised)
 
-```
-~/.config/3code/plugins/<name>/plugin.toml   user-installed, enabled
-.3code/plugins/<name>/plugin.toml            project-shipped
-```
+**`github` via mcpwrap (capability).** `mcpwrap add github -- npx -y
+@modelcontextprotocol/server-github`; `mcpwrap skill github` writes the
+catalog line's target. Session cost: 15 tok/call + one ~400 tok skill
+read, and the sandbox policy governs its network and file access.
 
-Manifest:
+**`lintgate` (harness, `tool.pre`).** Runs the project formatter on
+every write/patch, vetoes with the reformat diff. Zero model-facing
+surface; now also fast enough (no IPC) to run on `file.write` without
+a thought.
 
-```
-# plugin.toml
-name = "github"
-version = "1.2.0"
-type = "mcp+hooks"          ; mcp | hooks | auth, combinable
-command = ["python3", "server.py"]
-description = "GitHub issues/PRs"     ; one catalog line, enforced short
-cap = 20000                 ; max tool-result chars (default)
-timeout = 30                ; per-call seconds, clamped like bash
+**`approve` (harness, `tool.pre` + `askUser`).** Veto-any on
+destructive bash (`git push --force`, `rm -rf`, `drop table`) resolved
+by a synchronous y/n in the editor line mid-tool-call. The demo of why
+in-process matters: the hook asks the human *through* the TUI and the
+model receives the answer as a tool result. Out-of-process designs
+cannot do this cleanly.
 
-[events]                    ; hooks this plugin subscribes to
-listen = ["tool.pre", "tool.post"]
+**`secretkeeper` (harness, `tool.post`).** Strips key-shaped strings
+from every tool result before it enters context. Saves tokens, stops
+secrets riding to the provider. Sees bash, read, and mcpwrap output
+alike.
 
-[tool.create_comment]       ; description overrides (the diet)
-desc = "Comment on a GitHub PR/issue."
-```
+**`dbguard` (harness, `tool.pre`).** Watches bash commands hitting the
+project DB CLI (or an `mcpwrap sqlite` subcommand), parses the SQL,
+vetoes destructive statements outside an explicit session flag. Policy
+plugin guarding a capability plugin; they need not know about each
+other.
 
-Trust model, stated plainly in `:plugin help`: installing a plugin is
-installing software; it runs with your permissions, unsandboxed, like
-3code itself. The fences protect you from the *model*, not from your
-own installs.
+**`tokenmeter` (harness, `turn.end` + `setBarText`).** Appends usage to
+a local ledger and renders a live month-total in the status bar.
+`model.retry` events can flip the bar to "quota hold, retry in 14m".
 
-**Project plugins start disabled.** A cloned repo may ship
-`.3code/plugins/`; on first sight the TUI prints one line ("this
-project ships 2 plugins; `:plugin on` to enable") and remembers the
-answer in the *user* config, never in the repo. This closes the
-prompt-injection-shaped hole (malicious repo + eager model = exfil
-service) the same way `.sandbox` closes path holes.
+**`testwise` (harness + bundled skill).** Logs test-run signatures
+across sessions; its bundled skill teaches the model to `cat` the log
+before refactoring a "broken" test that is merely flaky. Harness memory
+that survives `:clear`.
 
-Lifecycle: lazy spawn at first use (startup stays fast), one silent
-restart on crash, then marked sick for the session with a clean tool
-error naming the plugin. Stderr from a plugin goes to the debug log,
-never the transcript.
-
-## Why this shape (summary of decisions and their reasons)
-
-| decision | reason |
-|---|---|
-| subprocess, never in-process | TUI crash isolation, sandbox coherence, language freedom |
-| MCP subset for tools | ecosystem leverage; bespoke protocols get zero plugins |
-| mount-on-demand schemas | token economy is the product; skills proved the pattern |
-| native event stream for hooks | MCP has no lifecycle; we need `tool.pre` veto |
-| one sync hook only (`tool.pre`) | hooks on the hot path would add latency to every tool call |
-| project plugins disabled by default | repo-shipped code must not auto-run |
-| auth as tiny stdout contract | OAuth needs code, not config; narrowest possible surface |
-| refuse sampling/resources | cost holes and prompt-discipline breaks |
-
-## Conceived plugins
-
-Each exercises a different part of the surface.
-
-**`github` (mcp).** The canonical mount example. Idle cost: one catalog
-line. The interesting detail is the diet: the stock MCP GitHub server's
-schema is ~2.8k tokens; curated overrides bring it under 900. Mounted
-once when you actually say "look at issue 43", amortized over the
-session.
-
-**`lintgate` (hooks).** `tool.pre` on write/patch: runs the project's
-formatter, vetoes the write with the diff of what it *would* have
-changed ("plugin lintgate: prettier reformat required, 3 lines"). The
-model self-corrects on the next call instead of shipping
-badly-formatted code. Zero model-facing surface, zero catalog tokens;
-pure harness-side value. This is the poster child for why hooks are
-worth a layer.
-
-**`secretkeeper` (hooks).** `tool.post` scan of every tool result for
-API-key-shaped strings (AWS, ghp_, sk-, PEM blocks); matches replaced
-with `[redacted:aws-key]` before the result enters context. Doubly
-3code: saves tokens AND stops secrets riding to the provider in tool
-output. Observes bash, read, and MCP tools alike.
-
-**`dbguard` (hooks, composing with mcp).** You mount `sqlite-mcp` so
-the model can query a database; `dbguard` watches `tool.pre` for its
-`exec` tool, parses the SQL, vetoes anything `DELETE`/`DROP`-shaped
-outside an explicit `--yes-destructive` session flag. Policy plugin
-guarding capability plugin, no cooperation needed between them.
-
-**`approve` (mcp).** Registers one tool, `ask_human(question, options)`.
-When the model calls it, 3code surfaces a y/n/choice prompt in the
-editor line; the human's answer returns as the tool result. A plugin
-whose backend is *you*. Gives cautious users a middle path between
-"full auto" and "ask before every command": destructive work becomes
-opt-in through the prompt itself.
-
-**`tokenmeter` (hooks).** `turn.end` appends the `Usage` record to
-`~/.local/share/3code/usage.csv`; `:plugin stats` reads back
-per-provider, per-model totals for the month. Free-tier users are
-exactly the people obsessing over quota ceilings; nobody in the
-ecosystem gives them a local, provider-agnostic ledger.
-
-**`patient-notify` (hooks).** Pairs with 3code's ~36h patient retry:
-listens to a new `model.retry` event (trivial to add: fired on 429/5xx
-backoff) and desktop-notifies "holding for quota reset, next attempt in
-14m" so a parked session on a free tier is legible from across the
-room.
-
-**`hands-off-auth` (auth).** A new subscription provider's login is a
-browser dance and a device-code poll. Ships as an auth plugin printing
-bearer tokens; users of that provider install one directory instead of
-waiting for a 3code release.
-
-**`testwise` (hooks, with state).** `tool.post` on bash watches test
-commands, keeps a sqlite of (file, error signature) outcomes across
-sessions. When the model hits a failure whose signature keeps flapping,
-the hook rewrites... no: it vetoes nothing, but the plugin can expose a
-*skill* (Layer 4) telling the model how to query its own log with a
-plain `cat`-able file, e.g. "3 failures of this test today, three
-different errors: treat as flaky, one more run before you refactor."
-Harness memory that survives `:clear`.
+**`vendor-xyz` (auth).** A new subscription provider's device-code
+login + Keychain token storage, shipped as a `.so` the day the vendor
+launches, no 3code release needed.
 
 ## Implementation sketch
 
-Phased, each phase independently shippable:
+Two deliverables, loosely coupled:
 
-1. **Registry + skills bundling** (~250 loc). Manifest parse, discovery
-   dirs, `:plugin` TUI listing, disabled-by-default project gating,
-   plugin skills in `skillsDirs()`. Value before any protocol exists.
-2. **MCP client + mount** (~600 loc). `plugins.nim`: lazy spawn,
-   handshake, `tools/list`, `tools/call`, timeout/crash policy; the
-   `{{plugins}}` catalog line in `prompts.nim`; the `plugin {load}`
-   harness tool; schema overlay in `toolsFor`; dispatch hook in
-   `actions.nim` `unknownTool` path. Fixture plugin in `testdata/`
-   (shell or Nim) + tests wired into the shakedown per testing.md.
-3. **Hooks** (~300 loc). Event pump, sync `tool.pre` with 2s budget,
-   `tool.post`/`turn.end` fire-and-forget, sick-plugin demotion.
-4. **Auth plugins** (~80 loc) and, experimental-gated, one bar text
-   segment setter.
+1. **`mcpwrap`** (new tool, ~700 loc): stdio JSON-RPC client,
+   `add`/`skill` subcommands, tools.json cache, flag mapping from JSON
+   Schema, text output with caps. Standalone; testable without 3code;
+   immediately useful to other agents.
+2. **Harness plugins** (~550 loc in 3code): `plugin/api.nim` SDK,
+   `dynlib` loader + ABI check + crash marker, event pump wired into
+   `turns.nim`/`actions.nim` at exactly six call sites, `:plugin` TUI
+   command, `[plugins]` config, sandbox deny rule for config dirs,
+   `setBarText`/`askUser` host services, one example plugin
+   (`lintgate`) as the reference implementation and test fixture.
 
-Open questions, deliberately deferred: result streaming for long tool
-calls (v2, alongside whatever streamexec needs), hook plugins that want
-to *inject* a tool result augmentation on `tool.post` (write-amplitude:
-probably yes in v2 with the same 2s budget), remote MCP over HTTP (the
-search backends prove the shape; security review first).
+Auth plugins slot into 2 (~120 loc) once the two host services prove
+the boundary. Visual tests per `.agents/testing.md` cover the
+`askUser` editor-line prompt and the bar segment; the rest is protocol
+and can be testament-tested headlessly.
+
+Deferred: `mcpwrapd` daemon, more UI setters, a static compile-in tier
+(`plugins/*.nim` compiled into source builds, zero ABI risk, for users
+who live in the toolchain anyway).
