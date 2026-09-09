@@ -2,6 +2,16 @@
 
 **unreleased** - resume keeps the prompt cache hot
 
+- **Typing no longer flickers the turn clock to 0s.** Every keystroke
+  repaints the live token bar through the editor's diff painter, which
+  rebuilt the frame from a model field the animation thread never
+  updates, so for one frame per keystroke the elapsed counter showed
+  `0s` (or, during tool bar ticks, lost its `Ns` suffix entirely) until
+  the next 80ms animation frame restored the real clock. The bar-tick
+  label and its elapsed counter are now derived from the last frame the
+  animation thread actually painted, so a keystroke frame can never
+  show a clock the screen never had.
+
 - **Private mode.** `-p`/`--private` or `:private on` (default off,
   session-only, like a browser's private window). While on, turns only
   run on allow-private providers/models and the live token bar repaints

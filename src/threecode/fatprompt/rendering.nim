@@ -344,6 +344,15 @@ func hasElapsedSuffix*(label: string): bool =
     dec i
   i >= 0 and label[i] == ' '
 
+func barTickLabel*(label: string; secs: int): string =
+  ## Bar-tick label with the whole-second elapsed counter appended. Labels
+  ## that already carry a clock (retry countdown) are passed through
+  ## unchanged. Both the GUI thread's tick and the input thread's editor
+  ## repaint must build the bar label through this so a keystroke frame can
+  ## never show a different counter than the frame above/below it.
+  if label.hasElapsedSuffix: label
+  else: label & "  " & $secs & "s"
+
 func waitBarLabel*(w: RetryWaitState): string =
   ## Bar label for a retry backoff: the retry context plus the live
   ## countdown. The turn clock is omitted while the transport sleeps.
