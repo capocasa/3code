@@ -32,7 +32,7 @@ when defined(posix):
 import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
                   toolstream, turns, transcript, sandbox, box, wall,
-                  auth_xai, auth_openai]
+                  auth_xai, auth_openai, auth_google]
 when defined(windows):
   import threecode/streamexec  # for resolveBash, used by ensureBash
 when not defined(android):
@@ -471,6 +471,8 @@ proc main() =
     result = auth_xai.subscriptionTokenFor(provider)
     if result == "":
       result = auth_openai.subscriptionTokenFor(provider)
+    if result == "":
+      result = auth_google.subscriptionTokenFor(provider)
   extraHeadersImpl = chatgptExtraHeaders
   api.codexModelsHook = auth_openai.fetchCodexModels
   api.bearerHook = subscriptionBearer

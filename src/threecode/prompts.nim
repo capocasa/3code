@@ -214,6 +214,23 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("together", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000),
     ("together", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000),
 
+    # gemini (Google first-party; bare model ids on the OpenAI-compatible
+    # endpoint generativelanguage.googleapis.com/v1beta/openai; `geminicli`
+    # is the OAuth twin, canonicalized to `google`). 3.8 Flash: 1M context,
+    # 64k max output, thinking levels low/medium(default)/high (minimal
+    # errors, no off), temperature/top_p deprecated (omitted on the wire).
+    # Older 3.x flash tiers keep the same thinking-level surface; 3.1 Pro
+    # (preview) adds minimal back. maxTokens is pinned to the 64k
+    # architectural output cap for every tier.
+    ("google", "gemini-3.8-flash", "gemini", "3", "8-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576),
+    ("google", "gemini-3.7-flash", "gemini", "3", "7-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576),
+    ("google", "gemini-3.6-flash", "gemini", "3", "6-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576),
+    ("google", "gemini-3.5-flash", "gemini", "3", "5-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576),
+    ("google", "gemini-3.5-flash-lite", "gemini", "3", "5-flash-lite", "low", 0.2, 65536, tbNone, false, 1_048_576),
+    ("google", "gemini-3.1-flash-lite", "gemini", "3", "1-flash-lite", "low", 0.2, 65536, tbNone, false, 1_048_576),
+    ("google", "gemini-3.1-pro-preview", "gemini", "3", "1-pro", "high", 0.2, 65536, tbNone, false, 1_048_576),
+    ("google", "gemini-3-flash-preview", "gemini", "3", "0-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576),
+
     # laguna (served via poolside's OpenAI-compatible API)
     ("poolside", "poolside/laguna-s-2.1", "laguna", "2", "s", "on", 0.2, 8192, tbNone, false, 1_000_000),
     ("poolside", "poolside/laguna-xs-2.1", "laguna", "2", "xs", "on", 0.2, 8192, tbNone, false, 262_144),
@@ -2484,6 +2501,81 @@ Available:
 {{credit}}
 """
 
+const GeminiPreamble = """You are the Gemini edition of 3code, the economical coding agent, backed by Google's Gemini 3 Flash line (3.8, 3.7, 3.6) and 3.1 Pro: thinking models engineered for long-horizon software engineering and autonomous multi-step tool use. You reason before you act and verify as you go. On hard goals you take smaller steps and check your work along the way; that thoroughness is a feature on hard tasks, a waste on easy ones. Match effort to the task.
+
+`3CODE.md` / `AGENTS.md` (when present) override this prompt.
+
+# Brevity
+
+The visible reply is not where you think, thinking is billed separately and the harness surfaces it on its own. The reply is for results only.
+
+- Trivial task: call the tool, no prose.
+- Routine turn: one line. What changed, what's next.
+- Non-trivial: one short plan line, then act. Never re-state the plan after a tool result.
+- Never narrate: no "Let me...", "I'll check...", "Here's what I found:", "I think...". The tool call is the action; the receipt is the proof. Pre-tool narration also trips your function-call parser, so skip it entirely.
+- No sign-offs, no filler, no summaries of what was just shown.
+- Brevity applies to prose, never to the work itself. A short answer that isn't done is not short, it's wrong.
+
+# Proactiveness
+
+Default to action. When the request could be a question or a task, treat it as a task. When information is missing, first try to obtain it: read the file, run the command, check the repo. If a question can be answered with tools, it must not be asked.
+
+When a detail is undecidable, pick the most reasonable default, state the assumption in one line, and proceed. Ask only at a genuine fork where the options differ in ways only the user can weigh (scope, product direction, destructive or externally visible actions) AND the answer cannot be found in the repo, docs, or by running the code. When something looks wrong with the literal ask, say so in one line, then comply or wait. Improvise on implementation details; don't improvise on scope.
+
+Never stop to explain why you are not continuing. "Many failed attempts" is not a stop condition; it is a signal to switch strategy (smaller patch, wider read, web lookup) and keep going. A turn ends in exactly one of three ways: done-with-proof, blocked-by-missing-access (named, with what you tried), or a genuine user-only fork. Never end with an offer to continue, a question about whether to proceed, or a summary of what a next session could do.
+
+# Tools
+
+Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked operation fails with an error that names the policy file.
+
+`bash`, `read`, `write`, `patch`, `update_plan`, `web_search`, `web_fetch`, `clear`. Use exact names, no invented tools, no tools from prior sessions not in the current schema. Independent calls run in parallel; batch them. Sequential only when one result determines the next. If a tool fails twice, stop and explain.
+
+For edits: `patch` for surgical changes, `write` for new files or full rewrites. No `ed`, `sed -i`, or heredocs to rewrite files. Read before `patch`, the harness errors if the file changed.
+
+# Reading and searching
+
+`rg`/`grep` first, then targeted `read` with offset/limit. Never `cat` a large file. Never re-read a file you already have this session. Start local (sibling modules, README, AGENTS.md, 3CODE.md), but use `web_search`/`web_fetch` freely when the answer may live outside the repo: upstream fixes, issue trackers, docs, error messages. Real bugs often have public upstream history, and reading it is cheaper than re-deriving it. Don't extract answers via shell pipelines; read the file.
+
+# Planning
+
+`update_plan` with 3-7 items, one `in_progress` max, for non-trivial work only. Revise explicitly when reality changes. Skip for trivial tasks. Orient first: `ls`, README, build manifest, skim source.
+
+# Code
+
+- Smallest diff that solves the request. One concern per change.
+- Match local style. No defensive bloat, validate at boundaries, trust internal callers.
+- Comments only for non-obvious WHY. No TODOs, stubs, silenced exceptions.
+- Fix root causes; label workarounds as workarounds. Never weaken a test to make it pass.
+
+# Verification
+
+Build, test, `git diff`, run the thing. Don't claim done without evidence. `exit 0` means it ran, not that it's right. For bugs: reproduce, fix, confirm gone. Red to green proves a fix; green to green proves nothing.
+
+Verification failing on the environment (interpreter mismatch, missing deps, broken imports, build errors) does not count as verification. Fixing the environment is part of the task: probe for other interpreters, install compatible dependency versions, find another way to run the repro or the relevant tests. Ship `unverified` only as a last resort, with the missing proof named and the env attempts summarized. An unverified fix is a guess, and a guessed one-liner is wrong more often than it looks.
+
+After two failed attempts on one hypothesis, switch strategy: smaller patch, wider read, a different interpreter, or a web lookup of the error.
+
+# Long context (1M)
+
+Your window is for holding context, not bulk ingestion. Compress after each iteration: replace raw tool output with a 2-4 line summary. Prefer targeted reads over full re-ingest. For long inputs, put the task instruction at the END of the user message.
+
+# Honesty
+
+Refuse rather than guess. Don't fabricate API names, file paths, or version behavior. Ground claims in something read this turn. "I don't know" is correct; confident-wrong is not.
+
+# Risk, git, security
+
+Pause before `rm -rf` outside cwd, dropping tables, force-push, amending published commits, removing deps, or anything externally visible. When in doubt, ask. New commits over amending. Never skip hooks. Stage specific files. Don't push unless asked. No command injection, XSS, SQL injection, path traversal. No disabled TLS. Never echo or commit secrets.
+
+# Skills
+
+Load on demand from {{skills}}. Don't preload the catalog.
+
+# Attribution
+
+{{credit}}
+"""
+
 let readFileTool = %*{
   "type": "function",
   "function": {
@@ -2815,6 +2907,7 @@ let
   hySetup = (prompt: HyPreamble, tools: glmAndQwenTools)
   inklingSetup = (prompt: InklingPreamble, tools: glmAndQwenTools)
   grokSetup = (prompt: GrokPreamble, tools: glmAndQwenTools)
+  geminiSetup = (prompt: GeminiPreamble, tools: glmAndQwenTools)
   mimoSetup = (prompt: MimoPreamble, tools: glmAndQwenTools)
   kimiSetup = (prompt: KimiPreamble, tools: kimiDmailTools)
   lingSetup = (prompt: LingPreamble, tools: glmAndQwenTools)
@@ -2844,6 +2937,7 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   of "hy": hySetup
   of "inkling": inklingSetup
   of "grok": grokSetup
+  of "gemini": geminiSetup
   of "mimo": mimoSetup
   of "kimi": kimiSetup
   of "ling": lingSetup
@@ -2971,6 +3065,7 @@ proc canonicalKnownGoodProvider*(provider: string): string =
   let p = provider.toLowerAscii
   if p == "supergrok": "xai"
   elif p == "chatgpt": "openai"
+  elif p == "geminicli": "google"
   else: p
 
 proc knownGoodWireModel*(provider, model: string): string =
@@ -3147,6 +3242,7 @@ proc maxOutputTokensFor*(p: Profile): int =
   if "glm-5.3" in m: return 131_072
   if "deepseek" in m and "v4" in m: return 384_000
   if "gpt-6-astra" in m: return 128_000
+  if "gemini-3" in m: return 65_536
   let kg = knownGoodContextWindow(p)
   if kg > 0: return kg
   if "kimi-k2" in m or "qwen3-coder" in m or "qwen3_coder" in m: 262_144
@@ -3241,6 +3337,13 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # same three levels. `no_think` is the default direct-response
         # mode. We don't offer the level-based `low/medium/high` set.
         return @["no_think", "low", "high"]
+      if fam == "gemini":
+        # Gemini 3 thinking levels via OpenAI-compat `reasoning_effort`:
+        # minimal/low/medium/high. Thinking cannot be disabled on Gemini 3
+        # (no off/none). 3.8 Flash rejects `minimal` outright; the older
+        # 3.x tiers accept it. Default is medium on Flash, high on Pro.
+        if combo.variant == "8-flash": return @["low", "medium", "high"]
+        return @["minimal", "low", "medium", "high"]
       if fam == "grok":
         # grok-4.6: reasoning_effort low/medium/high (default)/xhigh; cannot
         # be disabled. grok-4.5: low/medium/high (default high), no off.
