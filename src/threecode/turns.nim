@@ -17,8 +17,11 @@ const
   FlailMaxEscalations* = 3   ## three recovery attempts, fourth flagged call aborts
   FlailWindowSize* = 8       ## how many recent call fingerprints to remember
   FlailSpacedThreshold* = 3  ## failing repeats of one call at any spacing flag on this occurrence
-  FlailStreakMin* = 9        ## same-tool calls in a row all carrying one distinctive token flag here
+  FlailStreakMin* = 9        ## ring size: the last N same-tool calls decide the streak signal
   FlailStreakArm* = 12       ## same-tool run length before the streak signal is even considered
+  FlailStreakJaccard* = 0.5  ## avg pairwise token overlap the ring must reach to flag
+  FlailStreakNearDup* = 0.8  ## pairwise Jaccard at which two ring calls count as near-duplicates
+  FlailStreakCluster* = 4    ## near-duplicates forming a tight repeat cluster flag on their own
 
 type
   FlailVerdict* = enum
@@ -42,14 +45,13 @@ type
     ##    only judged on identical-consecutive repetition, so a
     ##    legitimately idempotent poll (re-check output that changes) is
     ##    never falsely flagged.
-    ## 4. Stuck streak: `FlailStreakMin` consecutive calls to the same tool
-    ##    sharing one distinctive argument token. Every call in the
-    ##    recorded doom loop was a novel, successful fingerprint; only this
-    ##    signal sees it. Only armed once the same-tool run reaches
-    ##    `FlailStreakArm`: models legitimately iterate 9-11 variants of one
-    ##    command prefix (fixed binary and flags, varying tail) while
-    ##    debugging, and the shared-prefix tokens that survive trimming the
-    ##    `cd <dir> &&` boilerplate would flag that healthy work.
+    ## 4. Stuck streak: the last `FlailStreakMin` calls to the same tool are
+    ##    mostly the same call, and the run is at least `FlailStreakArm` long.
+    ##    Mostly-same means either ring-wide overlap (average pairwise token
+    ##    Jaccard >= `FlailStreakJaccard`) or a tight cluster of
+    ##    `FlailStreakCluster` near-duplicates. Sharing one keyword is
+    ##    deliberately not enough: recorded sessions show varied work on one
+    ##    project or host shares boilerplate tokens across every call.
     ##
     ## Recovery uses a graduated ladder of injected messages, because field
     ## reports on GLM 5.x loops (zai-org/GLM-5#116) show a plain "be careful"
@@ -179,6 +181,30 @@ proc distinctiveTokens(argsStr: string): HashSet[string] =
     var s = argsStr
     tokenify(s, result)
 
+proc streakRingStuck(ring: seq[HashSet[string]]): bool =
+  ## True when the ring is mostly the same call, in either of two shapes:
+  ## ring-wide overlap (average pairwise token Jaccard >=
+  ## `FlailStreakJaccard`, the emission-stuck loop where every call is a
+  ## cosmetic variant of the last) or a tight cluster (`FlailStreakCluster`
+  ## calls each >= `FlailStreakNearDup` similar to a common member, the doom
+  ## loop that hammers one near-identical probe amid other variation).
+  if ring.len < 2: return false
+  var total = 0.0
+  var pairs = 0
+  var cluster = 1
+  for i in 0 ..< ring.len:
+    var near = 0
+    for j in 0 ..< ring.len:
+      if j == i: continue
+      let u = (ring[i] + ring[j]).len
+      let jac = if u > 0: (ring[i] * ring[j]).len.float / u.float else: 0.0
+      if jac >= FlailStreakNearDup: inc near
+      if j > i:
+        total += jac
+        inc pairs
+    if near + 1 > cluster: cluster = near + 1
+  total / pairs.float >= FlailStreakJaccard or cluster >= FlailStreakCluster
+
 proc countInWindow(det: FlailDetector, fp: string): int =
   for w in det.window:
     if w == fp: inc result
@@ -204,13 +230,13 @@ proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
 
   # Streak signal state: a ring of the last FlailStreakMin same-tool
   # calls and the distinctive tokens each carried. A switch to a different
-  # tool empties the ring. The signal fires when the full ring shares at
-  # least one token: every recent call to this tool is probing the same
-  # thing. A sliding window (not a shrinking run intersection) so one
-  # healthy deviation inside a doom loop does not permanently disarm it.
-  # The ring only starts filling at FlailStreakArm calls into the run, so
-  # a healthy burst of same-tool iteration (compile, read, tweak, test)
-  # shorter than that never arms the signal at all.
+  # tool empties the ring. The signal fires when the ring is mostly the
+  # same call (see streakRingStuck). A sliding window (not a shrinking run
+  # intersection) so one healthy deviation inside a doom loop does not
+  # permanently disarm it. The ring only starts filling at FlailStreakArm
+  # calls into the run, so a healthy burst of same-tool iteration
+  # (compile, read, tweak, test) shorter than that never arms the signal
+  # at all.
   let toks = distinctiveTokens(argsStr)
   if det.streakName != name:
     det.streakName = name
@@ -221,12 +247,8 @@ proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
     det.streakTokens.add toks
     if det.streakTokens.len > FlailStreakMin:
       det.streakTokens.delete 0
-  var stuckStreak = false
-  if det.streakTokens.len == FlailStreakMin:
-    var common = det.streakTokens[0]
-    for s in det.streakTokens[1 ..^ 1]:
-      common = common * s
-    stuckStreak = common.len > 0
+  let stuckStreak = det.streakTokens.len == FlailStreakMin and
+    streakRingStuck(det.streakTokens)
 
   # Push onto the bounded window.
   det.window.add fp
@@ -247,14 +269,12 @@ proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
   #    misses because the calls interleave. A spaced cycle of *successful*
   #    calls (re-run a test, re-check output) is legitimate polling and is
   #    never flagged; progress distinguishes a stuck loop from a poll.
-  # 4. Stuck streak: the last FlailStreakMin calls were all to the same tool
-  #    and all carry one distinctive argument token, and the same-tool run
-  #    is at least FlailStreakArm long. Catches the recorded GLM doom loop
-  #    where every call was a novel fingerprint (cosmetic pipeline
-  #    variations of one grep), succeeded (exit 0), and never repeated
-  #    exactly, so signals 1-3 all stayed quiet while the model spent 25
-  #    calls re-probing one fact; the arm gate keeps short healthy bursts
-  #    of same-command-prefix iteration out.
+  # 4. Stuck streak: the last FlailStreakMin calls were all to the same
+  #    tool and are mostly the same call (ring-wide overlap or a tight
+  #    near-duplicate cluster, see streakRingStuck), and the same-tool run
+  #    is at least FlailStreakArm long. Catches emission-stuck loops whose
+  #    calls are cosmetic variants of each other; the arm gate keeps short
+  #    healthy bursts of same-command-prefix iteration out.
   let knownFailing = not det.progress.getOrDefault(fp, true)
   let isLoop = consecutive or (det.lastNoProgress and seen >= 1) or
     (knownFailing and seen >= FlailSpacedThreshold - 1) or stuckStreak
