@@ -28,7 +28,16 @@ proc parse(path: string): seq[Call] =
       # Arg blocks (write/patch bodies, bash commands) keep indented lines
       # and interior blank lines; the block ends at the first non-indented
       # non-blank line (tokens/tool_result/next section header).
-      if line.startsWith("  "):
+      if line.strip.startsWith("{\"id\":"):
+        # The wire line is what the app actually executed; use its
+        # arguments verbatim instead of the displayed block, which
+        # duplicates the command and would double-count its tokens.
+        try:
+          cur.args = parseJson(line.strip){"function"}{"arguments"}.getStr
+        except CatchableError:
+          discard
+        mode = mNone
+      elif line.startsWith("  "):
         cur.args.add "\n" & line.substr(2)
       elif cur.args.len > 0:
         cur.args.add "\n"
@@ -41,9 +50,10 @@ var det: FlailDetector
 let calls = parse(paramStr(1))
 echo "calls: ", calls.len
 for i, c in calls:
-  let argsJson = "{\"command\":" & escapeJson(c.args) & "}"
-  let v = det.observeCall(c.name, argsJson)
-  det.noteResult(c.name, argsJson, madeChange = c.code == 0)
+  # c.args is the raw wire arguments JSON the app executed; pass it through
+  # untouched so fingerprints and tokens match what the app saw.
+  let v = det.observeCall(c.name, c.args)
+  det.noteResult(c.name, c.args, madeChange = c.code == 0)
   if v != fvOk:
     echo "call #", i + 1, " (", c.name, "): ",
       if v == fvEscalate: "ESCALATE " & $det.escalations else: "ABORT"

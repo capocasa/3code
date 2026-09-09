@@ -112,12 +112,29 @@ proc isMutating(name: string): bool =
         "edit_file", "str_replace", "str_replace_editor", "create_file"]
 
 proc tokenify(s: var string, outSet: var HashSet[string]) =
-  ## Strip a leading `cd <dir> &&`, split into tokens, trim punctuation,
-  ## normalize digits to '#', keep tokens of length >= 6.
-  if s.startsWith("cd "):
-    let rest = s[3 ..^ 1]
-    let sp = rest.find(" && ")
-    if sp > 0: s = rest[sp + 4 ..^ 1]
+  ## Strip a leading `cd <dir> &&` or `ssh [user@]host` remote-exec prefix,
+  ## split into tokens, trim punctuation, normalize digits to '#', keep
+  ## tokens of length >= 6.
+  ## The ssh strip matters because a remote session bakes the host and the
+  ## remote working directory into every command; without it the host token
+  ## is the one thing a whole run of ssh calls shares and the streak signal
+  ## reads connection boilerplate as a probing theme.
+  for _ in 0 ..< 4:
+    var stripped = false
+    s = s.strip(leading = true, trailing = false)
+    if s.startsWith("cd "):
+      let rest = s[3 ..^ 1]
+      let sp = rest.find(" && ")
+      if sp > 0:
+        s = rest[sp + 4 ..^ 1]
+        stripped = true
+    if s.startsWith("ssh "):
+      let rest = s[4 ..^ 1]
+      let sp = rest.find(' ')
+      s = if sp > 0: rest[sp + 1 ..^ 1] else: ""
+      while s.len > 0 and s[0] in {' ', '\'', '"'}: s = s[1 ..^ 1]
+      stripped = true
+    if not stripped: break
   for tok in s.splitWhitespace():
     var t = tok
     while t.len > 0 and not (t[0].isAlphanumeric or t[0] == '_'):
@@ -150,8 +167,9 @@ proc distinctiveTokens(argsStr: string): HashSet[string] =
   ## carrying one distinctive token is probing the same thing over and
   ## over. Only JSON string *values* are tokenized (the keys - command,
   ## path, search - would otherwise be the persistent "theme" of every
-  ## call). A leading `cd <dir> &&` is stripped from each value so a
-  ## persistent working directory cannot masquerade as the theme.
+  ## call). A leading `cd <dir> &&` or `ssh [user@]host` prefix is stripped
+  ## from each value so a persistent working directory or connection target
+  ## cannot masquerade as the theme.
   ## Digits are normalized away so counters, line numbers and pids do not
   ## mask similarity; tokens shorter than 6 chars are dropped because
   ## short tokens are usually flags, paths' common words or shell keywords.

@@ -267,6 +267,48 @@ suite "flail detector":
     check det.escalations == 0
     check det.streakTokens.len == 0
 
+  test "ssh session with varied remote commands never trips the streak signal":
+    # Mirrors the false positive from session 20260909T213716-2ICaadgQ:
+    # a long run of ssh calls to one host, every one a novel fingerprint
+    # probing a different fact. The host token (digits normalized to
+    # root@##.#.#.#) was the only thing all calls shared, so the streak
+    # signal read connection boilerplate as a theme and flagged call #24,
+    # then cascaded to an abort on three genuinely different follow-ups.
+    var det: FlailDetector
+    template sshCmd(c: string) =
+      check det.observeCall("bash", "{\"command\":" & escapeJson(c) & "}") == fvOk
+      det.noteResult("bash", "{\"command\":" & escapeJson(c) & "}", true)
+    sshCmd "ssh root@10.0.7.1 'ls -ld /home/carlo/3 2>/dev/null; which nim nimble choosenim 2>/dev/null; cat /etc/os-release | head -2'"
+    sshCmd "ssh root@10.0.7.1 '/opt/nim/bin/nim --version; apt-get install -y libsass-dev sqlite3 2>&1 | tail -2'"
+    sshCmd "ssh root@10.0.7.1 'sudo -u carlo bash -c \"cd ~/3 && git clone --recursive https://github.com/nim-lang/nimforum 2>&1 | tail -2\"'"
+    sshCmd "ssh root@10.0.7.1 'sudo -u carlo bash -c \"export PATH=/opt/nim/bin:$PATH; cd ~/3/nimforum && nimble build -d:release -y 2>&1 | tail -15\"'"
+    sshCmd "ssh root@10.0.7.1 'grep -n \"loadConfig\" -A40 /home/carlo/3/nimforum/src/utils.nim | head -70'"
+    sshCmd "ssh root@10.0.7.1 'grep -n \"public\\|staticDir\\|getEnv\" /home/carlo/3/nimforum/src/forum.nim | head -20'"
+    sshCmd "ssh root@10.0.7.1 'grep -n \"blankdb\\|devdb\" -A3 /home/carlo/3/nimforum/nimforum.nimble'"
+    sshCmd "ssh root@10.0.7.1 'sudo -u carlo bash -c \"export PATH=/opt/nim/bin:$PATH; cd ~/3/nimforum && nimble blankdb -y 2>&1 | tail -3\"'"
+    sshCmd "ssh root@10.0.7.1 'sed -n 20,60p /home/carlo/3/nimforum/src/setup_nimforum.nim'"
+    sshCmd "ssh root@10.0.7.1 'sed -n 370,395p /home/carlo/3/nimforum/src/setup_nimforum.nim'"
+    sshCmd "ssh root@10.0.7.1 'grep -rn \"Rank.Admin\\|rank == Rank\" /home/carlo/3/nimforum/src/forum.nim | head'"
+    sshCmd "ssh root@10.0.7.1 'grep -rn \"registerUser\\|Rank.Moderator\\|firstUser\" /home/carlo/3/nimforum/src/forum.nim | head -10'"
+    sshCmd "ssh root@10.0.7.1 'grep -rn \"Admin\" /home/carlo/3/nimforum/src/forum.nim | head -8'"
+    sshCmd "ssh root@10.0.7.1 'grep -rn \"Admin\" /home/carlo/3/nimforum/src/ --include=\"*.nim\" -l'"
+    check det.escalations == 0
+
+  test "ssh-wrapped doom loop still flags on the shared probe token":
+    # The ssh prefix strip must remove only the connection boilerplate, not
+    # blind the streak signal: 12+ ssh calls all grepping one symbol still
+    # share that symbol and must flag.
+    var det: FlailDetector
+    # Ring fills at arm (12) plus FlailStreakMin (9) calls: flags on #20.
+    for i in 1 .. 21:
+      let c = "ssh root@10.0.7.1 'grep -rn \"execCmdEx\" /opt/nim/lib/pure/os" & $i & ".nim | head -3'"
+      let args = "{\"command\":" & escapeJson(c) & "}"
+      if i < 20:
+        check det.observeCall("bash", args) == fvOk
+      else:
+        check det.observeCall("bash", args) == fvEscalate
+      det.noteResult("bash", args, true)
+
   test "same-prefix burst that turns into a real loop still flags":
     # The other side of the arm gate: keep the shared-prefix variants
     # going past FlailStreakArm + FlailStreakMin and the signal must
