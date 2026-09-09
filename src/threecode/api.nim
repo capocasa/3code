@@ -11,7 +11,7 @@
 ## combo, `callModel` promotes those tags to synthetic tool_calls so the rest
 ## of the pipeline sees a uniform shape.
 
-import std/[algorithm, atomics, hashes, httpclient, json, locks, monotimes, nativesockets, net, os, sequtils, strformat, strutils, tables, times, uri]
+import std/[algorithm, atomics, hashes, httpclient, json, locks, monotimes, nativesockets, net, options, os, sequtils, strformat, strutils, tables, times, uri]
 when defined(posix):
   import std/posix except SocketHandle
 import streamhttp
@@ -1992,8 +1992,9 @@ proc applyStreamingOptions*(p: Profile, body: JsonNode) =
     else: discard
 
 proc applyGenerationDefaults*(p: Profile, body: JsonNode) =
-  ## Known-good generation policy. Temperature is intentionally hardcoded
-  ## for now; later a user override can resolve before this writes the field.
+  ## Known-good generation policy: table values with any
+  ## `[provider.params]` overrides already patched in (they resolve inside
+  ## `knownGoodGeneration(p: Profile)`).
   let d = knownGoodGeneration(p)
   if d.temperature >= 0.0:
     body["temperature"] = %d.temperature
@@ -2003,12 +2004,17 @@ proc applyGenerationDefaults*(p: Profile, body: JsonNode) =
   # other than 1.0; omit the field so the server default applies.
   # Table rows can't say "omit" per provider (temperature < 0 would
   # silence every route to that model), so special-case here like k3.
-  if providerOf(p) == "kimicode" and body.hasKey("temperature"):
+  # A user-set [provider.params] temperature survives: overriding the
+  # curated behavior is the point of the override.
+  if providerOf(p) == "kimicode" and p.params.temperature.isNone and
+     body.hasKey("temperature"):
     body.delete("temperature")
   # Gemini 3 deprecates temperature/top_p (the 3.8 migration guide says
   # to strip them; the OpenAI-compat layer rejects or ignores them
-  # depending on tier). Omit so the model's own sampling applies.
-  if p.family == "gemini" and body.hasKey("temperature"):
+  # depending on tier). Omit so the model's own sampling applies, unless
+  # the user explicitly configured one (same rule as kimicode).
+  if p.family == "gemini" and p.params.temperature.isNone and
+     body.hasKey("temperature"):
     body.delete("temperature")
 
 proc applyDeepseekReasoning(p: Profile, body: JsonNode) =

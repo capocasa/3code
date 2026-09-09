@@ -1,4 +1,4 @@
-import std/[json, os, osproc, strutils, unittest]
+import std/[json, options, os, osproc, strutils, unittest]
 import threecode/[api, config, prompts, types]
 import stub_helpers
 
@@ -1160,6 +1160,115 @@ suite "xml tool_call fallback":
       applyThinkBack(p, body)
       check "clear_thinking" notin body
       check "thinking" notin body
+
+suite "api: [provider.params] overrides":
+  test "generation defaults patch per field, unset fields keep the table value":
+    let base = Profile(name: "zai.glm-5.2", model: "glm-5.2", family: "glm")
+    check knownGoodGeneration(base).temperature == 0.2
+    check knownGoodGeneration(base).maxTokens == 8192
+    var p = base
+    p.params.temperature = some(0.7)
+    check knownGoodGeneration(p).temperature == 0.7
+    check knownGoodGeneration(p).maxTokens == 8192
+    var q = base
+    q.params.maxTokens = some(32768)
+    check knownGoodGeneration(q).temperature == 0.2
+    check knownGoodGeneration(q).maxTokens == 32768
+
+  test "generation overrides apply to off-table pairs too":
+    var p = Profile(name: "local.custom", model: "custom", family: "glm")
+    p.params.temperature = some(0.0)
+    p.params.maxTokens = some(4096)
+    let d = knownGoodGeneration(p)
+    check d.temperature == 0.0
+    check d.maxTokens == 4096
+
+  test "think_back override wins in both directions":
+    var p = Profile(name: "zai.glm-5.2", model: "glm-5.2", family: "glm")
+    check knownGoodThinkBack(p) == tbAllTurns
+    p.params.thinkBack = some(tbNone)
+    check knownGoodThinkBack(p) == tbNone
+    var q = Profile(name: "openai.gpt-5.5", model: "gpt-5.5", family: "gpt")
+    check knownGoodThinkBack(q) == tbNone
+    q.params.thinkBack = some(tbAllTurns)
+    check knownGoodThinkBack(q) == tbAllTurns
+
+  test "think_back override drives the history strip like callModel does":
+    let messages = %*[
+      {"role": "user", "content": "hi"},
+      {"role": "assistant", "content": "hello",
+       "reasoning_content": "private chain of thought"},
+      {"role": "user", "content": "continue"}
+    ]
+    var p = Profile(name: "zai.glm-5.2", family: "glm", model: "glm-5.2")
+    p.params.thinkBack = some(tbNone)
+    let wire = stripInternalFields(messages)
+    stripThinkBack(knownGoodThinkBack(p), wire)
+    check "reasoning_content" notin wire[1]
+
+  test "think_back override drives applyThinkBack wire fields":
+    block glmNone:
+      var p = Profile(name: "zai.glm-5.2", family: "glm", model: "glm-5.2")
+      p.params.thinkBack = some(tbNone)
+      let body = %*{}
+      applyThinkBack(p, body)
+      check "clear_thinking" notin body
+    block glmAll:
+      var p = Profile(name: "zai.glm-5.2", family: "glm", model: "glm-5.2")
+      p.params.thinkBack = some(tbAllTurns)
+      let body = %*{}
+      applyThinkBack(p, body)
+      check body{"clear_thinking"}.getBool == false
+    block kimiAll:
+      var p = Profile(name: "kimicode.kimi-for-coding", family: "kimi",
+                      model: "kimi-for-coding")
+      p.params.thinkBack = some(tbAllTurns)
+      let body = %*{}
+      applyThinkBack(p, body)
+      check body{"thinking"}{"keep"}.getStr == "all"
+
+  test "context_window override wins over the table":
+    var p = Profile(name: "zai.glm-5.2", model: "glm-5.2", family: "glm")
+    check knownGoodContextWindow(p) == 1_000_000
+    p.params.contextWindow = some(123_456)
+    check knownGoodContextWindow(p) == 123_456
+
+  test "applyGenerationDefaults sends the overrides":
+    var p = Profile(name: "zai.glm-5.2", model: "glm-5.2", family: "glm")
+    p.params.temperature = some(0.9)
+    p.params.maxTokens = some(999)
+    let body = %*{}
+    applyGenerationDefaults(p, body)
+    check body{"temperature"}.getFloat == 0.9
+    check body{"max_tokens"}.getInt == 999
+
+  test "explicit temperature survives the kimicode/gemini omit quirks":
+    block kimicodeOverride:
+      var p = Profile(name: "kimicode.kimi-for-coding", family: "kimi",
+                      model: "kimi-for-coding")
+      p.params.temperature = some(0.6)
+      let body = %*{}
+      applyGenerationDefaults(p, body)
+      check body{"temperature"}.getFloat == 0.6
+    block kimicodeTableValueStillOmitted:
+      let p = Profile(name: "kimicode.kimi-for-coding", family: "kimi",
+                      model: "kimi-for-coding")
+      let body = %*{}
+      applyGenerationDefaults(p, body)
+      check "temperature" notin body
+    block geminiOverride:
+      var p = Profile(name: "google.gemini-3.8-flash", family: "gemini",
+                      model: "gemini-3.8-flash")
+      p.params.temperature = some(0.5)
+      let body = %*{}
+      applyGenerationDefaults(p, body)
+      check body{"temperature"}.getFloat == 0.5
+    block geminiTableValueStillOmitted:
+      let p = Profile(name: "google.gemini-3.8-flash", family: "gemini",
+                      model: "gemini-3.8-flash")
+      let body = %*{}
+      applyGenerationDefaults(p, body)
+      check "temperature" notin body
 
 suite "runTurns empty-content auto-handling":
 

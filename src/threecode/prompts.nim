@@ -14,8 +14,12 @@
 ## Anything outside `KnownGoodCombos` requires `--experimental` to run.
 ]#
 
-import std/[algorithm, hashes, json, os, sequtils, sha1, strutils]
+import std/[algorithm, hashes, json, options, os, sequtils, sha1, strutils]
 import types, util, modelname
+
+# ThinkBackMode moved to types.nim (Profile.params needs it); re-export
+# for modules that historically reached it through prompts.
+export types.ThinkBackMode, parseThinkBackMode
 
 # this is expected to be overridden by a more useful value in config.nims
 const Version* {.strdefine.} = "devel"
@@ -27,11 +31,6 @@ const ModelUserAgent* = "3code/" & Version
 
 
 type
-  ThinkBackMode* = enum
-    tbNone         ## strip reasoning_content from all replayed assistant messages
-    tbCurrentTurn  ## keep reasoning within the active tool loop, strip at the last user turn boundary
-    tbAllTurns     ## keep reasoning_content on every replayed assistant message
-
   KnownGoodCombo* = tuple[
     # `xmlToolCalls`: endpoint sometimes leaks the model's native
     # `<tool_call>...</tool_call>` chat template into delta.content
@@ -3159,10 +3158,16 @@ proc knownGoodGeneration*(provider, model: string): GenerationDefaults =
   GenerationDefaults(temperature: -1.0, maxTokens: 0)
 
 proc knownGoodGeneration*(p: Profile): GenerationDefaults =
-  if p.name == "": return GenerationDefaults(temperature: -1.0, maxTokens: 0)
-  let dot = p.name.find('.')
-  if dot < 0: return GenerationDefaults(temperature: -1.0, maxTokens: 0)
-  knownGoodGeneration(p.name[0 ..< dot], p.model)
+  ## Table value for the pair, with any `[provider.params]` overrides
+  ## patched over it. Each field overrides independently: a config that
+  ## sets only `temperature` keeps the table's maxTokens.
+  result = GenerationDefaults(temperature: -1.0, maxTokens: 0)
+  if p.name != "":
+    let dot = p.name.find('.')
+    if dot >= 0:
+      result = knownGoodGeneration(p.name[0 ..< dot], p.model)
+  if p.params.temperature.isSome: result.temperature = p.params.temperature.get
+  if p.params.maxTokens.isSome: result.maxTokens = p.params.maxTokens.get
 
 proc knownGoodThinkBack*(provider, model: string): ThinkBackMode =
   ## How much assistant `reasoning_content` this known-good combo replays
@@ -3176,6 +3181,9 @@ proc knownGoodThinkBack*(provider, model: string): ThinkBackMode =
   tbNone
 
 proc knownGoodThinkBack*(p: Profile): ThinkBackMode =
+  ## `[provider.params] think_back` wins over the table entry; unset
+  ## falls through to it.
+  if p.params.thinkBack.isSome: return p.params.thinkBack.get
   if p.name == "": return tbNone
   let dot = p.name.find('.')
   if dot < 0: return tbNone
@@ -3222,6 +3230,9 @@ proc knownGoodContextWindow*(provider, model: string): int =
   0
 
 proc knownGoodContextWindow*(p: Profile): int =
+  ## `[provider.params] context_window` wins over the table entry; unset
+  ## falls through to it.
+  if p.params.contextWindow.isSome: return p.params.contextWindow.get
   if p.name == "": return 0
   let dot = p.name.find('.')
   if dot < 0: return 0

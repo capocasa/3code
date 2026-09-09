@@ -11,7 +11,7 @@
 ## and `:model` cycling walk the wizard-entered model order: the first model
 ## the user entered is the default and cycling follows config order.
 
-import std/[os, parsecfg, sequtils, streams, strformat, strutils, tables, terminal, uri]
+import std/[options, os, parsecfg, sequtils, streams, strformat, strutils, tables, terminal, uri]
 when defined(posix):
   import std/posix except SocketHandle
 import types, prompts, util, auth_openai, modelname, minline
@@ -27,6 +27,10 @@ type
     ## stored a separate `model_prefix` key; it is expanded into the model
     ## ids on load and never written back out.
     name*, url*, key*, modelPrefix*, family*: string
+    params*: ModelParams  ## [provider.params] overrides for the
+                          ## known-good model parameters (temperature,
+                          ## max_tokens, think_back, context_window).
+                          ## All-none means "use the known-good table".
     auth*: string  ## "oauth" = subscription login (tokens in the auth
                    ## store, `key` stays empty); anything else = static key.
     models*: seq[string]
@@ -273,7 +277,8 @@ type
     ## can report `path:line:` for a bad section/key/value without re-reading.
 
 const
-  PermittedSections = ["settings", "search", "colors", "provider", "shortcuts"]
+  PermittedSections = ["settings", "search", "colors", "provider",
+                       "provider.params", "shortcuts"]
   SettingsKeys = ["current", "notify", "streaming", "sandbox",
                   "sandbox_enabled", "patient_retry", "patient-retry",
                   "sandbox_wall_warn",
@@ -283,6 +288,10 @@ const
   ColorKeys = ["bright-white", "off-white", "dim-white"]
   ProviderKeys = ["name", "url", "key", "model_prefix", "family",
                   "models", "reasoning", "reasonings", "auth"]
+  ProviderParamsKeys = ["temperature", "max-tokens", "max_tokens",
+                        "think-back", "think_back",
+                        "context-window", "context_window"]
+  ThinkBackValues = ["none", "turn", "all"]
   SearchEngines = ["exa", "parallel", "brave"]
   # `light` is the canonical light-background value; `bright` is the
   # legacy spelling and stays accepted so existing configs keep working.
@@ -298,6 +307,7 @@ proc permittedKey(section, key: string): bool =
     let base = if key.endsWith("-light"): key[0 ..< key.len - 6] else: key
     base in ColorKeys
   of "provider": key in ProviderKeys
+  of "provider.params": key in ProviderParamsKeys
   of "shortcuts": key in minline.ShortcutNames
   else: false
 
@@ -339,6 +349,23 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
           ent.value.strip.toLowerAscii notin ColorModes:
         return &"{path}:{ent.line}: unknown tone '{ent.value}' " &
                "(expected one of: auto, dark, light)"
+    of "provider.params":
+      case ent.key
+      of "temperature":
+        try: discard parseFloat(ent.value.strip)
+        except ValueError:
+          return &"{path}:{ent.line}: bad value '{ent.value}' for 'temperature' " &
+                 "in [provider.params] (expected a number like 0.4)"
+      of "max-tokens", "max_tokens", "context-window", "context_window":
+        try: discard parseInt(ent.value.strip)
+        except ValueError:
+          return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
+                 "in [provider.params] (expected a whole number of tokens)"
+      of "think-back", "think_back":
+        if ent.value.strip.toLowerAscii notin ThinkBackValues:
+          return &"{path}:{ent.line}: unknown think-back mode '{ent.value}' " &
+                 "(expected one of: none, turn, all)"
+      else: discard
     of "shortcuts":
       if ent.value.strip != "":
         try:
@@ -400,9 +427,14 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
     case e.kind
     of cfgEof: flush(); break
     of cfgSectionStart:
-      flush()
+      # [provider.params] extends the [provider] section before it, so
+      # it must not flush the provider being built.
+      if e.section != "provider.params": flush()
       section = e.section
-      if section == "provider": inProvider = true
+      if section == "provider":
+        inProvider = true
+      elif section == "provider.params" and not inProvider:
+        die &"{path}:{p.getLine()}: [provider.params] with no [provider] section in scope", ExitConfig
     of cfgKeyValuePair, cfgOption:
       entries.add (section, e.key, e.value, p.getLine())
       let v = expandEnvValue(e.value)
@@ -481,6 +513,23 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
         of "reasonings": prov.reasonings = splitModels(v).mapIt(it.toLowerAscii)
         of "auth": prov.auth = v.strip.toLowerAscii
         else: discard
+      of "provider.params":
+        # Malformed numbers land here as unset; validateConfig (run at
+        # the end of this parse) rejects them with path:line before any
+        # caller sees the half-parsed provider.
+        case e.key
+        of "temperature":
+          try: prov.params.temperature = some(parseFloat(v.strip))
+          except ValueError: discard
+        of "max-tokens", "max_tokens":
+          try: prov.params.maxTokens = some(parseInt(v.strip))
+          except ValueError: discard
+        of "think-back", "think_back":
+          prov.params.thinkBack = some(parseThinkBackMode(v))
+        of "context-window", "context_window":
+          try: prov.params.contextWindow = some(parseInt(v.strip))
+          except ValueError: discard
+        else: discard
       of "shortcuts":
         shortcuts[e.key] = v
       else: discard
@@ -554,6 +603,17 @@ proc writeConfigFile*(path: string, current: string,
       buf.add "reasoning = " & quoteVal(pr.reasoning) & "\n"
     if pr.reasonings.len > 0:
       buf.add "reasonings = " & quoteVal(formatModels(pr.reasonings)) & "\n"
+    if pr.params.temperature.isSome or pr.params.maxTokens.isSome or
+       pr.params.thinkBack.isSome or pr.params.contextWindow.isSome:
+      buf.add "\n[provider.params]\n"
+      if pr.params.temperature.isSome:
+        buf.add "temperature = " & quoteVal($pr.params.temperature.get) & "\n"
+      if pr.params.maxTokens.isSome:
+        buf.add "max-tokens = " & quoteVal($pr.params.maxTokens.get) & "\n"
+      if pr.params.thinkBack.isSome:
+        buf.add "think-back = " & quoteVal(formatThinkBack(pr.params.thinkBack.get)) & "\n"
+      if pr.params.contextWindow.isSome:
+        buf.add "context-window = " & quoteVal($pr.params.contextWindow.get) & "\n"
   writeFile(path, buf)
 
 proc configPath*(): string =
@@ -658,6 +718,7 @@ proc buildProfile*(current: string, providers: seq[ProviderRec],
       prof.version = ver
       prof.variant = vrt
       prof.reasoning = resolveReasoning(pr, prof)
+      prof.params = pr.params
       return prof
   Profile()
 
@@ -717,6 +778,7 @@ proc loadProfile*(wanted: string): Profile =
   prof.version = ver
   prof.variant = vrt
   prof.reasoning = resolveReasoning(prov, prof)
+  prof.params = prov.params
   if wanted == "" and not experimentalEnabled and not isKnownGood(prof):
     let fallback = firstKnownGoodCombo(providers)
     if fallback != "":
