@@ -132,6 +132,25 @@ proc editorRowsAboveCursor(ed: var minline.LineEditor): int =
   refreshEditorWidth(ed)
   min(ed.renderRow, max(1, minline.renderedRows(ed)) - 1)
 
+proc freshCaretRowAbove*(ed: minline.LineEditor): int =
+  ## The caret's row within the editor counted at the editor's live
+  ## width — the rows-above-caret a terminal that reflows on resize
+  ## moved the caret through. The resize walk-up needs this alongside
+  ## the painted `renderRow` (the pre-resize geometry a non-reflow
+  ## terminal still holds); walking a block total instead of these
+  ## caret-relative counts stepped past the block top and ate the
+  ## committed row above it.
+  let width = max(2, ed.width)
+  let pw = if ed.promptW > 0: ed.promptW else: minline.visualCols(ed.prompt)
+  let cw = if ed.contPromptW > 0: ed.contPromptW else: minline.visualCols(ed.contPrompt)
+  let renderedText = ed.line.text & ed.renderSuffix
+  let cursorText =
+    if ed.renderSuffixCursor: renderedText else: ed.line.text
+  let cursorPos =
+    if ed.renderSuffixCursor: renderedText.len else: ed.line.position
+  let (vrow, _) = minline.cursorVisual(cursorText, cursorPos, pw, cw, width)
+  min(max(1, minline.renderedRows(ed)) - 1, vrow)
+
 proc clampedFooterRows(e: TerminalEngine; frame: FooterFrame;
                        termW: int): int =
   ## The reserved rows may only be walked up when they are actually live
@@ -259,28 +278,33 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   # prompt).
   let entryCaretRow = if edPtr != nil: edPtr[].renderRow else: -1
 
+  # The terminal reflowed (or froze) the painted rows on a width
+  # change; the tracked model no longer matches the screen. Compute the
+  # one-shot erase walk here — but emit it at the walk site below, where
+  # the ordinary repaint walks to the block top, so the cursor makes one
+  # move, not two. The walk reaches the block top in EITHER geometry,
+  # counted from the caret: the pre-reflow rows a non-reflow terminal
+  # still holds (its caret stayed on the old row) and the fresh rows a
+  # reflow terminal moved the caret through. Counting block totals
+  # instead (the editor sentinel in `sections` plus the editor's own
+  # rows) over-walked one row past the top on every width change and ate
+  # the committed row above the prompt.
+  var resizeErase = -1
   if resized:
-    # The terminal reflowed the painted rows; the tracked model no
-    # longer matches the screen. Repaint from scratch: walk up the
-    # larger of the pre/post-reflow block heights (the stale rows
-    # occupy at most the pre-reflow count, the fresh paint the
-    # post-reflow count), erase down, and diff against an empty model
-    # so every row is rewritten.
-    let prevEdRows = if edPtr != nil: max(1, minline.renderedRows(edPtr[])) else: 0
-    let belowCaretRz = if entryCaretRow >= 0:
-      max(0, prevEdRows - 1 - min(entryCaretRow, prevEdRows - 1)) else: 0
-    let prevTotal = e.paintedFooterRows + e.toolViewportRows.len +
+    let prevEdRows = if edPtr != nil:
+      max(1, (if edPtr[].prevRowSpans.len > 0: edPtr[].prevRowSpans.len
+              else: minline.renderedRows(edPtr[])))
+    else: 0
+    let prevAbove = e.paintedFooterRows + e.toolViewportRows.len +
       e.viewportGapRows + e.liveContentRows.len + e.liveContentGapRows +
-      prevEdRows
-    var newTotal = newLiveRows.len + newViewportRows.len + sections.len +
+      (if entryCaretRow >= 0: min(entryCaretRow, prevEdRows - 1)
+       else: prevEdRows - 1)
+    let newAbove = newLiveRows.len + newViewportRows.len +
       (if newLiveRows.len > 0 and newLiveGap: 1 else: 0) +
-      (if newViewportRows.len > 0 and newViewportGap: 1 else: 0)
-    if edPtr != nil:
-      newTotal += prevEdRows
-    let upErase = max(0, max(prevTotal, newTotal) - 1 - belowCaretRz)
-    if upErase > 0:
-      stdout.write "\x1b[" & $upErase & "A"
-    stdout.write "\r\x1b[J"
+      (if newViewportRows.len > 0 and newViewportGap: 1 else: 0) +
+      (if edPtr != nil: sections.len - 1 + edPtr[].freshCaretRowAbove()
+       else: sections.len)
+    resizeErase = max(prevAbove, newAbove)
     e.lastVolatileRows = @[]
     e.lastPaintSig = ""
     e.paintedFooterRows = 0
@@ -400,8 +424,10 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   # first (the old erase created them by clearing rows below the walk-up
   # target); without the scroll the first rewrite of a row at the
   # terminal's bottom edge would push the block instead of replacing it.
+  # The resize erase below clears its own rows down, so it never needs
+  # the scroll.
   var blockGrew = false
-  if blockH > prevH:
+  if blockH > prevH and resizeErase < 0:
     if belowCaret > 0:
       # The growth scroll must run at the block's bottom row: a `\r\n`
       # from a mid-block caret merely steps down one existing row (no
@@ -417,10 +443,14 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   let edTop = if newEdModel.len > 0: blockH - newEdModel.len else: -1
   # Walk up from the caret's entry row to the block's top. After a
   # growth scroll the cursor already sits at the (new) block bottom.
-  let up = max(0, prevH - 1 - belowCaret)
+  # On resize this is the single walk: to whichever block top sits
+  # higher, then erase down so the row loop repaints from a blank slate.
+  let up = if resizeErase >= 0: resizeErase else: max(0, prevH - 1 - belowCaret)
 
   if up > 0:
     stdout.write "\x1b[" & $up & "A"
+  if resizeErase >= 0:
+    stdout.write "\r\x1b[J"
   # When the previous block was taller at the top (a commit consumed
   # content rows out of band), the cursor's walk-up reaches the stale
   # top rows while the anchor-aligned row loop only covers the new
