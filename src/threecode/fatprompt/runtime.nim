@@ -338,7 +338,8 @@ proc setAnimSpinner*(spinner: string; elapsed: int) {.gcsafe.} =
     release frameModelLock
 
 proc setAnimRetryWait*(label: string; remainingS: int) {.gcsafe.} =
-  ## Enter/update the retry-backoff countdown shown in the spinner bar.
+  ## Enter/update the retry-backoff countdown shown on the notice row
+  ## above the bar (the bar itself keeps token info and the turn timer).
   {.cast(gcsafe).}:
     acquire frameModelLock
     frameModelShared.retryWait = RetryWaitState(active: true,
@@ -346,7 +347,7 @@ proc setAnimRetryWait*(label: string; remainingS: int) {.gcsafe.} =
     release frameModelLock
 
 proc setAnimRetryRemaining*(remainingS: int) {.gcsafe.} =
-  ## Tick the countdown down without touching the label or spinner glyph.
+  ## Tick the countdown down without touching the notice label.
   {.cast(gcsafe).}:
     acquire frameModelLock
     frameModelShared.retryWait.remainingS = max(0, remainingS)
@@ -843,10 +844,9 @@ proc guiLoop(unused: string) {.thread.} =
     try:
       case m.mode
       of amSpinner:
-        # Clock glyph while a retry backoff counts down; braille rotation
-        # resumes the moment the next HTTP attempt starts (the controller
-        # clears retryWait then).
-        let glyph = if m.retryWait.active: "⧗" else: frames[i mod frames.len]
+        # A live retry backoff no longer hijacks the bar: the braille
+        # keeps rotating and the notice counts down on the ticker row.
+        let glyph = frames[i mod frames.len]
         # Build the frame from the snapshot copy instead of writing the
         # glyph back via setSpinFrame + currentFrameFromModel: each of
         # those is a separate frameModelLock critical section, and
@@ -878,7 +878,7 @@ proc guiLoop(unused: string) {.thread.} =
         let secs = (epochTime() - barTickStart).int
         let label =
           if m.label.hasElapsedSuffix: m.label
-          else: m.label & "  " & $secs & "s"
+          else: m.label & "  " & clockDuration(secs)
         let frame = tokenBarFrame(label)
         let snap = m.viewport
         if snap.active:
@@ -1785,10 +1785,13 @@ proc apiNoUsage*(elapsed: int) =
   commitTranscriptBytes(&"  · {elapsed}s\r\n", true)
 
 proc apiRetryNotice*(msg: string) =
-  ## Controller-side retry notice committed as a harness line: non-bold
-  ## magenta, no indent, no bullet, one line separated from surrounding
-  ## items by exactly one blank row like every other transcript item.
-  commitTranscriptBytes(errS(msg), true)
+  ## Retry notices no longer commit to scrollback: the message is printed
+  ## once on the live notice row (the ticker row above the token bar) and
+  ## dynamically replaced with the latest message. The `retryWait` hook
+  ## that follows every notice carries the same text plus the countdown
+  ## and drives that row. Kept as a hook so headless frontends still
+  ## receive the notice event.
+  discard msg
 
 proc installApiStreamHooks*() =
   setApiStreamHooks(ApiStreamHooks(

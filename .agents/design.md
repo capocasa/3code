@@ -39,6 +39,10 @@ never reads well, so the gap the ticker provides is wanted whether or not a
 thinking ticker is active. The ticker must never overwrite scrollback content,
 the token bar, or any editor row.
 
+The token bar is for token information only: usage counts, context fill,
+and the count-up turn timer (hh:mm:ss). Transport status and retry notices
+must never replace it; they use the notice row above it.
+
 The token bar preserves the existing product behavior, even if the current
 implementation is replaced:
 
@@ -203,10 +207,16 @@ has exactly one response procedure regardless of how many triggers can fire
 the interrupt flag, and returns control to the prompt.
 
 Api retry notices come from the transport layer (`api.nim`) but are reported
-through a controller-registered hook (`retryNotice`), never written directly
-to stderr. They land in scrollback as harness items and are not persisted to
-the `.3log` session transcript, like `:commands`: they are controller
-feedback, not conversation messages.
+through controller-registered hooks, never written directly to stderr. They
+are NOT harness lines in scrollback: a retry notice is printed once on the
+notice row (the reserved ticker row above the token bar, non-bold magenta)
+and dynamically replaced in place while the countdown ticks and later
+attempts fail, so a patient retry loop cannot flood scrollback. The notice
+countdown lives inside the notice row; the token bar below it keeps token
+information and the count-up turn timer. Like harness messages, notices are
+not persisted to the `.3log` session transcript: they are controller
+feedback, not conversation messages. When the retry budget is exhausted the
+final error commits through the ordinary error path.
 
 ## Exit Contract
 

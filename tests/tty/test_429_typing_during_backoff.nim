@@ -88,7 +88,7 @@ suite "429 backoff with buffered typing":
     # mid-backoff when we type. Generous budget: on the slow macOS CI
     # runner the app's submit-to-notice latency alone approached the 5s
     # default (two OSX flakes).
-    tty.expectInHistory("429", timeoutMs = 15_000)
+    tty.expectNoticeRow("429")
     tty.drain(50)
     # Type the follow-up. The text lives in `ed.line.text` while a turn
     # is running; the editor paints it on top of the spinner so the
@@ -162,7 +162,7 @@ suite "429 backoff with buffered typing":
     # Wait long enough for the first retry notice to land AND for the
     # user to type a follow-up while the spinner is still ticking
     # through the second backoff.
-    tty.expectInHistory("429", timeoutMs = 15_000)
+    tty.expectNoticeRow("429")
     tty.drain(50)
     tty.send "next prompt"
     tty.expect "next prompt"

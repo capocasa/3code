@@ -16,7 +16,7 @@ discard """
   # product paths on Windows without the throughput issue.
   disabled: "win"
 """
-import std/[json, os, strutils, times, unicode, unittest]
+import std/[json, os, re, strutils, times, unicode, unittest]
 import threecode/types
 when defined(posix):
   import posix except SocketHandle
@@ -1060,14 +1060,16 @@ suite "terminal visual contract":
     check "Folded and done." in log
     check "kimi-dmail-ok" notin log
 
-  test "api retry notice is a harness line in scrollback, not stderr noise":
-    # Regression: the retry notice used to be `stderr.writeLine` from the
-    # transport layer (api.nim). That bypassed fat-prompt preservation and
-    # landed on the prompt row, scrolling it up. It must instead commit as
-    # a harness line through the same transcript path as `interrupted by
-    # user`: non-bold magenta, no indent, one scrollback line, fat prompt
-    # preserved, and NOT persisted to the `.3log` (it is controller feedback,
-    # not a conversation message).
+  test "api retry notice is a live notice row, never scrollback noise":
+    # Contract: the token bar is for token information only, and a retry
+    # notice must not append to scrollback on every attempt. The notice is
+    # printed once on the reserved notice row above the bar (non-bold
+    # magenta, countdown inside the message) and dynamically replaced as
+    # the countdown ticks and the next attempt fails; it is never committed
+    # to scrollback and never persisted to the `.3log`. Regression guard:
+    # the notice used to be `stderr.writeLine` from the transport layer
+    # (api.nim), which bypassed fat-prompt preservation and landed on the
+    # prompt row; before that it was a committed harness line per attempt.
     if getEnv("THREECODE_TTY_ONLY").len > 0 and
         getEnv("THREECODE_TTY_ONLY") != "api_retry_notice":
       check true
@@ -1091,8 +1093,41 @@ suite "terminal visual contract":
       tty.expect "❯"
       tty.send "go"
       tty.send "\n"
-      # The retry notice is visible in scrollback as ordinary history.
-      tty.expectInHistory "rate limit (code 429), retry 2/12 in 0:01"
+      # Catch the notice while the backoff is live: it must occupy the
+      # reserved row above the bar, non-bold magenta, with the countdown
+      # inside the message (0:01 or 0:00 depending on the captured tick).
+      # Generous budget: on the slow macOS CI runner the submit-to-notice
+      # latency alone approached the 5s default.
+      var noticeFrame = -1
+      var noticeRow = -1
+      let deadline = epochTime() + 15.0
+      while epochTime() < deadline and noticeFrame < 0 and not tty.exited:
+        # Drive the gui thread deterministically: in test-frame mode it
+        # paints only on the ticker handshake, so without this the notice
+        # row would never reach the pty.
+        tty.advanceTicker()
+        tty.drain(100, recordFrame = true)
+        for fi in 0 ..< tty.frames.len:
+          for r in 0 ..< tty.frames[fi].rows.len:
+            if "rate limit (code 429), retry 2/12 in" in
+                tty.frames[fi].rows[r]:
+              noticeFrame = fi
+              noticeRow = r
+              break
+          if noticeFrame >= 0: break
+      if noticeFrame < 0:
+        doAssert false, "retry notice never appeared on screen\n" &
+          tty.dumpFramesAround("rate limit")
+      let f = tty.frames[noticeFrame].visual
+      require noticeRow + 1 < f.cells.len
+      check f.cells[noticeRow][0].fgColor == colMagenta
+      check not f.cells[noticeRow][0].attrs.hasAttr(saBold)
+      # The token bar below the notice row keeps token information; the
+      # message itself never lands in the bar.
+      check "rate limit" notin tty.frames[noticeFrame].rows[noticeRow + 1]
+      # The turn timer in that same bar row counts up in hh:mm:ss form.
+      check tty.frames[noticeFrame].rows[noticeRow + 1].contains(
+        re"\d{2}:\d{2}:\d{2}")
       # ...and the retried reply reaches scrollback after the backoff.
       tty.expectInHistory "reply after retry"
       # The prompt is live again afterward (the footer was preserved, not
@@ -1101,38 +1136,25 @@ suite "terminal visual contract":
       # The notice is controller feedback, not a conversation message, so it
       # must never reach the persisted session transcript.
       check "rate limit" notin root.sessionLogText()
-      # Spacing contract: an alert line (429 retry notice) is bracketed by
-      # exactly one blank line above and one below — not flush against the
-      # preceding prompt echo (0 above) and not separated by a double gap.
-      var hist = tty.historyText().splitLines()
-      var idx = -1
-      for i, line in hist:
-        if line == "rate limit (code 429), retry 2/12 in 0:01": idx = i
-      check idx > 0
-      check hist[idx - 1].strip.len == 0
-      check hist[idx + 1].strip.len == 0
-      # Color contract, asserted on the rendered grid (what the user
-      # sees), not on raw bytes: alert lines (429 retry notice) are
-      # non-bold magenta, and the startup profile's model value is bright
-      # white. The grid retains scrolled-off rows, so both still-committed
-      # lines are found in the final grid state.
-      var noticeRow = -1
+      # Scrollback contract: the notice lived on the volatile notice row
+      # and was replaced in place, so the settled screen holds no trace of
+      # it. The reply and the user echo are the committed lines.
+      tty.drain(300)
+      check "rate limit (code 429)" notin tty.screenText()
+      # Color contract for the committed rows, asserted on the rendered
+      # grid (what the user sees): the startup profile's model value is
+      # bright white. The grid retains scrolled-off rows.
       var modelRow = -1
       var modelCol = -1
       for r in 0 ..< tty.grid.rows.len:
         let text = tty.grid.rowText(r)
-        if noticeRow < 0 and "rate limit (code 429)" in text:
-          noticeRow = r
         if modelRow < 0 and "stub-model" in text:
           modelRow = r
           # Each grid cell holds one rune; the row text is the
           # concatenation of cell texts, so the char offset of the
           # value equals its cell index (ASCII here).
           modelCol = text.find("stub-model")
-      require noticeRow >= 0
       require modelRow >= 0 and modelCol >= 0
-      check tty.grid.cellFg(noticeRow, 0) == colMagenta
-      check not tty.grid.cellAttr(noticeRow, 0).hasAttr(saBold)
       check tty.grid.cellFg(modelRow, modelCol) == colBrightWhite
 
   test "submitting a prompt survives the working directory being removed":

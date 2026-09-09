@@ -10,7 +10,7 @@
 ## and the public expect*/send/resize/close API are identical across both;
 ## only the harness internals fork on `when defined(...)`.
 
-import std/[os, strformat, strutils, monotimes, unicode, json]
+import std/[os, re, strformat, strutils, monotimes, unicode, json]
 
 proc epochTime(): float =
   ## Harness-relative clock only: all deadlines and frame offsets are monotonic.
@@ -1561,6 +1561,22 @@ proc expectTypedAtPrompt*(s: TtySession; text: string;
   doAssert false, "typed text not live at prompt: " & text & "\n" &
     s.dumpFramesAround(text)
 
+proc expectNoticeRow*(s: TtySession; needle: string;
+                      timeoutMs = 15_000): bool {.discardable.} =
+  ## Wait until `needle` is visible on the live screen, driving the gui
+  ## frame handshake so notice-row content (painted only by the gui
+  ## thread, which test-frame mode gates behind the ticker) reaches the
+  ## pty deterministically instead of by wall-clock luck. Use this for
+  ## retry notices and other live-row waits; scrollback waits keep
+  ## `expectInHistory`.
+  let deadline = epochTime() + timeoutMs.float / 1000.0
+  while epochTime() < deadline and not s.exited:
+    if needle in s.screenText(): return true
+    s.advanceTicker()
+    s.drain(100, recordFrame = true)
+  doAssert false, "expected notice row not on screen: " & needle & "\n" &
+    s.dumpFramesAround(needle)
+
 proc expectInHistory*(s: TtySession; text: string; timeoutMs = 5000): bool {.discardable.} =
   let deadline = epochTime() + timeoutMs.float / 1000.0
   while epochTime() < deadline:
@@ -1739,9 +1755,11 @@ proc expectRowAppearsOnce*(s: TtySession; text: string): bool {.discardable.} =
   true
 
 proc tokenBarRows(s: TtySession): seq[string] =
-  ## Return rows that look like the compact token/status bar.
+  ## Return rows that look like the compact token/status bar: a token slot
+  ## plus a timer suffix (legacy "45s" or the hh:mm:ss turn clock).
   for row in s.currentRows():
-    if ("↑" in row or "↓" in row or "↻" in row) and "s" in row:
+    if ("↑" in row or "↓" in row or "↻" in row) and
+        ("s" in row or row.contains(re"\d{2}:\d{2}:\d{2}")):
       result.add row
 
 proc expectTokenBar*(s: TtySession; parts: openArray[string];
