@@ -226,6 +226,25 @@ suite "flail detector":
     check verdicts[firstFire] == fvEscalate
     check fvAbort in verdicts[verdicts.len - 3 .. ^1]
 
+  test "screenshot streak fires on the synthetic token":
+    # Screenshot calls carry no argument tokens (no path, no command), so
+    # the streak signal would be blind to a capture doom loop; the fixed
+    # synthetic token makes any long run of them read as one theme even
+    # when the args vary.
+    var det: FlailDetector
+    let argss = ["{}", "{\"fidelity\":true}", "{\"fidelity\":false}",
+                 "{\"x\":1}", "{\"y\":2}"]
+    var verdicts: seq[FlailVerdict]
+    for i in 0 ..< FlailStreakArm + FlailStreakMin + 3:
+      let a = argss[i mod argss.len]
+      verdicts.add det.observeCall("screenshot", a)
+      det.noteResult("screenshot", a, true)
+    # Quiet until the ring fills (same arithmetic as the bash streak).
+    const firstFire = FlailStreakArm + FlailStreakMin - 2
+    for v in verdicts[0 ..< firstFire]:
+      check v == fvOk
+    check verdicts[firstFire] == fvEscalate
+
   test "a genuinely different call breaks the streak":
     var det: FlailDetector
     for i in 1 .. FlailStreakArm:

@@ -165,3 +165,46 @@ else:
       check st.contains("delivered=16x12")
       s.close()
 
+    test "consecutive captures without an action are capped at 3":
+      if not x11Ready(): skip()
+      let root = newFixture("cap")
+      writeConfig(root)
+      isolateEnv(root)
+      copyFile("testdata/images/tiny.png", root / "run" / "tiny.png")
+      putEnv("THREECODE_SCREENSHOT_SRC", root / "run" / "tiny.png")
+      # Varying args keep the flail identical-repeat signal out of the
+      # way; the cap is the turn-scoped consecutive counter.
+      proc shotCall(n: int): JsonNode =
+        %*{"content": "", "tool_calls": [{
+          "id": "call_" & $n,
+          "type": "function",
+          "function": {"name": "screenshot",
+                       "arguments": $(%*{"n": n})}}]}
+      writeFile(root / "run" / "stub_responses.json", $(%*[
+        shotCall(1), shotCall(2), shotCall(3), shotCall(4),
+        %*{"content": "capped"}
+      ]))
+      putEnv("THREECODE_STUB_RESPONSES", root / "run" / "stub_responses.json")
+      resetStubResponses()
+
+      let s = initAgentSession(AgentOptions(cwd: root / "run",
+                                            experimental: true))
+      check s.prompt("keep looking") == "capped"
+      var receipts = 0
+      var capNote = ""
+      for m in s.messages:
+        if m{"role"}.getStr == "tool":
+          let c = m{"content"}.getStr
+          if c.startsWith("screenshot "): inc receipts
+          elif "screenshots in a row" in c: capNote = c
+      check receipts == 3
+      check "no action between them" in capNote
+      check "shot" in capNote
+      # Only the three executed captures delivered numbered files (the
+      # sha-named persistence copies dedupe identical captures too).
+      var delivered = 0
+      for f in walkFiles(sessionImageDir(s.state.savePath) / "*"):
+        let stem = f.extractFilename.split('.')[0]
+        if stem.len == 3 and stem.allCharsInSet(Digits): inc delivered
+      check delivered == 3
+      s.close()

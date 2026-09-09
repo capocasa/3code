@@ -3452,13 +3452,14 @@ proc buildCredit*(p: Profile): string =
   else:
     "Credit where it's due — to whoever trained the weights driving you and the lab serving them."
 
-const BuiltinSkills*: array[6, (string, string)] = [
+const BuiltinSkills*: array[7, (string, string)] = [
   ("role-conversational.md",   staticRead("skills/role-conversational.md")),
   ("role-sysadmin.md",         staticRead("skills/role-sysadmin.md")),
   ("role-thinking-partner.md", staticRead("skills/role-thinking-partner.md")),
   ("role-writing.md",          staticRead("skills/role-writing.md")),
   ("task-debug-systematic.md", staticRead("skills/task-debug-systematic.md")),
   ("cybernetic-plan.md",       staticRead("skills/cybernetic-plan.md")),
+  ("computer-use.md",          staticRead("skills/computer-use.md")),
 ]
   ## Universal skills compiled into the binary. Materialized to
   ## `~/.local/share/3code/skills/` on startup; re-extracted whenever

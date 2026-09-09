@@ -232,6 +232,47 @@ proc captureScreenshot*(destDir: string,
       return (ImageInfo(), stErr)
   (res, "")
 
+func computerUseNote*(shotPath: string): string =
+  ## The one-time activation note (dmail pattern: a user message, never a
+  ## system-prompt edit). Ports the load-bearing rules: observe->act->
+  ## verify, never replay a sent action, coordinate discipline, plus the
+  ## `shot` cheat sheet. ~1.5K chars, paid once per session at activation.
+  result = "[computer use on] You can now see and drive this desktop.\n" &
+    "\n" &
+    "screenshot() captures the screen; the image arrives with your next " &
+    "message. Coordinates you read off it are pixels of that delivered " &
+    "raster (at most 1280 on the long edge), never the native screen.\n" &
+    "\n" &
+    "The shot script drives mouse and keyboard, taking delivered-raster " &
+    "coordinates and doing the mapping itself:\n" &
+    "  " & shotPath & " click 640 360    also doubleclick/rightclick/" &
+    "middleclick X Y\n" &
+    "  " & shotPath & " drag 100 100 400 400\n" &
+    "  " & shotPath & " type \"hello world\"    types into the focused " &
+    "window\n" &
+    "  " & shotPath & " key ctrl+s            also enter, alt+Tab, " &
+    "ctrl+shift+t\n" &
+    "  " & shotPath & " scroll up 3           or scroll down 5\n" &
+    "  " & shotPath & " title                 active window + geometry " &
+    "+ scale\n" &
+    "Never do the scale math yourself, and never feed screenshot " &
+    "coordinates to raw xdotool — always go through shot.\n" &
+    "\n" &
+    "Working rules:\n" &
+    "- Observe, act, verify: screenshot() to see, one shot action, then " &
+    "screenshot() again to verify. Act on what you see, not what you " &
+    "expect.\n" &
+    "- A sent action may already have run. After an interruption or any " &
+    "doubt, re-observe before acting again — never replay an action " &
+    "blind.\n" &
+    "- 'stale frame' from shot means the screen changed since your " &
+    "capture: screenshot() again before acting.\n" &
+    "- Screenshots show pixels, not correctness; verify real work from " &
+    "artifacts (files, exit codes, tests).\n" &
+    "- These actions drive the user's real desktop with no sandbox; the " &
+    "user sees everything. Esc/Ctrl-C is the panic button. Stop driving " &
+    "the desktop when the task no longer needs it."
+
 func screenshotReceipt*(info: ImageInfo): string =
   ## Text receipt for a capture; `screenshotBanner` parses this shape.
   &"screenshot {info.width}x{info.height} -> delivered " &

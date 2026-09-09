@@ -149,7 +149,10 @@ proc imageReadToken(name, argsStr: string): string =
   ## expensive (full re-encode + base64 on the wire), so repeats of the
   ## same image must escalate even when the path token falls under the
   ## 6-char floor or the calls vary only in offset/limit. Keyed on the
-  ## whole path so two different images never share a token.
+  ## whole path so two different images never share a token. Screenshots
+  ## carry no args at all, so they get a fixed token: a streak of them is
+  ## the doom loop this signal exists for.
+  if "screenshot" in name.toLowerAscii: return "tool:screenshot"
   if "read" notin name.toLowerAscii: return ""
   try:
     let p = parseJson(argsStr){"path"}.getStr("")
@@ -610,6 +613,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     emptyRetries = 0               # bare empty-reply resends after smart-handling
     flailDet: FlailDetector        # identical-consecutive-tool-call guard
     nextCheckpoint = 0             # id of the marker on the next assistant message
+    consecShots = 0                # screenshots since the last other action
   # Computer use activates once per run, before the first request: the
   # backend probe, the `shot` script and the one-time note all happen
   # here so every entry path (REPL :command, --computer flag, config
@@ -630,14 +634,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         commitTranscriptBytes(errLnS(err), true)
         break computerGate
       let sp = screen.shotScriptPath(sessionIdFromPath(session.savePath))
-      messages.add %*{"role": "user", "content":
-        "[computer use on] screenshot() captures this screen and attaches " &
-        "the image to your next message; the shot script drives mouse and " &
-        "keyboard with delivered-raster coordinates:\n" & sp &
-        " click 640 360   (also: doubleclick/rightclick/middleclick X Y, " &
-        "drag X1 Y1 X2 Y2, type TEXT, key ctrl+s, scroll up 3, title)\n" &
-        "Act on what you see; a stale-frame error means call screenshot() " &
-        "first. Esc is the panic button; the user sees every action."}
+      messages.add %*{"role": "user", "content": computerUseNote(sp)}
       saveSession(session, messages)
   # dmail is offered only when the active profile's tool schema includes
   # it (kimi family); the marker tagging below keys off the same flag.
@@ -650,6 +647,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           dmailEnabled = true
           break
   const
+    MaxConsecutiveShots = 3  # captures without an intervening action, then a note
     MaxLengthEscalations = 3
     MaxSteerAttempts = 1
     MaxEmptyRetries = 12
@@ -967,6 +965,28 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
               parseErr & ". Re-emit this tool call."}
           continue
         let act = toolCallToAction(p.family, name, args)
+        # Screenshot cap: captures are expensive (image tokens on the wire)
+        # and a run of them with no action between is avoidance, not
+        # observation. Identical consecutive calls are the flail
+        # detector's; this catches the varying-args variant.
+        if act.kind == akScreenshot:
+          inc consecShots
+          if consecShots > MaxConsecutiveShots:
+            let note = "SYSTEM: " & $consecShots & " screenshots in a row " &
+              "with no action between them. You already see the current " &
+              "screen — act on it (the shot script) or reply; another " &
+              "capture changes nothing."
+            session.toolLog.add ToolRecord(
+              banner: "! screenshot (cap)", output: note, code: -1,
+              kind: akError)
+            messages.add %*{"role": "tool", "tool_call_id": id,
+                            "content": note}
+            commitTranscriptBytes(
+              errLnS("screenshot cap: repeated captures without an " &
+                "intervening action; demanding one from the model"), true)
+            continue
+        else:
+          consecShots = 0
         let silent = isSkillRead(act)
         let toolT0 = epochTime()
         if session.readCache == nil: session.readCache = newReadCache()
