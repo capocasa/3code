@@ -3,7 +3,10 @@
 Status: **proposal**, revised after review. Deltas from revision 1: no
 MCP anywhere in 3code (a Nim framework wraps MCP servers into plain CLI
 tools instead), and harness plugins are **in-process** via a versioned
-C-ABI. Both changes are decisions, not suggestions.
+C-ABI. Both changes are decisions, not suggestions. Revision 3 folds in
+the vim/neovim lesson (see `plan-vim-lesson.md`): command registration,
+transcript emission, async post + timers, read services, keymap
+registration.
 
 ## The one-sentence version
 
@@ -128,11 +131,30 @@ type
     alloc*: proc (n: csize_t): pointer {.cdecl.}
     dealloc*: proc (p: pointer) {.cdecl.}
     setBarText*: proc (s: cstring) {.cdecl.}
-      ## The one UI surface in v1: a text segment in the status bar.
+      ## A text segment in the status bar (the statusline lineage).
     askUser*: proc (question, options: cstring,
                     outBuf: cstring, outCap: cint): cint {.cdecl.}
       ## Synchronous y/n/choice prompt in the editor line. Returns the
       ## chosen index (1-based) or 0 on timeout/ctrl-c.
+      ## This is vim.ui.select.
+    emitTranscript*: proc (s, kind: cstring) {.cdecl.}
+      ## Append a committed scrollback block. The "everything is a
+      ## buffer" primitive: any plugin output becomes a receipt,
+      ## styled by the engine, append-only per .agents/design.md.
+    post*: proc (ev, payloadJson: cstring) {.cdecl.}
+      ## Thread-safe; delivered on the next event-pump tick. The async
+      ## escape hatch (neovim's lesson: never block, post instead).
+    setTimer*: proc (ms: cint, ev, payloadJson: cstring) {.cdecl.}
+    registerCommand*: proc (name, argSpec: cstring) {.cdecl.}
+      ## The `:` command layer (fugitive's home). Dispatched back as an
+      ## onEvent "cmd.<name>" with the raw args as payload; argSpec is
+      ## a completion spec the command-line parser uses.
+    lastResult*: proc (what, outBuf: cstring, outCap: cint): cint {.cdecl.}
+      ## Read services: "lastResult" (previous tool receipt), "usage"
+      ## (running totals), "sessions". Read-only host state.
+    bindKey*: proc (keys, cmd: cstring) {.cdecl.}
+      ## Writes the same table `[shortcuts]` loads at startup; plugins
+      ## get no separate input mechanism, just a shared one.
 
   PluginVtable* {.bycopy.} = object
     abiVersion*: cint
@@ -242,10 +264,12 @@ the whole interface, and `mcpwrap skill` generates it.
   were trained on). A plugin that needs model interaction uses hooks,
   the bar, or ships a CLI.
 - **Message-list mutation.** Plugins never see the conversation array.
-- **UI internals.** `setBarText` is the entire UI surface in v1,
-  through one vetted setter, because the layout engine is fragile by
-  admission. More setters only after visual-test coverage per
-  `.agents/testing.md`.
+- **UI internals.** `setBarText` and `emitTranscript` are the entire
+  UI surface in v1, through vetted entry points, because the layout
+  engine is fragile by admission. No drawing, no panes, no widget
+  anything; everything a plugin shows is text in the transcript (the
+  vim bet: one medium beats N APIs). More setters only after
+  visual-test coverage per `.agents/testing.md`.
 - **Plugin installation or enablement by the agent.** The model can
   never write config/plugin dirs; default sandbox policy gains that
   deny rule regardless of the plugin system.
@@ -314,12 +338,19 @@ Two deliverables, loosely coupled:
    `add`/`skill` subcommands, tools.json cache, flag mapping from JSON
    Schema, text output with caps. Standalone; testable without 3code;
    immediately useful to other agents.
-2. **Harness plugins** (~550 loc in 3code): `plugin/api.nim` SDK,
+2. **Harness plugins** (~800 loc in 3code): `plugin/api.nim` SDK,
    `dynlib` loader + ABI check + crash marker, event pump wired into
    `turns.nim`/`actions.nim` at exactly six call sites, `:plugin` TUI
-   command, `[plugins]` config, sandbox deny rule for config dirs,
-   `setBarText`/`askUser` host services, one example plugin
-   (`lintgate`) as the reference implementation and test fixture.
+   command, `[plugins]` config, sandbox deny rule for config dirs, the
+   seven host services (`setBarText`, `askUser`, `emitTranscript`,
+   `post`+`setTimer`, `registerCommand`, `lastResult`, `bindKey`), the
+   `:` command dispatch table, and one example plugin (`lintgate`) as
+   the reference implementation and test fixture.
+
+Also in scope per the vim lesson: the `formatter = "..."` setting
+(`'formatprg'` analog, the 90% of lintgate that belongs in config) and
+the `path:line:col:` issue-line convention for plugin-issued messages
+(the quickfix analog, textual, free today, navigable later).
 
 Auth plugins slot into 2 (~120 loc) once the two host services prove
 the boundary. Visual tests per `.agents/testing.md` cover the
