@@ -2,6 +2,19 @@
 
 **unreleased** - resume keeps the prompt cache hot
 
+- **DeepSeek V4.1 Flash everywhere it is served.** Added to the
+  known-good registry on all five providers carrying it: `deepseek`
+  (first-party, canonical id `deepseek-flash`; the old `v4-flash` /
+  `v4-flash-vision-exp` ids route to it now and `v4-pro` follows on
+  Sep 14), `deepinfra` (fp8), `novita`, `openrouter`, and `nanogpt`.
+  552B causal-encoder-decoder architecture with native vision, 1M
+  context, 384K max output, reasoning on by default. Verified against
+  the live APIs: first-party takes `thinking.type` + `reasoning_effort`
+  low/high/max (integers 400, `none` does not disable thinking), hosted
+  stacks honor `reasoning_effort: none` as a true no-think; the
+  existing tier mapping needed no changes. `:model deepseek4.1-flash`
+  after adding the id to the provider's `models` line.
+
 - **Typing no longer flickers the turn clock to 0s.** Every keystroke
   repaints the live token bar through the editor's diff painter, which
   rebuilt the frame from a model field the animation thread never

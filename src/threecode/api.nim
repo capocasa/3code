@@ -2091,21 +2091,26 @@ proc applyGenerationDefaults*(p: Profile, body: JsonNode) =
 
 proc applyDeepseekReasoning(p: Profile, body: JsonNode) =
   ## DeepSeek's reasoning surface differs by serving stack. The
-  ## first-party API (provider `deepseek`) exposes `thinking.type`
-  ## (disabled/enabled/adaptive) plus `reasoning_effort`
-  ## (low/medium/high/max/xhigh); only `disabled` is a true off (0
-  ## reasoning tokens). Hosted stacks (nebius, baseten, together, ...)
-  ## ignore `thinking.type` and expose only `reasoning_effort`
-  ## (low/medium/high), vLLM-style, behaving like gpt-oss. Temperature
-  ## is pinned to 0.0 on the first-party API for deterministic coding
-  ## output.
+  ## first-party API (provider `deepseek`, now DeepSeek-V4.1-Flash behind
+  ## `deepseek-flash`) exposes `thinking.type` (disabled/enabled) plus
+  ## `reasoning_effort`; documented values are low/high/max, with compat
+  ## aliases (minimal→low, medium/xhigh→high, ultra→max) and integer
+  ## efforts rejected outright (verified live: 400 on `20`). Only
+  ## `thinking.type: disabled` is a true off; `reasoning_effort: none`
+  ## is silently accepted but still thinks on chat completions. Hosted
+  ## stacks (deepinfra, novita, nanogpt, nebius, baseten, together, ...)
+  ## ignore `thinking.type` and expose only `reasoning_effort`,
+  ## vLLM-style, behaving like gpt-oss, where `none` IS honored as 0
+  ## reasoning tokens (verified on deepinfra + novita V4.1-Flash).
+  ## Temperature is pinned to 0.0 on the first-party API for
+  ## deterministic coding output (accepted but inert while thinking;
+  ## top_p floors at 0.95 there).
   case providerOf(p)
   of "deepseek":
-    ## First-party API: thinking.type (disabled/enabled/adaptive) plus
-    ## reasoning_effort (low/medium/high/max/xhigh). disabled is the
-    ## only true off (0 reasoning tokens); enabled engages heavy
-    ## reasoning regardless of effort level. Temperature 0.0 for
-    ## deterministic coding output.
+    ## First-party API: thinking.type disabled/enabled plus
+    ## reasoning_effort (low/high/max; medium is a compat alias that
+    ## maps to high). disabled is the only true off (0 reasoning
+    ## tokens). Temperature 0.0 for deterministic coding output.
     case p.reasoning
     of "low":
       body["thinking"] = %*{"type": "disabled"}
