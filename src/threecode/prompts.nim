@@ -183,11 +183,21 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openai", "gpt-5.6-luna", "gpt", "", "5.6-luna", "medium", 0.2, 4096, tbNone, false, 400_000, false),
     ("openai", "gpt-6-astra", "gpt", "", "6-astra", "medium", 0.2, 8192, tbNone, false, 1_050_000, false),
 
-    # deepseek
+    # deepseek. V4.1 Flash (2026-09-10): first-party canonical id is
+    # `deepseek-flash` (the v4-flash / v4-flash-vision-exp ids now route
+    # to it, and v4-pro follows after 2026-09-14 until V4.1 Pro ships);
+    # 552B CED architecture, native vision, 1M context, 384K max output.
+    # Thinking defaults on; see applyDeepseekReasoning for the wire
+    # knobs. Hosted copies on novita/openrouter/nanogpt speak the vLLM
+    # `reasoning_effort` surface, deepinfra serves fp8 weights. Not yet
+    # on fireworks/nebius/baseten/nvidia/together/hetzner (weights are
+    # a day old); add rows as they land.
     ("baseten", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
     ("baseten", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false),
+    ("deepseek", "deepseek-flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
     ("deepseek", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
     ("deepseek", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false),
+    ("deepinfra", "deepseek-ai/DeepSeek-V4.1-Flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
     ("deepinfra", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
     ("deepinfra", "deepseek-ai/DeepSeek-V4-Flash", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
     ("deepinfra", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false),
@@ -207,12 +217,14 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("inceptron", "deepseek-ai/DeepSeek-V4-Flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
     ("nebius", "deepseek-ai/DeepSeek-V4-Flash", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
     ("nebius", "deepseek-ai/DeepSeek-V4-Pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false),
+    ("novita", "deepseek/deepseek-v4.1-flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, true),
     ("novita", "deepseek/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, true),
     ("novita", "deepseek/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, true),
     ("novita", "deepseek/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, true),
     ("nvidia", "deepseek-ai/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
     ("openrouter", "deepseek/deepseek-chat", "deepseek", "3", "", "medium", 0.2, 8192, tbAllTurns, false, 128_000, false),
     ("openrouter", "deepseek/deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, tbAllTurns, false, 128_000, false),
+    ("openrouter", "deepseek/deepseek-v4.1-flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
     ("openrouter", "deepseek/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
     ("openrouter", "deepseek/deepseek-v4-pro-0813", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false),
     ("openrouter", "deepseek/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
@@ -318,6 +330,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "TEE/qwen3.6-35b-a3b-uncensored", "qwen", "3.6", "35b-a3b-u", "on", 0.2, 8192, tbNone, false, 262_144, false),
     ("nanogpt", "TEE/qwen3.6-27b", "qwen", "3.6", "27b", "on", 0.2, 8192, tbNone, false, 128_000, false),
     ("nanogpt", "alibaba/qwen3.6-flash", "qwen", "3.6", "flash", "on", 0.2, 4096, tbNone, false, 128_000, false),
+    ("nanogpt", "deepseek/deepseek-v4.1-flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
     ("nanogpt", "deepseek/deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
     ("nanogpt", "deepseek/deepseek-v4-pro-0813", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false),
     ("nanogpt", "TEE/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
