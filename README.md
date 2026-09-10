@@ -69,7 +69,7 @@ The Termux build runs on your phone: the installer detects `$PREFIX` and drops t
 2. Run `3code` in a project directory. With no provider configured, the
    setup wizard starts by itself.
 3. At the first prompt, enter `nvidia` and paste your key.
-4. Pick a model from the list. `glm-5.3-flash` and `deepseek-v4-flash` are solid defaults.
+4. Pick a model from the list. `glm-5.3-flash` and `deepseek-flash` (V4.1) are solid defaults.
 5. Type a prompt:
 
 ```
