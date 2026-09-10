@@ -71,15 +71,31 @@ proc snapshot(s: TtySession; label: string) =
     echo "    row ", i, mark, ": '", row, "'"
 
 proc barElapsedSecs(row: string): int =
-  ## The trailing ` Ns` elapsed counter of a spinner/bar row, or -1.
+  ## The trailing turn clock of a LIVE streaming bar row, in whole
+  ## seconds, or -1. The format is clockDuration's (`4`, `2:08`,
+  ## `1:12:21`; leading zero fields dropped). Only spinner-led rows are
+  ## considered: committed receipts also end in a clock now (the turn's
+  ## final elapsed), and those must not count as live frames.
   ## Harness rows carry full-width trailing padding; drop it first.
   result = -1
-  let row = row.strip(leading = false, trailing = true)
-  if row.len < 3 or row[^1] != 's': return
-  var i = row.len - 2
-  while i >= 0 and row[i].isDigit: dec i
-  if i < row.len - 2 and i >= 0 and row[i] == ' ':
-    result = parseInt(row[i + 1 .. row.len - 2])
+  let led = row.strip(leading = true, trailing = false)
+  var live = false
+  for g in ["\u280b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834",
+            "\u2826", "\u2827", "\u2807", "\u280f"]:
+    if led.startsWith(g): live = true; break
+  if not live: return
+  let s = row.strip(leading = false, trailing = true)
+  let sp = s.rfind(' ')
+  if sp < 0: return
+  var mult = 1
+  try:
+    let parts = s[sp + 1 .. ^1].split(':')
+    for i in countdown(parts.high, 0):
+      if parts[i].len == 0: return -1
+      inc result, parseInt(parts[i]) * mult
+      mult *= 60
+  except ValueError:
+    result = -1
 
 suite "typing during active stream":
   test "typed text lands on caret row, not one row above":
@@ -151,7 +167,7 @@ suite "typing during active stream":
     # Elapsed-counter regression: once the turn clock is past 1s, keep
     # typing and scan every captured frame. The keystroke repaint and
     # the GUI tick must agree: after the bar has shown >= 1s no later
-    # frame may fall back to `0s` (the stale frame-model elapsed).
+    # frame may fall back to `0` (the stale frame-model elapsed).
     var liveSecs = -1
     var waitedMs = 0
     while liveSecs < 1 and waitedMs < 10000:
@@ -172,12 +188,12 @@ suite "typing during active stream":
       tty.drain(60)
       for fi in since ..< tty.frames.len:
         for row in tty.frames[fi].rows:
-          if " 0s" in row:
+          if barElapsedSecs(row) == 0:
             staleZeroFrames.add "frame " & $fi & ": '" & row & "'"
       since = tty.frames.len
     check staleZeroFrames.len == 0
     for hit in staleZeroFrames:
-      echo "stale 0s bar frame while typing: ", hit
+      echo "stale 0 bar frame while typing: ", hit
     tty.drain(4500)
     tty.expectAlive()
     snapshot(tty, "final")

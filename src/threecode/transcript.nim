@@ -157,6 +157,9 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
       # `tiAssistant` fallback below renders it identically to live.
       if isEmptyReplyMsg(c): c = ""
       let u = usageFromJson(m{"usage"})
+      # The live receipt carries the turn timer; it round-trips through
+      # the .3log `tokens` record, so replay can render it identically.
+      let elapsed = m{"usage"}{"elapsed"}.getInt(-1)
       let isLast = i == lastAssistant
       let hasTools =
         block:
@@ -173,7 +176,7 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
       if c.len > 0 or not hasTools:
         var bytes = formatItem(assistantItem(c))
         if receiptCap:
-          bytes.attachReceipt(receiptBytes(tokenLineLabel(u, window)), true)
+          bytes.attachReceipt(receiptBytes(tokenLineLabel(u, window, elapsed)), true)
         if not firstItem:
           stdout.write "\n"
         stdout.write bytes & "\n"
@@ -195,7 +198,7 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
         let tcs = m{"tool_calls"}
         let deferredReceipt =
           if not isLast and u.totalTokens > 0:
-            receiptBytes(tokenLineLabel(u, window))
+            receiptBytes(tokenLineLabel(u, window, elapsed))
           else: ""
         for j in 0 ..< tcs.len:
           let tc = tcs[j]
