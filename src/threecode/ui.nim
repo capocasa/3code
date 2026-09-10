@@ -922,10 +922,7 @@ proc cmdModelList(prof: Profile): string =
     elif kg == "" and not experimentalEnabled:
       result.add GreyFg & short & Reset & "\r\n"
     else:
-      # In experimental mode `*` marks known-good families; the current
-      # model carries the star instead (the bright row already says it).
-      let kgSuffix = if experimentalEnabled and kg != "": "*" else: ""
-      result.add hintLnS(short & kgSuffix)
+      result.add hintLnS(short)
 
 proc cmdModelSelect(target: string, prof: var Profile): string =
   let prov = currentProvider()
