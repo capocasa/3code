@@ -6,6 +6,8 @@ Does 5× more work for the same tokens. Your subscription lasts longer. Free-tie
 
 → [3code.capocasa.dev](https://3code.capocasa.dev)
 
+<a href="https://badge.capocasa.dev/"><img src="https://badge.capocasa.dev/badge.svg" alt="Founder led, founder held" width="220" height="60"></a>
+
 ![3code](docs/3code-screen-1.png)
 
 ---
