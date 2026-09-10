@@ -2979,7 +2979,7 @@ commands:
   :clear            reset conversation (keeps system prompt)
   :model            list models for current provider (current marked with *)
   :model X          switch to model X (within current provider)
-  :provider         list configured providers (current marked with *)
+  :provider         list configured providers (current shows its model)
   :provider X       switch to provider X (model defaults to first in its list)
   :provider add     add a new provider (interactive, verified)
   :provider add X   same, with X as provider name, url, or api key
