@@ -788,14 +788,16 @@ proc cmdProviderList(prof: Profile): string =
   let curName = if prof.name == "": "" else: prof.name.split('.')[0]
   for pr in activeProviders:
     let current = pr.name == curName
-    # Current provider shows the live model; the others show the model a
-    # switch would land on (last used, else the first wizard entry).
-    let mark = if current: prof.model else: rememberedModel(pr)
-    let tail = if pr.models.len > 0: &"  [{shortModel(mark)}]" else: ""
-    if not experimentalEnabled and not hasKnownGoodModel(pr):
-      result.add GreyFg & pr.name & tail & Reset & "\r\n"
+    # Only the current provider names a model: the live one, bright.
+    # What a switch to another provider would land on is a convenience,
+    # not worth the visual noise on every line.
+    if current and pr.models.len > 0:
+      result.add pr.name & "  " & BrightWhiteFg &
+        "[" & shortModel(prof.model) & "]" & Reset & "\r\n"
+    elif not experimentalEnabled and not hasKnownGoodModel(pr):
+      result.add GreyFg & pr.name & Reset & "\r\n"
     else:
-      result.add hintLnS(pr.name & tail)
+      result.add hintLnS(pr.name)
 
 proc cmdProviderSelect(target: string, prof: var Profile): string =
   var prov: ProviderRec
@@ -915,12 +917,12 @@ proc cmdModelList(prof: Profile): string =
   for m in orderedModels(prov):
     let short = shortModel(m)
     let kg = knownGoodFamily(prov.name, m)
-    let tail = if m == prof.model: &"  [{prov.name}]" else: ""
-    if kg == "" and not experimentalEnabled:
-      result.add GreyFg & short & tail & Reset & "\r\n"
+    if m == prof.model:
+      result.add BrightWhiteFg & short & "*" & Reset & "\r\n"
+    elif kg == "" and not experimentalEnabled:
+      result.add GreyFg & short & Reset & "\r\n"
     else:
-      let kgSuffix = if experimentalEnabled and kg != "": "*" else: ""
-      result.add hintLnS(short & kgSuffix & tail)
+      result.add hintLnS(short)
 
 proc cmdModelSelect(target: string, prof: var Profile): string =
   let prov = currentProvider()
