@@ -17,6 +17,8 @@ suite "modelname: normalizeModelName":
 
   test "glued family and version":
     check normalizeModelName("hy3") == "hy3"
+    check normalizeModelName("hy4") == "hy4"
+    check normalizeModelName("tencent/hy4-preview") == "hy4-preview"
     check normalizeModelName("qwen3.8-27b") == "qwen-3.8-27b"
     check normalizeModelName("glm5.3-flash") == "glm-5.3-flash"
 
@@ -28,6 +30,11 @@ suite "modelname: normalizeModelName":
 
   test "suffix after colon":
     check normalizeModelName("thinkingmachines/inkling:free") == "inkling:free"
+
+  test "mistral family":
+    check normalizeModelName("mistralai/mistral-large-2512") == "mistral-large-2512"
+    check normalizeModelName("mistral-medium-3-5") == "mistral-medium-3-5"
+    check normalizeModelName("mistral-large-latest") == "mistral-large-latest"
 
   test "qualifiers kept in order":
     check normalizeModelName("Qwen/Qwen3.6-35B-A3B-FP8") == "qwen-3.6-35b-a3b-fp8"
@@ -134,6 +141,7 @@ suite "modelname: format":
 
   test "single digit version":
     check format(ModelName(family: "hy", version: "3")) == "hy3"
+    check format(ModelName(family: "hy", version: "4")) == "hy4"
     check format(ModelName(family: "kimi", version: "k3")) == "kimi-k3"
 
   test "suffix":

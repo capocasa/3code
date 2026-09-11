@@ -748,7 +748,9 @@ suite "provider wizard configuration":
     inputs = @["nvapi-key", "gpt-oss-120b"]
     discard handleCommand(":provider add", messages, session, prof, editor)
     check "nvidia" in firstFieldCompletions
-    check "mistral" notin firstFieldCompletions
+    # mistral is a known-good family now; anthropic is catalog-only.
+    check "mistral" in firstFieldCompletions
+    check "anthropic" notin firstFieldCompletions
 
     activeProviders = @[]
     activeCurrent = ""
@@ -756,7 +758,7 @@ suite "provider wizard configuration":
     experimentalEnabled = true
     inputs = @["nvapi-key2", "gpt-oss-120b"]
     discard handleCommand(":provider add", messages, session, prof, editor)
-    check "mistral" in firstFieldCompletions
+    check "anthropic" in firstFieldCompletions
 
   test "edit rejects a free-text model in regular mode":
     # Same rule as the add wizard: without --experimental the model list
