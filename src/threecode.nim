@@ -110,11 +110,11 @@ proc refuseRoot() =
       quit ExitUsage
 
 proc ensureBash() =
-  ## Windows startup guard: 3code depends on bash, and the supported source
-  ## is the MSYS2 tree the installer drops into the 3code app dir
-  ## (`%LOCALAPPDATA%\3code\msys64`). Hard-fail if it is missing — the one
-  ## fix is to (re)run the installer, which also bootstraps MSYS2. POSIX
-  ## always has /bin/sh so this is a no-op there.
+  ## Windows startup guard: 3code depends on bash. The supported sources
+  ## are the MSYS2 tree the installer drops into the 3code app dir
+  ## (`%LOCALAPPDATA%\3code\msys64`) and, for a manual install from a
+  ## release folder, the bash shipped with Git for Windows. Hard-fail if
+  ## neither is present. POSIX always has /bin/sh so this is a no-op there.
   ##
   ## The provider-stub binary (the tty test harness) skips this: those tests
   ## drive REPL rendering, not bash enforcement, and CI has no bundled MSYS2
@@ -124,8 +124,11 @@ proc ensureBash() =
   when defined(windows) and not defined(providerStub):
     let b = resolveBash()
     if b.len == 0:
-      stderr.writeLine "3code: bash not found. Re-run the installer to set it up:"
+      stderr.writeLine "3code: no bash found. Install Git for Windows"
+      stderr.writeLine "(gitforwindows.org) and 3code will use its bash, or run the"
+      stderr.writeLine "installer to bundle MSYS2:"
       stderr.writeLine "  irm https://3code.capocasa.dev/install.ps1 | iex"
+      stderr.writeLine "Or set `bash_path` in the [settings] section of your config."
       quit ExitUsage
 
 proc initSandbox(cwd: string) =

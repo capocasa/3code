@@ -14,6 +14,7 @@ else:
   import std/streams
 import types, util, shell, sandbox
 when defined(windows):
+  import registry
   import sandwall
   import sandwall/wall as sandwallWall
 
@@ -37,6 +38,41 @@ when defined(windows):
     ## system MSYS2 roots or PATH: a single deterministic location.
     result = getEnv("LOCALAPPDATA") & r"\3code\msys64\usr\bin\bash.exe"
 
+  proc gitForWindowsRoots(): seq[string] =
+    ## Candidate roots of a Git for Windows install, most explicit first.
+    ## The registry `InstallPath` is what Git's own installer writes, so
+    ## it survives a non-standard install dir; the env-var roots cover the
+    ## default install without a registry read and the 32-bit-3code-on-
+    ## 64-bit case (a 32-bit process sees `ProgramFiles` as the (x86) tree
+    ## but `ProgramW6432` as the real one); `%LOCALAPPDATA%\Programs` is
+    ## where a per-user Git lands when installed without admin rights.
+    try:
+      let reg = getUnicodeValue(r"SOFTWARE\GitForWindows", "InstallPath",
+                                HKEY_LOCAL_MACHINE)
+      if reg.len > 0: result.add reg
+    except CatchableError:
+      discard
+    for name in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"]:
+      let root = getEnv(name)
+      if root.len > 0: result.add root / "Git"
+    let local = getEnv("LOCALAPPDATA")
+    if local.len > 0: result.add local / "Programs" / "Git"
+
+  proc gitForWindowsBash(): string =
+    ## Git for Windows ships two bashes: `bin\bash.exe`, a launcher that
+    ## exports MSYSTEM and builds a PATH carrying the full unix toolset
+    ## plus `git.exe`, and `usr\bin\bash.exe`, the bare MSYS2 shell that
+    ## resolves nothing without an explicit PATH. Prefer the launcher;
+    ## fall back to the bare shell for portable layouts that lack it.
+    let roots = gitForWindowsRoots()
+    for root in roots:
+      let launcher = root / "bin" / "bash.exe"
+      if fileExists(launcher): return launcher
+    for root in roots:
+      let raw = root / "usr" / "bin" / "bash.exe"
+      if fileExists(raw): return raw
+    return ""
+
   proc toPosixPath(path: string): string =
     ## Convert a Windows path to a POSIX path for MSYS2 bash.
     ## C:\Users\foo -> /c/Users/foo
@@ -46,11 +82,13 @@ when defined(windows):
       result = "/" & drive & result[2 .. ^1]
 
   proc resolveBash*(): string =
-    ## Windows bash resolution. Order: the 3code-owned bundled MSYS2
-    ## (the supported, always-present source), then an explicit config
-    ## override (`bash_path`) for hyper-users, then nothing (hard-fail
-    ## at the startup guard). We never fall back to a system or PATH
-    ## bash: the bundled toolset is the whole point.
+    ## Windows bash resolution. Order: the 3code-owned bundled MSYS2 (the
+    ## supported, always-present source), then an explicit config override
+    ## (`bash_path`), then a Git for Windows install. The Git fallback is
+    ## what lets a user run 3code straight from a plain release folder,
+    ## using the bash Git already installed, without the 3code installer's
+    ## MSYS2 tree. Returns "" when none is found; the startup guard then
+    ## hard-fails.
     if cachedBash.len > 0: return cachedBash
     let bundled = bundledMsys2Bash()
     if fileExists(bundled):
@@ -60,6 +98,10 @@ when defined(windows):
       if bashPathOverride.len > 0 and fileExists(bashPathOverride):
         cachedBash = bashPathOverride
         return bashPathOverride
+    let gitBash = gitForWindowsBash()
+    if gitBash.len > 0:
+      cachedBash = gitBash
+      return gitBash
     return ""
 
 const PartialLineFlushMs = 700
@@ -451,8 +493,12 @@ export DEBIAN_FRONTEND=noninteractive
       putenv("HISTSIZE", "0")
       putenv("CHERE_INVOKING", "1")
       putenv("CYGWIN", "nodosfilewarning")
-      let msysBin = getEnv("LOCALAPPDATA") & r"\3code\msys64\usr\bin"
-      putenv("PATH", msysBin & ";" & getEnv("PATH"))
+      # Prepend the directory holding the resolved bash so a bare MSYS2
+      # `usr\bin` bash (`...\msys64\usr\bin`, or a `bash_path` override)
+      # finds its unix tools. Git's `bin\bash.exe` launcher ignores this
+      # and builds its own PATH, so the same line is correct for both.
+      let bashBin = b.parentDir
+      putenv("PATH", bashBin & ";" & getEnv("PATH"))
       let posixScript = toPosixPath(scriptPath)
       let posixStdin = toPosixPath(stdinPath)
       # Use bash -c to source the script and exit

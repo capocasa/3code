@@ -56,6 +56,14 @@ irm https://3code.capocasa.dev/install.ps1 | iex
 pkg install curl && curl -fsSL https://3code.capocasa.dev/install | sh
 ```
 
+On Windows the PowerShell installer also fetches a private MSYS2 tree (bash
++ unix tools) under `%LOCALAPPDATA%\3code`. If you already run
+[Git for Windows](https://git-scm.com/download/win), you can skip that:
+unpack `3code-windows-amd64.zip` from the
+[releases page](https://github.com/capocasa/3code/releases/latest) anywhere and
+3code uses Git's bash. Details in the
+[manual](https://3code.capocasa.dev/docs#manual-install-on-windows).
+
 The Termux build runs on your phone: the installer detects `$PREFIX` and drops the binary in `$PREFIX/bin`. Android has no OS sandbox, but the in-process path checks still apply. Details in the [manual](https://3code.capocasa.dev/docs#termux-on-android-arm64).
 
 ## Quickstart
