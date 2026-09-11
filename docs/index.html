@@ -16,10 +16,10 @@
 <link rel="icon" type="image/png" sizes="32x32" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA3XAAAN1wFCKJt4AAAAB3RJTUUH4QQQEwksSS9ZWwAAAk1JREFUWMPtll2ITVEUx39nn/O7Y5qR8f05wtCUUr6ZIS++8pEnkZInPImneaCQ5METNdOkeFBKUhMPRIkHKfEuUZSUlGlKPN2TrgfncpvmnntnmlEyq1Z7t89/rf9a6+y99oZxGZf/XeIq61EdtgKXgdXA0xrYAvBjOIF1AI9zvjcC74BSpndrJPkBWDScTF8Aa4E3wDlgHbASaANmVqlcCnwHvgDvgVfAJ+AikAAvgfVZwLnSVZHZaOuKoQi3ZOMi4NkYkpe1p4J7A8BpYAD49hfIy/oqG0+hLomiKP2L5L+1ubn5115S+3OAn4EnwBlgMzCjyt6ZAnQCJ4A7wOs88iRJHvw50HoujuPBoCKwHWiosy8MdfZnAdcHk8dxXFJ3VQbQlCTJvRBCGdRbD4M6uc5glpY3eAihpN5S5w12diSEcCCEcKUO4ljdr15T76ur1FDDLIQQ3qv71EdDOe3Kxj3leRXyk+pxdWnFWod6Wt2bY3de3aSuUHcPBVimHs7mK9WrmeOF6lR1o9qnzskh2ar2qm1qizpfXaPeVGdlmGN5pb09qMxz1Xb1kLqgzn1RyH7JUXW52lr5e/Kqi9qpto7V1atuUzfnARrV7jEib1T76gG2qxdGmXyiekkt1GswPTtek0aBfJp6YySGBfWg2tPQ0FAYgf1stUfdmdcjarbYJEniKIq6gY/Aw+zWHAC+p2labGpqiorFYgGYCEzN7oQdQClN07O1/EfDyGgC0ALMBdYAi4FyK+4H3gLPsxfR1zRNi+NP7nH5J+QntnXe5B5mpfQAAAAASUVORK5CYII=">
 
 <!-- CSS -->
-<link rel="stylesheet" type="text/css" href="nimdoc.out.css?v=2.2.10">
+<link rel="stylesheet" type="text/css" href="nimdoc.out.css?v=2.2.12">
 
 <!-- JS -->
-<script type="text/javascript" src="dochack.js?v=2.2.10"></script>
+<script type="text/javascript" src="dochack.js?v=2.2.12"></script>
 </head>
 <body>
   <div class="document" id="documentId">
@@ -55,6 +55,13 @@ curl -fsSL https://3code.capocasa.dev/install | sh
 # Windows (PowerShell)
 irm https://3code.capocasa.dev/install.ps1 | iex</pre></p>
 
+<h3 id="manual-install-on-windows">Manual install on Windows</h3><p>The PowerShell one-liner also downloads a private MSYS2 tree (bash + unix tools) into <tt class="docutils literal"><span class="pre">%LOCALAPPDATA%\3code\msys64</span></tt>, so 3code always has a shell of its own. If you would rather not, install <a class="reference external" href="https://git-scm.com/download/win">Git for Windows</a> and run 3code from a plain release folder:</p>
+<ol class="simple"><li>Download <tt class="docutils literal"><span class="pre">3code-windows-amd64.zip</span></tt> from the <a class="reference external" href="https://github.com/capocasa/3code/releases/latest">latest release</a> and unpack it, for example to <tt class="docutils literal"><span class="pre">C:\tools\3code</span></tt>. The zip carries <tt class="docutils literal"><span class="pre">3code.exe</span></tt>, the OpenSSL DLLs, and <tt class="docutils literal"><span class="pre">cacert.pem</span></tt>, so the folder is self-contained.</li>
+<li>Put the folder on your <tt class="docutils literal"><span class="pre">PATH</span></tt>, or call <tt class="docutils literal"><span class="pre">3code.exe</span></tt> by full path.</li>
+<li>Run it. 3code resolves bash in this order: its own bundled MSYS2, then a <tt class="docutils literal"><span class="pre">bash_path</span></tt> setting, then the Git for Windows install. With Git for Windows present, no MSYS2 download is needed.</li>
+</ol>
+<p>The one-time <tt class="docutils literal"><span class="pre">3code setup</span></tt> (sandbox user + network fence) is still required on Windows; it needs an elevated shell.</p>
+
 <h3 id="termux-on-android-arm64">Termux on Android arm64</h3><p>Inside Termux, the same one-liner installs the Android arm64 build:</p>
 <p><pre class="listing">curl -fsSL https://3code.capocasa.dev/install | sh</pre></p>
 <p>It detects Termux via <tt class="docutils literal"><span class="pre">$PREFIX</span></tt> and installs to <tt class="docutils literal"><span class="pre">$PREFIX/bin</span></tt>, which is already on PATH. If you prefer to build where it will run, Termux only needs:</p>
@@ -76,7 +83,7 @@ nimble install https://github.com/capocasa/3code</pre></p>
 <h3 id="run-your-first-prompt">Run your first prompt</h3><p><pre class="listing">❯ Build a Hello World program in Nim</pre></p>
 <p>That is enough to get started.</p>
 
-<h2 id="providers-and-authentication">Providers and authentication</h2><p><tt class="docutils literal"><span class="pre">:provider</span></tt> lists configured providers and marks the current one. <tt class="docutils literal"><span class="pre">:model</span></tt> does the same for its models. Both commands have tab completion, so there is no need to memorize catalog names.</p>
+<h2 id="providers-and-authentication">Providers and authentication</h2><p><tt class="docutils literal"><span class="pre">:provider</span></tt> lists configured providers and marks the current one, along with the model a switch would land on. <tt class="docutils literal"><span class="pre">:model</span></tt> does the same for its models. Both commands have tab completion, so there is no need to memorize catalog names. Model choices are sticky per provider: switching back with <tt class="docutils literal"><span class="pre">:provider</span></tt> returns to the model you last used there, not the first one in its list. The current provider and model are also sticky per directory: each project starts where it last left off, while directories never touched by <tt class="docutils literal"><span class="pre">:provider</span></tt> / <tt class="docutils literal"><span class="pre">:model</span></tt> keep the global config default.</p>
 <p><pre class="listing">:provider nvidia
 :model gpt-oss-120b</pre></p>
 
@@ -113,8 +120,8 @@ nimble install https://github.com/capocasa/3code</pre></p>
 <tr><td>Ctrl+L</td><td>clear the screen</td></tr>
 <tr><td>Alt+E</td><td>edit the input buffer in $VISUAL/$EDITOR</td></tr>
 <tr><td>Ctrl+X Ctrl+E</td><td>same (emacs edit-and-execute-command)</td></tr>
-<tr><td>Ctrl+C</td><td>clear current input</td></tr>
-<tr><td>Esc</td><td>cancel the current operation</td></tr>
+<tr><td>Ctrl+C</td><td>clear current input; cancel the turn when it is empty</td></tr>
+<tr><td>Esc</td><td>same as Ctrl+C</td></tr>
 <tr><td>Ctrl+D</td><td>exit</td></tr>
 </table><p>If you forget one, <tt class="docutils literal"><span class="pre">:help</span></tt> prints the current command and key list.</p>
 
@@ -147,6 +154,47 @@ suspend =</pre></p>
 :retry on</pre></p>
 <p>Even with patient retry off, 3code gives transient failures about a minute before returning to the interactive prompt. The setting is stored as <tt class="docutils literal"><span class="pre">patient_retry</span></tt> in <tt class="docutils literal"><span class="pre">[settings]</span></tt>. Press Esc to cancel the wait.</p>
 
+<h2 id="private-mode">Private mode</h2><p>Private mode is incognito mode for the agent: off by default, on for one session only, never persisted. While it is on, turns only run on providers you have marked as trusted with your data, and the live token bar repaints in the private color (magenta by default) so the mode is always visible. Scrollback receipts keep the normal color, so old receipts also show which turns ran private.</p>
+<p>Turn it on either way:</p>
+<p><pre class="listing">3code -p            # from the start
+:private on         # mid-session (turns the bar magenta)</pre></p>
+<p>A provider or model is <em>allow-private</em> when:</p>
+<ol class="simple"><li><p>you set it explicitly with <tt class="docutils literal"><span class="pre">:private allow</span></tt>, or in the config:</p>
+<p><pre class="listing">[params]
+provider = &quot;together&quot;
+allow-private = &quot;true&quot;
+
+[params]
+provider = &quot;zai&quot;
+model = &quot;glm-5.3&quot;
+allow-private = &quot;true&quot;</pre></p>
+<p>With <tt class="docutils literal"><span class="pre">model</span></tt> empty the whole provider is trusted; a model-scoped entry beats a provider-wide one, and <tt class="docutils literal"><span class="pre">allow-private = &quot;false&quot;</span></tt> revokes.</p>
+</li>
+<li>or its known-good entry is curated for a provider whose published policy is zero data retention with no training on API data. Curated today: <tt class="docutils literal"><span class="pre">together</span></tt>, <tt class="docutils literal"><span class="pre">fireworks</span></tt>, <tt class="docutils literal"><span class="pre">ovh</span></tt>, <tt class="docutils literal"><span class="pre">novita</span></tt>. Everything else, including all first-party labs, must be allowed explicitly.</li>
+</ol>
+<p>Everything else is refused at the gate with a pointer to the fix:</p>
+<p><pre class="listing">zai.glm-5.2 is not allow-private (trust it with :private allow zai, or
+switch to a zero-training provider; :private lists)</pre></p>
+
+<h3 id="picking-a-private-provider">Picking a private provider</h3><p>Pick a provider with a zero-training policy you are satisfied with (a strict zero data retention policy, or at least a no-training plus bounded retention policy). A shortlist by region:</p>
+<table border="1" class="docutils"><tr><th>region</th><th>provider</th><th>policy</th></tr>
+<tr><td>EU</td><td><a class="reference external" href="https://tensorx.ai">TensorX</a></td><td>zero data retention; GPUs in Dublin and Helsinki, Irish/EU jurisdiction (add it as a custom provider, it is not in the catalog)</td></tr>
+<tr><td>EU</td><td><a class="reference external" href="https://www.ovhcloud.com/en/public-cloud/ai-endpoints/">OVHcloud AI Endpoints</a></td><td>no training on your data, retention for billing only; hosted in France (catalog: <tt class="docutils literal"><span class="pre">ovh</span></tt>)</td></tr>
+<tr><td>USA</td><td><a class="reference external" href="https://together.ai">Together AI</a></td><td>no storage of inputs/outputs by default; training is opt-in and off (catalog: <tt class="docutils literal"><span class="pre">together</span></tt>)</td></tr>
+<tr><td>USA</td><td><a class="reference external" href="https://fireworks.ai">Fireworks AI</a></td><td>zero data retention by default; no logging of prompts or generations (catalog: <tt class="docutils literal"><span class="pre">fireworks</span></tt>)</td></tr>
+<tr><td>Asia</td><td><a class="reference external" href="https://novita.ai">Novita</a></td><td>zero data retention by default, no training on your content, per their terms of service (catalog: <tt class="docutils literal"><span class="pre">novita</span></tt>)</td></tr>
+<tr><td>Asia</td><td>Z.ai pay-as-you-go</td><td>routing guides report zero retention on the paid API; read the current DPA before trusting it (catalog: <tt class="docutils literal"><span class="pre">zai</span></tt>)</td></tr>
+</table><p>Or pick any provider you trust, and allow it explicitly. That is a judgment call, not a recommendation.</p>
+
+<h3 id="walkthrough">Walkthrough</h3><p><pre class="listing">❯ :provider myprovider
+❯ :model glm-5.3
+❯ :private allow myprovider glm-5.3   # persisted as [params] allow-private
+❯ :private on                         # bar turns magenta, turns are gated</pre></p>
+<p><tt class="docutils literal"><span class="pre">:private</span></tt> with no argument shows the mode, whether the current model is allowed, and which configured providers are trusted. <tt class="docutils literal"><span class="pre">:private deny</span></tt> removes trust. The bar color is configurable like the other colors:</p>
+<p><pre class="listing">[colors]
+private-bar = &quot;\x1b[95m&quot;
+token-bar = &quot;\x1b[36m&quot;</pre></p>
+
 <h2 id="reasoning">Reasoning</h2><p><tt class="docutils literal"><span class="pre">:reasoning</span></tt> lists the levels the current model actually supports and marks the active one:</p>
 <p><pre class="listing">:reasoning
 :reasoning high
@@ -161,6 +209,7 @@ suspend =</pre></p>
 <li>GPT-5.1 and later add <tt class="docutils literal"><span class="pre">none</span></tt></li>
 <li>GPT-5.4 and GPT-5.5 add <tt class="docutils literal"><span class="pre">xhigh</span></tt></li>
 <li>GPT-5.6 adds <tt class="docutils literal"><span class="pre">max</span></tt> and does not use <tt class="docutils literal"><span class="pre">minimal</span></tt></li>
+<li>GPT-6 Astra uses <tt class="docutils literal"><span class="pre">low</span></tt>, <tt class="docutils literal"><span class="pre">medium</span></tt>, <tt class="docutils literal"><span class="pre">high</span></tt>, <tt class="docutils literal"><span class="pre">xhigh</span></tt>, and <tt class="docutils literal"><span class="pre">max</span></tt>; thinking cannot be disabled</li>
 <li>GPT-5.5 Pro uses <tt class="docutils literal"><span class="pre">medium</span></tt>, <tt class="docutils literal"><span class="pre">high</span></tt>, and <tt class="docutils literal"><span class="pre">xhigh</span></tt>; GPT-5 Pro uses <tt class="docutils literal"><span class="pre">high</span></tt></li>
 <li>GPT-4.x has no reasoning setting</li>
 </ul>
@@ -337,7 +386,7 @@ allow ./</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-06 10:19:09 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-11 13:59:57 UTC</small>
       </div>
     </div>
   </div>
