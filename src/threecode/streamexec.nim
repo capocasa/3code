@@ -30,12 +30,19 @@ proc shPath(): string =
 when defined(windows):
   var cachedBash* {.threadvar.}: string
 
+  proc bundledMsys2Root*(): string =
+    ## Root of the 3code-owned MSYS2 tree (`%LOCALAPPDATA%\3code\msys64`).
+    ## Under a private profile, so the sandwall account cannot read the
+    ## tree in it without an explicit grant; callers stamp that at run
+    ## time (see runBash) where the invoking user's own path is known.
+    result = getEnv("LOCALAPPDATA") & r"\3code\msys64"
+
   proc bundledMsys2Bash(): string =
     ## The installer drops an MSYS2 tree into the 3code app dir
     ## (`%LOCALAPPDATA%\3code\msys64`), so 3code owns its bash + unix
     ## toolset regardless of what else is on the system. No probing of
     ## system MSYS2 roots or PATH: a single deterministic location.
-    result = getEnv("LOCALAPPDATA") & r"\3code\msys64\usr\bin\bash.exe"
+    result = bundledMsys2Root() & r"\usr\bin\bash.exe"
 
   proc toPosixPath(path: string): string =
     ## Convert a Windows path to a POSIX path for MSYS2 bash.
@@ -487,6 +494,19 @@ export DEBIAN_FRONTEND=noninteractive
           var writable = resolved.writable
           var readonly = resolved.readonly
           if fenced: writable.add tmp else: readonly.add tmp
+          # The sandwall account re-spawns bash out of THIS user's MSYS
+          # tree, which sits under a private profile the sandwall account
+          # cannot traverse. The one-time `setup` grant used the elevated
+          # setup account's %LOCALAPPDATA%, which differs whenever a
+          # standard user elevated with a separate admin's credentials -
+          # so the tree the sandbox actually runs bash from had no ACE and
+          # bash died with access denied. Stamp read+execute here, in the
+          # invoking user's own context (they own the tree, so no admin
+          # needed); sandwall's read list handles the ancestors + skip-
+          # when-already-stamped.
+          let msysRoot = bundledMsys2Root()
+          if msysRoot.len > 0 and dirExists(msysRoot):
+            readonly.add msysRoot
           sandwallWall.beginCapture()
           var inProcCode = 127
           try:

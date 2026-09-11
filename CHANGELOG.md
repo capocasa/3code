@@ -2,6 +2,18 @@
 
 **unreleased** - resume keeps the prompt cache hot
 
+- **Windows sandbox works when setup ran as another account.** Two bugs
+  blocked issue #33 ("Windows sandbox is not set up"). The sandwall
+  credential lived per-user under the elevated setup account's
+  `%LOCALAPPDATA%`, so when a standard user elevated with a separate
+  admin's credentials the real user could not decrypt it and every run
+  reported the sandbox as unset up; it now lives in a machine-wide store
+  (`%ProgramData%\sandwall`) under machine-scope DPAPI. And the sandwall
+  account is spawned from the user's own MSYS tree, which the setup-time
+  grant never touched (it used the setup account's `%LOCALAPPDATA%`); the
+  bash tool now stamps read+execute on it at run time, in the invoking
+  user's context. Both fixes land in sandwall 0.5.6.
+
 - **DeepSeek V4.1 Flash everywhere it is served.** Added to the
   known-good registry on all five providers carrying it: `deepseek`
   (first-party, canonical id `deepseek-flash`; the old `v4-flash` /
