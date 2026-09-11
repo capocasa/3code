@@ -2250,6 +2250,10 @@ proc applyHy3Reasoning(p: Profile, body: JsonNode) =
   ##   `reasoning_effort` key, matching Hy3's own chat template
   ##   (`reasoning_effort not in ['high', 'low', 'no_think']` raises).
   ## - OpenRouter: normalized `reasoning.effort` (same three levels).
+  ## Hy4 (v4) reuses this surface but its template accepts only `high`
+  ## (default) and `no_think`; the level set is gated in
+  ## `knownGoodReasonings`. The first-party `tencent` route rides the
+  ## else branch below.
   ## Empty `p.reasoning` means "no wire param" — the server default
   ## (`no_think`) applies, which is the intended cheap path.
   if p.reasoning == "": return
@@ -2258,6 +2262,19 @@ proc applyHy3Reasoning(p: Profile, body: JsonNode) =
     body["reasoning"] = %*{"effort": p.reasoning}
   else:
     body["chat_template_kwargs"] = %*{"reasoning_effort": p.reasoning}
+
+proc applyMistralReasoning(p: Profile, body: JsonNode) =
+  ## Mistral reasoning is a top-level `reasoning_effort` that accepts
+  ## exactly "none" and "high" (422 on anything else). First-party
+  ## (api.mistral.ai) takes the field directly; OpenRouter rides the
+  ## normalized `reasoning.effort`. Empty `p.reasoning` means "no wire
+  ## param" and the server default (none) applies.
+  if p.reasoning == "": return
+  case providerOf(p)
+  of "openrouter":
+    body["reasoning"] = %*{"effort": p.reasoning}
+  else:
+    body["reasoning_effort"] = %p.reasoning
 
 proc applyInklingReasoning(p: Profile, body: JsonNode) =
   ## Thinking Machines Inkling exposes a level-based reasoning effort on
@@ -2417,6 +2434,7 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "mimo": applyMimoReasoning(p, body)
   of "0xalpha": applyOxAlphaReasoning(p, body)
   of "nemotron": applyNemotronReasoning(p, body)
+  of "mistral": applyMistralReasoning(p, body)
   else: discard
 
 proc applyThinkBack*(p: Profile, body: JsonNode) =

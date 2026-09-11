@@ -204,6 +204,31 @@ suite "api request shaping":
     check knownGoodReasonings("together", "zai-org/GLM-5.1") == @["off", "on"]
     check knownGoodReasonings("together", "zai-org/GLM-5") == @["off", "on"]
 
+  test "hy4 narrows the knob to two levels":
+    # Hy4's chat template accepts exactly high and no_think; Hy3 keeps low.
+    check knownGoodReasonings("openrouter", "tencent/hy4-preview") == @["no_think", "high"]
+    check knownGoodReasonings("tencent", "hy4-preview") == @["no_think", "high"]
+    check knownGoodReasonings("openrouter", "tencent/hy3") == @["no_think", "low", "high"]
+
+  test "mistral: medium none/high, large no knob":
+    check knownGoodReasonings("mistral", "mistral-medium-3-5") == @["none", "high"]
+    check knownGoodReasonings("openrouter", "mistralai/mistral-medium-3-5") == @["none", "high"]
+    check knownGoodReasonings("mistral", "mistral-large-2512").len == 0
+    block firstParty:
+      var body = %*{"stream": true}
+      let p = Profile(name: "mistral.mistral-medium-3-5", family: "mistral",
+                      variant: "medium", model: "mistral-medium-3-5",
+                      reasoning: "high")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "high"
+    block openrouterRoute:
+      var body = %*{"stream": true}
+      let p = Profile(name: "openrouter.mistralai/mistral-medium-3-5",
+                      family: "mistral", variant: "medium",
+                      model: "mistralai/mistral-medium-3-5", reasoning: "high")
+      applyReasoning(p, body)
+      check body{"reasoning"}{"effort"}.getStr == "high"
+
   test "glm-5.3 forces thinking: low/high/max, no off":
     # 5.3 replaced the thinking toggle with a top-level reasoning_effort
     # knob (z.ai) normalized to reasoning.effort on gateways. Off is gone.

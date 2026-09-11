@@ -32,6 +32,16 @@
   interrupted the in-flight turn, so a stray Esc discarded the typed
   follow-up and killed the turn.
 
+- **Hy4 and Mistral added to the known-good registry.** Tencent Hy4
+  preview (770B total / 49B active MoE, Apache 2.0, 1M context) lands on
+  `openrouter` (`tencent/hy4-preview`) and the new first-party `tencent`
+  TokenHub route (`hy4-preview`). Its chat template accepts exactly
+  `high` (default) and `no_think`, so the hy family's reasoning knob
+  narrows to two levels on v4. Mistral joins as a family with Mistral
+  Large 3 (675B total / 41B active MoE, Apache 2.0, no reasoning knob)
+  and Mistral Medium 3.5 (128B dense, Modified MIT, `reasoning_effort`
+  none/high), on `api.mistral.ai` and OpenRouter `mistralai/*`.
+
 - **DeepSeek V4.1 Flash everywhere it is served.** Added to the
   known-good registry on all five providers carrying it: `deepseek`
   (first-party, canonical id `deepseek-flash`; the old `v4-flash` /

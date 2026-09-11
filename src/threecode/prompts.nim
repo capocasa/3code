@@ -253,6 +253,16 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("poolside", "poolside/laguna-s-2.1", "laguna", "2", "s", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("poolside", "poolside/laguna-xs-2.1", "laguna", "2", "xs", "on", 0.2, 8192, tbNone, false, 262_144, false),
 
+    # mistral (api.mistral.ai/v1; bare model ids). Large 3 (675B-A41B MoE,
+    # Apache 2.0) and Medium 3.5 (128B dense, Modified MIT), both 256K ctx,
+    # multimodal. Medium 3.5 carries reasoning_effort none/high (none is
+    # the wire default); Large 3 has no advertised knob. Thinking chunks
+    # are not replayed, so tbNone.
+    ("mistral", "mistral-large-2512", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false),
+    ("mistral", "mistral-medium-3-5", "mistral", "", "medium", "high", 0.7, 8192, tbNone, false, 262_144, false),
+    ("openrouter", "mistralai/mistral-large-2512", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false),
+    ("openrouter", "mistralai/mistral-medium-3-5", "mistral", "", "medium", "high", 0.7, 8192, tbNone, false, 262_144, false),
+
     # minimax
     ("minimax", "MiniMax-M3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("minimax", "MiniMax-M2.7", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, false),
@@ -293,6 +303,13 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("novita", "tencent/hy3", "hy", "3", "", "no_think", 0.2, 8192, tbNone, false, 262_144, true),
     ("deepinfra", "tencent/Hy3", "hy", "3", "", "no_think", 0.2, 8192, tbNone, false, 262_144, false),
     ("openrouter", "tencent/hy3", "hy", "3", "", "no_think", 0.2, 8192, tbNone, false, 262_144, false),
+
+    # Hy4 preview (Tencent Hunyuan v4, Aug 2026): 770B total / 49B active,
+    # Apache 2.0, 1M ctx (960k in / 64k out). Two-level reasoning, high
+    # (default) or no_think; preserved thinking. Tencent recommends temp
+    # 0.9; held at 0.6 for agentic tool-call reliability.
+    ("openrouter", "tencent/hy4-preview", "hy", "4", "preview", "high", 0.6, 65536, tbAllTurns, false, 1_000_000, false),
+    ("tencent", "hy4-preview", "hy", "4", "preview", "high", 0.6, 65536, tbAllTurns, false, 1_000_000, false),
 
     # grok (xAI first-party API, api.x.ai/v1; OpenAI-compatible)
     # grok-4.6: 500k ctx, reasoning_effort low/medium/high (default)/xhigh
@@ -1497,6 +1514,36 @@ Brief. State results, not deliberation. Match response shape to task. End-of-tur
 
 {{credit}}
 """
+
+# Hy4 (Tencent Hunyuan v4, 2026-08) reuses the Hy3 body. Only the
+# header, the window, and the reasoning-knob wording differ: Hy4's chat
+# template accepts exactly `high` (default) and `no_think` and raises on
+# anything else, so the graded `low` tier is dropped.
+const Hy4Preamble = HyPreamble
+  .replace("Hy3", "Hy4")
+  .replace("295B total / 21B active MoE", "770B total / 49B active MoE")
+  .replace("have a 256K context window", "have a 1M context window")
+  .replace("You carry a graded reasoning knob, not a binary on/off. Match depth to the task:",
+           "You carry a two-level reasoning knob. Match depth to the task:")
+  .replace("- `low`: light reasoning for routine multi-step edits, small refactors, and \"read a few files, patch one\" work.\n", "")
+  .replace("- `no_think` (default, fastest):", "- `no_think`:")
+  .replace("- `high`: deep chain-of-thought", "- `high` (default): deep chain-of-thought")
+
+# Mistral family (Large 3, Medium 3.5). Both share the GLM/OpenAI tool
+# surface; only the header and the reasoning knob describe Mistral.
+const MistralPreamble = GlmPreamble
+  .replace("You are the GLM edition of 3code, the economical coding agent.",
+           "You are the Mistral edition of 3code, the economical coding agent, " &
+           "backed by Mistral Large 3 (675B total / 41B active MoE) or Mistral " &
+           "Medium 3.5 (128B dense), both 256K-context open-weight multimodal " &
+           "models built for reasoning, agentic work, and coding.")
+  .replace("\n\n# Tools",
+           "\n\n# Reasoning\n\n" &
+           "Mistral Medium 3.5 exposes `reasoning_effort` with two levels: `high` " &
+           "(default here) returns a full thinking chunk, the right choice for " &
+           "agentic coding and hard problems; `none` turns it off for cheap direct " &
+           "responses. Mistral Large 3 has no reasoning knob.\n\n" &
+           "# Tools")
 
 const DeepSeekPreamble = """You are the DeepSeek edition of 3code, the economical coding agent.
 
@@ -2924,6 +2971,8 @@ let
   minimaxSetup = (prompt: MiniMaxPreamble, tools: glmAndQwenTools)
   longcatSetup = (prompt: LongcatPreamble, tools: glmAndQwenTools)
   hySetup = (prompt: HyPreamble, tools: glmAndQwenTools)
+  hy4Setup = (prompt: Hy4Preamble, tools: glmAndQwenTools)
+  mistralSetup = (prompt: MistralPreamble, tools: glmAndQwenTools)
   inklingSetup = (prompt: InklingPreamble, tools: glmAndQwenTools)
   grokSetup = (prompt: GrokPreamble, tools: glmAndQwenTools)
   geminiSetup = (prompt: GeminiPreamble, tools: glmAndQwenTools)
@@ -2953,7 +3002,12 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   of "deepseek": deepseekSetup
   of "minimax": minimaxSetup
   of "longcat": longcatSetup
-  of "hy": hySetup
+  of "hy":
+    # Hy4 narrows the knob (high/no_think only) and doubles the window;
+    # the prompt differs enough to keep a second tuple.
+    if p.version == "4": hy4Setup
+    else: hySetup
+  of "mistral": mistralSetup
   of "inkling": inklingSetup
   of "grok": grokSetup
   of "gemini": geminiSetup
@@ -3379,9 +3433,15 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # vLLM surface via `chat_template_kwargs.reasoning_effort` with
         # values `no_think` / `low` / `high` (see `applyHy3Reasoning` in
         # api.nim). OpenRouter-normalized to `reasoning.effort` with the
-        # same three levels. `no_think` is the default direct-response
-        # mode. We don't offer the level-based `low/medium/high` set.
+        # same three levels. Hy4's template accepts exactly `high`
+        # (default) and `no_think` and raises on anything else.
+        if combo.version == "4": return @["no_think", "high"]
         return @["no_think", "low", "high"]
+      if fam == "mistral":
+        # Mistral Medium 3.5 exposes reasoning_effort none/high; Large 3
+        # has no advertised knob.
+        if combo.variant.startsWith("medium"): return @["none", "high"]
+        return @[]
       if fam == "gemini":
         # Gemini 3 thinking levels via OpenAI-compat `reasoning_effort`:
         # minimal/low/medium/high. Thinking cannot be disabled on Gemini 3
