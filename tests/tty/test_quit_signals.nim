@@ -7,9 +7,9 @@
 ##   * Ctrl-D with text present is a *no-op*: the text stays, it never
 ##     quits and never edits.
 ##   * Ctrl-D never interrupts an ongoing turn.
-##   * Ctrl-C with text on the prompt clears the text and does NOT
-##     interrupt; Ctrl-C on an empty prompt interrupts an ongoing turn.
-##   * ESC always interrupts an ongoing turn and never touches the text.
+##   * Ctrl-C and ESC with text on the prompt clear the text (into
+##     history) and do NOT interrupt; on an empty prompt they interrupt
+##     an ongoing turn.
 ##   * `:q`, `:quit` and `:exit` quit from an idle prompt.
 ##   * No quit path leaves a stack trace or internal-error notice behind.
 ##
@@ -189,7 +189,8 @@ suite "quit signals":
     # the raw byte history from when it was echoed while typing, so check
     # the settled screen, not the byte stream).
     check "draft" notin tty.screenText()
-    # The turn is still running: a bare ESC interrupts it (ESC never edits).
+    # The turn is still running and the line is empty, so a bare ESC now
+    # interrupts it (ESC with text would clear instead).
     tty.send "\x1b"
     tty.expectInHistory "interrupted by user"
     tty.expectIdleCaret()
