@@ -25,6 +25,13 @@
   run `3code.exe`. Fixes #34, where Git Bash was on the box but 3code still
   reported "bash not found".
 
+- **Esc now clears the draft instead of cancelling the turn.** Esc and
+  Ctrl-C behave identically: with a non-empty prompt they clear it
+  (adding the discarded line to history) and leave the running turn
+  alone; only an empty prompt cancels. Previously Esc always
+  interrupted the in-flight turn, so a stray Esc discarded the typed
+  follow-up and killed the turn.
+
 - **DeepSeek V4.1 Flash everywhere it is served.** Added to the
   known-good registry on all five providers carrying it: `deepseek`
   (first-party, canonical id `deepseek-flash`; the old `v4-flash` /

@@ -341,13 +341,25 @@ suite "minline editor: cursor navigation":
     # Ctrl+Alt+H arrives as ESC + backspace byte (0x08).
     check minline.isEscapeTailByte(8)
 
-  test "bare Escape cancels like Ctrl+C":
-    var ed = initEditor()
-    let d = newDriver()
-    d.pushString "draft"
-    d.push Esc
-    expect InputCancelled:
-      discard d.run(ed, prompt = "> ")
+  test "bare Escape clears a non-empty line, cancels an empty one":
+    block nonEmpty:
+      # ESC on a non-empty line clears the draft (like Ctrl-C); it does
+      # NOT cancel. Distinguishing proof: the read continues and ends with
+      # EOF (input exhausted) rather than the InputCancelled a cancel
+      # would raise; the draft is gone.
+      var ed = initEditor()
+      let d = newDriver()
+      d.pushString "draft"
+      d.push Esc
+      expect EOFError:
+        discard d.run(ed, prompt = "> ")
+      check ed.line.text.len == 0
+    block empty:
+      var ed = initEditor()
+      let d = newDriver()
+      d.push Esc
+      expect InputCancelled:
+        discard d.run(ed, prompt = "> ")
 
   test "Ctrl+C with text clears the line and erases nothing above it":
     # Ctrl-C on a non-empty line clears the draft in place (it does NOT
@@ -363,13 +375,13 @@ suite "minline editor: cursor navigation":
       discard d.run(ed, prompt = "> ")
     check rowText(d.grid, 0) == "previous line"
 
-  test "bare ESC at idle does not erase the row above the prompt":
+  test "bare ESC with text clears the draft without erasing scrollback":
     var ed = initEditor()
     let d = newDriver()
     d.terminal.write "previous line\r\n"
     d.pushString "hello"
-    d.push Esc
-    expect InputCancelled:
+    d.push Esc        # clear the draft in place (no cancel)
+    expect EOFError:  # ESC left the line empty; the read then hits EOF
       discard d.run(ed, prompt = "> ")
     check rowText(d.grid, 0) == "previous line"
 
@@ -548,17 +560,19 @@ suite "minline editor: newline insertion (multiline)":
     check rowText(d.grid, 0) == "> x"
     check rowText(d.grid, 1).startsWith("  y")
 
-  test "late escape tails are not printed into the terminal grid":
+  test "bare Escape with no pending tail clears the draft in place":
+    # `pendingInput` reports no escape tail, so the leading ESC is bare:
+    # it clears the draft (like Ctrl-C) and the read continues, letting
+    # the next keystroke start a fresh line. The old draft must be gone.
     var ed = initEditor()
     let d = newDriver()
     d.pendingInput = proc(): bool = false
     d.pushString "x"
-    d.push XMod: Shift + Enter
-    expect InputCancelled:
-      discard d.run(ed, prompt = "> ")
-    check rowText(d.grid, 0) == "> x"
-    for r in 0..<d.grid.rows.len:
-      check "[" notin rowText(d.grid, r)
+    d.push Esc
+    d.pushString "y"
+    d.push Enter
+    check d.run(ed, prompt = "> ") == "y"
+    check rowText(d.grid, 0) == "> y"
 
   test "a late OSC 11 reply is swallowed, never painted into the prompt":
     # A terminal that answers the background-color query after the app
@@ -608,9 +622,8 @@ suite "minline editor: newline insertion (multiline)":
     d.push Enter
     d.pushString " edited"
     d.push Enter
-    d.push Esc
 
-    expect InputCancelled:
+    expect EOFError:
       discard d.run(ed, prompt = "> ")
     check submits == @["line1\nline2", "line1\nline2 edited"]
     check ed.line.text == "line1\nline2 edited"
@@ -639,8 +652,7 @@ suite "minline editor: newline insertion (multiline)":
     d.pushString "hello"
     d.push Enter      # queue; pendingCaret on, suffix shown, caret hidden
     d.pushString " world"  # cancels the queue, edits in place
-    d.push Esc
-    expect InputCancelled:
+    expect EOFError:
       discard d.run(ed, prompt = "> ")
     check cancelled == 1
     check ed.line.text == "hello world"
@@ -664,8 +676,7 @@ suite "minline editor: newline insertion (multiline)":
     d.push Enter      # queue; caret parked at end
     d.push Backspace  # cancels queue, deletes trailing 'o'
     d.pushString "o!"
-    d.push Esc
-    expect InputCancelled:
+    expect EOFError:
       discard d.run(ed, prompt = "> ")
     check cancelled == 1
     check ed.line.text == "hello!"
@@ -689,7 +700,6 @@ suite "minline editor: newline insertion (multiline)":
     d.pushString "hi"
     d.push Enter       # queue; pendingCaret on
     d.pushString " "   # first keystroke after queue: cancels + inserts
-    d.push Esc
     var clearsAfterCancel = 0
     var suffixPainted = false
     let write: WriteProc = proc(s: string) =
@@ -704,7 +714,7 @@ suite "minline editor: newline insertion (multiline)":
     let widthProc: WidthProc = proc(): int = d.width
     let hasPendingInput: HasPendingInputProc = proc(): bool =
       d.terminal.hasPendingInput()
-    expect InputCancelled:
+    expect EOFError:
       discard ed.readLineWith("> ", getCh, write, getWidth = widthProc,
                               hasPendingInput = hasPendingInput)
     check clearsAfterCancel == 1
