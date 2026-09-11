@@ -62,7 +62,7 @@
 ❯ first line
   second line
 
-⣿ ○0% 00:00:00
+⣿ ○0% 0
 ❯
 ===== 104 =====
 
@@ -78,7 +78,7 @@
 ❯ first line
   second line
 
-⣿ ○0% 00:00:00
+⣿ ○0% 0
 ❯ queued line one
 ===== 701 =====
 
@@ -94,7 +94,7 @@
 ❯ first line
   second line
 
-⣿ ○0% 00:00:00
+⣿ ○0% 0
 ❯ queued line one
   
 ===== 324 =====
@@ -111,7 +111,7 @@
 ❯ first line
   second line
 
-⣿ ○0% 00:00:00
+⣿ ○0% 0
 ❯ queued line one
   queued line two
 ===== 999 =====
@@ -128,7 +128,7 @@
 ❯ first line
   second line
 
-⣿ ○0% 00:00:00
+⣿ ○0% 0
 ❯ queued line one
   queued line two ⧖
 ===== 590 =====
@@ -146,7 +146,7 @@
 
 ● First multiline response.
 
-⣿ ○0% ↓6 00:00:00
+⣿ ○0% ↓6 0
 ❯ queued line one
   queued line two ⧖
 ===== 850 =====
@@ -164,7 +164,7 @@
 
 ● First multiline response.
 
-  ○1%  ↑120  ↓24  00:00:00
+  ○1%  ↑120  ↓24  0
 ❯ queued line one
   queued line two ⧖
 ===== 759 =====
@@ -181,14 +181,14 @@
 ❯ first line
 
 ● First multiline response.
-  ○1%  ↑120  ↓24  00:00:00
+  ○1%  ↑120  ↓24  0
 
 ❯ queued line one
   queued line two
 
 ● Queued multiline response.
 
-⣿ ○1% ↓6 00:00:00
+⣿ ○1% ↓6 0
 ❯
 ===== 334 =====
 
@@ -204,14 +204,14 @@
 ❯ first line
 
 ● First multiline response.
-  ○1%  ↑120  ↓24  00:00:00
+  ○1%  ↑120  ↓24  0
 
 ❯ queued line one
   queued line two
 
 ● Queued multiline response.
 
-  ○1%  ↑180  ↓32  00:00:00
+  ○1%  ↑180  ↓32  0
 ❯
 ===== 859 =====
 
@@ -227,13 +227,13 @@
 ❯ first line
 
 ● First multiline response.
-  ○1%  ↑120  ↓24  00:00:00
+  ○1%  ↑120  ↓24  0
 
 ❯ queued line one
   queued line two
 
 ● Queued multiline response.
-  ○1%  ↑180  ↓32  00:00:00
+  ○1%  ↑180  ↓32  0
 
   ○1%
 ❯

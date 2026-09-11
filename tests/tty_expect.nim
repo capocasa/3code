@@ -1756,10 +1756,12 @@ proc expectRowAppearsOnce*(s: TtySession; text: string): bool {.discardable.} =
 
 proc tokenBarRows(s: TtySession): seq[string] =
   ## Return rows that look like the compact token/status bar: a token slot
-  ## plus a timer suffix (legacy "45s" or the hh:mm:ss turn clock).
+  ## plus a trailing turn clock in clockDuration form (`4`, `2:08`,
+  ## `1:12:21` — bare seconds under a minute).
   for row in s.currentRows():
     if ("↑" in row or "↓" in row or "↻" in row) and
-        ("s" in row or row.contains(re"\d{2}:\d{2}:\d{2}")):
+        row.strip(leading = false, trailing = true).contains(
+          re" \d+(:\d{2}){0,2}$"):
       result.add row
 
 proc expectTokenBar*(s: TtySession; parts: openArray[string];
