@@ -1329,11 +1329,13 @@ when defined(posix):
 
 var
   DefaultShortcuts*: Table[string, string] = {
-    # ESC always cancels (even with text). CtrlC clears when the line is
-    # non-empty and cancels when empty. Up/Down move by visual row and
-    # fall through to history at the boundary; CtrlP/CtrlN are history-only.
+    # ESC and CtrlC clear a non-empty line (discarding the text into
+    # history) and only cancel when the line is empty. So a cancel key
+    # pressed mid-turn with a typed draft edits the draft instead of
+    # interrupting the turn. Up/Down move by visual row and fall through
+    # to history at the boundary; CtrlP/CtrlN are history-only.
     "cancel": "ESC CtrlC",
-    "clear": "CtrlC",
+    "clear": "ESC CtrlC",
     "quit-if-empty": "CtrlD",
     "home": "Home CtrlA",
     "end": "End CtrlE",
@@ -1508,8 +1510,8 @@ proc runCommandsForKey*(ed: var LineEditor, keyName: string): bool =
     fullRedraw(ed)
     return true
   # Deterministic order: clear before cancel so a key bound to both
-  # (CtrlC by default) clears when the line has text and cancels when
-  # empty. Cancel with no clear (ESC by default) always cancels.
+  # (ESC and CtrlC by default) clears when the line has text and cancels
+  # when empty. A key bound only to cancel always cancels.
   var ordered: seq[string] = @[]
   if "clear" in cmds: ordered.add "clear"
   if "cancel" in cmds: ordered.add "cancel"
@@ -1538,7 +1540,8 @@ var configuredShortcuts*: Table[string, string]
   ## share the same bindings without locks.
 
 proc runEscCommands(ed: var LineEditor) =
-  ## Run ESCMAP commands. Default: ESC always cancels. Double-ESC
+  ## Run ESCMAP commands. Default: ESC clears a non-empty line (adding
+  ## the text to history) and cancels only an empty one. Double-ESC
   ## requires two presses. Unbound ESC still cancels (historical).
   if runCommandsForKey(ed, "esc"): return
   cmdCancel(ed)
