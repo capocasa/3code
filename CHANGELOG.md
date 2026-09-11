@@ -1,6 +1,6 @@
 # Changelog
 
-**unreleased** - resume keeps the prompt cache hot
+**0.7.1** - private mode, per-model params, cache-hot resume, DeepSeek V4.1 Flash, GPT-6 Astra
 
 - **Windows sandbox works when setup ran as another account.** Two bugs
   blocked issue #33 ("Windows sandbox is not set up"). The sandwall
@@ -96,8 +96,6 @@
   path emits. A resumed turn hits the cache exactly like the live
   session's next turn would; an end-to-end test asserts live and resumed
   continuations produce identical request bytes.
-
-**0.7.1** - GPT-6 Astra on OpenAI and ChatGPT
 
 - **GPT-6 Astra.** `gpt-6-astra` is known-good for both the `openai`
   (API key) and `chatgpt` (Plus/Pro subscription) providers: 1.05M-token
