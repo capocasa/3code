@@ -1,30 +1,6 @@
 import std/[os, strutils, times, unittest]
 import threecode/[actions, types, streamexec]
 
-when defined(windows):
-  proc ensureBashForTest() =
-    ## On a clean Windows CI runner the bundled MSYS2
-    ## (`%LOCALAPPDATA%\3code\msys64`) is absent, so resolveBash() returns
-    ## "" and runStreamingBash would exit 127 for every case. The streaming
-    ## plumbing this suite exercises (line-by-line callback, stderr merge,
-    ## exit-code propagation, NUL suppression) is independent of *which*
-    ## bash runs it, so point cachedBash at the runner's git-bash when the
-    ## bundled one is missing. Production resolveBash is unchanged: it never
-    ## falls back to a system bash (the bundled toolset is the product
-    ## contract); only this test injects one.
-    if resolveBash().len == 0:
-      for cand in [r"C:\Program Files\Git\usr\bin\bash.exe",
-                   r"C:\Program Files\Git\bin\bash.exe"]:
-        if fileExists(cand):
-          cachedBash = cand
-          return
-else:
-  proc ensureBashForTest() = discard
-
-# Run once at process start. The Windows-specific suite at the bottom resets
-# cachedBash="" per-test and runs last, so this global set doesn't leak into it.
-ensureBashForTest()
-
 suite "streamexec: basic streaming":
   test "streams stdout lines":
     var lines: seq[string]
@@ -369,16 +345,24 @@ suite "streamexec: no external timeout dependency":
 
 when defined(windows):
   suite "streamexec: Windows bash resolution":
-    # On a clean CI runner no installer has run, so the bundled MSYS2 is
-    # absent and resolveBash() returns "". That is the documented contract
-    # (the startup guard hard-fails on it); assert it here rather than
-    # depending on the runner shipping bash at the bundle path.
-    test "resolveBash returns empty when no bundled bash":
+    # Issue #34: a Windows user with Git for Windows but no installer-run
+    # MSYS2 tree still needs a bash. resolveBash() now falls back to the
+    # Git for Windows install, so this suite asserts the fallback rather
+    # than the old "returns empty" contract. The bundled MSYS2 still wins
+    # when present, so the git-specific assertion only fires without it.
+    test "resolveBash finds a bash when the bundled MSYS2 is absent":
       cachedBash = ""  # defeat the threadvar cache
-      check resolveBash() == ""
+      let bundled = getEnv("LOCALAPPDATA") & r"\3code\msys64\usr\bin\bash.exe"
+      if not fileExists(bundled):
+        let b = resolveBash()
+        check b.len > 0
+        # The CI runner and most Windows boxes carry Git for Windows, so
+        # the fallback should resolve to its tree.
+        check b.toLowerAscii.contains("git")
 
-    test "runStreamingBash fails cleanly when no bundled bash":
+    test "runStreamingBash runs through the resolved bash":
       cachedBash = ""
       let act = Action(kind: akBash, body: "echo hello")
-      let (_, code, _) = runStreamingBash(act, nil, nil)
-      check code == 127
+      let (output, code, _) = runStreamingBash(act, nil, nil)
+      check code == 0
+      check "hello" in output
