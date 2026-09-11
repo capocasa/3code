@@ -131,6 +131,11 @@ suite "modelname: normalizeModelName":
     check normalizeModelName("zai-glm-5-2") == "glm-5.2"
     check normalizeModelName("glm-5-2") == "glm-5.2"
 
+  test "flattened vendor prefix chops at last family marker":
+    check normalizeModelName("deepseek-ai-deepseek-v4-pro") == "deepseek4-pro"
+    check normalizeModelName("deepseek-ai-deepseek-chat") == "deepseek-chat"
+    check normalizeModelName("mistral-ai-mistral-large-2512") == "mistral-large-2512"
+
   test "nvfp4 qualifier":
     check normalizeModelName("GLM-5.2-NVFP4") == "glm-5.2-nvfp4"
 

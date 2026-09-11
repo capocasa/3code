@@ -16,7 +16,8 @@
 ## the first non-numeric token (`flash`, `pro`, `sol`, `preview`); the
 ## rest are qualifiers (`a3b`, `0731`, `vision-exp`), kept as-is but
 ## lowercased. The suffix is the `:free` tail. Author prefixes
-## (`zai-org/`, `accounts/fireworks/models/`) are stripped.
+## (`zai-org/`, `accounts/fireworks/models/`) are stripped, including
+## dash-flattened ones (`zai-glm-5-2`, `deepseek-ai-deepseek-v4-pro`).
 
 import std/[sequtils, strutils]
 
@@ -145,6 +146,24 @@ func normalizeModelName*(name: string): string =
       break
   # (aliasExpansion duplicates this loop for callers that only need the
   # expansion; keep the two in sync.)
+  # Vendor prefix without slash: `zai-glm-5-3-flash`,
+  # `deepseek-ai-deepseek-v4-pro`. Chop everything before the last
+  # dash-delimited family marker; the position-0 logic below then parses
+  # the remainder. Last marker, because prefixes pile up on the left
+  # (`deepseek-ai-deepseek-v4-pro` has the family inside the vendor name
+  # too). Markers starting at the same index (`-gpt-`, `-gpt-oss-`) chop
+  # to the same place; ModelFamilies order picks the family.
+  var chop = -1
+  for f in ModelFamilies:
+    let idx = s.rfind("-" & f & "-")
+    if idx > chop: chop = idx
+  if chop >= 0:
+    s = s[chop + 1 .. ^1]
+  else:
+    for f in ModelFamilies:
+      if s.len > f.len + 1 and s.endsWith("-" & f):
+        s = s[s.len - f.len .. ^1]
+        break
   # Family: exact, dash-prefix, or glued (`qwen3.8`, `hy3`).
   var fam = ""
   var rest = ""
@@ -161,20 +180,6 @@ func normalizeModelName*(name: string): string =
       fam = f
       rest = s[f.len .. ^1]
       break
-  if fam == "":
-    # Vendor-prefixed without slash: `zai-glm-5-3-flash`,
-    # `deepseek-ai-deepseek-v4-pro`. Find the family marker mid-string.
-    for f in ModelFamilies:
-      let marker = "-" & f & "-"
-      let idx = s.find(marker)
-      if idx >= 0:
-        fam = f
-        rest = s[idx + marker.len .. ^1]
-        break
-      if s.endsWith("-" & f):
-        fam = f
-        rest = ""
-        break
   if fam == "":
     return name.strip.toLowerAscii  # unknown: keep as-is (lowercased)
   var toks = rest.split('-').filterIt(it != "")
