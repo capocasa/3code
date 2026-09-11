@@ -1125,9 +1125,10 @@ suite "terminal visual contract":
       # The token bar below the notice row keeps token information; the
       # message itself never lands in the bar.
       check "rate limit" notin tty.frames[noticeFrame].rows[noticeRow + 1]
-      # The turn timer in that same bar row counts up in hh:mm:ss form.
+      # The turn timer in that same bar row counts up in clockDuration
+      # form (`4`, `2:08`, `1:12:21`).
       check tty.frames[noticeFrame].rows[noticeRow + 1].contains(
-        re"\d{2}:\d{2}:\d{2}")
+        re"\d+(:\d{2}){0,2}\s*$")
       # ...and the retried reply reaches scrollback after the backoff.
       tty.expectInHistory "reply after retry"
       # The prompt is live again afterward (the footer was preserved, not

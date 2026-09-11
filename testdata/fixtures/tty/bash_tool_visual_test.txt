@@ -37,7 +37,7 @@
 
 ● Running bash checks.
 
-⣿ ○0% ↓5 00:00:00
+⣿ ○0% ↓5 0
 ❯
 ===== 914 =====
 
@@ -54,7 +54,7 @@
 
 ● Running bash checks.
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 338 =====
 
@@ -73,7 +73,7 @@
 
 $ printf 'ok-one\nok-two\n'
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 844 =====
 
@@ -93,7 +93,7 @@ $ printf 'ok-one\nok-two\n'
 $ printf 'ok-one\nok-two\n'
   ok-one
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 858 =====
 
@@ -114,7 +114,7 @@ $ printf 'ok-one\nok-two\n'
   ok-one
   ok-two
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 906 =====
 
@@ -137,7 +137,7 @@ $ printf 'ok-one\nok-two\n'
 
 $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 110 =====
 
@@ -161,7 +161,7 @@ $ printf 'ok-one\nok-two\n'
 $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 296 =====
 
@@ -186,7 +186,7 @@ $ printf 'bad-one\nbad-two\nbad-three\n'; exit 7
   bad-one
   bad-two
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 874 =====
 
@@ -212,7 +212,7 @@ $ printf 'ok-one\nok-two\n'
   bad-two
   bad-three
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 963 =====
 
@@ -240,7 +240,7 @@ $ printf 'ok-one\nok-two\n'
 
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 192 =====
 
@@ -269,7 +269,7 @@ $ printf 'ok-one\nok-two\n'
 $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\nscroll-8\nscroll-9\nscroll-10\n'
   scroll-1
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 844 =====
 
@@ -299,7 +299,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
   scroll-1
   scroll-2
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 152 =====
 
@@ -330,7 +330,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
   scroll-2
   scroll-3
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 863 =====
 
@@ -362,7 +362,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
   scroll-3
   scroll-4
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 345 =====
 
@@ -395,7 +395,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
   scroll-4
   scroll-5
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 607 =====
 
@@ -429,7 +429,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
   scroll-5
   scroll-6
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 326 =====
 
@@ -464,7 +464,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
   scroll-6
   scroll-7
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 330 =====
 
@@ -500,7 +500,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
   scroll-7
   scroll-8
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 593 =====
 
@@ -536,7 +536,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
   scroll-8
   scroll-9
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 258 =====
 
@@ -572,7 +572,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
   scroll-9
   scroll-10
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 134 =====
 
@@ -610,7 +610,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
 
 $ sleep 3; printf 'slow-done\n'
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 511 =====
 
@@ -649,7 +649,7 @@ $ printf 'scroll-1\nscroll-2\nscroll-3\nscroll-4\nscroll-5\nscroll-6\nscroll-7\n
 $ sleep 3; printf 'slow-done\n'
   slow-done
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 371 =====
 
@@ -691,7 +691,7 @@ $ sleep 3; printf 'slow-done\n'
 $ echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   xxxxxxx
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 690 =====
 
@@ -735,7 +735,7 @@ $ echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   xxx
 
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 ❯
 ===== 153 =====
 
@@ -778,11 +778,11 @@ $ echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   xxxxxxx
   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 xx
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 
 ● Bash checks complete.
 
-⣿ ○1% ↓5 00:00:00
+⣿ ○1% ↓5 0
 ❯
 ===== 419 =====
 
@@ -825,11 +825,11 @@ $ echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   xxxxxxx
   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 xx
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 
 ● Bash checks complete.
 
-  ○1%  ↑210  ↓20  00:00:00
+  ○1%  ↑210  ↓20  0
 ❯
 ===== 855 =====
 
@@ -872,10 +872,10 @@ $ echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
   xxxxxxx
   xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 xx
-  ○1%  ↑130  ↓18  00:00:00
+  ○1%  ↑130  ↓18  0
 
 ● Bash checks complete.
-  ○1%  ↑210  ↓20  00:00:00
+  ○1%  ↑210  ↓20  0
 
   ○1%
 ❯
