@@ -247,8 +247,8 @@ Useful input keys:
 | Ctrl+L | clear the screen |
 | Alt+E | edit the input buffer in $VISUAL/$EDITOR |
 | Ctrl+X Ctrl+E | same (emacs edit-and-execute-command) |
-| Ctrl+C | clear current input |
-| Esc | cancel the current operation |
+| Ctrl+C | clear current input; cancel the turn when it is empty |
+| Esc | same as Ctrl+C |
 | Ctrl+D | exit |
 
 If you forget one, `:help` prints the current command and key list.

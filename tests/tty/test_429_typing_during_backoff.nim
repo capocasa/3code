@@ -4,21 +4,15 @@ discard """
   ## the long backoff window + typing stress fills the ConPTY output pipe).
 """
 ## Regression: text typed into the buffered editor while a 429 retry is in
-## flight must survive both ending paths of the retry block — ESC
-## cancelling the backoff and the retry budget exhausting cleanly. The
-## earlier behavior wiped `ed.line.text` on the InputCancelled path so the
-## prompt came back empty (`❯ `) and the user had to retype the whole
-## follow-up. The visual anchor then landed at column 2 of an empty
-## editor, which read as "the caret is on the wrong column" to anyone
-## looking at the screen.
+## flight must not disturb the retry. A cancel key (Ctrl-C or ESC) with a
+## non-empty draft clears the draft into history instead of interrupting
+## the turn, so the backoff keeps retrying and the typed text is
+## recoverable from history.
 ##
-## The empty-editor case is already covered by `test_retry_exhaustion`
-## (3x 503) and the Ctrl-C case by `test_interrupt_prestream_freeze`. The
-## thing those tests do NOT cover is "text the user typed during the
-## backoff must still be on the prompt row after the cancel/exhaust
-## resolves". This file covers that gap on the 429 path specifically,
-## which has its own backoff schedule (rateRetryLevel, capped at 90s) and
-## is the path users actually hit.
+## The empty-editor cancel case is covered by
+## `test_interrupt_prestream_freeze`. This file covers the 429 path
+## specifically (its own backoff schedule, rateRetryLevel capped at 90s),
+## which is the path users actually hit.
 import std/[json, os, strutils, unittest]
 import tty_expect
 import stub_helpers
@@ -56,15 +50,14 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
   ]
 
 suite "429 backoff with buffered typing":
-  test "ESC during 429 backoff preserves the typed follow-up prompt":
+  test "ESC during 429 backoff clears the draft, does not interrupt":
     let root = newFixture("429_typed_esc")
     writeConfiguredProvider(root)
-    # 2x 429 (StubMaxAttempts=2 with -d:fastStubRetries) then a normal
-    # reply. The 2nd 429 is the one that would exhaust the budget if we
-    # did not Ctrl-C; we Ctrl-C during the first backoff to take the
-    # "interrupted during retry backoff" path.
+    # 1x 429 then a normal reply. The 429 triggers one rate backoff (~1s
+    # under fastStubRetries); ESC with a typed draft must clear the draft
+    # (like Ctrl-C) instead of interrupting the turn, so the stub retries
+    # and the turn recovers on its own.
     writeFile(root / "run" / "stub_responses.json", $(%*[
-      {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
       {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
       {"role": "assistant", "preStreamDelayMs": 50,
        "content": "recovered", "contentChunks": ["recovered"],
@@ -85,9 +78,7 @@ suite "429 backoff with buffered typing":
     tty.expect "go"
     tty.send "\n"
     # Wait for the retry notice to land in scrollback so the spinner is
-    # mid-backoff when we type. Generous budget: on the slow macOS CI
-    # runner the app's submit-to-notice latency alone approached the 5s
-    # default (two OSX flakes).
+    # mid-backoff when we type.
     tty.expectNoticeRow("429")
     tty.drain(50)
     # Type the follow-up. The text lives in `ed.line.text` while a turn
@@ -96,38 +87,19 @@ suite "429 backoff with buffered typing":
     tty.send "next prompt"
     tty.expect "next prompt"
     tty.drain(100)
-    # ESC. The interrupt should preserve the buffered text and leave
-    # the caret at the end of the typed string (ESC never edits; a
-    # Ctrl-C here would clear the draft instead of interrupting).
+    # ESC with a non-empty draft clears the draft (like Ctrl-C) and must
+    # NOT interrupt the turn: the 429 backoff keeps retrying.
     tty.send "\x1b"
-    tty.expectInHistory "interrupted by user"
-    tty.drain(500)
+    tty.drain(300)
     tty.expectAlive()
-    # Post-cancel prompt contract: the prompt glyph and the typed text
-    # are both on the caret row, and the caret sits past the typed text
-    # (so the user can hit Enter to send it as the next prompt).
-    let f = tty.frames[^1]
-    doAssert not f.cursorHidden,
-      "REGRESSION: caret hidden after 429+ESC with buffered text"
-    let caretRow = f.rows[f.cursorRow]
-    doAssert caretRow.contains("next prompt"),
-      "REGRESSION: buffered 'next prompt' not on caret row " &
-        $f.cursorRow & ", got: '" & caretRow & "'"
-    doAssert caretRow.contains("\u276f"),
-      "REGRESSION: prompt glyph \u276f missing from caret row " &
-        $f.cursorRow & ", got: '" & caretRow & "'"
-    # The caret must sit past the typed text, not at column 2 of an
-    # empty editor. The exact column is a cell count, not a byte count
-    # (the `❯` is a 3-byte UTF-8 glyph but 1 cell), so we only assert
-    # the lower bound.
-    doAssert f.cursorCol > 12,
-      "REGRESSION: caret at col " & $f.cursorCol &
-        " but should be past the typed 'next prompt' (>= 13); row: '" &
-        caretRow & "'"
-    # The preserved follow-up must actually be sent on Enter.
-    tty.send "\n"
+    tty.expectNeverInHistory "interrupted by user"
+    # The draft is gone from the live prompt row.
+    check "next prompt" notin tty.screenText()
+    # The backoff runs to completion and the turn recovers on its own.
     tty.expectInHistory "recovered"
-    echo "  PASS: 429+ESC kept the buffered follow-up on the prompt row"
+    # The cleared line was recorded in history, exactly like a Ctrl-C clear.
+    check "next prompt" in readFile(root / "xdg" / "3code" / "history")
+    echo "  PASS: 429+ESC cleared the draft without interrupting the backoff"
 
   test "429 budget exhaustion preserves the typed follow-up prompt":
     let root = newFixture("429_typed_exhaust")
