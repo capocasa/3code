@@ -35,10 +35,10 @@ jobs:
         run: echo "$HOME/nim-toolchain/bin" >> $GITHUB_PATH
 
       - name: Install dependencies
-        # sandwall is not on the public package registry; install it from
-        # its git URL first so --depsOnly can resolve it from the local store.
+        # All deps resolve by name from threecode.nimble via the public
+        # package registry; tags are versions, so tag builds get tagged
+        # dependency versions.
         run: |
-          nimble install -y https://github.com/capocasa/sandwall
           nimble install -y --depsOnly
 
       - name: Compute build flags

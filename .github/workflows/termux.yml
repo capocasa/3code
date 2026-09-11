@@ -21,8 +21,10 @@ jobs:
           nim-install-directory: nim-toolchain
 
       - name: Install dependencies
+        # All deps resolve by name from threecode.nimble via the public
+        # package registry; tags are versions, so tag builds get tagged
+        # dependency versions.
         run: |
-          nimble install -y https://github.com/capocasa/sandwall
           nimble install -y --depsOnly
 
       - name: Download Android NDK
@@ -152,8 +154,10 @@ jobs:
           nim-install-directory: nim-toolchain
 
       - name: Install dependencies
+        # All deps resolve by name from threecode.nimble via the public
+        # package registry; tags are versions, so tag builds get tagged
+        # dependency versions.
         run: |
-          nimble install -y https://github.com/capocasa/sandwall
           nimble install -y --depsOnly
 
       - name: Download Android NDK
