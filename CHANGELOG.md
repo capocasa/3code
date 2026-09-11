@@ -2,6 +2,17 @@
 
 **unreleased** - resume keeps the prompt cache hot
 
+- **Windows: run from a release folder with Git for Windows' bash.** 3code
+  no longer needs the installer's bundled MSYS2 to find a shell. When the
+  bundle is absent, `resolveBash()` falls back to a Git for Windows install:
+  the `SOFTWARE\GitForWindows` `InstallPath` registry value, then
+  `%ProgramFiles%\Git`, `%ProgramW6432%\Git`, `%ProgramFiles(x86)%\Git`, and
+  `%LOCALAPPDATA%\Programs\Git`, preferring `bin\bash.exe` (its launcher
+  sets `MSYSTEM` and a PATH carrying the unix tools and `git.exe`) over the
+  bare `usr\bin\bash.exe`. So `winget install Git.Git`, unpack a release zip,
+  run `3code.exe`. Fixes #34, where Git Bash was on the box but 3code still
+  reported "bash not found".
+
 - **DeepSeek V4.1 Flash everywhere it is served.** Added to the
   known-good registry on all five providers carrying it: `deepseek`
   (first-party, canonical id `deepseek-flash`; the old `v4-flash` /

@@ -56,10 +56,12 @@ The following were previously disabled and are now **enabled and adapted**
   test is identical cross-platform; only the input encoding differs.
 - `tests/api/test_api.nim` — probe subprocess outPath now carries the `.exe`
   suffix on Windows.
-- `tests/stream/test_streamexec.nim` — injects the runner's git-bash via
-  `cachedBash` when the bundled MSYS2 is absent, so the streaming-plumbing
-  tests (line callback, stderr merge, exit codes, NUL suppression) run
-  against a real bash. Production `resolveBash()` is unchanged.
+- `tests/stream/test_streamexec.nim` runs its streaming-plumbing
+  tests (line callback, stderr merge, exit codes, NUL suppression) through
+  the bash `resolveBash()` resolves. On the runner that is the Git for
+  Windows `bin\bash.exe` (the bundled MSYS2 is absent), which is exactly
+  the issue #34 fallback: production `resolveBash()` now finds a Git for
+  Windows install when the installer's MSYS2 tree is missing.
 - `tests/config/test_provider_wizard.nim` — two of the nine subtests
   ("add wizard lists models sorted alphabetically", "edit wizard lists
   models sorted alphabetically") capture wizard stdout by reassigning the

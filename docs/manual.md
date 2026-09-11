@@ -73,6 +73,26 @@ curl -fsSL https://3code.capocasa.dev/install | sh
 irm https://3code.capocasa.dev/install.ps1 | iex
 ```
 
+### Manual install on Windows
+
+The PowerShell one-liner also downloads a private MSYS2 tree (bash + unix
+tools) into `%LOCALAPPDATA%\3code\msys64`, so 3code always has a shell of its
+own. If you would rather not, install
+[Git for Windows](https://git-scm.com/download/win) and run 3code from a plain
+release folder:
+
+1. Download `3code-windows-amd64.zip` from the
+   [latest release](https://github.com/capocasa/3code/releases/latest) and
+   unpack it, for example to `C:\tools\3code`. The zip carries `3code.exe`,
+   the OpenSSL DLLs, and `cacert.pem`, so the folder is self-contained.
+2. Put the folder on your `PATH`, or call `3code.exe` by full path.
+3. Run it. 3code resolves bash in this order: its own bundled MSYS2, then a
+   `bash_path` setting, then the Git for Windows install. With Git for Windows
+   present, no MSYS2 download is needed.
+
+The one-time `3code setup` (sandbox user + network fence) is still required on
+Windows; it needs an elevated shell.
+
 ### Termux on Android arm64
 
 Inside Termux, the same one-liner installs the Android arm64 build:
