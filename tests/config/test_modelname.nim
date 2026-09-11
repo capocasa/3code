@@ -127,6 +127,10 @@ suite "modelname: normalizeModelName":
   test "glm turbo":
     check normalizeModelName("zai-glm-5-turbo") == "glm5-turbo"
 
+  test "mistral-hosted glm id normalizes like z.ai's":
+    check normalizeModelName("zai-glm-5-2") == "glm-5.2"
+    check normalizeModelName("glm-5-2") == "glm-5.2"
+
   test "nvfp4 qualifier":
     check normalizeModelName("GLM-5.2-NVFP4") == "glm-5.2-nvfp4"
 

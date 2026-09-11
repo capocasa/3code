@@ -256,10 +256,14 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # mistral (api.mistral.ai/v1; bare model ids). Large 3 (675B-A41B MoE,
     # Apache 2.0) and Medium 3.5 (128B dense, Modified MIT), both 256K ctx,
     # multimodal. Medium 3.5 carries reasoning_effort none/high (none is
-    # the wire default); Large 3 has no advertised knob. Thinking chunks
-    # are not replayed, so tbNone.
+    # the wire default); Large 3 has no advertised knob. The platform also
+    # hosts third-party GLM-5.2 (`zai-glm-5-2`, 1M ctx) on its own
+    # reasoning_effort ladder; the strict input validator rejects
+    # `reasoning_content` on replayed assistant messages, so everything
+    # here is tbNone.
     ("mistral", "mistral-large-2512", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false),
     ("mistral", "mistral-medium-3-5", "mistral", "", "medium", "high", 0.7, 8192, tbNone, false, 262_144, false),
+    ("mistral", "zai-glm-5-2", "glm", "5", "2", "high", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("openrouter", "mistralai/mistral-large-2512", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false),
     ("openrouter", "mistralai/mistral-medium-3-5", "mistral", "", "medium", "high", 0.7, 8192, tbNone, false, 262_144, false),
 

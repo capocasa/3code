@@ -912,13 +912,30 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
           # echo back on the next turn; only render the ticker when enabled.
           var r = delta{"reasoning_content"}.getStr("")
           if r.len == 0: r = delta{"reasoning"}.getStr("")
+          var c = delta{"content"}.getStr("")
+          # Mistral-native chunked thinking: while the model reasons,
+          # delta.content is an array of typed chunks instead of a string
+          # ({"type":"thinking","thinking":[{"type":"text","text":..}]},
+          # plus a {"type":"text"} chunk on the thinking->answer
+          # transition). Fold both into the string paths below.
+          let cn = delta{"content"}
+          if cn != nil and cn.kind == JArray:
+            for chunk in cn:
+              case chunk{"type"}.getStr("")
+              of "thinking":
+                let th = chunk{"thinking"}
+                if th != nil and th.kind == JArray:
+                  for t in th:
+                    r &= t{"text"}.getStr("")
+              of "text":
+                c &= chunk{"text"}.getStr("")
+              else: discard
           if r.len > 0:
             accReasoning &= r
             slurped += r.len
             fireProgress(job, slurped)
             if not contentStarted:
               fireReasoning(job, accReasoning, slurped)
-          let c = delta{"content"}.getStr("")
           if c.len > 0:
             accContent &= c
             slurped += c.len
@@ -1689,9 +1706,24 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
     result.errBody = body
     result.errMsg = "response missing choices[0].message"
     return
-  let content = message{"content"}.getStr("")
+  var content = message{"content"}.getStr("")
   var reasoning = message{"reasoning_content"}.getStr("")
   if reasoning.len == 0: reasoning = message{"reasoning"}.getStr("")
+  # Mistral-native chunked content: with reasoning on, message.content is
+  # an array of thinking/text chunks instead of a string (same shape the
+  # streaming path folds). Without it, content is a plain string.
+  let mc = message{"content"}
+  if mc != nil and mc.kind == JArray:
+    for chunk in mc:
+      case chunk{"type"}.getStr("")
+      of "thinking":
+        let th = chunk{"thinking"}
+        if th != nil and th.kind == JArray:
+          for t in th:
+            reasoning &= t{"text"}.getStr("")
+      of "text":
+        content &= chunk{"text"}.getStr("")
+      else: discard
   var toolCalls =
     if message{"tool_calls"} != nil and message{"tool_calls"}.kind == JArray:
       message{"tool_calls"}
@@ -1977,6 +2009,10 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
   ## - `reasoning: {effort: ...}` on OpenRouter for GLM-5.2 (and the
   ##   OpenCode gateways serving 5.3 and omen-alpha); OpenRouter maps
   ##   `high` to high and `max` to its native `xhigh`.
+  ## - Top-level `reasoning_effort` on Mistral's hosting of `zai-glm-5-2`:
+  ##   the platform ladder none/minimal/low/medium/high/xhigh/max
+  ##   (live-verified 422 on anything else). `off` maps to `none`; the
+  ##   z.ai-native `thinking` object is extra_forbidden there.
   ## - `chat_template_kwargs.enable_thinking` (bool) on vLLM stacks (nvidia,
   ##   hetzner); other vLLM GLM providers (nebius, deepinfra, fireworks)
   ##   accept the same knob but always think when it's omitted.
@@ -2028,6 +2064,13 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
       of "off": body["reasoning"] = %*{"enabled": false}
       of "max": body["reasoning"] = %*{"effort": "xhigh"}
       else: body["reasoning"] = %*{"effort": "high"}
+  of "mistral":
+    case p.reasoning
+    of "off": body["reasoning_effort"] = %"none"
+    of "low": body["reasoning_effort"] = %"low"
+    of "on", "high": body["reasoning_effort"] = %"high"
+    of "max": body["reasoning_effort"] = %"max"
+    else: discard
   of "nvidia", "hetzner":
     if glm53:
       case p.reasoning

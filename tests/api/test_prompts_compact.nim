@@ -381,6 +381,15 @@ suite "compact: contextWindowFor (known-good)":
     let p = Profile(name: "zai.test", model: "glm-5.2", family: "glm")
     check contextWindowFor(p) == 1_000_000
 
+  test "mistral-hosted zai-glm-5-2: glm family, 1M window, tbNone":
+    # api.mistral.ai's strict input validator rejects `reasoning_content`
+    # on replayed assistant messages (extra_forbidden), so the row keeps
+    # tbNone like the first-party mistral rows.
+    check knownGoodFamily("mistral", "zai-glm-5-2") == "glm"
+    check contextWindowFor(Profile(name: "mistral.test",
+                                   model: "zai-glm-5-2")) == 1_000_000
+    check knownGoodThinkBack("mistral", "zai-glm-5-2") == tbNone
+
   test "glm-5.1 profile returns 200000":
     let p = Profile(name: "zai.test", model: "glm-5.1", family: "glm")
     check contextWindowFor(p) == 200_000

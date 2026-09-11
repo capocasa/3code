@@ -105,6 +105,47 @@ proc makeSseReasoningThenTool(reasoning, cmd, id: string): string =
   result.add("data: " & $ %*{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"id":id} & "\n\n")
   result.add("data: [DONE]\n\n")
 
+proc makeSseMistralChunkedThinking(thinking, text, id: string): string =
+  ## Mistral-native reasoning stream (zai-glm-5-2 on api.mistral.ai, and
+  ## first-party mistral-medium-3-5): while the model thinks, delta.content
+  ## is an ARRAY of typed chunks instead of a string; the answer phase goes
+  ## back to plain strings. No reasoning_content field anywhere. Shapes
+  ## captured live against api.mistral.ai.
+  result = ""
+  result.add("data: " & $ %*{"choices":[{"index":0,"delta":{
+    "role":"assistant","content":""}}],"id":id} & "\n\n")
+  result.add("data: " & $ %*{"choices":[{"index":0,"delta":{"index":0,
+    "content":[{"type":"thinking","closed":true,
+    "thinking":[{"type":"text","text":thinking}]}]}}],"id":id} & "\n\n")
+  # thinking -> answer transition can carry a text chunk in the array
+  result.add("data: " & $ %*{"choices":[{"index":0,"delta":{"index":0,
+    "content":[{"type":"text","text":"OK, "}]}}],"id":id} & "\n\n")
+  result.add("data: " & $ %*{"choices":[{"index":0,"delta":{
+    "index":0,"content":text}}],"id":id} & "\n\n")
+  result.add("data: " & $ %*{"choices":[{"index":0,"delta":{
+    "index":0,"content":""},"finish_reason":"stop"}],"id":id} & "\n\n")
+  result.add("data: [DONE]\n\n")
+
+proc makeSseMistralChunkedThinkingTool(think1, think2, args, id: string): string =
+  ## Same Mistral chunked-thinking stream, but the turn ends in a tool
+  ## call. Live shape: thinking fragments and tool_calls deltas interleave,
+  ## sometimes in the SAME delta (tool_calls + a content array together).
+  result = ""
+  result.add("data: " & $ %*{"choices":[{"index":0,"delta":{"index":0,
+    "content":[{"type":"thinking","closed":true,
+    "thinking":[{"type":"text","text":think1}]}]}}],"id":id} & "\n\n")
+  result.add("data: " & $ %*{"choices":[{"index":0,"delta":{
+    "tool_calls":[{"id":"chatcmpl-tool-" & id,"type":"function",
+    "function":{"name":"bash","arguments":""},"index":0}],"index":0,
+    "content":[{"type":"thinking","closed":true,
+    "thinking":[{"type":"text","text":think2}]}]}}],"id":id} & "\n\n")
+  result.add("data: " & $ %*{"choices":[{"index":0,"delta":{
+    "tool_calls":[{"type":"function","function":{"arguments":args},
+    "index":0}],"index":0,"content":""}}],"id":id} & "\n\n")
+  result.add("data: " & $ %*{"choices":[{"index":0,"delta":{
+    "index":0,"content":""},"finish_reason":"tool_calls"}],"id":id} & "\n\n")
+  result.add("data: [DONE]\n\n")
+
 proc makeSseMultiTool(cmd1, cmd2, id: string): string =
   ## SSE stream with two tool_calls, each fragmented across deltas.
   result = ""
@@ -294,6 +335,38 @@ suite "streaming SSE tool-call accumulation":
     check result{"tool_calls"}.len == 1
     let args = result{"tool_calls"}[0]{"function"}{"arguments"}.getStr()
     check args == "{\"command\":\"echo MIXED_99\"}"
+    joinThread(srv)
+    server.socket.close()
+    closeCachedStreamConn()
+
+  test "mistral chunked thinking folds into content and reasoning":
+    let server = newSseServer(makeSseMistralChunkedThinking(
+      "The user asks for a short reply.", "all good.", "id-m1"))
+    var srv: Thread[SseServer]
+    createThread(srv, serveThread, server)
+    var usage = Usage()
+    let result = callModel(testProfile(server), %*[{"role": "user", "content": "say ok"}], usage, 0)
+    check result != nil
+    check result{"content"}.getStr == "OK, all good."
+    check result{"reasoning_content"}.getStr == "The user asks for a short reply."
+    joinThread(srv)
+    server.socket.close()
+    closeCachedStreamConn()
+
+  test "mistral chunked thinking interleaved with a tool call":
+    let server = newSseServer(makeSseMistralChunkedThinkingTool(
+      "The user wants a command. ", "I will call bash.",
+      "{\"command\":\"echo MISTRAL_TOOL_9\"}", "id-m2"))
+    var srv: Thread[SseServer]
+    createThread(srv, serveThread, server)
+    var usage = Usage()
+    let result = callModel(testProfile(server), %*[{"role": "user", "content": "run echo"}], usage, 0)
+    check result != nil
+    check result{"tool_calls"}.len == 1
+    check result{"tool_calls"}[0]{"function"}{"arguments"}.getStr ==
+      "{\"command\":\"echo MISTRAL_TOOL_9\"}"
+    check result{"reasoning_content"}.getStr ==
+      "The user wants a command. I will call bash."
     joinThread(srv)
     server.socket.close()
     closeCachedStreamConn()
