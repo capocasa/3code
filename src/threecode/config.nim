@@ -972,6 +972,7 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("qwen-us",     "https://dashscope-us.aliyuncs.com/compatible-mode/v1"),
   ("sambanova",   "https://api.sambanova.ai/v1"),
   ("scaleway",    "https://api.scaleway.ai/v1"),
+  ("tencent",     "https://tokenhub-intl.tencentcloudmaas.com/v1"),
   ("together",    "https://api.together.xyz/v1"),
   ("together-eu", "https://eu.api.together.xyz/v1"),
   ("venice",      "https://api.venice.ai/api/v1"),
