@@ -90,8 +90,10 @@ release folder:
    `bash_path` setting, then the Git for Windows install. With Git for Windows
    present, no MSYS2 download is needed.
 
-The one-time `3code setup` (sandbox user + network fence) is still required on
-Windows; it needs an elevated shell.
+The one-time `3code setup` (sandbox user + network fence) is still required
+on Windows. It needs admin rights: run it from a console/RDP session and it
+asks for them via the Windows UAC prompt (from ssh it prints what to do
+instead; there the run must come from an admin account or elevated shell).
 
 ### Termux on Android arm64
 
@@ -690,11 +692,15 @@ macOS confines it to loopback with Seatbelt. 3code sets the standard proxy
 variables and a Git SSH proxy command for the child process. Denied HTTP
 connections return 403.
 
-On Windows, host rules require one elevated setup command:
+On Windows, host rules require one admin setup command:
 
 ```
 3code setup
 ```
+
+It asks for admin rights through the UAC prompt when run unelevated from a
+console or RDP session; over ssh (no screen for the prompt) it says so and
+exits - run it from an account with admin instead.
 
 Without that setup, 3code warns and runs the command without a network fence.
 That is safer than pretending the fence exists. Set `sandbox_wall_warn = off`
