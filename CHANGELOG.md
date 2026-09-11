@@ -1,5 +1,18 @@
 # Changelog
 
+**Unreleased**
+
+- **GLM-5.2 on Mistral.** api.mistral.ai now hosts third-party
+  `zai-glm-5-2` (1M context): known-good as `mistral.zai-glm-5-2`, on the
+  platform's top-level `reasoning_effort` ladder (none/minimal/low/medium/
+  high/xhigh/max, live-verified; `off` maps to `none`, the z.ai `thinking`
+  object is extra_forbidden, and `reasoning_content` on replayed assistant
+  messages 422s, hence tbNone). Mistral's chunked thinking — `delta.content`
+  as an array of thinking/text chunks while reasoning, same shape in
+  non-streaming `message.content` — now folds into the regular
+  content/reasoning paths, so first-party `mistral-medium-3-5` benefits
+  too.
+
 **0.7.1** - private mode, per-model params, cache-hot resume, DeepSeek V4.1 Flash, GPT-6 Astra
 
 - **Windows sandbox works when setup ran as another account.** Two bugs

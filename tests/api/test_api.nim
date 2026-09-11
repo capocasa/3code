@@ -229,6 +229,35 @@ suite "api request shaping":
       applyReasoning(p, body)
       check body{"reasoning"}{"effort"}.getStr == "high"
 
+  test "mistral-hosted glm-5.2 rides the platform reasoning_effort ladder":
+    # api.mistral.ai serves `zai-glm-5-2` with its own top-level
+    # reasoning_effort (none/minimal/low/medium/high/xhigh/max; the z.ai
+    # `thinking` object is extra_forbidden). Our off/high/max maps onto
+    # none/high/max.
+    check knownGoodReasonings("mistral", "zai-glm-5-2") == @["off", "high", "max"]
+    block offn:
+      var body = %*{"stream": true}
+      let p = Profile(name: "mistral.zai-glm-5-2", family: "glm",
+                      version: "5", variant: "2",
+                      model: "zai-glm-5-2", reasoning: "off")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "none"
+      check "thinking" notin body
+    block highn:
+      var body = %*{"stream": true}
+      let p = Profile(name: "mistral.zai-glm-5-2", family: "glm",
+                      version: "5", variant: "2",
+                      model: "zai-glm-5-2", reasoning: "high")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "high"
+    block maxn:
+      var body = %*{"stream": true}
+      let p = Profile(name: "mistral.zai-glm-5-2", family: "glm",
+                      version: "5", variant: "2",
+                      model: "zai-glm-5-2", reasoning: "max")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "max"
+
   test "glm-5.3 forces thinking: low/high/max, no off":
     # 5.3 replaced the thinking toggle with a top-level reasoning_effort
     # knob (z.ai) normalized to reasoning.effort on gateways. Off is gone.
