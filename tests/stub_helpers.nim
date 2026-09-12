@@ -4,7 +4,13 @@ import std/[os, osproc, strutils, sha1]
 
 proc nimbleDepFlags*(): string =
   ## Out-of-tree probes must explicitly load the project's dependency paths.
-  for line in readFile(getCurrentDir() / "nimble.paths").splitLines:
+  ## `nimble.paths` is a `nimble setup` artifact: present in a dev tree, but
+  ## absent in CI, which installs deps into the default nimble path (found by
+  ## name without any flags). Only inject flags when the file is there.
+  let paths = getCurrentDir() / "nimble.paths"
+  if not fileExists(paths):
+    return ""
+  for line in readFile(paths).splitLines:
     let arg = line.strip
     if arg.startsWith("--path:\"") and arg.endsWith("\""):
       result.add " " & quoteShell("--path:" & arg[8 ..< arg.len - 1])
