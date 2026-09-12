@@ -93,6 +93,9 @@ suite "no-config bootstrap":
       "[settings]\ncurrent = \"ghost-provider\"\n")
     let tty = startTty(root)
     defer: tty.close()
+    tty.drain(2500)
+    echo "DIAG screen=[", tty.screenText(), "]"
+    echo "DIAG raw=[", tty.cleanRaw(), "]"
     tty.expect "no [provider] section"
     tty.expectExit(ExitConfig.int, timeoutMs = 5000)
 
