@@ -326,4 +326,14 @@ proc die*(msg: string, code = 1) {.noreturn.} =
   # trailing newline. Without this, the error appends to the prompt on the
   # same row. At startup the cursor is at col 0, so the extra line is inert.
   stderr.write "\n3code: " & msg & "\n"
+  stderr.flushFile
+  when defined(windows):
+    # Under the ConPTY tty harness the pseudoconsole host relays the child's
+    # output asynchronously. A child that writes and exits immediately races
+    # that relay and the final write is dropped (reproduced with a bare
+    # `fputs+return`: captured when it sleeps ~20ms first, lost otherwise).
+    # Give the relay a bounded window so the harness sees the diagnostic.
+    # Only under the test harness; a real console keeps the host alive.
+    if getEnv("THREECODE_TEST_FRAME_FD").len > 0:
+      sleep(200)
   quit code

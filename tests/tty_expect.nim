@@ -123,12 +123,20 @@ type
     ## sequences (model-vs-physical desync class).
     pendingEsc*: string
     ## Cursor visibility as declared by the app's own DECSET/DECRST 25
-    ## sequences. `beginTurn` hides the cursor for the whole turn and
-    ## `endTurn` shows it, so this is the only reliable idle signal:
-    ## with the persistent prompt the ❯ caret row is painted while a
-    ## turn is still live, which used to fool caret-only idle checks
-    ## into sending the next input mid-turn (the gui_join_freeze race).
+    ## sequences. NOT a reliable idle signal on its own: beginTurn hides the
+    ## cursor, but the streaming repaint and the input thread's keystroke
+    ## redraw both re-show it while a turn is live (so buffered typing stays
+    ## legible), so the caret sits on the ❯ prompt row mid-turn too.
+    ## `turnIdle` (below) is the authoritative signal; this is the fallback
+    ## used where the frame channel is inert (ConPTY).
     cursorShown*: bool
+    ## The app's own turn state, tracked from the `'b'`/`'i'` events it
+    ## writes on the frame channel at `beginTurn` / turn end. The caret is
+    ## shown on the prompt row during a running turn too (buffered typing
+    ## stays visible), so `cursorShown` cannot distinguish idle from a
+    ## quiet mid-turn; this can. Starts true (no turn yet). POSIX only:
+    ## the frame channel is inert under ConPTY.
+    turnIdle*: bool
 
 const
   DefaultTtyCols* = 120
@@ -493,12 +501,24 @@ proc pollOnce*(s: TtySession, waitMs: int; recordIdleFrame = true): bool =
       # is reaped and `s.exited` is set (an early return here skips reaping
       # and leaves a zombie the caller never observes).
       if n > 0:
+        # A read carries one event byte per child emit (the child blocks on
+        # the ack between writes). `'f'` is a render boundary (flush a
+        # frame); `'b'`/`'i'` are turn-state only and must NOT add a frame,
+        # or every golden frame sequence would gain spurious frames.
+        var sawFrame = false
+        for i in 0 ..< n:
+          case buf[i]
+          of 'i': s.turnIdle = true
+          of 'b': s.turnIdle = false
+          else: sawFrame = true
         while s.readPtyChunk(5):
           discard
-        s.flushFrame(force = true)
+        if sawFrame:
+          s.flushFrame(force = true)
         if s.frameAckFd > 0:
-          var ch = 'a'
-          discard posix.write(s.frameAckFd, addr ch, 1)
+          for i in 0 ..< n:
+            var ch = 'a'
+            discard posix.write(s.frameAckFd, addr ch, 1)
         result = true
     elif not result and recordIdleFrame:
       s.flushFrame()
@@ -700,6 +720,7 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       started: epochTime(),
       keepHistory: keepHistory,
       cursorShown: true,
+      turnIdle: true,
       exitCode: -1,
       frameEventFd: frameRead,
       frameAckFd: ackWrite,
@@ -872,6 +893,7 @@ proc newTtySession*(bin: string; args: openArray[string] = [];
       started: epochTime(),
       keepHistory: keepHistory,
       cursorShown: true,
+      turnIdle: true,
       exitCode: -1)
     discard result.resize(cols, rows)
 
@@ -1631,20 +1653,25 @@ proc expectAlive*(s: TtySession;
       s.dumpFramesAround("")
 
 proc expectIdleCaret*(s: TtySession; timeoutMs = 5000) =
-  ## Wait for the turn to fully end: the caret is visible again (the cursor is
-  ## hidden for the whole turn by `beginTurn`, shown again by `endTurn`) and
-  ## sits on the live `❯` prompt row. This is the reliable turn-completion
-  ## signal under eager streaming, where content and the prompt glyph both
-  ## appear mid-turn, so `expect "❯"` and content-count checks can fire while
-  ## the turn is still running and race the next send.
+  ## Wait for the turn to fully end. The caret must be visible on the live
+  ## `❯` prompt row AND the app must have declared the turn idle.
+  ##
+  ## The caret check alone is NOT enough: the caret is kept visible on the
+  ## prompt row during a running turn too (so buffered typing is legible),
+  ## so it passes mid-turn while a follow-up model call is still in flight.
+  ## A following Ctrl-D is then swallowed as inert (`inputTurnActive`), and
+  ## the child never quits (the OSX `test_resume_replay_bytes` "still
+  ## running" flake). The app's own `'i'`/`'b'` turn-state events over the
+  ## frame channel are the authoritative signal; under ConPTY (no frame
+  ## channel) fall back to cursor visibility alone.
   let deadline = epochTime() + timeoutMs.float / 1000.0
   while epochTime() < deadline and not s.exited:
     s.drain(0, recordFrame = false)
-    # The caret row alone is not enough: the persistent prompt keeps the
-    # ❯ row painted while a turn is live, so a caret-only check passes
-    # mid-turn and the next send races the running turn. Require the
-    # app-declared cursor too — beginTurn hides it, endTurn shows it.
-    if s.cursorShown and s.cursorRowHasText("\u276f"):
+    when defined(posix):
+      let idle = s.turnIdle
+    else:
+      let idle = true
+    if idle and s.cursorShown and s.cursorRowHasText("\u276f"):
       return
     let remaining = max(1, int((deadline - epochTime()) * 1000))
     discard s.waitForOutput(remaining, recordFrame = false)
