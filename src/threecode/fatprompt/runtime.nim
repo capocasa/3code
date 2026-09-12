@@ -1825,13 +1825,7 @@ proc installApiStreamHooks*() =
     noUsage: apiNoUsage,
     retryNotice: apiRetryNotice,
     retryWait: proc(label: string; remainingS: int) =
-      setAnimRetryWait(label, remainingS)
-      # Test-frame mode gates the gui thread behind an explicit paint request
-      # (see `requestTestSpinnerFrame`); streaming drives it via
-      # `apiContentDelta`, but a retry backoff produces no content, so without
-      # this the live notice row never reaches the pty and the tty harness
-      # cannot observe a backoff in progress.
-      requestTestSpinnerFrame(),
+      setAnimRetryWait(label, remainingS),
     retryWaitTick: proc(remainingS: int) =
       setAnimRetryRemaining(remainingS),
     retryWaitClear: proc() =
