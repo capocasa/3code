@@ -2639,6 +2639,30 @@ proc wizardFinish*() =
   # cdModal exit routes through `wizardFinish`, so clear it here.
   inputIdleLinePending.store(false, moRelease)
 
+proc emitTestTurnStateEvent*(idle: bool) =
+  ## Turn-state signal for the tty harness, sent over the frame-event
+  ## channel: 'i' when no turn is running, 'b' when one begins. The harness
+  ## cannot infer idleness from the screen: the caret stays visible on the
+  ## prompt row during a running turn too (so buffered typing is visible),
+  ## so a cursor-visibility check passes mid-turn and a following Ctrl-D is
+  ## swallowed as inert. POSIX only (the frame channel is POSIX-gated), and
+  ## no-op unless the harness armed it. Blocks on the harness ack like
+  ## `emitTestFrameEvent`, so the state is ordered before later output.
+  when defined(posix):
+    let fdText = getEnv("THREECODE_TEST_FRAME_FD")
+    if fdText.len > 0:
+      try:
+        let fd = cint(parseInt(fdText))
+        var ch = if idle: 'i' else: 'b'
+        discard posix.write(fd, addr ch, 1)
+        let ackText = getEnv("THREECODE_TEST_FRAME_ACK_FD")
+        if ackText.len > 0:
+          let ackFd = cint(parseInt(ackText))
+          var ack: array[1, char]
+          discard posix.read(ackFd, addr ack[0], 1)
+      except CatchableError:
+        discard
+
 proc beginTurn*() =
   ## Hide the physical terminal caret for the duration of the turn. The
   ## prompt glyph stays visible as the stable visual anchor.
@@ -2655,6 +2679,7 @@ proc beginTurn*() =
     release inputStateLock
   inputTurnActive.store(true, moRelease)
   inputIdleLinePending.store(false, moRelease)
+  emitTestTurnStateEvent(idle = false)
 
 proc stopTurnInputForFinalRender*() =
   ## Mark the persistent input thread as idle before final assistant text is
@@ -2667,6 +2692,7 @@ proc stopTurnInputForFinalRender*() =
     finally:
       release inputStateLock
     inputTurnActive.store(false, moRelease)
+  emitTestTurnStateEvent(idle = true)
 
 proc endTurn*(repaintPrompt = true) =
   ## Transition to typing-ready state: clear the bar at its current

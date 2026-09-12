@@ -158,6 +158,17 @@ on Windows:
    Windows. Added 27 to the set; arrow keys use `0/224` prefixes so there
    is no conflict.
 
+4. **ConPTY drops output written just before a fast exit.** The pseudoconsole
+   host relays the child's writes to the output pipe asynchronously; a child
+   that writes and exits at once races that relay and the final write is lost
+   (`test_no_config_bootstrap`'s config-error subtest: the child exited 3 and
+   the harness captured nothing). Reproduced with a bare `fputs(...); return`
+   program through the harness: captured when it sleeps ~20ms before
+   returning, empty without the sleep, and `fflush` / `WriteConsole` do not
+   help. `die()` now flushes stderr and, only under the tty harness
+   (`THREECODE_TEST_FRAME_FD` set), sleeps a bounded 200ms before quitting so
+   the relay lands. Real consoles keep their host alive and need no delay.
+
 ## Options to re-enable the tty suite (historical)
 
 ### Option A: Port `tty_expect.nim` to ConPTY (recommended) — DONE
