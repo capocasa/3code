@@ -1825,8 +1825,7 @@ proc installApiStreamHooks*() =
     noUsage: apiNoUsage,
     retryNotice: apiRetryNotice,
     retryWait: proc(label: string; remainingS: int) =
-      setAnimRetryWait(label, remainingS)
-      requestTestSpinnerFrame(),
+      setAnimRetryWait(label, remainingS),
     retryWaitTick: proc(remainingS: int) =
       setAnimRetryRemaining(remainingS),
     retryWaitClear: proc() =

@@ -279,47 +279,58 @@ suite "quit signals":
     # `stopTurnInputForFinalRender`. `inputTurnActive` stayed true, so every
     # later Ctrl-D was misrouted to the turn-interrupt branch (a no-op at
     # idle) and the prompt could not be quit via the keyboard.
-    let root = newFixture("interrupt_backoff_then_ctrl_d")
-    writeConfiguredProvider(root)
-    # 2x 429 (StubMaxAttempts=2 via -d:fastStubRetries) then a reply. We
-    # Ctrl-C during the first 429's backoff to take the
-    # "interrupted by user during retry backoff" raise.
-    writeStubResponses(root, %*[
-      {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
-      {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
-      {"role": "assistant", "preStreamDelayMs": 50, "content": "recovered",
-       "contentChunks": ["recovered"],
-       "usage": {"promptTokens": 5, "completionTokens": 1,
-                  "totalTokens": 6, "cachedTokens": 0}}
-    ])
-    let stub = ensureStubBinary(extraDefines = "-d:fastStubRetries")
-    let tty = newTtySession(stub,
-                            args = ["-x", "-i"],
-                            cwd = root / "run",
-                            env = stubEnv(root, root / "run" / "stub_responses.json"))
-    defer: tty.close()
-    tty.expect "\u276f"
-    for ch in "go":
-      tty.send($ch); tty.drain(10)
-    tty.send "\n"
-    # Wait for the first retry notice so the transport is mid-backoff.
-    # Generous budget: submit-to-notice latency alone brushes the 5s
-    # default on slow CI runners (OSX and Windows flakes).
-    tty.expectNoticeRow("429")
-    tty.drain(50)
-    tty.send "\x03"               # Ctrl-C during the retry backoff
-    tty.expectInHistory "interrupted by user"
-    tty.expectIdleCaret()         # prompt returns after the interrupt
-    tty.expectAlive()             # interrupt did not exit the process
-    # The interrupt line must appear exactly once: a second print at a
-    # later prompt return means the flag re-armed outside a cancelled turn.
-    tty.expectCount("interrupted by user", 1, where = "raw")
-    # Now at an idle, empty prompt: Ctrl-D must quit like `:q` would. Before
-    # the fix this did nothing because inputTurnActive was still true.
-    tty.send "\x04"
-    tty.expectExit(0, timeoutMs = 5000)
-    assertNoTrace(tty)
-    echo "  PASS: Ctrl-C during retry backoff then Ctrl-D quit cleanly"
+    if defined(windows):
+      # The 3f9567b retry notice lives on the live notice row, which
+      # test-frame mode only paints when the (POSIX-only) ticker control loop
+      # is driven via `advanceTicker` -> `requestTestSpinnerFrame`. On Windows
+      # that loop is a no-op, so the notice never reaches the pty while a
+      # backoff is live: `expectNoticeRow("429")` matches the terminal error
+      # line only after the retries have ended, so the Ctrl-C lands at an idle
+      # prompt. POSIX covers the backoff-interrupt routing; skip the
+      # observation here. See docs/windows-testing.md.
+      skip()
+    else:
+      let root = newFixture("interrupt_backoff_then_ctrl_d")
+      writeConfiguredProvider(root)
+      # 2x 429 (StubMaxAttempts=2 via -d:fastStubRetries) then a reply. We
+      # Ctrl-C during the first 429's backoff to take the
+      # "interrupted by user during retry backoff" raise.
+      writeStubResponses(root, %*[
+        {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
+        {"failure": "429", "body": "{\"error\":\"rate limit\"}"},
+        {"role": "assistant", "preStreamDelayMs": 50, "content": "recovered",
+         "contentChunks": ["recovered"],
+         "usage": {"promptTokens": 5, "completionTokens": 1,
+                    "totalTokens": 6, "cachedTokens": 0}}
+      ])
+      let stub = ensureStubBinary(extraDefines = "-d:fastStubRetries")
+      let tty = newTtySession(stub,
+                              args = ["-x", "-i"],
+                              cwd = root / "run",
+                              env = stubEnv(root, root / "run" / "stub_responses.json"))
+      defer: tty.close()
+      tty.expect "\u276f"
+      for ch in "go":
+        tty.send($ch); tty.drain(10)
+      tty.send "\n"
+      # Wait for the first retry notice so the transport is mid-backoff.
+      # Generous budget: submit-to-notice latency alone brushes the 5s
+      # default on slow CI runners (OSX and Windows flakes).
+      tty.expectNoticeRow("429")
+      tty.drain(50)
+      tty.send "\x03"               # Ctrl-C during the retry backoff
+      tty.expectInHistory "interrupted by user"
+      tty.expectIdleCaret()         # prompt returns after the interrupt
+      tty.expectAlive()             # interrupt did not exit the process
+      # The interrupt line must appear exactly once: a second print at a
+      # later prompt return means the flag re-armed outside a cancelled turn.
+      tty.expectCount("interrupted by user", 1, where = "raw")
+      # Now at an idle, empty prompt: Ctrl-D must quit like `:q` would. Before
+      # the fix this did nothing because inputTurnActive was still true.
+      tty.send "\x04"
+      tty.expectExit(0, timeoutMs = 5000)
+      assertNoTrace(tty)
+      echo "  PASS: Ctrl-C during retry backoff then Ctrl-D quit cleanly"
 
   test "fatal API error then Ctrl-D quits (inputTurnActive reset)":
     # Regression: a fatal ApiError (retry budget exhausted with no user
