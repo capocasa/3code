@@ -74,7 +74,7 @@ the next `nim c`. Never `nimble install` a dependency: the pkgs2 snapshot
 shadows the develop link and the solver keeps reinstalling it. If a dep
 resolves to pkgs2, delete the copy and check
 `~/.nimble/pkgcache/tagged_versions.json` for a stale pre-tag entry. See
-`guidelines-updated.md` section 8.
+`~/.agents/archive/guidelines-updated.md` section 8.
 
 ## Commits
 
