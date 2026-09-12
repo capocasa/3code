@@ -1005,19 +1005,14 @@ proc advanceTicker*(s: TtySession) =
   if s.exited:
     return
   when defined(windows):
-    var ch = 't'
-    var written: int32 = 0
-    discard writeFile(s.tickerCommandFd, addr ch, 1, addr written, nil)
-    # Bounded ack wait: poll PeekNamedPipe for the ack byte (anonymous pipe
-    # handles are not waitable), never blocking indefinitely.
-    let ackDeadline = epochTime() + 2.0
-    while epochTime() < ackDeadline:
-      if pipeBytesAvail(s.tickerAckFd) > 0:
-        var ack: array[1, char]
-        var got: int32 = 0
-        discard readFile(s.tickerAckFd, addr ack[0], 1, addr got, nil)
-        break
-      sleep(1)
+    # The test ticker control loop that services this handshake is POSIX-only
+    # (runtime.nim `testTickerControlLoop`, `when defined(posix)`), so on
+    # Windows nothing reads the command byte or writes the ack. Waiting for an
+    # ack would burn the full 2s budget per call and let a short retry backoff
+    # lapse before the caller's next on-screen check. Live rows are painted
+    # proactively by the controller instead (the retry-notice hook requests a
+    # frame), so there is nothing to advance here.
+    return
   else:
     var ch = 't'
     discard posix.write(s.tickerCommandFd, addr ch, 1)
