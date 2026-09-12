@@ -4,7 +4,15 @@
 set -eu
 [ "$#" -ge 2 ] || { echo 'usage: build_binary.sh OUTPUT SOURCE [nim flags...]' >&2; exit 2; }
 out=$1; source=$2; shift 2
-case $out in /*) ;; *) out="$PWD/$out" ;; esac
+# Git-bash callers pass Windows paths (`D:\a\...\out`). dirname/mv/nim want
+# `/` separators, and a `D:` drive must not be mistaken for a relative path
+# (that doubled it into `$PWD/D:\...`).
+out=$(printf '%s' "$out" | tr '\\' '/')
+case $out in
+  /*) ;;
+  [A-Za-z]:/*) ;;
+  *) out="$PWD/$out" ;;
+esac
 mkdir -p "$(dirname "$out")"
 lock="$out.build-lock"
 waited=0
