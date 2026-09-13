@@ -11,6 +11,7 @@
 
 import std/[atomics, json, jsonutils, net, os, sequtils, strutils,
             unittest]
+from std/nativesockets import selectRead
 from std/times import epochTime
 when defined(posix):
   from std/posix import Timeval, Time, Suseconds, SockLen, SOL_SOCKET,
@@ -196,13 +197,34 @@ proc setSocketTimeoutMs(sock: Socket; ms: int) =
 proc acceptWithinDeadline(server: SseServer; client: var Socket): bool =
   ## Accept with a deadline. Returns false when no client dialed in time,
   ## letting serve threads (and their joiners) terminate instead of hanging
-  ## on an accept that will never come.
+  ## on an accept that will never come. Waits via selectRead, not
+  ## SO_RCVTIMEO on the listening socket: accept(2) ignores that option on
+  ## macOS, so a timeout-wrapped accept blocks forever there and the
+  ## joiner hangs (observed as a deterministic 300s CI kill on macos-14).
   while epochTime() < server.acceptDeadline:
+    var fds = @[server.socket.getFd]
     try:
+      if selectRead(fds, 200) == 0:
+        continue  # No pending connection yet: re-check the deadline.
       server.socket.accept(client)
       return true
     except OSError:
-      discard  # SO_RCVTIMEO wake: loop and re-check the deadline.
+      discard
+  false
+
+proc acceptUntilDone(server: SseServer; client: var Socket): bool =
+  ## acceptWithinDeadline, plus a stop flag the caller flips before
+  ## joinThread: a serve loop that would otherwise park in accept until
+  ## the deadline joins within one 200ms selectRead window.
+  while not server.done.load(moAcquire) and epochTime() < server.acceptDeadline:
+    var fds = @[server.socket.getFd]
+    try:
+      if selectRead(fds, 200) == 0:
+        continue
+      server.socket.accept(client)
+      return true
+    except OSError:
+      discard
   false
 
 proc newSseServer(response: string): SseServer =
@@ -279,7 +301,6 @@ proc logDiag(msg: string) =
   stderr.writeLine("[diag ", epochTime().formatFloat(ffDecimal, 3), "] ", msg)
 
 proc serveRetryable(server: SseServer) {.thread.} =
-  logDiag "retryable server up port " & $server.port.uint16
   ## Like serveThread, but serves every connection until the test flips
   ## `server.done` or the accept deadline passes. The transport re-dials
   ## once when a first attempt dies on a socket error (the RST race
@@ -287,17 +308,9 @@ proc serveRetryable(server: SseServer) {.thread.} =
   ## retry then waits out the whole quiet window for a head the dead
   ## server can never send — the 300s CI watchdog kills. Serving the
   ## re-dial turns that flake into a slightly slower green run.
-  var wakes = 0
-  while not server.done.load(moAcquire) and epochTime() < server.acceptDeadline:
+  while true:
     var client: Socket
-    try:
-      server.socket.accept(client)
-    except OSError:
-      inc wakes
-      if wakes <= 3 or wakes mod 100 == 0:
-        logDiag "accept wake " & $wakes
-      continue  # 200ms SO_RCVTIMEO wake: re-check done and the deadline.
-    logDiag "accepted conn " & $wakes
+    if not server.acceptUntilDone(client): return
     let contentLength = client.readRequestHead()
     let body = server.response
     let resp = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
@@ -307,7 +320,6 @@ proc serveRetryable(server: SseServer) {.thread.} =
     client.send("0\r\n\r\n")
     client.drainRequestBody(contentLength)
     client.close()
-    logDiag "served conn " & $wakes
 
 proc url(server: SseServer): string =
   # Bare endpoint like production provider urls; the transport appends
