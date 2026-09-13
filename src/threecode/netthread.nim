@@ -17,11 +17,18 @@
 ## `NetJobState` is a stack `var` in `callModelThreaded` (lifetime
 ## encloses the worker's run), passed by `ptr`. Communication is plain
 ## value types (`string`, `int`, `bool`) plus `JsonNode`, which is a ref
-## the worker builds and hands to the main thread once, under the lock,
+## the worker builds and serializes to a string for the main thread
 ## before setting `phase = npDone`. No concurrent mutation of the same
 ## node.
+##
+## ORC constraint 2 (issue #35): freeing a block on a thread other than
+## its allocating thread leaks the page (nim-lang/Nim#23361; still open
+## on devel, yrc included). So string ownership NEVER crosses threads:
+## the main thread takes byte-wise copies of payloads under the lock
+## (`drainDeltas`, `copyOutcome`), and the worker frees its own strings
+## on its own thread before exiting (`workerRelease`, gated on `reap`).
 
-import std/[locks, json]
+import std/[locks, json, os]
 import types
 
 type
@@ -74,6 +81,7 @@ type
     consumed*: int
     outcome*: StreamOutcome
     outcomeWritten*: bool
+    reaped*: bool
 
   NetJob* = ptr NetJobState
 
@@ -126,12 +134,76 @@ proc setPhase*(job: NetJob; phase: NetPhase) =
     job.phase = phase
     release(job.lock)
 
+proc rawCopy(src: string): string =
+  ## Byte-wise copy that never touches `src`'s refcount, so the source
+  ## stays owned (and is freed) by whichever thread allocated it.
+  if src.len == 0: return ""
+  result = newString(src.len)
+  copyMem(result[0].addr, src[0].unsafeAddr, src.len)
+
 proc drainDeltas*(job: NetJob; into: var seq[NetDelta]) =
   ## Copy all unconsumed deltas into `into` and advance `consumed`. Main
   ## thread only. The caller replays the copied deltas after the lock is
-  ## released.
+  ## released. Payloads are deep-copied byte-wise into main-owned strings:
+  ## a ref copy would hand the main thread strings the worker must free
+  ## (see the ORC constraint 2 note above). Reading the worker's bytes
+  ## under the lock is race-free; the worker only appends.
   {.cast(gcsafe).}:
     acquire(job.lock)
-    into = job.deltas[job.consumed ..< job.deltas.len]
+    into.setLen(0)
+    for i in job.consumed ..< job.deltas.len:
+      into.add(job.deltas[i])
+      let d = addr into[^1]
+      # Swap each payload for a main-owned copy. The assignment drops the
+      # borrowed worker ref (a refcount the worker still holds, so nothing
+      # is freed here) and stores fresh memory this thread will free
+      # itself. All under the lock, so the worker's appends are serialized
+      # against these reads.
+      case d.kind
+      of ndkReasoning: d.reasoning = rawCopy(d.reasoning)
+      of ndkContent: d.content = rawCopy(d.content)
+      of ndkContentFinished: d.fullContent = rawCopy(d.fullContent)
+      of ndkTrimTrailing: d.trimFullContent = rawCopy(d.trimFullContent)
+      of ndkProgress, ndkActivity, ndkAfterLive: discard
     job.consumed = job.deltas.len
+    release(job.lock)
+
+proc copyOutcome*(job: NetJob): StreamOutcome =
+  ## Main-thread copy of the outcome. Ints/bools copy directly; every
+  ## string is byte-wise copied into main-owned memory so no worker
+  ## allocation ends up freed on the main thread. `assistantMsg` is nil
+  ## on this path (the worker serializes it to `assistantMsgJson`).
+  {.cast(gcsafe).}:
+    acquire(job.lock)
+    if job.outcomeWritten:
+      result = job.outcome
+      result.retryAfter = rawCopy(job.outcome.retryAfter)
+      result.errMsg = rawCopy(job.outcome.errMsg)
+      result.errBody = rawCopy(job.outcome.errBody)
+      result.assistantMsgJson = rawCopy(job.outcome.assistantMsgJson)
+      result.finishReason = rawCopy(job.outcome.finishReason)
+      result.assistantMsg = nil
+    release(job.lock)
+
+proc reap*(job: NetJob) =
+  ## Main signals: all copies taken, the worker may free its own
+  ## allocations now. Called once, after the final `drainDeltas` and
+  ## `copyOutcome`, before joining the worker.
+  {.cast(gcsafe).}:
+    acquire(job.lock)
+    job.reaped = true
+    release(job.lock)
+
+proc workerRelease*(job: NetJob) =
+  ## Worker-side cleanup after `publishOutcome`: wait for `reap`, then
+  ## free the worker-owned strings here on this thread. The wait is
+  ## bounded by main's poll cadence plus one drain.
+  while not job.reaped:
+    sleep(1)
+  {.cast(gcsafe).}:
+    acquire(job.lock)
+    # @[] / StreamOutcome() are allocation-free replacements, so main's
+    # later destruction of these fields frees nothing across threads.
+    job.deltas = @[]
+    job.outcome = StreamOutcome()
     release(job.lock)

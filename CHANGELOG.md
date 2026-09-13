@@ -2,6 +2,23 @@
 
 **Unreleased**
 
+- **Long sessions no longer leak memory (issue #35).** Three leaks
+  compounded into the ever-growing RSS (52 GB in the wild once).
+  Every `newHttpClient` call built a fresh OpenSSL context whose
+  `SSL_CTX` and parsed CA trust store (~0.8 MB) never freed, because
+  `SslContext` has no destructor in std/net; the summarizer did this
+  every compaction, `streamhttp` on every TLS connection. Contexts are
+  now cached per process (streamhttp 0.4.6). The threaded streaming
+  worker now frees its own strings on its own thread (string ownership
+  never crosses threads: ORC leaks a block freed off its allocating
+  thread, nim-lang/Nim#23361) and collects its heap before exiting,
+  which stops cycle-registered connection refs from stranding entries
+  in the global cycle table. 3000-turn repro: RSS pinned at 15.9 MB
+  from turn 310 on (was +35 kB/turn forever). Regression test in
+  `tests/api/test_memory_leak.nim` fails on master at ~111 kB/turn.
+  Note: builds need Nim 2.2.12 or newer. 2.2.10's TLSF leaked per
+  worker thread at 1.3 MB/turn (nim-lang/Nim#20542, fixed upstream).
+
 - **GLM-5.2 on Mistral.** api.mistral.ai now hosts third-party
   `zai-glm-5-2` (1M context): known-good as `mistral.zai-glm-5-2`, on the
   platform's top-level `reasoning_effort` ladder (none/minimal/low/medium/

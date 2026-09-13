@@ -1,4 +1,4 @@
-import std/[json, net, os, sequtils, strformat, strutils, tables, unicode, times]
+import std/[json, locks, net, os, sequtils, strformat, strutils, tables, unicode, times]
 import types
 import threecode/unicodewidth
 when defined(posix):
@@ -401,7 +401,14 @@ proc bundledCaFile*(): string =
   else:
     ""
 
-proc bundledSslContext*(): SslContext =
+when defined(ssl):
+  import std/openssl except raiseException, newContext
+  var
+    sslCtxLock: Lock
+    sslCtxHandle {.guard: sslCtxLock.}: openssl.SslCtx
+  sslCtxLock.initLock()
+
+proc bundledSslContext*(): SslContext {.gcsafe.} =
   ## Drop-in `SslContext` for `newHttpClient(sslContext = ...)` and
   ## anywhere else a TLS context is consumed. macOS/Windows ship
   ## OpenSSL whose `OPENSSLDIR` is baked to a build-runner path that
@@ -411,7 +418,26 @@ proc bundledSslContext*(): SslContext =
   ## through to the system trust store. The `streamhttp` SSE path
   ## takes `bundledCaFile()` directly (it builds its own context
   ## internally), so the bundle wiring lives in one place either way.
-  newContext(verifyMode = CVerifyPeer, caFile = bundledCaFile())
+  ##
+  ## Cached for the process lifetime: `SslContext` has no `=destroy`,
+  ## so every fresh `newContext` leaks its `SSL_CTX` plus the full
+  ## parsed CA trust store (~0.8 MB) in C heap. The summarizer calls
+  ## this per compaction, so an uncached context was a per-few-turns
+  ## RSS leak (issue #35). The raw `SslCtx` handle is shared (OpenSSL
+  ## contexts are thread-safe once built); each caller gets its own
+  ## thin `SslContext` ref so no Nim refcount is ever shared across
+  ## threads. The handle intentionally outlives its refs: it is freed
+  ## only by an explicit `destroyContext` nobody wants here. A failed
+  ## construction isn't cached, so retried calls still raise.
+  when defined(ssl):
+    withLock(sslCtxLock):
+      if sslCtxHandle == nil:
+        sslCtxHandle = newContext(verifyMode = CVerifyPeer,
+                                  caFile = bundledCaFile()).context
+      result = new SslContext
+      result.context = sslCtxHandle
+  else:
+    result = newContext(verifyMode = CVerifyPeer, caFile = bundledCaFile())
 
 proc httpStatusDetail*(msg: string): string =
   ## Pull the offending status out of the RangeDefect httpclient raises

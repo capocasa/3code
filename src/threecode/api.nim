@@ -2579,6 +2579,13 @@ proc networkWorker(a: ptr NetWorkerArgs) {.thread.} =
       outcome.assistantMsgJson = $outcome.assistantMsg
       outcome.assistantMsg = nil
     publishOutcome(a.job, outcome)
+    # Free the worker-owned strings on this thread; blocks freed on a
+    # foreign thread leak under ORC (nim-lang/Nim#23361).
+    workerRelease(a.job)
+    # Collect this thread's heap before it dies: cycle-registered refs
+    # (StreamConn/Socket cycles) freed here otherwise strand their global
+    # cycle-collector entries when the thread exits without a collection.
+    GC_fullCollect()
 
 proc drainAndDispatch(job: NetJob; baseLabel: string) =
   ## Copy unconsumed deltas under the lock, then replay them through the
@@ -2638,30 +2645,41 @@ proc callModelThreaded*(p: Profile, bodyStr, baseLabel: string;
   # out from under the worker segfaults. The fd shutdown above (quiet-watch
   # already did it on the quiet path) wakes the worker's syscall; the worker
   # observes the flag, unwinds, and closes the conn itself in networkWorker.
-  # Bounded join: every worker syscall is bounded (connect by
-  # ConnectTimeoutMs, recv by QuietRecvWakeMs, TLS handshake internally),
-  # so the worker returns within a known worst case. The one exception is
-  # a first-time getAddrInfo wedge (documented, accepted): if the poll
-  # times out we detach rather than block forever.
+  # Bounded wait for the worker's outcome: every worker syscall is bounded
+  # (connect by ConnectTimeoutMs, recv by QuietRecvWakeMs, TLS handshake
+  # internally), so the worker publishes within a known worst case. The one
+  # exception is a first-time getAddrInfo wedge (documented, accepted): if
+  # the poll times out we detach rather than block forever. The worker
+  # parks in workerRelease after publishing until reap() fires, so once
+  # outcomeWritten is seen the join below returns promptly.
   var waited = 0
   let joinBudget = ConnectTimeoutMs + QuietTooLongMs + 5_000
-  while t.running() and waited < joinBudget:
+  while not job.outcomeWritten and t.running() and waited < joinBudget:
+    drainAndDispatch(addr job, baseLabel)
     sleep(NetWorkerPollMs)
     waited += NetWorkerPollMs
-  if t.running():
+  # Final drain and main-owned copies: the last reads of worker memory;
+  # everything main keeps beyond this point was allocated on the main
+  # thread (drainDeltas/copyOutcome copy payloads byte-wise for exactly
+  # this reason).
+  drainAndDispatch(addr job, baseLabel)
+  result = copyOutcome(addr job)
+  if result.assistantMsgJson.len > 0:
+    result.assistantMsg = parseJson(result.assistantMsgJson)
+    result.assistantMsgJson = ""
+  # Now the worker may free its own strings and exit. A worker that
+  # published (outcomeWritten) is straight-line code away from thread
+  # exit, so joining it is prompt and mandatory: detaching here would
+  # return into this stack frame while the worker still writes `job`.
+  reap(addr job)
+  if job.outcomeWritten or not t.running():
+    joinThread(t)
+  else:
     # Detached (getAddrInfo wedge): leave the cached conn alone. The worker
     # owns it and closes it whenever it eventually wakes; main touching it
     # here would race the worker's SSL handle use.
     discard
-  else:
-    joinThread(t)
-  drainAndDispatch(addr job, baseLabel)
-  if job.outcomeWritten:
-    result = job.outcome
-    if result.assistantMsgJson.len > 0:
-      result.assistantMsg = parseJson(result.assistantMsgJson)
-      result.assistantMsgJson = ""
-  elif isNetworkQuiet():
+  if not job.outcomeWritten and isNetworkQuiet():
     # Broke out of the poll loop on the quiet flag and the detached worker
     # never published an outcome (it was wedged in an unbounded send/handshake
     # the send-timeout could not reach, or was detached at the join budget).
