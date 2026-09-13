@@ -1009,6 +1009,16 @@ const KeyPrefixCatalog*: seq[(string, string)] = @[
   ("VENICE_",  "venice"),
 ]
 
+proc looksLikeZaiKey*(s: string): bool =
+  ## z.ai keys are ``{id}.{secret}`` with hex halves and no stable prefix,
+  ## so the prefix catalog cannot catch them. Shape match instead.
+  let dot = s.find('.')
+  if dot < 8 or s.len - dot - 1 < 8: return false
+  if s.count('.') != 1: return false
+  for c in s:
+    if c notin {'0'..'9', 'a'..'f', 'A'..'F', '.'}: return false
+  true
+
 proc inferProvider*(key: string): string =
   ## Returns catalog provider name, or "" if key prefix is not uniquely identifying.
   when defined(providerStub):
@@ -1016,7 +1026,17 @@ proc inferProvider*(key: string): string =
       return "stub"
   for (p, n) in KeyPrefixCatalog:
     if key.startsWith(p): return n
+  if looksLikeZaiKey(key): return "zaicode"
   ""
+
+proc looksLikeApiKey*(s: string): bool =
+  ## Long single-token entry: a secret whose prefix nobody recognizes
+  ## rather than a provider name (short words). Routes the wizard's first
+  ## field to the provider-for-key prompt instead of an error.
+  if s.len < 16: return false
+  for c in s:
+    if c in Whitespace: return false
+  true
 
 proc defaultNameFromUrl*(url: string): string =
   let host = parseUri(url).hostname

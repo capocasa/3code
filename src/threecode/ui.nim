@@ -451,10 +451,27 @@ proc readFirstProviderField(editor: var minline.LineEditor): string =
   result = readRequired(editor, label)
   editor.completionCallback = prevCb
 
+proc readProviderForKey(editor: var minline.LineEditor): string =
+  ## Owner name for an api key whose prefix nobody recognizes (z.ai keys
+  ## carry no prefix at all). Same candidate set as the first field minus
+  ## the subscription logins — a key cannot belong to those.
+  let prevCb = editor.completionCallback
+  editor.completionCallback = proc(ed: LineEditor): seq[string] =
+    if experimentalEnabled:
+      for (n, _) in ProviderCatalog: result.add n
+    else:
+      for combo in KnownGoodCombos:
+        if combo.provider notin result: result.add combo.provider
+  defer: editor.completionCallback = prevCb
+  readRequired(editor, "  provider for this key: ")
+
 proc promptNewProvider*(editor: var minline.LineEditor,
                         prefilled = ""): ProviderRec =
-  printSupported()
-  stdout.write "\n"
+  # A prefilled first field (`:provider add <entry>`) already answers the
+  # provider-or-key question; printing the supported list on top is noise.
+  if prefilled == "":
+    printSupported()
+    stdout.write "\n"
   let entry =
     if prefilled != "":
       # `:provider add <entry>` carries the first field on the command
@@ -529,10 +546,25 @@ proc promptNewProvider*(editor: var minline.LineEditor,
     ensureUniqueName(name)
     hintLn "  detected: ", resetStyle, name, GreyFg, " -> ", url, Reset
   else:
-    # Catalog / known-good provider name. Ask for the key next.
+    # Catalog / known-good provider name. Ask for the key next — unless the
+    # entry is a long single token no catalog knows: an api key whose
+    # prefix nobody recognizes (z.ai keys have none). Ask which provider
+    # owns it instead of erroring out or naming the provider after the key.
     name = entryLower
-    if not experimentalEnabled and curatedFor(name).len == 0:
+    let knownName = curatedFor(name).len > 0 or catalogUrl(name) != ""
+    if not knownName and looksLikeApiKey(entry):
+      name = readProviderForKey(editor).toLowerAscii
+      key = entry
+      # The command line carried the secret; scrub it like the recognized
+      # prefixes do at the top of this proc.
+      if prefilled != "":
+        editor.historyRemove(":provider add " & prefilled)
+    elif not knownName and not experimentalEnabled:
       hintLn &"  unknown provider '{entry}'; enable --experimental for custom",
+        resetStyle
+      raise newException(minline.InputCancelled, "")
+    if not experimentalEnabled and curatedFor(name).len == 0:
+      hintLn &"  unknown provider '{name}'; enable --experimental for custom",
         resetStyle
       raise newException(minline.InputCancelled, "")
     # Known-good names (e.g. `kilocode` for `kilo`) are not necessarily
@@ -554,7 +586,8 @@ proc promptNewProvider*(editor: var minline.LineEditor,
       hintLn "  for subscription login, enter chatgpt", resetStyle
     elif name == "google":
       hintLn "  for subscription login, enter geminicli", resetStyle
-    key = readRequired(editor, "  api key              : ", hidden = true)
+    if key == "":
+      key = readRequired(editor, "  api key              : ", hidden = true)
 
   if not experimentalEnabled:
     let curated = curatedFor(name)
