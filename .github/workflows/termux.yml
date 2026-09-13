@@ -127,7 +127,8 @@ jobs:
       - name: Upload artifact to 3code.capocasa.dev
         if: github.ref == 'refs/heads/main'
         run: |
-          curl -f -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-termux-arm64.tar.gz" \
+          # --retry: 5xx is transient on the upload endpoint
+          curl -f --retry 5 --retry-delay 5 -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-termux-arm64.tar.gz" \
             https://3code.capocasa.dev/main/builds/upload.nim
 
   yrc-stress:
