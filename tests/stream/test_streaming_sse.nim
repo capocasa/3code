@@ -179,6 +179,11 @@ type
       ## never dials (connection cache reuse, a transport retry that stays on
       ## the old socket) can pass its deadline and exit instead of blocking
       ## forever: the joinThread-after-it hang (1442s CI kill).
+    done*: Atomic[bool]
+      ## Flipped by the test right before joinThread. Only serveRetryable
+      ## reads it: it re-checks the flag on every 200ms accept wake so a
+      ## serve loop that would otherwise park until acceptDeadline joins
+      ## within one wake.
 
 proc setSocketTimeoutMs(sock: Socket; ms: int) =
   when defined(posix):
@@ -207,6 +212,7 @@ proc newSseServer(response: string): SseServer =
   result.socket.bindAddr(Port(0))
   result.socket.listen()
   result.socket.setSocketTimeoutMs(200)
+  result.done.store(false, moRelaxed)
   let (_, p) = result.socket.getLocalAddr()
   result.port = p
 
@@ -268,6 +274,30 @@ proc serveOnceDelayedHead(server: SseServer; delayMs: int) =
 
 proc serveThread(server: SseServer) {.thread.} =
   serveOnce(server)
+
+proc serveRetryable(server: SseServer) {.thread.} =
+  ## Like serveThread, but serves every connection until the test flips
+  ## `server.done` or the accept deadline passes. The transport re-dials
+  ## once when a first attempt dies on a socket error (the RST race
+  ## documented at drainRequestBody); against a one-shot server that
+  ## retry then waits out the whole quiet window for a head the dead
+  ## server can never send — the 300s CI watchdog kills. Serving the
+  ## re-dial turns that flake into a slightly slower green run.
+  while not server.done.load(moAcquire) and epochTime() < server.acceptDeadline:
+    var client: Socket
+    try:
+      server.socket.accept(client)
+    except OSError:
+      continue  # 200ms SO_RCVTIMEO wake: re-check done and the deadline.
+    let contentLength = client.readRequestHead()
+    let body = server.response
+    let resp = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+    client.send(resp)
+    let chunk = toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n"
+    client.send(chunk)
+    client.send("0\r\n\r\n")
+    client.drainRequestBody(contentLength)
+    client.close()
 
 proc url(server: SseServer): string =
   # Bare endpoint like production provider urls; the transport appends
@@ -493,7 +523,7 @@ suite "streaming SSE: mid-stream error (OpenRouter)":
       makeSseMidStreamError("Provider disconnected unexpectedly", "id-err-1",
         code = 400))
     var srv: Thread[SseServer]
-    createThread(srv, serveThread, server)
+    createThread(srv, serveRetryable, server)
     var usage = Usage()
     var raised = false
     try:
@@ -503,6 +533,7 @@ suite "streaming SSE: mid-stream error (OpenRouter)":
       raised = true
       check "Provider disconnected unexpectedly" in e.msg
     check raised
+    server.done.store(true, moRelease)
     joinThread(srv)
     server.socket.close()
     closeCachedStreamConn()
@@ -513,7 +544,7 @@ suite "streaming SSE: mid-stream error (OpenRouter)":
       makeSseMidStreamErrorAfterContent("partial text...",
         "Provider overloaded", "id-err-2", code = 400))
     var srv: Thread[SseServer]
-    createThread(srv, serveThread, server)
+    createThread(srv, serveRetryable, server)
     var usage = Usage()
     var raised = false
     try:
@@ -523,6 +554,7 @@ suite "streaming SSE: mid-stream error (OpenRouter)":
       raised = true
       check "Provider overloaded" in e.msg
     check raised
+    server.done.store(true, moRelease)
     joinThread(srv)
     server.socket.close()
     closeCachedStreamConn()

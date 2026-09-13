@@ -124,6 +124,24 @@ var networkQuietFlag: Atomic[bool]
 proc isNetworkQuiet*(): bool {.gcsafe.} =
   networkQuietFlag.load(moAcquire)
 
+type StallClock = object
+  ## Transport-side fallback for the quiet watchdog. The flag above is set
+  ## by the fatprompt quiet-watch thread, which only exists while the TUI
+  ## turn loop runs; library consumers and testament-run tests drive
+  ## callModel with no watcher at all, so a response head that never
+  ## arrives used to park the recv loop forever (one missed external
+  ## signal = infinite hang). Every StreamTimeoutError wait in the
+  ## transports now also carries its own clock: any successful read
+  ## touches it, and QuietTooLongMs of silence breaks the wait with the
+  ## same canonical networkQuietMsg the external watcher would produce.
+  since: float
+
+proc touch(c: var StallClock) =
+  c.since = epochTime()
+
+proc quietTooLong(c: var StallClock): bool =
+  epochTime() - c.since >= QuietTooLongMs / 1000.0
+
 proc markNetworkQuiet*() {.gcsafe.} =
   networkQuietFlag.store(true, moRelease)
 
@@ -780,6 +798,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
         else: (if plainHttp: "connect failed: " else: "TLS connect failed: ") & connectErrorDetail(e)
       return
     conn.setReadTimeoutMs(QuietRecvWakeMs)
+    var headStall = StallClock(since: epochTime())
     try:
       conn.sendRequest("POST", pathQuery, host,
                        headers = requestHeaders(
@@ -791,7 +810,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
           resp = conn.readResponseHead()
           break
         except StreamTimeoutError:
-          if isInterrupted() or isNetworkQuiet():
+          if isInterrupted() or isNetworkQuiet() or headStall.quietTooLong():
             closeCachedStreamConn()
             break
           continue
@@ -848,6 +867,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   # event can fan out to several OpenAI payloads (delta + usage +
   # [DONE]), replayed one per loop iteration.
   var caQueue: seq[string]
+  var bodyStall = StallClock(since: epochTime())
   while true:
     # Drain translated Gemini chunks before reading another SSE line:
     # one event can fan out to several OpenAI payloads.
@@ -855,11 +875,12 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     if caQueue.len > 0:
       payload = caQueue[0]
       caQueue.delete(0)
+      bodyStall.touch()
     else:
       var hasLine = false
       try: hasLine = conn.readLine(line)
       except StreamTimeoutError:
-        if isInterrupted() or isNetworkQuiet():
+        if isInterrupted() or isNetworkQuiet() or bodyStall.quietTooLong():
           closeCachedStreamConn()
           break
         continue
@@ -869,6 +890,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
         break
       if not hasLine: break
       fireActivity(job)
+      bodyStall.touch()
       if isInterrupted():
         closeCachedStreamConn()
         break
@@ -1284,6 +1306,7 @@ proc streamResponses(url, key, bodyStr: string, baseLabel: string,
         else: (if plainHttp: "connect failed: " else: "TLS connect failed: ") & connectErrorDetail(e)
       return
     conn.setReadTimeoutMs(QuietRecvWakeMs)
+    var headStall = StallClock(since: epochTime())
     try:
       conn.sendRequest("POST", pathQuery, host,
                        headers = requestHeaders(
@@ -1295,7 +1318,7 @@ proc streamResponses(url, key, bodyStr: string, baseLabel: string,
           resp = conn.readResponseHead()
           break
         except StreamTimeoutError:
-          if isInterrupted() or isNetworkQuiet():
+          if isInterrupted() or isNetworkQuiet() or headStall.quietTooLong():
             closeCachedStreamConn()
             break
           continue
@@ -1326,11 +1349,12 @@ proc streamResponses(url, key, bodyStr: string, baseLabel: string,
   var line = ""
   var streamErr = ""
   var sseErrorBody = ""
+  var bodyStall = StallClock(since: epochTime())
   while true:
     var hasLine = false
     try: hasLine = conn.readLine(line)
     except StreamTimeoutError:
-      if isInterrupted() or isNetworkQuiet():
+      if isInterrupted() or isNetworkQuiet() or bodyStall.quietTooLong():
         closeCachedStreamConn()
         break
       continue
@@ -1340,6 +1364,7 @@ proc streamResponses(url, key, bodyStr: string, baseLabel: string,
       break
     if not hasLine: break
     fireActivity(job)
+    bodyStall.touch()
     if isInterrupted():
       closeCachedStreamConn()
       break
