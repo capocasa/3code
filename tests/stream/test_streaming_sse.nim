@@ -297,9 +297,6 @@ proc serveOnceDelayedHead(server: SseServer; delayMs: int) =
 proc serveThread(server: SseServer) {.thread.} =
   serveOnce(server)
 
-proc logDiag(msg: string) =
-  stderr.writeLine("[diag ", epochTime().formatFloat(ffDecimal, 3), "] ", msg)
-
 proc serveRetryable(server: SseServer) {.thread.} =
   ## Like serveThread, but serves every connection until the test flips
   ## `server.done` or the accept deadline passes. The transport re-dials
@@ -546,22 +543,17 @@ suite "streaming SSE: mid-stream error (OpenRouter)":
         code = 400))
     var srv: Thread[SseServer]
     createThread(srv, serveRetryable, server)
-    logDiag "t1 calling callModel"
     var usage = Usage()
     var raised = false
     try:
       discard callModel(testProfile(server),
         %*[{"role": "user", "content": "go"}], usage, 0)
-      logDiag "t1 callModel RETURNED (no raise)"
     except ApiError as e:
       raised = true
-      logDiag "t1 callModel raised: " & e.msg[0 ..< min(80, e.msg.len)]
       check "Provider disconnected unexpectedly" in e.msg
     check raised
-    logDiag "t1 flipping done"
     server.done.store(true, moRelease)
     joinThread(srv)
-    logDiag "t1 joined"
     server.socket.close()
     closeCachedStreamConn()
 
@@ -572,22 +564,17 @@ suite "streaming SSE: mid-stream error (OpenRouter)":
         "Provider overloaded", "id-err-2", code = 400))
     var srv: Thread[SseServer]
     createThread(srv, serveRetryable, server)
-    logDiag "t2 calling callModel"
     var usage = Usage()
     var raised = false
     try:
       discard callModel(testProfile(server),
         %*[{"role": "user", "content": "go"}], usage, 0)
-      logDiag "t2 callModel RETURNED (no raise)"
     except ApiError as e:
       raised = true
-      logDiag "t2 callModel raised: " & e.msg[0 ..< min(80, e.msg.len)]
       check "Provider overloaded" in e.msg
     check raised
-    logDiag "t2 flipping done"
     server.done.store(true, moRelease)
     joinThread(srv)
-    logDiag "t2 joined"
     server.socket.close()
     closeCachedStreamConn()
 
