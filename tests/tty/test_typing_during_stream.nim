@@ -98,6 +98,60 @@ proc barElapsedSecs(row: string): int =
     result = -1
 
 suite "typing during active stream":
+  test "no cursor visibility toggles while a turn runs":
+    ## The caret is a drawn cell inside the editor rows; the physical
+    ## terminal cursor stays hidden for the whole interactive session.
+    ## Any per-paint `?25l`/`?25h` pair is immediate-mode residue: it makes
+    ## the caret flicker per keystroke (Linux) and per 80ms GUI tick
+    ## (continuous on Windows Terminal, which recomposites the cursor on
+    ## every visibility change). One hide at startup and one show at exit
+    ## are the only legal visibility bytes.
+    let root = newFixture("typing_during_stream_notoggles")
+    writeConfiguredProvider(root)
+    let chunks = ["aa ", "bb ", "cc ", "dd ", "ee ", "ff ", "gg ",
+                  "hh ", "ii ", "jj ", "kk ", "ll ", "mm ", "nn "]
+    let responses = %*[
+      {"content": chunks.join("").strip(),
+       "contentChunks": %* chunks,
+       "contentChunkDelayMs": 150,
+       "usage": {"promptTokens": 20, "completionTokens": 14,
+                 "totalTokens": 34, "cachedTokens": 0}}
+    ]
+    writeFile(root / "run" / "stub_responses.json", $responses)
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    tty.send "go"
+    tty.expect "go"
+    tty.send "\n"
+    tty.expectInHistory "aa"
+    tty.drain(100)
+    # Count window opens mid-turn: everything before it is startup paint
+    # (the one legal session-start hide), everything after is close/cleanup.
+    let mark = tty.raw.len
+    for ch in "typing":
+      rawSend(tty, $ch)
+      tty.drain(90)
+    # Hold the turn open long enough for several GUI ticks with no input.
+    tty.drain(600)
+    let tail = tty.raw[mark .. ^1]
+    let hides = tail.count("\x1b[?25l")
+    let shows = tail.count("\x1b[?25h")
+    check hides == 0
+    check shows == 0
+    if hides != 0 or shows != 0:
+      echo "cursor visibility toggled mid-turn: hides=", hides,
+           " shows=", shows, " over ", tail.len, " bytes"
+    tty.drain(4500)
+    tty.expectAlive()
+
   test "typed text lands on caret row, not one row above":
     let root = newFixture("typing_during_stream")
     writeConfiguredProvider(root)
