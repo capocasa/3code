@@ -46,7 +46,12 @@ must never replace it; they use the notice row above it.
 The token bar preserves the existing product behavior, even if the current
 implementation is replaced:
 
-- during an API call it shows a spinner and API-call timer,
+- during an ongoing API request it shows the braille spinner and the
+  API-call timer; the braille is strictly the in-flight indicator. During
+  a retry backoff (a wait between requests) the glyph is a clock or
+  hourglass instead, while the notice row counts down above. The count-up
+  timer never pauses or resets for retries: it measures the whole turn,
+  which can span many requests.
 - it always shows context percentage,
 - it shows input tokens when greater than zero,
 - it shows cache tokens when greater than zero,
@@ -213,10 +218,13 @@ notice row (the reserved ticker row above the token bar, non-bold magenta)
 and dynamically replaced in place while the countdown ticks and later
 attempts fail, so a patient retry loop cannot flood scrollback. The notice
 countdown lives inside the notice row; the token bar below it keeps token
-information and the count-up turn timer. Like harness messages, notices are
-not persisted to the `.3log` session transcript: they are controller
-feedback, not conversation messages. When the retry budget is exhausted the
-final error commits through the ordinary error path.
+information and the count-up turn timer. When the backoff ends the notice
+clears: the row returns to the empty spacer (or the thinking ticker), and
+the bar's glyph goes back to the braille spinner for the in-flight attempt.
+Like harness messages, notices are not persisted to the `.3log` session
+transcript: they are controller feedback, not conversation messages. When
+the retry budget is exhausted the final error commits through the ordinary
+error path.
 
 ## Exit Contract
 

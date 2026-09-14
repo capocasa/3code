@@ -319,6 +319,16 @@ proc getFrameModel*(): FrameModel {.gcsafe.} =
     result = frameModelShared
     release frameModelLock
 
+func liveSpinnerGlyph*(m: FrameModel; rotating: string): string =
+  ## The bar's activity glyph. Braille rotation means an in-flight API
+  ## request; a retry backoff is a wait between requests, so it shows the
+  ## hourglass while the notice row counts down. Every spinner-frame
+  ## builder (gui tick, input-thread editor redraw) derives the glyph
+  ## through this so a keystroke mid-backoff cannot flash braille.
+  if m.retryWait.active: "⧗"
+  elif rotating.len > 0: rotating
+  else: "○"
+
 proc setAnimMode*(mode: AnimationMode) {.gcsafe.} =
   {.cast(gcsafe).}:
     acquire frameModelLock
@@ -400,7 +410,7 @@ proc currentFrameFromModel*(): FooterFrame {.gcsafe.} =
     case m.mode
     of amSpinner:
       spinnerFooterFrame(
-        if m.spinner.len > 0: m.spinner else: "○",
+        liveSpinnerGlyph(m, m.spinner),
         m.label, m.ticker, lastPaintedElapsedS.load(moAcquire).int,
         m.retryWait)
     of amBarTick:
@@ -528,7 +538,7 @@ proc setSpinFrame(frame: string; elapsed: int) {.gcsafe.} =
 proc currentSpinnerFooterFrame(): FooterFrame {.gcsafe.} =
   let m = getFrameModel()
   spinnerFooterFrame(
-    if m.spinner.len > 0: m.spinner else: "○",
+    liveSpinnerGlyph(m, m.spinner),
     m.label, m.ticker, lastPaintedElapsedS.load(moAcquire).int,
     m.retryWait)
 
@@ -854,9 +864,10 @@ proc guiLoop(unused: string) {.thread.} =
     try:
       case m.mode
       of amSpinner:
-        # A live retry backoff no longer hijacks the bar: the braille
-        # keeps rotating and the notice counts down on the ticker row.
-        let glyph = frames[i mod frames.len]
+        # Braille rotation is strictly the in-flight-request indicator.
+        # During a retry backoff the request is over; the bar shows the
+        # hourglass while the notice counts down on the ticker row.
+        let glyph = liveSpinnerGlyph(m, frames[i mod frames.len])
         # Build the frame from the snapshot copy instead of writing the
         # glyph back via setSpinFrame + currentFrameFromModel: each of
         # those is a separate frameModelLock critical section, and

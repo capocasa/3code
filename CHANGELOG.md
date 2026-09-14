@@ -2,6 +2,15 @@
 
 **Unreleased**
 
+- **Retry waits show an hourglass, not the braille spinner.** The
+  braille glyph in the token bar is now strictly the in-flight-request
+  indicator. During a retry backoff (a wait between requests) the bar
+  swaps it for the hourglass `⧗` while the magenta notice row above
+  counts down; when the next attempt connects the notice clears, the
+  row returns to the empty spacer, and the braille returns. The
+  count-up turn timer is unchanged: it measures the whole turn, which
+  can span many requests.
+
 - **Long sessions no longer leak memory (issue #35).** Three leaks
   compounded into the ever-growing RSS (52 GB in the wild once).
   Every `newHttpClient` call built a fresh OpenSSL context whose

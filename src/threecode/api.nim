@@ -2966,12 +2966,13 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
         min(1 shl base, BackoffCap)
       else:
         min(1 shl serverRetryLevel, BackoffCap)
-    # Keep the spinner twirling across the backoff. Stopping it before the
+    # Keep the animation running across the backoff. Stopping it before the
     # sleep and restarting it after left the whole retry window with a frozen
     # bar and no animation, so a slow provider looked like the turn had
-    # stalled. The retry notice below commits as a transcript line (the
-    # spinner's footer repaint re-asserts itself on the next 80ms tick), and
-    # the backoff sleep is the long phase that most needs a live indicator.
+    # stalled. During the wait the bar swaps its braille spinner for the
+    # hourglass glyph (braille means an in-flight request), the notice row
+    # above it counts down, and the turn timer keeps ticking; the next
+    # attempt clears the notice and brings the braille back.
     let detail = formatApiDetail(errMsg, outcome.errBody, code)
     let retryLabel = detail & ", retry " & $(attempt + 1) &
       "/" & $MaxAttempts & " in"

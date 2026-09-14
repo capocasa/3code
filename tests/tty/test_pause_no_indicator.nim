@@ -18,6 +18,12 @@ discard """
 ##   - the retry-backoff window, where earlier code stopped the spinner before
 ##     entering the sleep and only restarted it after the sleep returned,
 ##     leaving the whole backoff gap with a frozen bar and no animation.
+##     Braille is strictly the in-flight-request indicator: during the
+##     backoff the bar carries the hourglass ⧗ instead, the notice row
+##     above it counts down, and the count-up turn timer keeps running
+##     (a turn spans many requests); when the next attempt connects the
+##     notice clears, the row above the bar returns to the empty spacer,
+##     and the braille returns.
 ##   - the content-streaming window, where the first content chunk killed the
 ##     GUI thread (so its rotating glyph could not clobber the streaming
 ##     partial), and the controller's per-chunk repaint used a static label
@@ -69,16 +75,19 @@ proc screenHasBraille(s: TtySession): bool =
   false
 
 suite "activity indicator covers every turn phase":
-  test "braille spinner is animating during the retry backoff":
+  test "retry backoff shows the hourglass; braille is strictly in-flight":
     let root = newFixture("pause_backoff_spinner")
     writeConfiguredProvider(root)
-    # First response 429 (rate, 1s backoff at level 0 with -d:fastStubRetries
-    # that caps attempts at 2). The retry-notice line lands immediately, but
-    # the spinner must keep twirling through the whole backoff sleep that
-    # follows it.
+    # First response: transport-level DNS failure ("server" category, 1s
+    # backoff at level 0 with -d:fastStubRetries that caps attempts at 2).
+    # The retry notice lands on the notice row immediately; through the whole
+    # backoff sleep the bar must show the hourglass, never braille. The
+    # recovered reply starts with a 4s pre-stream delay so the next
+    # attempt's in-flight window (braille, notice cleared, empty spacer
+    # above the bar) is observable before any content lands.
     writeFile(root / "run" / "stub_responses.json", $(%*[
-      {"failure": "429", "delayMs": 0, "body": "{\"error\":\"rate limit\"}"},
-      {"role": "assistant", "preStreamDelayMs": 50,
+      {"failure": "dns", "delayMs": 0},
+      {"role": "assistant", "preStreamDelayMs": 4000,
        "content": "ok after retry", "contentChunks": ["ok after retry"],
        "usage": {"promptTokens": 5, "completionTokens": 1,
                  "totalTokens": 6, "cachedTokens": 0}}
@@ -98,18 +107,39 @@ suite "activity indicator covers every turn phase":
     tty.send "\n"
     # The retry notice paints on the live notice row; the backoff sleep
     # follows it.
-    tty.expectNoticeRow("429")
-    # Sample the live screen repeatedly across the backoff window. The
-    # spinner repaints every 80ms, so a 250ms settle captures at least one
-    # animated frame with high probability. We ask the harness to advance
-    # spinner frames deterministically via the ticker fd so the test does
-    # not depend on wall-clock luck.
+    tty.expectNoticeRow("TLS connect failed")
+    # Sample the live screen across the backoff window. We ask the harness
+    # to advance spinner frames deterministically via the ticker fd so the
+    # test does not depend on wall-clock luck.
     tty.drain(50)
     tty.advanceTicker()
     tty.drain(50)
-    let sawBrailleDuringBackoff = tty.screenHasBraille()
-    check sawBrailleDuringBackoff
-    tty.expectInHistory "ok after retry"
+    # Mid-backoff: no request is in flight, so the bar shows the hourglass
+    # and no braille phase may appear anywhere on screen.
+    let waitTxt = tty.screenText()
+    check "\u29d7" in waitTxt
+    check(not tty.screenHasBraille())
+    let barRow = tty.rowContaining("\u29d7")
+    doAssert barRow > 0, "hourglass not on a bar row: " & waitTxt
+    check "\u25cb0%" in tty.rows[barRow]
+    check "TLS connect failed" in tty.rows[barRow - 1]
+    check "retry 2/2" in tty.rows[barRow - 1]
+    # Wait out the 1s backoff. The second attempt is now connecting (4s
+    # pre-stream delay): the notice is gone, the row above the bar is the
+    # empty spacer again, and the braille spinner is back.
+    tty.drain(1600)
+    tty.advanceTicker()
+    tty.drain(50)
+    let flightTxt = tty.screenText()
+    check "TLS connect failed" notin flightTxt
+    check "\u29d7" notin flightTxt
+    check tty.screenHasBraille()
+    let liveBar = tty.rowContaining("\u25cb0%")
+    doAssert liveBar > 0, "token bar not on screen: " & flightTxt
+    doAssert tty.rows[liveBar - 1].strip().len == 0,
+      "REGRESSION: row above the bar must return to the empty spacer, " &
+        "got: '" & tty.rows[liveBar - 1] & "'"
+    tty.expectInHistory("ok after retry", timeoutMs = 12000)
 
   test "braille spinner is animating during a mid-stream content gap":
     let root = newFixture("pause_stream_spinner")
