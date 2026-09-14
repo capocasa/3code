@@ -76,6 +76,13 @@ resolves to pkgs2, delete the copy and check
 `~/.nimble/pkgcache/tagged_versions.json` for a stale pre-tag entry. See
 `~/.agents/archive/guidelines-updated.md` section 8.
 
+## Scratch docs
+
+Plan, impl, and report scratch docs (`plan-*.md`, `impl-*.md`,
+`report-*.md`, and friends) are agent working notes, never repo content.
+Never commit them. Park them in untracked `.agents/archive/` when a chunk
+of work hands off to the next session.
+
 ## Commits
 
 Commit when a change reaches a sensible, complete state — don't wait to be
