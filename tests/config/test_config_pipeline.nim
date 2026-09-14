@@ -51,6 +51,17 @@ suite "config: inferProvider":
   test "returns empty for unknown prefix":
     check inferProvider("my-custom-key") == ""
 
+  test "recognizes the z.ai hex.hex key shape":
+    check inferProvider(
+      "0123456789abcdef0123456789abcdef.fedcba9876543210") == "zaicode"
+
+  test "rejects near-miss z.ai shapes":
+    # Halves too short, non-hex characters, multiple dots.
+    check inferProvider("abcdefg.fedcba") == ""
+    check inferProvider("zzzzzzzzzzzzzzzz.yyyyyyyyyyyyyyyy") == ""
+    check inferProvider(
+      "0123456789abcdef.0123456789abcdef.fedcba9876543210") == ""
+
 suite "config: curatedFor":
   test "returns models for known provider":
     let models = curatedFor("zai")

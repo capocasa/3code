@@ -609,7 +609,9 @@ suite "provider wizard configuration":
     check activeProviders.len == 0
 
   test "add rejects an unrecognized api key in regular mode":
-    inputs = @["some-free-text-secret"]
+    # Short garbage reads as a typo'd provider name, not a key: the
+    # unknown-provider error stands.
+    inputs = @["notaprovider"]
     var editor: LineEditor
     var prof: Profile
     var messages = newJArray()
@@ -618,6 +620,44 @@ suite "provider wizard configuration":
     discard handleCommand(":provider add", messages, session, prof, editor)
 
     check activeProviders.len == 0
+
+  test "add accepts a zaicode-shaped key":
+    # z.ai keys are hex.hex with no stable prefix; the wizard must detect
+    # the shape and wire the coding-plan endpoint without asking which
+    # provider owns the key.
+    let zaiKey = "0123456789abcdef0123456789abcdef.fedcba9876543210"
+    inputs = @[zaiKey, "glm-5.3"]
+    var editor: LineEditor
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider add", messages, session, prof, editor)
+
+    check activeProviders.len == 1
+    check activeProviders[0].name == "zaicode"
+    check activeProviders[0].url == "https://api.z.ai/api/coding/paas/v4"
+    check activeProviders[0].key == zaiKey
+    check activeProviders[0].models == @["glm-5.3"]
+    check not prompts.anyIt(it.startsWith("  provider for this key"))
+
+  test "add prompts for the provider behind an unrecognized key":
+    # A long token no catalog knows is a key with an unrecognized prefix;
+    # the wizard asks which provider owns it instead of bailing with
+    # "unknown provider".
+    inputs = @["some-free-text-secret", "zaicode", "glm-5.3"]
+    var editor: LineEditor
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider add", messages, session, prof, editor)
+
+    check activeProviders.len == 1
+    check activeProviders[0].name == "zaicode"
+    check activeProviders[0].key == "some-free-text-secret"
+    check activeProviders[0].models == @["glm-5.3"]
+    check prompts.anyIt(it.startsWith("  provider for this key: "))
 
   test "add rejects a non-listed model in regular mode":
     # The unknown model re-prompts; the follow-up curated entry saves.
@@ -704,6 +744,43 @@ suite "provider wizard configuration":
     check activeProviders[0].name == "nvidia"
     check activeProviders[0].key == "nvapi-prefilled"
     check activeProviders[0].models == @["openai/gpt-oss-120b"]
+
+  test "prefilled add skips the supported list":
+    # `:provider add <name>` already answered the provider question;
+    # printing the supported list on top is noise. The unprefilled add
+    # still lists them.
+    let capturePath = getTempDir() / ("wizard_prefill_capture_" &
+      $getCurrentProcessId() & ".txt")
+
+    proc runAdd(cmd: string; feed: seq[string]): string =
+      inputs = feed
+      activeProviders = @[]
+      activeCurrent = ""
+      var editor: LineEditor
+      var prof: Profile
+      var messages = newJArray()
+      var session = Session()
+      let savedStdout = stdout
+      let captureFile = open(capturePath, fmWrite)
+      stdout = captureFile
+      try:
+        discard handleCommand(cmd, messages, session, prof, editor)
+      finally:
+        flushFile(stdout)
+        stdout = savedStdout
+        close(captureFile)
+      result = readFile(capturePath)
+
+    let zaiKey = "0123456789abcdef0123456789abcdef.fedcba9876543210"
+    let prefilled = runAdd(":provider add zaicode", @[zaiKey, "glm-5.3"])
+    check activeProviders.len == 1
+    check activeProviders[0].name == "zaicode"
+    check not prefilled.contains("supported:")
+
+    let listed = runAdd(":provider add", @["zaicode", zaiKey, "glm-5.3"])
+    check activeProviders.len == 1
+    check listed.contains("supported:")
+    try: removeFile(capturePath) except OSError: discard
 
   test "first field label matches the mode":
     # Regular mode takes a provider name or api key only; the label must
