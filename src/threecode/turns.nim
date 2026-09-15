@@ -364,7 +364,7 @@ proc onTurnInterrupted*() =
   stopTurnInputForFinalRender()
   stopSpinner(clearLiveFooter = false)
   discard stopBarTick()
-  commitTranscriptBytes(errLnS(InterruptedByUserMsg), true)
+  commitTurnEndNotice(errLnS(InterruptedByUserMsg))
   emitTestFrameEvent()
   clearInterrupted()
 
@@ -681,7 +681,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       # turn. `endTurnAfterTranscriptAppend` finalizes the turn without
       # rewriting the prompt.
       saveSession(session, messages)
-      commitTranscriptBytes(errLnS(e.msg), true)
+      commitTurnEndNotice(errLnS(e.msg))
       endTurnAfterTranscriptAppend()
       turnEnded = true
       return false
@@ -806,9 +806,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       # notice so the user knows the model gave nothing back.
       messages.add msg
       saveSession(session, messages)
-      commitTranscriptBytes(
+      commitTurnEndNotice(
         errLnS("empty reply - giving up after " & $MaxEmptyRetries &
-          " retries"), true)
+          " retries"))
       endTurnAfterTranscriptAppend()
       turnEnded = true
       break
@@ -1098,10 +1098,10 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         continue
       if flailAbort:
         saveSession(session, messages)
-        commitTranscriptBytes(
+        commitTurnEndNotice(
           errLnS("turn aborted: the model kept repeating the same tool " &
             "call after three warnings. It appears stuck; please rephrase, " &
-            "give it a hint, or take over."), true)
+            "give it a hint, or take over."))
         endTurnAfterTranscriptAppend()
         turnEnded = true
         return false
