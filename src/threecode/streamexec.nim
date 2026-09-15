@@ -384,6 +384,22 @@ proc localFileSig(path: string): (Time, int) =
 proc runStreamingBash*(act: Action, cache: ReadCache,
                        onLine: proc(line: string) = nil):
     tuple[rawOut: string, code: int, cap: int] =
+  # Refuse rather than silently degrade: the sandbox wants to confine
+  # bash but the OS backend isn't actually available on this host
+  # (Landlock/Seatbelt probe failed, or on Windows `3code setup` was
+  # never run). Falling through to an unconfined bash here would give
+  # the model shell access with no filesystem or network boundary and
+  # no indication to the person that this happened. `--danger` on this
+  # exact invocation is the only way past this; see bashDangerRequired.
+  if sandbox.bashDangerRequired():
+    return (&"error: bash refused — the sandbox is on but the OS " &
+      "backend cannot confine it on this system (old kernel, a " &
+      "container seccomp profile blocking Landlock, or on Windows " &
+      "`3code setup` was never run). Running bash here would be " &
+      "unconfined with no warning otherwise. Re-run with --danger " &
+      "if you explicitly accept that risk for this session; the " &
+      "flag is not saved anywhere and must be given every time. " &
+      "See " & sandbox.policyHint() & ".", 1, DefaultBashTimeout)
   let cmd = act.body.strip
   let mutPath = bashMutationPath(cmd)
   let (readPath, fullRead) = bashReadPath(cmd)

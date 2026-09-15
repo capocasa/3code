@@ -360,6 +360,22 @@ proc backendWorks*(exe: string): bool =
     except CatchableError:
       result = false
 
+proc bashDangerRequired*(): bool =
+  ## True when a bash launch right now would NOT be confined by the OS
+  ## backend (Landlock/Seatbelt probe failed at startup, or on Windows
+  ## the sandbox user/creds were never set up via `3code setup`), while
+  ## the sandbox is otherwise meant to be on. In that situation bash is
+  ## refused unless `--danger` was passed on this exact invocation
+  ## (`dangerConfirmed`, never persisted to config — see types.nim).
+  ##
+  ## A deliberate `sandboxEnabled = false` (`:sandbox off` / `sandbox =
+  ## off` / `--no-sandbox`) is a separate, explicit choice and is not
+  ## gated here: the person already opted out on purpose, with
+  ## filesystem+network enforcement understood to be fully off. This
+  ## proc only covers the case where the sandbox *wants* to restrict
+  ## bash but silently can't.
+  active and sandboxEnabled and procboxExe.len == 0 and not dangerConfirmed
+
 proc mtimeOf(path: string): Time =
   try: getLastModificationTime(path)
   except OSError: fromUnix(0)
