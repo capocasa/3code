@@ -137,6 +137,12 @@ when defined(windows):
 
   proc getConsoleMode(h: Handle; mode: ptr int32): int32 {.stdcall,
       dynlib: "kernel32", importc: "GetConsoleMode".}
+  proc getNumberOfConsoleInputEvents(hConsoleInput: Handle;
+      lpcNumberOfEvents: ptr int32): int32 {.stdcall,
+      dynlib: "kernel32", importc: "GetNumberOfConsoleInputEvents".}
+  proc peekConsoleInputW(hConsoleInput: Handle; lpBuffer: pointer;
+      nLength: int32; lpNumberOfEventsRead: ptr int32): int32 {.stdcall,
+      dynlib: "kernel32", importc: "PeekConsoleInputW".}
 
   var stdinKindChecked = false
   var stdinIsConsole = true
@@ -1830,6 +1836,37 @@ template noteReplyCaptured*(reply: string) =
   if replyCaptureHook != nil:
     replyCaptureHook(reply)
 
+when defined(windows):
+  proc consoleHasTailKeyPress(): bool =
+    ## True when the console queue holds a key *press* whose char is a
+    ## valid escape tail. `kbhit()` only reports "some event is queued":
+    ## the key-UP record that trails every `_getch`-consumed press stays
+    ## in the queue, so whether a bare ESC saw a "pending tail" raced on
+    ## the UP's arrival timing and a lost cancel. Peeking the records
+    ## (no consumption - `_getch` still owns the queue) is deterministic.
+    var pending: int32 = 0
+    let h = getStdHandle(STD_INPUT_HANDLE_ML)
+    if h == 0 or getNumberOfConsoleInputEvents(h, addr pending) == 0 or
+        pending <= 0:
+      return false
+    var recs: array[16, array[32, uint8]]  # INPUT_RECORDs, size-padded
+    var got: int32 = 0
+    if peekConsoleInputW(h, addr recs[0][0], min(pending, 16'i32),
+                         addr got) == 0:
+      return false
+    for r in 0 ..< got.int:
+      let rec = addr recs[r]
+      # INPUT_RECORD: WORD EventType; KEY_EVENT_RECORD union at offset 4:
+      # bKeyDown@4, UnicodeChar@14.
+      let evType = uint16(rec[0]) or (uint16(rec[1]) shl 8)
+      if evType != 1: continue            # KEY_EVENT only
+      let keyDown = int32(rec[4]) or (int32(rec[5]) shl 8) or
+          (int32(rec[6]) shl 16) or (int32(rec[7]) shl 24)
+      if keyDown == 0: continue           # release: never a tail
+      let ch = int(rec[14])
+      return ch != 0 and isEscapeTailByte(ch)
+    false
+
 proc terminalHasPendingInput*(): bool =
   ## Return whether stdin has a pending byte that could be the tail of an
   ## ESC-prefixed escape sequence. Polls briefly for burst-delivered
@@ -1845,10 +1882,12 @@ proc terminalHasPendingInput*(): bool =
       return true
     let deadline = epochTime() + EscapeTailPollMs.float / 1000.0
     while epochTime() < deadline:
-      if (if stdinConsole(): kbhit() != 0 else: pipeByteReady()):
+      if (if stdinConsole(): consoleHasTailKeyPress() else:
+          pipeByteReady()):
         return true
       sleep 1
-    return if stdinConsole(): kbhit() != 0 else: pipeByteReady()
+    return if stdinConsole(): consoleHasTailKeyPress() else: pipeByteReady()
+
   when defined(posix):
     if isatty(0.cint) != 0:
       var pfd: TPollfd

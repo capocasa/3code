@@ -1,12 +1,6 @@
-discard """
-  # Windows: shutdownCachedStreamFd() is a no-op on Windows (it wraps
-  # posix.shutdown to wake a blocking recv on the interrupt path), so the
-  # core contract this test asserts (interrupt returns cleanly from a
-  # body that never arrives) is not yet implemented cross-platform. The
-  # Windows interrupt path needs an equivalent fd-wakeup (e.g. closesocket
-  # or a self-pipe). See docs/windows-testing.md.
-  disabled: "win"
-"""
+## Cross-platform since shutdownCachedStreamFd() grew a Winsock branch
+## (winlean.shutdown wakes a blocked recv from any thread); the Windows
+## interrupt contract this test asserts is the same fd-wakeup as POSIX.
 
 ## Blocks-forever test: a stuck provider must not hang the main thread.
 ##
