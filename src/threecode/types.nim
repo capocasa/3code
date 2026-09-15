@@ -35,6 +35,13 @@ var sandboxEnabled*: bool = true
   ## checks pass through.
   ## Default on, preserving the historical sandboxed behavior. Toggled
   ## at runtime via `:sandbox on/off`, persisted in `[settings]`.
+var dangerConfirmed*: bool = false
+  ## Set only by the `--danger` CLI flag; deliberately never persisted
+  ## to `[settings]` or any config file, so it has to be typed again on
+  ## every invocation. When the sandbox is meant to be on but the OS
+  ## backend cannot actually confine bash (Landlock/Seatbelt probe
+  ## failed, or the Windows sandbox user isn't set up), bash is refused
+  ## unless this is true; see `bashConfinementBlocked` in sandbox.nim.
 var conversationId*: string = ""
   ## Stable per-conversation id published by the session layer
   ## (sessionIdFromPath of the `.3log`). Sent as `x-opencode-session` on

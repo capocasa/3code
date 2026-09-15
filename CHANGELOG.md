@@ -2,6 +2,20 @@
 
 **Unreleased**
 
+- **Bash is refused, not silently unconfined, when the OS sandbox
+  backend can't confine it.** Previously, if the Landlock probe failed
+  (old kernel, a container's seccomp profile blocking it) or the
+  Windows sandbox user was never set up via `3code setup`, bash quietly
+  fell back to running with no filesystem or network confinement at
+  all — on POSIX with no notice whatsoever, on Windows with a startup
+  warning only. Now bash calls are refused outright in that situation
+  (`error: bash refused — ...`); read/write/patch tools are unaffected,
+  since those were already enforced in-process regardless of the OS
+  backend. Pass the new `--danger` flag to allow unconfined bash
+  anyway. `--danger` is intentionally not a `[settings]` option and
+  can't be persisted — it has to be given on every invocation where
+  it's needed.
+
 - **Long sessions no longer leak memory (issue #35).** Three leaks
   compounded into the ever-growing RSS (52 GB in the wild once).
   Every `newHttpClient` call built a fresh OpenSSL context whose

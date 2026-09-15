@@ -90,6 +90,11 @@ proc usage() {.noreturn.} =
   -p, --private        private mode: only allow-private providers/models run
                       (zero-training providers; the token bar repaints to show it)
       --no-sandbox     disable sandbox enforcement (bash runs unconfined)
+      --danger         allow bash to run unconfined when the sandbox
+                      wants to be on but the OS backend (Landlock/
+                      Seatbelt/Windows setup) is unavailable; otherwise
+                      bash is refused. Never persisted — required on
+                      every invocation.
   -D, --debug          colored debug trace to stderr
   -v, --version        print version
   -h, --help           this message
@@ -326,6 +331,12 @@ proc main() =
       of "x", "experimental": experimentalEnabled = true
       of "p", "private": privateMode = true
       of "no-sandbox": sandboxEnabled = false
+      of "danger":
+        # Deliberately not settable via [settings] or any other config
+        # file — see dangerConfirmed in types.nim. Must be typed on
+        # every invocation where the OS sandbox backend is unavailable
+        # and bash is still wanted unconfined.
+        dangerConfirmed = true
       of "D", "debug": debugEnabled = true
       of "i", "interactive": interactive = true
       of "m", "model":
@@ -444,19 +455,31 @@ proc main() =
   # the project, not the binary.
   initSandbox(session.cwd)
   startupTrace("initSandbox")
-  # Windows: when the dedicated sandbox user / creds are not set up,
-  # initSandbox clears procboxExe and every bash tool call runs
-  # unconfined (host rules unfenced). Say so once at startup, where the
-  # user sees it before trusting the sandbox, instead of only inside the
-  # first bash turn. Cheap: backendWorks on Windows is a user+creds
-  # check, no WFP engine open, no spawn.
-  when defined(windows) and not defined(providerStub):
+  # When the OS sandbox backend cannot actually confine bash (Landlock
+  # probe failed on POSIX — old kernel, a container's seccomp profile
+  # blocking it — or on Windows the dedicated sandbox user/creds were
+  # never set up via `3code setup`), bash is refused at call time
+  # (see bashDangerRequired / runStreamingBash) unless --danger was
+  # given on this invocation. Say so once here too, at startup, so the
+  # person sees it before the first bash turn rather than only inside
+  # the tool error. Cheap: on Windows backendWorks is a user+creds
+  # check (no WFP engine open, no spawn); on POSIX initSandbox already
+  # paid for the probe above.
+  when not defined(providerStub):
     if sandboxEnabled and sandbox.active and sandboxWallWarn and
         sandbox.procboxExe.len == 0:
-      stderr.writeLine("3code: Windows sandbox is not set up; bash " &
-        "runs unconfined and policy host rules are NOT enforced. " &
-        "Run `3code setup` once as admin. " &
-        "(disable this warning: [settings] sandbox_wall_warn = off)")
+      if dangerConfirmed:
+        stderr.writeLine("3code: sandbox backend unavailable " &
+          "(old kernel / container seccomp / on Windows `3code setup` " &
+          "not run) — --danger is set, so bash WILL run unconfined " &
+          "this session. Read/write/patch tools remain confined.")
+      else:
+        stderr.writeLine("3code: sandbox backend unavailable " &
+          "(old kernel / container seccomp / on Windows `3code setup` " &
+          "not run) — bash is refused this session, not run " &
+          "unconfined. Pass --danger to allow it anyway (never saved, " &
+          "required every time). Read/write/patch tools are unaffected. " &
+          "(suppress this notice: [settings] sandbox_wall_warn = off)")
     startupTrace("sandbox-setup-warn")
 
   try:
