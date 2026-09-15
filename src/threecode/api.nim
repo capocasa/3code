@@ -14,6 +14,8 @@
 import std/[algorithm, atomics, hashes, httpclient, json, locks, monotimes, nativesockets, net, options, os, sequtils, strformat, strutils, tables, times, uri]
 when defined(posix):
   import std/posix except SocketHandle
+when defined(windows):
+  import std/winlean
 import streamhttp
 import types, util, prompts, streamexec, netthread, auth_openai, auth_google,
        codeassist
@@ -486,6 +488,14 @@ proc shutdownCachedStreamFd*() {.gcsafe.} =
     let fd = cachedStreamFd
     if fd != osInvalidSocket:
       discard posix.shutdown(posix.SocketHandle(fd), SHUT_RDWR.cint)
+  else:
+    # Winsock shutdown wakes a blocked recv/SSL_read on the socket from
+    # any thread, same contract as the POSIX branch. Without it a Ctrl-C /
+    # ESC during a wedged provider read sets the flag but nothing ever
+    # observes it: the stream loop is parked in recv with no timeout.
+    let fd = cachedStreamFd
+    if fd != osInvalidSocket:
+      discard winlean.shutdown(fd, 2'i32)  # SD_BOTH
 
 proc requestTurnInterrupt*(source = "unspecified") {.gcsafe.} =
   ## One cancellation path for signal hooks, buffered prompt keys, and

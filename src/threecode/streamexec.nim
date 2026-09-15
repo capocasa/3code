@@ -370,12 +370,93 @@ when defined(posix):
       result = result or toolCancelHit.load(moRelaxed)
     toolCancelPid.store(0, moRelaxed)
 else:
-  proc cancelActiveTool*() = discard
+  # Windows tool cancel/timeout. POSIX signals the tool's process group;
+  # the Windows equivalent is a Job Object the child is assigned to right
+  # after spawn: TerminateJobObject kills the whole tree (bash + every
+  # native descendant holding the output pipe open) in one call, and the
+  # same handle is the timeout watchdog's lever. The cancel trigger is the
+  # input thread (ESC / Ctrl-C during a turn raise InputCancelled ->
+  # requestTurnInterrupt -> cancelActiveTool); POSIX additionally peeks
+  # raw stdin for 0x03/0x1b, which the Windows console path delivers
+  # through the editor instead.
+  import std/winlean
+  const
+    PROCESS_TERMINATE = 0x0001'i32
+    PROCESS_SET_QUOTA = 0x0100'i32
+  proc createJobObject(lpJobAttributes, lpName: pointer): Handle {.stdcall,
+      dynlib: "kernel32", importc: "CreateJobObjectA".}
+  proc assignProcessToJobObject(hJob, hProcess: Handle): int32 {.stdcall,
+      dynlib: "kernel32", importc: "AssignProcessToJobObject".}
+  proc terminateJobObject(hJob: Handle, uExitCode: int32): int32 {.stdcall,
+      dynlib: "kernel32", importc: "TerminateJobObject".}
+  proc openProcess(dwDesiredAccess, bInheritHandle,
+      dwProcessId: int32): Handle {.stdcall, dynlib: "kernel32",
+      importc: "OpenProcess".}
+
+  var
+    toolJobHandle: Handle = 0
+    toolCancelHit: Atomic[bool]
+    toolTimedOut: Atomic[bool]
+    toolTimeoutStop: Atomic[bool]
+    toolTimeoutThread: Thread[void]
+    toolTimeoutCap: Atomic[int]
+
+  proc cancelActiveTool*() {.gcsafe.} =
+    let job = toolJobHandle
+    if job != 0:
+      toolCancelHit.store(true, moRelaxed)
+      discard terminateJobObject(job, 1'i32)
+
   proc setToolStdinWatcherEnabled*(enabled: bool) = discard
-  proc startToolCancelWatcher(pid: int) = discard
-  proc stopToolCancelWatcher(): bool = false
-  proc startToolTimeoutWatcher(cap: int) = discard
-  proc stopToolTimeoutWatcher(): bool = false
+
+  proc startToolCancelWatcher(pid: int) =
+    # Arm the job for the freshly spawned tool process. The process handle
+    # can be dropped once assigned: the job holds its own reference.
+    toolCancelHit.store(false, moRelaxed)
+    if toolJobHandle != 0:
+      discard closeHandle(toolJobHandle)
+      toolJobHandle = 0
+    let hProc = openProcess(PROCESS_TERMINATE or PROCESS_SET_QUOTA, 0,
+                            pid.int32)
+    if hProc == 0: return
+    let job = createJobObject(nil, nil)
+    if job != 0 and assignProcessToJobObject(job, hProc) != 0:
+      toolJobHandle = job
+    else:
+      if job != 0: discard closeHandle(job)
+    discard closeHandle(hProc)
+
+  proc stopToolCancelWatcher(): bool =
+    result = toolCancelHit.load(moRelaxed)
+    if toolJobHandle != 0:
+      # A cancel that raced the watcher arming (or a cancel-in-flight)
+      # must not leave a live child for waitForExit to block on: kill
+      # before releasing the job handle.
+      if result: discard terminateJobObject(toolJobHandle, 1'i32)
+      discard closeHandle(toolJobHandle)
+      toolJobHandle = 0
+
+  proc toolTimeoutLoop() {.thread, nimcall.} =
+    let deadline = epochTime() + toolTimeoutCap.load(moRelaxed).float
+    while not toolTimeoutStop.load(moRelaxed):
+      if epochTime() >= deadline:
+        let job = toolJobHandle
+        if job != 0:
+          toolTimedOut.store(true, moRelaxed)
+          discard terminateJobObject(job, 1'i32)
+        return
+      sleep(200)
+
+  proc startToolTimeoutWatcher(cap: int) =
+    toolTimeoutCap.store(cap, moRelaxed)
+    toolTimedOut.store(false, moRelaxed)
+    toolTimeoutStop.store(false, moRelaxed)
+    createThread(toolTimeoutThread, toolTimeoutLoop)
+
+  proc stopToolTimeoutWatcher(): bool =
+    result = toolTimedOut.load(moRelaxed)
+    toolTimeoutStop.store(true, moRelaxed)
+    try: joinThread(toolTimeoutThread) except CatchableError: discard
 
 proc localFileSig(path: string): (Time, int) =
   try: (getLastModificationTime(path), getFileSize(path).int)

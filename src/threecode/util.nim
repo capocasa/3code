@@ -268,6 +268,9 @@ when defined(windows):
   proc getNumberOfConsoleInputEvents(hConsoleInput: Handle,
       lpcNumberOfEvents: ptr int32): int32 {.stdcall,
       dynlib: "kernel32", importc: "GetNumberOfConsoleInputEvents".}
+  proc readConsoleInputA(hConsoleInput: Handle; lpBuffer: pointer;
+      nLength: int32; lpNumberOfEventsRead: ptr int32): int32 {.stdcall,
+      dynlib: "kernel32", importc: "ReadConsoleInputA".}
 
   proc detectColorModeWindows(): ColorMode =
     ## Query the terminal background via OSC 11 on Windows. Windows
@@ -292,38 +295,56 @@ when defined(windows):
     var written: int32 = 0
     if writeFile(hOut, unsafeAddr query[0], query.len.int32, addr written, nil) == 0:
       return cmDark
-    # Read the reply with a deadline. `ReadFile` on a console input handle
-    # blocks in line-input mode until a CR arrives, so clear line/echo input
-    # for the duration of the read and restore afterwards. `WaitForSingleObject`
-    # polls the handle so we don't block forever if the terminal never answers.
+    # Read the reply with a deadline. Clear line/echo input for the
+    # duration of the read so queued keys are delivered unedited; restore
+    # afterwards.
     var oldMode: int32 = 0
     let haveMode = getConsoleMode(hIn, addr oldMode) != 0
     if haveMode:
       discard setConsoleMode(hIn, oldMode and not (ENABLE_LINE_INPUT or ENABLE_ECHO_INPUT))
     var buf: array[256, char]
     var total = 0
+    var replyDone = false
     let deadlineMs = 150'i32
     var elapsedMs = 0'i32
     const StepMs = 25'i32
-    # Peek the input-event count instead of WaitForSingleObject: a console
-    # input handle signals on ANY queued event (focus, mouse, stale key),
-    # not just our OSC reply, so a wait on the handle can return spuriously
-    # or, when a pending event keeps the queue non-empty, block far past
-    # the deadline until the user hits a key. Counting events bounds the
-    # wait to the deadline regardless of what else is queued.
+    # Consume input RECORDS with ReadConsoleInputA, never ReadFile. A
+    # console input queue holds non-character events too (focus, mouse,
+    # window-buffer-size, key-ups without a char); ReadFile waits for a
+    # KEY_EVENT that carries a character, so a single queued non-char
+    # event makes the "bounded" read block until the user happens to press
+    # a key - the startup-hangs-until-Return bug. ReadConsoleInputA removes
+    # every event type without blocking; key-down records with a char feed
+    # the reply buffer, everything else is dropped. Non-ASCII chars can't
+    # be part of an `rgb:` reply and are skipped.
     while elapsedMs < deadlineMs:
       var pending: int32 = 0
-      if getNumberOfConsoleInputEvents(hIn, addr pending) != 0 and pending > 0:
+      if getNumberOfConsoleInputEvents(hIn, addr pending) != 0 and
+          pending > 0:
+        var recs: array[16, array[32, uint8]]  # 16 INPUT_RECORDs, padded
+        let want = min(pending, 16'i32)
         var got: int32 = 0
-        if readFile(hIn, addr buf[total], (buf.len - total).int32,
-                    addr got, nil) != 0 and got > 0:
-          total += got.int
-          if total >= buf.len: break
-          # The reply is terminated by BEL (0x07) or ST (ESC \). Stop once
-          # a terminator lands so we don't wait out the full window.
-          if '\x07' in buf.toOpenArray(0, total - 1) or
-             (total >= 2 and buf[total - 2] == '\x1b' and buf[total - 1] == '\\'):
-            break
+        if readConsoleInputA(hIn, addr recs[0][0], want, addr got) != 0:
+          for r in 0 ..< got.int:
+            let rec = addr recs[r]
+            # INPUT_RECORD: WORD EventType; union at offset 4.
+            # KEY_EVENT_RECORD: bKeyDown@4, UnicodeChar@14.
+            let evType = uint16(rec[0]) or (uint16(rec[1]) shl 8)
+            if evType != 1: continue  # KEY_EVENT only
+            let keyDown = int32(rec[4]) or (int32(rec[5]) shl 8) or
+                (int32(rec[6]) shl 16) or (int32(rec[7]) shl 24)
+            let ch = uint16(rec[14]) or (uint16(rec[15]) shl 8)
+            if keyDown == 0 or ch == 0 or ch > 0x7F: continue
+            buf[total] = ch.char
+            inc total
+            if total >= buf.len: break
+            # The reply is terminated by BEL (0x07) or ST (ESC \). Stop
+            # once a terminator lands so we don't wait out the window.
+            if '\x07' in buf.toOpenArray(0, total - 1) or
+               (total >= 2 and buf[total - 2] == '\x1b' and buf[total - 1] == '\\'):
+              replyDone = true
+              break
+        if replyDone or total >= buf.len: break
       else:
         sleep(StepMs.int)
       elapsedMs += StepMs

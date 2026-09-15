@@ -2271,20 +2271,23 @@ proc inputThreadProc() {.thread.} =
         termui.writeRaw("\x1b[?2004h")
 
     when defined(windows):
-      # Raw input: clear line/echo so keystrokes (including Ctrl-D 0x04)
-      # are delivered to `_getch` unedited/unechoed. `ENABLE_PROCESSED_INPUT`
-      # is kept so that in a real Windows console Ctrl-C raises
-      # `CTRL_C_EVENT`, caught by `consoleCtrlHandler` below. Under the
-      # ConPTY test harness conhost consumes 0x03 without forwarding it and
-      # without raising the event, so the tty harness sends 0x04 instead
-      # (see `tty_expect.ctrlC`). Restore on exit via `restoreInputTermios`.
+      # Raw input: clear line/echo so keystrokes are delivered to `_getch`
+      # unedited/unechoed, and clear `ENABLE_PROCESSED_INPUT` too. With
+      # processed input on, conhost turns 0x03 into a CTRL_C_EVENT; in a
+      # real console that fires `consoleCtrlHandler` below, but under
+      # ConPTY (ssh sessions, the tty harness) the event mechanism is inert
+      # and conhost silently eats the byte - Ctrl-C appears dead. With it
+      # off, 0x03 arrives as a plain key and takes the editor's ctrl+c
+      # binding, the same interrupt path on every surface. The handler
+      # stays installed for Ctrl-Break / window close in real consoles.
+      # Restore on exit via `restoreInputTermios`.
       let h = getStdHandle(STD_INPUT_HANDLE)
       var mode: int32 = 0
       if getConsoleMode(h, addr mode) != 0:
         inputOrigConsoleMode = mode
         inputOrigConsoleModeValid = true
         discard setConsoleMode(h, mode and not
-          (ENABLE_LINE_INPUT or ENABLE_ECHO_INPUT))
+          (ENABLE_PROCESSED_INPUT or ENABLE_LINE_INPUT or ENABLE_ECHO_INPUT))
       # Route Ctrl-C / Ctrl-Break (real console) straight to the turn-
       # interrupt path via the console control handler.
       discard setConsoleCtrlHandler(

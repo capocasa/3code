@@ -12,12 +12,13 @@ files pass, 10 are skipped with `disabled: "win"` (see "Disabled tty tests"
 below), and 0 fail. One stream test remains disabled with a precise,
 irreducible blocker:
 
-- `tests/stream/test_netthread_blocks.nim` — asserts the
-  interrupt-returns-cleanly-from-a-stuck-socket contract. That relies on
-  `shutdownCachedStreamFd()` (src/threecode/api.nim), which is a no-op on
-  Windows because it wraps `posix.shutdown` to wake a blocking `recv`. The
-  Windows interrupt path needs an equivalent fd-wakeup (closesocket or a
-  self-pipe) before this test can pass.
+- `tests/stream/test_netthread_blocks.nim` — previously disabled: the
+  interrupt relied on `shutdownCachedStreamFd()` (src/threecode/api.nim),
+  which was POSIX-only. It now carries a Winsock branch
+  (`winlean.shutdown` wakes a blocked recv from any thread) and
+  streamhttp applies `SO_RCVTIMEO`/`SO_SNDTIMEO` (DWORD milliseconds) and
+  promotes `WSAETIMEDOUT` to `StreamTimeoutError`, so the stuck-socket
+  interrupt contract holds on Windows; the test is enabled.
 
 The tty suite (18 files) drives `3code` as a subprocess through the Windows
 Pseudo Console API (ConPTY). The POSIX PTY lifecycle in `tty_expect.nim` is
