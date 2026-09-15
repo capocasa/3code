@@ -2,6 +2,25 @@
 
 **Unreleased**
 
+- **The caret parks at the right margin instead of wrapping to the next
+  row.** When the drawn caret cell landed exactly on the last column
+  (content that fills the row exactly, or trailing spaces typed up to
+  the margin), the reverse-video cell wrapped onto the next physical
+  row: the caret appeared one row below the prompt at column 0, and the
+  editor block later settled one row low with a stray blank row above
+  the prompt. The caret now parks on the row's last painted cell, the
+  same place a physical cursor parks in deferred wrap.
+
+- **A patch edit with an empty search string is rejected instead of
+  prepending to the file.** Streamed tool-call arguments occasionally
+  arrive with a lost `search` or `replace` value. An empty `replace`
+  deletes the searched span (visible in the returned diff); but an
+  empty `search` hit `strutils.find("") == 0` and silently PREPENDED
+  the replace text at the top of the target file, corrupting it. Both
+  the `patch` tool and `apply_patch` update hunks now hard-error with
+  the offending edit index and touch nothing. Same guard, V4A path.
+
+
 - **The caret advances over typed spaces again.** The drawn caret is
   painted after the row's last non-space cell, so trailing spaces the
   user just typed (never painted as content) left the caret frozen in
