@@ -31,6 +31,19 @@ proc acquireTerminalWrite*() =
     acquire terminalLock
   inc terminalLockDepth
 
+proc tryAcquireTerminalWrite*(): bool =
+  ## Non-blocking variant of `acquireTerminalWrite` for cross-thread
+  ## readers that must never stall on the render path (the draft flusher,
+  ## which can also be driven from a signal-triggered cleanup). Returns
+  ## false when the lock is held elsewhere; nothing is acquired then.
+  if terminalLockDepth == 0:
+    result = tryAcquire(terminalLock)
+    if result:
+      inc terminalLockDepth
+  else:
+    result = true
+    inc terminalLockDepth
+
 proc releaseTerminalWrite*() =
   ## Leave the terminal-writer critical section acquired by
   ## `acquireTerminalWrite`.

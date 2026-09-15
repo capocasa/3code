@@ -1018,8 +1018,13 @@ proc liveContentRowCount*(e: TerminalEngine): int {.gcsafe.} =
   e.liveContentRows.len
 
 proc liveContentRowCount*(): int {.gcsafe.} =
+  ## Locked read: callers check this outside their own render critical
+  ## section (the guiLoop spinner branch picks repaintLiveContent vs
+  ## renderFooter from it) while render threads replace the seq under the
+  ## same lock; an unlocked read races the seq header swap.
   {.cast(gcsafe).}:
-    defaultEngine.liveContentRows.len
+    termio.withTerminalWriteLock:
+      result = defaultEngine.liveContentRows.len
 
 proc paintedFooterRowCount*(e: TerminalEngine): int {.gcsafe.} =
   e.paintedFooterRows
@@ -1034,7 +1039,13 @@ proc noteFooterPainted*(footerRowsAboveEditor: int) {.gcsafe.} =
   ## raw bytes before the input thread is up, so the first walk-up still
   ## knows the reserved gap row is live chrome.
   {.cast(gcsafe).}:
-    defaultEngine.noteFooterPainted(footerRowsAboveEditor)
+    # Both note procs drop the tracked volatile-row model (freeing the
+    # seq's strings), which the render threads copy under the terminal
+    # write lock; the wizard's noteNoFooter runs on the input thread, so
+    # the mutation itself must take the same lock (mirrors clearLiveContent
+    # and updateToolViewportSymbol in the heap-corruption fix).
+    termio.withTerminalWriteLock:
+      defaultEngine.noteFooterPainted(footerRowsAboveEditor)
 
 proc noteNoFooter*() {.gcsafe.} =
   ## Register that no footer rows are live chrome right now. Used by the
@@ -1042,7 +1053,8 @@ proc noteNoFooter*() {.gcsafe.} =
   ## none of the persistent prompt's reserved gap row; leaving the stale
   ## count in place makes the next transcript commit erase a scrollback row.
   {.cast(gcsafe).}:
-    defaultEngine.noteNoFooter()
+    termio.withTerminalWriteLock:
+      defaultEngine.noteNoFooter()
 
 # Commit the transcript blob as real scrollback, with the one blank
 # separator row owned here (see `appendTranscript` for the contract). The
