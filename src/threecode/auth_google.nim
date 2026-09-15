@@ -32,15 +32,13 @@ import oauth, util
 const
   GoogleAuthorize = "https://accounts.google.com/o/oauth2/v2/auth"
   GoogleToken = "https://oauth2.googleapis.com/token"
-  ## Public desktop OAuth client metadata from the open-source
-  ## `@google/gemini-cli` (packages/core/src/code_assist/oauth2.ts);
-  ## not a secret. Split across string parts only so GitHub's push
-  ## protection does not match the (public) credential literally; keep
-  ## the pieces separate.
-  GoogleClientId = "681255809395-" &
-                   "oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
-  GoogleClientSecret = "GOCSPX-" &
-                       "4uHgMPm-1o7Sk-geV6Cu5clXFsxl"
+  ## Desktop OAuth client metadata from the open-source
+  ## `@google/gemini-cli` (packages/core/src/code_assist/oauth2.ts).
+  ## Installed-application credential; per Google's OAuth docs the
+  ## client secret is "obviously not treated as a secret" here:
+  ## https://developers.google.com/identity/protocols/oauth2#installed
+  GoogleClientId = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
+  GoogleClientSecret = "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"
   GoogleScope = "https://www.googleapis.com/auth/cloud-platform " &
                 "https://www.googleapis.com/auth/userinfo.email " &
                 "https://www.googleapis.com/auth/userinfo.profile"
