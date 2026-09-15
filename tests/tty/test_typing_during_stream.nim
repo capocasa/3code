@@ -191,12 +191,14 @@ suite "typing during active stream":
     tty.drain(100)
     # Drive each keystroke with a settle long enough to capture the GUI
     # thread's intervening streaming repaint, not just the keystroke frame.
-    # While typing during a stream the caret must stay visible between
-    # keystrokes: the GUI thread repaints the footer every ~80ms and must
-    # not hide the caret while the editor is accepting buffered input.
-    # (Regression: the streaming repaint path hid the caret and never
-    # re-showed it, so the caret flickered off between keystrokes.)
-    var hiddenOnPromptRow = 0
+    # While typing during a stream the drawn caret must stay on the prompt
+    # row between keystrokes: the GUI thread repaints the footer every
+    # ~80ms and must never leave the editor without its caret cell.
+    # (Original regression: the streaming repaint path hid the physical
+    # caret and never re-showed it, so the caret flickered off between
+    # keystrokes. Now the physical cursor is hidden all session and the
+    # caret is a drawn reverse-video cell in the editor rows.)
+    var missingCaret = 0
     var since = tty.frames.len
     for ch in "hello":
       rawSend(tty, $ch)
@@ -209,13 +211,13 @@ suite "typing during active stream":
         block findPrompt:
           for i in countdown(f.rows.high, 0):
             if f.rows[i].startsWith("\u276f"):
-              if f.cursorRow == i and f.cursorHidden:
-                inc hiddenOnPromptRow
+              if f.drawnCaretCount(i) != 1:
+                inc missingCaret
               break findPrompt
       since = tty.frames.len
-    check hiddenOnPromptRow == 0
-    if hiddenOnPromptRow != 0:
-      echo "caret flickered off the prompt row ", hiddenOnPromptRow,
+    check missingCaret == 0
+    if missingCaret != 0:
+      echo "drawn caret missing from the prompt row in ", missingCaret,
         " frames while typing during the stream"
 
     # Elapsed-counter regression: once the turn clock is past 1s, keep

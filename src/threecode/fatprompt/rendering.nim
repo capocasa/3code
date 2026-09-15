@@ -537,7 +537,7 @@ proc footerLayout*(frame: FooterFrame; termW = 0): FooterLayout =
         labelCells(frame.label) + 5
     let barRows = barWrapRows(barCells, termW)
     result.rowsAboveEditor = 1 + barRows
-    result.bytes = "\x1b[?25l\r\x1b[2K"
+    result.bytes = "\r\x1b[2K"
     result.bytes.add retryNoticeRow(frame, termW)
     result.bytes.add "\r\n\x1b[2K"
     result.bytes.add barText
@@ -730,9 +730,6 @@ proc footerFrameBytes*(s: FatPromptState; termW = 0): string =
   if s.footer.barLabel.len == 0: ""
   else: barFooterBytes(s.footer.barLabel, termW)
 
-proc hideRealCaretBytes*(): string =
-  "\x1b[?25l"
-
 proc endTurnBytes*(label: string; repaintPrompt: bool,
                    termW = 0; gapAlready = false): string =
   if label.len > 0:
@@ -743,7 +740,6 @@ proc endTurnBytes*(label: string; repaintPrompt: bool,
       result.add barFooterBytes(label, termW)
       let rows = barWrapRows(2 + labelCells(label), termW)
       result.add "\x1b[" & $rows & "B"
-  result.add "\x1b[?25h"
 
 proc liveEditorBarTickFrame*(label: string): string =
   paintBarBytes(label)
@@ -752,9 +748,9 @@ proc absoluteBarTickFrame*(row: int; label: string; activeEditor: bool;
                            termW = 0): string =
   let pos = "\x1b[" & $row & ";1H"
   if activeEditor:
-    "\x1b[?25l" & pos & paintBarBytes(label)
+    pos & paintBarBytes(label)
   else:
-    "\x1b[?25l" & pos & barFooterBytes(label, termW)
+    pos & barFooterBytes(label, termW)
 
 proc moveToBarBelowBytes*(): string =
   "\x1b[1B"

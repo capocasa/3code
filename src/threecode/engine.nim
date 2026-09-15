@@ -642,7 +642,6 @@ proc diffEditorFrame*(e: var TerminalEngine; ed: var minline.LineEditor;
     if sig == e.lastPaintSig:
       return
     stdout.write termio.SyncBegin()
-    stdout.write "\x1b[?25l"
     var vrows: seq[VolatileRow]
     let texts = footerRowTexts(frame, termW)
     for i in 0 ..< rows:
@@ -652,8 +651,6 @@ proc diffEditorFrame*(e: var TerminalEngine; ed: var minline.LineEditor;
       e.liveContentRows, e.toolViewportRows,
       e.liveContentHasGap, e.toolViewportHasGap,
       e.toolViewportBannerRows)
-    if not ed.pendingCaret:
-      stdout.write "\x1b[?25h"
     e.noteFooterPaintedKeepRows(rows)
     e.lastPaintSig = sig
     stdout.write termio.SyncEnd()
@@ -669,8 +666,7 @@ proc beginEditorRedraw*(ed: var minline.LineEditor; ready: bool;
   if not engineOutputEnabled: return
   defaultEngine.beginEditorRedraw(ed, ready, frame)
 
-proc finishEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor;
-                         showCaret = true) =
+proc finishEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor) =
   if e.editorRedrawPending:
     if e.editorRedrawFooterRows > 0:
       # beginEditorRedraw already synced the row model with the bytes
@@ -686,11 +682,11 @@ proc finishEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor;
       e.noteNoFooter()
     e.editorRedrawPending = false
     e.editorRedrawFooterRows = 0
-  termio.finishEditorRedraw(showCaret)
+  termio.finishEditorRedraw()
 
-proc finishEditorRedraw*(ed: var minline.LineEditor; showCaret = true) =
+proc finishEditorRedraw*(ed: var minline.LineEditor) =
   if not engineOutputEnabled: return
-  defaultEngine.finishEditorRedraw(ed, showCaret)
+  defaultEngine.finishEditorRedraw(ed)
 
 proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool;
                    editor: ptr minline.LineEditor;
@@ -731,7 +727,6 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
       if sig == e.lastPaintSig:
         return
       stdout.write termio.SyncBegin()
-      stdout.write "\x1b[?25l"
       # The diff painter rewrites only rows whose content changed: a
       # ticking bar no longer erase-repaints the whole volatile block
       # every 80ms, so streaming live content and the tool viewport
@@ -746,8 +741,6 @@ proc renderFooter*(e: var TerminalEngine; frame: FooterFrame; inputRunning: bool
         e.liveContentHasGap, e.toolViewportHasGap,
         e.toolViewportBannerRows,
         prevPaintedFooterRows = prevFooterRows)
-      if not edPtr[].pendingCaret:
-        stdout.write "\x1b[?25h"
       if frame.kind == ffClear:
         e.noteNoFooter()
       else:
@@ -791,7 +784,6 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         if sig == e.lastPaintSig:
           return
         stdout.write termio.SyncBegin()
-        stdout.write "\x1b[?25l"
         e.toolViewportHasGap = true
         e.toolViewportRows = @rows
         e.toolViewportBannerRows = bannerRows
@@ -810,7 +802,6 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
       if sig == e.lastPaintSig:
         return
       stdout.write termio.SyncBegin()
-      stdout.write "\x1b[?25l"
       let prevFooterRows = e.paintedFooterRows
       let newGap = true
       var vrows: seq[VolatileRow]
@@ -821,8 +812,6 @@ proc renderToolViewport*(e: var TerminalEngine; rows: openArray[string];
         e.liveContentRows, @rows,
         e.liveContentHasGap, newGap, bannerRows,
         prevPaintedFooterRows = prevFooterRows)
-      if not editor[].pendingCaret:
-        stdout.write "\x1b[?25h"
       if frame.kind == ffClear:
         e.noteNoFooter()
       else:
@@ -876,7 +865,6 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
         if sig == e.lastPaintSig:
           return
         stdout.write termio.SyncBegin()
-        stdout.write "\x1b[?25l"
         e.liveContentHasGap = true
         e.liveContentRows = @rows
         e.writeLiveContentRows()
@@ -894,7 +882,6 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
       if sig == e.lastPaintSig:
         return
       stdout.write termio.SyncBegin()
-      stdout.write "\x1b[?25l"
       let prevFooterRows = e.paintedFooterRows
       var vrows: seq[VolatileRow]
       for row in footerRowTexts(frame, width):
@@ -905,14 +892,6 @@ proc renderLiveContent*(e: var TerminalEngine; rows: openArray[string];
         true, e.toolViewportHasGap,
         e.toolViewportBannerRows,
         prevPaintedFooterRows = prevFooterRows)
-      # Restore the caret to whatever the editor's pendingCaret dictates,
-      # matching `renderFooter` and the input thread's postRedraw. During
-      # buffered typing (pendingCaret == false) the caret must stay visible
-      # so the GUI thread's 80ms streaming repaint does not fight the
-      # input thread's keystroke redraw and flicker it on and off. Only a
-      # deferred-submit hourglass (pendingCaret == true) keeps it hidden.
-      if not editor[].pendingCaret:
-        stdout.write "\x1b[?25h"
       if frame.kind == ffClear:
         e.noteNoFooter()
       else:
@@ -969,7 +948,6 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
         if sig == e.lastPaintSig:
           return
         stdout.write termio.SyncBegin()
-        stdout.write "\x1b[?25l"
         e.writeLiveContentRows()
         if bytes.len > 0:
           stdout.write bytes
@@ -985,7 +963,6 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
       if sig == e.lastPaintSig:
         return
       stdout.write termio.SyncBegin()
-      stdout.write "\x1b[?25l"
       let prevFooterRows = e.paintedFooterRows
       var vrows: seq[VolatileRow]
       for row in footerRowTexts(frame, width):
@@ -996,8 +973,6 @@ proc repaintLiveContent*(e: var TerminalEngine; frame: FooterFrame;
         e.liveContentHasGap, e.toolViewportHasGap,
         e.toolViewportBannerRows,
         prevPaintedFooterRows = prevFooterRows)
-      if not editor[].pendingCaret:
-        stdout.write "\x1b[?25h"
       if frame.kind == ffClear:
         e.noteNoFooter()
       else:
@@ -1104,8 +1079,6 @@ proc repaintVolatileAfterCommit(e: var TerminalEngine;
     # ghostty) can batch/drop differently than the row model expects.
     stdout.write edPtr[].redrawBytes(synchronized = false)
     edPtr[].prevRowSpans = edPtr[].renderRowSpans()
-    if not edPtr[].pendingCaret:
-      stdout.write "\x1b[?25h"
     e.noteFooterPainted(footerRowsAboveEditor)
     # Do NOT sync the diff model here: the submit path clears the
     # editor buffer right after this repaint, and the next volatile
@@ -1145,7 +1118,7 @@ proc commitTranscriptItem(e: var TerminalEngine; transcript: string;
       e.liveContentRows.len + e.liveContentGapRows)
   stdout.write termio.SyncBegin()
   if editing:
-    stdout.write "\x1b[?25l\r"
+    stdout.write "\r"
   let up =
     if editing:
       max(0, e.walkUp(edPtr[]) + max(0, compactRowsAboveFooter))

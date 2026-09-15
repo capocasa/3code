@@ -84,18 +84,21 @@ suite "interrupt during pre-stream freeze regression":
     tty.expectInHistory "interrupted by user"
     tty.drain 300  # let the post-interrupt prompt frame settle
     # Regression: cancel must leave the prompt glyph on the caret row
-    # with the caret at col 2. A passing `expect "❯"` is not enough —
+    # with the drawn caret at col 2. A passing `expect "❯"` is not enough —
     # the earlier `❯` from the submitted prompt row can match. See the
     # matching assertion in the waitForTestContinue-based tests for the
-    # full bug description.
+    # full bug description. The caret is the drawn reverse-video cell;
+    # the physical cursor stays hidden all session.
     let fEsc = tty.frames[^1]
-    doAssert not fEsc.cursorHidden,
-      "REGRESSION (interrupted-by-user): caret hidden after ESC; expected col 2 on prompt row"
-    doAssert fEsc.cursorCol == 2,
-      "REGRESSION (interrupted-by-user): expected caret at col 2 after ❯, got " & $fEsc.cursorCol
-    doAssert fEsc.rows[fEsc.cursorRow].contains("❯"),
-      "REGRESSION (interrupted-by-user): prompt glyph ❯ missing from caret row " &
-        $fEsc.cursorRow & ", got: '" & fEsc.rows[fEsc.cursorRow] & "'"
+    block escPromptRow:
+      for i in countdown(fEsc.rows.high, 0):
+        if not fEsc.rows[i].startsWith("\u276f"): continue
+        doAssert fEsc.drawnCaretCount(i) == 1,
+          "REGRESSION (interrupted-by-user): drawn caret missing after ESC; expected exactly one on prompt row " & $i
+        doAssert fEsc.drawnCaretCol(i) == 2,
+          "REGRESSION (interrupted-by-user): expected drawn caret at col 2 after ❯, got " &
+            $fEsc.drawnCaretCol(i)
+        break escPromptRow
 
     # The prompt must come back and accept a real prompt.
     tty.expect "\u276f"
@@ -139,16 +142,18 @@ suite "interrupt during pre-stream freeze regression":
     tty.expectInHistory "interrupted by user"
     tty.drain 300  # let the post-interrupt prompt frame settle
     # Same interrupted-by-user prompt contract as the ESC case — glyph
-    # on the caret row, caret at col 2. See the matching assertion in
-    # the ESC test for the bug being locked out.
+    # on the caret row, drawn caret at col 2. See the matching assertion
+    # in the ESC test for the bug being locked out.
     let fCtlc = tty.frames[^1]
-    doAssert not fCtlc.cursorHidden,
-      "REGRESSION (interrupted-by-user): caret hidden after Ctrl-C; expected col 2 on prompt row"
-    doAssert fCtlc.cursorCol == 2,
-      "REGRESSION (interrupted-by-user): expected caret at col 2 after ❯, got " & $fCtlc.cursorCol
-    doAssert fCtlc.rows[fCtlc.cursorRow].contains("❯"),
-      "REGRESSION (interrupted-by-user): prompt glyph ❯ missing from caret row " &
-        $fCtlc.cursorRow & ", got: '" & fCtlc.rows[fCtlc.cursorRow] & "'"
+    block ctlcPromptRow:
+      for i in countdown(fCtlc.rows.high, 0):
+        if not fCtlc.rows[i].startsWith("\u276f"): continue
+        doAssert fCtlc.drawnCaretCount(i) == 1,
+          "REGRESSION (interrupted-by-user): drawn caret missing after Ctrl-C; expected exactly one on prompt row " & $i
+        doAssert fCtlc.drawnCaretCol(i) == 2,
+          "REGRESSION (interrupted-by-user): expected drawn caret at col 2 after ❯, got " &
+            $fCtlc.drawnCaretCol(i)
+        break ctlcPromptRow
 
     tty.expect "\u276f"
     tty.expectAlive()  # Ctrl-C during in-flight call must not exit

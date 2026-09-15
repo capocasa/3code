@@ -2,6 +2,14 @@
 
 **Unreleased**
 
+- **The caret no longer flickers.** The caret at the prompt is now a
+  drawn reverse-video cell inside the editor rows; the physical terminal
+  cursor stays hidden for the whole session (shown only at exit, Ctrl-Z
+  suspend, and external-editor handoff). Previously every repaint hid and
+  re-showed the real cursor: once per keystroke, and every 80ms GUI tick
+  while a turn ran, which read as continuous flicker on Windows Terminal.
+  Repaints now emit bytes only when content actually changed.
+
 - **Retry waits show an hourglass, not the braille spinner.** The
   braille glyph in the token bar is now strictly the in-flight-request
   indicator. During a retry backoff (a wait between requests) the bar

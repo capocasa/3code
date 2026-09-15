@@ -107,10 +107,6 @@ proc writeRaw*(bytes: string) =
     stdout.write bytes
     stdout.flushFile
 
-proc hideCaret*() =
-  ## Hide the physical terminal caret while the prompt is in turn-running mode.
-  writeRaw("\x1b[?25l")
-
 proc setSteadyCursor*() =
   ## Use a steady block cursor while 3code is active.
   writeRaw("\x1b[2 q")
@@ -125,11 +121,13 @@ proc beginEditorRedraw*(ed: var minline.LineEditor; ready: bool;
                         footerBarBytes: string;
                         footerRowsAboveEditor = 1) =
   ## Start an atomic live-editor redraw frame. The caller must finish with
-  ## `finishEditorRedraw` after minline has emitted the editor bytes.
+  ## `finishEditorRedraw` after minline has emitted the editor bytes. The
+  ## physical cursor is hidden for the whole session (the caret is drawn
+  ## inside the editor rows), so no visibility toggling happens here.
   acquireTerminalWrite()
   refreshEditorWidth(ed)
   stdout.write SyncBegin()
-  stdout.write "\x1b[?25l\r"
+  stdout.write "\r"
   ed.redrawWrappedExternally = true
   # `footerRowsAboveEditor` is the source of truth for reserved chrome above
   # the editor (gap-only prompt-only startup counts as 1 even with empty
@@ -163,11 +161,9 @@ proc beginEditorRedraw*(ed: var minline.LineEditor; ready: bool;
     stdout.write "\r\n"
   ed.renderRow = 0
 
-proc finishEditorRedraw*(showCaret = true) =
+proc finishEditorRedraw*() =
   ## Finish the live-editor redraw frame opened by `beginEditorRedraw`.
   try:
-    if showCaret:
-      stdout.write "\x1b[?25h"
     stdout.write SyncEnd()
     stdout.flushFile()
   finally:
