@@ -313,11 +313,60 @@ proc setFrameModel*(m: FrameModel) {.gcsafe.} =
     frameModelShared = m
     release frameModelLock
 
+func freshString(s: string): string =
+  ## Payload-fresh copy: the result owns a newly allocated payload, so its
+  ## refcount cell is only ever inc/dec'd by the copying thread. A plain
+  ## assignment aliases the source's cell, and destroying that copy outside
+  ## the lock races the controller's next write to it (ORC's cell RMW is not
+  ## thread-safe; Termux hardened_malloc aborts on the corruption).
+  if s.len == 0:
+    return ""
+  result = newString(s.len)
+  copyMem(addr result[0], unsafeAddr s[0], s.len)
+
+func freshFrame(f: FooterFrame): FooterFrame =
+  ## Same payload-fresh discipline for a built frame (see `freshString`).
+  result.kind = f.kind
+  result.elapsed = f.elapsed
+  result.clearRows = f.clearRows
+  result.ticker = freshString(f.ticker)
+  result.label = freshString(f.label)
+  result.spinner = freshString(f.spinner)
+  result.retryWait.active = f.retryWait.active
+  result.retryWait.remainingS = f.retryWait.remainingS
+  result.retryWait.label = freshString(f.retryWait.label)
+
 proc getFrameModel*(): FrameModel {.gcsafe.} =
+  ## Payload-fresh copy of the shared model, built under `frameModelLock`.
+  ## Reader threads (the GUI tick, the input thread's editor redraw) can
+  ## hold it, derive frames from it, and destroy it freely: no refcount cell
+  ## shared with the controller is ever touched outside the lock, and the
+  ## lock is never held across a terminal render (the gui-join deadlock,
+  ## test_gui_join_freeze).
   {.cast(gcsafe).}:
     acquire frameModelLock
-    result = frameModelShared
-    release frameModelLock
+    try:
+      result.mode = frameModelShared.mode
+      result.elapsed = frameModelShared.elapsed
+      result.clearRows = frameModelShared.clearRows
+      result.spinner = freshString(frameModelShared.spinner)
+      result.label = freshString(frameModelShared.label)
+      result.ticker = freshString(frameModelShared.ticker)
+      result.retryWait.active = frameModelShared.retryWait.active
+      result.retryWait.remainingS = frameModelShared.retryWait.remainingS
+      result.retryWait.label = freshString(frameModelShared.retryWait.label)
+      result.viewport.active = frameModelShared.viewport.active
+      result.viewport.exitCode = frameModelShared.viewport.exitCode
+      result.viewport.idx = frameModelShared.viewport.idx
+      result.viewport.maxLines = frameModelShared.viewport.maxLines
+      result.viewport.banner = freshString(frameModelShared.viewport.banner)
+      result.viewport.lines =
+        newSeq[string](frameModelShared.viewport.lines.len)
+      for i in 0 ..< frameModelShared.viewport.lines.len:
+        result.viewport.lines[i] =
+          freshString(frameModelShared.viewport.lines[i])
+    finally:
+      release frameModelLock
 
 func liveSpinnerGlyph*(m: FrameModel; rotating: string): string =
   ## The bar's activity glyph. Braille rotation means an in-flight API
@@ -409,15 +458,28 @@ proc currentFrameFromModel*(): FooterFrame {.gcsafe.} =
   {.cast(gcsafe).}:
     case m.mode
     of amSpinner:
-      spinnerFooterFrame(
+      # `m` is payload-fresh (getFrameModel), so the frame built from it
+      # may share `m`'s cells: both are owned by the calling thread.
+      result = spinnerFooterFrame(
         liveSpinnerGlyph(m, m.spinner),
         m.label, m.ticker, lastPaintedElapsedS.load(moAcquire).int,
         m.retryWait)
     of amBarTick:
-      tokenBarFrame(barTickLabel(m.label, lastPaintedElapsedS.load(moAcquire).int),
-                    m.ticker)
+      result = tokenBarFrame(
+        barTickLabel(m.label, lastPaintedElapsedS.load(moAcquire).int),
+        m.ticker)
     of amIdle:
-      footerFrame(fatPromptState)
+      # `fatPromptState` is controller-written (`emitFatPromptEvent` applies
+      # under `frameModelLock`), so serialize against that and hand back a
+      # payload-fresh frame: this arm runs on the input thread's editor
+      # redraw path, where destroying shared cells would race the apply.
+      acquire frameModelLock
+      try:
+        block:
+          let shared = footerFrame(fatPromptState)
+          result = freshFrame(shared)
+      finally:
+        release frameModelLock
 
 proc testFrameMode(): bool =
   ## Deterministic test mode gates the free-running gui thread behind a
@@ -483,8 +545,14 @@ proc ensureTestTickerControlStarted() =
 proc emitFatPromptEvent*(ev: FatPromptEvent) =
   ## Single state transition entry point for the volatile footer model.
   ## Terminal bytes are still rendered by the helpers below, but all
-  ## production state changes flow through this event reducer.
-  fatPromptState.apply ev
+  ## production state changes flow through this event reducer. The apply
+  ## holds `frameModelLock` because `currentFrameFromModel`'s amIdle arm
+  ## reads this state cross-thread (input-thread editor redraws); an
+  ## unlocked string swap here would race its copy's refcount cells.
+  {.cast(gcsafe).}:
+    acquire frameModelLock
+    fatPromptState.apply ev
+    release frameModelLock
 
 type LiveMarkdownStream* = object
   ## Incremental renderer for assistant content during provider streaming.
@@ -1123,10 +1191,21 @@ proc snapshotAndSaveDraft() =
   if tryAcquire(inputStateLock):
     try:
       sessionPtr = inputSession
-      if inputEditor != nil:
-        text = inputEditor[].line.text
     finally:
       release inputStateLock
+  # Read the editor text under the terminal write lock, the same lock the
+  # input thread holds while mutating `line.text` (via preMutate/postMutate)
+  # and the GUI thread holds while reading it in `renderFooter`. Reading it
+  # under `inputStateLock` instead raced those on the shared payload's
+  # refcount cell. The payload-fresh copy means the flusher thread never
+  # touches a cell the input thread owns, not even at `text`'s destroy.
+  # tryAcquire keeps the signal-handler path non-blocking.
+  if tryAcquire(termui.terminalLock):
+    try:
+      if inputEditor != nil:
+        text = freshString(inputEditor[].line.text)
+    finally:
+      release termui.terminalLock
   if sessionPtr != nil and sessionPtr[].savePath != "":
     saveDraft(sessionPtr[], text)
 
@@ -2317,7 +2396,13 @@ proc inputThreadProc() {.thread.} =
         var resp = WizardReadResponse(kind: wrSubmitted, text: "")
         acquire wizardRequestLock
         try:
-          req = wizardRequest
+          # Payload-fresh copy: `req`'s destroy must not touch cells the
+          # main thread's next `wizardRequest` write also dec-refs (the
+          # ORC+locks discipline used everywhere else in this module).
+          req = WizardReadRequest(
+            prompt: freshString(wizardRequest.prompt),
+            hidechars: wizardRequest.hidechars,
+            noHistory: wizardRequest.noHistory)
         finally:
           release wizardRequestLock
         # Park deferSubmit so the wizard's Enter submits directly
@@ -2614,7 +2699,10 @@ proc wizardReadLine*(editor: var minline.LineEditor, prompt: string,
     sleep 5
   acquire wizardRequestLock
   try:
-    result = wizardResponse.text
+    # Payload-fresh copy: `result` outlives the lock, and a later wizard
+    # step's `wizardResponse` write on the input thread would otherwise
+    # race this string's destroy on the main thread.
+    result = freshString(wizardResponse.text)
     let kind = wizardResponse.kind
     wizardResponsePosted.store(false, moRelease)
     # Clear the editor's draft so the persistent prompt repaints
