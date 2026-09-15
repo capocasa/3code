@@ -20,7 +20,6 @@
   the `patch` tool and `apply_patch` update hunks now hard-error with
   the offending edit index and touch nothing. Same guard, V4A path.
 
-
 - **The caret advances over typed spaces again.** The drawn caret is
   painted after the row's last non-space cell, so trailing spaces the
   user just typed (never painted as content) left the caret frozen in
@@ -35,6 +34,24 @@
   re-showed the real cursor: once per keystroke, and every 80ms GUI tick
   while a turn ran, which read as continuous flicker on Windows Terminal.
   Repaints now emit bytes only when content actually changed.
+
+- **Termux hardened_malloc aborts greatly reduced (again).** The Sep 2
+  frame-model ORC fix (d3dc825) was partially reverted three hours later
+  by the gui-join deadlock fix (700fb41): `getFrameModel` again handed
+  reader threads a copy whose destroy fires outside `frameModelLock`,
+  racing the controller's `setAnim*` writes; the input thread's editor
+  redraws read `fatPromptState` fully unlocked; and the draft flusher
+  again snapshotted the editor's `line.text` under `inputStateLock`
+  while the input thread mutates it under the terminal write lock.
+  Android's hardened_malloc detects the resulting refcount corruption
+  as "write after free" (glibc tolerates it, so Linux/macOS never
+  crashed). `getFrameModel` now returns a payload-fresh copy (every
+  string/seq byte-copied under the lock), so reader threads never
+  touch a refcount cell the controller owns, not even at destroy, and
+  the lock is still never held across a render (the gui-join deadlock
+  stays fixed). The amIdle frame read is serialized with
+  `emitFatPromptEvent`, the draft snapshot copies under the terminal
+  write lock, and the wizard handshake copies got the same treatment.
 
 - **Retry waits show an hourglass, not the braille spinner.** The
   braille glyph in the token bar is now strictly the in-flight-request
