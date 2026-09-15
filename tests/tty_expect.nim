@@ -1303,6 +1303,33 @@ proc normalizeFrameRows*(rows: openArray[string]): seq[string] =
     result.add row.normalizeElapsed().normalizeSpinnerGlyphs().
       strip(leading = false, trailing = true)
 
+proc drawnCaretCount*(s: TtySession; row: int): int =
+  ## Live-grid variant: reverse-video cells on a grid row (the drawn
+  ## caret). The physical cursor stays hidden for the whole session, so
+  ## this (not grid.row/grid.col) is how tests locate the caret.
+  if row < 0 or row >= s.grid.rows.len: return 0
+  for cell in s.grid.rows[row]:
+    if cell.attrs.hasAttr(saReverse):
+      inc result
+
+proc drawnCaretCount*(frame: TtyFrame; row: int): int =
+  ## Reverse-video cells on a row: the editor's drawn caret. The physical
+  ## cursor stays hidden for the whole session, so this (not
+  ## cursorRow/cursorCol) is how tests locate the caret. The caret cell is
+  ## the app's only reverse-video usage.
+  if row < 0 or row >= frame.visual.cells.len: return 0
+  for cell in frame.visual.cells[row]:
+    if cell.attrs.hasAttr(saReverse):
+      inc result
+
+proc drawnCaretCol*(frame: TtyFrame; row: int): int =
+  ## Column of the row's drawn caret cell, or -1 when the row has none.
+  result = -1
+  if row < 0 or row >= frame.visual.cells.len: return
+  for c, cell in frame.visual.cells[row]:
+    if cell.attrs.hasAttr(saReverse):
+      return c
+
 proc frameRowsWithCursor(frame: TtyFrame): seq[string] =
   if frame.visual.cells.len > 0:
     return frame.visual.displayRows()
@@ -1553,14 +1580,21 @@ proc expectNo*(s: TtySession; text: string; settleMs = 250): bool {.discardable.
   true
 
 proc cursorRowHasText(s: TtySession; text: string): bool =
-  ## Check the live grid (not a stale frame) for text on the cursor row.
-  ## The child's token-bar repaint can erase the prompt row after typing,
-  ## so a committed frame may not capture the echoed text. Checking the
-  ## live grid catches the text if it's currently visible, and checking
-  ## fresh raw bytes catches it if it was echoed but later erased.
+  ## Check the live grid (not a stale frame) for text on the caret row.
+  ## The caret is the drawn reverse-video cell (the physical cursor stays
+  ## hidden all session), and typing lands at the caret, so the caret's
+  ## row is where echoed text must appear. The child's token-bar repaint
+  ## can erase the prompt row after typing, so a committed frame may not
+  ## capture the echoed text; checking the live grid catches it if it is
+  ## currently visible, and checking fresh raw bytes catches it if it was
+  ## echoed but later erased.
   let rows = s.currentRows()
-  if not s.grid.cursorHidden and s.grid.row >= 0 and
-      s.grid.row < rows.len and text in rows[s.grid.row]:
+  var caretRow = -1
+  for i in 0 ..< s.grid.rows.len:
+    if s.drawnCaretCount(i) == 1:
+      caretRow = i
+      break
+  if caretRow >= 0 and caretRow < rows.len and text in rows[caretRow]:
     return true
   # The text may have been echoed (in raw) but erased from the grid by
   # a token-bar repaint. If it's in the fresh raw bytes, the editor was
@@ -1653,29 +1687,37 @@ proc expectAlive*(s: TtySession;
       s.dumpFramesAround("")
 
 proc expectIdleCaret*(s: TtySession; timeoutMs = 5000) =
-  ## Wait for the turn to fully end. The caret must be visible on the live
+  ## Wait for the turn to fully end. The drawn caret must sit on the live
   ## `❯` prompt row AND the app must have declared the turn idle.
   ##
-  ## The caret check alone is NOT enough: the caret is kept visible on the
+  ## The caret check alone is NOT enough: the caret is drawn on the
   ## prompt row during a running turn too (so buffered typing is legible),
   ## so it passes mid-turn while a follow-up model call is still in flight.
   ## A following Ctrl-D is then swallowed as inert (`inputTurnActive`), and
   ## the child never quits (the OSX `test_resume_replay_bytes` "still
   ## running" flake). The app's own `'i'`/`'b'` turn-state events over the
   ## frame channel are the authoritative signal; under ConPTY (no frame
-  ## channel) fall back to cursor visibility alone.
+  ## channel) fall back to the drawn caret alone. The physical cursor stays
+  ## hidden for the whole session, so cursor visibility is no longer an
+  ## idle signal at all.
   let deadline = epochTime() + timeoutMs.float / 1000.0
   while epochTime() < deadline and not s.exited:
-    s.drain(0, recordFrame = false)
+    s.drain(0)
     when defined(posix):
       let idle = s.turnIdle
     else:
       let idle = true
-    if idle and s.cursorShown and s.cursorRowHasText("\u276f"):
-      return
+    # Exactly one drawn caret cell somewhere in the editor block: on a
+    # multiline draft it sits on a continuation row, not the `❯` row.
+    if idle:
+      var carets = 0
+      for i in 0 ..< s.grid.rows.len:
+        inc carets, s.drawnCaretCount(i)
+      if carets == 1:
+        return
     let remaining = max(1, int((deadline - epochTime()) * 1000))
     discard s.waitForOutput(remaining, recordFrame = false)
-  doAssert false, "turn did not reach idle (caret not visible on prompt):\n" &
+  doAssert false, "turn did not reach idle (drawn caret not on prompt):\n" &
     s.dumpFramesAround("")
 
 proc expectPromptLive*(s: TtySession; timeoutMs = 5000): bool {.discardable.} =

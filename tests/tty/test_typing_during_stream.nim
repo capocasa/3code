@@ -98,6 +98,60 @@ proc barElapsedSecs(row: string): int =
     result = -1
 
 suite "typing during active stream":
+  test "no cursor visibility toggles while a turn runs":
+    ## The caret is a drawn cell inside the editor rows; the physical
+    ## terminal cursor stays hidden for the whole interactive session.
+    ## Any per-paint `?25l`/`?25h` pair is immediate-mode residue: it makes
+    ## the caret flicker per keystroke (Linux) and per 80ms GUI tick
+    ## (continuous on Windows Terminal, which recomposites the cursor on
+    ## every visibility change). One hide at startup and one show at exit
+    ## are the only legal visibility bytes.
+    let root = newFixture("typing_during_stream_notoggles")
+    writeConfiguredProvider(root)
+    let chunks = ["aa ", "bb ", "cc ", "dd ", "ee ", "ff ", "gg ",
+                  "hh ", "ii ", "jj ", "kk ", "ll ", "mm ", "nn "]
+    let responses = %*[
+      {"content": chunks.join("").strip(),
+       "contentChunks": %* chunks,
+       "contentChunkDelayMs": 150,
+       "usage": {"promptTokens": 20, "completionTokens": 14,
+                 "totalTokens": 34, "cachedTokens": 0}}
+    ]
+    writeFile(root / "run" / "stub_responses.json", $responses)
+    let stub = ensureStubBinary()
+    let tty = newTtySession(stub,
+                            args = ["-x", "-i"],
+                            cwd = root / "run",
+                            env = stubEnv(root, root / "run" / "stub_responses.json"))
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "\u276f"
+    tty.send "go"
+    tty.expect "go"
+    tty.send "\n"
+    tty.expectInHistory "aa"
+    tty.drain(100)
+    # Count window opens mid-turn: everything before it is startup paint
+    # (the one legal session-start hide), everything after is close/cleanup.
+    let mark = tty.raw.len
+    for ch in "typing":
+      rawSend(tty, $ch)
+      tty.drain(90)
+    # Hold the turn open long enough for several GUI ticks with no input.
+    tty.drain(600)
+    let tail = tty.raw[mark .. ^1]
+    let hides = tail.count("\x1b[?25l")
+    let shows = tail.count("\x1b[?25h")
+    check hides == 0
+    check shows == 0
+    if hides != 0 or shows != 0:
+      echo "cursor visibility toggled mid-turn: hides=", hides,
+           " shows=", shows, " over ", tail.len, " bytes"
+    tty.drain(4500)
+    tty.expectAlive()
+
   test "typed text lands on caret row, not one row above":
     let root = newFixture("typing_during_stream")
     writeConfiguredProvider(root)
@@ -137,12 +191,14 @@ suite "typing during active stream":
     tty.drain(100)
     # Drive each keystroke with a settle long enough to capture the GUI
     # thread's intervening streaming repaint, not just the keystroke frame.
-    # While typing during a stream the caret must stay visible between
-    # keystrokes: the GUI thread repaints the footer every ~80ms and must
-    # not hide the caret while the editor is accepting buffered input.
-    # (Regression: the streaming repaint path hid the caret and never
-    # re-showed it, so the caret flickered off between keystrokes.)
-    var hiddenOnPromptRow = 0
+    # While typing during a stream the drawn caret must stay on the prompt
+    # row between keystrokes: the GUI thread repaints the footer every
+    # ~80ms and must never leave the editor without its caret cell.
+    # (Original regression: the streaming repaint path hid the physical
+    # caret and never re-showed it, so the caret flickered off between
+    # keystrokes. Now the physical cursor is hidden all session and the
+    # caret is a drawn reverse-video cell in the editor rows.)
+    var missingCaret = 0
     var since = tty.frames.len
     for ch in "hello":
       rawSend(tty, $ch)
@@ -155,13 +211,13 @@ suite "typing during active stream":
         block findPrompt:
           for i in countdown(f.rows.high, 0):
             if f.rows[i].startsWith("\u276f"):
-              if f.cursorRow == i and f.cursorHidden:
-                inc hiddenOnPromptRow
+              if f.drawnCaretCount(i) != 1:
+                inc missingCaret
               break findPrompt
       since = tty.frames.len
-    check hiddenOnPromptRow == 0
-    if hiddenOnPromptRow != 0:
-      echo "caret flickered off the prompt row ", hiddenOnPromptRow,
+    check missingCaret == 0
+    if missingCaret != 0:
+      echo "drawn caret missing from the prompt row in ", missingCaret,
         " frames while typing during the stream"
 
     # Elapsed-counter regression: once the turn clock is past 1s, keep

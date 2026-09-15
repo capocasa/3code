@@ -585,10 +585,54 @@ proc totalRows*(text: string, promptW, contW, width: int): int =
   if width <= 0: return 1
   lineSpans(text, promptW, contW, width).len
 
+const
+  CaretCellOn* = "\x1b[7m"    ## reverse video on: the drawn caret cell
+  CaretCellOff* = "\x1b[27m"  ## reverse video off
+
+proc caretSliceBytes*(text: string; sp: LineSpan; caretAt: int): string =
+  ## The span's slice ``text[sp.start ..< sp.stop]`` with the drawn caret
+  ## embedded: the rune at the caret reversed, the row's first rune when
+  ## the caret sits at or before its start (line break / wrap gap), or a
+  ## reverse space appended past the content (end of text, trailing break
+  ## spaces). Shared by the span model and the full-repaint renderer so
+  ## the two can never disagree about where the caret draws.
+  if caretAt >= sp.stop:
+    return text[sp.start ..< sp.stop] & CaretCellOn & " " & CaretCellOff
+  if caretAt <= sp.start:
+    let rl = runeLenSafe(text, sp.start)
+    return CaretCellOn & text[sp.start ..< sp.start + rl] & CaretCellOff &
+      text[sp.start + rl ..< sp.stop]
+  let rl = runeLenSafe(text, caretAt)
+  return text[sp.start ..< caretAt] & CaretCellOn &
+    text[caretAt ..< caretAt + rl] & CaretCellOff &
+    text[caretAt + rl ..< sp.stop]
+
+proc caretRowOf*(text: string; caretAt: int; promptW, contW,
+                 width: int): int =
+  ## The visual row the drawn caret belongs on, or -1 for none. ``caretAt``
+  ## is a byte offset into ``text`` itself (pass the combined render text
+  ## when the suffix can carry the caret).
+  if caretAt < 0: return -1
+  cursorVisual(text, caretAt, promptW, contW, width)[0]
+
+proc caretByteOffset*(ed: LineEditor): int =
+  ## Byte offset of the caret within the combined render text
+  ## (``line.text & renderSuffix``), or -1 when no drawn caret applies.
+  ## The deferred-submit state is exempt: its suffix marker glyph is the
+  ## caret, and a second drawn cell would double the caret. Standalone
+  ## callers (no installed painter) keep the physical-cursor contract:
+  ## only the interactive app hides the cursor and draws the cell.
+  if ed.pendingCaret or ed.painter == nil: return -1
+  let combined = ed.line.text & ed.renderSuffix
+  if ed.renderSuffixCursor: combined.len
+  else: min(max(ed.line.position, 0), ed.line.text.len)
+
 proc renderRowSpans*(ed: var LineEditor): seq[string] =
   ## The editor's painted cell content per visual row, top-down (no cursor
   ## controls). Both the full repaint and the diff painter use it, so the
-  ## two can never drift. Index 0 is the editor's top row.
+  ## two can never drift. Index 0 is the editor's top row. The caret is a
+  ## drawn reverse-video cell on its row; the physical terminal cursor
+  ## stays hidden for the whole session, so a repaint can never flicker it.
   if ed.getWidth != nil:
     let w = ed.getWidth()
     if w > 0:
@@ -599,23 +643,39 @@ proc renderRowSpans*(ed: var LineEditor): seq[string] =
   ed.promptW = pw
   ed.contPromptW = cw
   result = @[]
+  let combined = ed.line.text & ed.renderSuffix
+  let caretAt = ed.caretByteOffset()
+  # Same (text, position) pair the physical-cursor positioning derives:
+  # the suffix carries the caret only when renderSuffixCursor says so.
+  let caretRow = caretRowOf(
+    if ed.renderSuffixCursor: combined else: ed.line.text,
+    caretAt, pw, cw, width)
   let head = promptWrap(pw, width).head
   for _ in 0 ..< head:
     result.add ""          # prompt fragment row: cells the terminal wrapped
-  for li, sp in lineSpans(ed.line.text & ed.renderSuffix, pw, cw, width):
+  for li, sp in lineSpans(combined, pw, cw, width):
     if li < head:
       continue             # fragment rows emitted above
-    result.add (if li == head: ed.prompt else: ed.contPrompt) &
-      (ed.line.text & ed.renderSuffix)[sp.start ..< sp.stop]
+    let prefix = if li == head: ed.prompt else: ed.contPrompt
+    if li == caretRow:
+      result.add prefix & caretSliceBytes(combined, sp, caretAt)
+    else:
+      result.add prefix & combined[sp.start ..< sp.stop]
 
-proc renderBuffer*(text, prompt, cont: string, width: int): string =
+proc renderBuffer*(text, prompt, cont: string, width: int,
+                    caretAt = -1): string =
   ## Bytes that paint the buffer. Visual rows are joined with ``"\r\n"``
   ## and no trailing newline is emitted. The prompt is written verbatim
   ## (so callers can include color escapes); its display width is taken
-  ## via ``visualCols``. Same for the continuation prompt.
+  ## via ``visualCols``. Same for the continuation prompt. ``caretAt >= 0``
+  ## draws the caret cell into its row (see ``caretSliceBytes``); the
+  ## offset indexes ``text`` itself.
   let promptW = visualCols(prompt)
   let contW = visualCols(cont)
-  if width <= 0: return prompt & text
+  if width <= 0:
+    return prompt & (if caretAt >= 0:
+      caretSliceBytes(text, (start: 0, stop: text.len), caretAt) else: text)
+  let caretRow = caretRowOf(text, caretAt, promptW, contW, width)
   let head = promptWrap(promptW, width).head
   result = prompt
   for li, sp in lineSpans(text, promptW, contW, width):
@@ -625,7 +685,10 @@ proc renderBuffer*(text, prompt, cont: string, width: int): string =
       # The wrapped prompt's last fragment shares a row with the first
       # content span; the terminal cursor is already at that column.
       discard
-    result.add text[sp.start ..< sp.stop]
+    if li == caretRow:
+      result.add caretSliceBytes(text, sp, caretAt)
+    else:
+      result.add text[sp.start ..< sp.stop]
 
 # History
 #
@@ -793,7 +856,8 @@ proc redrawBytes*(ed: var LineEditor; synchronized = true): string =
   if walkUp > 0:
     buf.add "\x1b[" & $walkUp & "A"
   buf.add "\r\x1b[J"
-  buf.add renderBuffer(renderedText, ed.prompt, ed.contPrompt, width)
+  buf.add renderBuffer(renderedText, ed.prompt, ed.contPrompt, width,
+    ed.caretByteOffset())
   if endRow > targetRow:
     buf.add "\x1b[" & $(endRow - targetRow) & "A"
   buf.add "\r"
@@ -1240,6 +1304,11 @@ KEYMAP["ctrl+l"]    = proc(ed: var LineEditor) =
 when defined(posix):
   KEYMAP["ctrl+z"]  = proc(ed: var LineEditor) =
     ed.write "\n\e[?2004l"
+    # The interactive app keeps the physical cursor hidden all session
+    # (the caret is drawn in the editor rows); the suspended shell needs
+    # a real one. Standalone callers never hid it, so they skip both.
+    if ed.painter != nil:
+      ed.write "\x1b[?25h"
     resetAttributes()
     stdout.flushFile()
     # Suspend and block until resumed, then repaint. requestBackground
@@ -1247,6 +1316,8 @@ when defined(posix):
     # after the shell's job-control output, not before the stop.
     requestBackground()
     ed.write "\e[?2004h"
+    if ed.painter != nil:
+      ed.write "\x1b[?25l"
     ed.renderRow = 0
     fullRedraw(ed)
 
@@ -1326,10 +1397,14 @@ proc cmdEditInEditor(ed: var LineEditor) =
 when defined(posix):
   proc cmdSuspend(ed: var LineEditor) =
     ed.write "\n\e[?2004l"
+    if ed.painter != nil:
+      ed.write "\x1b[?25h"
     resetAttributes()
     stdout.flushFile()
     requestBackground()
     ed.write "\e[?2004h"
+    if ed.painter != nil:
+      ed.write "\x1b[?25l"
     ed.renderRow = 0
     fullRedraw(ed)
 
@@ -1687,10 +1762,14 @@ proc initKeyTables*() =
   when defined(posix):
     KEYMAP["ctrl+z"]  = proc(ed: var LineEditor) =
       ed.write "\n\e[?2004l"
+      if ed.painter != nil:
+        ed.write "\x1b[?25h"
       resetAttributes()
       stdout.flushFile()
       requestBackground()
       ed.write "\e[?2004h"
+      if ed.painter != nil:
+        ed.write "\x1b[?25l"
       ed.renderRow = 0
       fullRedraw(ed)
   applyShortcuts(configuredShortcuts)
@@ -2218,7 +2297,11 @@ proc readLineWith*(ed: var LineEditor, prompt: string,
     if cleared:
       cleared = false
       fullRedraw(ed)
-      ed.write "\x1b[?25h"
+      # Standalone (painter-less) callers still use the physical cursor;
+      # the interactive app keeps it hidden all session and draws the
+      # caret cell instead.
+      if ed.painter == nil:
+        ed.write "\x1b[?25h"
   while true:
     var suffixJustCleared = false
     if ed.escPutback >= 0:

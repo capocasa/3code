@@ -211,6 +211,8 @@ proc requireVisibleEditorCaret(s: TtySession; needle: string) =
   # repaint, not a transient mid-paint state captured between two sync
   # bursts. Under CI load a bare drain(20) can land on a frame where the
   # editor repaint is in flight (cursor on the wrong row, row text empty).
+  # The caret is the drawn reverse-video cell (the physical cursor stays
+  # hidden all session): find its row and require the needle on it.
   let settleDeadline = epochTime() + 1.0
   while epochTime() < settleDeadline and not s.exited:
     if not s.pollOnce(20, recordIdleFrame = false):
@@ -219,14 +221,19 @@ proc requireVisibleEditorCaret(s: TtySession; needle: string) =
   s.flushFrame(force = true)
   require s.frames.len > 0
   let frame = s.frames[^1]
-  check not frame.cursorHidden
-  require frame.cursorRow >= 0 and frame.cursorRow < frame.rows.len
+  var caretRow = -1
+  for i in countdown(frame.rows.high, 0):
+    if frame.drawnCaretCount(i) == 1:
+      caretRow = i
+      break
+  check caretRow >= 0
+  require caretRow >= 0 and caretRow < frame.rows.len
   # lineSpans (minline.nim) intentionally excludes trailing break-spaces from
   # rendered rows (contentEnd stops at the last non-space), so a caret placed
   # after a just-typed trailing space sits on a row whose text is the prefix
   # without that space. Compare against the trimmed needle.
   let visible = needle.strip(leading = false)
-  check visible in frame.rows[frame.cursorRow]
+  check visible in frame.rows[caretRow]
 
 suite "terminal visual contract":
   test "resumed session replays the full conversation into scrollback":
@@ -1284,15 +1291,18 @@ suite "terminal visual contract":
     # position explicitly so the bug that cleared the row and parked
     # the caret at col 0 cannot slip through.
     let f = tty.frames[^1]
-    doAssert not f.cursorHidden,
-      "REGRESSION (interrupted-by-user): caret hidden after ESC; expected col 2 on prompt row"
-    doAssert f.cursorCol == 2,
-      "REGRESSION (interrupted-by-user): expected caret at col 2 after ❯, got " &
-        $f.cursorCol & " (rows: " & $f.rows.len & ")"
-    let promptRow = f.rows[f.cursorRow]
-    doAssert "❯" in promptRow,
-      "REGRESSION (interrupted-by-user): prompt glyph ❯ missing from caret row " &
-        $f.cursorRow & ", got: '" & promptRow & "'"
+    block promptRow:
+      for i in countdown(f.rows.high, 0):
+        if not f.rows[i].startsWith("\u276f"): continue
+        doAssert f.drawnCaretCount(i) == 1,
+          "REGRESSION (interrupted-by-user): drawn caret missing after ESC; expected exactly one on prompt row " & $i
+        doAssert f.drawnCaretCol(i) == 2,
+          "REGRESSION (interrupted-by-user): expected drawn caret at col 2 after ❯, got " &
+            $f.drawnCaretCol(i) & " (rows: " & $f.rows.len & ")"
+        doAssert "\u276f" in f.rows[i],
+          "REGRESSION (interrupted-by-user): prompt glyph ❯ missing from prompt row " &
+            $i & ", got: '" & f.rows[i] & "'"
+        break promptRow
     tty.expectAlive()
     tty.send "second"
     tty.send "\n"
@@ -1343,13 +1353,18 @@ suite "terminal visual contract":
     # case — glyph on the caret row, caret at col 2. See the matching
     # assertion in the ESC test for the bug being locked out.
     let f = tty.frames[^1]
-    doAssert not f.cursorHidden,
-      "REGRESSION (interrupted-by-user): caret hidden after Ctrl-C; expected col 2 on prompt row"
-    doAssert f.cursorCol == 2,
-      "REGRESSION (interrupted-by-user): expected caret at col 2 after ❯, got " & $f.cursorCol
-    doAssert "❯" in f.rows[f.cursorRow],
-      "REGRESSION (interrupted-by-user): prompt glyph ❯ missing from caret row " &
-        $f.cursorRow & ", got: '" & f.rows[f.cursorRow] & "'"
+    block promptRow:
+      for i in countdown(f.rows.high, 0):
+        if not f.rows[i].startsWith("\u276f"): continue
+        doAssert f.drawnCaretCount(i) == 1,
+          "REGRESSION (interrupted-by-user): drawn caret missing after Ctrl-C; expected exactly one on prompt row " & $i
+        doAssert f.drawnCaretCol(i) == 2,
+          "REGRESSION (interrupted-by-user): expected drawn caret at col 2 after ❯, got " &
+            $f.drawnCaretCol(i)
+        doAssert "\u276f" in f.rows[i],
+          "REGRESSION (interrupted-by-user): prompt glyph ❯ missing from prompt row " &
+            $i & ", got: '" & f.rows[i] & "'"
+        break promptRow
     tty.expectAlive()
     tty.send "second"
     tty.send "\n"
@@ -1562,15 +1577,20 @@ suite "terminal visual contract":
     # Regression: interrupting a bash tool left the caret parked at col 0
     # of the prompt row instead of col 2 after the ❯ glyph. Lock the same
     # interrupted-by-user prompt contract as the network-quiet cancel
-    # tests: glyph on the caret row, caret at col 2, caret visible.
+    # tests: glyph on the prompt row, drawn caret at col 2.
     let f = tty.frames[^1]
-    doAssert not f.cursorHidden,
-      "REGRESSION (interrupt-during-bash): caret hidden after Ctrl-C; expected col 2 on prompt row"
-    doAssert f.cursorCol == 2,
-      "REGRESSION (interrupt-during-bash): expected caret at col 2 after ❯, got " & $f.cursorCol
-    doAssert "❯" in f.rows[f.cursorRow],
-      "REGRESSION (interrupt-during-bash): prompt glyph ❯ missing from caret row " &
-        $f.cursorRow & ", got: '" & f.rows[f.cursorRow] & "'"
+    block promptRow:
+      for i in countdown(f.rows.high, 0):
+        if not f.rows[i].startsWith("\u276f"): continue
+        doAssert f.drawnCaretCount(i) == 1,
+          "REGRESSION (interrupt-during-bash): drawn caret missing after Ctrl-C; expected exactly one on prompt row " & $i
+        doAssert f.drawnCaretCol(i) == 2,
+          "REGRESSION (interrupt-during-bash): expected drawn caret at col 2 after ❯, got " &
+            $f.drawnCaretCol(i)
+        doAssert "\u276f" in f.rows[i],
+          "REGRESSION (interrupt-during-bash): prompt glyph ❯ missing from prompt row " &
+            $i & ", got: '" & f.rows[i] & "'"
+        break promptRow
     tty.expectAlive()
     # The regression: after interrupt the prompt must accept typing.
     tty.send "hello"

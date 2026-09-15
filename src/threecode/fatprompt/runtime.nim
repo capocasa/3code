@@ -719,7 +719,7 @@ proc paintBarPrompt(label: string) =
                              inputThreadRunning, inputEditor,
                              currentTermW())
   else:
-    termengine.syncWrite(hideRealCaretBytes() & barFooterBytes(label, currentTermW()))
+    termengine.syncWrite(barFooterBytes(label, currentTermW()))
 
 
 proc setBarPromptState*(label: string) =
@@ -994,8 +994,7 @@ proc paintInitialPrompt*(p: Profile) =
     # Raw gap + prompt. Register the reserved gap row so the first later
     # walk-up (spinner/bar paint, submit erase) does not under-count and
     # overwrite the line above the prompt.
-    termengine.syncWrite("\n" & hideRealCaretBytes() &
-      promptOnlyResetBytes())
+    termengine.syncWrite("\n" & promptOnlyResetBytes())
     termengine.noteFooterPainted(1)
 
 
@@ -1016,8 +1015,7 @@ proc paintResumedBarPrompt*(label: string) =
                              inputThreadRunning, inputEditor,
                              currentTermW())
   else:
-    termengine.syncWrite(hideRealCaretBytes() &
-      barPromptStartupBytes(label, currentTermW()))
+    termengine.syncWrite(barPromptStartupBytes(label, currentTermW()))
     termengine.noteFooterPainted(
       footerRowsAboveEditor(fatPromptState, currentTermW()))
 
@@ -1712,7 +1710,7 @@ proc apiBeforeCall*(lastPromptTokens, window: int): string =
   followupStartsAfterReceipt = false
   termui.withTerminalWriteLock:
     if not startsAfterReceipt and not liveEditorFooterAnchored():
-      stdout.write "\x1b[?25l\n"
+      stdout.write "\n"
       stdout.flushFile
   setSpinLabel(liveLabel(baseLabel, 0))
   startSpinner("")
@@ -1792,7 +1790,7 @@ proc apiFinalUsage*(usage: Usage; window, elapsed: int;
       let clearTicker =
         if hadTicker: "\r\x1b[1A\x1b[2K\r\n"
         else: ""
-      termengine.syncWrite(clearTicker & hideRealCaretBytes() &
+      termengine.syncWrite(clearTicker &
         barFooterBytes(label, currentTermW()))
   else:
     if hadTicker:
@@ -1944,7 +1942,7 @@ proc editBufferInExternalEditor(ed: var minline.LineEditor) =
     inputOrigTermios = raw
     inputOrigTermiosValid = true
     recordRawMode()
-    termui.writeRaw("\x1b[?2004h")
+    termui.writeRaw("\x1b[?2004h\x1b[?25l")
   else:
     let h = getStdHandle(STD_INPUT_HANDLE)
     var rawMode: int32 = 0
@@ -2227,7 +2225,7 @@ proc inputThreadProc() {.thread.} =
         # input thread must not paint the footer or signal editor-ready,
         # or it will overwrite the wizard's UI.
         return
-      termengine.finishEditorRedraw(ed, showCaret = not ed.pendingCaret)
+      termengine.finishEditorRedraw(ed)
       inputEditorReady.store(true, moRelease)
     # Hold the terminal write lock across editor mutation + redraw so the
     # background render threads (spinner/barTick) that read the same editor
@@ -2293,6 +2291,12 @@ proc inputThreadProc() {.thread.} =
       discard setConsoleCtrlHandler(
         cast[pointer](consoleCtrlHandler), 1.WinBool)
 
+    # One cursor-visibility change per session: the physical cursor stays
+    # hidden from here until exit/suspend/external-editor handoff, and the
+    # caret is drawn inside the editor rows. Per-paint `?25l`/`?25h`
+    # toggling is what flickered the caret on Windows (every 80ms GUI tick)
+    # and on every keystroke elsewhere.
+    termui.writeRaw("\x1b[?25l")
     edPtr[].deferSubmit = true
     edPtr[].submitIcon = DeferredSubmitMarker
     while inputRunning():
@@ -2693,13 +2697,14 @@ proc emitTestTurnStateEvent*(idle: bool) =
         discard
 
 proc beginTurn*() =
-  ## Hide the physical terminal caret for the duration of the turn. The
-  ## prompt glyph stays visible as the stable visual anchor.
-  ## Headless (library) sessions skip the input thread and caret: there is
-  ## no tty to read from or paint on.
+  ## Mark the prompt as turn-running. The physical caret stays hidden for
+  ## the whole session (hidden once at input-thread startup; the caret is
+  ## drawn inside the editor rows), so the turn boundary no longer touches
+  ## cursor visibility.
+  ## Headless (library) sessions skip the input thread: there is no tty to
+  ## read from or paint on.
   if termengine.engineOutputEnabled:
     ensureInputThreadStarted()
-    termui.hideCaret()
   emitFatPromptEvent setPromptModeEvent(pmTurnRunning)
   acquire inputStateLock
   try:

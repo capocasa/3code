@@ -216,6 +216,90 @@ suite "minline pure helpers":
 
 # ---------------- Driver: basic typing & submit ----------------
 
+suite "minline drawn caret spans":
+  # The drawn caret applies to the interactive app's editors (painter
+  # installed); standalone callers keep the physical cursor.
+  proc withPainter(ed: var LineEditor) =
+    ed.painter = proc(e: var LineEditor) = discard
+
+  test "empty editor draws a reverse space after the prompt":
+    var ed = initEditor()
+    withPainter ed
+    ed.prompt = "\u276f "
+    ed.width = 80
+    let rows = ed.renderRowSpans()
+    check rows.len == 1
+    check rows[0] == "\u276f " & CaretCellOn & " " & CaretCellOff
+
+  test "caret mid-text reverses the rune under it":
+    var ed = initEditor()
+    withPainter ed
+    ed.prompt = "P "
+    ed.width = 80
+    ed.line = Line(text: "hello", position: 2)
+    let rows = ed.renderRowSpans()
+    check rows == @["P he" & CaretCellOn & "l" & CaretCellOff & "lo"]
+
+  test "caret at end of text appends a reverse space":
+    var ed = initEditor()
+    withPainter ed
+    ed.prompt = "P "
+    ed.width = 80
+    ed.line = Line(text: "hello", position: 5)
+    let rows = ed.renderRowSpans()
+    check rows == @["P hello" & CaretCellOn & " " & CaretCellOff]
+
+  test "caret at position 0 reverses the first rune":
+    var ed = initEditor()
+    withPainter ed
+    ed.prompt = "P "
+    ed.width = 80
+    ed.line = Line(text: "hi", position: 0)
+    let rows = ed.renderRowSpans()
+    check rows == @["P " & CaretCellOn & "h" & CaretCellOff & "i"]
+
+  test "caret follows logical lines":
+    var ed = initEditor()
+    withPainter ed
+    ed.prompt = "P "
+    ed.contPrompt = ".."
+    ed.width = 80
+    ed.line = Line(text: "ab\ncd", position: 3)
+    let rows = ed.renderRowSpans()
+    check rows == @["P ab", ".." & CaretCellOn & "c" & CaretCellOff & "d"]
+
+  test "caret in a wrap gap appends a reverse space to the earlier row":
+    # width 7, prompt 2 -> 5 data cells; "alpha beta" wraps after
+    # "alpha". Position 5 sits in the break space between the spans:
+    # cursorVisual puts it on row 0 past its content, so the drawn caret
+    # is a reverse space appended to row 0.
+    var ed = initEditor()
+    withPainter ed
+    ed.prompt = "P "
+    ed.width = 7
+    ed.line = Line(text: "alpha beta", position: 5)
+    let rows = ed.renderRowSpans()
+    check rows == @["P alpha" & CaretCellOn & " " & CaretCellOff, "  beta"]
+
+  test "standalone editor (no painter) draws no caret cell":
+    var ed = initEditor()
+    ed.prompt = "P "
+    ed.width = 80
+    ed.line = Line(text: "hello", position: 2)
+    let rows = ed.renderRowSpans()
+    check rows == @["P hello"]
+
+  test "deferred submit draws no caret cell":
+    var ed = initEditor()
+    withPainter ed
+    ed.prompt = "P "
+    ed.width = 80
+    ed.line = Line(text: "queued", position: 6)
+    ed.renderSuffix = " \u29D6"
+    ed.pendingCaret = true
+    let rows = ed.renderRowSpans()
+    check rows == @["P queued \u29D6"]
+
 suite "minline editor: basic typing":
   test "type 'hello' + Enter returns 'hello'":
     var ed = initEditor()
