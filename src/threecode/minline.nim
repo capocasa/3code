@@ -597,7 +597,11 @@ proc caretSliceBytes*(text: string; sp: LineSpan; caretAt: int): string =
   ## spaces). Shared by the span model and the full-repaint renderer so
   ## the two can never disagree about where the caret draws.
   if caretAt >= sp.stop:
-    return text[sp.start ..< sp.stop] & CaretCellOn & " " & CaretCellOff
+    # The break-spaces between sp.stop and the caret are invisible cells
+    # the caret still steps over: cursorVisual counts them, so the paint
+    # must too or the drawn caret freezes in place while the user types
+    # spaces (the caret only caught up on the next non-space).
+    return text[sp.start ..< caretAt] & CaretCellOn & " " & CaretCellOff
   if caretAt <= sp.start:
     let rl = runeLenSafe(text, sp.start)
     return CaretCellOn & text[sp.start ..< sp.start + rl] & CaretCellOff &

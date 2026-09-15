@@ -2,6 +2,13 @@
 
 **Unreleased**
 
+- **The caret advances over typed spaces again.** The drawn caret is
+  painted after the row's last non-space cell, so trailing spaces the
+  user just typed (never painted as content) left the caret frozen in
+  place until the next non-space character. The caret cell now steps
+  over the invisible break-spaces, one column per space, matching where
+  the physical cursor sat before the drawn-caret switch.
+
 - **The caret no longer flickers.** The caret at the prompt is now a
   drawn reverse-video cell inside the editor rows; the physical terminal
   cursor stays hidden for the whole session (shown only at exit, Ctrl-Z

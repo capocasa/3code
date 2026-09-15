@@ -281,6 +281,28 @@ suite "minline drawn caret spans":
     let rows = ed.renderRowSpans()
     check rows == @["P alpha" & CaretCellOn & " " & CaretCellOff, "  beta"]
 
+  test "caret advances past a just-typed trailing space":
+    # lineSpans excludes trailing break-spaces from the painted slice
+    # (contentEnd stops at the last non-space); the caret cell must still
+    # step over them or typing a space leaves the caret frozen in place.
+    var ed = initEditor()
+    withPainter ed
+    ed.prompt = "P "
+    ed.width = 80
+    ed.line = Line(text: "hello ", position: 6)
+    let rows = ed.renderRowSpans()
+    check rows == @["P hello " & CaretCellOn & " " & CaretCellOff]
+
+  test "caret advances past trailing spaces before a newline":
+    var ed = initEditor()
+    withPainter ed
+    ed.prompt = "P "
+    ed.contPrompt = ".."
+    ed.width = 80
+    ed.line = Line(text: "ab \ncd", position: 3)
+    let rows = ed.renderRowSpans()
+    check rows == @["P ab " & CaretCellOn & " " & CaretCellOff, "..cd"]
+
   test "standalone editor (no painter) draws no caret cell":
     var ed = initEditor()
     ed.prompt = "P "

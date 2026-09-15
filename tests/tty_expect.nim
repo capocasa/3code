@@ -1322,6 +1322,14 @@ proc drawnCaretCount*(frame: TtyFrame; row: int): int =
     if cell.attrs.hasAttr(saReverse):
       inc result
 
+proc drawnCaretCol*(s: TtySession; row: int): int =
+  ## Live-grid variant: column of the row's drawn caret cell, or -1.
+  if row < 0 or row >= s.grid.rows.len: return -1
+  for c, cell in s.grid.rows[row]:
+    if cell.attrs.hasAttr(saReverse):
+      return c
+  -1
+
 proc drawnCaretCol*(frame: TtyFrame; row: int): int =
   ## Column of the row's drawn caret cell, or -1 when the row has none.
   result = -1

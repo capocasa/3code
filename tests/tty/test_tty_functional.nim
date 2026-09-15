@@ -228,12 +228,7 @@ proc requireVisibleEditorCaret(s: TtySession; needle: string) =
       break
   check caretRow >= 0
   require caretRow >= 0 and caretRow < frame.rows.len
-  # lineSpans (minline.nim) intentionally excludes trailing break-spaces from
-  # rendered rows (contentEnd stops at the last non-space), so a caret placed
-  # after a just-typed trailing space sits on a row whose text is the prefix
-  # without that space. Compare against the trimmed needle.
-  let visible = needle.strip(leading = false)
-  check visible in frame.rows[caretRow]
+  check needle in frame.rows[caretRow]
 
 suite "terminal visual contract":
   test "resumed session replays the full conversation into scrollback":
@@ -3039,6 +3034,25 @@ suite "terminal visual contract":
     tty.expect "❯"
     tty.expectAlive()
     tty.send "turn one"
+    # A typed trailing space paints no glyph, but the drawn caret must
+    # still advance one column over it (the caret cell steps over the
+    # unpainted break-space) — the frozen-caret regression lived here.
+    # `send " x"` waits for the x echo, so the repaints for both chars
+    # have landed; the caret must then sit exactly two columns right of
+    # its pre-space column, one cell per typed character.
+    tty.drain(100)
+    block:
+      var row0 = -1
+      for i in countdown(tty.grid.rows.high, 0):
+        if tty.drawnCaretCount(i) == 1:
+          row0 = i
+          break
+      check row0 >= 0
+      let col0 = tty.drawnCaretCol(row0)
+      tty.send " x"
+      tty.drain(100)
+      check tty.drawnCaretCol(row0) == col0 + 2
+      check "turn one x" in tty.rows()[row0]
     tty.send "\n"
     tty.expectInHistory "turn one"
     tty.expectCount("turn one reply", 1, where = "screen")
