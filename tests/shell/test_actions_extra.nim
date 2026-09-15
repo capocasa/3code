@@ -191,6 +191,47 @@ suite "actions: tool result not empty":
     check output.len > 0
     check "updated" in output
 
+suite "patch action structural validation":
+  # Regression: streamed tool-call arguments can arrive with an empty
+  # `search` or `replace` string (observed live: field values lost in
+  # transit). An empty search used to hit the exact-match fast path
+  # (`"".find` returns 0) and PREPEND the replace text at the top of the
+  # file, silently corrupting it. It must hard-error instead.
+  test "empty search errors and leaves the file unchanged":
+    let path = getTempDir() / "3code_empty_search_test.txt"
+    writeFile(path, "alpha\nbeta\ngamma\n")
+    defer: removeFile(path)
+    let act = Action(kind: akPatch, path: path,
+      edits: @[("", "INJECTED\n")])
+    let (output, code, _) = runAction(act, nil)
+    check code == 1
+    check "empty search" in output
+    check readFile(path) == "alpha\nbeta\ngamma\n"
+
+  test "apply_patch hunk with no context lines errors, file unchanged":
+    let path = getTempDir() / "3code_v4a_empty_search_test.txt"
+    writeFile(path, "alpha\nbeta\n")
+    defer: removeFile(path)
+    let act = Action(kind: akApplyPatch, body:
+      "*** Begin Patch\n*** Update File: " & path &
+      "\n@@\n+INJECTED\n*** End Patch\n")
+    let (output, code, _) = runAction(act, nil)
+    check code == 1
+    check "empty search block" in output
+    check readFile(path) == "alpha\nbeta\n"
+
+  test "empty replace with a valid search still deletes the span":
+    # Deleting via an empty replace is a legitimate edit; only the empty
+    # search is rejected.
+    let path = getTempDir() / "3code_empty_replace_test.txt"
+    writeFile(path, "alpha\nbeta\ngamma\n")
+    defer: removeFile(path)
+    let act = Action(kind: akPatch, path: path,
+      edits: @[("beta\n", "")])
+    let (_, code, _) = runAction(act, nil)
+    check code == 0
+    check readFile(path) == "alpha\ngamma\n"
+
 suite "fuzzy patch matching":
   test "exact match unchanged":
     let (newText, ok, strategy) = fuzzyReplaceFirst(

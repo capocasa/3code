@@ -515,6 +515,14 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
       return ("patch has no edits", 1, "")
     if act.path.len == 0:
       return ("error: patch: 'path' argument is required", 1, "")
+    for i, (s, _) in act.edits:
+      if s.len == 0:
+        # An empty search is always a mangled tool call (streamed
+        # arguments with a lost field value), never an intended edit:
+        # strutils.find("") returns 0, so it would silently PREPEND the
+        # replace text at the top of the file.
+        return (&"error: patch: edit {i + 1} has an empty search string " &
+                "(lost or mangled arguments); nothing was applied", 1, "")
     let path = resolvePath(act.path)
     let (paOk, paReason) = sandbox.checkRawPath(act.path, needsWrite = true)
     if not paOk:
@@ -591,6 +599,13 @@ proc runAction*(act: Action, cache: ReadCache = nil): tuple[output: string, code
           var applied = 0
           var hunkOk = true
           for (s, r) in op.edits:
+            if s.len == 0:
+              # Same guard as akPatch: an empty search block would
+              # silently prepend the hunk's lines at the top of the file.
+              msgs.add &"error: hunk with an empty search block in {path} (mangled patch); file unchanged"
+              hunkOk = false
+              anyFail = true
+              break
             let (next, ok, strategy) = fuzzyReplaceFirst(content, s, r)
             if not ok:
               let hint = nearestLineHint(content, s)
