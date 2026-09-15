@@ -1112,19 +1112,28 @@ proc stopBarTick*(): int =
 # on a graceful shutdown regardless.
 
 proc snapshotAndSaveDraft() =
-  ## Take a consistent (session path, editor text) snapshot under the input
-  ## lock and persist it as a draft. Called from the flusher thread and the
-  ## synchronous final flush. Uses tryAcquire so a flush triggered from a
-  ## signal handler (cleanup) can never block on a lock the input thread holds.
+  ## Take a consistent (session path, editor text) snapshot and persist it as
+  ## a draft. Called from the flusher thread and the synchronous final flush.
+  ## The editor's buffer belongs to the terminal write lock (the input thread
+  ## mutates `line.text` under it via preMutate/postMutate); reading it under
+  ## inputStateLock alone raced the string payload's refcount with the input
+  ## thread's mutation and corrupted the heap (the guiLoop repaintLiveContent
+  ## SIGSEGV in eqStrings). Acquire terminal first, then inputState, matching
+  ## the input thread's order (preMutate -> onMutate). tryAcquire keeps a
+  ## flush triggered from a signal handler (cleanup) non-blocking: when
+  ## either lock is held the snapshot is skipped and retried on the next tick.
   var sessionPtr: ptr Session = nil
   var text = ""
-  if tryAcquire(inputStateLock):
+  let haveTerminal = tryAcquireTerminalWrite()
+  if haveTerminal and tryAcquire(inputStateLock):
     try:
       sessionPtr = inputSession
       if inputEditor != nil:
         text = inputEditor[].line.text
     finally:
       release inputStateLock
+  if haveTerminal:
+    releaseTerminalWrite()
   if sessionPtr != nil and sessionPtr[].savePath != "":
     saveDraft(sessionPtr[], text)
 
