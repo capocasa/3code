@@ -133,7 +133,11 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
     if messages[i]{"role"}.getStr == "assistant":
       lastAssistant = i
       break
-  var firstItem = true
+  # Every replayed item gets the same one-blank leading separator a live
+  # commit writes (`writeTranscriptItem` always prepends "\r\n"): the first
+  # item included, so a resumed screen shows the same hint/blank/echo shape
+  # a fresh session does instead of starting flush under the "● resumed"
+  # banner.
   var toolIdx = 0
   for i in start ..< messages.len:
     let m = messages[i]
@@ -144,10 +148,8 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
       # No length truncation: the live path echoes the full submitted line
       # (wrapped at terminal width by `formatUserPromptItem`), so the replay
       # must too.
-      if not firstItem:
-        stdout.write "\n"
+      stdout.write "\n"
       stdout.write formatItem(userPromptItem(c)) & "\n"
-      firstItem = false
     of "assistant":
       var c = m{"content"}.getStr("").strip
       # Sessions saved by `renderSession` persist a tool-less empty reply as
@@ -177,10 +179,8 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
         var bytes = formatItem(assistantItem(c))
         if receiptCap:
           bytes.attachReceipt(receiptBytes(tokenLineLabel(u, window, elapsed)), true)
-        if not firstItem:
-          stdout.write "\n"
+        stdout.write "\n"
         stdout.write bytes & "\n"
-        firstItem = false
         # A tool-less empty reply persisted with the provider's explanation
         # (`finish_reason`) gets the same explanatory line the live retry
         # loop painted (`empty reply: <reason>. ...`), so a resumed session
@@ -266,10 +266,8 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
             if banner.len == 0: banner = "?"
             bytes = toolTranscriptBytes(banner, kind, output, code, toolIdx)
             bytes.trimTranscriptTail()
-          if not firstItem:
-            stdout.write "\n"
+          stdout.write "\n"
           stdout.write bytes & "\n"
-          firstItem = false
     of "tool":
       # Result already rendered alongside the assistant's tool_call via
       # toolLog; nothing to do here.

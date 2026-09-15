@@ -43,6 +43,8 @@ type
     msSlowStreamNoUsage  ## content chunk with NO usage object, then stall
     msStallAfterDone     ## complete SSE response, then black-hole (teardown close hang)
     msDripStream         ## many content chunks dripped with chunkDelayMs, then done
+    msDripStreamNoUsage  ## drip like msDripStream but the final chunk carries no
+                          ## usage object: the turn ends without token counts
 
   MockServer* = ref object of RootObj
     listener*: Socket
@@ -145,7 +147,7 @@ proc handleSlowStream(s: MockServer; client: Socket) =
   # Now stall: hold the socket, never send [DONE] or the closing chunk.
   client.holdUntilGone()
 
-proc handleDripStream(s: MockServer; client: Socket) =
+proc handleDripStream(s: MockServer; client: Socket; noUsage = false) =
   ## Stream many small content chunks with an inter-chunk delay, then a clean
   ## [DONE]. Each chunk triggers a live-content repaint on the controller
   ## thread while the 80ms gui spinner also repaints the volatile footer;
@@ -162,10 +164,14 @@ proc handleDripStream(s: MockServer; client: Socket) =
       " \"},\"finish_reason\":\"\"}]}"
     client.send(sseChunk(body))
     sleep(delay)
-  let usageTail = "{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]," &
-    "\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":24," &
-    "\"total_tokens\":36,\"cached_tokens\":0}}"
-  client.send(sseChunk(usageTail))
+  if noUsage:
+    let tail = "{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}"
+    client.send(sseChunk(tail))
+  else:
+    let usageTail = "{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]," &
+      "\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":24," &
+      "\"total_tokens\":36,\"cached_tokens\":0}}"
+    client.send(sseChunk(usageTail))
   client.send(sseDoneChunk())
   client.send("0\r\n\r\n")
 
@@ -212,6 +218,7 @@ proc serverLoop(s: MockServer) {.thread.} =
         of msOk: s.handleOk(client); handlerFinished = true
         of msSlowStream: s.handleSlowStream(client); handlerFinished = true
         of msDripStream: s.handleDripStream(client); handlerFinished = true
+        of msDripStreamNoUsage: s.handleDripStream(client, noUsage = true); handlerFinished = true
         of msSilentAfterAccept: s.handleSilent(client)
         of msSlowStreamNoUsage: s.handleSlowStreamNoUsage(client)
         of msStallAfterDone: s.handleStallAfterDone(client)

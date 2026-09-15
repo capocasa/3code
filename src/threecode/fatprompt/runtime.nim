@@ -1795,8 +1795,23 @@ proc apiFinalUsage*(usage: Usage; window, elapsed: int;
         &"  · context at {humanTokens(usage.promptTokens)}/{humanTokens(window)} — auto-summarization will fire near {humanTokens(int(SummarizeThresholdFrac * window.float))}; :summarize to act now" &
         Reset & "\r\n", true)
 
+proc commitTurnEndNotice*(bytes: string) =
+  ## Commit a turn-end harness line (no-usage elapsed, interrupt, fatal
+  ## error, empty-reply exhaustion, flail abort) as the turn's final
+  ## scrollback item, then drop the volatile bar. These turn ends never
+  ## arm `pendingHint`, so any bar row left above the idle prompt is
+  ## un-convertible: the next submit erases it and paints no receipt in
+  ## its place (the "sending a prompt removes the line above the prompt"
+  ## symptom). Clearing the bar inside `beforeRepaint` makes the commit's
+  ## own repaint produce prompt-only idle chrome, the same geometry the
+  ## first submit is correct for; the committed line keeps the timing or
+  ## error info. The next turn's spinner/footer paint rebuilds the bar.
+  commitTranscriptBytes(bytes, restoreEditor = true,
+    beforeRepaint = proc() =
+      emitFatPromptEvent clearBarEvent())
+
 proc apiNoUsage*(elapsed: int) =
-  commitTranscriptBytes(&"  · {elapsed}s\r\n", true)
+  commitTurnEndNotice(&"  · {elapsed}s\r\n")
 
 proc apiRetryNotice*(msg: string) =
   ## Retry notices no longer commit to scrollback: the message is printed
@@ -2765,25 +2780,33 @@ proc endTurnAfterTranscriptAppend*() =
 proc emitUserSubmit*(line: string) =
   ## Append the submitted prompt as transcript and clear the volatile editor
   ## area. The editor text itself is data; the on-screen prompt is chrome.
-  let receiptLabel =
-    if pendingHint.active:
-      tokenLineLabel(pendingHint.usage, pendingHint.window, pendingHint.elapsed)
-    else: ""
-  var bytes = ""
-  if receiptLabel.len > 0:
-    bytes.add receiptBytes(receiptLabel)
-    bytes.add "\r\n"
-  # The inter-item separator is owned by `appendTranscript` (one blank row
-  # prepended before every item after the first). Items carry bare content;
-  # the receipt sits flush above the prompt with a single \r\n joiner.
-  bytes.add formatUserPromptItem(line)
+  ## A pending receipt (armed by the previous turn's usage, or by --resume
+  ## whose replay suppresses the last receipt into the live bar) commits in
+  ## its own item FIRST, flush with the transcript above it - the same
+  ## shape `commitPendingReceiptAfterStream` paints when usage arrives
+  ## after a streamed answer - so the echo below keeps the standard
+  ## one-blank separator every other committed item has. Bundling receipt
+  ## and echo into one item joined them flush and dropped that separator:
+  ## the first submit after --resume removed the line above the prompt.
   proc clearSubmittedFooterState() =
     emitFatPromptEvent clearPendingHintEvent()
     emitFatPromptEvent clearBarEvent()
     emitFatPromptEvent clearTickerEvent()
+  if pendingHint.active:
+    let label = tokenLineLabel(pendingHint.usage, pendingHint.window,
+                               pendingHint.elapsed)
+    let receipt = receiptBytes(label)
+    if receipt.len > 0:
+      commitTranscriptBytes(
+        receipt,
+        restoreEditor = true,
+        beforeRepaint = clearSubmittedFooterState,
+        flushWithPrevious = true)
+  # The inter-item separator is owned by `appendTranscript` (one blank row
+  # prepended before every item after the first). Items carry bare content.
   receiptTouchesNextResponse = true
   commitTranscriptBytes(
-    bytes,
+    formatUserPromptItem(line),
     restoreEditor = false,
     beforeRepaint = clearSubmittedFooterState,
     reserveFooter = false)

@@ -218,6 +218,12 @@ proc stubCallModel(messages: JsonNode): JsonNode =
   inc stubResponseIdx
 
 proc stubUsage(node: JsonNode, content: string): Usage =
+  # `"noUsage": true` on a response emulates a provider whose stream ends
+  # without a usage object (the hookNoUsage turn-end path): all counters
+  # stay zero so callModelStub fires hookNoUsage instead of hookFinalUsage.
+  if node != nil and node.kind == JObject and
+      node{"noUsage"}.getBool(false):
+    return Usage()
   let u = if node != nil and node.kind == JObject: node{"usage"} else: nil
   if u != nil and u.kind == JObject:
     result.promptTokens =
@@ -400,10 +406,13 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
   let stubElapsed =
     if testFrameMode(): 0
     else: (epochTime() - stubT0).int
-  hookFinalUsage(usage, stubWindow, stubElapsed, stubContent,
-                 stubStreamedLive)
+  if usage.totalTokens > 0:
+    hookFinalUsage(usage, stubWindow, stubElapsed, stubContent,
+                   stubStreamedLive)
+  else:
+    hookNoUsage(stubElapsed)
   emitTestFrameEvent()
-  if result.kind == JObject:
+  if result.kind == JObject and usage.totalTokens > 0:
     result["usage"] = %*{
       "promptTokens": usage.promptTokens,
       "completionTokens": usage.completionTokens,
