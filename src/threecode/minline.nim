@@ -589,18 +589,36 @@ const
   CaretCellOn* = "\x1b[7m"    ## reverse video on: the drawn caret cell
   CaretCellOff* = "\x1b[27m"  ## reverse video off
 
-proc caretSliceBytes*(text: string; sp: LineSpan; caretAt: int): string =
+proc caretSliceBytes*(text: string; sp: LineSpan; caretAt: int;
+                       firstCol, width: int): string =
   ## The span's slice ``text[sp.start ..< sp.stop]`` with the drawn caret
   ## embedded: the rune at the caret reversed, the row's first rune when
   ## the caret sits at or before its start (line break / wrap gap), or a
   ## reverse space appended past the content (end of text, trailing break
-  ## spaces). Shared by the span model and the full-repaint renderer so
-  ## the two can never disagree about where the caret draws.
+  ## spaces). ``firstCol`` is the row's first content column (the wrapped
+  ## prompt's tail column on the editor's top row, the continuation width
+  ## elsewhere) and ``width`` the row width; ``width <= 0`` means single
+  ## row, never wrap. Shared by the span model and the full-repaint
+  ## renderer so the two can never disagree about where the caret draws.
   if caretAt >= sp.stop:
     # The break-spaces between sp.stop and the caret are invisible cells
     # the caret still steps over: cursorVisual counts them, so the paint
     # must too or the drawn caret freezes in place while the user types
     # spaces (the caret only caught up on the next non-space).
+    var col = firstCol
+    var i = sp.start
+    var lastStart = sp.start
+    while i < caretAt:
+      lastStart = i
+      inc col, runeCellWidth(text.runeAt(i))
+      i += runeLenSafe(text, i)
+    if width > 0 and col >= width and lastStart > sp.start:
+      # The caret sits at the right margin: an appended cell would wrap
+      # onto the next row (and the editor block then settles one row
+      # low). Park the caret on the row's last painted cell, exactly
+      # where a physical cursor parks in deferred wrap.
+      return text[sp.start ..< lastStart] & CaretCellOn &
+        text[lastStart ..< caretAt] & CaretCellOff
     return text[sp.start ..< caretAt] & CaretCellOn & " " & CaretCellOff
   if caretAt <= sp.start:
     let rl = runeLenSafe(text, sp.start)
@@ -655,6 +673,7 @@ proc renderRowSpans*(ed: var LineEditor): seq[string] =
     if ed.renderSuffixCursor: combined else: ed.line.text,
     caretAt, pw, cw, width)
   let head = promptWrap(pw, width).head
+  let firstCol = promptWrap(pw, width).firstCol
   for _ in 0 ..< head:
     result.add ""          # prompt fragment row: cells the terminal wrapped
   for li, sp in lineSpans(combined, pw, cw, width):
@@ -662,7 +681,8 @@ proc renderRowSpans*(ed: var LineEditor): seq[string] =
       continue             # fragment rows emitted above
     let prefix = if li == head: ed.prompt else: ed.contPrompt
     if li == caretRow:
-      result.add prefix & caretSliceBytes(combined, sp, caretAt)
+      result.add prefix & caretSliceBytes(combined, sp, caretAt,
+        if li == head: firstCol else: cw, width)
     else:
       result.add prefix & combined[sp.start ..< sp.stop]
 
@@ -678,9 +698,11 @@ proc renderBuffer*(text, prompt, cont: string, width: int,
   let contW = visualCols(cont)
   if width <= 0:
     return prompt & (if caretAt >= 0:
-      caretSliceBytes(text, (start: 0, stop: text.len), caretAt) else: text)
+      caretSliceBytes(text, (start: 0, stop: text.len), caretAt, 0, 0)
+      else: text)
   let caretRow = caretRowOf(text, caretAt, promptW, contW, width)
   let head = promptWrap(promptW, width).head
+  let firstCol = promptWrap(promptW, width).firstCol
   result = prompt
   for li, sp in lineSpans(text, promptW, contW, width):
     if li > head:
@@ -690,7 +712,8 @@ proc renderBuffer*(text, prompt, cont: string, width: int,
       # content span; the terminal cursor is already at that column.
       discard
     if li == caretRow:
-      result.add caretSliceBytes(text, sp, caretAt)
+      result.add caretSliceBytes(text, sp, caretAt,
+        if li == head: firstCol else: contW, width)
     else:
       result.add text[sp.start ..< sp.stop]
 

@@ -268,18 +268,41 @@ suite "minline drawn caret spans":
     let rows = ed.renderRowSpans()
     check rows == @["P ab", ".." & CaretCellOn & "c" & CaretCellOff & "d"]
 
-  test "caret in a wrap gap appends a reverse space to the earlier row":
+  test "caret at the right margin parks on the row's last cell":
     # width 7, prompt 2 -> 5 data cells; "alpha beta" wraps after
     # "alpha". Position 5 sits in the break space between the spans:
-    # cursorVisual puts it on row 0 past its content, so the drawn caret
-    # is a reverse space appended to row 0.
+    # cursorVisual puts it on row 0 at column 7 == width. An appended
+    # reverse space would wrap onto row 1, so the caret parks on the
+    # row's last painted cell instead (the physical-cursor convention).
     var ed = initEditor()
     withPainter ed
     ed.prompt = "P "
     ed.width = 7
     ed.line = Line(text: "alpha beta", position: 5)
     let rows = ed.renderRowSpans()
-    check rows == @["P alpha" & CaretCellOn & " " & CaretCellOff, "  beta"]
+    check rows == @["P alph" & CaretCellOn & "a" & CaretCellOff, "  beta"]
+
+  test "caret parking on a full row does not wrap onto the next row":
+    # width 12, prompt 2 -> 10 data cells. Content that fills the row
+    # exactly, and trailing spaces typed up to the margin, both land the
+    # caret at column == width: in each case the caret must stay on the
+    # content row (parked on its last cell), never on the row below.
+    block contentFillsRow:
+      var ed = initEditor()
+      withPainter ed
+      ed.prompt = "P "
+      ed.width = 12
+      ed.line = Line(text: "0123456789", position: 10)
+      let rows = ed.renderRowSpans()
+      check rows == @["P 012345678" & CaretCellOn & "9" & CaretCellOff]
+    block spacesReachMargin:
+      var ed = initEditor()
+      withPainter ed
+      ed.prompt = "P "
+      ed.width = 12
+      ed.line = Line(text: "abcdefg   ", position: 10)
+      let rows = ed.renderRowSpans()
+      check rows == @["P abcdefg  " & CaretCellOn & " " & CaretCellOff]
 
   test "caret advances past a just-typed trailing space":
     # lineSpans excludes trailing break-spaces from the painted slice

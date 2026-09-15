@@ -3203,6 +3203,48 @@ when false:
       inc cnt
     if i >= s.len: "" else: s[i..^1]
 
+  test "drawn caret at the right margin parks on the row, never wraps":
+    # The drawn caret cell is appended after the row's painted content;
+    # when the caret sits exactly at the right margin that appended cell
+    # would wrap onto the next physical row (caret seen one row below the
+    # prompt at col 0, and the editor block later settling one row low).
+    # It must instead park on the row's last cell, the same place a
+    # physical cursor parks in deferred wrap. Narrow width so both ways
+    # of reaching the margin are typed directly: content that fills the
+    # row exactly, and trailing spaces typed up to the margin.
+    let root = newFixture("caret_margin_park")
+    writeConfiguredProvider(root)
+    let tty = startStub(root, cols = 12)
+    defer: tty.close()
+    tty.expect "\u276f"
+    tty.expectIdleCaret()
+    # `❯ ` is 2 cells; 10 data cells fill the row exactly.
+    tty.send "0123456789"
+    tty.expectIdleCaret()
+    var promptRow = -1
+    for i, row in tty.rows():
+      if row.startsWith("\u276f 0123456789"):
+        promptRow = i
+    check promptRow >= 0
+    check tty.drawnCaretCount(promptRow + 1) == 0
+    check tty.drawnCaretCol(promptRow) == 11
+    # Clear, then reach the margin through trailing spaces: 7 chars
+    # (cols 2..8) plus 3 spaces parks the caret at col 12 == width.
+    tty.send "\x1b"
+    tty.drain(200)
+    tty.send "abcdefg   "
+    tty.drain(200)
+    tty.expectIdleCaret()
+    check tty.drawnCaretCount(promptRow + 1) == 0
+    check tty.drawnCaretCol(promptRow) == 11
+    # Keep typing: the wrap must settle on the continuation row directly
+    # below the prompt row, and the prompt row must not have moved down.
+    tty.send "xy"
+    tty.expectIdleCaret()
+    check tty.rows()[promptRow].startsWith("\u276f abcdefg")
+    check tty.rows()[promptRow + 1] == "  xy"
+    check tty.drawnCaretCol(promptRow + 1) == 4
+
   test "resize at idle rewraps the editor prompt":
     if getEnv("THREECODE_TTY_ONLY") notin ["", "resize_idle"]:
       check true
