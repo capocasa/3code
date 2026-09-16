@@ -102,6 +102,10 @@ suite "modelname: normalizeModelName":
     check normalizeModelName("ox-alpha-free") == "0xalpha1-free"
     check normalizeModelName("x-preview-f-free") == "0xalpha1-f-free"
 
+  test "union":
+    check normalizeModelName("stealth/union-alpha") == "union-alpha"
+    check normalizeModelName("Union-Alpha") == "union-alpha"
+
   test "qwen plus/max/flash variants":
     check normalizeModelName("qwen-3-6-plus") == "qwen-3.6-plus"
     check normalizeModelName("qwen3.7-max") == "qwen-3.7-max"

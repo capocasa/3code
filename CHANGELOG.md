@@ -2,6 +2,16 @@
 
 **Unreleased**
 
+- **Union Alpha stealth preview on OpenRouter.** `stealth/union-alpha`
+  (known-good as `openrouter.union-alpha`) is a free, unclaimed-lab
+  frontier model for agentic coding: 256K context, 128K output cap,
+  tools, reasoning always on. OpenRouter exposes no effort parameter
+  for it, so `:reasoning` offers no knob and nothing extra is sent on
+  the wire. It also appears on OpenCode Zen, but only on the Anthropic
+  messages wire behind an OpenCode-client gate during the free period;
+  OpenRouter is the open route. Expect the entry to vanish when the
+  preview ends or the lab claims the model.
+
 - **A one-line error notice at startup when the OS sandbox backend
   can't confine bash.** Previously, if the Landlock probe failed (old
   kernel, a container's seccomp profile blocking it) or the Windows
