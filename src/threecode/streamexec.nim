@@ -395,6 +395,7 @@ else:
 
   var
     toolJobHandle: Handle = 0
+    toolSandwallRun = false
     toolCancelHit: Atomic[bool]
     toolTimedOut: Atomic[bool]
     toolTimeoutStop: Atomic[bool]
@@ -402,10 +403,16 @@ else:
     toolTimeoutCap: Atomic[int]
 
   proc cancelActiveTool*() {.gcsafe.} =
-    let job = toolJobHandle
-    if job != 0:
-      toolCancelHit.store(true, moRelaxed)
-      discard terminateJobObject(job, 1'i32)
+    # Both levers: the startProcess job (plain path) and the sandwall
+    # job (in-process CPLW path). toolSandwallRun routes the kill; a
+    # terminated sandwall job wakes a caller blocked in waitForExit.
+    if toolJobHandle == 0 and not toolSandwallRun:
+      return
+    toolCancelHit.store(true, moRelaxed)
+    if toolSandwallRun:
+      interruptActiveRun()
+    if toolJobHandle != 0:
+      discard terminateJobObject(toolJobHandle, 1'i32)
 
   proc setToolStdinWatcherEnabled*(enabled: bool) = discard
 
@@ -440,10 +447,9 @@ else:
     let deadline = epochTime() + toolTimeoutCap.load(moRelaxed).float
     while not toolTimeoutStop.load(moRelaxed):
       if epochTime() >= deadline:
-        let job = toolJobHandle
-        if job != 0:
+        if toolJobHandle != 0 or toolSandwallRun:
           toolTimedOut.store(true, moRelaxed)
-          discard terminateJobObject(job, 1'i32)
+          cancelActiveTool()
         return
       sleep(200)
 
@@ -636,6 +642,11 @@ export DEBIAN_FRONTEND=noninteractive
             readonly.add msysRoot
           sandwallWall.beginCapture()
           var inProcCode = 127
+          var cancelledIn = false
+          var timedOutIn = false
+          toolSandwallRun = true
+          startToolCancelWatcher(0)
+          startToolTimeoutWatcher(cap)
           try:
             inProcCode = int(runSandboxed(writable, [b, "-c", bashCmd],
                                           read = readonly,
@@ -643,6 +654,10 @@ export DEBIAN_FRONTEND=noninteractive
           except CatchableError as e:
             discard sandwallWall.endCapture()
             return ("3code sandbox: " & e.msg, 127, cap)
+          finally:
+            cancelledIn = stopToolCancelWatcher()
+            timedOutIn = stopToolTimeoutWatcher()
+            toolSandwallRun = false
           let captured = sandwallWall.endCapture()
           var rawIn = ""
           var accIn = LineAcc()
@@ -661,6 +676,15 @@ export DEBIAN_FRONTEND=noninteractive
           emitFinalPartial(rawIn, accIn, onLine, partialShownIn,
                            partialTextIn, suppressIn)
           try: removeDir(tmp) except CatchableError: discard
+          if cancelledIn:
+            if rawIn.len > 0 and not rawIn.endsWith("\n"):
+              rawIn.add "\n"
+            rawIn.add ansiForegroundColorCode(fgMagenta) & InterruptedByUserMsg & ansiResetCode
+            return (rawIn, 130, cap)
+          if timedOutIn:
+            if rawIn.len > 0 and not rawIn.endsWith("\n"):
+              rawIn.add "\n"
+            return (rawIn, 124, cap)
           if inProcCode != 0 and sandboxEnabled and sandbox.active and
               ("Permission denied" in rawIn or
                "Operation not permitted" in rawIn):

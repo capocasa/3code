@@ -2,6 +2,23 @@
 
 **Unreleased**
 
+- **Windows: sandboxed bash tool calls no longer hold forever.** Every
+  bash tool call (`:! CMD` and model `bash` calls) on a set-up sandbox
+  wedged without output, timeout, or ESC cancel. Two stacked defects:
+  the CPLW wrapper handed `quoteCmdLine`-escaped text to `cmd.exe`,
+  whose parser does not honor `\"` escapes - the inner redirects leaked
+  out as cmd operators, cmd died resolving the bash script's POSIX path
+  as a network path before ever opening the output pipe, and the
+  parent's pipe pump parked in `ConnectNamedPipe` forever; `endRun`
+  then joined the parked pump and never returned. The command now
+  travels via the environment and runs through `cmd /v:on /c
+  !NIMBOX_CMD!` (expansion happens after operator parsing, so the text
+  reaches the child byte-for-byte); the pump reap is bounded and never
+  joins a pump that never connected; and the in-process sandbox path
+  arms the same cancel/timeout watchers as the plain path (ESC kills
+  the job tree, the 120s cap returns exit 124). Requires the sandwall
+  develop checkout (same fix landed there).
+
 - **The caret parks at the right margin instead of wrapping to the next
   row.** When the drawn caret cell landed exactly on the last column
   (content that fills the row exactly, or trailing spaces typed up to
