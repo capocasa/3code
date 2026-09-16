@@ -471,6 +471,8 @@ proc localFileSig(path: string): (Time, int) =
 proc runStreamingBash*(act: Action, cache: ReadCache,
                        onLine: proc(line: string) = nil):
     tuple[rawOut: string, code: int, cap: int] =
+  # When the OS sandbox backend is unavailable, bash runs unconfined
+  # here; that is announced once at startup (see main), not refused.
   let cmd = act.body.strip
   let mutPath = bashMutationPath(cmd)
   let (readPath, fullRead) = bashReadPath(cmd)

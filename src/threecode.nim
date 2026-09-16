@@ -444,19 +444,29 @@ proc main() =
   # the project, not the binary.
   initSandbox(session.cwd)
   startupTrace("initSandbox")
-  # Windows: when the dedicated sandbox user / creds are not set up,
-  # initSandbox clears procboxExe and every bash tool call runs
-  # unconfined (host rules unfenced). Say so once at startup, where the
-  # user sees it before trusting the sandbox, instead of only inside the
-  # first bash turn. Cheap: backendWorks on Windows is a user+creds
-  # check, no WFP engine open, no spawn.
-  when defined(windows) and not defined(providerStub):
+  # When the OS sandbox backend cannot actually confine bash (Landlock
+  # probe failed on POSIX: old kernel, a container's seccomp profile
+  # blocking it; or on Windows the dedicated sandbox user/creds were
+  # never set up via `3code setup`), every bash tool call this session
+  # runs with no filesystem or network boundary. Warn once here, before
+  # the fat prompt opens, in the same slot and shape as the auto-update
+  # notice (`· updated to v...`), but error-magenta so it reads as an
+  # error, not an FYI. Read/write/patch tools stay confined; those are
+  # enforced in-process regardless of the OS backend. Cheap: on Windows
+  # backendWorks is a user+creds check (no WFP engine open, no spawn);
+  # on POSIX initSandbox already paid for the probe above.
+  when not defined(providerStub):
     if sandboxEnabled and sandbox.active and sandboxWallWarn and
         sandbox.procboxExe.len == 0:
-      stderr.writeLine("3code: Windows sandbox is not set up; bash " &
-        "runs unconfined and policy host rules are NOT enforced. " &
-        "Run `3code setup` once as admin. " &
-        "(disable this warning: [settings] sandbox_wall_warn = off)")
+      let msg = "  · sandbox backend unavailable: bash runs unconfined " &
+        "this session (old kernel / container seccomp / on Windows " &
+        "`3code setup` not run); read/write/patch tools stay confined " &
+        "(disable this warning: [settings] sandbox_wall_warn = off)"
+      try:
+        stderr.write(MagentaFg & msg & Reset & "\n")
+      except CatchableError:
+        try: stderr.writeLine msg
+        except CatchableError: discard
     startupTrace("sandbox-setup-warn")
 
   try:
