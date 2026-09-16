@@ -955,6 +955,7 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("minimax",     "https://api.minimax.io/v1"),
   ("minimax-cn",  "https://api.minimaxi.com/v1"),
   ("mistral",     "https://api.mistral.ai/v1"),
+  ("mistralvibe", "https://api.mistral.ai/v1"),
   ("moonshot",    "https://api.moonshot.ai/v1"),
   ("moonshot-cn", "https://api.moonshot.cn/v1"),
   ("nanogpt",     "https://nano-gpt.com/api/v1"),

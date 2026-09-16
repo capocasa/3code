@@ -147,6 +147,7 @@ suite "prompts: defaultReasoningsFor":
     check defaultReasoningsFor("deepinfra", "zai-org/GLM-5.3-Flash", "glm") == @["low", "high", "max"]
     check defaultReasoningsFor("novita", "zai-org/glm-5.3-flash", "glm") == @["low", "high", "max"]
     check defaultReasoningsFor("venice", "z-ai-glm-5-3-flash", "glm") == @["low", "high", "max"]
+    check defaultReasoningsFor("mistral", "zai-glm-5-3", "glm") == @["low", "high", "max"]
 
   test "omen-alpha exposes low/high only (gateway caps effort at high)":
     check defaultReasoningsFor("opencodego", "omen-alpha", "glm") == @["low", "high"]
@@ -389,6 +390,26 @@ suite "compact: contextWindowFor (known-good)":
     check contextWindowFor(Profile(name: "mistral.test",
                                    model: "zai-glm-5-2")) == 1_000_000
     check knownGoodThinkBack("mistral", "zai-glm-5-2") == tbNone
+
+  test "mistral-hosted zai-glm-5-3: glm family, 1M window, tbNone":
+    # Same validator, same shape: reasoning_content replay 422s, so
+    # tbNone; models endpoint advertises max_context_length 1048576.
+    check knownGoodFamily("mistral", "zai-glm-5-3") == "glm"
+    check contextWindowFor(Profile(name: "mistral.test",
+                                   model: "zai-glm-5-3")) == 1_000_000
+    check knownGoodThinkBack("mistral", "zai-glm-5-3") == tbNone
+
+  test "mistralvibe vibe-cli aliases: mistral family, 256K window, tbNone":
+    # Coding-plan twin of `mistral` on the same endpoint; the vibe-cli
+    # ids are Medium 3.5 / Small 4 routing aliases with the same strict
+    # input validator, so the rows keep tbNone.
+    check knownGoodFamily("mistralvibe", "mistral-vibe-cli-latest") == "mistral"
+    check contextWindowFor(Profile(name: "mistralvibe.test",
+                                   model: "mistral-vibe-cli-latest")) == 262_144
+    check knownGoodThinkBack("mistralvibe", "mistral-vibe-cli-latest") == tbNone
+    check knownGoodFamily("mistralvibe", "mistral-vibe-cli-fast") == "mistral"
+    check contextWindowFor(Profile(name: "mistralvibe.test",
+                                   model: "mistral-vibe-cli-fast")) == 262_144
 
   test "glm-5.1 profile returns 200000":
     let p = Profile(name: "zai.test", model: "glm-5.1", family: "glm")

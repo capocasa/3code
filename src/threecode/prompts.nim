@@ -257,13 +257,28 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # Apache 2.0) and Medium 3.5 (128B dense, Modified MIT), both 256K ctx,
     # multimodal. Medium 3.5 carries reasoning_effort none/high (none is
     # the wire default); Large 3 has no advertised knob. The platform also
-    # hosts third-party GLM-5.2 (`zai-glm-5-2`, 1M ctx) on its own
-    # reasoning_effort ladder; the strict input validator rejects
+    # hosts third-party GLM (`zai-glm-5-2`, `zai-glm-5-3`, 1M ctx) on its
+    # own reasoning_effort ladder; the strict input validator rejects
     # `reasoning_content` on replayed assistant messages, so everything
-    # here is tbNone.
+    # here is tbNone. 5.3 is forced thinking (no none on the ladder) and
+    # takes the 64k output cap like every other 5.3 host.
     ("mistral", "mistral-large-2512", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false),
     ("mistral", "mistral-medium-3-5", "mistral", "", "medium", "high", 0.7, 8192, tbNone, false, 262_144, false),
     ("mistral", "zai-glm-5-2", "glm", "5", "2", "high", 0.2, 8192, tbNone, false, 1_000_000, false),
+    ("mistral", "zai-glm-5-3", "glm", "5", "3", "high", 0.2, 65536, tbNone, false, 1_000_000, false),
+
+    # mistralvibe is the Vibe Code coding-plan twin of `mistral`: same
+    # api.mistral.ai/v1 endpoint and API key, usage drawn from the plan's
+    # included monthly allowance before any pay-as-you-go billing. The
+    # vibe-cli ids are routing aliases: `-latest` is Medium 3.5, `-fast`
+    # is Small 4, both 256K ctx, vision-capable, on the same none/high
+    # reasoning_effort ladder as first-party Medium 3.5 (400 on anything
+    # else; chunked thinking content when high; `reasoning_content`
+    # replay 422s, hence tbNone). `mistral-vibe-cli-with-tools` is
+    # skipped: it only adds Mistral's server-side connector tools, which
+    # 3code's own tool schema replaces.
+    ("mistralvibe", "mistral-vibe-cli-latest", "mistral", "", "vibe", "high", 0.7, 8192, tbNone, false, 262_144, false),
+    ("mistralvibe", "mistral-vibe-cli-fast", "mistral", "", "vibe-fast", "none", 0.7, 8192, tbNone, false, 262_144, false),
     ("openrouter", "mistralai/mistral-large-2512", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false),
     ("openrouter", "mistralai/mistral-medium-3-5", "mistral", "", "medium", "high", 0.7, 8192, tbNone, false, 262_144, false),
 
@@ -3443,8 +3458,11 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         return @["no_think", "low", "high"]
       if fam == "mistral":
         # Mistral Medium 3.5 exposes reasoning_effort none/high; Large 3
-        # has no advertised knob.
-        if combo.variant.startsWith("medium"): return @["none", "high"]
+        # has no advertised knob. The vibe-cli coding-plan aliases
+        # (mistralvibe provider) ride Medium's ladder: none/high, nothing
+        # else (live-verified 400).
+        if combo.variant.startsWith("medium") or combo.variant.startsWith("vibe"):
+          return @["none", "high"]
         return @[]
       if fam == "gemini":
         # Gemini 3 thinking levels via OpenAI-compat `reasoning_effort`:

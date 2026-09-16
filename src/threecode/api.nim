@@ -2064,10 +2064,12 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
   ## - `reasoning: {effort: ...}` on OpenRouter for GLM-5.2 (and the
   ##   OpenCode gateways serving 5.3 and omen-alpha); OpenRouter maps
   ##   `high` to high and `max` to its native `xhigh`.
-  ## - Top-level `reasoning_effort` on Mistral's hosting of `zai-glm-5-2`:
-  ##   the platform ladder none/minimal/low/medium/high/xhigh/max
-  ##   (live-verified 422 on anything else). `off` maps to `none`; the
-  ##   z.ai-native `thinking` object is extra_forbidden there.
+  ## - Top-level `reasoning_effort` on Mistral's hosting of `zai-glm-5-2`
+  ##   and `zai-glm-5-3`: the platform ladder none/minimal/low/medium/
+  ##   high/xhigh/max (out-of-ladder values are rejected live). `off` maps
+  ##   to `none` on 5.2; 5.3 is forced thinking (the ladder stops at
+  ##   low/high/max) so `off` is dropped there; the z.ai-native
+  ##   `thinking` object is extra_forbidden on both.
   ## - `chat_template_kwargs.enable_thinking` (bool) on vLLM stacks (nvidia,
   ##   hetzner); other vLLM GLM providers (nebius, deepinfra, fireworks)
   ##   accept the same knob but always think when it's omitted.
@@ -2120,12 +2122,17 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
       of "max": body["reasoning"] = %*{"effort": "xhigh"}
       else: body["reasoning"] = %*{"effort": "high"}
   of "mistral":
-    case p.reasoning
-    of "off": body["reasoning_effort"] = %"none"
-    of "low": body["reasoning_effort"] = %"low"
-    of "on", "high": body["reasoning_effort"] = %"high"
-    of "max": body["reasoning_effort"] = %"max"
-    else: discard
+    if glm53:
+      case p.reasoning
+      of "low", "high", "max": body["reasoning_effort"] = %p.reasoning
+      else: discard
+    else:
+      case p.reasoning
+      of "off": body["reasoning_effort"] = %"none"
+      of "low": body["reasoning_effort"] = %"low"
+      of "on", "high": body["reasoning_effort"] = %"high"
+      of "max": body["reasoning_effort"] = %"max"
+      else: discard
   of "nvidia", "hetzner":
     if glm53:
       case p.reasoning
