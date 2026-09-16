@@ -148,7 +148,8 @@ proc freshCaretRowAbove*(ed: minline.LineEditor): int =
     if ed.renderSuffixCursor: renderedText else: ed.line.text
   let cursorPos =
     if ed.renderSuffixCursor: renderedText.len else: ed.line.position
-  let (vrow, _) = minline.cursorVisual(cursorText, cursorPos, pw, cw, width)
+  let (vrow, _) = minline.drawnCaretVisual(cursorText, cursorPos, pw, cw,
+    width)
   min(max(1, minline.renderedRows(ed)) - 1, vrow)
 
 proc clampedFooterRows(e: TerminalEngine; frame: FooterFrame;
@@ -401,7 +402,11 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
           else: edPtr[].line.position
         let pw = edPtr[].promptW
         let cw = edPtr[].contPromptW
-        let (vrow, vcol) = minline.cursorVisual(cursorText, cursorPos,
+        # The drawn caret, not the physical cursor's deferred-wrap
+        # parking spot: at the right margin the caret cell was painted
+        # one row below the content, and the hidden physical cursor must
+        # rest on that row or the next walk-up under-counts it.
+        let (vrow, vcol) = minline.drawnCaretVisual(cursorText, cursorPos,
           pw, cw, max(2, edPtr[].width))
         caretCol = vcol
         caretRow = i + min(max(1, newEdModel.len) - 1, vrow)

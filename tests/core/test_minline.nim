@@ -268,25 +268,27 @@ suite "minline drawn caret spans":
     let rows = ed.renderRowSpans()
     check rows == @["P ab", ".." & CaretCellOn & "c" & CaretCellOff & "d"]
 
-  test "caret at the right margin parks on the row's last cell":
+  test "caret at the right margin moves to the row below":
     # width 7, prompt 2 -> 5 data cells; "alpha beta" wraps after
     # "alpha". Position 5 sits in the break space between the spans:
-    # cursorVisual puts it on row 0 at column 7 == width. An appended
-    # reverse space would wrap onto row 1, so the caret parks on the
-    # row's last painted cell instead (the physical-cursor convention).
+    # cursorVisual puts it on row 0 at column 7 == width. The caret
+    # belongs where the next typed char lands: the start of the row
+    # below (its first rune reversed), never parked on the last cell of
+    # the full row (which hid the char the user just typed).
     var ed = initEditor()
     withPainter ed
     ed.prompt = "P "
     ed.width = 7
     ed.line = Line(text: "alpha beta", position: 5)
     let rows = ed.renderRowSpans()
-    check rows == @["P alph" & CaretCellOn & "a" & CaretCellOff, "  beta"]
+    check rows == @["P alpha", "  " & CaretCellOn & "b" & CaretCellOff & "eta"]
 
-  test "caret parking on a full row does not wrap onto the next row":
+  test "caret at a full row's margin gets a caret-only row below":
     # width 12, prompt 2 -> 10 data cells. Content that fills the row
     # exactly, and trailing spaces typed up to the margin, both land the
-    # caret at column == width: in each case the caret must stay on the
-    # content row (parked on its last cell), never on the row below.
+    # caret at column == width: the char prints normally and the caret
+    # waits on a row of its own below the content: no line break, no
+    # content wrapped onto that row until a typed char lands there.
     block contentFillsRow:
       var ed = initEditor()
       withPainter ed
@@ -294,7 +296,7 @@ suite "minline drawn caret spans":
       ed.width = 12
       ed.line = Line(text: "0123456789", position: 10)
       let rows = ed.renderRowSpans()
-      check rows == @["P 012345678" & CaretCellOn & "9" & CaretCellOff]
+      check rows == @["P 0123456789", "  " & CaretCellOn & " " & CaretCellOff]
     block spacesReachMargin:
       var ed = initEditor()
       withPainter ed
@@ -302,7 +304,10 @@ suite "minline drawn caret spans":
       ed.width = 12
       ed.line = Line(text: "abcdefg   ", position: 10)
       let rows = ed.renderRowSpans()
-      check rows == @["P abcdefg  " & CaretCellOn & " " & CaretCellOff]
+      check rows == @["P abcdefg", "  " & CaretCellOn & " " & CaretCellOff]
+    block renderBufferAppendsCaretRow:
+      let bytes = renderBuffer("0123456789", "P ", "  ", 12, caretAt = 10)
+      check bytes == "P 0123456789\r\n  " & CaretCellOn & " " & CaretCellOff
 
   test "caret advances past a just-typed trailing space":
     # lineSpans excludes trailing break-spaces from the painted slice

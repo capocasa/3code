@@ -580,8 +580,25 @@ proc cursorVisual*(text: string, position, promptW, contW, width: int): (int, in
   let lastRow = max(0, row - 1)
   (lastRow, if lastRow == head: firstCol else: contW)
 
+proc drawnCaretVisual*(text: string; caretAt, promptW, contW,
+                        width: int): (int, int) =
+  ## Visual position of the DRAWN caret for a caret offset into ``text``.
+  ## ``cursorVisual`` reports the margin itself (column == width, the
+  ## cell a terminal's physical cursor parks on in deferred wrap); the
+  ## drawn caret instead belongs one row down, at the next row's first
+  ## content column, so the char that filled the last cell prints
+  ## normally and the caret indicates where the next one will land.
+  ## Callers that only place the physical cursor keep ``cursorVisual``.
+  let (r, c) = cursorVisual(text, caretAt, promptW, contW, width)
+  if width > 0 and c >= width:
+    (r + 1, contW)
+  else:
+    (r, c)
+
 proc totalRows*(text: string, promptW, contW, width: int): int =
   ## Number of visual rows the rendered buffer occupies, always ``>= 1``.
+  ## Content rows only: the transient caret row a margin caret adds (see
+  ## ``drawnCaretVisual``) is live editor chrome, not buffer geometry.
   if width <= 0: return 1
   lineSpans(text, promptW, contW, width).len
 
@@ -590,35 +607,22 @@ const
   CaretCellOff* = "\x1b[27m"  ## reverse video off
 
 proc caretSliceBytes*(text: string; sp: LineSpan; caretAt: int;
-                       firstCol, width: int): string =
+                       width: int): string =
   ## The span's slice ``text[sp.start ..< sp.stop]`` with the drawn caret
   ## embedded: the rune at the caret reversed, the row's first rune when
   ## the caret sits at or before its start (line break / wrap gap), or a
   ## reverse space appended past the content (end of text, trailing break
-  ## spaces). ``firstCol`` is the row's first content column (the wrapped
-  ## prompt's tail column on the editor's top row, the continuation width
-  ## elsewhere) and ``width`` the row width; ``width <= 0`` means single
-  ## row, never wrap. Shared by the span model and the full-repaint
-  ## renderer so the two can never disagree about where the caret draws.
+  ## spaces). ``width`` the row width; ``width <= 0`` means single row,
+  ## never wrap. A caret at the right margin never reaches this proc as
+  ## an appended cell: ``drawnCaretVisual`` routes it to the row below, so
+  ## the appended reverse space only ever lands where it fits. Shared by
+  ## the span model and the full-repaint renderer so the two can never
+  ## disagree about where the caret draws.
   if caretAt >= sp.stop:
     # The break-spaces between sp.stop and the caret are invisible cells
     # the caret still steps over: cursorVisual counts them, so the paint
     # must too or the drawn caret freezes in place while the user types
     # spaces (the caret only caught up on the next non-space).
-    var col = firstCol
-    var i = sp.start
-    var lastStart = sp.start
-    while i < caretAt:
-      lastStart = i
-      inc col, runeCellWidth(text.runeAt(i))
-      i += runeLenSafe(text, i)
-    if width > 0 and col >= width and lastStart > sp.start:
-      # The caret sits at the right margin: an appended cell would wrap
-      # onto the next row (and the editor block then settles one row
-      # low). Park the caret on the row's last painted cell, exactly
-      # where a physical cursor parks in deferred wrap.
-      return text[sp.start ..< lastStart] & CaretCellOn &
-        text[lastStart ..< caretAt] & CaretCellOff
     return text[sp.start ..< caretAt] & CaretCellOn & " " & CaretCellOff
   if caretAt <= sp.start:
     let rl = runeLenSafe(text, sp.start)
@@ -633,9 +637,12 @@ proc caretRowOf*(text: string; caretAt: int; promptW, contW,
                  width: int): int =
   ## The visual row the drawn caret belongs on, or -1 for none. ``caretAt``
   ## is a byte offset into ``text`` itself (pass the combined render text
-  ## when the suffix can carry the caret).
+  ## when the suffix can carry the caret). A caret at the right margin
+  ## belongs one row below the cell that filled it (``drawnCaretVisual``),
+  ## which may be past the last content row: the renderer appends the
+  ## caret-only row ``renderRowSpans``/``renderBuffer`` emit.
   if caretAt < 0: return -1
-  cursorVisual(text, caretAt, promptW, contW, width)[0]
+  drawnCaretVisual(text, caretAt, promptW, contW, width)[0]
 
 proc caretByteOffset*(ed: LineEditor): int =
   ## Byte offset of the caret within the combined render text
@@ -673,7 +680,6 @@ proc renderRowSpans*(ed: var LineEditor): seq[string] =
     if ed.renderSuffixCursor: combined else: ed.line.text,
     caretAt, pw, cw, width)
   let head = promptWrap(pw, width).head
-  let firstCol = promptWrap(pw, width).firstCol
   for _ in 0 ..< head:
     result.add ""          # prompt fragment row: cells the terminal wrapped
   for li, sp in lineSpans(combined, pw, cw, width):
@@ -681,10 +687,17 @@ proc renderRowSpans*(ed: var LineEditor): seq[string] =
       continue             # fragment rows emitted above
     let prefix = if li == head: ed.prompt else: ed.contPrompt
     if li == caretRow:
-      result.add prefix & caretSliceBytes(combined, sp, caretAt,
-        if li == head: firstCol else: cw, width)
+      result.add prefix & caretSliceBytes(combined, sp, caretAt, width)
     else:
       result.add prefix & combined[sp.start ..< sp.stop]
+  if caretRow == result.len and caretAt >= 0:
+    # The caret sits at the right margin past every content row: it gets
+    # a row of its own below the content (continuation prompt + caret
+    # cell, no buffer text). This is not a line break: nothing wraps
+    # onto the row until a typed char actually lands there, which is the
+    # row's first content cell, exactly where the caret waits.
+    result.add ed.contPrompt & caretSliceBytes(combined,
+      (caretAt, caretAt), caretAt, width)
 
 proc renderBuffer*(text, prompt, cont: string, width: int,
                     caretAt = -1): string =
@@ -698,13 +711,14 @@ proc renderBuffer*(text, prompt, cont: string, width: int,
   let contW = visualCols(cont)
   if width <= 0:
     return prompt & (if caretAt >= 0:
-      caretSliceBytes(text, (start: 0, stop: text.len), caretAt, 0, 0)
+      caretSliceBytes(text, (start: 0, stop: text.len), caretAt, 0)
       else: text)
+  var rowCount = 0
   let caretRow = caretRowOf(text, caretAt, promptW, contW, width)
   let head = promptWrap(promptW, width).head
-  let firstCol = promptWrap(promptW, width).firstCol
   result = prompt
   for li, sp in lineSpans(text, promptW, contW, width):
+    inc rowCount
     if li > head:
       result.add "\r\n" & cont
     elif li > 0:
@@ -712,10 +726,14 @@ proc renderBuffer*(text, prompt, cont: string, width: int,
       # content span; the terminal cursor is already at that column.
       discard
     if li == caretRow:
-      result.add caretSliceBytes(text, sp, caretAt,
-        if li == head: firstCol else: contW, width)
+      result.add caretSliceBytes(text, sp, caretAt, width)
     else:
       result.add text[sp.start ..< sp.stop]
+  if caretRow == rowCount and caretAt >= 0:
+    # Margin caret past every content row: the caret-only row below the
+    # content (see renderRowSpans).
+    result.add "\r\n" & cont &
+      caretSliceBytes(text, (caretAt, caretAt), caretAt, width)
 
 # History
 #
@@ -858,14 +876,20 @@ proc redrawBytes*(ed: var LineEditor; synchronized = true): string =
   ed.contPromptW = cw
   let renderedText = ed.line.text & ed.renderSuffix
   let total = totalRows(renderedText, pw, cw, width)
-  let endRow = total - 1
   let cursorText =
     if ed.renderSuffixCursor: renderedText
     else: ed.line.text
   let cursorPos =
     if ed.renderSuffixCursor: renderedText.len
     else: ed.line.position
-  let (targetRow, targetCol) = cursorVisual(cursorText, cursorPos, pw, cw, width)
+  let caretAt = ed.caretByteOffset()
+  # The drawn caret (installed painter) rests where its cell was painted,
+  # one row past the content when the caret sits at the right margin; the
+  # standalone physical-cursor contract keeps `cursorVisual` (margin col
+  # clamps at the terminal into deferred wrap, classic readline parking).
+  let (targetRow, targetCol) =
+    if caretAt >= 0: drawnCaretVisual(cursorText, caretAt, pw, cw, width)
+    else: cursorVisual(cursorText, cursorPos, pw, cw, width)
   var buf = ""
   if synchronized:
     buf.add syncoutput.SyncBegin()
@@ -884,9 +908,16 @@ proc redrawBytes*(ed: var LineEditor; synchronized = true): string =
     buf.add "\x1b[" & $walkUp & "A"
   buf.add "\r\x1b[J"
   buf.add renderBuffer(renderedText, ed.prompt, ed.contPrompt, width,
-    ed.caretByteOffset())
-  if endRow > targetRow:
-    buf.add "\x1b[" & $(endRow - targetRow) & "A"
+    caretAt)
+  if total - 1 > targetRow:
+    buf.add "\x1b[" & $(total - 1 - targetRow) & "A"
+  elif targetRow > total - 1:
+    # The caret waits on its own row below the content: claim it (the
+    # leading `\r` disarms a pending wrap on a full-width content row)
+    # so the physical cursor rests where `renderRow` says it does.
+    buf.add "\r"
+    for _ in 0 ..< targetRow - (total - 1):
+      buf.add "\n"
   buf.add "\r"
   if targetCol > 0:
     buf.add "\x1b[" & $targetCol & "C"
@@ -897,11 +928,17 @@ proc redrawBytes*(ed: var LineEditor; synchronized = true): string =
 
 proc renderedRows*(ed: LineEditor): int =
   ## Visual rows currently owned by the editor, including any transient
-  ## suffix such as the buffered-submit hourglass.
+  ## suffix such as the buffered-submit hourglass, and the caret-only
+  ## row a margin caret currently occupies (it is painted chrome the
+  ## walk-up geometry must erase like any other editor row).
   let width = max(2, ed.width)
   let pw = if ed.promptW > 0: ed.promptW else: visualCols(ed.prompt)
   let cw = if ed.contPromptW > 0: ed.contPromptW else: visualCols(ed.contPrompt)
-  totalRows(ed.line.text & ed.renderSuffix, pw, cw, width)
+  let combined = ed.line.text & ed.renderSuffix
+  result = totalRows(combined, pw, cw, width)
+  let caretAt = ed.caretByteOffset()
+  if caretAt >= 0:
+    result = max(result, caretRowOf(combined, caretAt, pw, cw, width) + 1)
 
 proc fullRedraw*(ed: var LineEditor) =
   ## Wipe the previously rendered area, repaint prompt + buffer, place
@@ -933,6 +970,16 @@ proc parkAtEnd(ed: var LineEditor) =
   let width = max(2, ed.width)
   let total = totalRows(ed.line.text, ed.promptW, ed.contPromptW, width)
   let endRow = total - 1
+  if ed.renderRow > endRow:
+    # The caret waited on its own row below the content (a margin
+    # caret): blank that transient row and step back onto the content's
+    # last row, so the submit newline lands directly below the rendered
+    # input rather than below a leftover caret row.
+    ed.write "\r\x1b[K"
+    let up = ed.renderRow - endRow
+    if up > 0:
+      ed.write "\x1b[" & $up & "A"
+    ed.renderRow = endRow
   if ed.renderRow < endRow:
     emitMoveDown(ed, endRow - ed.renderRow)
   if ed.submitIcon.len > 0:
