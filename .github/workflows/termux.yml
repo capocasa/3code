@@ -102,7 +102,7 @@ jobs:
           # The image's Termux tree is owned by uid/gid 1000 (system); run
           # the container as that user so pkg and $HOME behave.
           CID=$(docker create -t --platform linux/arm64 --user 1000:1000 \
-            termux/termux-docker:latest sleep 900)
+            termux/termux-docker:latest sleep 1800)
           docker start $CID >/dev/null
           trap 'docker rm -f $CID >/dev/null 2>&1 || true' EXIT
           docker exec $CID mkdir -p /data/data/com.termux/files/usr/tmp
