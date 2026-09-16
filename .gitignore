@@ -42,3 +42,4 @@ tools/stress
 # compiled test binaries at tests/ root level
 tests/megatest
 knowngood_table
+AGENTS.md
