@@ -2,6 +2,15 @@
 
 **Unreleased**
 
+- **JSON error bodies never surface verbatim.** Providers answering
+  with FastAPI-style `{"detail":"..."}` bodies (NVIDIA NIM and friends)
+  showed the raw JSON as the error message. `extractErrorMsg` now knows
+  the `detail` convention, and any other unrecognized JSON object yields
+  its longest string leaf (ids, codes and urls are short; the human
+  sentence is the longest field) instead of dumping the body. OpenAI/
+  Anthropic `error.message` and Gemini flat `message` keep working, and
+  non-JSON bodies still pass through untouched.
+
 - **Connect failures no longer blame TLS when the host is not there.**
   A dead endpoint (DNS miss, connection refused, unreachable, timeout)
   surfaced as `TLS connect failed: Connection refused` because api.nim

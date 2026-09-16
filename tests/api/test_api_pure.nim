@@ -413,6 +413,22 @@ suite "api: extractErrorMsg":
     let msg = extractErrorMsg("""{"error":{"code":429,"message":"Resource exhausted","status":"RESOURCE_EXHAUSTED"}}""")
     check msg == "Resource exhausted"
 
+  test "extracts detail field (FastAPI/NVIDIA NIM style)":
+    let msg = extractErrorMsg("""{"detail":"Model meta/llama-3.3-70b-instruct is not available"}""")
+    check msg == "Model meta/llama-3.3-70b-instruct is not available"
+
+  test "detail array yields its longest string leaf":
+    let msg = extractErrorMsg("""{"detail":[{"loc":["body","messages"],"msg":"Field required"}]}""")
+    check msg == "Field required"
+
+  test "unknown JSON shape yields longest string leaf, not raw JSON":
+    let msg = extractErrorMsg("""{"code":"E123","what":"the frobnicator burst into flames"}""")
+    check msg == "the frobnicator burst into flames"
+
+  test "JSON without any string fields yields empty so transport msg wins":
+    let msg = extractErrorMsg("""{"error":429}""")
+    check msg == ""
+
   test "falls back to raw body for non-JSON":
     let msg = extractErrorMsg("plain text error")
     check msg == "plain text error"
