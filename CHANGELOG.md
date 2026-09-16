@@ -2,6 +2,17 @@
 
 **Unreleased**
 
+- **Fixed `reasoning field unknown` errors on the OpenCode zen
+  gateways.** Both `opencode` and `opencodego` hardened their request
+  validator: the OpenRouter-style `reasoning: {effort}` object is now
+  an unknown field, breaking every turn on GLM-5.2, GLM-5.3, and
+  omen-alpha there with `invalid request body: json: unknown field
+  "reasoning"`. 3code now sends the top-level `reasoning_effort`
+  those gateways accept (live-verified on both). Their GLM line is
+  thinking-only, so `:reasoning off` on glm-5.2 there is a silent
+  no-op, same as cerebras. OpenRouter keeps the object form, which
+  still works there.
+
 - **A one-line error notice at startup when the OS sandbox backend
   can't confine bash.** Previously, if the Landlock probe failed (old
   kernel, a container's seccomp profile blocking it) or the Windows
