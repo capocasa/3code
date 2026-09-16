@@ -2061,9 +2061,14 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
   ## - `reasoning_effort` (`high`/`max`) on Together for GLM-5.2; Together
   ##   accepts only those two effort levels and ignores the field on older
   ##   GLM (which think whenever the parameter is absent).
-  ## - `reasoning: {effort: ...}` on OpenRouter for GLM-5.2 (and the
-  ##   OpenCode gateways serving 5.3 and omen-alpha); OpenRouter maps
-  ##   `high` to high and `max` to its native `xhigh`.
+  ## - `reasoning: {effort: ...}` on OpenRouter for GLM-5.2 (and 5.3 /
+  ##   omen-alpha); OpenRouter maps `high` to high and `max` to its native
+  ##   `xhigh`. The OpenCode zen gateways serve the same models but reject
+  ##   the object (`json: unknown field "reasoning"` since their Sep 2026
+  ##   validator hardening); they take top-level `reasoning_effort` instead,
+  ##   and their GLM line is thinking-only: `reasoning_effort: none` and
+  ##   `chat_template_kwargs.enable_thinking: false` are both hard errors,
+  ##   so `off` is a silent no-op there (like cerebras).
   ## - Top-level `reasoning_effort` on Mistral's hosting of `zai-glm-5-2`:
   ##   the platform ladder none/minimal/low/medium/high/xhigh/max
   ##   (live-verified 422 on anything else). `off` maps to `none`; the
@@ -2107,10 +2112,10 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
       of "off": body["reasoning"] = %*{"enabled": false}
       of "max": body["reasoning_effort"] = %"max"
       else: body["reasoning_effort"] = %"high"
-  of "openrouter", "opencode", "opencodego":
+  of "openrouter":
     if glm53:
-      # 5.3 (and omen-alpha, same surface) has no off; gateways
-      # normalize to reasoning.effort passthrough
+      # 5.3 (and omen-alpha, same surface) has no off; OpenRouter
+      # normalizes to reasoning.effort passthrough
       case p.reasoning
       of "low", "high", "max": body["reasoning"] = %*{"effort": p.reasoning}
       else: discard
@@ -2119,6 +2124,20 @@ proc applyGlmReasoning(p: Profile, body: JsonNode) =
       of "off": body["reasoning"] = %*{"enabled": false}
       of "max": body["reasoning"] = %*{"effort": "xhigh"}
       else: body["reasoning"] = %*{"effort": "high"}
+  of "opencode", "opencodego":
+    # Zen gateways: same models, different validator. The OpenRouter-style
+    # `reasoning` object is an unknown field; top-level `reasoning_effort`
+    # is the accepted knob, and the GLM line there is thinking-only, so
+    # `off` cannot be honored (sent nothing, like cerebras).
+    if glm53:
+      case p.reasoning
+      of "low", "high", "max": body["reasoning_effort"] = %p.reasoning
+      else: discard
+    elif glm52:
+      case p.reasoning
+      of "off": discard
+      of "max": body["reasoning_effort"] = %"max"
+      else: body["reasoning_effort"] = %"high"
   of "mistral":
     case p.reasoning
     of "off": body["reasoning_effort"] = %"none"

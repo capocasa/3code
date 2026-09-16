@@ -187,6 +187,33 @@ suite "api request shaping":
       applyReasoning(p, body)
       check body{"reasoning"}{"enabled"}.getBool == false
 
+  test "opencode gateways send top-level reasoning_effort (zen rejects the object)":
+    block glm53zenV1:
+      var body = %*{"stream": true}
+      let p = Profile(name: "opencode.glm-5.3", family: "glm",
+                      version: "5", variant: "3",
+                      model: "glm-5.3", reasoning: "low")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "low"
+      check "reasoning" notin body
+    block glm52off:
+      # thinking-only upstream: off cannot be honored, nothing sent
+      var body = %*{"stream": true}
+      let p = Profile(name: "opencodego.glm-5.2", family: "glm",
+                      version: "5", variant: "2",
+                      model: "glm-5.2", reasoning: "off")
+      applyReasoning(p, body)
+      check "reasoning" notin body
+      check "reasoning_effort" notin body
+    block glm52max:
+      var body = %*{"stream": true}
+      let p = Profile(name: "opencodego.glm-5.2", family: "glm",
+                      version: "5", variant: "2",
+                      model: "glm-5.2", reasoning: "max")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "max"
+      check "reasoning" notin body
+
   test "together non-5.2 glm sends no effort knob":
     var body = %*{"stream": true}
     let p = Profile(name: "together.zai-org/GLM-5.1", family: "glm",
@@ -292,15 +319,16 @@ suite "api request shaping":
                       version: "5", variant: "3",
                       model: "glm-5.3", reasoning: "low")
       applyReasoning(p, body)
-      check body{"reasoning"}{"effort"}.getStr == "low"
+      check body{"reasoning_effort"}.getStr == "low"
+      check "reasoning" notin body
     block omenEffort:
       var body = %*{"stream": true}
       let p = Profile(name: "opencodego.omen-alpha", family: "glm",
                       version: "5", variant: "3",
                       model: "omen-alpha", reasoning: "high")
       applyReasoning(p, body)
-      check body{"reasoning"}{"effort"}.getStr == "high"
-      check "reasoning_effort" notin body
+      check body{"reasoning_effort"}.getStr == "high"
+      check "reasoning" notin body
       check "thinking" notin body
     block flashEffort:
       var body = %*{"stream": true}
