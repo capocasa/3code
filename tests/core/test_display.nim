@@ -218,10 +218,12 @@ when not defined(windows):
     test "replay matches formatItem blocks with live spacing":
       # The exact replay byte stream must equal the live item blocks
       # joined by one blank row, with no trailing blank after the last
-      # item. Assemble the expected bytes from the shared formatters so
-      # any divergence between live and replay fails here. The turn's
-      # receipt caps the LAST TOOL (the live `deferredReceipt` contract),
-      # not the prose above it.
+      # item. The first item carries the same one-blank leading separator
+      # a live commit writes, so a resumed screen starts with the same
+      # hint/blank/echo shape a fresh session does. Assemble the expected
+      # bytes from the shared formatters so any divergence between live
+      # and replay fails here. The turn's receipt caps the LAST TOOL (the
+      # live `deferredReceipt` contract), not the prose above it.
       let output = "hi\n"
       let toolLog = @[ToolRecord(banner: "echo hi", output: output,
         code: 0, kind: akBash)]
@@ -246,6 +248,7 @@ when not defined(windows):
       toolBytes.trimTranscriptTail()
       toolBytes.attachReceipt(receipt, true)
       let expected =
+        "\n" &
         formatItem(userPromptItem("hi there")) & "\n" &
         "\n" & prose1 & "\n" &
         "\n" & toolBytes & "\n" &
