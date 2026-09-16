@@ -47,7 +47,7 @@
 
 <h4 id="other-models">Other models</h4><p>DeepSeek, MiniMax, Kimi, Tencent Hy, Qwen, Grok, and LongCat are all supported somewhere. The registry changes too often for a copied list to age gracefully, so ask 3code for the current one:</p>
 <p><pre class="listing">3code --good</pre></p>
-<p>OpenRouter and Eurouter are handy when you want to try many models through one account. Once you settle on one, a direct provider account removes a service from the request path and is often cheaper.</p>
+<p>OpenRouter and Eurouter are handy when you want to try many models through one account. Once you settle on one, a direct provider account removes a service from the request path and is often cheaper. The <a class="reference external" href="#provider-catalog">provider catalog</a> below lists who hosts what, where, and which ones serve quantized weights.</p>
 
 <h3 id="install">Install</h3><p><pre class="listing"># macOS / Linux
 curl -fsSL https://3code.capocasa.dev/install | sh
@@ -60,7 +60,7 @@ irm https://3code.capocasa.dev/install.ps1 | iex</pre></p>
 <li>Put the folder on your <tt class="docutils literal"><span class="pre">PATH</span></tt>, or call <tt class="docutils literal"><span class="pre">3code.exe</span></tt> by full path.</li>
 <li>Run it. 3code resolves bash in this order: its own bundled MSYS2, then a <tt class="docutils literal"><span class="pre">bash_path</span></tt> setting, then the Git for Windows install. With Git for Windows present, no MSYS2 download is needed.</li>
 </ol>
-<p>The one-time <tt class="docutils literal"><span class="pre">3code setup</span></tt> (sandbox user + network fence) is still required on Windows; it needs an elevated shell.</p>
+<p>The one-time <tt class="docutils literal"><span class="pre">3code setup</span></tt> (sandbox user + network fence) is still required on Windows. It needs admin rights: run it from a console/RDP session and it asks for them via the Windows UAC prompt (from ssh it prints what to do instead; there the run must come from an admin account or elevated shell).</p>
 
 <h3 id="termux-on-android-arm64">Termux on Android arm64</h3><p>Inside Termux, the same one-liner installs the Android arm64 build:</p>
 <p><pre class="listing">curl -fsSL https://3code.capocasa.dev/install | sh</pre></p>
@@ -102,6 +102,62 @@ nimble install https://github.com/capocasa/3code</pre></p>
 <p>Switch accounts with:</p>
 <p><pre class="listing">:provider openai
 :provider chatgpt</pre></p>
+
+<h2 id="provider-catalog">Provider catalog</h2><p>Everything the wizard knows about, grouped by where inference actually runs. A <tt class="docutils literal"><span class="pre">★</span></tt> marks the providers on the <a class="reference external" href="https://3code.capocasa.dev">home page rotation</a>, which is the shortlist I recommend. Rows marked <strong>quantized</strong> serve fp8 or fp4 weights: cheaper per token, but a long agentic run hits the quality floor sooner than the same model at full precision, so treat them as bulk workhorse power, not the model you trust with a hard refactor. Hosting location is where your prompts run, not where the company is registered; for retention policies see <a class="reference external" href="#picking-a-private-provider">Picking a private provider</a>. <tt class="docutils literal"><span class="pre">3code --good</span></tt> prints the validated provider/model pairs for whichever of these you configure.</p>
+
+<h3 id="model-labs">Model labs</h3><p>First-party APIs from the labs that trained the models. Two of the home page names are subscription logins rather than catalog entries: <tt class="docutils literal"><span class="pre">chatgpt</span></tt> is a ChatGPT Plus/Pro login that rides on <tt class="docutils literal"><span class="pre">openai</span></tt>, and <tt class="docutils literal"><span class="pre">supergrok</span></tt> is a SuperGrok or X Premium+ login that rides on <tt class="docutils literal"><span class="pre">xai</span></tt>.</p>
+<table border="1" class="docutils"><tr><th>provider</th><th>hosting</th><th>notes</th></tr>
+<tr><td>★ zaicode</td><td>China (Z.ai, intl endpoint)</td><td>GLM coding plan, flat rate, my main setup</td></tr>
+<tr><td>★ zai</td><td>China (Z.ai, intl endpoint)</td><td>GLM pay-as-you-go</td></tr>
+<tr><td>★ deepseek</td><td>China (intl endpoint)</td><td>DeepSeek V4 line</td></tr>
+<tr><td>★ kimi / kimicode</td><td>China (intl endpoints)</td><td>Kimi API and Kimi coding plan subscription</td></tr>
+<tr><td>moonshot / moonshot-cn</td><td>China</td><td>same models; <tt class="docutils literal"><span class="pre">moonshot-cn</span></tt> is the domestic endpoint</td></tr>
+<tr><td>minimax / minimax-cn</td><td>China</td><td><tt class="docutils literal"><span class="pre">minimax-cn</span></tt> is the domestic endpoint</td></tr>
+<tr><td>qwen / qwen-cn / qwen-us</td><td>China (Alibaba)</td><td>intl, domestic, and US-hosted DashScope endpoints</td></tr>
+<tr><td>tencent</td><td>China (intl endpoint)</td><td>Hunyuan on Tencent MaaS</td></tr>
+<tr><td>★ openai</td><td>US</td><td>API key, or log in as <tt class="docutils literal"><span class="pre">chatgpt</span></tt> on a Plus/Pro subscription</td></tr>
+<tr><td>★ xai</td><td>US</td><td>API key, or log in as <tt class="docutils literal"><span class="pre">supergrok</span></tt> on SuperGrok/X Premium+</td></tr>
+<tr><td>anthropic</td><td>US</td><td>Claude</td></tr>
+<tr><td>google</td><td>US</td><td>Gemini through the OpenAI-compatible surface</td></tr>
+<tr><td>mistral</td><td>France (EU)</td><td>Mistral first-party, plus hosted GLM</td></tr>
+</table>
+<h3 id="us-inference-clouds">US inference clouds</h3><table border="1" class="docutils"><tr><th>provider</th><th>hosting</th><th>notes</th></tr>
+<tr><td>baseten</td><td>US</td><td></td></tr>
+<tr><td>cerebras</td><td>US</td><td>wafer-scale serving, fast GLM</td></tr>
+<tr><td>deepinfra</td><td>US</td><td><strong>quantized</strong> (fp8 weights)</td></tr>
+<tr><td>fireworks</td><td>US</td><td>zero data retention by default</td></tr>
+<tr><td>groq</td><td>US</td><td>fast small models</td></tr>
+<tr><td>hyperbolic</td><td>US</td><td></td></tr>
+<tr><td>nvidia</td><td>US</td><td>free credits to start</td></tr>
+<tr><td>sambanova</td><td>US</td><td></td></tr>
+<tr><td>together</td><td>US</td><td>no training on API data by default</td></tr>
+<tr><td>venice</td><td>US</td><td>privacy-leaning</td></tr>
+<tr><td>arcee</td><td>US</td><td></td></tr>
+<tr><td>friendli</td><td>US</td><td>Korean-founded inference cloud</td></tr>
+<tr><td>perplexity</td><td>US</td><td></td></tr>
+</table>
+<h3 id="eu-providers">EU providers</h3><p>Where to point 3code when data must stay under EU jurisdiction.</p>
+<table border="1" class="docutils"><tr><th>provider</th><th>hosting</th><th>notes</th></tr>
+<tr><td>★ greenpt</td><td>EU</td><td><strong>quantized</strong>; my EU pick anyway</td></tr>
+<tr><td>nebius</td><td>EU (Netherlands)</td><td></td></tr>
+<tr><td>inceptron</td><td>EU (Sweden)</td><td>zero data retention, EU residency</td></tr>
+<tr><td>ovh</td><td>France</td><td>no training, billing-only retention</td></tr>
+<tr><td>scaleway</td><td>France</td><td></td></tr>
+<tr><td>hetzner</td><td>Germany</td><td>free experiment, <strong>quantized</strong> (fp8/fp4 ids)</td></tr>
+<tr><td>together-eu</td><td>EU</td><td>Together's EU endpoint</td></tr>
+<tr><td>aki</td><td>EU</td><td></td></tr>
+<tr><td>lyceum</td><td>EU</td><td></td></tr>
+</table>
+<h3 id="routers-and-aggregators">Routers and aggregators</h3><p>One account, many models. The model you get is the model some upstream provider served; quantization, price, and policy vary by route, so check the route before blaming the model.</p>
+<table border="1" class="docutils"><tr><th>provider</th><th>hosting</th><th>notes</th></tr>
+<tr><td>★ openrouter</td><td>US company, upstreams worldwide</td><td>the easy way to try many models</td></tr>
+<tr><td>novita</td><td>Singapore</td><td>free tier; often <strong>quantized</strong></td></tr>
+<tr><td>nanogpt</td><td>varies</td><td>crypto payments; often <strong>quantized</strong></td></tr>
+<tr><td>opencode / opencodego</td><td>gateway</td><td>OpenCode Zen (metered) and Go (subscription) gateways</td></tr>
+<tr><td>huggingface</td><td>varies</td><td>router to partner clouds</td></tr>
+<tr><td>crof</td><td>varies</td><td>small aggregator</td></tr>
+<tr><td>cheaperinference</td><td>varies</td><td>discount aggregator</td></tr>
+</table><p>The known-good registry also covers a few providers that are not in the wizard catalog: TensorX (EU, Dublin and Helsinki), poolside, kilo, LongCat, and Xiaomi MiMo. Add those by hand as custom providers when wanted.</p>
 
 <h2 id="interactive-use">Interactive use</h2><p>At the interactive prompt, describe the result you want or enter a command beginning with <tt class="docutils literal"><span class="pre">:</span></tt>. Tab completes commands, provider names, model names, and paths where supported.</p>
 <p>3code loads <tt class="docutils literal"><span class="pre">3CODE.md</span></tt> and <tt class="docutils literal"><span class="pre">AGENTS.md</span></tt> from the project directory and its parents. These are good homes for project rules, build commands, and style requirements. To include a file directly in a prompt, prefix its path with <tt class="docutils literal"><span class="pre">@</span></tt>:</p>
@@ -314,8 +370,9 @@ allow ./</pre></p>
 <p>A host without a port matches every port. Add one when it matters, as in <tt class="docutils literal"><span class="pre">allow github.com:443</span></tt>. Wildcards work too: <tt class="docutils literal"><span class="pre">allow *.example.org</span></tt> allows that domain pattern.</p>
 <p>As with paths, the last matching rule wins. Any <tt class="docutils literal"><span class="pre">allow</span></tt> host rule makes unmatched hosts denied. With only <tt class="docutils literal"><span class="pre">deny</span></tt> host rules, unmatched hosts remain allowed. This is the small detail that decides whether you have made an allowlist or a blocklist.</p>
 <p>On Linux and macOS, fenced commands reach the network through a local CONNECT and SOCKS5 allowlist proxy. Linux puts the command in a network namespace; macOS confines it to loopback with Seatbelt. 3code sets the standard proxy variables and a Git SSH proxy command for the child process. Denied HTTP connections return 403.</p>
-<p>On Windows, host rules require one elevated setup command:</p>
+<p>On Windows, host rules require one admin setup command:</p>
 <p><pre class="listing">3code setup</pre></p>
+<p>It asks for admin rights through the UAC prompt when run unelevated from a console or RDP session; over ssh (no screen for the prompt) it says so and exits - run it from an account with admin instead.</p>
 <p>Without that setup, 3code warns and runs the command without a network fence. That is safer than pretending the fence exists. Set <tt class="docutils literal"><span class="pre">sandbox_wall_warn = off</span></tt> in <tt class="docutils literal"><span class="pre">[settings]</span></tt> if you no longer need the warning. <tt class="docutils literal"><span class="pre">3code unsetup</span></tt> removes the firewall filters; it is safe to run repeatedly.</p>
 
 <h3 id="editing-the-policy">Editing the policy</h3><p>Use an editor or the sandbox commands:</p>
@@ -386,7 +443,7 @@ allow ./</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-11 13:59:57 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-16 15:53:08 UTC</small>
       </div>
     </div>
   </div>

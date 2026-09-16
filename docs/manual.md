@@ -61,7 +61,9 @@ so ask 3code for the current one:
 
 OpenRouter and Eurouter are handy when you want to try many models through one
 account. Once you settle on one, a direct provider account removes a service
-from the request path and is often cheaper.
+from the request path and is often cheaper. The [provider
+catalog](#provider-catalog) below lists who hosts what, where, and which ones
+serve quantized weights.
 
 ### Install
 
@@ -210,6 +212,97 @@ Switch accounts with:
 :provider openai
 :provider chatgpt
 ```
+
+## Provider catalog
+
+Everything the wizard knows about, grouped by where inference actually
+runs. A `★` marks the providers on the [home page
+rotation](https://3code.capocasa.dev), which is the shortlist I recommend.
+Rows marked **quantized** serve fp8 or fp4 weights: cheaper per token, but a
+long agentic run hits the quality floor sooner than the same model at full
+precision, so treat them as bulk workhorse power, not the model you trust
+with a hard refactor. Hosting location is where your
+prompts run, not where the company is registered; for retention policies see
+[Picking a private provider](#picking-a-private-provider). `3code --good`
+prints the validated provider/model pairs for whichever of these you
+configure.
+
+### Model labs
+
+First-party APIs from the labs that trained the models. Two of the home page
+names are subscription logins rather than catalog entries: `chatgpt` is a
+ChatGPT Plus/Pro login that rides on `openai`, and `supergrok` is a SuperGrok
+or X Premium+ login that rides on `xai`.
+
+| provider | hosting | notes |
+| --- | --- | --- |
+| ★ zaicode | China (Z.ai, intl endpoint) | GLM coding plan, flat rate, my main setup |
+| ★ zai | China (Z.ai, intl endpoint) | GLM pay-as-you-go |
+| ★ deepseek | China (intl endpoint) | DeepSeek V4 line |
+| ★ kimi / kimicode | China (intl endpoints) | Kimi API and Kimi coding plan subscription |
+| moonshot / moonshot-cn | China | same models; `moonshot-cn` is the domestic endpoint |
+| minimax / minimax-cn | China | `minimax-cn` is the domestic endpoint |
+| qwen / qwen-cn / qwen-us | China (Alibaba) | intl, domestic, and US-hosted DashScope endpoints |
+| tencent | China (intl endpoint) | Hunyuan on Tencent MaaS |
+| ★ openai | US | API key, or log in as `chatgpt` on a Plus/Pro subscription |
+| ★ xai | US | API key, or log in as `supergrok` on SuperGrok/X Premium+ |
+| anthropic | US | Claude |
+| google | US | Gemini through the OpenAI-compatible surface |
+| mistral | France (EU) | Mistral first-party, plus hosted GLM |
+
+### US inference clouds
+
+| provider | hosting | notes |
+| --- | --- | --- |
+| baseten | US | |
+| cerebras | US | wafer-scale serving, fast GLM |
+| deepinfra | US | **quantized** (fp8 weights) |
+| fireworks | US | zero data retention by default |
+| groq | US | fast small models |
+| hyperbolic | US | |
+| nvidia | US | free credits to start |
+| sambanova | US | |
+| together | US | no training on API data by default |
+| venice | US | privacy-leaning |
+| arcee | US | |
+| friendli | US | Korean-founded inference cloud |
+| perplexity | US | |
+
+### EU providers
+
+Where to point 3code when data must stay under EU jurisdiction.
+
+| provider | hosting | notes |
+| --- | --- | --- |
+| ★ greenpt | EU | **quantized**; my EU pick anyway |
+| nebius | EU (Netherlands) | |
+| inceptron | EU (Sweden) | zero data retention, EU residency |
+| ovh | France | no training, billing-only retention |
+| scaleway | France | |
+| hetzner | Germany | free experiment, **quantized** (fp8/fp4 ids) |
+| together-eu | EU | Together's EU endpoint |
+| aki | EU | |
+| lyceum | EU | |
+
+### Routers and aggregators
+
+One account, many models. The model you get is the model some upstream
+provider served; quantization, price, and policy vary by route, so check the
+route before blaming the model.
+
+| provider | hosting | notes |
+| --- | --- | --- |
+| ★ openrouter | US company, upstreams worldwide | the easy way to try many models |
+| novita | Singapore | free tier; often **quantized** |
+| nanogpt | varies | crypto payments; often **quantized** |
+| opencode / opencodego | gateway | OpenCode Zen (metered) and Go (subscription) gateways |
+| huggingface | varies | router to partner clouds |
+| crof | varies | small aggregator |
+| cheaperinference | varies | discount aggregator |
+
+The known-good registry also covers a few providers that are not in the
+wizard catalog: TensorX (EU, Dublin and Helsinki), poolside, kilo, LongCat,
+and Xiaomi MiMo. Add those by hand as custom providers when wanted.
 
 ## Interactive use
 
