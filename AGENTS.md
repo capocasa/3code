@@ -57,6 +57,21 @@ assumption and the frame looks perfect.
 nim-style-guide
 nim-code-organization
 
+## Bisecting tests across revisions
+
+A testament run inside a git worktree is not evidence about that worktree's
+revision. Worktrees get `nimble.paths` via a symlink to the main checkout,
+and that file lists the main checkout's src as an absolute `--path`, so the
+test compiles against the main tree's CURRENT source while the revision
+under test supplies only the test file. The false results go both ways
+(passes that should fail and vice versa), and creating the worktree fresh
+does not help; the symlink still points at main. For any cross-revision
+comparison, compile the test by hand with `--noNimblePath
+-p:<worktree>/src` plus the dependency paths copied from `nimble.paths`
+(minus the self-referential src line), into a fresh `-o:` binary. Confirm
+the suspected first-bad commit fails and its parent passes under that
+manual harness before trusting the bisect.
+
 ## Builds
 
 Use `nimble setup` once per clone (generates `nimble.paths`), then build with
@@ -67,12 +82,16 @@ during development; it is only a pre-release smoke test, and it is exactly
 what poisons later `nimble build`s. If the binary behaves like an old commit,
 delete `~/.nimble/pkgs2/threecode-*` and rebuild with `nim c`.
 
-Dependencies (ttty, streamhttp, sandwall, tinotify) are develop-linked to
-their checkouts in `~/p/<name>` via `nimble develop -g`; `nimble setup` here
-resolves to those source dirs, so local edits to a dependency are live on
-the next `nim c`. Never `nimble install` a dependency: the pkgs2 snapshot
-shadows the develop link and the solver keeps reinstalling it. If a dep
-resolves to pkgs2, delete the copy and check
+Dependencies (ttty, streamhttp, sandwall, tinotify) resolve to their
+checkouts in `~/p/<name>` through explicit `--path:"..."` lines in
+`nimble.paths`, so local edits to a dependency are live on the next
+`nim c`. Keep those lines pointing at the checkout src dirs. Current nimble
+removed `nimble develop -g`, and `nimble develop --add <path>` from the
+project both fails AND truncates `nimble.paths` to a bare `--noNimblePath`
+as a side effect; restore the file by hand instead of rerunning it. Never
+`nimble install` a dependency: the pkgs2 snapshot shadows the path and the
+solver keeps reinstalling it. If a dep resolves to pkgs2, fix its
+`nimble.paths` line (or delete the pkgs2 copy) and check
 `~/.nimble/pkgcache/tagged_versions.json` for a stale pre-tag entry. See
 `~/.agents/archive/guidelines-updated.md` section 8.
 
