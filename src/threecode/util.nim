@@ -1,4 +1,5 @@
 import std/[json, locks, net, os, sequtils, strformat, strutils, tables, unicode, times]
+import streamhttp
 import types
 import threecode/unicodewidth
 when defined(posix):
@@ -499,6 +500,29 @@ proc connectErrorDetail*(e: ref CatchableError): string =
       result = result[1 .. ^2]
   else:
     result = msg
+
+proc endpointLabel*(host: string; port: Port; plainHttp: bool): string =
+  ## Host as shown in connect-failure messages: the bare host on the
+  ## scheme's default port, `host:port` when the URL named a specific one
+  ## (`localhost:11434 is not responding` instead of just `localhost`).
+  let defPort = if plainHttp: 80'u16 else: 443'u16
+  if port.uint16 == defPort: host else: host & ":" & $port.uint16
+
+proc connectFailMsg*(endpoint: string; plainHttp: bool;
+                     e: ref CatchableError): string =
+  ## User-facing diagnosis of a failed connect. `StreamConnectError` means
+  ## DNS or the TCP connect failed - the host was never reached - so the
+  ## message says the endpoint is not responding instead of blaming TLS;
+  ## a dead local server on plain http would otherwise surface through the
+  ## https wording as a confusing "TLS connect failed". Anything raised
+  ## after the TCP connect is genuinely TLS and keeps the TLS label.
+  if e of StreamConnectError:
+    endpoint & " is not responding (" & connectErrorDetail(e) & ")"
+  elif e of HandshakeTimeoutError:
+    e.msg  # already reads "TLS handshake timed out"
+  else:
+    (if plainHttp: "connect failed: " else: "TLS handshake failed: ") &
+      connectErrorDetail(e)
 
 proc userConfigRoot*(): string =
   ## XDG config root for 3code: `~/.config/3code/` on Linux,

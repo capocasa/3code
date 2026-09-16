@@ -805,7 +805,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       conn = acquireStreamConn(host, port, plainHttp)
     except CatchableError as e:
       result.errMsg = if isInterrupted(): InterruptedByUserMsg
-        else: (if plainHttp: "connect failed: " else: "TLS connect failed: ") & connectErrorDetail(e)
+        else: connectFailMsg(endpointLabel(host, port, plainHttp), plainHttp, e)
       return
     conn.setReadTimeoutMs(QuietRecvWakeMs)
     var headStall = StallClock(since: epochTime())
@@ -1313,7 +1313,7 @@ proc streamResponses(url, key, bodyStr: string, baseLabel: string,
       conn = acquireStreamConn(host, port, plainHttp)
     except CatchableError as e:
       result.errMsg = if isInterrupted(): InterruptedByUserMsg
-        else: (if plainHttp: "connect failed: " else: "TLS connect failed: ") & connectErrorDetail(e)
+        else: connectFailMsg(endpointLabel(host, port, plainHttp), plainHttp, e)
       return
     conn.setReadTimeoutMs(QuietRecvWakeMs)
     var headStall = StallClock(since: epochTime())
@@ -1585,7 +1585,7 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
       conn = acquireStreamConn(host, port, plainHttp)
     except CatchableError as e:
       result.errMsg = if isInterrupted(): InterruptedByUserMsg
-        else: (if plainHttp: "connect failed: " else: "TLS connect failed: ") & connectErrorDetail(e)
+        else: connectFailMsg(endpointLabel(host, port, plainHttp), plainHttp, e)
       return
     conn.setReadTimeoutMs(QuietRecvWakeMs)
     try:
@@ -1827,7 +1827,7 @@ proc callResponses(url, key, bodyStr: string; baseLabel: string;
       conn = acquireStreamConn(host, port, plainHttp)
     except CatchableError as e:
       result.errMsg = if isInterrupted(): InterruptedByUserMsg
-        else: (if plainHttp: "connect failed: " else: "TLS connect failed: ") & connectErrorDetail(e)
+        else: connectFailMsg(endpointLabel(host, port, plainHttp), plainHttp, e)
       return
     conn.setReadTimeoutMs(QuietRecvWakeMs)
     try:
@@ -3156,8 +3156,7 @@ proc verifyProfile*(p: Profile): (bool, string) =
   except CatchableError as e:
     invalidateResolved(host, port)
     return (false,
-      (if plainHttp: "connect failed: " else: "TLS connect failed: ") &
-      connectErrorDetail(e))
+      connectFailMsg(endpointLabel(host, port, plainHttp), plainHttp, e))
   defer: {.cast(gcsafe).}:
     try: conn.close() except CatchableError: discard
   conn.setReadTimeoutMs(QuietRecvWakeMs)

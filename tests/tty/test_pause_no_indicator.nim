@@ -107,7 +107,7 @@ suite "activity indicator covers every turn phase":
     tty.send "\n"
     # The retry notice paints on the live notice row; the backoff sleep
     # follows it.
-    tty.expectNoticeRow("TLS connect failed")
+    tty.expectNoticeRow("is not responding")
     # Sample the live screen across the backoff window. We ask the harness
     # to advance spinner frames deterministically via the ticker fd so the
     # test does not depend on wall-clock luck.
@@ -122,7 +122,7 @@ suite "activity indicator covers every turn phase":
     let barRow = tty.rowContaining("\u29d7")
     doAssert barRow > 0, "hourglass not on a bar row: " & waitTxt
     check "\u25cb0%" in tty.rows[barRow]
-    check "TLS connect failed" in tty.rows[barRow - 1]
+    check "is not responding (name or service not known)" in tty.rows[barRow - 1]
     check "retry 2/2" in tty.rows[barRow - 1]
     # Wait out the 1s backoff. The second attempt is now connecting (4s
     # pre-stream delay): the notice is gone, the row above the bar is the
@@ -131,7 +131,7 @@ suite "activity indicator covers every turn phase":
     tty.advanceTicker()
     tty.drain(50)
     let flightTxt = tty.screenText()
-    check "TLS connect failed" notin flightTxt
+    check "is not responding" notin flightTxt
     check "\u29d7" notin flightTxt
     check tty.screenHasBraille()
     let liveBar = tty.rowContaining("\u25cb0%")
