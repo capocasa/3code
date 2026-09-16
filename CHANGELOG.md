@@ -2,6 +2,20 @@
 
 **Unreleased**
 
+- **A one-line error notice at startup when the OS sandbox backend
+  can't confine bash.** Previously, if the Landlock probe failed (old
+  kernel, a container's seccomp profile blocking it) or the Windows
+  sandbox user was never set up via `3code setup`, bash quietly fell
+  back to running with no filesystem or network confinement at all:
+  on POSIX with no notice whatsoever, on Windows with a startup
+  warning only. Now that situation prints a single error-magenta line
+  before the fat prompt opens, in the same spot the `· updated to
+  v...` auto-update notice is written, so unconfined bash is never
+  silent. Read/write/patch tools are unaffected either way, since
+  those are enforced in-process regardless of the OS backend. The
+  notice is suppressible with the existing `[settings]
+  sandbox_wall_warn = off`.
+
 - **JSON error bodies never surface verbatim.** Providers answering
   with FastAPI-style `{"detail":"..."}` bodies (NVIDIA NIM and friends)
   showed the raw JSON as the error message. `extractErrorMsg` now knows
