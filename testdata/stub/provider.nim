@@ -142,14 +142,22 @@ proc stubHttpStatus*(f: StubFailure): int =
   of sfHttp504: 504
   else: 0
 
-proc stubTransportError*(f: StubFailure): string =
+proc stubTransportError*(f: StubFailure; p: Profile): string =
+  ## Mirrors the real transport's connect-failure wording (util.connectFailMsg)
+  ## so retry-path tests exercise the strings users actually see: connect-phase
+  ## failures name the endpoint, only genuine TLS failures mention TLS.
+  let u = parseUri(p.url)
+  let endpoint = endpointLabel(
+    if u.hostname.len > 0: u.hostname else: p.url,
+    if u.port.len > 0: Port(parseInt(u.port)) else: Port(443),
+    u.scheme == "http")
   case f
-  of sfDns: "TLS connect failed: name or service not known"
-  of sfNetworkUnreachable: "TLS connect failed: network is unreachable"
-  of sfConnectionRefused: "TLS connect failed: connection refused"
-  of sfConnectTimeout: "TLS connect failed: operation timed out"
-  of sfTls: "TLS connect failed: handshake failed"
-  of sfCertificate: "TLS connect failed: certificate verify failed"
+  of sfDns: endpoint & " is not responding (name or service not known)"
+  of sfNetworkUnreachable: endpoint & " is not responding (network is unreachable)"
+  of sfConnectionRefused: endpoint & " is not responding (connection refused)"
+  of sfConnectTimeout: endpoint & " is not responding (operation timed out)"
+  of sfTls: "TLS handshake failed: handshake failed"
+  of sfCertificate: "TLS handshake failed: certificate verify failed"
   of sfBrokenPipe: "request failed: broken pipe"
   of sfConnectionReset: "stream read: connection reset by peer"
   of sfEof: "stream read: EOF before end of response"
@@ -293,7 +301,7 @@ proc callModelStub(p: Profile, messages: JsonNode, usage: var Usage,
         sleep(step)
         remaining -= step
       let code = stubHttpStatus(lastFailure)
-      var errMsg = stubTransportError(lastFailure)
+      var errMsg = stubTransportError(lastFailure, p)
       if errMsg.len == 0:
         errMsg = stubFailureName(lastFailure)
       let category = retryCategory(errMsg, nil, code)

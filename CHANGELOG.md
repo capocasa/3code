@@ -2,6 +2,21 @@
 
 **Unreleased**
 
+- **Connect failures no longer blame TLS when the host is not there.**
+  A dead endpoint (DNS miss, connection refused, unreachable, timeout)
+  surfaced as `TLS connect failed: Connection refused` because api.nim
+  prefixed every error from `connectTls` with "TLS", even though the TLS
+  connect does its DNS resolve and TCP connect on a plain socket before
+  any TLS. streamhttp now runs that shared first step in a new
+  `connectTcp` used by both `connectTls` and `connectPlain`, raising a
+  distinct `StreamConnectError` for the pre-TLS phase; 3code renders those
+  as `<host[:port]> is not responding (<cause>)` (also for loopback http
+  providers, where a TLS mention was pure noise) and reserves `TLS
+  handshake failed: ...` for failures that are genuinely TLS. The retry
+  notice now reads, e.g., `localhost:11434 is not responding (Connection
+  refused), retry 3/64 in 0:03`. Requires the streamhttp develop checkout
+  (same change landed there).
+
 - **Windows: sandboxed bash tool calls no longer hold forever.** Every
   bash tool call (`:! CMD` and model `bash` calls) on a set-up sandbox
   wedged without output, timeout, or ESC cancel. Two stacked defects:
