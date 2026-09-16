@@ -290,9 +290,28 @@ proc networkQuietMsg*(quietMs = QuietTooLongMs): string =
   ## text (and the quiet budget that fired) without drift.
   NetworkQuietPrefix & " " & $(quietMs div 1000) & "s"
 
+proc longestStringLeaf(j: JsonNode): string =
+  ## Longest string value in the tree. Ids, codes, types and urls are short;
+  ## the human-readable sentence is the longest field. Used as the fallback
+  ## for error shapes we don't know, so no raw JSON reaches the user.
+  case j.kind
+  of JString: result = j.getStr
+  of JNull, JBool, JInt, JFloat: discard
+  of JObject:
+    for _, v in pairs(j):
+      let s = longestStringLeaf(v)
+      if s.len > result.len: result = s
+  of JArray:
+    for v in items(j):
+      let s = longestStringLeaf(v)
+      if s.len > result.len: result = s
+
 proc extractErrorMsg*(errBody: string): string =
-  ## Pull a human-readable message from a JSON error body.
-  ## Falls back to the raw body if parsing fails.
+  ## Pull a human-readable message from a JSON error body. Recognized
+  ## shapes: OpenAI/Anthropic `error.message`, Gemini-style flat `message`,
+  ## FastAPI-style `detail` (NVIDIA NIM emits this). Any other JSON object
+  ## yields its longest string leaf instead of raw JSON; non-JSON bodies
+  ## pass through verbatim.
   if errBody.len == 0: return ""
   let j = try: parseJson(errBody) except CatchableError: nil
   if j == nil or j.kind != JObject: return errBody
@@ -302,9 +321,10 @@ proc extractErrorMsg*(errBody: string): string =
     if msg.len > 0: return msg
   elif err != nil and err.kind == JString and err.getStr.len > 0:
     return err.getStr
-  let msg = j{"message"}.getStr("")
-  if msg.len > 0: return msg
-  return errBody
+  for key in ["message", "detail"]:
+    let msg = j{key}.getStr("")
+    if msg.len > 0: return msg
+  longestStringLeaf(j)
 
 proc isCodeEcho(s: string; code: int): bool =
   ## True when `s` carries no information beyond restating the HTTP status,
