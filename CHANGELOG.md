@@ -2,6 +2,15 @@
 
 **Unreleased**
 
+- **GLM-5.3 on Mistral.** api.mistral.ai now also serves `zai-glm-5-3`
+  (1M context, models endpoint reports max_context_length 1048576):
+  known-good as `mistral.zai-glm-5-3`, live-verified against the wire.
+  The platform ladder stops at `low`/`high`/`max` for it (400 naming
+  exactly those three; `none` is gone, so 5.3 is forced thinking there
+  too) and the z.ai `thinking` object and replayed `reasoning_content`
+  still 422, hence tbNone and the 64k output cap every other 5.3 host
+  carries. A stale `off` in the profile now sends nothing instead of
+  the fatal `none` the GLM-5.2 mapping would have produced.
 - **Fixed `reasoning field unknown` errors on the OpenCode zen
   gateways.** Both `opencode` and `opencodego` hardened their request
   validator: the OpenRouter-style `reasoning: {effort}` object is now

@@ -257,13 +257,26 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # Apache 2.0) and Medium 3.5 (128B dense, Modified MIT), both 256K ctx,
     # multimodal. Medium 3.5 carries reasoning_effort none/high (none is
     # the wire default); Large 3 has no advertised knob. The platform also
-    # hosts third-party GLM-5.2 (`zai-glm-5-2`, 1M ctx) on its own
-    # reasoning_effort ladder; the strict input validator rejects
+    # hosts third-party GLM (`zai-glm-5-2`, `zai-glm-5-3`, 1M ctx) on its
+    # own reasoning_effort ladder; the strict input validator rejects
     # `reasoning_content` on replayed assistant messages, so everything
-    # here is tbNone.
+    # here is tbNone. 5.3 is forced thinking (no none on the ladder) and
+    # takes the 64k output cap like every other 5.3 host.
     ("mistral", "mistral-large-2512", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false),
     ("mistral", "mistral-medium-3-5", "mistral", "", "medium", "high", 0.7, 8192, tbNone, false, 262_144, false),
     ("mistral", "zai-glm-5-2", "glm", "5", "2", "high", 0.2, 8192, tbNone, false, 1_000_000, false),
+    ("mistral", "zai-glm-5-3", "glm", "5", "3", "high", 0.2, 65536, tbNone, false, 1_000_000, false),
+
+    # mistralvibe was the Vibe Code coding-plan twin of `mistral`
+    # (vibe-cli routing aliases over Medium 3.5 / Small 4: same endpoint,
+    # none/high ladder, tbNone, `mistral-vibe-cli-with-tools` skipped as
+    # connector-tools-only). Parked: the plan has no key of its own,
+    # one Mistral API key covers both, so a `mistral` provider with the
+    # vibe-cli ids in user config (plus `family = "mistral"` under
+    # --experimental) reaches them. Re-add when the plan gets a
+    # separate credential.
+    # ("mistralvibe", "mistral-vibe-cli-latest", "mistral", "", "vibe", "high", 0.7, 8192, tbNone, false, 262_144, false),
+    # ("mistralvibe", "mistral-vibe-cli-fast", "mistral", "", "vibe-fast", "none", 0.7, 8192, tbNone, false, 262_144, false),
     ("openrouter", "mistralai/mistral-large-2512", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false),
     ("openrouter", "mistralai/mistral-medium-3-5", "mistral", "", "medium", "high", 0.7, 8192, tbNone, false, 262_144, false),
 
