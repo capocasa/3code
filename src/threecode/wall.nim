@@ -112,20 +112,31 @@ when defined(windows):
       stderr.writeLine("3code setup: " & e.msg)
       1
 
-  proc sharedSetupLog(): string =
+  proc runUnsetup(): int =
+    try:
+      uninstallFence()
+      uninstallAcFence()
+      echo "fence removed"
+      0
+    except OSError as e:
+      stderr.writeLine("3code unsetup: " & e.msg)
+      1
+
+  proc sharedSetupLog(kind: string): string =
     # A path both the unelevated caller and the elevated child (which
     # may be a different account when foreign admin credentials go
     # into the prompt) can write: %ProgramData% inherits Users
     # write-data and Admins full control. Falls back to temp.
+    let name = "3code-" & kind & ".log"
     let pd = getEnv("ProgramData", "")
-    if pd.len > 0: pd / "3code-setup.log"
-    else: getTempDir() / "3code-setup.log"
+    if pd.len > 0: pd / name
+    else: getTempDir() / name
 
-  proc elevateSetup(): int =
-    # Relaunch `3code setup` elevated through the UAC consent screen
+  proc elevateMain(kind: string): int =
+    # Relaunch `3code <kind>` elevated through the UAC consent screen
     # and relay the child's output. Returns the child's exit code, or
     # -1 when the prompt could not be shown or was declined.
-    let log = sharedSetupLog()
+    let log = sharedSetupLog(kind)
     if fileExists(log):
       try: removeFile(log)
       except OSError: discard
@@ -134,11 +145,11 @@ when defined(windows):
       fMask: seeMaskNoCloseProcess or seeMaskNoAsync,
       lpVerb: newWideCString("runas"),
       lpFile: newWideCString(getAppFilename()),
-      lpParameters: newWideCString("setup --elevated \"" & log & "\""),
+      lpParameters: newWideCString(kind & " --elevated \"" & log & "\""),
       nShow: swHide)
     if shellExecuteExW(addr sei) == 0:
       let e = getLastError()
-      stderr.writeLine("3code setup: admin rights " &
+      stderr.writeLine("3code " & kind & ": admin rights " &
         (if e == errorCancelled: "request was declined"
          else: "prompt failed (error " & $e & ")"))
       return -1
@@ -152,6 +163,19 @@ when defined(windows):
       try: removeFile(log)
       except OSError: discard
     int(code)
+
+  proc elevatedChild(body: proc(): int; logPath: string): int =
+    # The UAC-elevated re-run's body: stdout and stderr are dup2'd
+    # onto the caller's log so the unelevated parent can relay them.
+    let f: File = try: open(logPath, fmWrite)
+                  except IOError: nil
+    if f != nil:
+      discard cDup2(cint(getFileHandle(f)), 1.cint)
+      discard cDup2(cint(getFileHandle(f)), 2.cint)
+    result = body()
+    if f != nil: close(f)
+    flushFile(stdout)
+    flushFile(stderr)
 
 const usage = """
 3code wall - internal network-firewall subcommands (not for users)
@@ -241,19 +265,9 @@ proc setupMain*(args: seq[string]): int =
       echo "fence: installed=", st.installed, " filters=", st.filters
       if st.hint.len > 0: echo "  ", st.hint
       return 0
-    # Internal: the UAC-elevated re-run. stdout and stderr are dup2'd
-    # onto the caller's log so the unelevated parent can relay them.
+    # Internal: the UAC-elevated re-run (see elevatedChild).
     if args.len == 2 and args[0] == "--elevated":
-      let f: File = try: open(args[1], fmWrite)
-                   except IOError: nil
-      if f != nil:
-        discard cDup2(cint(getFileHandle(f)), 1.cint)
-        discard cDup2(cint(getFileHandle(f)), 2.cint)
-      result = runSetup()
-      if f != nil: close(f)
-      flushFile(stdout)
-      flushFile(stderr)
-      return result
+      return elevatedChild(runSetup, args[1])
     if not isElevated():
       if inSessionZero():
         stderr.writeLine("3code setup: sandbox setup needs an account " &
@@ -263,7 +277,7 @@ proc setupMain*(args: seq[string]): int =
         return 1
       stderr.writeLine("3code setup: sandbox setup needs an account " &
         "with admin rights; requesting them now (approve the UAC prompt)")
-      let rc = elevateSetup()
+      let rc = elevateMain("setup")
       if rc == -1:
         stderr.writeLine("3code setup: set up with an account that has " &
           "admin (an elevated shell, or approve the prompt when it shows)")
@@ -280,14 +294,30 @@ proc unsetupMain*(args: seq[string]): int =
   ## its DPAPI credentials in place (uninstalling a user with an active
   ## password policy is riskier than leaving a dormant account).
   when defined(windows):
-    try:
-      uninstallFence()
-      uninstallAcFence()
-      echo "fence removed"
-      return 0
-    except OSError as e:
-      stderr.writeLine("3code unsetup: " & e.msg)
-      return 1
+    # Internal: the UAC-elevated re-run (see elevatedChild).
+    if args.len == 2 and args[0] == "--elevated":
+      return elevatedChild(runUnsetup, args[1])
+    # Removing the filters needs the same admin token setup does;
+    # without elevation WFP denies the enum and the deletes outright.
+    if not isElevated():
+      if inSessionZero():
+        stderr.writeLine("3code unsetup: removing the sandbox fence " &
+          "needs an account with admin rights. This session (ssh or a " &
+          "service) cannot show the UAC prompt; run '3code unsetup' " &
+          "from the Windows console / an RDP session, or from an " &
+          "elevated shell")
+        return 1
+      stderr.writeLine("3code unsetup: removing the sandbox fence " &
+        "needs an account with admin rights; requesting them now " &
+        "(approve the UAC prompt)")
+      let rc = elevateMain("unsetup")
+      if rc == -1:
+        stderr.writeLine("3code unsetup: use an account that has " &
+          "admin (an elevated shell, or approve the prompt when it " &
+          "shows)")
+        return 1
+      return rc
+    return runUnsetup()
   else:
     stderr.writeLine("3code unsetup is only available on Windows")
     return 2
