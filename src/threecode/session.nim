@@ -87,9 +87,22 @@ proc sessionIdFromPath*(path: string): string =
 proc newSessionPath*(): string =
   let stamp = now().format("yyyyMMdd'T'HHmmss")
   createDir(sessionDir())
-  let (file, path) = createTempFile(stamp & "-", SessionExt, sessionDir())
-  file.close()
-  path
+  var n = 0
+  while true:
+    let id = if n == 0: stamp else: stamp & "-" & $n
+    let path = sessionDir() / (id & SessionExt)
+    # O_EXCL makes the claim atomic; the counter is the tie-breaker when two
+    # processes race for the same second.
+    when defined(posix):
+      let fd = open(path.cstring, O_WRONLY or O_CREAT or O_EXCL, 0644)
+      if fd >= 0:
+        discard close(fd)
+        return path
+    else:
+      if not fileExists(path):
+        writeFile(path, "")
+        return path
+    inc n
 
 # ---------------------------------------------------------------------------
 # Cwd path mangling.
