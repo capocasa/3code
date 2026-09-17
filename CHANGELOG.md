@@ -2,21 +2,6 @@
 
 **Unreleased**
 
-- **`mistralvibe`: the Mistral Vibe Code coding plan as its own provider.**
-  Same api.mistral.ai/v1 endpoint and API key as `mistral`, but a
-  separate catalog entry so plan usage stays its own profile: the Vibe
-  plan's included monthly allowance is shared across Studio, the API,
-  and Vibe Code, and drawing it down through a distinct provider keeps
-  the pay-as-you-go `mistral.*` turns separable. Known-good on it are
-  the vibe-cli routing aliases `mistral-vibe-cli-latest` (Medium 3.5)
-  and `mistral-vibe-cli-fast` (Small 4), both 256K ctx, tool-calling,
-  live-verified: reasoning_effort exactly `none`/`high` (400 on the
-  rest), chunked thinking content on high (already folded by the
-  Mistral batch/stream paths), `reasoning_content` replay 422s so
-  tbNone. `mistral-vibe-cli-with-tools` is deliberately absent; it only
-  adds Mistral's server-side connector tools, which 3code's own tool
-  schema replaces.
-
 - **GLM-5.3 on Mistral.** api.mistral.ai now also serves `zai-glm-5-3`
   (1M context, models endpoint reports max_context_length 1048576):
   known-good as `mistral.zai-glm-5-3`, live-verified against the wire.

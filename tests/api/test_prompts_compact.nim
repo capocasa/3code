@@ -399,17 +399,19 @@ suite "compact: contextWindowFor (known-good)":
                                    model: "zai-glm-5-3")) == 1_000_000
     check knownGoodThinkBack("mistral", "zai-glm-5-3") == tbNone
 
-  test "mistralvibe vibe-cli aliases: mistral family, 256K window, tbNone":
-    # Coding-plan twin of `mistral` on the same endpoint; the vibe-cli
-    # ids are Medium 3.5 / Small 4 routing aliases with the same strict
-    # input validator, so the rows keep tbNone.
-    check knownGoodFamily("mistralvibe", "mistral-vibe-cli-latest") == "mistral"
-    check contextWindowFor(Profile(name: "mistralvibe.test",
-                                   model: "mistral-vibe-cli-latest")) == 262_144
-    check knownGoodThinkBack("mistralvibe", "mistral-vibe-cli-latest") == tbNone
-    check knownGoodFamily("mistralvibe", "mistral-vibe-cli-fast") == "mistral"
-    check contextWindowFor(Profile(name: "mistralvibe.test",
-                                   model: "mistral-vibe-cli-fast")) == 262_144
+  # mistralvibe (parked with the provider; see KnownGoodCombos):
+  # vibe-cli ids resolve through plain `mistral` in user config instead.
+  # test "mistralvibe vibe-cli aliases: mistral family, 256K window, tbNone":
+  #   # Coding-plan twin of `mistral` on the same endpoint; the vibe-cli
+  #   # ids are Medium 3.5 / Small 4 routing aliases with the same strict
+  #   # input validator, so the rows keep tbNone.
+  #   check knownGoodFamily("mistralvibe", "mistral-vibe-cli-latest") == "mistral"
+  #   check contextWindowFor(Profile(name: "mistralvibe.test",
+  #                                  model: "mistral-vibe-cli-latest")) == 262_144
+  #   check knownGoodThinkBack("mistralvibe", "mistral-vibe-cli-latest") == tbNone
+  #   check knownGoodFamily("mistralvibe", "mistral-vibe-cli-fast") == "mistral"
+  #   check contextWindowFor(Profile(name: "mistralvibe.test",
+  #                                  model: "mistral-vibe-cli-fast")) == 262_144
 
   test "glm-5.1 profile returns 200000":
     let p = Profile(name: "zai.test", model: "glm-5.1", family: "glm")

@@ -229,30 +229,34 @@ suite "api request shaping":
       applyReasoning(p, body)
       check body{"reasoning"}{"effort"}.getStr == "high"
 
-  test "mistralvibe rides the vibe-cli aliases on Medium's none/high ladder":
-    # The Vibe Code coding-plan twin: same api.mistral.ai/v1 endpoint,
-    # plan-billed usage, vibe-cli routing aliases over Medium 3.5
-    # (`-latest`) and Small 4 (`-fast`). Both keep the platform
-    # reasoning_effort ladder at exactly none/high (400 otherwise).
-    check knownGoodReasonings("mistralvibe", "mistral-vibe-cli-latest") ==
-      @["none", "high"]
-    check knownGoodReasonings("mistralvibe", "mistral-vibe-cli-fast") ==
-      @["none", "high"]
-    block latestHigh:
-      var body = %*{"stream": true}
-      let p = Profile(name: "mistralvibe.mistral-vibe-cli-latest",
-                      family: "mistral", variant: "vibe",
-                      model: "mistral-vibe-cli-latest", reasoning: "high")
-      applyReasoning(p, body)
-      check body{"reasoning_effort"}.getStr == "high"
-    block fastNone:
-      var body = %*{"stream": true}
-      let p = Profile(name: "mistralvibe.mistral-vibe-cli-fast",
-                      family: "mistral", variant: "vibe-fast",
-                      model: "mistral-vibe-cli-fast", reasoning: "none")
-      applyReasoning(p, body)
-      check body{"reasoning_effort"}.getStr == "none"
-      check "reasoning" notin body
+  # mistralvibe (parked with the provider; see KnownGoodCombos): the
+  # vibe-cli aliases are usable through plain `mistral` in user config,
+  # so the twin has no catalog rows to test until the plan gets its own
+  # key. Blocks kept for the re-add.
+  # test "mistralvibe rides the vibe-cli aliases on Medium's none/high ladder":
+  #   # The Vibe Code coding-plan twin: same api.mistral.ai/v1 endpoint,
+  #   # plan-billed usage, vibe-cli routing aliases over Medium 3.5
+  #   # (`-latest`) and Small 4 (`-fast`). Both keep the platform
+  #   # reasoning_effort ladder at exactly none/high (400 otherwise).
+  #   check knownGoodReasonings("mistralvibe", "mistral-vibe-cli-latest") ==
+  #     @["none", "high"]
+  #   check knownGoodReasonings("mistralvibe", "mistral-vibe-cli-fast") ==
+  #     @["none", "high"]
+  #   block latestHigh:
+  #     var body = %*{"stream": true}
+  #     let p = Profile(name: "mistralvibe.mistral-vibe-cli-latest",
+  #                     family: "mistral", variant: "vibe",
+  #                     model: "mistral-vibe-cli-latest", reasoning: "high")
+  #     applyReasoning(p, body)
+  #     check body{"reasoning_effort"}.getStr == "high"
+  #   block fastNone:
+  #     var body = %*{"stream": true}
+  #     let p = Profile(name: "mistralvibe.mistral-vibe-cli-fast",
+  #                     family: "mistral", variant: "vibe-fast",
+  #                     model: "mistral-vibe-cli-fast", reasoning: "none")
+  #     applyReasoning(p, body)
+  #     check body{"reasoning_effort"}.getStr == "none"
+  #     check "reasoning" notin body
 
   test "mistral-hosted glm-5.2 rides the platform reasoning_effort ladder":
     # api.mistral.ai serves `zai-glm-5-2` with its own top-level

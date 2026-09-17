@@ -267,18 +267,16 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("mistral", "zai-glm-5-2", "glm", "5", "2", "high", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("mistral", "zai-glm-5-3", "glm", "5", "3", "high", 0.2, 65536, tbNone, false, 1_000_000, false),
 
-    # mistralvibe is the Vibe Code coding-plan twin of `mistral`: same
-    # api.mistral.ai/v1 endpoint and API key, usage drawn from the plan's
-    # included monthly allowance before any pay-as-you-go billing. The
-    # vibe-cli ids are routing aliases: `-latest` is Medium 3.5, `-fast`
-    # is Small 4, both 256K ctx, vision-capable, on the same none/high
-    # reasoning_effort ladder as first-party Medium 3.5 (400 on anything
-    # else; chunked thinking content when high; `reasoning_content`
-    # replay 422s, hence tbNone). `mistral-vibe-cli-with-tools` is
-    # skipped: it only adds Mistral's server-side connector tools, which
-    # 3code's own tool schema replaces.
-    ("mistralvibe", "mistral-vibe-cli-latest", "mistral", "", "vibe", "high", 0.7, 8192, tbNone, false, 262_144, false),
-    ("mistralvibe", "mistral-vibe-cli-fast", "mistral", "", "vibe-fast", "none", 0.7, 8192, tbNone, false, 262_144, false),
+    # mistralvibe was the Vibe Code coding-plan twin of `mistral`
+    # (vibe-cli routing aliases over Medium 3.5 / Small 4: same endpoint,
+    # none/high ladder, tbNone, `mistral-vibe-cli-with-tools` skipped as
+    # connector-tools-only). Parked: the plan has no key of its own,
+    # one Mistral API key covers both, so a `mistral` provider with the
+    # vibe-cli ids in user config (plus `family = "mistral"` under
+    # --experimental) reaches them. Re-add when the plan gets a
+    # separate credential.
+    # ("mistralvibe", "mistral-vibe-cli-latest", "mistral", "", "vibe", "high", 0.7, 8192, tbNone, false, 262_144, false),
+    # ("mistralvibe", "mistral-vibe-cli-fast", "mistral", "", "vibe-fast", "none", 0.7, 8192, tbNone, false, 262_144, false),
     ("openrouter", "mistralai/mistral-large-2512", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false),
     ("openrouter", "mistralai/mistral-medium-3-5", "mistral", "", "medium", "high", 0.7, 8192, tbNone, false, 262_144, false),
 
@@ -3458,11 +3456,8 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         return @["no_think", "low", "high"]
       if fam == "mistral":
         # Mistral Medium 3.5 exposes reasoning_effort none/high; Large 3
-        # has no advertised knob. The vibe-cli coding-plan aliases
-        # (mistralvibe provider) ride Medium's ladder: none/high, nothing
-        # else (live-verified 400).
-        if combo.variant.startsWith("medium") or combo.variant.startsWith("vibe"):
-          return @["none", "high"]
+        # has no advertised knob.
+        if combo.variant.startsWith("medium"): return @["none", "high"]
         return @[]
       if fam == "gemini":
         # Gemini 3 thinking levels via OpenAI-compat `reasoning_effort`:
