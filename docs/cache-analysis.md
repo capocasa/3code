@@ -115,11 +115,16 @@ submitted user message. Skill bodies are still read on demand, never loaded
 by catalog discovery. Editing a skill body does not change the system prompt.
 Changing a prompt override takes effect on a fresh session or profile change.
 
-Explicit model/provider changes still rebuild the system prompt. Clear and
-resume remain reset boundaries; saved sessions do not store system prompts,
-so this change does not promise byte-identical cache reuse across resume.
-Compaction retains the existing system snapshot but necessarily replaces
-conversation history. New skills are announced on the next user submission.
+Explicit model/provider changes still rebuild the system prompt. Clear
+remains a reset boundary. Saved sessions store the dynamic inputs the
+prompt was built from (the skills catalog, stamped with the profile
+identity that built the prompt) instead of the prompt itself; resume
+reconstructs it from the profile substituting the persisted catalog, which
+re-sends the live bytes and keeps the provider cache hot. The template
+lives in the binary, so resuming across a 3code upgrade that changed it
+re-sends a fresh prefix once. Compaction retains the existing system
+snapshot but necessarily replaces conversation history. New skills are
+announced on the next user submission.
 
 Verification covers stable prefixes, new/removed skills, body-only edits,
 reasoning versus model changes, compaction, clear, and the web example's

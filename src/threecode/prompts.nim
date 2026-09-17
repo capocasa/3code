@@ -14,7 +14,7 @@
 ## Anything outside `KnownGoodCombos` requires `--experimental` to run.
 ]#
 
-import std/[algorithm, hashes, json, options, os, sequtils, sha1, strutils]
+import std/[algorithm, hashes, json, options, os, sequtils, strutils]
 import types, util, modelname
 
 # ThinkBackMode moved to types.nim (Profile.params needs it); re-export
@@ -3038,9 +3038,10 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
 let DefaultSystemPrompt* = glmSetup.prompt.replace(
     "{{credit}}",
     "Credit where it's due — to whoever trained the weights driving you and the lab serving them.")
-  ## Bytes for the placeholder system message in fresh sessions and unloaded
-  ## session files. `refreshSystemPrompt` resolves it on the first turn
-  ## and on explicit model/provider changes.
+  ## Bytes for the placeholder system message in fresh sessions and in
+  ## session files (the real prompt is constructed at resume, never
+  ## persisted). `refreshSystemPrompt` resolves it on the first turn, on
+  ## explicit model/provider changes, and on resume.
 
 const ConfigExample* = """  [settings]
   current = "openai.gpt-4o-mini"
@@ -3619,51 +3620,60 @@ proc profileIdentity*(p: Profile): string =
   ## prompt still matches the active profile.
   $ %*[p.name, p.url, p.model, p.family, p.version, p.variant]
 
-proc skillsDigest*(skills: string): string =
-  ## Stable digest of a skills listing. Stored in `PromptState` and the
-  ## session header so resume can tell "catalog unchanged" (keep prefix,
-  ## no note) from "catalog drifted" (keep prefix, append the tail note a
-  ## live session appends when skills change mid-run).
-  ($($secureHash(skills))).toLowerAscii
+proc appendSkillsUpdate(messages: JsonNode, skills: string) =
+  ## Catalog drift rides the tail: the newly submitted user message carries
+  ## a replacement listing, never the cached prefix.
+  let tail = messages[^1]
+  if tail.kind != JObject or tail{"role"}.getStr != "user": return
+  tail["content"] = %(tail{"content"}.getStr &
+    "\n\n<available_skills>\nThe current skill catalog replaces earlier listings. " &
+    "Read skill files only when needed.\n" & skills & "\n</available_skills>")
 
 proc refreshSystemPrompt*(messages: JsonNode, p: Profile,
                           state: var PromptState) =
-  ## Snapshot the system prompt per conversation/profile. Catalog updates
-  ## belong in the newly submitted user message, never in the cached prefix.
-  ## A resumed session enters with `state.system` pointing at the persisted
-  ## system message and `state.identity`/`state.skills` restored from the
-  ## session header. When the identity still matches the resolved profile,
-  ## the persisted bytes are kept verbatim (they are exactly what the live
-  ## session sent, so the provider's prompt cache stays hot); a drifted
-  ## skills catalog appends the same tail note a live session gets. A
+  ## The system prompt is constructed from the profile, never persisted
+  ## whole: the template changes too rarely for the bytes to earn a place
+  ## in every session file. The file stores the dynamic inputs instead
+  ## (`state.skills`, the discovered catalog the prompt substituted) plus
+  ## the identity stamp, and resume rebuilds the exact bytes with them.
+  ## Catalog updates belong in the newly submitted user message, never in
+  ## the cached prefix. A resumed session enters with
+  ## `state.identity`/`state.skills` restored from the session file: when
+  ## the identity still matches the resolved profile, the rebuild
+  ## substitutes the persisted catalog, reproducing byte-for-byte what the
+  ## live session sent (so the provider's prompt cache stays hot); a
+  ## drifted catalog appends the same tail note a live session gets. A
   ## changed identity (model/provider switch between save and resume)
-  ## rebuilds, matching what a live session under the new profile sends.
+  ## rebuilds from the current catalog, matching what a live session under
+  ## the new profile sends.
   if messages == nil or messages.kind != JArray or messages.len == 0: return
   let m = messages[0]
   if m.kind != JObject or m{"role"}.getStr != "system": return
   let identity = profileIdentity(p)
   let skills = discoverSkills()
-  let digest = skillsDigest(skills)
   if cast[pointer](state.system) == cast[pointer](m) and state.identity != "":
-    # Resume adoption: this prompt was built by `state.identity`'s profile.
-    if state.identity == identity:
-      if state.skills != digest:
-        let tail = messages[^1]
-        if tail.kind == JObject and tail{"role"}.getStr == "user":
-          tail["content"] = %(tail{"content"}.getStr &
-            "\n\n<available_skills>\nThe current skill catalog replaces earlier listings. " &
-            "Read skill files only when needed.\n" & skills & "\n</available_skills>")
-        state.skills = digest
-      return
-    # else: identity changed since save; fall through to the rebuild
-  if cast[pointer](state.system) != cast[pointer](m) or state.identity != identity:
-    m["content"] = %buildSystemPrompt(p, skills)
-    state = PromptState(system: m, identity: identity, skills: digest)
-  elif digest != state.skills:
-    let tail = messages[^1]
-    if tail.kind != JObject or tail{"role"}.getStr != "user": return
-    tail["content"] = %(tail{"content"}.getStr &
-      "\n\n<available_skills>\nThe current skill catalog replaces earlier listings. " &
-      "Read skill files only when needed.\n" & skills & "\n</available_skills>")
-    state.skills = digest
+    # Live conversation: the prompt at index 0 is a snapshot owned by
+    # `state`. A profile switch rebuilds it; a catalog change rides the
+    # tail message.
+    if state.identity != identity:
+      m["content"] = %buildSystemPrompt(p, skills)
+      state = PromptState(system: m, identity: identity, skills: skills)
+    elif state.skills != skills:
+      appendSkillsUpdate(messages, skills)
+      state.skills = skills
+    return
+  if state.identity != "" and state.identity == identity and
+     state.skills.len > 0:
+    # Resume: rebuild substituting the persisted catalog so the prefix
+    # re-sends the live session's exact bytes.
+    m["content"] = %buildSystemPrompt(p, state.skills)
+    state.system = m
+    if state.skills != skills:
+      appendSkillsUpdate(messages, skills)
+      state.skills = skills
+    return
+  # Fresh conversation (placeholder prompt), cleared, or the profile
+  # changed between save and resume: build from the current catalog.
+  m["content"] = %buildSystemPrompt(p, skills)
+  state = PromptState(system: m, identity: identity, skills: skills)
 
