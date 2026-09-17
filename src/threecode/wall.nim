@@ -262,25 +262,29 @@ proc setupMain*(args: seq[string]): int =
   when defined(windows):
     if args.len > 0 and args[0] in ["--status", "status"]:
       let st = fenceStatus()
-      echo "fence: installed=", st.installed, " filters=", st.filters
-      if st.hint.len > 0: echo "  ", st.hint
+      if st.hint.len > 0:
+        # Denied, not absent: say unknown rather than installed=false.
+        echo "fence: unknown (", st.hint, ")"
+      else:
+        echo "fence: installed=", st.installed, " filters=", st.filters
       return 0
     # Internal: the UAC-elevated re-run (see elevatedChild).
     if args.len == 2 and args[0] == "--elevated":
       return elevatedChild(runSetup, args[1])
     if not isElevated():
       if inSessionZero():
-        stderr.writeLine("3code setup: sandbox setup needs an account " &
-          "with admin rights. This session (ssh or a service) cannot " &
-          "show the UAC prompt; run '3code setup' from the Windows " &
-          "console / an RDP session, or from an elevated shell")
+        stderr.writeLine("3code setup: admin rights are required, and " &
+          "this ssh/service session cannot show the UAC prompt. Run " &
+          "'3code setup' from an elevated shell, the Windows console, " &
+          "or an RDP session")
         return 1
-      stderr.writeLine("3code setup: sandbox setup needs an account " &
-        "with admin rights; requesting them now (approve the UAC prompt)")
+      stderr.writeLine("3code setup: admin rights are required; " &
+        "requesting them now (approve the UAC prompt)")
       let rc = elevateMain("setup")
       if rc == -1:
-        stderr.writeLine("3code setup: set up with an account that has " &
-          "admin (an elevated shell, or approve the prompt when it shows)")
+        stderr.writeLine("3code setup: admin rights are still needed; " &
+          "use an elevated shell or approve the UAC prompt when it " &
+          "shows")
         return 1
       return rc
     return runSetup()
@@ -301,20 +305,18 @@ proc unsetupMain*(args: seq[string]): int =
     # without elevation WFP denies the enum and the deletes outright.
     if not isElevated():
       if inSessionZero():
-        stderr.writeLine("3code unsetup: removing the sandbox fence " &
-          "needs an account with admin rights. This session (ssh or a " &
-          "service) cannot show the UAC prompt; run '3code unsetup' " &
-          "from the Windows console / an RDP session, or from an " &
-          "elevated shell")
+        stderr.writeLine("3code unsetup: admin rights are required, " &
+          "and this ssh/service session cannot show the UAC prompt. " &
+          "Run '3code unsetup' from an elevated shell, the Windows " &
+          "console, or an RDP session")
         return 1
-      stderr.writeLine("3code unsetup: removing the sandbox fence " &
-        "needs an account with admin rights; requesting them now " &
-        "(approve the UAC prompt)")
+      stderr.writeLine("3code unsetup: admin rights are required; " &
+        "requesting them now (approve the UAC prompt)")
       let rc = elevateMain("unsetup")
       if rc == -1:
-        stderr.writeLine("3code unsetup: use an account that has " &
-          "admin (an elevated shell, or approve the prompt when it " &
-          "shows)")
+        stderr.writeLine("3code unsetup: admin rights are still " &
+          "needed; use an elevated shell or approve the UAC prompt " &
+          "when it shows")
         return 1
       return rc
     return runUnsetup()
