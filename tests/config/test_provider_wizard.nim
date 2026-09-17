@@ -127,6 +127,24 @@ suite "provider wizard configuration":
     check prompts.anyIt(it.startsWith("  provider or api key:"))
     check prompts.anyIt(it.startsWith("  api key"))
 
+  test "add platte asks for the username and builds the url":
+    # platte's endpoint is per-user: https://<username>.on.platte.ai/api/v1
+    inputs = @["platte", "capocasa", "platte-pat", ""]
+    var editor: LineEditor
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider add", messages, session, prof, editor)
+
+    check activeProviders.len == 1
+    check activeProviders[0].name == "platte"
+    check activeProviders[0].url == "https://capocasa.on.platte.ai/api/v1"
+    check activeProviders[0].key == "platte-pat"
+    check activeProviders[0].models == @["glm-5.3"]
+    check prompts.anyIt(it.startsWith("  username"))
+    check verifiedModels.len == 0
+
   test "add rejects duplicate provider name":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",

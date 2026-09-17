@@ -2,6 +2,13 @@
 
 **Unreleased**
 
+- **Platte, the EU sovereign host.** platte.ai serves GLM 5.3 on
+  European infrastructure (`glm-5.3`, glm family, 1M context). Their
+  endpoint is per-user: `https://<username>.on.platte.ai/api/v1`, so the
+  provider wizard asks for the username after the provider name and
+  builds the host (under `--experimental`, just type the url). Auth is
+  a personal access token as bearer; the wizard's model step lists what
+  the token can see.
 - **Union Alpha stealth preview on OpenRouter, and a generic `other`
   family for unidentified models.** `stealth/union-alpha` (known-good
   as `openrouter.stealth/union-alpha`, pretty name `union-alpha`) is a
