@@ -3203,22 +3203,22 @@ when false:
       inc cnt
     if i >= s.len: "" else: s[i..^1]
 
-  test "drawn caret at the right margin parks on the row, never wraps":
-    # The drawn caret cell is appended after the row's painted content;
-    # when the caret sits exactly at the right margin that appended cell
-    # would wrap onto the next physical row (caret seen one row below the
-    # prompt at col 0, and the editor block later settling one row low).
-    # It must instead park on the row's last cell, the same place a
-    # physical cursor parks in deferred wrap. Narrow width so both ways
-    # of reaching the margin are typed directly: content that fills the
-    # row exactly, and trailing spaces typed up to the margin.
-    let root = newFixture("caret_margin_park")
+  test "drawn caret at the right margin moves onto the row below":
+    # When a typed char fills the row's last cell, the char must print
+    # normally (not hide under a parked reverse-video caret) and the
+    # caret must move onto the row below, marking where the next typed
+    # char will land. The row below is NOT a line break: it holds only
+    # the continuation prompt and the caret cell until a real char is
+    # typed onto it. Narrow width so both ways of reaching the margin
+    # are typed directly: content that fills the row exactly, and
+    # trailing spaces typed up to the margin.
+    let root = newFixture("caret_margin_row")
     writeConfiguredProvider(root)
     let tty = startStub(root, cols = 12)
     defer: tty.close()
     tty.expect "\u276f"
     tty.expectIdleCaret()
-    # `❯ ` is 2 cells; 10 data cells fill the row exactly.
+    # `\u276f ` is 2 cells; 10 data cells fill the row exactly.
     tty.send "0123456789"
     tty.expectIdleCaret()
     var promptRow = -1
@@ -3226,24 +3226,53 @@ when false:
       if row.startsWith("\u276f 0123456789"):
         promptRow = i
     check promptRow >= 0
-    check tty.drawnCaretCount(promptRow + 1) == 0
-    check tty.drawnCaretCol(promptRow) == 11
+    # The char printed plainly; the caret is the only reverse cell, on
+    # the row below (col 2, after the 2-cell continuation prompt).
+    check tty.drawnCaretCount(promptRow) == 0
+    check tty.drawnCaretCount(promptRow + 1) == 1
+    check tty.drawnCaretCol(promptRow + 1) == 2
+    # Keep typing: the wrap settles on that same row, in place; no
+    # content moved and the prompt row did not shift down.
+    tty.send "xy"
+    tty.expectIdleCaret()
+    check tty.rows()[promptRow].startsWith("\u276f 0123456789")
+    check tty.rows()[promptRow + 1] == "  xy"
+    check tty.drawnCaretCol(promptRow + 1) == 4
     # Clear, then reach the margin through trailing spaces: 7 chars
-    # (cols 2..8) plus 3 spaces parks the caret at col 12 == width.
+    # (cols 2..8) plus 3 spaces fill the row's last cell the invisible
+    # way; the caret still moves to the row below and typing settles in
+    # place exactly the same.
     tty.send "\x1b"
     tty.drain(200)
     tty.send "abcdefg   "
     tty.drain(200)
     tty.expectIdleCaret()
-    check tty.drawnCaretCount(promptRow + 1) == 0
-    check tty.drawnCaretCol(promptRow) == 11
-    # Keep typing: the wrap must settle on the continuation row directly
-    # below the prompt row, and the prompt row must not have moved down.
+    check tty.rows()[promptRow].startsWith("\u276f abcdefg")
+    check tty.drawnCaretCount(promptRow) == 0
+    check tty.drawnCaretCol(promptRow + 1) == 2
     tty.send "xy"
     tty.expectIdleCaret()
     check tty.rows()[promptRow].startsWith("\u276f abcdefg")
     check tty.rows()[promptRow + 1] == "  xy"
     check tty.drawnCaretCol(promptRow + 1) == 4
+    # Submit from the caret-only row: the transient row must vanish into
+    # the committed block, with no blank row or leftover caret cell
+    # between the committed prompt and the reply chrome.
+    tty.send "\x1b"
+    tty.drain(200)
+    tty.send "0123456789"
+    tty.expectIdleCaret()
+    check tty.drawnCaretCol(tty.rowContaining("0123456789") + 1) == 2
+    tty.send "\r"
+    tty.expect "ok"
+    tty.expectIdleCaret()
+    let committed = tty.rowContaining("\u276f 0123456789")
+    check committed >= 0
+    let nextPrompt = tty.rowContaining("\u276f")
+    check nextPrompt > committed
+    for i in committed + 1 ..< tty.rows().len:
+      if i != nextPrompt:
+        check tty.drawnCaretCount(i) == 0
 
   test "resize at idle rewraps the editor prompt":
     if getEnv("THREECODE_TTY_ONLY") notin ["", "resize_idle"]:
