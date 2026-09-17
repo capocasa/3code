@@ -2,6 +2,16 @@
 
 **Unreleased**
 
+- **Hetzner (and other no-space SSE gateways) stream replies again.**
+  inference.hetzner.com frames vLLM chunks as `data:{...}` with no space
+  after the colon. The SSE parser only recognized `data: {...}`, so every
+  chunk fell into the non-SSE bucket: the reply never parsed, the raw
+  `data:` lines were surfaced as the error body (one per failed retry
+  attempt, interleaved chatcmpl ids and all), and the turn ended empty.
+  Both stream paths now take the field value per the WHATWG spec: one
+  optional leading space after the colon is stripped, so both framings
+  parse.
+
 - **The caret parks at the right margin instead of wrapping to the next
   row.** When the drawn caret cell landed exactly on the last column
   (content that fills the row exactly, or trailing spaces typed up to

@@ -754,6 +754,14 @@ proc requestHeaders(p: Profile, key: string;
     for kv in extraHeadersHook(p):
       result.add kv
 
+proc sseFieldValue(line: string): string =
+  ## Value of an SSE `data:` line per the WHATWG spec: everything after
+  ## the colon with ONE optional leading space stripped. vLLM gateways
+  ## (inference.hetzner.com) frame chunks `data:{...}` without the space;
+  ## most providers send `data: {...}`. Both must parse.
+  result = line["data:".len .. ^1]
+  if result.len > 0 and result[0] == ' ': result = result[1 .. ^1]
+
 proc streamHttp(url, key, bodyStr: string, baseLabel: string,
                 slurped: var int, suppressXml: bool,
                 job: NetJob, codeAssist = false): StreamOutcome =
@@ -904,8 +912,8 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
       if isInterrupted():
         closeCachedStreamConn()
         break
-      if line.startsWith("data: "):
-        payload = line["data: ".len .. ^1]
+      if line.startsWith("data:"):
+        payload = sseFieldValue(line)
         if codeAssist:
           caQueue = translateEvent(caState, payload)
           continue
@@ -1383,10 +1391,10 @@ proc streamResponses(url, key, bodyStr: string, baseLabel: string,
       continue
     if line.strip.len == 0 or line.startsWith(": "):
       continue
-    if not line.startsWith("data: "):
+    if not line.startsWith("data:"):
       nonSSE.add line
       continue
-    let payload = line["data: ".len .. ^1]
+    let payload = sseFieldValue(line)
     let j = try: parseJson(payload)
               except CatchableError as e:
                 if payload.strip.len > 0:

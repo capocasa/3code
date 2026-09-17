@@ -56,6 +56,14 @@ proc makeSseCompleteContent(text, id: string): string =
   let d = $(%*{"choices":[{"index":0,"delta":{"content":text},"finish_reason":"stop"}],"id":id})
   result = "data: " & d & "\n\n" & "data: [DONE]\n\n"
 
+proc makeSseCompleteContentNoSpace(text, id: string): string =
+  ## Complete SSE stream whose events are framed `data:{...}` with NO space
+  ## after the colon (inference.hetzner.com's gateway frames vLLM chunks
+  ## this way; captured live 2026-02). The SSE spec makes the leading space
+  ## optional, so the parser must accept both.
+  let d = $(%*{"choices":[{"index":0,"delta":{"content":text},"finish_reason":"stop"}],"id":id})
+  result = "data:" & d & "\n\n" & "data:[DONE]\n\n"
+
 proc makeSseEmptyWithFinish(finishReason, id: string;
     completionTokens = 0; reasoningTokens = 0): string =
   ## SSE stream that emits NO content/tools/reasoning deltas at all, only a
@@ -364,6 +372,18 @@ suite "streaming SSE tool-call accumulation":
 
   test "complete plain content - no tool calls":
     let server = newSseServer(makeSseCompleteContent("Hello from the model!", "id-3"))
+    var srv: Thread[SseServer]
+    createThread(srv, serveThread, server)
+    var usage = Usage()
+    let result = callModel(testProfile(server), %*[{"role": "user", "content": "say hello"}], usage, 0)
+    check result != nil
+    check result{"content"}.getStr() == "Hello from the model!"
+    joinThread(srv)
+    server.socket.close()
+    closeCachedStreamConn()
+
+  test "data: field without leading space parses (hetzner framing)":
+    let server = newSseServer(makeSseCompleteContentNoSpace("Hello from the model!", "id-ns"))
     var srv: Thread[SseServer]
     createThread(srv, serveThread, server)
     var usage = Usage()
