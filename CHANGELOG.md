@@ -4,19 +4,20 @@
 
 - **Union Alpha stealth preview on OpenRouter, and a generic `other`
   family for unidentified models.** `stealth/union-alpha` (known-good
-  as `openrouter.stealth/union-alpha`, normalizes to `inkling2`) is a
+  as `openrouter.stealth/union-alpha`, pretty name `union-alpha`) is a
   free frontier model for agentic coding: 256K context, 128K output
   cap, tools. Sleuthing fingerprints it as Thinking Machines Lab's
-  Inkling 2 (unconfirmed), so it rides the inkling family; probing
-  shows the endpoint accepts `reasoning_effort` low/medium/high even
-  though its advertised supported_parameters omit it, so the standard
-  inkling `:reasoning` knob works. The new `other` family stays in the
-  registry as the bucket for the next unidentified model (neutral
-  preamble, standard tools, no reasoning knob). OpenCode Zen also
-  lists union-alpha, but only on the Anthropic messages wire behind an
-  OpenCode-client gate during the free period; OpenRouter is the open
-  route. Expect the entry to vanish when the preview ends or the lab
-  claims the model.
+  Inkling 2 (unconfirmed), so the combo rides the inkling family
+  (Inkling prompt, tools, reasoning surface) while the model keeps its
+  own pretty name. Probing shows the endpoint accepts
+  `reasoning_effort` low/medium/high even though its advertised
+  supported_parameters omit it, so the standard inkling `:reasoning`
+  knob works. The new `other` family stays in the registry as the
+  bucket for the next unidentified model (neutral preamble, standard
+  tools, no reasoning knob). OpenCode Zen also lists union-alpha, but
+  only on the Anthropic messages wire behind an OpenCode-client gate
+  during the free period; OpenRouter is the open route. Expect the
+  entry to vanish when the preview ends or the lab claims the model.
 
 - **A one-line error notice at startup when the OS sandbox backend
   can't confine bash.** Previously, if the Landlock probe failed (old

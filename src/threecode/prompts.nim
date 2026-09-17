@@ -106,7 +106,9 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # union-alpha (stealth preview, Sep 2026): "Union Alpha", free
     # during the preview on OpenRouter's stealth route. 256K context,
     # 128K output. Sleuthing fingerprints it as Inkling 2 (Thinking
-    # Machines Lab; unconfirmed), so it rides the inkling family:
+    # Machines Lab; unconfirmed), so the combo rides the inkling family
+    # while `union` stays a name-only family so the pretty name keeps
+    # reading union-alpha:
     # reasoning_effort low/medium/high is accepted even though the
     # endpoint's supported_parameters omits it (verified: `off` gets a
     # real enum error max|xhigh|high|medium|...). OpenCode Zen also
