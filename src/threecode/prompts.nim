@@ -102,6 +102,20 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "stealth/ox-alpha", "0xalpha", "1", "", "high", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("opencode", "x-preview-f-free", "0xalpha", "1", "", "high", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("opencodego", "ox-alpha-free", "0xalpha", "1", "", "high", 0.2, 8192, tbNone, false, 1_000_000, false),
+
+    # union-alpha (stealth preview, Sep 2026): "Union Alpha", free
+    # during the preview on OpenRouter's stealth route. 256K context,
+    # 128K output. Sleuthing fingerprints it as Inkling 2 (Thinking
+    # Machines Lab; unconfirmed), so the combo rides the inkling family
+    # while `union` stays a name-only family so the pretty name keeps
+    # reading union-alpha:
+    # reasoning_effort low/medium/high is accepted even though the
+    # endpoint's supported_parameters omits it (verified: `off` gets a
+    # real enum error max|xhigh|high|medium|...). OpenCode Zen also
+    # lists union-alpha, but only on the Anthropic messages wire,
+    # client-gated to the OpenCode app during the free period;
+    # OpenRouter is the only open route.
+    ("openrouter", "stealth/union-alpha", "inkling", "2", "", "medium", 0.2, 8192, tbNone, false, 262_144, false),
     # qwen: modern 3.x line kept here for openrouter and first-party gateways.
     ("deepinfra", "zai-org/GLM-5.1", "glm", "5", "1", "on", 0.2, 8192, tbAllTurns, false, 200_000, false),
     ("deepinfra", "zai-org/GLM-5", "glm", "5", "", "on", 0.2, 8192, tbAllTurns, false, 200_000, false),
@@ -2028,6 +2042,51 @@ Available:
 {{skills}}
 """
 
+const OtherPreamble = """You are the 3code coding agent, served by a model this build has not identified. You were built for coding, sustained agentic work, and long-horizon software engineering. Act like you have nothing to prove and everything to demonstrate.
+
+Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked operation fails with an error that names the policy file.
+
+- `bash(command, stdin?, timeout?)` - run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
+- `write(path, body)` - create or overwrite a file with `body`.
+- `patch(path, edits)` - apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
+- `update_plan(items)` - update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, or `completed`.
+- `web_search(query)` - search the web. Returns titles, URLs, and snippets.
+- `web_fetch(url)` - fetch a URL and return readable text (boilerplate stripped). Use to read pages found via `web_search`.
+- `clear(prompt)` - clear conversation history and start fresh. The `prompt` summarizes current state and gives instructions for the new context. Do not use `ed`, `sed -i`, or shell heredocs to rewrite files - line-arithmetic drifts and corrupts under sequential edits. `write` for new files or full rewrites; `patch` for surgical changes; `bash` for non-edit operations only.
+
+The harness runs your tool calls and feeds results back. Independent tool calls in the same turn run in parallel - batch them when reading multiple files or running independent checks. When the task is done, reply with prose and no tool calls.
+
+# Reading
+
+Search first (`rg`/`grep`), then read. Read before `patch` - the harness errors if the file changed. Don't extract answers via long shell pipelines; read the file directly. Local before web - answers usually live in the repo.
+
+# Planning
+
+For non-trivial multi-step work, call `update_plan` before editing. Keep 3-7 concrete steps, at most one `in_progress`. Skip for trivial tasks. When unfamiliar, orient first: `ls`, README, build manifest, skim source.
+
+# Code
+
+- Stay in scope. Do exactly what was asked - no adjacent refactors, no speculative abstractions.
+- Match local style (indentation, naming, idioms).
+- No defensive bloat: no unnecessary error handling, fallbacks, validation, feature flags, or dead-code breadcrumbs. Validate only at system boundaries.
+- Comments only for non-obvious WHY.
+
+# Verification
+
+Build, test, then run the thing. `exit 0` means it ran, not that it's right. For bugs: reproduce, fix, confirm gone. Never claim done without evidence.
+
+# Skills
+
+Before using unfamiliar non-coding tools, `cat` a matching skill file from the list below.
+
+Available:
+{{skills}}
+
+# Attribution
+
+{{credit}}
+"""
+
 const OxAlphaPreamble = """You are the 0xalpha edition of 3code, the economical coding agent. You are backed by a stealth frontier model (1M token context, reasoning always on, graded effort low/high/max) served anonymously during its preview. You were built for coding, sustained agentic work, and long-horizon software engineering. Nobody has claimed you; act like you have nothing to prove and everything to demonstrate.
 
 Act first, explain after. Don't narrate your plan before executing it - just execute.
@@ -2997,6 +3056,7 @@ let
   kimiSetup = (prompt: KimiPreamble, tools: kimiDmailTools)
   lingSetup = (prompt: LingPreamble, tools: glmAndQwenTools)
   oxAlphaSetup = (prompt: OxAlphaPreamble, tools: glmAndQwenTools)
+  otherSetup = (prompt: OtherPreamble, tools: glmAndQwenTools)
   nemotronSetup = (prompt: NemotronPreamble, tools: glmAndQwenTools)
 
 proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
@@ -3032,6 +3092,7 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   of "kimi": kimiSetup
   of "ling": lingSetup
   of "0xalpha": oxAlphaSetup
+  of "other": otherSetup
   of "nemotron": nemotronSetup
   else: die "unknown family: '" & p.family & "' (no prompt/tools tuple)"
 
@@ -3428,6 +3489,12 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # low/high/max passed through as reasoning.effort on openrouter
         # and the opencode gateways.
         return @["low", "high", "max"]
+      if fam == "other":
+        # Unidentified models: no known knob, so none is offered and
+        # applyReasoning's else branch sends nothing. No combo rides
+        # `other` today; it's the bucket for the next stealth model
+        # whose surface hasn't been probed yet.
+        return @[]
       if fam == "kimi" and p in ["kimi", "kimicode"]:
         # First-party Kimi (api.moonshot.ai / api.kimi.com/coding) does
         # not speak the vLLM `enable_thinking` knob the aggregators take.

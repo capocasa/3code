@@ -24,11 +24,14 @@ import std/[sequtils, strutils]
 const ModelFamilies* = [
   "gpt-oss", "glm", "qwen", "deepseek", "kimi", "minimax", "grok", "gpt",
   "mimo", "inkling", "laguna", "hy", "ling", "longcat", "0xalpha",
-  "nemotron", "mistral",
+  "nemotron", "mistral", "union",
 ]
   ## Hard list of model families, mirroring the families in
   ## `KnownGoodCombos` and `systemPromptFor`. `gpt-oss` is listed before
-  ## `gpt` so the longer family wins.
+  ## `gpt` so the longer family wins. Two entries exist for name parsing
+  ## only: `union` (the stealth mount keeps its own pretty name
+  ## `union-alpha` while its combo rides the inkling family) and the
+  ## combo-tag-only `other` family, which is never a name prefix.
 
 const ModelAliases* = [
   ("k3", "kimi-k3"),

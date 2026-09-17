@@ -2,6 +2,23 @@
 
 **Unreleased**
 
+- **Union Alpha stealth preview on OpenRouter, and a generic `other`
+  family for unidentified models.** `stealth/union-alpha` (known-good
+  as `openrouter.stealth/union-alpha`, pretty name `union-alpha`) is a
+  free frontier model for agentic coding: 256K context, 128K output
+  cap, tools. Sleuthing fingerprints it as Thinking Machines Lab's
+  Inkling 2 (unconfirmed), so the combo rides the inkling family
+  (Inkling prompt, tools, reasoning surface) while the model keeps its
+  own pretty name. Probing shows the endpoint accepts
+  `reasoning_effort` low/medium/high even though its advertised
+  supported_parameters omit it, so the standard inkling `:reasoning`
+  knob works. The new `other` family stays in the registry as the
+  bucket for the next unidentified model (neutral preamble, standard
+  tools, no reasoning knob). OpenCode Zen also lists union-alpha, but
+  only on the Anthropic messages wire behind an OpenCode-client gate
+  during the free period; OpenRouter is the open route. Expect the
+  entry to vanish when the preview ends or the lab claims the model.
+
 - **GLM-5.3 on Mistral.** api.mistral.ai now also serves `zai-glm-5-3`
   (1M context, models endpoint reports max_context_length 1048576):
   known-good as `mistral.zai-glm-5-3`, live-verified against the wire.

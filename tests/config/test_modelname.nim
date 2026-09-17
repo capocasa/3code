@@ -102,6 +102,13 @@ suite "modelname: normalizeModelName":
     check normalizeModelName("ox-alpha-free") == "0xalpha1-free"
     check normalizeModelName("x-preview-f-free") == "0xalpha1-f-free"
 
+  test "union (stealth mount of inkling 2, keeps its own name)":
+    check normalizeModelName("stealth/union-alpha") == "union-alpha"
+    check normalizeModelName("Union-Alpha") == "union-alpha"
+
+  test "unknown families pass through unchanged (the `other` bucket)":
+    check normalizeModelName("stealth/mystery-model") == "stealth/mystery-model"
+
   test "qwen plus/max/flash variants":
     check normalizeModelName("qwen-3-6-plus") == "qwen-3.6-plus"
     check normalizeModelName("qwen3.7-max") == "qwen-3.7-max"

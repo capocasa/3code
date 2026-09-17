@@ -93,7 +93,7 @@ servers.
 - **Cross-platform** — Linux x86-64/arm64 · macOS universal · Windows · Termux (Android arm64)
 - **No daemon, no web UI** — run it, use it, done
 - **Instant startup** — loads and responds instantly; your agent should never keep you waiting
-- **40 known-good combos** — validated provider + model pairings, just works out of the box
+- **41 known-good combos** — validated provider + model pairings, just works out of the box
 - **Loop guard** — detects runaway autonomous edits, halts at configurable thresholds
 - **Session persistence** — human-readable `.3log` format; resume any past session
 - **Native web search** — built-in, no curl dependency
