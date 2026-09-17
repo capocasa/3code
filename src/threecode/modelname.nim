@@ -24,11 +24,12 @@ import std/[sequtils, strutils]
 const ModelFamilies* = [
   "gpt-oss", "glm", "qwen", "deepseek", "kimi", "minimax", "grok", "gpt",
   "mimo", "inkling", "laguna", "hy", "ling", "longcat", "0xalpha",
-  "nemotron", "mistral", "union",
+  "nemotron", "mistral",
 ]
   ## Hard list of model families, mirroring the families in
   ## `KnownGoodCombos` and `systemPromptFor`. `gpt-oss` is listed before
-  ## `gpt` so the longer family wins.
+  ## `gpt` so the longer family wins. The `other` family (unidentified
+  ## models) is a combo tag only, never a name prefix, so it is not here.
 
 const ModelAliases* = [
   ("k3", "kimi-k3"),

@@ -102,8 +102,8 @@ suite "modelname: normalizeModelName":
     check normalizeModelName("ox-alpha-free") == "0xalpha1-free"
     check normalizeModelName("x-preview-f-free") == "0xalpha1-f-free"
 
-  test "union":
-    check normalizeModelName("stealth/union-alpha") == "union-alpha"
+  test "union (family-less `other` combo, wire id is the canonical form)":
+    check normalizeModelName("stealth/union-alpha") == "stealth/union-alpha"
     check normalizeModelName("Union-Alpha") == "union-alpha"
 
   test "qwen plus/max/flash variants":

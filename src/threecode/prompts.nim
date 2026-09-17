@@ -103,15 +103,16 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencode", "x-preview-f-free", "0xalpha", "1", "", "high", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("opencodego", "ox-alpha-free", "0xalpha", "1", "", "high", 0.2, 8192, tbNone, false, 1_000_000, false),
 
-    # union (stealth preview, Sep 2026): "Union Alpha", unclaimed lab,
-    # free during the preview on OpenRouter's stealth route. 256K context,
-    # 128K output, tools yes, reasoning always on but no effort knob is
-    # exposed on the wire (supported_parameters tops out at tools/
-    # response_format), so the :reasoning command offers nothing.
-    # OpenCode Zen also lists union-alpha, but only on the Anthropic
-    # messages wire, client-gated to the OpenCode app during the free
-    # period; OpenRouter is the only open route.
-    ("openrouter", "stealth/union-alpha", "union", "", "alpha", "on", 0.2, 8192, tbNone, false, 262_144, false),
+    # union-alpha (stealth preview, Sep 2026): "Union Alpha", unclaimed
+    # lab, free during the preview on OpenRouter's stealth route. 256K
+    # context, 128K output, tools yes, reasoning always on but no effort
+    # knob is exposed on the wire (supported_parameters tops out at
+    # tools/response_format), so the :reasoning command offers nothing.
+    # Rides the generic `other` family until the lab is identified;
+    # retag when sleuthed. OpenCode Zen also lists union-alpha, but only
+    # on the Anthropic messages wire, client-gated to the OpenCode app
+    # during the free period; OpenRouter is the only open route.
+    ("openrouter", "stealth/union-alpha", "other", "", "", "on", 0.2, 8192, tbNone, false, 262_144, false),
     # qwen: modern 3.x line kept here for openrouter and first-party gateways.
     ("deepinfra", "zai-org/GLM-5.1", "glm", "5", "1", "on", 0.2, 8192, tbAllTurns, false, 200_000, false),
     ("deepinfra", "zai-org/GLM-5", "glm", "5", "", "on", 0.2, 8192, tbAllTurns, false, 200_000, false),
@@ -2025,9 +2026,7 @@ Available:
 {{skills}}
 """
 
-const UnionPreamble = """You are the union edition of 3code, the economical coding agent. You are backed by Union Alpha, a stealth frontier model (256K token context, multimodal input, reasoning always on) served anonymously during its free preview. You were built for agentic coding, research, and long-horizon workflows. Nobody has claimed you; act like you have nothing to prove and everything to demonstrate.
-
-# Tools
+const OtherPreamble = """You are the 3code coding agent, served by a model this build has not identified. You were built for coding, sustained agentic work, and long-horizon software engineering. Act like you have nothing to prove and everything to demonstrate.
 
 Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked operation fails with an error that names the policy file.
 
@@ -3041,7 +3040,7 @@ let
   kimiSetup = (prompt: KimiPreamble, tools: kimiDmailTools)
   lingSetup = (prompt: LingPreamble, tools: glmAndQwenTools)
   oxAlphaSetup = (prompt: OxAlphaPreamble, tools: glmAndQwenTools)
-  unionSetup = (prompt: UnionPreamble, tools: glmAndQwenTools)
+  otherSetup = (prompt: OtherPreamble, tools: glmAndQwenTools)
   nemotronSetup = (prompt: NemotronPreamble, tools: glmAndQwenTools)
 
 proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
@@ -3077,7 +3076,7 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   of "kimi": kimiSetup
   of "ling": lingSetup
   of "0xalpha": oxAlphaSetup
-  of "union": unionSetup
+  of "other": otherSetup
   of "nemotron": nemotronSetup
   else: die "unknown family: '" & p.family & "' (no prompt/tools tuple)"
 
@@ -3473,8 +3472,9 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # low/high/max passed through as reasoning.effort on openrouter
         # and the opencode gateways.
         return @["low", "high", "max"]
-      if fam == "union":
-        # Stealth preview: reasons unconditionally and takes no effort
+      if fam == "other":
+        # Unidentified models: no known knob. union-alpha (the first
+        # `other` row) reasons unconditionally and takes no effort
         # parameter on the wire (OpenRouter's supported_parameters has
         # none), so no knob is offered. applyReasoning sends nothing.
         return @[]
