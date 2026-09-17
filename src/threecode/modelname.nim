@@ -42,6 +42,7 @@ const ModelAliases* = [
   ("o3-mini", "gpt-o3-mini"),
   ("o4-mini", "gpt-o4-mini"),
   ("ox-alpha", "0xalpha-1"),
+  ("union-alpha", "inkling-2"),
   ("x-preview-f", "0xalpha-1-f"),
 ]
   ## Bare names that don't carry their family on the surface. Matched

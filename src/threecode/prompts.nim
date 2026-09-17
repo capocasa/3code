@@ -103,16 +103,17 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencode", "x-preview-f-free", "0xalpha", "1", "", "high", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("opencodego", "ox-alpha-free", "0xalpha", "1", "", "high", 0.2, 8192, tbNone, false, 1_000_000, false),
 
-    # union-alpha (stealth preview, Sep 2026): "Union Alpha", unclaimed
-    # lab, free during the preview on OpenRouter's stealth route. 256K
-    # context, 128K output, tools yes, reasoning always on but no effort
-    # knob is exposed on the wire (supported_parameters tops out at
-    # tools/response_format), so the :reasoning command offers nothing.
-    # Rides the generic `other` family until the lab is identified;
-    # retag when sleuthed. OpenCode Zen also lists union-alpha, but only
-    # on the Anthropic messages wire, client-gated to the OpenCode app
-    # during the free period; OpenRouter is the only open route.
-    ("openrouter", "stealth/union-alpha", "other", "", "", "on", 0.2, 8192, tbNone, false, 262_144, false),
+    # union-alpha (stealth preview, Sep 2026): "Union Alpha", free
+    # during the preview on OpenRouter's stealth route. 256K context,
+    # 128K output. Sleuthing fingerprints it as Inkling 2 (Thinking
+    # Machines Lab; unconfirmed), so it rides the inkling family:
+    # reasoning_effort low/medium/high is accepted even though the
+    # endpoint's supported_parameters omits it (verified: `off` gets a
+    # real enum error max|xhigh|high|medium|...). OpenCode Zen also
+    # lists union-alpha, but only on the Anthropic messages wire,
+    # client-gated to the OpenCode app during the free period;
+    # OpenRouter is the only open route.
+    ("openrouter", "stealth/union-alpha", "inkling", "2", "", "medium", 0.2, 8192, tbNone, false, 262_144, false),
     # qwen: modern 3.x line kept here for openrouter and first-party gateways.
     ("deepinfra", "zai-org/GLM-5.1", "glm", "5", "1", "on", 0.2, 8192, tbAllTurns, false, 200_000, false),
     ("deepinfra", "zai-org/GLM-5", "glm", "5", "", "on", 0.2, 8192, tbAllTurns, false, 200_000, false),
@@ -3473,10 +3474,10 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # and the opencode gateways.
         return @["low", "high", "max"]
       if fam == "other":
-        # Unidentified models: no known knob. union-alpha (the first
-        # `other` row) reasons unconditionally and takes no effort
-        # parameter on the wire (OpenRouter's supported_parameters has
-        # none), so no knob is offered. applyReasoning sends nothing.
+        # Unidentified models: no known knob, so none is offered and
+        # applyReasoning's else branch sends nothing. No combo rides
+        # `other` today; it's the bucket for the next stealth model
+        # whose surface hasn't been probed yet.
         return @[]
       if fam == "kimi" and p in ["kimi", "kimicode"]:
         # First-party Kimi (api.moonshot.ai / api.kimi.com/coding) does

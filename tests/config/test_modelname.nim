@@ -102,9 +102,12 @@ suite "modelname: normalizeModelName":
     check normalizeModelName("ox-alpha-free") == "0xalpha1-free"
     check normalizeModelName("x-preview-f-free") == "0xalpha1-f-free"
 
-  test "union (family-less `other` combo, wire id is the canonical form)":
-    check normalizeModelName("stealth/union-alpha") == "stealth/union-alpha"
-    check normalizeModelName("Union-Alpha") == "union-alpha"
+  test "union (stealth mount of inkling 2)":
+    check normalizeModelName("stealth/union-alpha") == "inkling2"
+    check normalizeModelName("Union-Alpha") == "inkling2"
+
+  test "unknown families pass through unchanged (the `other` bucket)":
+    check normalizeModelName("stealth/mystery-model") == "stealth/mystery-model"
 
   test "qwen plus/max/flash variants":
     check normalizeModelName("qwen-3-6-plus") == "qwen-3.6-plus"
