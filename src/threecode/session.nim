@@ -5,20 +5,22 @@
 ## indented two spaces. The format is both the on-disk representation and the
 ## session audit trail - readable without tooling and diffable in git.
 ##
-## The system prompt is persisted verbatim: rebuilding it from the profile
-## on resume rewrites the cached prefix (skills catalog, credit line, any
-## override edit made since) and busts the provider's prompt cache. The
-## persisted bytes are the contract; catalog updates ride the tail message
-## via `refreshSystemPrompt` instead.
+## The system prompt is not persisted: it changes too rarely for the bytes
+## to earn a place in every session file. The file carries the dynamic
+## inputs instead - the discovered skills catalog that was substituted into
+## it - plus the identity stamp of the profile that built it, and
+## `refreshSystemPrompt` reconstructs the exact bytes from the profile on
+## resume.
 ##
-## Cache-parity contract: the message array `loadSessionFile` reconstructs is
-## byte-identical to the one the live session held at save time. Resuming
-## must not change what the next request re-sends: the system prompt is
-## persisted verbatim, bodies round-trip through the record codec without
-## loss, tool_calls carry their original wire JSON, and user preambles split
-## and rejoin on the exact grammar `sessionPreamble` emits. A resumed turn
-## hits the provider's prompt cache exactly like the live session's next
-## turn would.
+## Cache-parity contract: the message array `loadSessionFile` reconstructs
+## re-sends the bytes the live session would. Everything past the system
+## prompt round-trips byte-identically: bodies round-trip through the record
+## codec without loss, tool_calls carry their original wire JSON, and user
+## preambles split and rejoin on the exact grammar `sessionPreamble` emits.
+## The system prompt itself is rebuilt from the profile substituting the
+## persisted skills catalog, which reproduces the live bytes whenever the
+## identity stamp still matches the profile. A resumed turn hits the
+## provider's prompt cache exactly like the live session's next turn would.
 ##
 ## On load, the full OpenAI-shape `messages` JsonNode array is reconstructed
 ## from the records so the session can be resumed mid-conversation with no loss.
@@ -46,8 +48,15 @@ const SessionExt* = ".3log"
 #   body   := ('  ' line '\n')* ['~~\n']
 #
 # Roles:
-#   session     - one per file, top of the file. Created stamp + profile + cwd.
-#   system      - the system prompt (body = prompt text).
+#   session     - one per file, top of the file. Created stamp + profile + cwd
+#                 (+ prompt_identity, the cache stamp of the profile that
+#                 built the conversation's system prompt).
+#   skills      - the discovered skills catalog substituted into the system
+#                 prompt: the dynamic input, persisted so the resume-time
+#                 rebuild reproduces the live prompt bytes. The prompt
+#                 itself is constructed from the profile, never stored.
+#   system      - legacy: a system prompt persisted verbatim by older
+#                 3code. Parsed for wire shape; resume still reconstructs.
 #   user        - user input (body = message text).
 #   reasoning   - merges into the next assistant's reasoning_content.
 #   assistant   - assistant text content (body). Followed by zero or more
@@ -62,7 +71,7 @@ const SessionExt* = ".3log"
 #   tokens      - per-callModel token usage. Header-only, no body.
 # ---------------------------------------------------------------------------
 
-const Roles = ["session", "system", "context", "project_notes",
+const Roles = ["session", "skills", "system", "context", "project_notes",
                "user", "reasoning", "assistant",
                "tool_use", "tool_result", "tokens"]
 
@@ -956,17 +965,18 @@ proc renderSession*(session: Session, messages: JsonNode): string =
   if session.created.len > 0: hdr.add " " & session.created
   if session.profileName.len > 0: hdr.add " profile=" & session.profileName
   if session.cwd.len > 0: hdr.add " cwd=" & session.cwd
-  # Cache-parity stamps: which profile built the persisted system prompt
-  # and which skills catalog went into it. The loader restores both into
-  # PromptState so a resume keeps the persisted prefix when they still
-  # match (and rebuilds/notes when they do not) exactly like the live path.
+  # Cache-parity stamp: which profile built the conversation's system
+  # prompt. The loader restores it into PromptState so a resume rebuilds
+  # from the same profile (and builds fresh when it no longer matches).
   if session.promptState.identity.len > 0:
     hdr.add " prompt_identity=" & session.promptState.identity
-  if session.promptState.skills.len > 0:
-    hdr.add " skills=" & session.promptState.skills
   emitHeaderOnly s, hdr
+  # The dynamic input the system prompt substituted: persisted so the
+  # resume-time rebuild re-sends the exact catalog bytes the live session
+  # sent. The prompt template itself is constructed from the profile.
+  if session.promptState.skills.len > 0:
+    emitRecord s, "skills", session.promptState.skills
   if messages == nil or messages.kind != JArray: return s
-  var seenSystem = false
   # Map tool_call_id → exit code via the parallel toolLog (entries are
   # appended in the same order tool_calls fire across the message stream).
   var idToExit = initTable[string, int]()
@@ -986,12 +996,10 @@ proc renderSession*(session: Session, messages: JsonNode): string =
     if m.kind != JObject: continue
     case m{"role"}.getStr
     of "system":
-      # Persisted verbatim so resume re-sends the exact cached prefix
-      # (see the module doc). Duplicated `system` messages beyond the
-      # first would each re-send too, so only index 0 is kept.
-      if m{"content"}.getStr("").len > 0 and not seenSystem:
-        emitRecord s, "system", m{"content"}.getStr("")
-        seenSystem = true
+      # Constructed from the profile at resume; never persisted (see the
+      # module doc). Nothing to write for the wire shape either - the
+      # loader backfills a system message at index 0.
+      discard
     of "user":
       let raw = m{"content"}.getStr("")
       let (ctx, notes, body) = splitPreamble(raw)
@@ -1269,10 +1277,17 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
       if "cwd" in kv: sess.cwd = kv["cwd"]
       if "prompt_identity" in kv:
         sess.promptState.identity = kv["prompt_identity"]
-      if "skills" in kv: sess.promptState.skills = kv["skills"]
+    of "skills":
+      # The catalog the system prompt was built with (first record wins;
+      # only the resume-time rebuild consumes it, never the wire).
+      if sess.promptState.skills.len == 0:
+        sess.promptState.skills = r.body
+      lastAssistant = nil
     of "system":
-      # Only the first system record is the persisted prompt; duplicates
-      # (hand-merges, exotic histories) drop here rather than re-sending.
+      # Legacy verbatim prompt: kept for the wire shape (index 0 must be
+      # a system message) but never adopted into PromptState - resume
+      # reconstructs from the profile. Duplicates (hand-merges, exotic
+      # histories) drop here rather than re-sending.
       if hasResolvedSystem: discard
       else:
         messages.add %*{"role": "system", "content": r.body}
@@ -1340,19 +1355,15 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
   # unpaired ids that Kimi/Moonshot reject with 400 `tool_call_id is not
   # found`. Shared with the wire path in callModel.
   messages = repairToolCallPairing(messages)
+  # New-format files carry no `system` record (the prompt is constructed
+  # at resume), so index 0 is backfilled with the placeholder
+  # `refreshSystemPrompt` resolves; legacy files keep their verbatim body
+  # until that same rebuild replaces it.
   if messages.len == 0 or messages[0]{"role"}.getStr != "system":
     let backfill = newJArray()
     backfill.add %*{"role": "system", "content": DefaultSystemPrompt}
     for m in messages: backfill.add m
     messages = backfill
-  # Seed the resume-time PromptState so `refreshSystemPrompt` keeps the
-  # persisted bytes when the restored identity still matches the resolved
-  # profile. Sessions saved before the identity stamp (or with an
-  # unresolved/placeholder system message) stay unseeded, so their first
-  # turn resolves the prompt like a fresh session.
-  if hasResolvedSystem and sess.promptState.identity.len > 0 and
-     messages[0]{"content"}.getStr != DefaultSystemPrompt:
-    sess.promptState.system = messages[0]
   sess.toolLog = buildToolLogFromMessages(messages, exitByCallId)
   sess.plan = buildPlanFromMessages(messages, exitByCallId)
   (sess, messages)

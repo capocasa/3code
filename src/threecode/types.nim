@@ -185,6 +185,11 @@ type
   ReadCache* = ref object
     state*: Table[string, (Time, int)]
   PromptState* = object
+    ## Cache proof for the constructed system prompt: `identity` is the
+    ## `profileIdentity` stamp of the profile that built it, `skills` the
+    ## discovered skills catalog substituted into it (the dynamic part
+    ## persisted in the session file so resume can rebuild the exact
+    ## bytes).
     system*: JsonNode
     identity*, skills*: string
   Session* = object

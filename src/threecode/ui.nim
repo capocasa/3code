@@ -1546,6 +1546,10 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
         resp line
     of ":clear":
       messages = %* [{"role": "system", "content": buildSystemPrompt(prof)}]
+      # Fresh promptState like the akClear path: the next refresh builds
+      # anew instead of resume-substituting the old conversation's
+      # catalog stamp.
+      session.promptState = PromptState()
       session.toolLog.setLen 0
       session.usage = Usage()
       session.lastPromptTokens = 0

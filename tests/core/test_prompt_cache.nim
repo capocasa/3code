@@ -92,3 +92,45 @@ suite "prompt cache stability":
                   {"role": "user", "content": "new session"}]
     refreshSystemPrompt(messages, p, state)
     check messages[0]["content"].getStr.startsWith("Edited")
+
+  test "resume rebuilds the prefix substituting the persisted catalog":
+    # A saved session restores identity + the catalog its prompt was built
+    # with; refresh reconstructs the prompt from the profile using those
+    # exact bytes. A drifted catalog rides the tail, prefix untouched.
+    state = PromptState(identity: profileIdentity(p),
+                        skills: "- /old/solo.md")
+    messages = %*[{"role": "system", "content": DefaultSystemPrompt},
+                  {"role": "user", "content": "continue"}]
+    refreshSystemPrompt(messages, p, state)
+    let prefix = $messages[0]
+    check "- /old/solo.md" in messages[0]["content"].getStr
+    check "first.md" notin messages[0]["content"].getStr
+    check messages[^1]["content"].getStr.startsWith("continue")
+    check "first.md" in messages[^1]["content"].getStr
+    refreshSystemPrompt(messages, p, state)
+    check $messages[0] == prefix
+
+  test "resume with a changed identity rebuilds from the current catalog":
+    state = PromptState(identity: "[\"other\"]", skills: "- /old/solo.md")
+    messages = %*[{"role": "system", "content": DefaultSystemPrompt},
+                  {"role": "user", "content": "continue"}]
+    refreshSystemPrompt(messages, p, state)
+    check "first.md" in messages[0]["content"].getStr
+    check "first.md" notin messages[^1]["content"].getStr
+
+  test "resume picks up override edits (the prompt is constructed)":
+    refreshSystemPrompt(messages, p, state)
+    writeFile(root / ".3code" / "glm.txt", "Edited {{skills}}")
+    state.system = nil   # resume shape: stamps restored, prompt rebuilt
+    refreshSystemPrompt(messages, p, state)
+    check messages[0]["content"].getStr.startsWith("Edited")
+
+  test "resume without a persisted catalog builds from the current one":
+    # Legacy sessions saved before the skills record: no catalog bytes to
+    # substitute, so the rebuild uses the live discovery.
+    state = PromptState(identity: profileIdentity(p), skills: "")
+    messages = %*[{"role": "system", "content": DefaultSystemPrompt},
+                  {"role": "user", "content": "continue"}]
+    refreshSystemPrompt(messages, p, state)
+    check "first.md" in messages[0]["content"].getStr
+    check "first.md" notin messages[^1]["content"].getStr

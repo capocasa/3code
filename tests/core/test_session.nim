@@ -425,7 +425,13 @@ suite "session: resume wire parity":
     if fileExists(tmp): removeFile(tmp)
 
   proc wireOf(msgs: JsonNode): string =
-    $repairToolCallPairing(stripInternalFields(msgs))
+    ## Parity from the first user message on: the system prompt is
+    ## constructed at resume from the profile + persisted catalog, never
+    ## round-tripped through the file.
+    let stripped = stripInternalFields(msgs)
+    var tail = newJArray()
+    for i in 1 ..< stripped.len: tail.add stripped[i]
+    $repairToolCallPairing(tail)
 
   proc roundTrip(sess: Session, msgs: JsonNode): JsonNode =
     writeFile(tmp, renderSession(sess, msgs))
@@ -492,22 +498,44 @@ suite "session: resume wire parity":
     check lm[1]{"content"}.getStr == content
     check wireOf(lm) == wireOf(msgs)
 
-  test "persisted system prompt survives with identity stamps":
+  test "dynamic prompt inputs persist; the prompt itself does not":
     let sess = Session(created: "t", profileName: "p", cwd: "/tmp",
       promptState: PromptState(identity: "[\"prov.m\"]",
-                               skills: "abc123"))
+                               skills: "- /skills/one.md"))
     let msgs = %*[
-      {"role": "system", "content": "EXACT CACHED PREFIX"},
+      {"role": "system", "content": "FULL BUILT PROMPT"},
       {"role": "user", "content": "hi"},
       {"role": "assistant", "content": "yo", "reasoning_content": ""}
     ]
     writeFile(tmp, renderSession(sess, msgs))
+    let text = readFile(tmp)
+    check "FULL BUILT PROMPT" notin text        # constructed, not stored
+    check "- /skills/one.md" in text            # the dynamic part is
+    check "prompt_identity=[\"prov.m\"]" in text
     let (ls, lm) = loadSessionFile(tmp)
-    check lm[0]{"content"}.getStr == "EXACT CACHED PREFIX"
     check ls.promptState.identity == "[\"prov.m\"]"
-    check ls.promptState.skills == "abc123"
-    check cast[pointer](ls.promptState.system) == cast[pointer](lm[0])
+    check ls.promptState.skills == "- /skills/one.md"
+    check ls.promptState.system == nil          # rebuild owns index 0
+    check lm[0]{"role"}.getStr == "system"     # placeholder backfill
     check wireOf(lm) == wireOf(msgs)
+
+  test "legacy verbatim system record loads but is never adopted":
+    writeFile(tmp, """session 2025-01-01T00:00:00+00:00 profile=p cwd=/tmp prompt_identity=["x"]
+
+system
+  OLD VERBATIM PREFIX
+
+user
+  hi
+""")
+    let (ls, lm) = loadSessionFile(tmp)
+    check lm[0]{"role"}.getStr == "system"
+    check lm[0]{"content"}.getStr == "OLD VERBATIM PREFIX"
+    check ls.promptState.identity == "[\"x\"]"
+    # Resume reconstructs from the profile; the persisted body is not
+    # seeded into PromptState as a keep-verbatim prefix.
+    check ls.promptState.system == nil
+    check ls.promptState.skills.len == 0
 
   test "empty reasoning_content key is present on resumed assistants":
     # Think-back families keep the field on the wire; the loader must set

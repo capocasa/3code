@@ -2,6 +2,20 @@
 
 **Unreleased**
 
+- **Session files store the dynamic prompt inputs, not the prompt.** The
+  `.3log` no longer persists the system prompt verbatim in every session:
+  the template changes far too rarely for those bytes to earn their keep.
+  The file now records what actually varies - the discovered skills
+  catalog, stamped with the profile identity that built the prompt - and
+  resume reconstructs the exact bytes from the profile, substituting the
+  persisted catalog. Cache behavior is unchanged where it matters: a
+  resumed turn re-sends a byte-identical prefix while the identity stamp
+  still matches, a real model/provider switch still rebuilds, and a
+  drifted skills catalog still rides the tail message. Sessions saved by
+  older 3code still load and resume (their verbatim prompt is replaced by
+  the reconstruction), and prompt-override edits now take effect on
+  resume instead of being pinned to the saved bytes.
+
 - **Fixed `reasoning field unknown` errors on the OpenCode zen
   gateways.** Both `opencode` and `opencodego` hardened their request
   validator: the OpenRouter-style `reasoning: {effort}` object is now
