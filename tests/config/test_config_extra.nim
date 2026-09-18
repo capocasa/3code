@@ -248,6 +248,11 @@ suite "config: known-good lookup with normalized pretty names":
     check knownGoodWireModel("zai", "glm-5.3-flash") == "glm-5.3-flash"
     check knownGoodWireModel("zai", "glm-5.3") == "glm-5.3"
     check knownGoodWireModel("openrouter", "z-ai/glm-5.3-flash") == "z-ai/glm-5.3-flash"
+    # platte namespacing: the bare id is what configs persist, the wire
+    # id is prefixed (the bare id 404s on their endpoint).
+    check knownGoodWireModel("platte", "glm-5.3") == "z-ai/glm-5.3"
+    check knownGoodWireModel("platte", "z-ai/glm-5.3") == "z-ai/glm-5.3"
+    check knownGoodFamily("platte", "glm-5.3") == "glm"
     check knownGoodWireModel("novita", "glm-5.3-flash") == "zai-org/glm-5.3-flash"
     check knownGoodWireModel("venice", "glm-5.3-flash") == "z-ai-glm-5-3-flash"
 

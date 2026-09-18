@@ -141,7 +141,7 @@ suite "provider wizard configuration":
     check activeProviders[0].name == "platte"
     check activeProviders[0].url == "https://capocasa.on.platte.ai/api/v1"
     check activeProviders[0].key == "platte-pat"
-    check activeProviders[0].models == @["glm-5.3"]
+    check activeProviders[0].models == @["z-ai/glm-5.3"]
     check prompts.anyIt(it.startsWith("  username"))
     check verifiedModels.len == 0
 
