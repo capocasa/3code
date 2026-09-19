@@ -3070,11 +3070,27 @@ let
   otherSetup = (prompt: OtherPreamble, tools: glmAndQwenTools)
   nemotronSetup = (prompt: NemotronPreamble, tools: glmAndQwenTools)
 
+var bashToolDisabled* = false
+  ## Set at Windows startup when no bash was found (warnNoBash in
+  ## threecode.nim): the bash/shell tool is dropped from the advertised
+  ## surface so the model never plans around an execution path that
+  ## would only return an error. The user was warned at startup; a
+  ## ```bash fence in a reply still hits the streamexec guard, which
+  ## answers with the same install one-liner.
+
+proc withoutShellTools(tools: JsonNode): JsonNode =
+  result = newJArray()
+  for t in tools:
+    if t["function"]["name"].getStr in ["bash", "shell"]: continue
+    result.add t
+
 proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   ## (prompt, tools) for the active family. Unknown family dies — every
   ## entry in `KnownGoodCombos` and every experimental override must
-  ## name a family handled here.
-  case p.family
+  ## name a family handled here. When `bashToolDisabled` is set (Windows
+  ## host without any bash), the bash/shell tool is filtered out of the
+  ## advertised list.
+  let base = case p.family
   of "laguna": lagunaSetup
   of "glm": glmSetup
   of "qwen":
@@ -3106,6 +3122,10 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   of "other": otherSetup
   of "nemotron": nemotronSetup
   else: die "unknown family: '" & p.family & "' (no prompt/tools tuple)"
+  if bashToolDisabled:
+    (base.prompt, withoutShellTools(base.tools))
+  else:
+    base
 
 let DefaultSystemPrompt* = glmSetup.prompt.replace(
     "{{credit}}",

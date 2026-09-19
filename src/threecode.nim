@@ -113,10 +113,11 @@ proc warnNoBash() =
   ## Windows startup warning: 3code depends on bash. resolveBash checks Git
   ## for Windows, a standalone MSYS2, and the legacy 3code-installed MSYS2
   ## tree, once at startup (after the first-run provider wizard, so a fresh
-  ## user saves their provider first). When none is found the bash tool is
-  ## disabled for the session (its calls return an error) and this one-line
-  ## warning says how to fix it. POSIX always has /bin/sh so this is a
-  ## no-op there.
+  ## user saves their provider first). When none is found the bash/shell
+  ## tool is dropped from the advertised tool list for the session (a
+  ## ```bash fence in a reply still returns the install one-liner via the
+  ## streamexec guard) and this one-line warning says how to fix it. POSIX
+  ## always has /bin/sh so this is a no-op there.
   ##
   ## The provider-stub binary (the tty test harness) skips this: those tests
   ## drive REPL rendering, not bash enforcement, and CI has no bundled MSYS2
@@ -125,6 +126,7 @@ proc warnNoBash() =
   ## initSandbox.
   when defined(windows) and not defined(providerStub):
     if resolveBash().len == 0:
+      bashToolDisabled = true
       let msg = "  · bash tool disabled: no bash found. Install Git for " &
         "Windows as your user: https://git-scm.com/download/win"
       try:

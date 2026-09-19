@@ -505,3 +505,38 @@ suite "compact: decideContextAction":
 
   test "custom threshold":
     check decideContextAction(70_000, 128_000, 20, threshold = 0.5) == caSummarize
+
+suite "prompts: setup — bashToolDisabled":
+  # Windows no-bash state: the bash/shell tool is dropped from the
+  # advertised surface so the model never plans around it. The flag is
+  # Windows-only in production (warnNoBash) but the filter itself is
+  # plain code, so it is tested here on every platform.
+  test "bash and shell tools are filtered out when set":
+    let p = Profile(name: "zai.glm-5.1", model: "glm-5.1", family: "glm")
+    bashToolDisabled = true
+    defer: bashToolDisabled = false
+    let s = setup(p)
+    for t in s.tools:
+      let n = t{"function"}{"name"}.getStr
+      check n notin ["bash", "shell"]
+    check s.tools.len == 7  # glmAndQwenTools minus bash
+
+  test "shell-only surface (gpt-oss) keeps the rest":
+    let p = Profile(name: "x.gpt-oss", model: "gpt-oss-120b", family: "gpt-oss")
+    bashToolDisabled = true
+    defer: bashToolDisabled = false
+    let s = setup(p)
+    var names: seq[string]
+    for t in s.tools:
+      names.add t{"function"}{"name"}.getStr
+    check "shell" notin names
+    check names.len > 0
+
+  test "flag off advertises bash again":
+    let p = Profile(name: "zai.glm-5.1", model: "glm-5.1", family: "glm")
+    bashToolDisabled = false
+    let s = setup(p)
+    var foundBash = false
+    for t in s.tools:
+      if t{"function"}{"name"}.getStr == "bash": foundBash = true
+    check foundBash
