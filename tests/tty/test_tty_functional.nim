@@ -540,7 +540,11 @@ suite "terminal visual contract":
     for p in walkFiles(root / "tmp" / "3code" / "dirlock" / "*.lock"):
       let lines = readFile(p).strip.splitLines
       if lines.len > 1: lockId = lines[1]
-    doAssert lockId.len > 16 and lockId[8] == 'T' and lockId[15] == '-',
+    # Timestamp-only ids since the rename; a "-N" suffix only appears on a
+    # same-second collision, so accept both shapes.
+    doAssert lockId.len >= 15 and lockId[0..7].allCharsInSet(Digits) and
+      lockId[8] == 'T' and lockId[9..14].allCharsInSet(Digits) and
+      (lockId.len == 15 or lockId[15] == '-'),
       "dir lock should carry a session id line, got: " & lockId
     tty.expectInHistory lockId
     tty.send "\x1b[A"

@@ -94,7 +94,7 @@ proc newSessionPath*(): string =
     # O_EXCL makes the claim atomic; the counter is the tie-breaker when two
     # processes race for the same second.
     when defined(posix):
-      let fd = open(path.cstring, O_WRONLY or O_CREAT or O_EXCL, 0644)
+      let fd = open(path.cstring, O_WRONLY or O_CREAT or O_EXCL, 0o644)
       if fd >= 0:
         discard close(fd)
         return path

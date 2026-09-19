@@ -2,6 +2,14 @@
 
 **Unreleased**
 
+- **Session reservations are readable again on Linux/macOS.** The atomic
+  O_EXCL reservation added with timestamp-only session names passed
+  `0644` to `open` as a decimal literal (Nim parses no octal without the
+  `0o` prefix; 644₁₀ = 0o1204), so a fresh reservation landed on disk as
+  `-w----r--` with the sticky bit, unreadable even by the owner until the
+  first save's chmod 0600 normalized it. The draft-restore functional
+  test caught it (readFile on the reservation failed with EACCES).
+
 - **Windows: the installer's bundled shell is now a PortableGit tree.**
   The main-channel installer drops
   `%LOCALAPPDATA%\3code\git` (PortableGit) instead of the old
