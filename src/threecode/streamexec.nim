@@ -31,6 +31,26 @@ proc shPath(): string =
 when defined(windows):
   var cachedBash* {.threadvar.}: string
 
+  proc bundledGitRoot*(): string =
+    ## Root of the 3code-owned PortableGit tree
+    ## (`%LOCALAPPDATA%\3code\git`), dropped by the main-channel
+    ## installer. Under a private profile like the legacy MSYS2 tree, so
+    ## the sandwall account cannot read it without a runtime grant
+    ## (see runStreamingBash).
+    result = getEnv("LOCALAPPDATA") & r"\3code\git"
+
+  proc bundledGitBash(): string =
+    ## The installer's PortableGit tree ships the same two bashes as a
+    ## Git for Windows install: `bin\bash.exe`, a launcher that exports
+    ## MSYSTEM and builds a PATH carrying the full unix toolset, and
+    ## `usr\bin\bash.exe`, the bare MSYS2 shell. Prefer the launcher
+    ## (same rationale as gitForWindowsBash); fall back to the bare
+    ## shell.
+    let root = bundledGitRoot()
+    for b in [root / "bin" / "bash.exe", root / "usr" / "bin" / "bash.exe"]:
+      if fileExists(b): return b
+    return ""
+
   proc bundledMsys2Root*(): string =
     ## Root of the 3code-owned MSYS2 tree (`%LOCALAPPDATA%\3code\msys64`).
     ## Under a private profile, so the sandwall account cannot read the
@@ -96,19 +116,35 @@ when defined(windows):
       let drive = result[0].toLowerAscii
       result = "/" & drive & result[2 .. ^1]
 
+  proc bundledRootOf*(bashPath: string): string =
+    ## The 3code-owned tree (PortableGit or legacy MSYS2) the resolved
+    ## bash lives under, or "" for a system-wide install. The sandwall
+    ## account cannot traverse the invoking user's private profile, so
+    ## the sandbox stamp in runStreamingBash grants read+execute on
+    ## exactly this root, in the user's own context.
+    for root in [bundledGitRoot(), bundledMsys2Root()]:
+      if root.len > 0 and
+          bashPath.toLowerAscii.startsWith(root.toLowerAscii & "\\"):
+        return root
+    return ""
+
   proc resolveBash*(): string =
     ## Windows bash resolution, run once at startup. Order: an explicit
-    ## config override (`bash_path`), then Git for Windows (the standard
-    ## source: `winget install Git.Git` and 3code has a shell), then a
+    ## config override (`bash_path`) always wins, then the installer's
+    ## own PortableGit tree (`%LOCALAPPDATA%\3code\git`, the version the
+    ## installer pinned), then Git for Windows (the standard source:
+    ## `winget install Git.Git` and 3code has a shell), then a
     ## standalone MSYS2 install, then the legacy 3code-installed MSYS2
-    ## tree. Returns "" when none is found; the startup guard then
-    ## hard-fails.
+    ## tree (deprioritized: the release-channel installer still drops
+    ## it, and old installs are in the wild). Returns "" when none is
+    ## found; the startup guard then warns and disables the bash tool.
     if cachedBash.len > 0: return cachedBash
     when declared(bashPathOverride):
       if bashPathOverride.len > 0 and fileExists(bashPathOverride):
         cachedBash = bashPathOverride
         return bashPathOverride
-    for cand in [gitForWindowsBash(), systemMsys2Bash(), bundledMsys2Bash()]:
+    for cand in [bundledGitBash(), gitForWindowsBash(), systemMsys2Bash(),
+                 bundledMsys2Bash()]:
       if cand.len > 0 and fileExists(cand):
         cachedBash = cand
         return cand
@@ -594,9 +630,10 @@ export DEBIAN_FRONTEND=noninteractive
       putenv("CHERE_INVOKING", "1")
       putenv("CYGWIN", "nodosfilewarning")
       # Prepend the directory holding the resolved bash so a bare MSYS2
-      # `usr\bin` bash (`...\msys64\usr\bin`, or a `bash_path` override)
-      # finds its unix tools. Git's `bin\bash.exe` launcher ignores this
-      # and builds its own PATH, so the same line is correct for both.
+      # `usr\bin` bash (the bundled trees' fallback, a standalone MSYS2,
+      # or a `bash_path` override) finds its unix tools. Git's
+      # `bin\bash.exe` launcher ignores this and builds its own PATH, so
+      # the same line is correct for both.
       let bashBin = b.parentDir
       putenv("PATH", bashBin & ";" & getEnv("PATH"))
       let posixScript = toPosixPath(scriptPath)
@@ -637,17 +674,18 @@ export DEBIAN_FRONTEND=noninteractive
           var writable = resolved.writable
           var readonly = resolved.readonly
           if fenced: writable.add tmp else: readonly.add tmp
-          # The sandwall account re-spawns bash out of THIS user's MSYS
-          # tree, which sits under a private profile the sandwall account
-          # cannot traverse. The one-time `setup` grant used the elevated
-          # setup account's %LOCALAPPDATA%, which differs whenever a
-          # standard user elevated with a separate admin's credentials -
-          # so the tree the sandbox actually runs bash from had no ACE and
-          # bash died with access denied. Stamp read+execute here, in the
-          # invoking user's own context (they own the tree, so no admin
-          # needed); sandwall's read list handles the ancestors + skip-
-          # when-already-stamped.
-          let msysRoot = bundledMsys2Root()
+          # The sandwall account re-spawns bash out of THIS user's
+          # bundled tree (PortableGit or legacy MSYS2), which sits under
+          # a private profile the sandwall account cannot traverse. The
+          # one-time `setup` grant used the elevated setup account's
+          # %LOCALAPPDATA%, which differs whenever a standard user
+          # elevated with a separate admin's credentials - so the tree
+          # the sandbox actually runs bash from had no ACE and bash died
+          # with access denied. Stamp read+execute here, in the invoking
+          # user's own context (they own the tree, so no admin needed);
+          # sandwall's read list handles the ancestors + skip-when-
+          # already-stamped. A system-wide bash needs no stamp.
+          let msysRoot = bundledRootOf(b)
           if msysRoot.len > 0 and dirExists(msysRoot):
             readonly.add msysRoot
           sandwallWall.beginCapture()

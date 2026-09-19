@@ -349,10 +349,15 @@ when defined(windows):
     # MSYS2 tree still needs a bash. resolveBash() prefers the Git for
     # Windows install, so this suite asserts that rather than the old
     # "returns empty" contract.
-    test "resolveBash finds a bash when the bundled MSYS2 is absent":
+    test "resolveBash finds a bash when the bundled trees are absent":
       cachedBash = ""  # defeat the threadvar cache
-      let bundled = getEnv("LOCALAPPDATA") & r"\3code\msys64\usr\bin\bash.exe"
-      if not fileExists(bundled):
+      let bundled = [getEnv("LOCALAPPDATA") & r"\3code\git\bin\bash.exe",
+                     getEnv("LOCALAPPDATA") & r"\3code\git\usr\bin\bash.exe",
+                     getEnv("LOCALAPPDATA") & r"\3code\msys64\usr\bin\bash.exe"]
+      var anyBundled = false
+      for b in bundled:
+        if fileExists(b): anyBundled = true
+      if not anyBundled:
         let b = resolveBash()
         check b.len > 0
         # The CI runner and most Windows boxes carry Git for Windows, so

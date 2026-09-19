@@ -77,9 +77,9 @@ irm https://3code.capocasa.dev/install.ps1 | iex
 
 ### Manual install on Windows
 
-The PowerShell one-liner also downloads a private MSYS2 tree (bash + unix
-tools) into `%LOCALAPPDATA%\3code\msys64`, so 3code always has a shell of its
-own. If you would rather not, install
+The PowerShell one-liner also downloads a private PortableGit tree (bash
++ unix tools) into `%LOCALAPPDATA%\3code\git`, so 3code always has a shell
+of its own. If you would rather not, install
 [Git for Windows](https://git-scm.com/download/win) and run 3code from a plain
 release folder:
 
@@ -89,6 +89,7 @@ release folder:
    the OpenSSL DLLs, and `cacert.pem`, so the folder is self-contained.
 2. Put the folder on your `PATH`, or call `3code.exe` by full path.
 3. Run it. 3code resolves bash in this order: a `bash_path` setting, then
+   the installer's own PortableGit tree (`%LOCALAPPDATA%\3code\git`), then
    the Git for Windows install, then a standalone MSYS2 (`C:\msys64`), then
    the legacy `%LOCALAPPDATA%\3code\msys64` tree. With Git for Windows
    present, no MSYS2 download is needed.

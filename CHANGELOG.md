@@ -2,6 +2,19 @@
 
 **Unreleased**
 
+- **Windows: the installer's bundled shell is now a PortableGit tree.**
+  The main-channel installer drops
+  `%LOCALAPPDATA%\3code\git` (PortableGit) instead of the old
+  MSYS2 tree, and `resolveBash` picks it up first: `bin\bash.exe`
+  (the launcher that builds the full unix-toolset PATH) with
+  `usr\bin\bash.exe` as fallback. The legacy
+  `%LOCALAPPDATA%\3code\msys64` lookup stays, deprioritized to
+  last, because the release-channel installer still installs it and
+  old installs are in the wild. The sandbox read+execute stamp now
+  follows the tree the resolved bash actually lives under instead of
+  always stamping the legacy MSYS2 root, so a fenced command from the
+  new tree no longer dies with access denied.
+
 - **Windows bash detection covers the standard sources.** `resolveBash`
   now checks, in order: a `bash_path` override, Git for Windows
   (registry `InstallPath`, then the `ProgramFiles` variants, then a

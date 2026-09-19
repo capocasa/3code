@@ -110,9 +110,11 @@ proc refuseRoot() =
       quit ExitUsage
 
 proc warnNoBash() =
-  ## Windows startup warning: 3code depends on bash. resolveBash checks Git
-  ## for Windows, a standalone MSYS2, and the legacy 3code-installed MSYS2
-  ## tree, once at startup (after the first-run provider wizard, so a fresh
+  ## Windows startup warning: 3code depends on bash. resolveBash checks
+  ## the installer's own PortableGit tree (`%LOCALAPPDATA%\3code\git`),
+  ## Git for Windows, a standalone MSYS2, and the legacy 3code-installed
+  ## MSYS2 tree, once at startup (after the first-run provider wizard, so
+  ## a fresh
   ## user saves their provider first). When none is found the bash/shell
   ## tool is dropped from the advertised tool list for the session (a
   ## ```bash fence in a reply still returns the install one-liner via the
