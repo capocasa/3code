@@ -51,6 +51,13 @@ jobs:
             --clang.exe:"$NDK_CLANG" --clang.linkerexe:"$NDK_CLANG" \
             -o:3code-android src/threecode.nim
           file 3code-android
+          # TLS check for the smoke job, cross-compiled here: installing nim
+          # inside the emulated container (pkg install under qemu) can
+          # outlive any reasonable job budget, so the container only RUNS
+          # binaries now. Same flags; config.nims adds the Termux RUNPATH.
+          nim c -d:release --os:android --cpu:arm64 -d:ssl -d:testPlainHttp \
+            --clang.exe:"$NDK_CLANG" --clang.linkerexe:"$NDK_CLANG" \
+            -o:tlscheck-android tests/android_tlscheck.nim
 
       - name: Verify Termux RUNPATH
         # Nim's openssl wrapper dlopens libssl.so.3/libcrypto.so.3 at
@@ -66,6 +73,7 @@ jobs:
         run: |
           mkdir -p 3code-termux-arm64
           cp 3code-android 3code-termux-arm64/3code
+          cp tlscheck-android 3code-termux-arm64/tlscheck
           # Can't run the android binary on the x86 host; version comes
           # from the nimble file (tag releases) or the short SHA.
           grep -m1 '^version' threecode.nimble | cut -d'"' -f2 > 3code-termux-arm64/VERSION
@@ -102,7 +110,7 @@ jobs:
           # The image's Termux tree is owned by uid/gid 1000 (system); run
           # the container as that user so pkg and $HOME behave.
           CID=$(docker create -t --platform linux/arm64 --user 1000:1000 \
-            termux/termux-docker:latest sleep 1800)
+            termux/termux-docker:latest sleep 300)
           docker start $CID >/dev/null
           trap 'docker rm -f $CID >/dev/null 2>&1 || true' EXIT
           docker exec $CID mkdir -p /data/data/com.termux/files/usr/tmp
@@ -116,12 +124,11 @@ jobs:
           # TLS init is the fragile part on Termux: the openssl wrapper
           # dlopens libssl.so.3/libcrypto.so.3 at module init, and it only
           # works when DT_RUNPATH (asserted in the build job) points at the
-          # Termux lib dir. A bare --version doesn't touch TLS; this tiny
-          # program does a verified handshake the same way api.nim does.
-          docker cp tests/android_tlscheck.nim $CID:/data/data/com.termux/files/usr/tmp/
-          docker exec -t $CID sh -lc \
-            'command -v nim >/dev/null || pkg install -y nim >/dev/null 2>&1; \
-             nim c -r -d:ssl /data/data/com.termux/files/usr/tmp/android_tlscheck.nim' \
+          # Termux lib dir. A bare --version doesn't touch TLS; the
+          # cross-compiled tlscheck does a verified handshake the same way
+          # api.nim does. No -t: output must pipe into grep.
+          docker cp 3code-termux-arm64/tlscheck $CID:/data/data/com.termux/files/usr/tmp/tlscheck
+          docker exec $CID /data/data/com.termux/files/usr/tmp/tlscheck \
             | grep -q 'tls handshake ok'
 
       - name: Upload artifact to 3code.capocasa.dev

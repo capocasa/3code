@@ -1,5 +1,6 @@
-## TLS smoke check for the Termux CI smoke job (termux.yml). Compiled and
-## run inside the emulated Termux container against the freshly built
+## TLS smoke check for the Termux CI smoke job (termux.yml).
+## Cross-compiled by the build job (same NDK flags as the main binary)
+## and run inside the emulated Termux container against the freshly built
 ## android binary's runtime environment: the openssl wrapper dlopens
 ## libssl.so.3/libcrypto.so.3 at module init, which only resolves when the
 ## binary's DT_RUNPATH points at the Termux lib dir (see config.nims). A
