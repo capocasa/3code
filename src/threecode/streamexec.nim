@@ -703,7 +703,7 @@ export DEBIAN_FRONTEND=noninteractive
             rawIn.add "sandbox deny, see " & sandbox.sandboxPathInCwd() & "\n"
           return (rawIn, inProcCode, cap)
         else:
-          if sandboxWallWarn and not wallWarnShown and
+          if sandboxEnabled and sandboxWallWarn and not wallWarnShown and
               sandbox.active and sandbox.wallProxyNeeded(sandbox.current):
             wallWarnShown = true
             stderr.writeLine("3code: policy has host rules but the " &

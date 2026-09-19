@@ -12,8 +12,17 @@
   nothing is found, 3code no longer hard-fails: the startup warning
   (after the first-run provider wizard, so a fresh user saves their
   provider first) says the bash tool is disabled and points at a
-  per-user Git for Windows install, and any bash tool call returns the
-  same one-liner with exit 127 instead of the old five-line essay.
+  per-user Git for Windows install. The bash/shell tool is dropped
+  from the advertised tool list for the session, so the model never
+  plans around an execution path that would only error; a ```bash
+  fence in a reply still returns the install one-liner with exit 127
+  via the streamexec guard.
+
+- **No sandbox warnings when the sandbox is off.** `sandbox = off`
+  (or `--no-sandbox`) means the user has already decided bash runs
+  unconfined, so the Windows host-rules warning at bash launch no
+  longer prints either; the startup warnings already respected the
+  switch.
 
 - **A startup warning when the Windows net fence is missing.** `3code
   unsetup` removes the WFP fence but deliberately keeps the sandwall
