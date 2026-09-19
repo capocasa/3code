@@ -35,7 +35,8 @@ suite "transport connection identity":
     if not rejected:
       let wake = newSocket()
       wake.connect("127.0.0.1", port)
-      wake.send("\x16")
+      try: net.send(wake, "\x16", flags = {})
+      except CatchableError: discard
       wake.close()
     closeCachedStreamConn()
     joinThread(server)

@@ -45,10 +45,14 @@ proc serveStuckHead(server: StuckServer) {.thread.} =
     discard
   let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n" &
              "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
-  client.send(head)
-  # Never send a body byte. Wait until the client disconnects (fd shutdown).
-  var buf: array[16, char]
-  discard client.recv(addr buf[0], buf.len, timeout = -1)
+  try:
+    # flags = {}: raise on a gone client instead of std/net's EPIPE spin.
+    net.send(client, head, flags = {})
+    # Never send a body byte. Wait until the client disconnects (fd shutdown).
+    var buf: array[16, char]
+    discard client.recv(addr buf[0], buf.len, timeout = -1)
+  except CatchableError:
+    discard
   client.close()
 
 proc url(server: StuckServer): string =

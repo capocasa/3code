@@ -19,12 +19,22 @@ task test, "Run the test suite via testament (all, or named files)":
   for p in commandLineParams:
     if p.len > 0 and p[0] notin {'-'}:
       files.add p
-  # Plain Nim tracks all imported/configured inputs, not just source mtimes.
-  exec "sh tools/build_binary.sh 3code src/threecode.nim"
-  var cmd = "sh tools/test_dispatch.sh " & (if files.len == 0: "all" else: "files")
-  for file in files:
-    cmd.add " '" & file.replace("'", "'\"'\"'") & "'"
-  exec cmd
+  if files.len == 0:
+    # Full suite through the CI wrapper: testament output goes to a log
+    # file, never a reader pipe whose 64KiB buffer backpressures a wedged
+    # test into silent infinity (the `nimble test` hang), and a watchdog
+    # names and bounds any stall. PER_TEST_SECS=0 by default: local runs
+    # share the box with editors and other suites, where the CI 300s
+    # per-test cap flakily kills slow-but-healthy tty tests; an ambient
+    # PER_TEST_SECS still wins.
+    exec "PER_TEST_SECS=${PER_TEST_SECS:-0} sh tools/ci_tests.sh 2400"
+  else:
+    # Plain Nim tracks all imported/configured inputs, not just source mtimes.
+    exec "sh tools/build_binary.sh 3code src/threecode.nim"
+    var cmd = "sh tools/test_dispatch.sh files"
+    for file in files:
+      cmd.add " '" & file.replace("'", "'\"'\"'") & "'"
+    exec cmd
 
 task docs, "Build HTML manual from docs/manual.md":
   # nim md2html regenerates nimdoc.out.css from nimdoc's built-in default

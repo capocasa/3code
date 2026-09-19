@@ -9,8 +9,9 @@
 ##
 ## Must be compiled with -d:testPlainHttp so streamHttp accepts http://127.0.0.1.
 
-import std/[atomics, json, jsonutils, net, os, sequtils, strutils,
+import std/[atomics, json, jsonutils, os, sequtils, strutils,
             unittest]
+import std/net except send
 from std/nativesockets import selectRead
 from std/times import epochTime
 when defined(posix):
@@ -20,6 +21,16 @@ when defined(posix):
 import threecode/[api, types]
 
 {.push checks: off.}
+
+proc send(client: Socket; data: string) =
+  # NOT std/net's string send: its default SafeDisconn flag makes EPIPE
+  # (client RST'd mid-reply) non-raising inside its retry loop, so the
+  # written counter never advances and the serve thread spins at 100%
+  # CPU forever - the parallel-suite wedge (joinThread waits on a thread
+  # that can never return; repro'd under `testament all`: 95% CPU, 17min
+  # into a <45s test, perf stack pinned to send -> socketError ->
+  # isDisconnectionError). Same shadow as tests/mock_server.nim.
+  net.send(client, data, flags = {})
 
 # ---------------------------------------------------------------------------
 # SSE response builders — each returns a raw SSE byte stream.
@@ -278,11 +289,14 @@ proc serveOnce(server: SseServer) =
   let contentLength = client.readRequestHead()
   let body = server.response
   let resp = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
-  client.send(resp)
-  let chunk = toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n"
-  client.send(chunk)
-  client.send("0\r\n\r\n")
-  client.drainRequestBody(contentLength)
+  try:
+    client.send(resp)
+    let chunk = toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n"
+    client.send(chunk)
+    client.send("0\r\n\r\n")
+    client.drainRequestBody(contentLength)
+  except CatchableError:
+    discard  # client RST'd mid-reply: drop the connection, never spin
   client.close()
 
 proc serveOnceDelayedHead(server: SseServer; delayMs: int) =
@@ -295,11 +309,14 @@ proc serveOnceDelayedHead(server: SseServer; delayMs: int) =
   sleep(delayMs)
   let body = server.response
   let resp = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
-  client.send(resp)
-  let chunk = toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n"
-  client.send(chunk)
-  client.send("0\r\n\r\n")
-  client.drainRequestBody(contentLength)
+  try:
+    client.send(resp)
+    let chunk = toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n"
+    client.send(chunk)
+    client.send("0\r\n\r\n")
+    client.drainRequestBody(contentLength)
+  except CatchableError:
+    discard  # client died while we delayed: drop it, never spin
   client.close()
 
 proc serveThread(server: SseServer) {.thread.} =
@@ -319,11 +336,14 @@ proc serveRetryable(server: SseServer) {.thread.} =
     let contentLength = client.readRequestHead()
     let body = server.response
     let resp = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
-    client.send(resp)
-    let chunk = toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n"
-    client.send(chunk)
-    client.send("0\r\n\r\n")
-    client.drainRequestBody(contentLength)
+    try:
+      client.send(resp)
+      let chunk = toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n"
+      client.send(chunk)
+      client.send("0\r\n\r\n")
+      client.drainRequestBody(contentLength)
+    except CatchableError:
+      discard  # dead re-dialing client (the RST race): serve its re-dial
     client.close()
 
 proc url(server: SseServer): string =
@@ -630,11 +650,14 @@ proc serveCaptureHeaders(server: SseServer) {.thread.} =
     if s.toLowerAscii().startsWith("content-length:"):
       contentLength = try: parseInt(s.split(":")[1].strip) except ValueError: 0
   let body = makeSseCompleteContent("ok", "cap-1")
-  client.send("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n" &
-    "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
-  client.send(toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n")
-  client.send("0\r\n\r\n")
-  client.drainRequestBody(contentLength)
+  try:
+    client.send("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n" &
+      "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
+    client.send(toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n")
+    client.send("0\r\n\r\n")
+    client.drainRequestBody(contentLength)
+  except CatchableError:
+    discard
   client.close()
 
 proc serveVerifyOk(server: SseServer) {.thread.} =
@@ -645,11 +668,14 @@ proc serveVerifyOk(server: SseServer) {.thread.} =
   let contentLength = client.readRequestHead()
   let body = "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}," &
     "\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
-  client.send("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n" &
-    "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
-  client.send(toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n")
-  client.send("0\r\n\r\n")
-  client.drainRequestBody(contentLength)
+  try:
+    client.send("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n" &
+      "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
+    client.send(toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n")
+    client.send("0\r\n\r\n")
+    client.drainRequestBody(contentLength)
+  except CatchableError:
+    discard
   client.close()
 
 proc serveVerifySilent(server: SseServer) {.thread.} =
@@ -789,9 +815,12 @@ proc serveNonStreamDelayed(server: SseServer; delayMs: int) =
       "message": {"content": "BATCH_SURVIVED", "reasoning_content": ""},
       "finish_reason": "stop"}],
     "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}}
-  client.send("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" &
-    "Content-Length: " & $body.len & "\r\nConnection: close\r\n\r\n" & body)
-  client.drainRequestBody(contentLength)
+  try:
+    client.send("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" &
+      "Content-Length: " & $body.len & "\r\nConnection: close\r\n\r\n" & body)
+    client.drainRequestBody(contentLength)
+  except CatchableError:
+    discard
   client.close()
 
 proc serveBlackHoleThen401(server: SseServer) {.thread.} =
@@ -807,8 +836,11 @@ proc serveBlackHoleThen401(server: SseServer) {.thread.} =
     return
   discard c2.readRequestHead()
   let body = "{\"error\":\"unauthorized\"}"
-  c2.send("HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\n" &
-    "Content-Length: " & $body.len & "\r\nConnection: close\r\n\r\n" & body)
+  try:
+    c2.send("HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\n" &
+      "Content-Length: " & $body.len & "\r\nConnection: close\r\n\r\n" & body)
+  except CatchableError:
+    discard
   c2.close()
   c1.close()
 

@@ -17,7 +17,9 @@ proc serve999(s: Srv999) {.thread.} =
       try:
         while client.recvLine(3000).strip.len > 0: discard
       except CatchableError: discard
-      client.send("HTTP/1.1 999 Request Denied\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+      # flags = {}: raise on a client that already hung up, so the outer
+      # handler drops the socket instead of std/net's EPIPE retry spin.
+      net.send(client, "HTTP/1.1 999 Request Denied\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", flags = {})
       client.close()
     except CatchableError:
       discard

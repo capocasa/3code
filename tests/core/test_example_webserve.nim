@@ -15,8 +15,14 @@ import std/[httpclient, json, nativesockets, net, os, osproc, posix, streams, st
             times, unittest]
 import ../stub_helpers
 
-const WebPort = 18991  # the example's own default is 8501; keep the test
-                       # off it so a dev instance doesn't collide
+proc freePort(): int =
+  # Ephemeral, not a fixed number: two suite runs on one box (a second
+  # worktree, another agent session) collide on a fixed port and fail or
+  # cross-talk. Same pattern as test_oauth_loopback.
+  let probe = newSocket()
+  defer: probe.close()
+  probe.bindAddr(Port(0), "127.0.0.1")
+  probe.getLocalAddr()[1].int
 
 proc buildExample(): string =
   ## Compile example/webserve.nim with the stub provider into build/,
@@ -87,8 +93,9 @@ suite "example: webserve":
   test "page, prompt over SSE, and colon command":
     let bin = buildExample()
     let root = newFixture()
+    let webPort = freePort()
     var p = startProcess(bin, workingDir = root / "run",
-      args = ["--port", $WebPort, "-x"],
+      args = ["--port", $webPort, "-x"],
       env = newStringTable({
         "XDG_CONFIG_HOME": root / "xdg",
         "XDG_DATA_HOME": root / "data",
@@ -100,17 +107,17 @@ suite "example: webserve":
       discard p.waitForExit(3000)
       p.close()
 
-    check waitForPort("http://localhost:" & $WebPort & "/")
+    check waitForPort("http://localhost:" & $webPort & "/")
 
     let client = newHttpClient(timeout = 10_000)
     defer: client.close()
 
     # The page loads.
-    let page = client.getContent("http://localhost:" & $WebPort & "/")
+    let page = client.getContent("http://localhost:" & $webPort & "/")
     check page.contains("3code web")
 
     # A colon command runs on the session thread and returns its body.
-    check client.post("http://localhost:" & $WebPort & "/command",
+    check client.post("http://localhost:" & $webPort & "/command",
                       ":help").body.contains(":tokens")
 
     # A prompt turn streams over SSE. Open the event stream first, then
@@ -118,13 +125,13 @@ suite "example: webserve":
     # Read SSE at the socket level: httpclient wants a complete body,
     # but an event stream never ends.
     var ss = newSocket()
-    ss.connect("localhost", WebPort.Port, timeout = 10_000)
+    ss.connect("localhost", webPort.Port, timeout = 10_000)
     ss.send("GET /events HTTP/1.1\r\nHost: localhost\r\n\r\n")
     var headers = ""
     while "\r\n\r\n" notin headers:
       headers.add ss.recv(1, timeout = 10_000)
     check headers.contains("200")
-    check client.post("http://localhost:" & $WebPort & "/prompt",
+    check client.post("http://localhost:" & $webPort & "/prompt",
                       "hello web").code == Http202
     # Read the stream until the turn end arrives (or timeout).
     var acc = ""
@@ -142,7 +149,7 @@ suite "example: webserve":
     # the next user message, not by rewriting the already-sent system prompt.
     createDir(root / "run" / ".3code" / "skills")
     writeFile(root / "run" / ".3code" / "skills" / "late.md", "PRIVATE SKILL BODY")
-    check client.post("http://localhost:" & $WebPort & "/prompt",
+    check client.post("http://localhost:" & $webPort & "/prompt",
                       "continue").code == Http202
     acc = ""
     let secondDeadline = epochTime() + 10.0

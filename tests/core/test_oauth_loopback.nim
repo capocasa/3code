@@ -39,7 +39,10 @@ proc fetchCallback(port: int, path: string): string =
   let s = newSocket()
   defer: s.close()
   s.connect("127.0.0.1", Port(port))
-  s.send("GET " & path & " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+  # flags = {}: raise (caught here) if the loopback server already gave up,
+  # instead of std/net's silent EPIPE retry spin.
+  try: net.send(s, "GET " & path & " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n", flags = {})
+  except CatchableError: discard
   result = ""
   while true:
     let chunk = s.recv(4096)

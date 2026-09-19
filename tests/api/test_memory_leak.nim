@@ -86,12 +86,15 @@ when not defined(windows):
   proc jsonReply(client: Socket; body: string) =
     let head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" &
       "Content-Length: " & $body.len & "\r\nConnection: close\r\n\r\n"
-    client.send(head & body)
+    # flags = {}: std/net's default send swallows EPIPE (cancelled client)
+    # without advancing its retry counter - a 100% CPU spin. Raising lets
+    # serveLoop's per-connection handler drop the dead client.
+    net.send(client, head & body, flags = {})
 
   proc sseReply(client: Socket; body: string) =
     let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n" &
       "Content-Length: " & $body.len & "\r\nConnection: close\r\n\r\n"
-    client.send(head & body)
+    net.send(client, head & body, flags = {})
 
   proc handleRequest(server: LeakServer; client: Socket) =
     let bodyLen = client.readHead()
