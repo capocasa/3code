@@ -274,6 +274,20 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("google", "gemini-3.1-pro-preview", "gemini", "3", "1-pro", "high", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("google", "gemini-3-flash-preview", "gemini", "3", "0-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
 
+    # Command Code provider gateway open models (api.commandcode.ai/
+    # provider/v1, OpenAI chat completions; same plan/API key as their
+    # CLI). Org prefixes on the wire ids are theirs.
+    ("commandcode", "deepseek/deepseek-v4.1-flash", "deepseek", "4.1", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
+    ("commandcode", "deepseek/deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
+    ("commandcode", "deepseek/deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false),
+    ("commandcode", "z-ai/glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
+    ("commandcode", "z-ai/glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbCurrentTurn, false, 1_000_000, false),
+    ("commandcode", "zai-org/GLM-5.2", "glm", "5", "2", "high", 0.2, 8192, tbAllTurns, false, 1_000_000, false),
+    ("commandcode", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false),
+    ("commandcode", "MiniMaxAI/MiniMax-M3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
+    ("commandcode", "xai/grok-4.6", "grok", "4", "6", "high", 0.2, 8192, tbNone, false, 500_000, false),
+    ("commandcode", "xiaomi/mimo-v2.5", "mimo", "2", "5", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
+
     # laguna (served via poolside's OpenAI-compatible API)
     ("poolside", "poolside/laguna-s-2.1", "laguna", "2", "s", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("poolside", "poolside/laguna-xs-2.1", "laguna", "2", "xs", "on", 0.2, 8192, tbNone, false, 262_144, false),

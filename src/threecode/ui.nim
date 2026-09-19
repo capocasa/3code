@@ -124,6 +124,20 @@ proc pathCompletions*(frag: string): seq[string] =
     let full = if e.isDir: e.name & "/" else: e.name
     result.add relPrefix & full
 
+proc wizardProviderCandidates(): seq[string] =
+  ## Provider names offered by the wizard's first field, tab completion,
+  ## and the supported list: subscription logins plus the catalog
+  ## (--experimental) or the known-good set, alphabetical so a user can
+  ## scan for theirs.
+  for n in ["supergrok", "chatgpt", "geminicli"]: result.add n
+  if experimentalEnabled:
+    for (n, _) in ProviderCatalog:
+      if n notin result: result.add n
+  else:
+    for combo in KnownGoodCombos:
+      if combo.provider notin result: result.add combo.provider
+  sorted(result, cmpIgnoreCase)
+
 proc completionFor*(line: string): seq[string] =
   let words = line.split(' ')
   if words.len == 0: return
@@ -145,13 +159,7 @@ proc completionFor*(line: string): seq[string] =
       if words[1] in ["edit", "rm", "remove"]:
         for pr in activeProviders: result.add pr.name
       elif words[1] == "add":
-        result.add ["supergrok", "chatgpt", "geminicli"]
-        if experimentalEnabled:
-          for (n, _) in ProviderCatalog:
-            if n notin result: result.add n
-        else:
-          for combo in KnownGoodCombos:
-            if combo.provider notin result: result.add combo.provider
+        result = wizardProviderCandidates()
       return
   if words[0] == ":model" and words.len == 2:
     let prov = currentProvider()
@@ -307,6 +315,7 @@ proc printSupported() =
   var seen: seq[string]
   for combo in KnownGoodCombos:
     if combo.provider notin seen: seen.add combo.provider
+  seen.sort(cmpIgnoreCase)
   subtleWriteLn(stdout, "  supported: " & seen.join(", "))
 
 proc openBrowserUrl(url: string) {.gcsafe.} =
@@ -438,13 +447,7 @@ proc readFirstProviderField(editor: var minline.LineEditor): string =
   ## provider name or an API key; URLs are experimental-only.
   let prevCb = editor.completionCallback
   editor.completionCallback = proc(ed: LineEditor): seq[string] =
-    result.add ["supergrok", "chatgpt", "geminicli"]
-    if experimentalEnabled:
-      for (n, _) in ProviderCatalog:
-        if n notin result: result.add n
-    else:
-      for combo in KnownGoodCombos:
-        if combo.provider notin result: result.add combo.provider
+    wizardProviderCandidates()
   let label =
     if experimentalEnabled: "  provider, url, or api key: "
     else: "  provider or api key: "
@@ -462,6 +465,7 @@ proc readProviderForKey(editor: var minline.LineEditor): string =
     else:
       for combo in KnownGoodCombos:
         if combo.provider notin result: result.add combo.provider
+    sorted(result, cmpIgnoreCase)
   defer: editor.completionCallback = prevCb
   readRequired(editor, "  provider for this key: ")
 

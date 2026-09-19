@@ -66,6 +66,13 @@
   recovered from SO_ERROR for the verdict. The pre-prompt warnings now
   also honor `[settings] sandbox_wall_warn = off` on their first print
   (the switch was dead: they printed before the config was parsed).
+- **Command Code provider gateway (open models).** `commandcode` is a
+  first-class provider (catalog, wizard, known-good combos): one API
+  key from Command Code Studio runs the open-model lineup - DeepSeek
+  V4, GLM-5.3, Kimi K3, MiniMax M3, Grok 4.6, MiMo - through their
+  OpenAI-compatible `/provider/v1/chat/completions` endpoint. Same key
+  as their `cmd` CLI, metered against the plan's credits. The wizard's
+  supported-provider list and completions are now alphabetical.
 
 - **Hetzner (and other no-space SSE gateways) stream replies again.**
   inference.hetzner.com frames vLLM chunks as `data:{...}` with no space

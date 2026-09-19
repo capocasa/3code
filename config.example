@@ -113,6 +113,16 @@ models = "openai/gpt-oss-120b"
 ; auth = "oauth"
 ; models = "gpt-5.4 gpt-5.5"
 ;
+; Command Code subscription (API key from Studio, via `:provider add` ->
+; commandcode, or just paste the key). The open-model lineup rides the
+; OpenAI-compatible /provider/v1/chat/completions endpoint. Same key as
+; the `cmd` CLI; metered against the plan's credits.
+; [provider]
+; name = "commandcode"
+; url = "https://api.commandcode.ai/provider/v1"
+; key = "..."
+; models = "deepseek/deepseek-v4.1-flash z-ai/glm-5.3 moonshotai/Kimi-K3"
+;
 ; [provider]
 ; name = "xai"
 ; url = "https://api.x.ai/v1"

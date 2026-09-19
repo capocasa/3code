@@ -215,6 +215,21 @@ Switch accounts with:
 :provider chatgpt
 ```
 
+### Command Code
+
+A Command Code plan (GOAT, Pro, Max, or the Provider plan) gives API access
+through their provider gateway. Generate a key in Command Code Studio (the
+same key authenticates their `cmd` CLI) and add it with `:provider add
+commandcode`, or paste the key and pick `commandcode` when asked:
+
+```
+:provider add commandcode
+```
+
+The open-model lineup (DeepSeek, GLM, Kimi, MiniMax, Grok, MiMo) rides the
+gateway's OpenAI-compatible `/provider/v1/chat/completions` endpoint.
+Usage is metered against the plan's credits.
+
 ## Provider catalog
 
 Everything the wizard knows about, grouped by where inference actually
