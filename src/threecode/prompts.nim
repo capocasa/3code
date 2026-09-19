@@ -145,6 +145,17 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nebius", "zai-org/GLM-5.2", "glm", "5", "2", "high", 0.2, 8192, tbAllTurns, false, 1_000_000, false),
     ("baseten", "zai-org/GLM-5.2", "glm", "5", "2", "high", 0.2, 8192, tbAllTurns, false, 1_000_000, false),
 
+    # platte (platte.ai, EU sovereign hosting): OpenAI-compatible
+    # endpoint at https://<username>.on.platte.ai/api/v1 with a personal
+    # access token as bearer. The wizard asks for the username and builds
+    # the host; no static catalog url exists. Model ids are namespaced
+    # on the wire (their /models lists `z-ai/glm-5.3`; the bare id 404s
+    # with "Unknown model"), so the combo carries the prefixed id and
+    # configs persist the normalized `glm-5.3`. GLM-5.3 rides the
+    # generic hosted-stack reasoning knob (top-level reasoning_effort,
+    # low/high/max).
+    ("platte", "z-ai/glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
+
     # gpt-oss
     ("baseten", "openai/gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, tbNone, false, 131_072, false),
     ("cerebras", "gpt-oss-120b", "gpt-oss", "", "120b", "medium", 0.2, 8192, tbNone, false, 131_072, false),

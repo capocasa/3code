@@ -281,6 +281,7 @@ Where to point 3code when data must stay under EU jurisdiction.
 | scaleway | France | |
 | hetzner | Germany | free experiment, **quantized** (fp8/fp4 ids) |
 | together-eu | EU | Together's EU endpoint |
+| ★ platte | Germany | EU sovereign host; url embeds your username, wizard asks for it |
 | aki | EU | |
 | lyceum | EU | |
 

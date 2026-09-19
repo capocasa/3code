@@ -573,7 +573,14 @@ proc promptNewProvider*(editor: var minline.LineEditor,
     url = catalogUrl(name)
     if url == "": url = catalogUrl(canonicalKnownGoodProvider(name))
     ensureUniqueName(name)
-    if experimentalEnabled and url == "":
+    if name == "platte" and not experimentalEnabled:
+      # platte hosts one endpoint per user; the username is the first
+      # host label. Experimental users type the full url instead.
+      hintLn "  platte: https://<username>.on.platte.ai/api/v1", resetStyle
+      let user = readRequired(editor, "  username             : ")
+        .strip(chars = Whitespace + {'/', '.'})
+      url = "https://" & user.toLowerAscii & ".on.platte.ai/api/v1"
+    elif experimentalEnabled and url == "":
       url = readRequired(editor, "  api base url         : ")
         .strip(chars = {'/', ' '})
     elif experimentalEnabled:
