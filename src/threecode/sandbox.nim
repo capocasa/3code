@@ -360,6 +360,43 @@ proc backendWorks*(exe: string): bool =
     except CatchableError:
       result = false
 
+when defined(windows):
+  type NetFenceState* = enum
+    ## The Windows net-fence half of the sandbox: the persistent WFP
+    ## filters `3code setup` installs and `3code unsetup` removes.
+    nfsUnknown
+      ## Not resolved yet; never returned (netFenceState resolves).
+    nfsMissing
+    nfsInstalled
+
+  var netFence: NetFenceState = nfsUnknown
+
+  proc netFenceState*(): NetFenceState =
+    ## Whether the WFP net fence is enforcing, resolved once per process.
+    ## `3code unsetup` deliberately leaves the sandwall user and
+    ## credentials in place (so re-setup keeps the account), which means
+    ## `backendSupported` cannot see it go: this check can. Enumerating
+    ## the filter engine answers in milliseconds but needs an elevated
+    ## token; a standard user falls back to the behavioral probe (this
+    ## binary spawned as the sandwall user, one connect attempt), which
+    ## a working fence blocks synchronously, so only a missing fence
+    ## ever waits out the connect timeout. The probe's cap is passed
+    ## through the environment; sandwall releases that predate the knob
+    ## keep their own default.
+    if netFence != nfsUnknown: return netFence
+    block resolve:
+      try:
+        let st = sandwallWall.fenceStatus()
+        if st.hint.len == 0:
+          netFence = if st.installed: nfsInstalled else: nfsMissing
+          break resolve
+      except CatchableError:
+        discard
+      putEnv("WALL_PROBE_TIMEOUT_MS", "1200")
+      netFence =
+        if sandwallWall.verifyFenceBehavioral(): nfsInstalled else: nfsMissing
+    netFence
+
 proc mtimeOf(path: string): Time =
   try: getLastModificationTime(path)
   except OSError: fromUnix(0)

@@ -2,6 +2,28 @@
 
 **Unreleased**
 
+- **A startup warning when the Windows net fence is missing.** `3code
+  unsetup` removes the WFP fence but deliberately keeps the sandwall
+  user and credentials (so re-setup keeps the account), and the
+  sandbox-available check only looked at user+credentials: after an
+  unsetup, bash kept its filesystem confinement but every sandboxed
+  command had open network egress, with no warning anywhere (the
+  host-rules warning only fires when the policy names hosts, which the
+  Windows default never does). 3code now resolves the fence itself at
+  startup - an engine enum when the token is elevated (milliseconds),
+  otherwise one behavioral probe run as the sandwall user - and prints
+  `· 3code has open network access, run '3code setup' to sandbox`
+  before the prompt opens. The same resolution now also feeds the
+  host-rules check at bash launch, which previously read a standard
+  user's denied enum as "fence missing" and warned about open network
+  on healthy fences. The probe gained two fixes of its own: a timed-out
+  connect no longer crashes the probe child with an unhandled
+  TimeoutError traceback (Nim's timed connect on Windows surfaces an
+  instant failure as a full timeout), and the fence's WSAEACCES is
+  recovered from SO_ERROR for the verdict. The pre-prompt warnings now
+  also honor `[settings] sandbox_wall_warn = off` on their first print
+  (the switch was dead: they printed before the config was parsed).
+
 - **Hetzner (and other no-space SSE gateways) stream replies again.**
   inference.hetzner.com frames vLLM chunks as `data:{...}` with no space
   after the colon. The SSE parser only recognized `data: {...}`, so every

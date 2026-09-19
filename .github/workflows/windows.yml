@@ -39,12 +39,17 @@ jobs:
       - name: Compute build flags
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            # autoupdate on releases only
-            echo "BUILD_FLAGS=-d:autoUpdate" >> "$GITHUB_ENV"
+            # releases: release build + autoupdate
+            echo "BUILD_FLAGS=-d:release -d:autoUpdate" >> "$GITHUB_ENV"
+          else
+            # branch builds exist for testing: same fast debug config as
+            # the local Windows repro loop (AGENTS.md), so what CI ships
+            # for probing is what was probed locally
+            echo "BUILD_FLAGS=--opt:none --debugger:native" >> "$GITHUB_ENV"
           fi
 
       - name: Build
-        run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
+        run: nimble build -y ${{ env.BUILD_FLAGS }}
 
       - name: Stage OpenSSL DLLs for test binaries
         # The tty tests spawn the real 3code binary (built -d:ssl), which

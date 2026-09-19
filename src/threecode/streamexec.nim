@@ -608,8 +608,12 @@ export DEBIAN_FRONTEND=noninteractive
           discard sandbox.reloadIfChanged(getCurrentDir())
           var fenced = false
           if sandbox.wallProxyNeeded(sandbox.current):
-            let fenceInstalled = try: sandwallWall.fenceStatus().installed
-                                 except CatchableError: false
+            # The cached startup resolution (enum when the token is
+            # elevated, behavioral probe otherwise). fenceStatus alone
+            # reads as not-installed for a standard user whose engine
+            # enum is denied, which used to print the OPEN-network
+            # warning on healthy fences and airgap bash behind it.
+            let fenceInstalled = sandbox.netFenceState() == sandbox.nfsInstalled
             if fenceInstalled:
               try:
                 fenced = sandbox.ensureWallProxy(getCurrentDir())

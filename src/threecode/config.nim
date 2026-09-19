@@ -725,6 +725,44 @@ proc resolveSearchKey*(engine: string; keys: Table[string, string]): string =
       return getEnv(envVar)
   ""
 
+proc applyEarlySandboxSettings*(path: string) =
+  ## Apply only the two `[settings]` sandbox switches (`sandbox`,
+  ## `sandbox_wall_warn`) from a tolerant parse of `path`. The pre-prompt
+  ## sandbox warnings print before the full `parseConfigFile` run and
+  ## must respect `sandbox_wall_warn = off` on the first print; the full
+  ## parse later in startup re-applies everything authoritatively. A
+  ## missing or malformed file stays silent here: the full parse owns
+  ## the loud error.
+  if not fileExists(path): return
+  let stream = newFileStream(path, fmRead)
+  if stream == nil: return
+  var p: CfgParser
+  p.open(stream, path)
+  var section = ""
+  while true:
+    var e: CfgEvent
+    try: e = p.next
+    except CatchableError: break
+    case e.kind
+    of cfgEof: break
+    of cfgSectionStart: section = e.section
+    of cfgKeyValuePair, cfgOption:
+      if section != "settings": continue
+      let v = expandEnvValue(e.value).toLowerAscii
+      case e.key
+      of "sandbox", "sandbox_enabled":
+        case v
+        of "on", "true", "yes", "1": sandboxEnabled = true
+        of "off", "false", "no", "0": sandboxEnabled = false
+        else: discard
+      of "sandbox_wall_warn":
+        case v
+        of "on", "true", "yes", "1": sandboxWallWarn = true
+        of "off", "false", "no", "0": sandboxWallWarn = false
+        else: discard
+      else: discard
+    else: discard
+
 proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec], Table[string, string]) =
   ## Returns `(current, providers, colors)` and updates `activeSearchKey` /
   ## `activeSearchEngine` / `activeSearchKeys` / `activeShortcuts` as a side
