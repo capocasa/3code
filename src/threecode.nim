@@ -34,7 +34,7 @@ import threecode/[types, util, prompts, shell, session, compact,
                   toolstream, turns, transcript, sandbox, box, wall,
                   auth_xai, auth_openai, auth_google]
 when defined(windows):
-  import threecode/streamexec  # for resolveBash, used by ensureBash
+  import threecode/streamexec  # for resolveBash, used by warnNoBash
 when not defined(android):
   import tinotify
 else:
@@ -109,23 +109,29 @@ proc refuseRoot() =
         "Run as your normal user. (override: THREECODE_ALLOW_ROOT=1)"
       quit ExitUsage
 
-proc ensureBash() =
-  ## Windows startup guard: 3code depends on bash. resolveBash checks Git
+proc warnNoBash() =
+  ## Windows startup warning: 3code depends on bash. resolveBash checks Git
   ## for Windows, a standalone MSYS2, and the legacy 3code-installed MSYS2
   ## tree, once at startup (after the first-run provider wizard, so a fresh
-  ## user saves their provider first); hard-fail with a one-line fix if
-  ## none is present. POSIX always has /bin/sh so this is a no-op there.
+  ## user saves their provider first). When none is found the bash tool is
+  ## disabled for the session (its calls return an error) and this one-line
+  ## warning says how to fix it. POSIX always has /bin/sh so this is a
+  ## no-op there.
   ##
   ## The provider-stub binary (the tty test harness) skips this: those tests
   ## drive REPL rendering, not bash enforcement, and CI has no bundled MSYS2
-  ## so the guard would hard-fail before the prompt appears. Bash enforcement
+  ## so the warning would fire before the prompt appears. Bash enforcement
   ## is covered by the cli_args `sandbox` suite and by production. Same gate as
   ## initSandbox.
   when defined(windows) and not defined(providerStub):
     if resolveBash().len == 0:
-      stderr.writeLine "3code: no bash found. Install Git for Windows as " &
-        "your user: https://git-scm.com/download/win"
-      quit ExitUsage
+      let msg = "  · bash tool disabled: no bash found. Install Git for " &
+        "Windows as your user: https://git-scm.com/download/win"
+      try:
+        stderr.write(MagentaFg & msg & Reset & "\n")
+      except CatchableError:
+        try: stderr.writeLine msg
+        except CatchableError: discard
 
 proc initSandbox(cwd: string) =
   ## Load the sandbox policy into the global state and resolve this
@@ -574,11 +580,11 @@ proc main() =
   if prof.name == "":
     prof = bootstrapProvider(editor)
   session.profileName = prof.name
-  # Bash gate (Windows): after the first-run provider wizard, so a fresh
-  # user saves their provider before being told to install a bash, and
-  # before any turn can run a command.
-  ensureBash()
-  startupTrace("ensureBash")
+  # Bash warning (Windows): after the first-run provider wizard, so a fresh
+  # user saves their provider before being told to install a bash. The tool
+  # itself stays reachable and reports the disable on call.
+  warnNoBash()
+  startupTrace("warnNoBash")
   setActiveCommandHook(proc(cmd: string) {.gcsafe.} =
     {.cast(gcsafe).}:
       let kind = classifyCommand(cmd)

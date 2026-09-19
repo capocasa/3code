@@ -9,10 +9,11 @@
   `%ProgramFiles%\msys64`), and the legacy 3code-installed MSYS2 tree
   (`%LOCALAPPDATA%\3code\msys64`) from the old installer. Git for
   Windows now wins over the legacy bundle when both are present. When
-  nothing is found, the startup guard fails with a single line pointing
-  at a per-user Git for Windows install instead of the old five-line
-  essay. The gate moved after the first-run provider wizard, so a fresh
-  user saves their provider before being told to install a bash.
+  nothing is found, 3code no longer hard-fails: the startup warning
+  (after the first-run provider wizard, so a fresh user saves their
+  provider first) says the bash tool is disabled and points at a
+  per-user Git for Windows install, and any bash tool call returns the
+  same one-liner with exit 127 instead of the old five-line essay.
 
 - **A startup warning when the Windows net fence is missing.** `3code
   unsetup` removes the WFP fence but deliberately keeps the sandwall

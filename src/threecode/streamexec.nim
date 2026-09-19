@@ -575,7 +575,8 @@ export DEBIAN_FRONTEND=noninteractive
     else:
       let b = resolveBash()
       if b == "":
-        return ("bash not found", 127, cap)
+        return ("bash tool disabled: no bash found. Install Git for " &
+                "Windows: https://git-scm.com/download/win", 127, cap)
       # On Windows, we use bash -c with the script file path.
       # We set MSYSTEM, HOME, and PATH using putenv so that bash
       # can find its tools and the user's home directory.
