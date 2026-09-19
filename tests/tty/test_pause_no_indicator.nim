@@ -30,7 +30,7 @@ discard """
 ##     with no glyph at all. A provider that stalls mid-stream (slow second
 ##     chunk) therefore showed a frozen bar and no spinner, identical to the
 ##     backoff bug from the user's point of view.
-import std/[json, os, strutils, unittest]
+import std/[json, os, strutils, times, unittest]
 import tty_expect
 import stub_helpers
 
@@ -124,10 +124,20 @@ suite "activity indicator covers every turn phase":
     check "\u25cb0%" in tty.rows[barRow]
     check "is not responding (name or service not known)" in tty.rows[barRow - 1]
     check "retry 2/2" in tty.rows[barRow - 1]
-    # Wait out the 1s backoff. The second attempt is now connecting (4s
-    # pre-stream delay): the notice is gone, the row above the bar is the
-    # empty spacer again, and the braille spinner is back.
-    tty.drain(1600)
+    # Wait out the 1s backoff, then sample the second attempt's
+    # in-flight window (4s pre-stream delay): the notice is gone, the row
+    # above the bar is the empty spacer again, and the braille spinner is
+    # back. Wait for that STATE, not for a wall-clock duration: the
+    # backoff sleep steps in 100ms slices, so a starved CI runner
+    # stretches it well past 1s and a fixed drain(1600) samples
+    # mid-backoff. A long wait is harmless either way: a slow child also
+    # stretches the pre-stream delay, so the in-flight window only grows.
+    let inFlightAt = epochTime() + 10.0
+    while epochTime() < inFlightAt and not tty.exited:
+      tty.advanceTicker()
+      tty.drain(100)
+      if "is not responding" notin tty.screenText() and tty.screenHasBraille():
+        break
     tty.advanceTicker()
     tty.drain(50)
     let flightTxt = tty.screenText()
