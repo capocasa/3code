@@ -346,19 +346,20 @@ suite "streamexec: no external timeout dependency":
 when defined(windows):
   suite "streamexec: Windows bash resolution":
     # Issue #34: a Windows user with Git for Windows but no installer-run
-    # MSYS2 tree still needs a bash. resolveBash() now falls back to the
-    # Git for Windows install, so this suite asserts the fallback rather
-    # than the old "returns empty" contract. The bundled MSYS2 still wins
-    # when present, so the git-specific assertion only fires without it.
-    test "resolveBash finds a bash when the bundled MSYS2 is absent":
+    # tree still needs a bash. resolveBash() falls back to Git for Windows
+    # and then a system MSYS2, so this suite asserts the fallback rather
+    # than the old "returns empty" contract. The bundled trees still win
+    # when present, so the fallback assertions only fire without them.
+    test "resolveBash finds a bash when the bundled trees are absent":
       cachedBash = ""  # defeat the threadvar cache
-      let bundled = getEnv("LOCALAPPDATA") & r"\3code\msys64\usr\bin\bash.exe"
-      if not fileExists(bundled):
+      let bundledMsys = getEnv("LOCALAPPDATA") & r"\3code\msys64\usr\bin\bash.exe"
+      let bundledGit = getEnv("LOCALAPPDATA") & r"\3code\PortableGit\usr\bin\bash.exe"
+      if not fileExists(bundledMsys) and not fileExists(bundledGit):
         let b = resolveBash()
         check b.len > 0
-        # The CI runner and most Windows boxes carry Git for Windows, so
-        # the fallback should resolve to its tree.
-        check b.toLowerAscii.contains("git")
+        # The CI runner and most Windows boxes carry Git for Windows or a
+        # system MSYS2, so the fallback should resolve to one of those.
+        check b.toLowerAscii.contains("git") or b.toLowerAscii.contains("msys")
 
     test "runStreamingBash runs through the resolved bash":
       cachedBash = ""

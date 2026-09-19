@@ -111,10 +111,12 @@ proc refuseRoot() =
 
 proc ensureBash() =
   ## Windows startup guard: 3code depends on bash. The supported sources
-  ## are the MSYS2 tree the installer drops into the 3code app dir
-  ## (`%LOCALAPPDATA%\3code\msys64`) and, for a manual install from a
-  ## release folder, the bash shipped with Git for Windows. Hard-fail if
-  ## neither is present. POSIX always has /bin/sh so this is a no-op there.
+  ## are the PortableGit tree the installer drops into the 3code app dir
+  ## (`%LOCALAPPDATA%\3code\PortableGit`) and the older bundled MSYS2
+  ## (`%LOCALAPPDATA%\3code\msys64`), plus, for a manual install from a
+  ## release folder, the bash shipped with Git for Windows or a system
+  ## MSYS2. Hard-fail if none is present. POSIX always has /bin/sh so this
+  ## is a no-op there.
   ##
   ## The provider-stub binary (the tty test harness) skips this: those tests
   ## drive REPL rendering, not bash enforcement, and CI has no bundled MSYS2

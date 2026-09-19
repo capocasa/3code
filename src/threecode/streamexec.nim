@@ -38,6 +38,24 @@ when defined(windows):
     ## time (see runBash) where the invoking user's own path is known.
     result = getEnv("LOCALAPPDATA") & r"\3code\msys64"
 
+  proc bundledPortableGitRoot*(): string =
+    ## Root of the 3code-owned PortableGit tree
+    ## (`%LOCALAPPDATA%\3code\PortableGit`): the trimmed MinGit/PortableGit
+    ## layout the installer drops so 3code owns a bash + git + coreutils
+    ## regardless of what else is on the system. Same private-profile
+    ## situation (and run-time grant) as the MSYS2 tree.
+    result = getEnv("LOCALAPPDATA") & r"\3code\PortableGit"
+
+  proc bundledPortableGitBash(): string =
+    ## MinGit's layout puts bash at `usr\bin\bash.exe` (the busybox build
+    ## ships `bin\` only, and full PortableGit carries both); probe
+    ## `usr\bin` first, `bin` as the portable-layout fallback.
+    let root = bundledPortableGitRoot()
+    for sub in [r"\usr\bin", r"\bin"]:
+      let cand = root & sub & r"\bash.exe"
+      if fileExists(cand): return cand
+    return ""
+
   proc bundledMsys2Bash(): string =
     ## The installer drops an MSYS2 tree into the 3code app dir
     ## (`%LOCALAPPDATA%\3code\msys64`), so 3code owns its bash + unix
@@ -88,15 +106,29 @@ when defined(windows):
       let drive = result[0].toLowerAscii
       result = "/" & drive & result[2 .. ^1]
 
+  proc systemMsys2Bash(): string =
+    ## A system-wide MSYS2 install (`C:\msys64`, the installer's default
+    ## root). Last resort: not owned by 3code, so its toolset is whatever
+    ## the user kept on it.
+    const root = r"C:\msys64"
+    let cand = root & r"\usr\bin\bash.exe"
+    if fileExists(cand): return cand
+    return ""
+
   proc resolveBash*(): string =
-    ## Windows bash resolution. Order: the 3code-owned bundled MSYS2 (the
-    ## supported, always-present source), then an explicit config override
-    ## (`bash_path`), then a Git for Windows install. The Git fallback is
-    ## what lets a user run 3code straight from a plain release folder,
-    ## using the bash Git already installed, without the 3code installer's
-    ## MSYS2 tree. Returns "" when none is found; the startup guard then
-    ## hard-fails.
+    ## Windows bash resolution. Order: the 3code-owned bundled PortableGit
+    ## (the standard source the installer drops), then the 3code-owned
+    ## bundled MSYS2 (the pre-PortableGit layout, still supported), then an
+    ## explicit config override (`bash_path`), then a Git for Windows
+    ## install, then a system MSYS2. The Git fallback is what lets a user
+    ## run 3code straight from a plain release folder, using the bash Git
+    ## already installed, without the 3code installer's tree. Returns ""
+    ## when none is found; the startup guard then hard-fails.
     if cachedBash.len > 0: return cachedBash
+    let portable = bundledPortableGitBash()
+    if portable.len > 0:
+      cachedBash = portable
+      return portable
     let bundled = bundledMsys2Bash()
     if fileExists(bundled):
       cachedBash = bundled
@@ -109,6 +141,10 @@ when defined(windows):
     if gitBash.len > 0:
       cachedBash = gitBash
       return gitBash
+    let sysMsys = systemMsys2Bash()
+    if sysMsys.len > 0:
+      cachedBash = sysMsys
+      return sysMsys
     return ""
 
 const PartialLineFlushMs = 700
@@ -643,9 +679,9 @@ export DEBIAN_FRONTEND=noninteractive
           # invoking user's own context (they own the tree, so no admin
           # needed); sandwall's read list handles the ancestors + skip-
           # when-already-stamped.
-          let msysRoot = bundledMsys2Root()
-          if msysRoot.len > 0 and dirExists(msysRoot):
-            readonly.add msysRoot
+          for root in [bundledPortableGitRoot(), bundledMsys2Root()]:
+            if root.len > 0 and dirExists(root):
+              readonly.add root
           sandwallWall.beginCapture()
           var inProcCode = 127
           var cancelledIn = false
