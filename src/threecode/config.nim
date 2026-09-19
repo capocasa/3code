@@ -123,7 +123,7 @@ var activeShortcuts*: Table[string, string]
   ## apply the user's bindings at startup and after config reloads.
 
 var bashPathOverride*: string
-  ## Windows-only. `[settings]` `bash_path = "..."` overrides MSYS2
+  ## Windows-only. `[settings]` `bash_path = "..."` overrides bash
   ## detection in `streamexec.resolveBash` for users with bash at a
   ## non-standard location. Empty on POSIX (where /bin/sh is always used).
 

@@ -110,11 +110,11 @@ proc refuseRoot() =
       quit ExitUsage
 
 proc ensureBash() =
-  ## Windows startup guard: 3code depends on bash. The supported sources
-  ## are the MSYS2 tree the installer drops into the 3code app dir
-  ## (`%LOCALAPPDATA%\3code\msys64`) and, for a manual install from a
-  ## release folder, the bash shipped with Git for Windows. Hard-fail if
-  ## neither is present. POSIX always has /bin/sh so this is a no-op there.
+  ## Windows startup guard: 3code depends on bash. resolveBash checks Git
+  ## for Windows, a standalone MSYS2, and the legacy 3code-installed MSYS2
+  ## tree, once at startup (after the first-run provider wizard, so a fresh
+  ## user saves their provider first); hard-fail with a one-line fix if
+  ## none is present. POSIX always has /bin/sh so this is a no-op there.
   ##
   ## The provider-stub binary (the tty test harness) skips this: those tests
   ## drive REPL rendering, not bash enforcement, and CI has no bundled MSYS2
@@ -122,13 +122,9 @@ proc ensureBash() =
   ## is covered by the cli_args `sandbox` suite and by production. Same gate as
   ## initSandbox.
   when defined(windows) and not defined(providerStub):
-    let b = resolveBash()
-    if b.len == 0:
-      stderr.writeLine "3code: no bash found. Install Git for Windows"
-      stderr.writeLine "(gitforwindows.org) and 3code will use its bash, or run the"
-      stderr.writeLine "installer to bundle MSYS2:"
-      stderr.writeLine "  irm https://3code.capocasa.dev/install.ps1 | iex"
-      stderr.writeLine "Or set `bash_path` in the [settings] section of your config."
+    if resolveBash().len == 0:
+      stderr.writeLine "3code: no bash found. Install Git for Windows as " &
+        "your user: https://git-scm.com/download/win"
       quit ExitUsage
 
 proc initSandbox(cwd: string) =
@@ -394,13 +390,11 @@ proc main() =
         die("session not found: " & resumeId, ExitConfig)
 
   # ── All syntax validation and fast-exit dispatches are done; only now
-  #    do we gate on bash (Windows) and run the side-effecting startup work
-  #    (global interrupt hook, skill extraction disk I/O, background
-  #    auto-update fork). A usage error must bail before any of it, and a
-  #    session load must not pay for it twice. ──
+  #    do we run the side-effecting startup work (global interrupt hook,
+  #    skill extraction disk I/O, background auto-update fork). A usage
+  #    error must bail before any of it, and a session load must not pay
+  #    for it twice. ──
   startupTrace("cli-parse-done")
-  ensureBash()
-  startupTrace("ensureBash")
   installInterruptHook()
   startupTrace("installInterruptHook")
   materializeBuiltinSkills()
@@ -580,6 +574,11 @@ proc main() =
   if prof.name == "":
     prof = bootstrapProvider(editor)
   session.profileName = prof.name
+  # Bash gate (Windows): after the first-run provider wizard, so a fresh
+  # user saves their provider before being told to install a bash, and
+  # before any turn can run a command.
+  ensureBash()
+  startupTrace("ensureBash")
   setActiveCommandHook(proc(cmd: string) {.gcsafe.} =
     {.cast(gcsafe).}:
       let kind = classifyCommand(cmd)

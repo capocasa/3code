@@ -39,11 +39,19 @@ when defined(windows):
     result = getEnv("LOCALAPPDATA") & r"\3code\msys64"
 
   proc bundledMsys2Bash(): string =
-    ## The installer drops an MSYS2 tree into the 3code app dir
-    ## (`%LOCALAPPDATA%\3code\msys64`), so 3code owns its bash + unix
-    ## toolset regardless of what else is on the system. No probing of
-    ## system MSYS2 roots or PATH: a single deterministic location.
+    ## The legacy installer dropped an MSYS2 tree into the 3code app dir
+    ## (`%LOCALAPPDATA%\3code\msys64`). Installs from that era keep
+    ## working; new installs find bash elsewhere.
     result = bundledMsys2Root() & r"\usr\bin\bash.exe"
+
+  proc systemMsys2Bash(): string =
+    ## A standalone MSYS2 install. The installer's default root is
+    ## `C:\msys64`; `%ProgramFiles%\msys64` covers a non-default drive
+    ## letter chosen in the GUI installer.
+    for root in [r"C:\msys64", getEnv("ProgramFiles") / "msys64"]:
+      let bash = root / "usr" / "bin" / "bash.exe"
+      if fileExists(bash): return bash
+    return ""
 
   proc gitForWindowsRoots(): seq[string] =
     ## Candidate roots of a Git for Windows install, most explicit first.
@@ -89,26 +97,21 @@ when defined(windows):
       result = "/" & drive & result[2 .. ^1]
 
   proc resolveBash*(): string =
-    ## Windows bash resolution. Order: the 3code-owned bundled MSYS2 (the
-    ## supported, always-present source), then an explicit config override
-    ## (`bash_path`), then a Git for Windows install. The Git fallback is
-    ## what lets a user run 3code straight from a plain release folder,
-    ## using the bash Git already installed, without the 3code installer's
-    ## MSYS2 tree. Returns "" when none is found; the startup guard then
+    ## Windows bash resolution, run once at startup. Order: an explicit
+    ## config override (`bash_path`), then Git for Windows (the standard
+    ## source: `winget install Git.Git` and 3code has a shell), then a
+    ## standalone MSYS2 install, then the legacy 3code-installed MSYS2
+    ## tree. Returns "" when none is found; the startup guard then
     ## hard-fails.
     if cachedBash.len > 0: return cachedBash
-    let bundled = bundledMsys2Bash()
-    if fileExists(bundled):
-      cachedBash = bundled
-      return bundled
     when declared(bashPathOverride):
       if bashPathOverride.len > 0 and fileExists(bashPathOverride):
         cachedBash = bashPathOverride
         return bashPathOverride
-    let gitBash = gitForWindowsBash()
-    if gitBash.len > 0:
-      cachedBash = gitBash
-      return gitBash
+    for cand in [gitForWindowsBash(), systemMsys2Bash(), bundledMsys2Bash()]:
+      if cand.len > 0 and fileExists(cand):
+        cachedBash = cand
+        return cand
     return ""
 
 const PartialLineFlushMs = 700

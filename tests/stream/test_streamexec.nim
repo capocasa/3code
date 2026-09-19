@@ -346,10 +346,9 @@ suite "streamexec: no external timeout dependency":
 when defined(windows):
   suite "streamexec: Windows bash resolution":
     # Issue #34: a Windows user with Git for Windows but no installer-run
-    # MSYS2 tree still needs a bash. resolveBash() now falls back to the
-    # Git for Windows install, so this suite asserts the fallback rather
-    # than the old "returns empty" contract. The bundled MSYS2 still wins
-    # when present, so the git-specific assertion only fires without it.
+    # MSYS2 tree still needs a bash. resolveBash() prefers the Git for
+    # Windows install, so this suite asserts that rather than the old
+    # "returns empty" contract.
     test "resolveBash finds a bash when the bundled MSYS2 is absent":
       cachedBash = ""  # defeat the threadvar cache
       let bundled = getEnv("LOCALAPPDATA") & r"\3code\msys64\usr\bin\bash.exe"

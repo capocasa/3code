@@ -88,8 +88,9 @@ release folder:
    unpack it, for example to `C:\tools\3code`. The zip carries `3code.exe`,
    the OpenSSL DLLs, and `cacert.pem`, so the folder is self-contained.
 2. Put the folder on your `PATH`, or call `3code.exe` by full path.
-3. Run it. 3code resolves bash in this order: its own bundled MSYS2, then a
-   `bash_path` setting, then the Git for Windows install. With Git for Windows
+3. Run it. 3code resolves bash in this order: a `bash_path` setting, then
+   the Git for Windows install, then a standalone MSYS2 (`C:\msys64`), then
+   the legacy `%LOCALAPPDATA%\3code\msys64` tree. With Git for Windows
    present, no MSYS2 download is needed.
 
 The one-time `3code setup` (sandbox user + network fence) is still required
