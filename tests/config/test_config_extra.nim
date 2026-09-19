@@ -337,3 +337,50 @@ suite "config: [shortcuts] round-trip":
     writeConfigFile(tmp, "test.model-a", @[])
     let raw = readFile(tmp)
     check raw.find("[shortcuts]") < 0
+
+suite "config: applyEarlySandboxSettings":
+  var tmp = ""
+
+  setup:
+    tmp = getTempDir() / "3code-test-earlysandbox.ini"
+    sandboxEnabled = true
+    sandboxWallWarn = true
+
+  teardown:
+    removeFile(tmp)
+    sandboxEnabled = true
+    sandboxWallWarn = true
+
+  test "applies the two switches like the full parse":
+    type Case = tuple[text: string; wantEnabled, wantWarn: bool]
+    let cases: seq[Case] = @[
+      (text: "[settings]\nsandbox = \"off\"\nsandbox_wall_warn = \"off\"\n",
+       wantEnabled: false, wantWarn: false),
+      (text: "[settings]\nsandbox = \"on\"\nsandbox_wall_warn = \"on\"\n",
+       wantEnabled: true, wantWarn: true),
+      (text: "[settings]\nsandbox = \"true\"\nsandbox_wall_warn = \"0\"\n",
+       wantEnabled: true, wantWarn: false),
+      (text: "[settings]\ncurrent = \"x\"\n",
+       wantEnabled: true, wantWarn: true)]
+    for c in cases:
+      writeFile(tmp, c.text)
+      sandboxEnabled = true
+      sandboxWallWarn = true
+      applyEarlySandboxSettings(tmp)
+      check sandboxEnabled == c.wantEnabled
+      check sandboxWallWarn == c.wantWarn
+      # the full parse must land on the same values the early pass did
+      sandboxEnabled = true
+      sandboxWallWarn = true
+      discard parseConfigFile(tmp)
+      check sandboxEnabled == c.wantEnabled
+      check sandboxWallWarn == c.wantWarn
+
+  test "missing or malformed file leaves defaults, no raise":
+    applyEarlySandboxSettings(tmp)  # does not exist
+    check sandboxEnabled
+    check sandboxWallWarn
+    writeFile(tmp, "[settings\nsandbox = \"off\"\n")  # broken section line
+    applyEarlySandboxSettings(tmp)
+    check sandboxEnabled
+    check sandboxWallWarn

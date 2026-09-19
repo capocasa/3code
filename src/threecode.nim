@@ -438,6 +438,11 @@ proc main() =
     if prompt == "":
       restoredDraft = loadPendingDraft(session.cwd)
 
+  # The pre-prompt sandbox warnings below print before the full config
+  # parse (which happens after the locks); pull the two switches they
+  # consult forward so `sandbox_wall_warn = off` works on the first
+  # print. The full parse re-applies them unchanged.
+  applyEarlySandboxSettings(configPath())
   # Sandbox is mandatory: the single active policy (repo
   # `.sandbox`, user file, else the built-in default) is loaded.
   # Paths resolve relative to the session cwd so the policy follows
@@ -467,6 +472,25 @@ proc main() =
       except CatchableError:
         try: stderr.writeLine msg
         except CatchableError: discard
+    when defined(windows):
+      # The other half of the same warning. `3code unsetup` (or a
+      # setup whose fence install failed) leaves the sandwall user and
+      # credentials in place, so the backend check above still passes
+      # and bash keeps its filesystem confinement - but the WFP net
+      # fence is gone and every sandboxed command has open network
+      # egress. netFenceState costs an engine enum (milliseconds) on an
+      # elevated token, and only for a standard user pays the one
+      # behavioral probe.
+      if sandboxEnabled and sandbox.active and sandboxWallWarn and
+          sandbox.procboxExe.len > 0 and
+          sandbox.netFenceState() == sandbox.nfsMissing:
+        let msg = "  · 3code has open network access, run '3code setup' " &
+          "to sandbox"
+        try:
+          stderr.write(MagentaFg & msg & Reset & "\n")
+        except CatchableError:
+          try: stderr.writeLine msg
+          except CatchableError: discard
     startupTrace("sandbox-setup-warn")
 
   try:
