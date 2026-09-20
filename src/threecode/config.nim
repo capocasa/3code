@@ -874,6 +874,12 @@ proc applyEarlySandboxSettings*(path: string) =
         else: discard
       else: discard
     else: discard
+  # The handle must be closed, not left to the GC's finalizer: an open
+  # FileStream holds the config without FILE_SHARE_DELETE, so the atomic
+  # replace in `writeConfigFile` (moveFile over the live path) fails with
+  # Access Denied on Windows and kills the process through the unhandled
+  # OSError. The finalizer never ran in a short session.
+  p.close()
 
 proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec], Table[string, string]) =
   ## Returns `(current, providers, colors)` and updates `activeSearchKey` /
