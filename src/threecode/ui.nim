@@ -136,7 +136,7 @@ proc wizardProviderCandidates(): seq[string] =
   else:
     for combo in KnownGoodCombos:
       if combo.provider notin result: result.add combo.provider
-  sorted(result, cmpIgnoreCase)
+  sort(result, cmpIgnoreCase)
 
 proc completionFor*(line: string): seq[string] =
   let words = line.split(' ')
@@ -465,7 +465,7 @@ proc readProviderForKey(editor: var minline.LineEditor): string =
     else:
       for combo in KnownGoodCombos:
         if combo.provider notin result: result.add combo.provider
-    sorted(result, cmpIgnoreCase)
+    sort(result, cmpIgnoreCase)
   defer: editor.completionCallback = prevCb
   readRequired(editor, "  provider for this key: ")
 
