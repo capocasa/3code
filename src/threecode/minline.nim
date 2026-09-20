@@ -494,11 +494,13 @@ proc lineSpans*(text: string; promptW, contW, width: int): seq[LineSpan] =
     let rw = runeCellWidth(text.runeAt(i))
     if col + rw > width:
       if text[i] == ' ':
-        # A space that overflows is itself the break.
+        # A space that overflows is itself the break, and only that one
+        # space collapses into it. The rest of the run is typed content:
+        # it renders on the next row (via the caret slice while trailing,
+        # via the span once text follows) and the caret steps over it,
+        # instead of every trailing space vanishing into the wrap.
         result[result.high].stop = contentEnd
-        var s = i
-        while s < text.len and text[s] == ' ':
-          s += runeLenSafe(text, s)
+        let s = i + runeLenSafe(text, i)
         result.add (s, s)
         i = s
         col = contW
