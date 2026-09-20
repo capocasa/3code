@@ -243,7 +243,16 @@ proc diffRowBytes(text, prevText: string; width: int): string =
   ## clears to end of line without touching the next row: padding to the
   ## full width would put the cursor on the last cell, which a following
   ## `\n` (or the terminal's pending wrap) turns into an extra row shift.
-  result = "\r" & text & "\x1b[K"
+  ## A row whose text fills the width skips the EL: in the wrap-pending
+  ## state the cursor still rests ON the last cell, and EL erases from
+  ## the cursor cell inclusive (xterm's ClearRight), which would blank
+  ## the just-written char or caret cell that filled the margin. ttty
+  ## models EL as preserving that cell, so only a real terminal shows
+  ## the loss.
+  if width > 0 and minline.visualCols(text) >= width:
+    result = "\r" & text
+  else:
+    result = "\r" & text & "\x1b[K"
 
 proc paintVolatileRegion*(e: var TerminalEngine; width: int;
                           sections: openArray[VolatileRow];

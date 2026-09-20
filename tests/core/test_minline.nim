@@ -191,11 +191,13 @@ suite "minline pure helpers":
     let bytes = renderBuffer("hello world", "", "", 5)
     check bytes == "hello\r\nworld"
 
-  test "renderBuffer: multi-space run collapses at the break":
-    # width 5: "a" then 8 spaces then "b". The spaces overflow and form one
-    # break run; "b" lands on row 1 with no leading spaces.
+  test "renderBuffer: multi-space run keeps all but one space":
+    # width 5: "a" then 8 spaces then "b". Exactly one space collapses
+    # into the wrap (the first that overflows the row); the rest are
+    # content the user typed: the ones that still fit row 0 are blank
+    # cells beyond the painted slice, the others render leading row 1.
     let bytes = renderBuffer("a        b", "", "", 5)
-    check bytes == "a\r\nb"
+    check bytes == "a\r\n   b"
 
   test "renderBuffer: word-wrap does not duplicate fragment on original line":
     # width 30, prompt 2, contW 2 -> 28 data cells per row.

@@ -3235,6 +3235,12 @@ when false:
     check tty.drawnCaretCount(promptRow) == 0
     check tty.drawnCaretCount(promptRow + 1) == 1
     check tty.drawnCaretCol(promptRow + 1) == 2
+    # Byte contract, not grid: in the wrap-pending state xterm's cursor
+    # still rests ON the last cell and EL erases from the cursor cell
+    # inclusive, so a full row followed by `\x1b[K` blanks the char that
+    # filled the margin. ttty models EL as preserving that cell, which
+    # is exactly why the grid checks above can't catch the loss.
+    check "\u276f 0123456789\x1b[K" notin tty.raw
     # Keep typing: the wrap settles on that same row, in place; no
     # content moved and the prompt row did not shift down.
     tty.send "xy"
@@ -3258,7 +3264,37 @@ when false:
     tty.expectIdleCaret()
     check tty.rows()[promptRow].startsWith("\u276f abcdefg")
     check tty.rows()[promptRow + 1] == "  xy"
-    check tty.drawnCaretCol(promptRow + 1) == 4
+    # Only ONE trailing space may collapse into the wrap. Typing spaces
+    # one keystroke at a time past the margin: each one after the
+    # collapsed break must paint on the caret's row and advance the
+    # caret a cell. Before the fix the whole trailing run collapsed into
+    # the break: the caret froze at the continuation prompt while the
+    # user kept typing spaces (arrow keys still stepped over every one).
+    tty.send "\x1b"
+    tty.drain(200)
+    tty.send "abcdefg"
+    tty.expectIdleCaret()
+    check tty.drawnCaretCol(promptRow) == 9
+    tty.send " "
+    tty.expectIdleCaret()
+    check tty.drawnCaretCol(promptRow) == 10
+    tty.send " "
+    tty.expectIdleCaret()
+    check tty.drawnCaretCol(promptRow) == 11
+    # The third space fills the row's last cell: the caret drops to the
+    # row below, the wrap's home.
+    tty.send " "
+    tty.expectIdleCaret()
+    check tty.drawnCaretCol(promptRow + 1) == 2
+    # The fourth space is the one space the wrap collapses.
+    tty.send " "
+    tty.expectIdleCaret()
+    check tty.drawnCaretCol(promptRow + 1) == 2
+    # The fifth paints and the caret advances past it.
+    tty.send " "
+    tty.expectIdleCaret()
+    check tty.drawnCaretCol(promptRow + 1) == 3
+    check tty.rows()[promptRow].startsWith("\u276f abcdefg")
     # Submit from the caret-only row: the transient row must vanish into
     # the committed block, with no blank row or leftover caret cell
     # between the committed prompt and the reply chrome.
