@@ -88,6 +88,15 @@ func findModel*(p: ProviderRec, name: string): int =
 
 var activeCurrent*: string
 var activeProviders*: seq[ProviderRec]
+var baselineCurrent*: string
+  ## The `current` value as loaded from the config file at startup (before
+  ## any in-session command changed it). `writeConfigFile` diffs against it
+  ## to tell "this instance changed current" apart from "another instance
+  ## changed current on disk" — the latter must not be clobbered.
+var baselineProviders*: seq[ProviderRec]
+  ## Same startup snapshot for the provider list. A provider that differs
+  ## from BOTH this baseline and the in-memory list was edited by another
+  ## 3code instance since startup; `writeConfigFile` keeps the disk version.
 var activeParams*: seq[ParamsRec]
   ## Every `[params]` section from the active config, in file order. Kept
   ## so `writeConfigFile` can persist them and `buildProfile` can resolve
@@ -422,7 +431,7 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
     else: discard
   ""
 
-proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, string], Table[string, string], string, Table[string, string]) =
+proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, string], Table[string, string], string, Table[string, string]) {.raises: [ValueError, IOError, OSError].} =
   ## Streaming parse so that repeated [provider] and [params] sections
   ## accumulate as lists. Returns
   ## `(current, providers, colors, searchKeys, searchEngine, shortcuts)`;
@@ -436,6 +445,12 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
   ## meaning the default `exa`). `colors` is the flat
   ## `[colors]` map (raw keys verbatim, including any `-light` suffix); the
   ## caller routes it through `splitColorOverrides` + `applyColorOverrides`.
+  ## Raises `ValueError` (message prefixed `path:line:`) on a malformed
+  ## file instead of exiting: `writeConfigFile` re-parses the file
+  ## mid-session to merge concurrent instances' edits, and a config that
+  ## went bad on disk must surface as a caught error there, not kill the
+  ## process. Startup callers (`loadStateOrEmpty`, `loadProfile`) turn the
+  ## raise into the same `die` the parser used to do inline.
   var current = ""
   var searchKeys: Table[string, string]
   var searchEngine = ""
@@ -450,7 +465,7 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
   var inParams = false
   var entries: seq[RawEntry]
   let stream = newFileStream(path, fmRead)
-  if stream == nil: die &"cannot open {path}", ExitConfig
+  if stream == nil: raise newException(ValueError, "cannot open " & path)
   var p: CfgParser
   p.open(stream, path)
   proc flushParams() =
@@ -599,10 +614,10 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
         shortcuts[e.key] = v
       else: discard
     of cfgError:
-      die &"{path}: {e.msg}", ExitConfig
+      raise newException(ValueError, &"{path}: {e.msg}")
   p.close
   let verr = validateConfig(path, entries)
-  if verr != "": die verr, ExitConfig
+  if verr != "": raise newException(ValueError, verr)
   # Migration: older configs only kept one global `current`. Seed the
   # active provider's per-provider selection from it so stickiness works
   # (and persists) from the very next config write, not just after the
@@ -629,6 +644,102 @@ func quoteVal(s: string): string =
     else: result.add c
   result.add "\""
 
+func sameProvider(a, b: ProviderRec): bool =
+  ## Field-by-field equality (ProviderRec has no generated ==). `modelPrefix`
+  ## is excluded: it is a transient read-compat field, never written back out.
+  a.name == b.name and a.url == b.url and a.key == b.key and
+  a.family == b.family and a.auth == b.auth and a.models == b.models and
+  a.reasoning == b.reasoning and a.reasonings == b.reasonings and
+  a.currentModel == b.currentModel
+
+proc mergeForeignEdits(path: string; current: var string,
+                        providers: var seq[ProviderRec]): bool =
+  ## Fold edits made by other 3code instances since this one started into
+  ## the values about to be written. `writeConfigFile` serializes the whole
+  ## in-memory state, so a long-lived instance that writes for an
+  ## unrelated reason (`:model`, `:reasoning`, ...) used to revert any
+  ## edit another instance persisted in the meantime — the classic
+  ## "I edited a provider and the next restart didn't see it" report.
+  ##
+  ## Baseline-diff, `current` and each provider, keyed by name:
+  ## - unchanged since startup (matches baseline AND memory): keep memory;
+  ##   if disk differs, another instance touched it — keep disk.
+  ## - changed since startup (memory differs from baseline): this
+  ##   instance's own edit wins; disk is stale.
+  ## - on disk but not in baseline nor memory: another instance added it;
+  ##   keep it.
+  ## - in baseline but neither in memory nor on disk: another instance
+  ##   removed it; stay removed.
+  ## Returns false (and the caller skips the write) when the file exists
+  ## but cannot be read or parsed: better to leave a broken-but-recoverable
+  ## disk copy alone than clobber it with a parse of nothing.
+  if not fileExists(path): return true
+  # parseConfigFile mutates the settings globals as a side effect; the
+  # re-parse here is only to see the disk state, so snapshot and
+  # restore them — otherwise a toggle this instance changed in memory
+  # (e.g. `:streaming off`) would be reverted by the stale disk value
+  # right before the buffer serializes it.
+  let (savedNotify, savedStreaming, savedSandbox, savedPatient,
+       savedWallWarn, savedColorMode, savedBash) =
+    (notifyEnabled, streamingEnabled, sandboxEnabled, patientRetryEnabled,
+     sandboxWallWarn, colorModePref, bashPathOverride)
+  let savedParams = activeParams
+  let (diskCurrent, diskProviders, _, _, _, _) =
+    try: parseConfigFile(path)
+    except CatchableError as e:
+      stderr.writeLine("3code config: WARNING: " & path &
+        " is unreadable, this session's config changes are not saved: " &
+        e.msg)
+      return false
+  notifyEnabled = savedNotify
+  streamingEnabled = savedStreaming
+  sandboxEnabled = savedSandbox
+  patientRetryEnabled = savedPatient
+  sandboxWallWarn = savedWallWarn
+  colorModePref = savedColorMode
+  bashPathOverride = savedBash
+  activeParams = savedParams
+  # Same baseline-diff for the `current` line: an instance that never
+  # switched in-session still holds the startup value, so a different
+  # non-empty value on disk is another instance's switch and survives.
+  if diskCurrent != "" and current == baselineCurrent:
+    current = diskCurrent
+  var diskByName: Table[string, ProviderRec]
+  for pr in diskProviders: diskByName[pr.name] = pr
+  var baselineByName: Table[string, ProviderRec]
+  for pr in baselineProviders: baselineByName[pr.name] = pr
+  var merged: seq[ProviderRec]
+  for pr in providers:
+    let base = baselineByName.getOrDefault(pr.name)
+    if sameProvider(pr, base) and not diskByName.hasKey(pr.name):
+      # Untouched here, removed there: stay removed.
+      continue
+    if sameProvider(pr, base) and diskByName.hasKey(pr.name) and
+        not sameProvider(pr, diskByName[pr.name]):
+      # Untouched here, edited there: keep the disk version.
+      merged.add diskByName[pr.name]
+    else:
+      # This instance's own edit (or nobody's): memory wins.
+      merged.add pr
+  # Providers another instance added since startup: in neither baseline
+  # nor memory, but on disk. Appended after ours, disk order among them.
+  for pr in diskProviders:
+    if pr.name notin baselineByName and
+        not providers.anyIt(it.name == pr.name):
+      merged.add pr
+  providers = merged
+  true
+
+func normalizedCurrent(current: string): string =
+  ## `current` may hold a wire-style model id; persist the normalized
+  ## spelling. Only the model part: running the whole "provider.model"
+  ## string through normalizeModelName strips everything up to the model's
+  ## last `/`, which drops the provider name entirely for ids like
+  ## "baseten.zai-org/GLM-4.7" and leaves an unbootable current.
+  let curDot = current.find('.')
+  if curDot < 0: normalizeModelName(current)
+  else: current[0 .. curDot] & normalizeModelName(current[curDot + 1 .. ^1])
+
 proc writeConfigFile*(path: string, current: string,
                      providers: seq[ProviderRec]) =
   createDir(path.parentDir)
@@ -637,16 +748,11 @@ proc writeConfigFile*(path: string, current: string,
   var providers = providers
   for pr in providers.mitems:
     pr.models = pr.models.mapIt(normalizeModelName(it))
-  # Normalize only the model part: running the whole "provider.model"
-  # string through normalizeModelName strips everything up to the model's
-  # last `/`, which drops the provider name entirely for ids like
-  # "baseten.zai-org/GLM-4.7" and leaves an unbootable current.
-  let curDot = current.find('.')
-  let current =
-    if curDot < 0: normalizeModelName(current)
-    else: current[0 .. curDot] & normalizeModelName(current[curDot + 1 .. ^1])
+  var current = current
+  if not mergeForeignEdits(path, current, providers): return
+  let cur = normalizedCurrent(current)
   var buf = "[settings]\n"
-  buf.add "current = " & quoteVal(current) & "\n"
+  buf.add "current = " & quoteVal(cur) & "\n"
   if activeSearchKeys.len > 0 or activeSearchEngine != "exa":
     buf.add "\n[search]\n"
     if activeSearchEngine != "exa":
@@ -709,7 +815,13 @@ proc writeConfigFile*(path: string, current: string,
     if pm.params.allowPrivate.isSome:
       buf.add "allow-private = " &
         quoteVal(if pm.params.allowPrivate.get: "true" else: "false") & "\n"
-  writeFile(path, buf)
+  # Atomic replace (temp + rename, same scheme as drafts and the dir
+  # sticky-current): a crash or power-off mid-write never leaves a
+  # truncated config, which would otherwise look like "no provider
+  # configured" on the next start.
+  let tmpPath = path & ".tmp"
+  writeFile(tmpPath, buf)
+  moveFile(tmpPath, path)
 
 proc configPath*(): string =
   userConfigRoot() / "config"
@@ -768,8 +880,18 @@ proc loadStateOrEmpty*(path: string): (string, seq[ProviderRec], Table[string, s
   ## `activeSearchEngine` / `activeSearchKeys` / `activeShortcuts` as a side
   ## effect when the config sets them. `colors` is the flat `[colors]` map
   ## for the caller to route through the cascade. Missing file is benign.
-  if not fileExists(path): return ("", @[], initTable[string, string]())
-  let (current, providers, colors, searchKeys, searchEngine, shortcuts) = parseConfigFile(path)
+  ## Also records the startup baseline (`baselineCurrent` /
+  ## `baselineProviders`) that `writeConfigFile` diffs against to keep
+  ## concurrent instances from clobbering each other's edits.
+  if not fileExists(path):
+    baselineCurrent = ""
+    baselineProviders = @[]
+    return ("", @[], initTable[string, string]())
+  let (current, providers, colors, searchKeys, searchEngine, shortcuts) =
+    try: parseConfigFile(path)
+    except ValueError as e: die e.msg, ExitConfig
+  baselineCurrent = current
+  baselineProviders = providers
   if searchEngine != "": activeSearchEngine = searchEngine
   activeSearchKeys = searchKeys
   activeSearchKey = resolveSearchKey(activeSearchEngine, activeSearchKeys)
@@ -913,7 +1035,14 @@ proc loadProfile*(wanted: string): Profile =
     stderr.writeLine ""
     stderr.writeLine ConfigExample
     quit ExitConfig
-  let (current, providers, _, searchKeys, searchEngine, shortcuts) = parseConfigFile(path)
+  let (current, providers, _, searchKeys, searchEngine, shortcuts) =
+    try: parseConfigFile(path)
+    except ValueError as e: die e.msg, ExitConfig
+  # Single-shot runs (`3code -p ...`, subcommands) go through here instead
+  # of loadStateOrEmpty; arm the same merge baseline so their writes don't
+  # clobber concurrent edits either.
+  baselineCurrent = current
+  baselineProviders = providers
   if searchEngine != "": activeSearchEngine = searchEngine
   activeSearchKeys = searchKeys
   activeSearchKey = resolveSearchKey(activeSearchEngine, activeSearchKeys)

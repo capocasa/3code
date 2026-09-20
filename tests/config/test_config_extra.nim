@@ -1,4 +1,4 @@
-import std/[os, strutils, tables, unittest]
+import std/[os, sequtils, strutils, tables, unittest]
 import threecode/[config, prompts, types]
 
 suite "config: parseConfigFile round-trip":
@@ -389,3 +389,166 @@ suite "config: applyEarlySandboxSettings":
     applyEarlySandboxSettings(tmp)
     check sandboxEnabled
     check sandboxWallWarn
+
+suite "config: concurrent instances don't clobber each other":
+  var tmp = ""
+
+  setup:
+    tmp = getTempDir() / "3code-test-concurrent.ini"
+    removeFile(tmp)
+
+  teardown:
+    removeFile(tmp)
+
+  proc loadLikeStartup(path: string): (string, seq[ProviderRec]) =
+    # Model an instance's startup: parse the file AND record the baseline
+    # loadStateOrEmpty would have captured.
+    let (cur, provs, _, _, _, _) = parseConfigFile(path)
+    baselineCurrent = cur
+    baselineProviders = provs
+    (cur, provs)
+
+  test "a stale instance's write keeps another instance's provider edit":
+    # Two instances load the same config; instance A edits a provider's
+    # models; instance B (still holding its startup snapshot) then writes
+    # for an unrelated reason. B's write must not revert A's edit.
+    let providers = @[
+      ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
+                  models: @["model-a"]),
+      ProviderRec(name: "beta", url: "https://b.test", key: "sk-b",
+                  models: @["model-b"])
+    ]
+    writeConfigFile(tmp, "alpha.model-a", providers)
+    # Both instances load the file at startup.
+    let (aCurrent, aProviders) = loadLikeStartup(tmp)
+    let (bCurrent, bProviders) = loadLikeStartup(tmp)
+    check aCurrent == "alpha.model-a"
+    check bProviders.len == 2
+    # Instance A edits alpha's models (in-memory then persist).
+    var aEdited = aProviders
+    aEdited[0].models = @["model-a", "model-a2"]
+    writeConfigFile(tmp, aCurrent, aEdited)
+    # Instance B switches its current (unrelated write, stale snapshot).
+    writeConfigFile(tmp, "beta.model-b", bProviders)
+    # The merged file must keep A's edit AND B's current switch.
+    let (current, merged, _, _, _, _) = parseConfigFile(tmp)
+    check current == "beta.model-b"
+    check merged.len == 2
+    check merged[0].name == "alpha"
+    check merged[0].models == @["model-a", "model-a2"]
+    check merged[1].name == "beta"
+
+  test "a stale instance's write keeps another instance's provider add":
+    writeConfigFile(tmp, "alpha.model-a", @[
+      ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
+                  models: @["model-a"])])
+    let (_, bProviders) = loadLikeStartup(tmp)
+    # Instance A adds a brand-new provider.
+    writeConfigFile(tmp, "alpha.model-a", @[
+      ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
+                  models: @["model-a"]),
+      ProviderRec(name: "gamma", url: "https://g.test", key: "sk-g",
+                  models: @["model-g"])])
+    # Instance B writes its stale one-provider snapshot.
+    writeConfigFile(tmp, "alpha.model-a", bProviders)
+    let (_, merged, _, _, _, _) = parseConfigFile(tmp)
+    check merged.len == 2
+    check merged.mapIt(it.name) == @["alpha", "gamma"]
+
+  test "a stale instance's write keeps another instance's provider rm":
+    writeConfigFile(tmp, "alpha.model-a", @[
+      ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
+                  models: @["model-a"]),
+      ProviderRec(name: "gamma", url: "https://g.test", key: "sk-g",
+                  models: @["model-g"])])
+    let (_, bProviders) = loadLikeStartup(tmp)
+    # Instance A removes gamma.
+    writeConfigFile(tmp, "alpha.model-a", @[
+      ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
+                  models: @["model-a"])])
+    # Instance B writes its stale two-provider snapshot.
+    writeConfigFile(tmp, "alpha.model-a", bProviders)
+    let (_, merged, _, _, _, _) = parseConfigFile(tmp)
+    check merged.mapIt(it.name) == @["alpha"]
+
+  test "an edit made after this instance's own startup still wins":
+    # The merge must not resurrect disk state this instance itself
+    # deliberately changed after loading: baseline-diff means only
+    # providers that differ from BOTH baseline and disk are foreign.
+    writeConfigFile(tmp, "alpha.model-a", @[
+      ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
+                  models: @["model-a"])])
+    let (baseCurrent, baseProviders) = loadLikeStartup(tmp)
+    # This instance edits alpha in memory (differs from baseline).
+    var edited = baseProviders
+    edited[0].models = @["model-a", "model-a2"]
+    writeConfigFile(tmp, baseCurrent, edited)
+    # A second write of the same in-memory state must be stable.
+    writeConfigFile(tmp, baseCurrent, edited)
+    let (_, merged, _, _, _, _) = parseConfigFile(tmp)
+    check merged[0].models == @["model-a", "model-a2"]
+
+  test "a stale instance's write keeps another instance's current switch":
+    # Instance A switches to beta and persists; instance B (started
+    # earlier, never switched in-session) then writes for an unrelated
+    # reason. B still holds its startup current, so the different disk
+    # value is A's switch and must survive B's write.
+    let providers = @[
+      ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
+                  models: @["model-a"]),
+      ProviderRec(name: "beta", url: "https://b.test", key: "sk-b",
+                  models: @["model-b"])
+    ]
+    writeConfigFile(tmp, "alpha.model-a", providers)
+    let (bCurrent, bProviders) = loadLikeStartup(tmp)
+    check bCurrent == "alpha.model-a"
+    writeConfigFile(tmp, "beta.model-b", providers)  # instance A switches
+    writeConfigFile(tmp, bCurrent, bProviders)        # instance B writes stale
+    let (current, merged, _, _, _, _) = parseConfigFile(tmp)
+    check current == "beta.model-b"
+    check merged.len == 2
+
+  test "this instance's own current switch wins over the disk value":
+    # Both the disk and this instance moved current after startup; the
+    # in-session switch (differs from baseline) is this instance's own
+    # edit, so it wins instead of being reverted to the disk value.
+    let providers = @[
+      ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
+                  models: @["model-a", "model-a2"]),
+      ProviderRec(name: "beta", url: "https://b.test", key: "sk-b",
+                  models: @["model-b"])
+    ]
+    writeConfigFile(tmp, "alpha.model-a", providers)
+    let (bCurrent, bProviders) = loadLikeStartup(tmp)
+    writeConfigFile(tmp, "beta.model-b", providers)  # another instance
+    writeConfigFile(tmp, "alpha.model-a2", bProviders)  # own switch
+    let (current, _, _, _, _, _) = parseConfigFile(tmp)
+    check current == "alpha.model-a2"
+
+  test "a write is skipped when the disk config is unreadable":
+    # A config that went bad on disk (hand edit, truncation) must be left
+    # alone: overwriting it with the in-memory list would destroy whatever
+    # the user still has there. The write is dropped, file bytes unchanged.
+    let providers = @[
+      ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
+                  models: @["model-a"])
+    ]
+    writeConfigFile(tmp, "alpha.model-a", providers)
+    let (bCurrent, bProviders) = loadLikeStartup(tmp)
+    writeFile(tmp, "[settings]\nnope = \"x\"\n")
+    let before = readFile(tmp)
+    writeConfigFile(tmp, bCurrent, bProviders)
+    check readFile(tmp) == before
+
+  test "a fresh config with no disk file still writes":
+    # The skip only applies to a file that exists but cannot be parsed;
+    # the first-ever write (no file) must keep working.
+    let providers = @[
+      ProviderRec(name: "alpha", url: "https://a.test", key: "sk-a",
+                  models: @["model-a"])
+    ]
+    writeConfigFile(tmp, "alpha.model-a", providers)
+    check fileExists(tmp)
+    let (current, merged, _, _, _, _) = parseConfigFile(tmp)
+    check current == "alpha.model-a"
+    check merged.len == 1
