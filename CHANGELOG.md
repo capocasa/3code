@@ -2,6 +2,18 @@
 
 **Unreleased**
 
+- **Provider catalog swept against live listings.** `crof` is gone
+  (fraudulent aggregator, removed from the wizard catalog and docs).
+  Every keyed provider's `/models` was re-fetched: end-of-life combos
+  left the known-good registry (stealth previews 0xalpha and union-alpha
+  included, as their own comments predicted), and models already
+  known-good elsewhere were added where providers now list them: the
+  gemini flash line on openrouter/venice/cheaperinference/deepinfra,
+  GLM-5.3 on nvidia/nebius, tencent's full menu, xai's dated grok-4.20
+  builds. `harvest_models --sync` learned the current 12-field combo
+  tuple on the way (it still rendered 10-field rows, which would not
+  have compiled).
+
 - **Session reservations are readable again on Linux/macOS.** The atomic
   O_EXCL reservation added with timestamp-only session names passed
   `0644` to `open` as a decimal literal (Nim parses no octal without the

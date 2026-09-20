@@ -315,7 +315,6 @@ route before blaming the model.
 | nanogpt | varies | crypto payments; often **quantized** |
 | opencode / opencodego | gateway | OpenCode Zen (metered) and Go (subscription) gateways |
 | huggingface | varies | router to partner clouds |
-| crof | varies | small aggregator |
 | cheaperinference | varies | discount aggregator |
 
 The known-good registry also covers a few providers that are not in the

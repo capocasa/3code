@@ -4,8 +4,9 @@
 ## GET /models, and prints `KnownGoodCombos`-style entries for every
 ## listed model whose underlying model already exists on another
 ## provider in the registry. Parameters (family, version, variant,
-## reasoning, temperature, maxTokens, xmlToolCalls, contextWindow) are
-## copied from the existing entry, so the printed tuples can be pasted
+## reasoning, temperature, maxTokens, thinkBack, xmlToolCalls,
+## contextWindow, allowPrivate) are copied from the existing entry, so
+## the printed tuples can be pasted
 ## into `KnownGoodCombos` in src/threecode/prompts.nim after review.
 ##
 ## Model ids vary wildly between providers (`zai-org/GLM-5.2` vs
@@ -200,12 +201,13 @@ proc renderEntry(prov, id: string, src: KnownGoodCombo): string =
   var variant = src.variant
   let sid = shortId(id)
   for suffix in HarvestSuffixes:
-    if sid.endsWith("-" & suffix) and not variant.endsWith("-" & suffix):
+    if sid.endsWith("-" & suffix) and variant != suffix and
+        not variant.endsWith("-" & suffix):
       variant.add "-" & suffix
-  "(\"$1\", \"$2\", \"$3\", \"$4\", \"$5\", \"$6\", $7, $8, $9, $10)," % [
+  "(\"$1\", \"$2\", \"$3\", \"$4\", \"$5\", \"$6\", $7, $8, $9, $10, $11, $12)," % [
     prov, id, src.family, src.version, variant, src.reasoning,
-    fmtFloat(src.temperature), $src.maxTokens, $src.xmlToolCalls,
-    fmtTokens(src.contextWindow)]
+    fmtFloat(src.temperature), $src.maxTokens, $src.thinkBack,
+    $src.xmlToolCalls, fmtTokens(src.contextWindow), $src.allowPrivate]
 
 proc syncRegistry(path: string, live: Table[string, seq[string]]): string =
   ## Returns the registry const block rewritten against the live model
@@ -258,7 +260,7 @@ proc syncRegistry(path: string, live: Table[string, seq[string]]): string =
       else: cur.add c
       inc i
     if cur.strip() != "": fields.add cur.strip()
-    if fields.len != 10:
+    if fields.len != 12 or fields[8] notin ["tbNone", "tbCurrentTurn", "tbAllTurns"]:
       pendingComments.add raw  # unparseable: keep verbatim
       continue
     proc unq(s: string): string =
@@ -267,8 +269,10 @@ proc syncRegistry(path: string, live: Table[string, seq[string]]): string =
       family: unq(fields[2]), version: unq(fields[3]), variant: unq(fields[4]),
       reasoning: unq(fields[5]), temperature: parseFloat(fields[6]),
       maxTokens: parseInt(fields[7].replace("_", "")),
-      xmlToolCalls: fields[8] == "true",
-      contextWindow: parseInt(fields[9].replace("_", "")))
+      thinkBack: parseEnum[ThinkBackMode](fields[8]),
+      xmlToolCalls: fields[9] == "true",
+      contextWindow: parseInt(fields[10].replace("_", "")),
+      allowPrivate: fields[11] == "true")
     let key = e.provider.toLowerAscii & "\0" & e.model.toLowerAscii
     if key in seenKey:
       inc dropped

@@ -561,7 +561,8 @@ suite "api request shaping":
   test "knownGoodReasonings for grok: 4.5 levels, 4.20 adds off":
     check knownGoodReasonings("xai", "grok-4.5") == @["low", "medium", "high"]
     check knownGoodReasonings("xai", "grok-4.3") == @["low", "medium", "high"]
-    check knownGoodReasonings("xai", "grok-4.20") == @["off", "low", "medium", "high"]
+    check knownGoodReasonings("xai", "grok-4.20-0309-non-reasoning") == @["off", "low", "medium", "high"]
+    check knownGoodReasonings("openrouter", "x-ai/grok-4.20") == @["off", "low", "medium", "high"]
     check knownGoodReasonings("xai", "grok-build-0.1") == @["low", "medium", "high"]
     check knownGoodReasonings("openrouter", "x-ai/grok-4.5") == @["low", "medium", "high"]
 
@@ -603,7 +604,7 @@ suite "api request shaping":
     check isKnownGood(Profile(name: "openrouter.x-ai/grok-4.5", model: "x-ai/grok-4.5"))
     check knownGoodContextWindow("xai", "grok-4.5") == 500_000
     check knownGoodContextWindow("xai", "grok-4.3") == 1_000_000
-    check knownGoodContextWindow("xai", "grok-4.20") == 2_000_000
+    check knownGoodContextWindow("xai", "grok-4.20-0309-non-reasoning") == 2_000_000
     check knownGoodContextWindow("xai", "grok-build-0.1") == 256_000
 
   test "supergrok aliases xai known-good entries":
@@ -1169,8 +1170,8 @@ suite "xml tool_call fallback":
     check vb{"instructions"}.getStr.len > 0
 
   test "fallback flag is per-known-good entry":
-    check xmlToolCallsFallback(Profile(name: "nvidia.z-ai/glm-5.2",
-      model: "z-ai/glm-5.2", family: "glm")) == true
+    check xmlToolCallsFallback(Profile(name: "nvidia.z-ai/glm-5.3",
+      model: "z-ai/glm-5.3", family: "glm")) == true
     check xmlToolCallsFallback(Profile(name: "zai.glm-5.1",
       model: "glm-5.1", family: "glm")) == false
     check xmlToolCallsFallback(Profile(name: "nvidia.openai/gpt-oss-120b",
@@ -1181,8 +1182,8 @@ suite "xml tool_call fallback":
       model: "deepseek-v4-pro", family: "deepseek")) == tbAllTurns
     check knownGoodThinkBack(Profile(name: "zai.glm-5.2",
       model: "glm-5.2", family: "glm")) == tbAllTurns
-    check knownGoodThinkBack(Profile(name: "kimicode.kimi-k2.6",
-      model: "kimi-k2.6", family: "kimi")) == tbAllTurns
+    check knownGoodThinkBack(Profile(name: "kimicode.k3",
+      model: "k3", family: "kimi")) == tbAllTurns
     check knownGoodThinkBack(Profile(name: "together.moonshotai/Kimi-K2.6",
       model: "moonshotai/Kimi-K2.6", family: "kimi")) == tbAllTurns
     check knownGoodThinkBack(Profile(name: "openai.gpt-5.5",
@@ -1257,7 +1258,7 @@ suite "xml tool_call fallback":
     block kimi:
       # k2.6 needs `keep: "all"` to replay anything historical
       var body = %*{"stream": true}
-      let p = Profile(name: "kimicode.kimi-k2.6", family: "kimi",
+      let p = Profile(name: "kimi.kimi-k2.6", family: "kimi",
                       model: "kimi-k2.6")
       check knownGoodThinkBack(p) == tbAllTurns
       applyThinkBack(p, body)

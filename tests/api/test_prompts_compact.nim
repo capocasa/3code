@@ -30,17 +30,14 @@ suite "prompts: knownGoodFamily":
   test "Hetzner Qwen3.6-35B-A3B-FP8 is known-good":
     check knownGoodFamily("hetzner", "Qwen/Qwen3.6-35B-A3B-FP8") == "qwen"
 
+  test "Hetzner Qwen3.8-27B is known-good":
+    check knownGoodFamily("hetzner", "Qwen3.8-27B") == "qwen"
+
   test "OpenRouter Qwen3.8-27B is known-good":
     check knownGoodFamily("openrouter", "qwen/qwen3.8-27b") == "qwen"
 
   test "OpenRouter Qwen3.8-Flash is known-good":
     check knownGoodFamily("openrouter", "qwen/qwen3.8-flash") == "qwen"
-
-  test "Hetzner GLM-5.2-NVFP4 is known-good":
-    check knownGoodFamily("hetzner", "GLM-5.2-NVFP4") == "glm"
-
-  test "Hetzner DeepSeek-V4-Flash-0731 is known-good":
-    check knownGoodFamily("hetzner", "DeepSeek-V4-Flash-0731") == "deepseek"
 
   test "DeepSeek dated releases are known-good across providers":
     check knownGoodFamily("openrouter", "deepseek/deepseek-v4-flash-0731") ==
@@ -54,8 +51,10 @@ suite "prompts: knownGoodFamily":
     check knownGoodFamily("nanogpt", "deepseek/deepseek-v4-pro-0813") ==
       "deepseek"
 
-  test "approved DeepSeek service suffixes are known-good":
-    check knownGoodFamily("opencode", "deepseek-v4-flash-free") == "deepseek"
+  test "approved service suffixes are known-good":
+    check knownGoodFamily("baseten", "zai-org/GLM-5.3-Fast") == "glm"
+    check knownGoodFamily("fireworks",
+      "accounts/fireworks/routers/kimi-k3-fast") == "kimi"
     check knownGoodFamily("venice", "deepseek-v4-flash-0731-fast") ==
       "deepseek"
 
@@ -68,9 +67,6 @@ suite "prompts: knownGoodFamily":
     check knownGoodFamily("venice", "e2ee-deepseek-v4-flash") == ""
     check knownGoodFamily("openrouter",
       "deepseek/deepseek-v4-flash-20260731") == ""
-
-  test "Hetzner Kimi-K2.7-Code is known-good":
-    check knownGoodFamily("hetzner", "Kimi-K2.7-Code") == "kimi"
 
   test "litellm k3 (kimicode via counting proxy) is known-good":
     check knownGoodFamily("litellm", "k3") == "kimi"
