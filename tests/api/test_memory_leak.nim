@@ -89,6 +89,7 @@ when not defined(windows):
     # flags = {}: std/net's default send swallows EPIPE (cancelled client)
     # without advancing its retry counter - a 100% CPU spin. Raising lets
     # serveLoop's per-connection handler drop the dead client.
+    # Upstream: nim-lang/Nim#23455, fix drafted as nim-lang/Nim#26251.
     net.send(client, head & body, flags = {})
 
   proc sseReply(client: Socket; body: string) =

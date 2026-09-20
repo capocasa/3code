@@ -29,6 +29,7 @@ import std/net except send
 proc send(client: Socket; data: string) =
   # Nim 2.2 SafeDisconn suppresses EPIPE inside send's retry loop without
   # advancing it. Raise so interrupted clients cannot hang server teardown.
+  # Upstream bug nim-lang/Nim#23455; stdlib fix drafted as nim-lang/Nim#26251.
   net.send(client, data, flags = {})
 from std/times import epochTime
 

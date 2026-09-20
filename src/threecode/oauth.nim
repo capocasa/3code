@@ -268,7 +268,8 @@ proc awaitLoopbackCode*(listenPort: int, expectState: string,
   # flags = {} strips SafeDisconn: std/net's default send() swallows
   # EPIPE without advancing its retry counter, spinning at 100% CPU
   # forever when the browser already closed the tab. Same trap as
-  # tests/mock_server.nim's send shadow.
+  # tests/mock_server.nim's send shadow. Upstream bug nim-lang/Nim#23455;
+  # stdlib fix drafted as nim-lang/Nim#26251.
   try: net.send(client, resp, flags = {})
   except CatchableError: discard
 

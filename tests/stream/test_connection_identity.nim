@@ -35,6 +35,8 @@ suite "transport connection identity":
     if not rejected:
       let wake = newSocket()
       wake.connect("127.0.0.1", port)
+      # flags = {}: no EPIPE retry spin (nim-lang/Nim#23455; fix drafted
+      # as nim-lang/Nim#26251).
       try: net.send(wake, "\x16", flags = {})
       except CatchableError: discard
       wake.close()

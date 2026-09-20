@@ -46,7 +46,8 @@ proc serveStuckHead(server: StuckServer) {.thread.} =
   let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n" &
              "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
   try:
-    # flags = {}: raise on a gone client instead of std/net's EPIPE spin.
+    # flags = {}: raise on a gone client instead of std/net's EPIPE spin
+    # (nim-lang/Nim#23455; fix drafted as nim-lang/Nim#26251).
     net.send(client, head, flags = {})
     # Never send a body byte. Wait until the client disconnects (fd shutdown).
     var buf: array[16, char]

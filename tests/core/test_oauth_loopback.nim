@@ -40,7 +40,8 @@ proc fetchCallback(port: int, path: string): string =
   defer: s.close()
   s.connect("127.0.0.1", Port(port))
   # flags = {}: raise (caught here) if the loopback server already gave up,
-  # instead of std/net's silent EPIPE retry spin.
+  # instead of std/net's silent EPIPE retry spin
+  # (nim-lang/Nim#23455; fix drafted as nim-lang/Nim#26251).
   try: net.send(s, "GET " & path & " HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n", flags = {})
   except CatchableError: discard
   result = ""

@@ -30,6 +30,7 @@ proc send(client: Socket; data: string) =
   # that can never return; repro'd under `testament all`: 95% CPU, 17min
   # into a <45s test, perf stack pinned to send -> socketError ->
   # isDisconnectionError). Same shadow as tests/mock_server.nim.
+  # Upstream bug nim-lang/Nim#23455; stdlib fix drafted as nim-lang/Nim#26251.
   net.send(client, data, flags = {})
 
 # ---------------------------------------------------------------------------
