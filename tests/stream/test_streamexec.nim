@@ -360,9 +360,9 @@ when defined(windows):
       if not anyBundled:
         let b = resolveBash()
         check b.len > 0
-        # The CI runner and most Windows boxes carry Git for Windows, so
-        # the fallback should resolve to its tree.
-        check b.toLowerAscii.contains("git")
+        # The CI runner and most Windows boxes carry Git for Windows or a
+        # system MSYS2, so the fallback should resolve to one of those.
+        check b.toLowerAscii.contains("git") or b.toLowerAscii.contains("msys")
 
     test "runStreamingBash runs through the resolved bash":
       cachedBash = ""
