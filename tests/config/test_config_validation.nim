@@ -147,7 +147,7 @@ suite "config validation: schema (in-process)":
   test "bash_source and bash-source are permitted settings keys":
     let entries = @[
       ("settings", "bash_source", "auto", 3),
-      ("settings", "bash-source", "bundled-git", 4),
+      ("settings", "bash-source", "/usr/local/bin/bash", 4),
     ]
     check validateConfig(P, entries) == ""
 

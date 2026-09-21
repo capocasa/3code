@@ -24,7 +24,7 @@ current = "baseten.glm5"
 ; patient_retry = off ; disable patient retry of 429/5xx/network errors (on by default: ~36h hold so a long-running session rides out a usage limit or network dropout without dropping to the prompt)
 ; sandbox_wall_warn = off ; silence the Windows "wall not set up" warning (host rules in policy, no `3code wall setup-windows` yet)
 ; bash_path = "C:\\tools\\msys64\\usr\\bin\\bash.exe"  ; Windows only: force a bash path (MSYS2 and Git for Windows are auto-detected)
-; bash_source = auto  ; which bash to use: auto (default), bundled-git, git-for-windows, msys2, bundled-msys2, or a full path (any OS)
+; bash_source = auto  ; which bash to use: auto (default, normal detection order) or a full path to the shell (any OS)
 ;
 ; [shortcuts] remaps editor commands. Value is a space-separated list of
 ; keys; empty string unbinds. Defaults match today's hardcoded behaviour.

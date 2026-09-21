@@ -29,7 +29,7 @@ proc shPath(): string =
     if bashPathOverride.len > 0 and fileExists(bashPathOverride):
       return bashPathOverride
   when declared(bashSourcePref):
-    if bashSourcePref.len > 0 and '/' in bashSourcePref and
+    if bashSourcePref.len > 0 and bashSourcePref != "auto" and
         fileExists(bashSourcePref):
       return bashSourcePref
   when defined(android):
@@ -141,15 +141,14 @@ when defined(windows):
 
   proc resolveBash*(): string =
     ## Windows bash resolution, run once at startup. Order: an explicit
-    ## config override (`bash_path`) always wins, then the installer's
-    ## own PortableGit tree (`%LOCALAPPDATA%\3code\git`, the version the
-    ## installer pinned), then Git for Windows (the standard source:
-    ## `winget install Git.Git` and 3code has a shell), then a
-    ## standalone MSYS2 install, then the legacy 3code-installed MSYS2
-    ## tree (deprioritized: the release-channel installer still drops
-    ## it, and old installs are in the wild). A `bash_source` setting
-    ## pins one source: "bundled-git", "git-for-windows", "msys2", or
-    ## "bundled-msys2"; "auto" (the default) keeps the full order.
+    ## config override (`bash_path`, or `bash_source` with a full path)
+    ## always wins, then the installer's own PortableGit tree
+    ## (`%LOCALAPPDATA%\3code\git`, the version the installer pinned),
+    ## then Git for Windows (the standard source: `winget install Git.Git`
+    ## and 3code has a shell), then a standalone MSYS2 install, then the
+    ## legacy 3code-installed MSYS2 tree (deprioritized: the
+    ## release-channel installer still drops it, and old installs are in
+    ## the wild). `bash_source = "auto"` (the default) keeps this order.
     ## Returns "" when none is found; the startup guard then warns and
     ## disables the bash tool.
     if cachedBash.len > 0: return cachedBash
@@ -158,15 +157,10 @@ when defined(windows):
         cachedBash = bashPathOverride
         return bashPathOverride
     when declared(bashSourcePref):
-      let pick = case bashSourcePref
-        of "bundled-git": bundledGitBash()
-        of "git-for-windows": gitForWindowsBash()
-        of "msys2": systemMsys2Bash()
-        of "bundled-msys2": bundledMsys2Bash()
-        else: ""
-      if pick.len > 0 and fileExists(pick):
-        cachedBash = pick
-        return pick
+      if bashSourcePref.len > 0 and bashSourcePref != "auto" and
+          fileExists(bashSourcePref):
+        cachedBash = bashSourcePref
+        return bashSourcePref
     for cand in [bundledGitBash(), gitForWindowsBash(), systemMsys2Bash(),
                  bundledMsys2Bash()]:
       if cand.len > 0 and fileExists(cand):

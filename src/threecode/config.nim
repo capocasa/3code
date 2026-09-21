@@ -137,11 +137,10 @@ var bashPathOverride*: string
   ## non-standard location. Empty on POSIX (where /bin/sh is always used).
 
 var bashSourcePref*: string
-  ## All OS. `[settings]` `bash_source = "..."` picks which installed bash
-  ## 3code uses: "auto" (default, the resolution order below), or one of
-  ## "bundled-git", "git-for-windows", "msys2", "bundled-msys2" to pin a
-  ## specific source. On POSIX the only meaningful values are "auto" and a
-  ## full path (same as bash_path); anything else falls back to /bin/sh.
+  ## All OS. `[settings]` `bash_source = "..."`: "auto" (default) keeps
+  ## the normal detection order; any other value is a full path to the
+  ## shell to use, overriding detection. Same shape as `bash_path`, but
+  ## honored on every OS.
 
 proc gateExperimental*(p: Profile): bool =
   ## True if the profile is allowed to run a turn under current policy:
