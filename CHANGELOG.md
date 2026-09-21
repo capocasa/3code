@@ -1,6 +1,7 @@
 Changelog
 
-Unreleased
+0.8.0  private mode, per-model params, cache-hot resume, commandcode and
+       platte providers, PortableGit in the Windows installer
   - dead oauth refresh token ends the turn with a re-login hint, not a crash
   - harness autosends (steer, flail prods) show exact text in scrollback
   - Grok 4.7 known-good: xai, OpenRouter, OpenCode Zen (same shape as 4.6)
@@ -34,9 +35,6 @@ Unreleased
   - retry waits show an hourglass; braille spinner is in-flight only
   - long-session memory leaks fixed (SSL ctx cache, thread-local frees)
   - GLM-5.2 on Mistral: reasoning_effort ladder, chunked thinking folded
-
-0.7.1  private mode, per-model params, cache-hot resume, DeepSeek V4.1
-       Flash, GPT-6 Astra
   - Windows sandbox works when setup ran as another account (sandwall)
   - resolveBash falls back to Git for Windows; installer bundle optional
   - Esc clears the draft; only an empty prompt cancels the turn
