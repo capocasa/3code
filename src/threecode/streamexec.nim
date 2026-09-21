@@ -23,8 +23,8 @@ var wallWarnShown = false  ## one Windows wall warning per run
 proc shPath(): string =
   ## POSIX shell path. Android/Termux has no /bin/sh; $PREFIX/bin/sh is
   ## the same dash/bash the interactive shell uses. A `bash_path` or
-  ## `bash_source` config value that names an existing file wins, so the
-  ## same setting works on every OS.
+  ## `bash` config value that names an existing file wins, so
+  ## the same setting works on every OS.
   when declared(bashPathOverride):
     if bashPathOverride.len > 0 and fileExists(bashPathOverride):
       return bashPathOverride
@@ -141,14 +141,14 @@ when defined(windows):
 
   proc resolveBash*(): string =
     ## Windows bash resolution, run once at startup. Order: an explicit
-    ## config override (`bash_path`, or `bash_source` with a full path)
+    ## config override (`bash_path`, or `bash` with a full path)
     ## always wins, then the installer's own PortableGit tree
     ## (`%LOCALAPPDATA%\3code\git`, the version the installer pinned),
     ## then Git for Windows (the standard source: `winget install Git.Git`
     ## and 3code has a shell), then a standalone MSYS2 install, then the
     ## legacy 3code-installed MSYS2 tree (deprioritized: the
     ## release-channel installer still drops it, and old installs are in
-    ## the wild). `bash_source = "auto"` (the default) keeps this order.
+    ## the wild). `bash = "auto"` (the default) keeps this order.
     ## Returns "" when none is found; the startup guard then warns and
     ## disables the bash tool.
     if cachedBash.len > 0: return cachedBash

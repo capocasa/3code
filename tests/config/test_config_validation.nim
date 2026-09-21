@@ -144,10 +144,10 @@ suite "config validation: schema (in-process)":
     ]
     check validateConfig(P, entries) == ""
 
-  test "bash_source and bash-source are permitted settings keys":
+  test "bash is a permitted settings key":
     let entries = @[
-      ("settings", "bash_source", "auto", 3),
-      ("settings", "bash-source", "/usr/local/bin/bash", 4),
+      ("settings", "bash", "auto", 3),
+      ("settings", "bash", "/usr/local/bin/bash", 4),
     ]
     check validateConfig(P, entries) == ""
 

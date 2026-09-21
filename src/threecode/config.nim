@@ -137,7 +137,7 @@ var bashPathOverride*: string
   ## non-standard location. Empty on POSIX (where /bin/sh is always used).
 
 var bashSourcePref*: string
-  ## All OS. `[settings]` `bash_source = "..."`: "auto" (default) keeps
+  ## All OS. `[settings]` `bash = "..."`: "auto" (default) keeps
   ## the normal detection order; any other value is a full path to the
   ## shell to use, overriding detection. Same shape as `bash_path`, but
   ## honored on every OS.
@@ -333,7 +333,7 @@ const
                   "sandbox_enabled", "patient_retry", "patient-retry",
                   "sandbox_wall_warn",
                   "tone", "mode", "bash_path", "bash-path",
-                  "bash_source", "bash-source", "auto_update"]
+                  "bash", "auto_update"]
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
   ColorKeys = ["bright-white", "off-white", "dim-white", "token-bar",
                "private-bar"]
@@ -567,7 +567,7 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           else: discard
         of "bash_path", "bash-path":
           bashPathOverride = v
-        of "bash_source", "bash-source":
+        of "bash":
           bashSourcePref = v.strip.toLowerAscii
         else: discard
       of "search":

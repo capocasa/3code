@@ -92,7 +92,7 @@ release folder:
    the installer's own PortableGit tree (`%LOCALAPPDATA%\3code\git`), then
    the Git for Windows install, then a standalone MSYS2 (`C:\msys64`), then
    the legacy `%LOCALAPPDATA%\3code\msys64` tree. With Git for Windows
-   present, no MSYS2 download is needed. A `bash_source` setting overrides
+   present, no MSYS2 download is needed. A `bash` setting overrides
    the automatic order with a full path to the shell (any OS); `auto`
    (the default) keeps the order above.
 
