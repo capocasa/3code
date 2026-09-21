@@ -18,7 +18,7 @@ when defined(windows):
   import std/winlean
 import streamhttp
 import types, util, prompts, streamexec, netthread, auth_openai, auth_google,
-       codeassist
+       codeassist, oauth
 
 type
   VerifyProfileHook* = proc(p: Profile): (bool, string) {.closure.}
@@ -51,7 +51,20 @@ var
 
 proc bearerFor*(p: Profile): string =
   if bearerHook != nil:
-    let t = bearerHook(p)
+    let t =
+      try:
+        bearerHook(p)
+      except OAuthError as e:
+        # A dead stored grant (refresh token expired/revoked/rotated out)
+        # raises OAuthError from deep inside the hook. Nothing between here
+        # and the REPL loop would catch it, so it used to kill the whole
+        # process mid-turn. ApiError is the turn-error channel: the turn
+        # loop renders it and the prompt survives.
+        let dot = p.name.find('.')
+        let provider = if dot > 0: p.name[0 ..< dot] else: p.name
+        raise newException(ApiError, provider & " login expired (" &
+          e.msg & "). sign in again: :provider rm " & provider &
+          ", then :provider add " & provider)
     if t != "": return t
   p.key
 

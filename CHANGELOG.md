@@ -1,6 +1,7 @@
 Changelog
 
 Unreleased
+  - dead oauth refresh token ends the turn with a re-login hint, not a crash
   - harness autosends (steer, flail prods) show exact text in scrollback
   - Grok 4.7 known-good: xai, OpenRouter, OpenCode Zen (same shape as 4.6)
   - retry-backoff notice boxed by blank rows, absorbed on reconnect

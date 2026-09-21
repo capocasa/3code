@@ -1,5 +1,5 @@
 import std/[json, strutils, tables, unittest]
-import threecode/[api, types, util]
+import threecode/[api, oauth, types, util]
 
 suite "api: parseUsage":
   test "parses standard OpenAI usage object":
@@ -565,3 +565,63 @@ suite "api: HttpError":
     check net of ApiError
     check not (http of NetworkHealthError)
     check not (net of HttpError)
+
+suite "api: bearerFor":
+  template withBearerHook(hook: untyped, body: untyped) =
+    ## Install `hook` as api.bearerHook for the duration of `body`,
+    ## restore (nil) afterwards: it is module-level state.
+    let prevHook = api.bearerHook
+    api.bearerHook = hook
+    try:
+      body
+    finally:
+      api.bearerHook = prevHook
+
+  test "hook token wins over the profile key":
+    withBearerHook(proc(p: Profile): string = "tok"):
+      check bearerFor(Profile(name: "xai.grok-4", key: "xai-key")) == "tok"
+
+  test "empty hook result falls back to the profile key":
+    withBearerHook(proc(p: Profile): string = ""):
+      check bearerFor(Profile(name: "xai.grok-4", key: "xai-key")) == "xai-key"
+
+  test "nil hook uses the profile key":
+    check bearerFor(Profile(name: "xai.grok-4", key: "xai-key")) == "xai-key"
+
+  test "dead oauth grant becomes a turn ApiError, not an unhandled OAuthError":
+    # Regression: a rejected refresh token (HTTP 400 from the token
+    # endpoint) used to escape as OAuthError through callModel and crash
+    # the whole REPL. It must arrive as an ApiError (the turn-error
+    # channel the turn loop renders) carrying the provider name and a
+    # re-login hint.
+    let deadGrant = proc(p: Profile): string =
+      raise newException(OAuthError,
+        "HTTP 400: Invalid or unknown refresh token")
+    var msg = ""
+    var sawApiError = false
+    withBearerHook(deadGrant):
+      try:
+        discard bearerFor(Profile(name: "supergrok.grok-4.7", key: ""))
+      except ApiError as e:
+        sawApiError = true
+        msg = e.msg
+      except OAuthError:
+        fail()
+    check sawApiError
+    check "supergrok" in msg
+    check "login expired" in msg
+    check "Invalid or unknown refresh token" in msg
+    check ":provider rm supergrok" in msg
+    check ":provider add supergrok" in msg
+
+  test "grant-less provider name (no dot) still names itself in the error":
+    let deadGrant = proc(p: Profile): string =
+      raise newException(OAuthError,
+        "HTTP 400: Invalid or unknown refresh token")
+    var msg = ""
+    withBearerHook(deadGrant):
+      try:
+        discard bearerFor(Profile(name: "supergrok", key: ""))
+      except ApiError as e:
+        msg = e.msg
+    check "supergrok login expired" in msg
