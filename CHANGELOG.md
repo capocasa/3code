@@ -2,6 +2,11 @@
 
 **Unreleased**
 
+- **Grok 4.7.** xAI's new frontier model joins the known-good table:
+  `xai` (and the SuperGrok subscription twin), OpenRouter
+  (`x-ai/grok-4.7`), and OpenCode Zen. Same shape as grok-4.6: 500k
+  context, reasoning_effort low/medium/high (default)/xhigh, no off.
+
 - **The rate-limit notice gets breathing room.** The retry-backoff
   notice (rate limit, server error, network quiet) sat flush against
   the transcript line above and the token bar below. It is now boxed

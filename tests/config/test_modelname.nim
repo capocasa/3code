@@ -123,6 +123,7 @@ suite "modelname: normalizeModelName":
 
   test "grok multi-agent":
     check normalizeModelName("x-ai/grok-4.20-multi-agent") == "grok-4.20-multi-agent"
+    check normalizeModelName("x-ai/grok-4.7") == "grok-4.7"
 
   test "gpt-4o":
     check normalizeModelName("gpt-4o-mini") == "gpt-4o-mini"

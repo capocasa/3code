@@ -424,6 +424,14 @@ suite "api request shaping":
                       model: "grok-4.5", reasoning: "low")
       applyReasoning(p, body)
       check body{"reasoning_effort"}.getStr == "low"
+    block xhigh:
+      var body = %*{"stream": true}
+      let p = Profile(name: "xai.grok-4.7", family: "grok",
+                      version: "4", variant: "7",
+                      model: "grok-4.7", reasoning: "xhigh")
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == "xhigh"
+      check "reasoning" notin body
 
   test "grok-4.20 off disables reasoning, levels send reasoning_effort":
     block offn:
@@ -558,7 +566,10 @@ suite "api request shaping":
     check "max_output_tokens" notin body
     check body{"instructions"}.getStr == "sys"
 
-  test "knownGoodReasonings for grok: 4.5 levels, 4.20 adds off":
+  test "knownGoodReasonings for grok: 4.7/4.6 add xhigh, 4.20 adds off":
+    check knownGoodReasonings("xai", "grok-4.7") == @["low", "medium", "high", "xhigh"]
+    check knownGoodReasonings("xai", "grok-4.6") == @["low", "medium", "high", "xhigh"]
+    check knownGoodReasonings("openrouter", "x-ai/grok-4.7") == @["low", "medium", "high", "xhigh"]
     check knownGoodReasonings("xai", "grok-4.5") == @["low", "medium", "high"]
     check knownGoodReasonings("xai", "grok-4.3") == @["low", "medium", "high"]
     check knownGoodReasonings("xai", "grok-4.20-0309-non-reasoning") == @["off", "low", "medium", "high"]
@@ -577,6 +588,15 @@ suite "api request shaping":
     check knownGoodGeneration("openai", "gpt-6-astra").maxTokens == 8192
     check maxOutputTokensFor(Profile(name: "openai.gpt-6-astra",
       model: "gpt-6-astra")) == 128_000
+
+  test "grok-4.7 is known-good for xai and supergrok":
+    # The subscription twin resolves through the xai catalog; same
+    # 500k context window and high effort default.
+    check isKnownGood(Profile(name: "xai.grok-4.7", model: "grok-4.7"))
+    check isKnownGood(Profile(name: "supergrok.grok-4.7", model: "grok-4.7"))
+    check knownGoodContextWindow("xai", "grok-4.7") == 500_000
+    check knownGoodContextWindow("supergrok", "grok-4.7") == 500_000
+    check knownGoodGeneration("xai", "grok-4.7").maxTokens == 8192
 
   test "maxOutputTokensFor caps the escalation ladder at model output limits":
     # GLM-5.3 and DeepSeek-V4 sit in 1M contexts but cap a single
