@@ -1877,7 +1877,12 @@ proc apiFinalUsage*(usage: Usage; window, elapsed: int;
     if hadTicker:
       emitFatPromptEvent clearTickerEvent()
     setBarPromptState(label)
+  # Resting-label bookkeeping must survive the pendingHint this turn's
+  # own receipt commit clears: usage-less turn ends repaint the bar from
+  # it, so the idle bar keeps the latest numbers instead of vanishing.
   emitFatPromptEvent setPendingHintEvent(usage, window, elapsed)
+  emitFatPromptEvent setRestingLabelEvent(contextLabel(usage.promptTokens,
+                                                        window))
   if window > 0 and usage.promptTokens.float > 0.7 * window.float and
      usage.promptTokens.float <= SummarizeThresholdFrac * window.float:
     commitTranscriptBytes(
@@ -1888,17 +1893,20 @@ proc apiFinalUsage*(usage: Usage; window, elapsed: int;
 proc commitTurnEndNotice*(bytes: string) =
   ## Commit a turn-end harness line (no-usage elapsed, interrupt, fatal
   ## error, empty-reply exhaustion, flail abort) as the turn's final
-  ## scrollback item, then drop the volatile bar. These turn ends never
-  ## arm `pendingHint`, so any bar row left above the idle prompt is
-  ## un-convertible: the next submit erases it and paints no receipt in
-  ## its place (the "sending a prompt removes the line above the prompt"
-  ## symptom). Clearing the bar inside `beforeRepaint` makes the commit's
-  ## own repaint produce prompt-only idle chrome, the same geometry the
-  ## first submit is correct for; the committed line keeps the timing or
-  ## error info. The next turn's spinner/footer paint rebuilds the bar.
+  ## scrollback item, then rest the bar at the last-known context label.
+  ## These turn ends never arm `pendingHint`, so the volatile live-stream
+  ## label they leave on the bar is un-convertible: the next submit would
+  ## erase it and paint no receipt in its place. Repainting the standard
+  ## resting bar (same shape a successful turn leaves) inside
+  ## `beforeRepaint` swaps that stale label for the latest real numbers;
+  ## the next submit then consumes it exactly like any resting bar. A
+  ## session with no usage yet has no resting label; that stays prompt-only.
   commitTranscriptBytes(bytes, restoreEditor = true,
     beforeRepaint = proc() =
-      emitFatPromptEvent clearBarEvent())
+      if fatPromptState.footer.restingLabel.len > 0:
+        emitFatPromptEvent setBarEvent(fatPromptState.footer.restingLabel)
+      else:
+        emitFatPromptEvent clearBarEvent())
 
 proc apiNoUsage*(elapsed: int) =
   commitTurnEndNotice(&"  · {elapsed}s\r\n")

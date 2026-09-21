@@ -733,6 +733,8 @@ proc main() =
         let label = tokenLineLabel(lastUsage, window)
         emitFatPromptEvent setBarEvent(label, hasGap = true)
         emitFatPromptEvent setPendingHintEvent(lastUsage, window, -1)
+        emitFatPromptEvent setRestingLabelEvent(
+          contextLabel(lastUsage.promptTokens, window))
         paintResumedBarPrompt(label)
       else:
         paintInitialPrompt(prof)

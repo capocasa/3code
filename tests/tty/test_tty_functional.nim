@@ -2711,11 +2711,14 @@ suite "terminal visual contract":
   test "submit after a usage-less turn never removes the line above the prompt":
     # Reported: "sometimes - not always - sending a prompt removes the
     # line above the prompt. Never happens as first prompt." The sometimes
-    # is a turn whose stream ends without a usage object (gateway/proxy
-    # variance): that turn-end path never arms `pendingHint`, so the bar
-    # row it leaves above the idle prompt cannot be converted to a receipt
-    # - the next submit erases it and nothing takes its place. The first
-    # prompt is immune because no bar exists yet.
+    # was a turn whose stream ends without a usage object (gateway/proxy
+    # variance): that turn-end path never arms `pendingHint`, so the stale
+    # live-stream bar it left above the idle prompt was un-convertible and
+    # the next submit's erase ate a committed row. The turn end now repaints
+    # the standard resting bar (last-known context label), so the geometry
+    # the next submit consumes is exactly the one a successful turn leaves.
+    # This test pins both: the resting bar survives the usage-less turn, and
+    # the submit after it still eats nothing.
     let root = newFixture("no_usage_submit")
     writeConfiguredProvider(root)
     writeStubResponses(root, %*[
@@ -2746,9 +2749,10 @@ suite "terminal visual contract":
     tty.drain(300)
     tty.expectInHistory "↑10"
     # The usage-less turn ends with the elapsed line in scrollback. Its
-    # idle chrome must be prompt-only: the row above the live prompt is
-    # the reserved gap, blank. A stale bar row there is exactly the line
-    # the next submit removes.
+    # idle chrome keeps the resting bar: the row above the live prompt is
+    # the last-known context label (the same resting shape a successful
+    # turn leaves), not the stale live-stream label and not blank. The bar
+    # must carry the previous turn's numbers, not estimates.
     block:
       let rows = tty.rows()
       var promptRow = -1
@@ -2756,10 +2760,10 @@ suite "terminal visual contract":
         if r.startsWith("❯"): promptRow = i
       doAssert promptRow >= 1, "no live prompt row:\n" &
         tty.dumpFramesAround("Second reply line.")
-      doAssert rows[promptRow - 1].strip.len == 0,
-        "stale bar row above the idle prompt after a usage-less turn " &
-        "(the next submit removes it): '" & rows[promptRow - 1] & "'\n" &
-        tty.dumpFramesAround("Second reply line.")
+      doAssert rows[promptRow - 1].strip == "○0%",
+        "resting bar above the idle prompt after a usage-less turn " &
+        "must hold the last-known context label: '" &
+        rows[promptRow - 1] & "'\n" & tty.dumpFramesAround("Second reply line.")
     # Submit 3 must not eat anything: the elapsed line survives and the
     # new echo gets its blank separator.
     tty.send "hello three"; tty.expect "hello three"; tty.send "\n"
@@ -3086,6 +3090,20 @@ suite "terminal visual contract":
     tty.expectOnScreen "❯"  # prompt painted on the grid, not just raw bytes
     tty.expectAlive()
     tty.expectIdleCaret()  # ensure turn 2's interrupt fully settles first
+    # The interrupt's turn-end notice must not delete the token bar: it
+    # rests at turn 1's context label (row-exact: the receipt above also
+    # contains the glyph) until the next usage repaints it. A missing bar
+    # here is the "token bar gets deleted after running a prompt" bug.
+    block:
+      let rows = tty.rows()
+      var promptRow = -1
+      for i, r in rows:
+        if r.startsWith("❯"): promptRow = i
+      doAssert promptRow >= 2 and rows[promptRow - 1].strip == "○0%",
+        "resting bar missing above the idle prompt after an interrupted " &
+        "turn (row above prompt = '" &
+        (if promptRow >= 1: rows[promptRow - 1] else: "?") & "')\n" &
+        tty.dumpFramesAround("interrupted by user")
 
     # --- Turn 3: a second prompt after interrupt (process still interactive). ---
     tty.send "turn three"

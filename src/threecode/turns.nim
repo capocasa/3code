@@ -1070,6 +1070,10 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           flailDet = FlailDetector()  # fresh conversation, fresh ladder
           emitFatPromptEvent clearPendingHintEvent()
           emitFatPromptEvent clearBarEvent()
+          # The wiped conversation's numbers are meaningless to the rebuilt
+          # one: drop the resting label so a later usage-less turn end does
+          # not resurrect a bar with stale context numbers.
+          emitFatPromptEvent setRestingLabelEvent("")
           if session.savePath != "":
             # Drop the draft belonging to the cleared conversation before the
             # session path moves to a new id.

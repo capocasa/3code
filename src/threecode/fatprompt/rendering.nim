@@ -29,6 +29,7 @@ type
     hasGap*: bool
     ticker*: string
     pendingHint*: PendingHint
+    restingLabel*: string
 
   FatPromptState* = object
     footer*: FooterState
@@ -40,7 +41,8 @@ type
     fpeSetTicker,
     fpeClearTicker,
     fpeSetPendingHint,
-    fpeClearPendingHint
+    fpeClearPendingHint,
+    fpeSetResting
 
   FatPromptEvent* = object
     case kind*: FatPromptEventKind
@@ -57,6 +59,8 @@ type
       elapsed*: int
     of fpeClearBar, fpeClearTicker, fpeClearPendingHint:
       discard
+    of fpeSetResting:
+      restingLabel*: string
 
   PromptMarker* = enum
     pmUser, pmAssistant, pmBash, pmRead, pmWrite, pmPatch, pmOther
@@ -186,6 +190,12 @@ proc setPendingHintEvent*(usage: Usage; window, elapsed: int): FatPromptEvent =
 proc clearPendingHintEvent*(): FatPromptEvent =
   FatPromptEvent(kind: fpeClearPendingHint)
 
+proc setRestingLabelEvent*(resting: string): FatPromptEvent =
+  ## Last-known resting context bar ("◑58%"). Set whenever real usage
+  ## arrives; usage-less turn ends repaint the bar from it so the bar
+  ## keeps the latest numbers instead of vanishing.
+  FatPromptEvent(kind: fpeSetResting, restingLabel: resting)
+
 proc apply*(s: var FatPromptState; ev: FatPromptEvent) =
   case ev.kind
   of fpeSetPromptMode:
@@ -206,6 +216,8 @@ proc apply*(s: var FatPromptState; ev: FatPromptEvent) =
                                        elapsed: ev.elapsed)
   of fpeClearPendingHint:
     s.footer.pendingHint = PendingHint()
+  of fpeSetResting:
+    s.footer.restingLabel = ev.restingLabel
 
 proc initFatPrompt*(width = DefaultWidth, height = DefaultHeight,
                     window = 0): FatPrompt =

@@ -2,6 +2,17 @@
 
 **Unreleased**
 
+- **The token bar survives usage-less turn ends.** A turn whose stream
+  ended without a usage object (gateway variance, interrupt, fatal
+  error, empty-reply exhaustion, flail abort) used to drop the bar above
+  the prompt entirely; it reappeared only on the next turn with usage.
+  Those turn ends now repaint the standard resting bar from the
+  last-known context label, so the bar just stays with the latest
+  numbers. The submit after such a turn consumes it exactly like any
+  resting bar; the no-usage `· Ns` notice still commits to scrollback.
+  `:clear` and the model-side clear also drop the resting label so a
+  wiped conversation cannot resurrect stale numbers.
+
 - **Provider catalog swept against live listings.** `crof` is gone
   (fraudulent aggregator, removed from the wizard catalog and docs).
   Every keyed provider's `/models` was re-fetched: end-of-life combos

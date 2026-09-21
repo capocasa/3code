@@ -1568,6 +1568,9 @@ proc handleCommandResult*(cmd: string, messages: var JsonNode,
       session.plan.setLen 0
       emitFatPromptEvent clearPendingHintEvent()
       emitFatPromptEvent clearBarEvent()
+      # Same as akClear: the wiped conversation's resting label must not
+      # outlive it into a later usage-less turn end.
+      emitFatPromptEvent setRestingLabelEvent("")
       if session.savePath != "":
         clearDraft(session)
         releaseSessionLock(session.savePath)
