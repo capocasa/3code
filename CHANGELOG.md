@@ -1,326 +1,129 @@
-# Changelog
+Changelog
 
-**Unreleased**
+Unreleased
+  - harness autosends (steer, flail prods) show exact text in scrollback
+  - Grok 4.7 known-good: xai, OpenRouter, OpenCode Zen (same shape as 4.6)
+  - retry-backoff notice boxed by blank rows, absorbed on reconnect
+  - shortModel canonicalizes after slash-strip; zai-glm-5-3 shows glm-5.3
+  - prompt caret carries the palette's white tone, not the terminal default
+  - token bar survives usage-less turn ends (repainted from last label)
+  - catalog sweep: crof dropped, dead combos gone, stragglers added
+  - session reservations 0600 again (decimal 0644 parsed as 0o1204)
+  - Windows installer bundles PortableGit; resolveBash prefers it
+  - Windows bash detection: bash_path, Git for Windows, MSYS2, legacy
+  - no bash found: tool dropped with a warning instead of a hard fail
+  - sandbox = off silences the Windows host-rules warning at launch too
+  - Windows net-fence state resolved at startup; warns when it is gone
+  - new commandcode provider: one key for the open-model lineup
+  - SSE parser strips the optional space; Hetzner data:{...} streams
+  - new platte provider: GLM 5.3 on EU infrastructure
+  - union-alpha stealth preview on OpenRouter; generic other family
+  - GLM-5.3 on Mistral: 1M context, thinking-only low/high/max
+  - session files store the skills catalog, not the verbatim prompt
+  - OpenCode zen gateways take top-level reasoning_effort
+  - startup error line when the OS sandbox cannot confine bash
+  - JSON error bodies: detail convention read, longest string leaf picked
+  - pre-TLS connect failures say "host is not responding", not TLS
+  - Windows sandboxed bash no longer wedges (env-passed cmd, bounded reap)
+  - caret parks at the right margin instead of wrapping to the next row
+  - patch edits with empty search/replace rejected, file untouched
+  - caret steps over typed trailing spaces
+  - drawn caret, hidden physical cursor: no flicker, fewer bytes
+  - payload-fresh frame-model copies end the Termux write-after-free
+  - retry waits show an hourglass; braille spinner is in-flight only
+  - long-session memory leaks fixed (SSL ctx cache, thread-local frees)
+  - GLM-5.2 on Mistral: reasoning_effort ladder, chunked thinking folded
 
-- **Harness autosends are visible scrollback items.** The empty-reply steer and flail prods paint their exact text as `»` scrollback items and persist across resume.
-- **Grok 4.7.** Known-good on `xai`, OpenRouter, and OpenCode Zen; same shape as grok-4.6.
-- **The rate-limit notice gets breathing room.** The retry-backoff notice is boxed by a blank row above and below while live and absorbed when the next attempt connects.
-- **Mistral's flattened author prefix strips like everyone else's.** `shortModel` canonicalizes after slash-stripping (`zai-glm-5-3` shows as `glm-5.3`) and model lists dedup on the canonical name.
-- **The prompt caret is off-white on Windows too.** The caret cell carries the palette's white-family tone instead of the terminal-default foreground.
-- **The token bar survives usage-less turn ends.** Turns that end without a usage object repaint the resting bar from the last-known label instead of dropping it.
-- **Provider catalog swept against live listings.** `crof` removed, end-of-life combos dropped, stragglers added where providers list them, and `harvest_models --sync` fixed for the 12-field combo tuple.
-- **Session reservations are readable again on Linux/macOS.** A decimal `0644` literal parsed as 0o1204 left fresh reservations unreadable; they are created 0600 now.
-- **Windows: the installer's bundled shell is now a PortableGit tree.** `resolveBash` prefers the PortableGit bundle, and the sandbox read+execute stamp follows the tree the resolved bash lives under.
-- **Windows bash detection covers the standard sources.** `resolveBash` checks `bash_path`, Git for Windows, standalone MSYS2, and the legacy bundle; with nothing found the bash tool is dropped with a warning instead of hard-failing.
-- **No sandbox warnings when the sandbox is off.** `sandbox = off` silences the Windows host-rules warning at bash launch too.
-- **A startup warning when the Windows net fence is missing.** 3code resolves the WFP fence at startup and warns before the prompt opens; the host-rules check no longer misreads healthy fences as open.
-- **Command Code provider gateway.** New `commandcode` provider: one Command Code Studio key for the open-model lineup (DeepSeek V4, GLM-5.3, Kimi K3, MiniMax M3, Grok 4.6, MiMo).
-- **Hetzner (and other no-space SSE gateways) stream replies again.** The SSE parser strips one optional space after the colon per the WHATWG spec, so `data:{...}` framings parse.
-- **Platte, the EU sovereign host.** New `platte` provider serving GLM 5.3 on EU infrastructure, per-user endpoint, personal access token auth.
-- **Union Alpha stealth preview on OpenRouter.** `stealth/union-alpha` is known-good riding the inkling family; a generic `other` family buckets unidentified models.
-- **GLM-5.3 on Mistral.** `zai-glm-5-3` is known-good (1M context, thinking-only low/high/max); a stale `off` sends nothing.
-- **Session files store the dynamic prompt inputs, not the prompt.** The `.3log` persists the skills catalog instead of the verbatim system prompt, and resume rebuilds the prompt from the profile.
-- **Fixed `reasoning field unknown` on the OpenCode zen gateways.** `opencode`/`opencodego` get the top-level `reasoning_effort` their validator accepts; OpenRouter keeps the object form.
-- **A one-line error notice at startup when the OS sandbox backend can't confine bash.** Unconfined bash prints a single error-magenta line before the fat prompt instead of failing silently.
-- **JSON error bodies never surface verbatim.** `extractErrorMsg` reads FastAPI-style `detail` bodies and picks the longest string leaf from unrecognized JSON.
-- **Connect failures no longer blame TLS when the host is not there.** Pre-TLS failures render as `<host[:port]> is not responding (<cause>)` via streamhttp's new `StreamConnectError`.
-- **Windows: sandboxed bash tool calls no longer hold forever.** The command travels via the environment through `cmd /v:on /c !NIMBOX_CMD!`, the pump reap is bounded, and the sandbox path arms the cancel/timeout watchers.
-- **The caret parks at the right margin instead of wrapping to the next row.** A caret cell on the last column parks on the row's last painted cell, like deferred wrap.
-- **A patch edit with an empty search string is rejected instead of prepending to the file.** Empty `search` used to silently prepend the replace text at the top; empty fields now hard-error and touch nothing.
-- **The caret advances over typed spaces again.** The caret cell steps over invisible trailing break-spaces, one column per space.
-- **The caret no longer flickers.** The caret is a drawn cell with the physical cursor hidden all session, and repaints emit bytes only when content changed.
-- **Termux hardened_malloc aborts greatly reduced.** `getFrameModel` returns payload-fresh copies under the lock, ending the ORC refcount races hardened_malloc flagged as write-after-free.
-- **Retry waits show an hourglass, not the braille spinner.** The braille glyph is strictly the in-flight indicator; backoff waits swap it for `⧗`.
-- **Long sessions no longer leak memory (issue #35).** SSL contexts are cached per process and worker threads free their own strings; a 3000-turn repro pins RSS at 15.9 MB from turn 310 on (needs Nim 2.2.12).
-- **GLM-5.2 on Mistral.** `zai-glm-5-2` is known-good on the top-level `reasoning_effort` ladder, and Mistral's chunked thinking folds into the regular content/reasoning paths.
+0.7.1  private mode, per-model params, cache-hot resume, DeepSeek V4.1
+       Flash, GPT-6 Astra
+  - Windows sandbox works when setup ran as another account (sandwall)
+  - resolveBash falls back to Git for Windows; installer bundle optional
+  - Esc clears the draft; only an empty prompt cancels the turn
+  - Hy4 and Mistral join the known-good registry
+  - DeepSeek V4.1 Flash known-good on all five providers serving it
+  - typing no longer flickers the turn clock to 0s
+  - private mode: -p/--private, allow-private providers, magenta bar
+  - [params] per-(provider, model) overrides: temperature, max-tokens...
+  - retry notices live on one row instead of stacking in scrollback
+  - resume re-sends byte-identical history (prompt-cache friendly)
+  - GPT-6 Astra known-good on openai and chatgpt
 
-**0.7.1** - private mode, per-model params, cache-hot resume, DeepSeek V4.1 Flash, GPT-6 Astra
+0.7.0  key rebinding, editor integration, smarter stuck-loop guard
+  - [shortcuts] config rebinding for every key command
+  - Alt+E edits the draft in $EDITOR; :! runs a shell command yourself
+  - flail guard: nudges a spinning model twice, then aborts the turn
+  - faster rendering: frame skip, diff-painted keystrokes, ghostty fix
+  - Kimi K3 first-party reasoning knobs; GLM-5.3 effort ladder, 32k cap
+  - User-Agent on every request; opencode gateways get session header
+  - catalog: Qwen 3.5-3.8, DashScope, Omen-alpha, Aki, GreenPT, Lyceum
+  - resume replays through shared transcript formatters
+  - Termux release tarball with autoupdate
+  - transcript: checkpoint markers stripped, empty replies skipped
 
-- **Windows sandbox works when setup ran as another account.** Two bugs
-  blocked issue #33 ("Windows sandbox is not set up"). The sandwall
-  credential lived per-user under the elevated setup account's
-  `%LOCALAPPDATA%`, so when a standard user elevated with a separate
-  admin's credentials the real user could not decrypt it and every run
-  reported the sandbox as unset up; it now lives in a machine-wide store
-  (`%ProgramData%\sandwall`) under machine-scope DPAPI. And the sandwall
-  account is spawned from the user's own MSYS tree, which the setup-time
-  grant never touched (it used the setup account's `%LOCALAPPDATA%`); the
-  bash tool now stamps read+execute on it at run time, in the invoking
-  user's context. Both fixes land in sandwall 0.5.6.
+0.6.3  catalog sweep
+  - catalog: GLM-5.3, Qwen 3.8, DeepSeek V4 on 15 more providers
 
-- **Windows: run from a release folder with Git for Windows' bash.** 3code
-  no longer needs the installer's bundled MSYS2 to find a shell. When the
-  bundle is absent, `resolveBash()` falls back to a Git for Windows install:
-  the `SOFTWARE\GitForWindows` `InstallPath` registry value, then
-  `%ProgramFiles%\Git`, `%ProgramW6432%\Git`, `%ProgramFiles(x86)%\Git`, and
-  `%LOCALAPPDATA%\Programs\Git`, preferring `bin\bash.exe` (its launcher
-  sets `MSYSTEM` and a PATH carrying the unix tools and `git.exe`) over the
-  bare `usr\bin\bash.exe`. So `winget install Git.Git`, unpack a release zip,
-  run `3code.exe`. Fixes #34, where Git Bash was on the box but 3code still
-  reported "bash not found".
+0.6.2  GLM-5.3-Flash
+  - catalog: GLM-5.3-Flash on zai/zaicode; GLM-5.3 on regular z.ai API
 
-- **Esc now clears the draft instead of cancelling the turn.** Esc and
-  Ctrl-C behave identically: with a non-empty prompt they clear it
-  (adding the discarded line to history) and leave the running turn
-  alone; only an empty prompt cancels. Previously Esc always
-  interrupted the in-flight turn, so a stray Esc discarded the typed
-  follow-up and killed the turn.
+0.6.1  --no-sandbox, paste-aware input, catalog refresh
+  - --no-sandbox flag; pasted newlines kept as one draft
+  - wizard experimental mode lists the full /models output
+  - catalog: 0xalpha stealth preview, current free tiers
+  - terminal: late OSC 11 replies, Windows startup keys, macOS openpty
 
-- **Hy4 and Mistral added to the known-good registry.** Tencent Hy4
-  preview (770B total / 49B active MoE, Apache 2.0, 1M context) lands on
-  `openrouter` (`tencent/hy4-preview`) and the new first-party `tencent`
-  TokenHub route (`hy4-preview`). Its chat template accepts exactly
-  `high` (default) and `no_think`, so the hy family's reasoning knob
-  narrows to two levels on v4. Mistral joins as a family with Mistral
-  Large 3 (675B total / 41B active MoE, Apache 2.0, no reasoning knob)
-  and Mistral Medium 3.5 (128B dense, Modified MIT, `reasoning_effort`
-  none/high), on `api.mistral.ai` and OpenRouter `mistralai/*`.
+0.6.0  filesystem sandbox, subscription logins, network wall
+  - filesystem sandbox: one policy, deny/readonly/allow per line
+  - kernel enforcement: Landlock, Seatbelt, Windows restricted tokens
+  - network wall: host rules proxy bash egress (netns, Seatbelt, WFP)
+  - ChatGPT and SuperGrok subscription logins via browser OAuth
+  - OpenAI requests move to the Responses API; :reasoning lists levels
+  - patient retry: 429/5xx/network backoff, up to ~36 hours
+  - provider wizard: one field, parallel checks, known-good registry
+  - Windows: in-process bash capture; macOS: Seatbelt, own workflow
+  - AgentSession blocking API; example/webserve.nim web frontend
+  - Termux arm64 release archive
+  - terminal/input fixes: shared geometry, resize, ctrl-c/esc/ctrl-d
 
-- **DeepSeek V4.1 Flash everywhere it is served.** Added to the
-  known-good registry on all five providers carrying it: `deepseek`
-  (first-party, canonical id `deepseek-flash`; the old `v4-flash` /
-  `v4-flash-vision-exp` ids route to it now and `v4-pro` follows on
-  Sep 14), `deepinfra` (fp8), `novita`, `openrouter`, and `nanogpt`.
-  552B causal-encoder-decoder architecture with native vision, 1M
-  context, 384K max output, reasoning on by default. Verified against
-  the live APIs: first-party takes `thinking.type` + `reasoning_effort`
-  low/high/max (integers 400, `none` does not disable thinking), hosted
-  stacks honor `reasoning_effort: none` as a true no-think; the
-  existing tier mapping needed no changes. `:model deepseek4.1-flash`
-  after adding the id to the provider's `models` line.
+0.5.2  search engine overhaul: Exa, Brave, and Parallel backends
+  - search: Exa MCP default, Brave and Parallel REST engines
+  - per-engine keys (exa-key, brave-key); Exa runs keyless
 
-- **Typing no longer flickers the turn clock to 0s.** Every keystroke
-  repaints the live token bar through the editor's diff painter, which
-  rebuilt the frame from a model field the animation thread never
-  updates, so for one frame per keystroke the elapsed counter showed
-  `0s` (or, during tool bar ticks, lost its `Ns` suffix entirely) until
-  the next 80ms animation frame restored the real clock. The bar-tick
-  label and its elapsed counter are now derived from the last frame the
-  animation thread actually painted, so a keystroke frame can never
-  show a clock the screen never had.
+0.5.1  new providers, GLM-5.2 reasoning fixes, Qwen family
+  - new providers: OpenCode Zen/Go, Kimi, nano-gpt, zaicode
+  - GLM-5.2 reasoning fixed on Together/OpenRouter; variant bug fixed
+  - Qwen3.x first-class family (vLLM enable_thinking)
+  - provider config: shared keys/URLs allowed, clear dup-name error
+  - internals: KnownGoodCombos named fields replace tuple indices
 
-- **Private mode.** `-p`/`--private` or `:private on` (default off,
-  session-only, like a browser's private window). While on, turns only
-  run on allow-private providers/models and the live token bar repaints
-  magenta (`[colors] private-bar`, configurable like every other color;
-  scrollback receipts stay cyan so old receipts mark which turns ran
-  private). Trust is a `[params] allow-private = "true"` setting
-  (provider-wide or per model, `:private allow <provider> [model]`
-  writes it), or a curated known-good flag for providers whose published
-  policy is zero data retention / no training on API data: together,
-  fireworks, ovh, novita. Shortlist and walkthrough in the manual.
+0.5.0  Windows support, new providers, big stability push
+  - Windows support: MSYS2 bash, session locking, color palette
+  - new providers: Ollama, Eurouter, Lyceum, Regolo, TensorX, Novita
+  - streaming: network-quiet timeout, truncated SSE retry, ctrl-c
+  - resume: O(1) per-cwd index, full replay, stale lock reclaim
+  - rendering: resize redraw, single GUI thread, one byte-path renderer
+  - bash tool: native timeout and computeDiff, no GNU tools needed
+  - robustness: UTF-8 sanitize, binary diff guard, graceful exits
+  - packaging: --version provenance, nightly branch+commit strings
 
-- **`[params]`: per-(provider, model) parameter overrides.** A new
-  config section overrides any known-good model parameter:
-  `temperature`, `max-tokens`, `think-back` (`none`/`turn`/`all`, how
-  much of the assistant's own reasoning is replayed in the request
-  history), and `context-window`. Each section names a `provider` and
-  optionally a `model`; with `model` empty it covers every model of
-  that provider, and a model-scoped entry beats a provider-wide one.
-  Unset keys keep the curated value, so a section with only
-  `think_back = "none"` silences reasoning replay for a strict
-  provider without touching anything else. Off-table (experimental)
-  models can now get these parameters sent at all. Hyphen and
-  underscore spellings both work, values are schema-checked at load,
-  and an explicit `temperature` overrides even the kimicode /
-  Gemini 3 "omit temperature" endpoint quirks.
+0.4.0  error icons for failed tools, bottom-pinned bar, no raw JSON
 
-- **Retry notices no longer stack in scrollback.** A network-quiet or
-  rate-limit notice is printed once on a live notice row above the token
-  bar and dynamically replaced while the countdown ticks and later
-  attempts fail, instead of appending one magenta line per retry. The
-  countdown lives inside the notice; the token bar keeps token
-  information and its count-up turn timer, now in `hh:mm:ss` form
-  instead of bare seconds. On retry exhaustion the final error still
-  commits through the ordinary path.
+0.3.5  $/r/w tool bullets, bright cyan receipts, bar ticks
 
-- **Resume re-sends byte-identical history.** `-r` used to rebuild the
-  system prompt from the profile (busting the provider's prompt cache the
-  moment you reopened 3code) and to round-trip message bodies through a
-  lossy text codec: tool results lost their trailing newline and tool
-  calls were re-serialized from a human-readable summary. The `.3log`
-  format now persists the system prompt verbatim (stamped with the
-  profile identity and skills digest that built it, so a real model
-  switch still rebuilds), stores every tool call's original wire JSON in
-  a `-- wire --` section, closes newline-ended bodies with a `~~`
-  terminator, and splits user preambles on the exact grammar the live
-  path emits. A resumed turn hits the cache exactly like the live
-  session's next turn would; an end-to-end test asserts live and resumed
-  continuations produce identical request bytes.
+0.3.4  initial docs site, -i/--interactive flag, streaming ping test
 
-- **GPT-6 Astra.** `gpt-6-astra` is known-good for both the `openai`
-  (API key) and `chatgpt` (Plus/Pro subscription) providers: 1.05M-token
-  context, 128k architectural output cap, and a reasoning ladder of
-  `low`/`medium`/`high`/`xhigh`/`max` (no `none`: Astra always thinks).
-  `chatgpt` continues to route through the Codex backend with the same
-  subscription login.
+0.3.3  icon-based tool banners, history fixes, display polish
 
-**0.7.0** - key rebinding, editor integration, smarter stuck-loop guard
+0.3.2  native read command, binary guard for bash, deepseek known-good
 
-- **`[shortcuts]` key rebinding.** Every key is a named command, and every
-  command can be reassigned in the config file (`cancel = DoubleESC`, or an
-  empty value to unbind). See the manual for the full command list.
-- **Editor and shell integration.** `Alt+E` (or `Ctrl+X Ctrl+E`) edits the
-  input buffer in `$VISUAL`/`$EDITOR`; `:! <cmd>` runs a shell command
-  yourself, output lands in your scrollback only, the model never sees it.
-- **Stuck-turn recovery ("flail").** When the model spins without progress,
-  3code nudges it back to work twice before aborting the turn, and a
-  windowed no-progress guard catches doom loops of ever-new commands.
-  Healthy repeated builds no longer trigger it.
-- **Faster, steadier rendering.** Identical frames are skipped, editor
-  keystrokes are diff-painted instead of erase-repainting the block, and
-  ghostty no longer loses a row on submit (DEC 2026 sync output off).
-  Fixed: missing blank row after first submit, over-erased scrollback on
-  live-content commit, multiline up/down eating scrollback, stacked curl
-  progress meters in the tool viewport.
-- **Kimi K3 and GLM efficiency.** Kimi gets first-party reasoning knobs
-  (K3 `effort`, K2.x `thinking.type`) and a prompt rewrite that favors
-  action over offers to continue. GLM-5.3 gains an effort ladder for
-  length-starved turns and a 32k read cap.
-- **OpenCode Zen/Go.** Every model request now carries
-  `User-Agent: 3code/<version>` (previously none at all — Zen asked) and,
-  on the `opencode`/`opencodego` gateways, `x-opencode-session` with the
-  conversation's `.3log` id. The gateway routes/shards by that header and
-  rejects headerless requests from 2026-09-06. The id is stable across a
-  conversation's turns (token-cache affinity) and rotates with `:clear`,
-  which starts a new conversation.
-- **Catalog.** Qwen 3.5–3.8 lineup including small models, first-party
-  DashScope, Omen-alpha on opencodego, and new providers Aki, GreenPT,
-  Lyceum with known-good model lists. Model ids are normalized everywhere
-  (input, config, wizard), so a listed-but-unserved variant quietly maps
-  to the known-good wire id.
-- **Resume.** Replays render through the shared transcript formatters, and
-  web_search/web_fetch calls round-trip their queries.
-- **Termux.** Release tarball with autoupdate and a one-liner install.
-- **Notifications.** Transcript visibility rules strip checkpoint markers
-  and skip empty replies.
+0.3.1  update_plan tool, gpt-oss reasoning tuning
 
-**0.6.3** - Catalog sweep
+0.3.0  --good subcommand, ctrl-c cancel during stream, linux-arm64 builds
 
-- **Catalog.** GLM-5.3 / GLM-5.3-Flash, Qwen 3.8 and DeepSeek V4 known-good
-  on 15 more providers (Baseten, Nebius, Together, DeepInfra, Novita,
-  Tensorx, NanoGPT, Venice, Hetzner, Aki and friends).
+0.2.7  inline receipts, gpt-oss grounding prompts
 
-**0.6.2** - GLM-5.3-Flash
+0.2.5  token bar with cache indicator, skill autoloader, web-research
 
-- **Catalog.** GLM-5.3-Flash on `zai` and `zaicode`, same forced-thinking
-  contract as GLM-5.3 (`low`/`high`/`max`). GLM-5.3 itself is now also
-  known-good on the regular z.ai API, not just the coding endpoint.
+0.2.1  per-model tool dispatch, multiline input, markdown table fit
 
-**0.6.1** - --no-sandbox, paste-aware input, catalog refresh
-
-- **`--no-sandbox`.** Disable kernel sandbox enforcement so bash runs
-  unconfined. In-process read/write/patch checks still follow the policy
-  unless you also turn the sandbox off live.
-- **Pasted newlines.** A multi-line paste is kept as one draft instead of
-  treating each line as a submit.
-- **Provider wizard.** Experimental mode lists the full `/models` output;
-  regular mode still offers only known-good ids.
-- **Catalog.** 0xalpha stealth preview and current free tiers. Nemotron
-  was catalogued then dropped from known-good.
-- **Terminal.** Late OSC 11 replies no longer paint as a ghost prompt.
-  Windows drains leftover startup keystrokes so a boot-time Up cannot
-  recall history. macOS builds `openpty` from `util.h`.
-
-**0.6.0** - filesystem sandbox, subscription logins, network wall
-
-- **Filesystem sandbox.** Every tool call is confined by a one-rule-per-line
-  policy: `deny`, `readonly`, `allow`. Exactly one policy is active: project
-  `.sandbox`, else `~/.config/3code/sandbox`, else a built-in default that
-  denies everything except temp dirs and the project itself (spelled
-  `allow ./`), so a fresh project is writable out of the box and 3code never
-  writes a policy into your project or config dir on its own. Bash runs under
-  kernel enforcement via `3code sandbox` (Landlock on Linux, Seatbelt on
-  macOS, restricted-token ACLs on Windows); the read/write/patch tools check
-  the same policy in-process. A host without a working kernel backend
-  degrades to unconfined bash with the in-process checks still on.
-  `:sandbox show|on|off|allow|readonly|deny` inspect, change, and reload the
-  policy live; `:sandbox edit` opens it in `$VISUAL`. Both policy files are
-  hidden read-only to the model.
-- **Network wall.** Host rules in the policy restrict Bash network access
-  through a built-in allowlist proxy: Linux uses a network namespace, macOS
-  confines to loopback with Seatbelt, Windows uses the one-time `3code
-  setup` fence. The default policy leaves the network open.
-- **ChatGPT and SuperGrok logins.** `:provider add chatgpt` (ChatGPT
-  Plus/Pro) and `:provider add supergrok` (SuperGrok, X Premium+)
-  authenticate via browser OAuth with refreshable tokens, and can sit beside
-  API-key `openai` and `xai` providers.
-- **Responses API and per-model reasoning.** OpenAI API and ChatGPT requests
-  use the Responses API (Codex backend for ChatGPT). `:reasoning` lists the
-  levels the active model really accepts, from `none` to `max` where
-  supported.
-- **Patient retry.** `429`, `5xx`, and network failures back off
-  exponentially for up to about 36 hours, so a long session rides out a
-  usage limit without dropping to the prompt. `:retry on|off` controls it;
-  Esc cancels a running wait.
-- **Provider wizard and catalog.** The add-provider wizard accepts a name,
-  URL, key, or subscription login in one field, checks models in parallel,
-  and trusts the known-good registry instead of the provider's `/models`
-  endpoint. GLM-5.3, grok-4.6, Qwen3.8, and refreshed DeepSeek entries join
-  the registry.
-- **Windows and macOS.** Bash is captured in-process on Windows, piped stdin
-  reads via ReadFile so pipe input and EOF work, and startup warnings
-  explain a slow first launch or a missing sandbox setup. macOS gets
-  Seatbelt enforcement and its own build workflow.
-- **Library and web example.** The blocking `AgentSession` API exposes
-  prompts, events, commands, interruption, persistence, and sandboxing
-  without a terminal; `example/webserve.nim` is a threaded web frontend
-  with SSE streaming.
-- **Termux arm64.** Releases include an Android arm64 archive; Termux uses
-  its own OpenSSL and temp dir, and unsupported OS sandbox and notification
-  features degrade cleanly.
-- **Terminal and input fixes.** Transcript and footer repainting share one
-  geometry path; resize, interruption, and terminal-reply handling are more
-  reliable. Ctrl+C clears input, Esc interrupts, Ctrl+D exits.
-
-**0.5.2** - search engine overhaul: Exa, Brave, and Parallel backends
-
-- **Search backends replaced.** The dead Startpage HTML scraper is gone.
-  `web_search` now speaks Exa's hosted MCP endpoint (keyless by default, one
-  stateless JSON-RPC call), with Brave and Parallel added as alternative
-  REST engines. Engine is configurable via `[settings] engine`, with no
-  failover between them.
-- **Per-engine keys.** The single `[search] key` is split into
-  engine-specific `exa-key` and `brave-key`; each is also read from its
-  environment variable. Exa runs keyless without one.
-
-**0.5.1** - new providers, GLM-5.2 reasoning fixes, Qwen family
-
-- **New providers and models.** OpenCode Zen + Go gateways, Kimi API Platform, Kimi Code subscription, nano-gpt, and `zaicode` (Z.ai coding endpoint). GLM-5.2, GLM-5.1, GLM-5, DeepSeek-V4 Pro/Flash, MiniMax-M3, Kimi K3/K2.7-code/K2.6, Qwen3.6/3.7, and Tencent Hy3 across these aggregators.
-- **GLM-5.2 reasoning fixed.** Together and OpenRouter now actually send `reasoning_effort`/`reasoning.effort` for 5.2 (previously dropped silently); OpenRouter maps `max` to its native `xhigh`. A `variant` data bug that made GLM-5.2 collide with GLM-5.1 is corrected, so `:reasoning` offers the right `high`/`max` levels for every 5.2 entry, including third-party hosts.
-- **Qwen family.** Qwen3.x is now a first-class family with its own reasoning wiring (vLLM `enable_thinking`), `:reasoning` surface, and prompt branch.
-- **Provider config.** Adding a provider no longer treats a duplicate API key as a blocker, keys and URLs may be shared across providers, and a duplicate name gives a single clear error and returns to the prompt.
-- **Internals.** `KnownGoodCombos` uses named field access instead of magic tuple indices, so adding a field can no longer silently shift every lookup.
-
-**0.5.0** - Windows support, new providers, big stability push
-
-- **Windows support.** MSYS2 bash is the supported shell; the bash tool, session locking, and color palette all work on Windows. Linux CI is split into amd64 and arm64; macOS gets its own fast build+publish workflow.
-- **New providers and models.** Ollama, Eurouter, Lyceum, Regolo, and TensorX in the provider catalog, alongside MiniMax (M3, M2.7), Tencent Hunyuan (hy3 prompt family), Longcat, GLM-4.7-Flash (free z.ai MoE), and Novita. Refreshed DeepSeek, gpt-oss, Kimi, and GLM reasoning prompts and per-(provider, model) context windows.
-- **Stable and reliable streaming.** Network-quiet hangs and truncated SSE streams now time out and retry instead of freezing forever. Empty model replies are recovered via finish_reason-aware turn handling. Bounded streaming recv makes the quiet-network timeout actually fire, including at provider-connect time, where `verifyProfile` now uses the bounded `streamhttp` client instead of the unbounded `httpclient` that could deadlock. ctrl-c cancels mid-stream, mid-tool, and during provider connect, with no leftover freeze or stale echo. The caret no longer flickers when the streaming repaint races the input thread; assistant prose and the bash tool viewport carry their inter-item gap during live streaming; and a spurious timing line no longer prints on a mid-stream interrupt.
-- **Session resume and locking.** O(1) resume via a per-cwd session index; resume replays the full session into the scrollback. Stale session locks are reclaimed automatically and locking is atomic on Windows. A prompt draft survives an unexpected shutdown.
-- **Terminal rendering fixes.** Redraw the fat prompt on resize without stacking chrome or drifting the prompt. Single-GUI-thread ownership of the composite frame; spinner and bar-tick merged into one renderer (kills a thread leak that froze the bottom row). Tool banners, plan glyphs, and receipts now share one byte-path renderer across live streaming and session replay, with the old alternate renderers and dead plan code removed. Correct display width for CJK, emoji, and combining marks; unicode (UTF-8) input in the editor. Light/dark tone auto-detected via OSC 11 background query, with `[settings] tone` and `[colors]` config overrides.
-- **Bash tool.** Native timeout (no GNU `timeout` dependency, default 120s, ceiling 600s) and native `computeDiff` (no external `diff`). The model is told its own timeout. File contents shown for write-tool display.
-- **Robustness.** Sanitize wire body so invalid UTF-8 can't brick a session; guard `computeDiff` against binary content; exit gracefully if the working directory is deleted mid-session; no silent exit on a broken stdout mid-turn. Network quiet timeout tightened from 180s to 45s.
-- **Packaging.** `--version`/`3code -v` reports build provenance; nightly builds carry branch+commit in the version string.
-
-**0.4.0** - error icons for failed tool calls, pin bar+prompt to bottom during scrolling, suppress raw JSON on malformed tool args
-
-**0.3.5** - `$`/`r`/`w` tool bullets, bright cyan receipts, bar ticks during tool execution
-
-**0.3.4** - initial docs site, `-i`/`--interactive` flag, streaming ping test
-
-**0.3.3** - icon-based tool banners, history fixes, display polish
-
-**0.3.2** - native read command, binary guard for bash, deepseek in known-good
-
-**0.3.1** - `update_plan` tool, gpt-oss reasoning tuning
-
-**0.3.0** - `--good` subcommand, ctrl-c cancel during stream, linux-arm64 builds
-
-**0.2.7** - inline receipts, gpt-oss grounding prompts
-
-**0.2.5** - token bar with cache indicator, skill autoloader, web-research trigger
-
-**0.2.1** - per-model tool dispatch, multiline input, markdown table fit
-
-**0.2.0** - initial public release
+0.2.0  initial public release
