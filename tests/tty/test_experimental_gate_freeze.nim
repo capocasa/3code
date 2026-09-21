@@ -16,8 +16,10 @@ proc newFixture(name: string): string =
   createDir(result); createDir(result / "data"); createDir(result / "run")
 
 proc writeExperimentalProvider(root: string) =
-  ## A provider/model pair that is NOT in KnownGoodCombos, so the
-  ## experimental gate fires and the turn is refused (no `-x` passed).
+  ## A provider/model pair that is NOT in KnownGoodCombos. The config
+  ## current is one non-known-good model; the turn is launched with `-m`
+  ## picking the other, so the config current (an explicit user choice)
+  ## does not bypass the gate but the ad-hoc `-m` pick is refused by it.
   createDir(root / "xdg" / "3code")
   writeFile(root / "xdg" / "3code" / "config", """
 [settings]
@@ -27,7 +29,7 @@ current = "stub.stub-model"
 name = "stub"
 url = "stub://provider"
 key = "stub"
-models = "stub-model"
+models = "stub-model other-model"
 """)
 
 proc stubEnv(root: string): seq[EnvVar] =
@@ -48,7 +50,7 @@ suite "experimental gate freeze regression":
     # No -x: the (stub, stub-model) combo is not known-good, so the turn is
     # refused by gateExperimental.
     let tty = newTtySession(stub,
-                            args = ["-i"],
+                            args = ["-i", "-m", "stub.other-model"],
                             cwd = root / "run",
                             env = stubEnv(root),
                             keepHistory = true)
@@ -58,7 +60,7 @@ suite "experimental gate freeze regression":
     # Idle prompt is up.
     tty.expect "\u276f"
 
-    # Submit a prompt against the non-known-good combo.
+    # Submit a prompt against the ad-hoc non-known-good -m pick.
     for ch in "hello":
       tty.send($ch)
       tty.drain(10)

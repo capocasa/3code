@@ -281,6 +281,61 @@ suite "flail detector":
     check det.escalations == 0
     check det.streakTokens.len == 0
 
+  test "sequential file inspection never trips the streak signal":
+    # Regression, verbatim from the 20260921 stefani session (the harness's
+    # own turn): reading successive sections of one transcript with sed.
+    # Digit normalization turned every range token into the same
+    # `##,###p` filler, so four *different* sed calls over one file read
+    # as a tight near-duplicate cluster and the guard warned, then
+    # aborted the turn mid-investigation. Addresses are not intent.
+    var det: FlailDetector
+    let probes = [
+      "export PATH=/opt/osxcross/bin:$PATH && cd /tmp/3code-osx-bundle && cp ~/p/3code/osx/3code-macos-x86_64 ./3code && x86_64-apple-darwin24.5-otool -L libssl.3.dylib | head -4 && ls -la",
+      "scp -q /tmp/3code-osx-bundle.tar.gz /tmp/drive.py carlo@stefani:/tmp/ && timeout 30 ssh -o BatchMode=yes carlo@stefani 'rm -rf ~/3code-bundle && mkdir ~/3code-bundle && cd ~/3code-bundle && tar xzf /tmp/3code-osx-bundle.tar.gz'",
+      "timeout 20 ssh -o BatchMode=yes carlo@stefani 'cd ~/3code-osx-test && ~/3code-bundle/3code --help 2>&1 | head -30'",
+      "timeout 90 ssh -o BatchMode=yes carlo@stefani 'cd ~/3code-osx-test && time ~/3code-bundle/3code \"reply with exactly: TLS-OK\"' 2>&1 | tail -8",
+      "timeout 20 ssh -o BatchMode=yes carlo@stefani 'cd ~/3code-osx-test && rm -f tf.nim; nohup python3 /tmp/drive.py /tmp/3code-drive.log ~/3code-osx-test /Users/carlo/3code-bundle/3code > /tmp/drive.out 2>&1 & sleep 1; pgrep -fl drive.py'",
+      "sleep 90; timeout 25 ssh -o BatchMode=yes carlo@stefani 'ls -la ~/3code-osx-test/ 2>/dev/null; wc -c /tmp/3code-drive.log; tail -c 400 /tmp/3code-drive.log | cat -v | tail -6'",
+      "sleep 120; timeout 25 ssh -o BatchMode=yes carlo@stefani 'pgrep -fl drive.py >/dev/null && echo DRIVER-RUNNING || echo DRIVER-DONE; ls -la ~/3code-osx-test/'",
+      "for i in 1 2 3 4 5 6 7 8; do sleep 60; s=$(timeout 15 ssh -o BatchMode=yes carlo@stefani 'pgrep -fl drive.py >/dev/null && echo RUNNING || echo DONE'); echo \"$i: $s\"; [ \"$s\" = DONE ] && break; done",
+      "timeout 30 ssh -o BatchMode=yes carlo@stefani 'cat ~/3code-osx-test/tf.nim; echo ===; ls -t ~/.config/3code/sessions | head -3'",
+      "timeout 30 scp -q carlo@stefani:/tmp/3code-drive.log /tmp/3code-drive.log && ls -la /tmp/3code-drive.log",
+      "timeout 30 ssh -o BatchMode=yes carlo@stefani 'printf \"the quick brown fox jumps over the lazy dog\\n\" | /tmp/tf --width=20; echo ---; printf \"supercalifragilisticexpialidocious-and-more-letters-past-thirty\\n\" | /tmp/tf --width=10'",
+      "timeout 30 ssh -o BatchMode=yes carlo@stefani 'ls -t ~/.config/3code/sessions/*.3log | head -2'",
+      "timeout 30 scp -q carlo@stefani:~/.config/3code/sessions/20260921T203146.3log /tmp/session.3log && wc -l /tmp/session.3log && head -40 /tmp/session.3log",
+      "sed -n '40,140p' /tmp/session.3log",
+      "grep -n \"denied\\|deny\\|sandbox\\|seatbelt\\|error\\|fail\\|refus\\|timeout\\|panic\\|Trace\" /tmp/session.3log | head -20; echo ===TOOLCOUNT; grep -c \"^tool_use\" /tmp/session.3log",
+      "sed -n '140,260p' /tmp/session.3log",
+      "sed -n '260,400p' /tmp/session.3log",
+      "sed -n '400,520p' /tmp/session.3log",
+      "sed -n '780,994p' /tmp/session.3log | grep -v \"^  \" | head -60; echo ====; tail -60 /tmp/session.3log",
+      "awk 'index($0,\"SYSTEM\"){print NR\": \"substr($0,1,140)}' /tmp/session.3log; echo ===LAST-ASSISTANT; awk '/^assistant/{n=NR} END{print n}' /tmp/session.3log"]
+    for p in probes:
+      check det.observeCall("bash", "{\"command\":" & escapeJson(p) & "}") == fvOk
+      det.noteResult("bash", "{\"command\":" & escapeJson(p) & "}", true)
+    check det.escalations == 0
+
+  test "three-variant near-duplicate cycle escalates and aborts":
+    # The balance burner: GLM 5.3-class flails that cycle three cosmetic
+    # variants of one probe (digits and tails differ, intent identical).
+    # Every variant carries >= 2 distinctive tokens, so the ring reads
+    # near-duplicate overlap and the ladder runs to the abort.
+    var det: FlailDetector
+    let variants = [
+      "rg -n \"deadline\" src/engine.nim | head -20",
+      "rg -n \"deadline\" src/engine.nim | head -40",
+      "rg -n \"deadline\" src/engine.nim | tail -20"]
+    var verdicts: seq[FlailVerdict]
+    for i in 0 ..< FlailStreakArm + FlailStreakMin + 3:
+      let v = variants[i mod variants.len]
+      verdicts.add det.observeCall("bash", "{\"command\":" & escapeJson(v) & "}")
+      det.noteResult("bash", "{\"command\":" & escapeJson(v) & "}", true)
+    const firstFire = FlailStreakArm + FlailStreakMin - 2
+    for v in verdicts[0 ..< firstFire]:
+      check v == fvOk
+    check verdicts[firstFire] == fvEscalate
+    check fvAbort in verdicts[^3 .. ^1]
+
   test "ssh session with varied remote commands never trips the streak signal":
     # Mirrors the false positive from session 20260909T213716-2ICaadgQ:
     # a long run of ssh calls to one host, every one a novel fingerprint

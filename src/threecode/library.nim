@@ -132,22 +132,13 @@ proc combinedSubscriptionTokenFor(provider: string): string =
 
 proc resolveSessionProfile*(wanted, resumeProfile: string): Profile =
   ## Resolve the effective profile the same way the CLI does: explicit
-  ## model > resumed session's profile > config current, with the
-  ## known-good fallback when the resolved combo isn't curated and
-  ## `--experimental` wasn't given. A fallback also updates `activeCurrent`
-  ## so later lookups (`:provider`, status lines) agree with the session.
-  ## Empty Profile when nothing resolves (first run, unknown model);
-  ## callers decide how to surface that (CLI: provider wizard; library:
-  ## AgentError).
+  ## model > resumed session's profile > config current. An explicit
+  ## config current is the user's word and runs as-is; known-good
+  ## curation gates interactive `:provider`/`:model` picks
+  ## (`gateExperimental`), not what the config file says. Empty Profile
+  ## when nothing resolves (first run, unknown model); callers decide
+  ## how to surface that (CLI: provider wizard; library: AgentError).
   result = buildProfile(activeCurrent, activeProviders, wanted)
-  if wanted.len == 0 and not experimentalEnabled and result.name.len > 0 and
-     not isKnownGood(result):
-    let fallback = firstKnownGoodCombo(activeProviders)
-    if fallback.len > 0:
-      let alt = buildProfile(fallback, activeProviders, "")
-      if alt.name.len > 0:
-        activeCurrent = alt.name
-        result = alt
 
 proc initAgentSession*(opts: AgentOptions): AgentSession =
   ## Create or resume a session and install the headless plumbing.

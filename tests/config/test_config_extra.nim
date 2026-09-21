@@ -278,24 +278,6 @@ suite "config: known-good lookup with normalized pretty names":
                            key: "k", models: @["weird-model", "glm-5.3"])
     check orderedModels(prov) == @["weird-model", "glm-5.3"]
 
-suite "config: firstKnownGoodCombo":
-  test "finds first known-good combo":
-    let providers = @[
-      ProviderRec(name: "test", url: "", key: "", models: @["model-a"]),
-      ProviderRec(name: "zai", url: "https://api.test.com",
-                  key: "sk-test", models: @["glm-5.1"])
-    ]
-    let combo = firstKnownGoodCombo(providers)
-    check combo.len > 0
-    check combo.contains("zai")
-
-  test "returns empty when no providers have known-good models":
-    let providers = @[
-      ProviderRec(name: "unknown", url: "https://api.test.com",
-                  key: "sk-test", models: @["model-x"])
-    ]
-    check firstKnownGoodCombo(providers) == ""
-
 suite "config: currentProvider":
   var savedCurrent: string
   var savedProviders: seq[ProviderRec]

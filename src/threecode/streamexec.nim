@@ -170,6 +170,13 @@ when defined(windows):
 
 const PartialLineFlushMs = 700
 
+const SandboxDenyHint* = "sandbox deny: the sandbox policy blocked this " &
+  "operation; do not retry the command unchanged\n"
+  ## Appended to failed tool output that smells like EACCES under an
+  ## active sandbox. Deliberately fileless: the policy file exists only
+  ## after an edit and may live outside the cwd, so naming it sends the
+  ## model hunting for a file that is not there.
+
 type
   LineAcc = object
     ## One physical output line under terminal semantics: `phys` is the
@@ -632,6 +639,16 @@ export DEBIAN_FRONTEND=noninteractive
                 $int(sandbox.wallProxyPort()), sandbox.proxySockPath(),
                 getEnv("GIT_SSH_COMMAND", "")):
               env[k] = v
+        when defined(macosx):
+          # Children inherit TMPDIR=$DARWIN_USER_TEMP_DIR (/var/folders),
+          # which the policy leaves unwritable; every compiler temp
+          # write then dies with EPERM. The default policy keeps /tmp
+          # writable, so point TMPDIR there (Linux children already
+          # default to /tmp).
+          if env == nil:
+            env = newStringTable()
+            for k, v in envPairs(): env[k] = v
+          env["TMPDIR"] = "/tmp"
         startProcess(sandbox.procboxExe, args = args, env = env,
                      options = {poStdErrToStdOut, poUsePath})
       else:
@@ -795,7 +812,7 @@ export DEBIAN_FRONTEND=noninteractive
                "Operation not permitted" in rawIn):
             if rawIn.len > 0 and not rawIn.endsWith("\n"):
               rawIn.add "\n"
-            rawIn.add "sandbox deny, see " & sandbox.sandboxPathInCwd() & "\n"
+            rawIn.add SandboxDenyHint
           return (rawIn, inProcCode, cap)
         else:
           if sandboxEnabled and sandboxWallWarn and not wallWarnShown and
@@ -857,12 +874,15 @@ export DEBIAN_FRONTEND=noninteractive
   # kernel sandbox apart from a plain filesystem permission problem, so
   # a bare "Permission denied" would send the agent retrying blindly.
   # When the policy is enforced and the output smells like EACCES,
-  # append a pointer at the policy file. OSError messages are appended
-  # after the command's own output, so the hint lands at the end.
+  # append the sandbox hint so the model does not read EPERM as a
+  # broken command and retry blindly. The policy file is deliberately
+  # not referenced: it exists only after an edit and may live outside
+  # the cwd entirely, so a pointer sends the model hunting for a file
+  # that is not there.
   if code != 0 and sandboxEnabled and sandbox.active and
       ("Permission denied" in rawOut or "Operation not permitted" in rawOut):
     if rawOut.len > 0 and not rawOut.endsWith("\n"):
       rawOut.add "\n"
-    rawOut.add "sandbox deny, see " & sandbox.sandboxPathInCwd() & "\n"
+    rawOut.add SandboxDenyHint
 
   return (rawOut, code, cap)
