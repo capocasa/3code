@@ -604,9 +604,20 @@ proc totalRows*(text: string, promptW, contW, width: int): int =
   if width <= 0: return 1
   lineSpans(text, promptW, contW, width).len
 
-const
-  CaretCellOn* = "\x1b[7m"    ## reverse video on: the drawn caret cell
-  CaretCellOff* = "\x1b[27m"  ## reverse video off
+var CaretCellFg* = "\x1b[38;5;252m"
+  ## Foreground the drawn caret cell paints in: the mode-resolved
+  ## white-family tone (the `OffWhiteFg` tier). Without it the reversed
+  ## cell takes the terminal's default foreground, so the caret's color
+  ## is the terminal theme's, not ours (Windows Terminal's Campbell
+  ## default fg #CCCCCC reads dark grey next to our 252 off-white).
+  ## The app re-resolves this next to `applyPalette` at startup.
+
+const CaretCellOff* = "\x1b[27m\x1b[39m"  ## reverse off, fg back to default
+
+template CaretCellOn*: string = CaretCellFg & "\x1b[7m"
+  ## Foreground + reverse video on: the drawn caret cell. The editor row
+  ## around it is always unstyled, so `CaretCellOff` restoring the DEFAULT
+  ## foreground (not some saved one) keeps the row's remaining bytes plain.
 
 proc caretSliceBytes*(text: string; sp: LineSpan; caretAt: int;
                        width: int): string =
