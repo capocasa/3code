@@ -145,9 +145,18 @@ proc tokenify(s: var string, outSet: var HashSet[string]) =
       t = t[0 ..< t.len - 1]
     if t.len < 6: continue
     var norm = ""
+    var letters = 0
     for ch in t:
       if ch.isDigit: norm.add '#'
-      else: norm.add ch
+      else:
+        norm.add ch
+        if ch.isAlphaAscii: inc letters
+    # Addresses are not intent. A token that is mostly digits and
+    # punctuation (line ranges, versions, pids: `40,140p`, `2.2.10`)
+    # normalizes to `##,###p`-shaped filler, and filler made four
+    # *different* sed ranges over one file read as one near-duplicate
+    # cluster (20260921 stefani session). Tokens need real words.
+    if letters < 3: continue
     outSet.incl norm
 
 proc collectValues(node: JsonNode, outSet: var HashSet[string]) =
@@ -172,9 +181,11 @@ proc distinctiveTokens(argsStr: string): HashSet[string] =
   ## call). A leading `cd <dir> &&` or `ssh [user@]host` prefix is stripped
   ## from each value so a persistent working directory or connection target
   ## cannot masquerade as the theme.
-  ## Digits are normalized away so counters, line numbers and pids do not
-  ## mask similarity; tokens shorter than 6 chars are dropped because
-  ## short tokens are usually flags, paths' common words or shell keywords.
+  ## Digits are normalized away so counters do not mask similarity, and
+  ## tokens that carry almost no letters (line ranges, versions, pids)
+  ## are dropped outright as addresses rather than intent; tokens shorter
+  ## than 6 chars are dropped because short tokens are usually flags,
+  ## paths' common words or shell keywords.
   try:
     collectValues(parseJson(argsStr), result)
   except CatchableError:
@@ -188,6 +199,15 @@ proc streakRingStuck(ring: seq[HashSet[string]]): bool =
   ## cosmetic variant of the last) or a tight cluster (`FlailStreakCluster`
   ## calls each >= `FlailStreakNearDup` similar to a common member, the doom
   ## loop that hammers one near-identical probe amid other variation).
+  ##
+  ## Sets with fewer than two distinctive tokens never count as similar:
+  ## one shared token is the *subject* of a probe (the file being read)
+  ## and says nothing about intent, yet two such sets compare at Jaccard
+  ## 1.0. Counting them made a healthy file-inspection run (tail, sed,
+  ## wc over one transcript, 20260921 stefani session) read as a tight
+  ## near-duplicate cluster. Sparse pairs contribute 0 to the average
+  ## and never form near-duplicates; a true repeat of a sparse call is
+  ## still caught by the fingerprint signals, which don't need tokens.
   if ring.len < 2: return false
   var total = 0.0
   var pairs = 0
@@ -196,8 +216,10 @@ proc streakRingStuck(ring: seq[HashSet[string]]): bool =
     var near = 0
     for j in 0 ..< ring.len:
       if j == i: continue
+      let sparse = ring[i].len < 2 or ring[j].len < 2
       let u = (ring[i] + ring[j]).len
-      let jac = if u > 0: (ring[i] * ring[j]).len.float / u.float else: 0.0
+      let jac = if sparse or u == 0: 0.0
+                else: (ring[i] * ring[j]).len.float / u.float
       if jac >= FlailStreakNearDup: inc near
       if j > i:
         total += jac
