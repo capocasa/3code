@@ -136,6 +136,13 @@ var bashPathOverride*: string
   ## detection in `streamexec.resolveBash` for users with bash at a
   ## non-standard location. Empty on POSIX (where /bin/sh is always used).
 
+var bashSourcePref*: string
+  ## All OS. `[settings]` `bash_source = "..."` picks which installed bash
+  ## 3code uses: "auto" (default, the resolution order below), or one of
+  ## "bundled-git", "git-for-windows", "msys2", "bundled-msys2" to pin a
+  ## specific source. On POSIX the only meaningful values are "auto" and a
+  ## full path (same as bash_path); anything else falls back to /bin/sh.
+
 proc gateExperimental*(p: Profile): bool =
   ## True if the profile is allowed to run a turn under current policy:
   ## empty profile (caller handles that), known-good model, or the
@@ -327,7 +334,7 @@ const
                   "sandbox_enabled", "patient_retry", "patient-retry",
                   "sandbox_wall_warn",
                   "tone", "mode", "bash_path", "bash-path",
-                  "auto_update"]
+                  "bash_source", "bash-source", "auto_update"]
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
   ColorKeys = ["bright-white", "off-white", "dim-white", "token-bar",
                "private-bar"]
@@ -561,6 +568,8 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           else: discard
         of "bash_path", "bash-path":
           bashPathOverride = v
+        of "bash_source", "bash-source":
+          bashSourcePref = v.strip.toLowerAscii
         else: discard
       of "search":
         case e.key
@@ -680,9 +689,9 @@ proc mergeForeignEdits(path: string; current: var string,
   # (e.g. `:streaming off`) would be reverted by the stale disk value
   # right before the buffer serializes it.
   let (savedNotify, savedStreaming, savedSandbox, savedPatient,
-       savedWallWarn, savedColorMode, savedBash) =
+       savedWallWarn, savedColorMode, savedBash, savedBashSrc) =
     (notifyEnabled, streamingEnabled, sandboxEnabled, patientRetryEnabled,
-     sandboxWallWarn, colorModePref, bashPathOverride)
+     sandboxWallWarn, colorModePref, bashPathOverride, bashSourcePref)
   let savedParams = activeParams
   let (diskCurrent, diskProviders, _, _, _, _) =
     try: parseConfigFile(path)
@@ -698,6 +707,7 @@ proc mergeForeignEdits(path: string; current: var string,
   sandboxWallWarn = savedWallWarn
   colorModePref = savedColorMode
   bashPathOverride = savedBash
+  bashSourcePref = savedBashSrc
   activeParams = savedParams
   # Same baseline-diff for the `current` line: an instance that never
   # switched in-session still holds the startup value, so a different

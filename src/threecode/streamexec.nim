@@ -22,7 +22,16 @@ var wallWarnShown = false  ## one Windows wall warning per run
 
 proc shPath(): string =
   ## POSIX shell path. Android/Termux has no /bin/sh; $PREFIX/bin/sh is
-  ## the same dash/bash the interactive shell uses.
+  ## the same dash/bash the interactive shell uses. A `bash_path` or
+  ## `bash_source` config value that names an existing file wins, so the
+  ## same setting works on every OS.
+  when declared(bashPathOverride):
+    if bashPathOverride.len > 0 and fileExists(bashPathOverride):
+      return bashPathOverride
+  when declared(bashSourcePref):
+    if bashSourcePref.len > 0 and '/' in bashSourcePref and
+        fileExists(bashSourcePref):
+      return bashSourcePref
   when defined(android):
     getEnv("PREFIX", "/data/data/com.termux/files/usr") & "/bin/sh"
   else:
@@ -138,13 +147,26 @@ when defined(windows):
     ## `winget install Git.Git` and 3code has a shell), then a
     ## standalone MSYS2 install, then the legacy 3code-installed MSYS2
     ## tree (deprioritized: the release-channel installer still drops
-    ## it, and old installs are in the wild). Returns "" when none is
-    ## found; the startup guard then warns and disables the bash tool.
+    ## it, and old installs are in the wild). A `bash_source` setting
+    ## pins one source: "bundled-git", "git-for-windows", "msys2", or
+    ## "bundled-msys2"; "auto" (the default) keeps the full order.
+    ## Returns "" when none is found; the startup guard then warns and
+    ## disables the bash tool.
     if cachedBash.len > 0: return cachedBash
     when declared(bashPathOverride):
       if bashPathOverride.len > 0 and fileExists(bashPathOverride):
         cachedBash = bashPathOverride
         return bashPathOverride
+    when declared(bashSourcePref):
+      let pick = case bashSourcePref
+        of "bundled-git": bundledGitBash()
+        of "git-for-windows": gitForWindowsBash()
+        of "msys2": systemMsys2Bash()
+        of "bundled-msys2": bundledMsys2Bash()
+        else: ""
+      if pick.len > 0 and fileExists(pick):
+        cachedBash = pick
+        return pick
     for cand in [bundledGitBash(), gitForWindowsBash(), systemMsys2Bash(),
                  bundledMsys2Bash()]:
       if cand.len > 0 and fileExists(cand):
