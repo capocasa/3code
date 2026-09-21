@@ -92,7 +92,9 @@ release folder:
    the installer's own PortableGit tree (`%LOCALAPPDATA%\3code\git`), then
    the Git for Windows install, then a standalone MSYS2 (`C:\msys64`), then
    the legacy `%LOCALAPPDATA%\3code\msys64` tree. With Git for Windows
-   present, no MSYS2 download is needed.
+   present, no MSYS2 download is needed. A `bash` setting overrides
+   the automatic order with a full path to the shell (any OS); `auto`
+   (the default) keeps the order above.
 
 The one-time `3code setup` (sandbox user + network fence) is still required
 on Windows. It needs admin rights: run it from a console/RDP session and it

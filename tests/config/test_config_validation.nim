@@ -144,6 +144,13 @@ suite "config validation: schema (in-process)":
     ]
     check validateConfig(P, entries) == ""
 
+  test "bash is a permitted settings key":
+    let entries = @[
+      ("settings", "bash", "auto", 3),
+      ("settings", "bash", "/usr/local/bin/bash", 4),
+    ]
+    check validateConfig(P, entries) == ""
+
   test "model_prefix is a permitted provider key":
     let entries = @[("provider", "model_prefix", "openai/", 4)]
     check validateConfig(P, entries) == ""
