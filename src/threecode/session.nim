@@ -993,7 +993,10 @@ proc renderSession*(session: Session, messages: JsonNode): string =
       let (ctx, notes, body) = splitPreamble(raw)
       if ctx.len > 0: emitRecord s, "context", ctx
       if notes.len > 0: emitRecord s, "project_notes", notes
-      emitRecord s, "user", body
+      # `+agent` marks a harness-autosent prompt (empty-reply steer): replay
+      # renders it as a `»` agent-prompt item, never a user `❯` echo.
+      let hdr = if m{"agentSent"}.getBool(false): "user +agent" else: "user"
+      emitRecord s, hdr, body
     of "assistant":
       # Always emit the reasoning record, empty included: the live
       # transports stamp `reasoning_content` on every assistant message,
@@ -1023,8 +1026,12 @@ proc renderSession*(session: Session, messages: JsonNode): string =
     of "tool":
       let id = m{"tool_call_id"}.getStr
       let exitCode = idToExit.getOrDefault(id, 0)
-      emitRecord s, "tool_result " & id & " exit=" & $exitCode,
-                 m{"content"}.getStr("")
+      var hdr = "tool_result " & id & " exit=" & $exitCode
+      # `+agent` marks a harness-autosent note (flail escalation/abort) so
+      # replay renders the `»` item the live path committed, not a tool
+      # banner.
+      if m{"agentSent"}.getBool(false): hdr.add " +agent"
+      emitRecord s, hdr, m{"content"}.getStr("")
     else: discard
   s
 
@@ -1257,7 +1264,7 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
   var exitByCallId = initTable[string, int]()
   var hasResolvedSystem = false
   for r in records:
-    let (pos, kv, _) = parseArgs(r.args)
+    let (pos, kv, flags) = parseArgs(r.args)
     case r.role
     of "session":
       if pos.len > 0: sess.created = pos[0]
@@ -1289,7 +1296,9 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
       let content = joinPreamble(pendingCtx, pendingNotes, r.body)
       pendingCtx = ""
       pendingNotes = ""
-      messages.add %*{"role": "user", "content": content}
+      let msg = %{"role": %"user", "content": %content}
+      if "agent" in flags: msg["agentSent"] = %true
+      messages.add msg
       lastAssistant = nil
     of "reasoning":
       pendingReasoning = r.body
@@ -1335,7 +1344,10 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
       let exitCode = try: parseInt(kv.getOrDefault("exit", "0"))
                      except ValueError: 0
       exitByCallId[id] = exitCode
-      messages.add %*{"role": "tool", "tool_call_id": id, "content": r.body}
+      let msg = %{"role": %"tool", "tool_call_id": %id,
+                 "content": %r.body}
+      if "agent" in flags: msg["agentSent"] = %true
+      messages.add msg
       lastAssistant = nil
     else: discard
   # Repair orphaned tool_calls / orphaned tool results. A session saved

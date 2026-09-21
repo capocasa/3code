@@ -2,6 +2,21 @@
 
 **Unreleased**
 
+- **Harness autosends are visible scrollback items.** The prompts
+  3code sends on its own (the empty-reply steer, the flail detector's
+  prod notes) showed as paraphrased magenta harness lines while the
+  actual text went to the model unseen. They are now their own
+  scrollback category: the exact text sent, under a `»` marker in the
+  magenta intervention tier (cyan stays the token color), with a grey
+  context row above the steer. The marks persist in the session log,
+  so a resumed replay paints the same `»` items instead of a user echo
+  or a tool banner, and skips the empty-reply fallback for a turn the
+  steer recovered (live never painted it). The steer text also names
+  the problem now and leaves the tool path open ("Your last reply came
+  back empty. Answer now, or continue with a tool call.") instead of
+  demanding a final answer, since an empty reply is not always a
+  finished model.
+
 - **Grok 4.7.** xAI's new frontier model joins the known-good table:
   `xai` (and the SuperGrok subscription twin), OpenRouter
   (`x-ai/grok-4.7`), and OpenCode Zen. Same shape as grok-4.6: 500k

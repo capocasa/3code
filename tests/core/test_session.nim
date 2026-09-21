@@ -256,6 +256,32 @@ suite "session: renderSession → loadSessionFile round-trip":
     # toolLog should have one entry
     check ls.toolLog.len == 1
 
+  test "round-trips agentSent flags on user and tool messages":
+    # Harness-autosend markers (`agentSent`) must survive the .3log so a
+    # resumed replay renders `»` items for the empty-reply steer and the
+    # flail notes instead of a user echo / tool banner.
+    let sess = Session(created: "20250101T120000", profileName: "test",
+                       cwd: "/tmp")
+    let msgs = %*[
+      {"role": "system", "content": "sys"},
+      {"role": "user", "content": "go"},
+      {"role": "assistant", "content": "",
+       "tool_calls": [{"id": "call_9", "type": "function",
+                        "function": {"name": "bash",
+                                     "arguments": "{\"command\": \"ls\"}"}}]},
+      {"role": "tool", "tool_call_id": "call_9",
+       "content": "SYSTEM: Loop detected.", "agentSent": true},
+      {"role": "user", "content": "Please provide your final answer now.",
+       "agentSent": true}
+    ]
+    let (_, lm) = roundTrip(sess, msgs)
+    check lm.len == 5
+    check not lm[1].hasKey("agentSent")          # plain user stays plain
+    check lm[3]{"agentSent"}.getBool(false)       # flail note keeps the mark
+    check lm[3]["content"].getStr == "SYSTEM: Loop detected."
+    check lm[4]{"agentSent"}.getBool(false)       # steer keeps the mark
+    check lm[4]["role"].getStr == "user"          # wire role unchanged
+
   test "round-trips write action":
     let sess = Session(created: "20250101T120000", profileName: "test",
                        cwd: "/tmp")

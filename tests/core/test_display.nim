@@ -352,3 +352,92 @@ when not defined(windows):
       check rendered.contains(toolResultBytes(akBash, output, 0, 1))
       check "line one" in rendered
       check "line three" in rendered
+
+    test "agent-sent steer replays as a » item, never a user echo":
+      # The empty-reply steer is a harness-autosent user message (`agentSent`).
+      # Replay must render the `»` agent-prompt item the live path
+      # committed, not the `❯` user echo it would get from role alone. The
+      # empty assistant turn it recovered painted nothing live (no grey
+      # fallback, no receipt), so the replay must skip it too.
+      let msgs = %*[
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "content": "",
+         "usage": {"promptTokens": 50, "completionTokens": 0,
+                   "totalTokens": 50, "cachedTokens": 0}},
+        {"role": "user", "content": "Your last reply came back empty. " &
+           "Answer now, or continue with a tool call.",
+         "agentSent": true},
+        {"role": "assistant", "content": "Here it is.",
+         "usage": {"promptTokens": 60, "completionTokens": 5,
+                   "totalTokens": 65, "cachedTokens": 0}}]
+      let rendered = captureReplay(msgs, @[], window = 1000)
+      check "» " in rendered
+      check MagentaFg & "» Your last reply came back empty." in rendered
+      check "❯ Your last reply came back empty." notin rendered
+      check "❯ go" in rendered
+      check "Here it is." in rendered
+      check EmptyReplyMsg notin rendered   # the skipped empty turn leaves no fallback
+      check "↑50" notin rendered          # ...and no receipt for it either
+
+    test "flail escalation note replays as a » item, not a tool banner":
+      # A flail-escalated tool_call never executes; live commits only the
+      # `»` agent-prompt item for the note. Replay must skip the tool item
+      # (no `$` banner, no output rows) and render the same `»` item.
+      let note = "SYSTEM: Loop detected: you are repeating tool calls."
+      let toolLog = @[
+        ToolRecord(banner: "printf hi", output: "hi\n", code: 0,
+          kind: akBash),
+        ToolRecord(banner: "! bash (flailing)", output: note, code: -1,
+          kind: akError)]
+      let msgs = %*[
+        {"role": "assistant", "content": "",
+         "usage": {"promptTokens": 50, "completionTokens": 0,
+                   "totalTokens": 50, "cachedTokens": 0},
+         "tool_calls": [
+           {"id": "c1", "type": "function",
+            "function": {"name": "bash",
+              "arguments": "{\"command\": \"printf hi\"}"}},
+           {"id": "c2", "type": "function",
+            "function": {"name": "bash",
+              "arguments": "{\"command\": \"printf hi\"}"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "hi\n"},
+        {"role": "tool", "tool_call_id": "c2", "content": note,
+         "agentSent": true},
+        {"role": "assistant", "content": "Recovered.",
+         "usage": {"promptTokens": 60, "completionTokens": 5,
+                   "totalTokens": 65, "cachedTokens": 0}}]
+      let rendered = captureReplay(msgs, toolLog, window = 1000)
+      check MagentaFg & "» " & note in rendered
+      check "$ printf hi" in rendered   # the executed first call still shows
+      check rendered.count("SYSTEM: Loop detected") == 1
+
+    test "flail abort batch collapses duplicate notes into one » item":
+      # fvAbort pairs the abort note onto the flagged call AND every
+      # remaining call of the batch, but live commits one `»` item; replay
+      # must collapse the consecutive duplicates the same way.
+      let note = "SYSTEM: Turn aborted: the model is stuck in a loop."
+      let toolLog = @[ToolRecord(banner: "! bash (flail abort)",
+        output: note, code: -1, kind: akError)]
+      let msgs = %*[
+        {"role": "assistant", "content": "",
+         "usage": {"promptTokens": 50, "completionTokens": 0,
+                   "totalTokens": 50, "cachedTokens": 0},
+         "tool_calls": [
+           {"id": "c1", "type": "function",
+            "function": {"name": "bash",
+              "arguments": "{\"command\": \"make\"}"}},
+           {"id": "c2", "type": "function",
+            "function": {"name": "bash",
+              "arguments": "{\"command\": \"make\"}"}},
+           {"id": "c3", "type": "function",
+            "function": {"name": "bash",
+              "arguments": "{\"command\": \"make\"}"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": note,
+         "agentSent": true},
+        {"role": "tool", "tool_call_id": "c2", "content": note,
+         "agentSent": true},
+        {"role": "tool", "tool_call_id": "c3", "content": note,
+         "agentSent": true}]
+      let rendered = captureReplay(msgs, toolLog, window = 1000)
+      check rendered.count("» " & note) == 1
+      check "$ make" notin rendered   # no executed tool, so no tool banner

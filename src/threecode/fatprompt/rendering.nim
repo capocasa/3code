@@ -727,6 +727,28 @@ proc formatUserPromptItem*(line: string): string =
   ## included; the controller/transcript emitter owns inter-item spacing.
   result.addUserEcho(line, trailingNewline = false)
 
+proc formatAgentPromptItem*(line: string; note = ""): string =
+  ## Format a harness-autosent prompt (empty-reply steer, flail prod) as a
+  ## scrollback item body: the `»` marker and body in the magenta
+  ## intervention tier (never the token cyan), wrapped like the user echo
+  ## with continuation rows indented under the marker. `note` is the grey
+  ## context row above (why 3code intervened); it is live-only context and
+  ## never persists, so replay renders without it.
+  if note.len > 0:
+    result.add GreyFg & note & Reset & "\r\n"
+  let termW = try: terminalWidth() except CatchableError: 0
+  let lines = line.splitLines
+  for idx, l in lines:
+    let chunks =
+      if termW <= 0: @[l]
+      else: wrapPlain(l, max(1, termW - 2))
+    result.add MagentaFg & (if idx == 0: "» " else: "  ") & chunks[0]
+    for chunk in chunks[1 ..< chunks.len]:
+      result.add "\r\n" & MagentaFg & "  " & chunk
+    result.add Reset
+    if idx < lines.high:
+      result.add "\r\n"
+
 proc promptOnlyBytes*(): string =
   "\r\x1b[2K" & EditorPromptBytes
 
