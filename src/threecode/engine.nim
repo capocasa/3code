@@ -441,16 +441,25 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   # The resize erase below clears its own rows down, so it never needs
   # the scroll.
   var blockGrew = false
+  # Everything before the row loop lands in `lead`, not direct writes: a
+  # growth scroll is bare `\r\n`s, and line-buffered stdout flushes on every
+  # newline, so the scroll reached the terminal as its own pty write while
+  # the rewrite that re-anchors the rows was still buffered. A terminal that
+  # painted between those writes showed the scrolled block mid-frame: the
+  # editor's drawn caret stranded a row or two up inside the tool viewport
+  # (the occasional white caret flash near the $/€/£/¥ banner). One buffered
+  # write keeps the frame atomic regardless of read scheduling.
+  var lead = ""
   if blockH > prevH and resizeErase < 0:
     if belowCaret > 0:
       # The growth scroll must run at the block's bottom row: a `\r\n`
       # from a mid-block caret merely steps down one existing row (no
       # scroll), and the rewrite below would then push the block at the
       # screen's bottom edge instead of replacing it.
-      stdout.write "\x1b[" & $belowCaret & "B"
+      lead.add "\x1b[" & $belowCaret & "B"
       belowCaret = 0
     for _ in 0 ..< blockH - prevH:
-      stdout.write "\r\n"
+      lead.add "\r\n"
     prevH = blockH
     blockGrew = true
   let anchor = if caretRow >= 0: caretRow else: blockH - 1
@@ -462,9 +471,9 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   let up = if resizeErase >= 0: resizeErase else: max(0, prevH - 1 - belowCaret)
 
   if up > 0:
-    stdout.write "\x1b[" & $up & "A"
+    lead.add "\x1b[" & $up & "A"
   if resizeErase >= 0:
-    stdout.write "\r\x1b[J"
+    lead.add "\r\x1b[J"
   # When the previous block was taller at the top (a commit consumed
   # content rows out of band), the cursor's walk-up reaches the stale
   # top rows while the anchor-aligned row loop only covers the new
@@ -479,12 +488,12 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
       headBuf.add "\r\x1b[2K"
       headBuf.add "\x1b[1B"
     headBuf.add "\x1b[" & $staleHead & "A"
-    stdout.write headBuf
+    lead.add headBuf
   # Top-down rewrite: rows compare against the previous block aligned
   # at the bottom. The editor sections align at their cursor rows (the
   # caret does not move during a volatile repaint); rows before the
   # previous block ever existed compare against a sentinel.
-  var buf = "\r"
+  var buf = lead & "\r"
   # Editor-row indexing uses the physical editor count: after an
   # out-of-band wipe `prevEditorRows` is empty while the screen still
   # holds the editor's rows, so treating the count as zero would compare
