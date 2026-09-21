@@ -1287,12 +1287,15 @@ proc stopSpinner*(clearLiveFooter = true) =
   setAnimMode(amIdle)
   if clearLiveFooter and inputThreadRunning and inputEditor != nil and
       spinnerFramePainted.load(moRelaxed):
-    # The spinner footer is always gap+bar (2 rows) now that the ticker row
-    # is permanently reserved.
-    termengine.renderFooter(clearFooterFrame(2),
-                            inputThreadRunning,
-                            inputEditor,
-                            currentTermW())
+    # The spinner footer is gap+bar (2 rows) with the ticker row
+    # permanently reserved — plus the live retry notice's padding rows
+    # when a backoff was on screen. Clear every painted chrome row or the
+    # extras strand above the prompt.
+    termengine.renderFooter(
+      clearFooterFrame(max(2, termengine.paintedFooterRowCount())),
+      inputThreadRunning,
+      inputEditor,
+      currentTermW())
 
 proc nowMs(): int =
   int(epochTime() * 1000.0)

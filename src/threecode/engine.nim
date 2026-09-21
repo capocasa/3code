@@ -474,15 +474,26 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
     lead.add "\x1b[" & $up & "A"
   if resizeErase >= 0:
     lead.add "\r\x1b[J"
-  # When the previous block was taller at the top (a commit consumed
-  # content rows out of band), the cursor's walk-up reaches the stale
-  # top rows while the anchor-aligned row loop only covers the new
-  # block below them. Blank that stale head explicitly, then step back
-  # down to the new block's top. (ED-0 would be shorter, but terminal
-  # models that implement it as "drop the rows below" shift anything
-  # underneath up into the block.)
+  # When the previous block was taller at the top, the vacated rows are
+  # handled one of two ways. When the shrink is exactly the footer band
+  # losing rows (a retry notice's padding rows clearing), absorb them
+  # resize-style: erase down from the old top and repaint the shorter
+  # block there, so its bottom (and the caret) rise and the vacated rows
+  # end up below the block as dead space. Blanking them in place instead
+  # would strand them above the block as blank scrollback no walk-up ever
+  # covers again. Any other top-shrink (a commit consumed content rows
+  # out of band) keeps the in-place blanking: blank that stale head
+  # explicitly, then step back down to the new block's top. (ED-0 would
+  # be shorter, but terminal models that implement it as "drop the rows
+  # below" shift anything underneath up into the block.)
   let staleHead = max(0, prevH - blockH)
-  if staleHead > 0:
+  let footerShrink = max(0, max(e.paintedFooterRows, prevBarCount) -
+    footerRowsAboveEditor)
+  let absorbShrink = staleHead > 0 and resizeErase < 0 and
+    staleHead <= footerShrink
+  if absorbShrink:
+    lead.add "\r\x1b[J"
+  elif staleHead > 0:
     var headBuf = ""
     for _ in 0 ..< staleHead:
       headBuf.add "\r\x1b[2K"
@@ -507,7 +518,7 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   # geometry (a blanked gap row with the prompt one row off — the
   # wizard-bootstrap lost-prompt race). Compare everything as missing
   # and rewrite the full block, exactly like the resize path.
-  let diffValid = not blockGrew
+  let diffValid = not blockGrew and not absorbShrink
   const Missing = "\x01MISSING"
   for i in 0 ..< blockH:
     let text =
@@ -546,7 +557,7 @@ proc paintVolatileRegion*(e: var TerminalEngine; width: int;
   buf.add "\r"
   if caretCol > 0:
     buf.add "\x1b[" & $caretCol & "C"
-  if blockH < prevH:
+  if blockH < prevH and not absorbShrink:
     # The block shrank: the rows below the new bottom still hold stale
     # content the row loop never visits (it stops at the new bottom).
     # Blank them explicitly, counting from the new bottom — the anchor

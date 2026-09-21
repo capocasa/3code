@@ -1133,15 +1133,22 @@ suite "terminal visual contract":
         doAssert false, "retry notice never appeared on screen\n" &
           tty.dumpFramesAround("rate limit")
       let f = tty.frames[noticeFrame].visual
-      require noticeRow + 1 < f.cells.len
+      let rows = tty.frames[noticeFrame].rows
+      require noticeRow + 2 < f.cells.len
       check f.cells[noticeRow][0].fgColor == colMagenta
       check not f.cells[noticeRow][0].attrs.hasAttr(saBold)
-      # The token bar below the notice row keeps token information; the
+      # The notice is boxed by one blank row above and below: flush against
+      # the committed echo above and the token bar below, it read as glued
+      # to both (the "lacking one line above and below" report).
+      require noticeRow >= 1
+      check rows[noticeRow - 1].strip.len == 0
+      check rows[noticeRow + 1].strip.len == 0
+      # The token bar below the blank row keeps token information; the
       # message itself never lands in the bar.
-      check "rate limit" notin tty.frames[noticeFrame].rows[noticeRow + 1]
+      check "rate limit" notin rows[noticeRow + 2]
       # The turn timer in that same bar row counts up in clockDuration
       # form (`4`, `2:08`, `1:12:21`).
-      check tty.frames[noticeFrame].rows[noticeRow + 1].contains(
+      check rows[noticeRow + 2].contains(
         re"\d+(:\d{2}){0,2}\s*$")
       # ...and the retried reply reaches scrollback after the backoff.
       tty.expectInHistory "reply after retry"
@@ -1156,6 +1163,19 @@ suite "terminal visual contract":
       # it. The reply and the user echo are the committed lines.
       tty.drain(300)
       check "rate limit (code 429)" notin tty.screenText()
+      # The notice's padding rows vanished with it: exactly one blank row
+      # (the standard item separator) sits between the committed echo and
+      # the reply. Stray extra blanks would mean the volatile repaint
+      # blanked the padding in place instead of absorbing it.
+      var echoRow = -1
+      var replyRow = -1
+      for r in 0 ..< tty.grid.rows.len:
+        let text = tty.grid.rowText(r)
+        if echoRow < 0 and "go" in text and "❯" in text: echoRow = r
+        if replyRow < 0 and "reply after retry" in text: replyRow = r
+      require echoRow >= 0 and replyRow > echoRow
+      check replyRow - echoRow == 2
+      check tty.grid.rowText(echoRow + 1).strip.len == 0
       # Color contract for the committed rows, asserted on the rendered
       # grid (what the user sees): the startup profile's model value is
       # bright white. The grid retains scrolled-off rows.

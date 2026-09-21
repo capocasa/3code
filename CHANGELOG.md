@@ -2,6 +2,13 @@
 
 **Unreleased**
 
+- **The rate-limit notice gets breathing room.** The retry-backoff
+  notice (rate limit, server error, network quiet) sat flush against
+  the transcript line above and the token bar below. It is now boxed
+  by one blank row above and below while the countdown is live, and
+  the two rows are absorbed back when the next attempt connects, so
+  nothing extra is left in scrollback.
+
 - **The prompt caret is off-white on Windows too.** The drawn caret
   cell was plain reverse video with no foreground set, so its color was
   whatever the terminal's default foreground is: off-white on most Linux

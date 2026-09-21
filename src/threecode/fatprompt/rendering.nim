@@ -548,13 +548,28 @@ proc footerLayout*(frame: FooterFrame; termW = 0): FooterLayout =
       else:
         labelCells(frame.label) + 5
     let barRows = barWrapRows(barCells, termW)
-    result.rowsAboveEditor = 1 + barRows
-    result.bytes = "\r\x1b[2K"
-    result.bytes.add retryNoticeRow(frame, termW)
-    result.bytes.add "\r\n\x1b[2K"
-    result.bytes.add barText
-    result.bytes.add "\r\n\x1b[2K" & EditorPromptBytes
-    result.bytes.add "\r\x1b[" & $barRows & "A"
+    if frame.retryWait.active:
+      # The live notice is boxed by one blank row above and below: flush
+      # against the transcript above and the bar below, it read as glued
+      # to both. The two rows exist only while a backoff is live; when the
+      # wait clears the engine's volatile repaint absorbs them (see
+      # paintVolatileRegion), so they never strand as blank scrollback.
+      result.rowsAboveEditor = 3 + barRows
+      result.bytes = "\r\x1b[2K"
+      result.bytes.add "\r\n\x1b[2K" & retryNoticeRow(frame, termW)
+      result.bytes.add "\r\n\x1b[2K"
+      result.bytes.add "\r\n\x1b[2K"
+      result.bytes.add barText
+      result.bytes.add "\r\n\x1b[2K" & EditorPromptBytes
+      result.bytes.add "\r\x1b[" & $barRows & "A"
+    else:
+      result.rowsAboveEditor = 1 + barRows
+      result.bytes = "\r\x1b[2K"
+      result.bytes.add retryNoticeRow(frame, termW)
+      result.bytes.add "\r\n\x1b[2K"
+      result.bytes.add barText
+      result.bytes.add "\r\n\x1b[2K" & EditorPromptBytes
+      result.bytes.add "\r\x1b[" & $barRows & "A"
 
 proc rowsAboveEditor*(frame: FooterFrame; termW = 0): int =
   frame.footerLayout(termW).rowsAboveEditor
@@ -564,12 +579,21 @@ proc spinnerFooterBytes*(frame, label, ticker: string; elapsed: int,
   spinnerFooterFrame(frame, label, ticker, elapsed).footerLayout(termW).bytes
 
 proc liveEditorSpinnerFooterBytes*(frame, label, tickerRow: string;
-                                   elapsed: int; termW = 0): string =
+                                   elapsed: int; termW = 0;
+                                   padNotice = false): string =
   ## `tickerRow` is pre-styled ticker-row content (see retryNoticeRow),
-  ## "" for a blank gap row.
+  ## "" for a blank gap row. `padNotice` boxes that row with one blank row
+  ## above and below (the live retry notice); rowsAboveEditor counts all
+  ## three (see footerLayout).
   result.add "\r\x1b[2K"
-  result.add tickerRow
-  result.add "\r\n"
+  if padNotice:
+    result.add "\r\n\x1b[2K"
+    result.add tickerRow
+    result.add "\r\n\x1b[2K"
+    result.add "\r\n"
+  else:
+    result.add tickerRow
+    result.add "\r\n"
   result.add liveEditorSpinnerBarBytes(frame, label, elapsed)
 
 proc clearSpinnerFooterBytes*(hadTicker: bool): string =
@@ -659,7 +683,12 @@ proc footerRowTexts*(frame: FooterFrame; termW: int): seq[string] =
       else: "")
     result.add wrapStyledLine(liveBarText(frame.label), max(1, termW))
   of ffSpinner:
-    result.add retryNoticeRow(frame, termW)
+    if frame.retryWait.active:
+      result.add ""
+      result.add retryNoticeRow(frame, termW)
+      result.add ""
+    else:
+      result.add retryNoticeRow(frame, termW)
     result.add wrapStyledLine(
       spinnerBarText(frame.spinner, frame.label, frame.elapsed),
       max(1, termW))
@@ -672,7 +701,8 @@ proc footerFrameBytes*(frame: FooterFrame; termW = 0): string =
     # not the standalone layout's full footer, which includes the editor
     # prompt and a cursor park.
     result = liveEditorSpinnerFooterBytes(frame.spinner, frame.label,
-      retryNoticeRow(frame, termW), frame.elapsed, termW)
+      retryNoticeRow(frame, termW), frame.elapsed, termW,
+      padNotice = frame.retryWait.active)
   else:
     result = frame.footerLayout(termW).bytes
 
