@@ -42,7 +42,8 @@ type
     # (glm/kimi Preserved Thinking); tbNone for strict OpenAI-style
     # validators that reject the unknown field; tbCurrentTurn is the
     # cheap middle ground (tool-loop reasoning only) being trialled on
-    # glm/kimi rows.
+    # glm/kimi rows. zai rows are tbNone: the standard API never gets
+    # thinking back as input; zaicode (Coding Plan) keeps it.
     provider: string,
     model: string,
     family: string,
@@ -73,13 +74,13 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nebius", "zai-org/GLM-5.1", "glm", "5", "1", "on", 0.2, 8192, tbAllTurns, false, 200_000, false),
     ("together", "zai-org/GLM-5.1", "glm", "5", "1", "on", 0.2, 8192, tbAllTurns, false, 200_000, true),
     ("together", "zai-org/GLM-5", "glm", "5", "", "on", 0.2, 8192, tbAllTurns, false, 200_000, true),
-    ("zai", "glm-4.7", "glm", "4", "7", "on", 0.2, 8192, tbAllTurns, false, 200_000, false),
-    ("zai", "glm-5", "glm", "5", "", "on", 0.2, 8192, tbAllTurns, false, 200_000, false),
-    ("zai", "glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, tbAllTurns, false, 200_000, false),
-    ("zai", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, tbAllTurns, false, 200_000, false),
-    ("zai", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, tbAllTurns, false, 1_000_000, false),
-    ("zai", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
-    ("zai", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbCurrentTurn, false, 1_000_000, false),
+    ("zai", "glm-4.7", "glm", "4", "7", "on", 0.2, 8192, tbNone, false, 200_000, false),
+    ("zai", "glm-5", "glm", "5", "", "on", 0.2, 8192, tbNone, false, 200_000, false),
+    ("zai", "glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, tbNone, false, 200_000, false),
+    ("zai", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, tbNone, false, 200_000, false),
+    ("zai", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, tbNone, false, 1_000_000, false),
+    ("zai", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbNone, false, 1_000_000, false),
+    ("zai", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbNone, false, 1_000_000, false),
     ("zaicode", "glm-4.7", "glm", "4", "7", "on", 0.2, 8192, tbAllTurns, false, 200_000, false),
     ("zaicode", "glm-5", "glm", "5", "", "on", 0.2, 8192, tbAllTurns, false, 200_000, false),
     ("zaicode", "glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, tbAllTurns, false, 200_000, false),

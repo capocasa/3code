@@ -3,6 +3,7 @@ Changelog
 0.8.0  private mode, per-model params, cache-hot resume, commandcode and
        platte providers, PortableGit in the Windows installer
   - xiaomi provider; MiMo 2.6 Pro/Flash on xiaomi, OpenRouter, OpenCode Zen/Go
+  - thinking replay (think-back) is configurable per provider in [params]
   - dead oauth refresh token ends the turn with a re-login hint, not a crash
   - harness autosends (steer, flail prods) show exact text in scrollback
   - Grok 4.7 known-good: xai, OpenRouter, OpenCode Zen (same shape as 4.6)

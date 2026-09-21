@@ -1206,7 +1206,7 @@ suite "xml tool_call fallback":
     check knownGoodThinkBack(Profile(name: "deepseek.deepseek-v4-pro",
       model: "deepseek-v4-pro", family: "deepseek")) == tbAllTurns
     check knownGoodThinkBack(Profile(name: "zai.glm-5.2",
-      model: "glm-5.2", family: "glm")) == tbAllTurns
+      model: "glm-5.2", family: "glm")) == tbNone
     check knownGoodThinkBack(Profile(name: "kimicode.k3",
       model: "k3", family: "kimi")) == tbAllTurns
     check knownGoodThinkBack(Profile(name: "together.moonshotai/Kimi-K2.6",
@@ -1226,11 +1226,13 @@ suite "xml tool_call fallback":
       {"role": "user", "content": "continue"}
     ]
     block keep:
-      let p = Profile(name: "zai.glm-5.2", family: "glm", model: "glm-5.2")
+      let p = Profile(name: "zaicode.glm-5.2", family: "glm", model: "glm-5.2")
       check knownGoodThinkBack(p) == tbAllTurns
       let wire = stripInternalFields(messages)
-      # same strip path as callModel: the glm row keeps its reasoning
-      check knownGoodThinkBack(p) == tbAllTurns
+      # same strip path as callModel: the zaicode glm row keeps its
+      # reasoning; the zai (standard API) row does not
+      check knownGoodThinkBack(Profile(name: "zai.glm-5.2", family: "glm",
+        model: "glm-5.2")) == tbNone
       stripThinkBack(knownGoodThinkBack(p), wire)
       check wire[1]{"reasoning_content"}.getStr == "private chain of thought"
     block strip:
@@ -1271,10 +1273,11 @@ suite "xml tool_call fallback":
 
   test "applyThinkBack sends explicit knobs on z.ai and kimi":
     block zai:
+      # standard-API rows strip: no preserved-thinking knob is sent
       var body = %*{"stream": true}
       let p = Profile(name: "zai.glm-5.2", family: "glm", model: "glm-5.2")
       applyThinkBack(p, body)
-      check body{"clear_thinking"}.getBool == false
+      check "clear_thinking" notin body
     block zaicode:
       var body = %*{"stream": true}
       let p = Profile(name: "zaicode.glm-5.2", family: "glm", model: "glm-5.2")
