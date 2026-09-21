@@ -226,19 +226,6 @@ proc setCurrentModel*(provName, model: string) =
         if idx >= 0: pr.models[idx] else: model
       break
 
-proc firstKnownGoodCombo*(providers: seq[ProviderRec]): string =
-  ## "<provider>.<model>" of the first known-good (provider, model) pair
-  ## across `providers`, walking KnownGoodCombos order so the curated
-  ## ranking drives the fallback, not config-file order.
-  for combo in KnownGoodCombos:
-    for pr in providers:
-      if pr.url == "" or (pr.key == "" and pr.auth != "oauth"): continue
-      if canonicalKnownGoodProvider(pr.name) != combo.provider.toLowerAscii: continue
-      for m in pr.models:
-        if matchesKnownGoodModel(combo.model, m):
-          return pr.name & "." & m
-  ""
-
 proc currentProvider*(): ProviderRec =
   let dot = activeCurrent.find('.')
   let name = if dot < 0: activeCurrent else: activeCurrent[0 ..< dot]
@@ -1124,11 +1111,6 @@ proc loadProfile*(wanted: string): Profile =
   prof.variant = vrt
   prof.reasoning = resolveReasoning(prov, prof)
   prof.params = resolveParams(activeParams, prov.name, fullModel)
-  if wanted == "" and not experimentalEnabled and not isKnownGood(prof):
-    let fallback = firstKnownGoodCombo(providers)
-    if fallback != "":
-      let alt = buildProfile(fallback, providers, "")
-      if alt.name != "": return alt
   prof
 
 const ProviderCatalog*: seq[(string, string)] = @[

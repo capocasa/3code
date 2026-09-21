@@ -162,6 +162,20 @@ suite "config: buildProfile":
     let prof = buildProfile("", @[], "nonexistent.model")
     check prof.name == ""
 
+  test "explicit current is honored even when not known-good":
+    # [settings] current is the user's word: a curated combo elsewhere in
+    # the config must not silently replace it (stefani 20260921: current
+    # deepseek.deepseek-v4-flash was swapped for novita.tencent/hy3 at
+    # every startup because the catalog had dropped the deepseek combo).
+    let zai = ProviderRec(name: "zai", url: "https://api.z.ai",
+                          key: "sk-test", models: @["glm-5.1"])
+    let mine = ProviderRec(name: "mine", url: "https://api.mine/v1",
+                           key: "sk-test", models: @["weird-model"])
+    experimentalEnabled = false
+    let prof = buildProfile("mine.weird-model", @[zai, mine], "")
+    check prof.name == "mine.weird-model"
+    check prof.url == "https://api.mine/v1"
+
   test "picks first model when no model specified":
     let prov = ProviderRec(name: "test", url: "https://api.test.com",
                            key: "sk-test", models: @["model-a", "model-b"])

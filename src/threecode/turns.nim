@@ -1178,7 +1178,12 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
 proc runTurnsInteractive*(p: Profile, messages: var JsonNode,
     session: var Session): bool =
   ## Returns true if the turn was interrupted by the user. See `runTurns`.
-  if not gateExperimental(p):
+  # The catalog gates ad-hoc picks (`-m`, `:model`, `:provider` all check
+  # `gateExperimental` themselves before anything is set). A profile that
+  # is still the config's `[settings] current` - or a directory-sticky
+  # current - is the user's explicit word and runs ungated; refusing it
+  # would make a hand-edited config unusable without a flag.
+  if not gateExperimental(p) and p.name != activeCurrent:
     explainExperimentalGate(p)
     # The controller already ran `emitUserSubmit`, which parks the input
     # thread (`inputIdleLinePending`) until the turn starts. A normal turn
