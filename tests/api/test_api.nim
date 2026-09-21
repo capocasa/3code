@@ -717,28 +717,28 @@ suite "api request shaping":
   test "mimo on xiaomi sends thinking.type enabled/disabled":
     block onn:
       var body = %*{"stream": true}
-      let p = Profile(name: "xiaomi.mimo-v2.5-pro", family: "mimo",
-                      model: "mimo-v2.5-pro", reasoning: "on")
+      let p = Profile(name: "xiaomi.mimo-v2.6-pro", family: "mimo",
+                      model: "mimo-v2.6-pro", reasoning: "on")
       applyReasoning(p, body)
       check body{"thinking"}{"type"}.getStr == "enabled"
     block offn:
       var body = %*{"stream": true}
-      let p = Profile(name: "xiaomi.mimo-v2.5-pro", family: "mimo",
-                      model: "mimo-v2.5-pro", reasoning: "off")
+      let p = Profile(name: "xiaomi.mimo-v2.6-pro", family: "mimo",
+                      model: "mimo-v2.6-pro", reasoning: "off")
       applyReasoning(p, body)
       check body{"thinking"}{"type"}.getStr == "disabled"
 
   test "mimo on openrouter sends reasoning.enabled bool":
     block onn:
       var body = %*{"stream": true}
-      let p = Profile(name: "openrouter.xiaomi/mimo-v2.5-pro", family: "mimo",
-                      model: "xiaomi/mimo-v2.5-pro", reasoning: "on")
+      let p = Profile(name: "openrouter.xiaomi/mimo-v2.6-flash", family: "mimo",
+                      model: "xiaomi/mimo-v2.6-flash", reasoning: "on")
       applyReasoning(p, body)
       check body{"reasoning"}{"enabled"}.getBool == true
     block offn:
       var body = %*{"stream": true}
-      let p = Profile(name: "openrouter.xiaomi/mimo-v2.5-pro", family: "mimo",
-                      model: "xiaomi/mimo-v2.5-pro", reasoning: "off")
+      let p = Profile(name: "openrouter.xiaomi/mimo-v2.6-flash", family: "mimo",
+                      model: "xiaomi/mimo-v2.6-flash", reasoning: "off")
       applyReasoning(p, body)
       check body{"reasoning"}{"enabled"}.getBool == false
 
@@ -759,7 +759,12 @@ suite "api request shaping":
   test "mimo knownGoodReasonings offers off/on":
     check knownGoodReasonings("xiaomi", "mimo-v2.5-pro") == @["off", "on"]
     check knownGoodReasonings("xiaomi", "mimo-v2.5") == @["off", "on"]
+    check knownGoodReasonings("xiaomi", "mimo-v2.6-pro") == @["off", "on"]
+    check knownGoodReasonings("xiaomi", "mimo-v2.6-flash") == @["off", "on"]
     check knownGoodReasonings("openrouter", "xiaomi/mimo-v2.5-pro") == @["off", "on"]
+    check knownGoodReasonings("openrouter", "xiaomi/mimo-v2.6-flash") == @["off", "on"]
+    check knownGoodReasonings("opencodego", "mimo-v2.6-pro") == @["off", "on"]
+    check knownGoodReasonings("opencode", "mimo-v2.6-flash-free") == @["off", "on"]
 
   test "mimo setup resolves to MimoPreamble and glmAndQwenTools":
     let p = Profile(name: "xiaomi.mimo-v2.5-pro", family: "mimo",

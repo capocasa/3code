@@ -96,6 +96,11 @@ suite "modelname: normalizeModelName":
   test "mimo":
     check normalizeModelName("XiaomiMiMo/MiMo-V2.5-Pro") == "mimo-2.5-pro"
     check normalizeModelName("mimo-v2.5-pro") == "mimo-2.5-pro"
+    check normalizeModelName("xiaomi/mimo-v2.6-pro") == "mimo-2.6-pro"
+    check normalizeModelName("XiaomiMiMo/MiMo-V2.6-Flash") == "mimo-2.6-flash"
+    check normalizeModelName("mimo-v2.6-flash-free") == "mimo-2.6-flash-free"
+    check normalizeModelName("xiaomimimo/mimo-v2.6-pro") == "mimo-2.6-pro"
+    check normalizeModelName("xiaomi-mimo-v2-6") == "mimo-2.6"
 
   test "0xalpha aliases":
     check normalizeModelName("stealth/ox-alpha") == "0xalpha1"
