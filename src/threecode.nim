@@ -32,9 +32,7 @@ when defined(posix):
 import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
                   toolstream, turns, transcript, sandbox, box, wall,
-                  auth_xai, auth_openai, auth_google]
-when defined(windows):
-  import threecode/streamexec  # for resolveBash, used by warnNoBash
+                  auth_xai, auth_openai, auth_google, streamexec]
 when not defined(android):
   import tinotify
 else:
@@ -303,6 +301,7 @@ proc main() =
   startupTrace("cleanupStaleBinaries")
   when defined(posix):
     sandbox.sweepStaleWallDirs()
+  streamexec.sweepStaleBashDirs()
   refuseRoot()
   # Internal flag for the detached background worker. Run silently and
   # exit before any other startup work (skill extraction, config load).
