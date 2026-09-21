@@ -10,7 +10,12 @@
   magenta intervention tier (cyan stays the token color), with a grey
   context row above the steer. The marks persist in the session log,
   so a resumed replay paints the same `»` items instead of a user echo
-  or a tool banner.
+  or a tool banner, and skips the empty-reply fallback for a turn the
+  steer recovered (live never painted it). The steer text also names
+  the problem now and leaves the tool path open ("Your last reply came
+  back empty. Answer now, or continue with a tool call.") instead of
+  demanding a final answer, since an empty reply is not always a
+  finished model.
 
 - **The rate-limit notice gets breathing room.** The retry-backoff
   notice (rate limit, server error, network quiet) sat flush against

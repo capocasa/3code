@@ -356,23 +356,28 @@ when not defined(windows):
     test "agent-sent steer replays as a » item, never a user echo":
       # The empty-reply steer is a harness-autosent user message (`agentSent`).
       # Replay must render the `»` agent-prompt item the live path
-      # committed, not the `❯` user echo it would get from role alone.
+      # committed, not the `❯` user echo it would get from role alone. The
+      # empty assistant turn it recovered painted nothing live (no grey
+      # fallback, no receipt), so the replay must skip it too.
       let msgs = %*[
         {"role": "user", "content": "go"},
         {"role": "assistant", "content": "",
          "usage": {"promptTokens": 50, "completionTokens": 0,
                    "totalTokens": 50, "cachedTokens": 0}},
-        {"role": "user", "content": "Please provide your final answer now.",
+        {"role": "user", "content": "Your last reply came back empty. " &
+           "Answer now, or continue with a tool call.",
          "agentSent": true},
         {"role": "assistant", "content": "Here it is.",
          "usage": {"promptTokens": 60, "completionTokens": 5,
                    "totalTokens": 65, "cachedTokens": 0}}]
       let rendered = captureReplay(msgs, @[], window = 1000)
       check "» " in rendered
-      check MagentaFg & "» Please provide your final answer now." in rendered
-      check "❯ Please provide your final answer now." notin rendered
+      check MagentaFg & "» Your last reply came back empty." in rendered
+      check "❯ Your last reply came back empty." notin rendered
       check "❯ go" in rendered
       check "Here it is." in rendered
+      check EmptyReplyMsg notin rendered   # the skipped empty turn leaves no fallback
+      check "↑50" notin rendered          # ...and no receipt for it either
 
     test "flail escalation note replays as a » item, not a tool banner":
       # A flail-escalated tool_call never executes; live commits only the

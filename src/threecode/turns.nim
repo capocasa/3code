@@ -646,7 +646,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     MaxLengthEscalations = 3
     MaxSteerAttempts = 1
     MaxEmptyRetries = 12
-    EmptyReplySteerMsg = "Please provide your final answer now."
+    EmptyReplySteerMsg = "Your last reply came back empty. Answer now, " &
+                        "or continue with a tool call."
   decayEmptyRetryLevel(epochTime())
   # Publish the conversation id for the OpenCode Zen/Go session header
   # (stable across turns → routing/token-cache affinity). Recomputed every
@@ -764,8 +765,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       if steerAttempts < MaxSteerAttempts:
         inc steerAttempts
         # Append the empty assistant turn (so the exchange stays paired) plus
-        # a short steering user message asking for the final answer, then
-        # retry the same callModel with the nudged history.
+        # a short steering user message that names the observed problem and
+        # leaves the tool path open (an empty reply is not always a finished
+        # model demanding a final answer), then retry with the nudged history.
         messages.add msg
         messages.add %*{"role": "user", "content": EmptyReplySteerMsg,
                         "agentSent": true}

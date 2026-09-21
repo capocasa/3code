@@ -1631,6 +1631,6 @@ echo "OK"
     # prompt text sent as the user-role steer), with the grey context row
     # above it.
     check "empty reply; re-prompting for a final answer in" in runOut
-    check "» Please provide your final answer now." in runOut
+    check "» Your last reply came back empty." in runOut
     # The old dead-end string must NOT appear when recovery succeeds.
     check "empty reply - no content, no tool calls" notin runOut

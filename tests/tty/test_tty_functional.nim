@@ -1172,9 +1172,9 @@ max-tokens = "8192"
         # --- empty-reply steer: the autosent prompt is shown verbatim ---
         tty.send "steer me\n"
         tty.expectInHistory "empty reply; re-prompting for a final answer in"
-        tty.expectInHistory "» Please provide your final answer now."
+        tty.expectInHistory "» Your last reply came back empty."
         # The autosend is 3code's, never a user echo.
-        tty.expectNeverInHistory "❯ Please provide your final answer now."
+        tty.expectNeverInHistory "❯ Your last reply came back empty."
         tty.expectInHistory "STEERED-REPLY-MARKER"
         tty.expect "❯"
         tty.expectAlive()
@@ -1204,7 +1204,7 @@ max-tokens = "8192"
       # The .3log carries the `+agent` marks for both producers.
       let log = sessionLogText(root)
       check "user +agent" in log
-      check "Please provide your final answer now." in log
+      check "Your last reply came back empty." in log
       check "tool_result flail_b exit=-1 +agent" in log
       check "SYSTEM: Loop detected" in log
 
@@ -1215,8 +1215,11 @@ max-tokens = "8192"
           tty.writeFrameArtifact(root / "resume_frames.txt")
           tty.close()
         tty.expect "● resumed"
-        tty.expectInHistory "» Please provide your final answer now."
-        tty.expectNeverInHistory "❯ Please provide your final answer now."
+        tty.expectInHistory "» Your last reply came back empty."
+        tty.expectNeverInHistory "❯ Your last reply came back empty."
+        # Live painted nothing for the recovered empty turn itself; the
+        # replay must not paint it either.
+        tty.expectNeverInHistory "empty reply - no content, no tool calls"
         tty.expectInHistory "» SYSTEM: Loop detected"
         tty.expectInHistory "» SYSTEM: Turn aborted"
         tty.expectInHistory "❯ steer me"

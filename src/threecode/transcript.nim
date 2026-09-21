@@ -199,8 +199,16 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
       let receiptCap = not isLast and u.totalTokens > 0 and not hasTools
       # An empty reply paired with tool calls renders nothing live (the
       # empty-reply fallback is only for tool-less replies), so the replay
-      # skips the assistant item entirely in that shape.
-      if c.len > 0 or not hasTools:
+      # skips the assistant item entirely in that shape. Same for an empty
+      # turn the steer autosend recovered: live commits only the `»` steer
+      # item below (no grey fallback, no receipt, no reason line), and the
+      # steer user message always directly follows the assistant it nudges.
+      let steerFollows =
+        i + 1 < messages.len and
+        messages[i + 1].kind == JObject and
+        messages[i + 1]{"role"}.getStr == "user" and
+        messages[i + 1]{"agentSent"}.getBool(false)
+      if c.len > 0 or (not hasTools and not steerFollows):
         var bytes = formatItem(assistantItem(c))
         if receiptCap:
           bytes.attachReceipt(receiptBytes(tokenLineLabel(u, window, elapsed)), true)
