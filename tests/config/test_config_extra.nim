@@ -26,6 +26,17 @@ suite "config: parseConfigFile round-trip":
     check readProvs[1].name == "other"
     check readProvs[1].models == @["model-x"]
 
+  test "twin model spellings dedup on write and load":
+    # mistral serves one model as both `glm-5-2` and `zai-glm-5-2`;
+    # the persisted list holds it once.
+    let providers = @[
+      ProviderRec(name: "mistral", url: "https://api.mistral.ai/v1",
+                  key: "k", models: @["glm-5-2", "zai-glm-5-2", "kimi-k3"])
+    ]
+    writeConfigFile(tmp, "mistral.glm-5.2", providers)
+    let (_, readProvs, _, _, _, _) = parseConfigFile(tmp)
+    check readProvs[0].models == @["glm-5.2", "kimi-k3"]
+
   test "[search] exa-key round-trips through writeConfigFile":
     activeSearchKeys = initTable[string, string]()
     activeSearchKeys["exa"] = "exa-roundtrip"
@@ -208,6 +219,11 @@ suite "config: splitModels / formatModels":
 
   test "formatModels joins with space":
     check formatModels(@["a", "b", "c"]) == "a b c"
+
+  test "splitModels collapses twin spellings of one model":
+    check splitModels("glm-5-2 zai-glm-5-2 kimi-k3") ==
+      @["glm-5-2", "kimi-k3"]
+    check splitModels("glm-5.3 glm-5.3") == @["glm-5.3"]
 
 suite "config: known-good lookup with normalized pretty names":
   test "isKnownGood accepts the normalized form of a prefixed wire id":

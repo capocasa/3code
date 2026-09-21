@@ -2,6 +2,20 @@
 
 **Unreleased**
 
+- **Mistral's flattened author prefix strips like everyone else's.**
+  Providers spell hosted models `author/model` with a slash, but
+  Mistral flattens it to `zai-glm-5-3`, so the short-name chopper
+  (slash-only) left the author on screen: the profile's model row and
+  the provider list showed `zai-glm-5-3` while the same model showed
+  `glm-5.3` everywhere else. `shortModel` now slash-strips and then
+  canonicalizes, so one model shows one name regardless of provider
+  (venice's `z-ai-glm-5-3-flash` included); ids no known family parses
+  keep their slash-stripped spelling. Model lists also dedup now,
+  keyed on the canonical name: Mistral serves GLM as both `glm-5-2`
+  and `zai-glm-5-2`, and that twin no longer lands twice in the config
+  (existing files self-heal on the next write) or twice in the
+  wizard's offered list.
+
 - **The prompt caret is off-white on Windows too.** The drawn caret
   cell was plain reverse video with no foreground set, so its color was
   whatever the terminal's default foreground is: off-white on most Linux

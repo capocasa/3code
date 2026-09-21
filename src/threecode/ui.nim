@@ -639,7 +639,13 @@ proc promptNewProvider*(editor: var minline.LineEditor,
   hint "  fetching models...   ", resetStyle
   stdout.flushFile
   let (available, fetchErr) = fetchModels(modelsListUrl(name, url), fetchKeyFor(name, key))
-  let sortedAvailable = available.sorted
+  # One model under two spellings (mistral serves `glm-5-2` and
+  # `zai-glm-5-2`) collapses to one offer. preferCurated first so the
+  # surviving twin is the curated wire id the known-good pre-fill
+  # matches against.
+  var offered = available.sorted
+  preferCurated(name, offered)
+  let sortedAvailable = dedupModels(offered)
   let lookup = shortToFull(sortedAvailable)
   if fetchErr.len > 0:
     errLn "unavailable — ", fetchErr
@@ -735,8 +741,12 @@ proc promptEditProvider*(editor: var minline.LineEditor,
           errLn "unavailable — ", fetchErr
         elif available.len == 0:
           hintLn "  unavailable — enter manually", resetStyle
-        # Experimental mode shows the full /models endpoint output.
-        available.sorted
+        # Experimental mode shows the full /models endpoint output,
+        # one entry per model: preferCurated upgrades twin spellings to
+        # the curated wire id, dedupModels keeps the first.
+        var offered = available.sorted
+        preferCurated(name, offered)
+        dedupModels(offered)
       else:
         # Regular mode trusts the known-good registry, not /models.
         # Endpoints routinely list stale ids (or omit live ones), so the
