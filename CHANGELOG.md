@@ -2,6 +2,16 @@
 
 **Unreleased**
 
+- **Harness autosends are visible scrollback items.** The prompts
+  3code sends on its own (the empty-reply steer, the flail detector's
+  prod notes) showed as paraphrased magenta harness lines while the
+  actual text went to the model unseen. They are now their own
+  scrollback category: the exact text sent, under a `»` marker in the
+  magenta intervention tier (cyan stays the token color), with a grey
+  context row above the steer. The marks persist in the session log,
+  so a resumed replay paints the same `»` items instead of a user echo
+  or a tool banner.
+
 - **The rate-limit notice gets breathing room.** The retry-backoff
   notice (rate limit, server error, network quiet) sat flush against
   the transcript line above and the token bar below. It is now boxed

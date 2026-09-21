@@ -1981,6 +1981,8 @@ proc stripInternalFields*(messages: JsonNode): JsonNode =
   ## rejected by strict validators (fireworks, glm-5p1, etc.). `finish_reason`
   ## is attached to empty assistant turns so the turn loop can branch on it
   ## but is not a wire field. `interrupted` marks user-cancelled turns.
+  ## `agentSent` marks harness-autosend prompts (empty-reply steer, flail
+  ## notes) so replay renders them as `»` items; it never reaches a provider.
   ## Empty assistant `content` is filled with a placeholder: OpenAI-style
   ## validators (xAI, OpenAI, Moonshot) 400 on `role: assistant` with an
   ## empty content string, which is how a thinking-only / length-starved
@@ -1990,10 +1992,12 @@ proc stripInternalFields*(messages: JsonNode): JsonNode =
   for m in messages:
     var node = m
     if m.kind == JObject and
-       ("usage" in m or "interrupted" in m or "finish_reason" in m):
+       ("usage" in m or "interrupted" in m or "finish_reason" in m or
+        "agentSent" in m):
       var clean = newJObject()
       for k, v in m.pairs:
-        if k != "usage" and k != "interrupted" and k != "finish_reason":
+        if k != "usage" and k != "interrupted" and k != "finish_reason" and
+           k != "agentSent":
           clean[k] = v
       node = clean
     if node.kind == JObject and node{"role"}.getStr == "assistant":

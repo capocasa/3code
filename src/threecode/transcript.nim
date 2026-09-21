@@ -4,7 +4,7 @@
 ## fat-prompt runtime. Formatters in display/tool modules can still build item
 ## bodies, but this module owns item markers, trimming, and item separators.
 
-import std/[json, strutils]
+import std/[json, strutils, tables]
 
 import actions, display, fatprompt, session, types, util
 
@@ -13,6 +13,7 @@ export isEmptyReplyMsg
 type
   TranscriptKind* = enum
     tiUserPrompt,
+    tiAgentPrompt,
     tiAssistant,
     tiTool
 
@@ -20,6 +21,9 @@ type
     kind*: TranscriptKind
     marker*: string
     body*: string
+    ## Grey context row rendered above an agent-prompt body (why 3code
+    ## intervened). Live-only; never persisted, so replay renders without it.
+    note*: string
     attachSeparator*: bool
 
 proc trimTranscriptTail*(bytes: var string) =
@@ -53,6 +57,10 @@ proc userPromptItem*(line: string): TranscriptItem =
   TranscriptItem(kind: tiUserPrompt, marker: "❯", body: line,
                  attachSeparator: false)
 
+proc agentPromptItem*(line: string; note = ""): TranscriptItem =
+  TranscriptItem(kind: tiAgentPrompt, marker: "»", body: line, note: note,
+                 attachSeparator: false)
+
 proc assistantItem*(content: string): TranscriptItem =
   TranscriptItem(kind: tiAssistant, marker: "●", body: content,
                  attachSeparator: true)
@@ -77,6 +85,8 @@ proc formatItem*(item: TranscriptItem): string =
   case item.kind
   of tiUserPrompt:
     result = formatUserPromptItem(item.body)
+  of tiAgentPrompt:
+    result = formatAgentPromptItem(item.body, item.note)
   of tiAssistant:
     if item.body.strip.len == 0:
       result = emptyAssistantBytes(false)
@@ -138,6 +148,16 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
   # item included, so a resumed screen shows the same hint/blank/echo shape
   # a fresh session does instead of starting flush under the "● resumed"
   # banner.
+  # Harness-autosent tool notes (flail escalations/aborts) replay as `»`
+  # agent-prompt items, never as tool banners: keyed by tool_call_id. An
+  # abort batch pairs the same note onto every remaining call; consecutive
+  # duplicates collapse to one item exactly like the single live commit.
+  var agentNotes = initTable[string, string]()
+  for m in messages:
+    if m.kind == JObject and m{"role"}.getStr == "tool" and
+       m{"agentSent"}.getBool(false):
+      agentNotes[m{"tool_call_id"}.getStr] = m{"content"}.getStr("")
+  var lastAgentNote = ""
   var toolIdx = 0
   for i in start ..< messages.len:
     let m = messages[i]
@@ -145,11 +165,16 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
     of "user":
       let c = stripPreamble(m{"content"}.getStr("")).strip
       if c.len == 0: continue
+      # A harness-autosent steer renders as the `»` agent-prompt item the
+      # live path committed, never as a user `❯` echo.
+      let item =
+        if m{"agentSent"}.getBool(false): agentPromptItem(c)
+        else: userPromptItem(c)
       # No length truncation: the live path echoes the full submitted line
       # (wrapped at terminal width by `formatUserPromptItem`), so the replay
       # must too.
       stdout.write "\n"
-      stdout.write formatItem(userPromptItem(c)) & "\n"
+      stdout.write formatItem(item) & "\n"
     of "assistant":
       var c = m{"content"}.getStr("").strip
       # Sessions saved by `renderSession` persist a tool-less empty reply as
@@ -196,6 +221,10 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
         result = u
       if hasTools:
         let tcs = m{"tool_calls"}
+        # Dedupe scope is one batch: an abort batch pairs its note onto
+        # every remaining call, but a later turn may legitimately send the
+        # same note text again.
+        lastAgentNote = ""
         let deferredReceipt =
           if not isLast and u.totalTokens > 0:
             receiptBytes(tokenLineLabel(u, window, elapsed))
@@ -203,6 +232,16 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
         for j in 0 ..< tcs.len:
           let tc = tcs[j]
           inc toolIdx
+          let agentNote = agentNotes.getOrDefault(tc{"id"}.getStr, "")
+          if agentNote.len > 0:
+            if agentNote != lastAgentNote:
+              lastAgentNote = agentNote
+              var bytes = formatItem(agentPromptItem(agentNote))
+              if deferredReceipt.len > 0 and j == tcs.len - 1:
+                bytes.attachReceipt(deferredReceipt, true)
+              stdout.write "\n"
+              stdout.write bytes & "\n"
+            continue
           var code = 0
           var output = ""
           var kind = akBash

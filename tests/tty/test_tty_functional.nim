@@ -1074,6 +1074,155 @@ suite "terminal visual contract":
     check "Folded and done." in log
     check "kimi-dmail-ok" notin log
 
+  test "agent autosends: empty-reply steer and flail prod render as » items":
+    # Harness-autosent prompts are their own scrollback category: the exact
+    # text sent to the model under a `»` marker, never a user `❯` echo and
+    # never a paraphrased harness error line. Covers both producers (the
+    # empty-reply steer, the flail detector's escalation note) live, the
+    # persisted `+agent` marks, and the resumed replay painting the same
+    # items.
+    if getEnv("THREECODE_TTY_ONLY").len > 0 and
+        getEnv("THREECODE_TTY_ONLY") != "agent_autosend_items":
+      check true
+    else:
+      let root = newFixture("agent_autosend_items")
+      # max-tokens above the stub reply's completion tokens: without a
+      # known-good table entry the stub model reads as budget 0 and every
+      # empty reply takes the length-escalation ladder before the steer.
+      createDir(root / "xdg" / "3code")
+      writeFile(root / "xdg" / "3code" / "config", """
+[settings]
+current = "stub.stub-model"
+
+[provider]
+name = "stub"
+url = "stub://provider"
+key = "stub"
+family = "glm"
+models = "stub-model"
+
+[params]
+provider = "stub"
+max-tokens = "8192"
+""")
+      writeStubResponses(root, %*[
+        # Turn 1, reply 1: bare empty (no finish_reason, no tools) -> the
+        # steer autosend fires.
+        {"role": "assistant", "content": "", "contentChunks": [],
+         "usage": {"promptTokens": 10, "completionTokens": 3,
+                   "totalTokens": 13, "cachedTokens": 0}},
+        # Turn 1, reply 2: recovery after the steer.
+        {"role": "assistant", "content": "STEERED-REPLY-MARKER",
+         "contentChunks": ["STEERED-REPLY-MARKER"],
+         "usage": {"promptTokens": 20, "completionTokens": 4,
+                   "totalTokens": 24, "cachedTokens": 0}},
+        # Turn 2, reply 1: two identical bash calls in one batch; the second
+        # is the classic identical-repeat loop and escalates (skipped exec).
+        {"role": "assistant", "content": "",
+         "tool_calls": [
+           toolCall("flail_a", "bash",
+             %*{"command": "printf 'flail-real-run\\n'"}),
+           toolCall("flail_b", "bash",
+             %*{"command": "printf 'flail-real-run\\n'"})
+         ],
+         "usage": {"promptTokens": 30, "completionTokens": 5,
+                   "totalTokens": 35, "cachedTokens": 0}},
+        # Turn 2, reply 2: final answer after the prod.
+        {"role": "assistant", "content": "FLAIL-RECOVERED-MARKER",
+         "contentChunks": ["FLAIL-RECOVERED-MARKER"],
+         "usage": {"promptTokens": 40, "completionTokens": 6,
+                   "totalTokens": 46, "cachedTokens": 0}},
+        # Turn 3: five identical single-call replies. The first executes,
+        # the next three escalate (one » item each), the fifth aborts the
+        # turn with the abort note.
+        {"role": "assistant", "content": "",
+         "tool_calls": [toolCall("ab_1", "bash",
+           %*{"command": "printf 'doomed-loop\\n'"})],
+         "usage": {"promptTokens": 50, "completionTokens": 5,
+                   "totalTokens": 55, "cachedTokens": 0}},
+        {"role": "assistant", "content": "",
+         "tool_calls": [toolCall("ab_2", "bash",
+           %*{"command": "printf 'doomed-loop\\n'"})],
+         "usage": {"promptTokens": 50, "completionTokens": 5,
+                   "totalTokens": 55, "cachedTokens": 0}},
+        {"role": "assistant", "content": "",
+         "tool_calls": [toolCall("ab_3", "bash",
+           %*{"command": "printf 'doomed-loop\\n'"})],
+         "usage": {"promptTokens": 50, "completionTokens": 5,
+                   "totalTokens": 55, "cachedTokens": 0}},
+        {"role": "assistant", "content": "",
+         "tool_calls": [toolCall("ab_4", "bash",
+           %*{"command": "printf 'doomed-loop\\n'"})],
+         "usage": {"promptTokens": 50, "completionTokens": 5,
+                   "totalTokens": 55, "cachedTokens": 0}},
+        {"role": "assistant", "content": "",
+         "tool_calls": [toolCall("ab_5", "bash",
+           %*{"command": "printf 'doomed-loop\\n'"})],
+         "usage": {"promptTokens": 50, "completionTokens": 5,
+                   "totalTokens": 55, "cachedTokens": 0}}
+      ])
+
+      block live:
+        let tty = startStub(root, rows = 40)
+        defer:
+          tty.writeFrameArtifact(root / "frames.txt")
+          tty.close()
+
+        tty.expect "❯"
+        # --- empty-reply steer: the autosent prompt is shown verbatim ---
+        tty.send "steer me\n"
+        tty.expectInHistory "empty reply; re-prompting for a final answer in"
+        tty.expectInHistory "» Please provide your final answer now."
+        # The autosend is 3code's, never a user echo.
+        tty.expectNeverInHistory "❯ Please provide your final answer now."
+        tty.expectInHistory "STEERED-REPLY-MARKER"
+        tty.expect "❯"
+        tty.expectAlive()
+
+        # --- flail escalation: the prod sent to the model is shown ---
+        tty.send "flail please\n"
+        tty.expectInHistory "$ printf 'flail-real-run"
+        tty.expectInHistory "flail-real-run"
+        tty.expectInHistory "» SYSTEM: Loop detected"
+        # The old paraphrased harness line is gone.
+        tty.expectNeverInHistory "flailing detected (repeated tool call)"
+        tty.expectInHistory "FLAIL-RECOVERED-MARKER"
+        tty.expect "❯"
+        tty.expectAlive()
+
+        # --- flail abort: the abort note ends the turn, prompt returns ---
+        tty.send "doom loop\n"
+        tty.expectInHistory "$ printf 'doomed-loop"
+        tty.expectInHistory "» SYSTEM: Final warning"
+        tty.expectInHistory "turn aborted - rephrase, give a hint, or take over"
+        tty.expectInHistory "» SYSTEM: Turn aborted"
+        tty.expect "❯"
+        tty.expectIdleCaret()
+        tty.expectAlive()
+        tty.drain(300)
+
+      # The .3log carries the `+agent` marks for both producers.
+      let log = sessionLogText(root)
+      check "user +agent" in log
+      check "Please provide your final answer now." in log
+      check "tool_result flail_b exit=-1 +agent" in log
+      check "SYSTEM: Loop detected" in log
+
+      # --- resume: the replay paints the same » items, not echoes/banners ---
+      block resumed:
+        let tty = startStub(root, args = ["-x", "-r"], rows = 40)
+        defer:
+          tty.writeFrameArtifact(root / "resume_frames.txt")
+          tty.close()
+        tty.expect "● resumed"
+        tty.expectInHistory "» Please provide your final answer now."
+        tty.expectNeverInHistory "❯ Please provide your final answer now."
+        tty.expectInHistory "» SYSTEM: Loop detected"
+        tty.expectInHistory "» SYSTEM: Turn aborted"
+        tty.expectInHistory "❯ steer me"
+        tty.expectInHistory "❯ flail please"
+        tty.expectInHistory "❯ doom loop"
+
   test "api retry notice is a live notice row, never scrollback noise":
     # Contract: the token bar is for token information only, and a retry
     # notice must not append to scrollback on every attempt. The notice is

@@ -646,6 +646,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     MaxLengthEscalations = 3
     MaxSteerAttempts = 1
     MaxEmptyRetries = 12
+    EmptyReplySteerMsg = "Please provide your final answer now."
   decayEmptyRetryLevel(epochTime())
   # Publish the conversation id for the OpenCode Zen/Go session header
   # (stable across turns → routing/token-cache affinity). Recomputed every
@@ -766,13 +767,14 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         # a short steering user message asking for the final answer, then
         # retry the same callModel with the nudged history.
         messages.add msg
-        messages.add %*{"role": "user",
-          "content": "Please provide your final answer now."}
+        messages.add %*{"role": "user", "content": EmptyReplySteerMsg,
+                        "agentSent": true}
         saveSession(session, messages)
         let backoff = emptyReplyBackoffS()
         commitTranscriptBytes(
-          errLnS("empty reply; re-prompting for a final answer in " &
-            $backoff & "s"), true)
+          formatItem(agentPromptItem(EmptyReplySteerMsg,
+            "empty reply; re-prompting for a final answer in " &
+            $backoff & "s")), true)
         incEmptyRetryLevel()
         if emptyReplyWait():
           saveSession(session, messages)
@@ -876,6 +878,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       var cleared = false  # akClear: rebuild and continue loop
       var dmailRevert = false  # akDMail: history truncated, continue loop
       var flailAbort = false  # flail detector fired past all escalations
+      var flailAbortNote = ""  # the abort note sent to the model
       for i in 0 ..< toolCalls.len:
         let tc = toolCalls[i]
         let id = tc{"id"}.getStr
@@ -895,22 +898,18 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         of fvEscalate:
           # The model re-emitted the exact same call it just made. Skip
           # execution, pair the tool_call with the escalation notice (so
-          # the request/response pairing stays intact), and surface a
-          # harness line so the user sees the intervention.
+          # the request/response pairing stays intact), and show the exact
+          # note sent to the model as a `»` agent-prompt item. `agentSent`
+          # on the tool message makes the resumed replay render the same
+          # item instead of a tool banner.
           let note = flailEscalationMessage(flailDet.escalations)
           debugOut &"flail: identical repeat of {name}, escalation {flailDet.escalations}/{FlailMaxEscalations}"
           session.toolLog.add ToolRecord(
             banner: "! " & name & " (flailing)",
             output: note, code: -1, kind: akError)
           messages.add %*{"role": "tool", "tool_call_id": id,
-                          "content": note}
-          commitTranscriptBytes(
-            errLnS(if flailDet.escalations == 1:
-                     "flailing detected (repeated tool call); hinting the model"
-                   elif flailDet.escalations < FlailMaxEscalations:
-                     "still flailing; demanding a different approach from the model"
-                   else:
-                     "still flailing; final warning to the model"), true)
+                          "content": note, "agentSent": true}
+          commitTranscriptBytes(formatItem(agentPromptItem(note)), true)
           continue
         of fvAbort:
           # Still looping after all recovery attempts. Pair the tool_call,
@@ -920,18 +919,19 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           let note =
             "SYSTEM: Turn aborted: the same tool call was repeated after " &
             "three warnings. The model is stuck in a loop."
+          flailAbortNote = note
           session.toolLog.add ToolRecord(
             banner: "! " & name & " (flail abort)",
             output: note, code: -1, kind: akError)
           messages.add %*{"role": "tool", "tool_call_id": id,
-                          "content": note}
+                          "content": note, "agentSent": true}
           # Pair any remaining tool_calls in this batch too: the
           # assistant message carries them all and an unpaired id breaks
           # strict providers on the next request.
           for j in i + 1 ..< toolCalls.len:
             messages.add %*{"role": "tool",
               "tool_call_id": toolCalls[j]{"id"}.getStr,
-              "content": note}
+              "content": note, "agentSent": true}
           flailAbort = true
           break
         let (args, argsMalformed, parseErr) =
@@ -1103,9 +1103,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       if flailAbort:
         saveSession(session, messages)
         commitTurnEndNotice(
-          errLnS("turn aborted: the model kept repeating the same tool " &
-            "call after three warnings. It appears stuck; please rephrase, " &
-            "give it a hint, or take over."))
+          formatItem(agentPromptItem(flailAbortNote,
+            "turn aborted - rephrase, give a hint, or take over")))
         endTurnAfterTranscriptAppend()
         turnEnded = true
         return false
