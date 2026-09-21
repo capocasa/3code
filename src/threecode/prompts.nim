@@ -452,14 +452,25 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("together", "thinkingmachines/Inkling", "inkling", "1", "", "medium", 0.2, 8192, tbNone, false, 1_000_000, true),
     ("fireworks", "accounts/fireworks/models/inkling", "inkling", "1", "", "medium", 0.2, 8192, tbNone, false, 1_040_000, true),
 
-    # mimo (Xiaomi MiMo-V2.5-Pro: 1.02T MoE, 42B active, 1M context.
-    # Binary reasoning via `thinking.type` on the first-party API,
+    # mimo (Xiaomi MiMo: V2.6-Pro is the 1.02T MoE / 42B active flagship,
+    # V2.6-Flash the 309B / 15B active sibling; both 1M context, 128K max
+    # output, full-modal input. The V2.5 pair rides the same wire shapes
+    # until the platform deprecation on 2026-10-21. Binary reasoning via
+    # `thinking.type` on the first-party API (api.xiaomimimo.com),
     # `chat_template_kwargs.enable_thinking` on vLLM stacks, and
-    # `reasoning.effort` on OpenRouter. Returns `reasoning_content`.)
+    # `reasoning: {enabled}` on OpenRouter. Returns `reasoning_content`.
+    # mimo-v2.6-pro-ultraspeed also exists (same checkpoint, ~10x output
+    # speed) but is a contact-us service first-party; add when it opens.
+    # Tencent's tokenhub gateway resells the V2.5-Pro weights.)
+    ("xiaomi", "mimo-v2.6-pro", "mimo", "2.6", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
+    ("xiaomi", "mimo-v2.6-flash", "mimo", "2.6", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("xiaomi", "mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("xiaomi", "mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
+    ("openrouter", "xiaomi/mimo-v2.6-pro", "mimo", "2.6", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
+    ("openrouter", "xiaomi/mimo-v2.6-flash", "mimo", "2.6", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("openrouter", "xiaomi/mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("openrouter", "xiaomi/mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
+    ("tencent", "mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
 
     # venice (api.venice.ai; flattened ids like `zai-org-glm-5-2`,
     # params harvested by tools/harvest_models.nim from sibling entries)
@@ -683,6 +694,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencode", "grok-build-0.1", "grok", "build", "0.1", "low", 0.2, 8192, tbNone, false, 256_000, false),
     ("opencode", "kimi-k2.5", "kimi", "2", "5", "on", 0.6, 8192, tbAllTurns, false, 262_144, false),
     ("opencode", "kimi-k3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false),
+    ("opencode", "mimo-v2.6-flash-free", "mimo", "2.6", "flash-free", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("opencode", "mimo-v2.5-free", "mimo", "2.5", "free", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("opencode", "minimax-m2.5", "minimax", "2", "5", "low", 0.2, 8192, tbNone, false, 204_800, false),
     ("opencode", "minimax-m2.7", "minimax", "2", "7", "on", 0.2, 8192, tbNone, false, 204_800, false),
@@ -756,6 +768,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencodego", "grok-4.6", "grok", "4", "6", "high", 0.2, 8192, tbNone, false, 500_000, false),
     ("opencodego", "hy3", "hy", "3", "", "no_think", 0.2, 8192, tbNone, false, 262_144, false),
     ("opencodego", "kimi-k2.6", "kimi", "2", "6", "on", 0.6, 8192, tbAllTurns, false, 262_144, false),
+    ("opencodego", "mimo-v2.6-pro", "mimo", "2.6", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
+    ("opencodego", "mimo-v2.6-flash", "mimo", "2.6", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("opencodego", "mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("opencodego", "mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("opencodego", "qwen3.8-max", "qwen", "3.8", "max", "on", 0.2, 8192, tbNone, false, 262_144, false),

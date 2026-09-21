@@ -1162,6 +1162,7 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("together-eu", "https://eu.api.together.xyz/v1"),
   ("venice",      "https://api.venice.ai/api/v1"),
   ("xai",         "https://api.x.ai/v1"),
+  ("xiaomi",      "https://api.xiaomimimo.com/v1"),
   ("zai",         "https://api.z.ai/api/paas/v4"),
   ("zaicode",     "https://api.z.ai/api/coding/paas/v4"),
 ]
