@@ -109,12 +109,14 @@ when defined(windows):
     return ""
 
   proc toPosixPath(path: string): string =
-    ## Convert a Windows path to a POSIX path for MSYS2 bash.
-    ## C:\Users\foo -> /c/Users/foo
+    ## Convert a Windows path to the form MSYS2 bash accepts in every
+    ## tree, full or stripped. The historical /c/... form needs an
+    ## /etc/fstab cygdrive entry ("none / cygdrive binary,posix=0 0")
+    ## that a stripped MinGit-style tree lacks: bash then fails with
+    ## "No such file or directory" on the script and stdin paths. A
+    ## Windows path with forward slashes (C:/Users/foo) is converted
+    ## by the msys runtime itself in all layouts, fstab or not.
     result = path.replace('\\', '/')
-    if result.len >= 2 and result[1] == ':':
-      let drive = result[0].toLowerAscii
-      result = "/" & drive & result[2 .. ^1]
 
   proc bundledRootOf*(bashPath: string): string =
     ## The 3code-owned tree (PortableGit or legacy MSYS2) the resolved
@@ -636,6 +638,28 @@ export DEBIAN_FRONTEND=noninteractive
       # the same line is correct for both.
       let bashBin = b.parentDir
       putenv("PATH", bashBin & ";" & getEnv("PATH"))
+      # bash stats /tmp at startup and warns "could not find /tmp,
+      # please create!" when it is missing. A full Git for Windows
+      # install ships <root>\tmp; a stripped MinGit-style tree does
+      # not, and without /etc/fstab the msys runtime falls back to
+      # the root-relative dir. Create it once per tree (idempotent,
+      # no-op when present). A system-wide install under Program
+      # Files may deny the write; the warning is cosmetic there, so
+      # ignore the failure.
+      var msysRoot = bundledRootOf(b)
+      if msysRoot.len == 0:
+        # A system-wide tree: the msys root is the bash dir's
+        # great-grandparent (usr\bin\bash.exe -> root) or
+        # grandparent (bin\bash.exe -> root).
+        var d = b.parentDir
+        for _ in 1..2:
+          if d.parentDir.len == 0: break
+          d = d.parentDir
+        msysRoot = d
+      if msysRoot.len > 0:
+        try:
+          createDir(msysRoot / "tmp")
+        except CatchableError: discard
       let posixScript = toPosixPath(scriptPath)
       let posixStdin = toPosixPath(stdinPath)
       # Use bash -c to source the script and exit
