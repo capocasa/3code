@@ -229,6 +229,14 @@ proc requireVisibleEditorCaret(s: TtySession; needle: string) =
   check caretRow >= 0
   require caretRow >= 0 and caretRow < frame.rows.len
   check needle in frame.rows[caretRow]
+  # The caret cell carries the palette's explicit off-white fg (dark-mode
+  # `OffWhiteFg`, 252). With no fg the reverse-video block would take the
+  # terminal's default foreground: fine on a terminal whose fg is off-white
+  # (most Linux setups) but dark grey on Windows Terminal's Campbell default.
+  let cell = frame.visual.cells[caretRow][frame.drawnCaretCol(caretRow)]
+  doAssert cell.fgColor == col256 and cell.fgColorIdx == 252,
+    "REGRESSION: caret cell lost its explicit palette fg " &
+    "(dark-grey caret on Windows Terminal's Campbell default)"
 
 suite "terminal visual contract":
   test "resumed session replays the full conversation into scrollback":

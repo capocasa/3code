@@ -374,6 +374,7 @@ proc main() =
   # detection runs after the config file is read so `[settings] mode` can
   # pin a palette, then `[colors]` overrides are layered on top.
   applyPalette(cmDark)
+  minline.CaretCellFg = OffWhiteFg
 
   if listSessions:
     let paths = listSessionPathsForCwd(safeCwd())
@@ -546,10 +547,12 @@ proc main() =
   # colors before `[colors]` overrides are layered on top.
   startupTrace("locks-acquired")
   applyPalette(detectColorMode(colorModePref))
+  minline.CaretCellFg = OffWhiteFg
   startupTrace("palette-detect")
   if activeColorKeys.len > 0:
     let (both, lightOnly) = splitColorOverrides(activeColorKeys)
     applyColorOverrides(both, lightOnly)
+    minline.CaretCellFg = OffWhiteFg
   let wantedProfile =
     if model != "": model
     elif resume and session.profileName != "": session.profileName

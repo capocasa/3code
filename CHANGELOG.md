@@ -2,6 +2,14 @@
 
 **Unreleased**
 
+- **The prompt caret is off-white on Windows too.** The drawn caret
+  cell was plain reverse video with no foreground set, so its color was
+  whatever the terminal's default foreground is: off-white on most Linux
+  terminals, but dark grey under Windows Terminal's Campbell default.
+  The caret cell now carries the palette's explicit white-family tone
+  (mode-resolved like every other color: off-white on dark backgrounds,
+  dark grey on light ones), independent of the terminal theme.
+
 - **Provider catalog swept against live listings.** `crof` is gone
   (fraudulent aggregator, removed from the wizard catalog and docs).
   Every keyed provider's `/models` was re-fetched: end-of-life combos
