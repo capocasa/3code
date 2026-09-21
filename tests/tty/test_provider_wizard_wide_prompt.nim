@@ -94,7 +94,9 @@ suite "provider wizard wrapped prompt":
     # Exactly one live entry line; pre-fix each keystroke stacked another
     # wrapped `models [...]` block above it.
     check screen.countRowsContaining("models [") == 1
-    check countRowsContaining(screen, "gpt-5.6-luna") == 1
+    # The closing bracket keeps the header's `model gpt-5.6-luna` status
+    # row out of the count; only the wrapped roster's tail row matches.
+    check countRowsContaining(screen, "gpt-5.6-luna]") == 1
     check "xyz" in screen.replace("\r", "")
 
     # Leave the wizard cleanly and prove the app still works.

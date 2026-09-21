@@ -122,8 +122,11 @@ suite "activity indicator covers every turn phase":
     let barRow = tty.rowContaining("\u29d7")
     doAssert barRow > 0, "hourglass not on a bar row: " & waitTxt
     check "\u25cb0%" in tty.rows[barRow]
-    check "is not responding (name or service not known)" in tty.rows[barRow - 1]
-    check "retry 2/2" in tty.rows[barRow - 1]
+    # The notice is boxed by a blank spacer row above the bar, so it
+    # sits two rows up, not directly on top of the bar.
+    check tty.rows[barRow - 1].strip().len == 0
+    check "is not responding (name or service not known)" in tty.rows[barRow - 2]
+    check "retry 2/2" in tty.rows[barRow - 2]
     # Wait out the 1s backoff, then sample the second attempt's
     # in-flight window (4s pre-stream delay): the notice is gone, the row
     # above the bar is the empty spacer again, and the braille spinner is
