@@ -81,14 +81,14 @@ suite "provider wizard configuration":
     except OSError: discard
 
   test "initial bootstrap saves without a verification ping":
-    inputs = @["nvapi-initial", "gpt-oss-120b"]
+    inputs = @["nvapi-initial", "gpt-oss-20b"]
     var editor: LineEditor
 
     let prof = bootstrapProvider(editor)
 
-    check prof.name == "nvidia.openai/gpt-oss-120b"
+    check prof.name == "nvidia.openai/gpt-oss-20b"
     check activeProviders.len == 1
-    check activeProviders[0].models == @["openai/gpt-oss-120b"]
+    check activeProviders[0].models == @["openai/gpt-oss-20b"]
     check verifiedModels.len == 0
 
   test "additional add prompts for model before verifying detected provider":
@@ -112,7 +112,7 @@ suite "provider wizard configuration":
     check verifiedModels.len == 0
 
   test "add accepts provider name then api key":
-    inputs = @["nvidia", "nvapi-named", "gpt-oss-120b"]
+    inputs = @["nvidia", "nvapi-named", "gpt-oss-20b"]
     var editor: LineEditor
     var prof: Profile
     var messages = newJArray()
@@ -123,13 +123,13 @@ suite "provider wizard configuration":
     check activeProviders.len == 1
     check activeProviders[0].name == "nvidia"
     check activeProviders[0].key == "nvapi-named"
-    check activeProviders[0].models == @["openai/gpt-oss-120b"]
+    check activeProviders[0].models == @["openai/gpt-oss-20b"]
     check prompts.anyIt(it.startsWith("  provider or api key:"))
     check prompts.anyIt(it.startsWith("  api key"))
 
   test "add platte asks for the username and builds the url":
     # platte's endpoint is per-user: https://<username>.on.platte.ai/api/v1
-    inputs = @["platte", "capocasa", "platte-pat", ""]
+    inputs = @["platte", "capocasa", "platte-pat", "glm-5.3"]
     var editor: LineEditor
     var prof: Profile
     var messages = newJArray()
@@ -200,7 +200,7 @@ suite "provider wizard configuration":
                   key: "nvapi-old", models: @["z-ai/glm-5.2"])
     ]
     activeCurrent = "nvidia.z-ai/glm-5.2"
-    inputs = @["", "", "gpt-oss-120b"]
+    inputs = @["", "", "gpt-oss-20b"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -210,8 +210,8 @@ suite "provider wizard configuration":
                           editor)
 
     check activeProviders.len == 1
-    check activeProviders[0].models == @["openai/gpt-oss-120b"]
-    check activeCurrent == "nvidia.openai/gpt-oss-120b"
+    check activeProviders[0].models == @["openai/gpt-oss-20b"]
+    check activeCurrent == "nvidia.openai/gpt-oss-20b"
     check verifiedModels.len == 0
 
   test "add prefers known-good id over listed-but-unserved variant":
@@ -514,7 +514,7 @@ suite "provider wizard configuration":
                     key: "nvapi-old", models: @["z-ai/glm-5.2"])
       ]
       activeCurrent = "nvidia.z-ai/glm-5.2"
-      inputs = @["", "", "gpt-oss-120b"]
+      inputs = @["", "", "gpt-oss-20b"]
       var fetchCount = 0
       fetchModelsHook = proc(url, key: string): (seq[string], string) =
         inc fetchCount
@@ -679,7 +679,7 @@ suite "provider wizard configuration":
 
   test "add rejects a non-listed model in regular mode":
     # The unknown model re-prompts; the follow-up curated entry saves.
-    inputs = @["nvapi-add", "totally-made-up-model", "gpt-oss-120b"]
+    inputs = @["nvapi-add", "totally-made-up-model", "gpt-oss-20b"]
     var editor: LineEditor
     var prof: Profile
     var messages = newJArray()
@@ -688,7 +688,7 @@ suite "provider wizard configuration":
     discard handleCommand(":provider add", messages, session, prof, editor)
 
     check activeProviders.len == 1
-    check activeProviders[0].models == @["openai/gpt-oss-120b"]
+    check activeProviders[0].models == @["openai/gpt-oss-20b"]
     check verifiedModels.len == 0
 
   test "add accepts a custom url with a custom name in experimental mode":
@@ -753,7 +753,7 @@ suite "provider wizard configuration":
     var prof: Profile
     var messages = newJArray()
     var session = Session()
-    inputs = @["gpt-oss-120b"]
+    inputs = @["gpt-oss-20b"]
 
     discard handleCommand(":provider add nvapi-prefilled", messages, session,
                           prof, editor)
@@ -761,7 +761,7 @@ suite "provider wizard configuration":
     check activeProviders.len == 1
     check activeProviders[0].name == "nvidia"
     check activeProviders[0].key == "nvapi-prefilled"
-    check activeProviders[0].models == @["openai/gpt-oss-120b"]
+    check activeProviders[0].models == @["openai/gpt-oss-20b"]
 
   test "prefilled add skips the supported list":
     # `:provider add <name>` already answered the provider question;
@@ -809,7 +809,7 @@ suite "provider wizard configuration":
     var session = Session()
 
     experimentalEnabled = false
-    inputs = @["nvapi-key", "gpt-oss-120b"]
+    inputs = @["nvapi-key", "gpt-oss-20b"]
     discard handleCommand(":provider add", messages, session, prof, editor)
     check prompts[0] == "  provider or api key: "
 
@@ -817,7 +817,7 @@ suite "provider wizard configuration":
     activeProviders = @[]
     activeCurrent = ""
     experimentalEnabled = true
-    inputs = @["nvapi-key2", "gpt-oss-120b"]
+    inputs = @["nvapi-key2", "gpt-oss-20b"]
     discard handleCommand(":provider add", messages, session, prof, editor)
     check prompts[0] == "  provider, url, or api key: "
 
@@ -840,7 +840,7 @@ suite "provider wizard configuration":
     var session = Session()
 
     experimentalEnabled = false
-    inputs = @["nvapi-key", "gpt-oss-120b"]
+    inputs = @["nvapi-key", "gpt-oss-20b"]
     discard handleCommand(":provider add", messages, session, prof, editor)
     check "nvidia" in firstFieldCompletions
     # mistral and commandcode (open-model gateway rows) are known-good;
@@ -853,7 +853,7 @@ suite "provider wizard configuration":
     activeCurrent = ""
     firstFieldCompletions = @[]
     experimentalEnabled = true
-    inputs = @["nvapi-key2", "gpt-oss-120b"]
+    inputs = @["nvapi-key2", "gpt-oss-20b"]
     discard handleCommand(":provider add", messages, session, prof, editor)
     check "anthropic" in firstFieldCompletions
 
@@ -866,7 +866,7 @@ suite "provider wizard configuration":
                   key: "nvapi-old", models: @["z-ai/glm-5.2"])
     ]
     activeCurrent = "nvidia.z-ai/glm-5.2"
-    inputs = @["", "", "totally-made-up-model", "", "", "gpt-oss-120b"]
+    inputs = @["", "", "totally-made-up-model", "", "", "gpt-oss-20b"]
     var editor: LineEditor
     var prof = buildProfile(activeCurrent, activeProviders, "")
     var messages = newJArray()
@@ -875,13 +875,13 @@ suite "provider wizard configuration":
     discard handleCommand(":provider edit nvidia", messages, session, prof,
                           editor)
 
-    check activeProviders[0].models == @["openai/gpt-oss-120b"]
+    check activeProviders[0].models == @["openai/gpt-oss-20b"]
     check verifiedModels.len == 0
 
 suite "provider/model order":
-  # nvidia's curated order is gpt-oss-120b before gpt-oss-20b; these
-  # providers list them reversed, so any re-ranking by KnownGoodCombos
-  # would flip the results.
+  # nvidia's curated order is gpt-oss-20b before kimi-k3; these providers
+  # list them reversed, so any re-ranking by KnownGoodCombos would flip
+  # the results.
   var
     savedCurrent: string
     savedProviders: seq[ProviderRec]
@@ -900,7 +900,7 @@ suite "provider/model order":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
                   key: "nvapi",
-                  models: @["openai/gpt-oss-20b", "openai/gpt-oss-120b"])
+                  models: @["openai/gpt-oss-20b", "moonshotai/kimi-k3"])
     ]
     activeCurrent = "nvidia.openai/gpt-oss-20b"
 
@@ -927,7 +927,7 @@ suite "provider/model order":
 
   test ":model completion cycles in entered order":
     var completions = completionFor(":model ")
-    check completions == @["gpt-oss-20b", "gpt-oss-120b"]
+    check completions == @["gpt-oss-20b", "kimi-k3"]
 
   test ":model list shows entered order":
     var editor: LineEditor
@@ -938,5 +938,5 @@ suite "provider/model order":
     let listing = handleCommandResult(":model", messages, session,
                                     prof, editor).body
     let i20 = listing.find("gpt-oss-20b")
-    let i120 = listing.find("gpt-oss-120b")
-    check i20 >= 0 and i120 >= 0 and i20 < i120
+    let ik3 = listing.find("kimi-k3")
+    check i20 >= 0 and ik3 >= 0 and i20 < ik3

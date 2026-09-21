@@ -52,19 +52,22 @@ type
     params*: ModelParams
 
 func shortModel*(model: string): string =
-  ## Everything after the last `/` in a model id. This is the
-  ## user-visible short name: `gpt-oss-120b` for `openai/gpt-oss-120b`,
-  ## `glm-5p1` for `accounts/fireworks/models/glm-5p1`. When there is no
-  ## slash, the model id is already a bare name and is returned as-is.
+  ## The user-visible model name: everything after the last `/`, then
+  ## canonicalized. Slash-delimited authors (`openai/gpt-oss-120b`)
+  ## and dash-flattened ones (`zai-glm-5-3` on mistral,
+  ## `z-ai-glm-5-3-flash` on venice) reduce to the same canonical form
+  ## (`glm-5.3`), so one model shows one name regardless of provider.
+  ## Ids no family parses keep their slash-stripped spelling.
   let slash = model.rfind('/')
-  if slash < 0: model else: model[slash + 1 .. ^1]
+  let bare = if slash < 0: model else: model[slash + 1 .. ^1]
+  normalizeModelName(bare)
 
 proc shortToFull*(models: seq[string]): Table[string, string] =
-  ## Maps each short model name (after the last `/`) to the full model id.
-  ## When two full ids share the same short name — e.g. nvidia sometimes
-  ## lists a model both as `org/model-name` and bare `model-name` — only
-  ## the first occurrence is kept. This mirrors the display list: the
-  ## user sees both names, picks the short one, and gets the first match.
+  ## Maps each canonical short name (`shortModel`) to the full model id.
+  ## When two full ids share the short name — one model under two
+  ## spellings, like mistral's `glm-5-2` and `zai-glm-5-2` — only the
+  ## first occurrence is kept. This mirrors the display list: the user
+  ## sees each model once, picks the short name, gets the first match.
   ## If genuine ambiguity arises in the future we can promote a conflict
   ## notice here; for now silent first-wins is the right trade-off.
   for m in models:
@@ -73,8 +76,8 @@ proc shortToFull*(models: seq[string]): Table[string, string] =
       result[s] = m
 
 func findModel*(p: ProviderRec, name: string): int =
-  ## Matches by full model id, by short name (everything after the last
-  ## `/`), or by normalized name. Short-name matching handles
+  ## Matches by full model id, by canonical short name, or by normalized
+  ## name. Short-name matching handles
   ## `:variant <name>` from users who type the bare model name and old
   ## `current = provider.shortname` config values that haven't been
   ## rewritten yet. Normalized matching lets any provider spelling
@@ -301,13 +304,27 @@ proc chatgptExtraHeaders*(provider: string): seq[(string, string)] =
   if acc != "":
     result.add ("chatgpt-account-id", acc)
 
+func dedupModels*(models: seq[string]): seq[string] =
+  ## First occurrence wins, keyed on the canonical name. Providers list
+  ## one model under two spellings (mistral serves `glm-5-2` and
+  ## `zai-glm-5-2`); pickers and config writes want each model once.
+  var seen: seq[string]
+  for m in models:
+    let key = normalizeModelName(m)
+    if key notin seen:
+      seen.add key
+      result.add m
+
 proc splitModels*(s: string): seq[string] =
   ## Whitespace- (and comma-) separated list of bare model names. Family
   ## lives elsewhere — KnownGoodCombos hardcodes it; the [provider]
-  ## `family = ...` key supplies an experimental override.
+  ## `family = ...` key supplies an experimental override. Twin
+  ## spellings of one model collapse to the first (`glm-5-2` and
+  ## `zai-glm-5-2` are the same model on mistral).
   for raw in s.splitWhitespace:
     let m = raw.strip(chars = {',', ' '})
     if m.len > 0: result.add m
+  result = dedupModels(result)
 
 proc formatModels*(models: seq[string]): string = models.join(" ")
 
@@ -753,10 +770,12 @@ proc writeConfigFile*(path: string, current: string,
                      providers: seq[ProviderRec]) =
   createDir(path.parentDir)
   # Models are always persisted in normalized form; the wire ids stay
-  # untouched in memory. `current` may name a model too.
+  # untouched in memory. `current` may name a model too. Twin spellings
+  # of one model dedup to the first, so the file self-heals lists that
+  # were written before they collapsed.
   var providers = providers
   for pr in providers.mitems:
-    pr.models = pr.models.mapIt(normalizeModelName(it))
+    pr.models = dedupModels(pr.models.mapIt(normalizeModelName(it)))
   var current = current
   if not mergeForeignEdits(path, current, providers): return
   let cur = normalizedCurrent(current)

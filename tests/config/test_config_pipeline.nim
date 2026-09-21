@@ -9,7 +9,33 @@ suite "config: shortModel":
     check shortModel("gpt-oss-120b") == "gpt-oss-120b"
 
   test "handles nested paths":
-    check shortModel("accounts/fireworks/models/glm-5p1") == "glm-5p1"
+    check shortModel("accounts/fireworks/models/glm-5p1") == "glm-5.1"
+
+  test "canonicalizes the slash-stripped name":
+    check shortModel("openai/GPT-OSS-120B") == "gpt-oss-120b"
+
+  test "mistral's dash-flattened author strips too":
+    check shortModel("zai-glm-5-3") == "glm-5.3"
+    check shortModel("zai-glm-5-2") == "glm-5.2"
+    check shortModel("z-ai-glm-5-3-flash") == "glm-5.3-flash"
+    check shortModel("mistral-ai-mistral-large-2512") == "mistral-large-2512"
+
+  test "ids no family parses keep the slash-stripped spelling":
+    check shortModel("mistralai/codestral-2501") == "codestral-2501"
+    check shortModel("SomeVendor/Weird-Model-9") == "weird-model-9"
+
+suite "config: dedupModels":
+  test "twin spellings of one model collapse, first wins":
+    check dedupModels(@["glm-5-2", "zai-glm-5-2"]) == @["glm-5-2"]
+    check dedupModels(@["zai-glm-5-2", "glm-5-2"]) == @["zai-glm-5-2"]
+
+  test "exact duplicates collapse":
+    check dedupModels(@["glm-5.3", "glm-5.3", "kimi-k3"]) ==
+      @["glm-5.3", "kimi-k3"]
+
+  test "distinct models are untouched":
+    check dedupModels(@["glm-5.3", "glm-5.3-flash", "glm-5.3:free"]) ==
+      @["glm-5.3", "glm-5.3-flash", "glm-5.3:free"]
 
 suite "config: shortToFull":
   test "maps short to full":
@@ -20,6 +46,11 @@ suite "config: shortToFull":
   test "first occurrence wins on collision":
     let t = shortToFull(@["org/model", "model"])
     check t["model"] == "org/model"
+
+  test "twin spellings collapse to one entry":
+    let t = shortToFull(@["glm-5-2", "zai-glm-5-2"])
+    check t.len == 1
+    check t["glm-5.2"] == "glm-5-2"
 
   test "empty input returns empty table":
     let t = shortToFull(@[])
