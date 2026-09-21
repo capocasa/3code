@@ -521,6 +521,23 @@ else:
     toolTimeoutStop.store(true, moRelaxed)
     try: joinThread(toolTimeoutThread) except CatchableError: discard
 
+proc sweepStaleBashDirs*() =
+  ## Best-effort removal of per-run bash wrapper dirs (`cmd.sh` + `stdin`)
+  ## from dead 3code processes. Each run removes its own dir in a
+  ## `finally`; only a killed process leaks one, so a box that survived
+  ## many kills grows a permanent `3code_bash_*` crust in temp. Mirrors
+  ## `sweepStaleWallDirs`, which covers the POSIX proxy dirs only.
+  let tmp = tempDir()
+  for kind, path in walkDir(tmp):
+    if kind != pcDir: continue
+    let name = path.lastPathPart
+    if not name.startsWith("3code_bash_"): continue
+    let rest = name["3code_bash_".len .. ^1]
+    let pid = try: parseInt(rest.split('_')[0]) except ValueError: continue
+    if pid == getCurrentProcessId(): continue
+    if pidAlive(pid): continue
+    try: removeDir(path) except CatchableError: discard
+
 proc localFileSig(path: string): (Time, int) =
   try: (getLastModificationTime(path), getFileSize(path).int)
   except CatchableError: (Time(), 0)

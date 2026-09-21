@@ -8,6 +8,33 @@ when defined(posix):
 when defined(windows):
   import std/winlean
 
+proc pidAlive*(pid: int): bool =
+  ## True if a process with `pid` is currently running.
+  ##
+  ## Used to tell a genuinely-held lock (live owner) from a stale one left
+  ## behind by a crashed or killed 3code, and by the stale-bash-dir sweep.
+  ## Pid reuse can theoretically make a recycled pid look alive, but that's
+  ## an inherent limit of pid-based locking; lock callers still refuse
+  ## rather than corrupting a live session.
+  when defined(posix):
+    # kill(pid, 0) delivers no signal; it only probes existence. Same probe
+    # the tool-cancel loop uses (streamexec.nim).
+    if posix.kill(Pid(pid), 0) == 0: return true
+    let e = osLastError()
+    # ESRCH: no such process -> dead. EPERM: exists but not ours -> alive.
+    if e.int32 == EPERM.int32: return true
+    false
+  else:
+    const
+      WinProcessQueryLimitedInfo = 0x1000'i32
+      WinStillActive = 0x00000103'i32
+    let h = winlean.openProcess(WinProcessQueryLimitedInfo, 0'i32, DWORD pid)
+    if h == INVALID_HANDLE_VALUE: return false
+    var code: int32 = 0
+    let ok = winlean.getExitCodeProcess(h, code)
+    discard winlean.closeHandle(h)
+    ok != 0'i32 and code == WinStillActive
+
 proc tempDir*(): string =
   ## `getTempDir` that honors `$TMPDIR` on Android. Nim's stdlib
   ## hardcodes `/data/local/tmp` under `defined(android)`, which is the

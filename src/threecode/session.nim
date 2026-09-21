@@ -294,31 +294,6 @@ when defined(windows):
     WingenGenericWrite = 0x40000000'i32
     WinCreateNew = 1'i32
     WinFileAttributeNormal = 0x00000080'i32
-    WinProcessQueryLimitedInfo = 0x1000'i32
-    WinStillActive = 0x00000103'i32
-
-proc pidAlive(pid: int): bool =
-  ## True if a process with `pid` is currently running.
-  ##
-  ## Used to tell a genuinely-held lock (live owner) from a stale one left
-  ## behind by a crashed or killed 3code. Pid reuse can theoretically make a
-  ## recycled pid look alive, but that's an inherent limit of pid-based
-  ## locking; the caller still refuses rather than corrupting a live session.
-  when defined(posix):
-    # kill(pid, 0) delivers no signal; it only probes existence. Same probe
-    # the tool-cancel loop uses (streamexec.nim).
-    if posix.kill(Pid(pid), 0) == 0: return true
-    let e = osLastError()
-    # ESRCH: no such process -> dead. EPERM: exists but not ours -> alive.
-    if e.int32 == EPERM.int32: return true
-    false
-  else:
-    let h = winlean.openProcess(WinProcessQueryLimitedInfo, 0'i32, DWORD pid)
-    if h == INVALID_HANDLE_VALUE: return false
-    var code: int32 = 0
-    let ok = winlean.getExitCodeProcess(h, code)
-    discard winlean.closeHandle(h)
-    ok != 0'i32 and code == WinStillActive
 
 proc writeOwnerInfo(fd: int; data: string) =
   ## Write the owner record into a freshly created lock file: the pid line,
