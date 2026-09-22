@@ -88,7 +88,7 @@ nimble install https://github.com/capocasa/3code</pre></p>
 
 <h3 id="run-your-first-prompt">Run your first prompt</h3><p><pre class="listing">❯ Build a Hello World program in Nim</pre></p>
 <p>That is enough to get started.</p>
-<p>The same prompt given as a command-line argument runs once and exits, for scripts and one-offs; <tt class="docutils literal"><span class="pre">-i</span></tt>/<tt class="docutils literal"><span class="pre">--interactive</span></tt> runs it and then drops you into the REPL. All switches are in the <a class="reference external" href="reference.html#command-line-switches">reference</a>.</p>
+<p>The same prompt given as a command-line argument runs once and exits, for scripts and one-offs; <tt class="docutils literal"><span class="pre">-i</span></tt>/<tt class="docutils literal"><span class="pre">--interactive</span></tt> runs it and then drops you into the REPL. Chaining one-shot runs into a scripted session is covered in <a class="reference external" href="#scripting">Scripting</a>. All switches are in the <a class="reference external" href="reference.html#command-line-switches">reference</a>.</p>
 
 <h2 id="providers-and-authentication">Providers and authentication</h2><p><tt class="docutils literal"><span class="pre">:provider</span></tt> lists configured providers and marks the current one, along with the model a switch would land on. <tt class="docutils literal"><span class="pre">:model</span></tt> does the same for its models. Both commands have tab completion, so there is no need to memorize catalog names. Model choices are sticky per provider: switching back with <tt class="docutils literal"><span class="pre">:provider</span></tt> returns to the model you last used there, not the first one in its list. The current provider and model are also sticky per directory: each project starts where it last left off, while directories never touched by <tt class="docutils literal"><span class="pre">:provider</span></tt> / <tt class="docutils literal"><span class="pre">:model</span></tt> keep the global config default. All of this lives in the config file; see <a class="reference external" href="reference.html#config-file">config file in the reference</a> for every key.</p>
 <p><pre class="listing">:provider nvidia
@@ -493,6 +493,13 @@ tone = &quot;light&quot;</pre></p>
 
 <h3 id="one-model-small-tool-set">One model, small tool set</h3><p>No sub-agents, no trees of delegated prompts. A single conversation with bash, file tools, plan, and web access, plus skills loaded on demand, keeps the token budget on the work instead of on orchestration. When a task outgrows one context, chunked and cybernetic modes split it along files and worktrees instead of spawning agents.</p>
 
+<h2 id="scripting">Scripting</h2><p>The REPL is optional. A prompt given as a command-line argument runs one turn and exits (oneshot mode), and <tt class="docutils literal"><span class="pre">-r</span></tt> continues the directory's latest session in another oneshot, so a shell script or cron job can hold an ongoing conversation:</p>
+<p><pre class="listing">3code &quot;list the failing tests in this repo&quot;   # starts a session
+3code -r &quot;fix the first one and rerun&quot;        # continues it
+3code -r &quot;commit what changed&quot;                # and so on</pre></p>
+<p>Each <tt class="docutils literal"><span class="pre">-r</span></tt> call resumes the latest session saved for the working directory with the full prior context, byte-identically, so the prompt cache stays warm and the model sees the whole conversation. Run from the project directory; sessions are per-directory, same as <tt class="docutils literal"><span class="pre">--list</span></tt>.</p>
+<p>Oneshot output is the regular transcript rendering on stdout (the reply, tool banners, receipts, exactly what the interactive screen commits); diagnostics go to stderr. The limitation: for now that regular output is all a script gets. The exit code separates a completed turn (0) from usage, config, and crash failures (nonzero), but anything in between, including provider errors mid-turn, has to be parsed out of the text. A parseable-output flag is planned; until then, prompt for the shape you need (<tt class="docutils literal"><span class="pre">answer with just the file names, one per line</span></tt>). For embedding without parsing anything, the <a class="reference external" href="#library-api">library API</a> returns events as data.</p>
+
 <h2 id="library-api">Library API</h2><p>A Nim program can embed the same agent loop without bringing along the terminal interface:</p>
 <p><pre class="listing"><span class="Keyword">import</span> <span class="Identifier">threecode</span>
 
@@ -537,7 +544,7 @@ tone = &quot;light&quot;</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-22 20:33:23 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-22 20:38:52 UTC</small>
       </div>
     </div>
   </div>

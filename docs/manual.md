@@ -175,7 +175,8 @@ That is enough to get started.
 
 The same prompt given as a command-line argument runs once and exits, for
 scripts and one-offs; `-i`/`--interactive` runs it and then drops you into
-the REPL. All switches are in the
+the REPL. Chaining one-shot runs into a scripted session is covered in
+[Scripting](#scripting). All switches are in the
 [reference](reference.html#command-line-switches).
 
 ## Providers and authentication
@@ -1227,6 +1228,35 @@ bash, file tools, plan, and web access, plus skills loaded on demand, keeps
 the token budget on the work instead of on orchestration. When a task
 outgrows one context, chunked and cybernetic modes split it along files and
 worktrees instead of spawning agents.
+
+## Scripting
+
+The REPL is optional. A prompt given as a command-line argument runs one
+turn and exits (oneshot mode), and `-r` continues the directory's latest
+session in another oneshot, so a shell script or cron job can hold an
+ongoing conversation:
+
+```
+3code "list the failing tests in this repo"   # starts a session
+3code -r "fix the first one and rerun"        # continues it
+3code -r "commit what changed"                # and so on
+```
+
+Each `-r` call resumes the latest session saved for the working
+directory with the full prior context, byte-identically, so the prompt
+cache stays warm and the model sees the whole conversation. Run from the
+project directory; sessions are per-directory, same as `--list`.
+
+Oneshot output is the regular transcript rendering on stdout (the reply,
+tool banners, receipts, exactly what the interactive screen commits);
+diagnostics go to stderr. The limitation: for now that regular output is
+all a script gets. The exit code separates a completed turn (0) from
+usage, config, and crash failures (nonzero), but anything in between,
+including provider errors mid-turn, has to be parsed out of the text. A
+parseable-output flag is planned; until then, prompt for the shape you
+need (`answer with just the file names, one per line`). For embedding
+without parsing anything, the [library API](#library-api) returns events
+as data.
 
 ## Library API
 

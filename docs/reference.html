@@ -49,6 +49,7 @@
 <tr><td><tt class="docutils literal"><span class="pre">-v</span></tt>, <tt class="docutils literal"><span class="pre">--version</span></tt></td><td>print version (release builds carry branch/commit provenance)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">-h</span></tt>, <tt class="docutils literal"><span class="pre">--help</span></tt></td><td>the usage message, including the config path</td></tr>
 </table><p>Subcommands: <tt class="docutils literal"><span class="pre">good</span></tt> (same as <tt class="docutils literal"><span class="pre">--good</span></tt>), <tt class="docutils literal"><span class="pre">sandbox</span></tt> / <tt class="docutils literal"><span class="pre">sb</span></tt> (run a command under the <a class="reference external" href="manual.html#what-is-sandboxed">filesystem policy</a>), <tt class="docutils literal"><span class="pre">setup</span></tt> and <tt class="docutils literal"><span class="pre">unsetup</span></tt> (Windows sandbox/network-wall install and removal, see <a class="reference external" href="manual.html#network-rules">network rules</a>).</p>
+<p>A prompt given as an argument runs one turn and exits (oneshot); <tt class="docutils literal"><span class="pre">-r</span></tt> continues the directory's latest session the same way. Exit codes: 0 for a completed turn, 2 usage, 3 config, 1 crash. See <a class="reference external" href="manual.html#scripting">Scripting</a> in the manual for the pattern and its parsing limitation.</p>
 
 <h2 id="interactive-commands">Interactive commands</h2><p>Everything typeable at the <tt class="docutils literal"><span class="pre">❯</span></tt> prompt. Tab completes commands, provider names, model names, and paths where supported.</p>
 <table border="1" class="docutils"><tr><th>command</th><th>effect</th></tr>
@@ -157,7 +158,7 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-22 20:33:25 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-22 20:38:53 UTC</small>
       </div>
     </div>
   </div>

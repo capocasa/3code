@@ -36,6 +36,12 @@ under the [filesystem policy](manual.html#what-is-sandboxed)), `setup` and
 `unsetup` (Windows sandbox/network-wall install and removal, see
 [network rules](manual.html#network-rules)).
 
+A prompt given as an argument runs one turn and exits (oneshot); `-r`
+continues the directory's latest session the same way. Exit codes: 0 for
+a completed turn, 2 usage, 3 config, 1 crash. See
+[Scripting](manual.html#scripting) in the manual for the pattern and its
+parsing limitation.
+
 ## Interactive commands
 
 Everything typeable at the `❯` prompt. Tab completes commands, provider
