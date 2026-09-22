@@ -34,7 +34,7 @@
 <p>The standard way to use 3code is also the simplest one: type what you want, like <tt class="docutils literal"><span class="pre">fix the flickering caret in the resize path</span></tt> or <tt class="docutils literal"><span class="pre">add tests for the parser edge cases</span></tt>, and press Enter. Current models read the code, do the work, and report back, without asking you anything in between. If a task is overly broad (<tt class="docutils literal"><span class="pre">improve this project</span></tt>), you will get questions or a plan first; narrow it down and it is back to hands-off. The interface exists to stay out of that loop: scrollback is plain terminal history, the footer is two rows, and everything else is your terminal's own scrolling, search, and selection.</p>
 <p>This manual is organized how-to style: getting a provider, daily use, the screen, sessions, the sandbox, embedding. The dry inventory of every config key, command-line switch, and <tt class="docutils literal"><span class="pre">:</span></tt> command lives in the <a class="reference external" href="reference.html">reference</a>.</p>
 
-<h2 id="quickstart">Quickstart</h2><p>First, give 3code somewhere to run inference: an API provider or a local OpenAI-compatible server. Local models can work, though small ones still have a rough time with difficult coding tasks.</p>
+<h2 id="quickstart">Quickstart</h2><p>First, give 3code somewhere to run inference: an API provider or a local OpenAI-compatible server. Local models can work (Ollama and friends speak the same API), though small ones still have a rough time with difficult coding tasks.</p>
 
 <h3 id="get-a-provider">Get a provider</h3><p>There are plenty of compatible providers. A free tier is a good place to start. Pay for one after you know which model actually works for your projects.</p>
 
@@ -99,12 +99,12 @@ nimble install https://github.com/capocasa/3code</pre></p>
 <h3 id="xai-and-supergrok">xAI and SuperGrok</h3><p>An <tt class="docutils literal"><span class="pre">xai-</span></tt> key creates a normal <tt class="docutils literal"><span class="pre">xai</span></tt> provider. Enter <tt class="docutils literal"><span class="pre">supergrok</span></tt> instead to sign in with a SuperGrok or X Premium+ subscription. They can live side by side, which is useful if you have both kinds of account.</p>
 <p>The browser OAuth flow stores tokens in:</p>
 <p><pre class="listing">$XDG_DATA_HOME/3code/auth/xai.json</pre></p>
-<p>On POSIX systems the file is created with mode 0600, and tokens refresh automatically. Switch accounts with <tt class="docutils literal"><span class="pre">:provider xai</span></tt> and <tt class="docutils literal"><span class="pre">:provider supergrok</span></tt>.</p>
+<p>On POSIX systems the file is created with mode 0600, and tokens refresh automatically; a refresh token that dies ends the turn with a re-login hint, not a crash. Switch accounts with <tt class="docutils literal"><span class="pre">:provider xai</span></tt> and <tt class="docutils literal"><span class="pre">:provider supergrok</span></tt>.</p>
 
 <h3 id="openai-and-chatgpt">OpenAI and ChatGPT</h3><p>An OpenAI API key creates an <tt class="docutils literal"><span class="pre">openai</span></tt> provider. Enter <tt class="docutils literal"><span class="pre">chatgpt</span></tt> instead to use a ChatGPT Plus/Pro subscription. As with xAI and SuperGrok, both providers can exist together.</p>
 <p>ChatGPT login opens the OpenAI browser OAuth flow and stores tokens in:</p>
 <p><pre class="listing">$XDG_DATA_HOME/3code/auth/openai.json</pre></p>
-<p>On POSIX systems the file is created with mode 0600, and tokens refresh automatically. ChatGPT model listings and requests go through the Codex backend at <tt class="docutils literal"><span class="pre">chatgpt.com/backend-api/codex</span></tt>.</p>
+<p>On POSIX systems the file is created with mode 0600, and tokens refresh automatically; a dead refresh token ends the turn with a re-login hint rather than a crash. ChatGPT model listings and requests go through the Codex backend at <tt class="docutils literal"><span class="pre">chatgpt.com/backend-api/codex</span></tt>.</p>
 <p>OpenAI and ChatGPT use the Responses API. Other OpenAI-compatible providers use Chat Completions. The Codex backend is internal, unversioned, and intended for first-party clients. It works, but using it through 3code is your responsibility.</p>
 <p>Switch accounts with:</p>
 <p><pre class="listing">:provider openai
@@ -253,10 +253,10 @@ suspend =</pre></p>
 <p><pre class="listing">:retry
 :retry off
 :retry on</pre></p>
-<p>Even with patient retry off, 3code gives transient failures about a minute before returning to the interactive prompt. The setting is stored as <tt class="docutils literal"><span class="pre">patient_retry</span></tt> in <tt class="docutils literal"><span class="pre">[settings]</span></tt> (<a class="reference external" href="reference.html#settings">settings in the reference</a>). Press Esc to cancel the wait.</p>
+<p>Even with patient retry off, 3code gives transient failures about a minute before returning to the interactive prompt. The setting is stored as <tt class="docutils literal"><span class="pre">patient_retry</span></tt> in <tt class="docutils literal"><span class="pre">[settings]</span></tt> (<a class="reference external" href="reference.html#settings">settings in the reference</a>). Press Esc to cancel the wait. A stream that stalls network-quiet or arrives truncated mid-response is detected and retried on its own, regardless of the setting.</p>
 <p>For a provider whose streaming is the problem rather than its availability, <tt class="docutils literal"><span class="pre">:streaming off</span></tt> switches requests to plain request/response mode: the reliable fallback when a provider's SSE implementation drops or truncates responses. The setting is per session, or permanent as <tt class="docutils literal"><span class="pre">streaming = off</span></tt> in <tt class="docutils literal"><span class="pre">[settings]</span></tt>.</p>
 
-<h2 id="when-the-model-misbehaves">When the model misbehaves</h2><p>Two failure modes are common enough across providers that 3code guards against them automatically. Both guards are deliberately small: a few hundred tokens of mechanism for a failure mode that would otherwise burn millions.</p>
+<h2 id="when-the-model-misbehaves">When the model misbehaves</h2><p>Two failure modes are common enough across providers that 3code guards against them automatically. Both guards are deliberately small: a few hundred tokens of mechanism for a failure mode that would otherwise burn millions. Provider API errors along the way surface as formatted messages, never raw JSON bodies.</p>
 
 <h3 id="the-flailing-detector">The flailing detector</h3><p>Sometimes a model gets stuck repeating the same tool call: the same failing patch, the same unhelpful grep, a loop it cannot think its way out of. Every repeat burns another round trip and another batch of output tokens while making no progress. The flailing detector fingerprints each tool call and watches the recent window for repeats: identical calls back to back, A-B-A-B cycles, or a long streak of near-identical calls to the same tool.</p>
 <p>When it sees one, it intervenes in the model's voice of authority: a tool result is replaced by a short <tt class="docutils literal"><span class="pre">SYSTEM</span></tt> note naming the loop and demanding a strategy change. Two more escalations follow if needed, the last one telling the model to stop and report what is blocking it. A fourth flagged repeat aborts the turn and hands control back to you. Every intervention appears in the scrollback as a <tt class="docutils literal"><span class="pre">»</span></tt> row with the exact text sent, so nothing happens invisibly. A genuinely new tool call resets the ladder; normal work never sees it.</p>
@@ -376,7 +376,7 @@ Task: add test coverage to the parser module.</pre></p>
 <li><tt class="docutils literal"><span class="pre">~/.config/3code/skills/</span></tt> (your overrides)</li>
 <li><tt class="docutils literal"><span class="pre">~/.local/share/3code/skills/</span></tt> (built-ins, extracted by 3code itself)</li>
 </ol>
-<p>The built-ins shipped today are the role skills (conversational, sysadmin, thinking partner, writing), task-debug-systematic, and cybernetic-plan. To override one, put a file with the same name in a directory higher up the list. To add your own, drop a <tt class="docutils literal"><span class="pre">.md</span></tt> file in any of those directories with an instructive name: the filename is the trigger, so <tt class="docutils literal"><span class="pre">release-notes.md</span></tt> loads when the task smells like release notes.</p>
+<p>The built-ins shipped today are the role skills (conversational, sysadmin, thinking partner, writing), task-debug-systematic, and cybernetic-plan. To override one, put a file with the same name in a directory higher up the list. To add your own, drop a <tt class="docutils literal"><span class="pre">.md</span></tt> file in any of those directories with an instructive name: the filename is the trigger, so <tt class="docutils literal"><span class="pre">release-notes.md</span></tt> loads when the task smells like release notes. There is deliberately no MCP-style plugin protocol: a skill file plus command-line tools covers the same ground at a fraction of the context cost.</p>
 
 <h2 id="cybernetic-mode">Cybernetic mode</h2><p>Cybernetic mode is the sturdier option for a long coding task. Give the model a worktree and ask it to use the built-in cybernetic planning skill.</p>
 <p>The skill:</p>
@@ -537,7 +537,7 @@ tone = &quot;light&quot;</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-22 20:29:07 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-22 20:33:23 UTC</small>
       </div>
     </div>
   </div>

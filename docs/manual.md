@@ -29,8 +29,9 @@ key, command-line switch, and `:` command lives in the
 ## Quickstart
 
 First, give 3code somewhere to run inference: an API provider or a local
-OpenAI-compatible server. Local models can work, though small ones still have a
-rough time with difficult coding tasks.
+OpenAI-compatible server. Local models can work (Ollama and friends speak
+the same API), though small ones still have a rough time with difficult
+coding tasks.
 
 ### Get a provider
 
@@ -213,7 +214,8 @@ $XDG_DATA_HOME/3code/auth/xai.json
 ```
 
 On POSIX systems the file is created with mode 0600, and tokens refresh
-automatically. Switch accounts with `:provider xai` and
+automatically; a refresh token that dies ends the turn with a re-login
+hint, not a crash. Switch accounts with `:provider xai` and
 `:provider supergrok`.
 
 ### OpenAI and ChatGPT
@@ -229,7 +231,8 @@ $XDG_DATA_HOME/3code/auth/openai.json
 ```
 
 On POSIX systems the file is created with mode 0600, and tokens refresh
-automatically. ChatGPT model listings and requests go through the Codex backend
+automatically; a dead refresh token ends the turn with a re-login hint
+rather than a crash. ChatGPT model listings and requests go through the Codex backend
 at `chatgpt.com/backend-api/codex`.
 
 OpenAI and ChatGPT use the Responses API. Other OpenAI-compatible providers use
@@ -570,6 +573,8 @@ Even with patient retry off, 3code gives transient failures about a minute
 before returning to the interactive prompt. The setting is stored as
 `patient_retry` in `[settings]` ([settings in the
 reference](reference.html#settings)). Press Esc to cancel the wait.
+A stream that stalls network-quiet or arrives truncated mid-response is
+detected and retried on its own, regardless of the setting.
 
 For a provider whose streaming is the problem rather than its availability,
 `:streaming off` switches requests to plain request/response mode: the
@@ -582,7 +587,8 @@ in `[settings]`.
 Two failure modes are common enough across providers that 3code guards
 against them automatically. Both guards are deliberately small: a few
 hundred tokens of mechanism for a failure mode that would otherwise burn
-millions.
+millions. Provider API errors along the way surface as formatted messages,
+never raw JSON bodies.
 
 ### The flailing detector
 
@@ -883,6 +889,9 @@ To override one, put a file with the same name in a directory higher up
 the list. To add your own, drop a `.md` file in any of those directories
 with an instructive name: the filename is the trigger, so
 `release-notes.md` loads when the task smells like release notes.
+There is deliberately no MCP-style plugin protocol: a skill file plus
+command-line tools covers the same ground at a fraction of the context
+cost.
 
 ## Cybernetic mode
 

@@ -115,7 +115,7 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
 <tr><td><tt class="docutils literal"><span class="pre">bash</span></tt></td><td><tt class="docutils literal"><span class="pre">auto</span></tt> or full path (default auto)</td><td>any OS: a full path overrides all detection; <tt class="docutils literal"><span class="pre">auto</span></tt> keeps the normal order</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">auto_update</span></tt></td><td><tt class="docutils literal"><span class="pre">true</span></tt>/<tt class="docutils literal"><span class="pre">false</span></tt></td><td>self-update on launch; default on for prebuilt binaries, off for source builds. Nightly builds report branch and commit</td></tr>
 </table>
-<h3 id="provider">provider</h3><p>One <tt class="docutils literal"><span class="pre">[provider]</span></tt> section per provider; repeat the section header for each.</p>
+<h3 id="provider">provider</h3><p>One <tt class="docutils literal"><span class="pre">[provider]</span></tt> section per provider; repeat the section header for each. Sections may share a <tt class="docutils literal"><span class="pre">url</span></tt> and <tt class="docutils literal"><span class="pre">key</span></tt>; two sections with the same <tt class="docutils literal"><span class="pre">name</span></tt> are a config error.</p>
 <table border="1" class="docutils"><tr><th>key</th><th>meaning</th></tr>
 <tr><td><tt class="docutils literal"><span class="pre">name</span></tt></td><td>provider name, used in <tt class="docutils literal"><span class="pre">current</span></tt> and <tt class="docutils literal"><span class="pre">:provider</span></tt></td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">url</span></tt></td><td>OpenAI-compatible base URL</td></tr>
@@ -157,7 +157,7 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-22 20:29:09 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-22 20:33:25 UTC</small>
       </div>
     </div>
   </div>

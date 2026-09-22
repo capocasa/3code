@@ -128,6 +128,8 @@ Keys under `[settings]`:
 ### provider
 
 One `[provider]` section per provider; repeat the section header for each.
+Sections may share a `url` and `key`; two sections with the same `name` are
+a config error.
 
 | key | meaning |
 | --- | --- |
