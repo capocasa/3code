@@ -358,6 +358,13 @@ else:
   const
     ESCAPES* = {27}
 
+const MaxBufferBytes* = 512 * 1024
+  ## Hard cap on the editor buffer. Generous by any human measure (8x the
+  ## @file inline cap; whole-file prompts pasted verbatim fit), yet the
+  ## bound is real: the per-keystroke repaint walks every visual row, so
+  ## an unbounded paste would grow the render model without limit. Inserts
+  ## that would cross the cap are cut at a rune boundary and belled.
+
 const EscapeTailPollMs* = 50
   ## Wait long enough for terminal multi-byte escape tails that can be
   ## split from the leading ESC by the terminal/PTY stack. Too short a
@@ -526,12 +533,23 @@ proc lineSpans*(text: string; promptW, contW, width: int): seq[LineSpan] =
       col = contW
       lastBreak = -1
       contentEnd = i
+      if contW + rw > width:
+        # The rune overflows even alone on a continuation row (terminal
+        # narrower than the continuation prompt plus the rune): keep it
+        # on this row and let the column run past the margin. Without
+        # consuming it the walk re-tests the same byte forever.
+        contentEnd = min(i + rl, text.len)
+        inc col, rw
+        i += rl
       continue
     if text[i] == ' ':
       lastBreak = i
       lineEnd = contentEnd
     else:
-      contentEnd = i + rl
+      # Clamped: a truncated final rune (invalid UTF-8 at end of buffer,
+      # raw paste bytes) claims more bytes than exist, and an unclamped
+      # span stop would send every renderer's slice past text.len.
+      contentEnd = min(i + rl, text.len)
     inc col, rw
     i += rl
   result[result.high].stop = contentEnd
@@ -638,10 +656,18 @@ proc caretSliceBytes*(text: string; sp: LineSpan; caretAt: int;
     # spaces (the caret only caught up on the next non-space).
     return text[sp.start ..< caretAt] & CaretCellOn & " " & CaretCellOff
   if caretAt <= sp.start:
-    let rl = runeLenSafe(text, sp.start)
+    # The drawn caret can belong to a row whose span does not contain
+    # its byte: deferred wrap moves it one row down past a break-space
+    # gap, and that row's span may be empty or start past the caret.
+    # Reverse the span's first rune, or a lone caret cell when the span
+    # holds no whole rune; every slice must stay well formed either way
+    # (a stop below start is a RangeDefect, not an empty string).
+    let rl = min(runeLenSafe(text, sp.start), sp.stop - sp.start)
+    if rl <= 0:
+      return CaretCellOn & " " & CaretCellOff
     return CaretCellOn & text[sp.start ..< sp.start + rl] & CaretCellOff &
       text[sp.start + rl ..< sp.stop]
-  let rl = runeLenSafe(text, caretAt)
+  let rl = min(runeLenSafe(text, caretAt), sp.stop - caretAt)
   return text[sp.start ..< caretAt] & CaretCellOn &
     text[caretAt ..< caretAt + rl] & CaretCellOff &
     text[caretAt + rl ..< sp.stop]
@@ -1043,10 +1069,31 @@ proc deleteNext*(ed: var LineEditor) =
   callHook(ed.onMutate, ed)
   fullRedraw(ed)
 
+proc runeBoundaryAtOrBefore(s: string; n: int): int =
+  ## Largest offset ``<= n`` that does not split a UTF-8 rune of ``s``.
+  result = min(n, s.len)
+  while result > 0 and result < s.len and
+      (byte(s[result]) and 0xC0'u8) == 0x80'u8:
+    dec result
+
+proc capNotice(ed: var LineEditor) =
+  if ed.write != nil: ed.write "\a"
+
 proc insertText*(ed: var LineEditor, s: string) =
   ## Insert ``s`` at the current position. Replace mode overwrites runes
   ## within the current logical line; newlines in ``s`` always insert.
+  ## The insert is capped at ``MaxBufferBytes``: what does not fit is cut
+  ## at a rune boundary and the terminal is belled, so a runaway paste
+  ## lands whole up to the cap instead of growing the buffer forever.
   if s.len == 0: return
+  var s = s
+  let room = MaxBufferBytes - ed.line.text.len
+  if room <= 0:
+    capNotice(ed)
+    return
+  if s.len > room:
+    s.setLen runeBoundaryAtOrBefore(s, room)
+    capNotice(ed)
   if ed.mode == mdInsert or s.contains('\n'):
     ed.line.text = ed.line.text[0 ..< ed.line.position] & s &
                    ed.line.text[ed.line.position .. ^1]
@@ -1079,7 +1126,13 @@ proc insertNewline*(ed: var LineEditor) =
   ed.insertText("\n")
 
 proc changeLine*(ed: var LineEditor, s: string) =
-  ## Replace the entire buffer.
+  ## Replace the entire buffer (history recall, prefill, external
+  ## editor). Same hard cap as typing: oversized content is cut at a
+  ## rune boundary and belled rather than loaded unchecked.
+  var s = s
+  if s.len > MaxBufferBytes:
+    s.setLen runeBoundaryAtOrBefore(s, MaxBufferBytes)
+    capNotice(ed)
   ed.line.text = s
   ed.line.position = s.len
   callHook(ed.onMutate, ed)
@@ -1911,19 +1964,32 @@ proc readBracketedPaste(ed: var LineEditor): string =
   # `endsWith` on each iteration, which can be inefficient for large
   # pastes. Here we detect the terminator by checking the last five
   # characters directly, avoiding a full scan each loop.
+  # Accumulation stops at MaxBufferBytes (the insert itself is capped
+  # too): the bytes are still drained so the pty queue empties, but a
+  # runaway paste can never grow memory without bound. The terminator
+  # is tracked in its own tail window so detection survives the cap.
   const endSeq = "\e[201~"
   const endLen = endSeq.len
+  var tail = ""
+  var capped = false
   while true:
     let b = ed.getCh()
     if b < 0:
       return result
-    result.add b.chr
-    if result.len >= endLen:
-      # Compare the tail of the buffer with the end sequence.
-      if result[result.len - endLen ..< result.len] == endSeq:
-        # Remove the terminator and return the paste content.
+    if not capped:
+      if result.len >= MaxBufferBytes:
+        capped = true
+      else:
+        result.add b.chr
+    tail.add b.chr
+    if tail.len > endLen:
+      tail = tail[tail.len - endLen ..< tail.len]
+    if tail == endSeq:
+      # Remove the terminator and return the paste content. Only the
+      # uncapped run can end with it: past the cap nothing was appended.
+      if not capped and result.len >= endLen:
         result.setLen(result.len - endLen)
-        return result
+      return result
 
 proc stdinHasByteNow*(): bool =
   ## Return true if stdin has at least one byte available right now
@@ -2282,7 +2348,7 @@ proc handleEscape*(ed: var LineEditor, c1: int): bool =
               # newline that the terminal happens to send raw.
               var stars = 0
               for ch in paste:
-                if ch.ord in PRINTABLE:
+                if ch.ord in PRINTABLE and ed.line.text.len < MaxBufferBytes:
                   ed.line.text.add ch
                   inc ed.line.position
                   inc stars

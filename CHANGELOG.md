@@ -3,6 +3,12 @@ Changelog
 0.8.0  private mode, per-model params, cache-hot resume, commandcode and
        platte providers, PortableGit in the Windows installer
   - xiaomi provider; MiMo 2.6 Pro/Flash on xiaomi, OpenRouter, OpenCode Zen/Go
+  - editor buffer hard-capped at 512KB: oversized inserts and pastes cut
+    at a rune boundary and ring the bell instead of growing forever
+  - release-build crash typing large wrapped prompts fixed (caret past a
+    wrap gap built a negative slice); the wrap walk can no longer spin on
+    terminals too narrow for the prompt plus a rune, nor slice past the
+    buffer when a raw paste ends mid-rune
   - thinking replay (think-back) is configurable per provider in [params]
   - dead oauth refresh token ends the turn with a re-login hint, not a crash
   - harness autosends (steer, flail prods) show exact text in scrollback
