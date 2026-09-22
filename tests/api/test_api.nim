@@ -1298,14 +1298,12 @@ suite "xml tool_call fallback":
       let p = Profile(name: "kimicode.k3", family: "kimi", model: "k3")
       applyThinkBack(p, body)
       check body{"thinking"}{"keep"}.getStr == "all"
-    block zaicurrent:
-      # cheap glm row trialling current-turn replay: interleaved thinking
-      # with tool results is the default, and clear_thinking: false would
-      # commit to cross-turn keep, so send nothing extra
+    block zaiflash:
+      # standard-API glm rows strip (tbNone): no preserved-thinking knob
       var body = %*{"stream": true}
       let p = Profile(name: "zai.glm-5.3-flash", family: "glm",
                       model: "glm-5.3-flash")
-      check knownGoodThinkBack(p) == tbCurrentTurn
+      check knownGoodThinkBack(p) == tbNone
       applyThinkBack(p, body)
       check "clear_thinking" notin body
     block kimicurrent:
@@ -1348,7 +1346,7 @@ suite "api: [params] overrides":
     check d.maxTokens == 4096
 
   test "think_back override wins in both directions":
-    var p = Profile(name: "zai.glm-5.2", model: "glm-5.2", family: "glm")
+    var p = Profile(name: "zaicode.glm-5.2", model: "glm-5.2", family: "glm")
     check knownGoodThinkBack(p) == tbAllTurns
     p.params.thinkBack = some(tbNone)
     check knownGoodThinkBack(p) == tbNone
