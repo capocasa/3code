@@ -8,6 +8,9 @@ Changelog
   - harness autosends (steer, flail prods) show exact text in scrollback
   - Grok 4.7 known-good: xai, OpenRouter, OpenCode Zen (same shape as 4.6)
   - retry-backoff notice boxed by blank rows, absorbed on reconnect
+  - -c/--config switch reads an alternate config file (docs always promised it)
+  - [settings] max_timeout raises the bash timeout ceiling; THREECODE_MAX_TIMEOUT wins per run
+  - manual: configuration reference with the full env-var list (XDG roots, diagnostics)
   - shortModel canonicalizes after slash-strip; zai-glm-5-3 shows glm-5.3
   - prompt caret carries the palette's white tone, not the terminal default
   - token bar survives usage-less turn ends (repainted from last label)

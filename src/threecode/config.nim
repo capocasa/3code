@@ -335,7 +335,7 @@ const
                        "params", "shortcuts"]
   SettingsKeys = ["current", "notify", "streaming", "sandbox",
                   "sandbox_enabled", "patient_retry", "patient-retry",
-                  "sandbox_wall_warn",
+                  "sandbox_wall_warn", "max_timeout", "max-timeout",
                   "tone", "mode", "bash_path", "bash-path",
                   "bash", "auto_update"]
   SearchKeys = ["exa-key", "brave-key", "key", "engine"]
@@ -404,6 +404,11 @@ proc validateConfig*(path: string; entries: seq[RawEntry]): string =
           ent.value.strip.toLowerAscii notin BoolValues:
         return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
                "(expected on/off/true/false/yes/no/1/0)"
+      if ent.key in ["max_timeout", "max-timeout"]:
+        try: discard parseInt(ent.value.strip)
+        except ValueError:
+          return &"{path}:{ent.line}: bad value '{ent.value}' for '{ent.key}' " &
+                 "in [settings] (expected a whole number of seconds)"
       if ent.key in ["tone", "mode"] and
           ent.value.strip.toLowerAscii notin ColorModes:
         return &"{path}:{ent.line}: unknown tone '{ent.value}' " &
@@ -560,6 +565,11 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
           of "on", "true", "yes", "1": sandboxWallWarn = true
           of "off", "false", "no", "0": sandboxWallWarn = false
           else: discard
+        of "max_timeout", "max-timeout":
+          # Whole seconds. Schema validation already rejected non-numbers,
+          # so a parse failure here is unreachable in practice.
+          try: maxTimeoutSetting = v.strip.parseInt
+          except ValueError: discard
         of "tone", "mode":
           # `auto` detects the background (default); `dark`/`light` force a
           # palette. `mode`/`bright` are the legacy spellings and stay
@@ -692,9 +702,11 @@ proc mergeForeignEdits(path: string; current: var string,
   # (e.g. `:streaming off`) would be reverted by the stale disk value
   # right before the buffer serializes it.
   let (savedNotify, savedStreaming, savedSandbox, savedPatient,
-       savedWallWarn, savedColorMode, savedBash, savedBashSrc) =
+       savedWallWarn, savedMaxTimeout, savedColorMode, savedBash,
+       savedBashSrc) =
     (notifyEnabled, streamingEnabled, sandboxEnabled, patientRetryEnabled,
-     sandboxWallWarn, colorModePref, bashPathOverride, bashSourcePref)
+     sandboxWallWarn, maxTimeoutSetting, colorModePref, bashPathOverride,
+     bashSourcePref)
   let savedParams = activeParams
   let (diskCurrent, diskProviders, _, _, _, _) =
     try: parseConfigFile(path)
@@ -708,6 +720,7 @@ proc mergeForeignEdits(path: string; current: var string,
   sandboxEnabled = savedSandbox
   patientRetryEnabled = savedPatient
   sandboxWallWarn = savedWallWarn
+  maxTimeoutSetting = savedMaxTimeout
   colorModePref = savedColorMode
   bashPathOverride = savedBash
   bashSourcePref = savedBashSrc
@@ -788,6 +801,9 @@ proc writeConfigFile*(path: string, current: string,
     buf.add "patient_retry = \"off\"\n"
   if not sandboxWallWarn:
     buf.add "sandbox_wall_warn = \"off\"\n"
+  # Bare number, not a quoted literal: the reader parseInts the raw value.
+  if maxTimeoutSetting > 0 and maxTimeoutSetting != MaxBashTimeout:
+    buf.add "max_timeout = " & $maxTimeoutSetting & "\n"
   # Persist the colour tone only when it differs from `auto` (the default).
   if colorModePref != cmAuto:
     let label = if colorModePref == cmDark: "dark" else: "light"
@@ -838,8 +854,12 @@ proc writeConfigFile*(path: string, current: string,
   writeFile(tmpPath, buf)
   moveFile(tmpPath, path)
 
+var configPathOverride* = ""
+  ## Set by `-c/--config` before the first `configPath()` call.
+
 proc configPath*(): string =
-  userConfigRoot() / "config"
+  if configPathOverride.len > 0: configPathOverride
+  else: userConfigRoot() / "config"
 
 proc resolveSearchKey*(engine: string; keys: Table[string, string]): string =
   ## The engine-specific `[search] exa-key` / `brave-key` wins; otherwise the

@@ -22,6 +22,7 @@ current = "baseten.glm5"
 ; notify = off ; turn off the desktop notification that fires when a turn ends (on by default)
 ; sandbox = off ; disable filesystem sandbox enforcement (on by default: .sandbox in the project, else ~/.config/3code/sandbox)
 ; patient_retry = off ; disable patient retry of 429/5xx/network errors (on by default: ~36h hold so a long-running session rides out a usage limit or network dropout without dropping to the prompt)
+; max_timeout = 1800 ; raise the bash timeout ceiling in seconds (default 600; model-requested timeouts are clamped to it; THREECODE_MAX_TIMEOUT env var wins per run)
 ; sandbox_wall_warn = off ; silence the Windows "wall not set up" warning (host rules in policy, no `3code wall setup-windows` yet)
 ; bash_path = "C:\\tools\\msys64\\usr\\bin\\bash.exe"  ; Windows only: force a bash path (MSYS2 and Git for Windows are auto-detected)
 ; bash = auto  ; which bash to use: auto (default, normal detection order) or a full path to the shell (any OS)

@@ -15,7 +15,7 @@
 ## wins.
 
 import std/[httpclient, json, os, parsecfg, parseutils, strutils, times]
-import prompts, util
+import config, prompts, util
 
 const autoUpdate {.booldefine.} = false
 
@@ -44,8 +44,9 @@ const BinName =
 proc autoUpdateEnabled*(): bool =
   ## Resolution: explicit config value wins; otherwise fall back to the
   ## build-time default. Read `parsecfg` directly so the update path
-  ## doesn't drag in the rest of the config machinery.
-  let path = userConfigRoot() / "config"
+  ## doesn't drag in the rest of the config machinery. `configPath()` is
+  ## as far as the shared state goes, so `-c/--config` applies here too.
+  let path = configPath()
   if fileExists(path):
     try:
       let cfg = loadConfig(path)

@@ -55,10 +55,13 @@ curl -fsSL https://3code.capocasa.dev/install | sh
 # Windows (PowerShell)
 irm https://3code.capocasa.dev/install.ps1 | iex</pre></p>
 
-<h3 id="manual-install-on-windows">Manual install on Windows</h3><p>The PowerShell one-liner also downloads a private PortableGit tree (bash + unix tools) into <tt class="docutils literal"><span class="pre">%LOCALAPPDATA%\3code\git</span></tt>, so 3code always has a shell of its own. If you would rather not, install <a class="reference external" href="https://git-scm.com/download/win">Git for Windows</a> and run 3code from a plain release folder:</p>
+<h3 id="manual-install-on-windows">Manual install on Windows</h3><p>The PowerShell one-liner also downloads a private PortableGit tree (bash</p>
+<ul class="simple"><li>unix tools) into <tt class="docutils literal"><span class="pre">%LOCALAPPDATA%\3code\git</span></tt>, so 3code always has a shell</li>
+</ul>
+<p>of its own. If you would rather not, install <a class="reference external" href="https://git-scm.com/download/win">Git for Windows</a> and run 3code from a plain release folder:</p>
 <ol class="simple"><li>Download <tt class="docutils literal"><span class="pre">3code-windows-amd64.zip</span></tt> from the <a class="reference external" href="https://github.com/capocasa/3code/releases/latest">latest release</a> and unpack it, for example to <tt class="docutils literal"><span class="pre">C:\tools\3code</span></tt>. The zip carries <tt class="docutils literal"><span class="pre">3code.exe</span></tt>, the OpenSSL DLLs, and <tt class="docutils literal"><span class="pre">cacert.pem</span></tt>, so the folder is self-contained.</li>
 <li>Put the folder on your <tt class="docutils literal"><span class="pre">PATH</span></tt>, or call <tt class="docutils literal"><span class="pre">3code.exe</span></tt> by full path.</li>
-<li>Run it. 3code resolves bash in this order: a <tt class="docutils literal"><span class="pre">bash_path</span></tt> setting, then the installer's own PortableGit tree (<tt class="docutils literal"><span class="pre">%LOCALAPPDATA%\3code\git</span></tt>), then the Git for Windows install, then a standalone MSYS2 (<tt class="docutils literal"><span class="pre">C:\msys64</span></tt>), then the legacy <tt class="docutils literal"><span class="pre">%LOCALAPPDATA%\3code\msys64</span></tt> tree. With Git for Windows present, no MSYS2 download is needed.</li>
+<li>Run it. 3code resolves bash in this order: a <tt class="docutils literal"><span class="pre">bash_path</span></tt> setting, then the installer's own PortableGit tree (<tt class="docutils literal"><span class="pre">%LOCALAPPDATA%\3code\git</span></tt>), then the Git for Windows install, then a standalone MSYS2 (<tt class="docutils literal"><span class="pre">C:\msys64</span></tt>), then the legacy <tt class="docutils literal"><span class="pre">%LOCALAPPDATA%\3code\msys64</span></tt> tree. With Git for Windows present, no MSYS2 download is needed. A <tt class="docutils literal"><span class="pre">bash</span></tt> setting overrides the automatic order with a full path to the shell (any OS); <tt class="docutils literal"><span class="pre">auto</span></tt> (the default) keeps the order above.</li>
 </ol>
 <p>The one-time <tt class="docutils literal"><span class="pre">3code setup</span></tt> (sandbox user + network fence) is still required on Windows. It needs admin rights: run it from a console/RDP session and it asks for them via the Windows UAC prompt (from ssh it prints what to do instead; there the run must come from an admin account or elevated shell).</p>
 
@@ -103,6 +106,10 @@ nimble install https://github.com/capocasa/3code</pre></p>
 <p><pre class="listing">:provider openai
 :provider chatgpt</pre></p>
 
+<h3 id="command-code">Command Code</h3><p>A Command Code plan (GOAT, Pro, Max, or the Provider plan) gives API access through their provider gateway. Generate a key in Command Code Studio (the same key authenticates their <tt class="docutils literal"><span class="pre">cmd</span></tt> CLI) and add it with <tt class="docutils literal"><span class="pre">:provider add commandcode</span></tt>, or paste the key and pick <tt class="docutils literal"><span class="pre">commandcode</span></tt> when asked:</p>
+<p><pre class="listing">:provider add commandcode</pre></p>
+<p>The open-model lineup (DeepSeek, GLM, Kimi, MiniMax, Grok, MiMo) rides the gateway's OpenAI-compatible <tt class="docutils literal"><span class="pre">/provider/v1/chat/completions</span></tt> endpoint. Usage is metered against the plan's credits.</p>
+
 <h2 id="provider-catalog">Provider catalog</h2><p>Everything the wizard knows about, grouped by where inference actually runs. A <tt class="docutils literal"><span class="pre">★</span></tt> marks the providers on the <a class="reference external" href="https://3code.capocasa.dev">home page rotation</a>, which is the shortlist I recommend. Rows marked <strong>quantized</strong> serve fp8 or fp4 weights: cheaper per token, but a long agentic run hits the quality floor sooner than the same model at full precision, so treat them as bulk workhorse power, not the model you trust with a hard refactor. Hosting location is where your prompts run, not where the company is registered; for retention policies see <a class="reference external" href="#picking-a-private-provider">Picking a private provider</a>. <tt class="docutils literal"><span class="pre">3code --good</span></tt> prints the validated provider/model pairs for whichever of these you configure.</p>
 
 <h3 id="model-labs">Model labs</h3><p>First-party APIs from the labs that trained the models. Two of the home page names are subscription logins rather than catalog entries: <tt class="docutils literal"><span class="pre">chatgpt</span></tt> is a ChatGPT Plus/Pro login that rides on <tt class="docutils literal"><span class="pre">openai</span></tt>, and <tt class="docutils literal"><span class="pre">supergrok</span></tt> is a SuperGrok or X Premium+ login that rides on <tt class="docutils literal"><span class="pre">xai</span></tt>.</p>
@@ -145,6 +152,7 @@ nimble install https://github.com/capocasa/3code</pre></p>
 <tr><td>scaleway</td><td>France</td><td></td></tr>
 <tr><td>hetzner</td><td>Germany</td><td>free experiment, <strong>quantized</strong> (fp8/fp4 ids)</td></tr>
 <tr><td>together-eu</td><td>EU</td><td>Together's EU endpoint</td></tr>
+<tr><td>★ platte</td><td>Germany</td><td>EU sovereign host; url embeds your username, wizard asks for it</td></tr>
 <tr><td>aki</td><td>EU</td><td></td></tr>
 <tr><td>lyceum</td><td>EU</td><td></td></tr>
 </table>
@@ -398,6 +406,29 @@ allow ./</pre></p>
 <h3 id="platform-behavior-and-fallback">Platform behavior and fallback</h3><p>The Bash backend uses Landlock on Linux, Seatbelt on macOS, and restricted tokens plus ACLs on Windows. 3code probes it at startup rather than assuming it works. Old Linux kernels and containers whose seccomp policy blocks Landlock can fail the probe.</p>
 <p>If the OS backend is unavailable, Bash runs without filesystem confinement. The in-process read, write, and patch checks remain active. This keeps 3code usable, but the distinction matters: an arbitrary Bash command is then outside the filesystem fence.</p>
 
+<h2 id="configuration-reference">Configuration reference</h2><p>The config file is <tt class="docutils literal"><span class="pre">~/.config/3code/config</span></tt> (<tt class="docutils literal"><span class="pre">%APPDATA%\3code\config</span></tt> on Windows, <tt class="docutils literal"><span class="pre">~/Library/Application Support/3code/config</span></tt> on macOS). A different file can be read for a single run:</p>
+<p><pre class="listing">3code -c ~/p/experimental-config &quot;hello&quot;</pre></p>
+<p>The file is rewritten by 3code itself whenever providers or models change, and its schema is strict: an unknown section or key is a startup error, not a silent ignore.</p>
+
+<h3 id="bash-timeouts-and-max-timeout">Bash timeouts and max_timeout</h3><p>A bash command the model runs gets a timeout: the model can request one, the default is 120 seconds, and every request is clamped to a ceiling of 600 seconds. <tt class="docutils literal"><span class="pre">max_timeout</span></tt> raises the ceiling for a machine whose builds are slower than that:</p>
+<p><pre class="listing">[settings]
+max_timeout = 1800</pre></p>
+<p>The value is seconds. <tt class="docutils literal"><span class="pre">THREECODE_MAX_TIMEOUT</span></tt> (below) overrides it for one run.</p>
+
+<h3 id="environment-variables">Environment variables</h3><table border="1" class="docutils"><tr><th>variable</th><th>effect</th></tr>
+<tr><td><tt class="docutils literal"><span class="pre">XDG_CONFIG_HOME</span></tt></td><td>relocates the config root: config file, user skills, global prompts</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">XDG_DATA_HOME</span></tt></td><td>relocates the data root: sessions, history, auth tokens, builtin skills</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">THREECODE_MAX_TIMEOUT</span></tt></td><td>bash timeout ceiling for this run; wins over <tt class="docutils literal"><span class="pre">max_timeout</span></tt></td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">THREECODE_ALLOW_ROOT</span></tt></td><td>set to 1 to allow running as root (POSIX; refused otherwise)</td></tr>
+</table><p>Both XDG variables work on every platform, including Windows, and expect absolute paths. They exist so tests and isolated setups can redirect all of 3code's state; the platform defaults apply when they are unset.</p>
+<p>Diagnostics, useful when reporting a bug:</p>
+<table border="1" class="docutils"><tr><th>variable</th><th>effect</th></tr>
+<tr><td><tt class="docutils literal"><span class="pre">THREECODE_DEBUG_LOG</span></tt></td><td>append the <tt class="docutils literal"><span class="pre">-D</span></tt> debug trace to this path (POSIX)</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">THREECODE_TRACE_FILE</span></tt></td><td>write startup timing milestones here (startup-trace builds)</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">THREECODE_TERMDBG</span></tt></td><td>arm terminal-model probes, logged to this path, for rendering bug reports</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">THREECODE_FORCE_SYNC_OUTPUT</span></tt></td><td>set to 1 to re-enable DEC 2026 synchronized repaints (off by default)</td></tr>
+</table><p>Variables starting with <tt class="docutils literal"><span class="pre">THREECODE_TEST_</span></tt> belong to the test harness and change without notice.</p>
+
 <h2 id="library-api">Library API</h2><p>A Nim program can embed the same agent loop without bringing along the terminal interface:</p>
 <p><pre class="listing"><span class="Keyword">import</span> <span class="Identifier">threecode</span>
 
@@ -442,7 +473,7 @@ allow ./</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-16 15:53:08 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-22 20:49:03 UTC</small>
       </div>
     </div>
   </div>

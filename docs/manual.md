@@ -887,6 +887,60 @@ The in-process read, write, and patch checks remain active. This keeps 3code
 usable, but the distinction matters: an arbitrary Bash command is then outside
 the filesystem fence.
 
+## Configuration reference
+
+The config file is `~/.config/3code/config` (`%APPDATA%\3code\config` on
+Windows, `~/Library/Application Support/3code/config` on macOS). A different
+file can be read for a single run:
+
+```
+3code -c ~/p/experimental-config "hello"
+```
+
+The file is rewritten by 3code itself whenever providers or models change,
+and its schema is strict: an unknown section or key is a startup error, not a
+silent ignore.
+
+### Bash timeouts and max_timeout
+
+A bash command the model runs gets a timeout: the model can request one, the
+default is 120 seconds, and every request is clamped to a ceiling of 600
+seconds. `max_timeout` raises the ceiling for a machine whose builds are
+slower than that:
+
+```
+[settings]
+max_timeout = 1800
+```
+
+The value is seconds. `THREECODE_MAX_TIMEOUT` (below) overrides it for one
+run.
+
+### Environment variables
+
+| variable | effect |
+| --- | --- |
+| `XDG_CONFIG_HOME` | relocates the config root: config file, user skills, global prompts |
+| `XDG_DATA_HOME` | relocates the data root: sessions, history, auth tokens, builtin skills |
+| `THREECODE_MAX_TIMEOUT` | bash timeout ceiling for this run; wins over `max_timeout` |
+| `THREECODE_ALLOW_ROOT` | set to 1 to allow running as root (POSIX; refused otherwise) |
+
+Both XDG variables work on every platform, including Windows, and expect
+absolute paths. They exist so tests and isolated setups can redirect all of
+3code's state; the platform defaults apply when they are unset.
+
+Diagnostics, useful when reporting a bug:
+
+| variable | effect |
+| --- | --- |
+| `THREECODE_DEBUG_LOG` | append the `-D` debug trace to this path (POSIX) |
+| `THREECODE_TRACE_FILE` | write startup timing milestones here (startup-trace builds) |
+| `THREECODE_TERMDBG` | arm terminal-model probes, logged to this path, for rendering bug reports |
+| `THREECODE_FORCE_SYNC_OUTPUT` | set to 1 to re-enable DEC 2026 synchronized repaints (off by default) |
+
+Variables starting with `THREECODE_TEST_` belong to the test harness and
+change without notice.
+
 ## Library API
 
 A Nim program can embed the same agent loop without bringing along the terminal

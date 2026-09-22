@@ -133,6 +133,60 @@ suite "cli --list cap and short-flag stacking":
     check r.code == 0
     check "20260301T120000" in r.o
 
+suite "cli --config switch":
+  # -c/--config redirects the config file. The observable used here: a
+  # file that sets `current` without a [provider] section dies naming
+  # configPath(), which only happens because the file was actually read
+  # (the `current` came from it); without -c an isolated XDG goes to the
+  # first-run wizard instead.
+  var tmp: string
+
+  setup:
+    tmp = getTempDir() / ("3code-cli-cfg-" & $getCurrentProcessId() & "deny" &
+                          $epochTime().int64)
+    createDir(tmp)
+
+  teardown:
+    if dirExists(tmp): removeDir(tmp)
+
+  proc runIn(flags: string): tuple[o: string, code: int] =
+    let env = newStringTable({"XDG_DATA_HOME": tmp, "XDG_CONFIG_HOME": tmp})
+    let (outp, code) = execCmdEx(binPath().quoteShell & " " & flags,
+                                 {poStdErrToStdOut, poUsePath, poDaemon},
+                                 env, tmp)
+    result = (outp.strip(), code)
+
+  test "-c reads the named file":
+    writeFile(tmp / "cfg", "[settings]\ncurrent = \"x\"\n")
+    let r = runIn("-c " & (tmp / "cfg").quoteShell)
+    check r.code == 3  # ExitConfig
+    check "no [provider] section" in r.o
+    check (tmp / "cfg") in r.o
+
+  test "--config=VALUE form works too":
+    writeFile(tmp / "cfg", "[settings]\ncurrent = \"x\"\n")
+    let r = runIn("--config=" & (tmp / "cfg").quoteShell)
+    check r.code == 3  # ExitConfig
+    check "no [provider] section" in r.o
+
+  test "-c with a missing file is benign, not a die":
+    # A missing config has always been the first-run state; -c pointing
+    # at nothing must keep that meaning (wizard on EOF stdin aborts with
+    # a config exit), not turn into a new error.
+    let r = runIn("-c " & (tmp / "nope").quoteShell)
+    check r.code == 3
+    check "no [provider] section" notin r.o
+
+  test "--config without a value errors":
+    let r = runIn("--config")
+    check r.code == 2
+    check "requires a value" in r.o
+
+  test "-h documents the switch":
+    let r = run(["-h"])
+    check r.code == 2
+    check "--config FILE" in r.o
+
 suite "cli syntax errors do no startup work":
   # All argument parsing and syntax validation must complete and bail before
   # any side-effecting startup runs — in particular skill extraction, which
