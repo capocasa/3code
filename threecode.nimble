@@ -36,7 +36,7 @@ task test, "Run the test suite via testament (all, or named files)":
       cmd.add " '" & file.replace("'", "'\"'\"'") & "'"
     exec cmd
 
-task docs, "Build HTML manual from docs/manual.md":
+task docs, "Build HTML manual and reference from docs/*.md":
   # nim md2html regenerates nimdoc.out.css from nimdoc's built-in default
   # (light theme + visible theme switcher). Our curated dark theme lives
   # in 3code.css and wins by overwriting the generated file.
@@ -45,6 +45,7 @@ task docs, "Build HTML manual from docs/manual.md":
   # would break that path resolution.
   exec "nim md2html --docCmd:skip --outdir:docs docs/manual.md"
   mvFile("docs/manual.html", "docs/index.html")
+  exec "nim md2html --docCmd:skip --outdir:docs docs/reference.md"
   cpFile("docs/3code.css", "docs/nimdoc.out.css")
 
 task devdocs, "Build developer HTML docs from source":

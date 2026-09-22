@@ -11,6 +11,21 @@ token use, and computer time. Open models, especially GLM, are good enough for
 most of my programming work. 3code gives them a focused prompt, a small tool
 set, persistent sessions, and a terminal interface that stays out of the way.
 
+The standard way to use 3code is also the simplest one: type what you want,
+like `fix the flickering caret in the resize path` or `add tests for the
+parser edge cases`, and press Enter. Current models read the code, do the
+work, and report back, without asking you anything in between. If a task is
+overly broad (`improve this project`), you will get questions or a plan
+first; narrow it down and it is back to hands-off. The interface exists to
+stay out of that loop: scrollback is plain terminal history, the footer is
+two rows, and everything else is your terminal's own scrolling, search, and
+selection.
+
+This manual is organized how-to style: getting a provider, daily use, the
+screen, sessions, the sandbox, embedding. The dry inventory of every config
+key, command-line switch, and `:` command lives in the
+[reference](reference.html).
+
 ## Quickstart
 
 First, give 3code somewhere to run inference: an API provider or a local
@@ -94,7 +109,13 @@ release folder:
    the legacy `%LOCALAPPDATA%\3code\msys64` tree. With Git for Windows
    present, no MSYS2 download is needed. A `bash` setting overrides
    the automatic order with a full path to the shell (any OS); `auto`
-   (the default) keeps the order above.
+   (the default) keeps the order above. Both keys are documented in
+   [settings in the reference](reference.html#settings).
+
+The bash tool has its own timeout and diff computation built in, so it
+needs no GNU coreutils on the host; a bare PortableGit or MSYS2 bash is
+enough. If no bash can be found at all, 3code warns and drops the bash
+tool (file tools keep working) instead of failing to start.
 
 The one-time `3code setup` (sandbox user + network fence) is still required
 on Windows. It needs admin rights: run it from a console/RDP session and it
@@ -151,6 +172,11 @@ verifies each selection with a 1-token call; press Esc to stop verification.
 
 That is enough to get started.
 
+The same prompt given as a command-line argument runs once and exits, for
+scripts and one-offs; `-i`/`--interactive` runs it and then drops you into
+the REPL. All switches are in the
+[reference](reference.html#command-line-switches).
+
 ## Providers and authentication
 
 `:provider` lists configured providers and marks the current one, along with
@@ -160,7 +186,8 @@ Model choices are sticky per provider: switching back with `:provider` returns
 to the model you last used there, not the first one in its list. The current
 provider and model are also sticky per directory: each project starts where
 it last left off, while directories never touched by `:provider` / `:model`
-keep the global config default.
+keep the global config default. All of this lives in the config file; see
+[config file in the reference](reference.html#config-file) for every key.
 
 ```
 :provider nvidia
@@ -365,12 +392,19 @@ Useful input keys:
 | Esc | same as Ctrl+C |
 | Ctrl+D | exit |
 
-If you forget one, `:help` prints the current command and key list.
+If you forget one, `:help` prints the current command and key list. The
+full command table is in the [reference](reference.html#interactive-commands).
+
+Pasting behaves the way you want: a multi-line paste stays one draft instead
+of submitting on the first embedded newline, so you can paste a code block,
+edit it, and submit with Enter. `:!` and `@file` prefixes still work inside
+a pasted draft.
 
 ### Rebinding keys
 
 Keys are commands, and commands are reassignable in the config file
-(`~/.config/3code/config`, or the path passed with `--config`). Add a
+(`~/.config/3code/config`; see [config file in the
+reference](reference.html#config-file) for every platform). Add a
 `[shortcuts]` section that maps a command name to a space-separated list of
 keys:
 
@@ -402,9 +436,91 @@ and `Double` requires two quick presses, as in `DoubleESC` or `DoubleCtrlC`.
 
 `:help` always shows the bindings currently in effect.
 
-## Usage monitoring
+## The screen
 
-Each response ends with a compact token receipt:
+3code is not a TUI. The screen is ordinary terminal history scrolling up
+(your terminal's own scrollback, search, and mouse selection all work), plus
+a small live footer at the bottom: a thinking ticker row and a token bar
+above the prompt. Everything committed below the footer stays in the
+scrollback forever and can be re-read or copied like any shell output.
+
+### Scrollback contents
+
+Each conversation event gets a one-character marker or banner icon:
+
+| icon | item |
+| --- | --- |
+| `❯` | your prompt, echoed as submitted |
+| `●` | assistant message, rendered as markdown (headings, code fences, tables fitted to the terminal width) |
+| `»` | a harness-autosend: a note 3code itself sent to the model (empty-reply steer, loop nudges), with the exact text shown |
+| `$` | bash command with its command line; the icon turns `Ø` when the exit code is nonzero |
+| `r` | file read (path and line range) |
+| `w` | file write (path; the diff follows) |
+| `p` | patch, banner shows the first changed line |
+| `▸` | `update_plan` call, rendered as a checklist |
+| `⌕` | web search (query) |
+| `⇊` | web fetch (URL) |
+| `⟳` | context clear, followed by the handoff prompt for the fresh context |
+| `✉` | `dmail` (kimi family only): revert context to a checkpoint, keep the files |
+| `✕` | error, or a tool 3code does not know |
+
+Tool output below the banner is dimmed to keep the model's prose the
+loudest thing on screen. Long output is elided in the middle (`... N lines
+omitted :show N for full`); `:show N` prints the whole capture, `:log` lists
+every tool call of the session. Diffs are painted green/red, and a long diff
+is clipped with a `git diff` hint rather than flooding the screen. Failed
+tools mark their banner so a red `Ø`/`✕` scan tells you where a turn went
+wrong without reading anything.
+
+Grey `·` rows are 3code's own commentary: the context gauge warning before
+auto-summarization, the elapsed time when a turn ends without usage, the
+`● resumed` banner after `--resume`. The `»` rows deserve a second look when
+something odd happened: they are the interventions described in
+[when the model misbehaves](#when-the-model-misbehaves), shown verbatim
+instead of hidden, so you can see exactly what was sent on your behalf.
+
+### The token bar
+
+While a turn runs, the footer's bottom row is the token bar:
+
+```
+⠋ ◔25%  ↑4.2k  ↻18k  ↓1.1k  00:12
+```
+
+| field | meaning |
+| --- | --- |
+| `⠋` | braille spinner: a request is in flight; during a retry backoff it becomes an hourglass `⧗` while the notice row counts down |
+| `◔N%` | context window used; the circle fills (`○ ◔ ◑ ◕ ●`) as the window fills, one glance tells you how close you are to summarization |
+| `↑` | fresh input tokens this turn |
+| `↻` | cached input tokens: served from the provider's prompt cache, usually a tenth of the price |
+| `↓` | output tokens |
+| `00:12` | elapsed time for the live turn |
+
+The bar is an instrument panel, not a decoration: watch `↻` dominate `↑`
+to confirm the cache is hot (resuming a session re-sends byte-identical
+history precisely so it stays that way), watch the filling circle to decide
+between `:summarize` now and a clean `:clear` later, and treat a nonzero `Ø`
+together with a stuck spinner as your cue to look at the last `»` row. In
+[private mode](#private-mode) the whole bar repaints magenta so the mode is
+visible from across the room. Its color is configurable
+([token-bar in the reference](reference.html#colors)).
+
+### The thinking ticker
+
+The row above the token bar is a one-line ticker. While a reasoning model
+thinks, its planning text scrolls through it like a stock ticker, then the
+row goes quiet when the answer starts. It is an activity indicator and a
+quick-glance channel: enough to see the model is reasoning about the right
+files, not a panel to read. Nothing on it enters the transcript or the
+session; reasoning text is replayed to the provider only when the model's
+family needs it (the `think-back` parameter, see
+[params in the reference](reference.html#params)). The same row doubles
+as the notice row for retry countdowns and live warnings.
+
+### Receipts and conversation cost
+
+Each response ends with a compact token receipt spliced under the last
+scrollback item of the turn:
 
 ```
   ○12%  ↑4.2k  ↻18k  ↓1.1k  8s
@@ -412,14 +528,22 @@ Each response ends with a compact token receipt:
 
 | field | meaning |
 | --- | --- |
-| `○N%` | context window used |
+| `○N%` | context window used at that turn |
 | `↑` | fresh input tokens |
 | `↻` | cached input tokens |
 | `↓` | output tokens |
 | `Xs` | elapsed time |
 
-The receipt updates while the response streams. If a field is missing, the
-provider did not report it. 3code declines to invent accounting.
+The receipts are a per-turn cost ledger. `↑` and `↻` are what the provider
+bills as input (cached usually at a steep discount), `↓` is the output you
+waited for, and the percentage tells you how much of the window the turn
+consumed. Adding the `↑`, `↻`, and `↓` columns down the scrollback gives
+the token cost of the whole conversation, which is usually more interesting
+than any single turn: it shows the cache working (a hot session is mostly
+`↻`), the moment a task went sideways (a jump in `↑`), and the true price of
+those `just one more thing` follow-ups. `:tokens` totals the same columns
+for the session so far. If a field is missing, the provider did not report
+it. 3code declines to invent accounting.
 
 ## Patient retry
 
@@ -444,7 +568,52 @@ Use these commands to inspect or change the setting:
 
 Even with patient retry off, 3code gives transient failures about a minute
 before returning to the interactive prompt. The setting is stored as
-`patient_retry` in `[settings]`. Press Esc to cancel the wait.
+`patient_retry` in `[settings]` ([settings in the
+reference](reference.html#settings)). Press Esc to cancel the wait.
+
+For a provider whose streaming is the problem rather than its availability,
+`:streaming off` switches requests to plain request/response mode: the
+reliable fallback when a provider's SSE implementation drops or truncates
+responses. The setting is per session, or permanent as `streaming = off`
+in `[settings]`.
+
+## When the model misbehaves
+
+Two failure modes are common enough across providers that 3code guards
+against them automatically. Both guards are deliberately small: a few
+hundred tokens of mechanism for a failure mode that would otherwise burn
+millions.
+
+### The flailing detector
+
+Sometimes a model gets stuck repeating the same tool call: the same failing
+patch, the same unhelpful grep, a loop it cannot think its way out of. Every
+repeat burns another round trip and another batch of output tokens while
+making no progress. The flailing detector fingerprints each tool call and
+watches the recent window for repeats: identical calls back to back,
+A-B-A-B cycles, or a long streak of near-identical calls to the same tool.
+
+When it sees one, it intervenes in the model's voice of authority: a tool
+result is replaced by a short `SYSTEM` note naming the loop and demanding a
+strategy change. Two more escalations follow if needed, the last one
+telling the model to stop and report what is blocking it. A fourth flagged
+repeat aborts the turn and hands control back to you. Every intervention
+appears in the scrollback as a `»` row with the exact text sent, so nothing
+happens invisibly. A genuinely new tool call resets the ladder; normal
+work never sees it.
+
+### The empty response handler
+
+Some providers occasionally return a reply with no content and no tool
+calls: the model spent its budget thinking, or the gateway clipped the
+response. 3code refuses to accept that as an answer. Depending on what the
+response signaled, it either raises the output budget (the reply was cut
+off by `length`) or sends a short steering note demanding a real answer,
+then retries. Bare empties are retried up to twelve times with increasing
+backoff, and each attempt is visible as a grey or `»` scrollback row
+saying why and when the next attempt fires. If the provider stays empty,
+the turn ends with a notice instead of a silent nothing, and the scrollback
+shows exactly what was tried.
 
 ## Private mode
 
@@ -521,7 +690,8 @@ call, not a recommendation.
 
 `:private` with no argument shows the mode, whether the current model is
 allowed, and which configured providers are trusted. `:private deny`
-removes trust. The bar color is configurable like the other colors:
+removes trust. The bar color is configurable like the other colors
+([colors in the reference](reference.html#colors)):
 
 ```
 [colors]
@@ -561,6 +731,26 @@ Providers have not settled on one common reasoning scale.
 When a provider streams reasoning text, 3code keeps it moving through a
 one-line ticker above the interactive prompt. It is not added to the
 transcript.
+
+## Web research
+
+The model has two web tools: `web_search` (titles, URLs, snippets) and
+`web_fetch` (a URL rendered to readable text, boilerplate stripped). Ask
+for research in plain language and the tools load; the system prompt's web
+skill is only injected when the task needs it, so ordinary coding turns do
+not pay for it.
+
+The search backend is configurable: Exa (default, runs keyless), Parallel
+(keyless), and Brave (needs a free API key). Pick one in the config:
+
+```
+[search]
+engine = "brave"
+brave-key = "..."
+```
+
+There is no automatic failover between engines; the chosen one is used as
+is. See [search in the reference](reference.html#search) for all keys.
 
 ## Known-good models
 
@@ -605,6 +795,33 @@ each other's history. Provider prompt caches may expire before a saved session
 does. The session will still resume, but its old context may no longer get the
 cache discount.
 
+A resumed session replays the full prior conversation into your scrollback
+(the same `❯`/`●`/tool banners, receipts included) so you land back in
+context, and the history is re-sent byte-identically to the provider, which
+keeps the prompt cache hot: a resume usually costs cached-input prices on
+everything before your new prompt.
+
+Session files are ordinary JSON under 3code's data directory and are
+created readable only by your user (mode 0600 on POSIX). Also note that
+3code refuses to run as root: it executes the shell commands the model
+proposes, and root blast radius is unacceptable. Run it as your normal
+user (`THREECODE_ALLOW_ROOT=1` overrides, for containers).
+
+## Notifications and auto-update
+
+When a turn ends, 3code can fire a desktop notification, useful when you
+switched to a browser while a long turn grinds. It is on by default where
+supported; toggle it with `:notify on|off` or the `notify` setting. On
+Termux there is no notification service, so the setting does nothing.
+
+Prebuilt binaries self-update in the background: a detached worker checks
+GitHub releases at most every four hours, downloads the matching tarball,
+and atomically swaps the binary for the next launch. One dim line on the
+first launch after a swap is the whole visible footprint. Source builds do
+not self-update by default (what you built should not quietly replace
+itself); the `auto_update` setting overrides the default either way. Both
+settings are covered in [settings in the reference](reference.html#settings).
+
 ## Context management
 
 `:clear` starts a new conversation with the same provider and model:
@@ -626,14 +843,14 @@ a summary of things the model no longer needs.
 ## Chunked mode
 
 For a large mechanical task, ask the model to split the work into files. Each
-chunk ends by calling `context_clear` with instructions for the next one. The
+chunk ends by calling the `clear` tool with instructions for the next one. The
 model carries the plan forward and leaves the spent context behind.
 
 Example:
 
 ```
 Divide this task into 4-6 chunks in impl-N.md files.
-End each file by calling context_clear with instructions to read the next file.
+End each file by calling clear with instructions to read the next file.
 Then execute chunk 1.
 
 Task: add test coverage to the parser module.
@@ -642,6 +859,30 @@ Task: add test coverage to the parser module.
 Chunked mode works best when little human input is needed, such as adding basic
 tests across many modules. If the model forgets to load the next chunk, the
 task was probably too difficult or the plan too vague.
+
+## Skills
+
+A skill is a markdown file with instructions for a class of task: how to
+run a systematic debug, how to write release notes, how to behave as a
+thinking partner. Skills are cheap by construction: the system prompt
+carries only the file list (one bullet per skill), and the model reads a
+skill file with the normal `read` tool only when the task calls for it.
+Nothing is preloaded, so a skill you never use costs nothing.
+
+Skill files are found in these directories, first match wins on a name
+collision:
+
+1. `.3code/skills/` in the project
+2. `.agents/skills/` in the project (the vendor-neutral name)
+3. `~/.config/3code/skills/` (your overrides)
+4. `~/.local/share/3code/skills/` (built-ins, extracted by 3code itself)
+
+The built-ins shipped today are the role skills (conversational, sysadmin,
+thinking partner, writing), task-debug-systematic, and cybernetic-plan.
+To override one, put a file with the same name in a directory higher up
+the list. To add your own, drop a `.md` file in any of those directories
+with an instructive name: the filename is the trigger, so
+`release-notes.md` loads when the task smells like release notes.
 
 ## Cybernetic mode
 
@@ -672,6 +913,36 @@ For parallel or long-running work, use worktrees with cybernetic mode.
 The model is useful, but it does not need the run of your entire computer.
 3code applies a filesystem policy to every tool call. Bash commands also enter
 an OS sandbox, and host rules can fence their network access.
+
+The sandbox is questionless: it never interrupts the turn to ask whether a
+command may run. That is a deliberate trade. An agent that asks is an agent
+that costs a round trip and a context refresh every time it touches a new
+directory, which in practice means either an agent that nags or an agent
+whose guardrails get switched off. Instead the boundary is enforced by the
+kernel (Landlock, Seatbelt, Windows restricted tokens), decided by a policy
+you wrote before the turn started, and a denial is simply a failed command
+the model can read and route around. The tradeoff is that the policy needs
+setting up first: a couple of minutes once per project, and after that it
+does not stop on trivialities.
+
+In practice:
+
+- The project directory is writable out of the box (`allow ./` is in the
+  built-in default), plus the temp directories. A fresh clone needs no
+  setup at all.
+- Other directories need a rule. When a task will wander (a monorepo
+  sibling, `~/go`, the directory where you keep checkouts), consider adding
+  them broadly (`:sandbox allow ~/src`) rather than playing whack-a-mole
+  one path at a time; the model reads the policy and works within it
+  without asking.
+- Keep backups of what the sandbox protects. The fence is there so a
+  confused model cannot rewrite `~/.ssh` or dotfiles; it is not a substitute
+  for version control, and `git` inside a writable project remains your
+  real undo.
+- Use `deny` for sensitive data you know the model should never see or
+  send: `deny ./secrets`, `deny ~/.ssh`, credentials directories. Denial is
+  cheap, silent, and total (read, write, and network), so err on the side
+  of denying.
 
 Exactly one policy source is active:
 
@@ -840,7 +1111,9 @@ portable `./foo` form and reload immediately.
 
 `:sandbox off` disables filesystem and network enforcement for the session.
 The setting is stored as `sandbox = off` in `[settings]`. Use `:sandbox on` to
-restore enforcement.
+restore enforcement. The one-shot equivalent is the `--no-sandbox` flag, and
+`3code sandbox --policy FILE restrict -- CMD` runs a single command under a
+policy without starting the REPL.
 
 To allow the full filesystem, replace the policy with `allow /`. Without host
 rules, the network is unrestricted too. This is yolo mode. 3code makes you ask
@@ -886,6 +1159,65 @@ If the OS backend is unavailable, Bash runs without filesystem confinement.
 The in-process read, write, and patch checks remain active. This keeps 3code
 usable, but the distinction matters: an arbitrary Bash command is then outside
 the filesystem fence.
+
+## Colors
+
+3code detects whether your terminal has a dark or light background by
+querying it directly (OSC 11) and picks the matching palette, so a light
+theme just works without configuration. Terminals that do not answer are
+assumed dark. To pin a palette regardless of the terminal:
+
+```
+[settings]
+tone = "light"
+```
+
+The white family (prompt text, help, banners) adapts between tones; the
+functional colors (cyan receipts, green/red diffs, magenta private bar) are
+the same in both. Every white-family color plus the two bar colors can be
+overridden with quoted ANSI escapes under `[colors]`; see
+[colors in the reference](reference.html#colors).
+
+## Design decisions
+
+Why 3code looks and behaves the way it does. The through-line is economy:
+the least tokens, the least computer time, the least of your attention.
+
+### No TUI
+
+3code renders plain scrolling text, not a full-screen terminal interface.
+Committing to the shell/REPL paradigm buys a lot for free: your terminal's
+own scrollback, search, copy-paste, and font rendering keep working; the
+transcript is history in the literal sense, so yesterday's session is
+`3code -r` and a scroll up; logging and terminal multiplexers capture it
+unchanged. A TUI owns the screen, reimplements all of that worse, and adds
+a rendering surface that can itself be buggy (every terminal-rendering bug
+3code ever had lived in the footer, never in the history). The live
+surface is deliberately two rows.
+
+### Kernel enforcement, no questions
+
+The sandbox asks nothing and enforces at the kernel (Landlock, Seatbelt,
+Windows restricted tokens). The alternative architectures were worse. A
+judge model re-reading every command is unacceptable: it burns tokens on
+guesswork, adds latency to every tool call, and is security by vibes, a
+second model approving what the first one wrote. Approval prompts are
+security by interruption, and in practice train users to mash yes. A
+static kernel policy uses zero tokens, adds microseconds, and fails
+closed; the cost is the one-time setup described in
+[the sandbox section](#sandbox). And the honest calibration: most coding
+agent sessions run effectively unfenced anyway (yolo mode, `--dangerously-
+skip-permissions` and friends), so a fence that is cheap to set up and
+never interrupts is a real improvement over both the nagging gate and the
+absent one, even before it stops anything.
+
+### One model, small tool set
+
+No sub-agents, no trees of delegated prompts. A single conversation with
+bash, file tools, plan, and web access, plus skills loaded on demand, keeps
+the token budget on the work instead of on orchestration. When a task
+outgrows one context, chunked and cybernetic modes split it along files and
+worktrees instead of spawning agents.
 
 ## Library API
 

@@ -105,7 +105,7 @@ servers.
 
 3code is also a Nim library: the same agent the CLI runs, embeddable in your own program with the terminal replaced by return values and callbacks. Sandbox, tool calls, session persistence, all of it. Build a web frontend, a chat bot, a CI runner that fixes its own failures, an IDE plugin — the agent loop, tool use, and sandboxing are done; you bring the interface.
 
-The programming manual, with examples and API details, lives in the [docs](https://3code.capocasa.dev/docs).
+The programming manual, with examples and API details, lives in the [docs](https://3code.capocasa.dev/docs). The dry inventory of every config key, CLI switch, and `:` command is the [reference](https://3code.capocasa.dev/reference.html).
 
 ## Contributing
 
