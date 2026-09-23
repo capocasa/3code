@@ -1163,6 +1163,7 @@ const ProviderCatalog*: seq[(string, string)] = @[
   ("venice",      "https://api.venice.ai/api/v1"),
   ("xai",         "https://api.x.ai/v1"),
   ("xiaomi",      "https://api.xiaomimimo.com/v1"),
+  ("yolo-auto",   "https://yolo-auto.com/v1"),
   ("zai",         "https://api.z.ai/api/paas/v4"),
   ("zaicode",     "https://api.z.ai/api/coding/paas/v4"),
 ]
@@ -1193,6 +1194,7 @@ const KeyPrefixCatalog*: seq[(string, string)] = @[
   ("tgp_",     "together"),
   ("AIza",     "google"),
   ("VENICE_",  "venice"),
+  ("yolo_",    "yolo-auto"),
 ]
 
 proc looksLikeZaiKey*(s: string): bool =

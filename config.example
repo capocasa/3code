@@ -124,6 +124,16 @@ models = "openai/gpt-oss-120b"
 ; key = "..."
 ; models = "deepseek/deepseek-v4.1-flash z-ai/glm-5.3 moonshotai/Kimi-K3"
 ;
+; Yolo-Auto (https://yolo-auto.com) is an independent OpenAI-compatible
+; endpoint: flat-rate plans, no per-token billing, free tier. Two public
+; model aliases, `yolo` and `yolo-small`; GET /v1/models lists the current
+; catalog. Keys start with `yolo_`, so pasting one at the wizard works.
+; [provider]
+; name = "yolo-auto"
+; url = "https://yolo-auto.com/v1"
+; key = "yolo_..."
+; models = "yolo yolo-small"
+;
 ; [provider]
 ; name = "xai"
 ; url = "https://api.x.ai/v1"

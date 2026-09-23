@@ -79,6 +79,9 @@ suite "config: inferProvider":
   test "recognizes nvapi- as nvidia":
     check inferProvider("nvapi-xxx") == "nvidia"
 
+  test "recognizes yolo_ as yolo-auto":
+    check inferProvider("yolo_xxx") == "yolo-auto"
+
   test "returns empty for unknown prefix":
     check inferProvider("my-custom-key") == ""
 
@@ -100,6 +103,9 @@ suite "config: curatedFor":
 
   test "returns empty for unknown provider":
     check curatedFor("nonexistent").len == 0
+
+  test "yolo-auto offers the two alias models":
+    check curatedFor("yolo-auto") == @["yolo", "yolo-small"]
 
 suite "config: resolveFamily":
   test "known-good combo returns its family":
