@@ -19,6 +19,7 @@ usage: 3code [options] [prompt...]
 | switch | effect |
 | --- | --- |
 | `-m`, `--model PROVIDER[.MODEL]` | pick a model from the config, overriding `[settings] current` |
+| `-c`, `--config FILE` | read providers and settings from FILE for this run, instead of the default config path |
 | `-r`, `--resume[=ID]` | resume the latest session from this directory, or a specific one by ID |
 | `-i`, `--interactive` | drop into the REPL after running an initial prompt; without it, a prompt argument runs once and exits |
 | `-l`, `--list` | list recent sessions for this directory (max 20) and exit |
@@ -92,8 +93,10 @@ names, model names, and paths where supported.
 Location: `~/.config/3code/config` on Linux,
 `~/Library/Application Support/3code/config` on macOS,
 `%APPDATA%\3code\config` on Windows; `XDG_CONFIG_HOME` overrides the
-base directory on every platform. Annotated example: `docs/config.example`
-in the repository.
+base directory on every platform. `-c FILE` / `--config FILE` reads a
+different file for a single run; it is rewritten by 3code itself whenever
+providers or models change, same as the default. Annotated example:
+`docs/config.example` in the repository.
 
 Values are Nim string literals, always wrapped in double quotes. parsecfg
 treats `:`, `=`, and `#` as syntax in unquoted values, so an unquoted URL or
@@ -129,6 +132,7 @@ Keys under `[settings]`:
 | `tone` | `auto`/`dark`/`light` (default auto) | color palette selection; `auto` detects the terminal background via OSC 11. The legacy key `mode` and value `bright` still work |
 | `bash_path` | full path | Windows only: force a specific bash; auto-detection order is `bash_path`, PortableGit, Git for Windows, MSYS2, legacy msys64 tree |
 | `bash` | `auto` or full path (default auto) | any OS: a full path overrides all detection; `auto` keeps the normal order |
+| `max_timeout` | seconds (default 600) | raises the ceiling the bash tool clamps every `timeout` request to; `max-timeout` spelling accepted, and `THREECODE_MAX_TIMEOUT` (below) wins for one run |
 | `auto_update` | `true`/`false` | self-update on launch; default on for prebuilt binaries, off for source builds. Nightly builds report branch and commit |
 
 ### provider
@@ -200,3 +204,28 @@ only and wins there.
 keys](manual.html#rebinding-keys) in the manual for the key-name grammar
 and the full command list. Values merge onto the defaults; an empty value
 unbinds a command.
+
+## Environment variables
+
+| variable | effect |
+| --- | --- |
+| `XDG_CONFIG_HOME` | relocates the config root: config file, user skills, global prompts |
+| `XDG_DATA_HOME` | relocates the data root: sessions, history, auth tokens, builtin skills |
+| `THREECODE_MAX_TIMEOUT` | bash timeout ceiling for this run; wins over `max_timeout` |
+| `THREECODE_ALLOW_ROOT` | set to 1 to allow running as root (POSIX; refused otherwise) |
+
+Both XDG variables work on every platform, including Windows, and expect
+absolute paths. They exist so tests and isolated setups can redirect all of
+3code's state; the platform defaults apply when they are unset.
+
+Diagnostics, useful when reporting a bug:
+
+| variable | effect |
+| --- | --- |
+| `THREECODE_DEBUG_LOG` | append the `-D` debug trace to this path (POSIX) |
+| `THREECODE_TRACE_FILE` | write startup timing milestones here (startup-trace builds) |
+| `THREECODE_TERMDBG` | arm terminal-model probes, logged to this path, for rendering bug reports |
+| `THREECODE_FORCE_SYNC_OUTPUT` | set to 1 to re-enable DEC 2026 synchronized repaints (off by default) |
+
+Variables starting with `THREECODE_TEST_` belong to the test harness and
+change without notice.

@@ -90,7 +90,7 @@ nimble install https://github.com/capocasa/3code</pre></p>
 <p>That is enough to get started.</p>
 <p>The same prompt given as a command-line argument runs once and exits, for scripts and one-offs; <tt class="docutils literal"><span class="pre">-i</span></tt>/<tt class="docutils literal"><span class="pre">--interactive</span></tt> runs it and then drops you into the REPL. Chaining one-shot runs into a scripted session is covered in <a class="reference external" href="#scripting">Scripting</a>. All switches are in the <a class="reference external" href="reference.html#command-line-switches">reference</a>.</p>
 
-<h2 id="providers-and-authentication">Providers and authentication</h2><p><tt class="docutils literal"><span class="pre">:provider</span></tt> lists configured providers and marks the current one, along with the model a switch would land on. <tt class="docutils literal"><span class="pre">:model</span></tt> does the same for its models. Both commands have tab completion, so there is no need to memorize catalog names. Model choices are sticky per provider: switching back with <tt class="docutils literal"><span class="pre">:provider</span></tt> returns to the model you last used there, not the first one in its list. The current provider and model are also sticky per directory: each project starts where it last left off, while directories never touched by <tt class="docutils literal"><span class="pre">:provider</span></tt> / <tt class="docutils literal"><span class="pre">:model</span></tt> keep the global config default. All of this lives in the config file; see <a class="reference external" href="reference.html#config-file">config file in the reference</a> for every key.</p>
+<h2 id="providers-and-authentication">Providers and authentication</h2><p><tt class="docutils literal"><span class="pre">:provider</span></tt> lists configured providers and marks the current one, along with the model a switch would land on. <tt class="docutils literal"><span class="pre">:model</span></tt> does the same for its models. Both commands have tab completion, so there is no need to memorize catalog names. Model choices are sticky per provider: switching back with <tt class="docutils literal"><span class="pre">:provider</span></tt> returns to the model you last used there, not the first one in its list. The current provider and model are also sticky per directory: each project starts where it last left off, while directories never touched by <tt class="docutils literal"><span class="pre">:provider</span></tt> / <tt class="docutils literal"><span class="pre">:model</span></tt> keep the global config default. All of this lives in the config file; see <a class="reference external" href="reference.html#config-file">config file in the reference</a> for every key (<tt class="docutils literal"><span class="pre">-c FILE</span></tt> points a single run at a different one).</p>
 <p><pre class="listing">:provider nvidia
 :model gpt-oss-120b</pre></p>
 
@@ -544,7 +544,7 @@ tone = &quot;light&quot;</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-22 20:38:52 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-23 12:14:36 UTC</small>
       </div>
     </div>
   </div>

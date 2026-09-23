@@ -78,6 +78,8 @@ proc usage() {.noreturn.} =
        3code setup                  # one-time elevated sandbox setup (Windows)
 
   -m, --model PROVIDER[.MODEL]   pick model from config (overrides [settings])
+  -c, --config FILE    read providers and settings from FILE
+                      (default: the config: path shown below)
   -r, --resume[=ID]    resume latest session from this directory (or by id)
   -i, --interactive    drop into the REPL after running an initial prompt
                       (without it, a prompt runs once and exits)
@@ -339,6 +341,9 @@ proc main() =
       of "s", "session":
         if v != "": sessionOut = v
         else: pending = "session"
+      of "c", "config":
+        if v != "": configPathOverride = v
+        else: pending = "config"
       of "r", "resume":
         resume = true
         if v != "": resumeId = v
@@ -361,6 +366,9 @@ proc main() =
         pending = ""
       elif pending == "session":
         sessionOut = k
+        pending = ""
+      elif pending == "config":
+        configPathOverride = k
         pending = ""
       else:
         args.add k

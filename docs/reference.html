@@ -37,6 +37,7 @@
        3code setup                  # one-time elevated sandbox setup (Windows)</pre></p>
 <table border="1" class="docutils"><tr><th>switch</th><th>effect</th></tr>
 <tr><td><tt class="docutils literal"><span class="pre">-m</span></tt>, <tt class="docutils literal"><span class="pre">--model PROVIDER[.MODEL]</span></tt></td><td>pick a model from the config, overriding <tt class="docutils literal"><span class="pre">[settings] current</span></tt></td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">-c</span></tt>, <tt class="docutils literal"><span class="pre">--config FILE</span></tt></td><td>read providers and settings from FILE for this run, instead of the default config path</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">-r</span></tt>, <tt class="docutils literal"><span class="pre">--resume[=ID]</span></tt></td><td>resume the latest session from this directory, or a specific one by ID</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">-i</span></tt>, <tt class="docutils literal"><span class="pre">--interactive</span></tt></td><td>drop into the REPL after running an initial prompt; without it, a prompt argument runs once and exits</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">-l</span></tt>, <tt class="docutils literal"><span class="pre">--list</span></tt></td><td>list recent sessions for this directory (max 20) and exit</td></tr>
@@ -91,7 +92,7 @@
 <tr><td><tt class="docutils literal"><span class="pre">:! CMD</span></tt></td><td>run a shell command yourself, output to scrollback only</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">:quit</span></tt> / <tt class="docutils literal"><span class="pre">:q</span></tt> / <tt class="docutils literal"><span class="pre">:exit</span></tt></td><td>leave</td></tr>
 </table>
-<h2 id="config-file">Config file</h2><p>Location: <tt class="docutils literal"><span class="pre">~/.config/3code/config</span></tt> on Linux, <tt class="docutils literal"><span class="pre">~/Library/Application Support/3code/config</span></tt> on macOS, <tt class="docutils literal"><span class="pre">%APPDATA%\3code\config</span></tt> on Windows; <tt class="docutils literal"><span class="pre">XDG_CONFIG_HOME</span></tt> overrides the base directory on every platform. Annotated example: <tt class="docutils literal"><span class="pre">docs/config.example</span></tt> in the repository.</p>
+<h2 id="config-file">Config file</h2><p>Location: <tt class="docutils literal"><span class="pre">~/.config/3code/config</span></tt> on Linux, <tt class="docutils literal"><span class="pre">~/Library/Application Support/3code/config</span></tt> on macOS, <tt class="docutils literal"><span class="pre">%APPDATA%\3code\config</span></tt> on Windows; <tt class="docutils literal"><span class="pre">XDG_CONFIG_HOME</span></tt> overrides the base directory on every platform. <tt class="docutils literal"><span class="pre">-c FILE</span></tt> / <tt class="docutils literal"><span class="pre">--config FILE</span></tt> reads a different file for a single run; it is rewritten by 3code itself whenever providers or models change, same as the default. Annotated example: <tt class="docutils literal"><span class="pre">docs/config.example</span></tt> in the repository.</p>
 <p>Values are Nim string literals, always wrapped in double quotes. parsecfg treats <tt class="docutils literal"><span class="pre">:</span></tt>, <tt class="docutils literal"><span class="pre">=</span></tt>, and <tt class="docutils literal"><span class="pre">#</span></tt> as syntax in unquoted values, so an unquoted URL or API key can silently truncate. <tt class="docutils literal"><span class="pre">;</span></tt> and <tt class="docutils literal"><span class="pre">#</span></tt> start comments. An unknown section or key is a startup error with a <tt class="docutils literal"><span class="pre">file:line:</span></tt> pointer, so a typo cannot quietly disable a setting.</p>
 <p>A minimal config:</p>
 <p><pre class="listing">[settings]
@@ -114,6 +115,7 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
 <tr><td><tt class="docutils literal"><span class="pre">tone</span></tt></td><td><tt class="docutils literal"><span class="pre">auto</span></tt>/<tt class="docutils literal"><span class="pre">dark</span></tt>/<tt class="docutils literal"><span class="pre">light</span></tt> (default auto)</td><td>color palette selection; <tt class="docutils literal"><span class="pre">auto</span></tt> detects the terminal background via OSC 11. The legacy key <tt class="docutils literal"><span class="pre">mode</span></tt> and value <tt class="docutils literal"><span class="pre">bright</span></tt> still work</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">bash_path</span></tt></td><td>full path</td><td>Windows only: force a specific bash; auto-detection order is <tt class="docutils literal"><span class="pre">bash_path</span></tt>, PortableGit, Git for Windows, MSYS2, legacy msys64 tree</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">bash</span></tt></td><td><tt class="docutils literal"><span class="pre">auto</span></tt> or full path (default auto)</td><td>any OS: a full path overrides all detection; <tt class="docutils literal"><span class="pre">auto</span></tt> keeps the normal order</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">max_timeout</span></tt></td><td>seconds (default 600)</td><td>raises the ceiling the bash tool clamps every <tt class="docutils literal"><span class="pre">timeout</span></tt> request to; <tt class="docutils literal"><span class="pre">max-timeout</span></tt> spelling accepted, and <tt class="docutils literal"><span class="pre">THREECODE_MAX_TIMEOUT</span></tt> (below) wins for one run</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">auto_update</span></tt></td><td><tt class="docutils literal"><span class="pre">true</span></tt>/<tt class="docutils literal"><span class="pre">false</span></tt></td><td>self-update on launch; default on for prebuilt binaries, off for source builds. Nightly builds report branch and commit</td></tr>
 </table>
 <h3 id="provider">provider</h3><p>One <tt class="docutils literal"><span class="pre">[provider]</span></tt> section per provider; repeat the section header for each. Sections may share a <tt class="docutils literal"><span class="pre">url</span></tt> and <tt class="docutils literal"><span class="pre">key</span></tt>; two sections with the same <tt class="docutils literal"><span class="pre">name</span></tt> are a config error.</p>
@@ -151,14 +153,28 @@ models = &quot;zai-org/GLM-5&quot;</pre></p>
 <tr><td><tt class="docutils literal"><span class="pre">private-bar</span></tt></td><td><tt class="docutils literal"><span class="pre">\x1b[35m</span></tt></td><td>same</td><td>the bar while <a class="reference external" href="manual.html#private-mode">private mode</a> is on</td></tr>
 </table><p>Values are quoted ANSI escape sequences; parsecfg interprets backslash escapes, so <tt class="docutils literal"><span class="pre">&quot;\x1b[36m&quot;</span></tt> becomes a real ESC byte. A plain key sets both tones; a <tt class="docutils literal"><span class="pre">-light</span></tt> suffixed key (<tt class="docutils literal"><span class="pre">bright-white-light</span></tt>) sets the light tone only and wins there.</p>
 
-<h3 id="shortcuts">shortcuts</h3><p><tt class="docutils literal"><span class="pre">[shortcuts]</span></tt> handles key rebinding for every editor command; see <a class="reference external" href="manual.html#rebinding-keys">rebinding keys</a> in the manual for the key-name grammar and the full command list. Values merge onto the defaults; an empty value unbinds a command. </p>
+<h3 id="shortcuts">shortcuts</h3><p><tt class="docutils literal"><span class="pre">[shortcuts]</span></tt> handles key rebinding for every editor command; see <a class="reference external" href="manual.html#rebinding-keys">rebinding keys</a> in the manual for the key-name grammar and the full command list. Values merge onto the defaults; an empty value unbinds a command.</p>
+
+<h2 id="environment-variables">Environment variables</h2><table border="1" class="docutils"><tr><th>variable</th><th>effect</th></tr>
+<tr><td><tt class="docutils literal"><span class="pre">XDG_CONFIG_HOME</span></tt></td><td>relocates the config root: config file, user skills, global prompts</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">XDG_DATA_HOME</span></tt></td><td>relocates the data root: sessions, history, auth tokens, builtin skills</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">THREECODE_MAX_TIMEOUT</span></tt></td><td>bash timeout ceiling for this run; wins over <tt class="docutils literal"><span class="pre">max_timeout</span></tt></td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">THREECODE_ALLOW_ROOT</span></tt></td><td>set to 1 to allow running as root (POSIX; refused otherwise)</td></tr>
+</table><p>Both XDG variables work on every platform, including Windows, and expect absolute paths. They exist so tests and isolated setups can redirect all of 3code's state; the platform defaults apply when they are unset.</p>
+<p>Diagnostics, useful when reporting a bug:</p>
+<table border="1" class="docutils"><tr><th>variable</th><th>effect</th></tr>
+<tr><td><tt class="docutils literal"><span class="pre">THREECODE_DEBUG_LOG</span></tt></td><td>append the <tt class="docutils literal"><span class="pre">-D</span></tt> debug trace to this path (POSIX)</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">THREECODE_TRACE_FILE</span></tt></td><td>write startup timing milestones here (startup-trace builds)</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">THREECODE_TERMDBG</span></tt></td><td>arm terminal-model probes, logged to this path, for rendering bug reports</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">THREECODE_FORCE_SYNC_OUTPUT</span></tt></td><td>set to 1 to re-enable DEC 2026 synchronized repaints (off by default)</td></tr>
+</table><p>Variables starting with <tt class="docutils literal"><span class="pre">THREECODE_TEST_</span></tt> belong to the test harness and change without notice. </p>
 
 
 
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-22 20:38:53 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-09-23 12:14:36 UTC</small>
       </div>
     </div>
   </div>

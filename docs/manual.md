@@ -189,7 +189,8 @@ to the model you last used there, not the first one in its list. The current
 provider and model are also sticky per directory: each project starts where
 it last left off, while directories never touched by `:provider` / `:model`
 keep the global config default. All of this lives in the config file; see
-[config file in the reference](reference.html#config-file) for every key.
+[config file in the reference](reference.html#config-file) for every key
+(`-c FILE` points a single run at a different one).
 
 ```
 :provider nvidia

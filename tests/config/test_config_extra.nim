@@ -1,6 +1,60 @@
 import std/[os, sequtils, strutils, tables, unittest]
 import threecode/[config, prompts, types]
 
+suite "config: [settings] max_timeout":
+  var tmp = ""
+
+  setup:
+    tmp = getTempDir() / "3code-test-maxtimeout.ini"
+    maxTimeoutSetting = 0
+    delEnv("THREECODE_MAX_TIMEOUT")
+
+  teardown:
+    removeFile(tmp)
+    maxTimeoutSetting = 0
+    delEnv("THREECODE_MAX_TIMEOUT")
+
+  test "parse sets the ceiling and maxBashTimeoutSecs reads it":
+    writeFile(tmp, "[settings]\nmax_timeout = 900\n")
+    discard parseConfigFile(tmp)
+    check maxTimeoutSetting == 900
+    check maxBashTimeoutSecs() == 900
+
+  test "hyphen spelling accepted":
+    writeFile(tmp, "[settings]\nmax-timeout = 1800\n")
+    discard parseConfigFile(tmp)
+    check maxTimeoutSetting == 1800
+
+  test "THREECODE_MAX_TIMEOUT overrides the config value":
+    writeFile(tmp, "[settings]\nmax_timeout = 900\n")
+    discard parseConfigFile(tmp)
+    putEnv("THREECODE_MAX_TIMEOUT", "1200")
+    check maxBashTimeoutSecs() == 1200
+
+  test "unset keeps the compiled default":
+    check maxBashTimeoutSecs() == MaxBashTimeout
+
+  test "non-numeric value rejected by the schema":
+    let m = validateConfig(tmp, @[("settings", "max_timeout", "lots", 3)])
+    check m == tmp & ":3: bad value 'lots' for 'max_timeout' in [settings] " &
+           "(expected a whole number of seconds)"
+
+  test "writer persists a non-default ceiling as a bare number":
+    maxTimeoutSetting = 900
+    writeConfigFile(tmp, "test.model-a", @[
+      ProviderRec(name: "test", url: "https://api.test.com",
+                  key: "sk-test", models: @["model-a"]),
+    ])
+    check readFile(tmp).contains("\nmax_timeout = 900\n")
+    maxTimeoutSetting = 0
+    discard parseConfigFile(tmp)
+    check maxTimeoutSetting == 900
+
+  test "writer omits the default ceiling":
+    maxTimeoutSetting = MaxBashTimeout
+    writeConfigFile(tmp, "", @[])
+    check not readFile(tmp).contains("max_timeout")
+
 suite "config: parseConfigFile round-trip":
   var tmp = ""
 
