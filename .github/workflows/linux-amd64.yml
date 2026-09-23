@@ -39,14 +39,14 @@ jobs:
         run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
 
       - name: Run tests
-        # tools/ci_tests.sh wraps `testament all`: categories still run in
+        # tests/tools/ci_tests.sh wraps `testament all`: categories still run in
         # parallel (one testament child per category), but output lands in
         # a log file instead of a pipe, a watchdog bounds the run and
         # attributes any hang to the exact test binary, and the exit code
         # is propagated. The old `for c in ...; testament cat` loop ran
         # categories sequentially and, worse, a single hung test stalled
         # the pipe so the step showed nothing after it.
-        run: sh tools/ci_tests.sh 1500
+        run: sh tests/tools/ci_tests.sh 1500
         timeout-minutes: 30
 
       - name: Package

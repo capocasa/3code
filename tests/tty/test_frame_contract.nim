@@ -100,7 +100,7 @@ suite "lossless frame contracts (ttty model)":
     expect AssertionDefect:
       s.expectCheckpoints(root / "expected.jsonl", root / "actual.jsonl")
     let viewer = root / "viewer"
-    check execCmd("nim c --hints:off --out:" & quoteShell(viewer) & " tools/pty_frames.nim") == 0
+    check execCmd("nim c --hints:off --out:" & quoteShell(viewer) & " tests/tools/pty_frames.nim") == 0
     let artifact = quoteShell(root / "frames.txt.jsonl")
     check execCmd(quoteShell(viewer) & " --diff " & artifact & " " & artifact) == 0
     let dump = execCmdEx(quoteShell(viewer) & " --dump " & artifact)

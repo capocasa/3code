@@ -48,7 +48,7 @@ const StubResponses = """
 """
 
 proc newFixture(name: string): string =
-  result = getCurrentDir() / "testdata/output/tty" / (name & "_" & $getCurrentProcessId())
+  result = getCurrentDir() / "tests/testdata/output/tty" / (name & "_" & $getCurrentProcessId())
   if dirExists(result): removeDir(result)
   createDir(result); createDir(result / "data"); createDir(result / "run")
   createDir(result / "xdg" / "3code")

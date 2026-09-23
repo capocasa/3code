@@ -27,7 +27,7 @@ discard """
 import std/[json, os, strutils, unittest]
 import tty_expect, stub_helpers
 
-const VisualOutputRoot = "testdata" / "output" / "tty"
+const VisualOutputRoot = "tests/testdata" / "output" / "tty"
 
 proc newFixture(name: string): string =
   result = getCurrentDir() / VisualOutputRoot / (name & "_" & $getCurrentProcessId())

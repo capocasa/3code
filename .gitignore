@@ -8,28 +8,29 @@ bin/
 .cache/
 timing/
 build/
-testdata/output/
-# Compiled probe binaries next to their .nim sources. Sources are tracked
-# by virtue of having a .nim extension; the bare binary (no extension) is
-# build output and contains the API key inlined by the source.
-# Compiled probe binaries next to their .nim sources. The source has
-# a .nim extension; the bare binary (no extension) is build output
-# and contains the API key inlined by the source.
-/testdata/probe_minimax_sse
-/testdata/probe_minimax_split
-nimcache/
-config.local.nims
-
-# testament drops compiled test binaries next to their source (no extension)
+# testament drops compiled test binaries next to their source (no extension);
+# test sources (.nim/.nims) are negated back in, as are the scripts under
+# tests/tools and the fixtures under tests/testdata
 tests/*/*
 !tests/*/*.nim
 !tests/*/*.nims
+!tests/tools/*
+!tests/testdata/**
+tests/testdata/output/
 testresults/
+
+# Compiled probe binaries next to their .nim sources. Sources are tracked
+# by virtue of having a .nim extension; the bare binary (no extension) is
+# build output and contains the API key inlined by the source.
+/tests/testdata/probe_minimax_sse
+/tests/testdata/probe_minimax_split
+nimcache/
+config.local.nims
 
 .archive/
 .agents/
 src/threecode.out
-tools/pty_frames
+tests/tools/pty_frames
 tests/golden/*.actual
 nimble.develop
 nimble.paths
@@ -37,7 +38,7 @@ nimbledeps
 src/threecode.exe
 
 # stress runner binary
-tools/stress
+tests/tools/stress
 
 # compiled test binaries at tests/ root level
 tests/megatest

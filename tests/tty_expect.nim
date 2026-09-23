@@ -1282,7 +1282,7 @@ proc normalizeTtyRunRoots(row: string): string =
   ## prefix, so frames are identical regardless of which worktree or clone
   ## the suite runs from. Skill and prompt paths materialize under the
   ## test's isolated XDG_DATA_HOME, which nests under that absolute root.
-  const marker = "testdata/output/tty/"
+  const marker = "tests/testdata/output/tty/"
   result = row
   var start = result.find(marker)
   while start >= 0:

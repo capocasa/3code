@@ -75,7 +75,7 @@ jobs:
           nim c -d:ssl -d:providerStub --threads:on --path:src -o:build/3code_stub.exe src/threecode.nim
 
       - name: Run tests
-        # Run the tty category via tools/ci_tests.sh: log file instead of a
+        # Run the tty category via tests/tools/ci_tests.sh: log file instead of a
         # pipe so a hung test cannot mask the rest, watchdog bounds the run
         # and names the hung binary, exit code propagated. Tests that hang
         # or fail under ConPTY are disabled with `disabled: "win"` in their
@@ -86,7 +86,7 @@ jobs:
         run: |
           # Smoke-check: the built 3code binary loads its DLLs standalone.
           ./3code.exe -v || { echo "3code.exe failed to start"; exit 1; }
-          sh tools/ci_tests.sh 900 tty
+          sh tests/tools/ci_tests.sh 900 tty
         timeout-minutes: 20
 
       - name: Package (Windows) - bundle OpenSSL DLLs alongside .exe

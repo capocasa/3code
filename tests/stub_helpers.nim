@@ -22,7 +22,7 @@ proc buildBinary*(defines, outName: string; forceRebuild = false): string =
   let tag = ($secureHash(defines))[0..15].toLowerAscii
   result = getCurrentDir() / "build" / (outName & "_" & tag)
   when defined(windows): result.add ".exe"
-  var cmd = "sh tools/build_binary.sh " & result.quoteShell &
+  var cmd = "sh tests/tools/build_binary.sh " & result.quoteShell &
     " src/threecode.nim " & defines
   if forceRebuild: cmd.add " --forceBuild:on"
   let (output, code) = execCmdEx(cmd)

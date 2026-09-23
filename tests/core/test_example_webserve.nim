@@ -2,7 +2,7 @@ discard """
   targets: "c"
   matrix: ""
 """
-## End-to-end test for example/webserve.nim: the library's web frontend
+## End-to-end test for docs/dev/example/webserve.nim: the library's web
 ## running against the stub provider, no network, no terminal.
 ##
 ## Builds the example with `-d:providerStub`, starts it with XDG roots and
@@ -25,7 +25,7 @@ proc freePort(): int =
   probe.getLocalAddr()[1].int
 
 proc buildExample(): string =
-  ## Compile example/webserve.nim with the stub provider into build/,
+  ## Compile docs/dev/example/webserve.nim with the stub provider into
   ## cached by mtime like the stub binary.
   result = getCurrentDir() / "build" / "example_webserve_stub"
   when defined(windows):
@@ -33,7 +33,7 @@ proc buildExample(): string =
   if fileExists(result):
     let binMtime = getLastModificationTime(result)
     var stale = false
-    for f in [getCurrentDir() / "example" / "webserve.nim",
+    for f in [getCurrentDir() / "docs" / "dev" / "example" / "webserve.nim",
               getCurrentDir() / "tests" / "core" / "test_example_webserve.nim"]:
       if getLastModificationTime(f) > binMtime: stale = true
     if not stale:
@@ -49,7 +49,7 @@ proc buildExample(): string =
   cmd.add " --path:" & (getCurrentDir() / "src").quoteShell
   cmd.add " --nimcache:" & (getCurrentDir() / "build" / "example_cache").quoteShell
   cmd.add " -o:" & result.quoteShell
-  cmd.add " example/webserve.nim"
+  cmd.add " docs/dev/example/webserve.nim"
   let (outp, code) = execCmdEx(cmd)
   doAssert code == 0, outp
 

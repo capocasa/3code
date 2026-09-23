@@ -36,7 +36,7 @@ const option {.strdefine.} = "default"
 const data = staticRead("input.txt")
 echo data, " ", part, " ", dep.dep, " ", configured, " ", option
 """)
-    let cmd = "sh tools/build_binary.sh " & quoteShell(binary) & " " &
+    let cmd = "sh tests/tools/build_binary.sh " & quoteShell(binary) & " " &
       quoteShell(source) & " --hints:off"
     proc build(extra = "") =
       let run = execCmdEx(cmd & extra)

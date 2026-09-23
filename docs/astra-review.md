@@ -45,7 +45,7 @@ Linux x86_64, Nim 2.2.10; terminal surface is POSIX PTY bytes interpreted by ttt
 **not an emulator screenshot**. No rendering discrepancy required a real-emulator
 reproduction. No packages installed or pushed.
 
-- Initial `sh tools/test_dispatch.sh all` exercised all six categories. API probes
+- Initial `sh tests/tools/test_dispatch.sh all` exercised all six categories. API probes
   exposed the dependency-quote bug; the API file then passed in 59.32s. The run
   recorded 29 core, 7 config, 4 shell, 6 stream and 5 other API file passes.
   Overlapping exploratory runs were stopped by owned process tree; this is not
@@ -71,7 +71,7 @@ reproduction. No packages installed or pushed.
   pass in `/tmp/astra-mock6-final.log` (12-iteration real-stream test 25.58s,
   network interruption 47.46s). This is broader coverage plus corrected-file
   reruns, not a claim of one clean full-suite invocation.
-- `sh tools/build_binary.sh /tmp/astra-release6 src/threecode.nim -d:release`
+- `sh tests/tools/build_binary.sh /tmp/astra-release6 src/threecode.nim -d:release`
   passed (cold 30.479s, final incremental 10.746s); `--version` reports the tested
   working-tree revision. `/tmp/astra-release6-final.log`.
 - Configured `stefani` VM probe with batch mode and strict known-host checking was
@@ -102,7 +102,7 @@ Recommendation: compare structured cells and explicit cursor state. Normalize id
 
 ### 3. High: cached test binaries do not reliably represent current inputs
 
-`tests/stub_helpers.nim:103-155`: `ensureStubBinary` invalidates only for newer `.nim` files under `src`; edits to the included `testdata/stub/provider.nim` and `http.nim` do not invalidate it. The neighboring `buildBinary` implementation at lines 61-101 already accounts for the stub directory, demonstrating drift between duplicated build paths.
+`tests/stub_helpers.nim:103-155`: `ensureStubBinary` invalidates only for newer `.nim` files under `src`; edits to the included `tests/testdata/stub/provider.nim` and `http.nim` do not invalidate it. The neighboring `buildBinary` implementation at lines 61-101 already accounts for the stub directory, demonstrating drift between duplicated build paths.
 
 Neither helper tracks compiler identity, changed defines for the same output name, config files, skill text embedded by the build, or develop-linked dependency changes. Both build into shared output/cache paths without synchronization. Concurrent categories or local runs can race a cold build or invalidation. The race is a source-based risk, not reproduced here.
 
@@ -118,9 +118,9 @@ Recommendation: use one runner for local and CI invocation, aggregate every sele
 
 ### 5. Medium: the watchdog can kill tests belonging to another run
 
-`tools/ci_tests.sh:78-94` searches the machine's process list for matching `tests/<category>/test_*` command names, without checking ancestry against this invocation. The global timeout path similarly uses broad process-name matching. Another worktree or concurrently running developer test can be killed once it exceeds this runner's threshold.
+`tests/tools/ci_tests.sh:78-94` searches the machine's process list for matching `tests/<category>/test_*` command names, without checking ancestry against this invocation. The global timeout path similarly uses broad process-name matching. Another worktree or concurrently running developer test can be killed once it exceeds this runner's threshold.
 
-`tools/ci_tests.sh:59` also uses `10#` arithmetic with a `/bin/sh` entry point. This is supported by bash, including this review machine's `sh`, but not portable POSIX shell syntax. It needs validation on the actual CI shell; no dash runtime was available here.
+`tests/tools/ci_tests.sh:59` also uses `10#` arithmetic with a `/bin/sh` entry point. This is supported by bash, including this review machine's `sh`, but not portable POSIX shell syntax. It needs validation on the actual CI shell; no dash runtime was available here.
 
 Recommendation: scope every watchdog action to owned descendants. Use portable decimal parsing or explicitly require the shell whose syntax is used. Test timeout attribution and exit status with short-lived dummy process trees.
 
@@ -128,7 +128,7 @@ Recommendation: scope every watchdog action to owned descendants. Use portable d
 
 `src/threecode/session.nim:67-69` gives new sessions only second-resolution timestamp names. `sessionLockPathFor` at lines 210-214 keys the shared temporary lock directory by that basename, not the complete session path or data root. Independent data roots started in the same second can contend for the same lock. Starts in the same data root also generate the same prospective log path.
 
-The CI runner's comment at `tools/ci_tests.sh:61-64` already describes second-granularity collisions as a source of library-test failures. This is a production identity problem, not something longer test delays should solve.
+The CI runner's comment at `tests/tools/ci_tests.sh:61-64` already describes second-granularity collisions as a source of library-test failures. This is a production identity problem, not something longer test delays should solve.
 
 Recommendation: collision-resistant session identities and atomic creation; namespace locks by the actual resource identity. Test simultaneous creation both within one data root and across isolated roots. Preserve existing session lookup compatibility.
 
@@ -142,7 +142,7 @@ Recommendation: include transport mode in connection identity and test scheme ch
 
 ### 8. Medium: visual fixture review lacks one dependable interface
 
-`meaningfulFrameText` at `tests/tty_expect.nim:1304` emits randomly numbered `===== NNN =====` headers. `tools/pty_frames.nim:19-20` only recognizes `===== frame ... =====`. Thus the viewer can read raw `frames.txt` recordings but not the meaningful golden/actual files produced by the comparator. The comparator at lines 1420-1438 reports two paths, not the first differing frame/cell. Random frame identifiers add noise without stable references.
+`meaningfulFrameText` at `tests/tty_expect.nim:1304` emits randomly numbered `===== NNN =====` headers. `tests/tools/pty_frames.nim:19-20` only recognizes `===== frame ... =====`. Thus the viewer can read raw `frames.txt` recordings but not the meaningful golden/actual files produced by the comparator. The comparator at lines 1420-1438 reports two paths, not the first differing frame/cell. Random frame identifiers add noise without stable references.
 
 Root `AGENTS.md` also directs agents to `.agents/testing.md` and `.agents/osx-testing.md`, neither present in this checkout. Several historical plans describe older harness states. These broken entry points cost every fresh model exploration time.
 

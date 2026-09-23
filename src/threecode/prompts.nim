@@ -474,7 +474,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("tencent", "mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
 
     # venice (api.venice.ai; flattened ids like `zai-org-glm-5-2`,
-    # params harvested by tools/harvest_models.nim from sibling entries)
+    # params harvested by tests/tools/harvest_models.nim from sibling entries)
     ("venice", "deepseek-v3.2", "deepseek", "3.2", "", "medium", 0.2, 8192, tbAllTurns, false, 128_000, false),
     ("venice", "deepseek-v4-flash-0731-fast", "deepseek", "4", "flash-fast", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
     ("venice", "deepseek-v4-flash-0731", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
@@ -525,7 +525,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("venice", "z-ai-glm-5-3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
 
     # cheaperinference (api.cheaperinference.com; bare first-party ids,
-    # params harvested by tools/harvest_models.nim)
+    # params harvested by tests/tools/harvest_models.nim)
     ("cheaperinference", "deepseek-v4-flash", "deepseek", "4", "flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
     ("cheaperinference", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false),
     ("cheaperinference", "glm-4.7", "glm", "4", "7", "on", 0.2, 8192, tbAllTurns, false, 200_000, false),

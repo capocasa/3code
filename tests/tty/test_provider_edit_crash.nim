@@ -13,10 +13,10 @@ import std/[json, os, strutils, unittest]
 import tty_expect
 import stub_helpers
 
-const Root = "testdata/output/tty/provider_edit_crash"
+const Root = "tests/testdata/output/tty/provider_edit_crash"
 
 proc newFixture(name: string): string =
-  result = getCurrentDir() / "testdata/output/tty" / (name & "_" & $getCurrentProcessId())
+  result = getCurrentDir() / "tests/testdata/output/tty" / (name & "_" & $getCurrentProcessId())
   if dirExists(result): removeDir(result)
   createDir(result); createDir(result / "data"); createDir(result / "run")
 

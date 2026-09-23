@@ -18,18 +18,18 @@ suite "test runner contracts":
       putEnv("PATH", oldPath)
       delEnv("RUNNER_ARGS")
     let unusual = "space ' ; literal.nim"
-    let run = execCmdEx("sh tools/test_dispatch.sh files fail " & quoteShell(unusual))
+    let run = execCmdEx("sh tests/tools/test_dispatch.sh files fail " & quoteShell(unusual))
     check run.exitCode != 0
     check readFile(dir / "args").splitLines()[0..1] == @["fail", unusual]
-    check execCmdEx("sh tools/test_dispatch.sh categories fail pass").exitCode != 0
-    check execCmdEx("sh tools/test_dispatch.sh files pass").exitCode == 0
+    check execCmdEx("sh tests/tools/test_dispatch.sh categories fail pass").exitCode != 0
+    check execCmdEx("sh tests/tools/test_dispatch.sh files pass").exitCode == 0
     putEnv("PATH", dir)
     removeFile(fake)
-    check execCmdEx("/bin/sh tools/test_dispatch.sh all").exitCode == 127
+    check execCmdEx("/bin/sh tests/tools/test_dispatch.sh all").exitCode == 127
 
   test "portable elapsed parsing and tree ownership":
     let run = execCmdEx("""sh -c '
-. tools/test_processes.sh
+. tests/tools/test_processes.sh
 [ "$(etime_secs 08:09)" = 489 ] || exit 1
 [ "$(etime_secs 2-03:08:09)" = 184089 ] || exit 2
 sleep 60 & unrelated=$!

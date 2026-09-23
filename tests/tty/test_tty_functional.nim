@@ -24,12 +24,12 @@ import tty_expect
 import ttty/grid
 import stub_helpers
 
-const VisualOutputRoot = "testdata" / "output" / "tty"
-const SimpleVisualTestFrames = "testdata" / "fixtures" / "tty" / "simple.txt"
-const MultilineVisualTestFrames = "testdata" / "fixtures" / "tty" / "multiline.txt"
-const BashToolVisualTestFrames = "testdata" / "fixtures" / "tty" / "bash_tool_visual_test.txt"
-const OtherToolsVisualTestFrames = "testdata" / "fixtures" / "tty" / "other_tools_visual_test.txt"
-const ResizeStreamFrames = "testdata" / "fixtures" / "tty" / "resize_stream_frames.txt"
+const VisualOutputRoot = "tests/testdata" / "output" / "tty"
+const SimpleVisualTestFrames = "tests/testdata" / "fixtures" / "tty" / "simple.txt"
+const MultilineVisualTestFrames = "tests/testdata" / "fixtures" / "tty" / "multiline.txt"
+const BashToolVisualTestFrames = "tests/testdata" / "fixtures" / "tty" / "bash_tool_visual_test.txt"
+const OtherToolsVisualTestFrames = "tests/testdata" / "fixtures" / "tty" / "other_tools_visual_test.txt"
+const ResizeStreamFrames = "tests/testdata" / "fixtures" / "tty" / "resize_stream_frames.txt"
 
 proc newFixture(name: string): string =
   result = getCurrentDir() / VisualOutputRoot / (name & "_" & $getCurrentProcessId())

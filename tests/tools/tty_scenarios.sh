@@ -1,7 +1,7 @@
 #!/bin/sh
 # Select existing unittest scenarios without building one executable per case.
 set -eu
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 source=tests/tty/test_tty_functional.nim
 names=$(sed '/^when false:/,$d' "$source" | sed -n 's/^  test "\(.*\)":$/\1/p')
 # Historical environment filters can silently skip a selected test.
@@ -16,9 +16,9 @@ for name do
     echo "Unknown scenario: $name (use --list)" >&2; exit 2;
   }
 done
-out=${TTY_SCENARIO_BINARY:-testdata/output/tty-functional}
+out=${TTY_SCENARIO_BINARY:-tests/testdata/output/tty-functional}
 start=$(date +%s)
-sh tools/build_binary.sh "$out" "$source"
+sh tests/tools/build_binary.sh "$out" "$source"
 printf 'scenario build_seconds=%s revision=%s binary=' "$(( $(date +%s) - start ))" "$(git rev-parse --short HEAD)"
 cksum "$out"
 rc=0

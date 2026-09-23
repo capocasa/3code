@@ -1,7 +1,7 @@
 ## Config file parsing and provider/profile resolution.
 ##
 ## The config file is a sequence of `[provider]` sections and an optional
-## `[settings]` section (see `config.example` in the project root for the
+## `[settings]` section (see `docs/config.example` for the
 ## format). `parseConfigFile` turns it into a list of `ProviderRec` values;
 ## `buildProfile` resolves a provider.model string to a `Profile` ready for
 ## API calls.

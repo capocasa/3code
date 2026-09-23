@@ -27,11 +27,11 @@ task test, "Run the test suite via testament (all, or named files)":
     # share the box with editors and other suites, where the CI 300s
     # per-test cap flakily kills slow-but-healthy tty tests; an ambient
     # PER_TEST_SECS still wins.
-    exec "PER_TEST_SECS=${PER_TEST_SECS:-0} sh tools/ci_tests.sh 2400"
+    exec "PER_TEST_SECS=${PER_TEST_SECS:-0} sh tests/tools/ci_tests.sh 2400"
   else:
     # Plain Nim tracks all imported/configured inputs, not just source mtimes.
-    exec "sh tools/build_binary.sh 3code src/threecode.nim"
-    var cmd = "sh tools/test_dispatch.sh files"
+    exec "sh tests/tools/build_binary.sh 3code src/threecode.nim"
+    var cmd = "sh tests/tools/test_dispatch.sh files"
     for file in files:
       cmd.add " '" & file.replace("'", "'\"'\"'") & "'"
     exec cmd

@@ -18,11 +18,11 @@
 # testament: the tty PTY tests are scheduler-sensitive and starve when
 # run against concurrently compiling categories on small runners.
 #
-# Usage: tools/ci_tests.sh [global-timeout-secs] [categories...]
+# Usage: tests/tools/ci_tests.sh [global-timeout-secs] [categories...]
 #   PER_TEST_SECS env overrides the per-test cap (default 300, 0=off).
 set -u
 
-sh tools/build_binary.sh 3code src/threecode.nim || exit $?
+sh tests/tools/build_binary.sh 3code src/threecode.nim || exit $?
 
 TIMEOUT_SECS=${1:-1500}
 [ $# -gt 0 ] && shift
@@ -76,9 +76,9 @@ echo "testament $* (timeout ${TIMEOUT_SECS}s, per-test cap ${PER_TEST_SECS:-off}
 # given if the '--run' option is selected".
 run_testament() {
   if [ $# -eq 0 ]; then
-    sh tools/test_dispatch.sh all
+    sh tests/tools/test_dispatch.sh all
   else
-    sh tools/test_dispatch.sh categories "$@"
+    sh tests/tools/test_dispatch.sh categories "$@"
   fi
 }
 run_testament "$@" >>"$LOG" 2>&1 &

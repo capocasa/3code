@@ -1,6 +1,6 @@
 import std/[os, posix, strformat, strutils, terminal, times]
 import posix/termios
-import ../tests/frame_artifact
+import ../frame_artifact
 
 type
   Frame = object
@@ -42,7 +42,7 @@ proc parseFrames(path: string): seq[Frame] =
     result.add current
 
 proc latestFramesPath(): string =
-  let root = "testdata" / "output" / "tty"
+  let root = "tests/testdata" / "output" / "tty"
   if not dirExists(root):
     return ""
 
@@ -142,7 +142,7 @@ proc main() =
     if paramCount() == 1: paramStr(1)
     else: latestFramesPath()
   if path.len == 0:
-    quit "no frames.txt found under testdata/output/tty", 1
+    quit "no frames.txt found under tests/testdata/output/tty", 1
   if not fileExists(path):
     quit "frames file not found: " & path, 1
 

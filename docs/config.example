@@ -5,8 +5,8 @@
 # unquoted URLs or API keys will silently truncate or drop.
 
 [settings]
-current = "baseten.glm5"
-; current = "openai.gpt-4o-mini"
+current = "ollama.qwen3-coder:480b"
+; current = "openrouter.openai/gpt-oss-120b"
 ; auto_update = "true"    ; on for prebuilt binaries, off for source builds
 ; [search] configures the `web_search` tool. Engine is one of:
 ;   exa       (default) keyless MCP endpoint; exa-key for a paid tier
@@ -65,26 +65,19 @@ current = "baseten.glm5"
 ; bright-white = "\x1b[37m"
 ; bright-white-light = "\x1b[30m"
 
-[provider]
-name = "baseten"
-url = "https://inference.baseten.co/v1"
-key = "..."
-models = "zai-org/GLM-5 thinkingmachines/inkling"
-; current_model = "zai-org/GLM-5"  ; remembered per-provider model: switching
-;                                   ; back with :provider returns here, not to the first
-;                                   ; entry. Written automatically by :model.
+# Providers. One block per provider; `name` prefixes its models in `:model`
+# and in `current` above. Two shapes are shown: a local OpenAI-compatible
+# server (no account, no spend, works offline) and one keyed aggregator;
+# every other provider follows the same block shape.
 
 [provider]
-name = "openai"
-url = "https://api.openai.com/v1"
-key = "sk-..."
-models = "gpt-4o-mini gpt-4o"
-
-[provider]
-name = "groq"
-url = "https://api.groq.com/openai/v1"
-key = "gsk_..."
-models = "llama-3.3-70b-versatile llama-3.1-8b-instant"
+name = "ollama"
+url = "http://localhost:11434/v1"
+key = "ollama"    ; ollama never checks it, but the config wants one
+models = "qwen3-coder:480b"
+; current_model = "qwen3-coder:480b"  ; remembered per-provider model: switching
+;                                       ; back with :provider returns here, not to the
+;                                       ; first entry. Written automatically by :model.
 
 [provider]
 name = "openrouter"
@@ -92,87 +85,10 @@ url = "https://openrouter.ai/api/v1"
 key = "sk-or-..."
 models = "openai/gpt-oss-120b"
 
-; SuperGrok subscription (browser OAuth via `:provider add` → supergrok).
-; Tokens live in $XDG_DATA_HOME/3code/auth/xai.json and refresh automatically.
-; Can sit beside an API-key `xai` provider.
-; [provider]
-; name = "supergrok"
-; url = "https://api.x.ai/v1"
-; key = ""
-; auth = "oauth"
-; models = "grok-4.7 grok-4.6 grok-4.5 grok-4.20"
-;
-; ChatGPT Plus/Pro subscription (browser OAuth via `:provider add` → chatgpt).
-; Tokens live in $XDG_DATA_HOME/3code/auth/openai.json and refresh
-; automatically. Requests go to the ChatGPT Codex backend
-; (chatgpt.com/backend-api/codex), not api.openai.com. Can sit beside an
-; API-key `openai` provider.
-; [provider]
-; name = "chatgpt"
-; url = "https://api.openai.com/v1"
-; key = ""
-; auth = "oauth"
-; models = "gpt-5.4 gpt-5.5"
-;
-; Command Code subscription (API key from Studio, via `:provider add` ->
-; commandcode, or just paste the key). The open-model lineup rides the
-; OpenAI-compatible /provider/v1/chat/completions endpoint. Same key as
-; the `cmd` CLI; metered against the plan's credits.
-; [provider]
-; name = "commandcode"
-; url = "https://api.commandcode.ai/provider/v1"
-; key = "..."
-; models = "deepseek/deepseek-v4.1-flash z-ai/glm-5.3 moonshotai/Kimi-K3"
-;
-; [provider]
-; name = "xai"
-; url = "https://api.x.ai/v1"
-; key = "xai-..."
-; models = "grok-4.7 grok-4.6 grok-4.5 grok-4.20"
-
-[provider]
-name = "together"
-url = "https://api.together.xyz/v1"
-key = "..."
-models = "thinkingmachines/Inkling zai-org/GLM-5.2"
-; model_prefix = "meta-llama/"
-; models = "Llama-3.3-70B-Instruct-Turbo"
-
-[provider]
-name = "fireworks"
-url = "https://api.fireworks.ai/inference/v1"
-key = "fw..."
-models = "accounts/fireworks/models/inkling"
-
-[provider]
-name = "longcat"
-url = "https://api.longcat.chat/openai"
-key = "..."
-models = "LongCat-2.0"
-
-[provider]
-name = "hetzner"
-url = "https://inference.hetzner.com/api/v1"
-key = "..."
-models = "GLM-5.2-NVFP4 DeepSeek-V4-Flash-0731 Qwen/Qwen3.6-35B-A3B-FP8 Kimi-K2.7-Code"
-
-[provider]
-name = "greenpt"
-url = "https://api.greenpt.ai/v1"
-key = "..."
-models = "glm-5.2 glm-5.3 glm-5.3-flash kimi-k3 deepseek-v4-flash-0731"
-
-[provider]
-name = "aki"
-url = "https://aki.io/openai/v1"
-key = "..."
-models = "kimi-k2.7-code-1100b deepseek-v4-flash-0731-284b minimax-m2.5-230b"
-
-[provider]
-name = "lyceum"
-url = "https://api.lyceum.technology/openai/v1"
-key = "lk_..."
-models = "z-ai/glm-5.2 moonshotai/kimi-k3 deepseek/deepseek-v4-pro"
+# Subscription providers (SuperGrok, ChatGPT) log in through the browser
+# with `:provider add` instead of a pasted key; see the manual. `auth =
+# "oauth"` blocks like the ones it writes are just another [provider]
+# section.
 
 # [params] sections override the known-good model parameters per
 # (provider, model) pair. `provider` scopes to one provider; `model` is
@@ -214,9 +130,10 @@ models = "z-ai/glm-5.2 moonshotai/kimi-k3 deepseek/deepseek-v4-pro"
 # name, when the (provider, model) combo isn't on the known-good
 # list. Known-good combos ignore it.
 ;
+; The local server is the usual off-table case: name its family.
 ; [provider]
-; name = "deepseek"
-; url = "https://api.deepseek.com/v1"
-; key = "..."
-; family = "deepseek"
-; models = "deepseek-chat"
+; name = "ollama-glm"
+; url = "http://localhost:11434/v1"
+; key = "ollama"
+; family = "glm"
+; models = "glm-4.6"

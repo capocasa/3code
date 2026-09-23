@@ -11,7 +11,7 @@ import threecode/streamexec
 
 suite "stale bash wrapper dir sweep":
   test "dead owner removed; live, own, and unparseable kept":
-    let root = getCurrentDir() / "testdata/output/core" /
+    let root = getCurrentDir() / "tests/testdata/output/core" /
         ("sweep_bash_" & $getCurrentProcessId())
     if dirExists(root): removeDir(root)
     createDir(root)

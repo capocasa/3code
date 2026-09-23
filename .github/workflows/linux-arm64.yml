@@ -63,7 +63,7 @@ jobs:
         # load the parallel fan-out starves those threads and produces
         # load-induced frame mismatches. Sequential `cat` runs the identical
         # tests without that contention.
-        run: sh tools/ci_tests.sh 1500
+        run: sh tests/tools/ci_tests.sh 1500
         timeout-minutes: 30
 
       - name: Package

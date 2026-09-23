@@ -7,7 +7,7 @@
 #
 # Usage: xterm_submit_repro.sh [turns] [iterations] [typing-delay-ms]
 set -u
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 BIN=$(ls build/3code_real_* | grep -v nimcache | head -1)
 TURNS=${1:-12}
 ITERS=${2:-2}

@@ -14,7 +14,7 @@
 #
 # Usage: ghostty_submit_repro.sh [turns] [iterations] [typing-delay-ms]
 set -u
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 BIN=${BIN:-build/3code_real_diag}
 TURNS=${1:-12}
 ITERS=${2:-2}

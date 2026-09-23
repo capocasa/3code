@@ -10,7 +10,7 @@ import tty_expect
 import stub_helpers
 
 proc newFixture(name: string): string =
-  result = getCurrentDir() / "testdata/output/tty" / (name & "_" & $getCurrentProcessId())
+  result = getCurrentDir() / "tests/testdata/output/tty" / (name & "_" & $getCurrentProcessId())
   if dirExists(result): removeDir(result)
   createDir(result); createDir(result / "data"); createDir(result / "run")
 
@@ -41,7 +41,7 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
   ]
 
 when isMainModule:
-  let outDir = getEnv("RAW_OUT_DIR", "testdata/output/tty")
+  let outDir = getEnv("RAW_OUT_DIR", "tests/testdata/output/tty")
   createDir(outDir)
   let root = newFixture("capture_raw")
   writeConfiguredProvider(root)
