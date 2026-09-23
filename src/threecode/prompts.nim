@@ -1025,6 +1025,15 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("deepinfra", "google/gemini-3.7-flash", "gemini", "3", "7-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("ovh", "Qwen3-Coder-30B-A3B-Instruct", "qwen", "3", "coder-30b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false),
     ("ovh", "Qwen3.5-397B-A17B", "qwen", "3.5", "397b-a17b", "on", 0.2, 8192, tbNone, false, 262_144, false),
+    # yolo-auto (https://yolo-auto.com/v1, OpenAI chat completions). Two
+    # stable public aliases front a model line whose underlying build is
+    # not part of the contract, so both ride the `other` family: no
+    # reasoning knob is offered, nothing is guessed at the wire surface,
+    # and the endpoint's own `GET /v1/models` list is the catalog the
+    # experimental wizard offers. The context window is left at 0 (not
+    # probed yet), which keeps the harness heuristic in charge.
+    ("yolo-auto", "yolo", "other", "", "", "", 0.2, 8192, tbNone, false, 0, false),
+    ("yolo-auto", "yolo-small", "other", "", "", "", 0.2, 8192, tbNone, false, 0, false),
   ]
     ## (provider, model, family, version, variant, reasoning, temperature,
     ## maxTokens, thinkBack, contextWindow) tuples.

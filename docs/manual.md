@@ -232,6 +232,21 @@ The open-model lineup (DeepSeek, GLM, Kimi, MiniMax, Grok, MiMo) rides the
 gateway's OpenAI-compatible `/provider/v1/chat/completions` endpoint.
 Usage is metered against the plan's credits.
 
+### Yolo-Auto
+
+[Yolo-Auto](https://yolo-auto.com) is an independent OpenAI-compatible
+endpoint on flat-rate plans: no per-token billing, and a free tier to try
+it on. Create a `yolo_` API key in the dashboard and add the provider:
+
+```
+:provider add yolo-auto
+```
+
+Pasting the key works too, since the `yolo_` prefix is recognized. Two
+model aliases are on offer, `yolo` and `yolo-small`; the endpoint's
+`GET /v1/models` lists the current catalog, which `--experimental` shows in
+the wizard. API documentation lives at <https://yolo-auto.com/docs>.
+
 ## Provider catalog
 
 Everything the wizard knows about, grouped by where inference actually
