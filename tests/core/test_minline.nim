@@ -352,6 +352,68 @@ suite "minline drawn caret spans":
     let rows = ed.renderRowSpans()
     check rows == @["P queued \u29D6"]
 
+  test "caret deferred onto an empty gap span draws a lone cell":
+    # Regression (release-build RangeDefect crash): after a wide rune
+    # fills a row's last cells, the drawn caret moves one row down onto
+    # a row whose span is an empty break-space gap. The slice arithmetic
+    # used to go negative there (newString(-1)) and killed the input
+    # thread mid-keystroke on large wrapped prompts. Positions 22-24 all
+    # hit it; 24 is a plain rune-aligned caret typed after the rune.
+    var ed = initEditor()
+    withPainter ed
+    ed.prompt = "P "
+    ed.contPrompt = "  "
+    ed.width = 4
+    ed.renderSuffix = " X"
+    ed.line = Line(text: "aa \u8A9E\u8A9E b\ncc \u8A9E\u8A9E\u8A9E   dd",
+                   position: 24)
+    let rows = ed.renderRowSpans()
+    check rows == @[
+      "P aa",
+      "  \u8A9E",
+      "  \u8A9E",
+      "  b",
+      "  cc",
+      "  \u8A9E",
+      "  \u8A9E",
+      "  \u8A9E",
+      "  " & CaretCellOn & " " & CaretCellOff,
+      "  dd",
+      "  X",
+    ]
+    # Mid-rune byte offsets (an unaligned position no healthy editor
+    # produces, but a corrupted history entry can) render, not crash.
+    ed.line = Line(text: "aa \u8A9E\u8A9E b\ncc \u8A9E\u8A9E\u8A9E   dd",
+                   position: 22)
+    let rows22 = ed.renderRowSpans()
+    check rows22[8] == "  " & CaretCellOn & " " & CaretCellOff
+    check rows22.len == rows.len
+
+  test "lineSpans clamps a truncated final rune to the buffer":
+    # A bracketed paste can deliver raw bytes; when the buffer ends
+    # mid-rune the walk's last span used to claim bytes past text.len
+    # and every renderer sliced out of bounds reading it.
+    let spans = lineSpans("\xE8\xAA", 2, 2, 10)
+    check spans == @[(start: 0, stop: 2)]
+    discard renderBuffer("\xE8\xAA", "P ", "  ", 10, caretAt = 2)
+    discard renderBuffer("\xE8", "P ", "  ", 10, caretAt = 1)
+    var ed = initEditor()
+    withPainter ed
+    ed.prompt = "P "
+    ed.width = 10
+    ed.renderSuffix = ""
+    ed.line = Line(text: "ok\xE8", position: 3)
+    discard ed.renderRowSpans()
+
+  test "lineSpans terminates when no rune fits after the prompt":
+    # Width 2 with a 2-cell continuation prompt leaves no content cell;
+    # the char-wrap branch used to re-test the same byte forever, so a
+    # narrow-terminal resize hung the input thread inside lineSpans.
+    # Now each over-wide rune owns its row and the walk advances.
+    let spans = lineSpans("\u8A9E\u8A9E\u8A9E", 2, 2, 2)
+    check spans == @[(start: 0, stop: 0), (start: 0, stop: 3),
+                     (start: 3, stop: 6), (start: 6, stop: 9)]
+
 suite "minline editor: basic typing":
   test "type 'hello' + Enter returns 'hello'":
     var ed = initEditor()
@@ -997,7 +1059,44 @@ suite "minline editor: render correctness":
 
 # ---------------- Driver: bracketed paste ----------------
 
+suite "minline editor: buffer cap":
+  test "insertText caps at MaxBufferBytes on a rune boundary and bells":
+    var ed = initEditor()
+    var outp = ""
+    ed.write = proc(s: string) = outp.add s
+    ed.insertText repeat("\u8A9E", 200_000)   # 600000 bytes, 524288 fit
+    check ed.line.text.len == 524_286         # 174762 whole 3-byte runes
+    check ed.line.text == repeat("\u8A9E", 174_762)
+    check ed.line.position == ed.line.text.len
+    check outp.contains "\a"
+    # A full buffer refuses further inserts with just the bell: no
+    # repaint bytes follow it because nothing changed.
+    ed.line.text = repeat('a', MaxBufferBytes)
+    ed.line.position = MaxBufferBytes
+    outp.setLen 0
+    ed.insertText "more"
+    check ed.line.text == repeat('a', MaxBufferBytes)
+    check outp == "\a"
+
+  test "changeLine caps oversized replacements":
+    var ed = initEditor()
+    var outp = ""
+    ed.write = proc(s: string) = outp.add s
+    ed.changeLine repeat('x', MaxBufferBytes + 5)
+    check ed.line.text.len == MaxBufferBytes
+    check ed.line.position == MaxBufferBytes
+    check outp.contains "\a"
+
 suite "minline editor: bracketed paste":
+  test "paste past the cap keeps MaxBufferBytes bytes":
+    var ed = initEditor()
+    let d = newDriver()
+    d.push @[27, 91, 50, 48, 48, 126]
+    d.pushString repeat('a', MaxBufferBytes + 100)
+    d.push @[27, 91, 50, 48, 49, 126]
+    d.push Enter
+    check d.run(ed, prompt = "> ").len == MaxBufferBytes
+
   test "paste with embedded newline lands as a newline in the buffer":
     var ed = initEditor()
     let d = newDriver()
