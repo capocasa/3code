@@ -1,7 +1,20 @@
-===== 747 =====
+===== frame 0 =====
+█
+===== frame 1 =====
 
   ╭─╮
-   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+█
+===== frame 2 =====
+
+  ╭─╮
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -9,11 +22,11 @@
 
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
-❯
-===== 935 =====
+❯ █
+===== frame 4 =====
 
   ╭─╮
-   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -22,10 +35,10 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
-===== 226 =====
+===== frame 5 =====
 
   ╭─╮
-   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -34,11 +47,11 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
-  
-===== 999 =====
+   
+===== frame 6 =====
 
   ╭─╮
-   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -48,10 +61,10 @@
 
 ❯ first line
   second line
-===== 324 =====
+===== frame 7 =====
 
   ╭─╮
-   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -64,10 +77,10 @@
 
 ⣿ ○0% 0
 ❯
-===== 104 =====
+===== frame 8 =====
 
   ╭─╮
-   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -80,10 +93,10 @@
 
 ⣿ ○0% 0
 ❯ queued line one
-===== 701 =====
+===== frame 9 =====
 
   ╭─╮
-   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -96,11 +109,11 @@
 
 ⣿ ○0% 0
 ❯ queued line one
-  
-===== 324 =====
+   
+===== frame 10 =====
 
   ╭─╮
-   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -114,10 +127,10 @@
 ⣿ ○0% 0
 ❯ queued line one
   queued line two
-===== 999 =====
+===== frame 13 =====
 
   ╭─╮
-   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -131,10 +144,10 @@
 ⣿ ○0% 0
 ❯ queued line one
   queued line two ⧖
-===== 590 =====
+===== frame 15 =====
 
   ╭─╮
-   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -143,16 +156,17 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
+  second line
 
 ● First multiline response.
 
 ⣿ ○0% ↓6 0
 ❯ queued line one
   queued line two ⧖
-===== 850 =====
+===== frame 16 =====
 
   ╭─╮
-   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -161,16 +175,55 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
+  second line
+
+● First multiline response.
+
+  ○0% ↓6
+❯ queued line one
+  queued line two ⧖
+===== frame 17 =====
+
+  ╭─╮
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  second line
+
+● First multiline response.
+
+⣿ ○0% ↓6 0
+❯ queued line one
+  queued line two ⧖
+===== frame 18 =====
+
+  ╭─╮
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  second line
 
 ● First multiline response.
 
   ○1%  ↑120  ↓24  0
 ❯ queued line one
   queued line two ⧖
-===== 759 =====
+===== frame 19 =====
 
   ╭─╮
-   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -179,6 +232,90 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
+  second line
+
+● First multiline response.
+  ○1%  ↑120  ↓24  0
+
+  ○1%
+
+===== frame 20 =====
+
+  ╭─╮
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  second line
+
+● First multiline response.
+  ○1%  ↑120  ↓24  0
+
+❯ queued line one
+  queued line two
+
+===== frame 21 =====
+
+  ╭─╮
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  second line
+
+● First multiline response.
+  ○1%  ↑120  ↓24  0
+
+❯ queued line one
+  queued line two
+
+⣿ ○1% 0
+❯
+===== frame 22 =====
+
+  ╭─╮
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  second line
+
+● First multiline response.
+  ○1%  ↑120  ↓24  0
+
+❯ queued line one
+  queued line two
+
+⣿ ○1% ↓6 0
+❯
+===== frame 23 =====
+
+  ╭─╮
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  second line
 
 ● First multiline response.
   ○1%  ↑120  ↓24  0
@@ -190,10 +327,10 @@
 
 ⣿ ○1% ↓6 0
 ❯
-===== 334 =====
+===== frame 24 =====
 
   ╭─╮
-   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -202,6 +339,55 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
+  second line
+
+● First multiline response.
+  ○1%  ↑120  ↓24  0
+
+❯ queued line one
+  queued line two
+
+● Queued multiline response.
+
+  ○1% ↓6
+❯
+===== frame 25 =====
+
+  ╭─╮
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  second line
+
+● First multiline response.
+  ○1%  ↑120  ↓24  0
+
+❯ queued line one
+  queued line two
+
+● Queued multiline response.
+
+⣿ ○1% ↓6 0
+❯
+===== frame 26 =====
+
+  ╭─╮
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
+  ╰─╯
+
+  provider  stub
+  model     stub-model
+
+  type a prompt. :help for commands. :q or Ctrl-D to exit.
+
+❯ first line
+  second line
 
 ● First multiline response.
   ○1%  ↑120  ↓24  0
@@ -213,10 +399,10 @@
 
   ○1%  ↑180  ↓32  0
 ❯
-===== 859 =====
+===== frame 27 =====
 
   ╭─╮
-   ─┤  3code v0.7.0-perc-d46ddd22-unstaged   the economical coding agent
+   ─┤  3code v0.8.0-line-5da306cb-unstaged   the economical coding agent
   ╰─╯
 
   provider  stub
@@ -225,6 +411,7 @@
   type a prompt. :help for commands. :q or Ctrl-D to exit.
 
 ❯ first line
+  second line
 
 ● First multiline response.
   ○1%  ↑120  ↓24  0
@@ -236,4 +423,4 @@
   ○1%  ↑180  ↓32  0
 
   ○1%
-❯
+❯ █

@@ -1,5 +1,19 @@
 Changelog
 
+**Unreleased**
+
+- **The occasional "submit deletes the line above the prompt" is fixed.**
+  A multi-row draft in the buffered mid-turn editor (history recall,
+  shift+enter, typing during the stream) made the answer-start erase
+  leave the cursor on the erased block top with the chrome row model
+  wiped; the repaint after it then re-anchored up to `editor rows - 1`
+  rows too high and overwrote the wrapped tail of the just-committed
+  prompt echo. Single-row drafts canceled the arithmetic out, which is
+  why it only showed sometimes. The content-start transition now parks
+  the cursor back on the editor caret row and keeps the painted-chrome
+  count. The multiline golden fixture is regenerated: it had recorded
+  the bug (the first echo's `second line` row missing).
+
 0.8.0  private mode, per-model params, cache-hot resume, commandcode and
        platte providers, PortableGit in the Windows installer
   - xiaomi provider; MiMo 2.6 Pro/Flash on xiaomi, OpenRouter, OpenCode Zen/Go

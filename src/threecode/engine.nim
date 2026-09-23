@@ -118,6 +118,7 @@ proc geometryAudit(tag: string; rows: int) =
   except IOError:
     discard
 
+
 proc refreshEditorWidth(ed: var minline.LineEditor) =
   let w = try: terminalWidth() except CatchableError: 0
   if w > 0:
@@ -1242,7 +1243,18 @@ proc prepareAssistantContentStart*(e: var TerminalEngine;
       if up > 0:
         stdout.write "\x1b[" & $up & "A"
       stdout.write "\x1b[J"
-      e.noteNoFooter()
+      if up > 0:
+        # Park the physical cursor back on the editor's caret row. Every
+        # volatile paint enters from there; one that enters from the erased
+        # block top walks up `blockH - 1` from it and lands `physEd - 1`
+        # rows above the block top when the editor holds a multi-row
+        # buffered draft (history recall / typing during the turn): the
+        # tail rows of the just-committed prompt echo get erased.
+        stdout.write "\x1b[" & $up & "B"
+      # Keep the painted-chrome count, drop the row contents: the next
+      # paint rebuilds chrome + editor at this anchor, and a zero count
+      # would fabricate a phantom growth scroll of the chrome rows.
+      e.noteFooterPainted(e.paintedFooterRows)
       stdout.write termio.SyncEnd()
       if flush:
         stdout.flushFile

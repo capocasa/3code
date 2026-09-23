@@ -2231,6 +2231,85 @@ max-tokens = "8192"
     tty.requireVisibleEditorCaret(acc)
     tty.continueStubApi()
 
+  test "answer start with a multi-row recalled draft keeps the committed echo whole":
+    # Reported: "sometimes, sending a prompt removes the line above the
+    # prompt." Root cause (ghostty capture + ttty step replay): a multi-row
+    # draft in the buffered mid-turn editor (history recall, or typing
+    # during the stream) makes `prepareAssistantContentStart`'s erase leave
+    # the cursor at the erased block top with the chrome model wiped; the
+    # next volatile paint then walks up `blockH - 1` from there and lands
+    # `physEd - 1` rows into the just-committed prompt echo, erasing its
+    # wrapped tail rows. With a single-row draft the same arithmetic
+    # cancels itself, which is why only the multi-row case ever showed.
+    let root = newFixture("recall_eat")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {"role": "assistant", "content": "first reply marker one",
+       "contentChunks": ["first reply marker one"],
+       "usage": {"promptTokens": 10, "completionTokens": 5,
+                 "totalTokens": 15, "cachedTokens": 0}},
+      {"role": "assistant", "waitForTestContinue": true,
+       "content": "second reply marker two",
+       "contentChunks": ["second ", "reply ", "marker ", "two"],
+       "contentChunkDelayMs": 80,
+       "usage": {"promptTokens": 12, "completionTokens": 6,
+                 "totalTokens": 18, "cachedTokens": 0}}
+    ])
+    let tty = startStub(root, cols = 100)
+    defer: tty.close()
+    tty.expect "❯"
+    # Turn 1 arms the resting bar.
+    tty.send "warm up turn"; tty.expect "warm up turn"; tty.send "\n"
+    tty.expectInHistory "first reply marker one"
+    tty.expectTokenBar(["○", "↑10"])
+    tty.drain(300)
+    # Turn 2's prompt wraps to four rows at 100 cols.
+    var prompt = "recall me alpha"
+    while prompt.len < 330: prompt.add " br"
+    prompt.add " omega"
+    for i in countup(0, prompt.len - 1, 20):
+      tty.send prompt[i ..< min(i + 20, prompt.len)]
+      tty.drain(4)
+    tty.expect "omega"
+    tty.send "\n"
+    tty.expectInHistory "recall me alpha"
+    # The turn is held open: recall the long prompt into the buffered
+    # mid-turn editor, then release the answer while the multi-row draft
+    # still occupies the editor above the bar.
+    tty.drain(200)
+    tty.send "\x1b[A"
+    tty.drain(500)
+    tty.continueStubApi()
+    tty.expectInHistory "second reply marker two"
+    tty.expectIdleCaret()
+    tty.drain(400)
+    # The committed echo must survive whole: above the answer row sits one
+    # blank, then the echo's wrapped rows with no blank inside, up to its
+    # `❯` head row, then one more blank separator above that.
+    let rows = tty.rows()
+    var answerRow = -1
+    for i, r in rows:
+      if r.startsWith("● second reply"): answerRow = i
+    doAssert answerRow >= 2,
+      "answer row missing\n" & tty.dumpFramesAround("second reply")
+    doAssert rows[answerRow - 1].strip.len == 0,
+      "no blank between echo and answer (row above = '" &
+      rows[answerRow - 1] & "')\n" & tty.dumpFramesAround("second reply")
+    var i2 = answerRow - 2
+    var echoTail = 0
+    while i2 >= 0 and rows[i2].len > 0 and not rows[i2].startsWith("❯"):
+      inc echoTail
+      dec i2
+    doAssert i2 >= 0 and rows[i2].startsWith("❯ recall me alpha"),
+      "echo head row not found above its tail\n" &
+      tty.dumpFramesAround("recall me alpha")
+    doAssert rows[i2 - 1].strip.len == 0,
+      "echo head has no blank separator above it (row above = '" &
+      rows[i2 - 1] & "')\n" & tty.dumpFramesAround("recall me alpha")
+    doAssert echoTail == 3,
+      "committed echo lost " & $(3 - echoTail) & " tail row(s) to the " &
+      "answer commit\n" & tty.dumpFramesAround("recall me alpha")
+
   test "interrupt during a queued mid-turn prompt sends the queue next":
     # Design contract: a prompt queued during a turn shows the hourglass.
     # In that state, Ctrl-C (or Esc) cancelling the *current* turn must send

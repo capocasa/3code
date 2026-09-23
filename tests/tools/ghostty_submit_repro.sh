@@ -32,7 +32,7 @@ openbox >/dev/null 2>&1 &
 WM=$!
 sleep 1
 
-python3 tools/sse_drip_mock.py 4789 "$OUT/requests.log" > "$OUT/server.url" &
+python3 "$(dirname "$0")"/sse_drip_mock.py 4789 "$OUT/requests.log" > "$OUT/server.url" &
 MOCK=$!
 sleep 0.5
 URL=$(cat "$OUT/server.url")
@@ -134,10 +134,10 @@ for iter in $(seq 1 "$ITERS"); do
   for snap in "$OUT/shots$iter"/*.png; do
     tag=$(basename "$snap" .png)
     [ -f "$OUT/shots$iter/$tag.ts" ] || continue
-    python3 tools/ts_strip.py "$OUT/shots$iter/$tag.ts" > "$OUT/bytes.tmp"
+    python3 "$(dirname "$0")"/ts_strip.py "$OUT/shots$iter/$tag.ts" > "$OUT/bytes.tmp"
     ./build/replay_ttty "$OUT/bytes.tmp" 100 30 > "$OUT/ttty.tmp"
     echo "-- iter $iter $tag"
-    python3 tools/ghostty_mask_diff.py "$snap" "$OUT/ttty.tmp" 30 \
+    python3 "$(dirname "$0")"/ghostty_mask_diff.py "$snap" "$OUT/ttty.tmp" 30 \
       || echo "   ^^ ITER $iter $tag: DIVERGENCE"
   done
 done

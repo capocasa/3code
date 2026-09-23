@@ -23,7 +23,7 @@ XVFB=$!
 sleep 1
 export DISPLAY=:99
 
-python3 tools/sse_drip_mock.py 4789 "$OUT/requests.log" > "$OUT/server.url" &
+python3 "$(dirname "$0")"/sse_drip_mock.py 4789 "$OUT/requests.log" > "$OUT/server.url" &
 MOCK=$!
 sleep 0.5
 URL=$(cat "$OUT/server.url")
