@@ -32,7 +32,8 @@ when defined(posix):
 import threecode/[types, util, prompts, shell, session, compact,
                   config, actions, api, display, ui, update, fatprompt,
                   toolstream, turns, transcript, sandbox, box, wall,
-                  auth_xai, auth_openai, auth_google, streamexec]
+                  auth_xai, auth_openai, auth_google, auth_anthropic,
+                  streamexec]
 when not defined(android):
   import tinotify
 else:
@@ -525,6 +526,8 @@ proc main() =
       result = auth_openai.subscriptionTokenFor(provider)
     if result == "":
       result = auth_google.subscriptionTokenFor(provider)
+    if result == "":
+      result = auth_anthropic.subscriptionTokenFor(provider)
   extraHeadersImpl = chatgptExtraHeaders
   api.codexModelsHook = auth_openai.fetchCodexModels
   api.bearerHook = subscriptionBearer

@@ -86,8 +86,18 @@ url = "https://openrouter.ai/api/v1"
 key = "sk-or-..."
 models = "openai/gpt-oss-120b"
 
-# Subscription providers (SuperGrok, ChatGPT) log in through the browser
-# with `:provider add` instead of a pasted key; see the manual. `auth =
+# Anthropic speaks its own Messages wire: an sk-ant- key is all the setup
+# (Claude 5.x thinks adaptively; `:reasoning` sets the effort level).
+
+# [provider]
+# name = "anthropic"
+# url = "https://api.anthropic.com/v1"
+# key = "sk-ant-..."
+# models = "claude-opus-5-5 claude-sonnet-5"
+
+# Subscription providers (SuperGrok, ChatGPT, Claude Pro/Max) log in
+# through the browser with `:provider add` instead of a pasted key
+# (enter `supergrok`, `chatgpt`, or `claudecode`); see the manual. `auth =
 # "oauth"` blocks like the ones it writes are just another [provider]
 # section.
 

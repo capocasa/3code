@@ -18,7 +18,7 @@ when defined(windows):
   import std/winlean
 import streamhttp
 import types, util, prompts, streamexec, netthread, auth_openai, auth_google,
-       codeassist, oauth
+       codeassist, anthropic, auth_anthropic, oauth
 
 type
   VerifyProfileHook* = proc(p: Profile): (bool, string) {.closure.}
@@ -575,7 +575,8 @@ proc buildStreamAssistantMsg*(content, reasoning: string,
                               tools: OrderedTable[int, JsonNode],
                               usage: Usage,
                               wasInterrupted = false;
-                              finishReason = ""): JsonNode =
+                              finishReason = "";
+                              reasoningBlocks: seq[JsonNode] = @[]): JsonNode =
   ## Build the assistant message reconstructed from an SSE stream.
   ## Returns nil only when the stream produced nothing at all: no
   ## content/tools/reasoning, no usage, no finish_reason, which signals a
@@ -596,6 +597,10 @@ proc buildStreamAssistantMsg*(content, reasoning: string,
   # fails with `invalid_request_error`. Always set it; other providers
   # ignore the extra field.
   result["reasoning_content"] = %reasoning
+  if reasoningBlocks.len > 0:
+    # Anthropic thinking blocks for tool-loop replay; an internal
+    # field (see stripInternalFields / anthropic.nim).
+    result["reasoning_blocks"] = %reasoningBlocks
   if tools.len > 0:
     var tcArr = newJArray()
     var keys = toSeq(tools.keys).sorted
@@ -746,6 +751,20 @@ proc geminicliProfile*(p: Profile): bool =
   ## auth_google) instead of OpenAI chat completions.
   providerOf(p) == "geminicli"
 
+proc anthropicProfile*(p: Profile): bool =
+  ## True when this profile speaks the Anthropic Messages wire
+  ## (`/messages` with typed content blocks; see anthropic.nim) instead
+  ## of OpenAI chat completions. The claude family covers Anthropic
+  ## direct and the Anthropic-protocol gateways.
+  p.family == "claude"
+
+proc claudecodeProfile*(p: Profile): bool =
+  ## True for the Claude-subscription twin (OAuth tokens from
+  ## auth_anthropic, `claudecode` provider). Same Messages wire as the
+  ## claude family, but Bearer + beta header instead of x-api-key and a
+  ## url pinned to api.anthropic.com.
+  providerOf(p) == "claudecode"
+
 proc requestUrl*(p: Profile): string =
   ## Full request URL (scheme://host/path, no endpoint suffix). The
   ## ChatGPT subscription token is not valid against api.openai.com, so
@@ -753,6 +772,14 @@ proc requestUrl*(p: Profile): string =
   ## the configured url.
   if chatgptProfile(p): auth_openai.CodexApiUrl
   elif geminicliProfile(p): auth_google.CloudCodeApiUrl
+  elif claudecodeProfile(p):
+    # testPlainHttp (also the supported loopback-HTTP escape) keeps a
+    # local server url for the transport tests; everything else pins
+    # api.anthropic.com, where the subscription token is valid.
+    when defined(testPlainHttp):
+      if p.url.startsWith("http://127.0.0.1"): p.url
+      else: auth_anthropic.ClaudeApiUrl
+    else: auth_anthropic.ClaudeApiUrl
   else: p.url
 
 proc endpointUrl*(p: Profile, responses, streaming: bool): string =
@@ -764,6 +791,7 @@ proc endpointUrl*(p: Profile, responses, streaming: bool): string =
   if geminicliProfile(p):
     if streaming: base & CodeAssistStreamPath
     else: base & CodeAssistGeneratePath
+  elif anthropicProfile(p): base & AnthropicMessagesPath
   elif responses: base & "/responses"
   else: base & "/chat/completions"
 
@@ -772,10 +800,39 @@ proc requestHeaders(p: Profile, key: string;
   ## Base headers every model request sends, plus whatever
   ## `extraHeadersHook` adds for this profile (ChatGPT Codex wants
   ## `chatgpt-account-id`, `OpenAI-Beta`, `originator`).
-  result = @[("Authorization", "Bearer " & key),
-             ("Content-Type", "application/json"),
-             ("Accept", accept),
-             ("User-Agent", ModelUserAgent)]
+  if claudecodeProfile(p):
+    # The subscription token authenticates as a Bearer with the OAuth
+    # beta opt-in; x-api-key is rejected for these credentials. The
+    # drop_block thinking replay adds its own beta on models that bind
+    # thinking blocks (anthropic-beta takes a comma list).
+    var betas = ClaudeOAuthBeta
+    if runsPrefixCheck(p.model):
+      betas.add "," & ThinkingBindingBeta
+    result = @[("Authorization", "Bearer " & key),
+               ("anthropic-version", AnthropicVersionHeader),
+               ("anthropic-beta", betas),
+               ("Content-Type", "application/json"),
+               ("Accept", accept),
+               ("User-Agent", ModelUserAgent)]
+  elif anthropicProfile(p):
+    # Anthropic-protocol endpoints take `x-api-key` + the pinned
+    # version header. drop_block thinking replay (see anthropic.nim)
+    # needs its beta opt-in on the models that bind thinking blocks.
+    var betas = ""
+    if runsPrefixCheck(p.model):
+      betas = ThinkingBindingBeta
+    result = @[("x-api-key", key),
+               ("anthropic-version", AnthropicVersionHeader),
+               ("Content-Type", "application/json"),
+               ("Accept", accept),
+               ("User-Agent", ModelUserAgent)]
+    if betas.len > 0:
+      result.insert(("anthropic-beta", betas), 2)
+  else:
+    result = @[("Authorization", "Bearer " & key),
+               ("Content-Type", "application/json"),
+               ("Accept", accept),
+               ("User-Agent", ModelUserAgent)]
   if providerOf(p) in ["opencode", "opencodego"]:
     # Zen/Go route and shard by this header; requests without it are
     # rejected as of 2026-09-06. Stable across the conversation's turns
@@ -797,7 +854,8 @@ proc sseFieldValue(line: string): string =
 
 proc streamHttp(url, key, bodyStr: string, baseLabel: string,
                 slurped: var int, suppressXml: bool,
-                job: NetJob, codeAssist = false): StreamOutcome =
+                job: NetJob, codeAssist = false,
+                anthropic = false): StreamOutcome =
   debugOut "streamHttp start"
   # Post `bodyStr` to `url` and consume SSE chunks until `[DONE]`. `slurped`
   # accumulates an approximate output-character count so the caller can
@@ -887,6 +945,7 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
 
   var accContent = ""
   var accReasoning = ""
+  var accReasoningBlocks: seq[JsonNode] = @[]
   var accTools = initOrderedTable[int, JsonNode]()
   var nonSSE: seq[string]
   var contentStarted = false
@@ -914,8 +973,9 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   var sseErrorBody = ""
   var sseErrorCode = 0
   var caState: CodeAssistStreamState
-  # Translated Gemini chunks queued by the Code Assist path: one SSE
-  # event can fan out to several OpenAI payloads (delta + usage +
+  var anthropicState: AnthropicStreamState
+  # Translated chunks queued by the Code Assist / Anthropic paths: one
+  # SSE event can fan out to several OpenAI payloads (delta + usage +
   # [DONE]), replayed one per loop iteration.
   var caQueue: seq[string]
   var bodyStall = StallClock(since: epochTime())
@@ -949,6 +1009,9 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
         payload = sseFieldValue(line)
         if codeAssist:
           caQueue = translateEvent(caState, payload)
+          continue
+        if anthropic:
+          caQueue = translateAnthropicEvent(anthropicState, payload)
           continue
     if payload.len > 0:
       if payload.strip == "[DONE]":
@@ -986,6 +1049,11 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
           var r = delta{"reasoning_content"}.getStr("")
           if r.len == 0: r = delta{"reasoning"}.getStr("")
           var c = delta{"content"}.getStr("")
+          # Anthropic thinking block closed (see anthropic.nim): the
+          # exact (thinking, signature) pair for history replay.
+          let rblock = delta{"reasoning_block"}
+          if rblock != nil and rblock.kind == JObject:
+            accReasoningBlocks.add rblock
           # Mistral-native chunked thinking: while the model reasons,
           # delta.content is an array of typed chunks instead of a string
           # ({"type":"thinking","thinking":[{"type":"text","text":..}]},
@@ -1067,7 +1135,8 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   if isInterrupted():
     if result.assistantMsg == nil:
       result.assistantMsg = buildStreamAssistantMsg(accContent, accReasoning,
-        accTools, result.usage, isInterrupted())
+        accTools, result.usage, isInterrupted(),
+        reasoningBlocks = accReasoningBlocks)
     # Drop the cache: the SIGINT hook / watcher already shut down the
     # fd, so the conn is half-closed. Reusing it on the next turn
     # would fail on first send. The next call will reconnect cleanly.
@@ -1116,7 +1185,8 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   # surfaced as an error here.
   if result.assistantMsg == nil:
     result.assistantMsg = buildStreamAssistantMsg(accContent, accReasoning,
-      accTools, result.usage, isInterrupted(), finishReason)
+      accTools, result.usage, isInterrupted(), finishReason,
+      reasoningBlocks = accReasoningBlocks)
   if result.assistantMsg == nil:
     # No SSE data at all. Provider may have returned a plain JSON error
     # body. Surface as a retryable transport error so callModel handles it
@@ -1535,7 +1605,8 @@ proc streamResponses(url, key, bodyStr: string, baseLabel: string,
 
 proc buildBatchAssistantMsg*(message, reasoning: string;
                              toolCalls: JsonNode;
-                             finishReason = ""): JsonNode =
+                             finishReason = "";
+                             reasoningBlocks: JsonNode = nil): JsonNode =
   ## Build an assistant message from a non-streaming completion's
   ## `choices[0].message`. Mirrors `buildStreamAssistantMsg`'s shape so the
   ## rest of the pipeline (history replay, tool dispatch) sees a uniform
@@ -1551,6 +1622,11 @@ proc buildBatchAssistantMsg*(message, reasoning: string;
   # Same rationale as buildStreamAssistantMsg: DeepSeek-R1-style models
   # require `reasoning_content` on every assistant message in history.
   result["reasoning_content"] = %reasoning
+  if reasoningBlocks != nil and reasoningBlocks.kind == JArray and
+     reasoningBlocks.len > 0:
+    # Anthropic thinking blocks for tool-loop replay (see
+    # buildStreamAssistantMsg).
+    result["reasoning_blocks"] = reasoningBlocks
   if toolCalls != nil and toolCalls.kind == JArray and toolCalls.len > 0:
     result["tool_calls"] = toolCalls
   if finishReason.len > 0:
@@ -1575,7 +1651,8 @@ when httpStub:
   include "../../tests/testdata/stub/http.nim"
 
 proc callHttp(url, key, bodyStr: string; baseLabel: string;
-              slurped: var int; codeAssist = false): StreamOutcome =
+              slurped: var int; codeAssist = false;
+              anthropic = false): StreamOutcome =
   ## Non-streaming companion to `streamHttp`. Posts `bodyStr` (which carries
   ## `"stream": false`) and reads the complete JSON completion in one shot —
   ## no SSE, no recv-loop race. Same `StreamConn` cache and stale-conn retry
@@ -1731,8 +1808,8 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
     result.errBody = body
     return
 
-  # Parse the single JSON completion object. The Code Assist wire
-  # answers with a Gemini GenerateContentResponse; translate it to the
+  # Parse the single JSON completion object. The Code Assist and
+  # Anthropic wires answer with their native shapes; translate to the
   # OpenAI completion shape first so the rest of this proc is uniform.
   var body2 = body
   if codeAssist:
@@ -1740,6 +1817,13 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
     if translated == nil:
       result.errBody = body
       result.errMsg = "response parse: not a Code Assist response"
+      return
+    body2 = $translated
+  elif anthropic:
+    let translated = translateAnthropicResponse(body)
+    if translated == nil:
+      result.errBody = body
+      result.errMsg = "response parse: not an Anthropic message"
       return
     body2 = $translated
   let j = try: parseJson(body2)
@@ -1813,7 +1897,8 @@ proc callHttp(url, key, bodyStr: string; baseLabel: string;
   slurped = content.len + reasoning.len
   hookProgress(baseLabel, slurped)
 
-  result.assistantMsg = buildBatchAssistantMsg(content, reasoning, toolCalls, finishReason)
+  result.assistantMsg = buildBatchAssistantMsg(content, reasoning,
+    toolCalls, finishReason, message{"reasoning_blocks"})
   if result.assistantMsg == nil:
     # No content, no tool_calls, no reasoning, no finish_reason: a genuine
     # transport anomaly (not a budget-starved empty turn). Surface as a
@@ -1988,7 +2073,8 @@ proc callResponses(url, key, bodyStr: string; baseLabel: string;
     result.usage = responsesUsage(u2)
   debugOut &"callResponses end status={result.finishReason}"
 
-proc stripInternalFields*(messages: JsonNode): JsonNode =
+proc stripInternalFields*(messages: JsonNode;
+                            keepThinkingFields = false): JsonNode =
   ## Return a wire-safe copy of `messages` with internal bookkeeping fields
   ## removed. `usage` is stored on assistant messages for local replay but
   ## rejected by strict validators (fireworks, glm-5p1, etc.). `finish_reason`
@@ -2000,17 +2086,22 @@ proc stripInternalFields*(messages: JsonNode): JsonNode =
   ## validators (xAI, OpenAI, Moonshot) 400 on `role: assistant` with an
   ## empty content string, which is how a thinking-only / length-starved
   ## turn looks after `reasoning_content` is stripped for non-DeepSeek.
+  ## `reasoning_blocks` is the Anthropic thinking-block record; only the
+  ## Anthropic translation reads it back, so it is stripped unless the
+  ## caller keeps it.
   if messages == nil or messages.kind != JArray: return messages
   result = newJArray()
   for m in messages:
     var node = m
     if m.kind == JObject and
        ("usage" in m or "interrupted" in m or "finish_reason" in m or
-        "agentSent" in m):
+        "agentSent" in m or
+        ("reasoning_blocks" in m and not keepThinkingFields)):
       var clean = newJObject()
       for k, v in m.pairs:
         if k != "usage" and k != "interrupted" and k != "finish_reason" and
-           k != "agentSent":
+           k != "agentSent" and
+           (k != "reasoning_blocks" or keepThinkingFields):
           clean[k] = v
       node = clean
     if node.kind == JObject and node{"role"}.getStr == "assistant":
@@ -2063,6 +2154,8 @@ proc stripThinkBack*(mode: ThinkBackMode, wireMessages: JsonNode) =
     if mode == tbCurrentTurn and i >= lastUser: continue
     if m.contains("reasoning_content"):
       m.delete("reasoning_content")
+    if m.contains("reasoning_blocks"):
+      m.delete("reasoning_blocks")
 
 proc applyGptOssReasoning(p: Profile, body: JsonNode) =
   body["reasoning_effort"] = %p.reasoning
@@ -2561,6 +2654,13 @@ proc applyNemotronReasoning(p: Profile, body: JsonNode) =
     body["chat_template_kwargs"] = %*{"enable_thinking": true}
   else: discard
 
+proc applyClaudeReasoning(p: Profile, body: JsonNode) =
+  ## The OpenAI-shaped body is only an intermediate for the claude
+  ## family; anthropicBody reads `reasoning_effort` and maps it onto
+  ## the model's thinking surface (adaptive + effort, or the legacy
+  ## budget mode on 4.5-and-earlier; see anthropic.nim).
+  body["reasoning_effort"] = %p.reasoning
+
 proc applyReasoning*(p: Profile, body: JsonNode) =
   ## Per-family wire mapping for `Profile.reasoning`. Adding a new
   ## family means: (1) set `reasoning` in the known-good combo table,
@@ -2584,6 +2684,7 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   of "0xalpha": applyOxAlphaReasoning(p, body)
   of "nemotron": applyNemotronReasoning(p, body)
   of "mistral": applyMistralReasoning(p, body)
+  of "claude": applyClaudeReasoning(p, body)
   else: discard
 
 proc applyThinkBack*(p: Profile, body: JsonNode) =
@@ -2644,6 +2745,7 @@ type
     suppressXml: bool
     responses: bool  # POST /responses instead of /chat/completions
     codeAssist: bool  # Google Code Assist wire (translate Gemini SSE)
+    anthropic: bool  # Anthropic Messages wire (translate /messages SSE)
 
 proc networkWorker(a: ptr NetWorkerArgs) {.thread.} =
   ## Runs the full connect+send+SSE loop on a worker thread. Fires deltas
@@ -2668,7 +2770,7 @@ proc networkWorker(a: ptr NetWorkerArgs) {.thread.} =
         streamResponses(a.url, a.key, a.bodyStr, a.baseLabel, slurped, a.job)
       else:
         streamHttp(a.url, a.key, a.bodyStr, a.baseLabel, slurped,
-                   a.suppressXml, a.job, a.codeAssist)
+                   a.suppressXml, a.job, a.codeAssist, a.anthropic)
     # The StreamConn is a ref with internal cycles (Socket + SslContext).
     # Under ORC, freeing it from a different thread than the one that
     # allocated it segfaults the cycle collector. The worker owns the
@@ -2717,7 +2819,8 @@ proc drainAndDispatch(job: NetJob; baseLabel: string) =
       hookAfterLiveContent(baseLabel, d.afterSlurped)
 
 proc callModelThreaded*(p: Profile, bodyStr, baseLabel: string;
-                        suppressXml: bool; responses = false): StreamOutcome =
+                        suppressXml: bool; responses = false;
+                        anthropic = false): StreamOutcome =
   ## The threaded streaming path. Spawns a worker to run `streamHttp`, polls
   ## the shared state on a ~50ms cadence to replay deltas through the hooks,
   ## and joins the worker once it signals done (or the user interrupts).
@@ -2738,7 +2841,8 @@ proc callModelThreaded*(p: Profile, bodyStr, baseLabel: string;
     baseLabel: baseLabel,
     suppressXml: suppressXml,
     responses: responses,
-    codeAssist: geminicliProfile(p))
+    codeAssist: geminicliProfile(p),
+    anthropic: anthropic)
   createThread(t, networkWorker, addr args)
   while job.phase != npDone and not isInterrupted() and not isNetworkQuiet():
     drainAndDispatch(addr job, baseLabel)
@@ -2821,7 +2925,8 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
       "chat/completions rejects it, use a chat variant instead")
   if p.family == "deepseek":
     ensureReasoningField(messages)
-  let wireMessages = repairToolCallPairing(stripInternalFields(messages))
+  let wireMessages = repairToolCallPairing(stripInternalFields(messages,
+    keepThinkingFields = anthropicProfile(p)))
   stripThinkBack(knownGoodThinkBack(p), wireMessages)
   let bodyStr =
     if useResponses:
@@ -2857,6 +2962,10 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
           # wants the wrapped Gemini-native envelope. Project id is
           # discovered once (loadCodeAssist/onboardUser) and persisted.
           sanitizeUtf8(codeAssistBody(p, body, auth_google.projectId()))
+        elif anthropicProfile(p):
+          # Same trick for the Anthropic Messages wire: the OpenAI-shaped
+          # body is an intermediate the translation consumes whole.
+          sanitizeUtf8(anthropicBody(p, body))
         else:
           sanitizeUtf8($body)
   if "\"usage\"" in bodyStr:
@@ -2929,6 +3038,7 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
     # streaming off (the body pins "stream": true the same way).
     let streamTransport = streamingEnabled or chatgptProfile(p)
     let useCodeAssist = geminicliProfile(p)
+    let useAnthropic = anthropicProfile(p)
     outcome =
       if streamTransport:
         when networkSync:
@@ -2942,19 +3052,19 @@ proc callModel*(p: Profile, messages: JsonNode, usage: var Usage,
             else:
               streamHttp(endpointUrl(p, false, true), bearer, bodyStr,
                          baseLabel, slurped, xmlToolCallsFallback(p),
-                         addr syncJob, useCodeAssist)
+                         addr syncJob, useCodeAssist, useAnthropic)
           drainAndDispatch(addr syncJob, baseLabel)
           o
         else:
           callModelThreaded(p, bodyStr, baseLabel, xmlToolCallsFallback(p),
-                            useResponses)
+                            useResponses, useAnthropic)
       else:
         if useResponses:
           callResponses(endpointUrl(p, true, false), bearer, bodyStr,
                         baseLabel, slurped)
         else:
           callHttp(endpointUrl(p, false, false), bearer, bodyStr,
-                   baseLabel, slurped, useCodeAssist)
+                   baseLabel, slurped, useCodeAssist, useAnthropic)
     if isInterruptedMsg(outcome.errMsg):
       hookStopSpinner()
       if outcome.assistantMsg == nil:
@@ -3151,6 +3261,15 @@ proc verifyBody*(p: Profile): string =
       "max_tokens": 1,
       "reasoning_effort": "low"
     }, auth_google.projectId()))
+  elif anthropicProfile(p):
+    # Anthropic ping: /messages translation of the same shape. The
+    # 1-token budget forces the manual-mode thinking degrade inside
+    # the translation, so this stays a valid minimal request.
+    parseJson(anthropicBody(p, %*{
+      "model": p.model,
+      "messages": [%*{"role": "user", "content": "ping"}],
+      "max_tokens": 1
+    }))
   elif chatgptProfile(p):
     # Codex backend: SSE-only, server-side storage off, top-level
     # `instructions` mandatory.
@@ -3294,7 +3413,13 @@ proc fetchModels*(url, key: string): (seq[string], string) =
                                userAgent = ModelUserAgent,
                                sslContext = bundledSslContext())
     defer: client.close()
-    client.headers["Authorization"] = "Bearer " & key
+    if url.startsWith("https://api.anthropic.com"):
+      # The Anthropic models listing rejects a Bearer; it wants the
+      # Messages-protocol pair (x-api-key + pinned version).
+      client.headers["x-api-key"] = key
+      client.headers["anthropic-version"] = AnthropicVersionHeader
+    else:
+      client.headers["Authorization"] = "Bearer " & key
     let resp = guardedHttp(client.get(url & "/models"), IOError,
                            "fetching " & url)
     if resp.code.int != 200:

@@ -195,6 +195,9 @@ type
     capturedHeaders*: seq[string]
       ## Request header lines read by serveCaptureHeaders; read after
       # joinThread. Drives the OpenCode Zen/Go header contract tests.
+    capturedBody*: string
+      ## Request body read by serveAnthropicCapture; read after
+      # joinThread. Drives the Anthropic /messages translation tests.
     acceptDeadline: float
       ## Wakes a blocking accept() every 200ms so a serve thread whose client
       ## never dials (connection cache reuse, a transport retry that stays on
@@ -956,3 +959,211 @@ suite "non-streaming transport: provider silence is not a dead link":
     server.socket.close()
     check code == 401
     check epochTime() - t0 < 30.0
+
+# ---------------------------------------------------------------------------
+# Anthropic Messages wire (family "claude"): the same recv loop, but the
+# SSE stream is Anthropic event-shaped and streamHttp translates it to
+# OpenAI chunks on the fly (see anthropic.nim).
+# ---------------------------------------------------------------------------
+
+proc makeAnthropicSseToolLoop(): string =
+  ## Complete Anthropic stream: a thinking block (text + signature), a
+  ## text block, a tool_use block with fragmented argument JSON, then
+  ## message_delta/message_stop. Includes the `event:` lines the real
+  ## wire sends (streamHttp must skip them).
+  result = ""
+  for (ev, d) in @[
+    ("message_start", """{"type":"message_start","message":{"usage":{"input_tokens":11,"cache_read_input_tokens":4}}}"""),
+    ("content_block_start", """{"type":"content_block_start","index":0,"content_block":{"type":"thinking"}}"""),
+    ("content_block_delta", """{"type":"content_block_delta","index":0,"delta":{"thinking_delta":{"thinking":"plan the run"}}}"""),
+    ("content_block_delta", """{"type":"content_block_delta","index":0,"delta":{"signature_delta":{"signature":"sig-stream-1"}}}"""),
+    ("content_block_stop", """{"type":"content_block_stop","index":0}"""),
+    ("content_block_start", """{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}"""),
+    ("content_block_delta", """{"type":"content_block_delta","index":1,"delta":{"text_delta":{"text":"Listing."}}}"""),
+    ("content_block_stop", """{"type":"content_block_stop","index":1}"""),
+    ("content_block_start", """{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_stream_1","name":"bash"}}"""),
+    ("content_block_delta", """{"type":"content_block_delta","index":2,"delta":{"input_json_delta":{"partial_json":"{\"command\":"}}}"""),
+    ("content_block_delta", """{"type":"content_block_delta","index":2,"delta":{"input_json_delta":{"partial_json":"\"echo ANTHROPIC\"}"}}}"""),
+    ("content_block_stop", """{"type":"content_block_stop","index":2}"""),
+    ("message_delta", """{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":8}}"""),
+    ("message_stop", """{"type":"message_stop"}""")]:
+    result.add("event: " & ev & "\n" & "data: " & d & "\n\n")
+
+proc makeAnthropicSseText(text: string): string =
+  result = ""
+  let textDelta = $(%*{"type": "content_block_delta", "index": 0,
+    "delta": {"text_delta": {"text": text}}})
+  for (ev, d) in @[
+    ("message_start", """{"type":"message_start","message":{"usage":{"input_tokens":5}}}"""),
+    ("content_block_start", """{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"""),
+    ("content_block_delta", textDelta),
+    ("content_block_stop", """{"type":"content_block_stop","index":0}"""),
+    ("message_delta", """{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}"""),
+    ("message_stop", """{"type":"message_stop"}""")]:
+    result.add("event: " & ev & "\n" & "data: " & d & "\n\n")
+
+proc anthropicProfile(server: SseServer): Profile =
+  Profile(name: "anthropic.claude-sonnet-5", url: server.url,
+          key: "sk-ant-key", model: "claude-sonnet-5", family: "claude",
+          reasoning: "medium")
+
+proc serveAnthropicCapture(server: SseServer) {.thread.} =
+  ## Capture the request headers AND body (an Anthropic /messages
+  ## translation), then answer with a plain-text Anthropic stream.
+  var client: Socket
+  if not server.acceptWithinDeadline(client): return
+  var contentLength = 0
+  while true:
+    let line = client.recvLine(timeout = 3000)
+    let s = line.strip()
+    if s.len == 0: break
+    server.capturedHeaders.add s.toLowerAscii()
+    if s.toLowerAscii().startsWith("content-length:"):
+      contentLength = try: parseInt(s.split(":")[1].strip) except ValueError: 0
+  var bodyBuf = ""
+  while bodyBuf.len < contentLength:
+    let chunk = client.recv(contentLength - bodyBuf.len, timeout = 3000)
+    if chunk.len == 0: break
+    bodyBuf.add chunk
+  server.capturedBody = bodyBuf
+  let body = makeAnthropicSseText("ok")
+  try:
+    client.send("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n" &
+      "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n")
+    client.send(toHex(body.len).toLowerAscii() & "\r\n" & body & "\r\n")
+    client.send("0\r\n\r\n")
+  except CatchableError:
+    discard
+  client.close()
+
+suite "anthropic messages wire over the real transport":
+  test "thinking + text + tool_use stream becomes an OpenAI message":
+    let server = newSseServer(makeAnthropicSseToolLoop())
+    var srv: Thread[SseServer]
+    createThread(srv, serveThread, server)
+    var usage = Usage()
+    let result = callModel(anthropicProfile(server),
+      %*[{"role": "user", "content": "run echo ANTHROPIC"}], usage, 0)
+    check result != nil
+    check result{"content"}.getStr == "Listing."
+    check result{"reasoning_content"}.getStr == "plan the run"
+    check result{"reasoning_blocks"}[0]{"thinking"}.getStr == "plan the run"
+    check result{"reasoning_blocks"}[0]{"signature"}.getStr == "sig-stream-1"
+    check result{"tool_calls"}.len == 1
+    check result{"tool_calls"}[0]{"id"}.getStr == "toolu_stream_1"
+    check result{"tool_calls"}[0]{"function"}{"name"}.getStr == "bash"
+    check result{"tool_calls"}[0]{"function"}{"arguments"}.getStr ==
+      "{\"command\":\"echo ANTHROPIC\"}"
+    check result{"finish_reason"}.getStr == "tool_calls"
+    check usage.promptTokens == 15   # input 11 + cache_read 4
+    check usage.completionTokens == 8
+    check usage.totalTokens == 23
+    joinThread(srv)
+    server.socket.close()
+    closeCachedStreamConn()
+
+  test "second request replays thinking block and merged tool_results":
+    # First call: a tool-loop stream whose assistant message carries
+    # the recorded thinking blocks (asserted above). Second call: feed
+    # that message back through callModel and capture the translated
+    # /messages body the server receives.
+    let server = newSseServer("")
+    var srv: Thread[SseServer]
+    createThread(srv, serveAnthropicCapture, server)
+    var usage = Usage()
+    let history = %*[
+      {"role": "system", "content": "you are the Claude edition of 3code"},
+      {"role": "user", "content": "run echo ANTHROPIC"},
+      {"role": "assistant", "content": "Listing.",
+       "reasoning_content": "plan the run",
+       "reasoning_blocks": [
+         {"thinking": "plan the run", "signature": "sig-stream-1"}],
+       "tool_calls": [
+         {"id": "toolu_stream_1", "type": "function",
+          "function": {"name": "bash",
+                       "arguments": "{\"command\":\"echo ANTHROPIC\"}"}}]},
+      {"role": "tool", "tool_call_id": "toolu_stream_1", "content": "ANTHROPIC"}]
+    let result = callModel(anthropicProfile(server), history, usage, 0)
+    check result != nil
+    check result{"content"}.getStr == "ok"
+    joinThread(srv)
+    server.socket.close()
+    closeCachedStreamConn()
+    # Headers: x-api-key + pinned version, no bearer
+    check server.capturedHeaders.anyIt(it == "x-api-key: sk-ant-key")
+    check server.capturedHeaders.anyIt(it.startsWith("anthropic-version:"))
+    check not server.capturedHeaders.anyIt(it.startsWith("authorization:"))
+    check not server.capturedHeaders.anyIt(it.startsWith("anthropic-beta:"))
+    # Body: the /messages translation
+    let req = parseJson(server.capturedBody)
+    check req{"model"}.getStr == "claude-sonnet-5"
+    check req{"max_tokens"}.getInt > 0
+    check req{"system"}.getStr.len > 0
+    check req{"thinking"}{"type"}.getStr == "adaptive"
+    check req{"output_config"}{"effort"}.getStr == "medium"
+    check "temperature" notin req
+    check req{"tools"}[0]{"input_schema"} != nil
+    let msgs = req{"messages"}
+    check msgs[0]{"role"}.getStr == "user"
+    let asst = msgs[1]
+    check asst{"role"}.getStr == "assistant"
+    check asst{"content"}[0]{"type"}.getStr == "thinking"
+    check asst{"content"}[0]{"signature"}.getStr == "sig-stream-1"
+    check asst{"content"}[1]{"type"}.getStr == "text"
+    check asst{"content"}[2]{"type"}.getStr == "tool_use"
+    let tr = msgs[2]
+    check tr{"role"}.getStr == "user"
+    check tr{"content"}[0]{"type"}.getStr == "tool_result"
+    check tr{"content"}[0]{"tool_use_id"}.getStr == "toolu_stream_1"
+    check tr{"content"}[0]{"content"}.getStr == "ANTHROPIC"
+
+  test "opus 5.5 sends the thinking-binding beta and drop_block":
+    let server = newSseServer("")
+    var srv: Thread[SseServer]
+    createThread(srv, serveAnthropicCapture, server)
+    var usage = Usage()
+    let opus = Profile(name: "anthropic.claude-opus-5-5", url: server.url,
+                       key: "sk-ant-key", model: "claude-opus-5-5",
+                       family: "claude", reasoning: "high")
+    let result = callModel(opus,
+      %*[{"role": "user", "content": "say ok"}], usage, 0)
+    check result != nil
+    check result{"content"}.getStr == "ok"
+    joinThread(srv)
+    server.socket.close()
+    closeCachedStreamConn()
+    check server.capturedHeaders.anyIt(
+      it == "anthropic-beta: thinking-binding-controls-2026-08-01")
+    let req = parseJson(server.capturedBody)
+    check req{"thinking"}{"block_binding"}{"prefix_mismatch_behavior"}.getStr ==
+      "drop_block"
+    check req{"output_config"}{"effort"}.getStr == "high"
+
+proc claudecodeProfile(server: SseServer): Profile =
+  Profile(name: "claudecode.claude-sonnet-5", url: server.url,
+          key: "claude-oauth-access-token", model: "claude-sonnet-5",
+          family: "claude", reasoning: "medium")
+
+suite "claudecode (Claude subscription) over the real transport":
+  test "bearer + oauth beta header, no x-api-key, Claude Code system first":
+    let server = newSseServer("")
+    var srv: Thread[SseServer]
+    createThread(srv, serveAnthropicCapture, server)
+    var usage = Usage()
+    let result = callModel(claudecodeProfile(server),
+      %*[{"role": "system", "content": "you are the Claude edition of 3code"},
+         {"role": "user", "content": "say ok"}], usage, 0)
+    check result != nil
+    check result{"content"}.getStr == "ok"
+    joinThread(srv)
+    server.socket.close()
+    closeCachedStreamConn()
+    check server.capturedHeaders.anyIt(it == "authorization: bearer claude-oauth-access-token")
+    check server.capturedHeaders.anyIt(it == "anthropic-beta: oauth-2025-04-20")
+    check server.capturedHeaders.anyIt(it.startsWith("anthropic-version:"))
+    check not server.capturedHeaders.anyIt(it.startsWith("x-api-key:"))
+    let req = parseJson(server.capturedBody)
+    check req{"system"}[0]{"text"}.getStr ==
+      "You are Claude Code, Anthropic's official CLI for Claude."
+    check req{"system"}[1]{"text"}.getStr == "you are the Claude edition of 3code"
+    check req{"thinking"}{"type"}.getStr == "adaptive"

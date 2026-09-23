@@ -2,6 +2,19 @@ Changelog
 
 0.8.0  private mode, per-model params, cache-hot resume, commandcode and
        platte providers, PortableGit in the Windows installer
+  - anthropic provider: Claude on the native Messages wire (Opus 5.5,
+    Sonnet 5, Fable 5.1, Haiku 4.5) with an sk-ant- key — system prompt
+    as a top-level field, tool_use/tool_result content blocks, and the
+    `:reasoning` knob on the model's thinking surface (adaptive effort
+    low/medium/high/xhigh/max on 4.6+/5.x, the legacy token budget on
+    4.5; Opus 5.5+ and Fable cannot disable thinking). Thinking blocks
+    replay across tool loops with their signatures; the prefix-binding
+    models (Opus 5.5+, Fable) request drop_block so an interrupted or
+    compacted history degrades instead of 400ing. No sampling params
+    (the 4.6+ generations reject them). `claudecode` is the Claude
+    Pro/Max subscription twin: browser OAuth on the Claude Code public
+    client, Bearer + oauth beta against api.anthropic.com, the Claude
+    Code line leading the system prompt
   - xiaomi provider; MiMo 2.6 Pro/Flash on xiaomi, OpenRouter, OpenCode Zen/Go
   - editor buffer hard-capped at 512KB: oversized inserts and pastes cut
     at a rune boundary and ring the bell instead of growing forever

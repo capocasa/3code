@@ -23,8 +23,8 @@ import std/[sequtils, strutils]
 
 const ModelFamilies* = [
   "gpt-oss", "glm", "qwen", "deepseek", "kimi", "minimax", "grok", "gpt",
-  "mimo", "inkling", "laguna", "hy", "ling", "longcat", "0xalpha",
-  "nemotron", "mistral", "union",
+  "claude", "mimo", "inkling", "laguna", "hy", "ling", "longcat",
+  "0xalpha", "nemotron", "mistral", "union",
 ]
   ## Hard list of model families, mirroring the families in
   ## `KnownGoodCombos` and `systemPromptFor`. `gpt-oss` is listed before
