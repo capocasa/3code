@@ -462,7 +462,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # `reasoning: {enabled}` on OpenRouter. Returns `reasoning_content`.
     # mimo-v2.6-pro-ultraspeed also exists (same checkpoint, ~10x output
     # speed) but is a contact-us service first-party; add when it opens.
-    # Tencent's tokenhub gateway resells the V2.5-Pro weights.)
+    # Tencent's tokenhub gateway resells the V2.5-Pro weights; deepinfra
+    # and nano-gpt host the V2.6 pair, novita still V2.5.)
     ("xiaomi", "mimo-v2.6-pro", "mimo", "2.6", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("xiaomi", "mimo-v2.6-flash", "mimo", "2.6", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("xiaomi", "mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
@@ -484,6 +485,7 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("venice", "grok-4-20-multi-agent", "grok", "4", "20-ma", "high", 0.2, 8192, tbNone, false, 2_000_000, false),
     ("venice", "grok-4-3", "grok", "4", "3", "low", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("venice", "grok-4-6", "grok", "4", "6", "high", 0.2, 8192, tbNone, false, 500_000, false),
+    ("venice", "grok-4-7", "grok", "4", "7", "high", 0.2, 8192, tbNone, false, 500_000, false),
     ("venice", "grok-4-5", "grok", "4", "5", "high", 0.2, 8192, tbNone, false, 500_000, false),
     ("venice", "grok-build-0-1", "grok", "build", "0.1", "low", 0.2, 8192, tbNone, false, 256_000, false),
     ("venice", "inkling", "inkling", "1", "", "medium", 0.2, 8192, tbNone, false, 256_000, false),
@@ -740,10 +742,13 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("nanogpt", "x-ai/grok-4.20", "grok", "4", "20", "low", 0.2, 8192, tbNone, false, 2_000_000, false),
     ("nanogpt", "x-ai/grok-4.20-multi-agent", "grok", "4", "20-ma", "high", 0.2, 8192, tbNone, false, 2_000_000, false),
     ("nanogpt", "x-ai/grok-4.3", "grok", "4", "3", "low", 0.2, 8192, tbNone, false, 1_000_000, false),
+    ("nanogpt", "x-ai/grok-4.7", "grok", "4", "7", "high", 0.2, 8192, tbNone, false, 500_000, false),
     ("nanogpt", "x-ai/grok-4.6", "grok", "4", "6", "high", 0.2, 8192, tbNone, false, 500_000, false),
     ("nanogpt", "x-ai/grok-4.5", "grok", "4", "5", "high", 0.2, 8192, tbNone, false, 500_000, false),
     ("nanogpt", "x-ai/grok-build-0.1", "grok", "build", "0.1", "low", 0.2, 8192, tbNone, false, 256_000, false),
     ("nanogpt", "xiaomi/mimo-v2.5", "mimo", "2.5", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
+    ("nanogpt", "xiaomi/mimo-v2.6-flash", "mimo", "2.6", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
+    ("nanogpt", "xiaomi/mimo-v2.6-pro", "mimo", "2.6", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("nanogpt", "xiaomi/mimo-v2.5-pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("nanogpt", "z-ai/glm-5-turbo", "glm", "5", "turbo", "on", 0.2, 8192, tbAllTurns, false, 200_000, false),
     ("cheaperinference", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
@@ -802,6 +807,8 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("deepinfra", "Qwen/Qwen3.7-Max", "qwen", "3.7", "max", "on", 0.2, 8192, tbNone, false, 262_144, false),
     ("deepinfra", "XiaomiMiMo/MiMo-V2.5", "mimo", "2.5", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("deepinfra", "XiaomiMiMo/MiMo-V2.5-Pro", "mimo", "2.5", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
+    ("deepinfra", "XiaomiMiMo/MiMo-V2.6-Flash", "mimo", "2.6", "flash", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
+    ("deepinfra", "XiaomiMiMo/MiMo-V2.6-Pro", "mimo", "2.6", "pro", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("deepinfra", "inclusionAI/Ling-3.0-flash", "ling", "3", "0-flash", "off", 0.2, 8192, tbNone, false, 262_144, false),
     ("deepinfra", "moonshotai/Kimi-K2.7-Code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, false),
     ("deepinfra", "moonshotai/Kimi-K3", "kimi", "3", "", "on", 0.6, 8192, tbAllTurns, false, 1_000_000, false),

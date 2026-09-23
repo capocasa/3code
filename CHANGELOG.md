@@ -13,6 +13,8 @@ Changelog
   - dead oauth refresh token ends the turn with a re-login hint, not a crash
   - harness autosends (steer, flail prods) show exact text in scrollback
   - Grok 4.7 known-good: xai, OpenRouter, OpenCode Zen (same shape as 4.6)
+  - MiMo 2.6 known-good on DeepInfra and nano-gpt; Grok 4.7 on nano-gpt
+    and Venice (flattened grok-4-7 id)
   - retry-backoff notice boxed by blank rows, absorbed on reconnect
   - -c/--config switch reads an alternate config file (docs always promised it)
   - [settings] max_timeout raises the bash timeout ceiling; THREECODE_MAX_TIMEOUT wins per run
