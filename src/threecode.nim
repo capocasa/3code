@@ -614,18 +614,21 @@ proc main() =
                               body: "unknown command: " & cmd.strip &
                                     "  (try :help)\n")
         let bytes = plainCommandBodyBytes(res.body)
-        commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true)
+        commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true,
+                              clearEditor = true)
       of ckQuit:
         pushInputEvent(InputEvent(kind: ieQuit))
         requestTurnInterrupt("quit-command-during-turn")
       of ckMutating, ckModal:
         let msg = "cannot run " & cmd.strip & " while a turn is active"
         let bytes = plainCommandBodyBytes(msg & "\n")
-        commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true)
+        commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true,
+                              clearEditor = true)
       else:
         let bytes = plainCommandBodyBytes(
           "unknown command: " & cmd.strip & "  (try :help)\n")
-        commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true)
+        commitTranscriptBytes(bytes, restoreEditor = true, reserveFooter = true,
+                              clearEditor = true)
   )
 
   proc handleBufferedAfterTurn(): bool =
@@ -814,7 +817,9 @@ proc main() =
         let commandBytes = plainCommandBodyBytes(commandResult.body)
         let bytes = echoBytes & "\r\n\r\n" & commandBytes
         proc clearSubmittedCommandEditor() =
-          resetEditorRowModel(addr editor)
+          # No editor model reset here: the commit's walk-up must still see
+          # the multi-row command the terminal is showing. clearEditor below
+          # drops it inside the commit, after the walk-up.
           if commandResult.clearFooter:
             emitFatPromptEvent clearPendingHintEvent()
             emitFatPromptEvent clearBarEvent()
@@ -822,7 +827,8 @@ proc main() =
           bytes,
           restoreEditor = true,
           beforeRepaint = clearSubmittedCommandEditor,
-          reserveFooter = true)
+          reserveFooter = true,
+          clearEditor = true)
         releaseIdleSubmittedInput()
         continue
       if prof.name == "":

@@ -2310,6 +2310,91 @@ max-tokens = "8192"
       "committed echo lost " & $(3 - echoTail) & " tail row(s) to the " &
       "answer commit\n" & tty.dumpFramesAround("recall me alpha")
 
+  test "wrapped command submits erase their whole editor block":
+    # Reported fallout of "commands mangle the rows around the prompt": a
+    # `:command` long enough to wrap the editor to 3+ rows committed its
+    # echo from an editor model that had already been reset, so the
+    # erase walked up only the footer rows, started inside the editor,
+    # and stranded the stale bar + the editor's top rows between the
+    # previous content and the committed echo. Single-row commands
+    # canceled the arithmetic, which is why it only showed wrapped.
+    let root = newFixture("wrapped_command_eat")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[
+      {
+        "role": "assistant",
+        "content": "first reply marker one",
+        "contentChunks": ["first reply marker one"],
+        "usage": {"promptTokens": 10, "completionTokens": 5,
+                  "totalTokens": 15, "cachedTokens": 0}
+      },
+      {
+        "role": "assistant",
+        "waitForTestContinue": true,
+        "content": "second reply marker two",
+        "contentChunks": ["second reply marker two"],
+        "usage": {"promptTokens": 12, "completionTokens": 6,
+                  "totalTokens": 18, "cachedTokens": 0}
+      }
+    ])
+    let tty = startStub(root, cols = 60)
+    defer: tty.close()
+    tty.expect "❯"
+    # Turn 1 arms the receipt + resting bar below it.
+    tty.send "warm up turn\n"
+    tty.expectInHistory "first reply marker one"
+    tty.expectIdleCaret()
+    tty.drain(300)
+    # Idle submit of a command wrapping to 4 editor rows (one long word
+    # cannot break, so the editor stacks it over continuation rows).
+    tty.send ":sandbox allow " & repeat('w', 120) & "\n"
+    tty.expect "sandbox updated"
+    tty.drain(400)
+    block:
+      let rows = tty.rows()
+      var echoRow = -1
+      for i, r in rows:
+        if r.startsWith("❯ :sandbox allow"): echoRow = i
+      doAssert echoRow >= 2,
+        "command echo head row missing\n" & tty.dumpFramesAround("sandbox updated")
+      doAssert rows[echoRow - 1].strip.len == 0,
+        "row above the echo head is not the separator blank: '" &
+        rows[echoRow - 1] & "'\n" & tty.dumpFramesAround("sandbox updated")
+      doAssert "○0%" in rows[echoRow - 2],
+        "receipt does not sit two rows above the echo head: '" &
+        rows[echoRow - 2] & "'\n" & tty.dumpFramesAround("sandbox updated")
+      var echoHeads = 0
+      for r in rows:
+        if r.startsWith("❯ :sandbox allow"): inc echoHeads
+      doAssert echoHeads == 1,
+        "stale editor row duplicated above the committed echo\n" &
+        tty.dumpFramesAround("sandbox updated")
+    # Mid-turn submit of the same wrapped command: the buffered editor
+    # must be consumed whole by the rejection commit, leaving no `❯ :...`
+    # remnant on screen and a clean blank above the rejection.
+    tty.send "hold turn open\n"
+    tty.drain(500) # stream held open: bar + buffered editor are live
+    tty.send ":sandbox allow " & repeat('v', 120) & "\n"
+    tty.expect "cannot run :sandbox allow"
+    tty.drain(400)
+    block:
+      let rows = tty.rows()
+      var rejectRow = -1
+      for i, r in rows:
+        if r.startsWith("cannot run :sandbox allow"): rejectRow = i
+      doAssert rejectRow >= 1,
+        "rejection row missing\n" & tty.dumpFramesAround("cannot run")
+      for r in rows:
+        # 'v' filler only exists in the mid-turn command; the idle echo
+        # above (w's) is legitimate committed scrollback.
+        doAssert not r.startsWith("❯ :sandbox allow v"),
+          "stale command editor row lingered: '" & r & "'\n" &
+          tty.dumpFramesAround("cannot run")
+    tty.continueStubApi()
+    tty.expectInHistory "second reply marker two"
+    tty.expectIdleCaret()
+    tty.drain(300)
+
   test "interrupt during a queued mid-turn prompt sends the queue next":
     # Design contract: a prompt queued during a turn shows the hourglass.
     # In that state, Ctrl-C (or Esc) cancelling the *current* turn must send

@@ -1146,7 +1146,8 @@ proc commitTranscriptItem(e: var TerminalEngine; transcript: string;
                           compactRowsAboveFooter: int;
                           restoreEditor: bool;
                           reserveFooter: bool;
-                          flushWithPrevious = false) =
+                          flushWithPrevious = false;
+                          clearEditor = false) =
   ## The single commit-repaint path for both anchored and floating state:
   ## walk from the cursor to the top of the volatile region, erase it,
   ## commit the item as scrollback, rebuild the chrome. One proc owns the
@@ -1179,6 +1180,19 @@ proc commitTranscriptItem(e: var TerminalEngine; transcript: string;
   if up > 0:
     stdout.write "\x1b[" & $up & "A"
   stdout.write "\r\x1b[J"
+  if clearEditor and editing:
+    # The walk-up above read the editor's pre-submit geometry; only now,
+    # with the volatile region erased, may the model drop it. A caller
+    # resetting the editor before the commit makes `walkUp` count 0
+    # editor rows while the terminal still shows the multi-row command:
+    # the erase starts inside the editor and strands its top rows (and
+    # the bar) above the committed echo as stale scrollback.
+    edPtr[].line = minline.Line(text: "", position: 0)
+    edPtr[].renderSuffix = ""
+    edPtr[].renderSuffixCursor = false
+    edPtr[].renderRow = 0
+    edPtr[].echoRows = 0
+    edPtr[].prevRowSpans = @[]
   e.toolViewportRows = @[]
   # The erase just consumed the volatile live-content rows (the streaming
   # partial this commit writes to scrollback). Clear them inside the same
@@ -1205,7 +1219,8 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
                        compactRowsAboveFooter = 0;
                        restoreEditor = true;
                        reserveFooter = true;
-                       flushWithPrevious = false) =
+                       flushWithPrevious = false;
+                       clearEditor = false) =
   ## Append transcript bytes as real scrollback while preserving or clearing
   ## the volatile footer. One blank row separates every pair of items, owned
   ## by one place: here. Before every item after the first, `\r\n` is
@@ -1222,7 +1237,8 @@ proc appendTranscript*(e: var TerminalEngine; transcriptBytes: string;
     e.commitTranscriptItem(transcript, inputRunning, editor,
                            footerBytes, footerRowsAboveEditor,
                            compactRowsAboveFooter,
-                           restoreEditor, reserveFooter, flushWithPrevious)
+                           restoreEditor, reserveFooter, flushWithPrevious,
+                           clearEditor)
 
 proc prepareAssistantContentStart*(e: var TerminalEngine;
                                    inputRunning: bool;
@@ -1309,7 +1325,8 @@ proc appendTranscript*(transcriptBytes: string;
                        compactRowsAboveFooter = 0;
                        restoreEditor = true;
                        reserveFooter = true;
-                       flushWithPrevious = false) =
+                       flushWithPrevious = false;
+                       clearEditor = false) =
   if not engineOutputEnabled:
     if headlessTranscriptHook != nil and transcriptBytes.len > 0:
       headlessTranscriptHook(transcriptBytes)
@@ -1324,4 +1341,5 @@ proc appendTranscript*(transcriptBytes: string;
     compactRowsAboveFooter,
     restoreEditor,
     reserveFooter,
-    flushWithPrevious)
+    flushWithPrevious,
+    clearEditor)

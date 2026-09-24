@@ -14,6 +14,17 @@ Changelog
   count. The multiline golden fixture is regenerated: it had recorded
   the bug (the first echo's `second line` row missing).
 
+- **Wrapped `:commands` no longer strand stale rows above their echo.**
+  Both command submit paths cleared the editor's row model before the
+  commit walked up (the idle path via its beforeRepaint hook, the
+  mid-turn path in the submit handler itself), so a command wrapping
+  the editor to three or more rows erased from inside its own block:
+  the resting bar and the editor's top rows survived as junk between
+  the previous content and the committed echo. The model reset now
+  happens inside the commit, after the walk-up has consumed the
+  pre-submit geometry (`clearEditor`). Single-row commands were never
+  affected.
+
 0.8.0  private mode, per-model params, cache-hot resume, commandcode and
        platte providers, PortableGit in the Windows installer
   - xiaomi provider; MiMo 2.6 Pro/Flash on xiaomi, OpenRouter, OpenCode Zen/Go

@@ -839,14 +839,17 @@ proc resetEditorRowModel*(ed: ptr minline.LineEditor) =
 proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
                             beforeRepaint: proc() = nil;
                             reserveFooter = true;
-                            flushWithPrevious = false) =
+                            flushWithPrevious = false;
+                            clearEditor = false) =
   ## Commit transcript output while preserving the volatile footer.
   ## The controller owns the transcript bytes and item spacing. This proc owns
   ## the terminal mechanics: clear the volatile footer, append the bytes as
   ## scrollback, then repaint whatever footer state remains. ``beforeRepaint``
   ## runs after transcript bytes are known but before repaint bytes are
   ## computed, so a controller can convert a live bar into a receipt and clear
-  ## it without fatprompt reintroducing stale chrome.
+  ## it without fatprompt reintroducing stale chrome. ``clearEditor`` (command
+  ## submits, which repaint an empty prompt) drops the editor model inside
+  ## the commit, AFTER its walk-up consumed the pre-submit geometry.
   debugOut &"writeTranscriptWithFatPrompt enter barLabel={currentBarLabel.len}"
   let oldFooter = footerFrame(fatPromptState)
   if receiptTouchesNextResponse and transcriptBytes.hasNonNewlineBytes:
@@ -886,7 +889,8 @@ proc commitTranscriptBytes*(transcriptBytes: string; restoreEditor = true;
       0,
       restoreEditor,
       reserveFooter,
-      flushWithPrevious)
+      flushWithPrevious,
+      clearEditor)
   if reserveFooter and transcriptBytes.hasNonNewlineBytes and currentBarLabel.len > 0:
     emitFatPromptEvent setBarEvent(currentBarLabel, hasGap = true)
   debugOut "writeTranscriptWithFatPrompt exit"
@@ -2277,13 +2281,19 @@ proc inputThreadProc() {.thread.} =
         let rows = minline.totalRows(ed.line.text, ed.promptW, ed.contPromptW,
                                      max(2, ed.width))
         pushInputEvent(InputEvent(kind: ieCommand, text: cmd, echoRows: rows))
-        ed.line = minline.Line(text: "", position: 0)
-        ed.renderSuffix = ""
-        ed.renderSuffixCursor = false
-        ed.renderRow = 0
-        ed.echoRows = 0
+        # Leave the editor's row model intact: the hook's commit walks up
+        # over the rows the terminal is still showing, then clears the
+        # model inside itself (clearEditor). Clearing here first makes a
+        # multi-row command under-walk its erase and strand the top rows
+        # (and the bar) above the committed output.
         if activeCommandHook != nil:
           activeCommandHook(cmd)
+        else:
+          ed.line = minline.Line(text: "", position: 0)
+          ed.renderSuffix = ""
+          ed.renderSuffixCursor = false
+          ed.renderRow = 0
+          ed.echoRows = 0
         return
       let rows = minline.totalRows(ed.line.text, ed.promptW, ed.contPromptW,
                                     max(2, ed.width))
