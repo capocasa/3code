@@ -150,3 +150,61 @@ suite "spinner runs through backoff while typing":
       tty.drain(2000, recordFrame = false)
       tty.expectAlive()
     echo "  PASS: cancel during live stream did not crash"
+
+  test "no SIGSEGV when buffered-text cancel resets editor during live ticks":
+    # Same family, the next window over: cancelling buffered text mid-turn
+    # runs in the input thread's `except InputCancelled` handler, OUTSIDE
+    # readLineWith's preMutate..postMutate terminal-lock window. The handler
+    # reassigns `ed.line`, `renderSuffix`, `renderSuffixCursor`, `renderRow`
+    # unlocked; the gui tick's repaintLiveContent walks those same fields
+    # (renderRowSpans, editorSig, prevRowSpans reassignment at the paint's
+    # editor block) under the terminal write lock. The unlocked reassign
+    # decs the old string payloads' ORC cells while the gui thread holds
+    # uncounted borrows of them, freeing rows mid-walk: SIGSEGV in
+    # visualCols/diffRowBytes on the gui thread (release manifests; dev
+    # raises a Defect or survives on timing). Each cancel is one window,
+    # so every iteration is a fresh turn driven to a dense cancel.
+    for iteration in 1 .. 12:
+      let root = newFixture("cancel_reset_" & $iteration)
+      writeConfiguredProvider(root)
+      let chunks = block:
+        var cs = newJArray()
+        for i in 0 ..< 40:
+          cs.add %*("chunk-" & $i & " ")
+        cs
+      let responses = %*[
+        {"role": "assistant", "preStreamDelayMs": 100,
+         "content": "done", "contentChunks": chunks,
+         "contentChunkDelayMs": 80,
+         "usage": {"promptTokens": 5, "completionTokens": 1,
+                   "totalTokens": 6, "cachedTokens": 0}}]
+      writeFile(root / "run" / "stub_responses.json", $responses)
+      let tty = newTtySession(ensureStubBinary(),
+                              args = ["-x", "-i"],
+                              cwd = root / "run",
+                              env = stubEnv(root, root / "run" / "stub_responses.json",
+                                            guiLive = true))
+      defer:
+        tty.close()
+      tty.expect "\u276f"
+      tty.send "go"
+      tty.expect "go"
+      tty.send "\n"
+      tty.expect "chunk-1"
+      # Type buffered text, cancel it (mid-turn: prefill stash + reset),
+      # retype, cancel with the other chord. Tight cycles so each 80ms
+      # gui tick overlaps an except-handler window as often as possible.
+      for burst in 1 .. 6:
+        rawSend(tty, "buffered draft text " & $burst)
+        tty.drain(40, recordFrame = false)
+        rawSend(tty, if burst mod 2 == 1: "\x1b" else: "\x03")
+        tty.drain(40, recordFrame = false)
+        tty.expectAlive()
+        rawSend(tty, "retyped " & $burst)
+        tty.drain(40, recordFrame = false)
+        rawSend(tty, if burst mod 2 == 1: "\x03" else: "\x1b")
+        tty.drain(40, recordFrame = false)
+        tty.expectAlive()
+      tty.drain(1500, recordFrame = false)
+      tty.expectAlive()
+    echo "  PASS: buffered-cancel reset during live ticks did not crash"

@@ -610,18 +610,6 @@ proc currentSpinnerFooterFrame(): FooterFrame {.gcsafe.} =
     m.label, m.ticker, lastPaintedElapsedS.load(moAcquire).int,
     m.retryWait)
 
-proc refreshEditorWidth(ed: var minline.LineEditor) =
-  let w = try: terminalWidth() except CatchableError: 0
-  if w > 0:
-    ed.width = w
-
-proc liveEditorRows(): int =
-  if inputThreadRunning and inputEditor != nil:
-    refreshEditorWidth(inputEditor[])
-    max(1, minline.renderedRows(inputEditor[]))
-  else:
-    1
-
 proc currentTermW(): int =
   ## Best-effort terminal column count for width-aware fat-prompt geometry.
   ## Returns 0 when stdout is not a tty (test harnesses, redirected runs) so
@@ -2495,8 +2483,17 @@ proc inputThreadProc() {.thread.} =
           # wizard's last status line (`verifying... ok`). Restore the
           # persistent prompt string as well so a mid-hold repaint can
           # never flash the stale field prompt.
-          edPtr[].prompt = EditorPromptBytes
-          edPtr[].promptW = visualCols(EditorPromptBytes)
+          #
+          # The write lock: every editor field write outside readLineWith's
+          # preMutate..postMutate window races the gui tick's locked walk of
+          # the same fields (editorSig borrows `prompt`, renderRowSpans
+          # re-walks it); an unlocked reassign also decs the old prompt
+          # payload's ORC cell while the gui thread holds an uncounted
+          # borrow, freeing it mid-walk. Same class at every reset site
+          # below (the repaintLiveContent SIGSEGV in visualCols).
+          termui.withTerminalWriteLock:
+            edPtr[].prompt = EditorPromptBytes
+            edPtr[].promptW = visualCols(EditorPromptBytes)
           termengine.noteNoFooter()
         acquire wizardRequestLock
         try:
@@ -2538,11 +2535,13 @@ proc inputThreadProc() {.thread.} =
         else:
           pushInputEvent(InputEvent(kind: ieLine, text: text,
                                      echoRows: edPtr[].echoRows))
-        edPtr[].line = minline.Line(text: "", position: 0)
-        edPtr[].renderSuffix = ""
-        edPtr[].renderSuffixCursor = false
-        edPtr[].renderRow = 0
-        edPtr[].echoRows = 0
+        # Submit reset: see the wizard-completion lock comment above.
+        termui.withTerminalWriteLock:
+          edPtr[].line = minline.Line(text: "", position: 0)
+          edPtr[].renderSuffix = ""
+          edPtr[].renderSuffixCursor = false
+          edPtr[].renderRow = 0
+          edPtr[].echoRows = 0
       except minline.WizardSwitched:
         # `getCh` returned the wizard sentinel because a modal
         # wizard is waiting. Drop any text the user typed in the
@@ -2552,11 +2551,13 @@ proc inputThreadProc() {.thread.} =
         # the result. The editor's defer + cancel/submit handlers
         # have already cleaned up the persistent readLineWith's
         # own state; we only clear our outer-loop residue.
-        edPtr[].line = minline.Line(text: "", position: 0)
-        edPtr[].renderSuffix = ""
-        edPtr[].renderSuffixCursor = false
-        edPtr[].renderRow = 0
-        edPtr[].echoRows = 0
+        # Wizard-switch reset: see the wizard-completion lock comment above.
+        termui.withTerminalWriteLock:
+          edPtr[].line = minline.Line(text: "", position: 0)
+          edPtr[].renderSuffix = ""
+          edPtr[].renderSuffixCursor = false
+          edPtr[].renderRow = 0
+          edPtr[].echoRows = 0
         continue
       except minline.InputCancelled:
         if inputTurnActive.load(moAcquire):
@@ -2570,12 +2571,14 @@ proc inputThreadProc() {.thread.} =
           # made during the spinner / retry backoff is silently dropped —
           # the visual cursor lands on an empty `❯ ` and the user has to
           # retype the whole follow-up.
-          if edPtr[].line.text.len > 0:
-            edPtr[].prefillText = edPtr[].line.text
-            edPtr[].line = minline.Line(text: "", position: 0)
-          edPtr[].renderSuffix = ""
-          edPtr[].renderSuffixCursor = false
-          edPtr[].renderRow = 0
+          # Cancel reset: see the wizard-completion lock comment above.
+          termui.withTerminalWriteLock:
+            if edPtr[].line.text.len > 0:
+              edPtr[].prefillText = edPtr[].line.text
+              edPtr[].line = minline.Line(text: "", position: 0)
+            edPtr[].renderSuffix = ""
+            edPtr[].renderSuffixCursor = false
+            edPtr[].renderRow = 0
           continue
         # At idle: clear the draft in place and signal an interrupt. The
         # editor's renderRow still tracks the cursor's visual row from the
@@ -2590,17 +2593,22 @@ proc inputThreadProc() {.thread.} =
         # would erase real scrollback above the prompt. Push ieInterrupt
         # so the controller drains and continues with no walk-back of its
         # own.
-        edPtr[].line = minline.Line(text: "", position: 0)
-        edPtr[].renderSuffix = ""
-        edPtr[].renderSuffixCursor = false
-        edPtr[].echoRows = 0
-        # readLineWith's defer nilled ed.write when it raised, so restore it
+        # Idle-cancel reset + in-place fullRedraw: see the wizard-completion
+        # lock comment above. fullRedraw also rewrites prevRowSpans, whose
+        # payload the gui tick's diff painter may be walking under this same
+        # lock right now; unlocked it reassigns the seq mid-walk.
+        termui.withTerminalWriteLock:
+          edPtr[].line = minline.Line(text: "", position: 0)
+          edPtr[].renderSuffix = ""
+          edPtr[].renderSuffixCursor = false
+          edPtr[].echoRows = 0
+          # readLineWith's defer nilled ed.write when it raised, so restore it
         # for this in-place repaint. renderRow still tracks the cursor's
         # visual row from the last typing repaint, so fullRedraw walks up to
         # the draft's top row, erases to end (clearing every wrapped row),
         # and repaints an empty prompt there.
-        edPtr[].write = writeProc
-        minline.fullRedraw(edPtr[])
+          edPtr[].write = writeProc
+          minline.fullRedraw(edPtr[])
         # Leave ed.write set; the next readLineWith restores it and
         # nilling here would race with a concurrent fullRedraw in the
         # other thread.
@@ -2635,15 +2643,24 @@ proc inputThreadProc() {.thread.} =
         # input thread: a dead thread leaves the prompt painted but frozen
         # — caret never moves, keystrokes silently dropped. Reset the editor
         # state and retry the loop while we are still running.
-        edPtr[].line = minline.Line(text: "", position: 0)
-        edPtr[].renderSuffix = ""
-        edPtr[].renderSuffixCursor = false
-        edPtr[].renderRow = 0
-        edPtr[].deferSubmit = false
+        # Transient-error retry reset: see the wizard-completion lock comment
+        # above. The sleep stays outside the lock (retry backoff, not state).
+        termui.withTerminalWriteLock:
+          edPtr[].line = minline.Line(text: "", position: 0)
+          edPtr[].renderSuffix = ""
+          edPtr[].renderSuffixCursor = false
+          edPtr[].renderRow = 0
+          edPtr[].deferSubmit = false
         sleep 10
         continue
 
     restoreInputTermios()
+    # Shutdown reset: same lock discipline; the gui thread may still be
+    # mid-tick between the thread's exit signal and the controller's stopGui.
+    termui.withTerminalWriteLock:
+      edPtr[].renderSuffix = ""
+      edPtr[].renderSuffixCursor = false
+      edPtr[].deferSubmit = false
     edPtr[].onMutate = nil
     edPtr[].onSubmit = nil
     edPtr[].onCancelDeferredSubmit = nil
@@ -2651,9 +2668,6 @@ proc inputThreadProc() {.thread.} =
     edPtr[].postRedraw = nil
     edPtr[].painter = nil
     edPtr[].editInEditor = nil
-    edPtr[].deferSubmit = false
-    edPtr[].renderSuffix = ""
-    edPtr[].renderSuffixCursor = false
     edPtr[].getCh = nil
     edPtr[].write = nil
     edPtr[].getWidth = nil

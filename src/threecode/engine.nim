@@ -702,22 +702,28 @@ proc beginEditorRedraw*(ed: var minline.LineEditor; ready: bool;
   defaultEngine.beginEditorRedraw(ed, ready, frame)
 
 proc finishEditorRedraw*(e: var TerminalEngine; ed: var minline.LineEditor) =
-  if e.editorRedrawPending:
-    if e.editorRedrawFooterRows > 0:
-      # beginEditorRedraw already synced the row model with the bytes
-      # this redraw paints; keep it.
-      e.noteFooterPaintedKeepRows(e.editorRedrawFooterRows)
-    elif e.paintedFooterRows > 0:
-      # A bare editor redraw (no footer bytes) must not wipe a nonzero
-      # painted-footer count left by the ffNone commit path: that path
-      # reserves the one-row gap below the last item as live chrome, and
-      # the count is what makes the next commit's walk-up erase it.
-      discard
-    else:
-      e.noteNoFooter()
-    e.editorRedrawPending = false
-    e.editorRedrawFooterRows = 0
-  termio.finishEditorRedraw()
+  # Runs on the input thread (the editor-ready hook) while the gui tick
+  # reads the same engine fields under the terminal write lock; the note
+  # procs inside also free the tracked volatile-row seq, which a gui tick
+  # must never observe mid-swap. Take the same lock (reentrant with the
+  # note wrappers' own).
+  termio.withTerminalWriteLock:
+    if e.editorRedrawPending:
+      if e.editorRedrawFooterRows > 0:
+        # beginEditorRedraw already synced the row model with the bytes
+        # this redraw paints; keep it.
+        e.noteFooterPaintedKeepRows(e.editorRedrawFooterRows)
+      elif e.paintedFooterRows > 0:
+        # A bare editor redraw (no footer bytes) must not wipe a nonzero
+        # painted-footer count left by the ffNone commit path: that path
+        # reserves the one-row gap below the last item as live chrome, and
+        # the count is what makes the next commit's walk-up erase it.
+        discard
+      else:
+        e.noteNoFooter()
+      e.editorRedrawPending = false
+      e.editorRedrawFooterRows = 0
+    termio.finishEditorRedraw()
 
 proc finishEditorRedraw*(ed: var minline.LineEditor) =
   if not engineOutputEnabled: return
