@@ -506,7 +506,7 @@ proc parseConfigFile*(path: string): (string, seq[ProviderRec], Table[string, st
       # meaningful for a subscription login, so re-mark the known
       # subscription twins here instead of asking the user to re-add.
       if prov.auth == "" and prov.key == "" and
-         prov.name.toLowerAscii in ["supergrok", "chatgpt"]:
+         prov.name.toLowerAscii in ["supergrok", "chatgpt", "claudecode"]:
         prov.auth = "oauth"
       providers.add prov
       prov = ProviderRec()

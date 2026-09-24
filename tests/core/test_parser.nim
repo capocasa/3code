@@ -2,6 +2,11 @@ import std/[unittest, json, strutils]
 import threecode/[types, actions]
 
 suite "glm/qwen dispatch":
+  test "claude dispatches on the glm/qwen tool surface":
+    let act = toolCallToAction("claude", "bash", %*{"command": "echo hi"})
+    check act.kind == akBash
+    check act.body == "echo hi"
+
   test "bash takes a command string":
     let act = toolCallToAction("glm", "bash", %*{"command": "nimble test"})
     check act.kind == akBash

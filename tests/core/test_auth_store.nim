@@ -6,6 +6,7 @@ import std/[json, os, times, unittest]
 import threecode/oauth
 import threecode/auth_openai as openai
 import threecode/auth_xai as xai
+import threecode/auth_anthropic as anthropic
 
 template withTempStore(body: untyped) =
   ## Point both providers' stores into a scratch data root via
@@ -60,3 +61,12 @@ suite "auth token store":
   test "xai corrupt store reads as logged out, not a crash":
     withTempStore:
       checkCorruptStoreIsZero(xai.loadTokens, xai.tokenPath())
+
+  test "anthropic corrupt store reads as logged out, not a crash":
+    withTempStore:
+      checkCorruptStoreIsZero(anthropic.loadTokens, anthropic.tokenPath())
+
+  test "anthropic subscriptionTokenFor only resolves the claudecode twin":
+    check anthropic.subscriptionTokenFor("claudecode") == ""
+    check anthropic.subscriptionTokenFor("anthropic") == ""
+    check anthropic.subscriptionTokenFor("commandcode") == ""

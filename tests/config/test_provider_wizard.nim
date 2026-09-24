@@ -843,11 +843,12 @@ suite "provider wizard configuration":
     inputs = @["nvapi-key", "gpt-oss-20b"]
     discard handleCommand(":provider add", messages, session, prof, editor)
     check "nvidia" in firstFieldCompletions
-    # mistral and commandcode (open-model gateway rows) are known-good;
-    # anthropic stays catalog-only.
+    # mistral, commandcode (open-model gateway rows), and anthropic
+    # (claude rows) are known-good; hyperbolic stays catalog-only.
     check "mistral" in firstFieldCompletions
     check "commandcode" in firstFieldCompletions
-    check "anthropic" notin firstFieldCompletions
+    check "anthropic" in firstFieldCompletions
+    check "hyperbolic" notin firstFieldCompletions
 
     activeProviders = @[]
     activeCurrent = ""

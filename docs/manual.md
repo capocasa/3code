@@ -159,6 +159,7 @@ The first field accepts:
 - an API key with a recognized prefix
 - `supergrok` for SuperGrok or X Premium+ login
 - `chatgpt` for ChatGPT Plus/Pro login
+- `claudecode` for Claude Pro/Max login
 
 The wizard lists the provider's known-good models (a curated registry of
 combinations 3code has tested) and saves your selection as-is. With
@@ -249,6 +250,39 @@ Switch accounts with:
 :provider chatgpt
 ```
 
+### Anthropic and Claude
+
+An `sk-ant-` key (or `anthropic` in the wizard) creates a normal API-key
+provider against api.anthropic.com. 3code speaks the Anthropic Messages wire
+natively: the system prompt as a top-level field, tool calls as typed content
+blocks, and adaptive thinking with effort levels (`:reasoning` low / medium /
+high / xhigh / max). Claude 5.x always thinks — `off` is not offered on Opus
+5.5 and Fable, where Anthropic rejects it — and thinking summaries stream to
+the reasoning ticker. Thinking blocks replay across tool loops with their
+signatures, so long agentic runs keep their reasoning; the models that bind
+thinking to the conversation (Opus 5.5, Fable) ride Anthropic's drop-block
+fallback so an interrupted or compacted history degrades instead of failing.
+
+A Claude Pro or Max subscription works like the ChatGPT login: enter
+`claudecode` in the provider wizard and finish the browser OAuth on
+claude.ai. Tokens live in:
+
+```
+$XDG_DATA_HOME/3code/auth/anthropic.json
+```
+
+On POSIX systems the file is created with mode 0600, and tokens refresh
+automatically. The subscription token only works against api.anthropic.com
+(the url is pinned), authenticates as a Bearer with Anthropic's OAuth beta
+opt-in, and the endpoint requires the request's system prompt to open with
+the Claude Code line — 3code sends that line first and its own Claude
+preamble second. An API-key `anthropic` provider can sit beside it.
+
+The same caveat as the ChatGPT/Codex twin applies: the OAuth surface is
+scoped to Anthropic's own client and is neither versioned nor offered to
+third parties. It works today; using it through 3code is your
+responsibility, and it can stop at any time.
+
 ### Command Code
 
 A Command Code plan (GOAT, Pro, Max, or the Provider plan) gives API access
@@ -280,10 +314,11 @@ configure.
 
 ### Model labs
 
-First-party APIs from the labs that trained the models. Two of the home page
+First-party APIs from the labs that trained the models. Three of the home page
 names are subscription logins rather than catalog entries: `chatgpt` is a
-ChatGPT Plus/Pro login that rides on `openai`, and `supergrok` is a SuperGrok
-or X Premium+ login that rides on `xai`.
+ChatGPT Plus/Pro login that rides on `openai`, `supergrok` is a SuperGrok
+or X Premium+ login that rides on `xai`, and `claudecode` is a Claude Pro/Max
+login that rides on `anthropic`.
 
 | provider | hosting | notes |
 | --- | --- | --- |
@@ -297,7 +332,7 @@ or X Premium+ login that rides on `xai`.
 | tencent | China (intl endpoint) | Hunyuan on Tencent MaaS |
 | ★ openai | US | API key, or log in as `chatgpt` on a Plus/Pro subscription |
 | ★ xai | US | API key, or log in as `supergrok` on SuperGrok/X Premium+ |
-| anthropic | US | Claude |
+| anthropic | US | Claude on the Messages wire, or log in as `claudecode` on Pro/Max |
 | google | US | Gemini through the OpenAI-compatible surface |
 | mistral | France (EU) | Mistral first-party, plus hosted GLM |
 

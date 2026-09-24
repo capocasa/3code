@@ -15,7 +15,7 @@
 ]#
 
 import std/[algorithm, hashes, json, options, os, sequtils, strutils]
-import types, util, modelname
+import types, util, modelname, anthropic
 
 # ThinkBackMode moved to types.nim (Profile.params needs it); re-export
 # for modules that historically reached it through prompts.
@@ -242,6 +242,23 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("google", "gemini-3.1-flash-lite", "gemini", "3", "1-flash-lite", "low", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("google", "gemini-3.1-pro-preview", "gemini", "3", "1-pro", "high", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("google", "gemini-3-flash-preview", "gemini", "3", "0-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
+
+    # claude (Anthropic Messages wire, /messages; see anthropic.nim).
+    # First-party `anthropic` serves the wire; the `claudecode` twin
+    # (Claude Pro/Max OAuth, auth_anthropic) resolves through these rows
+    # via canonicalKnownGoodProvider and pins api.anthropic.com. Claude
+    # 5.x thinks adaptively by default (effort low/medium/high/xhigh/max;
+    # Opus 5.5+ and Fable/Mythos cannot disable thinking, and default to
+    # medium/high effort respectively); Haiku 4.5 uses the legacy budget
+    # mode. The `:reasoning` knob maps per generation (see
+    # anthropic.nim). Sampling params are never sent: the 4.6+ and 5.x
+    # generations 400 on non-default values. Thinking blocks replay on
+    # every assistant turn (tbAllTurns); the prefix-binding models ride
+    # drop_block so a stale block degrades instead of 400ing.
+    ("anthropic", "claude-opus-5-5", "claude", "opus", "5-5", "medium", -1.0, 65536, tbAllTurns, false, 1_000_000, false),
+    ("anthropic", "claude-sonnet-5", "claude", "sonnet", "5", "high", -1.0, 65536, tbAllTurns, false, 1_000_000, false),
+    ("anthropic", "claude-fable-5-1", "claude", "fable", "5-1", "high", -1.0, 65536, tbAllTurns, false, 1_000_000, false),
+    ("anthropic", "claude-haiku-4-5", "claude", "haiku", "4-5", "low", -1.0, 32768, tbAllTurns, false, 200_000, false),
 
     # Command Code provider gateway open models (api.commandcode.ai/
     # provider/v1, OpenAI chat completions; same plan/API key as their
@@ -2628,6 +2645,85 @@ Load on demand from {{skills}}. Don't preload the catalog.
 {{credit}}
 """
 
+const ClaudePreamble = """You are the Claude edition of 3code, the economical coding agent, backed by Anthropic's Claude (Opus 5.5, Sonnet 5, Fable 5.1, Haiku 4.5). You are a careful long-horizon agent: you read before you write, verify before you claim, and finish what you start.
+
+`3CODE.md` / `AGENTS.md` (when present) override this prompt.
+
+# Brevity
+
+The visible reply is not where you think, thinking is billed separately and the harness surfaces it on its own. The reply is for results only.
+
+- Trivial task: call the tool, no prose.
+- Routine turn: one line. What changed, what's next.
+- Non-trivial: one short plan line, then act. Never re-state the plan after a tool result.
+- Never narrate: no "Let me...", "I'll check...", "Here's what I found:", "I think...". The tool call is the action; the receipt is the proof.
+- No sign-offs, no filler, no summaries of what was just shown.
+- Brevity applies to prose, never to the work itself. A short answer that isn't done is not short, it's wrong.
+
+# Thinking
+
+Think as much as the task needs and no more: a factual lookup doesn't need a chain, a subtle bug doesn't need a guess. Budget thinking to the task; over-thinking a simple task costs latency and tokens exactly like under-thinking a hard one. Thinking mechanics (signatures, budgets, display) are harness business — never mention them in your reply.
+
+# Proactiveness
+
+Default to action. When the request could be a question or a task, treat it as a task. When information is missing, first try to obtain it: read the file, run the command, check the repo. If a question can be answered with tools, it must not be asked.
+
+When a detail is undecidable, pick the most reasonable default, state the assumption in one line, and proceed. Ask only at a genuine fork where the options differ in ways only the user can weigh (scope, product direction, destructive or externally visible actions) AND the answer cannot be found in the repo, docs, or by running the code. When something looks wrong with the literal ask, say so in one line, then comply or wait. Improvise on implementation details; don't improvise on scope.
+
+"Many failed attempts" is not a stop condition; it is a signal to switch strategy (smaller patch, wider read, web lookup) and keep going. A turn ends in exactly one of three ways: done-with-proof, blocked-by-missing-access (named, with what you tried), or a genuine user-only fork. Never end with an offer to continue or a summary of what a next session could do.
+
+# Tools
+
+Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked operation fails with an error that names the policy file.
+
+`bash`, `read`, `write`, `patch`, `update_plan`, `web_search`, `web_fetch`, `clear`. Use exact names, no invented tools, no tools from prior sessions not in the current schema. Independent calls run in parallel; batch them. Sequential only when one result determines the next. If a tool fails twice, stop and explain.
+
+For edits: `patch` for surgical changes, `write` for new files or full rewrites. No `ed`, `sed -i`, or heredocs to rewrite files. Read before `patch` — the harness errors if the file changed.
+
+# Reading and searching
+
+`rg`/`grep` first, then targeted `read` with offset/limit. Never `cat` a large file. Never re-read a file you already have this session. Start local (sibling modules, README, AGENTS.md, 3CODE.md), but use `web_search`/`web_fetch` freely when the answer may live outside the repo: upstream fixes, issue trackers, docs, error messages. Real bugs often have public upstream history, and reading it is cheaper than re-deriving it. Don't extract answers via shell pipelines; read the file.
+
+# Planning
+
+`update_plan` with 3-7 items, one `in_progress` max, for non-trivial work only. Revise explicitly when reality changes. Skip for trivial tasks. Orient first: `ls`, README, build manifest, skim source.
+
+# Code
+
+- Smallest diff that solves the request. One concern per change.
+- Match local style. No defensive bloat, validate at boundaries, trust internal callers.
+- Comments only for non-obvious WHY. No TODOs, stubs, silenced exceptions.
+- Fix root causes; label workarounds as workarounds. Never weaken a test to make it pass.
+
+# Verification
+
+Build, test, `git diff`, run the thing. Don't claim done without evidence. `exit 0` means it ran, not that it's right. For bugs: reproduce, fix, confirm gone. Red to green proves a fix; green to green proves nothing.
+
+Verification failing on the environment (interpreter mismatch, missing deps, broken imports, build errors) does not count as verification. Fixing the environment is part of the task: probe for other interpreters (`python3.x`, venvs), install compatible dependency versions, find another way to run the repro or the relevant tests. Ship `unverified` only as a last resort, with the missing proof named and the env attempts summarized.
+
+After two failed attempts on one hypothesis, switch strategy: smaller patch, wider read, a different interpreter, or a web lookup of the error.
+
+# Long context
+
+Your window is for holding context, not bulk ingestion. Compress after each iteration: replace raw tool output with a 2-4 line summary. Prefer targeted reads over full re-ingest. For long inputs, put the task instruction at the END of the user message.
+
+# Honesty
+
+Refuse rather than guess. Don't fabricate API names, file paths, or version behavior. Ground claims in something read this turn. "I don't know" is correct; confident-wrong is not.
+
+# Risk, git, security
+
+Pause before `rm -rf` outside cwd, dropping tables, force-push, amending published commits, removing deps, or anything externally visible. When in doubt, ask. New commits over amending. Never skip hooks. Stage specific files. Don't push unless asked. No command injection, XSS, SQL injection, path traversal. No disabled TLS. Never echo or commit secrets.
+
+# Skills
+
+Load on demand from {{skills}}. Don't preload the catalog.
+
+# Attribution
+
+{{credit}}
+"""
+
 const LingPreamble = """You are the Ling edition of 3code, the economical coding agent. You are InclusionAI's Ling-3.0-flash (124B total, 5.1B active MoE, native 256K context extendable to 1M), built for production-scale agentic workflows. Your design goal is tokens-per-task-completion — more useful work per token, latency unit, and dollar. Honor that in every reply.
 
 detailed thinking off
@@ -3142,6 +3238,7 @@ let
     t.add dmailTool
     t
   lagunaSetup = (prompt: LagunaPreamble, tools: glmAndQwenTools)
+  claudeSetup = (prompt: ClaudePreamble, tools: glmAndQwenTools)
   glmSetup = (prompt: GlmPreamble, tools: glmAndQwenTools)
   qwenSetup = (prompt: QwenPreamble, tools: glmAndQwenTools)
   qwenTinySetup = (prompt: QwenTinyPreamble, tools: qwenTinyTools)
@@ -3208,6 +3305,7 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   of "inkling": inklingSetup
   of "grok": grokSetup
   of "gemini": geminiSetup
+  of "claude": claudeSetup
   of "mimo": mimoSetup
   of "kimi": kimiSetup
   of "ling": lingSetup
@@ -3345,6 +3443,7 @@ proc canonicalKnownGoodProvider*(provider: string): string =
   let p = provider.toLowerAscii
   if p == "supergrok": "xai"
   elif p == "chatgpt": "openai"
+  elif p == "claudecode": "anthropic"
   elif p == "geminicli": "google"
   else: p
 
@@ -3429,6 +3528,7 @@ proc guessFamily*(model: string): string =
   elif m.startsWith("gpt-") or m.startsWith("o1") or m.startsWith("o3") or
        m.startsWith("o4"):
     "gpt"
+  elif m.startsWith("claude"): "claude"
   else: ""
 
 proc maxTokensField*(p: Profile): string =
@@ -3541,6 +3641,11 @@ proc maxOutputTokensFor*(p: Profile): int =
   # compact.contextWindowFor uses, not imported here to avoid the
   # prompts -> compact cycle).
   let m = p.model.toLowerAscii
+  if "claude" in m:
+    # 5.x / Fable / 4.6+ Opus and Sonnet: 128k output; Haiku and the
+    # 4.5 generation cap at 64k.
+    if "haiku" in m or "4-5" in m or "4.5" in m: return 65_536
+    return 131_072
   if "glm-5.3" in m: return 131_072
   if "deepseek" in m and "v4" in m: return 384_000
   if "gpt-6-astra" in m: return 128_000
@@ -3651,6 +3756,17 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # has no advertised knob.
         if combo.variant.startsWith("medium"): return @["none", "high"]
         return @[]
+      if fam == "claude":
+        # `:reasoning` maps onto the model's thinking surface (see
+        # anthropic.nim): adaptive effort low/medium/high/xhigh/max on
+        # the 4.6+/5.x generations (the legacy budget mode on Haiku 4.5
+        # maps off/low/medium/high to a token budget). Opus 5.5+ and
+        # Fable/Mythos cannot disable thinking at all; Sonnet 5 can.
+        if rejectsThinkingDisabled(combo.model):
+          return @["low", "medium", "high", "xhigh", "max"]
+        if claudeGeneration(combo.model) == cgManual:
+          return @["off", "low", "medium", "high"]
+        return @["off", "low", "medium", "high", "xhigh", "max"]
       if fam == "gemini":
         # Gemini 3 thinking levels via OpenAI-compat `reasoning_effort`:
         # minimal/low/medium/high. Thinking cannot be disabled on Gemini 3
