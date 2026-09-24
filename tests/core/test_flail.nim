@@ -176,6 +176,10 @@ suite "flail detector":
     check "structurally different" in shape
     check "Final warning" in warn
     check "aborted" in warn
+    # No fake role prefix: the tool-result slot already marks the text as
+    # harness-authored, and the same bytes render under the magenta `»`.
+    for m in [hint, shape, warn]:
+      check "SYSTEM" notin m
     # Recovery steps must push the model back to work, never to the user;
     # these messages persist in context and GLM generalizes any "tell the
     # user" into a habit of asking for guidance instead of acting.

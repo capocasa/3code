@@ -1171,7 +1171,7 @@ max-tokens = "8192"
         tty.expect "❯"
         # --- empty-reply steer: the autosent prompt is shown verbatim ---
         tty.send "steer me\n"
-        tty.expectInHistory "empty reply; re-prompting for a final answer in"
+        tty.expectInHistory "auto: empty reply, re-prompting for a final answer in"
         tty.expectInHistory "» Your last reply came back empty."
         # The autosend is 3code's, never a user echo.
         tty.expectNeverInHistory "❯ Your last reply came back empty."
@@ -1183,7 +1183,8 @@ max-tokens = "8192"
         tty.send "flail please\n"
         tty.expectInHistory "$ printf 'flail-real-run"
         tty.expectInHistory "flail-real-run"
-        tty.expectInHistory "» SYSTEM: Loop detected"
+        tty.expectInHistory "auto: skipped a repeated tool call"
+        tty.expectInHistory "» Loop detected"
         # The old paraphrased harness line is gone.
         tty.expectNeverInHistory "flailing detected (repeated tool call)"
         tty.expectInHistory "FLAIL-RECOVERED-MARKER"
@@ -1193,9 +1194,9 @@ max-tokens = "8192"
         # --- flail abort: the abort note ends the turn, prompt returns ---
         tty.send "doom loop\n"
         tty.expectInHistory "$ printf 'doomed-loop"
-        tty.expectInHistory "» SYSTEM: Final warning"
-        tty.expectInHistory "turn aborted - rephrase, give a hint, or take over"
-        tty.expectInHistory "» SYSTEM: Turn aborted"
+        tty.expectInHistory "» Final warning"
+        tty.expectInHistory "auto: turn aborted - rephrase, give a hint, or take over"
+        tty.expectInHistory "» Turn aborted"
         tty.expect "❯"
         tty.expectIdleCaret()
         tty.expectAlive()
@@ -1206,7 +1207,7 @@ max-tokens = "8192"
       check "user +agent" in log
       check "Your last reply came back empty." in log
       check "tool_result flail_b exit=-1 +agent" in log
-      check "SYSTEM: Loop detected" in log
+      check "Loop detected" in log
 
       # --- resume: the replay paints the same » items, not echoes/banners ---
       block resumed:
@@ -1220,8 +1221,8 @@ max-tokens = "8192"
         # Live painted nothing for the recovered empty turn itself; the
         # replay must not paint it either.
         tty.expectNeverInHistory "empty reply - no content, no tool calls"
-        tty.expectInHistory "» SYSTEM: Loop detected"
-        tty.expectInHistory "» SYSTEM: Turn aborted"
+        tty.expectInHistory "» Loop detected"
+        tty.expectInHistory "» Turn aborted"
         tty.expectInHistory "❯ steer me"
         tty.expectInHistory "❯ flail please"
         tty.expectInHistory "❯ doom loop"

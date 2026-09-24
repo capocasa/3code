@@ -1656,7 +1656,7 @@ echo "OK"
     # The steer autosend renders as a `»` agent-prompt item (the actual
     # prompt text sent as the user-role steer), with the grey context row
     # above it.
-    check "empty reply; re-prompting for a final answer in" in runOut
+    check "auto: empty reply, re-prompting for a final answer in" in runOut
     check "» Your last reply came back empty." in runOut
     # The old dead-end string must NOT appear when recovery succeeds.
     check "empty reply - no content, no tool calls" notin runOut

@@ -321,27 +321,27 @@ proc flailEscalationMessage*(step: int): string =
   ## the final warning. Deliberately short: this is the only token cost of
   ## the whole mechanism.
   ##
+  ## No fake role prefix ("SYSTEM:") on the wire: the tool-result slot is
+  ## already where every provider expects harness-authored text, and no API
+  ## defines an in-content role label. The same text is what the user sees
+  ## under the magenta `»` marker, so it stays plain imperative prose.
+  ##
   ## Steps 1-2 never invite the model to stop and ask the user: these
   ## messages persist in context for the rest of the session, and GLM
   ## generalizes "tell the user what is blocking you" into a habit of
   ## checking in instead of acting (field reports, Sep 2026). The
   ## user-handoff instruction lives only in the step-3 final warning.
   if step == 1:
-    "SYSTEM: Loop detected: you are repeating tool calls that are not making " &
-    "progress. Repeating them will not help. Change strategy now: use a " &
-    "different input, a different tool, or a smaller step, and continue " &
-    "the task."
+    "Loop detected: these tool calls are not making progress. Change " &
+    "strategy now: a different input, a different tool, or a smaller step."
   elif step == 2:
-    "SYSTEM: You repeated the same call after a loop warning. Telling " &
-    "yourself to be careful does not fix this: the next call would likely " &
-    "come out identical again. Do not emit that call. First reply in plain " &
-    "prose with no tool call: one sentence stating the hypothesis your next " &
-    "attempt will test. Then, if you continue, use " &
-    "a structurally different call (different arguments, flags, or tool), " &
-    "not the same one with cosmetic edits."
+    "You repeated the same call after a warning; the next one would come " &
+    "out identical. Do not repeat it. Reply first in plain prose, no tool " &
+    "call: one sentence stating the hypothesis your next attempt will " &
+    "test. If you continue, make a structurally different call: different " &
+    "arguments, flags, or tool."
   else:
-    "SYSTEM: Final warning: you are still repeating non-progress tool calls " &
-    "after two warnings. One more repeat and this turn is aborted. Stop " &
+    "Final warning: one more repeated call and this turn is aborted. Stop " &
     "calling tools and tell the user what is blocking you."
 
 proc emitTestFrameEvent() =
@@ -797,7 +797,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         let backoff = emptyReplyBackoffS()
         commitTranscriptBytes(
           formatItem(agentPromptItem(EmptyReplySteerMsg,
-            "empty reply; re-prompting for a final answer in " &
+            "auto: empty reply, re-prompting for a final answer in " &
             $backoff & "s")), true)
         incEmptyRetryLevel()
         if emptyReplyWait():
@@ -933,7 +933,9 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
             output: note, code: -1, kind: akError)
           messages.add %*{"role": "tool", "tool_call_id": id,
                           "content": note, "agentSent": true}
-          commitTranscriptBytes(formatItem(agentPromptItem(note)), true)
+          commitTranscriptBytes(
+            formatItem(agentPromptItem(note,
+              "auto: skipped a repeated tool call")), true)
           continue
         of fvAbort:
           # Still looping after all recovery attempts. Pair the tool_call,
@@ -941,8 +943,8 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
           # visible warning.
           debugOut &"flail: repeat of {name} after {FlailMaxEscalations} escalations; aborting turn"
           let note =
-            "SYSTEM: Turn aborted: the same tool call was repeated after " &
-            "three warnings. The model is stuck in a loop."
+            "Turn aborted: the same tool call was repeated after three " &
+            "warnings; you did not change course."
           flailAbortNote = note
           session.toolLog.add ToolRecord(
             banner: "! " & name & " (flail abort)",
@@ -1128,7 +1130,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         saveSession(session, messages)
         commitTurnEndNotice(
           formatItem(agentPromptItem(flailAbortNote,
-            "turn aborted - rephrase, give a hint, or take over")))
+            "auto: turn aborted - rephrase, give a hint, or take over")))
         endTurnAfterTranscriptAppend()
         turnEnded = true
         return false

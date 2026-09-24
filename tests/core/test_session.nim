@@ -270,7 +270,7 @@ suite "session: renderSession → loadSessionFile round-trip":
                         "function": {"name": "bash",
                                      "arguments": "{\"command\": \"ls\"}"}}]},
       {"role": "tool", "tool_call_id": "call_9",
-       "content": "SYSTEM: Loop detected.", "agentSent": true},
+       "content": "Loop detected.", "agentSent": true},
       {"role": "user", "content": "Please provide your final answer now.",
        "agentSent": true}
     ]
@@ -278,7 +278,7 @@ suite "session: renderSession → loadSessionFile round-trip":
     check lm.len == 5
     check not lm[1].hasKey("agentSent")          # plain user stays plain
     check lm[3]{"agentSent"}.getBool(false)       # flail note keeps the mark
-    check lm[3]["content"].getStr == "SYSTEM: Loop detected."
+    check lm[3]["content"].getStr == "Loop detected."
     check lm[4]{"agentSent"}.getBool(false)       # steer keeps the mark
     check lm[4]["role"].getStr == "user"          # wire role unchanged
 

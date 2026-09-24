@@ -383,7 +383,7 @@ when not defined(windows):
       # A flail-escalated tool_call never executes; live commits only the
       # `»` agent-prompt item for the note. Replay must skip the tool item
       # (no `$` banner, no output rows) and render the same `»` item.
-      let note = "SYSTEM: Loop detected: you are repeating tool calls."
+      let note = "Loop detected: you are repeating tool calls."
       let toolLog = @[
         ToolRecord(banner: "printf hi", output: "hi\n", code: 0,
           kind: akBash),
@@ -409,13 +409,13 @@ when not defined(windows):
       let rendered = captureReplay(msgs, toolLog, window = 1000)
       check MagentaFg & "» " & note in rendered
       check "$ printf hi" in rendered   # the executed first call still shows
-      check rendered.count("SYSTEM: Loop detected") == 1
+      check rendered.count("Loop detected") == 1
 
     test "flail abort batch collapses duplicate notes into one » item":
       # fvAbort pairs the abort note onto the flagged call AND every
       # remaining call of the batch, but live commits one `»` item; replay
       # must collapse the consecutive duplicates the same way.
-      let note = "SYSTEM: Turn aborted: the model is stuck in a loop."
+      let note = "Turn aborted: the model is stuck in a loop."
       let toolLog = @[ToolRecord(banner: "! bash (flail abort)",
         output: note, code: -1, kind: akError)]
       let msgs = %*[
