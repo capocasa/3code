@@ -14,6 +14,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Pin Xcode toolchain
+        # macos-15 keeps several Xcodes around and can switch the default
+        # between image rolls; a default switch would silently recompile
+        # both binary slices with a different clang. Select an explicit
+        # version (the long-staying image default); if a future image
+        # drops it this fails loudly instead of drifting. Must run before
+        # setup-nim: on macOS the action builds Nim from source, and the
+        # bootstrap compile uses this clang too.
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app
+          xcodebuild -version
+          xcodebuild -version | grep -qx 'Xcode 16.4' || { echo "Xcode 16.4 not selected" >&2; exit 1; }
+          cc --version | head -1
+
       - name: Restore Nim toolchain cache
         id: cache-nim
         uses: actions/cache@v4
@@ -140,8 +154,8 @@ jobs:
       - name: Package
         # Deterministic archive: entry order from a sorted list, mtimes
         # anchored to the commit (SOURCE_DATE_EPOCH), owner normalized,
-        # gzip without name/timestamp. The openssl dylibs still float with
-        # brew; their version is recorded in BUILD_INFO.
+        # gzip without name/timestamp. The openssl dylibs come from the
+        # pinned bottle below.
         run: |
           export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
           mkdir -p 3code-macos-universal
@@ -150,14 +164,34 @@ jobs:
           # without running the binary on its target OS.
           ./3code -v > 3code-macos-universal/VERSION
           cp README.md LICENSE 3code-macos-universal/
-          OPENSSL_PREFIX="$(brew --prefix openssl@3)"
-          cp "${OPENSSL_PREFIX}/lib/libssl.3.dylib"    3code-macos-universal/
-          cp "${OPENSSL_PREFIX}/lib/libcrypto.3.dylib" 3code-macos-universal/
+          # OpenSSL dylibs from a pinned Homebrew bottle instead of the
+          # runner's floating brew tree: the ghcr blob is digest-addressed
+          # and immutable, and the sha256 makes a pin bump a conscious act
+          # (same policy as cacert.pem). The bottle's pre-pour install
+          # names (@@HOMEBREW_CELLAR@@/...) are rewritten to @loader_path
+          # so the pair loads standalone.
+          OPENSSL_VERSION=3.6.4
+          OPENSSL_BOTTLE_SHA256=b7139450ed389be82f807daaadffa778d9c4753a3b2d8f784da1cf7383994ee2
+          TOKEN="$(curl -fsSL "https://ghcr.io/token?scope=repository:homebrew/core/openssl/3:pull&service=ghcr.io" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+          curl -fsSL -H "Authorization: Bearer ${TOKEN}" \
+            "https://ghcr.io/v2/homebrew/core/openssl/3/blobs/sha256:${OPENSSL_BOTTLE_SHA256}" \
+            -o openssl-bottle.tar.gz
+          echo "${OPENSSL_BOTTLE_SHA256}  openssl-bottle.tar.gz" | shasum -a 256 -c -
+          OSSL="$(mktemp -d)"
+          tar -xzf openssl-bottle.tar.gz -C "$OSSL" \
+            "openssl@3/${OPENSSL_VERSION}/lib/libssl.3.dylib" \
+            "openssl@3/${OPENSSL_VERSION}/lib/libcrypto.3.dylib"
+          cp "$OSSL/openssl@3/${OPENSSL_VERSION}/lib/libssl.3.dylib"    3code-macos-universal/
+          cp "$OSSL/openssl@3/${OPENSSL_VERSION}/lib/libcrypto.3.dylib" 3code-macos-universal/
           chmod +w 3code-macos-universal/libssl.3.dylib 3code-macos-universal/libcrypto.3.dylib
           install_name_tool -id @loader_path/libcrypto.3.dylib 3code-macos-universal/libcrypto.3.dylib
           install_name_tool -id @loader_path/libssl.3.dylib    3code-macos-universal/libssl.3.dylib
-          install_name_tool -change "${OPENSSL_PREFIX}/lib/libcrypto.3.dylib" \
-            @loader_path/libcrypto.3.dylib 3code-macos-universal/libssl.3.dylib
+          # The pre-pour reference to libcrypto varies by bottle; rewrite
+          # whatever otool reports instead of hardcoding it.
+          CRYPTO_REF="$(otool -L 3code-macos-universal/libssl.3.dylib | awk '/libcrypto/ {print $1; exit}')"
+          install_name_tool -change "$CRYPTO_REF" @loader_path/libcrypto.3.dylib \
+            3code-macos-universal/libssl.3.dylib
           ln -sf libssl.3.dylib    3code-macos-universal/libssl.dylib
           ln -sf libcrypto.3.dylib 3code-macos-universal/libcrypto.dylib
           # Pinned by checksum: cacert.pem is a mutable URL, so an upstream
@@ -168,7 +202,7 @@ jobs:
           {
             nim --version | head -1
             cc --version | head -1
-            brew list --versions openssl@3
+            echo "openssl@3 ${OPENSSL_VERSION} bottle:${OPENSSL_BOTTLE_SHA256}"
             shasum -a 256 3code | cut -d' ' -f1
             echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
           } > 3code-macos-universal/BUILD_INFO
