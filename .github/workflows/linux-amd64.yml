@@ -46,8 +46,10 @@ jobs:
         # is propagated. The old `for c in ...; testament cat` loop ran
         # categories sequentially and, worse, a single hung test stalled
         # the pipe so the step showed nothing after it.
-        run: sh tests/tools/ci_tests.sh 1500
-        timeout-minutes: 30
+        # 1800s, not 1500: ci_tests.sh now runs the tty category alone after the
+        # parallel categories, which stretches the tail of the run.
+        run: sh tests/tools/ci_tests.sh 1800
+        timeout-minutes: 35
 
       - name: Package
         run: |

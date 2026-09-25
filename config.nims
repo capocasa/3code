@@ -13,6 +13,23 @@ proc onTag(): bool =
   # nightly build, which both run with -d:release.
   gorgeEx("git describe --tags --exact-match HEAD").exitCode == 0
 
+proc hasUnstagedChanges(): bool =
+  ## staticExec merges stderr into its output (poStdErrToStdOut), and on
+  ## Windows `git status` emits shell noise even on a clean tree, which
+  ## used to mark every CI build "-unstaged" while a direct status in
+  ## git-bash showed the tree clean. Only porcelain v1 records count:
+  ## two status columns, a space, then the path. A failing git (no repo,
+  ## no git) reports no changes, same as the old empty-output behavior.
+  let r = gorgeEx("git status --porcelain=v1")
+  if r.exitCode != 0:
+    return false
+  for line in r.output.splitLines():
+    if line.len >= 3 and line[2] == ' ' and
+        line[0] in {' ', 'M', 'A', 'D', 'R', 'C', 'U', '?'} and
+        line[1] in {' ', 'M', 'A', 'D', 'R', 'C', 'U', '?'}:
+      return true
+  return false
+
 proc getVersionString(): string =
   if onTag():
     getNimbleVersion()
@@ -20,7 +37,7 @@ proc getVersionString(): string =
     getNimbleVersion() & "-" &
       gorge("git branch --show-current").strip() &
       "-" & gorge("git rev-parse --short=8 HEAD").strip() &
-      (if gorge("git status --porcelain=v1").strip() != "": "-unstaged" else: "")
+      (if hasUnstagedChanges(): "-unstaged" else: "")
 
 switch("path", "src")
 switch("path", "tests")  # test helpers (tty_expect, stub_helpers, minline_testutils)

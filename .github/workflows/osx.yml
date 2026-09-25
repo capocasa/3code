@@ -126,8 +126,10 @@ jobs:
         # themselves because each category is still sequential inside
         # testament. If load-induced tty flakes reappear on this 3-core
         # runner, pass explicit categories to serialize them.
-        run: sh tests/tools/ci_tests.sh 1500
-        timeout-minutes: 30
+        # 1800s, not 1500: ci_tests.sh now runs the tty category alone after the
+        # parallel categories, which stretches the tail of the run.
+        run: sh tests/tools/ci_tests.sh 1800
+        timeout-minutes: 35
 
       - name: Package
         run: |

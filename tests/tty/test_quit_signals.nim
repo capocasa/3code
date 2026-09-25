@@ -165,7 +165,9 @@ suite "quit signals":
       # do nothing and expectExit would fail.
       tty.expectAlive()
       tty.send "\x04"
-      tty.expectExit(0, timeoutMs = 8000)
+      # 20s drain budget, as with the queued :q below: turn teardown on a
+      # loaded 3-core runner can outlive 8s without anything being wrong.
+      tty.expectExit(0, timeoutMs = 20_000)
       assertNoTrace(tty)
       echo "  PASS: Ctrl-D during a turn was inert; Ctrl-C interrupted; Ctrl-D quit"
 
@@ -266,7 +268,10 @@ suite "quit signals":
     # Queue a quit while the turn is still active; the controller must drain
     # it after the turn ends and exit cleanly.
     tty.send ":q\n"
-    tty.expectExit(0, timeoutMs = 8000)
+    # 20s, not 8s: the exit drains the active turn first; on a loaded
+    # 3-core CI runner that alone can outlive 8s and the queued-quit
+    # behaviour (what this tests) is then misreported as a failure.
+    tty.expectExit(0, timeoutMs = 20_000)
     assertNoTrace(tty)
     echo "  PASS: :q queued during a turn exited cleanly after the turn"
 

@@ -14,12 +14,13 @@
 #   git-bash have none) and a pass/fail summary is always printed, so
 #   failures cannot fall outside a tail window.
 #
-# Categories run in parallel but each category is sequential inside
-# testament: the tty PTY tests are scheduler-sensitive and starve when
-# run against concurrently compiling categories on small runners.
+# Categories run in parallel, except tty which runs last and alone:
+# its PTY tests are scheduler-sensitive and starved when run against
+# concurrently compiling categories on small runners (see run_testament).
+# Each category is sequential inside testament.
 #
 # Usage: tests/tools/ci_tests.sh [global-timeout-secs] [categories...]
-#   PER_TEST_SECS env overrides the per-test cap (default 300, 0=off).
+#   PER_TEST_SECS env overrides the per-test cap (default 480, 0=off).
 set -u
 
 sh tests/tools/build_binary.sh 3code src/threecode.nim || exit $?
@@ -28,7 +29,10 @@ TIMEOUT_SECS=${1:-1500}
 [ $# -gt 0 ] && shift
 . "$(dirname "$0")/test_processes.sh"
 WATCH_SECS=30
-PER_TEST_SECS=${PER_TEST_SECS:-300}
+# 480, not 300: the slowest legitimate tty stress test runs ~280-310s
+# on a 3-core CI runner; the 300 cap killed it mid-run as a "hang".
+# The cap exists to catch hangs (no progress), which it still does.
+PER_TEST_SECS=${PER_TEST_SECS:-480}
 
 LOG=$(mktemp "${TMPDIR:-/tmp}/3code_testament.XXXXXXXX") || exit 1
 SNAP=$(mktemp "${TMPDIR:-/tmp}/3code_watch.XXXXXXXX") || exit 1
@@ -76,7 +80,26 @@ echo "testament $* (timeout ${TIMEOUT_SECS}s, per-test cap ${PER_TEST_SECS:-off}
 # given if the '--run' option is selected".
 run_testament() {
   if [ $# -eq 0 ]; then
-    sh tests/tools/test_dispatch.sh all
+    # Default selection: every category except tty in parallel, then tty
+    # alone. The tty PTY tests are scheduler-sensitive: on small runners
+    # (macos-15 is 3-core) the concurrent category compiles starve the
+    # render threads, producing load-induced frame mismatches, assertion
+    # failures and per-test-cap kills -- `testament all` fans out every
+    # category at once and did all of those. Alone (as the windows job
+    # already runs it), the same suite passes.
+    # Category rule mirrors testament's isTestFile: a dir with at least
+    # one t*.nim; helper dirs like tests/tools have none and are skipped
+    # by that rule.
+    cats=''
+    for d in tests/*/; do
+      d=${d%/}
+      [ "$d" = tests/tty ] && continue
+      ls "$d"/t*.nim >/dev/null 2>&1 && cats="$cats ${d#tests/}"
+    done
+    sh tests/tools/test_dispatch.sh categories $cats
+    if [ -n "$(ls tests/tty/t*.nim 2>/dev/null)" ]; then
+      sh tests/tools/test_dispatch.sh categories tty
+    fi
   else
     sh tests/tools/test_dispatch.sh categories "$@"
   fi
