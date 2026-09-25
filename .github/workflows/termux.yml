@@ -15,15 +15,18 @@ jobs:
 
       - uses: jiro4989/setup-nim-action@v2
         with:
-          nim-version: stable
+          # Exact version, not `stable`: the same commit must compile with
+          # the same compiler forever. Bump deliberately, together with
+          # regenerating nimble.lock (its `nim` entry records the version).
+          nim-version: 2.2.12
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           parent-nim-install-directory: $HOME
           nim-install-directory: nim-toolchain
 
       - name: Install dependencies
-        # All deps resolve by name from threecode.nimble via the public
-        # package registry; tags are versions, so tag builds get tagged
-        # dependency versions.
+        # nimble.lock pins every dependency to an exact revision + checksum;
+        # install honors it, so rebuilds of the same commit get identical
+        # dependency trees (bump requires -> `nimble lock` to update).
         run: |
           nimble install -y --depsOnly
 
@@ -70,7 +73,10 @@ jobs:
           readelf -d 3code-android | grep -q 'RUNPATH.*\[/data/data/com.termux/files/usr/lib\]'
 
       - name: Package
+        # SOURCE_DATE_EPOCH anchors all archive mtimes to the commit, so
+        # the tarball is byte-identical across rebuilds of one commit.
         run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
           mkdir -p 3code-termux-arm64
           cp 3code-android 3code-termux-arm64/3code
           cp tlscheck-android 3code-termux-arm64/tlscheck
@@ -78,8 +84,23 @@ jobs:
           # from the nimble file (tag releases) or the short SHA.
           grep -m1 '^version' threecode.nimble | cut -d'"' -f2 > 3code-termux-arm64/VERSION
           git rev-parse --short=8 HEAD >> 3code-termux-arm64/VERSION
+          {
+            nim --version | head -1
+            "${NDK_CLANG}" --version | head -1
+            sha256sum 3code-android | cut -d' ' -f1
+            echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
+          } > 3code-termux-arm64/BUILD_INFO
           cp README.md LICENSE 3code-termux-arm64/
-          tar czf 3code-termux-arm64.tar.gz 3code-termux-arm64
+          pack() {
+            tar --sort=name --mtime="@${SOURCE_DATE_EPOCH}" --owner=0 --group=0 --numeric-owner \
+              -cf - 3code-termux-arm64 | gzip -n > 3code-termux-arm64.tar.gz
+          }
+          pack
+          h1=$(sha256sum 3code-termux-arm64.tar.gz | cut -d' ' -f1)
+          find 3code-termux-arm64 ! -type l -exec touch {} +  # perturb mtimes (not symlinks: touch would create dangling targets)
+          pack
+          h2=$(sha256sum 3code-termux-arm64.tar.gz | cut -d' ' -f1)
+          [ "$h1" = "$h2" ] || { echo "archive not reproducible: $h1 vs $h2" >&2; exit 1; }
 
       - name: Upload artifact (GitHub Actions)
         uses: actions/upload-artifact@v4
@@ -162,9 +183,8 @@ jobs:
           nim-install-directory: nim-toolchain
 
       - name: Install dependencies
-        # All deps resolve by name from threecode.nimble via the public
-        # package registry; tags are versions, so tag builds get tagged
-        # dependency versions.
+        # nimble.lock pins deps for the shipped builds; this experimental
+        # stress job rides devel Nim on purpose and keeps the same lock.
         run: |
           nimble install -y --depsOnly
 

@@ -6,9 +6,17 @@ on:
     branches: [main]
     tags: ['[0-9]+.[0-9]+.[0-9]+']
 
+env:
+  # dlls.zip is a mutable URL: pinned by sha256 so an upstream refresh is
+  # a conscious bump, not silent drift.
+  DLLS_SHA256: 4b20b0fc775d2cfece0c1a09d4ec0bdbcd01d257ce8d556d9a8a88e6c4cd6961
+
 jobs:
   build:
-    runs-on: windows-latest
+    # Pinned label (windows-latest rolls to new Server releases); the
+    # image still receives tool updates under the label, recorded in the
+    # artifact's BUILD_INFO.
+    runs-on: windows-2025
 
     # git-bash on the Windows runner. The Windows default (pwsh) does not
     # propagate non-zero exit codes from native exes like nimble, so a failed
@@ -24,15 +32,18 @@ jobs:
 
       - uses: jiro4989/setup-nim-action@v2
         with:
-          nim-version: stable
+          # Exact version, not `stable`: the same commit must compile with
+          # the same compiler forever. Bump deliberately, together with
+          # regenerating nimble.lock (its `nim` entry records the version).
+          nim-version: 2.2.12
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           parent-nim-install-directory: $HOME
           nim-install-directory: nim-toolchain
 
       - name: Install dependencies
-        # All deps resolve by name from threecode.nimble via the public
-        # package registry; tags are versions, so tag builds get tagged
-        # dependency versions.
+        # nimble.lock pins every dependency to an exact revision + checksum;
+        # install honors it, so rebuilds of the same commit get identical
+        # dependency trees (bump requires -> `nimble lock` to update).
         run: |
           nimble install -y --depsOnly
 
@@ -58,9 +69,14 @@ jobs:
         # STATUS_DLL_INIT_FAILED (0xC0000142). Place them next to the root
         # binary and the test build dir so both load. cacert.pem feeds
         # SSL_CERT_FILE for the stub provider's local TLS path.
+        # dlls.zip is a mutable URL: pinned by sha256 so an upstream
+        # refresh is a conscious bump, not silent drift.
         shell: pwsh
         run: |
           Invoke-WebRequest -Uri https://nim-lang.org/download/dlls.zip -OutFile dlls.zip
+          if ((Get-FileHash dlls.zip -Algorithm SHA256).Hash -ne $env:DLLS_SHA256) {
+            throw "dlls.zip sha256 mismatch (expected $env:DLLS_SHA256)"
+          }
           Expand-Archive -Path dlls.zip -DestinationPath dlls
           New-Item -ItemType Directory -Path build -Force | Out-Null
           Copy-Item dlls/libssl-1_1-x64.dll, dlls/libcrypto-1_1-x64.dll, dlls/cacert.pem .
@@ -90,31 +106,63 @@ jobs:
         timeout-minutes: 20
 
       - name: Package (Windows) - bundle OpenSSL DLLs alongside .exe
-        shell: pwsh
+        # Stock Windows ships no OpenSSL. Nim's std/net dlopens libssl /
+        # libcrypto by hardcoded names; without these DLLs alongside
+        # 3code.exe, any TLS code path dies with
+        #   could not load: (libcrypto-1_1-x64|libeay64).dll
+        # Use the canonical Nim Windows DLL bundle from nim-lang.org
+        # (pinned by sha256 above); it also ships a cacert.pem that we
+        # point SSL_CERT_FILE at. The "Stage OpenSSL DLLs" step already
+        # downloaded + extracted dlls/ earlier; reuse it instead of
+        # re-downloading. Re-fetch (still pinned) only if staging was
+        # skipped (e.g. running this job standalone).
         run: |
-          New-Item -ItemType Directory -Path 3code-windows-amd64 | Out-Null
-          Copy-Item 3code.exe 3code-windows-amd64/
-          Copy-Item README.md, LICENSE 3code-windows-amd64/
-          # Stock Windows ships no OpenSSL. Nim's std/net dlopens libssl /
-          # libcrypto by hardcoded names; without these DLLs alongside
-          # 3code.exe, any TLS code path dies with
-          #   could not load: (libcrypto-1_1-x64|libeay64).dll
-          # Use the canonical Nim Windows DLL bundle from nim-lang.org;
-          # it also ships a cacert.pem that we point SSL_CERT_FILE at.
-          # The "Stage OpenSSL DLLs" step already downloaded + extracted
-          # dlls/ earlier; reuse it instead of re-downloading (the second
-          # Expand-Archive fails on the existing cacert.pem). Re-fetch only
-          # if staging was skipped (e.g. running this job standalone).
-          if (-not (Test-Path dlls/libssl-1_1-x64.dll)) {
-            Invoke-WebRequest -Uri https://nim-lang.org/download/dlls.zip -OutFile dlls.zip
-            Expand-Archive -Path dlls.zip -DestinationPath dlls -Force
-          }
-          Copy-Item dlls/libssl-1_1-x64.dll, dlls/libcrypto-1_1-x64.dll, dlls/cacert.pem 3code-windows-amd64/
+          export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
+          mkdir -p 3code-windows-amd64
+          cp 3code.exe 3code-windows-amd64/
+          cp README.md LICENSE 3code-windows-amd64/
+          if [ ! -f dlls/libssl-1_1-x64.dll ]; then
+            curl -fsSL -o dlls.zip https://nim-lang.org/download/dlls.zip
+            echo "${DLLS_SHA256}  dlls.zip" | sha256sum -c -
+            unzip -q dlls.zip -d dlls
+          fi
+          cp dlls/libssl-1_1-x64.dll dlls/libcrypto-1_1-x64.dll dlls/cacert.pem 3code-windows-amd64/
           # Capture the version from the staged binary (needs the DLLs
           # alongside it to launch) so it can be checked without running
           # the binary on its target OS.
-          & 3code-windows-amd64/3code.exe -v | Set-Content -Encoding ascii 3code-windows-amd64/VERSION
-          Compress-Archive -Path 3code-windows-amd64 -DestinationPath 3code-windows-amd64.zip
+          ./3code-windows-amd64/3code.exe -v > 3code-windows-amd64/VERSION
+          {
+            nim --version | head -1
+            sha256sum 3code.exe | cut -d' ' -f1
+            echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
+          } > 3code-windows-amd64/BUILD_INFO
+          # Deterministic zip: Compress-Archive embeds wall-clock mtimes,
+          # and bsdtar's zip writer stores atime/ctime in the UT extra
+          # field (ctime cannot be set in userspace). Python's zipfile
+          # writes exactly what we tell it: fixed date, sorted names,
+          # normalized modes.
+          cat > /tmp/mkzip.py <<'PY'
+          import os, sys, zipfile
+          from datetime import datetime, timezone
+          src, out, epoch = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          dt = datetime.fromtimestamp(epoch, timezone.utc).timetuple()[:6]
+          names = sorted(
+              os.path.join(r, n).replace(os.sep, "/")
+              for r, ds, fs in os.walk(src)
+              for n in ds + fs)
+          with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+              for n in names:
+                  zi = zipfile.ZipInfo(n, dt)
+                  zi.external_attr = (os.stat(n).st_mode & 0xFFFF) << 16
+                  z.writestr(zi, open(n, "rb").read())
+          PY
+          pack() { python /tmp/mkzip.py 3code-windows-amd64 3code-windows-amd64.zip "$SOURCE_DATE_EPOCH"; }
+          pack
+          h1=$(sha256sum 3code-windows-amd64.zip | cut -d' ' -f1)
+          find 3code-windows-amd64 ! -type l -exec touch {} +  # perturb mtimes (not symlinks: touch would create dangling targets)
+          pack
+          h2=$(sha256sum 3code-windows-amd64.zip | cut -d' ' -f1)
+          [ "$h1" = "$h2" ] || { echo "archive not reproducible: $h1 vs $h2" >&2; exit 1; }
 
       - name: Upload artifact (GitHub Actions)
         uses: actions/upload-artifact@v4

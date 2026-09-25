@@ -18,14 +18,19 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /home/runner/nim-toolchain
-          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-${{ hashFiles('*.nimble') }}
+          # Key includes the pinned nim-version: a hit must never resurrect
+          # a toolchain older/newer than the nim-version input above.
+          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-2.2.12-${{ hashFiles('*.nimble') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-
 
       - uses: jiro4989/setup-nim-action@v2
         if: steps.cache-nim.outputs.cache-hit != 'true'
         with:
-          nim-version: stable
+          # Exact version, not `stable`: the same commit must compile with
+          # the same compiler forever. Bump deliberately, together with
+          # regenerating nimble.lock (its `nim` entry records the version).
+          nim-version: 2.2.12
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           parent-nim-install-directory: $HOME
           nim-install-directory: nim-toolchain
@@ -35,9 +40,9 @@ jobs:
         run: echo "$HOME/nim-toolchain/bin" >> $GITHUB_PATH
 
       - name: Install dependencies
-        # All deps resolve by name from threecode.nimble via the public
-        # package registry; tags are versions, so tag builds get tagged
-        # dependency versions.
+        # nimble.lock pins every dependency to an exact revision + checksum;
+        # install honors it, so rebuilds of the same commit get identical
+        # dependency trees (bump requires -> `nimble lock` to update).
         run: |
           nimble install -y --depsOnly
 
@@ -67,14 +72,32 @@ jobs:
         timeout-minutes: 30
 
       - name: Package
+        # SOURCE_DATE_EPOCH anchors all archive mtimes to the commit, so
+        # the tarball is byte-identical across rebuilds of one commit.
         run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
           mkdir -p 3code-linux-arm64
           cp 3code 3code-linux-arm64/
           # Capture the version from the built binary so it can be checked
           # without running the binary on its target OS.
           ./3code -v > 3code-linux-arm64/VERSION
+          {
+            nim --version | head -1
+            cc --version | head -1
+            sha256sum 3code | cut -d' ' -f1
+            echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
+          } > 3code-linux-arm64/BUILD_INFO
           cp README.md LICENSE 3code-linux-arm64/
-          tar czf 3code-linux-arm64.tar.gz 3code-linux-arm64
+          pack() {
+            tar --sort=name --mtime="@${SOURCE_DATE_EPOCH}" --owner=0 --group=0 --numeric-owner \
+              -cf - 3code-linux-arm64 | gzip -n > 3code-linux-arm64.tar.gz
+          }
+          pack
+          h1=$(sha256sum 3code-linux-arm64.tar.gz | cut -d' ' -f1)
+          find 3code-linux-arm64 ! -type l -exec touch {} +  # perturb mtimes (not symlinks: touch would create dangling targets)
+          pack
+          h2=$(sha256sum 3code-linux-arm64.tar.gz | cut -d' ' -f1)
+          [ "$h1" = "$h2" ] || { echo "archive not reproducible: $h1 vs $h2" >&2; exit 1; }
 
       - name: Upload artifact (GitHub Actions)
         uses: actions/upload-artifact@v4

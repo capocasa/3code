@@ -7,7 +7,10 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    # Pinned label (macos-latest rolls to new macOS releases); the image
+    # still receives weekly tool updates under the label, recorded in the
+    # artifact's BUILD_INFO.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -16,14 +19,19 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /Users/runner/nim-toolchain
-          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-${{ hashFiles('*.nimble') }}
+          # Key includes the pinned nim-version: a hit must never resurrect
+          # a toolchain older/newer than the nim-version input above.
+          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-2.2.12-${{ hashFiles('*.nimble') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-
 
       - uses: jiro4989/setup-nim-action@v2
         if: steps.cache-nim.outputs.cache-hit != 'true'
         with:
-          nim-version: stable
+          # Exact version, not `stable`: the same commit must compile with
+          # the same compiler forever. Bump deliberately, together with
+          # regenerating nimble.lock (its `nim` entry records the version).
+          nim-version: 2.2.12
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           parent-nim-install-directory: $HOME
           nim-install-directory: nim-toolchain
@@ -33,9 +41,9 @@ jobs:
         run: echo "$HOME/nim-toolchain/bin" >> $GITHUB_PATH
 
       - name: Install dependencies
-        # All deps resolve by name from threecode.nimble via the public
-        # package registry; tags are versions, so tag builds get tagged
-        # dependency versions.
+        # nimble.lock pins every dependency to an exact revision + checksum;
+        # install honors it, so rebuilds of the same commit get identical
+        # dependency trees (bump requires -> `nimble lock` to update).
         run: |
           nimble install -y --depsOnly
 
@@ -130,7 +138,12 @@ jobs:
         timeout-minutes: 30
 
       - name: Package
+        # Deterministic archive: entry order from a sorted list, mtimes
+        # anchored to the commit (SOURCE_DATE_EPOCH), owner normalized,
+        # gzip without name/timestamp. The openssl dylibs still float with
+        # brew; their version is recorded in BUILD_INFO.
         run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
           mkdir -p 3code-macos-universal
           cp 3code 3code-macos-universal/
           # Capture the version from the built binary so it can be checked
@@ -147,8 +160,30 @@ jobs:
             @loader_path/libcrypto.3.dylib 3code-macos-universal/libssl.3.dylib
           ln -sf libssl.3.dylib    3code-macos-universal/libssl.dylib
           ln -sf libcrypto.3.dylib 3code-macos-universal/libcrypto.dylib
+          # Pinned by checksum: cacert.pem is a mutable URL, so an upstream
+          # refresh must be a conscious pin bump, not silent drift.
+          CACERT_SHA256=a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505
           curl -fsSL https://curl.se/ca/cacert.pem -o 3code-macos-universal/cacert.pem
-          tar czf 3code-macos-universal.tar.gz 3code-macos-universal
+          echo "${CACERT_SHA256}  3code-macos-universal/cacert.pem" | shasum -a 256 -c -
+          {
+            nim --version | head -1
+            cc --version | head -1
+            brew list --versions openssl@3
+            shasum -a 256 3code | cut -d' ' -f1
+            echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
+          } > 3code-macos-universal/BUILD_INFO
+          pack() {
+            find 3code-macos-universal | LC_ALL=C sort \
+              | bsdtar --format gnutar --uid 0 --gid 0 --mtime "@${SOURCE_DATE_EPOCH}" \
+                --no-recursion -T - -cf - \
+              | gzip -n > 3code-macos-universal.tar.gz
+          }
+          pack
+          h1=$(shasum -a 256 3code-macos-universal.tar.gz | cut -d' ' -f1)
+          find 3code-macos-universal ! -type l -exec touch {} +  # perturb mtimes (not symlinks: touch would create dangling targets)
+          pack
+          h2=$(shasum -a 256 3code-macos-universal.tar.gz | cut -d' ' -f1)
+          [ "$h1" = "$h2" ] || { echo "archive not reproducible: $h1 vs $h2" >&2; exit 1; }
 
       - name: Upload artifact (GitHub Actions)
         uses: actions/upload-artifact@v4
