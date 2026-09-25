@@ -10,9 +10,39 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    # Frozen toolchain, not the runner image: the ubuntu-22.04 label
+    # re-rolls weekly (gcc/glibc/binutils drift). This digest and the
+    # archive snapshot below are both immutable, so the same commit
+    # produces the same bytes forever. Verified by the reproducibility
+    # check step. To move forward: look up the new digest, pick a new
+    # snapshot timestamp, rebuild twice, compare.
+    container:
+      image: ubuntu:22.04@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
 
     steps:
+      - name: Freeze apt to a pinned archive snapshot
+        # Runs before checkout: the base image has no git yet. ca-certificates
+        # comes from the live archive first (it only affects TLS trust, not
+        # artifact bytes); everything that touches the binary comes from the
+        # frozen snapshot.
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates
+          sed -i 's|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/20260925T000000Z/|; s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/20260925T000000Z/|' /etc/apt/sources.list
+          apt-get update
+          # build-essential: gcc/binutils for the binary; git: checkout +
+          #   config.nims's version probe; curl/xz: nim toolchain download;
+          #   procps: test watchdog ps/pgrep; zstd: actions/cache
+          apt-get install -y --no-install-recommends build-essential git curl ca-certificates xz-utils procps zstd
+
       - uses: actions/checkout@v4
+
+      - name: Trust the checkout
+        # config.nims runs git (branch/sha/status) for the version define;
+        # in a container the workspace is owned by a different uid, so
+        # git would refuse and corrupt the version string.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - uses: jiro4989/setup-nim-action@v2
         with:
@@ -21,7 +51,7 @@ jobs:
           # regenerating nimble.lock (its `nim` entry records the version).
           nim-version: 2.2.12
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-          parent-nim-install-directory: $HOME
+          parent-nim-install-directory: /opt
           nim-install-directory: nim-toolchain
 
       - name: Install dependencies
@@ -53,17 +83,6 @@ jobs:
           h2=$(sha256sum 3code | cut -d' ' -f1)
           [ "$h1" = "$h2" ] || { echo "rebuild differs: $h1 vs $h2" >&2; exit 1; }
           echo "reproducible: $h2"
-
-      - name: Run tests
-        # tests/tools/ci_tests.sh wraps `testament all`: categories still run in
-        # parallel (one testament child per category), but output lands in
-        # a log file instead of a pipe, a watchdog bounds the run and
-        # attributes any hang to the exact test binary, and the exit code
-        # is propagated. The old `for c in ...; testament cat` loop ran
-        # categories sequentially and, worse, a single hung test stalled
-        # the pipe so the step showed nothing after it.
-        run: sh tests/tools/ci_tests.sh 1500
-        timeout-minutes: 30
 
       - name: Package
         # SOURCE_DATE_EPOCH anchors all archive mtimes to the commit, so
@@ -107,3 +126,36 @@ jobs:
           # --retry: 5xx is transient on the upload endpoint
           curl -f --retry 5 --retry-delay 5 -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-linux-amd64.tar.gz" \
             https://3code.capocasa.dev/main/builds/upload.nim
+
+  test:
+    # Tests stay on the stock runner: they produce no artifacts, and the
+    # sandbox/tty tests assume runner-level kernel access (landlock,
+    # userns, PTYs) that a container's seccomp profile may not allow.
+    needs: build
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: 2.2.12
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          parent-nim-install-directory: $HOME
+          nim-install-directory: nim-toolchain
+
+      - name: Install dependencies
+        # Same lock as the build jobs: what gets tested is what ships.
+        run: |
+          nimble install -y --depsOnly
+
+      - name: Run tests
+        # tests/tools/ci_tests.sh wraps `testament all`: categories still run in
+        # parallel (one testament child per category), but output lands in
+        # a log file instead of a pipe, a watchdog bounds the run and
+        # attributes any hang to the exact test binary, and the exit code
+        # is propagated. The old `for c in ...; testament cat` loop ran
+        # categories sequentially and, worse, a single hung test stalled
+        # the pipe so the step showed nothing after it.
+        run: sh tests/tools/ci_tests.sh 1500
+        timeout-minutes: 30

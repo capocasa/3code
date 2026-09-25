@@ -9,17 +9,50 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04-arm
+    # Frozen toolchain, not the runner image: the ubuntu-22.04-arm label
+    # re-rolls weekly (gcc/glibc/binutils drift). This digest and the
+    # archive snapshot below are both immutable, so the same commit
+    # produces the same bytes forever. There is no prebuilt arm64 Nim, so
+    # setup-nim-action compiles the compiler here too: under the frozen
+    # gcc that compiler build is itself frozen.
+    container:
+      image: ubuntu:22.04@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
 
     steps:
+      - name: Freeze apt to a pinned archive snapshot
+        # Runs before checkout: the base image has no git yet. ca-certificates
+        # comes from the live archive first (it only affects TLS trust, not
+        # artifact bytes); everything that touches the binary comes from the
+        # frozen snapshot.
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates
+          sed -i 's|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/20260925T000000Z/|; s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/20260925T000000Z/|' /etc/apt/sources.list
+          apt-get update
+          # build-essential: gcc/binutils for nim + the binary; git: checkout
+          #   + config.nims's version probe; curl/xz: nim source download;
+          #   procps: test watchdog ps/pgrep; zstd: actions/cache
+          apt-get install -y --no-install-recommends build-essential git curl ca-certificates xz-utils procps zstd
+
       - uses: actions/checkout@v4
+
+      - name: Trust the checkout
+        # config.nims runs git (branch/sha/status) for the version define;
+        # in a container the workspace is owned by a different uid, so
+        # git would refuse and corrupt the version string.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Restore Nim toolchain cache
         id: cache-nim
         uses: actions/cache@v4
         with:
-          path: /home/runner/nim-toolchain
+          # /opt, not $HOME: job containers don't share the runner's HOME,
+          # and an absolute path keeps cache hits aligned with the install
+          # directory below.
+          path: /opt/nim-toolchain
           # Key includes the pinned nim-version: a hit must never resurrect
-          # a toolchain older/newer than the nim-version input above.
+          # a toolchain older/newer than the nim-version input below.
           key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-2.2.12-${{ hashFiles('*.nimble') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-
@@ -32,12 +65,12 @@ jobs:
           # regenerating nimble.lock (its `nim` entry records the version).
           nim-version: 2.2.12
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-          parent-nim-install-directory: $HOME
+          parent-nim-install-directory: /opt
           nim-install-directory: nim-toolchain
 
       - name: Add Nim to PATH on cache hit
         if: steps.cache-nim.outputs.cache-hit == 'true'
-        run: echo "$HOME/nim-toolchain/bin" >> $GITHUB_PATH
+        run: echo "/opt/nim-toolchain/bin" >> $GITHUB_PATH
 
       - name: Install dependencies
         # nimble.lock pins every dependency to an exact revision + checksum;
@@ -55,21 +88,6 @@ jobs:
 
       - name: Build
         run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
-
-      - name: Run tests
-        # nimble's nimscript task swallows a non-zero testament exit (it
-        # converts the OSError into a logged exception but still exits 0),
-        # so a failing test reports green. Call testament directly and
-        # propagate $? so a test failure actually fails the step.
-        #
-        # Run categories sequentially rather than via `all` (which fan-outs
-        # every category in parallel). The tty PTY tests spawn real
-        # subprocesses whose render threads are scheduler-sensitive; under
-        # load the parallel fan-out starves those threads and produces
-        # load-induced frame mismatches. Sequential `cat` runs the identical
-        # tests without that contention.
-        run: sh tests/tools/ci_tests.sh 1500
-        timeout-minutes: 30
 
       - name: Package
         # SOURCE_DATE_EPOCH anchors all archive mtimes to the commit, so
@@ -111,3 +129,56 @@ jobs:
           # --retry: 5xx is transient on the upload endpoint
           curl -f --retry 5 --retry-delay 5 -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-linux-arm64.tar.gz" \
             https://3code.capocasa.dev/main/builds/upload.nim
+
+  test:
+    # Tests stay on the stock runner: they produce no artifacts, and the
+    # sandbox/tty tests assume runner-level kernel access (landlock,
+    # userns, PTYs) that a container's seccomp profile may not allow.
+    needs: build
+    runs-on: ubuntu-22.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore Nim toolchain cache
+        id: cache-nim
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/nim-toolchain
+          # Key includes the pinned nim-version: a hit must never resurrect
+          # a toolchain older/newer than the nim-version input above.
+          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-2.2.12-${{ hashFiles('*.nimble') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-
+
+      - uses: jiro4989/setup-nim-action@v2
+        if: steps.cache-nim.outputs.cache-hit != 'true'
+        with:
+          nim-version: 2.2.12
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          parent-nim-install-directory: $HOME
+          nim-install-directory: nim-toolchain
+
+      - name: Add Nim to PATH on cache hit
+        if: steps.cache-nim.outputs.cache-hit == 'true'
+        run: echo "$HOME/nim-toolchain/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        # Same lock as the build jobs: what gets tested is what ships.
+        run: |
+          nimble install -y --depsOnly
+
+      - name: Run tests
+        # nimble's nimscript task swallows a non-zero testament exit (it
+        # converts the OSError into a logged exception but still exits 0),
+        # so a failing test reports green. Call testament directly and
+        # propagate $? so a test failure actually fails the step.
+        #
+        # Run categories sequentially rather than via `all` (which fan-outs
+        # every category in parallel). The tty PTY tests spawn real
+        # subprocesses whose render threads are scheduler-sensitive; under
+        # load the parallel fan-out starves those threads and produces
+        # load-induced frame mismatches. Sequential `cat` runs the identical
+        # tests without that contention.
+        run: sh tests/tools/ci_tests.sh 1500
+        timeout-minutes: 30
