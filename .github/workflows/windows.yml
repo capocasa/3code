@@ -30,6 +30,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install pinned C toolchain
+        # nim's Windows zip ships no C compiler, so the binary is compiled
+        # by whatever gcc is first on PATH — and the image's tool versions
+        # float with weekly image rolls. Use the same mingw64.7z Nim's own
+        # Windows CI uses (winlibs GCC 11.1.0, unchanged on that URL since
+        # 2021), pinned by sha256 like dlls.zip above: an upstream refresh
+        # must be a conscious bump. Extracted outside the checkout because
+        # config.nims embeds `git status --porcelain` in the version
+        # define — an untracked toolchain dir would mark every build
+        # "-unstaged".
+        run: |
+          MINGW64_SHA256=04a535d1e0880364ca9609713744f1a9a36835c4ced834cf435c4dc4eca2159a
+          curl -fsSL -o "$RUNNER_TEMP/mingw64.7z" https://nim-lang.org/download/mingw64.7z
+          echo "${MINGW64_SHA256}  $RUNNER_TEMP/mingw64.7z" | sha256sum -c -
+          7z x -y -o"$RUNNER_TEMP/mingw" "$RUNNER_TEMP/mingw64.7z" > /dev/null
+          echo "$RUNNER_TEMP/mingw/mingw64/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/mingw/mingw64/bin/gcc" --version | head -1
+
       - uses: jiro4989/setup-nim-action@v2
         with:
           # Exact version, not `stable`: the same commit must compile with
@@ -131,8 +149,12 @@ jobs:
           # alongside it to launch) so it can be checked without running
           # the binary on its target OS.
           ./3code-windows-amd64/3code.exe -v > 3code-windows-amd64/VERSION
+          # Toolchain provenance: answers "same toolchain?" when comparing
+          # two builds later. gcc is the pinned mingw64.7z from the first
+          # step, so the line is stable across image rolls.
           {
             nim --version | head -1
+            gcc --version | head -1
             sha256sum 3code.exe | cut -d' ' -f1
             echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
           } > 3code-windows-amd64/BUILD_INFO
