@@ -92,8 +92,11 @@ jobs:
         # package root. Generated after `nimble build` so the main binary's
         # path set stays the one nimble passes.
         run: |
+          # cygpath -m: git-bash's $HOME is the MSYS form (/c/...), which
+          # the Windows-native nim.exe cannot resolve. Glob in MSYS form,
+          # emit each path as C:/... (native, forward slashes).
           { echo '--noNimblePath'
-            for d in "$HOME"/.nimble/pkgs2/*/; do echo "--path:\"$d\""; done
+            for d in "$HOME"/.nimble/pkgs2/*/; do echo "--path:\"$(cygpath -m "$d")\""; done
           } > nimble.paths
           cat nimble.paths
 
