@@ -1,0 +1,111 @@
+{
+  "version": 2,
+  "packages": {
+    "nim": {
+      "version": "2.2.12",
+      "vcsRevision": "d595ef18c7c4d5a3e5a8668509678e0569f78f6b",
+      "url": "https://github.com/nim-lang/Nim.git",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": ""
+      }
+    },
+    "sandwall": {
+      "version": "0.5.8",
+      "vcsRevision": "90ae817cd201a36df4b7e9af3e540a4584fcf9ec",
+      "url": "https://github.com/capocasa/sandwall",
+      "downloadMethod": "git",
+      "dependencies": [
+        "nim"
+      ],
+      "checksums": {
+        "sha1": "62f8fdfd53b8723b00221abee56b8a5900549ebc"
+      }
+    },
+    "streamhttp": {
+      "version": "0.5.0",
+      "vcsRevision": "ca7734f9d0cdff7eb37576fd17ec2189c26315c4",
+      "url": "https://github.com/capocasa/streamhttp",
+      "downloadMethod": "git",
+      "dependencies": [
+        "nim"
+      ],
+      "checksums": {
+        "sha1": "23fffcb82d36cb26d3f55795ae461b40ad328a66"
+      }
+    },
+    "unicodedb": {
+      "version": "0.14.1",
+      "vcsRevision": "b70aac15a3fdc7647997bd6cd10bccd8b2c00e54",
+      "url": "https://github.com/nitely/nim-unicodedb",
+      "downloadMethod": "git",
+      "dependencies": [
+        "nim"
+      ],
+      "checksums": {
+        "sha1": "a9dc8cfd3c0546957d1a99d2c6ace8fc5034f330"
+      }
+    },
+    "zippy": {
+      "version": "0.10.20",
+      "vcsRevision": "cd562ba43ae8904a4d1ba55611b8a521ef4a179e",
+      "url": "https://github.com/guzba/zippy",
+      "downloadMethod": "git",
+      "dependencies": [
+        "nim"
+      ],
+      "checksums": {
+        "sha1": "fae5430d597432ea2916a6d45dee53542784d51e"
+      }
+    },
+    "x11": {
+      "version": "1.2",
+      "vcsRevision": "29aca5e519ebf5d833f63a6a2769e62ec7bfb83a",
+      "url": "https://github.com/nim-lang/x11",
+      "downloadMethod": "git",
+      "dependencies": [
+        "nim"
+      ],
+      "checksums": {
+        "sha1": "6db9aa495a228e9e68faa80acf301f60accd8e5a"
+      }
+    },
+    "ttty": {
+      "version": "0.5.3",
+      "vcsRevision": "bf9e550bc5040e683d89a1beef5896dc9fc66398",
+      "url": "https://github.com/capocasa/ttty",
+      "downloadMethod": "git",
+      "dependencies": [
+        "nim",
+        "x11"
+      ],
+      "checksums": {
+        "sha1": "f23b461f283b456693003b91704e5f6ef8270067"
+      }
+    },
+    "tinotify": {
+      "version": "0.1.4",
+      "vcsRevision": "8faea8ec0e2f2895ad63990c151737170ec3acbf",
+      "url": "https://github.com/capocasa/tinotify",
+      "downloadMethod": "git",
+      "dependencies": [
+        "nim"
+      ],
+      "checksums": {
+        "sha1": "3f0c209786a0d35ec847bc4a607138f119ac0b46"
+      }
+    },
+    "libsha": {
+      "version": "1.0",
+      "vcsRevision": "fcdc448a63cc70814df5e92de050d8225715fe0a",
+      "url": "https://github.com/forlan-ua/nim-libsha",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "d03f6cd5cdc1ba8b4dbfeb7ed8d297acbff2f50b"
+      }
+    }
+  },
+  "tasks": {}
+}

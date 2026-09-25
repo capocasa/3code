@@ -1,29 +1,56 @@
 name: OSX
 on:
   workflow_dispatch:
+    inputs:
+      run-tests:
+        description: 'Run the test suite (turn off to validate packaging alone)'
+        type: boolean
+        default: true
   push:
     branches: [main]
     tags: ['[0-9]+.[0-9]+.[0-9]+']
 
 jobs:
   build:
-    runs-on: macos-latest
+    # Pinned label (macos-latest rolls to new macOS releases); the image
+    # still receives weekly tool updates under the label, recorded in the
+    # artifact's BUILD_INFO.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+
+      - name: Pin Xcode toolchain
+        # macos-15 keeps several Xcodes around and can switch the default
+        # between image rolls; a default switch would silently recompile
+        # both binary slices with a different clang. Select an explicit
+        # version (the long-staying image default); if a future image
+        # drops it this fails loudly instead of drifting. Must run before
+        # setup-nim: on macOS the action builds Nim from source, and the
+        # bootstrap compile uses this clang too.
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app
+          xcodebuild -version
+          xcodebuild -version | grep -qx 'Xcode 16.4' || { echo "Xcode 16.4 not selected" >&2; exit 1; }
+          cc --version | head -1
 
       - name: Restore Nim toolchain cache
         id: cache-nim
         uses: actions/cache@v4
         with:
           path: /Users/runner/nim-toolchain
-          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-${{ hashFiles('*.nimble') }}
+          # Key includes the pinned nim-version: a hit must never resurrect
+          # a toolchain older/newer than the nim-version input above.
+          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-2.2.12-${{ hashFiles('*.nimble') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-
 
       - uses: jiro4989/setup-nim-action@v2
         if: steps.cache-nim.outputs.cache-hit != 'true'
         with:
-          nim-version: stable
+          # Exact version, not `stable`: the same commit must compile with
+          # the same compiler forever. Bump deliberately, together with
+          # regenerating nimble.lock (its `nim` entry records the version).
+          nim-version: 2.2.12
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           parent-nim-install-directory: $HOME
           nim-install-directory: nim-toolchain
@@ -33,9 +60,9 @@ jobs:
         run: echo "$HOME/nim-toolchain/bin" >> $GITHUB_PATH
 
       - name: Install dependencies
-        # All deps resolve by name from threecode.nimble via the public
-        # package registry; tags are versions, so tag builds get tagged
-        # dependency versions.
+        # nimble.lock pins every dependency to an exact revision + checksum;
+        # install honors it, so rebuilds of the same commit get identical
+        # dependency trees (bump requires -> `nimble lock` to update).
         run: |
           nimble install -y --depsOnly
 
@@ -107,6 +134,17 @@ jobs:
 
           echo "sandbox matrix: all checks passed"
 
+      - name: Generate nimble.paths for direct nim invocations
+        # Placed after the arm64 slice's `nimble build`: extra --path
+        # switches change module symbol naming, so the release slice keeps
+        # the exact path set nimble passes. See the comment in windows.yml
+        # for what this file is for.
+        run: |
+          { echo '--noNimblePath'
+            for d in "$HOME"/.nimble/pkgs2/*/; do echo "--path:\"$d\""; done
+          } > nimble.paths
+          cat nimble.paths
+
       - name: Build x86_64 and create universal binary
         env:
           SLICE_DIR: ${{ runner.temp }}
@@ -126,29 +164,105 @@ jobs:
         # themselves because each category is still sequential inside
         # testament. If load-induced tty flakes reappear on this 3-core
         # runner, pass explicit categories to serialize them.
+        # Dispatch-only bypass: tty timing tests are marginal on the 3-core
+        # macos-15 runner; run-tests=false validates build+packaging alone.
+        if: github.event_name != 'workflow_dispatch' || inputs.run-tests
         run: sh tests/tools/ci_tests.sh 1500
         timeout-minutes: 30
 
       - name: Package
+        # Deterministic archive: entry order from a sorted list, mtimes
+        # anchored to the commit (SOURCE_DATE_EPOCH), owner normalized,
+        # gzip without name/timestamp. Python tarfile, not bsdtar: the
+        # runner's bsdtar rejects --mtime on create, and its failure inside
+        # the find|sort|bsdtar|gzip pipeline is masked by gzip's success
+        # (the step shell is bash -e, no pipefail), which shipped an empty
+        # tarball that still passed the h1==h2 double-pack check. Python
+        # writes every field explicitly and the member-count guard below
+        # catches any empty archive. The openssl dylibs come from the
+        # pinned bottle below.
+        shell: bash
         run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
           mkdir -p 3code-macos-universal
           cp 3code 3code-macos-universal/
           # Capture the version from the built binary so it can be checked
           # without running the binary on its target OS.
           ./3code -v > 3code-macos-universal/VERSION
           cp README.md LICENSE 3code-macos-universal/
-          OPENSSL_PREFIX="$(brew --prefix openssl@3)"
-          cp "${OPENSSL_PREFIX}/lib/libssl.3.dylib"    3code-macos-universal/
-          cp "${OPENSSL_PREFIX}/lib/libcrypto.3.dylib" 3code-macos-universal/
+          # OpenSSL dylibs from a pinned Homebrew bottle instead of the
+          # runner's floating brew tree: the ghcr blob is digest-addressed
+          # and immutable, and the sha256 makes a pin bump a conscious act
+          # (same policy as cacert.pem). The bottle's pre-pour install
+          # names (@@HOMEBREW_CELLAR@@/...) are rewritten to @loader_path
+          # so the pair loads standalone.
+          OPENSSL_VERSION=3.6.4
+          OPENSSL_BOTTLE_SHA256=b7139450ed389be82f807daaadffa778d9c4753a3b2d8f784da1cf7383994ee2
+          TOKEN="$(curl -fsSL "https://ghcr.io/token?scope=repository:homebrew/core/openssl/3:pull&service=ghcr.io" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+          curl -fsSL -H "Authorization: Bearer ${TOKEN}" \
+            "https://ghcr.io/v2/homebrew/core/openssl/3/blobs/sha256:${OPENSSL_BOTTLE_SHA256}" \
+            -o openssl-bottle.tar.gz
+          echo "${OPENSSL_BOTTLE_SHA256}  openssl-bottle.tar.gz" | shasum -a 256 -c -
+          OSSL="$(mktemp -d)"
+          tar -xzf openssl-bottle.tar.gz -C "$OSSL" \
+            "openssl@3/${OPENSSL_VERSION}/lib/libssl.3.dylib" \
+            "openssl@3/${OPENSSL_VERSION}/lib/libcrypto.3.dylib"
+          cp "$OSSL/openssl@3/${OPENSSL_VERSION}/lib/libssl.3.dylib"    3code-macos-universal/
+          cp "$OSSL/openssl@3/${OPENSSL_VERSION}/lib/libcrypto.3.dylib" 3code-macos-universal/
           chmod +w 3code-macos-universal/libssl.3.dylib 3code-macos-universal/libcrypto.3.dylib
           install_name_tool -id @loader_path/libcrypto.3.dylib 3code-macos-universal/libcrypto.3.dylib
           install_name_tool -id @loader_path/libssl.3.dylib    3code-macos-universal/libssl.3.dylib
-          install_name_tool -change "${OPENSSL_PREFIX}/lib/libcrypto.3.dylib" \
-            @loader_path/libcrypto.3.dylib 3code-macos-universal/libssl.3.dylib
+          # The pre-pour reference to libcrypto varies by bottle; rewrite
+          # whatever otool reports instead of hardcoding it.
+          CRYPTO_REF="$(otool -L 3code-macos-universal/libssl.3.dylib | awk '/libcrypto/ {print $1; exit}')"
+          install_name_tool -change "$CRYPTO_REF" @loader_path/libcrypto.3.dylib \
+            3code-macos-universal/libssl.3.dylib
           ln -sf libssl.3.dylib    3code-macos-universal/libssl.dylib
           ln -sf libcrypto.3.dylib 3code-macos-universal/libcrypto.dylib
+          # Pinned by checksum: cacert.pem is a mutable URL, so an upstream
+          # refresh must be a conscious pin bump, not silent drift.
+          CACERT_SHA256=a41b5d356aea97a529fe27e0f7316d2f9d946d75927476cf9cf1b90637d00505
           curl -fsSL https://curl.se/ca/cacert.pem -o 3code-macos-universal/cacert.pem
-          tar czf 3code-macos-universal.tar.gz 3code-macos-universal
+          echo "${CACERT_SHA256}  3code-macos-universal/cacert.pem" | shasum -a 256 -c -
+          {
+            nim --version | head -1
+            cc --version | head -1
+            echo "openssl@3 ${OPENSSL_VERSION} bottle:${OPENSSL_BOTTLE_SHA256}"
+            shasum -a 256 3code | cut -d' ' -f1
+            echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
+          } > 3code-macos-universal/BUILD_INFO
+          cat > /tmp/mktar.py <<'PY'
+          import gzip, os, sys, tarfile
+          src, out, epoch = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          names = sorted(
+              os.path.join(r, n).replace(os.sep, "/")
+              for r, ds, fs in os.walk(src)
+              for n in ds + fs)
+          # GzipFile with filename='' and mtime=0: no name, no timestamp
+          with open(out, "wb") as raw, \
+              gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as gz, \
+              tarfile.open(fileobj=gz, mode="w") as t:
+              for n in names:
+                  ti = t.gettarinfo(n)
+                  ti.mtime = epoch
+                  ti.uid = ti.gid = 0
+                  ti.uname = ti.gname = ""
+                  if ti.isfile():
+                      t.addfile(ti, open(n, "rb"))
+                  else:
+                      t.addfile(ti)
+          PY
+          pack() { python3 /tmp/mktar.py 3code-macos-universal 3code-macos-universal.tar.gz "$SOURCE_DATE_EPOCH"; }
+          pack
+          h1=$(shasum -a 256 3code-macos-universal.tar.gz | cut -d' ' -f1)
+          # files-only layout, like the windows zip: 10 members
+          members=$(tar -tzf 3code-macos-universal.tar.gz | wc -l)
+          [ "$members" -ge 10 ] || { echo "archive has only $members members" >&2; exit 1; }
+          find 3code-macos-universal ! -type l -exec touch {} +  # perturb mtimes (not symlinks: touch would create dangling targets)
+          pack
+          h2=$(shasum -a 256 3code-macos-universal.tar.gz | cut -d' ' -f1)
+          [ "$h1" = "$h2" ] || { echo "archive not reproducible: $h1 vs $h2" >&2; exit 1; }
 
       - name: Upload artifact (GitHub Actions)
         uses: actions/upload-artifact@v4

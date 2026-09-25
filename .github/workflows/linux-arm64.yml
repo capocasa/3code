@@ -9,35 +9,89 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04-arm
+    # Frozen toolchain, not the runner image: the ubuntu-22.04-arm label
+    # re-rolls weekly (gcc/glibc/binutils drift). This digest and the
+    # archive snapshot below are both immutable, so the same commit
+    # produces the same bytes forever. There is no prebuilt arm64 Nim, so
+    # the compiler is bootstrapped from the pinned source tarball below;
+    # under the frozen gcc that compiler build is itself frozen.
+    container:
+      image: ubuntu:22.04@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
 
     steps:
+      - name: Freeze apt to a pinned archive snapshot
+        # Runs before checkout: the base image has no git yet. ca-certificates
+        # comes from the live archive first (it only affects TLS trust, not
+        # artifact bytes); everything that touches the binary comes from the
+        # frozen snapshot.
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates
+          sed -i 's|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/20260925T000000Z/|; s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/20260925T000000Z/|' /etc/apt/sources.list
+          apt-get update
+          # build-essential: gcc/binutils for nim + the binary; git: checkout
+          #   + config.nims's version probe; curl/xz: nim source download;
+          #   procps: test watchdog ps/pgrep; zstd: actions/cache
+          apt-get install -y --no-install-recommends build-essential git curl ca-certificates xz-utils procps zstd
+
       - uses: actions/checkout@v4
+
+      - name: Trust the checkout
+        # config.nims runs git (branch/sha/status) for the version define;
+        # in a container the workspace is owned by a different uid, so
+        # git would refuse and corrupt the version string.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Restore Nim toolchain cache
         id: cache-nim
         uses: actions/cache@v4
         with:
-          path: /home/runner/nim-toolchain
-          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-${{ hashFiles('*.nimble') }}
+          # /opt, not $HOME: job containers don't share the runner's HOME,
+          # and an absolute path keeps cache hits aligned with the install
+          # directory below.
+          path: /opt/nim-toolchain
+          # Key includes the pinned nim-version: a hit must never resurrect
+          # a toolchain older/newer than the nim-version input below.
+          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-2.2.12-${{ hashFiles('*.nimble') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-
 
-      - uses: jiro4989/setup-nim-action@v2
+      - name: Build Nim toolchain from source (pinned)
+        # Inline instead of setup-nim-action: the action is composite, and
+        # its run steps embed ${{ github.action_path }} — the runner-side
+        # path, which does not exist inside a `container:` job (the mount
+        # lives at /__w/...), so its script died with exit 127. Same
+        # bootstrap sequence as the action's install_nim.sh (build.sh,
+        # koch boot, koch tools — which also builds bin/nimble from the
+        # tarball's vendored dist/nimble), plus a sha256 pin the action
+        # never did.
+        # Exact version, not `stable`: the same commit must compile with
+        # the same compiler forever. Bump deliberately, together with
+        # regenerating nimble.lock (its `nim` entry records the version).
         if: steps.cache-nim.outputs.cache-hit != 'true'
-        with:
-          nim-version: stable
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          parent-nim-install-directory: $HOME
-          nim-install-directory: nim-toolchain
+        run: |
+          NIM_SRC_SHA256=2639a06a5ea7a7fcf57df1e7e1ef4d1b2bee58c7ac9bd00dbd2aa5bea1e5a56a
+          curl -fsSL -o /tmp/nim.tar.xz https://nim-lang.org/download/nim-2.2.12.tar.xz
+          echo "${NIM_SRC_SHA256}  /tmp/nim.tar.xz" | sha256sum -c -
+          tar -xJf /tmp/nim.tar.xz -C /opt
+          cd /opt/nim-2.2.12
+          ./build.sh
+          bin/nim c --noNimblePath --skipUserCfg --skipParentCfg --hints:off koch
+          ./koch boot -d:release --skipUserCfg --skipParentCfg --hints:off
+          ./koch tools --skipUserCfg --skipParentCfg --hints:off
+          mv /opt/nim-2.2.12 /opt/nim-toolchain
+          echo "/opt/nim-toolchain/bin" >> "$GITHUB_PATH"
+          /opt/nim-toolchain/bin/nim --version | head -1
 
       - name: Add Nim to PATH on cache hit
         if: steps.cache-nim.outputs.cache-hit == 'true'
-        run: echo "$HOME/nim-toolchain/bin" >> $GITHUB_PATH
+        run: echo "/opt/nim-toolchain/bin" >> $GITHUB_PATH
 
       - name: Install dependencies
-        # All deps resolve by name from threecode.nimble via the public
-        # package registry; tags are versions, so tag builds get tagged
-        # dependency versions.
+        # nimble.lock pins every dependency to an exact revision + checksum;
+        # install honors it, so rebuilds of the same commit get identical
+        # dependency trees (bump requires -> `nimble lock` to update).
         run: |
           nimble install -y --depsOnly
 
@@ -50,6 +104,96 @@ jobs:
 
       - name: Build
         run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
+
+      - name: Package
+        # SOURCE_DATE_EPOCH anchors all archive mtimes to the commit, so
+        # the tarball is byte-identical across rebuilds of one commit.
+        run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
+          mkdir -p 3code-linux-arm64
+          cp 3code 3code-linux-arm64/
+          # Capture the version from the built binary so it can be checked
+          # without running the binary on its target OS.
+          ./3code -v > 3code-linux-arm64/VERSION
+          {
+            nim --version | head -1
+            cc --version | head -1
+            sha256sum 3code | cut -d' ' -f1
+            echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
+          } > 3code-linux-arm64/BUILD_INFO
+          cp README.md LICENSE 3code-linux-arm64/
+          pack() {
+            tar --sort=name --mtime="@${SOURCE_DATE_EPOCH}" --owner=0 --group=0 --numeric-owner \
+              -cf - 3code-linux-arm64 | gzip -n > 3code-linux-arm64.tar.gz
+          }
+          pack
+          h1=$(sha256sum 3code-linux-arm64.tar.gz | cut -d' ' -f1)
+          find 3code-linux-arm64 ! -type l -exec touch {} +  # perturb mtimes (not symlinks: touch would create dangling targets)
+          pack
+          h2=$(sha256sum 3code-linux-arm64.tar.gz | cut -d' ' -f1)
+          [ "$h1" = "$h2" ] || { echo "archive not reproducible: $h1 vs $h2" >&2; exit 1; }
+
+      - name: Upload artifact (GitHub Actions)
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3code-linux-arm64
+          path: 3code-linux-arm64.tar.gz
+
+      - name: Upload artifact to 3code.capocasa.dev
+        if: github.ref == 'refs/heads/main'
+        run: |
+          # --retry: 5xx is transient on the upload endpoint
+          curl -f --retry 5 --retry-delay 5 -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-linux-arm64.tar.gz" \
+            https://3code.capocasa.dev/main/builds/upload.nim
+
+  test:
+    # Tests stay on the stock runner: they produce no artifacts, and the
+    # sandbox/tty tests assume runner-level kernel access (landlock,
+    # userns, PTYs) that a container's seccomp profile may not allow.
+    needs: build
+    runs-on: ubuntu-22.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore Nim toolchain cache
+        id: cache-nim
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/nim-toolchain
+          # Key includes the pinned nim-version: a hit must never resurrect
+          # a toolchain older/newer than the nim-version input above.
+          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-2.2.12-${{ hashFiles('*.nimble') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-
+
+      - uses: jiro4989/setup-nim-action@v2
+        if: steps.cache-nim.outputs.cache-hit != 'true'
+        with:
+          nim-version: 2.2.12
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          parent-nim-install-directory: $HOME
+          nim-install-directory: nim-toolchain
+
+      - name: Add Nim to PATH on cache hit
+        if: steps.cache-nim.outputs.cache-hit == 'true'
+        run: echo "$HOME/nim-toolchain/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        # Same lock as the build jobs: what gets tested is what ships.
+        run: |
+          nimble install -y --depsOnly
+
+      - name: Generate nimble.paths for direct nim invocations
+        # The committed nimble.lock makes nim disable its pkgs2 package scan
+        # (see windows.yml), and testament compiles get no --path flags from
+        # nimble. nimble.paths (gitignored, included by config.nims) restores
+        # the exact paths the disabled scan would have used.
+        run: |
+          { echo '--noNimblePath'
+            for d in "$HOME"/.nimble/pkgs2/*/; do echo "--path:\"$d\""; done
+          } > nimble.paths
+          cat nimble.paths
 
       - name: Run tests
         # nimble's nimscript task swallows a non-zero testament exit (it
@@ -65,26 +209,3 @@ jobs:
         # tests without that contention.
         run: sh tests/tools/ci_tests.sh 1500
         timeout-minutes: 30
-
-      - name: Package
-        run: |
-          mkdir -p 3code-linux-arm64
-          cp 3code 3code-linux-arm64/
-          # Capture the version from the built binary so it can be checked
-          # without running the binary on its target OS.
-          ./3code -v > 3code-linux-arm64/VERSION
-          cp README.md LICENSE 3code-linux-arm64/
-          tar czf 3code-linux-arm64.tar.gz 3code-linux-arm64
-
-      - name: Upload artifact (GitHub Actions)
-        uses: actions/upload-artifact@v4
-        with:
-          name: 3code-linux-arm64
-          path: 3code-linux-arm64.tar.gz
-
-      - name: Upload artifact to 3code.capocasa.dev
-        if: github.ref == 'refs/heads/main'
-        run: |
-          # --retry: 5xx is transient on the upload endpoint
-          curl -f --retry 5 --retry-delay 5 -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-linux-arm64.tar.gz" \
-            https://3code.capocasa.dev/main/builds/upload.nim

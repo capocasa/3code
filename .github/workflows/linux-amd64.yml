@@ -10,21 +10,63 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    # Frozen toolchain, not the runner image: the ubuntu-22.04 label
+    # re-rolls weekly (gcc/glibc/binutils drift). This digest and the
+    # archive snapshot below are both immutable, so the same commit
+    # produces the same bytes forever. Verified by the reproducibility
+    # check step. To move forward: look up the new digest, pick a new
+    # snapshot timestamp, rebuild twice, compare.
+    container:
+      image: ubuntu:22.04@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
 
     steps:
+      - name: Freeze apt to a pinned archive snapshot
+        # Runs before checkout: the base image has no git yet. ca-certificates
+        # comes from the live archive first (it only affects TLS trust, not
+        # artifact bytes); everything that touches the binary comes from the
+        # frozen snapshot.
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates
+          sed -i 's|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/20260925T000000Z/|; s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/20260925T000000Z/|' /etc/apt/sources.list
+          apt-get update
+          # build-essential: gcc/binutils for the binary; git: checkout +
+          #   config.nims's version probe; curl/xz: nim toolchain download;
+          #   procps: test watchdog ps/pgrep; zstd: actions/cache
+          apt-get install -y --no-install-recommends build-essential git curl ca-certificates xz-utils procps zstd
+
       - uses: actions/checkout@v4
 
-      - uses: jiro4989/setup-nim-action@v2
-        with:
-          nim-version: stable
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          parent-nim-install-directory: $HOME
-          nim-install-directory: nim-toolchain
+      - name: Trust the checkout
+        # config.nims runs git (branch/sha/status) for the version define;
+        # in a container the workspace is owned by a different uid, so
+        # git would refuse and corrupt the version string.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install Nim toolchain (pinned)
+        # Inline instead of setup-nim-action: the action is composite, and
+        # its run steps embed ${{ github.action_path }} — the runner-side
+        # path, which does not exist inside a `container:` job (the mount
+        # lives at /__w/...), so its script died with exit 127. Same
+        # layout the action installs (/opt/nim-toolchain), plus a sha256
+        # pin the action never did.
+        # Exact version, not `stable`: the same commit must compile with
+        # the same compiler forever. Bump deliberately, together with
+        # regenerating nimble.lock (its `nim` entry records the version).
+        run: |
+          NIM_SHA256=7df1611449a6842af69322aa2c1206942982650a5f6bc0d37bc8ec109932f638
+          curl -fsSL -o /tmp/nim.tar.xz https://nim-lang.org/download/nim-2.2.12-linux_x64.tar.xz
+          echo "${NIM_SHA256}  /tmp/nim.tar.xz" | sha256sum -c -
+          tar -xJf /tmp/nim.tar.xz -C /opt
+          mv /opt/nim-2.2.12 /opt/nim-toolchain
+          echo "/opt/nim-toolchain/bin" >> "$GITHUB_PATH"
+          /opt/nim-toolchain/bin/nim --version | head -1
 
       - name: Install dependencies
-        # All deps resolve by name from threecode.nimble via the public
-        # package registry; tags are versions, so tag builds get tagged
-        # dependency versions.
+        # nimble.lock pins every dependency to an exact revision + checksum;
+        # install honors it, so rebuilds of the same commit get identical
+        # dependency trees (bump requires -> `nimble lock` to update).
         run: |
           nimble install -y --depsOnly
 
@@ -38,26 +80,48 @@ jobs:
       - name: Build
         run: nimble build -y -d:release ${{ env.BUILD_FLAGS }}
 
-      - name: Run tests
-        # tests/tools/ci_tests.sh wraps `testament all`: categories still run in
-        # parallel (one testament child per category), but output lands in
-        # a log file instead of a pipe, a watchdog bounds the run and
-        # attributes any hang to the exact test binary, and the exit code
-        # is propagated. The old `for c in ...; testament cat` loop ran
-        # categories sequentially and, worse, a single hung test stalled
-        # the pipe so the step showed nothing after it.
-        run: sh tests/tools/ci_tests.sh 1500
-        timeout-minutes: 30
+      - name: Reproducibility check (rebuild from scratch)
+        # A clean recompile+relink of the same tree must be byte-identical.
+        # Catches ordering nondeterminism and anything the build itself
+        # leaks into the binary (paths, timestamps, git state).
+        run: |
+          h1=$(sha256sum 3code | cut -d' ' -f1)
+          rm -f 3code
+          rm -rf ~/.cache/nim/threecode_r
+          nimble build -y -d:release ${{ env.BUILD_FLAGS }}
+          h2=$(sha256sum 3code | cut -d' ' -f1)
+          [ "$h1" = "$h2" ] || { echo "rebuild differs: $h1 vs $h2" >&2; exit 1; }
+          echo "reproducible: $h2"
 
       - name: Package
+        # SOURCE_DATE_EPOCH anchors all archive mtimes to the commit, so
+        # the tarball is byte-identical across rebuilds of one commit.
         run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
           mkdir -p 3code-linux-amd64
           cp 3code 3code-linux-amd64/
           # Capture the version from the built binary so it can be checked
           # without running the binary on its target OS.
           ./3code -v > 3code-linux-amd64/VERSION
+          # Toolchain provenance: answers "same toolchain?" when comparing
+          # two builds later.
+          {
+            nim --version | head -1
+            cc --version | head -1
+            sha256sum 3code | cut -d' ' -f1
+            echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
+          } > 3code-linux-amd64/BUILD_INFO
           cp README.md LICENSE 3code-linux-amd64/
-          tar czf 3code-linux-amd64.tar.gz 3code-linux-amd64
+          pack() {
+            tar --sort=name --mtime="@${SOURCE_DATE_EPOCH}" --owner=0 --group=0 --numeric-owner \
+              -cf - 3code-linux-amd64 | gzip -n > 3code-linux-amd64.tar.gz
+          }
+          pack
+          h1=$(sha256sum 3code-linux-amd64.tar.gz | cut -d' ' -f1)
+          find 3code-linux-amd64 ! -type l -exec touch {} +  # perturb mtimes (not symlinks: touch would create dangling targets)
+          pack
+          h2=$(sha256sum 3code-linux-amd64.tar.gz | cut -d' ' -f1)
+          [ "$h1" = "$h2" ] || { echo "archive not reproducible: $h1 vs $h2" >&2; exit 1; }
 
       - name: Upload artifact (GitHub Actions)
         uses: actions/upload-artifact@v4
@@ -71,3 +135,47 @@ jobs:
           # --retry: 5xx is transient on the upload endpoint
           curl -f --retry 5 --retry-delay 5 -H "Authorization: Bearer ${{ secrets.RELEASE_SECRET }}" -F "file=@3code-linux-amd64.tar.gz" \
             https://3code.capocasa.dev/main/builds/upload.nim
+
+  test:
+    # Tests stay on the stock runner: they produce no artifacts, and the
+    # sandbox/tty tests assume runner-level kernel access (landlock,
+    # userns, PTYs) that a container's seccomp profile may not allow.
+    needs: build
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: 2.2.12
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          parent-nim-install-directory: $HOME
+          nim-install-directory: nim-toolchain
+
+      - name: Install dependencies
+        # Same lock as the build jobs: what gets tested is what ships.
+        run: |
+          nimble install -y --depsOnly
+
+      - name: Generate nimble.paths for direct nim invocations
+        # The committed nimble.lock makes nim disable its pkgs2 package scan
+        # (see windows.yml), and testament compiles get no --path flags from
+        # nimble. nimble.paths (gitignored, included by config.nims) restores
+        # the exact paths the disabled scan would have used.
+        run: |
+          { echo '--noNimblePath'
+            for d in "$HOME"/.nimble/pkgs2/*/; do echo "--path:\"$d\""; done
+          } > nimble.paths
+          cat nimble.paths
+
+      - name: Run tests
+        # tests/tools/ci_tests.sh wraps `testament all`: categories still run in
+        # parallel (one testament child per category), but output lands in
+        # a log file instead of a pipe, a watchdog bounds the run and
+        # attributes any hang to the exact test binary, and the exit code
+        # is propagated. The old `for c in ...; testament cat` loop ran
+        # categories sequentially and, worse, a single hung test stalled
+        # the pipe so the step showed nothing after it.
+        run: sh tests/tools/ci_tests.sh 1500
+        timeout-minutes: 30
