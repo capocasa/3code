@@ -48,6 +48,23 @@ jobs:
             echo "BUILD_FLAGS=--opt:none --debugger:native" >> "$GITHUB_ENV"
           fi
 
+      - name: gorge probe
+        run: |
+          mkdir -p .agents
+          cat > .agents/gorgeprobe.nims <<'EOF2'
+          let r = gorgeEx("git status --porcelain=v1")
+          echo "gorgeEx exitCode: ", r.exitCode
+          echo "gorgeEx output repr: ", repr(r.output)
+          echo "gorge branch repr: ", repr(gorge("git branch --show-current"))
+          EOF2
+          mkdir -p .agents
+          nim e .agents/gorgeprobe.nims
+          echo "--- bash direct:"
+          git status --porcelain=v1 | od -c | head -5
+          echo "--- cmd direct:"
+          cmd //c "git status --porcelain=v1" | od -c | head -5
+          echo "--- HOME in bash: '$HOME'; autocrlf: $(git config --get core.autocrlf)"
+
       - name: Build
         run: nimble build -y ${{ env.BUILD_FLAGS }}
 
