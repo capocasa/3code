@@ -184,6 +184,17 @@ jobs:
         run: |
           nimble install -y --depsOnly
 
+      - name: Generate nimble.paths for direct nim invocations
+        # The committed nimble.lock makes nim disable its pkgs2 package scan
+        # (see windows.yml), and testament compiles get no --path flags from
+        # nimble. nimble.paths (gitignored, included by config.nims) restores
+        # the exact paths the disabled scan would have used.
+        run: |
+          { echo '--noNimblePath'
+            for d in "$HOME"/.nimble/pkgs2/*/; do echo "--path:\"$d\""; done
+          } > nimble.paths
+          cat nimble.paths
+
       - name: Run tests
         # nimble's nimscript task swallows a non-zero testament exit (it
         # converts the OSError into a logged exception but still exits 0),

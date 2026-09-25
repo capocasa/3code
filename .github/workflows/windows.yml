@@ -80,6 +80,23 @@ jobs:
       - name: Build
         run: nimble build -y ${{ env.BUILD_FLAGS }}
 
+      - name: Generate nimble.paths for direct nim invocations
+        # nim disables its pkgs2 package scan whenever a nimble.lock is
+        # present (compiler/nim.nim: nimbleLockExists -> disableNimblePath;
+        # the lock means nimble passes explicit --path flags, so nim assumes
+        # nothing else needs the scan). Direct `nim c` and testament
+        # compiles then fail with "cannot open file: <dep>" — main-branch CI
+        # only works because it has no committed lock. nimble.paths
+        # (gitignored, included by config.nims) restores exactly the paths
+        # the disabled scan would have used: one --path per installed
+        # package root. Generated after `nimble build` so the main binary's
+        # path set stays the one nimble passes.
+        run: |
+          { echo '--noNimblePath'
+            for d in "$HOME"/.nimble/pkgs2/*/; do echo "--path:\"$d\""; done
+          } > nimble.paths
+          cat nimble.paths
+
       - name: Stage OpenSSL DLLs for test binaries
         # The tty tests spawn the real 3code binary (built -d:ssl), which
         # dlopens libssl/libcrypto by Nim's hardcoded names. Stock Windows

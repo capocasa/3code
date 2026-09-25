@@ -37,6 +37,18 @@ jobs:
         run: |
           nimble install -y --depsOnly
 
+      - name: Generate nimble.paths for direct nim invocations
+        # The committed nimble.lock makes nim disable its pkgs2 package scan
+        # (see windows.yml), and the cross-compiles below are direct `nim c`
+        # calls that get no --path flags from nimble. nimble.paths
+        # (gitignored, included by config.nims) restores the exact paths the
+        # disabled scan would have used.
+        run: |
+          { echo '--noNimblePath'
+            for d in "$HOME"/.nimble/pkgs2/*/; do echo "--path:\"$d\""; done
+          } > nimble.paths
+          cat nimble.paths
+
       - name: Download Android NDK
         # The main binary builds for Termux via NDK cross-compile. No
         # -d:termux: that links -landroid-glob (a Termux package for
@@ -195,6 +207,15 @@ jobs:
         # stress job rides devel Nim on purpose and keeps the same lock.
         run: |
           nimble install -y --depsOnly
+
+      - name: Generate nimble.paths for direct nim invocations
+        # Same as the build job: the lock disables nim's pkgs2 scan and the
+        # stress-test cross-compiles are direct `nim c` calls.
+        run: |
+          { echo '--noNimblePath'
+            for d in "$HOME"/.nimble/pkgs2/*/; do echo "--path:\"$d\""; done
+          } > nimble.paths
+          cat nimble.paths
 
       - name: Download Android NDK
         run: |

@@ -129,6 +129,17 @@ jobs:
 
           echo "sandbox matrix: all checks passed"
 
+      - name: Generate nimble.paths for direct nim invocations
+        # Placed after the arm64 slice's `nimble build`: extra --path
+        # switches change module symbol naming, so the release slice keeps
+        # the exact path set nimble passes. See the comment in windows.yml
+        # for what this file is for.
+        run: |
+          { echo '--noNimblePath'
+            for d in "$HOME"/.nimble/pkgs2/*/; do echo "--path:\"$d\""; done
+          } > nimble.paths
+          cat nimble.paths
+
       - name: Build x86_64 and create universal binary
         env:
           SLICE_DIR: ${{ runner.temp }}
