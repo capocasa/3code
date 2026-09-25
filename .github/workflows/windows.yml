@@ -77,13 +77,6 @@ jobs:
             echo "BUILD_FLAGS=--opt:none --debugger:native" >> "$GITHUB_ENV"
           fi
 
-      - name: Compute build flags
-        run: |
-          echo "=== diagnostic git status ==="
-          git status --porcelain=v1 | head -20
-          echo "=== autocrlf: $(git config --get core.autocrlf || echo unset)"
-          echo "=== end diagnostic ==="
-
       - name: Build
         run: nimble build -y ${{ env.BUILD_FLAGS }}
 
