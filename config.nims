@@ -14,13 +14,17 @@ proc onTag(): bool =
   gorgeEx("git describe --tags --exact-match HEAD").exitCode == 0
 
 proc hasUnstagedChanges(): bool =
-  ## staticExec merges stderr into its output (poStdErrToStdOut), and on
-  ## Windows `git status` emits shell noise even on a clean tree, which
-  ## used to mark every CI build "-unstaged" while a direct status in
-  ## git-bash showed the tree clean. Only porcelain v1 records count:
+  ## "Unstaged" means compiled sources differ from HEAD, so untracked
+  ## files do not count: the windows job stages dlls.zip/dlls in the
+  ## workspace before the test phase, and ci_tests.sh's rebuild of the
+  ## 3code binary then re-evaluates this probe -- `?? dlls/` used to bake
+  ## "-unstaged" into every windows build (the packaged exe is that
+  ## rebuild; linux/mac package a pre-test binary, which is why only
+  ## windows showed it). Belt and braces: staticExec merges stderr into
+  ## its output (poStdErrToStdOut), so only porcelain v1 records count --
   ## two status columns, a space, then the path. A failing git (no repo,
-  ## no git) reports no changes, same as the old empty-output behavior.
-  let r = gorgeEx("git status --porcelain=v1")
+  ## no git) reports no changes, like the old empty-output behavior.
+  let r = gorgeEx("git status --porcelain=v1 --untracked-files=no")
   if r.exitCode != 0:
     return false
   for line in r.output.splitLines():
