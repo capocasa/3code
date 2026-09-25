@@ -1,6 +1,11 @@
 name: OSX
 on:
   workflow_dispatch:
+    inputs:
+      run-tests:
+        description: 'Run the test suite (turn off to validate packaging alone)'
+        type: boolean
+        default: true
   push:
     branches: [main]
     tags: ['[0-9]+.[0-9]+.[0-9]+']
@@ -159,6 +164,9 @@ jobs:
         # themselves because each category is still sequential inside
         # testament. If load-induced tty flakes reappear on this 3-core
         # runner, pass explicit categories to serialize them.
+        # Dispatch-only bypass: tty timing tests are marginal on the 3-core
+        # macos-15 runner; run-tests=false validates build+packaging alone.
+        if: github.event_name != 'workflow_dispatch' || inputs.run-tests
         run: sh tests/tools/ci_tests.sh 1500
         timeout-minutes: 30
 
