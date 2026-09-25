@@ -13,8 +13,8 @@ jobs:
     # re-rolls weekly (gcc/glibc/binutils drift). This digest and the
     # archive snapshot below are both immutable, so the same commit
     # produces the same bytes forever. There is no prebuilt arm64 Nim, so
-    # setup-nim-action compiles the compiler here too: under the frozen
-    # gcc that compiler build is itself frozen.
+    # the compiler is bootstrapped from the pinned source tarball below;
+    # under the frozen gcc that compiler build is itself frozen.
     container:
       image: ubuntu:22.04@sha256:b8b6ee6aa931ecd9d0d952abc34dc0e5f7c6a30c6bb71b079fe399fde0329c02
 
@@ -57,16 +57,32 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-
 
-      - uses: jiro4989/setup-nim-action@v2
+      - name: Build Nim toolchain from source (pinned)
+        # Inline instead of setup-nim-action: the action is composite, and
+        # its run steps embed ${{ github.action_path }} — the runner-side
+        # path, which does not exist inside a `container:` job (the mount
+        # lives at /__w/...), so its script died with exit 127. Same
+        # bootstrap sequence as the action's install_nim.sh (build.sh,
+        # koch boot, koch tools — which also builds bin/nimble from the
+        # tarball's vendored dist/nimble), plus a sha256 pin the action
+        # never did.
+        # Exact version, not `stable`: the same commit must compile with
+        # the same compiler forever. Bump deliberately, together with
+        # regenerating nimble.lock (its `nim` entry records the version).
         if: steps.cache-nim.outputs.cache-hit != 'true'
-        with:
-          # Exact version, not `stable`: the same commit must compile with
-          # the same compiler forever. Bump deliberately, together with
-          # regenerating nimble.lock (its `nim` entry records the version).
-          nim-version: 2.2.12
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          parent-nim-install-directory: /opt
-          nim-install-directory: nim-toolchain
+        run: |
+          NIM_SRC_SHA256=2639a06a5ea7a7fcf57df1e7e1ef4d1b2bee58c7ac9bd00dbd2aa5bea1e5a56a
+          curl -fsSL -o /tmp/nim.tar.xz https://nim-lang.org/download/nim-2.2.12.tar.xz
+          echo "${NIM_SRC_SHA256}  /tmp/nim.tar.xz" | sha256sum -c -
+          tar -xJf /tmp/nim.tar.xz -C /opt
+          cd /opt/nim-2.2.12
+          ./build.sh
+          bin/nim c --noNimblePath --skipUserCfg --skipParentCfg --hints:off koch
+          ./koch boot -d:release --skipUserCfg --skipParentCfg --hints:off
+          ./koch tools --skipUserCfg --skipParentCfg --hints:off
+          mv /opt/nim-2.2.12 /opt/nim-toolchain
+          echo "/opt/nim-toolchain/bin" >> "$GITHUB_PATH"
+          /opt/nim-toolchain/bin/nim --version | head -1
 
       - name: Add Nim to PATH on cache hit
         if: steps.cache-nim.outputs.cache-hit == 'true'

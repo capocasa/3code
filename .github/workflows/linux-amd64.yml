@@ -44,15 +44,24 @@ jobs:
         # git would refuse and corrupt the version string.
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - uses: jiro4989/setup-nim-action@v2
-        with:
-          # Exact version, not `stable`: the same commit must compile with
-          # the same compiler forever. Bump deliberately, together with
-          # regenerating nimble.lock (its `nim` entry records the version).
-          nim-version: 2.2.12
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          parent-nim-install-directory: /opt
-          nim-install-directory: nim-toolchain
+      - name: Install Nim toolchain (pinned)
+        # Inline instead of setup-nim-action: the action is composite, and
+        # its run steps embed ${{ github.action_path }} — the runner-side
+        # path, which does not exist inside a `container:` job (the mount
+        # lives at /__w/...), so its script died with exit 127. Same
+        # layout the action installs (/opt/nim-toolchain), plus a sha256
+        # pin the action never did.
+        # Exact version, not `stable`: the same commit must compile with
+        # the same compiler forever. Bump deliberately, together with
+        # regenerating nimble.lock (its `nim` entry records the version).
+        run: |
+          NIM_SHA256=7df1611449a6842af69322aa2c1206942982650a5f6bc0d37bc8ec109932f638
+          curl -fsSL -o /tmp/nim.tar.xz https://nim-lang.org/download/nim-2.2.12-linux_x64.tar.xz
+          echo "${NIM_SHA256}  /tmp/nim.tar.xz" | sha256sum -c -
+          tar -xJf /tmp/nim.tar.xz -C /opt
+          mv /opt/nim-2.2.12 /opt/nim-toolchain
+          echo "/opt/nim-toolchain/bin" >> "$GITHUB_PATH"
+          /opt/nim-toolchain/bin/nim --version | head -1
 
       - name: Install dependencies
         # nimble.lock pins every dependency to an exact revision + checksum;
