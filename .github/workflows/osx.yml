@@ -173,8 +173,15 @@ jobs:
       - name: Package
         # Deterministic archive: entry order from a sorted list, mtimes
         # anchored to the commit (SOURCE_DATE_EPOCH), owner normalized,
-        # gzip without name/timestamp. The openssl dylibs come from the
+        # gzip without name/timestamp. Python tarfile, not bsdtar: the
+        # runner's bsdtar rejects --mtime on create, and its failure inside
+        # the find|sort|bsdtar|gzip pipeline is masked by gzip's success
+        # (the step shell is bash -e, no pipefail), which shipped an empty
+        # tarball that still passed the h1==h2 double-pack check. Python
+        # writes every field explicitly and the member-count guard below
+        # catches any empty archive. The openssl dylibs come from the
         # pinned bottle below.
+        shell: bash
         run: |
           export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
           mkdir -p 3code-macos-universal
@@ -225,14 +232,33 @@ jobs:
             shasum -a 256 3code | cut -d' ' -f1
             echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
           } > 3code-macos-universal/BUILD_INFO
-          pack() {
-            find 3code-macos-universal | LC_ALL=C sort \
-              | bsdtar --format gnutar --uid 0 --gid 0 --mtime "@${SOURCE_DATE_EPOCH}" \
-                --no-recursion -T - -cf - \
-              | gzip -n > 3code-macos-universal.tar.gz
-          }
+          cat > /tmp/mktar.py <<'PY'
+          import gzip, os, sys, tarfile
+          src, out, epoch = sys.argv[1], sys.argv[2], int(sys.argv[3])
+          names = sorted(
+              os.path.join(r, n).replace(os.sep, "/")
+              for r, ds, fs in os.walk(src)
+              for n in ds + fs)
+          # GzipFile with filename='' and mtime=0: no name, no timestamp
+          with open(out, "wb") as raw, \
+              gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as gz, \
+              tarfile.open(fileobj=gz, mode="w") as t:
+              for n in names:
+                  ti = t.gettarinfo(n)
+                  ti.mtime = epoch
+                  ti.uid = ti.gid = 0
+                  ti.uname = ti.gname = ""
+                  if ti.isfile():
+                      t.addfile(ti, open(n, "rb"))
+                  else:
+                      t.addfile(ti)
+          PY
+          pack() { python3 /tmp/mktar.py 3code-macos-universal 3code-macos-universal.tar.gz "$SOURCE_DATE_EPOCH"; }
           pack
           h1=$(shasum -a 256 3code-macos-universal.tar.gz | cut -d' ' -f1)
+          # files-only layout, like the windows zip: 10 members
+          members=$(tar -tzf 3code-macos-universal.tar.gz | wc -l)
+          [ "$members" -ge 10 ] || { echo "archive has only $members members" >&2; exit 1; }
           find 3code-macos-universal ! -type l -exec touch {} +  # perturb mtimes (not symlinks: touch would create dangling targets)
           pack
           h2=$(shasum -a 256 3code-macos-universal.tar.gz | cut -d' ' -f1)
