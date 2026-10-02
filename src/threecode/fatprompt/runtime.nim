@@ -838,6 +838,10 @@ proc resetEditorRowModel*(ed: ptr minline.LineEditor) =
   ed[].line = minline.Line(text: "", position: 0)
   ed[].renderSuffix = ""
   ed[].renderSuffixCursor = false
+  # The deferred-submit marker is gone, so its caret suppression must go
+  # too: a leftover `pendingCaret` on an empty editor paints a prompt row
+  # with no caret cell at all (the physical cursor stays hidden).
+  ed[].pendingCaret = false
   ed[].renderRow = 0
   ed[].echoRows = 0
   ed[].prevRowSpans = @[]
@@ -2895,8 +2899,8 @@ proc stopTurnInputForFinalRender*() =
 proc endTurn*(repaintPrompt = true) =
   ## Transition to typing-ready state: clear the bar at its current
   ## row, advance one row to leave a blank "gap" between the last
-  ## content row and the bar, repaint bar+prompt, and show the terminal
-  ## caret. The gap is
+  ## content row and the bar, and repaint bar+prompt (the caret stays a
+  ## drawn cell; the physical cursor stays hidden all session). The gap is
   ## one-shot — `emitUserSubmit` overwrites it with the receipt at
   ## next submit, so it never persists in scroll history.
   # Defensive: nothing should be animating between turns. If a tool
@@ -2955,7 +2959,6 @@ proc endTurnAfterTranscriptAppend*() =
   if hadTicker:
     emitFatPromptEvent clearTickerEvent()
   let label = currentBarLabel
-  termengine.writeRaw("\x1b[?25h")
   if label.len > 0:
     emitFatPromptEvent setBarEvent(label, hasGap = true)
   emitFatPromptEvent setPromptModeEvent(pmIdle)

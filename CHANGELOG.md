@@ -2,6 +2,18 @@ Changelog
 
 **Unreleased**
 
+- **Caret flicker in the spinner, finished.** The drawn-caret rework
+  left one `?25h` at every turn end: nothing ever re-hid the cursor,
+  so from the second turn on the terminal's own blinking caret sat
+  parked on the bar row, in and around the braille spinner. The
+  physical cursor now stays hidden for the whole session as designed
+  (one hide at startup, one show at exit). Two masked bugs surfaced
+  once it really was hidden: after a queued autosend the idle prompt
+  drew no caret at all (a leftover `pendingCaret` suppressed the drawn
+  cell; the visible cursor had been standing in for it), and the
+  frame-artifact renderer drew the caret from the physical cursor, so
+  it now draws the reverse-video cell instead.
+
 - **Space Bunny stealth model known-good on OpenRouter and OpenCode
   Zen.** `stealth/space-bunny-alpha` (OpenRouter) and `space-bunny-free`
   (Zen) are a free anonymous preview (1M context, 524k output cap,

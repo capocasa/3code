@@ -676,14 +676,19 @@ suite "terminal visual contract":
     tty.expectCount("This is a test response.", 1, where = "screen")
     tty.expectTokenBar(["○", "↑120", "↓24"])
     tty.drain(200)
-    # Wait for the settled idle repaint (caret back on the live ❯ row):
-    # the live bar is painted before the receipt commits to scrollback, so
-    # sampling earlier races the final commit.
+    # Wait for the settled idle repaint (drawn caret back on the live ❯
+    # row; the physical cursor stays hidden all session): the live bar is
+    # painted before the receipt commits to scrollback, so sampling
+    # earlier races the final commit.
     tty.waitUntil(proc(s: TtySession): bool =
-      not s.grid.cursorHidden and s.grid.row >= 0 and
-        s.grid.row < s.rows().len and "❯" in s.rows()[s.grid.row])
+      var caretRow = -1
+      for i in countdown(s.grid.rows.len - 1, 0):
+        if s.drawnCaretCount(i) == 1:
+          caretRow = i
+          break
+      caretRow >= 0 and caretRow < s.rows().len and "❯" in s.rows()[caretRow])
     let settled = tty.checkpoint("one-turn/idle-after-reply")
-    doAssert not settled.cursorHidden
+    doAssert settled.cursorHidden
     tty.writeCheckpoints(root / "checkpoints.jsonl")
     # The receipt sits flush under the answer, no blank row between them
     # (design.md: "no blank line between the last output of the API call
@@ -2898,12 +2903,13 @@ max-tokens = "8192"
     var wipeAt = -1
     var wipeDetail = ""
     for i in 1 ..< tty.frames.len:
-      # Skip pairs rooted in a volatile streaming frame (caret hidden):
-      # row positions aren't stable there, and a separator insertion on
-      # commit legitimately shifts volatile content down. A genuine
-      # in-place wipe of committed scrollback persists into stable
-      # (caret-visible) frames, so this skip costs no coverage.
-      if tty.frames[i - 1].cursorHidden: continue
+      # Skip pairs whose row counts differ (the volatile viewport grew,
+      # shrank, or the grid scrolled): row positions aren't stable there,
+      # and a separator insertion on commit legitimately shifts volatile
+      # content down. A genuine in-place wipe of committed scrollback
+      # persists into row-count-stable frames, so this skip costs no
+      # coverage.
+      if tty.frames[i - 1].rows.len != tty.frames[i].rows.len: continue
       let prev = tty.frames[i - 1].rows
       let cur = tty.frames[i].rows
       for r in 1 ..< min(prev.len, cur.len):
@@ -3096,10 +3102,11 @@ max-tokens = "8192"
     tty.expectTokenBar(["○", "↑10", "↓5"])
     tty.drain(300)
     # The token bar is only painted while the turn is active. Sample the
-    # *stable idle* state — wait for the caret to reappear on the live `❯`
-    # prompt — so frames[^1] is the idle repaint, not a transient spinner
-    # tick that can sample a mid-turn frame and report a false maxRun>1.
-    # The stranded-gap bug persists into the idle frame (it is committed
+    # *stable idle* state: wait for the drawn caret to sit on the live `❯`
+    # prompt row (the physical cursor stays hidden all session), so
+    # frames[^1] is the idle repaint, not a transient spinner tick that
+    # can sample a mid-turn frame and report a false maxRun>1. The
+    # stranded-gap bug persists into the idle frame (it is committed
     # scrollback), so maxRun <= 1 still catches it.
     let idleDeadline = epochTime() + 5.0
     block waitForIdle:
@@ -3107,8 +3114,12 @@ max-tokens = "8192"
         tty.drain(20)
         if tty.frames.len > 0:
           let f = tty.frames[^1]
-          if not f.cursorHidden and f.cursorRow >= 0 and
-              f.cursorRow < f.rows.len and "❯" in f.rows[f.cursorRow]:
+          var caretRow = -1
+          for i in countdown(f.rows.high, 0):
+            if f.drawnCaretCount(i) == 1:
+              caretRow = i
+              break
+          if caretRow >= 0 and "❯" in f.rows[caretRow]:
             break waitForIdle
         sleep 10
     # The final frame must not have >1 consecutive blank rows anywhere in

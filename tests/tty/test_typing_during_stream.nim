@@ -149,7 +149,22 @@ suite "typing during active stream":
     if hides != 0 or shows != 0:
       echo "cursor visibility toggled mid-turn: hides=", hides,
            " shows=", shows, " over ", tail.len, " bytes"
+    # Let the turn finish (14 chunks * 150ms) and re-count over the whole
+    # post-startup window: mid-turn, turn end, and the idle repaint. A
+    # `?25h` at turn end is just as illegal: nothing ever re-hides the
+    # cursor afterwards (the one session hide ran at startup), so every
+    # later bar/spinner paint parks a blinking native caret on the bar
+    # row, right where the braille spinner rotates.
     tty.drain(4500)
+    let whole = tty.raw[mark .. ^1]
+    let endHides = whole.count("\x1b[?25l")
+    let endShows = whole.count("\x1b[?25h")
+    check endHides == 0
+    check endShows == 0
+    if endHides != 0 or endShows != 0:
+      echo "cursor visibility changed across turn end: hides=", endHides,
+           " shows=", endShows, " over ", whole.len, " bytes"
+    check tty.frames[^1].cursorHidden
     tty.expectAlive()
 
   test "typed text lands on caret row, not one row above":
