@@ -14,7 +14,7 @@
 ## Anything outside `KnownGoodCombos` requires `--experimental` to run.
 ]#
 
-import std/[algorithm, hashes, json, options, os, sequtils, strutils]
+import std/[algorithm, hashes, json, options, os, sequtils, strutils, tables]
 import types, util, modelname, anthropic
 
 # ThinkBackMode moved to types.nim (Profile.params needs it); re-export
@@ -3500,6 +3500,21 @@ proc canonicalKnownGoodProvider*(provider: string): string =
   elif p == "geminicli": "google"
   else: p
 
+type WireRepairEntry = tuple[wire, wireNorm: string]
+
+func buildWireRepairIndex(): Table[string, seq[WireRepairEntry]] =
+  ## Per-provider (wire id, normalized wire id) pairs in KnownGoodCombos
+  ## order. `knownGoodWireModel` used to re-normalize every combo id on
+  ## every call, and callers run it once per model in the config: a
+  ## 40-provider / 2300-model config spent ~10s of pure CPU in
+  ## `writeConfigFile` per `:provider` switch. The table is built once
+  ## at compile time, so reads stay pure and cost nothing at startup.
+  for combo in KnownGoodCombos:
+    result.mgetOrPut(combo.provider.toLowerAscii, @[]).add(
+      (combo.model, normalizeModelName(combo.model)))
+
+const wireRepairIndex = buildWireRepairIndex()
+
 proc knownGoodWireModel*(provider, model: string): string =
   ## Full wire model id for a known-good (provider, model), or "" when
   ## off the table. Config files persist normalized ids (the author
@@ -3507,10 +3522,20 @@ proc knownGoodWireModel*(provider, model: string): string =
   ## (`qwen/qwen3.8-27b`, not `qwen-3.8-27b`). Also repairs
   ## listed-but-unserved variants (`kimi-k3-256k` -> `k3`).
   let p = canonicalKnownGoodProvider(provider)
-  for combo in KnownGoodCombos:
-    if combo.provider.toLowerAscii == p and
-       matchesWireRepairCandidate(combo.model, model):
-      return combo.model
+  let entries = wireRepairIndex.getOrDefault(p)
+  if entries.len == 0: return ""
+  let m = model.toLowerAscii
+  let norm = normalizeModelName(model)
+  for entry in entries:
+    # Same match as `matchesWireRepairCandidate`, with the combo's
+    # normalized form precomputed and `model` normalized once instead
+    # of per combo.
+    if entry.wire.toLowerAscii == m or entry.wireNorm == m:
+      return entry.wire
+    if norm.startsWith(entry.wireNorm & "-"):
+      let tail = norm[entry.wireNorm.len + 1 .. ^1]
+      if tail.split('-').allIt(it.len > 0 and it[0] in {'0'..'9'}):
+        return entry.wire
   ""
 
 proc knownGoodFamily*(p: Profile): string =

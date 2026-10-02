@@ -1,5 +1,5 @@
-import std/[os, sequtils, strutils, tables, unittest]
-import threecode/[config, prompts, types]
+import std/[os, sequtils, strformat, strutils, tables, times, unittest]
+import threecode/[config, modelname, prompts, types]
 
 suite "config: [settings] max_timeout":
   var tmp = ""
@@ -335,6 +335,82 @@ suite "config: known-good lookup with normalized pretty names":
     let g = knownGoodGeneration("zai", "glm-5.3")
     check (g.temperature, g.maxTokens) == (0.2, 65536)
     check knownGoodContextWindow("zai", "glm-5.3") == 1_000_000
+
+  # Reference for the indexed lookup: the original full-table scan,
+  # kept here so the index (precomputed normalized combo ids) provably
+  # answers exactly what the scan answered.
+  proc referenceWireModel(provider, model: string): string =
+    let p = canonicalKnownGoodProvider(provider)
+    for combo in KnownGoodCombos:
+      if combo.provider.toLowerAscii == p and
+         matchesWireRepairCandidate(combo.model, model):
+        return combo.model
+    ""
+
+  test "knownGoodWireModel index answers what the table scan answered":
+    # Every curated id, its normalized spelling, and its uppercased raw
+    # form must resolve identically through index and scan.
+    for combo in KnownGoodCombos:
+      for m in [combo.model, normalizeModelName(combo.model),
+                combo.model.toUpperAscii]:
+        let got = knownGoodWireModel(combo.provider, m)
+        let want = referenceWireModel(combo.provider, m)
+        if got != want:
+          checkpoint &"{combo.provider} / {m}: index={got} scan={want}"
+          fail()
+    # Repair tails, near-misses, and unknowns, against the providers
+    # with the largest combo lists (where an index/scan divergence in
+    # entry order would show) plus the curated spellings above.
+    let probes = [
+      "kimi-k3-256k", "kimi-k3", "k3", "kimi-k2.6",
+      "glm-5.3", "glm-5.3-flash", "z-ai/glm-5.3", "GLM-5.3-FLASH",
+      "qwen-3.8-27b", "weird-model", "", "gpt-5.5-pro"]
+    for prov in ["nanogpt", "openrouter", "venice", "novita",
+                 "deepinfra", "opencode", "kimicode", "zai", "platte"]:
+      for m in probes:
+        let got = knownGoodWireModel(prov, m)
+        let want = referenceWireModel(prov, m)
+        if got != want:
+          checkpoint &"{prov} / {m}: index={got} scan={want}"
+          fail()
+
+  test "writeConfigFile stays fast on a heavy provider set":
+    # Regression: the per-model known-good lookup re-normalized every
+    # combo id on every call, so serializing a config like a real one
+    # (dozens of providers, thousands of models) burned ~10s of pure
+    # CPU inside the `:provider` switch. The index must keep the write
+    # in the sub-second range it had on small configs.
+    var names: seq[string]
+    for combo in KnownGoodCombos:
+      if combo.provider notin names: names.add combo.provider
+    var providers: seq[ProviderRec]
+    for i, name in names:
+      if i >= 40: break
+      var models: seq[string]
+      for combo in KnownGoodCombos:
+        if combo.provider == name: models.add normalizeModelName(combo.model)
+      for j in 0 ..< 60:
+        models.add "filler-" & $j & "-variant"
+      providers.add ProviderRec(name: name, url: "https://x.test/v1",
+                                key: "sk-test", models: models,
+                                currentModel: models[0])
+    let tmp = getTempDir() / "3code-test-heavy-write.ini"
+    let t0 = epochTime()
+    writeConfigFile(tmp, providers[0].name & "." & providers[0].models[0],
+                    providers)
+    let elapsed = epochTime() - t0
+    removeFile(tmp)
+    checkpoint &"writeConfigFile over {providers.len} providers took {elapsed:.2f}s"
+    check elapsed < 3.0
+
+  test "knownGoodWireModel maps subscription twins onto the table":
+    for (twin, canonical) in [("supergrok", "xai"), ("chatgpt", "openai"),
+                             ("claudecode", "anthropic"), ("geminicli", "google")]:
+      for combo in KnownGoodCombos:
+        if combo.provider.toLowerAscii == canonical:
+          check knownGoodWireModel(twin, normalizeModelName(combo.model)) ==
+                combo.model
+          break
 
   test "knownGoodWireModel repairs listed-but-unserved variants":
     check knownGoodWireModel("kimicode", "kimi-k3-256k") == "k3"
