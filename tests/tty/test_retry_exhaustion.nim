@@ -66,8 +66,8 @@ suite "retry exhaustion regression":
     tty.expectInHistory "hi"
     tty.drain(500)
     let f = tty.frames[^1]
-    doAssert not f.cursorHidden,
-      "baseline: caret hidden after success"
+    doAssert f.cursorHidden,
+      "baseline: physical cursor visible after success"
     doAssert f.cursorCol == 2,
       "baseline: expected caret at col 2 after ❯, got " & $f.cursorCol
     doAssert f.rows[f.cursorRow].contains("\u276f"),
@@ -114,8 +114,8 @@ suite "retry exhaustion regression":
     tty.drain(500)
     # Prompt glyph must be back on the caret row, caret at col 2.
     let f = tty.frames[^1]
-    doAssert not f.cursorHidden,
-      "REGRESSION (retry-exhaust): caret hidden after exhaustion; expected col 2 on prompt row"
+    doAssert f.cursorHidden,
+      "REGRESSION (retry-exhaust): physical cursor visible after exhaustion; expected col 2 on prompt row"
     doAssert f.cursorCol == 2,
       "REGRESSION (retry-exhaust): expected caret at col 2 after ❯, got " & $f.cursorCol
     doAssert f.rows[f.cursorRow].contains("\u276f"),

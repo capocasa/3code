@@ -24,12 +24,17 @@ proc cellText(cell: Cell): string =
   if cell.text.len > 0: cell.text else: $cell.rune
 
 proc displayRows*(f: VisualFrame; cursor = true): seq[string] =
+  ## Caret rendering: the physical cursor when visible (standalone
+  ## callers, the pre-hide startup frame), plus the drawn reverse-video
+  ## caret cell. The interactive app keeps the physical cursor hidden
+  ## all session, so the reverse cell is where its caret lives.
   for r, row in f.cells:
     var text = ""
     for c, cell in row:
       if cell.width == 0: continue
-      if cursor and not f.cursorHidden and r == f.cursorRow and
-          f.cursorCol >= c and f.cursorCol < c + cell.width:
+      if (cursor and not f.cursorHidden and r == f.cursorRow and
+          f.cursorCol >= c and f.cursorCol < c + cell.width) or
+          cell.attrs.hasAttr(saReverse):
         text.add "█" & repeat(" ", cell.width - 1)
       else:
         text.add cell.cellText

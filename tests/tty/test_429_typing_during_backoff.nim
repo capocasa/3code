@@ -147,8 +147,8 @@ suite "429 backoff with buffered typing":
     # Same contract as the Ctrl-C case: typed text + glyph on the caret
     # row, caret past the typed text.
     let f = tty.frames[^1]
-    doAssert not f.cursorHidden,
-      "REGRESSION: caret hidden after 429 budget exhaustion with buffered text"
+    doAssert f.cursorHidden,
+      "REGRESSION: physical cursor visible after 429 budget exhaustion with buffered text"
     let caretRow = f.rows[f.cursorRow]
     doAssert caretRow.contains("next prompt"),
       "REGRESSION: buffered 'next prompt' not on caret row " &
