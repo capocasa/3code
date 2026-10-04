@@ -803,7 +803,13 @@ proc isAtBoundary(line: string, i: int): bool =
 
 func applyInlineMd*(line: string): string =
   ## Strict in-line replacements for `***bold-italic***`, `**bold**`,
-  ## `*italic*` / `_italic_`, and backtick-code. Body text rides the
+  ## `*italic*` / `_italic_`, backtick-code, and `[text](url)` links.
+  ## Links become OSC 8 hyperlinks: the terminal makes the whole visible
+  ## span clickable and carries the URI itself (invisible). The target
+  ## stays visible in the text (bare `url` when the text is the url,
+  ## `text - url` otherwise) so terminals without OSC 8 support, and
+  ## regex URL detection, still work; unsupported terminals ignore the
+  ## unknown OSC per ECMA-48. Body text rides the
   ## terminal's default foreground (no envelope SGR), so the reverts
   ## just cancel bold / italic / underline back to default — no need
   ## to re-engage `\x1b[2m` (we no longer dim the body).
@@ -897,15 +903,76 @@ func applyInlineMd*(line: string): string =
           result.add "\x1b[1m" & inner & "\x1b[22m"
           i = j + 1
           continue
+    if line[i] == '[':
+      # `[text](url)` inline link. Text may carry nested inline
+      # markdown; the url is emitted verbatim (never recursed into,
+      # urls legitimately contain `*` and `_`). One level of balanced
+      # parens inside the url is honored (Wikipedia-style). Anything
+      # that isn't a URI target (`#anchor`, relative paths) or has a
+      # malformed shape passes through verbatim like the other markers.
+      var j = i + 1
+      while j < line.len and line[j] != ']' and line[j] != '[':
+        inc j
+      if j < line.len and line[j] == ']' and j + 1 < line.len and
+          line[j + 1] == '(':
+        var k = j + 2
+        var depth = 0
+        while k < line.len:
+          case line[k]
+          of '(': inc depth
+          of ')':
+            if depth == 0: break
+            dec depth
+          of ' ', '\t', '\x1b', '[': break
+          else: discard
+          inc k
+        if k < line.len and line[k] == ')':
+          let text = line[i + 1 ..< j]
+          let url = line[j + 2 ..< k]
+          if url.len > 0 and ("://" in url or url.startsWith("mailto:")):
+            let vis = if text.len == 0 or text == url:
+                        url
+                      else:
+                        applyInlineMd(text) & " - " & url
+            result.add "\x1b]8;;" & url & "\x1b\\" & vis &
+                       "\x1b]8;;\x1b\\"
+            i = k + 1
+            continue
     result.add line[i]
     inc i
 
+func oscSpanLen*(s: string, i: int): int =
+  ## Length in bytes of the OSC escape sequence starting at `s[i]`
+  ## (`ESC ] ... ST` or `... BEL`), or 0 if `i` doesn't point at one.
+  ## OSC spans are invisible (e.g. the URI inside an OSC 8 hyperlink),
+  ## so width/wrap math must skip them like CSI sequences. A span left
+  ## unterminated at end of input runs to the end, mirroring a parser
+  ## holding a partial sequence; a bare ESC that isn't ST ends the span
+  ## without being consumed.
+  if s[i] != '\x1b' or i + 1 >= s.len or s[i + 1] != ']':
+    return 0
+  var j = i + 2
+  while j < s.len:
+    if s[j] == '\x07':
+      return j + 1 - i
+    if s[j] == '\x1b':
+      if j + 1 < s.len and s[j + 1] == '\\':
+        return j + 2 - i
+      return j - i
+    inc j
+  result = s.len - i
+
 func visibleWidth*(s: string): int =
   ## Count visible columns in a string that may contain ANSI CSI escape
-  ## sequences (`\e[...<letter>`). Each rune is weighted by its East
-  ## Asian Width: CJK / emoji count as 2, combining marks as 0.
+  ## sequences (`\e[...<letter>`) or OSC sequences (`\e]...ST`, such as
+  ## OSC 8 hyperlinks). Each rune is weighted by its East Asian Width:
+  ## CJK / emoji count as 2, combining marks as 0.
   var i = 0
   while i < s.len:
+    let osc = oscSpanLen(s, i)
+    if osc > 0:
+      i += osc
+      continue
     if s[i] == '\x1b' and i + 1 < s.len and s[i + 1] == '[':
       i += 2
       while i < s.len and s[i] notin {'A'..'Z', 'a'..'z'}:
@@ -950,8 +1017,8 @@ func wrapAnsi*(s: string, width: int): seq[string] =
 
 func charWrapAnsi*(s: string, width: int): seq[string] =
   ## Character-wrap: break at exactly `width` visible columns, even
-  ## mid-word. ANSI CSI escapes pass through without counting toward
-  ## width. Lines that fit are returned as-is.
+  ## mid-word. ANSI CSI and OSC escapes pass through without counting
+  ## toward width. Lines that fit are returned as-is.
   if width <= 0 or s.len == 0:
     result.add s
     return
@@ -959,6 +1026,11 @@ func charWrapAnsi*(s: string, width: int): seq[string] =
   var lineW = 0
   var i = 0
   while i < s.len:
+    let osc = oscSpanLen(s, i)
+    if osc > 0:
+      line.add s[i ..< i + osc]
+      i += osc
+      continue
     if s[i] == '\x1b' and i + 1 < s.len and s[i + 1] == '[':
       let start = i
       i += 2

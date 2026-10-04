@@ -550,7 +550,7 @@ Each conversation event gets a one-character marker or banner icon:
 | icon | item |
 | --- | --- |
 | `❯` | your prompt, echoed as submitted |
-| `●` | assistant message, rendered as markdown (headings, code fences, tables fitted to the terminal width) |
+| `●` | assistant message, rendered as markdown (headings, code fences, tables fitted to the terminal width, `[text](url)` links as clickable OSC 8 hyperlinks with the target kept visible) |
 | `»` | a harness-autosend: a note 3code itself sent to the model (empty-reply steer, loop nudges), with the exact text shown |
 | `$` | bash command with its command line; the icon turns `Ø` when the exit code is nonzero |
 | `r` | file read (path and line range) |

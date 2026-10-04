@@ -100,7 +100,18 @@ proc stripAnsi(s: string): string =
   result = newStringOfCap(s.len)
   var i = 0
   while i < s.len:
-    if s[i] == '\x1b' and i + 1 < s.len and s[i + 1] == '[':
+    if s[i] == '\x1b' and i + 1 < s.len and s[i + 1] == ']':
+      # OSC (e.g. an OSC 8 hyperlink): swallow through BEL or ST so the
+      # invisible URI doesn't leak into the plain-text surface.
+      i += 2
+      while i < s.len and s[i] != '\x07' and s[i] != '\x1b':
+        inc i
+      if i < s.len and s[i] == '\x07':
+        inc i
+      elif i < s.len and s[i] == '\x1b' and i + 1 < s.len and
+          s[i + 1] == '\\':
+        inc i, 2
+    elif s[i] == '\x1b' and i + 1 < s.len and s[i + 1] == '[':
       i += 2
       while i < s.len and s[i] notin {'m', 'K', 'J', 'H', 'A', 'B', 'C', 'D',
                                       'G', 'f', 'h', 'l', 'q', 's', 'u'}:

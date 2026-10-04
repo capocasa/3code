@@ -53,6 +53,12 @@ suite "util: visibleWidth":
   test "counts ASCII characters":
     check visibleWidth("hello") == 5
 
+  test "OSC 8 spans are zero width":
+    check visibleWidth("\x1b]8;;https://foo\x1b\\hi\x1b]8;;\x1b\\") == 2
+
+  test "BEL-terminated OSC is zero width":
+    check visibleWidth("\x1b]8;;https://foo\ahi\x1b]8;;\a") == 2
+
   test "counts UTF-8 codepoints, not bytes":
     check visibleWidth("café") == 4
 
@@ -60,6 +66,14 @@ suite "util: visibleWidth":
     check visibleWidth("") == 0
 
 suite "util: wrapAnsi":
+  test "wraps hyperlink by visible width, spans stay whole":
+    let lines = wrapAnsi(
+      "a \x1b]8;;https://foo/bar\x1b\\doc - https://foo/bar\x1b]8;;\x1b\\ b", 12)
+    check lines == @[
+      "a \x1b]8;;https://foo/bar\x1b\\doc -",
+      "https://foo/bar\x1b]8;;\x1b\\",
+      "b"]
+
   test "wraps long line at word boundary":
     let lines = wrapAnsi("one two three four", 9)
     check lines.len >= 2
@@ -142,6 +156,42 @@ suite "util: applyInlineMd":
     let r = applyInlineMd("`code`")
     check "`code`" notin r
     check "code" in r
+
+  test "link with url as text renders bare url in an OSC 8 span":
+    check applyInlineMd("[https://foo](https://foo)") ==
+      "\x1b]8;;https://foo\x1b\\https://foo\x1b]8;;\x1b\\"
+
+  test "link with differing text renders text - url":
+    check applyInlineMd("[docs](https://foo)") ==
+      "\x1b]8;;https://foo\x1b\\docs - https://foo\x1b]8;;\x1b\\"
+
+  test "link text carries nested inline markdown":
+    check applyInlineMd("[**b** x](https://foo)") ==
+      "\x1b]8;;https://foo\x1b\\\x1b[1mb\x1b[22m x - https://foo\x1b]8;;\x1b\\"
+
+  test "url underscores and stars stay literal":
+    check applyInlineMd("[w](https://en.wiki.org/wiki/Foo_bar*baz)") ==
+      "\x1b]8;;https://en.wiki.org/wiki/Foo_bar*baz\x1b\\" &
+      "w - https://en.wiki.org/wiki/Foo_bar*baz\x1b]8;;\x1b\\"
+
+  test "url with balanced parens stays whole":
+    check applyInlineMd("[x](https://en.wiki.org/wiki/Foo_(bar))") ==
+      "\x1b]8;;https://en.wiki.org/wiki/Foo_(bar)\x1b\\" &
+      "x - https://en.wiki.org/wiki/Foo_(bar)\x1b]8;;\x1b\\"
+
+  test "mailto links are recognized":
+    check applyInlineMd("[a@b](mailto:a@b)") ==
+      "\x1b]8;;mailto:a@b\x1b\\a@b - mailto:a@b\x1b]8;;\x1b\\"
+
+  test "non-uri targets pass through verbatim":
+    check applyInlineMd("[see](#anchor)") == "[see](#anchor)"
+    check applyInlineMd("[see](foo/bar)") == "[see](foo/bar)"
+    check applyInlineMd("[see](https://foo)") != "[see](https://foo)"
+
+  test "malformed link shapes pass through verbatim":
+    check applyInlineMd("[see] (https://foo)") == "[see] (https://foo)"
+    check applyInlineMd("[no close](https://foo") == "[no close](https://foo"
+    check applyInlineMd("[[]](https://foo)") == "[[]](https://foo)"
 
 suite "util: resolvePath":
   test "resolves tilde to home":

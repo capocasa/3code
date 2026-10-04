@@ -3480,6 +3480,13 @@ max-tokens = "8192"
       {"role": "assistant", "content": "turn four reply",
        "contentChunks": ["turn four reply"],
        "usage": {"promptTokens": 10, "completionTokens": 3,
+                  "totalTokens": 13, "cachedTokens": 0}},
+      # Turn 5: a markdown link renders as OSC 8 with the target visible.
+      {"role": "assistant",
+       "content": "turn five reply: see [docs](https://example.com/pricing) now",
+       "contentChunks": ["turn five reply: see ",
+                          "[docs](https://example.com/pricing) now"],
+       "usage": {"promptTokens": 10, "completionTokens": 3,
                   "totalTokens": 13, "cachedTokens": 0}}
     ])
 
@@ -3577,6 +3584,16 @@ max-tokens = "8192"
     tty.expectInHistory "❯ line alpha"
     tty.expectInHistory "  line beta"
     tty.expectCount("turn four reply", 1, where = "screen")
+    tty.expect "❯"
+    tty.expectAlive()
+
+    # --- Turn 5: a markdown link becomes an OSC 8 hyperlink with the
+    # target kept visible; the raw `[text](url)` syntax never paints. ---
+    tty.send "turn five"
+    tty.send "\n"
+    tty.expectInHistory "turn five"
+    tty.expectCount("docs - https://example.com/pricing", 1, where = "screen")
+    tty.expectNeverInHistory("](https://")
     tty.expect "❯"
     tty.expectAlive()
     # Prompt is live and interactive at session end (the deferred close reaps

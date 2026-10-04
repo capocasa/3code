@@ -251,6 +251,18 @@ suite "util: charWrapAnsi":
   test "single character width":
     check charWrapAnsi("abc", 1) == @["a", "b", "c"]
 
+  test "OSC 8 span passes through without width":
+    let s = "\x1b]8;;https://foo\x1b\\ab\x1b]8;;\x1b\\"
+    check charWrapAnsi(s, 5) == @[s]
+
+  test "split keeps OSC span bytes whole, zero width":
+    check charWrapAnsi("x\x1b]8;;u\x1b\\yz\x1b]8;;\x1b\\", 1) == @[
+      "x\x1b]8;;u\x1b\\",
+      "y",
+      "z\x1b]8;;\x1b\\"]
+    check charWrapAnsi("ab\x1b]8;;u\x1b\\cd\x1b]8;;\x1b\\", 4) ==
+      @["ab\x1b]8;;u\x1b\\cd\x1b]8;;\x1b\\"]
+
 suite "util: visibleWidth unicode":
   test "ASCII counts as 1":
     check visibleWidth("hello") == 5

@@ -2,6 +2,14 @@ Changelog
 
 **Unreleased**
 
+- **Markdown links are OSC 8 hyperlinks.** `[text](url)` now renders
+  as a clickable span instead of raw syntax. The target stays visible
+  in the text (bare `url` when the text is the url, `text - url`
+  otherwise), so terminals without OSC 8 support still show, and
+  regex-detect, the address; width/wrap math skips OSC sequences like
+  it already skipped CSI, and the library's plain-text surface strips
+  them.
+
 - **Caret flicker in the spinner, finished.** The drawn-caret rework
   left one `?25h` at every turn end: nothing ever re-hid the cursor,
   so from the second turn on the terminal's own blinking caret sat
