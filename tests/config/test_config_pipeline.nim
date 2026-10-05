@@ -79,6 +79,9 @@ suite "config: inferProvider":
   test "recognizes nvapi- as nvidia":
     check inferProvider("nvapi-xxx") == "nvidia"
 
+  test "recognizes tl_live_ as tesseracted":
+    check inferProvider("tl_live_cc0c1429xxx") == "tesseracted"
+
   test "returns empty for unknown prefix":
     check inferProvider("my-custom-key") == ""
 

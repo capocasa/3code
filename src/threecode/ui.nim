@@ -549,7 +549,7 @@ proc promptNewProvider*(editor: var minline.LineEditor,
       errLn "name required"
       raise newException(minline.InputCancelled, "name required")
     ensureUniqueName(name)
-    key = readRequired(editor, "  api key              : ", hidden = true)
+    key = readRequired(editor, "  api key              : ", hidden = false)
   elif inferredFromKey != "":
     # API keys are not unique across providers; only the name is.
     if not experimentalEnabled and curatedFor(inferredFromKey).len == 0:
@@ -611,7 +611,7 @@ proc promptNewProvider*(editor: var minline.LineEditor,
     elif name == "anthropic":
       hintLn "  for subscription login, enter claudecode", resetStyle
     if key == "":
-      key = readRequired(editor, "  api key              : ", hidden = true)
+      key = readRequired(editor, "  api key              : ", hidden = false)
 
   if not experimentalEnabled:
     let curated = curatedFor(name)
@@ -712,7 +712,7 @@ proc promptNewProvider*(editor: var minline.LineEditor,
       "  [enter]=retry models, k=re-enter key, c=cancel : ").toLowerAscii
     if choice == "k":
       key = readRequired(editor,
-        "  api key              : ", hidden = true)
+        "  api key              : ", hidden = false)
     elif choice == "c":
       raise newException(minline.InputCancelled, "cancelled by user")
 
@@ -741,7 +741,7 @@ proc promptEditProvider*(editor: var minline.LineEditor,
           &"  url [{existing.url}]  : ").strip(chars = {'/', ' '})
         if newUrl == "": existing.url else: newUrl
     let newKey = readOptional(editor,
-      "  api key [keep existing] : ", hidden = true)
+      "  api key [keep existing] : ", hidden = false)
     let key = if newKey == "": existing.key else: newKey
     let curated = curatedFor(name)
     let sortedAvailable =

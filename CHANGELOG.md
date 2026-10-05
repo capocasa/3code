@@ -2,6 +2,22 @@ Changelog
 
 **Unreleased**
 
+- **Tesseracted: Kolibri-1 without the GPUs.** Tesseracted Labs (Munich)
+  is hosting Kolibri-1 behind an OpenAI-compatible gateway at
+  api.tesseracted.com/v1 (free during launch week, key via
+  tesseracted.com/kolibri-1-chat/developers); `:provider add tesseracted`
+  prefills the url. The known-good row reuses the kolibri family
+  (same prompts, same Hermes tool surface, tbCurrentTurn, 262144
+  window per the gateway's own input+output cap), with two gateway
+  differences: `applyKolibriReasoning` sends top-level
+  `reasoning_effort` (true `none` for off) instead of
+  `chat_template_kwargs`, and `allowPrivate` is off (third party,
+  usage metadata retained ~31 days) so private mode stays opt-in.
+  Output is capped at 16,384 tokens by the gateway (not the model).
+  `tl_live_` joins the key-prefix catalog, so pasting the key names
+  the provider, and the wizard now echoes api keys as typed instead
+  of hiding them.
+
 - **Kolibri-1 known-good: first harness with curated support for Aleph
   Alpha's open-weight model.** Kolibri-1 (78B MoE, 3.46B active,
   German/English, Apache 2.0) is served self-hosted on vLLM with the

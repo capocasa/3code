@@ -1109,6 +1109,19 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     # allowPrivate: self-hosted, nothing leaves the machine.
     ("kolibri", "Aleph-Alpha/Kolibri-1", "kolibri", "1", "", "high", 1.0, 65536, tbCurrentTurn, true, 262_144, true),
     ("kolibri", "Aleph-Alpha/Kolibri-1-BF16", "kolibri", "1", "bf16", "high", 1.0, 65536, tbCurrentTurn, true, 262_144, true),
+
+    # tesseracted: the same Kolibri-1 served by Tesseracted Labs'
+    # hosted OpenAI-compatible gateway (api.tesseracted.com/v1), not a
+    # self-host. Same underlying vLLM stack, but the gateway normalizes
+    # the reasoning knob to top-level `reasoning_effort` with a true
+    # "none" (see `applyKolibriReasoning`), and hard-caps input+output
+    # at 262,144 tokens. Tool calls arrive as proper `tool_calls` (no
+    # Hermes leak observed), so xmlToolCalls is false. allowPrivate
+    # false: the gateway promises no API body persistence but keeps
+    # usage metadata ~31 days and is a third party, so private mode
+    # stays an explicit opt-in. maxTokens is the gateway's own output
+    # cap (16,384), not the model's.
+    ("tesseracted", "Aleph-Alpha/Kolibri-1", "kolibri", "1", "", "high", 1.0, 16384, tbCurrentTurn, false, 262_144, false),
   ]
     ## (provider, model, family, version, variant, reasoning, temperature,
     ## maxTokens, thinkBack, contextWindow) tuples.

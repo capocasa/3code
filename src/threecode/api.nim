@@ -2614,12 +2614,23 @@ proc applyKolibriReasoning(p: Profile, body: JsonNode) =
   ## false` for a true off (the kolibri1 reasoning parser reads the same
   ## switch, so the reply's reasoning/content split follows). Thinking is
   ## on by default when the kwargs are omitted.
-  case p.reasoning
-  of "off":
-    body["chat_template_kwargs"] = %*{"enable_thinking": false}
-  of "low", "medium", "high":
-    body["chat_template_kwargs"] = %*{"reasoning_effort": p.reasoning}
-  else: discard
+  ##
+  ## Tesseracted's hosted gateway fronts the same stack but normalizes
+  ## the knob: top-level `reasoning_effort` that also takes "none" for
+  ## a true off (their API docs), no chat_template_kwargs documented.
+  case providerOf(p)
+  of "tesseracted":
+    case p.reasoning
+    of "off": body["reasoning_effort"] = %"none"
+    of "low", "medium", "high": body["reasoning_effort"] = %p.reasoning
+    else: discard
+  else:
+    case p.reasoning
+    of "off":
+      body["chat_template_kwargs"] = %*{"enable_thinking": false}
+    of "low", "medium", "high":
+      body["chat_template_kwargs"] = %*{"reasoning_effort": p.reasoning}
+    else: discard
 
 proc applyLagunaReasoning(p: Profile, body: JsonNode) =
   ## Laguna models (S 2.1, XS 2.1, M.1) toggle reasoning via
