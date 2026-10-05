@@ -223,6 +223,13 @@ keep the global config default. All of this lives in the config file; see
 :model gpt-oss-120b
 ```
 
+When a provider ships new models, `:provider update <name>` re-runs just
+the models step of the wizard: the offered list refreshes (curated in
+regular mode, the provider's `/models` endpoint under `--experimental`)
+and Enter keeps the current selection. Name, URL, and key pass through
+untouched; `:provider edit <name>` is the full wizard when those need
+changing too.
+
 ### API keys
 
 Most providers use an API key, and the wizard recognizes the common prefixes.

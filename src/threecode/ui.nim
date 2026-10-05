@@ -78,7 +78,7 @@ proc classifyCommand*(cmd: string): CommandKind =
       ckSafeImmediate
     elif parts.len == 1 and parts[0] == "list":
       ckSafeImmediate
-    elif parts.len >= 1 and parts[0] in ["add", "edit"]:
+    elif parts.len >= 1 and parts[0] in ["add", "edit", "update"]:
       ckModal
     else:
       ckMutating
@@ -156,7 +156,7 @@ proc completionFor*(line: string): seq[string] =
       for pr in activeProviders: result.add pr.name
       return
     if words.len == 3:
-      if words[1] in ["edit", "rm", "remove"]:
+      if words[1] in ["edit", "update", "rm", "remove"]:
         for pr in activeProviders: result.add pr.name
       elif words[1] == "add":
         result = wizardProviderCandidates()
@@ -716,6 +716,81 @@ proc promptNewProvider*(editor: var minline.LineEditor,
     elif choice == "c":
       raise newException(minline.InputCancelled, "cancelled by user")
 
+proc promptModelsSelection(editor: var minline.LineEditor, name, url,
+                           key: string, current: seq[string]): seq[string] =
+  ## The wizard's models field, shared by `:provider edit` (after its
+  ## name/url/key prompts) and `:provider update` (which asks nothing
+  ## else): prints the offered list, reads a space-separated selection
+  ## with `current` as the enter-to-keep default, and verifies each pick
+  ## with a one-token call under --experimental. Retries the field on
+  ## empty/unknown picks or an all-fail verification.
+  let curated = curatedFor(name)
+  let sortedAvailable =
+    if experimentalEnabled:
+      hint "  fetching models...   ", resetStyle
+      stdout.flushFile
+      let (available, fetchErr) = fetchModels(modelsListUrl(name, url),
+                                             fetchKeyFor(name, key))
+      if fetchErr.len > 0:
+        errLn "unavailable — ", fetchErr
+      elif available.len == 0:
+        hintLn "  unavailable — enter manually", resetStyle
+      # Experimental mode shows the full /models endpoint output,
+      # one entry per model: preferCurated upgrades twin spellings to
+      # the curated wire id, dedupModels keeps the first.
+      var offered = available.sorted
+      preferCurated(name, offered)
+      dedupModels(offered)
+    else:
+      # Regular mode trusts the known-good registry, not /models.
+      # Endpoints routinely list stale ids (or omit live ones), so the
+      # wizard offers exactly the curated combos for this provider.
+      if curated.len == 0:
+        hintLn "  no known-good models for this provider; enable --experimental",
+          resetStyle
+      curated
+  let prevCb = editor.completionCallback
+  editor.completionCallback = proc(ed: LineEditor): seq[string] =
+    sortedAvailable.mapIt(shortModel(it))
+  defer: editor.completionCallback = prevCb
+  if sortedAvailable.len > 0:
+    hintLn &"  {sortedAvailable.len} available", resetStyle
+    for m in sortedAvailable:
+      hintLn "    ", resetStyle, shortModel(m)
+  # Resolve short names against the offered list; unknown names pass
+  # through as-is (full id entered by the user).
+  let lookup = shortToFull(sortedAvailable)
+  var chosen = current
+  while true:
+    let prefill = chosen.mapIt(shortModel(it)).join(" ")
+    let entered = readOptional(editor, &"  models [{prefill}]  : ")
+    if entered != "": chosen = splitModels(entered)
+    var models = chosen.mapIt(lookup.getOrDefault(it, it))
+    # Same listed-but-unserved guard as the add wizard.
+    preferCurated(name, models)
+    if not experimentalEnabled:
+      # Regular mode trusts the curated list only; free-text model ids
+      # are experimental. Unknown names re-prompt like the add wizard.
+      var unknown: seq[string]
+      for m in models:
+        if m notin curated: unknown.add m
+      if unknown.len > 0:
+        errLn "unknown known-good model: " & unknown.join(", ")
+        continue
+    if models.len == 0:
+      errLn "need at least one model"
+      continue
+    if not experimentalEnabled:
+      # Registry-trusted: no verification ping. A bad key surfaces on
+      # the first turn instead.
+      return models
+    let res = verifyModels(name, url, key, models)
+    if res.cancelled:
+      raise newException(minline.InputCancelled, "cancelled by user")
+    if res.kept.len > 0:
+      return res.kept
+    chosen = models
+
 proc promptEditProvider*(editor: var minline.LineEditor,
                         existing: ProviderRec): ProviderRec =
   hintLn &"  editing '{existing.name}' (enter to keep; ctrl+c/esc clears line, empty line aborts)",
@@ -743,81 +818,14 @@ proc promptEditProvider*(editor: var minline.LineEditor,
     let newKey = readOptional(editor,
       "  api key [keep existing] : ", hidden = true)
     let key = if newKey == "": existing.key else: newKey
-    let curated = curatedFor(name)
-    let sortedAvailable =
-      if experimentalEnabled:
-        hint "  fetching models...   ", resetStyle
-        stdout.flushFile
-        let (available, fetchErr) = fetchModels(modelsListUrl(name, url),
-                                               fetchKeyFor(name, key))
-        if fetchErr.len > 0:
-          errLn "unavailable — ", fetchErr
-        elif available.len == 0:
-          hintLn "  unavailable — enter manually", resetStyle
-        # Experimental mode shows the full /models endpoint output,
-        # one entry per model: preferCurated upgrades twin spellings to
-        # the curated wire id, dedupModels keeps the first.
-        var offered = available.sorted
-        preferCurated(name, offered)
-        dedupModels(offered)
-      else:
-        # Regular mode trusts the known-good registry, not /models.
-        # Endpoints routinely list stale ids (or omit live ones), so the
-        # wizard offers exactly the curated combos for this provider.
-        if curated.len == 0:
-          hintLn "  no known-good models for this provider; enable --experimental",
-            resetStyle
-        curated
-    let prevCb = editor.completionCallback
-    editor.completionCallback = proc(ed: LineEditor): seq[string] =
-      sortedAvailable.mapIt(shortModel(it))
-    defer: editor.completionCallback = prevCb
-    if sortedAvailable.len > 0:
-      hintLn &"  {sortedAvailable.len} available", resetStyle
-      for m in sortedAvailable:
-        hintLn "    ", resetStyle, shortModel(m)
-    let modelsCurrent = existing.models.mapIt(shortModel(it)).join(" ")
-    let newModels = readOptional(editor,
-      &"  models [{modelsCurrent}]  : ")
-    let rawModels = if newModels == "": existing.models
-                   else: splitModels(newModels)
-    # Resolve short names against the offered list; unknown names pass
-    # through as-is (full id entered by the user).
-    let lookup = shortToFull(sortedAvailable)
-    var models = rawModels.mapIt(lookup.getOrDefault(it, it))
-    # Same listed-but-unserved guard as the add wizard.
-    preferCurated(name, models)
-    if not experimentalEnabled:
-      # Regular mode trusts the curated list only; free-text model ids
-      # are experimental. Unknown names re-prompt like the add wizard.
-      var unknown: seq[string]
-      for m in models:
-        if m notin curated: unknown.add m
-      if unknown.len > 0:
-        errLn "unknown known-good model: " & unknown.join(", ")
-        continue
-    if models.len == 0:
-      errLn "need at least one model"
-      continue
-    if not experimentalEnabled:
-      # Registry-trusted: no verification ping. A bad key surfaces on
-      # the first turn instead.
-      return ProviderRec(name: name, url: url, key: key,
-                         auth: existing.auth, models: models,
-                         family: existing.family,
-                         reasoning: existing.reasoning,
-                         reasonings: existing.reasonings,
-                         currentModel: existing.currentModel)
-    let res = verifyModels(name, url, key, models)
-    if res.cancelled:
-      raise newException(minline.InputCancelled, "cancelled by user")
-    if res.kept.len > 0:
-      return ProviderRec(name: name, url: url, key: key, auth: existing.auth,
-                         models: res.kept,
-                         family: existing.family,
-                         reasoning: existing.reasoning,
-                         reasonings: existing.reasonings,
-                         currentModel: existing.currentModel)
+    let models = promptModelsSelection(editor, name, url, key,
+                                       existing.models)
+    return ProviderRec(name: name, url: url, key: key,
+                       auth: existing.auth, models: models,
+                       family: existing.family,
+                       reasoning: existing.reasoning,
+                       reasonings: existing.reasonings,
+                       currentModel: existing.currentModel)
 
 proc persistCurrent() =
   ## Flush the global config and the per-directory sticky current, so a
@@ -909,15 +917,17 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile,
     prof = buildProfile(activeCurrent, activeProviders, "")
   hintLnS(&"added {prov.name}") & profileLinesS(prof)
 
-proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
-                     prof: var Profile): string =
-  var idx = -1
+proc providerIndex(target: string): int =
   for i, pr in activeProviders:
-    if pr.name == target: idx = i; break
-  if idx < 0:
-    return errLnS(&"unknown provider: {target}")
-  let updated = promptEditProvider(editor, activeProviders[idx])
-  activeProviders[idx] = updated
+    if pr.name == target: return i
+  -1
+
+proc applyProviderUpdate(target: string, updated: ProviderRec,
+                         prof: var Profile) =
+  ## Commit a rewritten provider rec: reconcile the sticky current when
+  ## the edited provider is the active one (keep the live model if it
+  ## survived the edit, else the provider's remembered default), then
+  ## flush config and dir-sticky state.
   let curName = if activeCurrent == "": "" else: activeCurrent.split('.')[0]
   if curName == target:
     let wantedModel = prof.model
@@ -928,6 +938,33 @@ proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
     setCurrentModel(updated.name, model)
     prof = buildProfile(activeCurrent, activeProviders, "")
   persistCurrent()
+
+proc cmdProviderEdit(target: string, editor: var minline.LineEditor,
+                     prof: var Profile): string =
+  let idx = providerIndex(target)
+  if idx < 0:
+    return errLnS(&"unknown provider: {target}")
+  let updated = promptEditProvider(editor, activeProviders[idx])
+  activeProviders[idx] = updated
+  applyProviderUpdate(target, updated, prof)
+  hintLnS(&"updated {target}")
+
+proc cmdProviderUpdate(target: string, editor: var minline.LineEditor,
+                       prof: var Profile): string =
+  # The models-only corner of the edit wizard: same offered list and
+  # verification, but name, url, key, and auth pass through untouched.
+  let idx = providerIndex(target)
+  if idx < 0:
+    return errLnS(&"unknown provider: {target}")
+  let existing = activeProviders[idx]
+  hintLn &"  updating models for '{existing.name}' (key unchanged; enter to keep)",
+    resetStyle
+  let models = promptModelsSelection(editor, existing.name, existing.url,
+                                     existing.key, existing.models)
+  var updated = existing
+  updated.models = models
+  activeProviders[idx] = updated
+  applyProviderUpdate(target, updated, prof)
   hintLnS(&"updated {target}")
 
 proc cmdProviderRm(target: string, prof: var Profile): string =
@@ -966,6 +1003,10 @@ proc cmdProvider(arg: string, editor: var minline.LineEditor,
     if parts.len != 2:
       return errLnS("usage: :provider edit <name>")
     cmdProviderEdit(parts[1], editor, prof)
+  of "update":
+    if parts.len != 2:
+      return errLnS("usage: :provider update <name>")
+    cmdProviderUpdate(parts[1], editor, prof)
   of "rm", "remove":
     if parts.len != 2:
       return errLnS(&"usage: :provider {parts[0]} <name>")
@@ -1269,7 +1310,7 @@ proc commandTitle(name, arg: string; ok: bool): string =
     let parts = arg.splitWhitespace()
     if parts.len == 0:
       "providers"
-    elif parts[0] in ["add", "edit", "rm", "remove"]:
+    elif parts[0] in ["add", "edit", "update", "rm", "remove"]:
       "provider " & (if parts[0] == "remove": "rm" else: parts[0])
     else:
       "profile"

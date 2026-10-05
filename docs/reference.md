@@ -62,6 +62,7 @@ names, model names, and paths where supported.
 | `:provider add` | add a provider (interactive wizard, verified) |
 | `:provider add X` | same, with X as name, URL, or API key |
 | `:provider edit X` | edit provider X (url, key, models) |
+| `:provider update X` | replace provider X's model list (key and url unchanged) |
 | `:provider rm X` | remove provider X |
 | `:reasoning` | list reasoning levels for the current model, `*` marks active |
 | `:reasoning X` | switch reasoning level |

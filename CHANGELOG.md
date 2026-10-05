@@ -2,6 +2,13 @@ Changelog
 
 **Unreleased**
 
+- **`:provider update <name>`.** Re-runs just the models step of the
+  provider wizard: the offered list refreshes (curated registry in
+  regular mode, the provider's `/models` endpoint under
+  `--experimental`), Enter keeps the current selection, and the key,
+  url, and name pass through untouched. `:provider edit` remains the
+  full wizard.
+
 - **Markdown links are OSC 8 hyperlinks.** `[text](url)` now renders
   as a clickable span instead of raw syntax. The target stays visible
   in the text (bare `url` when the text is the url, `text - url`
