@@ -9,14 +9,14 @@ Changelog
   url, and name pass through untouched. `:provider edit` remains the
   full wizard.
 
-- **`:provider new` / `:provider add-new`.** `new` lists the models a
+- **`:provider new` / `:provider pull`.** `new` lists the models a
   provider serves that its config doesn't list yet (curated registry
   growth in regular mode, the `/models` endpoint under
   `--experimental`), across every configured provider or just one by
-  name. `add-new` appends those models to the stored list, scoped the
-  same way or down to named models (`add-new nvidia glm-5.4`);
-  nothing is removed, and under `--experimental` each addition is
-  verified with a one-token call first.
+  name. `pull` brings those models into the stored list, scoped the
+  same way or down to named models (`pull nvidia glm-5.4`); nothing
+  is removed, and under `--experimental` each addition is verified
+  with a one-token call first.
 
 - **Markdown links are OSC 8 hyperlinks.** `[text](url)` now renders
   as a clickable span instead of raw syntax. The target stays visible

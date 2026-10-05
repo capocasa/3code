@@ -3398,7 +3398,7 @@ commands:
   :provider edit X    edit provider X (url, key, models)
   :provider update X  update the models of provider X (key unchanged)
   :provider new [X]   list models X serves that its config lacks (all: no X)
-  :provider add-new [X [M...]]  add those models to X (all: no X)
+  :provider pull [X [M...]]  pull those models into X's list (all: no X)
   :provider rm X      remove provider X
   :reasoning          list reasoning levels for current model (* marks active)
   :reasoning X        switch reasoning level (low / medium / high)

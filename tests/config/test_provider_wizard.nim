@@ -508,7 +508,7 @@ suite "provider wizard configuration":
 
     check body.contains("unknown provider: nope")
 
-  test "add-new appends every new model":
+  test "pull appends every new model":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
                   key: "nvapi-old", models: @["z-ai/glm-5.3"])
@@ -519,7 +519,7 @@ suite "provider wizard configuration":
     var messages = newJArray()
     var session = Session()
 
-    discard handleCommand(":provider add-new nvidia", messages, session, prof,
+    discard handleCommand(":provider pull nvidia", messages, session, prof,
                           editor)
 
     check activeProviders[0].models.len == curatedFor("nvidia").len
@@ -529,7 +529,7 @@ suite "provider wizard configuration":
     check activeCurrent == "nvidia.z-ai/glm-5.3"
     check verifiedModels.len == 0
 
-  test "add-new bare covers every configured provider":
+  test "pull bare covers every configured provider":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
                   key: "nvapi-old", models: @["z-ai/glm-5.3"]),
@@ -542,7 +542,7 @@ suite "provider wizard configuration":
     var messages = newJArray()
     var session = Session()
 
-    discard handleCommand(":provider add-new", messages, session, prof,
+    discard handleCommand(":provider pull", messages, session, prof,
                           editor)
 
     check activeProviders[0].models.len == curatedFor("nvidia").len
@@ -550,7 +550,7 @@ suite "provider wizard configuration":
     check activeProviders[1].models[0] == "gpt-oss-120b"
     check activeCurrent == "nvidia.z-ai/glm-5.3"
 
-  test "add-new with named models adds just those":
+  test "pull with named models adds just those":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
                   key: "nvapi-old", models: @["z-ai/glm-5.3"])
@@ -561,13 +561,13 @@ suite "provider wizard configuration":
     var messages = newJArray()
     var session = Session()
 
-    discard handleCommand(":provider add-new nvidia gpt-oss-20b kimi-k3",
+    discard handleCommand(":provider pull nvidia gpt-oss-20b kimi-k3",
                           messages, session, prof, editor)
 
     check activeProviders[0].models ==
       @["z-ai/glm-5.3", "openai/gpt-oss-20b", "moonshotai/kimi-k3"]
 
-  test "add-new skips named models already stored":
+  test "pull skips named models already stored":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
                   key: "nvapi-old", models: @["z-ai/glm-5.3"])
@@ -578,12 +578,12 @@ suite "provider wizard configuration":
     var messages = newJArray()
     var session = Session()
 
-    discard handleCommand(":provider add-new nvidia glm-5.3 gpt-oss-20b",
+    discard handleCommand(":provider pull nvidia glm-5.3 gpt-oss-20b",
                           messages, session, prof, editor)
 
     check activeProviders[0].models == @["z-ai/glm-5.3", "openai/gpt-oss-20b"]
 
-  test "add-new rejects unknown models in regular mode":
+  test "pull rejects unknown models in regular mode":
     activeProviders = @[
       ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
                   key: "nvapi-old", models: @["z-ai/glm-5.3"])
@@ -594,13 +594,13 @@ suite "provider wizard configuration":
     var messages = newJArray()
     var session = Session()
 
-    let body = handleCommandResult(":provider add-new nvidia no-such-model",
+    let body = handleCommandResult(":provider pull nvidia no-such-model",
                                    messages, session, prof, editor).body
 
     check body.contains("unknown known-good model: no-such-model")
     check activeProviders[0].models == @["z-ai/glm-5.3"]
 
-  test "new and add-new diff against the fetched endpoint under experimental":
+  test "new and pull diff against the fetched endpoint under experimental":
     experimentalEnabled = true
     fetchModelsHook = proc(url, key: string): (seq[string], string) =
       (@["z-ai/glm-5.3", "z-ai/glm-6", "madeup/new-model"], "")
@@ -623,7 +623,7 @@ suite "provider wizard configuration":
     verifyProfileHook = proc(p: Profile): (bool, string) =
       if p.model == "madeup/new-model": (false, "HTTP 404")
       else: (true, "")
-    discard handleCommand(":provider add-new nvidia", messages, session, prof,
+    discard handleCommand(":provider pull nvidia", messages, session, prof,
                           editor)
 
     # Only the verified addition lands; the stored model keeps its place.

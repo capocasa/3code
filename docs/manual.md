@@ -233,10 +233,11 @@ changing too.
 To see what you are missing without entering the wizard,
 `:provider new` lists every configured provider's not-yet-configured
 models (`:provider new <name>` for one provider), and
-`:provider add-new` adds them, optionally scoped the same way or down
-to named models: `:provider add-new nvidia glm-5.4`. New models append
-to the stored list; nothing is removed, and under `--experimental`
-each addition is verified with a one-token call first.
+`:provider pull` brings them in, optionally scoped the same way or
+down to named models: `:provider pull nvidia glm-5.4`. New models
+append to the stored list; nothing is removed, and under
+`--experimental` each addition is verified with a one-token call
+first.
 
 ### API keys
 

@@ -79,7 +79,7 @@ proc classifyCommand*(cmd: string): CommandKind =
     elif parts.len == 1 and parts[0] == "list":
       ckSafeImmediate
     elif parts.len >= 1 and parts[0] in ["add", "edit", "update", "new",
-                                        "add-new"]:
+                                        "pull"]:
       ckModal
     else:
       ckMutating
@@ -162,12 +162,12 @@ proc completionFor*(line: string): seq[string] =
       for pr in activeProviders: result.add pr.name
       return
     if words.len == 3:
-      if words[1] in ["edit", "update", "new", "add-new", "rm", "remove"]:
+      if words[1] in ["edit", "update", "new", "pull", "rm", "remove"]:
         for pr in activeProviders: result.add pr.name
       elif words[1] == "add":
         result = wizardProviderCandidates()
       return
-    if words.len == 4 and words[1] == "add-new":
+    if words.len == 4 and words[1] == "pull":
       # The provider's not-yet-stored models. Curated only: completion
       # never fetches. Under --experimental the endpoint may know more;
       # that list is what `:provider new <name>` is for.
@@ -1015,8 +1015,8 @@ proc cmdProviderNew(target: string): string =
   if not anyNew:
     result.add hintLnS("no new models")
 
-proc cmdProviderAddNew(target: string, models: seq[string],
-                       prof: var Profile): string =
+proc cmdProviderPull(target: string, models: seq[string],
+                     prof: var Profile): string =
   ## Append the models `:provider new` shows to the stored list. Bare:
   ## every provider takes all of its new models. With a provider name:
   ## just that one, or with explicit model names only those (short or
@@ -1121,9 +1121,9 @@ proc cmdProvider(arg: string, editor: var minline.LineEditor,
     if parts.len > 2:
       return errLnS("usage: :provider new [name]")
     cmdProviderNew(if parts.len == 2: parts[1] else: "")
-  of "add-new":
-    cmdProviderAddNew(if parts.len >= 2: parts[1] else: "",
-                      if parts.len > 2: parts[2 .. ^1] else: @[], prof)
+  of "pull":
+    cmdProviderPull(if parts.len >= 2: parts[1] else: "",
+                    if parts.len > 2: parts[2 .. ^1] else: @[], prof)
   of "rm", "remove":
     if parts.len != 2:
       return errLnS(&"usage: :provider {parts[0]} <name>")
@@ -1427,7 +1427,7 @@ proc commandTitle(name, arg: string; ok: bool): string =
     let parts = arg.splitWhitespace()
     if parts.len == 0:
       "providers"
-    elif parts[0] in ["add", "edit", "update", "new", "add-new", "rm",
+    elif parts[0] in ["add", "edit", "update", "new", "pull", "rm",
                       "remove"]:
       "provider " & (if parts[0] == "remove": "rm" else: parts[0])
     else:
