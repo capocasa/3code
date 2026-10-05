@@ -336,23 +336,6 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("openrouter", "minimax/minimax-m3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("together", "MiniMaxAI/MiniMax-M3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, true),
     ("nebius", "MiniMaxAI/MiniMax-M3", "minimax", "3", "", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
-    # space bunny (stealth preview, Sep 2026; openrouter banner says it
-    # goes away Oct 5): anonymous free model, 1M context / 524k output,
-    # text+image+video in. Tokenizer and reasoning wire shape match the
-    # MiniMax M-series (unconfirmed), so it rides the minimax family:
-    # enable_thinking + reasoning_split are accepted on both routes and
-    # the split works (reasoning arrives as reasoning_details /
-    # reasoning_content, separate from content; verified live on both).
-    # Reasoning is mandatory: the upstream effort ladder is
-    # minimal..max but `none` 400s ("Reasoning is mandatory for this
-    # endpoint and cannot be disabled") and enable_thinking=false is
-    # silently ignored, so `:reasoning` offers no knob. The openrouter
-    # stealth route also drops reasoning deltas from the SSE stream
-    # unless include_reasoning is set (see applyStreamingOptions).
-    # Zen's free mount is zero-retention; openrouter's stealth terms
-    # allow provider retention (no training), so no allow-private flag.
-    ("openrouter", "stealth/space-bunny-alpha", "minimax", "", "alpha", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
-    ("opencode", "space-bunny-free", "minimax", "", "alpha", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
 
     # kimi
     ("fireworks", "accounts/fireworks/models/kimi-k2p6", "kimi", "2", "6", "on", 0.6, 8192, tbAllTurns, false, 262_144, true),
@@ -441,11 +424,6 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("opencodego", "kimi-k2.7-code", "kimi", "2", "7-code", "on", 0.6, 8192, tbAllTurns, false, 262_144, false),
     ("opencodego", "glm-5.3", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
     ("opencodego", "glm-5.3-flash", "glm", "5", "3-flash", "low", 0.2, 65536, tbAllTurns, false, 1_000_000, false),
-    # omen-alpha (OpenCode Go stealth release, Sep 2026): tokenizer and
-    # reasoning_content wire shape match the GLM line, so it rides the glm
-    # prompt and the 5.3 effort surface. Effort ladder is low/high only;
-    # 500k window, 128k output.
-    ("opencodego", "omen-alpha", "glm", "5", "3", "high", 0.2, 65536, tbAllTurns, false, 500_000, false),
     ("opencodego", "glm-5.2", "glm", "5", "2", "high", 0.2, 8192, tbAllTurns, false, 1_000_000, false),
     ("opencodego", "glm-5.1", "glm", "5", "1", "on", 0.2, 8192, tbAllTurns, false, 200_000, false),
     ("opencodego", "deepseek-v4-pro", "deepseek", "4", "pro", "low", 0.2, 8192, tbAllTurns, false, 1_000_000, false),
@@ -3790,8 +3768,6 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         # no off. Variant encodes the minor version digit (4.7 -> "7",
         # 5.1 -> "1", 5.2 -> "2", 5.3 -> "3") and may carry a suffix.
         if combo.version == "5" and combo.variant.startsWith("2"): return @["off", "high", "max"]
-        # omen-alpha rides the 5.3 surface but its gateway tops out at high
-        if combo.model == "omen-alpha": return @["low", "high"]
         if combo.version == "5" and combo.variant.startsWith("3"): return @["low", "high", "max"]
         return @["off", "on"]
       if fam == "0xalpha":
@@ -3817,12 +3793,6 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         if combo.variant.startsWith("7-code"):
           return @[]
         return @["off", "on"]
-      if combo.model in ["stealth/space-bunny-alpha", "space-bunny-free"]:
-        # Space Bunny thinks unconditionally: the upstream effort ladder
-        # is minimal..max but `none` 400s and the minimax
-        # enable_thinking=false bool is ignored (verified live on both
-        # routes), so no knob is offered - same rule as kimi-k2.7-code.
-        return @[]
       if fam in ["laguna", "kimi", "qwen", "longcat", "minimax", "mimo", "ling", "nemotron"]:
         # These families have no graded effort knob on the OpenAI-compatible
         # surface (see `applyMiniMaxReasoning` / `applyMimoReasoning` in

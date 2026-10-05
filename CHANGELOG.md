@@ -2,6 +2,15 @@ Changelog
 
 **Unreleased**
 
+- **Stealth models left the known-good registry.** The curated table no
+  longer carries anonymous/stealth mounts: `stealth/space-bunny-alpha`
+  (OpenRouter), `space-bunny-free` (Zen), and `omen-alpha` (OpenCode Go)
+  join 0xalpha and union-alpha off the table; a different mechanism will
+  cover stealth models. They stay runnable via `--experimental` with a
+  family override, and their context-window / output-cap substring
+  fallbacks and the OpenRouter `include_reasoning` streaming fix remain,
+  so an experimental run behaves as before.
+
 - **Markdown links are OSC 8 hyperlinks.** `[text](url)` now renders
   as a clickable span instead of raw syntax. The target stays visible
   in the text (bare `url` when the text is the url, `text - url`
