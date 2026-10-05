@@ -1168,6 +1168,43 @@ suite "xml tool_call fallback":
     let args = parseJson(r.calls[0]{"function"}{"arguments"}.getStr)
     check args{"body"}.getStr == "line1\nline2"
 
+  test "parses Hermes JSON body (kolibri leak shape)":
+    # Kolibri's native emission is Hermes-style JSON inside the tags;
+    # a vLLM stack that leaks it into content does it in this shape.
+    let raw = "<tool_call>\n{\"name\": \"bash\", \"arguments\": " &
+              "{\"command\": \"echo hi\"}}\n</tool_call>"
+    let r = parseXmlToolCalls(raw)
+    check r.calls.len == 1
+    check r.calls[0]{"function"}{"name"}.getStr == "bash"
+    let args = parseJson(r.calls[0]{"function"}{"arguments"}.getStr)
+    check args{"command"}.getStr == "echo hi"
+    check r.cleaned.strip() == ""
+
+  test "Hermes body with nested empty array arguments":
+    let raw = "<tool_call>{\"name\": \"patch\", \"arguments\": " &
+              "{\"path\": \"a.nim\", \"edits\": []}" &
+              "}</tool_call>"
+    let r = parseXmlToolCalls(raw)
+    check r.calls[0]{"function"}{"name"}.getStr == "patch"
+    let args = parseJson(r.calls[0]{"function"}{"arguments"}.getStr)
+    check args{"path"}.getStr == "a.nim"
+
+  test "GLM arg_key body still parses after Hermes addition":
+    let raw = "<tool_call>bash<arg_key>command</arg_key>" &
+              "<arg_value>true</arg_value></tool_call>"
+    let r = parseXmlToolCalls(raw)
+    check r.calls.len == 1
+    check r.calls[0]{"function"}{"name"}.getStr == "bash"
+    let args = parseJson(r.calls[0]{"function"}{"arguments"}.getStr)
+    check args{"command"}.getStr == "true"
+
+  test "non-JSON, non-arg_key body falls back to bare-name call":
+    let raw = "<tool_call>update_plan</tool_call>"
+    let r = parseXmlToolCalls(raw)
+    check r.calls.len == 1
+    check r.calls[0]{"function"}{"name"}.getStr == "update_plan"
+    check r.calls[0]{"function"}{"arguments"}.getStr == "{}"
+
   test "verifyBody sends stream:true matching callModel":
     let p = Profile(name: "zai.glm-5.1", model: "glm-5.1", family: "glm")
     let body = parseJson(verifyBody(p))

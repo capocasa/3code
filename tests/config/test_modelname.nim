@@ -161,6 +161,11 @@ suite "modelname: normalizeModelName":
   test "free suffix":
     check normalizeModelName("z-ai/glm-5.2:free") == "glm-5.2:free"
 
+  test "kolibri":
+    check normalizeModelName("Aleph-Alpha/Kolibri-1") == "kolibri1"
+    check normalizeModelName("kolibri-1") == "kolibri1"
+    check normalizeModelName("Aleph-Alpha/Kolibri-1-BF16") == "kolibri1-bf16"
+
 suite "modelname: format":
 
   test "round trip":
@@ -169,6 +174,7 @@ suite "modelname: format":
 
   test "single digit version":
     check format(ModelName(family: "hy", version: "3")) == "hy3"
+    check format(ModelName(family: "kolibri", version: "1")) == "kolibri1"
     check format(ModelName(family: "hy", version: "4")) == "hy4"
     check format(ModelName(family: "kimi", version: "k3")) == "kimi-k3"
 

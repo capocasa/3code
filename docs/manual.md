@@ -395,6 +395,7 @@ Where to point 3code when data must stay under EU jurisdiction.
 | hetzner | Germany | free experiment, **quantized** (fp8/fp4 ids) |
 | together-eu | EU | Together's EU endpoint |
 | ★ platte | Germany | EU sovereign host; url embeds your username, wizard asks for it |
+| ★ kolibri | your own hardware | Aleph Alpha's Kolibri-1 (open weights, Apache 2.0, German/English): serve it yourself with vLLM + the aleph-alpha-inference plugin, then `:provider add kolibri` (url `http://localhost:8000/v1`) |
 | aki | EU | |
 | lyceum | EU | |
 

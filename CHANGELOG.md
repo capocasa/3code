@@ -2,6 +2,27 @@ Changelog
 
 **Unreleased**
 
+- **Kolibri-1 known-good: first harness with curated support for Aleph
+  Alpha's open-weight model.** Kolibri-1 (78B MoE, 3.46B active,
+  German/English, Apache 2.0) is served self-hosted on vLLM with the
+  official aleph-alpha-inference plugin; `:provider add kolibri`
+  prefills `http://localhost:8000/v1` and the known-good rows cover both
+  weight ids (FP8 and BF16) under the `kolibri` family (alias
+  `alephalpha`). Reasoning is the model's own graded chat-template knob:
+  `:reasoning` offers off/low/medium/high mapped to
+  `chat_template_kwargs.reasoning_effort` / `enable_thinking: false`,
+  matching what the `kolibri1` reasoning parser reads server-side.
+  Thinking replay is tbCurrentTurn, exactly the chat template's own
+  contract (a turn's tool loop keeps its thinking, older turns drop
+  it). Sampling follows the model card (temperature 1.0; top_p/top_k
+  come from the repo's generation_config server-side), context window
+  curated at the recommended 262144, allowPrivate on (self-hosted).
+  The XML tool-call fallback now also parses Hermes-style JSON bodies
+  (`<tool_call>{"name": ..., "arguments": ...}</tool_call>`), Kolibri's
+  native emission, alongside GLM's arg_key markup. Dedicated Kolibri
+  system prompt; the model was RL-trained across randomized harnesses
+  and prompts, so it takes the house style without a special recipe.
+
 - **Caret flicker in the spinner, finished.** The drawn-caret rework
   left one `?25h` at every turn end: nothing ever re-hid the cursor,
   so from the second turn on the terminal's own blinking caret sat
