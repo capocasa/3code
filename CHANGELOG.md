@@ -2,6 +2,43 @@ Changelog
 
 **Unreleased**
 
+- **Tesseracted: Kolibri-1 without the GPUs.** Tesseracted Labs (Munich)
+  is hosting Kolibri-1 behind an OpenAI-compatible gateway at
+  api.tesseracted.com/v1 (free during launch week, key via
+  tesseracted.com/kolibri-1-chat/developers); `:provider add tesseracted`
+  prefills the url. The known-good row reuses the kolibri family
+  (same prompts, same Hermes tool surface, tbCurrentTurn, 262144
+  window per the gateway's own input+output cap), with two gateway
+  differences: `applyKolibriReasoning` sends top-level
+  `reasoning_effort` (true `none` for off) instead of
+  `chat_template_kwargs`, and `allowPrivate` is off (third party,
+  usage metadata retained ~31 days) so private mode stays opt-in.
+  Output is capped at 16,384 tokens by the gateway (not the model).
+  `tl_live_` joins the key-prefix catalog, so pasting the key names
+  the provider, and the wizard now echoes api keys as typed instead
+  of hiding them.
+
+- **Kolibri-1 known-good: first harness with curated support for Aleph
+  Alpha's open-weight model.** Kolibri-1 (78B MoE, 3.46B active,
+  German/English, Apache 2.0) is served self-hosted on vLLM with the
+  official aleph-alpha-inference plugin; `:provider add kolibri`
+  prefills `http://localhost:8000/v1` and the known-good rows cover both
+  weight ids (FP8 and BF16) under the `kolibri` family (alias
+  `alephalpha`). Reasoning is the model's own graded chat-template knob:
+  `:reasoning` offers off/low/medium/high mapped to
+  `chat_template_kwargs.reasoning_effort` / `enable_thinking: false`,
+  matching what the `kolibri1` reasoning parser reads server-side.
+  Thinking replay is tbCurrentTurn, exactly the chat template's own
+  contract (a turn's tool loop keeps its thinking, older turns drop
+  it). Sampling follows the model card (temperature 1.0; top_p/top_k
+  come from the repo's generation_config server-side), context window
+  curated at the recommended 262144, allowPrivate on (self-hosted).
+  The XML tool-call fallback now also parses Hermes-style JSON bodies
+  (`<tool_call>{"name": ..., "arguments": ...}</tool_call>`), Kolibri's
+  native emission, alongside GLM's arg_key markup. Dedicated Kolibri
+  system prompt; the model was RL-trained across randomized harnesses
+  and prompts, so it takes the house style without a special recipe.
+
 - **Stealth models left the known-good registry.** The curated table no
   longer carries anonymous/stealth mounts: `stealth/space-bunny-alpha`
   (OpenRouter), `space-bunny-free` (Zen), and `omen-alpha` (OpenCode Go)

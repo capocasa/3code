@@ -1,5 +1,5 @@
 import std/[json, strutils, tables, unittest]
-import threecode/[api, oauth, types, util]
+import threecode/[api, oauth, prompts, types, util]
 
 suite "api: parseUsage":
   test "parses standard OpenAI usage object":
@@ -625,3 +625,62 @@ suite "api: bearerFor":
       except ApiError as e:
         msg = e.msg
     check "supergrok login expired" in msg
+
+suite "api: applyReasoning — kolibri":
+  # Kolibri's knob rides chat_template_kwargs: reasoning_effort
+  # (low/medium/high) or enable_thinking false for a true off.
+  test "off sends enable_thinking false":
+    var body = %*{"stream": true}
+    let p = Profile(name: "kolibri.Aleph-Alpha/Kolibri-1",
+                    family: "kolibri", model: "Aleph-Alpha/Kolibri-1",
+                    reasoning: "off")
+    applyReasoning(p, body)
+    check body{"chat_template_kwargs"}{"enable_thinking"}.getBool == false
+    check not body.hasKey("reasoning_effort")
+
+  test "effort levels map to reasoning_effort":
+    for effort in ["low", "medium", "high"]:
+      var body = %*{"stream": true}
+      let p = Profile(name: "kolibri.Aleph-Alpha/Kolibri-1",
+                      family: "kolibri", model: "Aleph-Alpha/Kolibri-1",
+                      reasoning: effort)
+      applyReasoning(p, body)
+      check body{"chat_template_kwargs"}{"reasoning_effort"}.getStr == effort
+      check not body.hasKey("enable_thinking")
+
+  test "empty reasoning sends nothing (server default: think)":
+    var body = %*{"stream": true}
+    let p = Profile(name: "kolibri.Aleph-Alpha/Kolibri-1",
+                    family: "kolibri", model: "Aleph-Alpha/Kolibri-1",
+                    reasoning: "")
+    applyReasoning(p, body)
+    check not body.hasKey("chat_template_kwargs")
+
+suite "api: applyReasoning — kolibri on tesseracted":
+  # Tesseracted's hosted gateway normalizes the knob to top-level
+  # reasoning_effort, with "none" as the true off.
+  test "off sends top-level none":
+    var body = %*{"stream": true}
+    let p = Profile(name: "tesseracted.Aleph-Alpha/Kolibri-1",
+                    family: "kolibri", model: "Aleph-Alpha/Kolibri-1",
+                    reasoning: "off")
+    applyReasoning(p, body)
+    check body{"reasoning_effort"}.getStr == "none"
+    check not body.hasKey("chat_template_kwargs")
+
+  test "effort levels pass through top-level":
+    for effort in ["low", "medium", "high"]:
+      var body = %*{"stream": true}
+      let p = Profile(name: "tesseracted.Aleph-Alpha/Kolibri-1",
+                      family: "kolibri", model: "Aleph-Alpha/Kolibri-1",
+                      reasoning: effort)
+      applyReasoning(p, body)
+      check body{"reasoning_effort"}.getStr == effort
+      check not body.hasKey("chat_template_kwargs")
+      check not body.hasKey("enable_thinking")
+
+  test "combo is known-good with the kolibri level set":
+    check isKnownGood(Profile(name: "tesseracted.Aleph-Alpha/Kolibri-1",
+                              model: "Aleph-Alpha/Kolibri-1"))
+    check knownGoodReasonings("tesseracted", "Aleph-Alpha/Kolibri-1") ==
+        @["off", "low", "medium", "high"]

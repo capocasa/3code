@@ -641,10 +641,12 @@ proc buildStreamAssistantMsg*(content, reasoning: string,
     result["interrupted"] = %true
 
 proc parseXmlToolCalls*(content: string): tuple[cleaned: string, calls: seq[JsonNode]] =
-  ## Extract GLM/Qwen native `<tool_call>NAME<arg_key>K</arg_key>
-  ## <arg_value>V</arg_value>...</tool_call>` blocks from `content` and
-  ## promote them to OpenAI-style `tool_calls` entries. Returns the
-  ## content with those blocks removed and the synthesized calls.
+  ## Extract native `<tool_call>...</tool_call>` blocks from `content`
+  ## and promote them to OpenAI-style `tool_calls` entries. Two body
+  ## shapes: Hermes-style JSON (`{"name": ..., "arguments": {...}}`,
+  ## Kolibri/Qwen3) and GLM's `NAME<arg_key>K</arg_key>
+  ## <arg_value>V</arg_value>` markup. Returns the content with those
+  ## blocks removed and the synthesized calls.
   ##
   ## Some endpoints (e.g. nvidia z-ai/glm-5.2 mid-turn) leak the model's
   ## chat-template tokens into the SSE content stream instead of parsing
@@ -671,6 +673,27 @@ proc parseXmlToolCalls*(content: string): tuple[cleaned: string, calls: seq[Json
       cleaned.add content[openIdx .. ^1]
       break
     let inner = content[openIdx + Open.len ..< closeIdx]
+    # Hermes-style blocks carry a JSON body (Kolibri, Qwen3):
+    # <tool_call>{"name": "bash", "arguments": {"command": "ls"}}</tool_call>
+    # Try that shape first; the arg_key/arg_value markup below is GLM's.
+    var hermes = false
+    block:
+      let j = try: parseJson(inner.strip)
+              except CatchableError: nil
+      if j != nil and j.kind == JObject and j{"name"}.kind == JString:
+        let args =
+          if j{"arguments"}.kind == JString: j{"arguments"}.getStr
+          elif j{"arguments"}.kind != JNull: $j["arguments"]
+          else: "{}"
+        calls.add %*{
+          "id": "xmltc-" & $calls.len & "-" & toHex(hash(content[openIdx ..< closeIdx + Close.len]).uint64, 8),
+          "type": "function",
+          "function": {"name": j{"name"}.getStr, "arguments": args}
+        }
+        hermes = true
+    if hermes:
+      i = closeIdx + Close.len
+      continue
     let firstK = inner.find(KOpen)
     let name =
       if firstK < 0: inner.strip()
@@ -2583,6 +2606,32 @@ proc applyMimoReasoning(p: Profile, body: JsonNode) =
     of "off": body["chat_template_kwargs"] = %*{"enable_thinking": false}
     else: discard
 
+proc applyKolibriReasoning(p: Profile, body: JsonNode) =
+  ## Kolibri (Aleph Alpha, self-served on vLLM via the
+  ## aleph-alpha-inference plugin) exposes its reasoning knob through the
+  ## chat template, not a top-level field: `chat_template_kwargs` carries
+  ## `reasoning_effort` ("low"/"medium"/"high") or `enable_thinking:
+  ## false` for a true off (the kolibri1 reasoning parser reads the same
+  ## switch, so the reply's reasoning/content split follows). Thinking is
+  ## on by default when the kwargs are omitted.
+  ##
+  ## Tesseracted's hosted gateway fronts the same stack but normalizes
+  ## the knob: top-level `reasoning_effort` that also takes "none" for
+  ## a true off (their API docs), no chat_template_kwargs documented.
+  case providerOf(p)
+  of "tesseracted":
+    case p.reasoning
+    of "off": body["reasoning_effort"] = %"none"
+    of "low", "medium", "high": body["reasoning_effort"] = %p.reasoning
+    else: discard
+  else:
+    case p.reasoning
+    of "off":
+      body["chat_template_kwargs"] = %*{"enable_thinking": false}
+    of "low", "medium", "high":
+      body["chat_template_kwargs"] = %*{"reasoning_effort": p.reasoning}
+    else: discard
+
 proc applyLagunaReasoning(p: Profile, body: JsonNode) =
   ## Laguna models (S 2.1, XS 2.1, M.1) toggle reasoning via
   ## the OpenAI-compatible `reasoning: {enabled: bool}` field, the same
@@ -2688,6 +2737,7 @@ proc applyReasoning*(p: Profile, body: JsonNode) =
   ## (2) write an `applyXReasoning` proc, (3) add a case branch.
   case p.family
   of "laguna": applyLagunaReasoning(p, body)
+  of "kolibri": applyKolibriReasoning(p, body)
   of "gpt-oss": applyGptOssReasoning(p, body)
   of "gpt": applyGptReasoning(p, body)
   of "glm": applyGlmReasoning(p, body)

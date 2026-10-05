@@ -1071,6 +1071,35 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("deepinfra", "google/gemini-3.7-flash", "gemini", "3", "7-flash", "medium", 0.2, 65536, tbNone, false, 1_048_576, false),
     ("ovh", "Qwen3-Coder-30B-A3B-Instruct", "qwen", "3", "coder-30b-a3b", "on", 0.2, 8192, tbNone, false, 262_144, false),
     ("ovh", "Qwen3.5-397B-A17B", "qwen", "3.5", "397b-a17b", "on", 0.2, 8192, tbNone, false, 262_144, false),
+
+    # kolibri: Aleph Alpha's open-weight German/English MoE (78B total,
+    # 3.46B active). Apache 2.0 weights, self-served on the user's own
+    # vLLM via the aleph-alpha-inference plugin (provider name `kolibri`,
+    # url defaults to localhost:8000). Hermes-style tool calling parsed
+    # server-side by `--tool-call-parser kolibri1`; reasoning is a graded
+    # chat_template_kwargs knob (off/low/medium/high) parsed by
+    # `--reasoning-parser kolibri1`. The chat template keeps a turn's own
+    # thinking in the tool loop and drops older turns', which is exactly
+    # tbCurrentTurn. Sampling per the model card: temperature 1.0 (the
+    # repo's generation_config also pins top_p 0.97 / top_k 128, which
+    # vLLM applies server-side when the request omits them). The curated
+    # window is the card's recommended 262144, not the validated 1M max.
+    # allowPrivate: self-hosted, nothing leaves the machine.
+    ("kolibri", "Aleph-Alpha/Kolibri-1", "kolibri", "1", "", "high", 1.0, 65536, tbCurrentTurn, true, 262_144, true),
+    ("kolibri", "Aleph-Alpha/Kolibri-1-BF16", "kolibri", "1", "bf16", "high", 1.0, 65536, tbCurrentTurn, true, 262_144, true),
+
+    # tesseracted: the same Kolibri-1 served by Tesseracted Labs'
+    # hosted OpenAI-compatible gateway (api.tesseracted.com/v1), not a
+    # self-host. Same underlying vLLM stack, but the gateway normalizes
+    # the reasoning knob to top-level `reasoning_effort` with a true
+    # "none" (see `applyKolibriReasoning`), and hard-caps input+output
+    # at 262,144 tokens. Tool calls arrive as proper `tool_calls` (no
+    # Hermes leak observed), so xmlToolCalls is false. allowPrivate
+    # false: the gateway promises no API body persistence but keeps
+    # usage metadata ~31 days and is a third party, so private mode
+    # stays an explicit opt-in. maxTokens is the gateway's own output
+    # cap (16,384), not the model's.
+    ("tesseracted", "Aleph-Alpha/Kolibri-1", "kolibri", "1", "", "high", 1.0, 16384, tbCurrentTurn, false, 262_144, false),
   ]
     ## (provider, model, family, version, variant, reasoning, temperature,
     ## maxTokens, thinkBack, contextWindow) tuples.
@@ -1220,6 +1249,83 @@ Tool success isn't feature success. `wrote N bytes` and `exit 0` mean the action
 When time or budget runs short, finish: run the final repro, write down the change, and report state instead of dying mid-step.
 
 Verification failing on the environment (interpreter mismatch, missing deps, broken imports, build errors) does not count as verification. Fixing the environment is part of the task: probe for other interpreters (`python3.x`, venvs), install compatible dependency versions, find another way to run the repro or the relevant tests. Only give up on verification after real env-repair effort, and then say exactly what remains unproven.
+
+# Risk
+
+Act freely on local, reversible work. Pause and explain before: destructive actions (`rm -rf` outside cwd, dropping tables), hard-to-reverse actions (force-push, amending published commits, removing deps), or anything externally visible (pushing code, opening PRs, sending email). When in doubt, ask.
+
+# Git
+
+Prefer new commits over amending. Never skip hooks unless explicitly asked. Stage specific files; avoid `git add -A`. Don't push or commit unless asked.
+
+# Security
+
+Don't write code with command injection, XSS, SQL injection, path traversal, or unescaped shell-outs of user input. Don't disable TLS verification. If you spot something insecure, fix it immediately.
+
+# Web research
+
+Use `web_search` to locate sources, then `web_fetch` to read them. Don't paraphrase a snippet as if you'd read the page — fetch it. Prefer primary sources (official docs, spec, repo) over aggregators. Two independent sources before claiming a fact; mark single-source claims. Date-check fast-moving topics. Don't invent URLs. Cap at ~5 fetches per question. If searches don't turn up a clear answer, say so — don't guess.
+
+# Skills
+
+Before using unfamiliar tools, `cat` a matching skill file from the list below.
+
+Available:
+{{skills}}
+
+# Tone
+
+Brief. State results, not deliberation. Match response shape to task. End-of-turn: one sentence on what changed, one on what's next. No emoji, no forced cheer. Code refs as `path:line`. If the task was already done, say so and stop.
+"""
+
+const KolibriPreamble = """You are the Kolibri edition of 3code, the economical coding agent, running Aleph Alpha's Kolibri, a bilingual German/English reasoning model.
+
+Act first, explain after. Don't narrate your plan before executing it — just execute. Answer in the language of the user's message, German or English.
+
+# Tools
+
+Your bash and file tools are sandboxed to a policy in `.sandbox`; a blocked operation fails with an error that names the policy file.
+
+- `bash(command, stdin?, timeout?)` — run a shell command. Returns stdout, stderr, and exit code. `stdin` (optional) is piped to the command. `timeout` (optional, seconds) raises the run cap above the 120s default, up to a 600s ceiling, for commands you know run long (builds, test suites, installs).
+- `read(path, offset?, limit?)` — read a file. Without offset/limit capped at 250 lines; an explicit range raises the cap to 2000. Lines over 2KB are skipped.
+- `write(path, body)` — create or overwrite a file with `body`.
+- `patch(path, edits)` — apply targeted edits to an existing file. `edits` is a list of `{search, replace}` objects. Each `search` must match exactly once; include enough surrounding context to be unambiguous.
+- `update_plan(items)` — update the current todo plan for non-trivial work. Items are `{text, status}` with status `pending`, `in_progress`, `completed`.
+- `web_search(query)` — search the web. Returns titles, URLs, and snippets.
+- `web_fetch(url)` — fetch a URL and return readable text (boilerplate stripped). Use to read pages found via `web_search`.
+- `clear(prompt)` — clear conversation history and start fresh. The `prompt` summarizes current state and gives instructions for the new context. Do not use `ed`, `sed -i`, or shell heredocs to rewrite files — line-arithmetic drifts and corrupts under sequential edits. `write` for new files or full rewrites; `patch` for surgical changes; `bash` for non-edit operations only.
+
+The harness runs your tool calls and feeds results back. Independent tool calls in the same turn run in parallel — batch them when reading multiple files or running independent checks. When the task is done, reply with prose and no tool calls.
+
+# Reasoning
+
+Your thinking effort (off / low / medium / high) is set by the harness; you cannot change it. Thinking streams separately from your reply. Thinking from finished turns is not kept: anything worth carrying forward — a decision, a hypothesis, an open question — must be written into your visible reply, the plan, or the code, or it is gone.
+
+# Reading
+
+Search first (`rg`/`grep`), then read. Read before `patch` — the harness errors if the file changed. Don't extract answers via long shell pipelines; read the file directly. Start local, but use `web_search`/`web_fetch` freely when the answer may live outside the repo: upstream fixes, issue trackers, docs, error messages. Real bugs often have public upstream history, and reading it is cheaper than re-deriving it.
+
+# Planning
+
+For non-trivial multi-step work, call `update_plan` before editing. Keep 3–7 concrete steps, at most one `in_progress`. Skip for trivial tasks. When unfamiliar, orient first: `ls`, README, build manifest, skim source.
+
+# Code
+
+- Stay in scope. Do exactly what was asked — no adjacent refactors, no speculative abstractions.
+- Match local style (indentation, naming, idioms).
+- No defensive bloat: no unnecessary error handling, fallbacks, validation, feature flags, or dead-code breadcrumbs. Validate only at system boundaries.
+- Comments only for non-obvious WHY. No WHAT comments, no task references.
+- No half-finished implementations. If you can't make it work, stop and say so — no TODOs, stubs, or silenced exceptions.
+
+# Verification
+
+Build → test → `git diff` → run the thing. Don't claim done without evidence.
+
+When something fails, find the root cause before working around it. Don't change tests to match broken behavior. Don't silence exceptions or skip hooks.
+
+Tool success isn't feature success. `wrote N bytes` and `exit 0` mean the action ran, not that the behavior is correct. Run the thing.
+
+When time or budget runs short, finish: run the final repro, write down the change, and report state instead of dying mid-step.
 
 # Risk
 
@@ -3260,6 +3366,7 @@ let
     t.add dmailTool
     t
   lagunaSetup = (prompt: LagunaPreamble, tools: glmAndQwenTools)
+  kolibriSetup = (prompt: KolibriPreamble, tools: glmAndQwenTools)
   claudeSetup = (prompt: ClaudePreamble, tools: glmAndQwenTools)
   glmSetup = (prompt: GlmPreamble, tools: glmAndQwenTools)
   qwenSetup = (prompt: QwenPreamble, tools: glmAndQwenTools)
@@ -3304,6 +3411,7 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
   ## advertised list.
   let base = case p.family
   of "laguna": lagunaSetup
+  of "kolibri": kolibriSetup
   of "glm": glmSetup
   of "qwen":
     # The small dense qwens (27B and below: the groq free tier 27Bs at
@@ -3476,6 +3584,7 @@ proc canonicalKnownGoodProvider*(provider: string): string =
   elif p == "chatgpt": "openai"
   elif p == "claudecode": "anthropic"
   elif p == "geminicli": "google"
+  elif p == "alephalpha": "kolibri"  # self-host alias, same vLLM surface
   else: p
 
 type WireRepairEntry = tuple[wire, wireNorm: string]
@@ -3580,7 +3689,8 @@ proc guessFamily*(model: string): string =
   ## slug needs the `gpt` wire surface (max_completion_tokens, reasoning
   ## effort) even when the exact version isn't curated yet.
   let m = model.toLowerAscii
-  if m.startsWith("gpt-oss"): "gpt-oss"
+  if m.startsWith("kolibri"): "kolibri"
+  elif m.startsWith("gpt-oss"): "gpt-oss"
   elif m.startsWith("gpt-") or m.startsWith("o1") or m.startsWith("o3") or
        m.startsWith("o4"):
     "gpt"
@@ -3762,6 +3872,10 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         if combo.variant in ["5", "5-mini", "5-nano"]:
           return @["minimal", "low", "medium", "high"]
         return @ReasoningLevels
+      if fam == "kolibri":
+        # Graded chat-template effort knob, plus a true off via
+        # enable_thinking: false. See `applyKolibriReasoning`.
+        return @["off", "low", "medium", "high"]
       if fam == "glm":
         # 5.2 (variant "2") exposes a graded effort knob (high/max); older
         # GLM is on/off only. 5.3 / 5.3-flash force thinking: low/high/max,
