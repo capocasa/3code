@@ -105,6 +105,7 @@ nimble install https://github.com/capocasa/3code</pre></p>
 <p><pre class="listing">:provider nvidia
 :model gpt-oss-120b</pre></p>
 <p>When a provider ships new models, <tt class="docutils literal"><span class="pre">:provider update &lt;name&gt;</span></tt> re-runs just the models step of the wizard: the offered list refreshes (curated in regular mode, the provider's <tt class="docutils literal"><span class="pre">/models</span></tt> endpoint under <tt class="docutils literal"><span class="pre">--experimental</span></tt>) and Enter keeps the current selection. Name, URL, and key pass through untouched; <tt class="docutils literal"><span class="pre">:provider edit &lt;name&gt;</span></tt> is the full wizard when those need changing too.</p>
+<p>To see what you are missing without entering the wizard, <tt class="docutils literal"><span class="pre">:provider new</span></tt> lists every configured provider's not-yet-configured models (<tt class="docutils literal"><span class="pre">:provider new &lt;name&gt;</span></tt> for one provider), and <tt class="docutils literal"><span class="pre">:provider add-new</span></tt> adds them, optionally scoped the same way or down to named models: <tt class="docutils literal"><span class="pre">:provider add-new nvidia glm-5.4</span></tt>. New models append to the stored list; nothing is removed, and under <tt class="docutils literal"><span class="pre">--experimental</span></tt> each addition is verified with a one-token call first.</p>
 
 <h3 id="api-keys">API keys</h3><p>Most providers use an API key, and the wizard recognizes the common prefixes. For an unknown provider or a custom URL, start 3code with <tt class="docutils literal"><span class="pre">--experimental</span></tt>. The flag is deliberate: compatibility is likely, not promised.</p>
 
@@ -574,7 +575,7 @@ tone = &quot;light&quot;</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-05 15:37:41 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-05 16:02:10 UTC</small>
       </div>
     </div>
   </div>

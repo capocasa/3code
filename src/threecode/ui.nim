@@ -78,7 +78,8 @@ proc classifyCommand*(cmd: string): CommandKind =
       ckSafeImmediate
     elif parts.len == 1 and parts[0] == "list":
       ckSafeImmediate
-    elif parts.len >= 1 and parts[0] in ["add", "edit", "update"]:
+    elif parts.len >= 1 and parts[0] in ["add", "edit", "update", "new",
+                                        "add-new"]:
       ckModal
     else:
       ckMutating
@@ -138,6 +139,11 @@ proc wizardProviderCandidates(): seq[string] =
       if combo.provider notin result: result.add combo.provider
   sort(result, cmpIgnoreCase)
 
+proc providerIndex(target: string): int =
+  for i, pr in activeProviders:
+    if pr.name == target: return i
+  -1
+
 proc completionFor*(line: string): seq[string] =
   let words = line.split(' ')
   if words.len == 0: return
@@ -156,10 +162,20 @@ proc completionFor*(line: string): seq[string] =
       for pr in activeProviders: result.add pr.name
       return
     if words.len == 3:
-      if words[1] in ["edit", "update", "rm", "remove"]:
+      if words[1] in ["edit", "update", "new", "add-new", "rm", "remove"]:
         for pr in activeProviders: result.add pr.name
       elif words[1] == "add":
         result = wizardProviderCandidates()
+      return
+    if words.len == 4 and words[1] == "add-new":
+      # The provider's not-yet-stored models. Curated only: completion
+      # never fetches. Under --experimental the endpoint may know more;
+      # that list is what `:provider new <name>` is for.
+      let idx = providerIndex(words[2])
+      if idx >= 0:
+        let pr = activeProviders[idx]
+        for m in curatedFor(pr.name):
+          if pr.findModel(m) < 0: result.add shortModel(m)
       return
   if words[0] == ":model" and words.len == 2:
     let prov = currentProvider()
@@ -716,6 +732,29 @@ proc promptNewProvider*(editor: var minline.LineEditor,
     elif choice == "c":
       raise newException(minline.InputCancelled, "cancelled by user")
 
+proc offeredModels(name, url, key, label: string): seq[string] =
+  ## Everything the wizard would offer right now: the curated known-good
+  ## registry in regular mode (offline; new releases grow it), or the
+  ## live /models endpoint under --experimental, twin-collapsed onto
+  ## curated wire ids like the wizard's offered list. `label` prefixes
+  ## the fetching hint when several providers fetch in a row
+  ## (`:provider new` over all configured providers).
+  if not experimentalEnabled:
+    return curatedFor(name)
+  if label != "":
+    hint &"  {label}: ", resetStyle
+  hint "fetching models...   ", resetStyle
+  stdout.flushFile
+  let (available, fetchErr) = fetchModels(modelsListUrl(name, url),
+                                         fetchKeyFor(name, key))
+  if fetchErr.len > 0:
+    errLn "unavailable — ", fetchErr
+  elif available.len == 0:
+    hintLn "  unavailable — enter manually", resetStyle
+  var offered = available.sorted
+  preferCurated(name, offered)
+  dedupModels(offered)
+
 proc promptModelsSelection(editor: var minline.LineEditor, name, url,
                            key: string, current: seq[string]): seq[string] =
   ## The wizard's models field, shared by `:provider edit` (after its
@@ -724,27 +763,14 @@ proc promptModelsSelection(editor: var minline.LineEditor, name, url,
   ## with `current` as the enter-to-keep default, and verifies each pick
   ## with a one-token call under --experimental. Retries the field on
   ## empty/unknown picks or an all-fail verification.
+  # Experimental mode offers the full /models endpoint output; regular
+  # mode trusts the known-good registry, not /models: endpoints
+  # routinely list stale ids (or omit live ones).
   let curated = curatedFor(name)
   let sortedAvailable =
     if experimentalEnabled:
-      hint "  fetching models...   ", resetStyle
-      stdout.flushFile
-      let (available, fetchErr) = fetchModels(modelsListUrl(name, url),
-                                             fetchKeyFor(name, key))
-      if fetchErr.len > 0:
-        errLn "unavailable — ", fetchErr
-      elif available.len == 0:
-        hintLn "  unavailable — enter manually", resetStyle
-      # Experimental mode shows the full /models endpoint output,
-      # one entry per model: preferCurated upgrades twin spellings to
-      # the curated wire id, dedupModels keeps the first.
-      var offered = available.sorted
-      preferCurated(name, offered)
-      dedupModels(offered)
+      offeredModels(name, url, key, "")
     else:
-      # Regular mode trusts the known-good registry, not /models.
-      # Endpoints routinely list stale ids (or omit live ones), so the
-      # wizard offers exactly the curated combos for this provider.
       if curated.len == 0:
         hintLn "  no known-good models for this provider; enable --experimental",
           resetStyle
@@ -917,11 +943,6 @@ proc cmdProviderAdd(editor: var minline.LineEditor, prof: var Profile,
     prof = buildProfile(activeCurrent, activeProviders, "")
   hintLnS(&"added {prov.name}") & profileLinesS(prof)
 
-proc providerIndex(target: string): int =
-  for i, pr in activeProviders:
-    if pr.name == target: return i
-  -1
-
 proc applyProviderUpdate(target: string, updated: ProviderRec,
                          prof: var Profile) =
   ## Commit a rewritten provider rec: reconcile the sticky current when
@@ -967,6 +988,95 @@ proc cmdProviderUpdate(target: string, editor: var minline.LineEditor,
   applyProviderUpdate(target, updated, prof)
   hintLnS(&"updated {target}")
 
+proc cmdProviderNew(target: string): string =
+  ## Models the provider serves that its stored config doesn't list
+  ## yet — the curated registry's growth since the provider was
+  ## configured (regular mode), or the endpoint's current output minus
+  ## the stored list (--experimental). No target: every provider.
+  var targets: seq[ProviderRec]
+  if target != "":
+    let idx = providerIndex(target)
+    if idx < 0:
+      return errLnS(&"unknown provider: {target}")
+    targets = @[activeProviders[idx]]
+  else:
+    targets = activeProviders
+  if targets.len == 0:
+    return hintLnS("no providers")
+  var anyNew = false
+  for pr in targets:
+    let newOnes = offeredModels(pr.name, pr.url, pr.key, pr.name)
+      .filterIt(pr.findModel(it) < 0)
+    if newOnes.len == 0: continue
+    anyNew = true
+    result.add hintLnS(&"{pr.name}  {newOnes.len} new")
+    for m in newOnes:
+      result.add hintLnS("    " & shortModel(m))
+  if not anyNew:
+    result.add hintLnS("no new models")
+
+proc cmdProviderAddNew(target: string, models: seq[string],
+                       prof: var Profile): string =
+  ## Append the models `:provider new` shows to the stored list. Bare:
+  ## every provider takes all of its new models. With a provider name:
+  ## just that one, or with explicit model names only those (short or
+  ## full ids, resolved against the offered list like the wizard's
+  ## models field). Nothing is removed; the wizard-entered order of the
+  ## existing list is kept, new models append in offered order.
+  ## Verification under --experimental follows the wizard: only models
+  ## whose one-token ping passes land in the config.
+  var idxs: seq[int]
+  if target != "":
+    let idx = providerIndex(target)
+    if idx < 0:
+      return errLnS(&"unknown provider: {target}")
+    idxs = @[idx]
+  else:
+    if activeProviders.len == 0:
+      return hintLnS("no providers")
+    for i in 0 ..< activeProviders.len: idxs.add i
+  var anyAdded = false
+  for idx in idxs:
+    let pr = activeProviders[idx]
+    let offered = offeredModels(pr.name, pr.url, pr.key, pr.name)
+    var picks: seq[string]
+    if models.len > 0:
+      let lookup = shortToFull(offered)
+      picks = models.mapIt(lookup.getOrDefault(it, it))
+      preferCurated(pr.name, picks)
+      if not experimentalEnabled:
+        # Regular mode trusts the curated list only; free-text model
+        # ids are experimental, same guard as the wizards.
+        var unknown: seq[string]
+        for m in picks:
+          if m notin offered: unknown.add m
+        if unknown.len > 0:
+          return errLnS("unknown known-good model: " & unknown.join(", "))
+    else:
+      picks = offered.filterIt(pr.findModel(it) < 0)
+    # Already-stored names (lenient match, same as :model) skip; a
+    # named repeat collapses through dedupModels.
+    var fresh: seq[string]
+    for m in picks:
+      if pr.findModel(m) < 0: fresh.add m
+    fresh = dedupModels(fresh)
+    var kept = fresh
+    if experimentalEnabled and fresh.len > 0:
+      let res = verifyModels(pr.name, pr.url, pr.key, fresh)
+      if res.cancelled:
+        raise newException(minline.InputCancelled, "cancelled by user")
+      kept = res.kept
+    if kept.len == 0: continue
+    var updated = pr
+    updated.models.add kept
+    activeProviders[idx] = updated
+    applyProviderUpdate(pr.name, updated, prof)
+    anyAdded = true
+    result.add hintLnS(&"{pr.name}  +{kept.len}  " &
+      kept.mapIt(shortModel(it)).join(" "))
+  if not anyAdded:
+    result.add hintLnS("no new models")
+
 proc cmdProviderRm(target: string, prof: var Profile): string =
   var idx = -1
   for i, pr in activeProviders:
@@ -1007,6 +1117,13 @@ proc cmdProvider(arg: string, editor: var minline.LineEditor,
     if parts.len != 2:
       return errLnS("usage: :provider update <name>")
     cmdProviderUpdate(parts[1], editor, prof)
+  of "new":
+    if parts.len > 2:
+      return errLnS("usage: :provider new [name]")
+    cmdProviderNew(if parts.len == 2: parts[1] else: "")
+  of "add-new":
+    cmdProviderAddNew(if parts.len >= 2: parts[1] else: "",
+                      if parts.len > 2: parts[2 .. ^1] else: @[], prof)
   of "rm", "remove":
     if parts.len != 2:
       return errLnS(&"usage: :provider {parts[0]} <name>")
@@ -1310,7 +1427,8 @@ proc commandTitle(name, arg: string; ok: bool): string =
     let parts = arg.splitWhitespace()
     if parts.len == 0:
       "providers"
-    elif parts[0] in ["add", "edit", "update", "rm", "remove"]:
+    elif parts[0] in ["add", "edit", "update", "new", "add-new", "rm",
+                      "remove"]:
       "provider " & (if parts[0] == "remove": "rm" else: parts[0])
     else:
       "profile"
