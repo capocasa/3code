@@ -2,6 +2,18 @@ Changelog
 
 **Unreleased**
 
+- **The macOS universal tarball was arm64-only.** The OSX workflow
+  lipos the arm64 and x86_64 slices into `./3code`, then the test
+  suite runs, and its first step rebuilds `./3code` natively, silently
+  replacing the fat binary before packaging. Every macos-universal
+  tarball since the workflow appeared, including the 0.8.0 release,
+  was thin arm64: fine on Apple Silicon, `bad CPU type in executable`
+  on Intel Macs. The fat binary now lives outside the workspace where
+  the test rebuild cannot touch it, and the build fails loudly if
+  either slice is missing. Intel users of the 0.8.0 release asset stay
+  broken until the next release; a fresh install from main works once
+  CI has rebuilt.
+
 - **Tesseracted: Kolibri-1 without the GPUs.** Tesseracted Labs (Munich)
   is hosting Kolibri-1 behind an OpenAI-compatible gateway at
   api.tesseracted.com/v1 (free during launch week, key via
