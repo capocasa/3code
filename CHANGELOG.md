@@ -73,8 +73,10 @@ Changelog
   The XML tool-call fallback now also parses Hermes-style JSON bodies
   (`<tool_call>{"name": ..., "arguments": ...}</tool_call>`), Kolibri's
   native emission, alongside GLM's arg_key markup. Dedicated Kolibri
-  system prompt; the model was RL-trained across randomized harnesses
-  and prompts, so it takes the house style without a special recipe.
+  system prompt, tightened to the output-contract style and grounded
+  in the model card; the model was RL-trained across randomized
+  harnesses and prompts, so it takes the house style without a
+  special recipe.
 
 - **Stealth models left the known-good registry.** The curated table no
   longer carries anonymous/stealth mounts: `stealth/space-bunny-alpha`
