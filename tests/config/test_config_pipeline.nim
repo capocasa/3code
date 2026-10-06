@@ -96,6 +96,30 @@ suite "config: inferProvider":
     check inferProvider(
       "0123456789abcdef.0123456789abcdef.fedcba9876543210") == ""
 
+suite "config: echoMasksAsKey":
+  test "known key prefixes mask from the first characters":
+    check echoMasksAsKey("nvapi-")
+    check echoMasksAsKey("nvapi-typing")
+    check echoMasksAsKey("sk-or-v1-abc")
+    check echoMasksAsKey("AIza")
+
+  test "z.ai shape masks without a catalog prefix":
+    check echoMasksAsKey("0123456789abcdef0123456789abcdef.fedcba9876543210")
+
+  test "provider names and urls never mask":
+    for name in ["nvidia", "stub", "cheaperinference", "supergrok",
+                 "claudecode"]:
+      check not echoMasksAsKey(name)
+    check not echoMasksAsKey("http://localhost:8000/v1")
+    check not echoMasksAsKey("https://api.tesseracted.com/v1")
+
+  test "prefixless secret masks once it outgrows provider names":
+    check not echoMasksAsKey("a2345678901234567890")  # 20 chars: still visible
+    check echoMasksAsKey("a23456789012345678901")  # 21 chars: key territory
+    check echoMasksAsKey("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
+    # Whitespace means it is not a single token, key or otherwise.
+    check not echoMasksAsKey("a longer sentence past twenty chars")
+
 suite "config: curatedFor":
   test "returns models for known provider":
     let models = curatedFor("zai")

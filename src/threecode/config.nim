@@ -1281,6 +1281,25 @@ proc looksLikeApiKey*(s: string): bool =
     if c in Whitespace: return false
   true
 
+proc echoMasksAsKey*(s: string): bool =
+  ## Echo-time masking for the wizard's multipurpose first field
+  ## (provider name, url, or key). Known key prefixes and the z.ai shape
+  ## mask from the first typed character; an unrecognized entry masks once
+  ## it outgrows the longest catalog provider name (``cheaperinference``,
+  ## 16 chars) plus margin, so a prefixless secret never echoes in full.
+  ## Urls stay visible: the field accepts them under --experimental and
+  ## they are not secrets. Uses the real prefix catalog, not
+  ## ``inferProvider`` (whose providerStub special case would mask the
+  ## stub provider name in test builds).
+  if s.startsWith("http://") or s.startsWith("https://"): return false
+  for (p, _) in KeyPrefixCatalog:
+    if s.startsWith(p): return true
+  if looksLikeZaiKey(s): return true
+  if s.len <= 20: return false
+  for c in s:
+    if c in Whitespace: return false
+  true
+
 proc defaultNameFromUrl*(url: string): string =
   let host = parseUri(url).hostname
   if host == "": return ""
