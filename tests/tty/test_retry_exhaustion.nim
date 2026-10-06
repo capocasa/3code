@@ -49,13 +49,17 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
 # glyph on the last non-empty row (the bar row holds that slot mid-turn).
 const rawPtyCaretCol = not defined(windows)
 
-func promptSettled(f: TtyFrame): bool =
-  var glyphRow = -1
+func lastContentRow(f: TtyFrame): int =
+  ## Bottom-most non-empty row: the live prompt's slot at settle (the bar
+  ## row holds it mid-turn).
   for r in countdown(f.rows.len - 1, 0):
     if f.rows[r].len > 0:
-      if "\u276f" in f.rows[r]: glyphRow = r
-      break
-  result = f.cursorHidden and glyphRow >= 0 and
+      return r
+  result = -1
+
+func promptSettled(f: TtyFrame): bool =
+  let glyphRow = f.lastContentRow()
+  result = f.cursorHidden and glyphRow >= 0 and "\u276f" in f.rows[glyphRow] and
     (not rawPtyCaretCol or
       (f.cursorRow == glyphRow and f.cursorCol == 2))
 
@@ -147,7 +151,7 @@ suite "retry exhaustion regression":
       if tty.frames[^1].promptSettled():
         settled = true
         break
-    # Prompt glyph must be back on the caret row.
+    # Prompt glyph must be back on the last content row.
     let f = tty.frames[^1]
     doAssert settled,
       "REGRESSION (retry-exhaust): prompt never settled after exhaustion; " &
@@ -156,9 +160,11 @@ suite "retry exhaustion regression":
     when rawPtyCaretCol:
       doAssert f.cursorCol == 2,
         "REGRESSION (retry-exhaust): expected caret at col 2 after ❯, got " & $f.cursorCol
-    doAssert f.rows[f.cursorRow].contains("❯"),
-      "REGRESSION (retry-exhaust): prompt glyph ❯ missing from caret row " &
-      $f.cursorRow & ", got: '" & f.rows[f.cursorRow] & "'"
+    let glyphRow = f.lastContentRow()
+    doAssert glyphRow >= 0 and "❯" in f.rows[glyphRow],
+      "REGRESSION (retry-exhaust): prompt glyph ❯ missing from last " &
+      "content row, got: '" &
+      (if glyphRow >= 0: f.rows[glyphRow] else: "<no content rows>") & "'"
     # The next prompt must be accepted and answered.
     tty.send "hello model"
     tty.expect "hello model"
