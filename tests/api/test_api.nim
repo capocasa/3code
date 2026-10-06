@@ -267,10 +267,47 @@ suite "api request shaping":
     check knownGoodReasonings("tencent", "hy4-preview") == @["no_think", "high"]
     check knownGoodReasonings("openrouter", "tencent/hy3") == @["no_think", "low", "high"]
 
-  test "mistral: medium none/high, large no knob":
+  test "mistral: medium/large-4 none/high, large-3 no knob":
     check knownGoodReasonings("mistral", "mistral-medium-3-5") == @["none", "high"]
     check knownGoodReasonings("openrouter", "mistralai/mistral-medium-3-5") == @["none", "high"]
+    check knownGoodReasonings("mistral", "mistral-large-4") == @["none", "high"]
     check knownGoodReasonings("mistral", "mistral-large-2512").len == 0
+    check knownGoodReasonings("mistral", "mistral-vibe-cli-latest") == @["none", "high"]
+    check knownGoodReasonings("mistral", "mistral-vibe-cli-fast") == @["none", "high"]
+    check knownGoodReasoning("mistral", "mistral-large-4") == "high"
+    check knownGoodReasoning("mistral", "mistral-vibe-cli-latest") == "high"
+    check knownGoodReasoning("mistral", "mistral-vibe-cli-fast") == "none"
+    block vibeGeneration:
+      # The Vibe CLI sends temperature 1.0 (platform default); the
+      # curated rows carry it so `:temperature`-less profiles match
+      # what mistral-vibe itself sends.
+      let g = knownGoodGeneration("mistral", "mistral-vibe-cli-latest")
+      check g.temperature == 1.0
+      check g.maxTokens == 8192
+    block vibePreamble:
+      # The Mistral preamble is the Vibe CLI prompt 3codified: vibe
+      # structure and content, 3code tool surface, denser phrasing.
+      let p = Profile(name: "mistral.mistral-vibe-cli-latest", family: "mistral",
+                      variant: "vibe", model: "mistral-vibe-cli-latest")
+      let (prompt, _) = setup(p)
+      check "Instruction hierarchy" in prompt
+      check "Blast radius" in prompt
+      check "Stop when stuck" in prompt
+      check "direct without being cold" in prompt
+      check "Prove it worked" in prompt
+      check "{{skills}}" in prompt  # spliced at build time
+      check "{{header}}" notin prompt  # header splice applied
+      check "{{reasoning}}" notin prompt
+    check knownGoodContextWindow(Profile(name: "mistral.test",
+        family: "mistral", version: "4", variant: "large",
+        model: "mistral-large-4")) == 524_288
+    block large4Preamble:
+      let p = Profile(name: "mistral.mistral-large-4", family: "mistral",
+                      version: "4", variant: "large", model: "mistral-large-4")
+      let (prompt, _) = setup(p)
+      check "Mistral Large 4" in prompt
+      check "reasoning_effort" in prompt
+      check "Large 3" notin prompt
     block firstParty:
       var body = %*{"stream": true}
       let p = Profile(name: "mistral.mistral-medium-3-5", family: "mistral",
