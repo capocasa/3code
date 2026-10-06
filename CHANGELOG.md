@@ -45,8 +45,15 @@ Changelog
   usage metadata retained ~31 days) so private mode stays opt-in.
   Output is capped at 16,384 tokens by the gateway (not the model).
   `tl_live_` joins the key-prefix catalog, so pasting the key names
-  the provider, and the wizard now echoes api keys as typed instead
-  of hiding them.
+  the provider.
+
+- **The provider wizard masks api keys in its multipurpose field.**
+  The first field (provider name, url, or key) echoes as typed so
+  names and urls stay readable, but the moment the buffer reads as a
+  key (a recognized key prefix from the first character, an
+  unrecognized secret once it outgrows any provider name) the line
+  repaints masked, so at most the pre-detection prefix ever reaches
+  the screen. The dedicated api-key fields remain fully hidden reads.
 
 - **Kolibri-1 known-good: first harness with curated support for Aleph
   Alpha's open-weight model.** Kolibri-1 (78B MoE, 3.46B active,
