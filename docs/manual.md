@@ -412,7 +412,7 @@ Where to point 3code when data must stay under EU jurisdiction.
 | together-eu | EU | Together's EU endpoint |
 | ★ platte | Germany | EU sovereign host; url embeds your username, wizard asks for it |
 | ★ kolibri | your own hardware | Aleph Alpha's Kolibri-1 (open weights, Apache 2.0, German/English): serve it yourself with vLLM + the aleph-alpha-inference plugin, then `:provider add kolibri` (url `http://localhost:8000/v1`) |
-| ★ tesseracted | Germany | Tesseracted Labs' hosted Kolibri-1 (same weights, their GPUs): `:provider add tesseracted` (url `https://api.tesseracted.com/v1`), key from tesseracted.com/kolibri-1-chat/developers; free launch-week access |
+| ★ tesseracted | Germany | Tesseracted Labs' hosted Kolibri-1 (same weights, their GPUs): `:provider add tesseracted` (url `https://api.tesseracted.com/v1`); still in preview, so model access is granted manually: email modelaccess@tesseracted.com describing your use case and they send a key (`tl_live_...`) |
 | aki | EU | |
 | lyceum | EU | |
 

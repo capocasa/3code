@@ -52,7 +52,7 @@ Or use your existing subscription:
 | [antigravity](https://antigravity.google) | gemini | comes with a google account |
 | [chatgpt](https://chatgpt.com) | gpt | use an existing chatgpt pro account |
 
-Also supported: moonshot's Kimi (subscriptions and API), Deepseek, OpenRouter, and many others, plus self-hosted Kolibri (Aleph Alpha's open-weight German/English model on your own vLLM). The [provider guide](https://3code.capocasa.dev/docs#known-good-models) has the full list.
+Also supported: moonshot's Kimi (subscriptions and API), Deepseek, OpenRouter, and many others, plus Kolibri (Aleph Alpha's open-weight German/English model): self-hosted on your own vLLM, or hosted by Tesseracted. The [provider guide](https://3code.capocasa.dev/docs#known-good-models) has the full list.
 
 Tip: you can use expensive models on small subscriptions with 3code. Leave the task and it will continue automatically when your 5h window resets.
 
