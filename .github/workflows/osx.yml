@@ -152,8 +152,15 @@ jobs:
           mv 3code "$SLICE_DIR/3code-arm64"
           rm -rf ~/.cache/nim/threecode_r
           nim c -d:release ${{ env.BUILD_FLAGS }} --passC:"-arch x86_64" --passL:"-arch x86_64" --cpu:amd64 -o:"$SLICE_DIR/3code-x86_64" src/threecode.nim
-          lipo -create "$SLICE_DIR/3code-arm64" "$SLICE_DIR/3code-x86_64" -output 3code
-          file 3code
+          # The fat binary must stay outside the workspace: the next step
+          # (Run tests) rebuilds ./3code natively via ci_tests.sh ->
+          # build_binary.sh, and a fat binary parked at ./3code gets silently
+          # replaced by that arm64 rebuild before Package copies it. That is
+          # how 0.8.0 shipped an arm64-only "universal" tarball.
+          lipo -create "$SLICE_DIR/3code-arm64" "$SLICE_DIR/3code-x86_64" -output "$SLICE_DIR/3code-universal"
+          file "$SLICE_DIR/3code-universal"
+          lipo -archs "$SLICE_DIR/3code-universal" | grep -qw arm64   || { echo "missing arm64 slice" >&2; exit 1; }
+          lipo -archs "$SLICE_DIR/3code-universal" | grep -qw x86_64 || { echo "missing x86_64 slice" >&2; exit 1; }
 
       - name: Run tests
         # tests/tools/ci_tests.sh wraps testament: log file instead of a pipe (a
@@ -187,10 +194,12 @@ jobs:
         run: |
           export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
           mkdir -p 3code-macos-universal
-          cp 3code 3code-macos-universal/
+          cp "$RUNNER_TEMP/3code-universal" 3code-macos-universal/3code
           # Capture the version from the built binary so it can be checked
-          # without running the binary on its target OS.
-          ./3code -v > 3code-macos-universal/VERSION
+          # without running the binary on its target OS (its native arm64
+          # slice does run here, which doubles as a smoke test of the fat
+          # binary itself).
+          ./3code-macos-universal/3code -v > 3code-macos-universal/VERSION
           cp README.md LICENSE 3code-macos-universal/
           # OpenSSL dylibs from a pinned Homebrew bottle instead of the
           # runner's floating brew tree: the ghcr blob is digest-addressed
@@ -231,7 +240,7 @@ jobs:
             nim --version | head -1
             cc --version | head -1
             echo "openssl@3 ${OPENSSL_VERSION} bottle:${OPENSSL_BOTTLE_SHA256}"
-            shasum -a 256 3code | cut -d' ' -f1
+            shasum -a 256 3code-macos-universal/3code | cut -d' ' -f1
             echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
           } > 3code-macos-universal/BUILD_INFO
           cat > /tmp/mktar.py <<'PY'
