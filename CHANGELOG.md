@@ -1,6 +1,8 @@
 Changelog
 
-**Unreleased**
+0.8.1  prompt text selection and transcript search, provider refresh
+       commands and CLI, kolibri-1 and tesseracted providers, macOS
+       universal tarball and Windows console keys fixed
 
 - **`:provider update <name>`.** Re-runs just the models step of the
   provider wizard: the offered list refreshes (curated registry in
