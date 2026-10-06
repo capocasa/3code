@@ -285,15 +285,19 @@ suite "api request shaping":
       check g.temperature == 1.0
       check g.maxTokens == 8192
     block vibePreamble:
-      # The Vibe-mined discipline sections ride on every mistral
-      # preamble: hierarchy, blast radius, stuck heuristics, voice.
+      # The Mistral preamble is the Vibe CLI prompt 3codified: vibe
+      # structure and content, 3code tool surface, denser phrasing.
       let p = Profile(name: "mistral.mistral-vibe-cli-latest", family: "mistral",
                       variant: "vibe", model: "mistral-vibe-cli-latest")
       let (prompt, _) = setup(p)
       check "Instruction hierarchy" in prompt
       check "Blast radius" in prompt
-      check "# Stuck" in prompt
-      check "Concise is not curt" in prompt
+      check "Stop when stuck" in prompt
+      check "direct without being cold" in prompt
+      check "Prove it worked" in prompt
+      check "{{skills}}" in prompt  # spliced at build time
+      check "{{header}}" notin prompt  # header splice applied
+      check "{{reasoning}}" notin prompt
     check knownGoodContextWindow(Profile(name: "mistral.test",
         family: "mistral", version: "4", variant: "large",
         model: "mistral-large-4")) == 524_288
