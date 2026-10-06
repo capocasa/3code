@@ -37,21 +37,27 @@ proc stubEnv(root, responsesPath: string): seq[EnvVar] =
     (key: "THREECODE_STUB_STREAM", val: "1"),
   ]
 
-# ConPTY re-synthesizes the output stream: erase-to-EOL becomes padding
-# spaces and every trailing cursor-only move (the CR+CUF park, and even an
-# absolute CUP) is dropped, so the physical cursor parks wherever ConPTY's
-# last cell write ended, at the row's right edge, never at the app's target
-# column. The caret column is therefore only assertable against a raw PTY
-# stream. Verified with a ConPTY capture probe on a real Windows box: both
-# park forms vanish from the synthesized stream.
+# ConPTY re-synthesizes the output stream, so the physical cursor is not
+# assertable on Windows: every trailing cursor-only move (the CR+CUF park,
+# even an absolute CUP) is dropped, and ConPTY's own closing pass (a wall of
+# per-row ELs plus a final ESC[120C) walks its cursor to the bottom-right of
+# the screen, rows away from the painted prompt. Verified by capturing a
+# real stub session through a ConPTY probe on a real Windows box: at settle
+# the model sees cursor row 39/col 120/hidden while the glyph sits on the
+# last content row. The caret position is only assertable against a raw
+# PTY stream; typing-ready on Windows means: cursor hidden, and the prompt
+# glyph on the last non-empty row (the bar row holds that slot mid-turn).
 const rawPtyCaretCol = not defined(windows)
 
 func promptSettled(f: TtyFrame): bool =
-  ## Typing-ready: cursor hidden, prompt glyph on the caret row, and on a
-  ## raw PTY also the physical caret parked at the glyph.
-  f.cursorHidden and f.cursorRow < f.rows.len and
-    "\u276f" in f.rows[f.cursorRow] and
-    (not rawPtyCaretCol or f.cursorCol == 2)
+  var glyphRow = -1
+  for r in countdown(f.rows.len - 1, 0):
+    if f.rows[r].len > 0:
+      if "\u276f" in f.rows[r]: glyphRow = r
+      break
+  result = f.cursorHidden and glyphRow >= 0 and
+    (not rawPtyCaretCol or
+      (f.cursorRow == glyphRow and f.cursorCol == 2))
 
 suite "retry exhaustion regression":
   test "baseline: a successful turn leaves the prompt in the typing-ready state":
