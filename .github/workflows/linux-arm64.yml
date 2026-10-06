@@ -51,11 +51,11 @@ jobs:
           # and an absolute path keeps cache hits aligned with the install
           # directory below.
           path: /opt/nim-toolchain
-          # Key includes the pinned nim-version: a hit must never resurrect
-          # a toolchain older/newer than the nim-version input below.
-          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-2.2.12-${{ hashFiles('*.nimble') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-
+          # Key is the pinned nim-version only: nothing in the nimble file
+          # affects how the compiler builds. No restore-keys: a non-exact
+          # hit is never used (the build step below runs anyway) and the
+          # restored tree collides with the mv into the install dir.
+          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-2.2.12
 
       - name: Build Nim toolchain from source (pinned)
         # Inline instead of setup-nim-action: the action is composite, and
@@ -161,11 +161,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /home/runner/nim-toolchain
-          # Key includes the pinned nim-version: a hit must never resurrect
-          # a toolchain older/newer than the nim-version input above.
-          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-2.2.12-${{ hashFiles('*.nimble') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-
+          # Key is the pinned nim-version only: nothing in the nimble file
+          # affects how the compiler builds. No restore-keys: a non-exact
+          # hit is never used (setup-nim runs anyway) and the restored tree
+          # is not a layout the action would produce itself.
+          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-2.2.12
 
       - uses: jiro4989/setup-nim-action@v2
         if: steps.cache-nim.outputs.cache-hit != 'true'
