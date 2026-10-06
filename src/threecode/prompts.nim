@@ -1837,9 +1837,10 @@ const Hy4Preamble = HyPreamble
 # keep. The discipline sections are compressed from Mistral's own Vibe
 # CLI prompt (mistral-vibe 2.26.0, vibe/core/prompts/cli.md) and the
 # best sibling preambles (glm, kolibri); the tool surface and rules are
-# 3code's. The header and the reasoning section are per-model splices
-# (see MistralPreamble / MistralLarge4Preamble below).
-const MistralBody = """{{header}}
+# 3code's. One prompt for the whole family, tuned for Large 4 (the
+# newest member); older members (Large 3, Medium 3.5) get the same
+# body with the Large 4 header and reasoning section.
+const MistralPreamble = """You are the Mistral edition of 3code, the economical coding agent, backed by Mistral Large 4 (1.05T-A49B MoE, 524K context, open weights, multimodal).
 
 # Instruction hierarchy
 
@@ -1862,7 +1863,9 @@ Every token costs. The reply is for results, not deliberation.
 - No filler, no sign-offs, no emoji. Stop when the answer is complete.
 - No preamble before tool calls. After completion: one sentence, what changed and what's next. Code refs as `path:line`. If the task was already done, say so and stop.
 
-{{reasoning}}
+# Reasoning
+
+`reasoning_effort` is `high` (default) or `none`. High streams thinking in its own channel; it doesn't grow the transcript. Budget it: hard bugs, multi-file changes, subtle correctness earn the chain; a rename or a lookup does not. Never reference the knob in your reply.
 
 # Tools
 
@@ -1916,37 +1919,6 @@ Load on demand when a skill fits the task; don't preload the catalog. If the tas
 
 {{credit}}
 """
-
-# Mistral family (Large 3, Medium 3.5, the Vibe CLI routing aliases).
-# The reasoning section differs per model; the header names the backing
-# model. Large 3 has no reasoning knob.
-const MistralPreamble = MistralBody
-  .replace("{{header}}",
-           "You are the Mistral edition of 3code, the economical coding agent, " &
-           "backed by Mistral Large 3 (675B-A41B MoE) or Medium 3.5 (128B " &
-           "dense), 256K context, open weights.")
-  .replace("{{reasoning}}",
-           "# Reasoning\n\n" &
-           "Medium 3.5 exposes `reasoning_effort`: `high` (default) or " &
-           "`none`. High streams thinking in its own channel; it doesn't " &
-           "grow the transcript. Budget it: hard bugs, multi-file changes, " &
-           "subtle correctness earn the chain; a rename or a lookup does " &
-           "not. Large 3 has no knob. Never reference the knob in your reply.")
-
-# Large 4 ("le Chonk", 2026-10 public preview): 1.05T-A49B MoE, 524K ctx,
-# same none/high `reasoning_effort` ladder Medium 3.5 carries.
-const MistralLarge4Preamble = MistralBody
-  .replace("{{header}}",
-           "You are the Mistral edition of 3code, the economical coding agent, " &
-           "backed by Mistral Large 4 (1.05T-A49B MoE, 524K context, open " &
-           "weights, multimodal).")
-  .replace("{{reasoning}}",
-           "# Reasoning\n\n" &
-           "`reasoning_effort` is `high` (default) or `none`. High streams " &
-           "thinking in its own channel; it doesn't grow the transcript. " &
-           "Budget it: hard bugs, multi-file changes, subtle correctness " &
-           "earn the chain; a rename or a lookup does not. Never reference " &
-           "the knob in your reply.")
 
 const DeepSeekPreamble = """You are the DeepSeek edition of 3code, the economical coding agent.
 
@@ -3492,7 +3464,6 @@ let
   hySetup = (prompt: HyPreamble, tools: glmAndQwenTools)
   hy4Setup = (prompt: Hy4Preamble, tools: glmAndQwenTools)
   mistralSetup = (prompt: MistralPreamble, tools: glmAndQwenTools)
-  mistralLarge4Setup = (prompt: MistralLarge4Preamble, tools: glmAndQwenTools)
   inklingSetup = (prompt: InklingPreamble, tools: glmAndQwenTools)
   grokSetup = (prompt: GrokPreamble, tools: glmAndQwenTools)
   geminiSetup = (prompt: GeminiPreamble, tools: glmAndQwenTools)
@@ -3545,12 +3516,7 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
     # the prompt differs enough to keep a second tuple.
     if p.version == "4": hy4Setup
     else: hySetup
-  of "mistral":
-    # Large 4 ("le Chonk") gets its own preamble: the shared one
-    # describes Large 3 / Medium 3.5 and claims there is no Large
-    # reasoning knob, which is wrong for the 4's none/high ladder.
-    if p.version == "4": mistralLarge4Setup
-    else: mistralSetup
+  of "mistral": mistralSetup
   of "inkling": inklingSetup
   of "grok": grokSetup
   of "gemini": geminiSetup

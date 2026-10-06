@@ -304,7 +304,7 @@ suite "prompts: setup — kimi":
     check "dmail" notin s.prompt
 
 suite "prompts: setup — mistral":
-  test "Large 4 returns the economical Mistral preamble":
+  test "returns the economical Mistral preamble (one prompt for the family)":
     let p = Profile(name: "mistral.mistral-large-4", url: "x", key: "k",
                     model: "mistral-large-4", family: "mistral",
                     version: "4")
@@ -322,14 +322,13 @@ suite "prompts: setup — mistral":
     check "does this look good" notin s.prompt
     check "anything else" notin s.prompt
 
-  test "Large 3 / Medium 3.5 preamble names both models":
+  test "older members get the same prompt (no family split)":
     let p = Profile(name: "mistral.mistral-large-2512", url: "x", key: "k",
                     model: "mistral-large-2512", family: "mistral")
     let s = setup(p)
     check "Mistral edition of 3code" in s.prompt
-    check "Large 3" in s.prompt
-    check "Medium 3.5" in s.prompt
-    check "Large 3 has no knob" in s.prompt
+    check "1.05T-A49B" in s.prompt  # same Large 4 header
+    check "reasoning_effort" in s.prompt
 
   test "tools are glmAndQwenTools (bash/read/write/patch)":
     let p = Profile(name: "mistral.mistral-large-4", url: "x", key: "k",

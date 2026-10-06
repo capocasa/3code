@@ -297,18 +297,26 @@ suite "api request shaping":
       check "thinking in its own channel" in prompt
       check "red -> green" in prompt
       check "{{skills}}" in prompt  # spliced at build time
-      check "{{header}}" notin prompt  # header splice applied
-      check "{{reasoning}}" notin prompt
+      check "{{header}}" notin prompt  # no header splice anymore
+      check "{{reasoning}}" notin prompt  # no reasoning splice anymore
     check knownGoodContextWindow(Profile(name: "mistral.test",
         family: "mistral", version: "4", variant: "large",
         model: "mistral-large-4")) == 524_288
-    block large4Preamble:
+    block familyPreamble:
+      # One prompt for the whole family, tuned for Large 4.
       let p = Profile(name: "mistral.mistral-large-4", family: "mistral",
                       version: "4", variant: "large", model: "mistral-large-4")
       let (prompt, _) = setup(p)
       check "Mistral Large 4" in prompt
       check "reasoning_effort" in prompt
       check "Large 3" notin prompt
+    block olderMemberSamePrompt:
+      # Large 3 gets the same prompt (no family split).
+      let p = Profile(name: "mistral.mistral-large-2512", family: "mistral",
+                      model: "mistral-large-2512")
+      let (prompt, _) = setup(p)
+      check "Mistral Large 4" in prompt  # same header
+      check "reasoning_effort" in prompt
     block firstParty:
       var body = %*{"stream": true}
       let p = Profile(name: "mistral.mistral-medium-3-5", family: "mistral",
