@@ -1,5 +1,45 @@
 Changelog
 
+Unreleased
+
+- **Mistral Large 4 known-good.** Mistral's new frontier open-weight
+  model ("le Chonk", 1.05T total / 49B active MoE, multimodal, public
+  preview since Oct 6; weights promised end of month) is served as
+  `mistral-large-4` on api.mistral.ai with a 524,288-token window per
+  `/v1/models` (the docs page advertises 1M; the API figure is the
+  safe one). It carries the same `reasoning_effort` ladder as Medium
+  3.5 — exactly `none`/`high`, 400 on anything else — and streams
+  thinking as chunked `thinking` content, the shape the Mistral-native
+  parser already folds, so no wire changes were needed. Known-good
+  row: reasoning high, temperature 0.2, 8192 output, tbNone (the
+  platform's strict validator rejects `reasoning_content` on replayed
+  assistant messages).
+
+- **The Vibe CLI routing aliases are curated under `mistral`.**
+  `mistral-vibe-cli-latest` (routes Medium 3.5, thinking high) and
+  `mistral-vibe-cli-fast` (routes Small 4, thinking off) — the ids
+  Mistral's own `mistral-vibe` CLI sends by default — are known-good
+  rows on the plain `mistral` provider (one API key covers both, so
+  the parked `mistralvibe` twin stays parked). Both ride the none/high
+  ladder with temperature 1.0, what the Vibe CLI itself sends.
+
+- **The Mistral system prompt is now Mistral's own, 3codified.**
+  Mined from the open-source Vibe CLI (mistral-vibe 2.26.0,
+  `vibe/core/prompts/cli.md`): the structure and content are Vibe's —
+  instruction hierarchy (critical vs overridable, AGENTS.md
+  precedence, external data as data), blast-radius rules (one-time
+  approval doesn't generalize; state action and radius in one line),
+  ambiguity handling (one question, no strategy menus, no silent
+  partial completion), stop-when-stuck tripwires (same error twice,
+  no-op edit, three edits to one file → re-read fresh, change
+  strategy after two failures), and the voice rules (concise is not
+  curt, no filler words, phase-transition signaling) — with 3code's
+  tool surface and rules substituted and the phrasing tightened for
+  density. Per-model variation is two splices on the shared body
+  (header, reasoning section) instead of replace chains against GLM
+  wording; Large 4, Large 3/Medium 3.5, and the vibe-cli aliases all
+  render from it.
+
 0.8.1  prompt text selection and transcript search, provider refresh
        commands and CLI, kolibri-1 and tesseracted providers, macOS
        universal tarball and Windows console keys fixed
