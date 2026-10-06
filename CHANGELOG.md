@@ -1,6 +1,7 @@
 Changelog
 
-Unreleased
+0.8.2  mistral large 4 known-good, mistral-vibe-cli model aliases,
+       mistral system prompt mined from the vibe cli
 
 - **Mistral Large 4 known-good.** Mistral's new frontier open-weight
   model ("le Chonk", 1.05T total / 49B active MoE, multimodal, public
