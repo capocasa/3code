@@ -272,7 +272,28 @@ suite "api request shaping":
     check knownGoodReasonings("openrouter", "mistralai/mistral-medium-3-5") == @["none", "high"]
     check knownGoodReasonings("mistral", "mistral-large-4") == @["none", "high"]
     check knownGoodReasonings("mistral", "mistral-large-2512").len == 0
+    check knownGoodReasonings("mistral", "mistral-vibe-cli-latest") == @["none", "high"]
+    check knownGoodReasonings("mistral", "mistral-vibe-cli-fast") == @["none", "high"]
     check knownGoodReasoning("mistral", "mistral-large-4") == "high"
+    check knownGoodReasoning("mistral", "mistral-vibe-cli-latest") == "high"
+    check knownGoodReasoning("mistral", "mistral-vibe-cli-fast") == "none"
+    block vibeGeneration:
+      # The Vibe CLI sends temperature 1.0 (platform default); the
+      # curated rows carry it so `:temperature`-less profiles match
+      # what mistral-vibe itself sends.
+      let g = knownGoodGeneration("mistral", "mistral-vibe-cli-latest")
+      check g.temperature == 1.0
+      check g.maxTokens == 8192
+    block vibePreamble:
+      # The Vibe-mined discipline sections ride on every mistral
+      # preamble: hierarchy, blast radius, stuck heuristics, voice.
+      let p = Profile(name: "mistral.mistral-vibe-cli-latest", family: "mistral",
+                      variant: "vibe", model: "mistral-vibe-cli-latest")
+      let (prompt, _) = setup(p)
+      check "Instruction hierarchy" in prompt
+      check "Blast radius" in prompt
+      check "# Stuck" in prompt
+      check "Concise is not curt" in prompt
     check knownGoodContextWindow(Profile(name: "mistral.test",
         family: "mistral", version: "4", variant: "large",
         model: "mistral-large-4")) == 524_288
