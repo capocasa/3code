@@ -109,11 +109,25 @@ suite "retry exhaustion regression":
     tty.drain(5000)
     # Process must still be alive after the budget is exhausted.
     tty.expectAlive()
-    # Give the spinner→prompt transition time to fully settle so the
-    # cursor lands on the prompt row, not on the spinner row.
-    tty.drain(500)
+    # A loaded CI runner can lag the spinner→prompt repaint (or the retry
+    # backoff itself) well past any fixed sleep: the caret sits at the
+    # spinner row's right edge until the repaint lands. Poll for the
+    # settled prompt instead (same pattern as test_selection's cut).
+    var settled = false
+    for _ in 0 ..< 60:
+      tty.drain(250)
+      let probe = tty.frames[^1]
+      if probe.cursorHidden and probe.cursorCol == 2 and
+          probe.cursorRow < probe.rows.len and
+          "\u276f" in probe.rows[probe.cursorRow]:
+        settled = true
+        break
     # Prompt glyph must be back on the caret row, caret at col 2.
     let f = tty.frames[^1]
+    doAssert settled,
+      "REGRESSION (retry-exhaust): prompt never settled after exhaustion; " &
+      "last frame: col=" & $f.cursorCol & " row=" & $f.cursorRow &
+      " hidden=" & $f.cursorHidden
     doAssert f.cursorHidden,
       "REGRESSION (retry-exhaust): physical cursor visible after exhaustion; expected col 2 on prompt row"
     doAssert f.cursorCol == 2,
