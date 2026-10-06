@@ -51,11 +51,12 @@ jobs:
           # and an absolute path keeps cache hits aligned with the install
           # directory below.
           path: /opt/nim-toolchain
-          # Key is the pinned nim-version only: nothing in the nimble file
-          # affects how the compiler builds. No restore-keys: a non-exact
-          # hit is never used (the build step below runs anyway) and the
-          # restored tree collides with the mv into the install dir.
-          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-2.2.12
+          # Version-first and hash-free: nothing in the nimble file affects
+          # how the compiler builds, and the cache service prefix-matches
+          # lookup keys even with no restore-keys, so the key must not be a
+          # prefix of a legacy "...-nim-toolchain-2.2.12-<hash>" entry or a
+          # stale tree restores on every miss and collides with the mv.
+          key: nim-toolchain-2.2.12-${{ runner.os }}-${{ runner.arch }}
 
       - name: Build Nim toolchain from source (pinned)
         # Inline instead of setup-nim-action: the action is composite, and
@@ -80,6 +81,8 @@ jobs:
           bin/nim c --noNimblePath --skipUserCfg --skipParentCfg --hints:off koch
           ./koch boot -d:release --skipUserCfg --skipParentCfg --hints:off
           ./koch tools --skipUserCfg --skipParentCfg --hints:off
+          # Belt for the prefix-match hazard above: never mv onto a leftover.
+          rm -rf /opt/nim-toolchain
           mv /opt/nim-2.2.12 /opt/nim-toolchain
           echo "/opt/nim-toolchain/bin" >> "$GITHUB_PATH"
           /opt/nim-toolchain/bin/nim --version | head -1
@@ -161,11 +164,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /home/runner/nim-toolchain
-          # Key is the pinned nim-version only: nothing in the nimble file
-          # affects how the compiler builds. No restore-keys: a non-exact
-          # hit is never used (setup-nim runs anyway) and the restored tree
-          # is not a layout the action would produce itself.
-          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-2.2.12
+          # Version-first and hash-free (see the build job's cache step);
+          # never a prefix of a legacy hashed key, no restore-keys.
+          key: nim-toolchain-2.2.12-${{ runner.os }}-${{ runner.arch }}
 
       - uses: jiro4989/setup-nim-action@v2
         if: steps.cache-nim.outputs.cache-hit != 'true'

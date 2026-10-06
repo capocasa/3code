@@ -38,11 +38,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /Users/runner/nim-toolchain
-          # Key is the pinned nim-version only: nothing in the nimble file
-          # affects how the compiler builds. No restore-keys: a non-exact
-          # hit is never used (setup-nim runs anyway) and the restored tree
-          # is not a layout the action would produce itself.
-          key: ${{ runner.os }}-${{ runner.arch }}-nim-toolchain-2.2.12
+          # Version-first and hash-free (see linux-arm64.yml): never a
+          # prefix of a legacy hashed key, no restore-keys.
+          key: nim-toolchain-2.2.12-${{ runner.os }}-${{ runner.arch }}
 
       - uses: jiro4989/setup-nim-action@v2
         if: steps.cache-nim.outputs.cache-hit != 'true'
