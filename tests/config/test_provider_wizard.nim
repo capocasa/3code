@@ -300,6 +300,336 @@ suite "provider wizard configuration":
     check activeProviders[0].models == @["openai/gpt-oss-120b"]
     check activeCurrent == "nvidia.openai/gpt-oss-120b"
 
+  test "update replaces the models and keeps key, url, and name":
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["z-ai/glm-5.2"])
+    ]
+    activeCurrent = "nvidia.z-ai/glm-5.2"
+    inputs = @["gpt-oss-20b"]
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider update nvidia", messages, session, prof,
+                          editor)
+
+    check activeProviders.len == 1
+    check activeProviders[0].name == "nvidia"
+    check activeProviders[0].url == "https://integrate.api.nvidia.com/v1"
+    check activeProviders[0].key == "nvapi-old"
+    check activeProviders[0].models == @["openai/gpt-oss-20b"]
+    # The dropped live model (glm-5.2) falls back to the new first model.
+    check activeCurrent == "nvidia.openai/gpt-oss-20b"
+    check prof.model == "openai/gpt-oss-20b"
+    # Models-only: no name, url, or api key prompt may appear.
+    check prompts.len == 1
+    check prompts[0].startsWith("  models [")
+    check verifiedModels.len == 0
+
+  test "update keeps the current models on enter":
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["openai/gpt-oss-20b",
+                                              "z-ai/glm-5.3"])
+    ]
+    activeCurrent = "nvidia.z-ai/glm-5.3"
+    inputs = @[""]
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider update nvidia", messages, session, prof,
+                          editor)
+
+    check activeProviders[0].models == @["openai/gpt-oss-20b", "z-ai/glm-5.3"]
+    check activeCurrent == "nvidia.z-ai/glm-5.3"
+
+  test "update leaves the active provider alone when targeting another":
+    activeProviders = @[
+      ProviderRec(name: "groq", url: "https://api.groq.com/openai/v1",
+                  key: "gsk-live", models: @["openai/gpt-oss-120b"]),
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["z-ai/glm-5.2"])
+    ]
+    activeCurrent = "groq.openai/gpt-oss-120b"
+    inputs = @["gpt-oss-20b"]
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider update nvidia", messages, session, prof,
+                          editor)
+
+    check activeProviders[1].models == @["openai/gpt-oss-20b"]
+    check activeProviders[0].models == @["openai/gpt-oss-120b"]
+    check activeCurrent == "groq.openai/gpt-oss-120b"
+    check prof.model == "openai/gpt-oss-120b"
+
+  test "update re-prompts on an unknown known-good model":
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["z-ai/glm-5.2"])
+    ]
+    activeCurrent = "nvidia.z-ai/glm-5.2"
+    inputs = @["no-such-model", "gpt-oss-20b"]
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider update nvidia", messages, session, prof,
+                          editor)
+
+    check activeProviders[0].models == @["openai/gpt-oss-20b"]
+    check prompts.len == 2
+    check prompts[1].startsWith("  models [")
+
+  test "update fetches and verifies under experimental":
+    experimentalEnabled = true
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["z-ai/glm-5.2"])
+    ]
+    activeCurrent = "nvidia.z-ai/glm-5.2"
+    var fetchedKeys: seq[string]
+    fetchModelsHook = proc(url, key: string): (seq[string], string) =
+      fetchedKeys.add key
+      (nvidiaModels(), "")
+    verifyProfileHook = proc(p: Profile): (bool, string) =
+      verifiedModels.add p.model
+      (true, "")
+    inputs = @["gpt-oss-20b"]
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider update nvidia", messages, session, prof,
+                          editor)
+
+    check fetchedKeys == @["nvapi-old"]
+    check activeProviders[0].key == "nvapi-old"
+    check activeProviders[0].models == @["openai/gpt-oss-20b"]
+    check verifiedModels == @["openai/gpt-oss-20b"]
+
+  test "update on an unknown provider errors without prompting":
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["z-ai/glm-5.2"])
+    ]
+    activeCurrent = "nvidia.z-ai/glm-5.2"
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider update nope", messages, session, prof,
+                          editor)
+
+    check prompts.len == 0
+    check activeProviders[0].models == @["z-ai/glm-5.2"]
+
+  test "new lists models missing from the config":
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["z-ai/glm-5.3"])
+    ]
+    activeCurrent = "nvidia.z-ai/glm-5.3"
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    let body = handleCommandResult(":provider new nvidia", messages, session,
+                                   prof, editor).body
+
+    check body.contains("nvidia  7 new")
+    check body.contains("gpt-oss-20b")
+    check verifiedModels.len == 0
+    check activeProviders[0].models == @["z-ai/glm-5.3"]
+
+  test "new covers every configured provider":
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["z-ai/glm-5.3"]),
+      ProviderRec(name: "openai", url: "https://api.openai.com/v1",
+                  key: "sk-old", models: @["gpt-oss-120b", "gpt-oss-20b"])
+    ]
+    activeCurrent = "nvidia.z-ai/glm-5.3"
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    let body = handleCommandResult(":provider new", messages, session,
+                                   prof, editor).body
+
+    check body.contains("nvidia  7 new")
+    let iOpenai = body.find("openai")
+    check iOpenai >= 0
+    check body[iOpenai .. ^1].contains("new")
+
+  test "new says no new models when the config is complete":
+    activeProviders = @[
+      ProviderRec(name: "openai", url: "https://api.openai.com/v1",
+                  key: "sk-old", models: @["gpt-oss-120b", "gpt-oss-20b"])
+    ]
+    # o1/o1-mini and the rest of openai's curated list would make this
+    # fragile; use every curated id the registry actually carries.
+    let curated = curatedFor("openai")
+    activeProviders[0].models = curated
+    activeCurrent = "openai." & curated[0]
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    let body = handleCommandResult(":provider new openai", messages, session,
+                                   prof, editor).body
+
+    check body.contains("no new models")
+
+  test "new on an unknown provider errors":
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["z-ai/glm-5.3"])
+    ]
+    var editor: LineEditor
+    var prof: Profile
+    var messages = newJArray()
+    var session = Session()
+
+    let body = handleCommandResult(":provider new nope", messages, session,
+                                   prof, editor).body
+
+    check body.contains("unknown provider: nope")
+
+  test "pull appends every new model":
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["z-ai/glm-5.3"])
+    ]
+    activeCurrent = "nvidia.z-ai/glm-5.3"
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider pull nvidia", messages, session, prof,
+                          editor)
+
+    check activeProviders[0].models.len == curatedFor("nvidia").len
+    check activeProviders[0].models[0] == "z-ai/glm-5.3"
+    check "openai/gpt-oss-20b" in activeProviders[0].models
+    check activeProviders[0].key == "nvapi-old"
+    check activeCurrent == "nvidia.z-ai/glm-5.3"
+    check verifiedModels.len == 0
+
+  test "pull bare covers every configured provider":
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["z-ai/glm-5.3"]),
+      ProviderRec(name: "openai", url: "https://api.openai.com/v1",
+                  key: "sk-old", models: @["gpt-oss-120b"])
+    ]
+    activeCurrent = "nvidia.z-ai/glm-5.3"
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider pull", messages, session, prof,
+                          editor)
+
+    check activeProviders[0].models.len == curatedFor("nvidia").len
+    check activeProviders[1].models.len == curatedFor("openai").len
+    check activeProviders[1].models[0] == "gpt-oss-120b"
+    check activeCurrent == "nvidia.z-ai/glm-5.3"
+
+  test "pull with named models adds just those":
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["z-ai/glm-5.3"])
+    ]
+    activeCurrent = "nvidia.z-ai/glm-5.3"
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider pull nvidia gpt-oss-20b kimi-k3",
+                          messages, session, prof, editor)
+
+    check activeProviders[0].models ==
+      @["z-ai/glm-5.3", "openai/gpt-oss-20b", "moonshotai/kimi-k3"]
+
+  test "pull skips named models already stored":
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["z-ai/glm-5.3"])
+    ]
+    activeCurrent = "nvidia.z-ai/glm-5.3"
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    discard handleCommand(":provider pull nvidia glm-5.3 gpt-oss-20b",
+                          messages, session, prof, editor)
+
+    check activeProviders[0].models == @["z-ai/glm-5.3", "openai/gpt-oss-20b"]
+
+  test "pull rejects unknown models in regular mode":
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["z-ai/glm-5.3"])
+    ]
+    activeCurrent = "nvidia.z-ai/glm-5.3"
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    let body = handleCommandResult(":provider pull nvidia no-such-model",
+                                   messages, session, prof, editor).body
+
+    check body.contains("unknown known-good model: no-such-model")
+    check activeProviders[0].models == @["z-ai/glm-5.3"]
+
+  test "new and pull diff against the fetched endpoint under experimental":
+    experimentalEnabled = true
+    fetchModelsHook = proc(url, key: string): (seq[string], string) =
+      (@["z-ai/glm-5.3", "z-ai/glm-6", "madeup/new-model"], "")
+    activeProviders = @[
+      ProviderRec(name: "nvidia", url: "https://integrate.api.nvidia.com/v1",
+                  key: "nvapi-old", models: @["z-ai/glm-5.3"])
+    ]
+    activeCurrent = "nvidia.z-ai/glm-5.3"
+    var editor: LineEditor
+    var prof = buildProfile(activeCurrent, activeProviders, "")
+    var messages = newJArray()
+    var session = Session()
+
+    let body = handleCommandResult(":provider new nvidia", messages, session,
+                                   prof, editor).body
+    check body.contains("2 new")
+    check body.contains("glm6")
+    check body.contains("new-model")
+
+    verifyProfileHook = proc(p: Profile): (bool, string) =
+      if p.model == "madeup/new-model": (false, "HTTP 404")
+      else: (true, "")
+    discard handleCommand(":provider pull nvidia", messages, session, prof,
+                          editor)
+
+    # Only the verified addition lands; the stored model keeps its place.
+    check activeProviders[0].models == @["z-ai/glm-5.3", "z-ai/glm-6"]
+    check activeProviders[0].key == "nvapi-old"
+
   test "verification cancel hook aborts the add":
     experimentalEnabled = true
     inputs = @["nvapi-add", "gpt-oss-120b"]

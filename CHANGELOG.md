@@ -2,6 +2,22 @@ Changelog
 
 **Unreleased**
 
+- **`:provider update <name>`.** Re-runs just the models step of the
+  provider wizard: the offered list refreshes (curated registry in
+  regular mode, the provider's `/models` endpoint under
+  `--experimental`), Enter keeps the current selection, and the key,
+  url, and name pass through untouched. `:provider edit` remains the
+  full wizard.
+
+- **`:provider new` / `:provider pull`.** `new` lists the models a
+  provider serves that its config doesn't list yet (curated registry
+  growth in regular mode, the `/models` endpoint under
+  `--experimental`), across every configured provider or just one by
+  name. `pull` brings those models into the stored list, scoped the
+  same way or down to named models (`pull nvidia glm-5.4`); nothing
+  is removed, and under `--experimental` each addition is verified
+  with a one-token call first.
+
 - **The macOS universal tarball was arm64-only.** The OSX workflow
   lipos the arm64 and x86_64 slices into `./3code`, then the test
   suite runs, and its first step rebuilds `./3code` natively, silently

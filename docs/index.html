@@ -104,6 +104,8 @@ nimble install https://github.com/capocasa/3code</pre></p>
 <h2 id="providers-and-authentication">Providers and authentication</h2><p><tt class="docutils literal"><span class="pre">:provider</span></tt> lists configured providers and marks the current one, along with the model a switch would land on. <tt class="docutils literal"><span class="pre">:model</span></tt> does the same for its models. Both commands have tab completion, so there is no need to memorize catalog names. Model choices are sticky per provider: switching back with <tt class="docutils literal"><span class="pre">:provider</span></tt> returns to the model you last used there, not the first one in its list. The current provider and model are also sticky per directory: each project starts where it last left off, while directories never touched by <tt class="docutils literal"><span class="pre">:provider</span></tt> / <tt class="docutils literal"><span class="pre">:model</span></tt> keep the global config default. All of this lives in the config file; see <a class="reference external" href="reference.html#config-file">config file in the reference</a> for every key (<tt class="docutils literal"><span class="pre">-c FILE</span></tt> points a single run at a different one).</p>
 <p><pre class="listing">:provider nvidia
 :model gpt-oss-120b</pre></p>
+<p>When a provider ships new models, <tt class="docutils literal"><span class="pre">:provider update &lt;name&gt;</span></tt> re-runs just the models step of the wizard: the offered list refreshes (curated in regular mode, the provider's <tt class="docutils literal"><span class="pre">/models</span></tt> endpoint under <tt class="docutils literal"><span class="pre">--experimental</span></tt>) and Enter keeps the current selection. Name, URL, and key pass through untouched; <tt class="docutils literal"><span class="pre">:provider edit &lt;name&gt;</span></tt> is the full wizard when those need changing too.</p>
+<p>To see what you are missing without entering the wizard, <tt class="docutils literal"><span class="pre">:provider new</span></tt> lists every configured provider's not-yet-configured models (<tt class="docutils literal"><span class="pre">:provider new &lt;name&gt;</span></tt> for one provider), and <tt class="docutils literal"><span class="pre">:provider pull</span></tt> brings them in, optionally scoped the same way or down to named models: <tt class="docutils literal"><span class="pre">:provider pull nvidia glm-5.4</span></tt>. New models append to the stored list; nothing is removed, and under <tt class="docutils literal"><span class="pre">--experimental</span></tt> each addition is verified with a one-token call first.</p>
 
 <h3 id="api-keys">API keys</h3><p>Most providers use an API key, and the wizard recognizes the common prefixes. For an unknown provider or a custom URL, start 3code with <tt class="docutils literal"><span class="pre">--experimental</span></tt>. The flag is deliberate: compatibility is likely, not promised.</p>
 
@@ -236,7 +238,7 @@ suspend =</pre></p>
 <h3 id="scrollback-contents">Scrollback contents</h3><p>Each conversation event gets a one-character marker or banner icon:</p>
 <table border="1" class="docutils"><tr><th>icon</th><th>item</th></tr>
 <tr><td><tt class="docutils literal"><span class="pre">❯</span></tt></td><td>your prompt, echoed as submitted</td></tr>
-<tr><td><tt class="docutils literal"><span class="pre">●</span></tt></td><td>assistant message, rendered as markdown (headings, code fences, tables fitted to the terminal width)</td></tr>
+<tr><td><tt class="docutils literal"><span class="pre">●</span></tt></td><td>assistant message, rendered as markdown (headings, code fences, tables fitted to the terminal width, <tt class="docutils literal"><span class="pre">[text](url)</span></tt> links as clickable OSC 8 hyperlinks with the target kept visible)</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">»</span></tt></td><td>a harness-autosend: a note 3code itself sent to the model (empty-reply steer, loop nudges), with the exact text shown</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">$</span></tt></td><td>bash command with its command line; the icon turns <tt class="docutils literal"><span class="pre">Ø</span></tt> when the exit code is nonzero</td></tr>
 <tr><td><tt class="docutils literal"><span class="pre">r</span></tt></td><td>file read (path and line range)</td></tr>
@@ -573,7 +575,7 @@ tone = &quot;light&quot;</pre></p>
       <div class="twelve-columns footer">
         <span class="nim-sprite"></span>
         <br>
-        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-02 10:27:06 UTC</small>
+        <small style="color: var(--hint);">Made with Nim. Generated: 2026-10-05 16:26:24 UTC</small>
       </div>
     </div>
   </div>

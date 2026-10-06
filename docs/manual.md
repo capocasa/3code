@@ -223,6 +223,22 @@ keep the global config default. All of this lives in the config file; see
 :model gpt-oss-120b
 ```
 
+When a provider ships new models, `:provider update <name>` re-runs just
+the models step of the wizard: the offered list refreshes (curated in
+regular mode, the provider's `/models` endpoint under `--experimental`)
+and Enter keeps the current selection. Name, URL, and key pass through
+untouched; `:provider edit <name>` is the full wizard when those need
+changing too.
+
+To see what you are missing without entering the wizard,
+`:provider new` lists every configured provider's not-yet-configured
+models (`:provider new <name>` for one provider), and
+`:provider pull` brings them in, optionally scoped the same way or
+down to named models: `:provider pull nvidia glm-5.4`. New models
+append to the stored list; nothing is removed, and under
+`--experimental` each addition is verified with a one-token call
+first.
+
 ### API keys
 
 Most providers use an API key, and the wizard recognizes the common prefixes.

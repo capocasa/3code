@@ -3472,49 +3472,52 @@ const HelpText* = """
 3code the economical coding agent
 
 commands:
-  :help             show this message
-  :tokens           show token usage for this session
-  :clear            reset conversation (keeps system prompt)
-  :model            list models for current provider (current marked with *)
-  :model X          switch to model X (within current provider)
-  :provider         list configured providers (current shows its model)
-  :provider X       switch to provider X (model defaults to first in its list)
-  :provider add     add a new provider (interactive, verified)
-  :provider add X   same, with X as provider name, url, or api key
-  :provider edit X  edit provider X (url, key, models)
-  :provider rm X    remove provider X
-  :reasoning        list reasoning levels for current model (* marks active)
-  :reasoning X      switch reasoning level (low / medium / high)
-  :streaming        show streaming mode (on = live output, off = request/response)
-  :streaming on|off toggle SSE streaming (off is the reliable fallback for flaky SSE)
-  :notify           show notify mode (on = desktop notification when a turn ends)
-  :notify on|off    toggle turn-end desktop notification
-  :retry            show patient-retry mode (on = ~36h hold for outages/limits)
-  :retry on|off     toggle patient retry of 429/5xx/network errors
-  :private          show private mode (off by default; on = allow-private only)
-  :private on|off   toggle private mode for this session (bar recolors)
-  :private allow X  trust provider X (optionally one model: allow X M) with
-                    private data; persists as [params] allow-private
-  :prompt           show the active system prompt
-  :show [N]         show full output of tool call N (default: last)
-  :log              list all tool calls this session
-  :sessions         list recent sessions saved in this directory (max 20)
-  :session          show this session's id (for --resume <id>)
-  :summarize        collapse old turns into a synthetic recap (meta model call)
-  :version          show the running 3code version
-  :sandbox (:sb)    show the active filesystem sandbox rules
-  :sandbox show     (same)
-  :sandbox on|off   toggle sandbox enforcement (off = bash unconfined)
-  :sandbox allow T  add a writable/connectable rule (allow T)
+  :help               show this message
+  :tokens             show token usage for this session
+  :clear              reset conversation (keeps system prompt)
+  :model              list models for current provider (current marked with *)
+  :model X            switch to model X (within current provider)
+  :provider           list configured providers (current shows its model)
+  :provider X         switch to provider X (model defaults to first in its list)
+  :provider add       add a new provider (interactive, verified)
+  :provider add X     same, with X as provider name, url, or api key
+  :provider edit X    edit provider X (url, key, models)
+  :provider update X  update the models of provider X (key unchanged)
+  :provider new [X]   list models X serves that its config lacks (all: no X)
+  :provider pull [X [M...]]  pull those models into X's list (all: no X)
+  :provider rm X      remove provider X
+  :reasoning          list reasoning levels for current model (* marks active)
+  :reasoning X        switch reasoning level (low / medium / high)
+  :streaming          show streaming mode (on = live output, off = request/response)
+  :streaming on|off   toggle SSE streaming (off is the reliable fallback for flaky SSE)
+  :notify             show notify mode (on = desktop notification when a turn ends)
+  :notify on|off      toggle turn-end desktop notification
+  :retry              show patient-retry mode (on = ~36h hold for outages/limits)
+  :retry on|off       toggle patient retry of 429/5xx/network errors
+  :private            show private mode (off by default; on = allow-private only)
+  :private on|off     toggle private mode for this session (bar recolors)
+  :private allow X    trust provider X (optionally one model: allow X M) with
+                      private data; persists as [params] allow-private
+  :prompt             show the active system prompt
+  :show [N]           show full output of tool call N (default: last)
+  :log                list all tool calls this session
+  :sessions           list recent sessions saved in this directory (max 20)
+  :session            show this session's id (for --resume <id>)
+  :summarize          collapse old turns into a synthetic recap (meta model call)
+  :version            show the running 3code version
+  :sandbox (:sb)      show the active filesystem sandbox rules
+  :sandbox show       (same)
+  :sandbox on|off     toggle sandbox enforcement (off = bash unconfined)
+  :sandbox allow T    add a writable/connectable rule (allow T)
   :sandbox readonly P  add a read-only rule (readonly P)
-  :sandbox deny T   add a deny rule (deny T)
-  :sandbox edit     open the policy file in $VISUAL/$EDITOR, reload on quit
+  :sandbox deny T     add a deny rule (deny T)
+  :sandbox edit       open the policy file in $VISUAL/$EDITOR, reload on quit
   (T is a path or a host; P a path. Project paths write as ./foo,
   home paths as ~/foo; a bare word is a host. Policy words: allow,
   readonly, deny; see .sandbox)
-  :! CMD            run CMD directly through the sandboxed shell
-                    (output shown, not sent to the model)
-  :q :quit          exit (also Ctrl-D)
+  :! CMD              run CMD directly through the sandboxed shell
+                      (output shown, not sent to the model)
+  :q :quit            exit (also Ctrl-D)
 
 input:
   single-line   just type and press Enter
