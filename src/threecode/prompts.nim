@@ -293,15 +293,19 @@ const KnownGoodCombos*: seq[KnownGoodCombo] = @[
     ("poolside", "poolside/laguna-s-2.1", "laguna", "2", "s", "on", 0.2, 8192, tbNone, false, 1_000_000, false),
     ("poolside", "poolside/laguna-xs-2.1", "laguna", "2", "xs", "on", 0.2, 8192, tbNone, false, 262_144, false),
 
-    # mistral (api.mistral.ai/v1; bare model ids). Large 3 (675B-A41B MoE,
-    # Apache 2.0) and Medium 3.5 (128B dense, Modified MIT), both 256K ctx,
-    # multimodal. Medium 3.5 carries reasoning_effort none/high (none is
-    # the wire default); Large 3 has no advertised knob. The platform also
-    # hosts third-party GLM (`zai-glm-5-2`, `zai-glm-5-3`, 1M ctx) on its
-    # own reasoning_effort ladder; the strict input validator rejects
-    # `reasoning_content` on replayed assistant messages, so everything
-    # here is tbNone. 5.3 is forced thinking (no none on the ladder) and
-    # takes the 64k output cap like every other 5.3 host.
+    # mistral (api.mistral.ai/v1; bare model ids). Large 4 (1.05T-A49B
+    # MoE, open weights, public preview since 2026-10) and Large 3
+    # (675B-A41B MoE, Apache 2.0), both multimodal; Medium 3.5 (128B
+    # dense, Modified MIT). Large 4 serves 524K ctx per /v1/models (the
+    # docs page advertises 1M; the API figure is the safe one) and carries
+    # reasoning_effort none/high like Medium 3.5; Large 3 has no advertised
+    # knob. The platform also hosts third-party GLM (`zai-glm-5-2`,
+    # `zai-glm-5-3`, 1M ctx) on its own reasoning_effort ladder; the strict
+    # input validator rejects `reasoning_content` on replayed assistant
+    # messages, so everything here is tbNone. 5.3 is forced thinking (no
+    # none on the ladder) and takes the 64k output cap like every other
+    # 5.3 host.
+    ("mistral", "mistral-large-4", "mistral", "4", "large", "high", 0.2, 8192, tbNone, false, 524_288, false),
     ("mistral", "mistral-large-2512", "mistral", "", "large", "", 0.2, 8192, tbNone, false, 262_144, false),
     ("mistral", "mistral-medium-3-5", "mistral", "", "medium", "high", 0.7, 8192, tbNone, false, 262_144, false),
     ("mistral", "zai-glm-5-2", "glm", "5", "2", "high", 0.2, 8192, tbNone, false, 1_000_000, false),
@@ -1825,8 +1829,9 @@ const Hy4Preamble = HyPreamble
   .replace("- `no_think` (default, fastest):", "- `no_think`:")
   .replace("- `high`: deep chain-of-thought", "- `high` (default): deep chain-of-thought")
 
-# Mistral family (Large 3, Medium 3.5). Both share the GLM/OpenAI tool
-# surface; only the header and the reasoning knob describe Mistral.
+# Mistral family (Large 4, Large 3, Medium 3.5). All share the
+# GLM/OpenAI tool surface; only the header and the reasoning knob
+# describe Mistral.
 const MistralPreamble = GlmPreamble
   .replace("You are the GLM edition of 3code, the economical coding agent.",
            "You are the Mistral edition of 3code, the economical coding agent, " &
@@ -1839,6 +1844,23 @@ const MistralPreamble = GlmPreamble
            "(default here) returns a full thinking chunk, the right choice for " &
            "agentic coding and hard problems; `none` turns it off for cheap direct " &
            "responses. Mistral Large 3 has no reasoning knob.\n\n" &
+           "# Tools")
+
+# Large 4 ("le Chonk", 2026-10 public preview) reuses the Mistral body;
+# the header and the reasoning section differ: 1.05T-A49B MoE, 524K ctx,
+# and the same none/high `reasoning_effort` ladder Medium 3.5 carries.
+const MistralLarge4Preamble = GlmPreamble
+  .replace("You are the GLM edition of 3code, the economical coding agent.",
+           "You are the Mistral edition of 3code, the economical coding agent, " &
+           "backed by Mistral Large 4 (1.05T total / 49B active MoE), a " &
+           "524K-context open-weight multimodal model built for reasoning, " &
+           "agentic work, and coding.")
+  .replace("\n\n# Tools",
+           "\n\n# Reasoning\n\n" &
+           "You carry `reasoning_effort` with two levels: `high` (default " &
+           "here) returns a full thinking chunk, the right choice for " &
+           "agentic coding and hard problems; `none` turns it off for cheap " &
+           "direct responses.\n\n" &
            "# Tools")
 
 const DeepSeekPreamble = """You are the DeepSeek edition of 3code, the economical coding agent.
@@ -3385,6 +3407,7 @@ let
   hySetup = (prompt: HyPreamble, tools: glmAndQwenTools)
   hy4Setup = (prompt: Hy4Preamble, tools: glmAndQwenTools)
   mistralSetup = (prompt: MistralPreamble, tools: glmAndQwenTools)
+  mistralLarge4Setup = (prompt: MistralLarge4Preamble, tools: glmAndQwenTools)
   inklingSetup = (prompt: InklingPreamble, tools: glmAndQwenTools)
   grokSetup = (prompt: GrokPreamble, tools: glmAndQwenTools)
   geminiSetup = (prompt: GeminiPreamble, tools: glmAndQwenTools)
@@ -3437,7 +3460,12 @@ proc setup*(p: Profile): tuple[prompt: string, tools: JsonNode] =
     # the prompt differs enough to keep a second tuple.
     if p.version == "4": hy4Setup
     else: hySetup
-  of "mistral": mistralSetup
+  of "mistral":
+    # Large 4 ("le Chonk") gets its own preamble: the shared one
+    # describes Large 3 / Medium 3.5 and claims there is no Large
+    # reasoning knob, which is wrong for the 4's none/high ladder.
+    if p.version == "4": mistralLarge4Setup
+    else: mistralSetup
   of "inkling": inklingSetup
   of "grok": grokSetup
   of "gemini": geminiSetup
@@ -3932,9 +3960,11 @@ proc knownGoodReasonings*(provider, model: string): seq[string] =
         if combo.version == "4": return @["no_think", "high"]
         return @["no_think", "low", "high"]
       if fam == "mistral":
-        # Mistral Medium 3.5 exposes reasoning_effort none/high; Large 3
-        # has no advertised knob.
+        # Mistral Medium 3.5 and Large 4 expose reasoning_effort
+        # none/high (400 on anything else); Large 3 has no advertised
+        # knob.
         if combo.variant.startsWith("medium"): return @["none", "high"]
+        if combo.version == "4": return @["none", "high"]
         return @[]
       if fam == "claude":
         # `:reasoning` maps onto the model's thinking surface (see
