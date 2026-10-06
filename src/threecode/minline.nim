@@ -552,6 +552,12 @@ type
     canceled*: bool
     eof*: bool
     hidechars*: bool
+    maskWhen*: proc(text: string): bool {.closure.}
+      ## Optional per-keystroke secret detection for otherwise visible
+      ## reads (the wizard's multipurpose first field: provider name, url,
+      ## or key). Consulted by the redraw path on the live buffer: the
+      ## moment it answers true the line repaints masked, so at most the
+      ## pre-detection prefix is ever echoed. Nil on plain reads.
     escPutback*: int           ## byte stashed by `handleEscape` when an Alt chord's letter has no KEYMAP binding; drained by the readLine loop so it prints as normal input after the cancel.
     lastKeyName*: string      ## last dispatched key name (for double-press counting)
     keyCount*: int            ## consecutive presses of lastKeyName (0 after a different key)
@@ -1232,7 +1238,17 @@ proc redrawBytes*(ed: var LineEditor; synchronized = true): string =
   let cw = if ed.contPromptW > 0: ed.contPromptW else: visualCols(ed.contPrompt)
   ed.promptW = pw
   ed.contPromptW = cw
-  let renderedText = ed.line.text & ed.renderSuffix
+  # Hidden reads, and visible reads whose `maskWhen` flags the buffer as
+  # a secret, draw one `*` per buffer byte — the same stand-in the
+  # incremental echo writes — so a repaint (backspace, arrow, resize, the
+  # mask flipping on mid-line) can never spell the cleartext onto the
+  # screen. Byte-for-byte length match keeps every caret/selection offset
+  # valid against the masked stand-in.
+  let renderedText =
+    if ed.hidechars or (ed.maskWhen != nil and ed.maskWhen(ed.line.text)):
+      repeat('*', ed.line.text.len) & ed.renderSuffix
+    else:
+      ed.line.text & ed.renderSuffix
   let total = totalRows(renderedText, pw, cw, width)
   let cursorText =
     if ed.renderSuffixCursor: renderedText

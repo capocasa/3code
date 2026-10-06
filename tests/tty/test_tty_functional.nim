@@ -387,7 +387,7 @@ suite "terminal visual contract":
     check ":tokens" notin log
     check ":provider add" notin log
 
-  test "idle provider add wizard is visible and echoes the api key":
+  test "idle provider add wizard is visible and masks secrets":
     let root = newFixture("provider_add_wizard")
     writeConfiguredProvider(root)
     writeStubResponses(root, %*[])
@@ -401,22 +401,24 @@ suite "terminal visual contract":
     tty.expect "❯"
     tty.send ":provider add\n"
     tty.drain(200)
-    # First field is name|url|key (keys typed there are detected by
-    # prefix). Drive a catalog name so the next field is the api-key
-    # prompt, the field this test covers.
+    # First field is name|url|key. A catalog name echoes as typed; it
+    # is not a secret. (The same field's prefixless-key masking has its
+    # own test below.)
     tty.expect "provider, url, or api key"
-    tty.send "nvidia\n"
+    tty.send "nvidia"
+    tty.drain(200)
+    check "nvidia" in tty.screenText()  # a provider name is not a secret
+    tty.send "\n"
     tty.drain(200)
     # -x: optional url override before the key.
     tty.expect "url"
     tty.send "\n"
     tty.expect "api key"
-    check "********************" notin tty.screenText()
-    # The wizard echoes the key as typed (hidden input went away with
-    # the key-prefix wizard work); the asterisk mask never appears.
+    # The api-key field is hidden from the first keystroke: the mask
+    # appears, the cleartext never does (screen or raw output).
     tty.send "nvapi-visible-secret"
-    tty.expect "nvapi-visible-secret"
-    tty.expectNo "********************"
+    tty.expect "********************"
+    tty.expectNo "nvapi-visible-secret"
     tty.send "\n"
     tty.expect "models"
     tty.send "\x1b"
@@ -424,6 +426,41 @@ suite "terminal visual contract":
     tty.expect "\u276f"
     tty.expectNo "cancelled"  # silent return per the bug report
     tty.expectAlive()  # cancelling :provider add must not exit the process
+
+  test "idle provider add first field masks a prefixless key past 20 chars":
+    let root = newFixture("provider_add_firstfield_mask")
+    writeConfiguredProvider(root)
+    writeStubResponses(root, %*[])
+
+    let tty = startStub(root)
+    defer:
+      tty.writeFrameArtifact(root / "frames.txt")
+      tty.close()
+
+    tty.expect "❯"
+    tty.send ":provider add\n"
+    tty.drain(200)
+    tty.expect "provider, url, or api key"
+    # 19 chars echo as typed (still provider-name territory); the tail
+    # crosses the 20-char threshold and flips the line to the mask. The
+    # tail must never reach screen or raw output; the erased prefix must
+    # not survive on screen either.
+    const prefix = "a234567890123456789"  # 19 chars
+    const tail = "SECRET-tail-98765"
+    for ch in prefix:
+      tty.send $ch
+    tty.drain(200)
+    check prefix in tty.screenText()
+    for ch in tail:
+      tty.send $ch
+    tty.drain(200)
+    tty.expect "********************"
+    tty.expectNo tail
+    check prefix notin tty.screenText()
+    tty.send "\x1b"
+    tty.drain(300)
+    tty.expect "\u276f"
+    tty.expectAlive()
 
   test "idle provider add that completes returns to a fresh main prompt":
     ## Regression: when `:provider add` ran through to completion, the

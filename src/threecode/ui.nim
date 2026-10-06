@@ -467,15 +467,20 @@ proc readFirstProviderField(editor: var minline.LineEditor): string =
   ## First wizard field: catalog name, URL, API key, or a subscription
   ## login (`supergrok`, `chatgpt`, `geminicli`, `claudecode`). Regular
   ## mode takes a known-good provider name or an API key; URLs are
-  ## experimental-only.
+  ## experimental-only. The field echoes as typed unless the buffer reads
+  ## as a key (`echoMasksAsKey`): recognized prefixes mask from the first
+  ## character, unrecognized secrets once they outgrow provider names.
   let prevCb = editor.completionCallback
   editor.completionCallback = proc(ed: LineEditor): seq[string] =
     wizardProviderCandidates()
+  let prevMask = editor.maskWhen
+  editor.maskWhen = echoMasksAsKey
   let label =
     if experimentalEnabled: "  provider, url, or api key: "
     else: "  provider or api key: "
   result = readRequired(editor, label)
   editor.completionCallback = prevCb
+  editor.maskWhen = prevMask
 
 proc readProviderForKey(editor: var minline.LineEditor): string =
   ## Owner name for an api key whose prefix nobody recognizes (z.ai keys
@@ -565,7 +570,7 @@ proc promptNewProvider*(editor: var minline.LineEditor,
       errLn "name required"
       raise newException(minline.InputCancelled, "name required")
     ensureUniqueName(name)
-    key = readRequired(editor, "  api key              : ", hidden = false)
+    key = readRequired(editor, "  api key              : ", hidden = true)
   elif inferredFromKey != "":
     # API keys are not unique across providers; only the name is.
     if not experimentalEnabled and curatedFor(inferredFromKey).len == 0:
@@ -627,7 +632,7 @@ proc promptNewProvider*(editor: var minline.LineEditor,
     elif name == "anthropic":
       hintLn "  for subscription login, enter claudecode", resetStyle
     if key == "":
-      key = readRequired(editor, "  api key              : ", hidden = false)
+      key = readRequired(editor, "  api key              : ", hidden = true)
 
   if not experimentalEnabled:
     let curated = curatedFor(name)
@@ -728,7 +733,7 @@ proc promptNewProvider*(editor: var minline.LineEditor,
       "  [enter]=retry models, k=re-enter key, c=cancel : ").toLowerAscii
     if choice == "k":
       key = readRequired(editor,
-        "  api key              : ", hidden = false)
+        "  api key              : ", hidden = true)
     elif choice == "c":
       raise newException(minline.InputCancelled, "cancelled by user")
 
@@ -842,7 +847,7 @@ proc promptEditProvider*(editor: var minline.LineEditor,
           &"  url [{existing.url}]  : ").strip(chars = {'/', ' '})
         if newUrl == "": existing.url else: newUrl
     let newKey = readOptional(editor,
-      "  api key [keep existing] : ", hidden = false)
+      "  api key [keep existing] : ", hidden = true)
     let key = if newKey == "": existing.key else: newKey
     let models = promptModelsSelection(editor, name, url, key,
                                        existing.models)
