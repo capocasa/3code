@@ -285,16 +285,17 @@ suite "api request shaping":
       check g.temperature == 1.0
       check g.maxTokens == 8192
     block vibePreamble:
-      # The Mistral preamble is the Vibe CLI prompt 3codified: vibe
-      # structure and content, 3code tool surface, denser phrasing.
+      # The Mistral preamble is the economical 3code prompt: terse
+      # discipline sections, 3code tool surface, thinking-channel
+      # awareness for the none/high reasoning_effort ladder.
       let p = Profile(name: "mistral.mistral-vibe-cli-latest", family: "mistral",
                       variant: "vibe", model: "mistral-vibe-cli-latest")
       let (prompt, _) = setup(p)
       check "Instruction hierarchy" in prompt
       check "Blast radius" in prompt
-      check "Stop when stuck" in prompt
-      check "direct without being cold" in prompt
-      check "Prove it worked" in prompt
+      check "Every token costs" in prompt
+      check "thinking in its own channel" in prompt
+      check "red -> green" in prompt
       check "{{skills}}" in prompt  # spliced at build time
       check "{{header}}" notin prompt  # header splice applied
       check "{{reasoning}}" notin prompt

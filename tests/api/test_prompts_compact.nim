@@ -303,6 +303,59 @@ suite "prompts: setup — kimi":
     check not seen
     check "dmail" notin s.prompt
 
+suite "prompts: setup — mistral":
+  test "Large 4 returns the economical Mistral preamble":
+    let p = Profile(name: "mistral.mistral-large-4", url: "x", key: "k",
+                    model: "mistral-large-4", family: "mistral",
+                    version: "4")
+    let s = setup(p)
+    check "Mistral edition of 3code" in s.prompt
+    check "economical coding agent" in s.prompt
+    check "1.05T-A49B" in s.prompt
+    check "524K" in s.prompt
+    check "reasoning_effort" in s.prompt
+    check "thinking in its own channel" in s.prompt
+    check "Every token costs" in s.prompt
+    check "Blast radius" in s.prompt
+    check "red -> green" in s.prompt
+    check "unverified" in s.prompt
+    check "does this look good" notin s.prompt
+    check "anything else" notin s.prompt
+
+  test "Large 3 / Medium 3.5 preamble names both models":
+    let p = Profile(name: "mistral.mistral-large-2512", url: "x", key: "k",
+                    model: "mistral-large-2512", family: "mistral")
+    let s = setup(p)
+    check "Mistral edition of 3code" in s.prompt
+    check "Large 3" in s.prompt
+    check "Medium 3.5" in s.prompt
+    check "Large 3 has no knob" in s.prompt
+
+  test "tools are glmAndQwenTools (bash/read/write/patch)":
+    let p = Profile(name: "mistral.mistral-large-4", url: "x", key: "k",
+                    model: "mistral-large-4", family: "mistral",
+                    version: "4")
+    let s = setup(p)
+    check s.tools.kind == JArray
+    check s.tools.len == 8
+    var names: seq[string]
+    for t in s.tools:
+      names.add t{"function"}{"name"}.getStr
+    check "bash" in names
+    check "read" in names
+    check "write" in names
+    check "patch" in names
+
+  test "mistral prompt is terse (under 6KB with splices)":
+    let p = Profile(name: "mistral.mistral-large-4", url: "x", key: "k",
+                    model: "mistral-large-4", family: "mistral",
+                    version: "4")
+    let s = setup(p)
+    let full = s.prompt
+      .replace("{{credit}}", buildCredit(p))
+      .replace("{{skills}}", "(none installed)")
+    check full.len < 6000
+
 suite "prompts: buildCredit":
   test "builds attribution for valid profile":
     let p = Profile(name: "zai.glm-5.1", model: "glm-5.1")
