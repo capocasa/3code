@@ -978,11 +978,16 @@ proc resolveFamily*(prov: ProviderRec, prof: Profile): string =
   ## Family is resolved at profile-build time:
   ## 1. KnownGoodCombos hardcode (always wins; ignores config and -x)
   ## 2. provider-level `family = ...` — only honored under --experimental
-  ## 3. default → "glm"
+  ## 3. google/geminicli default → "gemini": every model they serve is
+  ##    Gemini, so a not-yet-curated id (a brand-new launch before it gets
+  ##    a KnownGoodCombos row) rides the right preamble and wire knobs
+  ##    under --experimental instead of the glm default
+  ## 4. default → "glm"
   let kg = knownGoodFamily(prof)
   if kg != "": return kg
   if experimentalEnabled and prov.family.strip != "":
     return prov.family.strip.toLowerAscii
+  if canonicalKnownGoodProvider(prov.name) == "google": return "gemini"
   "glm"
 
 func paramsModelMatches*(spec, model: string): bool =

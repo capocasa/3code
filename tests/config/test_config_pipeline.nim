@@ -139,6 +139,25 @@ suite "config: resolveFamily":
     let prof = Profile(name: "test.unknown-model", model: "unknown-model")
     check resolveFamily(prov, prof) == "glm"
 
+  test "uncurated google model defaults to gemini":
+    let prov = ProviderRec(name: "google", models: @["gemini-4-argon"])
+    let prof = Profile(name: "google.gemini-4-argon", model: "gemini-4-argon")
+    check resolveFamily(prov, prof) == "gemini"
+
+  test "geminicli twin defaults to gemini too":
+    let prov = ProviderRec(name: "geminicli", models: @["gemini-4-argon"])
+    let prof = Profile(name: "geminicli.gemini-4-argon", model: "gemini-4-argon")
+    check resolveFamily(prov, prof) == "gemini"
+
+  test "experimental family override still wins over google default":
+    var saved = experimentalEnabled
+    experimentalEnabled = true
+    let prov = ProviderRec(name: "google", family: "glm",
+                           models: @["some-other"])
+    let prof = Profile(name: "google.some-other", model: "some-other")
+    check resolveFamily(prov, prof) == "glm"
+    experimentalEnabled = saved
+
 suite "config: resolveReasoning":
   test "provider config reasoning wins":
     let prov = ProviderRec(reasoning: "high")
