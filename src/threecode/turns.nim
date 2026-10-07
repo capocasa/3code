@@ -890,18 +890,25 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         # A forced-thinking model that spent the whole budget on reasoning
         # and returned nothing will usually do it again at 2x the budget:
         # the thinking scales with effort, not with headroom. Demote the
-        # effort first (high -> low; verified against Z.ai: effort high
-        # starves 400-token budgets that effort low finishes in 1k) and
-        # only raise the budget once effort is already at the floor or
-        # the family has no graded knob. Budget bumps are also clamped
-        # by the model's real output cap (131k on GLM-5.3), so a starved
-        # turn at the cap would otherwise just re-derive the same
-        # override and burn identical retries.
+        # effort first (one rung down the model's own ladder; verified
+        # against Z.ai: effort high starves 400-token budgets that effort
+        # low finishes in 1k) and only raise the budget once effort is
+        # already at the floor or the family has no graded knob. The
+        # ladder must be the model's own supported set, stepped down one
+        # entry at a time: a hardcoded high -> low sent Mistral (none/high
+        # only) a value its API rejects with 400, turning the recovery
+        # into a dead turn. Budget bumps are also clamped by the model's
+        # real output cap (131k on GLM-5.3), so a starved turn at the cap
+        # would otherwise just re-derive the same override and burn
+        # identical retries.
         var demoted = false
-        if wire.reasoning == "max":
-          wire.reasoning = "high"; demoted = true
-        elif wire.reasoning == "high":
-          wire.reasoning = "low"; demoted = true
+        block demote:
+          let ladder = defaultReasoningsFor(providerOf(wire), wire.model,
+            wire.family)
+          let idx = ladder.find(wire.reasoning)
+          if idx <= 0: break demote
+          wire.reasoning = ladder[idx - 1]
+          demoted = true
         if not demoted:
           let cur =
             if maxTokensOverride > 0: maxTokensOverride
