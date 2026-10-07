@@ -148,15 +148,22 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
   # item included, so a resumed screen shows the same hint/blank/echo shape
   # a fresh session does instead of starting flush under the "● resumed"
   # banner.
-  # Harness-autosent tool notes (flail escalations/aborts) replay as `»`
-  # agent-prompt items, never as tool banners: keyed by tool_call_id. An
-  # abort batch pairs the same note onto every remaining call; consecutive
-  # duplicates collapse to one item exactly like the single live commit.
+  # Flail-noted calls executed, so they replay as their tool banner PLUS
+  # the `»` note item (`flailNote` field, keyed by tool_call_id).
+  # Note-only pairings (an abort batch's unexecuted remainder,
+  # `agentSent`) replay as the `»` item alone, never a tool banner. Both
+  # kinds share the consecutive-duplicate collapse: an abort batch pairs
+  # the same note onto every remaining call, exactly like the single live
+  # commit.
   var agentNotes = initTable[string, string]()
+  var flailNotes = initTable[string, string]()
   for m in messages:
-    if m.kind == JObject and m{"role"}.getStr == "tool" and
-       m{"agentSent"}.getBool(false):
+    if m.kind != JObject or m{"role"}.getStr != "tool": continue
+    if m{"agentSent"}.getBool(false):
       agentNotes[m{"tool_call_id"}.getStr] = m{"content"}.getStr("")
+    let fn = m{"flailNote"}.getStr("")
+    if fn.len > 0:
+      flailNotes[m{"tool_call_id"}.getStr] = fn
   var lastAgentNote = ""
   var toolIdx = 0
   for i in start ..< messages.len:
@@ -315,6 +322,13 @@ proc replaySessionTail*(messages: JsonNode, toolLog: seq[ToolRecord],
             bytes.trimTranscriptTail()
           stdout.write "\n"
           stdout.write bytes & "\n"
+          # The flail-noted call's `»` warning rides below its tool item,
+          # the same position the live commit wrote it.
+          let flailNote = flailNotes.getOrDefault(tc{"id"}.getStr, "")
+          if flailNote.len > 0 and flailNote != lastAgentNote:
+            lastAgentNote = flailNote
+            stdout.write "\n"
+            stdout.write formatItem(agentPromptItem(flailNote)) & "\n"
     of "tool":
       # Result already rendered alongside the assistant's tool_call via
       # toolLog; nothing to do here.

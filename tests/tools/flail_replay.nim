@@ -7,6 +7,7 @@ type Call = object
   name, args, output: string
   newBatch: bool  # this call opens a new model response
   code: int
+  agent: bool     # +agent: result replaced by a harness note, never ran
 
 proc parse(path: string): seq[Call] =
   type Mode = enum mNone, mUse, mUseArgs, mResult
@@ -26,13 +27,14 @@ proc parse(path: string): seq[Call] =
       mode = mUse
     elif line.startsWith("tool_result "):
       mode = mResult
+      cur.agent = "+agent" in line
       for p in line.splitWhitespace:
         if p.startsWith("exit="):
           cur.code = parseInt(p[5..^1])
     elif mode == mResult:
       # Result body: indented lines until the ~~ terminator. Results the
-      # harness replaced (flail notes) carry +agent on the header; their
-      # body is the note, not a tool output.
+      # harness replaced (an abort batch's note-only remainder) carry
+      # +agent on the header; their body is the note, not a tool output.
       if line.startsWith("  "):
         cur.output.add line.substr(2) & "\n"
       elif line.strip == "~~":
@@ -70,9 +72,11 @@ for i, c in calls:
   if c.newBatch:
     det.flaggedInBatch = false
   let v = det.observeCall(c.name, c.args)
-  if v == fvOk:
-    # Skipped calls never execute, so the app never notes their result.
+  # Loop verdicts execute the call too (the +flail results carry the real
+  # output); only +agent notes (an abort batch's unexecuted remainder)
+  # never ran, so only those skip the result signal.
+  if not c.agent:
     det.noteResult(c.name, c.args, madeChange = c.code == 0, output = c.output)
-  else:
+  if v != fvOk:
     echo "call #", i + 1, " (", c.name, "): ",
       if v == fvEscalate: "ESCALATE " & $det.escalations else: "ABORT"

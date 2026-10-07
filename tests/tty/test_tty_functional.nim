@@ -1121,8 +1121,8 @@ suite "terminal visual contract":
     # text sent to the model under a `»` marker, never a user `❯` echo and
     # never a paraphrased harness error line. Covers both producers (the
     # empty-reply steer, the flail detector's escalation note) live, the
-    # persisted `+agent` marks, and the resumed replay painting the same
-    # items.
+    # persisted `+agent`/`+flail` marks, and the resumed replay painting
+    # the same items (the flagged commands execute and replay as banners).
     if getEnv("THREECODE_TTY_ONLY").len > 0 and
         getEnv("THREECODE_TTY_ONLY") != "agent_autosend_items":
       check true
@@ -1159,7 +1159,8 @@ max-tokens = "8192"
          "usage": {"promptTokens": 20, "completionTokens": 4,
                    "totalTokens": 24, "cachedTokens": 0}},
         # Turn 2, reply 1: two identical bash calls in one batch; the second
-        # is the classic identical-repeat loop and escalates (skipped exec).
+        # is the classic identical-repeat loop and escalates, but executes
+        # anyway with the note riding on the result.
         {"role": "assistant", "content": "",
          "tool_calls": [
            toolCall("flail_a", "bash",
@@ -1174,7 +1175,7 @@ max-tokens = "8192"
          "contentChunks": ["FLAIL-RECOVERED-MARKER"],
          "usage": {"promptTokens": 40, "completionTokens": 6,
                    "totalTokens": 46, "cachedTokens": 0}},
-        # Turn 3: five identical single-call replies. The first executes,
+        # Turn 3: five identical single-call replies. Every one executes;
         # the next three escalate (one » item each), the fifth aborts the
         # turn with the abort note.
         {"role": "assistant", "content": "",
@@ -1221,11 +1222,11 @@ max-tokens = "8192"
         tty.expect "❯"
         tty.expectAlive()
 
-        # --- flail escalation: the prod sent to the model is shown ---
+        # --- flail escalation: the command runs, then the prod shows ---
         tty.send "flail please\n"
         tty.expectInHistory "$ printf 'flail-real-run"
         tty.expectInHistory "flail-real-run"
-        tty.expectInHistory "auto: skipped a repeated tool call"
+        tty.expectInHistory "auto: repeated tool call executed, warning sent"
         tty.expectInHistory "» Loop detected"
         # The old paraphrased harness line is gone.
         tty.expectNeverInHistory "flailing detected (repeated tool call)"
@@ -1233,9 +1234,11 @@ max-tokens = "8192"
         tty.expect "❯"
         tty.expectAlive()
 
-        # --- flail abort: the abort note ends the turn, prompt returns ---
+        # --- flail abort: the triggering call runs, then the note ends the
+        # turn and the prompt returns ---
         tty.send "doom loop\n"
         tty.expectInHistory "$ printf 'doomed-loop"
+        tty.expectInHistory "doomed-loop"
         tty.expectInHistory "» Final warning"
         tty.expectInHistory "auto: turn aborted - rephrase, give a hint, or take over"
         tty.expectInHistory "» Turn aborted"
@@ -1244,12 +1247,19 @@ max-tokens = "8192"
         tty.expectAlive()
         tty.drain(300)
 
-      # The .3log carries the `+agent` marks for both producers.
+      # The .3log carries the `+agent`/`+flail` marks for both producers;
+      # the escalated and aborting calls executed, so their results are
+      # real (exit=0) with the note recorded alongside.
       let log = sessionLogText(root)
       check "user +agent" in log
       check "Your last reply came back empty." in log
-      check "tool_result flail_b exit=-1 +agent" in log
+      check "tool_result flail_a exit=0" in log
+      check "flail flail_b" in log
+      check "tool_result flail_b exit=0 +flail" in log
       check "Loop detected" in log
+      check "flail ab_5" in log
+      check "tool_result ab_5 exit=0 +flail" in log
+      check "Turn aborted" in log
 
       # --- resume: the replay paints the same » items, not echoes/banners ---
       block resumed:
@@ -1265,6 +1275,9 @@ max-tokens = "8192"
         tty.expectNeverInHistory "empty reply - no content, no tool calls"
         tty.expectInHistory "» Loop detected"
         tty.expectInHistory "» Turn aborted"
+        # The escalated calls executed, so their banners replay too.
+        tty.expectInHistory "$ printf 'flail-real-run"
+        tty.expectInHistory "$ printf 'doomed-loop"
         tty.expectInHistory "❯ steer me"
         tty.expectInHistory "❯ flail please"
         tty.expectInHistory "❯ doom loop"

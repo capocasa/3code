@@ -73,7 +73,7 @@ const SessionExt* = ".3log"
 
 const Roles = ["session", "skills", "system", "context", "project_notes",
                "user", "reasoning", "assistant",
-               "tool_use", "tool_result", "tokens"]
+               "tool_use", "tool_result", "tokens", "flail"]
 
 # ---------- paths ----------
 
@@ -1026,11 +1026,19 @@ proc renderSession*(session: Session, messages: JsonNode): string =
     of "tool":
       let id = m{"tool_call_id"}.getStr
       let exitCode = idToExit.getOrDefault(id, 0)
+      # `+flail` marks a flail-noted result (the call executed; the note
+      # rides on top of the content). The preceding `flail` record carries
+      # the note itself so load can restore the field and the rebuilt
+      # toolLog can strip the note back out of the output.
+      let flailNote = m{"flailNote"}.getStr("")
+      if flailNote.len > 0:
+        emitRecord s, "flail " & id, flailNote
       var hdr = "tool_result " & id & " exit=" & $exitCode
-      # `+agent` marks a harness-autosent note (flail escalation/abort) so
-      # replay renders the `»` item the live path committed, not a tool
-      # banner.
+      # `+agent` marks a harness-autosent note (an abort batch's unexecuted
+      # remainder) so replay renders the `»` item the live path committed,
+      # not a tool banner.
       if m{"agentSent"}.getBool(false): hdr.add " +agent"
+      if flailNote.len > 0: hdr.add " +flail"
       emitRecord s, hdr, m{"content"}.getStr("")
     else: discard
   s
@@ -1136,7 +1144,14 @@ proc buildToolLogFromMessages(messages: JsonNode,
   for m in messages:
     if m.kind != JObject: continue
     if m{"role"}.getStr != "tool": continue
-    idToContent[m{"tool_call_id"}.getStr] = m{"content"}.getStr("")
+    var content = m{"content"}.getStr("")
+    # A flail-noted call's content carries the note above the real result;
+    # the toolLog (and every replay banner built from it) wants the bare
+    # result, not the warning.
+    let note = m{"flailNote"}.getStr("")
+    if note.len > 0 and content.startsWith(note & "\n\n"):
+      content = content.substr(note.len + 2)
+    idToContent[m{"tool_call_id"}.getStr] = content
   for m in messages:
     if m.kind != JObject: continue
     if m{"role"}.getStr != "assistant": continue
@@ -1262,6 +1277,7 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
   var pendingNotes = ""
   var lastAssistant: JsonNode = nil
   var exitByCallId = initTable[string, int]()
+  var pendingFlail = initTable[string, string]()
   var hasResolvedSystem = false
   for r in records:
     let (pos, kv, flags) = parseArgs(r.args)
@@ -1339,6 +1355,9 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
         sess.usage.totalTokens += u{"totalTokens"}.getInt(0)
         sess.usage.cachedTokens += u{"cachedTokens"}.getInt(0)
         sess.lastPromptTokens = u{"promptTokens"}.getInt(0)
+    of "flail":
+      # The flail note for the tool_result that follows it.
+      if pos.len > 0: pendingFlail[pos[0]] = r.body
     of "tool_result":
       let id = if pos.len > 0: pos[0] else: ""
       let exitCode = try: parseInt(kv.getOrDefault("exit", "0"))
@@ -1347,6 +1366,8 @@ proc loadSessionFile*(path: string): (Session, JsonNode) =
       let msg = %{"role": %"tool", "tool_call_id": %id,
                  "content": %r.body}
       if "agent" in flags: msg["agentSent"] = %true
+      if "flail" in flags and pendingFlail.hasKey(id):
+        msg["flailNote"] = %pendingFlail[id]
       messages.add msg
       lastAssistant = nil
     else: discard
