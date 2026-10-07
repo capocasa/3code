@@ -1,10 +1,10 @@
 ## Replay a .3log session log through the real FlailDetector to verify
-## when each signal fires on the recorded mergepdf session.
+## when each signal fires on a recorded session.
 import std/[os, strutils, json]
 import threecode/turns except fingerprint
 
 type Call = object
-  name, args: string
+  name, args, output: string
   code: int
 
 proc parse(path: string): seq[Call] =
@@ -23,6 +23,14 @@ proc parse(path: string): seq[Call] =
       for p in line.splitWhitespace:
         if p.startsWith("exit="):
           cur.code = parseInt(p[5..^1])
+    elif mode == mResult:
+      # Result body: indented lines until the ~~ terminator. Results the
+      # harness replaced (flail notes) carry +agent on the header; their
+      # body is the note, not a tool output.
+      if line.startsWith("  "):
+        cur.output.add line.substr(2) & "\n"
+      elif line.strip == "~~":
+        mode = mNone
     elif mode in {mUse, mUseArgs} and
         (line.startsWith("  ") or line.strip == ""):
       # Arg blocks (write/patch bodies, bash commands) keep indented lines
@@ -53,7 +61,9 @@ for i, c in calls:
   # c.args is the raw wire arguments JSON the app executed; pass it through
   # untouched so fingerprints and tokens match what the app saw.
   let v = det.observeCall(c.name, c.args)
-  det.noteResult(c.name, c.args, madeChange = c.code == 0)
-  if v != fvOk:
+  if v == fvOk:
+    # Skipped calls never execute, so the app never notes their result.
+    det.noteResult(c.name, c.args, madeChange = c.code == 0, output = c.output)
+  else:
     echo "call #", i + 1, " (", c.name, "): ",
       if v == fvEscalate: "ESCALATE " & $det.escalations else: "ABORT"

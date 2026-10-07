@@ -712,9 +712,12 @@ repeat burns another round trip and another batch of output tokens while
 making no progress. The flailing detector fingerprints each tool call and
 watches the recent window for repeats: identical calls back to back,
 A-B-A-B cycles, or a long uninterrupted streak of near-identical calls to
-the same tool; a call about something else restarts the streak, so a
-verification run retrying one command with different capture tails while
-reading other files in between is not a loop.
+the same tool whose results stopped saying anything new; a call about
+something else restarts the streak, and a streak that keeps delivering
+fresh output is never a loop no matter how similar the calls look, so a
+systematic scan (one fixed query walked over successive windows of a
+file) runs uninterrupted. A verification run retrying one command while
+reading other files in between is not a loop either.
 
 When it sees one, it intervenes in the model's voice of authority: a tool
 result is replaced by a short `SYSTEM` note naming the loop and demanding a

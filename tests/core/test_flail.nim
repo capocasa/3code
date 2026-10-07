@@ -352,6 +352,80 @@ suite "flail detector":
     check verdicts[firstFire] == fvEscalate
     check fvAbort in verdicts[^3 .. ^1]
 
+  test "windowed scan with a fixed query never trips the streak signal":
+    # Regression, verbatim from the 20261007T100839 mistral session (both
+    # false positives in one run): a fixed grep pattern walked over
+    # successive sed/awk windows of one file. Every call tokenizes
+    # identically (the ranges are pure digits, dropped as addresses), so
+    # the ring read a near-duplicate cluster and aborted the turn
+    # mid-scan - while every fingerprint was novel and every window
+    # delivered fresh lines. Scans are progress: the staleness arm keeps
+    # them quiet no matter how many windows they cover.
+    var det: FlailDetector
+    let scans = [
+      "grep -n \"mistral\" src/threecode/prompts.nim | awk -F: '$1 > 900 && $1 < 1000'",
+      "sed -n '945,955p' src/threecode/prompts.nim",
+      "sed -n '935,955p' src/threecode/prompts.nim",
+      "grep -n \"experimental\\|Experimental\" src/threecode/prompts.nim | head -20",
+      "sed -n '680,710p' src/threecode/prompts.nim",
+      "grep -n \"mistral\" src/threecode/prompts.nim | awk -F: '$1 > 1000'",
+      "grep -n \"mistral\" src/threecode/prompts.nim | awk -F: '$1 > 300 && $1 < 1000'",
+      "grep -n \"mistral\" src/threecode/prompts.nim | awk -F: '$1 > 1000 && $1 < 1840'",
+      "grep -n \"mistral\" src/threecode/prompts.nim | awk -F: '{print $1}' | tr '\\n' ' '",
+      "sed -n '900,930p' src/threecode/prompts.nim",
+      "sed -n '2389,2432p' src/threecode/prompts.nim | grep -c \"^-\"",
+      "sed -n '2434,2481p' src/threecode/prompts.nim | grep -c \"^-\"",
+      "sed -n '1215,1287p' src/threecode/prompts.nim | grep -c \"^-\"",
+      "sed -n '1141,1213p' src/threecode/prompts.nim | grep -c \"^-\"",
+      "sed -n '2483,2586p' src/threecode/prompts.nim | grep -c \"^-\"",
+      "sed -n '1372,1468p' src/threecode/prompts.nim | grep -c \"^-\"",
+      "sed -n '1470,1605p' src/threecode/prompts.nim | grep -c \"^-\"",
+      "sed -n '1607,1711p' src/threecode/prompts.nim | grep -c \"^-\"",
+      "sed -n '1728,1820p' src/threecode/prompts.nim | grep -c \"^-\"",
+      "sed -n '1923,2098p' src/threecode/prompts.nim | grep -c \"^-\"",
+      "sed -n '2676,2778p' src/threecode/prompts.nim | grep -c \"^-\"",
+      "sed -n '2780,2859p' src/threecode/prompts.nim | grep -c \"^-\"",
+      "sed -n '2147,2387p' src/threecode/prompts.nim | grep -c \"^-\"",
+      "sed -n '1843,1921p' src/threecode/prompts.nim | grep -n \"Instruction hierarchy\\|Critical\\|Blast radius\"",
+      "sed -n '1289,1370p' src/threecode/prompts.nim | grep -n \"Instruction hierarchy\\|Critical\\|Blast radius\\|3CODE.md\\|AGENTS.md\"",
+      "sed -n '2588,2674p' src/threecode/prompts.nim | grep -n \"Instruction hierarchy\\|Critical\\|Blast radius\\|3CODE.md\\|AGENTS.md\"",
+      "sed -n '2940,3009p' src/threecode/prompts.nim | grep -n \"Instruction hierarchy\\|Critical\\|Blast radius\\|3CODE.md\\|AGENTS.md\"",
+      "sed -n '3010,3057p' src/threecode/prompts.nim | grep -n \"Instruction hierarchy\\|Critical\\|Blast radius\\|3CODE.md\\|AGENTS.md\""]
+    for i, c in scans:
+      # Each window's grep returns its own lines: fresh letters per call,
+      # so digit normalization cannot fake or erase novelty.
+      let tag = $char(ord('a') + i div 26) & $char(ord('a') + i mod 26)
+      let shown = "3:# window " & tag & " has its own text\n" &
+        "9:# and a second distinct line " & tag
+      check det.observeCall("bash", "{\"command\":" & escapeJson(c) & "}") == fvOk
+      det.noteResult("bash", "{\"command\":" & escapeJson(c) & "}", true, shown)
+    check det.escalations == 0
+
+  test "near-duplicate streak re-delivering the same output still flags":
+    # The other side of the staleness arm, same commands as the scan above:
+    # when the ring fills with near-duplicate calls whose results repeat
+    # what the model has already seen (the cosmetic-variant endgame of the
+    # recorded doom loops), the streak still escalates to the abort.
+    var det: FlailDetector
+    let probes = [
+      "sed -n '1289,1370p' src/threecode/prompts.nim | grep -n \"Instruction hierarchy\\|Critical\\|Blast radius\\|3CODE.md\\|AGENTS.md\"",
+      "sed -n '2588,2674p' src/threecode/prompts.nim | grep -n \"Instruction hierarchy\\|Critical\\|Blast radius\\|3CODE.md\\|AGENTS.md\"",
+      "sed -n '2940,3009p' src/threecode/prompts.nim | grep -n \"Instruction hierarchy\\|Critical\\|Blast radius\\|3CODE.md\\|AGENTS.md\"",
+      "sed -n '3010,3057p' src/threecode/prompts.nim | grep -n \"Instruction hierarchy\\|Critical\\|Blast radius\\|3CODE.md\\|AGENTS.md\""]
+    const firstFire = FlailStreakArm + FlailStreakMin - 2
+    var verdicts: seq[FlailVerdict]
+    for i in 0 ..< firstFire + 4:
+      let c = probes[i mod probes.len]
+      # Same probe, same answer every time: stale from the second cycle on.
+      let shown = "5:`3CODE.md` / `AGENTS.md` (when present) override this prompt.\n" &
+        "46:`rg` first, then targeted `read` with offset/limit."
+      verdicts.add det.observeCall("bash", "{\"command\":" & escapeJson(c) & "}")
+      det.noteResult("bash", "{\"command\":" & escapeJson(c) & "}", true, shown)
+    for v in verdicts[0 ..< firstFire]:
+      check v == fvOk
+    check verdicts[firstFire] == fvEscalate
+    check fvAbort in verdicts[firstFire .. ^1]
+
   test "capture-retry verification with interleaved reads stays quiet":
     # Regression, the shape of the 20260930 astropy session (report.md):
     # a long bash run retrying one pytest command with cycling capture

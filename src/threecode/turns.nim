@@ -22,6 +22,8 @@ const
   FlailStreakJaccard* = 0.5  ## avg pairwise token overlap the ring must reach to flag
   FlailStreakNearDup* = 0.8  ## pairwise Jaccard at which two ring calls count as near-duplicates
   FlailStreakCluster* = 4    ## near-duplicates forming a tight repeat cluster flag on their own
+  FlailStreakStale* = 4      ## consecutive results adding no new output line before the streak can flag
+  FlailSeenLinesMax* = 4096  ## per-run output-line memory cap; past it the epoch restarts empty
 
 type
   FlailVerdict* = enum
@@ -72,6 +74,8 @@ type
     streakName*: string       ## tool name of the current same-tool run
     streakLen*: int           ## length of the current same-tool run
     streakTokens*: seq[HashSet[string]]  ## ring of per-call distinctive tokens
+    staleStreak*: int         ## consecutive executed streak calls that added no new output line
+    seenLines*: HashSet[string]  ## output lines (normalized) already delivered in this run
 
 proc canonicalJson(node: JsonNode): string =
   ## Stable serialization with sorted object keys, so key-order variants of
@@ -248,15 +252,52 @@ proc countInWindow(det: FlailDetector, fp: string): int =
   for w in det.window:
     if w == fp: inc result
 
-proc noteResult*(det: var FlailDetector, name, argsStr: string, madeChange: bool) =
+proc normalizeOutLine(line: string): string =
+  ## One output line reduced for the staleness memory: whitespace collapsed,
+  ## digits normalized, so counters, timings, pids and progress lines that
+  ## differ only in numbers compare equal (a doom loop re-running one command
+  ## reads stale even when its output carries fresh numbers).
+  for ch in line.strip():
+    if ch.isDigit: result.add '#'
+    elif ch in Whitespace:
+      if result.len == 0 or result[^1] != ' ': result.add ' '
+    else:
+      result.add ch
+
+proc noteResult*(det: var FlailDetector, name, argsStr: string, madeChange: bool,
+                 output = "") =
   ## Record whether the just-executed call actually changed anything. Called
-  ## after execution with the tool's own verdict (exit code 0 vs failure).
-  ## Read-only tools pass madeChange=true so they never arm the no-progress
-  ## signal. The per-fingerprint record powers the spaced-repeat signal: a
-  ## call that failed before and keeps coming back inside the window is a
-  ## stuck cycle even when other calls interleave.
+  ## after execution with the tool's own verdict (exit code 0 vs failure)
+  ## and its full output. Read-only tools pass madeChange=true so they never
+  ## arm the no-progress signal. The per-fingerprint record powers the
+  ## spaced-repeat signal: a call that failed before and keeps coming
+  ## back inside the window is a stuck cycle even when other calls
+  ## interleave. The output feeds the streak signal's staleness arm:
+  ## consecutive results that add no new line are a run going nowhere.
   det.lastNoProgress = isMutating(name) and not madeChange
   det.progress[fingerprint(name, argsStr)] = madeChange
+
+  # Staleness memory for the streak signal: a result is fresh when it
+  # delivers at least one output line this run has not delivered before.
+  # Fresh work disarms the streak signal no matter how similar the calls
+  # look, because similar calls with fresh results are a scan, not a loop
+  # (20261007T100839 mistral session: a fixed grep pattern run over
+  # successive sed/awk windows of one file tokenizes every call
+  # identically and read as a tight near-duplicate cluster, aborting the
+  # turn mid-scan; every call had a novel fingerprint and fresh output).
+  var fresh = false
+  for line in output.splitLines():
+    let n = normalizeOutLine(line)
+    if n.len == 0: continue
+    if n notin det.seenLines:
+      fresh = true
+      det.seenLines.incl n
+  if det.seenLines.len > FlailSeenLinesMax:
+    det.seenLines.clear()
+  if fresh:
+    det.staleStreak = 0
+  else:
+    inc det.staleStreak
 
 proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
   ## Record one tool call and decide what to do with it. Called once per
@@ -288,6 +329,8 @@ proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
     det.streakName = name
     det.streakLen = 0
     det.streakTokens = @[]
+    det.staleStreak = 0
+    det.seenLines.clear()
   inc det.streakLen
   if det.streakLen >= FlailStreakArm:
     if toks.len > 0:
@@ -298,7 +341,14 @@ proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
         det.streakTokens.add toks
         if det.streakTokens.len > FlailStreakMin:
           det.streakTokens.delete 0
+  # The staleness arm: token shape alone cannot tell a scan from a loop,
+  # because a fixed query walked over successive windows of one subject
+  # tokenizes every call identically. Results can: a scan delivers a new
+  # window's lines every call, a loop re-delivers what the model has
+  # already seen. Only a run whose last FlailStreakStale results added no
+  # new output line may flag (20261007T100839 mistral session).
   let stuckStreak = det.streakTokens.len == FlailStreakMin and
+    det.staleStreak >= FlailStreakStale and
     streakRingStuck(det.streakTokens)
 
   # Push onto the bounded window.
@@ -322,10 +372,15 @@ proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
   #    never flagged; progress distinguishes a stuck loop from a poll.
   # 4. Stuck streak: the last FlailStreakMin calls were all to the same
   #    tool and are mostly the same call (ring-wide overlap or a tight
-  #    near-duplicate cluster, see streakRingStuck), and the same-tool run
-  #    is at least FlailStreakArm long. Catches emission-stuck loops whose
-  #    calls are cosmetic variants of each other; the arm gate keeps short
-  #    healthy bursts of same-command-prefix iteration out.
+  #    near-duplicate cluster, see streakRingStuck), the same-tool run
+  #    is at least FlailStreakArm long, and the last FlailStreakStale
+  #    results added no new output line. Catches emission-stuck loops
+  #    whose calls are cosmetic variants of each other; the arm gate
+  #    keeps short healthy bursts of same-command-prefix iteration out,
+  #    and the staleness arm keeps systematic scans out - one fixed query
+  #    walked over successive windows of a file tokenizes every call
+  #    identically but delivers fresh lines each time, which is progress,
+  #    not a loop.
   let knownFailing = not det.progress.getOrDefault(fp, true)
   let isLoop = consecutive or (det.lastNoProgress and seen >= 1) or
     (knownFailing and seen >= FlailSpacedThreshold - 1) or stuckStreak
@@ -1095,7 +1150,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
         # counts heaviest. Successful calls never arm the signal, so
         # legitimate polling is untouched. Uses the tool's own exit
         # verdict, so it costs nothing extra at runtime.
-        flailDet.noteResult(name, argsStr, madeChange = code == 0)
+        flailDet.noteResult(name, argsStr, madeChange = code == 0, output = r)
 
         session.toolLog.add ToolRecord(banner: bannerFor(act), output: r,
           code: code, kind: act.kind, plan: act.plan)
