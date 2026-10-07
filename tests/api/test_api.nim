@@ -1874,6 +1874,72 @@ echo "OK"
       checkpoint runOut
     check "reasoning loop - giving up after 2 re-prompts" in runOut
 
+  test "runTurns demotes within the model's own reasoning ladder on length":
+    # Mistral Medium 3.5 exposes reasoning_effort none/high only; demoting
+    # the hardcoded way (high -> low) sends a value the API rejects with
+    # 400 ("reasoning_effort low is not supported for this model"), so the
+    # length-retry killed the turn instead of recovering. The demote must
+    # step one rung down the model's own supported ladder: high -> none.
+    let pid = $getCurrentProcessId()
+    let probeDir = getTempDir() / ("tc_empty_demote_ladder_" & pid)
+    let probePath = probeDir / "probe.nim"
+    let outPath = probeDir / ("probe" & Exe)
+    let cacheDir = probeDir / "nimcache"
+    createDir(probeDir)
+    createDir(cacheDir)
+    defer:
+      try: removeDir(probeDir) except OSError: discard
+    writeFile(probeDir / "stub_responses.json", """[{
+  "role": "assistant",
+  "content": "",
+  "stream": false,
+  "finish_reason": "length"
+},{
+  "role": "assistant",
+  "content": "RECOVERED_AFTER_DEMOTE",
+  "stream": false
+}]""")
+    writeFile(probePath, """
+import std/[json, strutils]
+import threecode
+import threecode/api except callModel
+
+var messages = %*[
+  {"role": "system", "content": "sys"},
+  {"role": "user", "content": "go"}
+]
+var session: Session
+session.savePath = ""
+session.readCache = newReadCache()
+let profile = Profile(name: "mistral.mistral-medium-3-5", url: "stub://", key: "k",
+  family: "mistral", model: "mistral-medium-3-5", reasoning: "high")
+
+discard runTurnsInteractive(profile, messages, session)
+
+let lastAssistant = messages[^1]
+doAssert lastAssistant{"role"}.getStr == "assistant"
+doAssert "RECOVERED_AFTER_DEMOTE" in lastAssistant{"content"}.getStr,
+  "content: " & lastAssistant{"content"}.getStr
+doAssert lastStubReasoningEffort() == "none",
+  "effort was " & lastStubReasoningEffort() & " (demoted off the model ladder)"
+doAssert lastStubMaxTokensOverride() == 0,
+  "override was " & $lastStubMaxTokensOverride() & " (budget raised before demote)"
+echo "OK"
+""")
+    let compileCmd = "nim c -d:ssl -d:providerStub --threads:on --path:src " &
+      nimbleDepFlags() & " --nimcache:" & cacheDir.quoteShell &
+      " -o:" & outPath.quoteShell & " " & probePath.quoteShell
+    let (compileCode_out, compileCode) = execCmdEx(compileCmd)
+    check compileCode == 0
+    if compileCode != 0:
+      checkpoint compileCode_out
+    let (runOut, runCode) = execCmdEx(outPath.quoteShell, workingDir = probeDir)
+    check runCode == 0
+    if runCode != 0:
+      checkpoint runOut
+    check "retrying with lower reasoning effort" in runOut
+    check "token budget" notin runOut
+
   test "runTurns retries then recovers on a bare empty reply (no finish_reason)":
     # A 200 OK that comes back with no content, no tool calls, and no
     # finish_reason is not budget-starved and not steerable. runTurns must
