@@ -27,20 +27,49 @@ suite "flail detector":
 
   test "identical repeat escalates three times, then aborts":
     var det: FlailDetector
+    template batchCall: untyped =
+      # One call per fresh model response; runTurns clears the per-batch
+      # guard the same way between batches.
+      det.flaggedInBatch = false
+      det.observeCall("bash", "{\"command\":\"ls\"}")
+    check batchCall == fvOk
+    check batchCall == fvEscalate
+    check det.escalations == 1
+    check batchCall == fvEscalate
+    check det.escalations == 2
+    check batchCall == fvEscalate
+    check det.escalations == 3
+    check batchCall == fvAbort
+    check batchCall == fvAbort
+
+  test "flags later in the same batch reuse the rung instead of climbing":
+    var det: FlailDetector
     check det.observeCall("bash", "{\"command\":\"ls\"}") == fvOk
     check det.observeCall("bash", "{\"command\":\"ls\"}") == fvEscalate
     check det.escalations == 1
+    # Same model response (flaggedInBatch still set): the model has not
+    # seen the first note yet, so the ladder neither advances nor aborts -
+    # a batch of parallel calls cannot burn three rungs and a sentence
+    # before the first nudge lands (20261007T100839 mistral session,
+    # calls #266-277).
     check det.observeCall("bash", "{\"command\":\"ls\"}") == fvEscalate
-    check det.escalations == 2
+    check det.escalations == 1
     check det.observeCall("bash", "{\"command\":\"ls\"}") == fvEscalate
-    check det.escalations == 3
-    check det.observeCall("bash", "{\"command\":\"ls\"}") == fvAbort
-    check det.observeCall("bash", "{\"command\":\"ls\"}") == fvAbort
+    check det.escalations == 1
+    # A novel call in the same batch keeps the ladder frozen too: the
+    # model chose it before any note could land.
+    check det.observeCall("bash", "{\"command\":\"ls -la\"}") == fvOk
+    check det.escalations == 1
+    # The next batch starts fresh; a novel call there resets.
+    det.flaggedInBatch = false
+    check det.observeCall("bash", "{\"command\":\"pwd\"}") == fvOk
+    check det.escalations == 0
 
   test "novel call resets the ladder":
     var det: FlailDetector
     check det.observeCall("bash", "{\"command\":\"ls\"}") == fvOk
     check det.observeCall("bash", "{\"command\":\"ls\"}") == fvEscalate
+    det.flaggedInBatch = false
     check det.observeCall("bash", "{\"command\":\"ls -la\"}") == fvOk
     check det.escalations == 0
     # Repeating the new call starts the ladder fresh.
@@ -51,6 +80,7 @@ suite "flail detector":
     var det: FlailDetector
     check det.observeCall("bash", "{}") == fvOk
     check det.observeCall("bash", "{}") == fvEscalate
+    det.flaggedInBatch = false
     check det.observeCall("read", "{}") == fvOk
     check det.escalations == 0
 
@@ -216,6 +246,7 @@ suite "flail detector":
     # covers its tight-repeat endgame.
     var det: FlailDetector
     for i in 0 ..< FlailStreakArm + FlailStreakMin + 3:
+      det.flaggedInBatch = false  # one call per model response
       let g = doomGreps[i mod 8]
       check det.observeCall("bash", "{\"command\":" & escapeJson(g) & "}") == fvOk
       det.noteResult("bash", "{\"command\":" & escapeJson(g) & "}", true)
@@ -233,6 +264,7 @@ suite "flail detector":
     # only the streak signal can fire.
     var verdicts: seq[FlailVerdict]
     for i in 0 ..< FlailStreakArm + FlailStreakMin + 3:
+      det.flaggedInBatch = false  # one call per model response
       let g = greps[i mod greps.len]
       verdicts.add det.observeCall("bash", "{\"command\":" & escapeJson(g) & "}")
       det.noteResult("bash", "{\"command\":" & escapeJson(g) & "}", true)
@@ -264,7 +296,12 @@ suite "flail detector":
       "rg -n \"deadline\" src/engine.nim | head -40",
       "rg -n \"deadline\" src/engine.nim | tail -20"]
     for i in 1 .. FlailStreakMin:
-      let v = det.observeCall("bash", "{\"command\":" & escapeJson(variants[(i - 1) mod 3]) & "}")
+      det.flaggedInBatch = false  # one call per model response
+      let args = "{\"command\":" & escapeJson(variants[(i - 1) mod 3]) & "}"
+      let v = det.observeCall("bash", args)
+      # Cycling variants repeat fingerprints from the second round on, so
+      # their results go stale and arm the signal by the full ring.
+      det.noteResult("bash", args, true)
       if i < FlailStreakMin:
         check v == fvOk
       else:
@@ -343,6 +380,7 @@ suite "flail detector":
       "rg -n \"deadline\" src/engine.nim | tail -20"]
     var verdicts: seq[FlailVerdict]
     for i in 0 ..< FlailStreakArm + FlailStreakMin + 3:
+      det.flaggedInBatch = false  # one call per model response
       let v = variants[i mod variants.len]
       verdicts.add det.observeCall("bash", "{\"command\":" & escapeJson(v) & "}")
       det.noteResult("bash", "{\"command\":" & escapeJson(v) & "}", true)
@@ -401,6 +439,26 @@ suite "flail detector":
       det.noteResult("bash", "{\"command\":" & escapeJson(c) & "}", true, shown)
     check det.escalations == 0
 
+  test "no-match and header-only windows stay fresh questions":
+    # Second regression from the 20261007T100839 mistral session: the stale
+    # arm armed through no-match windows (grep exit 1, empty output) and
+    # windows whose whole yield was a header shape an earlier window had
+    # already shown ("# Attribution"). A novel window asks a question this
+    # run has not asked; "nothing here" and a repeated header are its
+    # answers, not re-delivery. Only a repeated call can be stale.
+    var det: FlailDetector
+    det.flaggedInBatch = false  # unused here, kept symmetric with the loops
+    for i in 0 ..< FlailStreakArm + FlailStreakMin + 4:
+      det.flaggedInBatch = false
+      let c = "sed -n '" & $(1000 + i * 90) & "," & $(1000 + i * 90 + 89) &
+        "p' src/threecode/prompts.nim | grep -n 'Knowledge\\|Long context\\|Honesty\\|Output\\|Attribution'"
+      let args = "{\"command\":" & escapeJson(c) & "}"
+      let shown = if i mod 2 == 0: "" else: "41:# Attribution\n"
+      check det.observeCall("bash", args) == fvOk
+      det.noteResult("bash", args, madeChange = i mod 2 == 1, output = shown)
+    check det.escalations == 0
+    check det.streakTokens.len == FlailStreakMin  # the ring did stick;
+    # only novelty kept the stale arm from arming
   test "near-duplicate streak re-delivering the same output still flags":
     # The other side of the staleness arm, same commands as the scan above:
     # when the ring fills with near-duplicate calls whose results repeat
@@ -415,6 +473,7 @@ suite "flail detector":
     const firstFire = FlailStreakArm + FlailStreakMin - 2
     var verdicts: seq[FlailVerdict]
     for i in 0 ..< firstFire + 4:
+      det.flaggedInBatch = false  # one call per model response
       let c = probes[i mod probes.len]
       # Same probe, same answer every time: stale from the second cycle on.
       let shown = "5:`3CODE.md` / `AGENTS.md` (when present) override this prompt.\n" &
@@ -497,13 +556,20 @@ suite "flail detector":
 
   test "ssh-wrapped doom loop still flags on the shared probe token":
     # The ssh prefix strip must remove only the connection boilerplate, not
-    # blind the streak signal: 12+ ssh calls all grepping one symbol still
-    # share that symbol and must flag.
+    # blind the streak signal. The doom shape cycles a few probes (repeated
+    # fingerprints re-delivering the same nothing) while every call still
+    # shares the stripped probe token, so the ring sticks and the stale
+    # arm arms. Novel one-shot ssh probes over new files are a scan and
+    # stay quiet; only the cycle flags.
     var det: FlailDetector
+    let probes = [
+      "ssh root@10.0.7.1 'grep -rn \"execCmdEx\" /opt/nim/lib/pure/os.nim | head -3'",
+      "ssh root@10.0.7.1 'grep -rn \"execCmdEx\" /opt/nim/lib/pure/os.nim | wc -l'",
+      "ssh root@10.0.7.1 'grep -rn \"execCmdEx\" /opt/nim/lib/pure/os.nim | tail -2'"]
     # Ring fills at arm (12) plus FlailStreakMin (9) calls: flags on #20.
     for i in 1 .. 21:
-      let c = "ssh root@10.0.7.1 'grep -rn \"execCmdEx\" /opt/nim/lib/pure/os" & $i & ".nim | head -3'"
-      let args = "{\"command\":" & escapeJson(c) & "}"
+      det.flaggedInBatch = false  # one call per model response
+      let args = "{\"command\":" & escapeJson(probes[i mod probes.len]) & "}"
       if i < 20:
         check det.observeCall("bash", args) == fvOk
       else:
@@ -511,13 +577,17 @@ suite "flail detector":
       det.noteResult("bash", args, true)
 
   test "same-prefix burst that turns into a real loop still flags":
-    # The other side of the arm gate: keep the shared-prefix variants
-    # going past FlailStreakArm + FlailStreakMin and the signal must
-    # still fire. The prefix survives cd trimming, so this also covers
-    # the `cd <dir> &&` case from the report.
+    # The other side of the arm gate: shared-prefix iteration that settles
+    # into a cycle of capture tails (repeated fingerprints re-delivering
+    # the same compile output, the recorded doom shape) must still fire
+    # once past FlailStreakArm + FlailStreakMin. The prefix survives cd
+    # trimming, so this also covers the `cd <dir> &&` case from the report.
     var det: FlailDetector
+    let tails = ["tail -5", "tail -9", "tail -13"]
     for i in 0 ..< FlailStreakArm + FlailStreakMin:
-      let c = "cd /home/carlo/.local/bin && nim c -d:release --opt:speed -o:bst-ocr bst.nim 2>&1 | tail -" & $i
+      det.flaggedInBatch = false  # one call per model response
+      let c = "cd /home/carlo/.local/bin && nim c -d:release --opt:speed -o:bst-ocr bst.nim 2>&1 | " &
+        tails[i mod tails.len]
       let v = det.observeCall("bash", "{\"command\":" & escapeJson(c) & "}")
       if i < FlailStreakArm + FlailStreakMin - 2:
         check v == fvOk

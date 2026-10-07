@@ -5,6 +5,7 @@ import threecode/turns except fingerprint
 
 type Call = object
   name, args, output: string
+  newBatch: bool  # this call opens a new model response
   code: int
 
 proc parse(path: string): seq[Call] =
@@ -12,11 +13,16 @@ proc parse(path: string): seq[Call] =
   var
     cur: Call
     mode: Mode = mNone
+    newBatch = false
   for line in lines(path):
-    if line.startsWith("tool_use "):
+    if line == "assistant":
+      # tool_use blocks after this line belong to one response batch.
+      newBatch = true
+    elif line.startsWith("tool_use "):
       if cur.name != "": result.add cur
       let parts = line.splitWhitespace(maxsplit = 3)
-      cur = Call(name: parts[2])
+      cur = Call(name: parts[2], newBatch: newBatch)
+      newBatch = false
       mode = mUse
     elif line.startsWith("tool_result "):
       mode = mResult
@@ -59,7 +65,10 @@ let calls = parse(paramStr(1))
 echo "calls: ", calls.len
 for i, c in calls:
   # c.args is the raw wire arguments JSON the app executed; pass it through
-  # untouched so fingerprints and tokens match what the app saw.
+  # untouched so fingerprints and tokens match what the app saw. Batch
+  # boundaries reset the one-rung-per-batch guard, like runTurns does.
+  if c.newBatch:
+    det.flaggedInBatch = false
   let v = det.observeCall(c.name, c.args)
   if v == fvOk:
     # Skipped calls never execute, so the app never notes their result.

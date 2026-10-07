@@ -65,8 +65,11 @@ type
     ## forcing a change in the *shape* of the call, so the middle rung of
     ## the ladder demands exactly that before the final warning.
     ##
-    ## Each escalation fires once; a flagged call after the last escalation
-    ## aborts the turn. A genuinely novel call resets the ladder.
+    ## Each escalation fires once per model batch: models that emit many
+    ## tool calls in one response get one nudge per response, never a
+    ## whole ladder inside a single batch. A flagged call in a later batch
+    ## after the last escalation aborts the turn. A genuinely novel call
+    ## resets the ladder.
     window*: seq[string]      ## recent fingerprints, oldest first, <= FlailWindowSize
     escalations*: int
     lastNoProgress*: bool     ## did the previous executed call report no change?
@@ -76,6 +79,7 @@ type
     streakTokens*: seq[HashSet[string]]  ## ring of per-call distinctive tokens
     staleStreak*: int         ## consecutive executed streak calls that added no new output line
     seenLines*: HashSet[string]  ## output lines (normalized) already delivered in this run
+    flaggedInBatch*: bool     ## a loop already fired in this model batch (one rung per batch)
 
 proc canonicalJson(node: JsonNode): string =
   ## Stable serialization with sorted object keys, so key-order variants of
@@ -275,17 +279,22 @@ proc noteResult*(det: var FlailDetector, name, argsStr: string, madeChange: bool
   ## interleave. The output feeds the streak signal's staleness arm:
   ## consecutive results that add no new line are a run going nowhere.
   det.lastNoProgress = isMutating(name) and not madeChange
-  det.progress[fingerprint(name, argsStr)] = madeChange
+  let fp = fingerprint(name, argsStr)
+  let isRepeat = fp in det.progress  # sampled before recording this sighting
+  det.progress[fp] = madeChange
 
-  # Staleness memory for the streak signal: a result is fresh when it
-  # delivers at least one output line this run has not delivered before.
-  # Fresh work disarms the streak signal no matter how similar the calls
-  # look, because similar calls with fresh results are a scan, not a loop
-  # (20261007T100839 mistral session: a fixed grep pattern run over
-  # successive sed/awk windows of one file tokenizes every call
-  # identically and read as a tight near-duplicate cluster, aborting the
-  # turn mid-scan; every call had a novel fingerprint and fresh output).
-  var fresh = false
+  # Staleness memory for the streak signal. A NOVEL call is fresh by
+  # definition: it asks a question this run has not asked (a new window,
+  # a new file, a new flag) and whatever comes back - matches, a repeated
+  # line shape from another window, or nothing at all - is new information
+  # about that question. Only a REPEATED call can re-deliver: same
+  # question, same answer (20261007T100839 mistral session, second
+  # incident: a fixed grep walked over successive windows armed the
+  # stale streak through no-match windows (empty output) and windows
+  # whose whole yield was a header shape an earlier window had already
+  # shown; every call probed a new window). A repeat is fresh only when
+  # its output adds a line this run has not delivered before.
+  var fresh = not isRepeat
   for line in output.splitLines():
     let n = normalizeOutLine(line)
     if n.len == 0: continue
@@ -385,12 +394,27 @@ proc observeCall*(det: var FlailDetector, name, argsStr: string): FlailVerdict =
   let isLoop = consecutive or (det.lastNoProgress and seen >= 1) or
     (knownFailing and seen >= FlailSpacedThreshold - 1) or stuckStreak
   if not isLoop:
-    # Genuinely new or harmless: a clearly novel call resets the ladder.
-    if seen == 0:
+    # Genuinely new or harmless: a clearly novel call resets the ladder -
+    # unless a flag already fired in this batch, where the novel call was
+    # emitted before the model could have seen any note and the ladder
+    # must stay frozen until the next batch.
+    if seen == 0 and not det.flaggedInBatch:
       det.escalations = 0
     return fvOk
 
+  if det.flaggedInBatch:
+    # A loop already fired in this model batch: the model emitted several
+    # tool calls in one response (mistral emits up to a dozen) and has not
+    # seen any note yet. The recovery ladder is one rung per response -
+    # three ESCALATEs and an ABORT inside a single batch would sentence the
+    # whole batch before the first nudge could land (20261007T100839
+    # mistral session, second incident: calls #266-277 burned every rung
+    # in one response). Reuse the current rung; the caller resets the flag
+    # when the next batch starts.
+    return fvEscalate
+
   # Flagged as a loop.
+  det.flaggedInBatch = true
   if det.escalations < FlailMaxEscalations:
     inc det.escalations
     return fvEscalate
@@ -1030,6 +1054,10 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
       var dmailRevert = false  # akDMail: history truncated, continue loop
       var flailAbort = false  # flail detector fired past all escalations
       var flailAbortNote = ""  # the abort note sent to the model
+      # One escalation rung per model response: the model cannot have
+      # reacted to a note it has not seen yet, so flags later in this same
+      # batch reuse the current rung instead of advancing the ladder.
+      flailDet.flaggedInBatch = false
       for i in 0 ..< toolCalls.len:
         let tc = toolCalls[i]
         let id = tc{"id"}.getStr

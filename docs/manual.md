@@ -716,8 +716,12 @@ the same tool whose results stopped saying anything new; a call about
 something else restarts the streak, and a streak that keeps delivering
 fresh output is never a loop no matter how similar the calls look, so a
 systematic scan (one fixed query walked over successive windows of a
-file) runs uninterrupted. A verification run retrying one command while
-reading other files in between is not a loop either.
+file) runs uninterrupted: every window is a new question, and "no match
+here" is its answer, not a repeat. A verification run retrying one
+command while reading other files in between is not a loop either. When
+a streak does flag, the recovery ladder climbs one rung per model
+response: a batch of parallel tool calls gets one nudge it can actually
+see, never three warnings and a sentence in a single breath.
 
 When it sees one, it intervenes in the model's voice of authority: a tool
 result is replaced by a short `SYSTEM` note naming the loop and demanding a
