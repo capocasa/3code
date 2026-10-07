@@ -905,6 +905,106 @@ proc sseFieldValue(line: string): string =
   result = line["data:".len .. ^1]
   if result.len > 0 and result[0] == ' ': result = result[1 .. ^1]
 
+# ---------- Reasoning repetition guard ----------
+#
+# Forced-thinking models (GLM-5.3 et al.) sometimes wedge in the thinking
+# phase: one phrase keeps re-emitting ('Die Schule der magischen Tiere"
+# alikes: "Die Schule der magischen Tiere"...' for 5k chars, tensorx
+# 20261007T114126; 'Let me read the file now.' x31, 20260817T015301)
+# until the model escapes on its own, exhausts the output budget, or the
+# user interrupts. The tool-call flail detector never sees these - no tool
+# call is ever emitted - so the stream itself carries a cheap n-gram scan:
+# while the reply is still in its pure-reasoning phase, the reasoning tail
+# is scanned every ReasoningLoopStep bytes, and a stream whose tail is
+# dominated by one repeated phrase is cut and returned with the synthetic
+# finish_reason below for the turn loop to steer on.
+#
+# Calibration over 63,479 reasoning records from the saved session corpus:
+# wordy 8-grams reach 9 hits in sane reasoning that quotes dense output
+# (ps tables, row decodes, FFI declarations) and 10+ only in recorded
+# loops. Grams must also carry ReasoningLoopWordy real words so pure data
+# echoes (#### rows, r2: m labels, 0.091s timings) never dominate the
+# count. Word-split text only: CJK reasoning that repeats inside one
+# unbroken character run is not seen by this scan.
+
+const
+  ReasoningLoopTail* = 3072  ## bytes of reasoning tail one scan sees
+  ReasoningLoopGram* = 8     ## tokens per n-gram the scan counts
+  ReasoningLoopWordy* = 5    ## gram tokens that must carry a >= 3-letter run
+  ReasoningLoopHits* = 10    ## hits for one gram in the tail that mean stuck
+  ReasoningLoopStep* = 512   ## bytes of new reasoning between scans
+  ReasoningLoopFinish* = "reasoning-loop"
+    ## Synthetic finish_reason on a guard-cut stream's assistant message.
+    ## Internal like the provider values the turn loop branches on;
+    ## stripInternalFields drops it before the wire.
+
+proc loopWordByte(b: uint8): bool {.inline.} =
+  (b >= uint8('a') and b <= uint8('z')) or
+  (b >= uint8('A') and b <= uint8('Z')) or
+  (b >= uint8('0') and b <= uint8('9')) or b >= 0x80
+
+proc normLoopToken(tok: string): tuple[norm: string, wordy: bool] =
+  ## Lowercased token with edge punctuation trimmed and digits folded to
+  ## `#` (numbers vary between repeats; words do not). `wordy` says the
+  ## token carries a real word - an ASCII letter run of at least 3 - so
+  ## filler from digit folding and quoting (##, r#=#, #.###s) does not
+  ## count toward a gram's wordiness. Non-ASCII bytes are word material
+  ## as-is (umlauts, CJK); only ASCII punctuation is ever trimmed.
+  var a = 0
+  var b = tok.len - 1
+  while a <= b and not loopWordByte(cast[uint8](tok[a])): inc a
+  while b >= a and not loopWordByte(cast[uint8](tok[b])): dec b
+  if a > b: return ("", false)
+  var run = 0
+  var bestRun = 0
+  template endRun() =
+    if run > bestRun: bestRun = run
+    run = 0
+  for i in a .. b:
+    let ch = tok[i]
+    if ch in '0' .. '9':
+      result.norm.add '#'
+      endRun()
+    elif ch in 'A' .. 'Z':
+      result.norm.add char(uint8(ch) + 32'u8)
+      inc run
+    elif ch in 'a' .. 'z' or ord(ch) >= 128:
+      result.norm.add ch
+      inc run
+    else:
+      result.norm.add ch
+      endRun()
+  endRun()
+  result.wordy = bestRun >= 3
+
+proc reasoningLoops*(text: string): bool =
+  ## True when the tail of `text` is dominated by one repeated phrase: a
+  ## `ReasoningLoopGram`-token n-gram carrying at least `ReasoningLoopWordy`
+  ## real words occurs `ReasoningLoopHits` or more times in the last
+  ## `ReasoningLoopTail` bytes.
+  let tail = if text.len > ReasoningLoopTail:
+      text[text.len - ReasoningLoopTail ..^ 1]
+    else: text
+  var toks: seq[tuple[norm: string, wordy: bool]] = @[]
+  for w in tail.splitWhitespace():
+    let t = normLoopToken(w)
+    if t.norm.len >= 2: toks.add t
+  if toks.len < ReasoningLoopGram: return false
+  var counts = initCountTable[string]()
+  for i in 0 .. toks.len - ReasoningLoopGram:
+    var wordy = 0
+    for k in i ..< i + ReasoningLoopGram:
+      if toks[k].wordy: inc wordy
+    if wordy < ReasoningLoopWordy: continue
+    var gram = ""
+    for k in i ..< i + ReasoningLoopGram:
+      if k > i: gram.add ' '
+      gram.add toks[k].norm
+    counts.inc(gram)
+  for c in counts.values:
+    if c >= ReasoningLoopHits: return true
+  false
+
 proc streamHttp(url, key, bodyStr: string, baseLabel: string,
                 slurped: var int, suppressXml: bool,
                 job: NetJob, codeAssist = false,
@@ -994,6 +1094,8 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
 
   var accContent = ""
   var accReasoning = ""
+  var nextLoopScan = 0         # accReasoning length that arms the next guard scan
+  var reasoningLoopCut = false  # the repetition guard ended this stream
   var accReasoningBlocks: seq[JsonNode] = @[]
   var accTools = initOrderedTable[int, JsonNode]()
   var nonSSE: seq[string]
@@ -1029,6 +1131,10 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
   var caQueue: seq[string]
   var bodyStall = StallClock(since: epochTime())
   while true:
+    # The repetition guard sets its flag deep inside the delta parse (a
+    # `break` there would cross the try frame); the top of the loop is the
+    # one place that stops the read without consuming another SSE line.
+    if reasoningLoopCut: break
     # Drain translated Gemini chunks before reading another SSE line:
     # one event can fan out to several OpenAI payloads.
     var payload = ""
@@ -1126,6 +1232,16 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
             fireProgress(job, slurped)
             if not contentStarted:
               fireReasoning(job, accReasoning, slurped)
+            # Repetition guard: only while the reply is still pure reasoning
+            # (nothing visible, no tool call accumulating) - once content or
+            # tool deltas exist, cutting would truncate a live reply, and a
+            # model that already answered is not the failure mode here.
+            if accContent.len == 0 and accTools.len == 0 and
+               accReasoning.len >= nextLoopScan:
+              nextLoopScan = accReasoning.len + ReasoningLoopStep
+              if reasoningLoops(accReasoning):
+                closeCachedStreamConn()
+                reasoningLoopCut = true
           if c.len > 0:
             accContent &= c
             slurped += c.len
@@ -1191,6 +1307,18 @@ proc streamHttp(url, key, bodyStr: string, baseLabel: string,
     # would fail on first send. The next call will reconnect cleanly.
     closeCachedStreamConn()
     result.errMsg = InterruptedByUserMsg
+    return
+  if reasoningLoopCut:
+    # Cut by the repetition guard. Return the partial reasoning as an empty
+    # assistant turn carrying the marker finish_reason - not a transport
+    # error (errMsg stays empty, the cached conn is already dropped), so
+    # callModel hands the turn loop a branchable message instead of
+    # burning network retries on a healthy connection.
+    result.finishReason = ReasoningLoopFinish
+    result.assistantMsg = buildStreamAssistantMsg(accContent, accReasoning,
+      accTools, result.usage, false, ReasoningLoopFinish,
+      reasoningBlocks = accReasoningBlocks)
+    debugOut &"streamHttp: reasoning-loop cut at {accReasoning.len} chars"
     return
   if streamErr.len > 0:
     result.errMsg = "stream read: " & streamErr &

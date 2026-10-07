@@ -759,6 +759,7 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     maxTokensOverride = 0          # > 0 replaces known-good max_tokens
     lengthEscalations = 0          # "length" retries so far this turn
     steerAttempts = 0              # "stop"/unknown steering retries
+    loopSteers = 0                 # reasoning-loop cut re-prompts this turn
     emptyRetries = 0               # bare empty-reply resends after smart-handling
     flailDet: FlailDetector        # identical-consecutive-tool-call guard
     nextCheckpoint = 0             # id of the marker on the next assistant message
@@ -777,8 +778,12 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     MaxLengthEscalations = 3
     MaxSteerAttempts = 1
     MaxEmptyRetries = 12
+    MaxLoopSteers = 2
     EmptyReplySteerMsg = "Your last reply came back empty. Answer now, " &
                         "or continue with a tool call."
+    ReasoningLoopSteerMsg = "Your last reply was cut because your reasoning " &
+                        "kept repeating itself. Answer now, or continue with " &
+                        "a tool call."
   decayEmptyRetryLevel(epochTime())
   # Publish the conversation id for the OpenCode Zen/Go session header
   # (stable across turns → routing/token-cache affinity). Recomputed every
@@ -875,12 +880,50 @@ proc runTurns*(p: Profile, messages: var JsonNode, session: var Session): bool =
     # the empty-reply recovery, not commit as a one-character reply.
     let replyIsEmpty = cutVisibleContent(content).strip.len == 0
     if replyIsEmpty and toolCalls.len == 0:
-      # Empty assistant turn. Try the targeted recoveries first (escalate the
-      # budget on "length", steer on "stop"/unknown), then fall back to a
-      # bare resend. A hostile or broken provider can't pin the turn: each
-      # path has its own ceiling, and the final resend loop is bounded by
-      # MaxEmptyRetries. This is a conversational concern, kept out of
-      # callModel's transport retry block.
+      # Empty assistant turn. Try the targeted recoveries first (reasoning
+      # loop steer, escalate the budget on "length", steer on
+      # "stop"/unknown), then fall back to a bare resend. A hostile or
+      # broken provider can't pin the turn: each path has its own ceiling,
+      # and the final resend loop is bounded by MaxEmptyRetries. This is a
+      # conversational concern, kept out of callModel's transport retry
+      # block.
+      if finishReason == ReasoningLoopFinish and loopSteers < MaxLoopSteers:
+        # The stream guard cut the model out of a thinking repetition loop
+        # (see api.nim). Budget escalation is the wrong medicine - the
+        # model is stuck, not starved - and a bare resend would just re-cut,
+        # so steer with a note that names the failure, then give up cleanly
+        # once the steers are spent (below).
+        inc loopSteers
+        messages.add msg
+        messages.add %*{"role": "user", "content": ReasoningLoopSteerMsg,
+                        "agentSent": true}
+        saveSession(session, messages)
+        let kb = (msg{"reasoning_content"}.getStr.len + 1023) div 1024
+        let backoff = emptyReplyBackoffS()
+        commitTranscriptBytes(
+          formatItem(agentPromptItem(ReasoningLoopSteerMsg,
+            "auto: reasoning repeated itself (" & $kb & "k chars), " &
+            "re-prompting in " & $backoff & "s")), true)
+        incEmptyRetryLevel()
+        if emptyReplyWait():
+          saveSession(session, messages)
+          onTurnInterrupted()
+          turnEnded = true
+          return true
+        debugOut &"runTurns: reasoning-loop steer-retry {loopSteers}/{MaxLoopSteers}"
+        continue
+      if finishReason == ReasoningLoopFinish:
+        # Still looping after MaxLoopSteers re-prompts: the model cannot
+        # leave the loop on its own. Commit the empty turn and end with a
+        # notice instead of feeding the bare-resend loop a cut every time.
+        messages.add msg
+        saveSession(session, messages)
+        commitTurnEndNotice(
+          errLnS("reasoning loop - giving up after " & $MaxLoopSteers &
+            " re-prompts"))
+        endTurnAfterTranscriptAppend()
+        turnEnded = true
+        break
       let budgetStarved =
         finishReason == "length" or
         usage.completionTokens >= knownGoodGeneration(wire).maxTokens or

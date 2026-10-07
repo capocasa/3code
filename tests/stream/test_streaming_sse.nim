@@ -97,6 +97,17 @@ proc makeSseEmptyWithFinish(finishReason, id: string;
       "finish_reason":finishReason}],"id":id} & "\n\n")
   result.add("data: [DONE]\n\n")
 
+proc makeSseReasoningLines(lines: seq[string]; trailing, id: string): string =
+  ## Pure-reasoning stream: one reasoning_content delta per line, then a
+  ## content delta with finish_reason stop and [DONE]. `trailing` is what
+  ## a healthy stream would deliver after thinking; the loop-guard tests
+  ## assert it never arrives when the reasoning wedges.
+  result = ""
+  for l in lines:
+    result.add("data: " & $ %*{"choices":[{"index":0,"delta":{"reasoning_content":l & "\n"}}],"id":id} & "\n\n")
+  result.add("data: " & $ %*{"choices":[{"index":0,"delta":{"content":trailing},"finish_reason":"stop"}],"id":id} & "\n\n")
+  result.add("data: [DONE]\n\n")
+
 proc makeSseMidStreamError(message, id: string; code = 502): string =
   ## OpenRouter mid-stream error: a `data:` chunk with a top-level `error`
   ## object and `choices[0].finish_reason` set to "error". The HTTP status
@@ -571,6 +582,119 @@ suite "streaming SSE: empty-content with finish_reason":
     server.socket.close()
     closeCachedStreamConn()
 
+
+suite "reasoning repetition guard (pure)":
+  # Field shapes from the calibration corpus (43,695 saved reasoning
+  # records): the tensorx 20261007T114126 thinking loop must fire, sane
+  # reasoning that merely repeats a topic phrase, and reasoning quoting
+  # dense structured output, must not.
+  const loopLine = """- "Die Schule der magischen Tiere" alikes: "Die Schule der magischen Tiere"..."""
+
+  test "recorded loop shape fires":
+    check reasoningLoops(repeat(loopLine & "\n", 12))
+
+  test "loop lines interleaved with fresh prose still fire":
+    var text = ""
+    for i in 0 ..< 12:
+      text.add loopLine & "\n"
+      if i mod 2 == 0:
+        text.add "Real candidates from memory of the market, round " & $i & ".\n"
+    check reasoningLoops(text)
+
+  test "nine repeats stay under the tripwire":
+    check not reasoningLoops(repeat(loopLine & "\n", 9))
+
+  test "sane brainstorm repeating a topic phrase does not fire":
+    # Same session, first reasoning record: "Die drei ??? Kids" is the
+    # topic and appears a dozen times, but every sentence differs.
+    let sane = @[
+      "The user asks for Hoerspiel recommendations for a sensitive 8yo.",
+      "Die drei ??? Kids is for younger kids, milder than the original.",
+      "\"Die drei ??? Kids\" - mild detective stories, age 7 and up.",
+      "\"Die drei ??? Kids\" is the top recommendation given TKKG junior.",
+      "Maybe list Die drei ??? Kids first, then Fuenf Freunde as backup.",
+      "The gap between Die drei ??? Kids and the original is scare factor.",
+      "Age ratings for Die drei ??? Kids say ab 6, kids are 10 in stories.",
+      "Some Die drei ??? Kids folgen play with Grusel but resolve rationally.",
+      "I should verify Die drei ??? Kids claims via web search before.",
+      "Also note Die drei !!! as the girls' trio variant, milder again."]
+    check not reasoningLoops(repeat(sane.join("\n") & "\n\n", 3))
+
+  test "reasoning quoting dense structured output does not fire":
+    # 20260914T065736: decoding a screen row-by-row. Pure data echoes must
+    # not dominate the count even at high density.
+    let rows = @[
+      "- r2: m (receipt), r3: j, r4: A, r5: m, r6: B",
+      "- r7-13: AAAAAAAA (7 bright, r7..r13)",
+      "r14: B, r15: A, r16: m, r17: B, r18: A, r19: A, r20: B",
+      "r21: A, r22: m, r23: B, r24: A, r25: A, r26: B, r27: j, r28: m",
+      "observed r18-26: AABAmBAAB - turns 4+answer+receipt then turn 5",
+      "r7-13 is the anomaly: 7 contiguous A rows, no separator blank",
+      "r2: m, r3: j, r4: A - banner remnants scrolled above the receipt",
+      "r14: B, r15: A, r16: m echo the same triple as r5, r6 - cached?",
+      "decode r18 r19 r20 r21 r22 r23 r24 carefully before concluding",
+      "r7 r8 r9 r10 r11 r12 r13 all bright - five-row echo plus answer"]
+    check not reasoningLoops(repeat(rows.join("\n") & "\n", 3))
+
+suite "streaming SSE: reasoning repetition guard":
+  const loopLine = """- "Die Schule der magischen Tiere" alikes: "Die Schule der magischen Tiere"..."""
+
+  test "wedged reasoning stream is cut and tagged, trailing content lost":
+    # Field shape, tensorx glm-5.3-flash 20261007T114126: thinking repeats
+    # one phrase until cut. The cut must land mid-stream - the content
+    # delta and [DONE] after the loop are never consumed - and the message
+    # carries the marker finish_reason for the turn loop's recovery.
+    var lines: seq[string] = @[]
+    for i in 0 ..< 40:
+      lines.add loopLine
+    let server = newSseServer(makeSseReasoningLines(lines,
+      "SENTENCE_AFTER_CUT", "id-rloop"))
+    var srv: Thread[SseServer]
+    createThread(srv, serveThread, server)
+    var usage = Usage()
+    let result = callModel(testProfile(server),
+      %*[{"role": "user", "content": "go"}], usage, 0)
+    check result != nil
+    check result{"finish_reason"}.getStr == ReasoningLoopFinish
+    check result{"content"}.getStr == ""
+    check not result{"reasoning_content"}.getStr.contains("SENTENCE_AFTER_CUT")
+    check result{"reasoning_content"}.getStr.contains("magischen")
+    joinThread(srv)
+    server.socket.close()
+    closeCachedStreamConn()
+
+  test "topical but varied reasoning streams through untouched":
+    # Same model and topic as the loop, but every sentence differs: no
+    # cut, the trailing answer arrives, finish_reason is the provider's.
+    let sane = @[
+      "The user asks for Hoerspiel recommendations for a sensitive 8yo.",
+      "Die drei ??? Kids is for younger kids, milder than the original.",
+      "\"Die drei ??? Kids\" - mild detective stories, age 7 and up.",
+      "\"Die drei ??? Kids\" is the top recommendation given TKKG junior.",
+      "Maybe list Die drei ??? Kids first, then Fuenf Freunde as backup.",
+      "The gap between Die drei ??? Kids and the original is scare factor.",
+      "Age ratings for Die drei ??? Kids say ab 6, kids are 10 in stories.",
+      "Some Die drei ??? Kids folgen play with Grusel but resolve rationally.",
+      "I should verify Die drei ??? Kids claims via web search before.",
+      "Also note Die drei !!! as the girls' trio variant, milder again."]
+    var lines: seq[string] = @[]
+    for round in 0 ..< 6:
+      for s in sane:
+        lines.add "(round " & $round & ") " & s
+    let server = newSseServer(makeSseReasoningLines(lines,
+      "Here is the list.", "id-rsane"))
+    var srv: Thread[SseServer]
+    createThread(srv, serveThread, server)
+    var usage = Usage()
+    let result = callModel(testProfile(server),
+      %*[{"role": "user", "content": "go"}], usage, 0)
+    check result != nil
+    check result{"finish_reason"}.getStr == "stop"
+    check result{"content"}.getStr == "Here is the list."
+    check result{"reasoning_content"}.getStr.len > ReasoningLoopTail
+    joinThread(srv)
+    server.socket.close()
+    closeCachedStreamConn()
 
 suite "streaming SSE: mid-stream error (OpenRouter)":
   # OpenRouter emits mid-stream provider failures as a `data:` chunk with a

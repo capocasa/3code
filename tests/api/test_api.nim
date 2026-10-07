@@ -1725,6 +1725,155 @@ echo "OK"
     check "retrying with lower reasoning effort" in runOut
     check "token budget" notin runOut
 
+  test "runTurns steers on a reasoning-loop cut, then recovers":
+    # The stream guard (api.nim) cuts a wedged thinking stream and returns
+    # an empty assistant turn tagged finish_reason "reasoning-loop". That
+    # must take the loop steer, not the budget escalation (the model is
+    # stuck, not starved): a re-prompt naming the failure, then recovery
+    # when the next response carries content. Field shape: tensorx
+    # glm-5.3-flash 20261007T114126.
+    let pid = $getCurrentProcessId()
+    let probeDir = getTempDir() / ("tc_loop_steer_" & pid)
+    let probePath = probeDir / "probe.nim"
+    let outPath = probeDir / ("probe" & Exe)
+    let cacheDir = probeDir / "nimcache"
+    createDir(probeDir)
+    createDir(cacheDir)
+    defer:
+      try: removeDir(probeDir) except OSError: discard
+    writeFile(probeDir / "stub_responses.json", """[{
+  "role": "assistant",
+  "content": "",
+  "reasoning_content": "- Die Schule loop Die Schule loop Die Schule loop",
+  "stream": false,
+  "finish_reason": "reasoning-loop"
+},{
+  "role": "assistant",
+  "content": "RECOVERED_AFTER_LOOP_STEER",
+  "stream": false
+}]""")
+    writeFile(probePath, """
+import std/[json, strutils]
+import threecode
+import threecode/api except callModel
+
+var messages = %*[
+  {"role": "system", "content": "sys"},
+  {"role": "user", "content": "go"}
+]
+var session: Session
+session.savePath = ""
+session.readCache = newReadCache()
+let profile = Profile(name: "zai.glm-5.3", url: "stub://", key: "k",
+  family: "glm", model: "glm-5.3", reasoning: "high")
+
+discard runTurnsInteractive(profile, messages, session)
+
+let lastAssistant = messages[^1]
+doAssert lastAssistant{"role"}.getStr == "assistant"
+doAssert "RECOVERED_AFTER_LOOP_STEER" in lastAssistant{"content"}.getStr,
+  "content: " & lastAssistant{"content"}.getStr
+# The cut turn and the agent steer both land in history, in that order.
+var cutIdx = -1
+var steerIdx = -1
+for i in 0 ..< messages.len:
+  let m = messages[i]
+  if m{"finish_reason"}.getStr == "reasoning-loop": cutIdx = i
+  if m{"agentSent"}.getBool(false): steerIdx = i
+doAssert cutIdx > 0, "cut assistant turn missing from history"
+doAssert steerIdx == cutIdx + 1,
+  "steer not appended right after the cut turn: " & $steerIdx & " vs " & $cutIdx
+doAssert "repeating itself" in messages[steerIdx]{"content"}.getStr
+# The budget ladder must NOT have fired for a loop cut.
+doAssert lastStubMaxTokensOverride() == 0,
+  "override was " & $lastStubMaxTokensOverride() & " (budget raised on a loop)"
+doAssert lastStubReasoningEffort() == "high",
+  "effort was " & lastStubReasoningEffort() & " (demoted on a loop)"
+echo "OK"
+""")
+    let compileCmd = "nim c -d:ssl -d:providerStub --threads:on --path:src " &
+      nimbleDepFlags() & " --nimcache:" & cacheDir.quoteShell &
+      " -o:" & outPath.quoteShell & " " & probePath.quoteShell
+    let (compileOut, compileCode) = execCmdEx(compileCmd)
+    check compileCode == 0
+    if compileCode != 0:
+      checkpoint compileOut
+    let (runOut, runCode) = execCmdEx(outPath.quoteShell, workingDir = probeDir)
+    check runCode == 0
+    if runCode != 0:
+      checkpoint runOut
+    check "reasoning repeated itself" in runOut
+
+  test "runTurns gives up after two loop steers, ending the turn cleanly":
+    # A model that re-wedges after every steer cannot be talked out of the
+    # loop; the turn must end with a notice instead of feeding the
+    # empty-resend machinery a cut stream forever.
+    let pid = $getCurrentProcessId()
+    let probeDir = getTempDir() / ("tc_loop_giveup_" & pid)
+    let probePath = probeDir / "probe.nim"
+    let outPath = probeDir / ("probe" & Exe)
+    let cacheDir = probeDir / "nimcache"
+    createDir(probeDir)
+    createDir(cacheDir)
+    defer:
+      try: removeDir(probeDir) except OSError: discard
+    writeFile(probeDir / "stub_responses.json", """[{
+  "role": "assistant",
+  "content": "",
+  "reasoning_content": "loop one",
+  "stream": false,
+  "finish_reason": "reasoning-loop"
+},{
+  "role": "assistant",
+  "content": "",
+  "reasoning_content": "loop two",
+  "stream": false,
+  "finish_reason": "reasoning-loop"
+},{
+  "role": "assistant",
+  "content": "",
+  "reasoning_content": "loop three",
+  "stream": false,
+  "finish_reason": "reasoning-loop"
+}]""")
+    writeFile(probePath, """
+import std/[json, sequtils, strutils]
+import threecode
+import threecode/api except callModel
+
+var messages = %*[
+  {"role": "system", "content": "sys"},
+  {"role": "user", "content": "go"}
+]
+var session: Session
+session.savePath = ""
+session.readCache = newReadCache()
+let profile = Profile(name: "zai.glm-5.3", url: "stub://", key: "k",
+  family: "glm", model: "glm-5.3", reasoning: "high")
+
+discard runTurnsInteractive(profile, messages, session)
+
+# Three cut responses consumed: the initial call plus two steered retries,
+# then the turn ended. The give-up path leaves the last cut turn as the
+# final message.
+let cuts = messages.filterIt(it{"finish_reason"}.getStr == "reasoning-loop")
+doAssert cuts.len == 3, "cuts: " & $cuts.len
+doAssert messages[^1]{"finish_reason"}.getStr == "reasoning-loop"
+echo "OK"
+""")
+    let compileCmd = "nim c -d:ssl -d:providerStub --threads:on --path:src " &
+      nimbleDepFlags() & " --nimcache:" & cacheDir.quoteShell &
+      " -o:" & outPath.quoteShell & " " & probePath.quoteShell
+    let (compileOut, compileCode) = execCmdEx(compileCmd)
+    check compileCode == 0
+    if compileCode != 0:
+      checkpoint compileOut
+    let (runOut, runCode) = execCmdEx(outPath.quoteShell, workingDir = probeDir)
+    check runCode == 0
+    if runCode != 0:
+      checkpoint runOut
+    check "reasoning loop - giving up after 2 re-prompts" in runOut
+
   test "runTurns retries then recovers on a bare empty reply (no finish_reason)":
     # A 200 OK that comes back with no content, no tool calls, and no
     # finish_reason is not budget-starved and not steerable. runTurns must

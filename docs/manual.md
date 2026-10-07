@@ -732,6 +732,21 @@ appears in the scrollback as a `»` row with the exact text sent, so nothing
 happens invisibly. A genuinely new tool call resets the ladder; normal
 work never sees it.
 
+### The thinking loop guard
+
+Reasoning models have their own version of getting stuck: the thinking
+stream wedges on one phrase and re-emits it until the model escapes, the
+output budget dies, or you interrupt. No tool call is ever emitted, so the
+flailing detector watches in vain. The stream itself carries the guard:
+while a reply is still pure thinking, the recent tail is scanned for one
+phrase repeating, and a wedged stream is cut mid-flight. What lands
+instead is an empty turn plus a `»` re-prompt naming what happened -
+"your reasoning kept repeating itself" - which is usually enough; two
+re-prompts that both re-wedge end the turn with a notice instead of
+burning retries. The tripwire is calibrated against 63,479 recorded
+reasoning passes: thinking that merely repeats a topic phrase, or quotes
+dense tables of output, sails under it; every recorded loop trips it.
+
 ### The empty response handler
 
 Some providers occasionally return a reply with no content and no tool
